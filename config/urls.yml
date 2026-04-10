@@ -1,7 +1,7 @@
 settings:
   timeout_seconds: 10
   retries: 2
-  user_agent: "StayAwakeBot/1.0 (github-health-checker)"
+  user_agent: "StayAwakeBot-Sentinel/1.0 (stayawakebot-sentinel)"
   alert_on_failure: true
   alert_on_recovery: true
   consecutive_failures_before_alert: 2
