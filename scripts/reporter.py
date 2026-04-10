@@ -39,6 +39,7 @@ def main() -> None:
         run_entry["urls"].append({
             "name": r.get("name"),
             "url": r.get("url"),
+            "dns_ms": r.get("dns_ms"),
             "healthy": bool(r.get("healthy")),
             "status_code": r.get("status_code"),
             "response_ms": r.get("response_ms"),
@@ -71,6 +72,7 @@ def main() -> None:
         status["urls"].append({
             "name": r.get("name"),
             "url": r.get("url"),
+            "dns_ms": r.get("dns_ms"),
             "healthy": bool(r.get("healthy")),
             "status_code": r.get("status_code"),
             "response_ms": r.get("response_ms"),
@@ -93,18 +95,19 @@ def main() -> None:
     md_lines.append("")
     md_lines.append("## Results")
     md_lines.append("")
-    md_lines.append("| Name | Status | Code | Response | SSL | Uptime (30d) |")
-    md_lines.append("|------|--------|------|----------|-----|--------------|")
+    md_lines.append("| Name | Status | Code | Response | DNS | SSL | Uptime (30d) |")
+    md_lines.append("|------|--------|------|----------|-----|-----|--------------|")
     for r in results:
         name = r.get("name")
         status_icon = "✅ OK" if r.get("healthy") else "❌ DOWN"
         code = r.get("status_code") or "—"
         response = f"{r.get('response_ms')}ms" if r.get("response_ms") else (r.get("error") or "—")
+        dns_field = f"{r.get('dns_ms')}ms" if r.get('dns_ms') is not None else "—"
         ssl_field = "—"
         if r.get("ssl") and isinstance(r.get("ssl"), dict) and r.get("ssl").get("expires_in_days") is not None:
             ssl_field = f"{r['ssl']['expires_in_days']}d"
         uptime = next((u["uptime_30d_pct"] for u in status["urls"] if u["name"] == name), "—")
-        md_lines.append(f"| {name} | {status_icon} | {code} | {response} | {ssl_field} | {uptime}% |")
+        md_lines.append(f"| {name} | {status_icon} | {code} | {response} | {dns_field} | {ssl_field} | {uptime}% |")
 
     md_lines.append("")
     md_lines.append("## Details")
@@ -112,6 +115,8 @@ def main() -> None:
     for r in results:
         md_lines.append(f"### {r.get('name')}")
         md_lines.append(f"- URL: `{r.get('url')}`")
+        if r.get('dns_ms') is not None:
+            md_lines.append(f"- DNS resolution: {r.get('dns_ms')}ms")
         md_lines.append(f"- Checked at: {r.get('checked_at')}")
         md_lines.append(f"- Redirects: {r.get('redirect_count')}")
         tags = ", ".join(r.get('tags') or [])

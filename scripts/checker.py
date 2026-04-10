@@ -32,6 +32,7 @@ async def check_one(session: aiohttp.ClientSession, cfg) -> dict:
         "name": cfg.name,
         "url": cfg.url,
         "checked_at": utc_iso_now(),
+        "dns_ms": None,
         "status_code": None,
         "response_ms": None,
         "redirect_count": 0,
@@ -54,9 +55,10 @@ async def check_one(session: aiohttp.ClientSession, cfg) -> dict:
     for attempt in range(1, attempts + 1):
         result["attempt"] = attempt
         try:
-            _ = await resolve_dns(host, port)
+            dns_ms = await resolve_dns(host, port)
+            result["dns_ms"] = int(dns_ms) if dns_ms is not None else None
         except Exception:
-            pass
+            result["dns_ms"] = None
         start = time.monotonic()
         try:
             timeout = aiohttp.ClientTimeout(total=cfg.timeout_seconds)
@@ -135,12 +137,13 @@ async def main() -> None:
         name = r["name"][:18].ljust(18)
         code = str(r.get("status_code") or "—")
         resp = (f"{r.get('response_ms')}ms" if r.get("response_ms") is not None else "—")
+        dns = (f"{r.get('dns_ms')}ms" if r.get("dns_ms") is not None else "—")
         ssl_info = "—"
         if r.get("ssl") and isinstance(r.get("ssl"), dict) and r["ssl"].get("expires_in_days") is not None:
             ssl_info = f"{r['ssl']['expires_in_days']}d remaining"
         err = r.get("error")
         tag = "OK" if r.get("healthy") else "FAIL"
-        print(f"[{tag}] {name} {code:>4}   {resp:>7}  {err or 'SSL: ' + ssl_info}")
+        print(f"[{tag}] {name} {code:>4}   {resp:>7}  DNS: {dns:>6}  {err or 'SSL: ' + ssl_info}")
         if not r.get("healthy"):
             any_unhealthy = True
 

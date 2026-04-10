@@ -7,8 +7,8 @@ settings:
   consecutive_failures_before_alert: 2
 
 urls:
-  - name: "My API"
-    url: "https://api.example.com/health"
+  - name: "Ndevu Store Application"
+    url: "https://ndevu-store-be.onrender.com"
     expected_status: 200
     max_response_ms: 800
     check_ssl: true
@@ -16,16 +16,10 @@ urls:
     tags: [api, production]
     timeout_seconds: 5
 
-  - name: "Marketing site"
-    url: "https://example.com"
+  - name: "The Inventory Application"
+    url: "https://the-inventory-hazel.vercel.app"
     expected_status: 200
     max_response_ms: 2000
     check_ssl: true
     tags: [web, production]
 
-  - name: "Admin dashboard"
-    url: "https://admin.example.com/login"
-    expected_status: 200
-    max_response_ms: 3000
-    check_ssl: true
-    tags: [web, internal]
