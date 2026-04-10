@@ -1,0 +1,31 @@
+settings:
+  timeout_seconds: 10
+  retries: 2
+  user_agent: "StayAwakeBot/1.0 (github-health-checker)"
+  alert_on_failure: true
+  alert_on_recovery: true
+  consecutive_failures_before_alert: 2
+
+urls:
+  - name: "My API"
+    url: "https://api.example.com/health"
+    expected_status: 200
+    max_response_ms: 800
+    check_ssl: true
+    keyword: "ok"
+    tags: [api, production]
+    timeout_seconds: 5
+
+  - name: "Marketing site"
+    url: "https://example.com"
+    expected_status: 200
+    max_response_ms: 2000
+    check_ssl: true
+    tags: [web, production]
+
+  - name: "Admin dashboard"
+    url: "https://admin.example.com/login"
+    expected_status: 200
+    max_response_ms: 3000
+    check_ssl: true
+    tags: [web, internal]

@@ -1,0 +1,60 @@
+{
+  "generated_at": "2026-04-10T18:18:06.743049+00:00",
+  "results": [
+    {
+      "name": "My API",
+      "url": "https://api.example.com/health",
+      "checked_at": "2026-04-10T18:18:05.678638+00:00",
+      "status_code": null,
+      "response_ms": null,
+      "redirect_count": 0,
+      "ssl": null,
+      "keyword_found": null,
+      "healthy": false,
+      "error": "connection_error: Cannot connect to host api.example.com:443 ssl:default [No address associated with hostname]",
+      "attempt": 3,
+      "tags": [
+        "api",
+        "production"
+      ]
+    },
+    {
+      "name": "Marketing site",
+      "url": "https://example.com",
+      "checked_at": "2026-04-10T18:18:05.689263+00:00",
+      "status_code": 200,
+      "response_ms": 673,
+      "redirect_count": 0,
+      "ssl": {
+        "valid": false,
+        "expires_in_days": null,
+        "error": "no_notAfter"
+      },
+      "keyword_found": null,
+      "healthy": false,
+      "error": null,
+      "attempt": 1,
+      "tags": [
+        "web",
+        "production"
+      ]
+    },
+    {
+      "name": "Admin dashboard",
+      "url": "https://admin.example.com/login",
+      "checked_at": "2026-04-10T18:18:05.689533+00:00",
+      "status_code": null,
+      "response_ms": null,
+      "redirect_count": 0,
+      "ssl": null,
+      "keyword_found": null,
+      "healthy": false,
+      "error": "connection_error: Cannot connect to host admin.example.com:443 ssl:default [No address associated with hostname]",
+      "attempt": 3,
+      "tags": [
+        "web",
+        "internal"
+      ]
+    }
+  ]
+}
