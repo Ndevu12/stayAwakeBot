@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Alerter for StayAwakeBot — sends Slack and GitHub alerts based on reports/latest.json and history.json
+"""Alerter for StayAwakeBot Sentinel — sends Slack and GitHub alerts based on reports/latest.json and history.json
 """
 from __future__ import annotations
 import argparse
@@ -61,21 +61,21 @@ def main() -> None:
         if healthy and prev and not prev.get("healthy") and settings.get("alert_on_recovery", True):
             if slack_webhook:
                 payload = {
-                    "text": "StayAwakeBot Alert",
+                    "text": "StayAwakeBot Sentinel Alert",
                     "attachments": [
                         {
                             "color": "#36a64f",
                             "title": f"RECOVERY: {name}",
                             "title_link": url,
                             "text": f"Recovered at {utc_now_str()}",
-                            "footer": f"StayAwakeBot | {utc_now_str()}",
+                            "footer": f"StayAwakeBot Sentinel | {utc_now_str()}",
                         }
                     ],
                 }
                 send_slack(slack_webhook, payload)
             if token and repo:
                 owner, repo_name = repo.split("/")
-                q = urllib.parse.quote_plus(f"repo:{owner}/{repo_name} label:stayawakebot state:open {name}")
+                q = urllib.parse.quote_plus(f"repo:{owner}/{repo_name} label:stayawakebot-sentinel state:open {name}")
                 search = f"/search/issues?q={q}"
                 res = github_api(search, token=token)
                 if res and res.get("items"):
@@ -92,14 +92,14 @@ def main() -> None:
                 text = f"DOWN: {name} — {url}\nStatus: {u.get('status_code')} | Response: {u.get('response_ms')}ms | {reason}"
                 if slack_webhook:
                     payload = {
-                        "text": "StayAwakeBot Alert",
+                        "text": "StayAwakeBot Sentinel Alert",
                         "attachments": [
                             {
                                 "color": "#ff0000",
                                 "title": f"DOWN: {name}",
                                 "title_link": url,
                                 "text": text,
-                                "footer": f"StayAwakeBot | {utc_now_str()}",
+                                "footer": f"StayAwakeBot Sentinel | {utc_now_str()}",
                                 "fields": [
                                     {"title": "Consecutive failures", "value": str(consec), "short": True},
                                 ],
@@ -111,8 +111,8 @@ def main() -> None:
                     owner, repo_name = repo.split("/")
                     issue = {
                         "title": title_for_issue("DOWN", name, url),
-                        "body": f"## StayAwakeBot detected a failure\n\n**URL:** {url}\n**Detected at:** {utc_now_str()}\n**Status code:** {u.get('status_code')}\n**Response time:** {u.get('response_ms')}ms\n**Reason:** {reason}\n**Consecutive failures:** {consec}\n\nAuto-opened by StayAwakeBot. Will be auto-closed on recovery.",
-                        "labels": ["stayawakebot"],
+                        "body": f"## StayAwakeBot Sentinel detected an availability issue\n\n**URL:** {url}\n**Detected at:** {utc_now_str()}\n**Status code:** {u.get('status_code')}\n**Response time:** {u.get('response_ms')}ms\n**Reason:** {reason}\n**Consecutive failures:** {consec}\n\nAuto-opened by StayAwakeBot Sentinel. Will be auto-closed on recovery.",
+                        "labels": ["stayawakebot-sentinel"],
                     }
                     _ = github_api(f"/repos/{owner}/{repo_name}/issues", method="POST", token=token, data=issue)
                 u["alerted"] = True
