@@ -1,6 +1,7 @@
 <!-- STAYAWAKEBOT_BADGE -->
-![Health](https://img.shields.io/badge/health-0%2F3%20up-red)
+![Health](https://img.shields.io/badge/health-0%2F2%20up-red)
 <!-- STAYAWAKEBOT_BADGE_END -->
+
 
 
 

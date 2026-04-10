@@ -6,5 +6,6 @@ name = "pypi"
 [packages]
 aiohttp = "*"
 pyyaml = "*"
+typing-extensions = "*"
 
 [dev-packages]

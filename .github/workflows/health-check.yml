@@ -63,6 +63,6 @@ jobs:
         run: |
           git config user.name "StayAwakeBot"
           git config user.email "bot@stayawake.local"
-          git add reports/ README.md
+          git add -A
           git diff --staged --quiet || git commit -m "chore: health report $(date -u '+%Y-%m-%d %H:%M UTC')"
           git push
