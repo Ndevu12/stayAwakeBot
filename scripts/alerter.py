@@ -9,7 +9,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 import urllib.parse
 
-from helpers.alerter_helpers import parse_args, utc_now_str, send_slack, github_api, title_for_issue
+from helpers.alerter_helpers import (
+    parse_args, utc_now_str, 
+    send_slack, github_api, title_for_issue
+)
 
 
 def main() -> None:

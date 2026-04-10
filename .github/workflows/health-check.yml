@@ -31,6 +31,7 @@ jobs:
         with:
           python-version: '3.11'
           cache: 'pip'
+          cache-dependency-path: Pipfile
 
       - name: Install pipenv and dependencies
         run: |
@@ -39,18 +40,23 @@ jobs:
           pipenv install --deploy --system
 
       - name: Run checker
-        run: python scripts/checker.py --config config/urls.yml
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python -m scripts.checker --config config/urls.yml
 
       - name: Generate report
-        run: python scripts/reporter.py
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python -m scripts.reporter
 
       - name: Send alerts
         if: always()
         env:
+          PYTHONPATH: ${{ github.workspace }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-        run: python scripts/alerter.py
+        run: python -m scripts.alerter
 
       - name: Commit reports
         if: always()

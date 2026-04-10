@@ -3,6 +3,8 @@
 <!-- STAYAWAKEBOT_BADGE_END -->
 
 
+
+
 # StayAwakeBot
 
 A GitHub Actions-native URL health monitoring bot. Runs entirely on GitHub Actions and writes reports back to the repository.
