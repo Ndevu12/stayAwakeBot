@@ -1,4 +1,4 @@
-name: URL Health Check
+name: StayAwakeBot Sentinel — URL Availability Check (sentinel subtask)
 
 on:
   schedule:
@@ -18,7 +18,7 @@ permissions:
   issues: write
 
 jobs:
-  health-check:
+  availability-check:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
@@ -61,8 +61,8 @@ jobs:
       - name: Commit reports
         if: always()
         run: |
-          git config user.name "StayAwakeBot"
+          git config user.name "StayAwakeBot Sentinel"
           git config user.email "bot@stayawake.local"
           git add -A
-          git diff --staged --quiet || git commit -m "chore: health report $(date -u '+%Y-%m-%d %H:%M UTC')"
+          git diff --staged --quiet || git commit -m "chore(sentinel): availability report $(date -u '+%Y-%m-%d %H:%M UTC')"
           git push

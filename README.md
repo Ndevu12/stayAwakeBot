@@ -1,5 +1,5 @@
 <!-- STAYAWAKEBOT_BADGE -->
-![Health](https://img.shields.io/badge/health-0%2F2%20up-red)
+![Availability](https://img.shields.io/badge/availability-0%2F2%20up-red)
 <!-- STAYAWAKEBOT_BADGE_END -->
 
 
@@ -8,7 +8,9 @@
 
 # StayAwakeBot
 
-A GitHub Actions-native URL health monitoring bot. Runs entirely on GitHub Actions and writes reports back to the repository.
+StayAwakeBot is a GitHub Actions-native monitoring toolkit. This repository includes the
+`StayAwakeBot Sentinel` component (an availability/checks subtask) that runs on GitHub Actions
+and writes reports back to the repository.
 
 ## Quick Setup
 
