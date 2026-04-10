@@ -1,0 +1,25 @@
+settings:
+  timeout_seconds: 10
+  retries: 2
+  user_agent: "StayAwakeBot/1.0 (github-health-checker)"
+  alert_on_failure: true
+  alert_on_recovery: true
+  consecutive_failures_before_alert: 2
+
+urls:
+  - name: "Ndevu Store Application"
+    url: "https://ndevu-store-be.onrender.com"
+    expected_status: 200
+    max_response_ms: 800
+    check_ssl: true
+    keyword: "ok"
+    tags: [api, production]
+    timeout_seconds: 5
+
+  - name: "The Inventory Application"
+    url: "https://the-inventory-hazel.vercel.app"
+    expected_status: 200
+    max_response_ms: 2000
+    check_ssl: true
+    tags: [web, production]
+

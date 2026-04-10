@@ -1,0 +1,68 @@
+name: URL Health Check
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+    inputs:
+      config_path:
+        description: 'Path to config file'
+        required: false
+        default: 'config/urls.yml'
+  push:
+    paths:
+      - 'config/urls.yml'
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  health-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: Pipfile
+
+      - name: Install pipenv and dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pipenv
+          pipenv install --deploy --system
+
+      - name: Run checker
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python -m scripts.checker --config config/urls.yml
+
+      - name: Generate report
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python -m scripts.reporter
+
+      - name: Send alerts
+        if: always()
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python -m scripts.alerter
+
+      - name: Commit reports
+        if: always()
+        run: |
+          git config user.name "StayAwakeBot"
+          git config user.email "bot@stayawake.local"
+          git add -A
+          git diff --staged --quiet || git commit -m "chore: health report $(date -u '+%Y-%m-%d %H:%M UTC')"
+          git push
