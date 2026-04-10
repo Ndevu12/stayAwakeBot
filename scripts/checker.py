@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Async URL health checker for StayAwakeBot
+"""Async URL availability checker for StayAwakeBot Sentinel
 
 Usage: python scripts/checker.py --config config/urls.yml
 """
