@@ -12,6 +12,7 @@ from typing import Any
 def parse_args():
     p = argparse.ArgumentParser(description="StayAwakeBot async URL health checker")
     p.add_argument("--config", default="config/urls.yml", help="Path to config YAML")
+    p.add_argument("--fail-on-unhealthy", action="store_true", help="Exit with non-zero if any URL is unhealthy (opt-in)")
     return p.parse_args()
 
 

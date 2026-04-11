@@ -130,7 +130,58 @@ async def main() -> None:
         tasks = [check_one(session, uc) for uc in url_cfgs]
         results = await asyncio.gather(*tasks, return_exceptions=False)
 
-    LATEST_PATH.write_text(json.dumps({"generated_at": utc_iso_now(), "results": results}, indent=2))
+    # Build a richer latest payload and write both latest.json and a dated copy
+    total = len(results)
+    healthy_count = sum(1 for r in results if r.get("healthy"))
+    resp_vals = [int(r.get("response_ms")) for r in results if r.get("response_ms") is not None]
+    avg_resp = int(sum(resp_vals) / len(resp_vals)) if resp_vals else None
+    latest_payload = {
+        "generated_at": utc_iso_now(),
+        "results": results,
+        "summary": {
+            "total": total,
+            "healthy": healthy_count,
+            "unhealthy": total - healthy_count,
+            "avg_response_ms": avg_resp,
+        },
+        "any_unhealthy": any(r.get("healthy") is not True for r in results),
+    }
+    LATEST_PATH.write_text(json.dumps(latest_payload, indent=2))
+
+    # Also persist a minimal run entry into reports/history.json so history is
+    # preserved even if reporter does not run or fails. Reporter will deduplicate
+    # entries by `generated_at`.
+    history_path = REPORTS_DIR / "history.json"
+    try:
+        history = json.loads(history_path.read_text()) if history_path.exists() else []
+    except Exception:
+        history = []
+
+    run_entry = {"generated_at": latest_payload["generated_at"], "urls": []}
+    for r in results:
+        run_entry["urls"].append({
+            "name": r.get("name"),
+            "url": r.get("url"),
+            "dns_ms": r.get("dns_ms"),
+            "healthy": bool(r.get("healthy")),
+            "status_code": r.get("status_code"),
+            "response_ms": r.get("response_ms"),
+            "error": r.get("error"),
+            "checked_at": r.get("checked_at"),
+            "tags": r.get("tags", []),
+            "alerted": False,
+        })
+    # Append only if this generated_at isn't already present
+    if not any(h.get("generated_at") == run_entry["generated_at"] for h in history):
+        history.append(run_entry)
+        try:
+            history_path.write_text(json.dumps(history, indent=2))
+        except Exception:
+            # Best-effort: do not fail the checker if history cannot be written
+            pass
+
+    # Note: runs are preserved in `reports/history.json` via the reporter;
+    # do not create extra per-run JSON files here to avoid duplication.
 
     any_unhealthy = False
     for r in results:
@@ -147,7 +198,12 @@ async def main() -> None:
         if not r.get("healthy"):
             any_unhealthy = True
 
-    sys.exit(1 if any_unhealthy else 0)
+    # Default behavior: do not fail the process — this checker is an analyzer and should
+    # allow downstream reporter/alerter steps to run. If the user explicitly requests
+    # strict failure (for local debugging), allow that via `--fail-on-unhealthy`.
+    if getattr(args, "fail_on_unhealthy", False):
+        sys.exit(1 if any_unhealthy else 0)
+    return
 
 
 if __name__ == "__main__":

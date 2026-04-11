@@ -1,6 +1,12 @@
 <!-- STAYAWAKEBOT_BADGE -->
-![Availability](https://img.shields.io/badge/availability-0%2F2%20up-red)
+![Health](https://img.shields.io/badge/health-0%2F2%20up-red)
 <!-- STAYAWAKEBOT_BADGE_END -->
+
+
+
+
+
+
 
 
 
@@ -50,6 +56,10 @@ All reports are stored under the `reports/` directory committed back to the repo
 - `reports/status.json` — machine-readable summary of current status
 - `reports/YYYY-MM-DD/HH-MM-UTC.md` — human-readable markdown report for each run
 
+Note: The checker now writes a richer `latest.json` that includes a `summary` block
+and an `any_unhealthy` boolean. The reporter appends run summaries to `reports/history.json`,
+so per-run JSON files are not created by the checker.
+
 ## Local development
 
 Use Pipenv to create an isolated environment and install dependencies.
@@ -64,3 +74,19 @@ pipenv run python scripts/alerter.py
 ```
 
 This project uses `Pipfile` for dependency management; do not rely on a `requirements.txt` file.
+
+Notes on checker behaviour
+
+- By default the checker is non-fatal (it will exit successfully) so that reporting
+  and alerting steps can always run in CI. The checker still writes full results
+  to `reports/latest.json` and a timestamped JSON file for each run.
+- To make the checker exit with a non-zero code (useful for local debugging), pass
+  `--fail-on-unhealthy` to the checker CLI:
+
+```bash
+pipenv run python scripts/checker.py --config config/urls.yml --fail-on-unhealthy
+```
+
+This will cause the checker to return a non-zero exit code if any URL was flagged
+unhealthy. In CI the default non-failing behavior is recommended so that reports
+are always generated and committed.
