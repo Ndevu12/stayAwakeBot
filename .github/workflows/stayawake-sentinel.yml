@@ -42,9 +42,14 @@ jobs:
       - name: Run checker
         env:
           PYTHONPATH: ${{ github.workspace }}
-        run: python -m scripts.checker --config config/urls.yml
+        run: |
+          set +e
+          python -m scripts.checker --config config/urls.yml
+          echo "CHECKER_EXIT=$?" >> $GITHUB_ENV
+          set -e
 
       - name: Generate report
+        if: always()
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: python -m scripts.reporter
@@ -63,6 +68,27 @@ jobs:
         run: |
           git config user.name "StayAwakeBot Sentinel"
           git config user.email "bot@stayawake.local"
-          git add -A
+          git add reports/ README.md || true
           git diff --staged --quiet || git commit -m "chore(sentinel): availability report $(date -u '+%Y-%m-%d %H:%M UTC')"
           git push
+
+      - name: Backup reports history
+        if: always()
+        run: |
+          # Make a timestamped backup of reports/history.json before any repo changes
+          TS=$(date -u +"%Y%m%d%H%M%S")
+          if [ -f reports/history.json ]; then
+            cp reports/history.json reports/history.json.bak.$TS
+            echo "Backed up reports/history.json to reports/history.json.bak.$TS"
+          else
+            echo "No reports/history.json to back up"
+          fi
+
+      - name: Enforce checker exit code
+        if: always()
+        run: |
+          # Fail the job after reports/alerts/commit ran if the checker detected failures.
+          if [ "${CHECKER_EXIT:-0}" != "0" ]; then
+            echo "Checker reported failures (exit ${CHECKER_EXIT})."
+            exit 1
+          fi

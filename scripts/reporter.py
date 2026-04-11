@@ -53,8 +53,24 @@ def main() -> None:
             resp_count += 1
         if r.get("healthy"):
             healthy_count += 1
-    history.append(run_entry)
-    history_path.write_text(json.dumps(history, indent=2))
+    # Avoid duplicating runs if checker already persisted a minimal entry
+    if not any(h.get("generated_at") == generated_at for h in history):
+        history.append(run_entry)
+        history_path.write_text(json.dumps(history, indent=2))
+    else:
+        # If an entry with this generated_at exists, merge/ensure fields are present
+        for h in history:
+            if h.get("generated_at") == generated_at:
+                # ensure urls list contains same structure; prefer reporter's richer fields
+                h_urls = {u.get("name"): u for u in h.get("urls", [])}
+                for new_u in run_entry.get("urls", []):
+                    name = new_u.get("name")
+                    if name in h_urls:
+                        # merge keys from reporter run into existing entry
+                        h_urls[name].update(new_u)
+                    else:
+                        h.get("urls", []).append(new_u)
+        history_path.write_text(json.dumps(history, indent=2))
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=30)
     status = {
