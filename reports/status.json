@@ -1,21 +1,21 @@
 {
-  "generated_at": "2026-04-13T08:34:03.580644+00:00",
+  "generated_at": "2026-04-13T10:20:52.117893+00:00",
   "summary": {
     "total": 2,
     "healthy": 0,
     "unhealthy": 2,
-    "avg_response_ms": 925
+    "avg_response_ms": 1038
   },
   "urls": [
     {
       "name": "Ndevu Store Application",
       "url": "https://ndevu-store-be.onrender.com",
-      "dns_ms": 3,
+      "dns_ms": 9,
       "healthy": false,
       "status_code": null,
       "response_ms": null,
       "uptime_30d_pct": 0.0,
-      "last_checked": "2026-04-13T08:33:46.458685+00:00"
+      "last_checked": "2026-04-13T10:20:34.391656+00:00"
     },
     {
       "name": "The Inventory Application",
@@ -23,9 +23,9 @@
       "dns_ms": 20,
       "healthy": false,
       "status_code": 200,
-      "response_ms": 925,
+      "response_ms": 1038,
       "uptime_30d_pct": 0.0,
-      "last_checked": "2026-04-13T08:33:46.469648+00:00"
+      "last_checked": "2026-04-13T10:20:34.395553+00:00"
     }
   ]
 }
