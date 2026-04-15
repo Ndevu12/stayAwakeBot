@@ -1,10 +1,10 @@
 {
-  "generated_at": "2026-04-15T16:45:38.648284+00:00",
+  "generated_at": "2026-04-15T17:53:27.616603+00:00",
   "summary": {
     "total": 2,
     "healthy": 0,
     "unhealthy": 2,
-    "avg_response_ms": 938
+    "avg_response_ms": 1080
   },
   "urls": [
     {
@@ -15,17 +15,17 @@
       "status_code": null,
       "response_ms": null,
       "uptime_30d_pct": 0.0,
-      "last_checked": "2026-04-15T16:45:20.603172+00:00"
+      "last_checked": "2026-04-15T17:53:10.258359+00:00"
     },
     {
       "name": "The Inventory Application",
       "url": "https://the-inventory-hazel.vercel.app",
-      "dns_ms": 31,
+      "dns_ms": 67,
       "healthy": false,
       "status_code": 200,
-      "response_ms": 938,
+      "response_ms": 1080,
       "uptime_30d_pct": 0.0,
-      "last_checked": "2026-04-15T16:45:20.614602+00:00"
+      "last_checked": "2026-04-15T17:53:10.278678+00:00"
     }
   ]
 }
