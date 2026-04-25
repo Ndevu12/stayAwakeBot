@@ -1,19 +1,23 @@
 {
-  "generated_at": "2026-04-25T08:35:57.982375+00:00",
+  "generated_at": "2026-04-25T09:34:16.328456+00:00",
   "results": [
     {
       "name": "Ndevu Store Application",
       "url": "https://ndevu-store-be.onrender.com",
-      "checked_at": "2026-04-25T08:35:40.346167+00:00",
-      "dns_ms": 11,
-      "status_code": null,
-      "response_ms": null,
+      "checked_at": "2026-04-25T09:34:15.353720+00:00",
+      "dns_ms": 59,
+      "status_code": 200,
+      "response_ms": 158,
       "redirect_count": 0,
-      "ssl": null,
-      "keyword_found": null,
+      "ssl": {
+        "valid": false,
+        "expires_in_days": null,
+        "error": "no_notAfter"
+      },
+      "keyword_found": false,
       "healthy": false,
-      "error": "timeout after 5s (attempt 3/3)",
-      "attempt": 3,
+      "error": null,
+      "attempt": 1,
       "tags": [
         "api",
         "production"
@@ -22,10 +26,10 @@
     {
       "name": "The Inventory Application",
       "url": "https://the-inventory-hazel.vercel.app",
-      "checked_at": "2026-04-25T08:35:40.348878+00:00",
-      "dns_ms": 29,
+      "checked_at": "2026-04-25T09:34:15.378877+00:00",
+      "dns_ms": 28,
       "status_code": 200,
-      "response_ms": 1016,
+      "response_ms": 784,
       "redirect_count": 1,
       "ssl": {
         "valid": false,
@@ -46,7 +50,7 @@
     "total": 2,
     "healthy": 0,
     "unhealthy": 2,
-    "avg_response_ms": 1016
+    "avg_response_ms": 471
   },
   "any_unhealthy": true
 }
