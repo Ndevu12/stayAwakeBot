@@ -1,10 +1,10 @@
 {
-  "generated_at": "2026-05-13T07:32:00.396416+00:00",
+  "generated_at": "2026-05-13T10:07:25.165188+00:00",
   "summary": {
     "total": 2,
     "healthy": 0,
     "unhealthy": 2,
-    "avg_response_ms": 963
+    "avg_response_ms": 935
   },
   "urls": [
     {
@@ -15,7 +15,7 @@
       "status_code": null,
       "response_ms": null,
       "uptime_30d_pct": 0.0,
-      "last_checked": "2026-05-13T07:31:43.145363+00:00"
+      "last_checked": "2026-05-13T10:07:07.529721+00:00"
     },
     {
       "name": "The Inventory Application",
@@ -23,9 +23,9 @@
       "dns_ms": 27,
       "healthy": false,
       "status_code": 200,
-      "response_ms": 963,
+      "response_ms": 935,
       "uptime_30d_pct": 0.0,
-      "last_checked": "2026-05-13T07:31:43.157035+00:00"
+      "last_checked": "2026-05-13T10:07:07.532397+00:00"
     }
   ]
 }
