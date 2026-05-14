@@ -19598,5 +19598,40 @@
         "alerted": true
       }
     ]
+  },
+  {
+    "generated_at": "2026-05-14T21:43:19.224624+00:00",
+    "urls": [
+      {
+        "name": "Ndevu Store Application",
+        "url": "https://ndevu-store-be.onrender.com",
+        "dns_ms": 13,
+        "healthy": false,
+        "status_code": null,
+        "response_ms": null,
+        "error": "timeout after 5s (attempt 3/3)",
+        "checked_at": "2026-05-14T21:43:01.716080+00:00",
+        "tags": [
+          "api",
+          "production"
+        ],
+        "alerted": false
+      },
+      {
+        "name": "The Inventory Application",
+        "url": "https://the-inventory-hazel.vercel.app",
+        "dns_ms": 85,
+        "healthy": false,
+        "status_code": 500,
+        "response_ms": 1996,
+        "error": null,
+        "checked_at": "2026-05-14T21:43:01.728870+00:00",
+        "tags": [
+          "web",
+          "production"
+        ],
+        "alerted": false
+      }
+    ]
   }
 ]
