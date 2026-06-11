@@ -1,31 +1,31 @@
 {
-  "generated_at": "2026-06-11T02:05:43.349115+00:00",
+  "generated_at": "2026-06-11T07:02:46.084132+00:00",
   "summary": {
     "total": 2,
     "healthy": 0,
     "unhealthy": 2,
-    "avg_response_ms": 1859
+    "avg_response_ms": 2333
   },
   "urls": [
     {
       "name": "Ndevu Store Application",
       "url": "https://ndevu-store-be.onrender.com",
-      "dns_ms": 7,
+      "dns_ms": 5,
       "healthy": false,
       "status_code": null,
       "response_ms": null,
       "uptime_30d_pct": 0.0,
-      "last_checked": "2026-06-11T02:05:25.598768+00:00"
+      "last_checked": "2026-06-11T07:02:29.034470+00:00"
     },
     {
       "name": "The Inventory Application",
       "url": "https://the-inventory-hazel.vercel.app",
-      "dns_ms": 31,
+      "dns_ms": 77,
       "healthy": false,
       "status_code": 200,
-      "response_ms": 1859,
+      "response_ms": 2333,
       "uptime_30d_pct": 0.0,
-      "last_checked": "2026-06-11T02:05:25.664451+00:00"
+      "last_checked": "2026-06-11T07:02:29.037718+00:00"
     }
   ]
 }
