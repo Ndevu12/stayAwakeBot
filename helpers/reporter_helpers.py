@@ -28,7 +28,7 @@ def update_readme_badge(readme_path: Path, healthy: int, total: int):
     badge_block = (
         "<!-- STAYAWAKEBOT_BADGE -->\n"
         f"![Health](https://img.shields.io/badge/health-{badge_text}-{color})\n"
-        "<!-- STAYAWAKEBOT_BADGE_END -->\n"
+        "<!-- STAYAWAKEBOT_BADGE_END -->"
     )
     if "<!-- STAYAWAKEBOT_BADGE -->" in content:
         start = content.index("<!-- STAYAWAKEBOT_BADGE -->")
