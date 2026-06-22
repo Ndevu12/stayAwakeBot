@@ -1,13 +1,17 @@
-name: StayAwakeBot Security Sentinel — worm scan (security subtask)
+name: Security Sentinel — scan, report, alert (event-driven)
 
+# Security state only changes when code changes, so this is EVENT-DRIVEN, not on a
+# clock. PRs/pushes are gated by worm-guard.yml; this runs after code lands on main
+# (and on demand) to refresh the badge/status, alert on anything that slipped the
+# gate, and keep a committed report. Org-wide coverage is distributed: each repo runs
+# its own worm-guard on its own events. For bulk local scanning + fixes, use the CLI.
 on:
-  schedule:
-    - cron: '0 */6 * * *'          # every 6 hours
-  workflow_dispatch:
   push:
-    paths:
-      - 'config/security.yml'
-      - 'config/security_signatures.yml'
+    branches: [main]
+    paths-ignore:
+      - 'reports/**'
+      - 'README.md'
+  workflow_dispatch:
 
 permissions:
   contents: write                  # commit security reports + badge
@@ -22,7 +26,7 @@ jobs:
   security-scan:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout (full history for evil-merge detection)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -40,15 +44,22 @@ jobs:
           pip install pipenv
           pipenv install --deploy --system
 
-      - name: Run security scan
+      - name: Scan this repository
         env:
           PYTHONPATH: ${{ github.workspace }}
-          # PAT with read access to scan OTHER repos/orgs (configure as a secret).
-          GH_SECURITY_TOKEN: ${{ secrets.GH_SECURITY_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set +e
-          python -m stayawakebot.cli.security_scan --config config/security.yml
+          {
+            echo "settings:"
+            echo "  signatures_path: \"config/security_signatures.yml\""
+            echo "  exclude_dirs: [\".git\", \"node_modules\", \".next\", \"dist\", \"build\", \".malware-quarantine\", \".venv\"]"
+            echo "targets:"
+            echo "  local: [\"${{ github.workspace }}\"]"
+            echo "  github: { users: [], orgs: [] }"
+            echo "allowlist:"
+            echo "  - path_glob: \"tests/security/fixtures/**\""
+          } > "$RUNNER_TEMP/ci-security.yml"
+          python -m stayawakebot.cli.security_scan --config "$RUNNER_TEMP/ci-security.yml" --local-only
           echo "SCAN_EXIT=$?" >> $GITHUB_ENV
           set -e
 
@@ -75,7 +86,6 @@ jobs:
           git add reports/security README.md || true
           if git diff --staged --quiet; then echo "no changes to commit"; exit 0; fi
           git commit -m "chore(security): scan report $(date -u '+%Y-%m-%d %H:%M UTC')"
-          # Resilient push: rebase onto any concurrent commit, retry on race.
           for i in 1 2 3 4 5; do
             git pull --rebase --autostash origin "${GITHUB_REF_NAME}" && git push && exit 0
             echo "push race; retry $i"; sleep $((RANDOM % 4 + 2))

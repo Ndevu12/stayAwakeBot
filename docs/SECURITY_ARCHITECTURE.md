@@ -74,3 +74,21 @@ and `prevent/SECURITY_BASELINE.md` covers branch protection + token/Action harde
 PR per repo**, targeting the default branch for review. Before opening it checks the API for
 an existing open PR from that branch and updates it instead of creating a duplicate. Work is
 isolated in a git worktree; it never commits to or force-pushes the default branch.
+
+## Trigger model (event-driven, not scheduled)
+
+Uptime monitoring needs polling; **security state only changes when code changes**, so
+the security side is event-driven — copying the availability sentinel's cron would be
+wasteful and reactive.
+
+| Where | Trigger | What runs |
+|-------|---------|-----------|
+| Hosted — gate | `pull_request` + `push` (code paths) | `worm-guard` blocks infection from landing (read-only, fail-on-findings) |
+| Hosted — sentinel | `push` to `main` (merge) + `workflow_dispatch` | scan the repo, refresh badge/status, alert, commit report |
+| Local — CLI | on demand | `security_scan` over all dev roots; `security_remediate [--apply] [--open-pr]` fixes each repo |
+| Availability | `schedule` (*/5) | uptime genuinely needs polling — the one place a clock is correct |
+
+Org-wide coverage is **distributed**: every repo runs its own `worm-guard` on its own
+events, rather than a central poller sweeping the org on a timer. A periodic backstop
+(e.g. weekly) is optional — enable a `schedule:` only if you want to catch newly-added
+signatures applied to old code.
