@@ -1,0 +1,28 @@
+name: Worm Guard — block infected merges
+
+# Gate: scan PRs (catch injected indicators) and pushes of real code to main
+# (catch evil merges). The sentinels' frequent report/badge commits are ignored.
+on:
+  pull_request:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'reports/**'
+      - 'README.md'
+
+permissions:
+  contents: read
+
+jobs:
+  worm-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history for evil-merge detection)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan for worm indicators
+        uses: ./.github/actions/worm-scan
+        with:
+          fail-on-findings: 'true'
+          allowlist-globs: 'tests/security/fixtures/**'
