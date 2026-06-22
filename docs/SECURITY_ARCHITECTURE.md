@@ -15,13 +15,13 @@ threats are added as configuration, not code.
 config (data) ─► signature engine ─► matchers ─► findings ─► scanner ─► report/alert ─► remediator(PR)
 ```
 - **Signatures** (`config/security_signatures.yml`): IoCs as data. New threat = new entry.
-- **Matchers** (`helpers/security/matchers.py`, Strategy): one technique each, selected by a
+- **Matchers** (`stayawakebot/security/matchers/`, Strategy): one technique each, selected by a
   signature's `matcher` field — `content`, `filename`, `structural-json`, `heuristic`, `git-history`.
-- **Targets** (`helpers/security/targets.py`, DIP): `LocalRepoTarget` and `RemoteRepoTarget`
+- **Targets** (`stayawakebot/security/targets/`, DIP): `LocalRepoTarget` and `RemoteRepoTarget`
   (sandboxed shallow clone, read-only) share one interface.
-- **Scanner** (`helpers/security/scanner.py`): runs matchers over a target → `ScanResult`; applies allowlist.
-- **Findings** (`helpers/security/findings.py`): typed `Severity`/`Finding`/`ScanResult`.
-- **Shared** (`helpers/common/{io,git,github}.py`): reused by both subtasks (DRY).
+- **Scanner** (`stayawakebot/security/scanner.py`): runs matchers over a target → `ScanResult`; applies allowlist.
+- **Findings** (`stayawakebot/security/models.py`): typed `Severity`/`Finding`/`ScanResult`.
+- **Shared** (`stayawakebot/common + stayawakebot/adapters`): reused by both subtasks (DRY).
 
 ## Safety / threat model
 - **Never executes scanned code** — static analysis + git plumbing only.
@@ -44,7 +44,7 @@ config (data) ─► signature engine ─► matchers ─► findings ─► sca
 - `config/security_signatures.yml` — the signature database.
 
 ## CLI / pipeline scripts
-- `scripts/security_scan.py` — Phase 1 (detect → `reports/security/latest.json` + `latest.md`).
+- `stayawakebot/cli/security_scan.py (+ security/service.py)` — Phase 1 (detect → `reports/security/latest.json` + `latest.md`).
 - (Phase 2) `security_report.py` / `security_alert.py`; (Phase 3) `security_remediate.py`.
 
 ## Phasing

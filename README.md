@@ -62,9 +62,9 @@ Use Pipenv to create an isolated environment and install dependencies.
 pip install pipenv
 pipenv shell
 pipenv install
-pipenv run python scripts/checker.py --config config/urls.yml
-pipenv run python scripts/reporter.py
-pipenv run python scripts/alerter.py
+pipenv run python -m stayawakebot.cli.check --config config/urls.yml
+pipenv run python -m stayawakebot.cli.report
+pipenv run python -m stayawakebot.cli.alert
 ```
 
 This project uses `Pipfile` for dependency management; do not rely on a `requirements.txt` file.
@@ -78,7 +78,7 @@ Notes on checker behaviour
   `--fail-on-unhealthy` to the checker CLI:
 
 ```bash
-pipenv run python scripts/checker.py --config config/urls.yml --fail-on-unhealthy
+pipenv run python -m stayawakebot.cli.check --config config/urls.yml --fail-on-unhealthy
 ```
 
 This will cause the checker to return a non-zero exit code if any URL was flagged

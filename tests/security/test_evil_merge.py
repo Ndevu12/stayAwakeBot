@@ -13,8 +13,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from helpers.security.matchers import GitHistoryMatcher          # noqa: E402
-from helpers.security.targets import LocalRepoTarget, ScanOptions  # noqa: E402
+from stayawakebot.security.matchers.git_history import GitHistoryMatcher          # noqa: E402
+from stayawakebot.security.targets import LocalRepoTarget, ScanOptions  # noqa: E402
 
 EVIL_SIG = [{
     "id": "evil-merge", "category": "evil-merge", "severity": "high",

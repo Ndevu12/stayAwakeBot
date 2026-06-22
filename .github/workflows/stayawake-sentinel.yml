@@ -44,7 +44,7 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           set +e
-          python -m scripts.checker --config config/urls.yml
+          python -m stayawakebot.cli.check --config config/urls.yml
           echo "CHECKER_EXIT=$?" >> $GITHUB_ENV
           set -e
 
@@ -52,7 +52,7 @@ jobs:
         if: always()
         env:
           PYTHONPATH: ${{ github.workspace }}
-        run: python -m scripts.reporter
+        run: python -m stayawakebot.cli.report
 
       - name: Send alerts
         if: always()
@@ -61,7 +61,7 @@ jobs:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-        run: python -m scripts.alerter
+        run: python -m stayawakebot.cli.alert
 
       - name: Commit reports
         if: always()
