@@ -17,6 +17,11 @@ permissions:
   contents: write
   issues: write
 
+# Serialize commits to main across both sentinel workflows to avoid push races.
+concurrency:
+  group: stayawake-main-writer
+  cancel-in-progress: false
+
 jobs:
   availability-check:
     runs-on: ubuntu-latest
@@ -69,8 +74,14 @@ jobs:
           git config user.name "StayAwakeBot Sentinel"
           git config user.email "bot@stayawake.local"
           git add reports/ README.md || true
-          git diff --staged --quiet || git commit -m "chore(sentinel): availability report $(date -u '+%Y-%m-%d %H:%M UTC')"
-          git push
+          if git diff --staged --quiet; then echo "no changes to commit"; exit 0; fi
+          git commit -m "chore(sentinel): availability report $(date -u '+%Y-%m-%d %H:%M UTC')"
+          # Resilient push: rebase onto any concurrent commit, retry on race.
+          for i in 1 2 3 4 5; do
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" && git push && exit 0
+            echo "push race; retry $i"; sleep $((RANDOM % 4 + 2))
+          done
+          echo "push failed after retries"; exit 1
 
       - name: Backup reports history
         if: always()

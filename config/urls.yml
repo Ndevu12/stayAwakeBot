@@ -24,4 +24,4 @@ urls:
     tags: [web, production]
 
 
-# Security scanning is configured separately in config/security.yml (security sentinel).
+# See config/security.yml for the security sentinel configuration.

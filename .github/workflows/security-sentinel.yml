@@ -13,6 +13,11 @@ permissions:
   contents: write                  # commit security reports + badge
   issues: write                    # open/close finding issues
 
+# Shared with the availability sentinel so the two never push to main concurrently.
+concurrency:
+  group: stayawake-main-writer
+  cancel-in-progress: false
+
 jobs:
   security-scan:
     runs-on: ubuntu-latest
@@ -68,5 +73,11 @@ jobs:
           git config user.name "StayAwakeBot Security Sentinel"
           git config user.email "security-bot@stayawake.local"
           git add reports/security README.md || true
-          git diff --staged --quiet || git commit -m "chore(security): scan report $(date -u '+%Y-%m-%d %H:%M UTC')"
-          git push
+          if git diff --staged --quiet; then echo "no changes to commit"; exit 0; fi
+          git commit -m "chore(security): scan report $(date -u '+%Y-%m-%d %H:%M UTC')"
+          # Resilient push: rebase onto any concurrent commit, retry on race.
+          for i in 1 2 3 4 5; do
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" && git push && exit 0
+            echo "push race; retry $i"; sleep $((RANDOM % 4 + 2))
+          done
+          echo "push failed after retries"; exit 1
