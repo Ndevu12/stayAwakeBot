@@ -62,7 +62,7 @@ signatures:
     severity: medium
     matcher: content
     pattern: 'Blockchain Explorer|BlockchainFont|TechMono'
-    file_globs: ["*.md"]
+    file_globs: ["**/fonts/README.md", "**/fonts/*.md"]
     description: "Fake 'Blockchain Explorer' fonts README used as camouflage (GlassWorm-family)"
     remediation: quarantine-dir
 

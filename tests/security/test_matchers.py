@@ -9,9 +9,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from helpers.security.signatures import load_signatures          # noqa: E402
-from helpers.security.scanner import scan_target                 # noqa: E402
-from helpers.security.targets import LocalRepoTarget, ScanOptions  # noqa: E402
+from stayawakebot.security.signatures import load_signatures          # noqa: E402
+from stayawakebot.security.scanner import scan_target                 # noqa: E402
+from stayawakebot.security.targets import LocalRepoTarget, ScanOptions  # noqa: E402
 
 FIX = Path(__file__).resolve().parent / "fixtures"
 SIGS = load_signatures(ROOT / "config" / "security_signatures.yml")
