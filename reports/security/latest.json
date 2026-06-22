@@ -1,0 +1,39 @@
+{
+  "generated_at": "2026-06-22T16:44:35.156874+00:00",
+  "summary": {
+    "targets": 2,
+    "infected": 0,
+    "findings": 0,
+    "critical": 0,
+    "high": 0
+  },
+  "any_infected": false,
+  "results": [
+    {
+      "target": "~/.nvm",
+      "source": "local",
+      "infected": false,
+      "error": null,
+      "summary": {
+        "total": 0,
+        "by_severity": {},
+        "by_category": {},
+        "max_severity": null
+      },
+      "findings": []
+    },
+    {
+      "target": "~/work/stayAwakeBot/stayAwakeBot",
+      "source": "local",
+      "infected": false,
+      "error": null,
+      "summary": {
+        "total": 0,
+        "by_severity": {},
+        "by_category": {},
+        "max_severity": null
+      },
+      "findings": []
+    }
+  ]
+}
