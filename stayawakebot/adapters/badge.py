@@ -1,25 +1,43 @@
 #!/usr/bin/env python3
-"""README health-badge adapter (single responsibility: rewrite the badge block)."""
+"""README badge adapter (single responsibility: rewrite a marker-delimited badge).
+
+Generic `set_badge` is reused for both the health and the security badges (DRY);
+feature-specific wrappers keep their exact label/format.
+"""
 from __future__ import annotations
 
 from pathlib import Path
 
-_START = "<!-- STAYAWAKEBOT_BADGE -->"
-_END = "<!-- STAYAWAKEBOT_BADGE_END -->"
 
-
-def update_readme_badge(readme_path: str | Path, healthy: int, total: int) -> None:
+def set_badge(readme_path: str | Path, marker: str, alt: str,
+              message: str, color: str) -> None:
+    start, end = f"<!-- {marker} -->", f"<!-- {marker}_END -->"
+    block = (f"{start}\n"
+             f"![{alt}](https://img.shields.io/badge/{message}-{color})\n"
+             f"{end}")
     p = Path(readme_path)
     content = p.read_text(encoding="utf-8") if p.exists() else ""
-    color = "brightgreen" if healthy == total else "red"
-    block = (f"{_START}\n"
-             f"![Health](https://img.shields.io/badge/health-{healthy}%2F{total}%20up-{color})\n"
-             f"{_END}")
-    if _START in content and _END in content:
-        start, end = content.index(_START), content.index(_END) + len(_END)
-        new = content[:start] + block + content[end:]
-    elif _START in content:
-        new = content.replace(_START, block)
+    if start in content and end in content:
+        s, e = content.index(start), content.index(end) + len(end)
+        new = content[:s] + block + content[e:]
+    elif start in content:
+        new = content.replace(start, block)
     else:
         new = block + "\n" + content
     p.write_text(new, encoding="utf-8")
+
+
+def update_readme_badge(readme_path: str | Path, healthy: int, total: int) -> None:
+    """Availability health badge (unchanged format/markers)."""
+    color = "brightgreen" if healthy == total else "red"
+    set_badge(readme_path, "STAYAWAKEBOT_BADGE", "Health",
+              f"health-{healthy}%2F{total}%20up", color)
+
+
+def update_security_badge(readme_path: str | Path, infected: int, findings: int) -> None:
+    """Security badge: green when clean, red with finding count otherwise."""
+    if infected == 0:
+        message, color = "security-clean", "brightgreen"
+    else:
+        message, color = f"security-{findings}%20findings", "red"
+    set_badge(readme_path, "STAYAWAKEBOT_SECURITY_BADGE", "Security", message, color)

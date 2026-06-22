@@ -1,6 +1,9 @@
 <!-- STAYAWAKEBOT_BADGE -->
 ![Health](https://img.shields.io/badge/health-0%2F2%20up-red)
 <!-- STAYAWAKEBOT_BADGE_END -->
+<!-- STAYAWAKEBOT_SECURITY_BADGE -->
+![Security](https://img.shields.io/badge/security-clean-brightgreen)
+<!-- STAYAWAKEBOT_SECURITY_BADGE_END -->
 
 # StayAwakeBot
 
