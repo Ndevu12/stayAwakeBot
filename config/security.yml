@@ -41,4 +41,4 @@ alerts:
   # Minimum severity that triggers an alert.
   min_severity: "high"
 
-# Availability monitoring is configured in config/urls.yml (uptime sentinel).
+# See config/urls.yml for the uptime sentinel configuration.
