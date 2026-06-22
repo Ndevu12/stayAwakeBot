@@ -56,3 +56,10 @@ config (data) ─► signature engine ─► matchers ─► findings ─► sca
 ## Testing
 `tests/security/` — inert fixtures (clean vs infected) covering every matcher, plus a real
 evil-merge git fixture. Run: `python -m unittest discover -s tests/security`.
+
+## Remediation (Phase 3)
+
+`python -m stayawakebot.cli.security_remediate [--apply]` — dry-run by default. With
+`--apply` it strips/quarantines worm artifacts (originals backed up to `.malware-quarantine/`)
+and commits the fix to a `security/auto-clean-<stamp>` branch — never main, never force-pushed.
+Evil-merge findings are reported as manual (need a history rewrite).
