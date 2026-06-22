@@ -1,0 +1,42 @@
+# StayAwakeBot — Security sentinel configuration.
+#
+# Controls WHAT gets scanned and HOW the security subtask behaves. The signature
+# database (the WHAT-to-detect) lives separately in config/security_signatures.yml.
+
+settings:
+  signatures_path: "config/security_signatures.yml"
+  # Remediation mode (Phase 3): report-only | dry-run | pr
+  #   report-only : detect + report, never change files
+  #   dry-run     : compute fixes, show diff, do not write
+  #   pr          : apply fixes on a branch and open a PR (never push to main)
+  remediation_mode: "report-only"
+  # Directories never traversed during scanning.
+  exclude_dirs: [".git", "node_modules", ".next", "dist", "build", ".malware-quarantine", ".venv", "venv"]
+  # Max file size (bytes) to read for content matching (skip huge binaries).
+  max_file_bytes: 2000000
+  # Shallow-clone depth for remote targets (history matchers need a few commits).
+  remote_clone_depth: 50
+
+targets:
+  # Local clone paths or globs (expanded with ~ and shell-style wildcards).
+  local:
+    - "~/dev/**"
+  # GitHub accounts/orgs to enumerate and shallow-clone for scanning.
+  # Requires a read-only token in env GITHUB_TOKEN (or GH_SECURITY_TOKEN).
+  github:
+    users: []          # e.g. [Ndevu12]
+    orgs: []           # e.g. [UB-TechDEV]
+    include_forks: false
+    include_archived: false
+
+# Findings to ignore (tune false positives). Match by signature id and/or path glob.
+allowlist:
+  # The security test fixtures intentionally contain inert IoC strings.
+  - path_glob: "tests/security/fixtures/**"
+
+# Alerting (wired in Phase 2). Channels read their secrets from env.
+alerts:
+  slack: false
+  github_issues: false
+  # Minimum severity that triggers an alert.
+  min_severity: "high"
