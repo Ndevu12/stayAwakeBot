@@ -8,6 +8,7 @@ force-push, never pushed. The human reviews and opens the PR.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,6 +19,7 @@ from stayawakebot.security.scanner import scan_target
 from stayawakebot.security.service import discover_local_repos
 from stayawakebot.security.targets import ScanOptions, LocalRepoTarget
 from stayawakebot.security import remediation
+from stayawakebot.security import pr as pr_submit
 
 
 def _options(settings: dict) -> ScanOptions:
@@ -54,12 +56,14 @@ def _commit_branch(repo: Path, applied) -> str | None:
     return branch
 
 
-def remediate(config_path: str = "config/security.yml", apply: bool = False) -> int:
+def remediate(config_path: str = "config/security.yml", apply: bool = False,
+              open_pr: bool = False) -> int:
     cfg = load_yaml(config_path)
     settings = cfg.get("settings", {})
     opts = _options(settings)
     sigs = load_signatures(settings.get("signatures_path", "config/security_signatures.yml"))
     allowlist = cfg.get("allowlist", [])
+    token = os.environ.get("GH_SECURITY_TOKEN") or os.environ.get("GITHUB_TOKEN")
 
     total = 0
     for repo in discover_local_repos(cfg.get("targets", {}).get("local", []), opts):
@@ -76,7 +80,14 @@ def remediate(config_path: str = "config/security.yml", apply: bool = False) -> 
             print(f"    ⚠ manual {f.signature_id}: {f.path} ({f.description[:50]})")
         total += len(changes)
 
-        if apply and changes:
+        if not (apply and changes):
+            continue
+        if open_pr:
+            if not token:
+                print("    → --open-pr needs GH_SECURITY_TOKEN or GITHUB_TOKEN; skipped")
+            else:
+                print(f"    → {pr_submit.submit_fix_pr(repo, opts, sigs, allowlist, token)}")
+        else:
             was_clean = _is_clean(repo)
             applied = remediation.apply(repo, changes, repo / ".malware-quarantine")
             print(f"    → applied {len(applied)} change(s); originals in .malware-quarantine/")
@@ -92,7 +103,8 @@ def remediate(config_path: str = "config/security.yml", apply: bool = False) -> 
         print("No auto-remediable findings.")
     elif not apply:
         print(f"\nDRY-RUN: {total} change(s) planned across the repos above. "
-              "Re-run with --apply to fix (backs up to .malware-quarantine/ and commits to a branch).")
+              "Re-run with --apply (local branch) or --apply --open-pr (push a fix branch + "
+              "open one rolling PR per repo, de-duplicated).")
     else:
         print(f"\nApplied remediation for {total} change(s). Review the branches/diffs, then open PRs. "
               "Evil-merge findings (⚠ manual) need a history rewrite — not auto-fixed.")
