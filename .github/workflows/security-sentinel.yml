@@ -12,6 +12,8 @@ on:
       - 'reports/**'
       - 'README.md'
   workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * 1'   # weekly backstop: catch new signatures applied to old code
 
 permissions:
   contents: write                  # commit security reports + badge
