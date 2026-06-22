@@ -1,0 +1,140 @@
+# StayAwakeBot — Security signature database (data-driven IoCs).
+#
+# Adding a new threat = add an entry here; no Python changes required (DRY/scalable).
+# Each signature is consumed by the matcher named in its `matcher` field. Matcher-
+# specific keys are documented per type in helpers/security/matchers.py.
+#
+# Fields (common):
+#   id          unique, kebab-case
+#   category    grouping (code-loader | fake-font | vscode-autorun | git-marker | camouflage | evil-merge)
+#   severity    critical | high | medium | low
+#   matcher     content | filename | structural-json | git-history | heuristic
+#   description human-readable
+#   remediation strategy id (consumed in Phase 3): strip-appended-payload |
+#               quarantine-file | quarantine-dir | remove-foreign-vscode | strip-gitignore-markers | manual
+version: 1
+
+signatures:
+  # ── Obfuscated loader fingerprints (content regex) ───────────────────────────
+  - id: loader-fromcharcode-127
+    category: code-loader
+    severity: critical
+    matcher: content
+    pattern: 'String\.fromCharCode\(127\)'
+    description: "Obfuscated loader fingerprint — fromCharCode(127) string shuffler"
+    remediation: strip-appended-payload
+
+  - id: loader-seed-var
+    category: code-loader
+    severity: critical
+    matcher: content
+    pattern: 'var\s+_\$_[0-9a-f]{2,}\s*='
+    description: "Obfuscated loader seed variable (var _$_xxxx=)"
+    remediation: strip-appended-payload
+
+  - id: loader-decoder-fn
+    category: code-loader
+    severity: high
+    matcher: content
+    pattern: '=\s*sfL\('
+    description: "Obfuscated loader decoder call (sfL())"
+    remediation: strip-appended-payload
+
+  - id: loader-global-bang
+    category: code-loader
+    severity: high
+    matcher: content
+    pattern: "global\\['!'\\]\\s*="
+    description: "Loader bootstrap assigning global['!']"
+    remediation: strip-appended-payload
+
+  - id: loader-require-hijack
+    category: code-loader
+    severity: high
+    matcher: content
+    pattern: 'global\[_\$_[0-9a-f]+\[0\]\]\s*=\s*require'
+    description: "Loader reassigning global.require to smuggle CommonJS into ESM"
+    remediation: strip-appended-payload
+
+  # ── Camouflage README (heuristic content) ────────────────────────────────────
+  - id: camouflage-blockchain-readme
+    category: camouflage
+    severity: medium
+    matcher: content
+    pattern: 'Blockchain Explorer|BlockchainFont|TechMono'
+    file_globs: ["*.md"]
+    description: "Fake 'Blockchain Explorer' fonts README used as camouflage (GlassWorm-family)"
+    remediation: quarantine-dir
+
+  # ── Fake font payload (filename + content cross-check via heuristic) ─────────
+  - id: fake-font-fa-solid-400
+    category: fake-font
+    severity: critical
+    matcher: filename
+    pattern: 'fa-solid-400.woff2'
+    description: "Payload disguised as FontAwesome fa-solid-400.woff2 (not a real FA file)"
+    remediation: quarantine-dir
+
+  - id: fake-font-text-woff
+    category: fake-font
+    severity: critical
+    matcher: heuristic
+    kind: text-in-fontfile
+    file_globs: ["*.woff", "*.woff2", "*.ttf", "*.otf"]
+    description: "Font file whose bytes are actually JavaScript/text (disguised payload)"
+    remediation: quarantine-file
+
+  # ── Oversized single line in a config file (obfuscation heuristic) ────────────
+  - id: oversized-config-line
+    category: code-loader
+    severity: medium
+    matcher: heuristic
+    kind: long-line
+    threshold: 2000
+    file_globs: ["*.mjs", "*.cjs", "*.js", "*.ts", "postcss.config.*"]
+    description: "Config file with an abnormally long single line (likely appended payload)"
+    remediation: strip-appended-payload
+
+  # ── VS Code auto-run harness (structured JSON) ───────────────────────────────
+  - id: vscode-task-folderopen-exec
+    category: vscode-autorun
+    severity: critical
+    matcher: structural-json
+    kind: vscode-task-autorun
+    description: "VS Code task auto-running a command on folderOpen (executes on open)"
+    remediation: remove-foreign-vscode
+
+  - id: vscode-task-runs-font
+    category: vscode-autorun
+    severity: critical
+    matcher: structural-json
+    kind: vscode-task-runs-font
+    description: "VS Code task whose command executes a font file via node"
+    remediation: remove-foreign-vscode
+
+  - id: vscode-allow-automatic-tasks
+    category: vscode-autorun
+    severity: high
+    matcher: structural-json
+    kind: vscode-allow-automatic-tasks
+    description: "settings.json enables task.allowAutomaticTasks (required for folderOpen abuse)"
+    remediation: remove-foreign-vscode
+
+  # ── .gitignore camouflage markers (content) ──────────────────────────────────
+  - id: gitignore-autopush-markers
+    category: git-marker
+    severity: medium
+    matcher: content
+    pattern: 'temp_auto_push\.bat|temp_interactive_push\.bat|branch_structure\.json'
+    file_globs: [".gitignore"]
+    description: "Injected .gitignore markers for the worm's auto-push tooling"
+    remediation: strip-gitignore-markers
+
+  # ── Evil merge (git history) ─────────────────────────────────────────────────
+  - id: evil-merge
+    category: evil-merge
+    severity: high
+    matcher: git-history
+    kind: evil-merge
+    description: "Merge commit introducing content present in neither parent (review-evading)"
+    remediation: manual
