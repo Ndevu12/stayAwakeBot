@@ -23,3 +23,5 @@ urls:
     check_ssl: true
     tags: [web, production]
 
+
+# Security scanning is configured separately in config/security.yml (security sentinel).

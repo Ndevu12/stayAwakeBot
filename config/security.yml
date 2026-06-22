@@ -40,3 +40,5 @@ alerts:
   github_issues: false
   # Minimum severity that triggers an alert.
   min_severity: "high"
+
+# Availability monitoring is configured in config/urls.yml (uptime sentinel).
