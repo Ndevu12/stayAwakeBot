@@ -69,3 +69,8 @@ Evil-merge findings are reported as manual (need a history rewrite).
 A reusable `worm-scan` composite Action (`.github/actions/worm-scan`) gates PRs/merges in
 any repo (`worm-guard.yml`), a portable `prevent/pre-commit` hook blocks local commits,
 and `prevent/SECURITY_BASELINE.md` covers branch protection + token/Action hardening.
+
+`--apply --open-pr` pushes a stable `security/auto-clean` branch and opens **one rolling
+PR per repo**, targeting the default branch for review. Before opening it checks the API for
+an existing open PR from that branch and updates it instead of creating a duplicate. Work is
+isolated in a git worktree; it never commits to or force-pushes the default branch.

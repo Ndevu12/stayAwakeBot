@@ -60,3 +60,17 @@ def list_repos(account: str, kind: str, token: str | None,
             break
         page += 1
     return slugs
+
+
+def list_open_pulls(owner: str, repo: str, head_branch: str, token: str | None) -> list[dict]:
+    """Open PRs whose head is `owner:head_branch` (used for de-duplication)."""
+    res = request(f"/repos/{owner}/{repo}/pulls?state=open&head={owner}:{head_branch}",
+                  token=token)
+    return res if isinstance(res, list) else []
+
+
+def create_pull(owner: str, repo: str, title: str, head: str, base: str,
+                body: str, token: str | None) -> dict | None:
+    """Open a PR. Returns the created PR dict (with 'number','html_url') or None."""
+    return request(f"/repos/{owner}/{repo}/pulls", method="POST", token=token,
+                   data={"title": title, "head": head, "base": base, "body": body})
