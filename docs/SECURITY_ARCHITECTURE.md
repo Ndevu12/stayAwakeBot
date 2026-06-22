@@ -63,3 +63,9 @@ evil-merge git fixture. Run: `python -m unittest discover -s tests/security`.
 `--apply` it strips/quarantines worm artifacts (originals backed up to `.malware-quarantine/`)
 and commits the fix to a `security/auto-clean-<stamp>` branch — never main, never force-pushed.
 Evil-merge findings are reported as manual (need a history rewrite).
+
+## Prevention
+
+A reusable `worm-scan` composite Action (`.github/actions/worm-scan`) gates PRs/merges in
+any repo (`worm-guard.yml`), a portable `prevent/pre-commit` hook blocks local commits,
+and `prevent/SECURITY_BASELINE.md` covers branch protection + token/Action hardening.

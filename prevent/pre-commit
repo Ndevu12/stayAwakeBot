@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# StayAwakeBot worm pre-commit hook — blocks committing worm indicators.
+# Dependency-free (grep only). A lightweight first line; the full scanner runs in CI.
+# Bypass a false positive with: git commit --no-verify
+set -uo pipefail
+SIG='fromCharCode\(127\)|_\$_1e42|sfL\(|var _\$_|global\[_\$_'
+fail=0
+staged="$(git diff --cached --name-only --diff-filter=ACM)"
+[ -z "$staged" ] && exit 0
+
+while IFS= read -r f; do
+  [ -f "$f" ] || continue
+  base="$(basename "$f")"
+  grep -qIE "$SIG" "$f" 2>/dev/null && { echo "  ✗ worm loader fingerprint: $f"; fail=1; }
+  [ "$base" = "fa-solid-400.woff2" ] && { echo "  ✗ suspicious payload font: $f"; fail=1; }
+  case "$f" in
+    *.vscode/tasks.json)
+      grep -qE 'folderOpen' "$f" 2>/dev/null && grep -qE '\.woff2|node ' "$f" 2>/dev/null \
+        && { echo "  ✗ VS Code folderOpen auto-run task: $f"; fail=1; } ;;
+    *.vscode/settings.json)
+      grep -q 'allowAutomaticTasks' "$f" 2>/dev/null \
+        && { echo "  ✗ task.allowAutomaticTasks: $f"; fail=1; } ;;
+  esac
+  [ "$base" = ".gitignore" ] && grep -qE 'temp_auto_push\.bat|temp_interactive_push\.bat|branch_structure\.json' "$f" 2>/dev/null \
+    && { echo "  ✗ worm .gitignore markers: $f"; fail=1; }
+done <<< "$staged"
+
+if [ "$fail" = 1 ]; then
+  echo ""
+  echo "✋ Commit blocked — worm indicators detected (StayAwakeBot worm-guard)."
+  echo "   Real positive? Clean with: python -m stayawakebot.cli.security_remediate --apply"
+  echo "   False positive?  Bypass with: git commit --no-verify"
+  exit 1
+fi
+exit 0
