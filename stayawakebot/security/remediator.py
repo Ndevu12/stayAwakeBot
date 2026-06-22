@@ -9,11 +9,14 @@ force-push, never pushed. The human reviews and opens the PR.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
 from stayawakebot.common.config import load_yaml
+from stayawakebot.adapters import github_api
 from stayawakebot.security.signatures import load_signatures
 from stayawakebot.security.scanner import scan_target
 from stayawakebot.security.service import discover_local_repos
@@ -109,3 +112,53 @@ def remediate(config_path: str = "config/security.yml", apply: bool = False,
         print(f"\nApplied remediation for {total} change(s). Review the branches/diffs, then open PRs. "
               "Evil-merge findings (⚠ manual) need a history rewrite — not auto-fixed.")
     return total
+
+
+def submit_org_prs(config_path: str = "config/security.yml", token: str | None = None) -> int:
+    """Event-driven / on-demand org sweep: for each configured GitHub repo, open or
+    update ONE de-duplicated remediation PR (clean repos are skipped). Returns the
+    number of repos that now have an open fix PR.
+    """
+    cfg = load_yaml(config_path)
+    settings = cfg.get("settings", {})
+    opts = _options(settings)
+    sigs = load_signatures(settings.get("signatures_path", "config/security_signatures.yml"))
+    allowlist = cfg.get("allowlist", [])
+    token = token or os.environ.get("GH_SECURITY_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    if not token:
+        print("Org remediation needs GH_SECURITY_TOKEN/GITHUB_TOKEN with repo + PR write scope.")
+        return 0
+
+    gconf = cfg.get("targets", {}).get("github", {}) or {}
+    slugs: list[str] = []
+    for kind in ("users", "orgs"):
+        for acct in gconf.get(kind, []) or []:
+            slugs += github_api.list_repos(acct, kind, token,
+                                           gconf.get("include_forks", False),
+                                           gconf.get("include_archived", False))
+    slugs = sorted(set(slugs))
+    if not slugs:
+        print("No GitHub targets configured (targets.github.users/orgs).")
+        return 0
+
+    print(f"Sweeping {len(slugs)} repo(s) for worm indicators…")
+    opened = 0
+    for slug in slugs:
+        tmp = Path(tempfile.mkdtemp(prefix="sab-org-"))
+        clone = tmp / "repo"
+        url = f"https://x-access-token:{token}@github.com/{slug}.git"
+        r = subprocess.run(["git", "clone", "--quiet", "--depth", "50", url, str(clone)],
+                           capture_output=True, text=True, check=False)
+        if r.returncode != 0:
+            print(f"  {slug}: clone failed (check token access)")
+            shutil.rmtree(tmp, ignore_errors=True)
+            continue
+        try:
+            outcome = pr_submit.submit_fix_pr(clone, opts, sigs, allowlist, token)
+            print(f"  {slug}: {outcome}")
+            if "opened PR" in outcome or "updated existing PR" in outcome:
+                opened += 1
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+    print(f"Done. {opened} repo(s) have an open remediation PR (duplicates avoided).")
+    return opened
