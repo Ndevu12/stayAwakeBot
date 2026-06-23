@@ -41,6 +41,7 @@ stayawake-security-scan    = "stayawake.bots.security.cli.scan:main"
 stayawake-security-report  = "stayawake.bots.security.cli.report:main"
 stayawake-security-alert   = "stayawake.bots.security.cli.alert:main"
 stayawake-security-remediate = "stayawake.bots.security.cli.remediate:main"
+stayawake-security-audit   = "stayawake.bots.security.cli.audit:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/stayawake"]
