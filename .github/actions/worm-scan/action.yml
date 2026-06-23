@@ -4,7 +4,7 @@ author: 'StayAwakeBot'
 
 inputs:
   sentinel-ref:
-    description: 'Ref/SHA of Ndevu12/stayAwakeBot to run the scanner from (pin to a SHA in production).'
+    description: 'Ref/SHA of Ndevu12/stayAwakeBot to install the scanner from (pin to a SHA in production).'
     required: false
     default: 'main'
   fail-on-findings:
@@ -24,33 +24,28 @@ runs:
       with:
         python-version: '3.11'
 
+    - name: Install scanner
+      shell: bash
+      run: pip install "stayawake @ git+https://github.com/Ndevu12/stayAwakeBot@${{ inputs.sentinel-ref }}"
+
     - name: Run worm scan
       shell: bash
       run: |
         set -euo pipefail
-        work="$GITHUB_WORKSPACE"
-        tmp="$(mktemp -d)"
-        git clone --quiet --depth 1 --branch "${{ inputs.sentinel-ref }}" \
-          https://github.com/Ndevu12/stayAwakeBot "$tmp/sab" \
-          || git clone --quiet https://github.com/Ndevu12/stayAwakeBot "$tmp/sab"
-        python -m pip install --quiet pyyaml
+        cfg="$(mktemp)"
         {
           echo "settings:"
-          echo "  signatures_path: \"$tmp/sab/config/security_signatures.yml\""
           echo "  exclude_dirs: [\".git\", \"node_modules\", \".next\", \"dist\", \"build\", \".malware-quarantine\", \".venv\"]"
           echo "targets:"
-          echo "  local: [\"$work\"]"
+          echo "  local: [\"$GITHUB_WORKSPACE\"]"
           echo "  github: { users: [], orgs: [] }"
           if [ -n "${{ inputs.allowlist-globs }}" ]; then
             echo "allowlist:"
             IFS=',' read -ra G <<< "${{ inputs.allowlist-globs }}"
             for g in "${G[@]}"; do echo "  - path_glob: \"$(echo "$g" | xargs)\""; done
           fi
-        } > "$tmp/scan.yml"
+        } > "$cfg"
         flag=""
         [ "${{ inputs.fail-on-findings }}" = "true" ] && flag="--fail-on-findings"
-        # Run from the scanner clone so its `security` package isn't shadowed by a
-        # same-named dir in the repo being scanned. Config uses absolute paths.
-        cd "$tmp/sab"
-        PYTHONPATH="$tmp/sab" python -m security.cli.scan \
-          --config "$tmp/scan.yml" --local-only $flag
+        # Installed console script; uses the packaged signature DB. No clone, no PYTHONPATH.
+        stayawake-security-scan --config "$cfg" --local-only $flag

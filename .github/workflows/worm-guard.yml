@@ -25,4 +25,4 @@ jobs:
         uses: ./.github/actions/worm-scan
         with:
           fail-on-findings: 'true'
-          allowlist-globs: 'tests/security/fixtures/**'
+          allowlist-globs: 'tests/bots/security/fixtures/**'

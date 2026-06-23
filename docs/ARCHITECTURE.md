@@ -1,42 +1,46 @@
 # StayAwakeBot — Architecture
 
-Two bots as **separate top-level packages** (`health`, `security`) over a shared core
-(`shared`). Each bot is self-contained; layering runs
-`cli → service → (domain + adapters) → shared`. Every folder has one responsibility.
+A distributable (`pip install`-able) toolkit: two bots as packages under one
+`stayawake` namespace, over a shared `core`. Layering runs
+`cli → service → (domain + adapters) → core`. One responsibility per folder.
 
 ```
-shared/        io · timeutil · config · git           # shared utilities (DRY)
-  adapters/    http_client · github_api · slack · badge   # external I/O, one integration per file (SRP)
-health/        models · config · checker · reporter · alerter · service   # uptime sentinel bot
-  cli/         check · report · alert                 # thin: argparse → service
-security/      models · signatures · scanner · service · reporter · alerter · remediator · pr
-  matchers/    base · content · filename · structural · heuristic · git_history  # one technique per file
-  targets/     base · local · remote
-  cli/         scan · report · alert · remediate
-config/   urls.yml · security.yml · security_signatures.yml
-tests/    health · security                     # mirrors source (run with `-t .`)
-docs/     ARCHITECTURE.md · SECURITY_ARCHITECTURE.md
+src/stayawake/                     ← single import root (installable; no name clashes)
+  core/        io · timeutil · config · git          # shared utilities (DRY)
+    adapters/  http_client · github_api · slack · badge   # external I/O, one per file (SRP)
+  bots/
+    health/    models · config · checker · reporter · alerter · service · cli/   # uptime sentinel
+    security/  models · signatures · scanner · service · reporter · alerter · remediator · pr
+      matchers/  base · content · filename · structural · heuristic · git_history  # one technique/file
+      targets/   base · local · remote
+      data/      signatures.yml      # default IoC DB shipped INSIDE the package
+      cli/       scan · report · alert · remediate
+pyproject.toml   packaging: metadata · console scripts · package-data
+config/   urls.yml · security.yml        # deployment config (targets/allowlist; signatures are packaged)
+tests/    bots/health · bots/security    # mirrors src
+docs/  prevent/  reports/  .github/  CONTRIBUTING.md
 ```
 
 ## Principles
-- **SRP** — one responsibility per folder/file; matchers and targets are folders, one concern each.
-- **DRY** — `shared/` (+ `shared/adapters/`) is reused by both bots; no duplicated git/github/slack/io.
-- **Reusability** — adapters, matchers, and targets are drop-in; CLIs are trivial wrappers.
-- **Maintainability** — clear layering, typed domain models, tests mirror the tree.
-- **Scalability** — a new bot is added as another top-level package; new detections are added as
-  data (`config/security_signatures.yml`) or a new file in `security/matchers/`.
+- **SRP** — `core` (utilities) · `bots/*` (each bot) · `cli/` (entrypoints) · `data/` (signatures) are separate.
+- **DRY** — `core` (+ `core/adapters`) is reused by both bots; console scripts reuse the thin `main()`s; one packaged signature source.
+- **Reusability / distributability** — `pip install stayawake` gives a self-contained scanner with console commands; the worm-scan Action installs it instead of cloning.
+- **Maintainability / collaboration** — standard modern `src/` layout, `pyproject.toml` single source of truth, `CONTRIBUTING.md`, tests mirror `src`, importable without path tricks.
+- **Scalability** — a new bot is `src/stayawake/bots/<bot>/`; new shared code is `src/stayawake/core/<x>`; new detections are data (`…/security/data/signatures.yml`) or a file in `security/matchers/`.
 
-## Entrypoints (used by `.github/workflows/`)
+## Install & run
+```bash
+pip install -e .            # or: pip install .
+stayawake-health-check   --config config/urls.yml
+stayawake-health-report
+stayawake-health-alert
+stayawake-security-scan  --config config/security.yml
+stayawake-security-remediate [--apply] [--open-pr] [--remote]
+python -m unittest discover -s tests      # tests (package must be installed)
 ```
-python -m health.cli.check   --config config/urls.yml
-python -m health.cli.report
-python -m health.cli.alert
-python -m security.cli.scan --config config/security.yml
-python -m security.cli.remediate [--apply] [--open-pr] [--remote]
-```
+(`python -m stayawake.bots.<bot>.cli.<action>` works too.)
 
 ## Adding a bot
-Create a new top-level package `<bot>/` with its `models`/`service` + a thin `cli/`,
-reuse `shared/` (+ `shared/adapters/`), and mirror tests under `tests/<bot>/`. The
-existing bots are untouched.
-EOF
+Create `src/stayawake/bots/<bot>/` with its `models`/`service` + a thin `cli/`,
+reuse `stayawake.core` (+ `core.adapters`), register console scripts in `pyproject.toml`,
+and mirror tests under `tests/bots/<bot>/`. Existing bots are untouched.

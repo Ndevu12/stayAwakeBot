@@ -4,7 +4,6 @@
 # database (the WHAT-to-detect) lives separately in config/security_signatures.yml.
 
 settings:
-  signatures_path: "config/security_signatures.yml"
   # Remediation mode (Phase 3): report-only | dry-run | pr
   #   report-only : detect + report, never change files
   #   dry-run     : compute fixes, show diff, do not write
