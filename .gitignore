@@ -207,3 +207,5 @@ __marimo__/
 
 # local malware quarantine (do not commit)
 .malware-quarantine/
+
+.DS_Store

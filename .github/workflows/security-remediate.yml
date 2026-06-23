@@ -32,4 +32,4 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}
           GH_SECURITY_TOKEN: ${{ secrets.GH_SECURITY_TOKEN }}
-        run: python -m stayawakebot.cli.security_remediate --remote
+        run: python -m security.cli.remediate --remote

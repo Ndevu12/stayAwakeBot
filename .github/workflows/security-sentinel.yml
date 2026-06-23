@@ -61,7 +61,7 @@ jobs:
             echo "allowlist:"
             echo "  - path_glob: \"tests/security/fixtures/**\""
           } > "$RUNNER_TEMP/ci-security.yml"
-          python -m stayawakebot.cli.security_scan --config "$RUNNER_TEMP/ci-security.yml" --local-only
+          python -m security.cli.scan --config "$RUNNER_TEMP/ci-security.yml" --local-only
           echo "SCAN_EXIT=$?" >> $GITHUB_ENV
           set -e
 
@@ -69,7 +69,7 @@ jobs:
         if: always()
         env:
           PYTHONPATH: ${{ github.workspace }}
-        run: python -m stayawakebot.cli.security_report
+        run: python -m security.cli.report
 
       - name: Send security alerts
         if: always()
@@ -78,7 +78,7 @@ jobs:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-        run: python -m stayawakebot.cli.security_alert
+        run: python -m security.cli.alert
 
       - name: Commit security reports + badge
         if: always()

@@ -1,0 +1,1 @@
+"""Security sentinel CLI entrypoints."""
