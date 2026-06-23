@@ -205,8 +205,9 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-# local malware quarantine (do not commit)
+# Malware quarantine / remediation artifacts (kept local, never committed)
 .malware-quarantine/
+*.malware-bak
 
 .DS_Store
 
