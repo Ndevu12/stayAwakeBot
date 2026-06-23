@@ -77,8 +77,9 @@ python -m unittest discover -s tests       # run the test suite
 Notes on checker behaviour
 
 - By default the checker is non-fatal (it will exit successfully) so that reporting
-  and alerting steps can always run in CI. The checker still writes full results
-  to `reports/latest.json` and a timestamped JSON file for each run.
+  and alerting steps can always run in CI. The checker writes full results to
+  `reports/latest.json` and appends a run summary to `reports/history.json`; the
+  reporter produces the dated markdown report (`reports/YYYY-MM-DD/HH-MM-UTC.md`).
 - To make the checker exit with a non-zero code (useful for local debugging), pass
   `--fail-on-unhealthy` to the checker CLI:
 

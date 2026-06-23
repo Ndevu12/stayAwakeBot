@@ -51,7 +51,7 @@ auto-run tasks, and `.gitignore` worm markers. Bypass a false positive with `--n
 ## 5. Recovery
 If the gate flags a repo, clean it:
 ```bash
-python -m security.cli.remediate --apply   # dry-run first (omit --apply)
+stayawake-security-remediate --apply   # dry-run first (omit --apply)
 ```
 Evil merges already in history need a `git filter-repo` purge + force-push after everyone
 on the team has cleaned their machines.
