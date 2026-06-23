@@ -69,6 +69,26 @@ stayawake-security-remediate --remote           # operate on remote GitHub targe
 Drop `--local-only` to also scan the GitHub users/orgs listed in `config/security.yml`.
 Use `--fail-on-findings` to make `scan` exit non-zero (the CI gate uses this).
 
+### Local defense-in-depth (hooks + audit)
+
+Harden a developer machine with layered, dependency-free git hooks:
+
+```bash
+prevent/install-hooks.sh                 # this repo: pre-commit + post-merge + post-checkout
+prevent/install-hooks.sh --template      # auto-protect all FUTURE clones (init.templateDir)
+prevent/install-hooks.sh --all ~/dev     # install into every existing repo under a root
+```
+
+- **pre-commit** blocks committing worm artifacts (outgoing).
+- **post-merge / post-checkout** scan code that *arrives* via pull/merge or clone — the
+  layer that catches **evil merges**, the worm's real spread vector.
+
+Audit the machine's security posture (cached GitHub credential, VS Code auto-run / Workspace Trust):
+
+```bash
+stayawake-security-audit                 # advisory; add --fail-on-issues for scripts/CI
+```
+
 ### Environment / secrets
 
 - `SLACK_WEBHOOK_URL` — enables Slack alerts (both bots).
