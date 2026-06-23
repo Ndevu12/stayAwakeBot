@@ -80,6 +80,7 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str) -> str:
             return f"{slug}: '{base}' already clean — nothing to PR"
 
         remediation.apply(wt, changes, quarantine)
+        remediation.ensure_ignored(wt)   # never commit quarantine/remediation artifacts
         _git(wt, "add", "-A")
         msg = "security: auto-remediate worm indicators\n\n" + \
               "\n".join(f"- {c.action}: {c.path}" for c in changes)

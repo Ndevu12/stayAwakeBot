@@ -93,6 +93,7 @@ def remediate(config_path: str = "config/security.yml", apply: bool = False,
         else:
             was_clean = _is_clean(repo)
             applied = remediation.apply(repo, changes, repo / ".malware-quarantine")
+            remediation.ensure_ignored(repo)   # keep quarantine artifacts out of any commit
             print(f"    → applied {len(applied)} change(s); originals in .malware-quarantine/")
             if was_clean:
                 branch = _commit_branch(repo, applied)
