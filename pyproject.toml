@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "stayawake"
+version = "0.1.0"
+description = "Distributable monitoring & security sentinel toolkit — uptime checks plus self-propagating-worm detection, remediation, and prevention."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "Jean Paul Elisa NIYOKWIZERWA" }]
+keywords = ["monitoring", "uptime", "security", "sentinel", "worm", "supply-chain", "github-actions"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: Security",
+  "Topic :: System :: Monitoring",
+]
+dependencies = [
+  "aiohttp",
+  "pyyaml",
+  "typing-extensions",
+]
+
+[project.optional-dependencies]
+dev = []   # the test suite uses the stdlib `unittest`
+
+[project.urls]
+Homepage = "https://github.com/Ndevu12/stayAwakeBot"
+Repository = "https://github.com/Ndevu12/stayAwakeBot"
+
+# Console scripts (available after `pip install`); each maps to an existing thin main() (DRY).
+[project.scripts]
+stayawake-health-check     = "stayawake.bots.health.cli.check:main"
+stayawake-health-report    = "stayawake.bots.health.cli.report:main"
+stayawake-health-alert     = "stayawake.bots.health.cli.alert:main"
+stayawake-security-scan    = "stayawake.bots.security.cli.scan:main"
+stayawake-security-report  = "stayawake.bots.security.cli.report:main"
+stayawake-security-alert   = "stayawake.bots.security.cli.alert:main"
+stayawake-security-remediate = "stayawake.bots.security.cli.remediate:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/stayawake"]
+
+# Ship the default signature database as package data so an installed scanner is self-contained.
+[tool.hatch.build.targets.wheel.force-include]
+"src/stayawake/bots/security/data/signatures.yml" = "stayawake/bots/security/data/signatures.yml"

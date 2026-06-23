@@ -209,3 +209,10 @@ __marimo__/
 .malware-quarantine/
 
 .DS_Store
+
+# packaging
+build/
+dist/
+*.egg-info/
+src/*.egg-info/
+.venv/

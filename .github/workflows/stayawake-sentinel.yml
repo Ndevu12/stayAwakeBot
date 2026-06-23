@@ -36,37 +36,31 @@ jobs:
         with:
           python-version: '3.11'
           cache: 'pip'
-          cache-dependency-path: Pipfile
+          cache-dependency-path: pyproject.toml
 
-      - name: Install pipenv and dependencies
+      - name: Install
         run: |
           python -m pip install --upgrade pip
-          pip install pipenv
-          pipenv install --deploy --system
+          pip install .
 
       - name: Run checker
-        env:
-          PYTHONPATH: ${{ github.workspace }}
         run: |
           set +e
-          python -m health.cli.check --config config/urls.yml
+          stayawake-health-check --config config/urls.yml
           echo "CHECKER_EXIT=$?" >> $GITHUB_ENV
           set -e
 
       - name: Generate report
         if: always()
-        env:
-          PYTHONPATH: ${{ github.workspace }}
-        run: python -m health.cli.report
+        run: stayawake-health-report
 
       - name: Send alerts
         if: always()
         env:
-          PYTHONPATH: ${{ github.workspace }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-        run: python -m health.cli.alert
+        run: stayawake-health-alert
 
       - name: Commit reports
         if: always()
