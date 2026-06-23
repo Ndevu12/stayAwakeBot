@@ -47,5 +47,32 @@ class TestRemediation(unittest.TestCase):
         self.assertNotIn("PAYLOAD_JUNK_HERE", out)
 
 
+class TestEnsureIgnored(unittest.TestCase):
+    def setUp(self):
+        self.repo = Path(tempfile.mkdtemp())
+        self.gi = self.repo / ".gitignore"
+
+    def _lines(self):
+        return self.gi.read_text(encoding="utf-8").splitlines()
+
+    def test_creates_gitignore_when_absent(self):
+        self.assertTrue(remediation.ensure_ignored(self.repo))
+        lines = self._lines()
+        self.assertIn(".malware-quarantine/", lines)
+        self.assertIn("*.malware-bak", lines)
+
+    def test_appends_only_missing_patterns(self):
+        self.gi.write_text("node_modules/\n.malware-quarantine/\n", encoding="utf-8")
+        self.assertTrue(remediation.ensure_ignored(self.repo))
+        lines = self._lines()
+        self.assertEqual(lines.count(".malware-quarantine/"), 1, "must not duplicate")
+        self.assertIn("*.malware-bak", lines)
+        self.assertIn("node_modules/", lines)
+
+    def test_idempotent_no_change_when_present(self):
+        remediation.ensure_ignored(self.repo)
+        self.assertFalse(remediation.ensure_ignored(self.repo), "second call should be a no-op")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -26,6 +26,12 @@ _ACTIONS = {
 }
 _GITIGNORE_MARKERS = {"branch_structure.json", "temp_auto_push.bat", "temp_interactive_push.bat"}
 
+# Quarantine / remediation artifacts must stay local and never be committed.
+# `ensure_ignored` guarantees a target repo's .gitignore carries these before we
+# `git add` a fix, so backups never leak into a commit or PR.
+_QUARANTINE_COMMENT = "# Malware quarantine / remediation artifacts (kept local, never committed)"
+_QUARANTINE_PATTERNS = (".malware-quarantine/", "*.malware-bak")
+
 
 @dataclass(frozen=True)
 class Change:
@@ -95,6 +101,28 @@ def strip_settings_autorun(text: str) -> str:
     data.pop("task.allowAutomaticTasks", None)
     data.pop("tasks", None)
     return json.dumps(data, indent=2) + "\n"
+
+
+def ensure_ignored(root: Path) -> bool:
+    """Guarantee `root/.gitignore` ignores quarantine/remediation artifacts.
+
+    Appends any missing patterns (and the explanatory comment) idempotently.
+    Returns True if the file was changed. Called before `git add` so backups
+    never land in a commit or PR.
+    """
+    gi = root / ".gitignore"
+    text = gi.read_text(encoding="utf-8", errors="replace") if gi.exists() else ""
+    present = {l.strip() for l in text.splitlines()}
+    missing = [p for p in _QUARANTINE_PATTERNS if p not in present]
+    if not missing:
+        return False
+    block: list[str] = []
+    if _QUARANTINE_COMMENT not in present:
+        block.append(_QUARANTINE_COMMENT)
+    block += missing
+    head = (text.rstrip("\n") + "\n\n") if text.strip() else ""
+    gi.write_text(head + "\n".join(block) + "\n", encoding="utf-8")
+    return True
 
 
 def _backup(root: Path, rel: str, quarantine: Path) -> None:
