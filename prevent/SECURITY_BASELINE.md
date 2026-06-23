@@ -27,12 +27,24 @@ jobs:
 ```
 **Pin `@<SHA>`**, not `@main`, so a compromise of the action repo can't change what runs.
 
-## 2. Pre-commit hook (local first line)
+## 2. Local git hooks (defense-in-depth on the developer machine)
+The hooks are dependency-free (grep only) and cover both directions:
+- **`pre-commit`** — blocks *committing* loader fingerprints, fake `fa-solid-400.woff2`,
+  `.vscode` folderOpen auto-run tasks, and `.gitignore` worm markers (bypass with `--no-verify`).
+- **`post-merge` / `post-checkout`** — scan code that *arrives* via `git pull`/merge or a
+  fresh clone/branch switch, and warn. This is the layer that catches **evil merges**
+  (the worm's real spread vector), which a pre-commit hook cannot see.
+
 ```bash
-bash <path-to-stayAwakeBot>/prevent/install-hooks.sh   # in each repo
+bash <stayAwakeBot>/prevent/install-hooks.sh                 # this repo
+bash <stayAwakeBot>/prevent/install-hooks.sh --template      # all FUTURE clones (init.templateDir)
+bash <stayAwakeBot>/prevent/install-hooks.sh --all ~/dev ~/work   # every existing repo under roots
 ```
-Blocks committing loader fingerprints, fake `fa-solid-400.woff2`, `.vscode` folderOpen
-auto-run tasks, and `.gitignore` worm markers. Bypass a false positive with `--no-verify`.
+
+Also audit the machine's posture (cached GitHub credential, VS Code auto-run / Workspace Trust):
+```bash
+stayawake-security-audit            # advisory; add --fail-on-issues for scripts/CI
+```
 
 ## 3. Branch protection (defense in depth)
 - Require pull-request review before merging to `main`; **disable auto-merge**.
