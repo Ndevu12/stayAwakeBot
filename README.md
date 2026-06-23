@@ -23,6 +23,66 @@ commit reports back to the repository — the same packaged code in both places.
 
 ![StayAwakeBot architecture](public/stayawakebot_architecture.svg)
 
+## Usage
+
+StayAwakeBot installs as a Python package and exposes both bots as **console scripts**.
+The same commands run locally or inside the bundled GitHub Actions workflows.
+
+### Install
+
+```bash
+pip install "stayawake @ git+https://github.com/Ndevu12/stayAwakeBot@main"   # or: pipx install "stayawake @ git+…"
+# from a clone, for development:
+pip install -e .
+```
+
+### Health bot — uptime monitoring
+
+Run the pipeline against `config/urls.yml`:
+
+```bash
+stayawake-health-check  --config config/urls.yml   # probe URLs → reports/latest.json
+stayawake-health-report                            # build status.json, history, dated .md, badge
+stayawake-health-alert                             # Slack alert on failures / recoveries
+```
+
+Add `--fail-on-unhealthy` to `check` to exit non-zero when any URL is down (handy locally;
+CI keeps it non-fatal so reports always generate).
+
+### Security bot — worm hunting
+
+```bash
+stayawake-security-scan --config config/security.yml --local-only   # scan local repos → reports/security/latest.json
+stayawake-security-report                                           # status + security badge
+stayawake-security-alert                                            # Slack + GitHub issue on findings
+```
+
+Remediation is **safe by default (dry-run)**:
+
+```bash
+stayawake-security-remediate                    # dry-run: show what would be fixed
+stayawake-security-remediate --apply            # strip/quarantine worm artifacts on a security/auto-clean branch
+stayawake-security-remediate --apply --open-pr  # also open one rolling PR per repo
+stayawake-security-remediate --remote           # operate on remote GitHub targets from config
+```
+
+Drop `--local-only` to also scan the GitHub users/orgs listed in `config/security.yml`.
+Use `--fail-on-findings` to make `scan` exit non-zero (the CI gate uses this).
+
+### Environment / secrets
+
+- `SLACK_WEBHOOK_URL` — enables Slack alerts (both bots).
+- `GH_SECURITY_TOKEN` (or `GITHUB_TOKEN`) — required for remote scans and opening issues / PRs.
+
+### In GitHub Actions
+
+The bundled workflows run these for you:
+
+- `stayawake-sentinel.yml` — health checks on a `*/5` cron.
+- `security-sentinel.yml` — security scan on push to `main` + manual dispatch + weekly backstop.
+- `security-remediate.yml` — remediation (dispatch + weekly).
+- `worm-guard.yml` — blocks infected / evil-merge changes on every PR and push.
+
 ## Quick Setup
 
 1. Fork the repo.
