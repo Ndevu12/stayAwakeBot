@@ -7,9 +7,17 @@
 
 # StayAwakeBot
 
-StayAwakeBot is a GitHub Actions-native monitoring toolkit. This repository includes the
-`StayAwakeBot Sentinel` component (an availability/checks subtask) that runs on GitHub Actions
-and writes reports back to the repository.
+StayAwakeBot is a distributable (`pip install`-able) Python monitoring **and** security
+toolkit. Under one `stayawake` namespace it ships two bots over a shared `core`:
+
+- **Health sentinel** — a URL/uptime availability monitor (HTTP status, latency, TLS,
+  keyword checks) that writes JSON/markdown reports and a status badge.
+- **Security sentinel** — a supply-chain worm hunter that detects, alerts on, and
+  auto-fixes self-propagating malware (obfuscated loaders, fake fonts, VS Code auto-run
+  tasks, and stealth "evil merges"), opening remediation PRs and gating CI.
+
+Run either bot as a **console script** locally, or as **GitHub Actions** workflows that
+commit reports back to the repository — the same packaged code in both places.
 
 ## Architecture
 
