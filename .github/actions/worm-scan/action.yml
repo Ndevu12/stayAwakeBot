@@ -49,5 +49,8 @@ runs:
         } > "$tmp/scan.yml"
         flag=""
         [ "${{ inputs.fail-on-findings }}" = "true" ] && flag="--fail-on-findings"
-        PYTHONPATH="$tmp/sab" python -m stayawakebot.cli.security_scan \
+        # Run from the scanner clone so its `security` package isn't shadowed by a
+        # same-named dir in the repo being scanned. Config uses absolute paths.
+        cd "$tmp/sab"
+        PYTHONPATH="$tmp/sab" python -m security.cli.scan \
           --config "$tmp/scan.yml" --local-only $flag

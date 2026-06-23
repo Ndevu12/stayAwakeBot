@@ -11,10 +11,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from stayawakebot.security.signatures import load_signatures      # noqa: E402
-from stayawakebot.security.scanner import scan_target             # noqa: E402
-from stayawakebot.security.targets import LocalRepoTarget, ScanOptions  # noqa: E402
-from stayawakebot.security import remediation                     # noqa: E402
+from security.signatures import load_signatures      # noqa: E402
+from security.scanner import scan_target             # noqa: E402
+from security.targets import LocalRepoTarget, ScanOptions  # noqa: E402
+from security import remediation                     # noqa: E402
 
 FIX = ROOT / "tests" / "security" / "fixtures" / "infected"
 SIGS = load_signatures(ROOT / "config" / "security_signatures.yml")

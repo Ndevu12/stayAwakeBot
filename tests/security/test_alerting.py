@@ -12,8 +12,8 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from stayawakebot.security import alerter                       # noqa: E402
-from stayawakebot.adapters.badge import update_security_badge   # noqa: E402
+from security import alerter                       # noqa: E402
+from shared.adapters.badge import update_security_badge   # noqa: E402
 
 LATEST = {
     "generated_at": "t",
@@ -41,9 +41,9 @@ class TestAlerter(unittest.TestCase):
         return {}
 
     def test_opens_for_infected_and_closes_for_clean(self):
-        with mock.patch("stayawakebot.security.alerter.github_api.request",
+        with mock.patch("security.alerter.github_api.request",
                         side_effect=self._fake_request), \
-             mock.patch("stayawakebot.security.alerter.send_slack"), \
+             mock.patch("security.alerter.send_slack"), \
              mock.patch.dict("os.environ",
                              {"GITHUB_TOKEN": "t", "GITHUB_REPOSITORY": "o/r"}, clear=False):
             alerter.run(self.f)

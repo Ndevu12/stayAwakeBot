@@ -11,9 +11,9 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from stayawakebot.security import pr                              # noqa: E402
-from stayawakebot.security.models import Finding, Severity, ScanResult  # noqa: E402
-from stayawakebot.security.remediation import Change             # noqa: E402
+from security import pr                              # noqa: E402
+from security.models import Finding, Severity, ScanResult  # noqa: E402
+from security.remediation import Change             # noqa: E402
 
 
 class TestSlug(unittest.TestCase):

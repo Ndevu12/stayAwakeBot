@@ -12,7 +12,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from stayawakebot.security import remediator                    # noqa: E402
+from security import remediator                    # noqa: E402
 
 SIGS = ROOT / "config" / "security_signatures.yml"
 

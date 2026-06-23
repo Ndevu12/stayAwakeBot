@@ -15,13 +15,13 @@ threats are added as configuration, not code.
 config (data) ─► signature engine ─► matchers ─► findings ─► scanner ─► report/alert ─► remediator(PR)
 ```
 - **Signatures** (`config/security_signatures.yml`): IoCs as data. New threat = new entry.
-- **Matchers** (`stayawakebot/security/matchers/`, Strategy): one technique each, selected by a
+- **Matchers** (`security/matchers/`, Strategy): one technique each, selected by a
   signature's `matcher` field — `content`, `filename`, `structural-json`, `heuristic`, `git-history`.
-- **Targets** (`stayawakebot/security/targets/`, DIP): `LocalRepoTarget` and `RemoteRepoTarget`
+- **Targets** (`security/targets/`, DIP): `LocalRepoTarget` and `RemoteRepoTarget`
   (sandboxed shallow clone, read-only) share one interface.
-- **Scanner** (`stayawakebot/security/scanner.py`): runs matchers over a target → `ScanResult`; applies allowlist.
-- **Findings** (`stayawakebot/security/models.py`): typed `Severity`/`Finding`/`ScanResult`.
-- **Shared** (`stayawakebot/common + stayawakebot/adapters`): reused by both subtasks (DRY).
+- **Scanner** (`security/scanner.py`): runs matchers over a target → `ScanResult`; applies allowlist.
+- **Findings** (`security/models.py`): typed `Severity`/`Finding`/`ScanResult`.
+- **Shared** (`shared + shared/adapters`): reused by both subtasks (DRY).
 
 ## Safety / threat model
 - **Never executes scanned code** — static analysis + git plumbing only.
@@ -44,7 +44,7 @@ config (data) ─► signature engine ─► matchers ─► findings ─► sca
 - `config/security_signatures.yml` — the signature database.
 
 ## CLI / pipeline scripts
-- `stayawakebot/cli/security_scan.py (+ security/service.py)` — Phase 1 (detect → `reports/security/latest.json` + `latest.md`).
+- `security/cli/scan.py (+ security/service.py)` — Phase 1 (detect → `reports/security/latest.json` + `latest.md`).
 - (Phase 2) `security_report.py` / `security_alert.py`; (Phase 3) `security_remediate.py`.
 
 ## Phasing
@@ -59,7 +59,7 @@ evil-merge git fixture. Run: `python -m unittest discover -s tests/security`.
 
 ## Remediation (Phase 3)
 
-`python -m stayawakebot.cli.security_remediate [--apply]` — dry-run by default. With
+`python -m security.cli.remediate [--apply]` — dry-run by default. With
 `--apply` it strips/quarantines worm artifacts (originals backed up to `.malware-quarantine/`)
 and commits the fix to a `security/auto-clean-<stamp>` branch — never main, never force-pushed.
 Evil-merge findings are reported as manual (need a history rewrite).

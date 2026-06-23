@@ -28,7 +28,7 @@ done <<< "$staged"
 if [ "$fail" = 1 ]; then
   echo ""
   echo "✋ Commit blocked — worm indicators detected (StayAwakeBot worm-guard)."
-  echo "   Real positive? Clean with: python -m stayawakebot.cli.security_remediate --apply"
+  echo "   Real positive? Clean with: python -m security.cli.remediate --apply"
   echo "   False positive?  Bypass with: git commit --no-verify"
   exit 1
 fi
