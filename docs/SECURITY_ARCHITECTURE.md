@@ -43,7 +43,7 @@ signatures (data) ─► signature engine ─► matchers ─► findings ─►
   allowlist, alert routing.
 - The signature database is shipped inside the package
   (`src/stayawake/bots/security/data/signatures.yml`); the installed scanner is self-contained.
-  Override it explicitly with `--signatures <path>` if you need a custom DB.
+  Point at a custom DB by setting `settings.signatures_path` in `config/security.yml`.
 
 ## CLI / pipeline scripts
 - `security/cli/scan.py` (+ `security/service.py`) — detect → `reports/security/latest.json` + `latest.md`.
