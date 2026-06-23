@@ -44,7 +44,7 @@ config (data) ─► signature engine ─► matchers ─► findings ─► sca
 - `config/security_signatures.yml` — the signature database.
 
 ## CLI / pipeline scripts
-- `security/cli/scan.py (+ security/service.py)` — Phase 1 (detect → `reports/security/latest.json` + `latest.md`).
+- `src/stayawake/bots/security/cli/scan.py (+ security/service.py)` — Phase 1 (detect → `reports/security/latest.json` + `latest.md`).
 - (Phase 2) `security_report.py` / `security_alert.py`; (Phase 3) `security_remediate.py`.
 
 ## Phasing
@@ -59,7 +59,7 @@ evil-merge git fixture. Run: `python -m unittest discover -s tests/security`.
 
 ## Remediation (Phase 3)
 
-`python -m security.cli.remediate [--apply]` — dry-run by default. With
+`stayawake-security-remediate [--apply]` — dry-run by default. With
 `--apply` it strips/quarantines worm artifacts (originals backed up to `.malware-quarantine/`)
 and commits the fix to a `security/auto-clean-<stamp>` branch — never main, never force-pushed.
 Evil-merge findings are reported as manual (need a history rewrite).

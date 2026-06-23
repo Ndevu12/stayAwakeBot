@@ -59,18 +59,20 @@ so per-run JSON files are not created by the checker.
 
 ## Local development
 
-Use Pipenv to create an isolated environment and install dependencies.
+The project is a standard `pyproject.toml` package — install it (editable) and run
+the console scripts:
 
 ```bash
-pip install pipenv
-pipenv shell
-pipenv install
-pipenv run python -m health.cli.check --config config/urls.yml
-pipenv run python -m health.cli.report
-pipenv run python -m health.cli.alert
+python -m venv .venv && source .venv/bin/activate
+pip install -e .
+stayawake-health-check --config config/urls.yml
+stayawake-health-report
+stayawake-health-alert
+stayawake-security-scan --config config/security.yml
+python -m unittest discover -s tests       # run the test suite
 ```
 
-This project uses `Pipfile` for dependency management; do not rely on a `requirements.txt` file.
+`pyproject.toml` is the single source of truth for dependencies and packaging.
 
 Notes on checker behaviour
 
@@ -81,7 +83,7 @@ Notes on checker behaviour
   `--fail-on-unhealthy` to the checker CLI:
 
 ```bash
-pipenv run python -m health.cli.check --config config/urls.yml --fail-on-unhealthy
+stayawake-health-check --config config/urls.yml --fail-on-unhealthy
 ```
 
 This will cause the checker to return a non-zero exit code if any URL was flagged
