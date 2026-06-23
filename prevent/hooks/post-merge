@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# StayAwakeBot worm post-merge hook — scans code that just ARRIVED via merge / pull.
+# This is the layer a pre-commit hook cannot provide: the worm spreads through "evil
+# merges" (content present in a merge but neither parent), which only appear when you
+# pull. Non-blocking (the merge already happened) but warns loudly so you can clean.
+set -uo pipefail
+. "$(dirname "$0")/_worm_lib.sh"
+
+if git rev-parse -q --verify ORIG_HEAD >/dev/null 2>&1; then base=ORIG_HEAD; else base='HEAD@{1}'; fi
+
+files=()
+while IFS= read -r f; do files+=("$f"); done \
+  < <(git diff --name-only --diff-filter=ACM "$base" HEAD 2>/dev/null)
+[ ${#files[@]} -eq 0 ] && exit 0
+
+if ! worm_scan_files "${files[@]}"; then
+  echo ""
+  echo "⚠️  Worm indicators in freshly MERGED code (StayAwakeBot)."
+  echo "    Inspect & clean: stayawake-security-scan --local-only && stayawake-security-remediate --apply"
+fi
+exit 0

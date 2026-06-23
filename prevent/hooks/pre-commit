@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# StayAwakeBot worm pre-commit hook — blocks committing worm indicators (outgoing).
+# A lightweight first line; the full scanner runs in CI and via stayawake-security-scan.
+# Bypass a false positive with: git commit --no-verify
+set -uo pipefail
+. "$(dirname "$0")/_worm_lib.sh"
+
+files=()
+while IFS= read -r f; do files+=("$f"); done \
+  < <(git diff --cached --name-only --diff-filter=ACM)
+[ ${#files[@]} -eq 0 ] && exit 0
+
+if ! worm_scan_files "${files[@]}"; then
+  echo ""
+  echo "✋ Commit blocked — worm indicators detected (StayAwakeBot worm-guard)."
+  echo "   Real positive? Clean with: stayawake-security-remediate --apply"
+  echo "   False positive?  Bypass with: git commit --no-verify"
+  exit 1
+fi
+exit 0
