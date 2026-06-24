@@ -56,9 +56,9 @@ jobs:
 
 Pin `@<sha>` rather than `@v1` for tamper-evident runs. See [Security baseline](prevent/SECURITY_BASELINE.md).
 
-## Run via Docker (no local Python 3.14 needed)
+## Run via Docker (no local Python needed)
 
-Prefer not to install a 3.14 toolchain? Pull the image and scan a mounted repo:
+Prefer not to install a Python toolchain at all? Pull the image and scan a mounted repo:
 
 ```bash
 docker run --rm -v "$PWD:/repo:ro" ghcr.io/ndevu12/stayawakebot \
