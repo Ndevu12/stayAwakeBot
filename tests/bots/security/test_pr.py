@@ -21,7 +21,7 @@ class TestSlug(unittest.TestCase):
         self.assertIsNone(pr.slug_from_url("git@gitlab.com:x/y.git"))
 
 
-def _fake_git(cwd, *args):
+def _fake_git(cwd, *args, **kwargs):   # **kwargs tolerates _git(..., env=…) on push
     cp = SimpleNamespace(returncode=0, stdout="", stderr="")
     if args[:2] == ("remote", "get-url"):
         cp.stdout = "git@github.com:owner/repo.git"
@@ -90,7 +90,7 @@ class TestPatchFallback(unittest.TestCase):
                  ScanResult("owner/repo", "local", []),          # post-apply re-scan: clean
                  ScanResult("owner/repo", "local", [])]
 
-        def fake_git(cwd, *args):
+        def fake_git(cwd, *args, **kwargs):   # **kwargs tolerates _git(..., env=…) on push
             cp = SimpleNamespace(returncode=0, stdout="", stderr="")
             if args[:2] == ("remote", "get-url"):
                 cp.stdout = "git@github.com:owner/repo.git"

@@ -5,12 +5,12 @@ Never installs, builds, runs hooks, or opens an editor — clone-and-read only.
 """
 from __future__ import annotations
 
-import os
 import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 
+from stayawake.core import git as gitutil
 from stayawake.bots.security.targets.base import Target, ScanOptions
 
 
@@ -24,15 +24,14 @@ class RemoteRepoTarget(Target):
         self._token = token
 
     def clone(self) -> bool:
-        url = f"https://github.com/{self._slug}.git"
-        env = dict(os.environ, GIT_TERMINAL_PROMPT="0", GIT_EDITOR="true")
-        if self._token:
-            url = f"https://x-access-token:{self._token}@github.com/{self._slug}.git"
+        # Token (if any) is supplied via GIT_ASKPASS, never in the URL/argv.
         try:
-            r = subprocess.run(
-                ["git", "clone", "--depth", str(self.opts.remote_clone_depth), "--no-tags",
-                 "--config", "core.hooksPath=/dev/null", url, str(self.root)],
-                capture_output=True, text=True, timeout=300, env=env, check=False)
+            with gitutil.github_https_auth(self._token) as (prefix, env):
+                r = subprocess.run(
+                    ["git", "clone", "--depth", str(self.opts.remote_clone_depth), "--no-tags",
+                     "--config", "core.hooksPath=/dev/null",
+                     f"{prefix}{self._slug}.git", str(self.root)],
+                    capture_output=True, text=True, timeout=300, env=env, check=False)
             return r.returncode == 0
         except (subprocess.SubprocessError, OSError):
             return False
