@@ -25,6 +25,8 @@ runs:
     - name: Set up Python
       uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1   # v6.3.0
       with:
+        # Explicit on purpose — NOT .python-version: this gate is distributable to other
+        # repos that won't have our .python-version file. Keep it self-contained.
         python-version: '3.13'
         check-latest: true       # always fetch the newest patch of that minor
 
