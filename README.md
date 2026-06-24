@@ -26,10 +26,15 @@ commit reports back to the repository — the same packaged code in both places.
 ## Quick start
 
 ```bash
-pip install "stayawake @ git+https://github.com/Ndevu12/stayAwakeBot@main"
+pip install stayawakebot                                            # from PyPI (released versions)
+# or the latest from source:
+pip install "stayawakebot @ git+https://github.com/Ndevu12/stayAwakeBot@main"
 stayawake-health-check  --config config/urls.yml                    # uptime check
 stayawake-security-scan --config config/security.yml --local-only   # worm scan
 ```
+
+> The distribution is published as **`stayawakebot`** (the name `stayawake` is taken on
+> PyPI by an unrelated project); the import package and `stayawake-*` commands are unchanged.
 
 ## Documentation
 
@@ -38,6 +43,7 @@ stayawake-security-scan --config config/security.yml --local-only   # worm scan
 - [Architecture](docs/ARCHITECTURE.md) — package layout and design principles
 - [Security architecture](docs/SECURITY_ARCHITECTURE.md) — detection, remediation, prevention
 - [Security baseline](prevent/SECURITY_BASELINE.md) — hardening checklist for any repo
+- [Releasing](docs/RELEASING.md) — maintainer runbook: tags, PyPI Trusted Publishing, verification
 - [Contributing](CONTRIBUTING.md) — development setup and guidelines
 
 ## License

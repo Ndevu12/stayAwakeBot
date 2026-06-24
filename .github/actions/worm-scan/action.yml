@@ -30,7 +30,7 @@ runs:
 
     - name: Install scanner
       shell: bash
-      run: pip install "stayawake @ git+https://github.com/Ndevu12/stayAwakeBot@${{ inputs.sentinel-ref }}"
+      run: pip install "stayawakebot @ git+https://github.com/Ndevu12/stayAwakeBot@${{ inputs.sentinel-ref }}"
 
     - name: Run worm scan
       shell: bash

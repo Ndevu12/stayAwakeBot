@@ -94,7 +94,7 @@ A reusable `worm-scan` composite Action (`.github/actions/worm-scan`) gates PRs/
 any repo (`worm-guard.yml`), portable git hooks (`prevent/hooks/`) block local commits and
 catch incoming infections, and `prevent/SECURITY_BASELINE.md` covers branch protection +
 token/Action hardening. The Action installs the published scanner
-(`pip install "stayawake @ git+…@<ref>"`) rather than cloning, so the gate runs the same code
+(`pip install "stayawakebot @ git+…@<ref>"`) rather than cloning, so the gate runs the same code
 as the package.
 
 Supply-chain hardening of the gate itself: pin `sentinel-ref` to a **commit SHA** (never `@main`,
