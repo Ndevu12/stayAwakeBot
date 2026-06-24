@@ -10,6 +10,11 @@ pip install -e .
 python -m unittest discover -s tests      # all tests must pass
 ```
 
+**Python version** — the CI toolchain version lives in one place, [`.python-version`](.python-version)
+(read by `actions/setup-python`); the packaged **floor** is `requires-python` in `pyproject.toml`.
+Bump the version there, not in workflow files. (The `worm-scan` action stays pinned
+explicitly so it remains self-contained for repos that adopt the gate.)
+
 ## Layout (one responsibility per folder)
 ```
 src/stayawake/
