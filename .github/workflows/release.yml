@@ -103,7 +103,7 @@ jobs:
           # Pin the scanner to a known-good SHA, NEVER the commit under test: a compromised
           # release commit must not be able to certify itself. Bump after an intentional
           # scanner/signature update (kept in sync with worm-guard.yml).
-          sentinel-ref: 788222f4f0ce2cd2a70e0189e9cfc1be24ab0ef7   # main @ 2026-06-23
+          sentinel-ref: 48837942ca136fb4af66d36d79dcbbd73d37f314   # lowered-floor commit + #1004 evil-merge fix (in sync with worm-guard.yml)
           fail-on-findings: 'true'
           allowlist-globs: >-
             tests/**|loader-fromcharcode-127,
