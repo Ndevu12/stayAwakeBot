@@ -20,6 +20,28 @@ from stayawake.bots.security.models import ScanResult
 from stayawake.bots.security.targets import ScanOptions, LocalRepoTarget, RemoteRepoTarget
 
 REPORTS_DIR = Path("reports/security")
+DEFAULT_CONFIG = "config/security.yml"
+
+
+def _read_config(config_path: str | None) -> dict:
+    """Load the scan config. When `config_path` is None we use the default file if it
+    exists, else an empty config — so a bare `stayawake-security-scan` in any repo
+    works without a config. An explicitly-given path that is missing is an error."""
+    if config_path is None:
+        p = Path(DEFAULT_CONFIG)
+        return load_yaml(p) if p.exists() else {}
+    return load_yaml(config_path)
+
+
+def _enclosing_repo_root(start: Path | None = None) -> Path:
+    """Nearest ancestor of `start` (default: CWD) that contains a .git, else `start`.
+    Lets a bare invocation default to 'scan the repo I'm standing in', even from a
+    subdirectory."""
+    start = (start or Path.cwd()).resolve()
+    for d in (start, *start.parents):
+        if (d / ".git").exists():
+            return d
+    return start
 
 
 def _options(settings: dict) -> ScanOptions:
@@ -94,9 +116,10 @@ def _resolve_remote(cfg: dict, opts: ScanOptions):
     return sorted(set(slugs)), token
 
 
-def scan(config_path: str = "config/security.yml", local_only: bool = False,
-         fail_on_findings: bool = False, reports_dir: str | Path | None = None) -> int:
-    cfg = load_yaml(config_path)
+def scan(config_path: str | None = None, local_only: bool = False,
+         fail_on_findings: bool = False, reports_dir: str | Path | None = None,
+         paths: list[str] | None = None) -> int:
+    cfg = _read_config(config_path)
     settings = cfg.get("settings", {})
     opts = _options(settings)
     sigs = load_signatures(settings.get("signatures_path"))
@@ -105,8 +128,29 @@ def scan(config_path: str = "config/security.yml", local_only: bool = False,
     # so tests and ad-hoc runs never clobber the repo's committed reports.
     rdir = Path(reports_dir or settings.get("reports_dir") or REPORTS_DIR)
 
+    # --- resolve WHAT to scan (targets are orthogonal to auth: local needs no token) --
+    cfg_targets = cfg.get("targets", {}) or {}
+    cfg_local = cfg_targets.get("local", []) or []
+    gh = cfg_targets.get("github", {}) or {}
+    remote_configured = bool(gh.get("users") or gh.get("orgs"))
+
+    cwd_default = False
+    if paths:                                  # explicit ad-hoc paths…
+        local_patterns = list(paths)
+        local_only = True                      # …are a local-only scan (no token needed)
+    elif cfg_local:                            # configured local globs
+        local_patterns = list(cfg_local)
+    elif local_only or not remote_configured:  # bare run → scan the current repo
+        local_patterns = [str(_enclosing_repo_root())]
+        cwd_default = True
+    else:                                       # remote-only config: no CWD fallback
+        local_patterns = []
+
+    if cwd_default:
+        print(f"No targets configured; scanning current repository: {local_patterns[0]}")
+
     results: list[ScanResult] = []
-    for repo in discover_local_repos(cfg.get("targets", {}).get("local", []), opts):
+    for repo in discover_local_repos(local_patterns, opts):
         display = str(repo).replace(os.path.expanduser("~"), "~")
         with LocalRepoTarget(repo, display, opts) as t:
             results.append(scan_target(t, sigs, allowlist))
