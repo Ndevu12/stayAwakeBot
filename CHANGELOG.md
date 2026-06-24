@@ -27,6 +27,9 @@ All notable changes to this project are documented here. The format is based on
 - This changelog.
 
 ### Changed
+- **Lowered the minimum Python to 3.13** (`requires-python >=3.13`, was `>=3.14`) — the code
+  uses no 3.14-only features, so this widens who can `pip install stayawakebot`. Verified by
+  running the full test suite on a real Python 3.13 interpreter (96/96 pass).
 - **Distribution renamed to `stayawakebot`** on PyPI (`stayawake` is owned by an unrelated
   project). The import package and console scripts are unchanged — only `pip install <name>`
   differs.
