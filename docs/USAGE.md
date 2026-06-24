@@ -154,14 +154,20 @@ scope is in parentheses):
 | `stayawake-security-alert` (GitHub issue) | write | Issues: R/W (`repo` / `public_repo`) |
 | `stayawake-security-audit --repo` | read | Administration: Read (`repo`) |
 
-### GitHub App (org-wide automation)
+### GitHub App (organization **or** personal account)
 
-For continuous, org-wide scanning/remediation, a **GitHub App** beats a human PAT: an
-admin installs it once on the chosen repos and StayAwakeBot mints a fresh **1-hour
-installation token** per run, scoped to exactly the App's granted permissions — nothing
-long-lived to leak, fully revocable, and the install itself defines which repos are in
-scope (no `targets.github` list needed). The private key stays in memory; signing is
-delegated to a vetted crypto library (never hand-rolled).
+A **GitHub App** is the hardened credential for continuous scanning/remediation, and it
+is **not org-only** — GitHub Apps install on either a personal (user) account or an
+organization, and StayAwakeBot treats both the same. You (or an org admin) install it
+once on the chosen repos and it mints a fresh **1-hour installation token** per run,
+scoped to exactly the App's granted permissions — nothing long-lived to leak, fully
+revocable, and the install itself defines which repos are in scope (no `targets.github`
+list needed). The private key stays in memory; signing is delegated to a vetted crypto
+library (never hand-rolled).
+
+For a personal account with a handful of repos, `gh auth login` or a fine-grained PAT is
+simpler. Reach for an App when you want that same rotating, narrowly-scoped, revocable
+token model on your own repos — or when you manage many.
 
 It's an **opt-in extra** so the base install stays stdlib-only:
 
