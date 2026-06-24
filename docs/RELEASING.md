@@ -59,7 +59,7 @@ the OIDC exchange is rejected.
 2. (Optional but recommended) Dry-run to TestPyPI: Actions → **Release** → *Run workflow*
    (this triggers `workflow_dispatch` → `publish-testpypi`). Then verify in a clean venv:
    ```bash
-   python3.14 -m venv /tmp/v && . /tmp/v/bin/activate
+   python3.13 -m venv /tmp/v && . /tmp/v/bin/activate
    # TestPyPI lacks our deps, so allow PyPI as a fallback index:
    pip install --index-url https://test.pypi.org/simple/ \
                --extra-index-url https://pypi.org/simple/ stayawakebot
