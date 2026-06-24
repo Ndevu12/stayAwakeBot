@@ -7,7 +7,7 @@ name = "stayawake"
 version = "0.1.0"
 description = "Distributable monitoring & security sentinel toolkit — uptime checks plus self-propagating-worm detection, remediation, and prevention."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.14"
 license = "MIT"
 authors = [{ name = "Jean Paul Elisa NIYOKWIZERWA" }]
 keywords = ["monitoring", "uptime", "security", "sentinel", "worm", "supply-chain", "github-actions"]
@@ -16,6 +16,7 @@ classifiers = [
   "Intended Audience :: Developers",
   "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Security",
   "Topic :: System :: Monitoring",
 ]
