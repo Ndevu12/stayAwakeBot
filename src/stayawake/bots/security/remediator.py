@@ -8,7 +8,6 @@ force-push, never pushed. The human reviews and opens the PR.
 """
 from __future__ import annotations
 
-import os
 import shutil
 import subprocess
 import tempfile
@@ -17,6 +16,7 @@ from pathlib import Path
 
 from stayawake.core.config import load_yaml
 from stayawake.core.adapters import github_api
+from stayawake.core import auth
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.service import discover_local_repos
@@ -77,7 +77,7 @@ def remediate(config_path: str = "config/security.yml", apply: bool = False,
     opts = _options(settings)
     sigs = load_signatures(settings.get("signatures_path"))
     allowlist = cfg.get("allowlist", [])
-    token = os.environ.get("GH_SECURITY_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    token, _ = auth.resolve_token()
 
     total = 0
     for repo in discover_local_repos(cfg.get("targets", {}).get("local", []), opts):
@@ -98,7 +98,7 @@ def remediate(config_path: str = "config/security.yml", apply: bool = False,
             continue
         if open_pr:
             if not token:
-                print("    → --open-pr needs GH_SECURITY_TOKEN or GITHUB_TOKEN; skipped")
+                print("    → " + auth.no_credential_hint("opening pull requests") + " Skipped.")
             else:
                 print(f"    → {pr_submit.submit_fix_pr(repo, opts, sigs, allowlist, token)}")
         else:
@@ -148,9 +148,11 @@ def submit_org_prs(config_path: str = "config/security.yml", token: str | None =
     opts = _options(settings)
     sigs = load_signatures(settings.get("signatures_path"))
     allowlist = cfg.get("allowlist", [])
-    token = token or os.environ.get("GH_SECURITY_TOKEN") or os.environ.get("GITHUB_TOKEN")
     if not token:
-        print("Org remediation needs GH_SECURITY_TOKEN/GITHUB_TOKEN with repo + PR write scope.")
+        token, _ = auth.resolve_token()
+    if not token:
+        print(auth.no_credential_hint("org remediation PRs") +
+              " The token needs repo + pull-request write scope.")
         return 0
 
     gconf = cfg.get("targets", {}).get("github", {}) or {}

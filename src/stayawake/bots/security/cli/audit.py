@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 
 from stayawake.bots.security import hygiene
+from stayawake.core import auth
 
 
 def main() -> None:
@@ -19,7 +19,10 @@ def main() -> None:
                    help="exit non-zero if any warning-level issue is found")
     a = p.parse_args()
 
-    token = os.environ.get("GH_SECURITY_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    token, _ = auth.resolve_token()
+    if a.repo and not token:
+        print(auth.no_credential_hint("auditing branch protection") +
+              " Skipping the branch-protection check.\n")
     issues = hygiene.check_credentials() + hygiene.check_vscode() \
         + hygiene.check_branch_protection(a.repo, token, a.branch)
     print(hygiene.render(issues))
