@@ -56,6 +56,18 @@ jobs:
 
 Pin `@<sha>` rather than `@v1` for tamper-evident runs. See [Security baseline](prevent/SECURITY_BASELINE.md).
 
+## Run via Docker (no local Python 3.14 needed)
+
+Prefer not to install a 3.14 toolchain? Pull the image and scan a mounted repo:
+
+```bash
+docker run --rm -v "$PWD:/repo:ro" ghcr.io/ndevu12/stayawakebot \
+  stayawake-security-scan --local-only --fail-on-findings
+```
+
+Tags: `:latest`, `:X.Y.Z`, `:X.Y`, and `:sha-<commit>`. The image runs as a non-root user, is
+built from the same wheel published to PyPI, and ships SLSA provenance + SBOM attestations.
+
 ## Documentation
 
 - [Usage](docs/USAGE.md) — install, run both bots, secrets, GitHub Actions, deploy your own
