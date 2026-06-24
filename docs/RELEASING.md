@@ -159,10 +159,13 @@ docker buildx imagetools inspect ghcr.io/ndevu12/stayawakebot:<version>   # see 
 
 Tracked here rather than silently omitted. Each is additive to the current pipeline:
 
-- [ ] **SBOM** (CycloneDX via `cyclonedx-py`) generated in the build job and attached to the
-      GitHub Release.
-- [ ] **`pip-audit`** as a release gate on the dependency set.
+- [x] **SBOM** (CycloneDX via `cyclonedx-py`) — generated in the build job from the wheel's
+      resolved deps and attached to the GitHub Release as `sbom.cdx.json`.
+- [x] **`pip-audit`** — release gate on the resolved dependency set. To ship past an advisory
+      that has no fix yet, add a scoped `--ignore-vuln GHSA-xxxx` to the *Audit dependencies*
+      step (don't drop `--strict`).
 - [x] **Container channel (P3)** — GHCR image with SLSA provenance + SBOM attestations and a
-      Trivy scan (see *Container image* above). Remaining: standalone cosign-signed release
-      assets for any P4 binaries.
+      **Trivy gate**: the image is built and scanned *before* publishing, and a fixable
+      critical/high (`ignore-unfixed: true`) fails the job before anything is pushed.
+- [ ] **cosign-signed release assets** beyond the PyPI/image attestations, if/when P4 binaries land.
 - [ ] **Required reviewers** actually enabled on the `pypi` environment (manual, step 1).
