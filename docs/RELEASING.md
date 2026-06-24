@@ -5,6 +5,22 @@ This project ships as the PyPI distribution **`stayawakebot`** (the import packa
 then builds, self-scans, publishes to PyPI via **Trusted Publishing (OIDC)**, and creates a
 GitHub Release. There is **no `PYPI_API_TOKEN`** — by design.
 
+## Activate the workflow (one-time, required first)
+
+The release workflow lives at **`.github/workflows-staged/release.yml`** instead of
+`.github/workflows/release.yml`. It was staged there because the automation credential that
+opened this branch lacks the GitHub `workflow` scope and cannot write under
+`.github/workflows/`. Activate it with a credential that has that scope (i.e. your own
+`git`):
+
+```bash
+git mv .github/workflows-staged/release.yml .github/workflows/release.yml
+git commit -m "ci(release): activate release pipeline"
+git push
+```
+
+(`git mv` keeps the staged directory out of the tree; nothing else needs to change.)
+
 ## One-time setup (manual — do this before the first release)
 
 These steps happen on the PyPI/GitHub web UIs and cannot be automated from the repo.
