@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 from stayawake.bots.security import hygiene
@@ -10,12 +11,17 @@ from stayawake.bots.security import hygiene
 
 def main() -> None:
     p = argparse.ArgumentParser(
-        description="StayAwakeBot local security hygiene audit (credentials + editor)")
+        description="StayAwakeBot local security hygiene audit (credentials + editor + branch protection)")
+    p.add_argument("--repo", metavar="OWNER/NAME",
+                   help="also audit this repo's default-branch protection (needs a token)")
+    p.add_argument("--branch", default="main", help="branch to check protection for (default: main)")
     p.add_argument("--fail-on-issues", action="store_true",
                    help="exit non-zero if any warning-level issue is found")
     a = p.parse_args()
 
-    issues = hygiene.audit()
+    token = os.environ.get("GH_SECURITY_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    issues = hygiene.check_credentials() + hygiene.check_vscode() \
+        + hygiene.check_branch_protection(a.repo, token, a.branch)
     print(hygiene.render(issues))
     warnings = [i for i in issues if i.severity == "warning"]
     sys.exit(1 if (a.fail_on_issues and warnings) else 0)

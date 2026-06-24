@@ -14,7 +14,7 @@ if [ "$prev" = "0000000000000000000000000000000000000000" ]; then
   while IFS= read -r f; do files+=("$f"); done < <(git ls-files)
 else
   while IFS= read -r f; do files+=("$f"); done \
-    < <(git diff --name-only --diff-filter=ACM "$prev" "$new" 2>/dev/null)
+    < <(git diff --name-only --diff-filter=ACMR "$prev" "$new" 2>/dev/null)
 fi
 [ ${#files[@]} -eq 0 ] && exit 0
 

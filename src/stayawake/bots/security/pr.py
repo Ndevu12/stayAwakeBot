@@ -18,6 +18,7 @@ from pathlib import Path
 from stayawake.core.adapters import github_api
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.targets import LocalRepoTarget
+from stayawake.bots.security.models import QUARANTINE_DIR
 from stayawake.bots.security import remediation
 
 FIX_BRANCH = "security/auto-clean"
@@ -27,6 +28,13 @@ _BOT = ("-c", "user.name=StayAwakeBot Security", "-c", "user.email=security-bot@
 def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(["git", "-C", str(cwd), *args],
                           capture_output=True, text=True, check=False)
+
+
+def _untrack_quarantine(repo: Path) -> bool:
+    """git only ignores UNTRACKED paths, so untrack any pre-existing tracked
+    quarantine dir before staging. Returns True if the quarantine is clean after."""
+    _git(repo, "rm", "-r", "--cached", "--ignore-unmatch", QUARANTINE_DIR)
+    return not _git(repo, "ls-files", QUARANTINE_DIR).stdout.strip()
 
 
 def slug_from_url(url: str) -> str | None:
@@ -79,11 +87,31 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str) -> str:
         if not changes:
             return f"{slug}: '{base}' already clean — nothing to PR"
 
-        remediation.apply(wt, changes, quarantine)
-        remediation.ensure_ignored(wt)   # never commit quarantine/remediation artifacts
+        applied = remediation.apply(wt, changes, quarantine)
+
+        # Post-apply verification — a worm-killer must never open a PR over a file
+        # that is still infected. Re-scan; quarantine any residual auto-fixable
+        # finding outright; abort the PR if the tree still is not clean.
+        def _residual():
+            fs = scan_target(LocalRepoTarget(wt, slug, opts), signatures, allowlist).findings
+            return [f for f in fs if remediation.is_auto_fixable(f)]
+        residual = _residual()
+        if residual:
+            applied += remediation.quarantine_residual(wt, residual, quarantine)
+            residual = _residual()
+        if residual:
+            return (f"{slug}: ABORTED — {len(residual)} finding(s) still present after "
+                    f"remediation; no PR opened (needs manual review)")
+        if not applied:
+            return f"{slug}: nothing was actually remediated — no PR"
+
+        # quarantine backups live in an out-of-tree tempdir here; still untrack any
+        # pre-existing TRACKED quarantine dir so live-malware backups never ship.
+        if not _untrack_quarantine(wt):
+            return f"{slug}: ABORTED — could not untrack {QUARANTINE_DIR}/ (would commit backups)"
         _git(wt, "add", "-A")
         msg = "security: auto-remediate worm indicators\n\n" + \
-              "\n".join(f"- {c.action}: {c.path}" for c in changes)
+              "\n".join(f"- {c.action}: {c.path}" for c in applied)
         _git(wt, *_BOT, "commit", "-m", msg)
 
         push_url = f"https://x-access-token:{token}@github.com/{slug}.git"
@@ -96,7 +124,7 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str) -> str:
         pr = github_api.create_pull(owner, name,
                                     title="security: auto-remediate worm indicators",
                                     head=FIX_BRANCH, base=base,
-                                    body=_pr_body(slug, changes), token=token)
+                                    body=_pr_body(slug, applied), token=token)
         if pr and pr.get("number"):
             return f"{slug}: opened PR #{pr['number']} ({pr.get('html_url','')})"
         return f"{slug}: branch pushed but PR creation failed (check token scope)"
