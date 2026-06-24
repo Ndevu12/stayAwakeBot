@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-06-24T09:20:34.672199+00:00",
+  "generated_at": "2026-06-24T09:31:58.172742+00:00",
   "summary": {
     "targets": 1,
     "infected": 1,
@@ -50,7 +50,7 @@
           "description": "Obfuscated loader seed variable (var/let/const _$_xxxx=)",
           "remediation": "strip-appended-payload",
           "line": 53,
-          "evidence": "!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; var x =sfL(\\\\\\\"inert\u2026",
+          "evidence": "!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; var x =sfL(\\\\\\\\\\\\\\\"i\u2026",
           "vector": "code-loader"
         },
         {
@@ -72,7 +72,7 @@
           "description": "Obfuscated loader seed variable (var/let/const _$_xxxx=)",
           "remediation": "strip-appended-payload",
           "line": 17,
-          "evidence": "!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; var x =sfL(\\\"inert\\\"\u2026",
+          "evidence": "!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; var x =sfL(\\\\\\\"inert\u2026",
           "vector": "code-loader"
         },
         {
@@ -193,7 +193,7 @@
           "description": "Obfuscated loader decoder call \u2014 the sfL decoder function",
           "remediation": "strip-appended-payload",
           "line": 53,
-          "evidence": "t';function sfL(w){return w}; var x =sfL(\\\\\\\"inert\\\\\\\"\\u2026\",           \"vector\u2026",
+          "evidence": "t';function sfL(w){return w}; var x =sfL(\\\\\\\\\\\\\\\"inert\\u2026\",           \"vector\u2026",
           "vector": "code-loader"
         },
         {
@@ -215,7 +215,7 @@
           "description": "Loader reassigning global.require to smuggle CommonJS into ESM",
           "remediation": "strip-appended-payload",
           "line": 218,
-          "evidence": "inert\\\\\\\"); global[_$_1e42[0]]= require;S\\\\u2026\\\",           \\\"vector\\\": \\\"code\u2026",
+          "evidence": "t\\\\\\\\\\\\\\\"); global[_$_1e42[0]]= require;S\\\\\\\\u2026\\\\\\\",           \\\\\\\"vector\\\\\\\"\u2026",
           "vector": "code-loader"
         },
         {
@@ -226,7 +226,7 @@
           "description": "Obfuscated loader decoder call \u2014 the sfL decoder function",
           "remediation": "strip-appended-payload",
           "line": 17,
-          "evidence": "t';function sfL(w){return w}; var x =sfL(\\\"inert\\\"\u2026` - **[critical]** `loader-fr\u2026",
+          "evidence": "t';function sfL(w){return w}; var x =sfL(\\\\\\\"inert\u2026` - **[critical]** `loader-fr\u2026",
           "vector": "code-loader"
         },
         {
@@ -248,7 +248,7 @@
           "description": "Loader reassigning global.require to smuggle CommonJS into ESM",
           "remediation": "strip-appended-payload",
           "line": 61,
-          "evidence": "\\\"inert\\\"); global[_$_1e42[0]]= require;S\\u2026\",           \"vector\": \"code-load\u2026",
+          "evidence": "inert\\\\\\\"); global[_$_1e42[0]]= require;S\\\\u2026\\\",           \\\"vector\\\": \\\"code\u2026",
           "vector": "code-loader"
         },
         {
