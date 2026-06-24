@@ -137,5 +137,5 @@ signatures:
     severity: high
     matcher: git-history
     kind: evil-merge
-    description: "Merge commit introducing content present in neither parent (review-evading)"
+    description: "Merge commit introducing content beyond a clean 3-way merge of its parents (review-evading)"
     remediation: manual
