@@ -86,40 +86,41 @@ the OIDC exchange is rejected.
 
 ## Publishing the Action to the Marketplace (P2)
 
-The scanner is also a GitHub Action. The Marketplace entry point is the **root `action.yml`**
-(a thin wrapper over `.github/actions/worm-scan`); Marketplace requires the metadata at the
-repo root. This is a one-time listing plus a moving-tag convention.
+The scanner is also a GitHub Action, and it now lives in **its own repository,
+[`Ndevu12/strix`](https://github.com/Ndevu12/strix)** ("StayAwakeBot Strix" on the Marketplace).
+Strix is a thin composite Action whose `action.yml` installs the published `stayawakebot` scanner
+from PyPI and runs `stayawake-security-scan` — the detection engine stays in the package. This
+repo no longer carries a root `action.yml`; the in-repo `.github/actions/worm-scan` composite is
+kept only for this project's own self-gating (`worm-guard.yml`) and from-source pins. Marketplace
+requires the metadata at the repo root, which is why the public Action is a separate repo rather
+than a subpath here.
 
-### One-time listing
-1. Ensure the root `action.yml` has a unique `name`, a `description`, and `branding`
-   (icon + color) — it does. Marketplace action names are globally unique; if
-   `StayAwakeBot Worm Scan` is taken, adjust the `name` field.
-2. GitHub → repo → **Releases → Draft a new release** → tick **"Publish this Action to the
-   GitHub Marketplace"**, accept the agreement, pick a primary + secondary category
-   (Security / Continuous integration).
-3. Publish the release (see tag convention below).
+### One-time listing (in `Ndevu12/strix`)
+1. The root `action.yml` already has a unique `name` (`StayAwakeBot Strix`), a `description`, and
+   `branding` (icon + color). Marketplace action names are globally unique; adjust the `name`
+   field if it is ever taken.
+2. GitHub → **`Ndevu12/strix`** → **Releases → edit the `v0.1.0` release** → tick **"Publish this
+   Action to the GitHub Marketplace"**, accept the agreement, and pick a primary + secondary
+   category (**Security / Continuous integration**).
+3. Save the release.
 
-### Tag convention — two schemes share one namespace
-- **Package (PyPI):** full `vX.Y.Z` tags. These are the source of truth for the version
-  (`hatch-vcs`).
-- **Action (Marketplace):** consumers expect a **moving major** tag, `uses: …@v1`. After each
-  `vX.Y.Z` release, fast-forward the major tag:
+### Tag convention (in `Ndevu12/strix`)
+- **Action (Marketplace):** consumers expect a **moving major** tag, `uses: Ndevu12/strix@v1`.
+  After each `vX.Y.Z` release of Strix, fast-forward the major tag:
   ```bash
   git tag -f v1 vX.Y.Z      # move v1 to the new release
   git push -f origin v1
   ```
-- These do **not** collide: `hatch-vcs` is pinned (`pyproject.toml` →
-  `tool.hatch.version.raw-options.git_describe_command`) to match only `v[0-9]*.[0-9]*.[0-9]*`,
-  so a bare `v1` can never be mistaken for the package version. (Verified: with a `v1` tag
-  present, `git describe` still resolves to the latest `vX.Y.Z`.)
+- Strix versions independently of the `stayawakebot` package (separate repo, separate tags), so
+  there is no namespace collision with the package's `hatch-vcs` `vX.Y.Z` tags here.
 - Keep recommending **SHA pins** (`@<sha>`) in docs for production consumers; the moving `v1`
   is for convenience, not for tamper-evidence.
 
-### Scanner-version coupling (post-PyPI follow-up)
-The Action currently installs the scanner from git (`sentinel-ref`, default `main`). Once the
-package is on PyPI, switch the install step in `.github/actions/worm-scan/action.yml` to
-`pip install "stayawakebot==<version>"` so the gate runs a pinned, attested release instead of
-a mutable ref — and bump that version in lockstep with the moving `v1` tag.
+### Scanner-version coupling
+Strix installs the scanner from PyPI via its `version` input (blank = latest; pin in production).
+Bump that pin in lockstep with the moving `v1` tag so the published Action references a known,
+attested release. Note: `stayawakebot 0.1.0` requires Python `>=3.14`, so Strix's `action.yml`
+sets up Python `3.14`; lower it to `3.13` once a release built on the `>=3.13` floor ships.
 
 ## Container image (GHCR — P3)
 

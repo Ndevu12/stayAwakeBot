@@ -90,13 +90,14 @@ protected and the **Worm Guard** check is required.
 
 ## Prevention
 
-A reusable `worm-scan` composite Action — published to the GitHub Marketplace via the root
-`action.yml` (`uses: Ndevu12/stayAwakeBot@v1`) and also reachable at its original subpath
-`.github/actions/worm-scan` — gates PRs/merges in
+A reusable `worm-scan` composite Action — published to the GitHub Marketplace as
+[`Ndevu12/strix`](https://github.com/Ndevu12/strix) (`uses: Ndevu12/strix@v1`), with the in-repo
+composite at `.github/actions/worm-scan` kept for this repo's own self-gating and from-source
+pins — gates PRs/merges in
 any repo (`worm-guard.yml`), portable git hooks (`prevent/hooks/`) block local commits and
 catch incoming infections, and `prevent/SECURITY_BASELINE.md` covers branch protection +
-token/Action hardening. The Action installs the published scanner
-(`pip install "stayawakebot @ git+…@<ref>"`) rather than cloning, so the gate runs the same code
+token/Action hardening. The Action installs the published scanner (Strix from PyPI; the in-repo
+composite via `git+…@<ref>`) rather than cloning the source tree, so the gate runs the same code
 as the package.
 
 Supply-chain hardening of the gate itself: pin `sentinel-ref` to a **commit SHA** (never `@main`,
