@@ -17,6 +17,7 @@ from pathlib import Path
 from stayawake.core.config import load_yaml
 from stayawake.core.adapters import github_api
 from stayawake.core import auth
+from stayawake.core import git as gitutil
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.service import discover_local_repos
@@ -172,9 +173,11 @@ def submit_org_prs(config_path: str = "config/security.yml", token: str | None =
     for slug in slugs:
         tmp = Path(tempfile.mkdtemp(prefix="sab-org-"))
         clone = tmp / "repo"
-        url = f"https://x-access-token:{token}@github.com/{slug}.git"
-        r = subprocess.run(["git", "clone", "--quiet", "--depth", "50", url, str(clone)],
-                           capture_output=True, text=True, check=False)
+        # Token via GIT_ASKPASS (env), never in the clone URL/argv.
+        with gitutil.github_https_auth(token) as (prefix, env):
+            r = subprocess.run(["git", "clone", "--quiet", "--depth", "50",
+                                f"{prefix}{slug}.git", str(clone)],
+                               capture_output=True, text=True, check=False, env=env)
         if r.returncode != 0:
             print(f"  {slug}: clone failed (check token access)")
             shutil.rmtree(tmp, ignore_errors=True)
