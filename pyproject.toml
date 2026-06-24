@@ -28,6 +28,9 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = []   # the test suite uses the stdlib `unittest`
+# GitHub App auth (org-wide installation tokens). Opt-in so the base install stays
+# stdlib-only; only needed to run with GH_APP_ID + a private key.
+app = ["pyjwt[crypto]>=2.0"]
 
 [project.urls]
 Homepage = "https://github.com/Ndevu12/stayAwakeBot"

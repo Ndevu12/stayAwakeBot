@@ -62,6 +62,27 @@ def list_repos(account: str, kind: str, token: str | None,
     return slugs
 
 
+def list_installation_repos(token: str | None, include_archived: bool = False) -> list[str]:
+    """Repos a GitHub App installation can access ('owner/name', ...), paginated.
+    `token` must be an installation access token (see core.github_app)."""
+    slugs: list[str] = []
+    page = 1
+    while True:
+        res = request(f"/installation/repositories?per_page=100&page={page}", token=token)
+        repos = res.get("repositories") if isinstance(res, dict) else None
+        if not repos:
+            break
+        for r in repos:
+            if not include_archived and r.get("archived"):
+                continue
+            if r.get("full_name"):
+                slugs.append(r["full_name"])
+        if len(repos) < 100:
+            break
+        page += 1
+    return slugs
+
+
 def list_open_pulls(owner: str, repo: str, head_branch: str, token: str | None) -> list[dict]:
     """Open PRs whose head is `owner:head_branch` (used for de-duplication)."""
     res = request(f"/repos/{owner}/{repo}/pulls?state=open&head={owner}:{head_branch}",
