@@ -45,7 +45,7 @@ signatures (data) ─► signature engine ─► matchers ─► findings ─►
 3. Camouflage `public/fonts/` dir with "Blockchain Explorer" README (content/heuristic)
 4. VS Code `folderOpen` auto-run task running a font via node (structural-json)
 5. `.gitignore` worm markers (content)
-6. **Evil merges** — content present in neither parent (git-history)
+6. **Evil merges** — content a merge introduces beyond a clean 3-way merge of its parents (git-history)
 
 ## Config
 - `config/security.yml` — targets (local globs + GitHub users/orgs), exclude dirs, remediation mode,

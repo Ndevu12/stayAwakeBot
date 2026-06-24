@@ -23,6 +23,7 @@ class GitHistoryMatcher(Matcher):
                     signature_id=sig["id"], category=sig["category"],
                     severity=Severity.parse(sig["severity"]), path=sha[:10],
                     description=sig["description"], remediation=sig.get("remediation", "manual"),
-                    evidence=f"{len(evil)} path(s) in neither parent; e.g. {sorted(evil)[:3]}; "
-                             f"by {meta.get('author_email','?')}", vector="evil-merge"))
+                    evidence=f"{len(evil)} path(s) introduced beyond a clean 3-way merge; "
+                             f"e.g. {sorted(evil)[:3]}; by {meta.get('author_email','?')}",
+                    vector="evil-merge"))
         return findings

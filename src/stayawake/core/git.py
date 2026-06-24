@@ -54,19 +54,29 @@ def github_https_auth(token: str | None):
             os.unlink(path)
 
 
-def _run(repo: str | Path, args: list[str]) -> str:
-    """Run a git command in `repo`; return stdout (empty string on failure)."""
+def _run_full(repo: str | Path, args: list[str]) -> subprocess.CompletedProcess | None:
+    """Run a git command in `repo`; return the CompletedProcess (None if git can't run).
+
+    Unlike `_run`, this exposes the return code and stdout even on non-zero exit — needed
+    for `merge-tree`, which exits 1 (not 0) on a conflicting auto-merge yet still prints the
+    resulting tree OID.
+    """
     try:
-        out = subprocess.run(
+        return subprocess.run(
             ["git", "-C", str(repo), *args],
             capture_output=True,
             text=True,
             timeout=60,
             check=False,
         )
-        return out.stdout if out.returncode == 0 else ""
     except (subprocess.SubprocessError, OSError):
-        return ""
+        return None
+
+
+def _run(repo: str | Path, args: list[str]) -> str:
+    """Run a git command in `repo`; return stdout (empty string on failure)."""
+    res = _run_full(repo, args)
+    return res.stdout if (res is not None and res.returncode == 0) else ""
 
 
 def is_git_repo(repo: str | Path) -> bool:
@@ -84,25 +94,63 @@ def parents(repo: str | Path, sha: str) -> list[str]:
     return out[1:] if len(out) > 1 else []
 
 
-def changed_paths(repo: str | Path, base: str, target: str) -> set[str]:
-    """Paths that differ between two commits (name-only)."""
-    out = _run(repo, ["diff", "--name-only", base, target])
+def changed_paths(repo: str | Path, base: str, target: str,
+                  diff_filter: str | None = None) -> set[str]:
+    """Paths that differ between two commits/trees (name-only).
+
+    `diff_filter` is passed straight to `git diff --diff-filter` (e.g. "AM" keeps only the
+    paths `target` Adds or Modifies and drops Deletions) — callers that care about content
+    `target` *introduces* want to ignore paths it merely removes.
+    """
+    args = ["diff", "--name-only"]
+    if diff_filter:
+        args.append(f"--diff-filter={diff_filter}")
+    args += [base, target]
+    out = _run(repo, args)
     return {line.strip() for line in out.splitlines() if line.strip()}
 
 
-def evil_merge_paths(repo: str | Path, merge_sha: str) -> set[str]:
-    """Paths a merge introduces that exist in NEITHER parent.
+def _auto_merge_tree(repo: str | Path, a: str, b: str) -> str | None:
+    """OID of the tree produced by a clean 3-way merge of commits `a` and `b` (their
+    merge-base auto-detected). Returns the tree even when the auto-merge *conflicts* (so the
+    recorded merge can be compared against the conflicted result). None when git lacks
+    `merge-tree --write-tree` (pre-2.38) or the command errors.
+    """
+    res = _run_full(repo, ["merge-tree", "--write-tree", a, b])
+    if res is None or res.returncode not in (0, 1):   # 0 = clean, 1 = conflicts; else unsupported
+        return None
+    oid = res.stdout.split("\n", 1)[0].strip() if res.stdout else ""
+    is_oid = bool(oid) and len(oid) in (40, 64) and all(c in "0123456789abcdef" for c in oid)
+    return oid if is_oid else None
 
-    The worm injects files in the merge commit itself, so they appear in neither
-    parent's diff — invisible in a normal PR review. Those paths are the signal.
+
+def evil_merge_paths(repo: str | Path, merge_sha: str) -> set[str]:
+    """Paths whose content the merge introduced BEYOND a clean 3-way merge of its parents.
+
+    An evil merge smuggles content in the merge commit itself, where a normal PR review —
+    which shows each parent's diff — can't see it. The signal is *not* "differs from both
+    parents": a benign 3-way merge of independent edits to one file also differs from both.
+    The signal is "differs from what merging the parents would have produced". So we compute
+    the parents' clean auto-merged tree and flag only the paths the recorded merge ADDS or
+    MODIFIES relative to it (injected files, or content slipped in during conflict
+    resolution). Pure deletions are NOT flagged: a path the merge *removes* relative to the
+    auto-merge — e.g. resolving by accepting the other branch's deletion of a file one branch
+    had added — introduces no review-evading content, so it is not an evil-merge signal.
+
+    Falls back to the coarser "changed vs every parent" intersection for octopus merges
+    (>2 parents) or when git is too old for `merge-tree --write-tree`.
     """
     ps = parents(repo, merge_sha)
     if len(ps) < 2:
         return set()
-    # A path changed vs EVERY parent is content unique to the merge commit.
+    if len(ps) == 2:
+        auto = _auto_merge_tree(repo, ps[0], ps[1])
+        if auto is not None:
+            return changed_paths(repo, auto, merge_sha, diff_filter="AM")
+    # Fallback: paths added/modified vs EVERY parent (over-reports overlapping clean merges).
     common: set[str] | None = None
     for p in ps:
-        diff = changed_paths(repo, p, merge_sha)
+        diff = changed_paths(repo, p, merge_sha, diff_filter="AM")
         common = diff if common is None else (common & diff)
     return common or set()
 

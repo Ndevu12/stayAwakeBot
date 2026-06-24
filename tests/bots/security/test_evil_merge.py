@@ -62,6 +62,37 @@ class TestEvilMerge(unittest.TestCase):
         self.assertTrue(findings, "evil merge should be detected")
         self.assertIn("evil.txt", findings[0].evidence)
 
+    def test_overlapping_clean_merge_not_flagged(self):
+        # Regression for #1004: both sides edit the SAME file in different hunks; the clean
+        # 3-way auto-merge combines them, so the merged file differs from BOTH parents. That
+        # is normal git, not an evil merge — it must NOT be flagged. (The old "changed vs
+        # every parent" intersection flagged exactly this.)
+        (self.d / "shared.txt").write_text("l1\nl2\nl3\nl4\nl5\n")
+        _git(self.d, "add", "shared.txt"); _git(self.d, "commit", "-qm", "add shared")
+        _git(self.d, "checkout", "-qb", "side")
+        (self.d / "shared.txt").write_text("l1-side\nl2\nl3\nl4\nl5\n")    # edit top hunk
+        _git(self.d, "add", "shared.txt"); _git(self.d, "commit", "-qm", "side edits l1")
+        _git(self.d, "checkout", "-q", self.base)
+        (self.d / "shared.txt").write_text("l1\nl2\nl3\nl4\nl5-base\n")    # edit bottom hunk
+        _git(self.d, "add", "shared.txt"); _git(self.d, "commit", "-qm", "base edits l5")
+        _git(self.d, "merge", "--no-ff", "-q", "-m", "clean combine", "side")
+        # The merged shared.txt == "l1-side … l5-base": differs from both parents, equals the
+        # clean auto-merge → no deviation → no finding.
+        self.assertEqual(self._findings(), [],
+                         "a clean 3-way merge of independent edits must not be flagged")
+
+    def test_merge_deleting_one_sided_add_not_flagged(self):
+        # Regression for the worm-guard false positive: `feature` ADDS b.txt (absent on base
+        # and at the merge-base). A clean 3-way merge KEEPS that addition, so the auto-merge
+        # tree contains b.txt — but the recorded merge DELETES it (a routine "accept the other
+        # branch's removal" resolution). That deviates from the auto-merge only by a deletion,
+        # which injects nothing, so it must NOT be flagged as an evil merge.
+        _git(self.d, "merge", "--no-ff", "--no-commit", "feature")
+        _git(self.d, "rm", "-qf", "b.txt")   # -f: b.txt is staged by the merge but not in HEAD
+        _git(self.d, "commit", "-qm", "merge but drop b.txt")
+        self.assertEqual(self._findings(), [],
+                         "a merge that only deletes a path must not be flagged")
+
 
 if __name__ == "__main__":
     unittest.main()
