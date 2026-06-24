@@ -29,8 +29,10 @@ jobs:
 
 ## 2. Local git hooks (defense-in-depth on the developer machine)
 The hooks are dependency-free (grep only) and cover both directions:
-- **`pre-commit`** — blocks *committing* loader fingerprints, fake `fa-solid-400.woff2`,
-  `.vscode` folderOpen auto-run tasks, and `.gitignore` worm markers (bypass with `--no-verify`).
+- **`pre-commit`** — blocks *committing* loader fingerprints (incl. the `global[...]` bang/
+  require-hijack variants), disguised font files, `.vscode` folderOpen auto-run tasks, the
+  "Blockchain Explorer" camouflage README, oversized minified lines, and `.gitignore` worm
+  markers — even in NUL-laden files and across renames (bypass with `--no-verify`).
 - **`post-merge` / `post-checkout`** — scan code that *arrives* via `git pull`/merge or a
   fresh clone/branch switch, and warn. This is the layer that catches **evil merges**
   (the worm's real spread vector), which a pre-commit hook cannot see.
@@ -39,9 +41,12 @@ The hooks are dependency-free (grep only) and cover both directions:
 bash <stayAwakeBot>/prevent/install-hooks.sh                 # this repo
 bash <stayAwakeBot>/prevent/install-hooks.sh --template      # all FUTURE clones (init.templateDir)
 bash <stayAwakeBot>/prevent/install-hooks.sh --all ~/dev ~/work   # every existing repo under roots
+bash <stayAwakeBot>/prevent/install-hooks.sh --force         # overwrite a foreign hook (else it's backed up)
 ```
 
-Also audit the machine's posture (cached GitHub credential, VS Code auto-run / Workspace Trust):
+An existing non-StayAwakeBot hook is backed up to `<hook>.pre-stayawake.bak` rather than
+destroyed. Also audit the machine's posture (cached GitHub credential, VS Code auto-run /
+Workspace Trust):
 ```bash
 stayawake-security-audit            # advisory; add --fail-on-issues for scripts/CI
 ```
@@ -50,6 +55,8 @@ stayawake-security-audit            # advisory; add --fail-on-issues for scripts
 - Require pull-request review before merging to `main`; **disable auto-merge**.
 - Require the **Worm Guard** status check to pass.
 - Restrict who can push to `main`; require linear history (blocks surprise merge commits).
+- Verify it's actually enforced: `stayawake-security-audit --repo owner/name` (needs a token)
+  warns if the branch is unprotected or Worm Guard isn't a required check.
 
 ## 4. Token & Action hardening
 - Pin all third-party actions to a **commit SHA**, not a tag.
