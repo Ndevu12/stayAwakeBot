@@ -49,12 +49,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }   # full history so evil merges are detectable
-      - uses: Ndevu12/stayAwakeBot@v1      # pin to a SHA in production
+      - uses: Ndevu12/strix@v1             # pin to a SHA in production
         with:
           fail-on-findings: 'true'
 ```
 
-Pin `@<sha>` rather than `@v1` for tamper-evident runs. See [Security baseline](prevent/SECURITY_BASELINE.md).
+`Ndevu12/strix` ("StayAwakeBot Strix") is the public Action — a thin wrapper that installs the
+published `stayawakebot` scanner from PyPI. Pin `@<sha>` rather than `@v1` for tamper-evident
+runs. See [Security baseline](prevent/SECURITY_BASELINE.md).
 
 ## Run via Docker (no local Python needed)
 
