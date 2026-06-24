@@ -81,6 +81,18 @@ class TestEvilMerge(unittest.TestCase):
         self.assertEqual(self._findings(), [],
                          "a clean 3-way merge of independent edits must not be flagged")
 
+    def test_merge_deleting_one_sided_add_not_flagged(self):
+        # Regression for the worm-guard false positive: `feature` ADDS b.txt (absent on base
+        # and at the merge-base). A clean 3-way merge KEEPS that addition, so the auto-merge
+        # tree contains b.txt — but the recorded merge DELETES it (a routine "accept the other
+        # branch's removal" resolution). That deviates from the auto-merge only by a deletion,
+        # which injects nothing, so it must NOT be flagged as an evil merge.
+        _git(self.d, "merge", "--no-ff", "--no-commit", "feature")
+        _git(self.d, "rm", "-qf", "b.txt")   # -f: b.txt is staged by the merge but not in HEAD
+        _git(self.d, "commit", "-qm", "merge but drop b.txt")
+        self.assertEqual(self._findings(), [],
+                         "a merge that only deletes a path must not be flagged")
+
 
 if __name__ == "__main__":
     unittest.main()
