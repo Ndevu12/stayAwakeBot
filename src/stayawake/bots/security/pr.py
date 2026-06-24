@@ -13,6 +13,7 @@ from __future__ import annotations
 import re
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 from stayawake.core.adapters import github_api
@@ -25,6 +26,8 @@ from stayawake.bots.security import remediation
 FIX_BRANCH = "security/auto-clean"
 PATCHES_DIR = Path("sab-patches")   # where the read-only fallback writes .patch files
 ISSUE_LABEL = "stayawake-security"  # de-dup marker for the issue fallback
+_FORK_POLL_TRIES = 10               # async fork readiness: poll up to ~30s
+_FORK_POLL_DELAY = 3
 _BOT = ("-c", "user.name=StayAwakeBot Security", "-c", "user.email=security-bot@stayawake.local")
 
 
@@ -85,6 +88,55 @@ def _open_issue_fallback(owner: str, name: str, findings, token: str) -> str | N
     except Exception:  # noqa: BLE001 — notification is best-effort; never mask the patch result
         pass
     return None
+
+
+def _wait_for_fork(slug: str, token: str) -> bool:
+    """A new fork is created asynchronously; poll until it's queryable (or give up)."""
+    owner, name = slug.split("/", 1)
+    for attempt in range(_FORK_POLL_TRIES):
+        if github_api.get_repo(owner, name, token) is not None:
+            return True
+        if attempt < _FORK_POLL_TRIES - 1:
+            time.sleep(_FORK_POLL_DELAY)
+    return False
+
+
+def _fork_and_pr(wt: Path, owner: str, name: str, base: str, applied, token: str) -> str | None:
+    """When we can't push to the upstream, push the fix to a fork under the authenticated
+    user and open a cross-fork PR. Returns an outcome string when forking is viable
+    (success OR a post-fork failure worth reporting), or None when forking isn't possible
+    so the caller falls through to the patch/issue floor.
+
+    Handles: no token identity, can't fork (permissions), forking your own repo, async
+    fork not ready, push-to-fork failure, duplicate fork PR, and PR-creation failure."""
+    me = (github_api.get_authenticated_user(token) or {}).get("login")
+    if not me or me.lower() == owner.lower():
+        return None  # no identity, or it's our own repo (a fork wouldn't help)
+    fork = github_api.create_fork(owner, name, token)
+    fork_slug = fork.get("full_name") if isinstance(fork, dict) else None
+    if not fork_slug or "/" not in fork_slug:
+        return None  # forking not permitted → fall back
+    if not _wait_for_fork(fork_slug, token):
+        return f"{owner}/{name}: forked to {fork_slug} but it wasn't ready in time — retry later"
+    # Push the fix branch to the fork (token via GIT_ASKPASS, never in URL/argv).
+    with gitutil.github_https_auth(token) as (prefix, env):
+        pushed = _git(wt, "push", "--force", f"{prefix}{fork_slug}.git",
+                      f"{FIX_BRANCH}:{FIX_BRANCH}", env=env).returncode == 0
+    if not pushed:
+        return None  # couldn't push to the fork either → fall back to patch/issue
+    fork_owner = fork_slug.split("/", 1)[0]
+    existing = github_api.list_open_pulls(owner, name, FIX_BRANCH, token, head_owner=fork_owner)
+    if existing:
+        pr = existing[0]
+        return (f"{owner}/{name}: updated existing fork PR #{pr['number']} "
+                f"({pr.get('html_url', '')}) from {fork_slug}")
+    pr = github_api.create_pull(owner, name, title="security: auto-remediate worm indicators",
+                                head=f"{fork_owner}:{FIX_BRANCH}", base=base,
+                                body=_pr_body(f"{owner}/{name}", applied), token=token)
+    if pr and pr.get("number"):
+        return (f"{owner}/{name}: opened fork PR #{pr['number']} ({pr.get('html_url', '')}) "
+                f"from {fork_slug}")
+    return f"{owner}/{name}: pushed to fork {fork_slug} but PR creation failed (check token scope)"
 
 
 def slug_from_url(url: str) -> str | None:
@@ -172,9 +224,13 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
             pushed = _git(wt, "push", "--force", f"{prefix}{slug}.git",
                           f"{FIX_BRANCH}:{FIX_BRANCH}", env=env).returncode == 0
         if not pushed:
-            # No write access — degrade gracefully instead of losing the work:
-            #   1) save the fix as a patch the owner can apply (needs no permissions),
-            #   2) notify the repo via a de-duplicated issue (needs only issues:write).
+            # No write access — walk down the remediation ladder:
+            #   1) push to a fork under our account and open a cross-fork PR,
+            #   2) else save the fix as a patch (needs no permissions) AND
+            #      notify the repo via a de-duplicated issue (needs only issues:write).
+            forked = _fork_and_pr(wt, owner, name, base, applied, token)
+            if forked:
+                return forked
             patch = _save_patch(wt, slug, Path(patches_dir) if patches_dir else PATCHES_DIR)
             issue = _open_issue_fallback(owner, name, findings, token)
             bits = []
