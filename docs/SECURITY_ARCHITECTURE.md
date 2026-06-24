@@ -27,6 +27,15 @@ signatures (data) ─► signature engine ─► matchers ─► findings ─►
 - **Never executes scanned code** — static analysis + git plumbing only.
 - Remote targets cloned into ephemeral sandboxes (`core.hooksPath=/dev/null`, no prompts), removed after.
 - Remediation defaults to **report-only**; fixes go through **PRs**, never force-push to main.
+- **No false "fixed"**: after applying, the remediator re-scans and quarantines any residual
+  finding, **aborting the commit/PR if the tree is not clean** — it never ships a still-infected
+  file under a remediation label.
+- **Evasion-resistant reads**: source files are scanned even when they carry NUL bytes (one NUL
+  must not mark a payload "binary") or exceed the size cap (head+tail is scanned). Content
+  matching is case-insensitive.
+- **No self-leak**: quarantine backups (which hold live payloads) are kept out of commits —
+  `.gitignore` is enforced *and* any pre-existing tracked quarantine dir is untracked before
+  staging; the scanner excludes its own `reports/` output so it never re-flags its evidence.
 - The bot's `contents: write` token is high-value — the prevention layer scopes it and hardens the
   auto-commit step (this is the exact surface the worm used to inject its payload via an evil merge).
 
@@ -40,16 +49,21 @@ signatures (data) ─► signature engine ─► matchers ─► findings ─►
 
 ## Config
 - `config/security.yml` — targets (local globs + GitHub users/orgs), exclude dirs, remediation mode,
-  allowlist, alert routing.
+  allowlist, alert routing. `exclude_dirs` defaults already skip `.git`, `node_modules`, build
+  output, `.malware-quarantine`, and `reports`.
 - The signature database is shipped inside the package
   (`src/stayawake/bots/security/data/signatures.yml`); the installed scanner is self-contained.
   Point at a custom DB by setting `settings.signatures_path` in `config/security.yml`.
+- **Allowlist rules require a `signature`** (optionally scoped by `path_glob`). A bare `path_glob`
+  is ignored — it would blanket-suppress every signature on that path, so a fresh payload dropped
+  there would slip by. The reusable Action takes `path_glob|signature_id` entries.
 
 ## CLI / pipeline scripts
 - `security/cli/scan.py` (+ `security/service.py`) — detect → `reports/security/latest.json` + `latest.md`.
 - `security/cli/report.py` · `security/cli/alert.py` · `security/cli/remediate.py` — report, alert, remediate.
+- `security/cli/audit.py` (+ `security/hygiene.py`) — local posture + branch-protection audit.
 
-Installed as console scripts: `stayawake-security-scan` · `-report` · `-alert` · `-remediate`
+Installed as console scripts: `stayawake-security-scan` · `-report` · `-alert` · `-remediate` · `-audit`
 (or `python -m stayawake.bots.security.cli.<action>`).
 
 ## Testing
@@ -66,15 +80,28 @@ Evil-merge findings are reported as manual (need a history rewrite).
 `--apply --open-pr` pushes a stable `security/auto-clean` branch and opens **one rolling
 PR per repo**, targeting the default branch for review. Before opening it checks the API for
 an existing open PR from that branch and updates it instead of creating a duplicate. Work is
-isolated in a git worktree; it never commits to or force-pushes the default branch.
+isolated in a git worktree; it never commits to or force-pushes the default branch. After
+applying, it **re-scans and aborts (no PR) if anything is still detected**, and the commit
+message / PR body describe only what was *actually* changed.
+
+`stayawake-security-audit [--repo owner/name]` checks local posture (cached GitHub credential,
+VS Code auto-run / Workspace Trust) and, with a token + `--repo`, that the default branch is
+protected and the **Worm Guard** check is required.
 
 ## Prevention
 
 A reusable `worm-scan` composite Action (`.github/actions/worm-scan`) gates PRs/merges in
-any repo (`worm-guard.yml`), a portable `prevent/pre-commit` hook blocks local commits,
-and `prevent/SECURITY_BASELINE.md` covers branch protection + token/Action hardening.
-The Action installs the published scanner (`pip install "stayawake @ git+…@<ref>"`) rather
-than cloning, so the gate runs the same code as the package.
+any repo (`worm-guard.yml`), portable git hooks (`prevent/hooks/`) block local commits and
+catch incoming infections, and `prevent/SECURITY_BASELINE.md` covers branch protection +
+token/Action hardening. The Action installs the published scanner
+(`pip install "stayawake @ git+…@<ref>"`) rather than cloning, so the gate runs the same code
+as the package.
+
+Supply-chain hardening of the gate itself: pin `sentinel-ref` to a **commit SHA** (never `@main`,
+which is mutable) and SHA-pin every third-party action — a later compromise of an upstream tag
+or of `main` then can't silently change what the gate runs. Bump the pin deliberately after a
+reviewed scanner/signature update. The gate scans the whole tree (only `reports/**` is exempt,
+since the bot's own reports quote detected payloads).
 
 ## Trigger model (event-driven, not scheduled)
 

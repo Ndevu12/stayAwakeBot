@@ -57,17 +57,26 @@ Harden a developer machine with layered, dependency-free git hooks:
 prevent/install-hooks.sh                 # this repo: pre-commit + post-merge + post-checkout
 prevent/install-hooks.sh --template      # auto-protect all FUTURE clones (init.templateDir)
 prevent/install-hooks.sh --all ~/dev     # install into every existing repo under a root
+prevent/install-hooks.sh --force         # overwrite a foreign hook instead of backing it up
 ```
 
 - **pre-commit** blocks committing worm artifacts (outgoing).
 - **post-merge / post-checkout** scan code that *arrives* via pull/merge or clone — the
-  layer that catches **evil merges**, the worm's real spread vector.
+  layer that catches **evil merges**, the worm's real spread vector. They use
+  `--diff-filter=ACMR`, so a payload introduced via a rename is caught too.
+- An existing non-StayAwakeBot hook is backed up to `<hook>.pre-stayawake.bak` (never
+  silently destroyed); the default install warns if future clones aren't yet protected.
 
-Audit the machine's security posture (cached GitHub credential, VS Code auto-run / Workspace Trust):
+Audit the machine's security posture (cached GitHub credential, VS Code auto-run /
+Workspace Trust), and optionally a repo's branch-protection gate:
 
 ```bash
-stayawake-security-audit                 # advisory; add --fail-on-issues for scripts/CI
+stayawake-security-audit                       # advisory; add --fail-on-issues for scripts/CI
+stayawake-security-audit --repo owner/name     # also check that Worm Guard is a required check
 ```
+
+`--repo` needs `GH_SECURITY_TOKEN` (or `GITHUB_TOKEN`) and warns if the default branch
+is unprotected or the Worm Guard status check isn't required.
 
 ## Environment / secrets
 

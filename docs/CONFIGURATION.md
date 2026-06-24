@@ -46,6 +46,15 @@ and alert routing. The signature database ships **inside the package**; point at
 DB with `settings.signatures_path`. Full field reference and the layered design live in
 [SECURITY_ARCHITECTURE.md](SECURITY_ARCHITECTURE.md).
 
+Each `allowlist` entry **must name a `signature`** (optionally scoped by `path_glob`) — a
+bare `path_glob` is ignored so it can't blanket-suppress a fresh payload on that path:
+
+```yaml
+allowlist:
+  - signature: fake-font-fa-solid-400
+    path_glob: "tests/**"
+```
+
 ## Reports
 
 Reports are written under `reports/` and committed back to the repo.
