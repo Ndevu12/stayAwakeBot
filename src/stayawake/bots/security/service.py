@@ -114,6 +114,9 @@ def _resolve_remote(cfg: dict, opts: ScanOptions):
             slugs += github_api.list_repos(acct, kind, token,
                                            gconf.get("include_forks", False),
                                            gconf.get("include_archived", False))
+    # With a GitHub App and no explicit accounts, scan everything the install can see.
+    if source == "github-app" and not slugs:
+        slugs += github_api.list_installation_repos(token, gconf.get("include_archived", False))
     return sorted(set(slugs)), token, source
 
 
