@@ -1,10 +1,13 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
-name = "stayawake"
-version = "0.1.0"
+name = "stayawakebot"
+# Version is derived from the git tag at build time (hatch-vcs); never hand-edited.
+# `stayawake` (the import package) stays the same — only the PyPI distribution name
+# differs, because `stayawake` is already taken on PyPI by an unrelated project.
+dynamic = ["version"]
 description = "Distributable monitoring & security sentinel toolkit — uptime checks plus self-propagating-worm detection, remediation, and prevention."
 readme = "README.md"
 requires-python = ">=3.14"
@@ -14,7 +17,6 @@ keywords = ["monitoring", "uptime", "security", "sentinel", "worm", "supply-chai
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
-  "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.14",
   "Topic :: Security",
@@ -46,6 +48,20 @@ stayawake-security-report  = "stayawake.bots.security.cli.report:main"
 stayawake-security-alert   = "stayawake.bots.security.cli.alert:main"
 stayawake-security-remediate = "stayawake.bots.security.cli.remediate:main"
 stayawake-security-audit   = "stayawake.bots.security.cli.audit:main"
+
+# Derive the version from the git tag (e.g. tag `v0.1.0` -> version `0.1.0`).
+[tool.hatch.version]
+source = "vcs"
+
+# Keep the source distribution lean and safe. Hatchling's default sdist would ship the
+# whole working tree — including reports/ (hundreds of scan reports that QUOTE detected
+# malware payloads) and tests/ fixtures (deliberately "infected" sample files). Shipping
+# those to PyPI is both bloat and, for a supply-chain scanner, an embarrassment.
+# `only-include` is restrictive (not glob-at-any-depth like `include`), so a stray
+# README.md under tests/fixtures cannot leak in. README/LICENSE/pyproject are always added
+# by Hatchling as metadata; CHANGELOG is named explicitly.
+[tool.hatch.build.targets.sdist]
+only-include = ["src/stayawake", "CHANGELOG.md"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/stayawake"]

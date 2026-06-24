@@ -6,10 +6,15 @@ The same commands run locally or inside the bundled GitHub Actions workflows.
 ## Install
 
 ```bash
-pip install "stayawake @ git+https://github.com/Ndevu12/stayAwakeBot@main"   # or: pipx install "stayawake @ git+…"
+pip install stayawakebot                                                          # released versions, from PyPI
+pip install "stayawakebot @ git+https://github.com/Ndevu12/stayAwakeBot@main"     # latest from source (or pipx install "…")
 # from a clone, for development:
 pip install -e .
 ```
+
+The PyPI distribution is named **`stayawakebot`** because `stayawake` is already taken on
+PyPI by an unrelated project. The import package (`stayawake`) and the `stayawake-*` console
+scripts are unchanged.
 
 ## Health bot — uptime monitoring
 
