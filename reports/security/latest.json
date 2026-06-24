@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-06-24T12:09:39.724299+00:00",
+  "generated_at": "2026-06-24T12:35:36.946742+00:00",
   "summary": {
     "targets": 1,
     "infected": 1,
@@ -260,7 +260,7 @@
           "description": "Loader reassigning global.require to smuggle CommonJS into ESM",
           "remediation": "strip-appended-payload",
           "line": 64,
-          "evidence": "\\\\\\\\\\\\\\\\\"); global[_$_1e42[0]]= require;S\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\u2026\\\\\u2026",
+          "evidence": "\\\\\\\\\\\\\\\\\"); global[_$_1e42[0]]= require;S\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\u2026",
           "vector": "code-loader"
         },
         {
