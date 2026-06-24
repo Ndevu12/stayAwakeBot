@@ -15,8 +15,9 @@ _API = "https://api.github.com"
 
 
 def request(path: str, method: str = "GET", token: str | None = None,
-            data: dict | None = None) -> Any:
-    """Low-level call. `path` is the API path (leading slash)."""
+            data: dict | None = None, quiet: bool = False) -> Any:
+    """Low-level call. `path` is the API path (leading slash). `quiet` suppresses error
+    logging (e.g. expected 404s while polling for an async fork to become available)."""
     headers = {"Accept": "application/vnd.github+json",
                "User-Agent": "StayAwakeBot/1.0"}
     body = None
@@ -30,15 +31,37 @@ def request(path: str, method: str = "GET", token: str | None = None,
         with urllib.request.urlopen(req, timeout=15) as resp:
             return json.loads(resp.read().decode())
     except urllib.error.HTTPError as he:
-        try:
-            detail = he.read().decode()
-        except Exception:
-            detail = str(he)
-        print(f"GitHub API error: {he.code} {detail}")
+        if not quiet:
+            try:
+                detail = he.read().decode()
+            except Exception:
+                detail = str(he)
+            print(f"GitHub API error: {he.code} {detail}")
         return None
     except Exception as e:  # noqa: BLE001
-        print(f"GitHub API request failed: {e}")
+        if not quiet:
+            print(f"GitHub API request failed: {e}")
         return None
+
+
+def get_authenticated_user(token: str | None) -> dict | None:
+    """The account the token belongs to (its 'login' is the fork owner). None on failure."""
+    res = request("/user", token=token)
+    return res if isinstance(res, dict) else None
+
+
+def get_repo(owner: str, repo: str, token: str | None) -> dict | None:
+    """A repo object, or None if it doesn't exist yet (quiet — used to poll a new fork)."""
+    res = request(f"/repos/{owner}/{repo}", token=token, quiet=True)
+    return res if isinstance(res, dict) else None
+
+
+def create_fork(owner: str, repo: str, token: str | None) -> dict | None:
+    """Fork a repo under the authenticated account (idempotent: returns the existing fork
+    if present). Creation is asynchronous — poll get_repo() for readiness. Returns the
+    fork object (with 'full_name') or None if forking isn't permitted."""
+    res = request(f"/repos/{owner}/{repo}/forks", method="POST", token=token)
+    return res if isinstance(res, dict) else None
 
 
 def list_repos(account: str, kind: str, token: str | None,
@@ -83,9 +106,12 @@ def list_installation_repos(token: str | None, include_archived: bool = False) -
     return slugs
 
 
-def list_open_pulls(owner: str, repo: str, head_branch: str, token: str | None) -> list[dict]:
-    """Open PRs whose head is `owner:head_branch` (used for de-duplication)."""
-    res = request(f"/repos/{owner}/{repo}/pulls?state=open&head={owner}:{head_branch}",
+def list_open_pulls(owner: str, repo: str, head_branch: str, token: str | None,
+                    head_owner: str | None = None) -> list[dict]:
+    """Open PRs on `owner/repo` whose head is `<head_owner>:head_branch` (for de-dup).
+    `head_owner` defaults to `owner` (same-repo PRs); pass the fork owner for cross-fork."""
+    ho = head_owner or owner
+    res = request(f"/repos/{owner}/{repo}/pulls?state=open&head={ho}:{head_branch}",
                   token=token)
     return res if isinstance(res, list) else []
 

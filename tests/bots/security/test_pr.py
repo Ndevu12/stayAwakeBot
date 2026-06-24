@@ -109,6 +109,7 @@ class TestReadOnlyFallback(unittest.TestCase):
                                return_value=[Change("strip-payload", "postcss.config.mjs")]), \
              mock.patch.object(pr.remediation, "apply",
                                return_value=[Change("strip-payload", "postcss.config.mjs")]), \
+             mock.patch.object(pr.github_api, "get_authenticated_user", return_value=None), \
              mock.patch.object(pr.github_api, "list_open_pulls", return_value=[]), \
              mock.patch.object(pr.github_api, "create_pull") as create_pull, \
              mock.patch.object(pr.github_api, "list_open_issues", return_value=existing_issues), \
@@ -134,6 +135,100 @@ class TestReadOnlyFallback(unittest.TestCase):
         outcome, _, create_issue = self._run([{"number": 9}], out)
         create_issue.assert_not_called()                 # an open issue exists ⇒ no duplicate
         self.assertIn("#9", outcome)
+
+
+class TestForkPr(unittest.TestCase):
+    """Fork → cross-fork PR rung: when we can't push to upstream but can fork, push the
+    fix to a fork under the authenticated user and open a cross-fork PR. All edge cases
+    fall through to the patch/issue floor."""
+
+    def _run(self, *, user=None, fork=None, repo_ready=True, fork_push_ok=True,
+             existing_fork_pulls=None, created_pr=None):
+        finding = Finding("x", "code-loader", Severity.CRITICAL, "postcss.config.mjs",
+                          "loader", remediation="strip-appended-payload")
+        scans = [ScanResult("up/repo", "local", [finding]),
+                 ScanResult("up/repo", "local", []),
+                 ScanResult("up/repo", "local", [])]
+
+        def fake_git(cwd, *args, **kwargs):
+            cp = SimpleNamespace(returncode=0, stdout="", stderr="")
+            if args[:2] == ("remote", "get-url"):
+                cp.stdout = "git@github.com:up/repo.git"
+            elif args[:1] == ("symbolic-ref",):
+                cp.stdout = "refs/remotes/origin/main"
+            elif args[:1] == ("push",):
+                url = next((a for a in args if ".git" in a), "")
+                if "up/repo.git" in url:
+                    cp.returncode = 1                    # upstream push rejected (no write)
+                else:
+                    cp.returncode = 0 if fork_push_ok else 1   # push to the fork
+            elif args[:1] == ("format-patch",):
+                cp.stdout = "patch-body\n"
+            return cp
+
+        out = Path(tempfile.mkdtemp())
+        with mock.patch.object(pr, "_git", side_effect=fake_git), \
+             mock.patch.object(pr.time, "sleep", return_value=None), \
+             mock.patch.object(pr, "scan_target",
+                               side_effect=lambda *a, **k: scans.pop(0) if scans else scans), \
+             mock.patch.object(pr.remediation, "plan",
+                               return_value=[Change("strip-payload", "postcss.config.mjs")]), \
+             mock.patch.object(pr.remediation, "apply",
+                               return_value=[Change("strip-payload", "postcss.config.mjs")]), \
+             mock.patch.object(pr.github_api, "get_authenticated_user", return_value=user), \
+             mock.patch.object(pr.github_api, "create_fork", return_value=fork), \
+             mock.patch.object(pr.github_api, "get_repo",
+                               return_value=({"x": 1} if repo_ready else None)), \
+             mock.patch.object(pr.github_api, "list_open_pulls",
+                               return_value=existing_fork_pulls or []), \
+             mock.patch.object(pr.github_api, "create_pull", return_value=created_pr) as create_pull, \
+             mock.patch.object(pr.github_api, "list_open_issues", return_value=[]), \
+             mock.patch.object(pr.github_api, "create_issue",
+                               return_value={"number": 1, "html_url": "iu"}) as create_issue:
+            outcome = pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t", patches_dir=out)
+        return outcome, create_pull, create_issue, out
+
+    def test_opens_cross_fork_pr(self):
+        outcome, create_pull, create_issue, _ = self._run(
+            user={"login": "me"}, fork={"full_name": "me/repo"},
+            created_pr={"number": 11, "html_url": "fu"})
+        self.assertIn("opened fork PR #11", outcome)
+        create_pull.assert_called_once()
+        self.assertEqual(create_pull.call_args.kwargs["head"], "me:security/auto-clean")
+        create_issue.assert_not_called()                 # fork PR succeeded → no issue floor
+
+    def test_dedup_existing_fork_pr(self):
+        outcome, create_pull, _, _ = self._run(
+            user={"login": "me"}, fork={"full_name": "me/repo"},
+            existing_fork_pulls=[{"number": 4, "html_url": "fu"}])
+        create_pull.assert_not_called()                  # already an open fork PR
+        self.assertIn("updated existing fork PR #4", outcome)
+
+    def test_own_repo_falls_back_to_floor(self):
+        # token belongs to the upstream owner → a fork is pointless → patch/issue floor
+        outcome, create_pull, create_issue, out = self._run(
+            user={"login": "up"}, fork={"full_name": "up/repo"})
+        create_pull.assert_not_called()
+        create_issue.assert_called_once()
+        self.assertTrue((out / "up-repo.patch").is_file())
+
+    def test_cannot_fork_falls_back_to_floor(self):
+        outcome, _, create_issue, out = self._run(user={"login": "me"}, fork=None)
+        create_issue.assert_called_once()                # forking not permitted → floor
+        self.assertTrue((out / "up-repo.patch").is_file())
+
+    def test_fork_not_ready_reports_retry(self):
+        outcome, create_pull, create_issue, _ = self._run(
+            user={"login": "me"}, fork={"full_name": "me/repo"}, repo_ready=False)
+        self.assertIn("wasn't ready", outcome)
+        create_pull.assert_not_called()
+        create_issue.assert_not_called()                 # reported; not the floor
+
+    def test_fork_push_failure_falls_back_to_floor(self):
+        outcome, _, create_issue, out = self._run(
+            user={"login": "me"}, fork={"full_name": "me/repo"}, fork_push_ok=False)
+        create_issue.assert_called_once()                # couldn't push to fork → floor
+        self.assertTrue((out / "up-repo.patch").is_file())
 
 
 if __name__ == "__main__":
