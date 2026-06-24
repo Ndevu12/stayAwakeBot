@@ -62,10 +62,19 @@ stayawake-security-remediate --apply --open-pr  # also open one rolling PR per r
 stayawake-security-remediate --remote           # operate on remote GitHub targets from config
 ```
 
-**Read-only fallback:** when `--open-pr` / `--remote` can't push a fix branch (you only
-have read access to the target), StayAwakeBot doesn't discard the fix — it writes it as a
-`git am`-able patch under `sab-patches/` and tells you how to apply it. So remediation
-always produces something actionable, even without write access.
+**Read-only fallback (remediation ladder):** when `--open-pr` / `--remote` can't push a
+fix branch (you only have read access to the target), StayAwakeBot doesn't discard the
+fix — it degrades down a ladder:
+
+1. **Fork → cross-fork PR** — if the token can fork, it pushes the fix to a fork under
+   your account and opens a PR from the fork into the upstream (de-duplicated; handles
+   the fork's asynchronous creation).
+2. Otherwise it writes the fix as a `git am`-able **patch** under `sab-patches/` **and**
+   (if the token has `issues: write`) opens a **de-duplicated issue** on the target repo
+   with the findings, so the owner is notified.
+
+So remediation always produces something actionable — a fork PR, a patch, a heads-up, or
+some combination — even without write access to the target.
 
 Drop `--local-only` to also scan the GitHub users/orgs listed in `config/security.yml`.
 Use `--fail-on-findings` to make `scan` exit non-zero (the CI gate uses this).
@@ -151,6 +160,8 @@ scope is in parentheses):
 | `stayawake-security-scan <path>` / public remotes | no | — |
 | `stayawake-security-scan` private remotes | read | Contents + Metadata: Read (`repo`) |
 | `stayawake-security-remediate --open-pr` / `--remote` | write | Contents + Pull requests: R/W (`repo`) |
+| ↳ fork fallback (cross-fork PR when you can't push upstream) | fork + PR | Pull requests: R/W on your fork (`public_repo` / `repo`) |
+| ↳ patch/issue fallback (no write at all) | none / issues | Issues: R/W for the notify issue (`repo` / `public_repo`); patch needs nothing |
 | `stayawake-security-alert` (GitHub issue) | write | Issues: R/W (`repo` / `public_repo`) |
 | `stayawake-security-audit --repo` | read | Administration: Read (`repo`) |
 
