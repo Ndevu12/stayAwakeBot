@@ -55,6 +55,33 @@ jobs:
           stayawake-security-scan --help
           stayawake-health-check --help
 
+      - name: Resolve app dependencies in a clean venv (for audit + SBOM)
+        run: |
+          python -m venv /tmp/appenv
+          /tmp/appenv/bin/pip install --quiet --upgrade pip
+          /tmp/appenv/bin/pip install dist/*.whl
+          # Audit/SBOM the app's RESOLVED dependency set; drop our own dist (not on PyPI yet).
+          /tmp/appenv/bin/pip freeze | grep -ivE '^stayawakebot==' > /tmp/app-requirements.txt
+
+      - name: Audit dependencies for known vulnerabilities (gate)
+        run: |
+          pip install pip-audit
+          # Fails the release on any advisory in the resolved deps. To ship past a vuln with
+          # no fix yet, add a scoped `--ignore-vuln GHSA-xxxx` here (see docs/RELEASING.md).
+          pip-audit --strict --requirement /tmp/app-requirements.txt
+
+      - name: Generate CycloneDX SBOM
+        run: |
+          pip install cyclonedx-bom
+          cyclonedx-py environment /tmp/appenv/bin/python --of JSON -o sbom.cdx.json
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7.0.1
+        with:
+          name: sbom
+          path: sbom.cdx.json
+          if-no-files-found: error
+
       - name: Upload distribution artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7.0.1
         with:
@@ -149,11 +176,16 @@ jobs:
         with:
           name: dist
           path: dist/
+      - name: Download SBOM
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c   # v8.0.1
+        with:
+          name: sbom
+          path: sbom/
       - name: Create release with auto-generated notes + artifacts
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" dist/* \
+          gh release create "${GITHUB_REF_NAME}" dist/* sbom/sbom.cdx.json \
             --title "${GITHUB_REF_NAME}" \
             --generate-notes \
             --verify-tag
@@ -197,30 +229,43 @@ jobs:
             type=sha,prefix=sha-
             type=raw,value=latest
 
-      - name: Build & push (with SLSA provenance + SBOM attestations)
+      # Build the image locally first and gate it on a vulnerability scan BEFORE publishing,
+      # so a fixable critical/high never reaches GHCR (no "published-but-failed"). The push
+      # step below reuses this build from the buildx cache.
+      - name: Build image for scanning (load locally, no push yet)
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf   # v7.2.0
         with:
           context: .
           build-args: VERSION=${{ env.VERSION }}
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          provenance: true       # SLSA provenance attestation pushed to GHCR
-          sbom: true             # SBOM attestation pushed to GHCR
+          load: true
+          tags: ghcr.io/ndevu12/stayawakebot:${{ env.VERSION }}
 
-      - name: Vulnerability scan (Trivy) — report, do not block a published release on upstream CVEs
+      - name: Vulnerability gate (Trivy) — block on FIXABLE critical/high
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25   # v0.36.0
         with:
           image-ref: ghcr.io/ndevu12/stayawakebot:${{ env.VERSION }}
           format: sarif
           output: trivy.sarif
           severity: CRITICAL,HIGH
-          exit-code: '0'         # base-image CVEs shouldn't fail the release; SARIF is the record
+          ignore-unfixed: true   # don't block on CVEs with no upstream fix available yet
+          exit-code: '1'         # a fixable critical/high fails the job before anything is pushed
 
       - name: Upload Trivy SARIF
-        if: always()
+        if: always()             # keep the scan record even when the gate fails
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7.0.1
         with:
           name: trivy-sarif
           path: trivy.sarif
+          if-no-files-found: warn
+
+      - name: Build & push (with SLSA provenance + SBOM attestations)
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf   # v7.2.0
+        with:
+          context: .
+          build-args: VERSION=${{ env.VERSION }}
+          push: true             # reuses the cached build above
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: true       # SLSA provenance attestation pushed to GHCR
+          sbom: true             # SBOM attestation pushed to GHCR
           if-no-files-found: warn
