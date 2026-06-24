@@ -1,10 +1,10 @@
-# Security scan — 2026-06-24T15:03:54.490582+00:00
+# Security scan — 2026-06-24T15:22:28.779411+00:00
 
-**1 targets** · 1 infected · 30 findings (14 critical, 13 high)
+**1 targets** · 1 infected · 29 findings (14 critical, 12 high)
 
 | Target | Source | Status | Findings | Top severity |
 |--------|--------|--------|----------|--------------|
-| ~/work/stayAwakeBot/stayAwakeBot | local | ❌ INFECTED | 30 | critical |
+| ~/work/stayAwakeBot/stayAwakeBot | local | ❌ INFECTED | 29 | critical |
 
 ## Findings
 
@@ -50,9 +50,6 @@
 - **[critical]** `loader-seed-var` — tests/bots/security/test_remediation.py:84
   - Obfuscated loader seed variable (var/let/const _$_xxxx=)
   - evidence: `     txt = "var _$_abcd = sfL(0)\nString.fromCharCode(127)\nexport default {a:1}…`
-- **[high]** `evil-merge` — d0cb72ace5
-  - Merge commit introducing content present in neither parent (review-evading)
-  - evidence: `2 path(s) in neither parent; e.g. ['docs/USAGE.md', 'src/stayawake/bots/security/service.py']; by 140616733+Ndevu12@users.noreply.github.com`
 - **[high]** `loader-decoder-fn` — reports/security/latest.json:54
   - Obfuscated loader decoder call — the sfL decoder function
   - evidence: `t';function sfL(w){return w}; var x =sfL(\\\\\\\\\\\\\\\\\\\u2026",           "v…`

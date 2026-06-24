@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-06-24T15:03:54.490582+00:00",
+  "generated_at": "2026-06-24T15:22:28.779411+00:00",
   "summary": {
     "targets": 1,
     "infected": 1,
-    "findings": 30,
+    "findings": 29,
     "critical": 14,
-    "high": 13
+    "high": 12
   },
   "any_infected": true,
   "results": [
@@ -15,17 +15,16 @@
       "infected": true,
       "error": null,
       "summary": {
-        "total": 30,
+        "total": 29,
         "by_severity": {
           "critical": 14,
-          "high": 13,
+          "high": 12,
           "medium": 3
         },
         "by_category": {
           "code-loader": 22,
           "vscode-autorun": 3,
           "fake-font": 2,
-          "evil-merge": 1,
           "git-marker": 1,
           "camouflage": 1
         },
@@ -185,17 +184,6 @@
           "line": 84,
           "evidence": "     txt = \"var _$_abcd = sfL(0)\\nString.fromCharCode(127)\\nexport default {a:1}\u2026",
           "vector": "code-loader"
-        },
-        {
-          "signature_id": "evil-merge",
-          "category": "evil-merge",
-          "severity": "high",
-          "path": "d0cb72ace5",
-          "description": "Merge commit introducing content present in neither parent (review-evading)",
-          "remediation": "manual",
-          "line": null,
-          "evidence": "2 path(s) in neither parent; e.g. ['docs/USAGE.md', 'src/stayawake/bots/security/service.py']; by 140616733+Ndevu12@users.noreply.github.com",
-          "vector": "evil-merge"
         },
         {
           "signature_id": "loader-decoder-fn",
