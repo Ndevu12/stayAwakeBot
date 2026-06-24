@@ -17,10 +17,11 @@ REPORTS_DIR = Path("reports")
 
 
 async def _check_async(config_path: str, reports_dir: str | Path | None = None) -> bool:
-    _settings, configs = load_config(config_path)
+    settings, configs = load_config(config_path)
     results = await checker.run_checks(configs)
     payload = checker.build_latest_payload(results)
-    rdir = Path(reports_dir) if reports_dir else REPORTS_DIR
+    # Precedence: explicit arg / --reports-dir → settings.reports_dir → default.
+    rdir = Path(reports_dir or settings.get("reports_dir") or REPORTS_DIR)
     rdir.mkdir(parents=True, exist_ok=True)
     write_json(rdir / "latest.json", payload)
     checker.append_minimal_history(results, payload["generated_at"], rdir)

@@ -49,6 +49,15 @@ Drop `--local-only` to also scan the GitHub users/orgs listed in `config/securit
 Use `--fail-on-findings` to make `scan` exit non-zero (the CI gate uses this).
 See [SECURITY_ARCHITECTURE.md](SECURITY_ARCHITECTURE.md) for how detection / remediation work.
 
+Reports go to `reports/security/` by default. To run a scan **without touching the
+committed reports** (local experiments, CI, scanning someone else's repo), redirect the
+output — via `--reports-dir` or `settings.reports_dir` in config:
+
+```bash
+stayawake-security-scan --local-only --reports-dir /tmp/sab-reports   # writes only there
+stayawake-health-check  --reports-dir /tmp/sab-reports                # same for the health bot
+```
+
 ## Local defense-in-depth (hooks + audit)
 
 Harden a developer machine with layered, dependency-free git hooks:
