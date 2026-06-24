@@ -62,6 +62,11 @@ stayawake-security-remediate --apply --open-pr  # also open one rolling PR per r
 stayawake-security-remediate --remote           # operate on remote GitHub targets from config
 ```
 
+**Read-only fallback:** when `--open-pr` / `--remote` can't push a fix branch (you only
+have read access to the target), StayAwakeBot doesn't discard the fix — it writes it as a
+`git am`-able patch under `sab-patches/` and tells you how to apply it. So remediation
+always produces something actionable, even without write access.
+
 Drop `--local-only` to also scan the GitHub users/orgs listed in `config/security.yml`.
 Use `--fail-on-findings` to make `scan` exit non-zero (the CI gate uses this).
 See [SECURITY_ARCHITECTURE.md](SECURITY_ARCHITECTURE.md) for how detection / remediation work.

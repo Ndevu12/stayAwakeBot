@@ -2,6 +2,7 @@
 """PR submission: slug parsing + duplicate-PR avoidance (no real git/network)."""
 from __future__ import annotations
 
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -76,6 +77,48 @@ class TestNoDuplicatePr(unittest.TestCase):
             outcome = pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t")
         create.assert_not_called()
         self.assertIn("ABORTED", outcome)
+
+
+class TestPatchFallback(unittest.TestCase):
+    def test_push_failure_saves_patch_instead_of_losing_fix(self):
+        # No write access: the branch push fails, so the fix must be written as a patch
+        # (the no-write floor of the remediation ladder), not silently discarded.
+        out = Path(tempfile.mkdtemp())
+        finding = Finding("x", "code-loader", Severity.CRITICAL, "postcss.config.mjs",
+                          "loader", remediation="strip-appended-payload")
+        scans = [ScanResult("owner/repo", "local", [finding]),   # worktree scan: infected
+                 ScanResult("owner/repo", "local", []),          # post-apply re-scan: clean
+                 ScanResult("owner/repo", "local", [])]
+
+        def fake_git(cwd, *args):
+            cp = SimpleNamespace(returncode=0, stdout="", stderr="")
+            if args[:2] == ("remote", "get-url"):
+                cp.stdout = "git@github.com:owner/repo.git"
+            elif args[:1] == ("symbolic-ref",):
+                cp.stdout = "refs/remotes/origin/main"
+            elif args[:1] == ("push",):
+                cp.returncode = 1                       # <-- read-only: push rejected
+            elif args[:1] == ("format-patch",):
+                cp.stdout = "From abc\nSubject: fix\n\npatch-body\n"
+            return cp
+
+        with mock.patch.object(pr, "_git", side_effect=fake_git), \
+             mock.patch.object(pr, "scan_target",
+                               side_effect=lambda *a, **k: scans.pop(0) if scans else scans), \
+             mock.patch.object(pr.remediation, "plan",
+                               return_value=[Change("strip-payload", "postcss.config.mjs")]), \
+             mock.patch.object(pr.remediation, "apply",
+                               return_value=[Change("strip-payload", "postcss.config.mjs")]), \
+             mock.patch.object(pr.github_api, "list_open_pulls", return_value=[]), \
+             mock.patch.object(pr.github_api, "create_pull") as create:
+            outcome = pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t",
+                                       patches_dir=out)
+
+        create.assert_not_called()                       # no PR opened
+        self.assertIn("patch", outcome.lower())
+        patch_file = out / "owner-repo.patch"
+        self.assertTrue(patch_file.is_file(), "fix must be saved as a patch on push failure")
+        self.assertIn("patch-body", patch_file.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":
