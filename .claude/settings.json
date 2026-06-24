@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -m unittest discover -s tests -t .)",
+      "Bash(python3 -m venv /tmp/secvenv2 -q)",
+      "Bash(/tmp/secvenv2/bin/pip install *)",
+      "Bash(/tmp/secvenv2/bin/python -m unittest discover -s tests -t .)",
+      "Bash(python3 -m venv /tmp/secvenv2)",
+      "Read(//tmp/secvenv2/**)",
+      "Bash(git fetch *)",
+      "Bash(git checkout *)",
+      "Bash(git pull *)"
+    ]
+  }
+}

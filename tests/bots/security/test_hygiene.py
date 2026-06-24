@@ -66,6 +66,31 @@ class TestVSCode(unittest.TestCase):
             self.assertEqual(hygiene.check_vscode(), [])
 
 
+class TestBranchProtection(unittest.TestCase):
+    def test_noop_without_slug_or_token(self):
+        self.assertEqual(hygiene.check_branch_protection(None, "t"), [])
+        self.assertEqual(hygiene.check_branch_protection("o/r", None), [])
+
+    def test_unprotected_branch_warns(self):
+        with mock.patch("stayawake.core.adapters.github_api.get_branch_protection",
+                        return_value=None):
+            issues = hygiene.check_branch_protection("o/r", "tok")
+        self.assertEqual([i.id for i in issues], ["branch-unprotected"])
+
+    def test_worm_guard_not_required_warns(self):
+        prot = {"required_status_checks": {"contexts": ["build", "lint"]}}
+        with mock.patch("stayawake.core.adapters.github_api.get_branch_protection",
+                        return_value=prot):
+            issues = hygiene.check_branch_protection("o/r", "tok")
+        self.assertEqual([i.id for i in issues], ["worm-guard-not-required"])
+
+    def test_worm_guard_required_is_clean(self):
+        prot = {"required_status_checks": {"contexts": ["Worm Guard — block infected merges"]}}
+        with mock.patch("stayawake.core.adapters.github_api.get_branch_protection",
+                        return_value=prot):
+            self.assertEqual(hygiene.check_branch_protection("o/r", "tok"), [])
+
+
 class TestAuditRender(unittest.TestCase):
     def test_render_clean(self):
         self.assertIn("no issues", hygiene.render([]))

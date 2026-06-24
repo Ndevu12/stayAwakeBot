@@ -21,8 +21,16 @@ from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.service import discover_local_repos
 from stayawake.bots.security.targets import ScanOptions, LocalRepoTarget
+from stayawake.bots.security.models import QUARANTINE_DIR
 from stayawake.bots.security import remediation
 from stayawake.bots.security import pr as pr_submit
+
+
+def _residual_auto_fixable(repo: Path, sigs, allowlist, opts) -> list:
+    """Re-scan a repo and return only findings that *should* have been auto-fixed —
+    i.e. anything the remediator claims to handle but left behind."""
+    fs = scan_target(LocalRepoTarget(repo, str(repo), opts), sigs, allowlist).findings
+    return [f for f in fs if remediation.is_auto_fixable(f)]
 
 
 def _options(settings: dict) -> ScanOptions:
@@ -52,6 +60,9 @@ def _commit_branch(repo: Path, applied) -> str | None:
     body = "\n".join(f"- {c.action}: {c.path}" for c in applied)
     if not _git(repo, "checkout", "-b", branch):
         return None
+    # git only ignores UNTRACKED paths — untrack any pre-existing tracked quarantine
+    # dir so live-malware backups are never committed onto the fix branch.
+    _git(repo, "rm", "-r", "--cached", "--ignore-unmatch", QUARANTINE_DIR)
     _git(repo, "add", "-A")
     _git(repo, "-c", "user.name=StayAwakeBot Security",
          "-c", "user.email=security-bot@stayawake.local",
@@ -92,9 +103,21 @@ def remediate(config_path: str = "config/security.yml", apply: bool = False,
                 print(f"    → {pr_submit.submit_fix_pr(repo, opts, sigs, allowlist, token)}")
         else:
             was_clean = _is_clean(repo)
-            applied = remediation.apply(repo, changes, repo / ".malware-quarantine")
+            quarantine = remediation.quarantine_path(repo)
+            applied = remediation.apply(repo, changes, quarantine)
+
+            # Post-apply verification: quarantine anything still flagged; never
+            # present an incompletely-cleaned repo as remediated.
+            residual = _residual_auto_fixable(repo, sigs, allowlist, opts)
+            if residual:
+                applied += remediation.quarantine_residual(repo, residual, quarantine)
+                residual = _residual_auto_fixable(repo, sigs, allowlist, opts)
             remediation.ensure_ignored(repo)   # keep quarantine artifacts out of any commit
-            print(f"    → applied {len(applied)} change(s); originals in .malware-quarantine/")
+            print(f"    → applied {len(applied)} change(s); originals in {QUARANTINE_DIR}/")
+            if residual:
+                print(f"    → ⚠ {len(residual)} finding(s) still present after remediation; "
+                      "left in the working tree for manual review (NOT committed).")
+                continue
             if was_clean:
                 branch = _commit_branch(repo, applied)
                 print(f"    → committed to branch '{branch}'. Review and open a PR (do NOT push to main)."
