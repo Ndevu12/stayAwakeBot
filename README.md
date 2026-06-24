@@ -36,6 +36,26 @@ stayawake-security-scan --config config/security.yml --local-only   # worm scan
 > The distribution is published as **`stayawakebot`** (the name `stayawake` is taken on
 > PyPI by an unrelated project); the import package and `stayawake-*` commands are unchanged.
 
+## Gate any repo's CI (GitHub Action)
+
+Add the security sentinel to any repository in one step — no install, no clone:
+
+```yaml
+# .github/workflows/worm-guard.yml
+on: [pull_request, push]
+jobs:
+  worm-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }   # full history so evil merges are detectable
+      - uses: Ndevu12/stayAwakeBot@v1      # pin to a SHA in production
+        with:
+          fail-on-findings: 'true'
+```
+
+Pin `@<sha>` rather than `@v1` for tamper-evident runs. See [Security baseline](prevent/SECURITY_BASELINE.md).
+
 ## Documentation
 
 - [Usage](docs/USAGE.md) — install, run both bots, secrets, GitHub Actions, deploy your own

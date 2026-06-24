@@ -7,6 +7,10 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **GitHub Action Marketplace entry point** (`action.yml` at repo root): adopt the security
+  sentinel with `uses: Ndevu12/stayAwakeBot@v1`. It wraps the existing
+  `.github/actions/worm-scan` composite (still reachable at its subpath), so no scan logic is
+  duplicated and the original interface keeps working. Includes Marketplace `branding`.
 - Versioned-release pipeline (`.github/workflows/release.yml`): tag-triggered build →
   self-scan gate → PyPI publish via Trusted Publishing (OIDC, no stored token) with PEP 740
   attestations → GitHub Release. Manual `workflow_dispatch` path publishes to TestPyPI.
@@ -22,6 +26,8 @@ All notable changes to this project are documented here. The format is based on
   `pyproject.toml`.
 - The source distribution (sdist) is now an explicit allowlist (`src/`, README, LICENSE,
   CHANGELOG, pyproject) so it no longer ships `reports/`, `.github/`, or local config.
+- `hatch-vcs` now derives the version only from `vX.Y.Z` tags (`git_describe_command` match),
+  so the moving Marketplace major tag (`v1`) cannot be mistaken for the package version.
 
 ## [0.1.0] - Unreleased
 

@@ -84,6 +84,43 @@ the OIDC exchange is rejected.
   ```
 - `pip download stayawakebot==<version>` then `twine check` the artifacts.
 
+## Publishing the Action to the Marketplace (P2)
+
+The scanner is also a GitHub Action. The Marketplace entry point is the **root `action.yml`**
+(a thin wrapper over `.github/actions/worm-scan`); Marketplace requires the metadata at the
+repo root. This is a one-time listing plus a moving-tag convention.
+
+### One-time listing
+1. Ensure the root `action.yml` has a unique `name`, a `description`, and `branding`
+   (icon + color) — it does. Marketplace action names are globally unique; if
+   `StayAwakeBot Worm Scan` is taken, adjust the `name` field.
+2. GitHub → repo → **Releases → Draft a new release** → tick **"Publish this Action to the
+   GitHub Marketplace"**, accept the agreement, pick a primary + secondary category
+   (Security / Continuous integration).
+3. Publish the release (see tag convention below).
+
+### Tag convention — two schemes share one namespace
+- **Package (PyPI):** full `vX.Y.Z` tags. These are the source of truth for the version
+  (`hatch-vcs`).
+- **Action (Marketplace):** consumers expect a **moving major** tag, `uses: …@v1`. After each
+  `vX.Y.Z` release, fast-forward the major tag:
+  ```bash
+  git tag -f v1 vX.Y.Z      # move v1 to the new release
+  git push -f origin v1
+  ```
+- These do **not** collide: `hatch-vcs` is pinned (`pyproject.toml` →
+  `tool.hatch.version.raw-options.git_describe_command`) to match only `v[0-9]*.[0-9]*.[0-9]*`,
+  so a bare `v1` can never be mistaken for the package version. (Verified: with a `v1` tag
+  present, `git describe` still resolves to the latest `vX.Y.Z`.)
+- Keep recommending **SHA pins** (`@<sha>`) in docs for production consumers; the moving `v1`
+  is for convenience, not for tamper-evidence.
+
+### Scanner-version coupling (post-PyPI follow-up)
+The Action currently installs the scanner from git (`sentinel-ref`, default `main`). Once the
+package is on PyPI, switch the install step in `.github/actions/worm-scan/action.yml` to
+`pip install "stayawakebot==<version>"` so the gate runs a pinned, attested release instead of
+a mutable ref — and bump that version in lockstep with the moving `v1` tag.
+
 ## Notes & invariants
 
 - **Versioning:** `hatch-vcs` derives the version from the tag — never hand-edit a version.

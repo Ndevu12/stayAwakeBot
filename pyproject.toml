@@ -50,6 +50,13 @@ stayawake-security-audit   = "stayawake.bots.security.cli.audit:main"
 [tool.hatch.version]
 source = "vcs"
 
+# Only consider full X.Y.Z release tags when deriving the version. The action is published
+# to the Marketplace under MOVING major tags (`v1`, `v2`) that share this git tag namespace;
+# without this `--match`, `git describe` could latch onto a bare `v1` and report the package
+# as version 1.x. Restricting the match keeps the two tag schemes from colliding.
+[tool.hatch.version.raw-options]
+git_describe_command = ["git", "describe", "--dirty", "--tags", "--long", "--match", "v[0-9]*.[0-9]*.[0-9]*"]
+
 # Keep the source distribution lean and safe. Hatchling's default sdist would ship the
 # whole working tree — including reports/ (hundreds of scan reports that QUOTE detected
 # malware payloads) and tests/ fixtures (deliberately "infected" sample files). Shipping

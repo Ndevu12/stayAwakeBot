@@ -90,7 +90,9 @@ protected and the **Worm Guard** check is required.
 
 ## Prevention
 
-A reusable `worm-scan` composite Action (`.github/actions/worm-scan`) gates PRs/merges in
+A reusable `worm-scan` composite Action — published to the GitHub Marketplace via the root
+`action.yml` (`uses: Ndevu12/stayAwakeBot@v1`) and also reachable at its original subpath
+`.github/actions/worm-scan` — gates PRs/merges in
 any repo (`worm-guard.yml`), portable git hooks (`prevent/hooks/`) block local commits and
 catch incoming infections, and `prevent/SECURITY_BASELINE.md` covers branch protection +
 token/Action hardening. The Action installs the published scanner
