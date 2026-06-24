@@ -11,10 +11,13 @@ All notable changes to this project are documented here. The format is based on
   generated in the build job and attached to each GitHub Release; a **`pip-audit` gate** that
   fails the release on a known-vulnerable dependency; and the container scan is now a **Trivy
   gate** (build → scan → push) that blocks a fixable critical/high *before* the image is pushed.
-- **GitHub Action Marketplace entry point** (`action.yml` at repo root): adopt the security
-  sentinel with `uses: Ndevu12/stayAwakeBot@v1`. It wraps the existing
-  `.github/actions/worm-scan` composite (still reachable at its subpath), so no scan logic is
-  duplicated and the original interface keeps working. Includes Marketplace `branding`.
+- **Public GitHub Action moved to its own repository, [`Ndevu12/strix`](https://github.com/Ndevu12/strix)**
+  ("StayAwakeBot Strix" on the Marketplace): adopt the security sentinel with
+  `uses: Ndevu12/strix@v1`. Strix is a thin composite Action that installs the published
+  `stayawakebot` scanner from PyPI and runs `stayawake-security-scan` — the detection engine
+  stays in the package, so no scan logic is duplicated. The in-repo `.github/actions/worm-scan`
+  composite is kept for this project's own self-gating (`worm-guard.yml`) and from-source pins;
+  the superseded root `action.yml` wrapper was removed.
 - **Container image on GHCR** (`ghcr.io/ndevu12/stayawakebot`), built and published by the
   release pipeline's `docker` job on each `v*` tag — removes the host Python 3.14 prerequisite.
   Multi-stage, digest-pinned base, non-root, built from the same wheel as PyPI, with SLSA
