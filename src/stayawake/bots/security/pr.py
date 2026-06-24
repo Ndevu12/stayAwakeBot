@@ -24,6 +24,7 @@ from stayawake.bots.security import remediation
 
 FIX_BRANCH = "security/auto-clean"
 PATCHES_DIR = Path("sab-patches")   # where the read-only fallback writes .patch files
+ISSUE_LABEL = "stayawake-security"  # de-dup marker for the issue fallback
 _BOT = ("-c", "user.name=StayAwakeBot Security", "-c", "user.email=security-bot@stayawake.local")
 
 
@@ -53,6 +54,37 @@ def _save_patch(wt: Path, slug: str, out_dir: Path) -> Path | None:
     except OSError:
         return None
     return dest
+
+
+def _issue_body(slug: str, findings) -> str:
+    lines = [f"StayAwakeBot detected self-propagating worm indicators in `{slug}` and could "
+             "not open a fix PR automatically (no write access to this repository).",
+             "", "## Indicators", ""]
+    for f in findings[:50]:
+        loc = f.path + (f":{f.line}" if getattr(f, "line", None) else "")
+        lines.append(f"- **[{f.severity.label()}]** `{f.signature_id}` — `{loc}`")
+    lines += ["", "A remediation has been generated. To apply it, grant the scanner repo + "
+              "pull-request write access for an automated PR, or run "
+              "`stayawake-security-remediate` against a local clone to produce a patch.", "",
+              "_Opened by StayAwakeBot Security. De-duplicated — re-runs won't open another._"]
+    return "\n".join(lines)
+
+
+def _open_issue_fallback(owner: str, name: str, findings, token: str) -> str | None:
+    """Notify the repo via a de-duplicated issue when a fix can't be PR'd. Needs only
+    `issues: write`; returns a short outcome, or None if it couldn't open one."""
+    try:
+        existing = github_api.list_open_issues(owner, name, token, labels=ISSUE_LABEL)
+        if existing:
+            return f"an open issue already tracks this (#{existing[0].get('number')})"
+        issue = github_api.create_issue(
+            owner, name, f"StayAwakeBot: worm indicators detected in {owner}/{name}",
+            _issue_body(f"{owner}/{name}", findings), token, labels=[ISSUE_LABEL])
+        if issue and issue.get("number"):
+            return f"opened issue #{issue['number']} ({issue.get('html_url', '')})"
+    except Exception:  # noqa: BLE001 — notification is best-effort; never mask the patch result
+        pass
+    return None
 
 
 def slug_from_url(url: str) -> str | None:
@@ -140,14 +172,20 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
             pushed = _git(wt, "push", "--force", f"{prefix}{slug}.git",
                           f"{FIX_BRANCH}:{FIX_BRANCH}", env=env).returncode == 0
         if not pushed:
-            # No write access: don't lose the fix when the worktree is removed — save it
-            # as a patch the repo owner can apply themselves.
+            # No write access — degrade gracefully instead of losing the work:
+            #   1) save the fix as a patch the owner can apply (needs no permissions),
+            #   2) notify the repo via a de-duplicated issue (needs only issues:write).
             patch = _save_patch(wt, slug, Path(patches_dir) if patches_dir else PATCHES_DIR)
+            issue = _open_issue_fallback(owner, name, findings, token)
+            bits = []
             if patch:
-                return (f"{slug}: push rejected (no write access?) — saved the fix as a patch at "
-                        f"{patch}. Apply on '{base}' with `git am {patch.name}`, or re-run with a "
-                        f"token that has repo + PR write scope.")
-            return f"{slug}: branch push failed (check token write scope)"
+                bits.append(f"saved the fix as a patch at {patch} "
+                            f"(apply on '{base}' with `git am {patch.name}`)")
+            if issue:
+                bits.append(issue)
+            if not bits:
+                return f"{slug}: branch push failed (check token write scope)"
+            return f"{slug}: push rejected (no write access?) — " + "; ".join(bits) + "."
 
         if existing:
             pr = existing[0]

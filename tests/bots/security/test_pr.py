@@ -79,11 +79,11 @@ class TestNoDuplicatePr(unittest.TestCase):
         self.assertIn("ABORTED", outcome)
 
 
-class TestPatchFallback(unittest.TestCase):
-    def test_push_failure_saves_patch_instead_of_losing_fix(self):
-        # No write access: the branch push fails, so the fix must be written as a patch
-        # (the no-write floor of the remediation ladder), not silently discarded.
-        out = Path(tempfile.mkdtemp())
+class TestReadOnlyFallback(unittest.TestCase):
+    """When the fix branch can't be pushed (no write access), the remediation ladder
+    must still produce something: a patch artifact AND a de-duplicated notify issue."""
+
+    def _run(self, existing_issues, out):
         finding = Finding("x", "code-loader", Severity.CRITICAL, "postcss.config.mjs",
                           "loader", remediation="strip-appended-payload")
         scans = [ScanResult("owner/repo", "local", [finding]),   # worktree scan: infected
@@ -110,15 +110,30 @@ class TestPatchFallback(unittest.TestCase):
              mock.patch.object(pr.remediation, "apply",
                                return_value=[Change("strip-payload", "postcss.config.mjs")]), \
              mock.patch.object(pr.github_api, "list_open_pulls", return_value=[]), \
-             mock.patch.object(pr.github_api, "create_pull") as create:
+             mock.patch.object(pr.github_api, "create_pull") as create_pull, \
+             mock.patch.object(pr.github_api, "list_open_issues", return_value=existing_issues), \
+             mock.patch.object(pr.github_api, "create_issue",
+                               return_value={"number": 5, "html_url": "iu"}) as create_issue:
             outcome = pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t",
                                        patches_dir=out)
+        return outcome, create_pull, create_issue
 
-        create.assert_not_called()                       # no PR opened
+    def test_saves_patch_and_opens_issue(self):
+        out = Path(tempfile.mkdtemp())
+        outcome, create_pull, create_issue = self._run([], out)
+        create_pull.assert_not_called()                  # no PR opened
+        create_issue.assert_called_once()                # notify issue opened
         self.assertIn("patch", outcome.lower())
+        self.assertIn("issue #5", outcome)
         patch_file = out / "owner-repo.patch"
         self.assertTrue(patch_file.is_file(), "fix must be saved as a patch on push failure")
         self.assertIn("patch-body", patch_file.read_text(encoding="utf-8"))
+
+    def test_issue_is_deduplicated(self):
+        out = Path(tempfile.mkdtemp())
+        outcome, _, create_issue = self._run([{"number": 9}], out)
+        create_issue.assert_not_called()                 # an open issue exists ⇒ no duplicate
+        self.assertIn("#9", outcome)
 
 
 if __name__ == "__main__":
