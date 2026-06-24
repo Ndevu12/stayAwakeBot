@@ -14,6 +14,7 @@ from stayawake.core.config import load_yaml
 from stayawake.core.io import write_json
 from stayawake.core.timeutil import now_iso
 from stayawake.core.adapters import github_api
+from stayawake.core import auth
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.models import ScanResult
@@ -106,14 +107,14 @@ def _render_markdown(payload: dict) -> str:
 
 def _resolve_remote(cfg: dict, opts: ScanOptions):
     gconf = cfg.get("targets", {}).get("github", {}) or {}
-    token = os.environ.get("GH_SECURITY_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    token, source = auth.resolve_token()
     slugs: list[str] = []
     for kind in ("users", "orgs"):
         for acct in gconf.get(kind, []) or []:
             slugs += github_api.list_repos(acct, kind, token,
                                            gconf.get("include_forks", False),
                                            gconf.get("include_archived", False))
-    return sorted(set(slugs)), token
+    return sorted(set(slugs)), token, source
 
 
 def scan(config_path: str | None = None, local_only: bool = False,
@@ -156,7 +157,12 @@ def scan(config_path: str | None = None, local_only: bool = False,
             results.append(scan_target(t, sigs, allowlist))
 
     if not local_only:
-        slugs, token = _resolve_remote(cfg, opts)
+        slugs, token, source = _resolve_remote(cfg, opts)
+        if slugs and source:
+            print(f"GitHub credential: using {source}.")
+        elif slugs:
+            print("No GitHub credential found; scanning public remotes anonymously. "
+                  "For private repos, run `gh auth login` or set GH_SECURITY_TOKEN.")
         for slug in slugs:
             rt = RemoteRepoTarget(slug, opts, token)
             try:
