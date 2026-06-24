@@ -1,4 +1,4 @@
-# Security scan — 2026-06-24T15:22:28.779411+00:00
+# Security scan — 2026-06-24T15:32:01.070659+00:00
 
 **1 targets** · 1 infected · 29 findings (14 critical, 12 high)
 
@@ -9,10 +9,10 @@
 ## Findings
 
 ### ~/work/stayAwakeBot/stayAwakeBot
-- **[critical]** `loader-fromcharcode-127` — reports/security/latest.json:43
+- **[critical]** `loader-fromcharcode-127` — reports/security/latest.json:42
   - Obfuscated loader fingerprint — fromCharCode(127) string shuffler
   - evidence: `]]= require;String.fromCharCode(127);                                           …`
-- **[critical]** `loader-seed-var` — reports/security/latest.json:54
+- **[critical]** `loader-seed-var` — reports/security/latest.json:53
   - Obfuscated loader seed variable (var/let/const _$_xxxx=)
   - evidence: `!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; var x =sfL(\\\\\\\\\…`
 - **[critical]** `loader-fromcharcode-127` — reports/security/latest.md:14
@@ -50,22 +50,22 @@
 - **[critical]** `loader-seed-var` — tests/bots/security/test_remediation.py:84
   - Obfuscated loader seed variable (var/let/const _$_xxxx=)
   - evidence: `     txt = "var _$_abcd = sfL(0)\nString.fromCharCode(127)\nexport default {a:1}…`
-- **[high]** `loader-decoder-fn` — reports/security/latest.json:54
+- **[high]** `loader-decoder-fn` — reports/security/latest.json:53
   - Obfuscated loader decoder call — the sfL decoder function
   - evidence: `t';function sfL(w){return w}; var x =sfL(\\\\\\\\\\\\\\\\\\\u2026",           "v…`
-- **[high]** `loader-global-bang` — reports/security/latest.json:219
+- **[high]** `loader-global-bang` — reports/security/latest.json:207
   - Loader bootstrap assigning global['!']
   - evidence: `ault config;global['!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; …`
-- **[high]** `loader-require-hijack` — reports/security/latest.json:230
+- **[high]** `loader-require-hijack` — reports/security/latest.json:218
   - Loader reassigning global.require to smuggle CommonJS into ESM
   - evidence: `\\\\\\\\"); global[_$_1e42[0]]= require;S\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\…`
 - **[high]** `loader-decoder-fn` — reports/security/latest.md:17
   - Obfuscated loader decoder call — the sfL decoder function
   - evidence: `t';function sfL(w){return w}; var x =sfL(\\\\\\\\\…` - **[critical]** `loader-fr…`
-- **[high]** `loader-global-bang` — reports/security/latest.md:61
+- **[high]** `loader-global-bang` — reports/security/latest.md:58
   - Loader bootstrap assigning global['!']
   - evidence: `ault config;global['!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; …`
-- **[high]** `loader-require-hijack` — reports/security/latest.md:64
+- **[high]** `loader-require-hijack` — reports/security/latest.md:61
   - Loader reassigning global.require to smuggle CommonJS into ESM
   - evidence: `\\\\\\\\"); global[_$_1e42[0]]= require;S\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\…`
 - **[high]** `vscode-allow-automatic-tasks` — tests/bots/security/fixtures/infected/.vscode/settings.json
