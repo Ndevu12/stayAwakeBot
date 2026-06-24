@@ -6,7 +6,7 @@
 
 settings:
   # Directories never traversed during scanning.
-  exclude_dirs: [".git", "node_modules", ".next", "dist", "build", ".malware-quarantine", "reports", ".venv", "venv"]
+  exclude_dirs: [".git", "node_modules", ".next", "dist", "build", ".malware-quarantine", "reports", "sab-patches", ".venv", "venv"]
   # Max file size (bytes) to read for content matching. Source files larger than this
   # are still scanned head+tail; only non-source assets are skipped.
   max_file_bytes: 2000000

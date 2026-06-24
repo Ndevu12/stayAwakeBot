@@ -22,6 +22,7 @@ from stayawake.bots.security.models import QUARANTINE_DIR
 from stayawake.bots.security import remediation
 
 FIX_BRANCH = "security/auto-clean"
+PATCHES_DIR = Path("sab-patches")   # where the read-only fallback writes .patch files
 _BOT = ("-c", "user.name=StayAwakeBot Security", "-c", "user.email=security-bot@stayawake.local")
 
 
@@ -35,6 +36,22 @@ def _untrack_quarantine(repo: Path) -> bool:
     quarantine dir before staging. Returns True if the quarantine is clean after."""
     _git(repo, "rm", "-r", "--cached", "--ignore-unmatch", QUARANTINE_DIR)
     return not _git(repo, "ls-files", QUARANTINE_DIR).stdout.strip()
+
+
+def _save_patch(wt: Path, slug: str, out_dir: Path) -> Path | None:
+    """Capture the fix commit as a git-am-able patch so a read-only run (no write access)
+    never loses the work when the branch can't be pushed. Returns the path, or None on
+    failure. This is the no-write floor of the remediation ladder."""
+    r = _git(wt, "format-patch", "-1", "HEAD", "--stdout")
+    if r.returncode != 0 or not r.stdout.strip():
+        return None
+    try:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        dest = (out_dir / (slug.replace("/", "-") + ".patch")).resolve()
+        dest.write_text(r.stdout, encoding="utf-8")
+    except OSError:
+        return None
+    return dest
 
 
 def slug_from_url(url: str) -> str | None:
@@ -64,8 +81,11 @@ def _pr_body(slug: str, changes) -> str:
     return "\n".join(lines)
 
 
-def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str) -> str:
-    """Open (or update) one dedup'd remediation PR for `repo`. Returns an outcome string."""
+def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
+                  patches_dir: Path | None = None) -> str:
+    """Open (or update) one dedup'd remediation PR for `repo`. Returns an outcome string.
+    If the branch can't be pushed (read-only access), falls back to writing a patch file
+    instead of discarding the fix when the worktree is torn down."""
     slug = origin_slug(repo)
     if not slug:
         return "no GitHub origin remote — skipped"
@@ -116,6 +136,13 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str) -> str:
 
         push_url = f"https://x-access-token:{token}@github.com/{slug}.git"
         if _git(wt, "push", "--force", push_url, f"{FIX_BRANCH}:{FIX_BRANCH}").returncode != 0:
+            # No write access: don't lose the fix when the worktree is removed — save it
+            # as a patch the repo owner can apply themselves.
+            patch = _save_patch(wt, slug, Path(patches_dir) if patches_dir else PATCHES_DIR)
+            if patch:
+                return (f"{slug}: push rejected (no write access?) — saved the fix as a patch at "
+                        f"{patch}. Apply on '{base}' with `git am {patch.name}`, or re-run with a "
+                        f"token that has repo + PR write scope.")
             return f"{slug}: branch push failed (check token write scope)"
 
         if existing:

@@ -30,10 +30,12 @@ def _ext(rel: str) -> str:
 
 @dataclass
 class ScanOptions:
-    # "reports" is excluded so the scanner never re-flags its OWN output: a report
-    # quotes the evidence of a detected payload, so scanning it would self-trigger.
+    # "reports" and "sab-patches" are excluded so the scanner never re-flags its OWN
+    # output: a report quotes a detected payload's evidence and a remediation patch
+    # contains the removed payload lines as diff deletions — scanning either self-triggers.
     exclude_dirs: set[str] = field(default_factory=lambda: {
-        ".git", "node_modules", ".next", "dist", "build", ".malware-quarantine", "reports"})
+        ".git", "node_modules", ".next", "dist", "build", ".malware-quarantine",
+        "reports", "sab-patches"})
     max_file_bytes: int = 2_000_000
     remote_clone_depth: int = 50
 
