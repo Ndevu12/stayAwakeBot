@@ -14,8 +14,11 @@ def main() -> None:
     p.add_argument("--local-only", action="store_true", help="skip remote GitHub targets")
     p.add_argument("--fail-on-findings", action="store_true",
                    help="exit non-zero if any infected target (for CI gating)")
+    p.add_argument("--reports-dir", default=None,
+                   help="where to write reports (default: reports/security); use a scratch "
+                        "dir to avoid touching committed reports")
     a = p.parse_args()
-    sys.exit(service.scan(a.config, a.local_only, a.fail_on_findings))
+    sys.exit(service.scan(a.config, a.local_only, a.fail_on_findings, a.reports_dir))
 
 
 if __name__ == "__main__":

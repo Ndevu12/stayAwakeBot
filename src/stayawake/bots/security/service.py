@@ -95,12 +95,15 @@ def _resolve_remote(cfg: dict, opts: ScanOptions):
 
 
 def scan(config_path: str = "config/security.yml", local_only: bool = False,
-         fail_on_findings: bool = False) -> int:
+         fail_on_findings: bool = False, reports_dir: str | Path | None = None) -> int:
     cfg = load_yaml(config_path)
     settings = cfg.get("settings", {})
     opts = _options(settings)
     sigs = load_signatures(settings.get("signatures_path"))
     allowlist = cfg.get("allowlist", [])
+    # Where reports are written. Override (CLI --reports-dir / settings.reports_dir / arg)
+    # so tests and ad-hoc runs never clobber the repo's committed reports.
+    rdir = Path(reports_dir or settings.get("reports_dir") or REPORTS_DIR)
 
     results: list[ScanResult] = []
     for repo in discover_local_repos(cfg.get("targets", {}).get("local", []), opts):
@@ -130,9 +133,9 @@ def scan(config_path: str = "config/security.yml", local_only: bool = False,
         "any_infected": any(r.infected for r in results),
         "results": [r.to_dict() for r in results],
     }
-    write_json(REPORTS_DIR / "latest.json", payload)
-    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    (REPORTS_DIR / "latest.md").write_text(_render_markdown(payload), encoding="utf-8")
+    rdir.mkdir(parents=True, exist_ok=True)
+    write_json(rdir / "latest.json", payload)
+    (rdir / "latest.md").write_text(_render_markdown(payload), encoding="utf-8")
 
     s = payload["summary"]
     print(f"Scanned {s['targets']} target(s): {s['infected']} infected, "
