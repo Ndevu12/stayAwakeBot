@@ -17,17 +17,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0   # v7.0.0
-      - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1   # v6.3.0
-        with:
-          python-version: '3.14'
-          check-latest: true       # always fetch the newest 3.14.x patch
-          cache: 'pip'
-          cache-dependency-path: pyproject.toml
-      - name: Install
-        run: |
-          python -m pip install --upgrade pip
-          pip install .
+      - name: Set up toolchain
+        uses: ./.github/actions/setup
       - name: Open remediation PRs
         env:
           GH_SECURITY_TOKEN: ${{ secrets.GH_SECURITY_TOKEN }}
