@@ -16,6 +16,24 @@ The PyPI distribution is named **`stayawakebot`** because `stayawake` is already
 PyPI by an unrelated project. The import package (`stayawake`) and the `stayawake-*` console
 scripts are unchanged.
 
+### Container image (no local Python 3.14)
+
+The same code ships as a digest-pinned, non-root image on GHCR. Any console script is the
+command; mount the repository to scan at `/repo`:
+
+```bash
+docker run --rm -v "$PWD:/repo:ro" ghcr.io/ndevu12/stayawakebot \
+  stayawake-security-scan --local-only --fail-on-findings
+docker run --rm ghcr.io/ndevu12/stayawakebot stayawake-health-check --help
+```
+
+Pin a version (`ghcr.io/ndevu12/stayawakebot:0.1.0`) or a commit (`:sha-<commit>`) for
+reproducibility; `:latest` tracks the newest release. To build it yourself:
+
+```bash
+docker build --build-arg VERSION=0.1.0 -t stayawakebot:local .
+```
+
 ## Health bot — uptime monitoring
 
 Run the pipeline against `config/urls.yml`:

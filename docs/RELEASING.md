@@ -121,6 +121,30 @@ package is on PyPI, switch the install step in `.github/actions/worm-scan/action
 `pip install "stayawakebot==<version>"` so the gate runs a pinned, attested release instead of
 a mutable ref — and bump that version in lockstep with the moving `v1` tag.
 
+## Container image (GHCR — P3)
+
+The release workflow's `docker` job also builds and pushes a container to
+`ghcr.io/ndevu12/stayawakebot` on every `v*` tag. It needs **no extra secret** — it
+authenticates to GHCR with the built-in `GITHUB_TOKEN` (`packages: write`) — and is gated by
+the same worm self-scan as the package.
+
+One-time, after the first image is pushed:
+- Repo → **Packages** → `stayawakebot` → **Package settings**: set visibility to **Public**
+  (so `docker pull` needs no auth) and **link it to this repository**.
+
+Each release publishes `:X.Y.Z`, `:X.Y`, `:latest`, and `:sha-<commit>`, with SLSA provenance
+and an SBOM attached as attestations, plus a Trivy SARIF scan (report-only — base-image CVEs
+don't block a release; the SARIF is the audit record). The image is built from the same wheel
+as PyPI, hermetically: `hatch-vcs` can't see git inside the build, so the job passes the tag
+version via `--build-arg VERSION` → `SETUPTOOLS_SCM_PRETEND_VERSION` (the generic var; the
+`_FOR_<dist>` named variant is ignored by hatch-vcs's backend).
+
+Verify a published image:
+```bash
+docker run --rm ghcr.io/ndevu12/stayawakebot:<version> stayawake-security-scan --help
+docker buildx imagetools inspect ghcr.io/ndevu12/stayawakebot:<version>   # see provenance/SBOM
+```
+
 ## Notes & invariants
 
 - **Versioning:** `hatch-vcs` derives the version from the tag — never hand-edit a version.
@@ -138,6 +162,7 @@ Tracked here rather than silently omitted. Each is additive to the current pipel
 - [ ] **SBOM** (CycloneDX via `cyclonedx-py`) generated in the build job and attached to the
       GitHub Release.
 - [ ] **`pip-audit`** as a release gate on the dependency set.
-- [ ] **Standalone signature/sigstore step** beyond the PyPI attestations (e.g. cosign-signed
-      release assets) if we add non-PyPI channels (Docker/binaries — P3/P4).
+- [x] **Container channel (P3)** — GHCR image with SLSA provenance + SBOM attestations and a
+      Trivy scan (see *Container image* above). Remaining: standalone cosign-signed release
+      assets for any P4 binaries.
 - [ ] **Required reviewers** actually enabled on the `pypi` environment (manual, step 1).

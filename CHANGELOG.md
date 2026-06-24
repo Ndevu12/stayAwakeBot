@@ -11,6 +11,10 @@ All notable changes to this project are documented here. The format is based on
   sentinel with `uses: Ndevu12/stayAwakeBot@v1`. It wraps the existing
   `.github/actions/worm-scan` composite (still reachable at its subpath), so no scan logic is
   duplicated and the original interface keeps working. Includes Marketplace `branding`.
+- **Container image on GHCR** (`ghcr.io/ndevu12/stayawakebot`), built and published by the
+  release pipeline's `docker` job on each `v*` tag — removes the host Python 3.14 prerequisite.
+  Multi-stage, digest-pinned base, non-root, built from the same wheel as PyPI, with SLSA
+  provenance + SBOM attestations and a Trivy scan. Adds `Dockerfile` and `.dockerignore`.
 - Versioned-release pipeline (`.github/workflows/release.yml`): tag-triggered build →
   self-scan gate → PyPI publish via Trusted Publishing (OIDC, no stored token) with PEP 740
   attestations → GitHub Release. Manual `workflow_dispatch` path publishes to TestPyPI.
