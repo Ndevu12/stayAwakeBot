@@ -30,7 +30,10 @@ runs:
 
     - name: Install scanner
       shell: bash
-      run: pip install "stayawakebot @ git+https://github.com/Ndevu12/stayAwakeBot@${{ inputs.sentinel-ref }}"
+      # Name-agnostic git install: works whether the pinned ref predates or follows
+      # the PyPI rename (the dist name changed; the console scripts did not). Once the
+      # package is on PyPI this becomes `pip install "stayawakebot==<version>"`.
+      run: pip install "git+https://github.com/Ndevu12/stayAwakeBot@${{ inputs.sentinel-ref }}"
 
     - name: Run worm scan
       shell: bash
