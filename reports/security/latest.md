@@ -1,4 +1,4 @@
-# Security scan — 2026-06-24T11:59:20.486434+00:00
+# Security scan — 2026-06-24T12:09:39.724299+00:00
 
 **1 targets** · 1 infected · 30 findings (14 critical, 13 high)
 
@@ -9,10 +9,10 @@
 ## Findings
 
 ### ~/work/stayAwakeBot/stayAwakeBot
-- **[critical]** `loader-fromcharcode-127` — reports/security/latest.json:42
+- **[critical]** `loader-fromcharcode-127` — reports/security/latest.json:43
   - Obfuscated loader fingerprint — fromCharCode(127) string shuffler
   - evidence: `]]= require;String.fromCharCode(127);                                           …`
-- **[critical]** `loader-seed-var` — reports/security/latest.json:53
+- **[critical]** `loader-seed-var` — reports/security/latest.json:54
   - Obfuscated loader seed variable (var/let/const _$_xxxx=)
   - evidence: `!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; var x =sfL(\\\\\\\\\…`
 - **[critical]** `loader-fromcharcode-127` — reports/security/latest.md:14
@@ -53,24 +53,24 @@
 - **[high]** `evil-merge` — d0cb72ace5
   - Merge commit introducing content present in neither parent (review-evading)
   - evidence: `2 path(s) in neither parent; e.g. ['docs/USAGE.md', 'src/stayawake/bots/security/service.py']; by 140616733+Ndevu12@users.noreply.github.com`
-- **[high]** `loader-decoder-fn` — reports/security/latest.json:53
+- **[high]** `loader-decoder-fn` — reports/security/latest.json:54
   - Obfuscated loader decoder call — the sfL decoder function
   - evidence: `t';function sfL(w){return w}; var x =sfL(\\\\\\\\\\\\\\\\\\\u2026",           "v…`
-- **[high]** `loader-global-bang` — reports/security/latest.json:207
+- **[high]** `loader-global-bang` — reports/security/latest.json:219
   - Loader bootstrap assigning global['!']
   - evidence: `ault config;global['!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; …`
-- **[high]** `loader-require-hijack` — reports/security/latest.json:218
+- **[high]** `loader-require-hijack` — reports/security/latest.json:230
   - Loader reassigning global.require to smuggle CommonJS into ESM
-  - evidence: `\\\\\\\\"); global[_$_1e42[0]]= require;S\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\u2026\\…`
+  - evidence: `\\\\\\\\"); global[_$_1e42[0]]= require;S\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\…`
 - **[high]** `loader-decoder-fn` — reports/security/latest.md:17
   - Obfuscated loader decoder call — the sfL decoder function
   - evidence: `t';function sfL(w){return w}; var x =sfL(\\\\\\\\\…` - **[critical]** `loader-fr…`
-- **[high]** `loader-global-bang` — reports/security/latest.md:58
+- **[high]** `loader-global-bang` — reports/security/latest.md:61
   - Loader bootstrap assigning global['!']
   - evidence: `ault config;global['!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; …`
-- **[high]** `loader-require-hijack` — reports/security/latest.md:61
+- **[high]** `loader-require-hijack` — reports/security/latest.md:64
   - Loader reassigning global.require to smuggle CommonJS into ESM
-  - evidence: `\\\\\\\\"); global[_$_1e42[0]]= require;S\\\\\\\\\\\\\\\\u2026\\\\\\\\\\\\\\\", …`
+  - evidence: `\\\\\\\\"); global[_$_1e42[0]]= require;S\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\u2026\\…`
 - **[high]** `vscode-allow-automatic-tasks` — tests/bots/security/fixtures/infected/.vscode/settings.json
   - settings.json enables task.allowAutomaticTasks (required for folderOpen abuse)
   - evidence: `task.allowAutomaticTasks: true`

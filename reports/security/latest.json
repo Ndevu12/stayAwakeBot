@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-06-24T11:59:20.486434+00:00",
+  "generated_at": "2026-06-24T12:09:39.724299+00:00",
   "summary": {
     "targets": 1,
     "infected": 1,
@@ -39,7 +39,7 @@
           "path": "reports/security/latest.json",
           "description": "Obfuscated loader fingerprint \u2014 fromCharCode(127) string shuffler",
           "remediation": "strip-appended-payload",
-          "line": 42,
+          "line": 43,
           "evidence": "]]= require;String.fromCharCode(127);                                           \u2026",
           "vector": "code-loader"
         },
@@ -50,7 +50,7 @@
           "path": "reports/security/latest.json",
           "description": "Obfuscated loader seed variable (var/let/const _$_xxxx=)",
           "remediation": "strip-appended-payload",
-          "line": 53,
+          "line": 54,
           "evidence": "!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; var x =sfL(\\\\\\\\\\\\\\\\\\\u2026",
           "vector": "code-loader"
         },
@@ -204,7 +204,7 @@
           "path": "reports/security/latest.json",
           "description": "Obfuscated loader decoder call \u2014 the sfL decoder function",
           "remediation": "strip-appended-payload",
-          "line": 53,
+          "line": 54,
           "evidence": "t';function sfL(w){return w}; var x =sfL(\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\u2026\",           \"v\u2026",
           "vector": "code-loader"
         },
@@ -215,7 +215,7 @@
           "path": "reports/security/latest.json",
           "description": "Loader bootstrap assigning global['!']",
           "remediation": "strip-appended-payload",
-          "line": 207,
+          "line": 219,
           "evidence": "ault config;global['!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; \u2026",
           "vector": "code-loader"
         },
@@ -226,8 +226,8 @@
           "path": "reports/security/latest.json",
           "description": "Loader reassigning global.require to smuggle CommonJS into ESM",
           "remediation": "strip-appended-payload",
-          "line": 218,
-          "evidence": "\\\\\\\\\\\\\\\\\"); global[_$_1e42[0]]= require;S\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\u2026\\\\\u2026",
+          "line": 230,
+          "evidence": "\\\\\\\\\\\\\\\\\"); global[_$_1e42[0]]= require;S\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\u2026",
           "vector": "code-loader"
         },
         {
@@ -248,7 +248,7 @@
           "path": "reports/security/latest.md",
           "description": "Loader bootstrap assigning global['!']",
           "remediation": "strip-appended-payload",
-          "line": 58,
+          "line": 61,
           "evidence": "ault config;global['!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; \u2026",
           "vector": "code-loader"
         },
@@ -259,8 +259,8 @@
           "path": "reports/security/latest.md",
           "description": "Loader reassigning global.require to smuggle CommonJS into ESM",
           "remediation": "strip-appended-payload",
-          "line": 61,
-          "evidence": "\\\\\\\\\\\\\\\\\"); global[_$_1e42[0]]= require;S\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\u2026\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\", \u2026",
+          "line": 64,
+          "evidence": "\\\\\\\\\\\\\\\\\"); global[_$_1e42[0]]= require;S\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\u2026\\\\\u2026",
           "vector": "code-loader"
         },
         {
