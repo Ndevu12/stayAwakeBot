@@ -208,6 +208,7 @@ __marimo__/
 # Malware quarantine / remediation artifacts (kept local, never committed)
 .malware-quarantine/
 *.malware-bak
+sab-patches/
 
 .DS_Store
 
