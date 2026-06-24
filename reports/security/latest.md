@@ -1,4 +1,4 @@
-# Security scan — 2026-06-24T08:52:27.496370+00:00
+# Security scan — 2026-06-24T09:20:34.672199+00:00
 
 **1 targets** · 1 infected · 29 findings (14 critical, 12 high)
 
@@ -9,18 +9,18 @@
 ## Findings
 
 ### ~/work/stayAwakeBot/stayAwakeBot
-- **[critical]** `loader-fromcharcode-127` — reports/security/latest.json:64
+- **[critical]** `loader-fromcharcode-127` — reports/security/latest.json:42
   - Obfuscated loader fingerprint — fromCharCode(127) string shuffler
   - evidence: `]]= require;String.fromCharCode(127);                                           …`
-- **[critical]** `loader-seed-var` — reports/security/latest.json:75
+- **[critical]** `loader-seed-var` — reports/security/latest.json:53
+  - Obfuscated loader seed variable (var/let/const _$_xxxx=)
+  - evidence: `!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; var x =sfL(\\\"inert…`
+- **[critical]** `loader-fromcharcode-127` — reports/security/latest.md:14
+  - Obfuscated loader fingerprint — fromCharCode(127) string shuffler
+  - evidence: `]]= require;String.fromCharCode(127);                                           …`
+- **[critical]** `loader-seed-var` — reports/security/latest.md:17
   - Obfuscated loader seed variable (var/let/const _$_xxxx=)
   - evidence: `!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; var x =sfL(\"inert\"…`
-- **[critical]** `loader-fromcharcode-127` — reports/security/latest.md:20
-  - Obfuscated loader fingerprint — fromCharCode(127) string shuffler
-  - evidence: `]]= require;String.fromCharCode(127);                                           …`
-- **[critical]** `loader-seed-var` — reports/security/latest.md:23
-  - Obfuscated loader seed variable (var/let/const _$_xxxx=)
-  - evidence: `!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; var x =sfL("inert");…`
 - **[critical]** `vscode-task-folderopen-exec` — tests/bots/security/fixtures/infected/.vscode/tasks.json
   - VS Code task auto-running a command on folderOpen (executes on open)
   - evidence: `task 'eslint-check' runOn=folderOpen`
@@ -50,24 +50,24 @@
 - **[critical]** `loader-seed-var` — tests/bots/security/test_remediation.py:84
   - Obfuscated loader seed variable (var/let/const _$_xxxx=)
   - evidence: `     txt = "var _$_abcd = sfL(0)\nString.fromCharCode(127)\nexport default {a:1}…`
-- **[high]** `loader-decoder-fn` — reports/security/latest.json:75
+- **[high]** `loader-decoder-fn` — reports/security/latest.json:53
   - Obfuscated loader decoder call — the sfL decoder function
-  - evidence: `t';function sfL(w){return w}; var x =sfL(\"inert\");\u2026",           "vector":…`
-- **[high]** `loader-global-bang` — reports/security/latest.json:174
+  - evidence: `t';function sfL(w){return w}; var x =sfL(\\\"inert\\\"\u2026",           "vector…`
+- **[high]** `loader-global-bang` — reports/security/latest.json:207
   - Loader bootstrap assigning global['!']
   - evidence: `ault config;global['!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; …`
-- **[high]** `loader-require-hijack` — reports/security/latest.json:163
+- **[high]** `loader-require-hijack` — reports/security/latest.json:218
+  - Loader reassigning global.require to smuggle CommonJS into ESM
+  - evidence: `inert\\\"); global[_$_1e42[0]]= require;S\\u2026\",           \"vector\": \"code…`
+- **[high]** `loader-decoder-fn` — reports/security/latest.md:17
+  - Obfuscated loader decoder call — the sfL decoder function
+  - evidence: `t';function sfL(w){return w}; var x =sfL(\"inert\"…` - **[critical]** `loader-fr…`
+- **[high]** `loader-global-bang` — reports/security/latest.md:58
+  - Loader bootstrap assigning global['!']
+  - evidence: `ault config;global['!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; …`
+- **[high]** `loader-require-hijack` — reports/security/latest.md:61
   - Loader reassigning global.require to smuggle CommonJS into ESM
   - evidence: `\"inert\"); global[_$_1e42[0]]= require;S\u2026",           "vector": "code-load…`
-- **[high]** `loader-decoder-fn` — reports/security/latest.md:23
-  - Obfuscated loader decoder call — the sfL decoder function
-  - evidence: `t';function sfL(w){return w}; var x =sfL("inert");…` - **[critical]** `fake-font…`
-- **[high]** `loader-global-bang` — reports/security/latest.md:49
-  - Loader bootstrap assigning global['!']
-  - evidence: `ault config;global['!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; …`
-- **[high]** `loader-require-hijack` — reports/security/latest.md:46
-  - Loader reassigning global.require to smuggle CommonJS into ESM
-  - evidence: `L("inert"); global[_$_1e42[0]]= require;S…` - **[high]** `loader-global-bang` — …`
 - **[high]** `vscode-allow-automatic-tasks` — tests/bots/security/fixtures/infected/.vscode/settings.json
   - settings.json enables task.allowAutomaticTasks (required for folderOpen abuse)
   - evidence: `task.allowAutomaticTasks: true`
