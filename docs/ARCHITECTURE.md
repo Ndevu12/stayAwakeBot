@@ -24,7 +24,7 @@ docs/  prevent/  reports/  .github/  CONTRIBUTING.md
 ## Principles
 - **SRP** — `core` (utilities) · `bots/*` (each bot) · `cli/` (entrypoints) · `data/` (signatures) are separate.
 - **DRY** — `core` (+ `core/adapters`) is reused by both bots; console scripts reuse the thin `main()`s; one packaged signature source.
-- **Reusability / distributability** — `pip install stayawake` gives a self-contained scanner with console commands; the worm-scan Action installs it instead of cloning.
+- **Reusability / distributability** — `pip install stayawakebot` gives a self-contained scanner with console commands; the worm-scan Action installs it instead of cloning.
 - **Maintainability / collaboration** — standard modern `src/` layout, `pyproject.toml` single source of truth, `CONTRIBUTING.md`, tests mirror `src`, importable without path tricks.
 - **Scalability** — a new bot is `src/stayawake/bots/<bot>/`; new shared code is `src/stayawake/core/<x>`; new detections are data (`…/security/data/signatures.yml`) or a file in `security/matchers/`.
 
