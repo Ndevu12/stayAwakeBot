@@ -27,6 +27,10 @@ jobs:
 ```
 **Pin `@<SHA>`**, not `@main`, so a compromise of the action repo can't change what runs.
 
+The same scanner is published to the GitHub Marketplace, so the shorter root reference also
+works — `uses: Ndevu12/stayAwakeBot@v1` (or `@<SHA>`). Both forms run identical logic; the
+root form is the Marketplace entry point, the subpath form is the original interface.
+
 ## 2. Local git hooks (defense-in-depth on the developer machine)
 The hooks are dependency-free (grep only) and cover both directions:
 - **`pre-commit`** — blocks *committing* loader fingerprints (incl. the `global[...]` bang/
