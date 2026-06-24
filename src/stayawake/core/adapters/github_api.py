@@ -97,6 +97,28 @@ def create_pull(owner: str, repo: str, title: str, head: str, base: str,
                    data={"title": title, "head": head, "base": base, "body": body})
 
 
+def list_open_issues(owner: str, repo: str, token: str | None,
+                     labels: str | None = None) -> list[dict]:
+    """Open issues (PRs filtered out), optionally restricted to a label. Used to
+    de-duplicate the remediation issue fallback."""
+    path = f"/repos/{owner}/{repo}/issues?state=open&per_page=100"
+    if labels:
+        path += f"&labels={labels}"
+    res = request(path, token=token)
+    # The issues endpoint also returns PRs; real issues lack a 'pull_request' key.
+    return [i for i in res if isinstance(i, dict) and "pull_request" not in i] \
+        if isinstance(res, list) else []
+
+
+def create_issue(owner: str, repo: str, title: str, body: str, token: str | None,
+                 labels: list[str] | None = None) -> dict | None:
+    """Open an issue. Returns the created issue dict (with 'number','html_url') or None."""
+    data: dict = {"title": title, "body": body}
+    if labels:
+        data["labels"] = labels
+    return request(f"/repos/{owner}/{repo}/issues", method="POST", token=token, data=data)
+
+
 def get_branch_protection(owner: str, repo: str, branch: str,
                           token: str | None) -> dict | None:
     """Branch-protection settings for a branch, or None if unprotected/inaccessible.

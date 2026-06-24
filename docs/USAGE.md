@@ -63,9 +63,11 @@ stayawake-security-remediate --remote           # operate on remote GitHub targe
 ```
 
 **Read-only fallback:** when `--open-pr` / `--remote` can't push a fix branch (you only
-have read access to the target), StayAwakeBot doesn't discard the fix — it writes it as a
-`git am`-able patch under `sab-patches/` and tells you how to apply it. So remediation
-always produces something actionable, even without write access.
+have read access to the target), StayAwakeBot doesn't discard the fix — it degrades
+gracefully: it writes the fix as a `git am`-able patch under `sab-patches/`, **and** (if
+the token has `issues: write`) opens a **de-duplicated issue** on the target repo with
+the findings so the owner is notified. So remediation always produces something
+actionable — a patch, a heads-up, or both — even without write access.
 
 Drop `--local-only` to also scan the GitHub users/orgs listed in `config/security.yml`.
 Use `--fail-on-findings` to make `scan` exit non-zero (the CI gate uses this).
@@ -151,6 +153,7 @@ scope is in parentheses):
 | `stayawake-security-scan <path>` / public remotes | no | — |
 | `stayawake-security-scan` private remotes | read | Contents + Metadata: Read (`repo`) |
 | `stayawake-security-remediate --open-pr` / `--remote` | write | Contents + Pull requests: R/W (`repo`) |
+| ↳ read-only fallback (notify issue when a PR can't be pushed) | issues | Issues: R/W (`repo` / `public_repo`) |
 | `stayawake-security-alert` (GitHub issue) | write | Issues: R/W (`repo` / `public_repo`) |
 | `stayawake-security-audit --repo` | read | Administration: Read (`repo`) |
 
