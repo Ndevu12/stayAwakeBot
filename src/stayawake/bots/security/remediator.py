@@ -149,8 +149,9 @@ def submit_org_prs(config_path: str = "config/security.yml", token: str | None =
     opts = _options(settings)
     sigs = load_signatures(settings.get("signatures_path"))
     allowlist = cfg.get("allowlist", [])
+    source = "explicit"
     if not token:
-        token, _ = auth.resolve_token()
+        token, source = auth.resolve_token()
     if not token:
         print(auth.no_credential_hint("org remediation PRs") +
               " The token needs repo + pull-request write scope.")
@@ -163,9 +164,12 @@ def submit_org_prs(config_path: str = "config/security.yml", token: str | None =
             slugs += github_api.list_repos(acct, kind, token,
                                            gconf.get("include_forks", False),
                                            gconf.get("include_archived", False))
+    # With a GitHub App and no explicit accounts, sweep everything the install can see.
+    if source == "github-app" and not slugs:
+        slugs += github_api.list_installation_repos(token, gconf.get("include_archived", False))
     slugs = sorted(set(slugs))
     if not slugs:
-        print("No GitHub targets configured (targets.github.users/orgs).")
+        print("No GitHub targets configured (targets.github.users/orgs or an App installation).")
         return 0
 
     print(f"Sweeping {len(slugs)} repo(s) for worm indicators…")

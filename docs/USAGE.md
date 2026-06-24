@@ -127,7 +127,10 @@ StayAwakeBot resolves one in this order:
    never set this up: the `GITHUB_` prefix is reserved, so you *can't* even create a
    secret with that name. It's the zero-config fallback for **same-repo** work inside
    Actions, and it can't reach other repos.
-3. Your **GitHub CLI** session — `gh auth token` — short-lived and never stored by
+3. A **GitHub App** installation token — for org-wide automation (see below). Minted on
+   demand from the App's key, scoped to exactly what the App was granted, and rotated
+   every hour. Preferred over a PAT for continuous/org use.
+4. Your **GitHub CLI** session — `gh auth token` — short-lived and never stored by
    StayAwakeBot, which is what the hygiene audit recommends over a cached PAT.
 
 In short: in CI, same-repo jobs ride the automatic `GITHUB_TOKEN` for free and only
@@ -150,6 +153,41 @@ scope is in parentheses):
 | `stayawake-security-remediate --open-pr` / `--remote` | write | Contents + Pull requests: R/W (`repo`) |
 | `stayawake-security-alert` (GitHub issue) | write | Issues: R/W (`repo` / `public_repo`) |
 | `stayawake-security-audit --repo` | read | Administration: Read (`repo`) |
+
+### GitHub App (organization **or** personal account)
+
+A **GitHub App** is the hardened credential for continuous scanning/remediation, and it
+is **not org-only** — GitHub Apps install on either a personal (user) account or an
+organization, and StayAwakeBot treats both the same. You (or an org admin) install it
+once on the chosen repos and it mints a fresh **1-hour installation token** per run,
+scoped to exactly the App's granted permissions — nothing long-lived to leak, fully
+revocable, and the install itself defines which repos are in scope (no `targets.github`
+list needed). The private key stays in memory; signing is delegated to a vetted crypto
+library (never hand-rolled).
+
+For a personal account with a handful of repos, `gh auth login` or a fine-grained PAT is
+simpler. Reach for an App when you want that same rotating, narrowly-scoped, revocable
+token model on your own repos — or when you manage many.
+
+It's an **opt-in extra** so the base install stays stdlib-only:
+
+```bash
+pip install "stayawake[app]"          # adds PyJWT[crypto] — only needed for App auth
+export GH_APP_ID=123456
+export GH_APP_PRIVATE_KEY="$(cat your-app.private-key.pem)"   # or GH_APP_PRIVATE_KEY_PATH=…
+# optional; auto-detected when the App has exactly one installation:
+export GH_APP_INSTALLATION_ID=98765
+stayawake-security-scan               # scans every repo the installation can see
+stayawake-security-remediate --remote # opens a dedup'd fix PR per infected install repo
+```
+
+If the App env is set without the extra installed, StayAwakeBot prints a clear
+`pip install "stayawake[app]"` hint rather than failing obscurely. An explicit
+`GH_SECURITY_TOKEN` still takes precedence (handy for a one-off human override).
+
+**Minimal App permissions** (Repository permissions): **Metadata: Read** (always) +
+**Contents: Read** to scan; add **Contents: Read & write** and **Pull requests: Read &
+write** to open remediation PRs.
 
 Other secrets:
 
