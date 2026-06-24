@@ -73,11 +73,14 @@ def resolve_token(hostname: str = "github.com") -> tuple[str | None, str | None]
 
 
 def no_credential_hint(action: str = "this operation") -> str:
-    """Actionable, gh-aware guidance to print when a required credential is missing."""
-    env = " / ".join(ENV_VARS)
+    """Actionable, gh-aware guidance to print when a required credential is missing.
+
+    Names the single token a user configures (GH_SECURITY_TOKEN); the automatic Actions
+    GITHUB_TOKEN isn't something to set up, so we don't tell people to."""
+    var = ENV_VARS[0]  # GH_SECURITY_TOKEN — the one credential a user configures
     if not gh_installed():
         return (f"No GitHub credential for {action}. Either install the GitHub CLI "
-                f"(https://cli.github.com) and run `gh auth login`, or set {env} "
+                f"(https://cli.github.com) and run `gh auth login`, or set {var} "
                 f"to a token with the required scope.")
     return (f"No GitHub credential for {action}. Run `gh auth login` "
-            f"(check with `gh auth status`), or set {env} to a token with the required scope.")
+            f"(check with `gh auth status`), or set {var} to a token with the required scope.")
