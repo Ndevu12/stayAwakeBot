@@ -9,7 +9,8 @@ Local repos (default — scans config local targets):
 
 Org-wide (configured GitHub targets):
   --remote           clone each configured repo and open/update its dedup'd fix PR
-                     (needs GH_SECURITY_TOKEN / GITHUB_TOKEN with repo + PR write scope)
+                     (needs a GitHub credential with repo + PR write scope: an env
+                     token or a `gh auth login` session)
 
 `python -m security.cli.remediate [--apply] [--open-pr] [--remote]`
 """

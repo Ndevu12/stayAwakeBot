@@ -22,7 +22,10 @@ def _cfg(users):
 
 class TestOrgSweep(unittest.TestCase):
     def test_no_token_is_noop(self):
-        with mock.patch.dict("os.environ", {}, clear=True):
+        # No env token AND no gh session → no credential at all (hermetic: don't let a
+        # logged-in gh on the test machine supply a real token).
+        with mock.patch.dict("os.environ", {}, clear=True), \
+             mock.patch.object(remediator.auth, "resolve_token", return_value=(None, None)):
             self.assertEqual(remediator.submit_org_prs(_cfg(["o"]), token=None), 0)
 
     def test_no_targets_is_noop(self):

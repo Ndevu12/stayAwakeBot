@@ -101,13 +101,52 @@ stayawake-security-audit                       # advisory; add --fail-on-issues 
 stayawake-security-audit --repo owner/name     # also check that Worm Guard is a required check
 ```
 
-`--repo` needs `GH_SECURITY_TOKEN` (or `GITHUB_TOKEN`) and warns if the default branch
-is unprotected or the Worm Guard status check isn't required.
+`--repo` needs a GitHub credential (an env token or a `gh auth login` session — see
+[Authentication](#authentication)) and warns if the default branch is unprotected or
+the Worm Guard status check isn't required.
 
-## Environment / secrets
+## Authentication
+
+**Local scanning needs no credential** — a GitHub token is only used to clone *private*
+remotes and to write (open PRs / issues, read branch protection).
+
+**You only ever configure one token: `GH_SECURITY_TOKEN`.** When a token is needed,
+StayAwakeBot resolves one in this order:
+
+1. **`GH_SECURITY_TOKEN`** — the one token you set up (a PAT). Export it on a dev
+   machine, or add it as a repo secret in CI. This is the only credential you configure,
+   and the only one that can reach **other** repos (the `--remote` org sweep).
+2. **`GITHUB_TOKEN`** — the token GitHub Actions mints automatically for every run. You
+   never set this up: the `GITHUB_` prefix is reserved, so you *can't* even create a
+   secret with that name. It's the zero-config fallback for **same-repo** work inside
+   Actions, and it can't reach other repos.
+3. Your **GitHub CLI** session — `gh auth token` — short-lived and never stored by
+   StayAwakeBot, which is what the hygiene audit recommends over a cached PAT.
+
+In short: in CI, same-repo jobs ride the automatic `GITHUB_TOKEN` for free and only
+cross-repo work needs the `GH_SECURITY_TOKEN` secret; on a dev machine, the simplest
+setup is `gh auth login` once (nothing to export, nothing persisted), or export
+`GH_SECURITY_TOKEN`. If `gh` isn't installed, get it from <https://cli.github.com>
+(StayAwakeBot never installs software for you). A `gh` that is missing, logged out, or
+slow never breaks a run — local scans still work, and remote / write operations print
+exactly what to do.
+
+### Minimal token scopes per command
+
+Grant the least privilege the task needs (fine-grained PAT permission shown; the classic
+scope is in parentheses):
+
+| Command | Needs a token? | Permission (classic) |
+| --- | --- | --- |
+| `stayawake-security-scan <path>` / public remotes | no | — |
+| `stayawake-security-scan` private remotes | read | Contents + Metadata: Read (`repo`) |
+| `stayawake-security-remediate --open-pr` / `--remote` | write | Contents + Pull requests: R/W (`repo`) |
+| `stayawake-security-alert` (GitHub issue) | write | Issues: R/W (`repo` / `public_repo`) |
+| `stayawake-security-audit --repo` | read | Administration: Read (`repo`) |
+
+Other secrets:
 
 - `SLACK_WEBHOOK_URL` — enables Slack alerts (both bots).
-- `GH_SECURITY_TOKEN` (or `GITHUB_TOKEN`) — required for remote scans and opening issues / PRs.
 
 ## In GitHub Actions
 
