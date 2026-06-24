@@ -1,5 +1,5 @@
 name: 'Set up StayAwakeBot toolchain'
-description: 'Install Python 3.14 (newest patch) with a pip cache, then install this repo as a package. Single source of truth for the CI toolchain.'
+description: 'Install Python with a pip cache, then install this repo as a package. Single source of truth for the CI toolchain (the version lives in python-version below).'
 author: 'StayAwakeBot'
 
 runs:
@@ -8,8 +8,8 @@ runs:
     - name: Set up Python
       uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1   # v6.3.0
       with:
-        python-version: '3.14'
-        check-latest: true       # always fetch the newest 3.14.x patch
+        python-version: '3.13'
+        check-latest: true       # always fetch the newest patch of that minor
         cache: 'pip'
         cache-dependency-path: pyproject.toml
 

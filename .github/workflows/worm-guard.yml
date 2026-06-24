@@ -28,11 +28,11 @@ jobs:
         with:
           # Pin the scanner to a known-good SHA, never @main (SECURITY_BASELINE doctrine):
           # a later compromise of main cannot silently change what the gate runs.
-          # Bump this after an intentional scanner/signature update.
-          # Pinned to this PR's own evil-merge fixes so the gate runs the corrected detector
-          # and stops false-positiving on benign 3-way merges and merge-only deletions
-          # (#1004). Re-pin to a main SHA after merge.
-          sentinel-ref: 8202db6e13107d731f9658e7184b4e335995f149   # evil-merge fixes (this PR: clean-merge + merge-deletion)
+          # The pinned scanner's requires-python must satisfy the CI runner's Python, so
+          # this points at the commit that lowered that floor; it descends from #1004, so
+          # it keeps the corrected evil-merge detector (byte-identical to the previous
+          # pin). Re-pin to a main SHA after merge.
+          sentinel-ref: 48837942ca136fb4af66d36d79dcbbd73d37f314   # lowered-floor commit + #1004 evil-merge fix
           fail-on-findings: 'true'
           # Fixture allowlist is signature-scoped (glob|signature): a fresh payload
           # under fixtures/ using any OTHER signature is still flagged.
