@@ -28,6 +28,7 @@ urls:
 - `alert_on_failure` (bool) — enable failure alerts
 - `alert_on_recovery` (bool) — enable recovery alerts
 - `consecutive_failures_before_alert` (int) — require this many consecutive failures before alerting
+- `reports_dir` (string, optional) — where reports are written (default `reports`); also settable per run with `--reports-dir`
 
 **`urls`** (list of URLs to check)
 - `name` (required) — friendly name
@@ -41,10 +42,11 @@ urls:
 
 ## `config/security.yml` (security bot)
 
-Targets (local globs + GitHub users/orgs), exclude dirs, remediation mode, allowlist,
-and alert routing. The signature database ships **inside the package**; point at a custom
-DB with `settings.signatures_path`. Full field reference and the layered design live in
-[SECURITY_ARCHITECTURE.md](SECURITY_ARCHITECTURE.md).
+Targets (local globs + GitHub users/orgs), `exclude_dirs`, `max_file_bytes`,
+`remote_clone_depth`, `reports_dir` (output location; default `reports/security`),
+allowlist, and alert routing. The signature database ships **inside the package**; point
+at a custom DB with `settings.signatures_path`. Full field reference and the layered
+design live in [SECURITY_ARCHITECTURE.md](SECURITY_ARCHITECTURE.md).
 
 Each `allowlist` entry **must name a `signature`** (optionally scoped by `path_glob`) — a
 bare `path_glob` is ignored so it can't blanket-suppress a fresh payload on that path:
