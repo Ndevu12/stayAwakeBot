@@ -10,6 +10,11 @@ from dataclasses import dataclass, field, asdict
 from enum import IntEnum
 from typing import Any
 
+# Single source of truth for the quarantine directory name, shared by the
+# remediation engine (writes backups), the remediator (commits), and the scanner
+# (excludes it from scans). Keep these in sync via this constant only.
+QUARANTINE_DIR = ".malware-quarantine"
+
 
 class Severity(IntEnum):
     """Ordered so thresholds can compare numerically (CRITICAL is highest)."""

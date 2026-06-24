@@ -57,21 +57,62 @@ class TestEnsureIgnored(unittest.TestCase):
 
     def test_creates_gitignore_when_absent(self):
         self.assertTrue(remediation.ensure_ignored(self.repo))
-        lines = self._lines()
-        self.assertIn(".malware-quarantine/", lines)
-        self.assertIn("*.malware-bak", lines)
+        self.assertIn(".malware-quarantine/", self._lines())
 
     def test_appends_only_missing_patterns(self):
-        self.gi.write_text("node_modules/\n.malware-quarantine/\n", encoding="utf-8")
+        self.gi.write_text("node_modules/\n", encoding="utf-8")
         self.assertTrue(remediation.ensure_ignored(self.repo))
         lines = self._lines()
         self.assertEqual(lines.count(".malware-quarantine/"), 1, "must not duplicate")
-        self.assertIn("*.malware-bak", lines)
         self.assertIn("node_modules/", lines)
 
     def test_idempotent_no_change_when_present(self):
         remediation.ensure_ignored(self.repo)
         self.assertFalse(remediation.ensure_ignored(self.repo), "second call should be a no-op")
+
+    def test_refuses_symlinked_gitignore(self):
+        outside = self.repo / "outside.txt"
+        outside.write_text("keep\n", encoding="utf-8")
+        self.gi.symlink_to(outside)
+        self.assertFalse(remediation.ensure_ignored(self.repo))   # must not follow the symlink
+        self.assertEqual(outside.read_text(encoding="utf-8"), "keep\n")
+
+
+class TestStripAndResidual(unittest.TestCase):
+    def test_strip_removes_loader_above_export(self):
+        # A1: loader prepended ABOVE export default must be removed, not preserved.
+        txt = "var _$_abcd = sfL(0)\nString.fromCharCode(127)\nexport default {a:1};\n"
+        out = remediation.strip_payload_text(txt)
+        self.assertNotIn("sfL(", out)
+        self.assertNotIn("fromCharCode", out)
+        self.assertIn("export default", out)
+
+    def test_is_auto_fixable(self):
+        good = type("F", (), {"remediation": "strip-appended-payload"})()
+        manual = type("F", (), {"remediation": "manual"})()
+        self.assertTrue(remediation.is_auto_fixable(good))
+        self.assertFalse(remediation.is_auto_fixable(manual))
+
+    def test_quarantine_residual_removes_and_backs_up(self):
+        repo = Path(tempfile.mkdtemp())
+        (repo / "evil.cjs").write_text("module.exports = sfL(0)\n", encoding="utf-8")
+        q = remediation.quarantine_path(repo)
+        finding = type("F", (), {"path": "evil.cjs"})()
+        done = remediation.quarantine_residual(repo, [finding], q)
+        self.assertEqual([c.action for c in done], ["quarantine"])
+        self.assertFalse((repo / "evil.cjs").exists())          # removed from the tree
+        self.assertTrue((q / "evil.cjs").exists())              # backed up first
+
+    def test_backup_skips_symlink(self):
+        repo = Path(tempfile.mkdtemp())
+        secret = repo / "secret.txt"
+        secret.write_text("top-secret\n", encoding="utf-8")
+        link = repo / "link.txt"
+        link.symlink_to(secret)
+        q = Path(tempfile.mkdtemp())
+        remediation._backup(repo, "link.txt", q)
+        # the symlink target's contents must not be copied into quarantine
+        self.assertFalse((q / "link.txt").exists())
 
 
 if __name__ == "__main__":

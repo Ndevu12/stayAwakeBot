@@ -14,16 +14,21 @@ from stayawake.bots.security.matchers import REGISTRY
 
 
 def _allowed(finding: Finding, allowlist: list[dict[str, Any]]) -> bool:
-    """True if a finding is suppressed by the allowlist (id and/or path glob)."""
+    """True if a finding is suppressed by the allowlist.
+
+    A rule must name a `signature` to suppress. A bare `path_glob` (no signature)
+    is intentionally NOT honored — it would blanket-suppress *every* signature on
+    that path, so a fresh payload dropped under e.g. a test-fixtures glob would slip
+    through silently. Fixture allowlisting therefore requires `signature` (+ optional
+    `path_glob` to scope it)."""
     for rule in allowlist or []:
         sig = rule.get("signature")
         glob = rule.get("path_glob")
-        if sig and sig != finding.signature_id:
-            continue
+        if not sig or sig != finding.signature_id:
+            continue                       # path-only rules are too broad — ignored
         if glob and not fnmatch(finding.path, glob):
             continue
-        if sig or glob:
-            return True
+        return True
     return False
 
 
