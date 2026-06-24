@@ -1,4 +1,4 @@
-# Security scan — 2026-06-24T12:09:39.724299+00:00
+# Security scan — 2026-06-24T12:35:36.946742+00:00
 
 **1 targets** · 1 infected · 30 findings (14 critical, 13 high)
 
@@ -70,7 +70,7 @@
   - evidence: `ault config;global['!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; …`
 - **[high]** `loader-require-hijack` — reports/security/latest.md:64
   - Loader reassigning global.require to smuggle CommonJS into ESM
-  - evidence: `\\\\\\\\"); global[_$_1e42[0]]= require;S\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\u2026\\…`
+  - evidence: `\\\\\\\\"); global[_$_1e42[0]]= require;S\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\…`
 - **[high]** `vscode-allow-automatic-tasks` — tests/bots/security/fixtures/infected/.vscode/settings.json
   - settings.json enables task.allowAutomaticTasks (required for folderOpen abuse)
   - evidence: `task.allowAutomaticTasks: true`
