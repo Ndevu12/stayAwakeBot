@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-06-24T11:18:22.816293+00:00",
+  "generated_at": "2026-06-24T11:59:20.486434+00:00",
   "summary": {
     "targets": 1,
     "infected": 1,
-    "findings": 29,
+    "findings": 30,
     "critical": 14,
-    "high": 12
+    "high": 13
   },
   "any_infected": true,
   "results": [
@@ -15,16 +15,17 @@
       "infected": true,
       "error": null,
       "summary": {
-        "total": 29,
+        "total": 30,
         "by_severity": {
           "critical": 14,
-          "high": 12,
+          "high": 13,
           "medium": 3
         },
         "by_category": {
           "code-loader": 22,
           "vscode-autorun": 3,
           "fake-font": 2,
+          "evil-merge": 1,
           "git-marker": 1,
           "camouflage": 1
         },
@@ -186,6 +187,17 @@
           "vector": "code-loader"
         },
         {
+          "signature_id": "evil-merge",
+          "category": "evil-merge",
+          "severity": "high",
+          "path": "d0cb72ace5",
+          "description": "Merge commit introducing content present in neither parent (review-evading)",
+          "remediation": "manual",
+          "line": null,
+          "evidence": "2 path(s) in neither parent; e.g. ['docs/USAGE.md', 'src/stayawake/bots/security/service.py']; by 140616733+Ndevu12@users.noreply.github.com",
+          "vector": "evil-merge"
+        },
+        {
           "signature_id": "loader-decoder-fn",
           "category": "code-loader",
           "severity": "high",
@@ -215,7 +227,7 @@
           "description": "Loader reassigning global.require to smuggle CommonJS into ESM",
           "remediation": "strip-appended-payload",
           "line": 218,
-          "evidence": "\\\\\\\\\\\\\\\\\"); global[_$_1e42[0]]= require;S\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\u2026\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\", \u2026",
+          "evidence": "\\\\\\\\\\\\\\\\\"); global[_$_1e42[0]]= require;S\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\u2026\\\\\u2026",
           "vector": "code-loader"
         },
         {
@@ -248,7 +260,7 @@
           "description": "Loader reassigning global.require to smuggle CommonJS into ESM",
           "remediation": "strip-appended-payload",
           "line": 61,
-          "evidence": "\\\\\\\\\\\\\\\\\"); global[_$_1e42[0]]= require;S\\\\\\\\\\\\\\\\u2026\\\\\\\\\\\\\\\",           \\\\\\\\\\\\\u2026",
+          "evidence": "\\\\\\\\\\\\\\\\\"); global[_$_1e42[0]]= require;S\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\u2026\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\", \u2026",
           "vector": "code-loader"
         },
         {

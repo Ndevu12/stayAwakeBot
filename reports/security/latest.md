@@ -1,10 +1,10 @@
-# Security scan — 2026-06-24T11:18:22.816293+00:00
+# Security scan — 2026-06-24T11:59:20.486434+00:00
 
-**1 targets** · 1 infected · 29 findings (14 critical, 12 high)
+**1 targets** · 1 infected · 30 findings (14 critical, 13 high)
 
 | Target | Source | Status | Findings | Top severity |
 |--------|--------|--------|----------|--------------|
-| ~/work/stayAwakeBot/stayAwakeBot | local | ❌ INFECTED | 29 | critical |
+| ~/work/stayAwakeBot/stayAwakeBot | local | ❌ INFECTED | 30 | critical |
 
 ## Findings
 
@@ -50,6 +50,9 @@
 - **[critical]** `loader-seed-var` — tests/bots/security/test_remediation.py:84
   - Obfuscated loader seed variable (var/let/const _$_xxxx=)
   - evidence: `     txt = "var _$_abcd = sfL(0)\nString.fromCharCode(127)\nexport default {a:1}…`
+- **[high]** `evil-merge` — d0cb72ace5
+  - Merge commit introducing content present in neither parent (review-evading)
+  - evidence: `2 path(s) in neither parent; e.g. ['docs/USAGE.md', 'src/stayawake/bots/security/service.py']; by 140616733+Ndevu12@users.noreply.github.com`
 - **[high]** `loader-decoder-fn` — reports/security/latest.json:53
   - Obfuscated loader decoder call — the sfL decoder function
   - evidence: `t';function sfL(w){return w}; var x =sfL(\\\\\\\\\\\\\\\\\\\u2026",           "v…`
@@ -58,7 +61,7 @@
   - evidence: `ault config;global['!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; …`
 - **[high]** `loader-require-hijack` — reports/security/latest.json:218
   - Loader reassigning global.require to smuggle CommonJS into ESM
-  - evidence: `\\\\\\\\"); global[_$_1e42[0]]= require;S\\\\\\\\\\\\\\\\u2026\\\\\\\\\\\\\\\", …`
+  - evidence: `\\\\\\\\"); global[_$_1e42[0]]= require;S\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\u2026\\…`
 - **[high]** `loader-decoder-fn` — reports/security/latest.md:17
   - Obfuscated loader decoder call — the sfL decoder function
   - evidence: `t';function sfL(w){return w}; var x =sfL(\\\\\\\\\…` - **[critical]** `loader-fr…`
@@ -67,7 +70,7 @@
   - evidence: `ault config;global['!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; …`
 - **[high]** `loader-require-hijack` — reports/security/latest.md:61
   - Loader reassigning global.require to smuggle CommonJS into ESM
-  - evidence: `\\\\\\\\"); global[_$_1e42[0]]= require;S\\\\\\\\u2026\\\\\\\",           \\\\\\…`
+  - evidence: `\\\\\\\\"); global[_$_1e42[0]]= require;S\\\\\\\\\\\\\\\\u2026\\\\\\\\\\\\\\\", …`
 - **[high]** `vscode-allow-automatic-tasks` — tests/bots/security/fixtures/infected/.vscode/settings.json
   - settings.json enables task.allowAutomaticTasks (required for folderOpen abuse)
   - evidence: `task.allowAutomaticTasks: true`
