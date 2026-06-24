@@ -27,7 +27,7 @@ class TestTargetResolution(unittest.TestCase):
 
         def fake_remote(cfg, opts):
             cap["remote_called"] = True
-            return [], None
+            return [], None, None   # mirror _resolve_remote's (slugs, token, source) 3-tuple
 
         with mock.patch.object(svc, "discover_local_repos", side_effect=fake_discover), \
              mock.patch.object(svc, "_resolve_remote", side_effect=fake_remote):
