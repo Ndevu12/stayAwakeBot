@@ -28,11 +28,11 @@ jobs:
         with:
           # Pin the scanner to a known-good SHA, never @main (SECURITY_BASELINE doctrine):
           # a later compromise of main cannot silently change what the gate runs.
-          # The pinned scanner's requires-python must satisfy the runner: CI moved to
-          # Python 3.13, so this points at the commit that lowered the floor to >=3.13.
-          # That commit descends from #1004, so it keeps the corrected evil-merge detector
-          # (byte-identical to the previous pin). Re-pin to a main SHA after merge.
-          sentinel-ref: 48837942ca136fb4af66d36d79dcbbd73d37f314   # py3.13 floor + #1004 evil-merge fix
+          # The pinned scanner's requires-python must satisfy the CI runner's Python, so
+          # this points at the commit that lowered that floor; it descends from #1004, so
+          # it keeps the corrected evil-merge detector (byte-identical to the previous
+          # pin). Re-pin to a main SHA after merge.
+          sentinel-ref: 48837942ca136fb4af66d36d79dcbbd73d37f314   # lowered-floor commit + #1004 evil-merge fix
           fail-on-findings: 'true'
           # Fixture allowlist is signature-scoped (glob|signature): a fresh payload
           # under fixtures/ using any OTHER signature is still flagged.

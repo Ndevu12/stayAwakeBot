@@ -26,7 +26,7 @@ runs:
       uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1   # v6.3.0
       with:
         python-version: '3.13'
-        check-latest: true       # always fetch the newest 3.13.x patch
+        check-latest: true       # always fetch the newest patch of that minor
 
     - name: Install scanner
       shell: bash
