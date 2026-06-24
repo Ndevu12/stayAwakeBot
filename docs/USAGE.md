@@ -91,18 +91,28 @@ the Worm Guard status check isn't required.
 ## Authentication
 
 **Local scanning needs no credential** — a GitHub token is only used to clone *private*
-remotes and to write (open PRs / issues, read branch protection). When a token is
-needed, StayAwakeBot resolves one in this order:
+remotes and to write (open PRs / issues, read branch protection).
 
-1. `GH_SECURITY_TOKEN` or `GITHUB_TOKEN` in the environment (CI and explicit overrides).
-2. Your **GitHub CLI** session — `gh auth token` — short-lived and never stored by
+**You only ever configure one token: `GH_SECURITY_TOKEN`.** When a token is needed,
+StayAwakeBot resolves one in this order:
+
+1. **`GH_SECURITY_TOKEN`** — the one token you set up (a PAT). Export it on a dev
+   machine, or add it as a repo secret in CI. This is the only credential you configure,
+   and the only one that can reach **other** repos (the `--remote` org sweep).
+2. **`GITHUB_TOKEN`** — the token GitHub Actions mints automatically for every run. You
+   never set this up: the `GITHUB_` prefix is reserved, so you *can't* even create a
+   secret with that name. It's the zero-config fallback for **same-repo** work inside
+   Actions, and it can't reach other repos.
+3. Your **GitHub CLI** session — `gh auth token` — short-lived and never stored by
    StayAwakeBot, which is what the hygiene audit recommends over a cached PAT.
 
-So on a developer machine the simplest setup is `gh auth login` once: nothing to export,
-nothing persisted. If `gh` isn't installed, get it from <https://cli.github.com>
-(StayAwakeBot never installs software for you) or set one of the env vars. A `gh` that is
-missing, logged out, or slow never breaks a run — local scans still work, and remote /
-write operations print exactly what to do.
+In short: in CI, same-repo jobs ride the automatic `GITHUB_TOKEN` for free and only
+cross-repo work needs the `GH_SECURITY_TOKEN` secret; on a dev machine, the simplest
+setup is `gh auth login` once (nothing to export, nothing persisted), or export
+`GH_SECURITY_TOKEN`. If `gh` isn't installed, get it from <https://cli.github.com>
+(StayAwakeBot never installs software for you). A `gh` that is missing, logged out, or
+slow never breaks a run — local scans still work, and remote / write operations print
+exactly what to do.
 
 ### Minimal token scopes per command
 
