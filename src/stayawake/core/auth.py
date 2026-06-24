@@ -60,12 +60,30 @@ def gh_token(hostname: str = "github.com") -> str | None:
     return None
 
 
+def _app_token() -> str | None:
+    """A GitHub App installation token, or None if no App is configured. Never raises:
+    a configured-but-broken App is reported and treated as 'no token' so resolution can
+    fall through (the caller's hint then guides)."""
+    from stayawake.core import github_app  # lazy: keeps PyJWT fully optional
+    try:
+        return github_app.installation_token()
+    except github_app.GithubAppError as e:
+        print(f"GitHub App auth configured but unavailable: {e}")
+        return None
+
+
 def resolve_token(hostname: str = "github.com") -> tuple[str | None, str | None]:
-    """Return (token, source). `source` is the env var name, 'gh', or None.
-    Callers decide whether a missing token is fatal (writes) or fine (public read)."""
+    """Return (token, source). `source` is the env var name, 'github-app', 'gh', or None.
+
+    Precedence: an explicit env PAT wins (human override) → a GitHub App installation
+    token (automation default) → the gh CLI session → none. Callers decide whether a
+    missing token is fatal (writes) or fine (public read)."""
     token, source = _env_token()
     if token:
         return token, source
+    app = _app_token()
+    if app:
+        return app, "github-app"
     token = gh_token(hostname)
     if token:
         return token, "gh"
