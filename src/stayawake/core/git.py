@@ -94,9 +94,19 @@ def parents(repo: str | Path, sha: str) -> list[str]:
     return out[1:] if len(out) > 1 else []
 
 
-def changed_paths(repo: str | Path, base: str, target: str) -> set[str]:
-    """Paths that differ between two commits (name-only)."""
-    out = _run(repo, ["diff", "--name-only", base, target])
+def changed_paths(repo: str | Path, base: str, target: str,
+                  diff_filter: str | None = None) -> set[str]:
+    """Paths that differ between two commits/trees (name-only).
+
+    `diff_filter` is passed straight to `git diff --diff-filter` (e.g. "AM" keeps only the
+    paths `target` Adds or Modifies and drops Deletions) — callers that care about content
+    `target` *introduces* want to ignore paths it merely removes.
+    """
+    args = ["diff", "--name-only"]
+    if diff_filter:
+        args.append(f"--diff-filter={diff_filter}")
+    args += [base, target]
+    out = _run(repo, args)
     return {line.strip() for line in out.splitlines() if line.strip()}
 
 
@@ -121,8 +131,11 @@ def evil_merge_paths(repo: str | Path, merge_sha: str) -> set[str]:
     which shows each parent's diff — can't see it. The signal is *not* "differs from both
     parents": a benign 3-way merge of independent edits to one file also differs from both.
     The signal is "differs from what merging the parents would have produced". So we compute
-    the parents' clean auto-merged tree and flag only the paths where the recorded merge
-    deviates from it (injected files, or content slipped in during conflict resolution).
+    the parents' clean auto-merged tree and flag only the paths the recorded merge ADDS or
+    MODIFIES relative to it (injected files, or content slipped in during conflict
+    resolution). Pure deletions are NOT flagged: a path the merge *removes* relative to the
+    auto-merge — e.g. resolving by accepting the other branch's deletion of a file one branch
+    had added — introduces no review-evading content, so it is not an evil-merge signal.
 
     Falls back to the coarser "changed vs every parent" intersection for octopus merges
     (>2 parents) or when git is too old for `merge-tree --write-tree`.
@@ -133,11 +146,11 @@ def evil_merge_paths(repo: str | Path, merge_sha: str) -> set[str]:
     if len(ps) == 2:
         auto = _auto_merge_tree(repo, ps[0], ps[1])
         if auto is not None:
-            return changed_paths(repo, auto, merge_sha)
-    # Fallback: paths changed vs EVERY parent (over-reports overlapping clean merges).
+            return changed_paths(repo, auto, merge_sha, diff_filter="AM")
+    # Fallback: paths added/modified vs EVERY parent (over-reports overlapping clean merges).
     common: set[str] | None = None
     for p in ps:
-        diff = changed_paths(repo, p, merge_sha)
+        diff = changed_paths(repo, p, merge_sha, diff_filter="AM")
         common = diff if common is None else (common & diff)
     return common or set()
 
