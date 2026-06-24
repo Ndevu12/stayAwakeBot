@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from stayawake.bots.security.matchers.base import load_jsonc
+from stayawake.bots.security.models import QUARANTINE_DIR
 
 # remediation id → internal action
 _ACTIONS = {
@@ -26,11 +27,28 @@ _ACTIONS = {
 }
 _GITIGNORE_MARKERS = {"branch_structure.json", "temp_auto_push.bat", "temp_interactive_push.bat"}
 
-# Quarantine / remediation artifacts must stay local and never be committed.
-# `ensure_ignored` guarantees a target repo's .gitignore carries these before we
+# Loader fingerprints (mirror the content signatures) used to drop payload lines
+# wherever they sit — not only when appended after `export default`.
+_LOADER_LINE = re.compile(
+    r"createRequire\(|String\s*[.\[]\s*['\"]?fromCharCode['\"]?\]?\s*\(\s*(?:127|0x7f)"
+    r"|(?:var|let|const)\s+_\$_[0-9a-f]{2,}\s*=|=\s*sfL\(|global\s*\[\s*(?:_\$_|['\"]!['\"])",
+    re.IGNORECASE,
+)
+
+# Quarantine / remediation backups must stay local and never be committed.
+# `ensure_ignored` guarantees a target repo's .gitignore carries this before we
 # `git add` a fix, so backups never leak into a commit or PR.
 _QUARANTINE_COMMENT = "# Malware quarantine / remediation artifacts (kept local, never committed)"
-_QUARANTINE_PATTERNS = (".malware-quarantine/", "*.malware-bak")
+_QUARANTINE_PATTERNS = (QUARANTINE_DIR + "/",)
+
+
+def is_auto_fixable(finding) -> bool:
+    """True if a finding has a known automatic remediation (i.e. not `manual`)."""
+    return getattr(finding, "remediation", "manual") in _ACTIONS
+
+
+def quarantine_path(root: Path) -> Path:
+    return root / QUARANTINE_DIR
 
 
 @dataclass(frozen=True)
@@ -75,12 +93,15 @@ def plan(findings) -> list[Change]:
 # ── individual transforms ────────────────────────────────────────────────────
 
 def strip_payload_text(text: str) -> str:
-    """Keep the legit config up to the first `export default ...;`; drop the
-    appended payload and any injected createRequire preamble."""
+    """Remove worm loader lines wherever they sit (not only appended after the
+    config) and cut any payload appended past the first `export default ...;`.
+
+    Best-effort: a post-apply re-scan (see `verify_clean`) is the real guarantee —
+    if any signature still fires the caller quarantines the whole file."""
     out: list[str] = []
     for line in text.splitlines():
-        if line.lstrip().startswith("import { createRequire }") or "createRequire(" in line:
-            continue
+        if _LOADER_LINE.search(line):
+            continue                      # drop loader / createRequire lines at any position
         if "export default" in line:
             idx = line.find(";")
             out.append(line[: idx + 1] if idx != -1 else line)
@@ -111,6 +132,8 @@ def ensure_ignored(root: Path) -> bool:
     never land in a commit or PR.
     """
     gi = root / ".gitignore"
+    if gi.is_symlink():
+        return False                      # refuse to follow a symlinked .gitignore (write-through guard)
     text = gi.read_text(encoding="utf-8", errors="replace") if gi.exists() else ""
     present = {l.strip() for l in text.splitlines()}
     missing = [p for p in _QUARANTINE_PATTERNS if p not in present]
@@ -129,12 +152,34 @@ def _backup(root: Path, rel: str, quarantine: Path) -> None:
     src = root / rel
     if not src.exists():
         return
+    if src.is_symlink():
+        return                            # never dereference a symlinked target into quarantine
     dest = quarantine / rel
     dest.parent.mkdir(parents=True, exist_ok=True)
     if src.is_dir():
-        shutil.copytree(src, dest, dirs_exist_ok=True)
+        # symlinks=True recreates inner symlinks as links instead of copying their
+        # (possibly out-of-tree) targets' contents into the quarantine.
+        shutil.copytree(src, dest, dirs_exist_ok=True, symlinks=True)
     else:
-        shutil.copy2(src, dest)
+        shutil.copy2(src, dest, follow_symlinks=False)
+
+
+def quarantine_residual(root: Path, findings, quarantine: Path) -> list["Change"]:
+    """Quarantine (back up + remove) every distinct file still flagged after a
+    strip/apply pass — the fail-safe so a partially-cleaned file is never left behind.
+    Returns the Changes performed."""
+    done: list[Change] = []
+    for rel in sorted({f.path for f in findings}):
+        target = root / rel
+        if not target.exists():
+            continue
+        _backup(root, rel, quarantine)
+        if target.is_dir() and not target.is_symlink():
+            shutil.rmtree(target)
+        else:
+            target.unlink()
+        done.append(Change("quarantine", rel, "residual after remediation"))
+    return done
 
 
 def apply(root: Path, changes: list[Change], quarantine: Path) -> list[Change]:

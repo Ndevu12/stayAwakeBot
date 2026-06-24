@@ -13,10 +13,27 @@ from pathlib import Path
 from typing import Iterator
 
 
+# Source/text extensions we always attempt to scan even when a file looks "binary"
+# (NUL bytes) or exceeds the size cap — the worm hides in exactly these, so one NUL
+# byte or 2 MB of padding must not buy it invisibility.
+SOURCE_EXTS = {
+    ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".mts", ".cts",
+    ".json", ".vue", ".svelte", ".md", ".yml", ".yaml", ".sh", ".bash",
+    ".py", ".rb", ".php", ".go", ".rs", ".html", ".htm", ".css", ".map",
+}
+
+
+def _ext(rel: str) -> str:
+    i = rel.rfind(".")
+    return rel[i:].lower() if i != -1 else ""
+
+
 @dataclass
 class ScanOptions:
+    # "reports" is excluded so the scanner never re-flags its OWN output: a report
+    # quotes the evidence of a detected payload, so scanning it would self-trigger.
     exclude_dirs: set[str] = field(default_factory=lambda: {
-        ".git", "node_modules", ".next", "dist", "build", ".malware-quarantine"})
+        ".git", "node_modules", ".next", "dist", "build", ".malware-quarantine", "reports"})
     max_file_bytes: int = 2_000_000
     remote_clone_depth: int = 50
 
@@ -49,10 +66,41 @@ class Target:
         except OSError:
             return None
 
+    def _head_tail(self, p: Path, half: int) -> bytes:
+        """Read a bounded head+tail of an oversized file (payload is usually
+        appended, so the tail matters) instead of skipping it wholesale."""
+        try:
+            with p.open("rb") as fh:
+                head = fh.read(half)
+                try:
+                    fh.seek(-half, os.SEEK_END)
+                except OSError:
+                    fh.seek(0)
+                tail = fh.read(half)
+            return head + b"\n/*\xe2\x80\xa6stayawake-truncated\xe2\x80\xa6*/\n" + tail
+        except OSError:
+            return b""
+
     def read_text(self, rel: str) -> str | None:
-        raw = self.read_bytes(rel)
-        if raw is None or b"\x00" in raw[:8192]:
+        p = self.root / rel
+        ext = _ext(rel)
+        try:
+            size = p.stat().st_size
+        except OSError:
             return None
+        if size > self.opts.max_file_bytes:
+            if ext not in SOURCE_EXTS:
+                return None                       # genuinely large binary — skip
+            raw = self._head_tail(p, max(1, self.opts.max_file_bytes // 2))
+        else:
+            raw = self.read_bytes(rel)
+            if raw is None:
+                return None
+        if b"\x00" in raw[:8192]:
+            if ext in SOURCE_EXTS:
+                raw = raw.replace(b"\x00", b"")   # NUL-laden source is itself suspicious — scan anyway
+            else:
+                return None                       # real binary asset
         return raw.decode("utf-8", errors="replace")
 
     def cleanup(self) -> None:

@@ -1,14 +1,16 @@
 name: Worm Guard — block infected merges
 
 # Gate: scan PRs (catch injected indicators) and pushes of real code to main
-# (catch evil merges). The sentinels' frequent report/badge commits are ignored.
+# (catch evil merges). README.md is NOT excluded — the content signatures match it,
+# so a payload appended to it must still be caught. reports/** is excluded only
+# because the bot's own reports quote detected payloads (their evidence snippets
+# would self-flag); those commits never carry executable code.
 on:
   pull_request:
   push:
     branches: [main]
     paths-ignore:
       - 'reports/**'
-      - 'README.md'
 
 permissions:
   contents: read
@@ -18,11 +20,30 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout (full history for evil-merge detection)
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
         with:
           fetch-depth: 0
       - name: Scan for worm indicators
         uses: ./.github/actions/worm-scan
         with:
+          # Pin the scanner to a known-good SHA, never @main (SECURITY_BASELINE doctrine):
+          # a later compromise of main cannot silently change what the gate runs.
+          # Bump this after an intentional scanner/signature update.
+          sentinel-ref: 788222f4f0ce2cd2a70e0189e9cfc1be24ab0ef7   # main @ 2026-06-23
           fail-on-findings: 'true'
-          allowlist-globs: 'tests/bots/security/fixtures/**'
+          # Fixture allowlist is signature-scoped (glob|signature): a fresh payload
+          # under fixtures/ using any OTHER signature is still flagged.
+          allowlist-globs: >-
+            tests/**|loader-fromcharcode-127,
+            tests/**|loader-seed-var,
+            tests/**|loader-decoder-fn,
+            tests/**|loader-global-bang,
+            tests/**|loader-require-hijack,
+            tests/**|oversized-config-line,
+            tests/**|fake-font-fa-solid-400,
+            tests/**|fake-font-text-woff,
+            tests/**|camouflage-blockchain-readme,
+            tests/**|vscode-task-folderopen-exec,
+            tests/**|vscode-task-runs-font,
+            tests/**|vscode-allow-automatic-tasks,
+            tests/**|gitignore-autopush-markers

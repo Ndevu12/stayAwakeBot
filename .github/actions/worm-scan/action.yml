@@ -12,7 +12,10 @@ inputs:
     required: false
     default: 'true'
   allowlist-globs:
-    description: 'Comma-separated path globs to ignore (e.g. test fixtures that contain inert markers).'
+    description: >-
+      Comma-separated allowlist entries of the form `path_glob|signature_id` (e.g.
+      `tests/fixtures/**|fake-font-fa-solid-400`). A signature id is REQUIRED — a bare
+      path glob is ignored, so a fresh payload under that path is still flagged.
     required: false
     default: ''
 
@@ -20,7 +23,7 @@ runs:
   using: 'composite'
   steps:
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b   # v5.3.0
       with:
         python-version: '3.11'
 
@@ -35,14 +38,21 @@ runs:
         cfg="$(mktemp)"
         {
           echo "settings:"
-          echo "  exclude_dirs: [\".git\", \"node_modules\", \".next\", \"dist\", \"build\", \".malware-quarantine\", \".venv\"]"
+          echo "  exclude_dirs: [\".git\", \"node_modules\", \".next\", \"dist\", \"build\", \".malware-quarantine\", \".venv\", \"reports\"]"
           echo "targets:"
           echo "  local: [\"$GITHUB_WORKSPACE\"]"
           echo "  github: { users: [], orgs: [] }"
           if [ -n "${{ inputs.allowlist-globs }}" ]; then
             echo "allowlist:"
             IFS=',' read -ra G <<< "${{ inputs.allowlist-globs }}"
-            for g in "${G[@]}"; do echo "  - path_glob: \"$(echo "$g" | xargs)\""; done
+            for entry in "${G[@]}"; do
+              glob="$(echo "${entry%%|*}" | xargs)"
+              echo "  - path_glob: \"$glob\""
+              if [ "$entry" != "${entry%%|*}" ]; then
+                sig="$(echo "${entry#*|}" | xargs)"
+                [ -n "$sig" ] && echo "    signature: \"$sig\""
+              fi
+            done
           fi
         } > "$cfg"
         flag=""

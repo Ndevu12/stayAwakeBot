@@ -74,3 +74,20 @@ def create_pull(owner: str, repo: str, title: str, head: str, base: str,
     """Open a PR. Returns the created PR dict (with 'number','html_url') or None."""
     return request(f"/repos/{owner}/{repo}/pulls", method="POST", token=token,
                    data={"title": title, "head": head, "base": base, "body": body})
+
+
+def get_branch_protection(owner: str, repo: str, branch: str,
+                          token: str | None) -> dict | None:
+    """Branch-protection settings for a branch, or None if unprotected/inaccessible.
+    Quiet on errors (a 404 is the common 'not protected' case)."""
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "StayAwakeBot/1.0"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    req = urllib.request.Request(
+        f"{_API}/repos/{owner}/{repo}/branches/{branch}/protection",
+        headers=headers, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read().decode())
+    except Exception:  # noqa: BLE001 — 404/403/network all mean "treat as unprotected"
+        return None

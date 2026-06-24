@@ -38,12 +38,17 @@ class TestScanner(unittest.TestCase):
         self.assertEqual([f.signature_id for f in res.findings], [])
         self.assertFalse(res.infected)
 
-    def test_allowlist_suppresses_by_path(self):
-        res = self._scan("infected", allow=[{"path_glob": "**/fa-solid-400.woff2"}])
-        self.assertFalse(
-            any(f.path.endswith("fa-solid-400.woff2") for f in res.findings),
-            "allowlisted path should be suppressed",
-        )
+    def test_allowlist_suppresses_by_signature_and_path(self):
+        res = self._scan("infected", allow=[
+            {"signature": "fake-font-fa-solid-400", "path_glob": "**/fa-solid-400.woff2"}])
+        self.assertNotIn("fake-font-fa-solid-400", {f.signature_id for f in res.findings},
+                         "signature+path allowlist should be suppressed")
+
+    def test_path_only_allowlist_does_not_blanket_suppress(self):
+        # Security: a bare path glob must NOT suppress findings — otherwise a fresh
+        # payload dropped under that path would slip through unflagged.
+        res = self._scan("infected", allow=[{"path_glob": "**"}])
+        self.assertTrue(res.findings, "path-only allowlist must not suppress everything")
 
     def test_findings_sorted_by_severity_desc(self):
         sev = [int(f.severity) for f in self._scan("infected").findings]

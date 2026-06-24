@@ -20,7 +20,8 @@ signatures:
     category: code-loader
     severity: critical
     matcher: content
-    pattern: 'String\.fromCharCode\(127\)'
+    # Tolerate member-access (String['fromCharCode']) and hex args (0x7f) too.
+    pattern: 'String\s*[.\[]\s*[''"]?fromCharCode[''"]?\]?\s*\(\s*(?:127|0x7f)\s*\)'
     description: "Obfuscated loader fingerprint — fromCharCode(127) string shuffler"
     remediation: strip-appended-payload
 
@@ -28,16 +29,16 @@ signatures:
     category: code-loader
     severity: critical
     matcher: content
-    pattern: 'var\s+_\$_[0-9a-f]{2,}\s*='
-    description: "Obfuscated loader seed variable (var _$_xxxx=)"
+    pattern: '(?:var|let|const)\s+_\$_[0-9a-f]{2,}\s*='
+    description: "Obfuscated loader seed variable (var/let/const _$_xxxx=)"
     remediation: strip-appended-payload
 
   - id: loader-decoder-fn
     category: code-loader
     severity: high
     matcher: content
-    pattern: '=\s*sfL\('
-    description: "Obfuscated loader decoder call (sfL())"
+    pattern: '\bsfL\s*\('
+    description: "Obfuscated loader decoder call — the sfL decoder function"
     remediation: strip-appended-payload
 
   - id: loader-global-bang
