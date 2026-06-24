@@ -1,0 +1,10 @@
+# Whitelist context: start by ignoring everything, then re-include only what the wheel build
+# needs. This guarantees reports/ (which quote malware payloads), tests/ fixtures, .git, CI
+# config, and local state can never leak into the image — the same concern that shapes the
+# sdist allowlist in pyproject.toml.
+*
+!pyproject.toml
+!README.md
+!LICENSE
+!CHANGELOG.md
+!src
