@@ -36,6 +36,23 @@ stayawake-security-report                                           # status + s
 stayawake-security-alert                                            # Slack + GitHub issue on findings
 ```
 
+### Ad-hoc local scanning (no token, no config)
+
+Scanning local code needs **no GitHub token and no config file** — a token is only
+for cloning private remotes or opening PRs. Point the scanner at paths, or just run it
+inside a repo:
+
+```bash
+stayawake-security-scan                      # no args → scans the repo you're standing in
+stayawake-security-scan ~/dev/some-project   # scan a specific repo (or a folder of repos)
+stayawake-security-scan ./a ./b --path ./c   # several at once (positional and/or --path)
+```
+
+A path may be a single repository or a directory containing many — the scanner walks it
+for git repos. Explicit paths imply `--local-only` (nothing is sent to GitHub). With no
+paths and nothing configured, it scans the current repository (found by walking up to the
+nearest `.git`), so a bare `stayawake-security-scan` "just works" after `pip install`.
+
 Remediation is **safe by default (dry-run)**:
 
 ```bash
