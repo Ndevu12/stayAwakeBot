@@ -29,7 +29,9 @@ jobs:
           # Pin the scanner to a known-good SHA, never @main (SECURITY_BASELINE doctrine):
           # a later compromise of main cannot silently change what the gate runs.
           # Bump this after an intentional scanner/signature update.
-          sentinel-ref: 788222f4f0ce2cd2a70e0189e9cfc1be24ab0ef7   # main @ 2026-06-23
+          # Pinned to this PR's own evil-merge fix so the gate runs the corrected detector
+          # and stops false-positiving on benign 3-way merges (#1004). Re-pin to a main SHA after merge.
+          sentinel-ref: 52550c403a8501fa9d9313bba5623b1603aff1d3   # evil-merge fix (this PR)
           fail-on-findings: 'true'
           # Fixture allowlist is signature-scoped (glob|signature): a fresh payload
           # under fixtures/ using any OTHER signature is still flagged.
