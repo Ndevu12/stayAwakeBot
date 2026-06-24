@@ -20,7 +20,7 @@ jobs:
   worm-guard:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0   # v7.0.0 (SHA-pinned)
         with: { fetch-depth: 0 }        # full history for evil-merge detection
       - uses: Ndevu12/stayAwakeBot/.github/actions/worm-scan@<PIN-A-SHA>
         with: { fail-on-findings: 'true' }
