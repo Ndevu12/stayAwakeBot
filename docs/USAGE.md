@@ -16,7 +16,7 @@ The PyPI distribution is named **`stayawakebot`** because `stayawake` is already
 PyPI by an unrelated project. The import package (`stayawake`) and the `stayawake-*` console
 scripts are unchanged.
 
-### Container image (no local Python 3.14)
+### Container image (no local Python needed)
 
 The same code ships as a digest-pinned, non-root image on GHCR. Any console script is the
 command; mount the repository to scan at `/repo`:
