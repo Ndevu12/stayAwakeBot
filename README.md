@@ -2,7 +2,7 @@
 ![Health](https://img.shields.io/badge/health-0%2F2%20up-red)
 <!-- STAYAWAKEBOT_BADGE_END -->
 <!-- STAYAWAKEBOT_SECURITY_BADGE -->
-![Security](https://img.shields.io/badge/security-clean-brightgreen)
+![Security](https://img.shields.io/badge/security-19%20findings-red)
 <!-- STAYAWAKEBOT_SECURITY_BADGE_END -->
 
 # StayAwakeBot
