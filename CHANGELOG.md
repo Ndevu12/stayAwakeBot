@@ -7,6 +7,10 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **Release-pipeline hardening:** a **CycloneDX SBOM** of the wheel's resolved dependencies,
+  generated in the build job and attached to each GitHub Release; a **`pip-audit` gate** that
+  fails the release on a known-vulnerable dependency; and the container scan is now a **Trivy
+  gate** (build → scan → push) that blocks a fixable critical/high *before* the image is pushed.
 - **GitHub Action Marketplace entry point** (`action.yml` at repo root): adopt the security
   sentinel with `uses: Ndevu12/stayAwakeBot@v1`. It wraps the existing
   `.github/actions/worm-scan` composite (still reachable at its subpath), so no scan logic is
