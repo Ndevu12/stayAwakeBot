@@ -5,6 +5,9 @@ settings:
   alert_on_failure: true
   alert_on_recovery: true
   consecutive_failures_before_alert: 2
+  # Optional: where reports are written (default: reports). Override per run with
+  # --reports-dir; set a scratch path here to keep committed reports untouched.
+  # reports_dir: reports
 
 urls:
   - name: "Ndevu Store Application"
