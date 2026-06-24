@@ -113,7 +113,9 @@ the Worm Guard status check isn't required.
 ## Authentication
 
 **Local scanning needs no credential** — a GitHub token is only used to clone *private*
-remotes and to write (open PRs / issues, read branch protection).
+remotes and to write (open PRs / issues, read branch protection). However it's supplied,
+the token is handed to git via `GIT_ASKPASS` — never embedded in a clone/push URL or the
+process arguments, so it can't leak through `ps`, git's error output, or CI logs.
 
 **You only ever configure one token: `GH_SECURITY_TOKEN`.** When a token is needed,
 StayAwakeBot resolves one in this order:

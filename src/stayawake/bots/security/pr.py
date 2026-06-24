@@ -16,6 +16,7 @@ import tempfile
 from pathlib import Path
 
 from stayawake.core.adapters import github_api
+from stayawake.core import git as gitutil
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.targets import LocalRepoTarget
 from stayawake.bots.security.models import QUARANTINE_DIR
@@ -26,9 +27,9 @@ PATCHES_DIR = Path("sab-patches")   # where the read-only fallback writes .patch
 _BOT = ("-c", "user.name=StayAwakeBot Security", "-c", "user.email=security-bot@stayawake.local")
 
 
-def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess:
+def _git(cwd: Path, *args: str, env: dict | None = None) -> subprocess.CompletedProcess:
     return subprocess.run(["git", "-C", str(cwd), *args],
-                          capture_output=True, text=True, check=False)
+                          capture_output=True, text=True, check=False, env=env)
 
 
 def _untrack_quarantine(repo: Path) -> bool:
@@ -134,8 +135,11 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
               "\n".join(f"- {c.action}: {c.path}" for c in applied)
         _git(wt, *_BOT, "commit", "-m", msg)
 
-        push_url = f"https://x-access-token:{token}@github.com/{slug}.git"
-        if _git(wt, "push", "--force", push_url, f"{FIX_BRANCH}:{FIX_BRANCH}").returncode != 0:
+        # Token is passed via GIT_ASKPASS (env), never embedded in the push URL/argv.
+        with gitutil.github_https_auth(token) as (prefix, env):
+            pushed = _git(wt, "push", "--force", f"{prefix}{slug}.git",
+                          f"{FIX_BRANCH}:{FIX_BRANCH}", env=env).returncode == 0
+        if not pushed:
             # No write access: don't lose the fix when the worktree is removed — save it
             # as a patch the repo owner can apply themselves.
             patch = _save_patch(wt, slug, Path(patches_dir) if patches_dir else PATCHES_DIR)
