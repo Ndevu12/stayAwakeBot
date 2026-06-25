@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 
 from stayawake.core.config import load_yaml
-from stayawake.core.io import write_json, resolve_writable_dir
+from stayawake.core.io import write_json, resolve_reports_dir
 from stayawake.core.timeutil import now_iso
 from stayawake.core.adapters import github_api
 from stayawake.core import auth
@@ -128,11 +128,6 @@ def scan(config_path: str | None = None, local_only: bool = False,
     opts = _options(settings)
     sigs = load_signatures(settings.get("signatures_path"))
     allowlist = cfg.get("allowlist", [])
-    # Where reports are written. Precedence: --reports-dir / arg → STAYAWAKE_REPORTS_DIR env
-    # (used by the container image) → settings.reports_dir → default. Writability is resolved
-    # at write time so an unwritable choice degrades instead of crashing the scan.
-    rdir = Path(reports_dir or os.environ.get("STAYAWAKE_REPORTS_DIR")
-                or settings.get("reports_dir") or REPORTS_DIR)
 
     # --- resolve WHAT to scan (targets are orthogonal to auth: local needs no token) --
     cfg_targets = cfg.get("targets", {}) or {}
@@ -188,7 +183,8 @@ def scan(config_path: str | None = None, local_only: bool = False,
         "any_infected": any(r.infected for r in results),
         "results": [r.to_dict() for r in results],
     }
-    rdir = resolve_writable_dir(rdir, label="security reports")
+    rdir = resolve_reports_dir(reports_dir, settings_value=settings.get("reports_dir"),
+                               default=REPORTS_DIR, label="security reports")
     write_json(rdir / "latest.json", payload)
     (rdir / "latest.md").write_text(_render_markdown(payload), encoding="utf-8")
 
