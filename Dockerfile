@@ -58,6 +58,12 @@ COPY --from=builder --chown=sentinel:sentinel /dist/*.whl /tmp/
 USER sentinel
 RUN pip install --no-cache-dir /tmp/*.whl && rm -f /tmp/*.whl
 
+# Default reports to a container-owned, writable dir. The repo is mounted at /repo, often
+# read-only (`:ro`) or owned by the host user, so the scanner's default `reports/security`
+# there isn't writable by `sentinel` (uid 10001). Writing inside the image avoids the crash;
+# bind-mount this path (or pass --reports-dir to a dir you own) to keep the reports.
+ENV STAYAWAKE_REPORTS_DIR=/home/sentinel/reports
+
 WORKDIR /repo
 
 # Mount the repository to scan at /repo (read-only is fine for scanning), e.g.:

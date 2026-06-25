@@ -8,6 +8,7 @@ code; remote repos are cloned read-only into sandboxes and removed after.
 from __future__ import annotations
 
 import os
+import tempfile
 from pathlib import Path
 
 from stayawake.core.config import load_yaml
@@ -120,6 +121,32 @@ def _resolve_remote(cfg: dict, opts: ScanOptions):
     return sorted(set(slugs)), token, source
 
 
+def _write_reports(rdir: Path, payload: dict) -> Path:
+    """Persist latest.json + latest.md under `rdir`, returning the dir actually used.
+
+    Detection has already succeeded by the time we get here, so an unwritable reports
+    directory (a read-only/`:ro` bind mount, or a host mount the container's non-root
+    user can't write — the common Docker case) must not crash the scan. When the chosen
+    dir can't be written we fall back to a fresh temp dir and warn, so the findings the
+    user already saw on stdout are still persisted somewhere and the exit code stands."""
+    def _persist(d: Path) -> None:
+        d.mkdir(parents=True, exist_ok=True)
+        write_json(d / "latest.json", payload)
+        (d / "latest.md").write_text(_render_markdown(payload), encoding="utf-8")
+
+    try:
+        _persist(rdir)
+        return rdir
+    except OSError as e:
+        fallback = Path(tempfile.mkdtemp(prefix="stayawake-reports-"))
+        print(f"WARNING: cannot write reports to {rdir} ({e.strerror or e}); "
+              f"wrote them to {fallback} instead. Pass --reports-dir to a writable "
+              f"location (e.g. a path you own, or run the container with "
+              f"--user \"$(id -u):$(id -g)\") to keep reports.")
+        _persist(fallback)
+        return fallback
+
+
 def scan(config_path: str | None = None, local_only: bool = False,
          fail_on_findings: bool = False, reports_dir: str | Path | None = None,
          paths: list[str] | None = None) -> int:
@@ -128,9 +155,11 @@ def scan(config_path: str | None = None, local_only: bool = False,
     opts = _options(settings)
     sigs = load_signatures(settings.get("signatures_path"))
     allowlist = cfg.get("allowlist", [])
-    # Where reports are written. Override (CLI --reports-dir / settings.reports_dir / arg)
-    # so tests and ad-hoc runs never clobber the repo's committed reports.
-    rdir = Path(reports_dir or settings.get("reports_dir") or REPORTS_DIR)
+    # Where reports are written. Precedence: CLI --reports-dir / arg → settings.reports_dir
+    # → STAYAWAKE_REPORTS_DIR env (the Docker image sets this to a writable, container-owned
+    # path so a bare `docker run` doesn't try to write the read-only mount) → repo default.
+    rdir = Path(reports_dir or settings.get("reports_dir")
+                or os.environ.get("STAYAWAKE_REPORTS_DIR") or REPORTS_DIR)
 
     # --- resolve WHAT to scan (targets are orthogonal to auth: local needs no token) --
     cfg_targets = cfg.get("targets", {}) or {}
@@ -186,9 +215,7 @@ def scan(config_path: str | None = None, local_only: bool = False,
         "any_infected": any(r.infected for r in results),
         "results": [r.to_dict() for r in results],
     }
-    rdir.mkdir(parents=True, exist_ok=True)
-    write_json(rdir / "latest.json", payload)
-    (rdir / "latest.md").write_text(_render_markdown(payload), encoding="utf-8")
+    _write_reports(rdir, payload)
 
     s = payload["summary"]
     print(f"Scanned {s['targets']} target(s): {s['infected']} infected, "

@@ -60,6 +60,16 @@ docker run --rm -v "$PWD:/repo:ro" ghcr.io/ndevu12/stayawakebot \
   stayawake-security-scan --local-only --fail-on-findings
 ```
 
+The exit code carries the verdict (non-zero on findings). The image writes its report inside
+the container by default, so the mount can stay read-only; to keep the report on the host,
+mount a directory you own and point the scan at it:
+
+```bash
+docker run --rm -v "$PWD:/repo:ro" -v "$PWD/out:/out" --user "$(id -u):$(id -g)" \
+  ghcr.io/ndevu12/stayawakebot \
+  stayawake-security-scan --local-only --fail-on-findings --reports-dir /out
+```
+
 Tags: `:latest`, `:X.Y.Z`, `:X.Y`, and `:sha-<commit>`. The image runs as a non-root user, is
 built from the same wheel published to PyPI, and ships SLSA provenance + SBOM attestations.
 

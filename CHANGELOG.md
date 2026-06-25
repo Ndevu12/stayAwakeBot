@@ -43,6 +43,16 @@ All notable changes to this project are documented here. The format is based on
 - `hatch-vcs` now derives the version only from `vX.Y.Z` tags (`git_describe_command` match),
   so the moving Marketplace major tag (`v1`) cannot be mistaken for the package version.
 
+### Fixed
+- **Scan no longer crashes when the reports directory isn't writable.** A read-only/`:ro`
+  bind mount, or a host mount the container's non-root user can't write, previously raised a
+  `PermissionError`/`OSError` *after* detection succeeded. The scan now falls back to a temp
+  dir with a warning and preserves its exit code, so the verdict still stands. The container
+  image also defaults reports to a container-owned dir (`STAYAWAKE_REPORTS_DIR`), so a bare
+  `docker run -v "$PWD:/repo:ro" …` works without `--reports-dir`.
+- Added `STAYAWAKE_REPORTS_DIR` as a report-location fallback (below `--reports-dir` and
+  `settings.reports_dir`), used by the Docker image to point at a writable default.
+
 ## [0.1.0] - Unreleased
 
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel

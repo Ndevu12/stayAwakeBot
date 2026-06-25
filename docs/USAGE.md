@@ -27,6 +27,18 @@ docker run --rm -v "$PWD:/repo:ro" ghcr.io/ndevu12/stayawakebot \
 docker run --rm ghcr.io/ndevu12/stayawakebot stayawake-health-check --help
 ```
 
+The verdict is the exit code, so the `/repo` mount can stay `:ro` — the image writes its
+report to a container-owned dir (`STAYAWAKE_REPORTS_DIR=/home/sentinel/reports`) rather than
+the read-only mount. If the report dir ever isn't writable the scan still completes and falls
+back to a temp dir with a warning, instead of crashing. To keep the report on the host, mount
+a directory you own and run as your uid:
+
+```bash
+docker run --rm -v "$PWD:/repo:ro" -v "$PWD/out:/out" --user "$(id -u):$(id -g)" \
+  ghcr.io/ndevu12/stayawakebot \
+  stayawake-security-scan --local-only --fail-on-findings --reports-dir /out
+```
+
 Pin a version (`ghcr.io/ndevu12/stayawakebot:0.1.0`) or a commit (`:sha-<commit>`) for
 reproducibility; `:latest` tracks the newest release. To build it yourself:
 
