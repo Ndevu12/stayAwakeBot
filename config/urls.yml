@@ -5,6 +5,9 @@ settings:
   alert_on_failure: true
   alert_on_recovery: true
   consecutive_failures_before_alert: 2
+  # Recovery debounce: require this many consecutive healthy checks before declaring
+  # recovery (closes the issue). Defaults to consecutive_failures_before_alert.
+  consecutive_healthy_before_recovery: 2
   # Optional: where reports are written (default: reports). Override per run with
   # --reports-dir; set a scratch path here to keep committed reports untouched.
   # reports_dir: reports

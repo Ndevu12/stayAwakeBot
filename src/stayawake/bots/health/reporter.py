@@ -87,6 +87,7 @@ def generate(latest_path: str | Path = "reports/latest.json",
         "name": r.get("name"), "url": r.get("url"), "dns_ms": r.get("dns_ms"),
         "healthy": bool(r.get("healthy")), "status_code": r.get("status_code"),
         "response_ms": r.get("response_ms"), "error": r.get("error"),
+        "reason": r.get("reason"),
         "checked_at": r.get("checked_at"), "tags": r.get("tags", []), "alerted": False,
     } for r in results]}
     _upsert_history(history, run_entry, generated_at)
