@@ -1,8 +1,8 @@
 name: CI — install & test
 
 # Validation gate that runs BEFORE code is trusted: install the package and run the
-# test suite on every pull request and on pushes to main. Report-only commits
-# (reports/**, README badge) are skipped so the per-run sentinel pushes don't trigger
+# test suite on every pull request and on pushes to main. Doc/report-only commits
+# (reports/**, README.md) are skipped so the per-run sentinel pushes don't trigger
 # a full test run. Mark this as a required status check in branch protection so
 # nothing merges to main without it passing.
 on:

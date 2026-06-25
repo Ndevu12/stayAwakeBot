@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build status.json, history.json, the dated markdown report, and the badge.
+"""Build status.json, history.json, and the dated markdown report.
 
 Single responsibility: transform `latest.json` into human/machine reports.
 """
@@ -8,7 +8,6 @@ from __future__ import annotations
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
-from stayawake.core.adapters.badge import update_readme_badge
 from stayawake.core.io import read_json, write_json
 
 
@@ -72,7 +71,7 @@ def _build_markdown(dt: datetime, results: list, healthy: int, avg_resp, status:
 
 
 def generate(latest_path: str | Path = "reports/latest.json",
-             reports_dir: str | Path = "reports", readme: str | Path = "README.md") -> None:
+             reports_dir: str | Path = "reports") -> None:
     latest = read_json(latest_path)
     if latest is None:
         print("latest.json not found; run checker first")
@@ -117,6 +116,5 @@ def generate(latest_path: str | Path = "reports/latest.json",
                                        status["summary"]["avg_response_ms"] or "—", status),
                        encoding="utf-8")
 
-    update_readme_badge(readme, healthy, len(results))
     print(f"Wrote report: {md_path}")
     print(f"Wrote status: {reports_dir / 'status.json'}")

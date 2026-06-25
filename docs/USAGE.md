@@ -40,7 +40,7 @@ Run the pipeline against `config/urls.yml`:
 
 ```bash
 stayawake-health-check  --config config/urls.yml   # probe URLs → reports/latest.json
-stayawake-health-report                            # build status.json, history, dated .md, badge
+stayawake-health-report                            # build status.json, history, dated .md
 stayawake-health-alert                             # Slack alert on failures / recoveries
 ```
 
@@ -55,7 +55,7 @@ stayawake-health-check --config config/urls.yml --fail-on-unhealthy
 
 ```bash
 stayawake-security-scan --config config/security.yml --local-only   # scan local repos → reports/security/latest.json
-stayawake-security-report                                           # status + security badge
+stayawake-security-report                                           # write security status.json
 stayawake-security-alert                                            # Slack + GitHub issue on findings
 ```
 
