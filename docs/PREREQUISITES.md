@@ -1,24 +1,20 @@
 # Prerequisites
 
-The single source of truth for what you need to install and run StayAwakeBot. Other docs link
-here instead of repeating it.
-
 ## Python
 
-StayAwakeBot is a pure-Python package supporting **Python 3.11–3.14**, tested on each in CI.
-Installation requires **Python ≥ 3.11** — there is **no upper bound**, so newer interpreters
-(3.14 and future releases) install and run fine even before they're added to the test matrix.
+You need **Python 3.11 or newer**. The package is built and tested against 3.11, 3.12, 3.13,
+and 3.14, and there's no upper limit — newer releases keep working as they ship.
 
-On an interpreter older than 3.11, `pip install stayawakebot` fails with:
+If `pip install stayawakebot` ends with:
 
 ```
 ERROR: Could not find a version that satisfies the requirement stayawakebot (from versions: none)
 ERROR: No matching distribution found for stayawakebot
 ```
 
-That is pip's (cryptic) way of saying your interpreter is below the floor — not that the package
-is missing. Switch to 3.11+: use your distro's `python3.12` package, or
-`pyenv install 3.12 && pyenv local 3.12`.
+it almost always means your Python is older than 3.11 — pip reports a version mismatch this way
+rather than saying so directly. Install a 3.11+ interpreter (your distribution's `python3.12`
+package, or `pyenv install 3.12`) and try again.
 
 ## Install
 
@@ -26,12 +22,11 @@ is missing. Switch to 3.11+: use your distro's `python3.12` package, or
 pip install stayawakebot          # or: pipx install stayawakebot
 ```
 
-See [USAGE.md](USAGE.md) for the console scripts and configuration.
+The console scripts and configuration are described in [USAGE.md](USAGE.md).
 
-## No local Python? Use the container
+## Running without a local Python
 
-The same tool ships as a digest-pinned, non-root image on GHCR, so Docker is the only
-requirement:
+A prebuilt image is published to GHCR, so Docker alone is enough:
 
 ```bash
 docker run --rm ghcr.io/ndevu12/stayawakebot:latest stayawake-security-scan --help
