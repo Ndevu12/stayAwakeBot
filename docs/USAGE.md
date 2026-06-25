@@ -5,6 +5,8 @@ The same commands run locally or inside the bundled GitHub Actions workflows.
 
 ## Install
 
+Requires **Python 3.11+** (tested on 3.11–3.14).
+
 ```bash
 pip install stayawakebot                                                          # released versions, from PyPI
 pip install "stayawakebot @ git+https://github.com/Ndevu12/stayAwakeBot@main"     # latest from source (or pipx install "…")
