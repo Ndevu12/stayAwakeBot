@@ -14,7 +14,8 @@ src/stayawake/                     ← single import root (installable; no name 
       matchers/  base · content · filename · structural · heuristic · git_history  # one technique/file
       targets/   base · local · remote
       data/      signatures.yml      # default IoC DB shipped INSIDE the package
-      cli/       scan · report · alert · remediate
+      cli/       scan · report · alert · remediate    # legacy per-bot scripts (frozen, used by CI)
+  cli/         dispatch · _meta · commands/{scan,run,report,alert,fix,audit,…}   # unified `saw` CLI
 pyproject.toml   packaging: metadata · console scripts · package-data
 config/   urls.yml · security.yml        # deployment config (targets/allowlist; signatures are packaged)
 tests/    bots/health · bots/security    # mirrors src
@@ -23,6 +24,7 @@ docs/  prevent/  reports/  .github/  CONTRIBUTING.md
 
 ## Principles
 - **SRP** — `core` (utilities) · `bots/*` (each bot) · `cli/` (entrypoints) · `data/` (signatures) are separate.
+- **Unified CLI** — the top-level `stayawake.cli` package is the terse, security-only `saw` (and `stayawake`) command; one module per verb under `cli/commands/`, each routing to the **same** `bots/security` service the legacy `stayawake-security-*` scripts call. The legacy per-bot `cli/` scripts stay frozen (CI/Docker depend on them); health remains remote-only. See [CLI command guide](CLI.md).
 - **DRY** — `core` (+ `core/adapters`) is reused by both bots; console scripts reuse the thin `main()`s; one packaged signature source.
 - **Reusability / distributability** — `pip install stayawakebot` gives a self-contained scanner with console commands; the worm-scan Action installs it instead of cloning.
 - **Maintainability / collaboration** — standard modern `src/` layout, `pyproject.toml` single source of truth, `CONTRIBUTING.md`, tests mirror `src`, importable without path tricks.
