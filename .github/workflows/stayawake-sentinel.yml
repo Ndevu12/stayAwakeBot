@@ -10,6 +10,7 @@ on:
         required: false
         default: 'config/urls.yml'
   push:
+    branches: [main]      # only on main — never commit reports onto feature/PR branches
     paths:
       - 'config/urls.yml'
 

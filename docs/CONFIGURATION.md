@@ -10,6 +10,7 @@ settings:            # global defaults
   alert_on_failure: true
   alert_on_recovery: true
   consecutive_failures_before_alert: 1
+  consecutive_healthy_before_recovery: 1   # recovery debounce (defaults to the failure threshold)
 urls:
   - name: Example
     url: https://example.com
@@ -28,7 +29,12 @@ urls:
 - `alert_on_failure` (bool) — enable failure alerts
 - `alert_on_recovery` (bool) — enable recovery alerts
 - `consecutive_failures_before_alert` (int) — require this many consecutive failures before alerting
+- `consecutive_healthy_before_recovery` (int, optional) — require this many consecutive healthy checks before declaring recovery (debounces flapping endpoints; defaults to `consecutive_failures_before_alert`)
 - `reports_dir` (string, optional) — where reports are written (default `reports`); also settable per run with `--reports-dir`
+
+### GitHub issue alerting (health bot)
+
+The sentinel keeps **one self-updating issue per project** (label `stayawakebot-sentinel`), found by a stable hidden marker in the body rather than the title. While a project is down the issue body is **refreshed silently** (edits don't notify); a comment is posted **only on state transitions** — the first DOWN (issue opened) and recovery (one comment, then the issue is **closed**). The body names the *failing dimension* (status / latency / keyword / TLS) and carries a collapsed incident log of recent transitions, so the tracker shows only active incidents instead of one issue per run.
 
 **`urls`** (list of URLs to check)
 - `name` (required) — friendly name
