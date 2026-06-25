@@ -30,6 +30,10 @@ All notable changes to this project are documented here. The format is based on
 - This changelog.
 
 ### Changed
+- **Minimum Python lowered to 3.11** (`requires-python >=3.11`, was `>=3.13`), with a CI test
+  matrix across **3.11–3.14** so the supported range is verified on every push. The code never
+  needed 3.13, so this fixes the confusing `pip install` failure on 3.11/3.12. The published
+  wheel is unchanged (pure-Python — one artifact for every supported version).
 - **Health alerting now keeps one self-updating issue per project** instead of opening a new
   `[DOWN]` issue every run. The GitHub issue is the source of truth (found by a stable hidden
   marker, not a history flag), so a lost/rebuilt history can't produce duplicates: while a

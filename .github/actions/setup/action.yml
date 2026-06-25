@@ -1,11 +1,29 @@
 name: 'Set up StayAwakeBot toolchain'
-description: 'Install Python with a pip cache, then install this repo as a package. Single source of truth for the CI toolchain (the version lives in .python-version).'
+description: 'Install Python with a pip cache, then install this repo as a package. Defaults to .python-version (single source for non-matrix jobs); a caller can override the version, e.g. the CI test matrix.'
 author: 'StayAwakeBot'
+
+inputs:
+  python-version:
+    description: 'Explicit Python version (e.g. a CI matrix minor). When empty, falls back to .python-version.'
+    required: false
+    default: ''
 
 runs:
   using: 'composite'
   steps:
-    - name: Set up Python
+    # Matrix path: a caller (e.g. ci.yml's 3.11–3.14 matrix) requested an explicit minor.
+    - name: Set up Python (explicit version)
+      if: inputs.python-version != ''
+      uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1   # v6.3.0
+      with:
+        python-version: ${{ inputs.python-version }}
+        check-latest: true                      # always fetch the newest patch of that minor
+        cache: 'pip'
+        cache-dependency-path: pyproject.toml
+
+    # Default path: non-matrix jobs (release, sentinels) use the single source of truth.
+    - name: Set up Python (.python-version)
+      if: inputs.python-version == ''
       uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1   # v6.3.0
       with:
         python-version-file: .python-version   # single source for the CI Python version
