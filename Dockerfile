@@ -69,11 +69,11 @@ ENV STAYAWAKE_REPORTS_DIR=/tmp/stayawake
 
 # Mount the repository to scan at /repo (read-only is fine for scanning), e.g.:
 #   docker run --rm -v "$PWD:/repo:ro" ghcr.io/ndevu12/stayawakebot \
-#     stayawake-security-scan --local-only --fail-on-findings
+#     saw scan --local --fail
 # To keep the report on the host, mount a writable dir and run as your own uid so the
 # bind-mount is writable:
 #   docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/repo" \
-#     ghcr.io/ndevu12/stayawakebot stayawake-security-scan --local-only --reports-dir /repo/reports
-# The package ships several console scripts, so there is no single ENTRYPOINT — name the
-# command you want. A bare `docker run` prints the security scanner's help.
-CMD ["stayawake-security-scan", "--help"]
+#     ghcr.io/ndevu12/stayawakebot saw scan --local --reports-dir /repo/reports
+# The package ships several console scripts (saw, plus the legacy stayawake-*), so there is no
+# single ENTRYPOINT — name the command you want. A bare `docker run` prints the saw CLI help.
+CMD ["saw", "--help"]
