@@ -29,6 +29,17 @@ docker run --rm -v "$PWD:/repo:ro" ghcr.io/ndevu12/stayawakebot \
 docker run --rm ghcr.io/ndevu12/stayawakebot stayawake-health-check --help
 ```
 
+The container runs as a non-root user, so a host bind-mount isn't writable by it: the scan's
+verdict is its **exit code** (`0`/`1`), and by default the report is written to a container
+path (`STAYAWAKE_REPORTS_DIR`, `/tmp/stayawake` in the image) rather than the read-only mount.
+To keep the report on the host, mount a writable dir and run as your own user:
+
+```bash
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/repo" \
+  ghcr.io/ndevu12/stayawakebot \
+  stayawake-security-scan --local-only --reports-dir /repo/reports
+```
+
 Pin a version (`ghcr.io/ndevu12/stayawakebot:0.1.0`) or a commit (`:sha-<commit>`) for
 reproducibility; `:latest` tracks the newest release. To build it yourself:
 

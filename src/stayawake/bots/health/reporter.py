@@ -5,10 +5,11 @@ Single responsibility: transform `latest.json` into human/machine reports.
 """
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
-from stayawake.core.io import read_json, write_json
+from stayawake.core.io import read_json, write_json, resolve_writable_dir
 
 
 def compute_uptime(url_name: str, history: list, cutoff: datetime) -> float:
@@ -71,12 +72,14 @@ def _build_markdown(dt: datetime, results: list, healthy: int, avg_resp, status:
 
 
 def generate(latest_path: str | Path = "reports/latest.json",
-             reports_dir: str | Path = "reports") -> None:
+             reports_dir: str | Path | None = None) -> None:
     latest = read_json(latest_path)
     if latest is None:
         print("latest.json not found; run checker first")
         return
-    reports_dir = Path(reports_dir)
+    reports_dir = resolve_writable_dir(
+        reports_dir or os.environ.get("STAYAWAKE_REPORTS_DIR") or "reports",
+        label="health reports")
     results = latest.get("results", [])
     generated_at = latest.get("generated_at")
 
