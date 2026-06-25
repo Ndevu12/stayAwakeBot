@@ -1,4 +1,4 @@
-# Security scan — 2026-06-25T07:48:44.576185+00:00
+# Security scan — 2026-06-25T07:56:18.051174+00:00
 
 **1 targets** · 1 infected · 29 findings (14 critical, 12 high)
 
