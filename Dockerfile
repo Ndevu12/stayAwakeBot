@@ -60,9 +60,20 @@ RUN pip install --no-cache-dir /tmp/*.whl && rm -f /tmp/*.whl
 
 WORKDIR /repo
 
+# Default reports to a container-internal path the runtime user can always write — a host
+# bind-mount (e.g. -v "$PWD:/repo:ro") is owned by the host uid and isn't writable by
+# `sentinel`, so the verdict (exit code) shouldn't depend on persisting a report there.
+# Override with --reports-dir or this var; report writing also degrades gracefully if the
+# chosen dir turns out unwritable.
+ENV STAYAWAKE_REPORTS_DIR=/tmp/stayawake
+
 # Mount the repository to scan at /repo (read-only is fine for scanning), e.g.:
 #   docker run --rm -v "$PWD:/repo:ro" ghcr.io/ndevu12/stayawakebot \
 #     stayawake-security-scan --local-only --fail-on-findings
+# To keep the report on the host, mount a writable dir and run as your own uid so the
+# bind-mount is writable:
+#   docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/repo" \
+#     ghcr.io/ndevu12/stayawakebot stayawake-security-scan --local-only --reports-dir /repo/reports
 # The package ships several console scripts, so there is no single ENTRYPOINT — name the
 # command you want. A bare `docker run` prints the security scanner's help.
 CMD ["stayawake-security-scan", "--help"]
