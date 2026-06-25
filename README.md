@@ -24,12 +24,13 @@ commit reports back to the repository — the same packaged code in both places.
 pip install stayawakebot                                            # from PyPI (released versions)
 # or the latest from source:
 pip install "stayawakebot @ git+https://github.com/Ndevu12/stayAwakeBot@main"
-stayawake-health-check  --config config/urls.yml                    # uptime check
-stayawake-security-scan --config config/security.yml --local-only   # worm scan
+stayawake-health-check  --config config/urls.yml                    # uptime check (remote-only bot)
+saw scan --config config/security.yml --local                       # worm scan (local security CLI)
 ```
 
-> The distribution is published as **`stayawakebot`** (the name `stayawake` is taken on
-> PyPI by an unrelated project); the import package and `stayawake-*` commands are unchanged.
+> The distribution is published as **`stayawakebot`** (the name `stayawake` is taken on PyPI by
+> an unrelated project). Local security runs through the terse **`saw`** command (see the
+> [CLI guide](docs/CLI.md)); the legacy `stayawake-*` console scripts are unchanged and still work.
 
 ## Gate any repo's CI (GitHub Action)
 
@@ -59,7 +60,7 @@ Prefer not to install a Python toolchain at all? Pull the image and scan a mount
 
 ```bash
 docker run --rm -v "$PWD:/repo:ro" ghcr.io/ndevu12/stayawakebot \
-  stayawake-security-scan --local-only --fail-on-findings
+  saw scan --local --fail
 ```
 
 The exit code is the verdict (`0` clean, `1` findings). To keep the report file too, mount a
@@ -68,7 +69,7 @@ writable dir and run as your own user so the bind-mount is writable:
 ```bash
 docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/repo" \
   ghcr.io/ndevu12/stayawakebot \
-  stayawake-security-scan --local-only --reports-dir /repo/reports
+  saw scan --local --reports-dir /repo/reports
 ```
 
 Tags: `:latest`, `:X.Y.Z`, `:X.Y`, and `:sha-<commit>`. The image runs as a non-root user, is
@@ -76,6 +77,7 @@ built from the same wheel published to PyPI, and ships SLSA provenance + SBOM at
 
 ## Documentation
 
+- [CLI command guide](docs/CLI.md) — the `saw` security commands (scan, run, fix, audit, …)
 - [Usage](docs/USAGE.md) — install, run both bots, secrets, GitHub Actions, deploy your own
 - [Configuration & Reports](docs/CONFIGURATION.md) — config file fields and report formats
 - [Architecture](docs/ARCHITECTURE.md) — package layout and design principles

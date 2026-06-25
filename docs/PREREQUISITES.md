@@ -29,5 +29,5 @@ The console scripts and configuration are described in [USAGE.md](USAGE.md).
 A prebuilt image is published to GHCR, so Docker alone is enough:
 
 ```bash
-docker run --rm ghcr.io/ndevu12/stayawakebot:latest stayawake-security-scan --help
+docker run --rm ghcr.io/ndevu12/stayawakebot:latest saw scan --help
 ```
