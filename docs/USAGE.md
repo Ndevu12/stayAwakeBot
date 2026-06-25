@@ -25,7 +25,7 @@ command; mount the repository to scan at `/repo`:
 
 ```bash
 docker run --rm -v "$PWD:/repo:ro" ghcr.io/ndevu12/stayawakebot \
-  stayawake-security-scan --local-only --fail-on-findings
+  saw scan --local --fail
 docker run --rm ghcr.io/ndevu12/stayawakebot stayawake-health-check --help
 ```
 
@@ -37,7 +37,7 @@ To keep the report on the host, mount a writable dir and run as your own user:
 ```bash
 docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/repo" \
   ghcr.io/ndevu12/stayawakebot \
-  stayawake-security-scan --local-only --reports-dir /repo/reports
+  saw scan --local --reports-dir /repo/reports
 ```
 
 Pin a version (`ghcr.io/ndevu12/stayawakebot:0.1.0`) or a commit (`:sha-<commit>`) for
@@ -66,10 +66,14 @@ stayawake-health-check --config config/urls.yml --fail-on-unhealthy
 
 ## Security bot — worm hunting
 
+The local security CLI is **`saw`** (see the [CLI guide](CLI.md)). Run the stages individually,
+or `saw run` to do scan → report → alert in one pass:
+
 ```bash
-stayawake-security-scan --config config/security.yml --local-only   # scan local repos → reports/security/latest.json
-stayawake-security-report                                           # write security status.json
-stayawake-security-alert                                            # Slack + GitHub issue on findings
+saw scan --config config/security.yml --local   # scan local repos → reports/security/latest.json
+saw report                                       # write security status.json
+saw alert                                        # Slack + GitHub issue on findings
+saw run                                          # …or all three at once
 ```
 
 ### Ad-hoc local scanning (no token, no config)
@@ -79,26 +83,26 @@ for cloning private remotes or opening PRs. Point the scanner at paths, or just 
 inside a repo:
 
 ```bash
-stayawake-security-scan                      # no args → scans the repo you're standing in
-stayawake-security-scan ~/dev/some-project   # scan a specific repo (or a folder of repos)
-stayawake-security-scan ./a ./b --path ./c   # several at once (positional and/or --path)
+saw scan                      # no args → scans the repo you're standing in
+saw scan ~/dev/some-project   # scan a specific repo (or a folder of repos)
+saw scan ./a ./b --path ./c   # several at once (positional and/or --path)
 ```
 
 A path may be a single repository or a directory containing many — the scanner walks it
-for git repos. Explicit paths imply `--local-only` (nothing is sent to GitHub). With no
+for git repos. Explicit paths imply `--local` (nothing is sent to GitHub). With no
 paths and nothing configured, it scans the current repository (found by walking up to the
-nearest `.git`), so a bare `stayawake-security-scan` "just works" after `pip install`.
+nearest `.git`), so a bare `saw scan` "just works" after `pip install`.
 
 Remediation is **safe by default (dry-run)**:
 
 ```bash
-stayawake-security-remediate                    # dry-run: show what would be fixed
-stayawake-security-remediate --apply            # strip/quarantine worm artifacts on a security/auto-clean branch
-stayawake-security-remediate --apply --open-pr  # also open one rolling PR per repo
-stayawake-security-remediate --remote           # operate on remote GitHub targets from config
+saw fix                    # dry-run: show what would be fixed
+saw fix --apply            # strip/quarantine worm artifacts on a security/auto-clean branch
+saw fix --apply --pr       # also open one rolling PR per repo
+saw fix --remote           # operate on remote GitHub targets from config
 ```
 
-**Read-only fallback (remediation ladder):** when `--open-pr` / `--remote` can't push a
+**Read-only fallback (remediation ladder):** when `--pr` / `--remote` can't push a
 fix branch (you only have read access to the target), StayAwakeBot doesn't discard the
 fix — it degrades down a ladder:
 
@@ -112,8 +116,8 @@ fix — it degrades down a ladder:
 So remediation always produces something actionable — a fork PR, a patch, a heads-up, or
 some combination — even without write access to the target.
 
-Drop `--local-only` to also scan the GitHub users/orgs listed in `config/security.yml`.
-Use `--fail-on-findings` to make `scan` exit non-zero (the CI gate uses this).
+Drop `--local` to also scan the GitHub users/orgs listed in `config/security.yml`.
+Use `--fail` to make `scan` exit non-zero (for CI gating).
 See [SECURITY_ARCHITECTURE.md](SECURITY_ARCHITECTURE.md) for how detection / remediation work.
 
 Reports go to `reports/security/` by default. To run a scan **without touching the
@@ -121,8 +125,8 @@ committed reports** (local experiments, CI, scanning someone else's repo), redir
 output — via `--reports-dir` or `settings.reports_dir` in config:
 
 ```bash
-stayawake-security-scan --local-only --reports-dir /tmp/sab-reports   # writes only there
-stayawake-health-check  --reports-dir /tmp/sab-reports                # same for the health bot
+saw scan --local --reports-dir /tmp/sab-reports                      # writes only there
+stayawake-health-check  --reports-dir /tmp/sab-reports               # same for the health bot
 ```
 
 ## Local defense-in-depth (hooks + audit)
@@ -147,8 +151,8 @@ Audit the machine's security posture (cached GitHub credential, VS Code auto-run
 Workspace Trust), and optionally a repo's branch-protection gate:
 
 ```bash
-stayawake-security-audit                       # advisory; add --fail-on-issues for scripts/CI
-stayawake-security-audit --repo owner/name     # also check that Worm Guard is a required check
+saw audit                       # advisory; add --fail for scripts/CI
+saw audit --repo owner/name     # also check that Worm Guard is a required check
 ```
 
 `--repo` needs a GitHub credential (an env token or a `gh auth login` session — see
@@ -193,13 +197,13 @@ scope is in parentheses):
 
 | Command | Needs a token? | Permission (classic) |
 | --- | --- | --- |
-| `stayawake-security-scan <path>` / public remotes | no | — |
-| `stayawake-security-scan` private remotes | read | Contents + Metadata: Read (`repo`) |
-| `stayawake-security-remediate --open-pr` / `--remote` | write | Contents + Pull requests: R/W (`repo`) |
+| `saw scan <path>` / public remotes | no | — |
+| `saw scan` private remotes | read | Contents + Metadata: Read (`repo`) |
+| `saw fix --pr` / `--remote` | write | Contents + Pull requests: R/W (`repo`) |
 | ↳ fork fallback (cross-fork PR when you can't push upstream) | fork + PR | Pull requests: R/W on your fork (`public_repo` / `repo`) |
 | ↳ patch/issue fallback (no write at all) | none / issues | Issues: R/W for the notify issue (`repo` / `public_repo`); patch needs nothing |
-| `stayawake-security-alert` (GitHub issue) | write | Issues: R/W (`repo` / `public_repo`) |
-| `stayawake-security-audit --repo` | read | Administration: Read (`repo`) |
+| `saw alert` (GitHub issue) | write | Issues: R/W (`repo` / `public_repo`) |
+| `saw audit --repo` | read | Administration: Read (`repo`) |
 
 ### GitHub App (organization **or** personal account)
 
@@ -224,8 +228,8 @@ export GH_APP_ID=123456
 export GH_APP_PRIVATE_KEY="$(cat your-app.private-key.pem)"   # or GH_APP_PRIVATE_KEY_PATH=…
 # optional; auto-detected when the App has exactly one installation:
 export GH_APP_INSTALLATION_ID=98765
-stayawake-security-scan               # scans every repo the installation can see
-stayawake-security-remediate --remote # opens a dedup'd fix PR per infected install repo
+saw scan               # scans every repo the installation can see
+saw fix --remote       # opens a dedup'd fix PR per infected install repo
 ```
 
 If the App env is set without the extra installed, StayAwakeBot prints a clear

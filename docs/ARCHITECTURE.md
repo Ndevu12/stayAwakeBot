@@ -33,11 +33,11 @@ docs/  prevent/  reports/  .github/  CONTRIBUTING.md
 ## Install & run
 ```bash
 pip install -e .            # or: pip install .
-stayawake-health-check   --config config/urls.yml
+stayawake-health-check   --config config/urls.yml    # health bot is remote-only; scripts kept for CI
 stayawake-health-report
 stayawake-health-alert
-stayawake-security-scan  --config config/security.yml
-stayawake-security-remediate [--apply] [--open-pr] [--remote]
+saw scan  --config config/security.yml               # local security CLI (see docs/CLI.md)
+saw fix [--apply] [--pr] [--remote]
 python -m unittest discover -s tests      # tests (package must be installed)
 ```
 (`python -m stayawake.bots.<bot>.cli.<action>` works too.)
