@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Entrypoint: security badge + status. `python -m security.cli.report`."""
+"""Entrypoint: security status report. `python -m security.cli.report`."""
 from __future__ import annotations
 
 import argparse

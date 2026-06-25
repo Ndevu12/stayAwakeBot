@@ -141,6 +141,9 @@ jobs:
         with:
           repository-url: https://test.pypi.org/legacy/
           attestations: true
+          # TestPyPI forbids re-uploading an existing version; a dispatch dry-run of a
+          # version already there (e.g. one bootstrapped manually) should no-op, not fail.
+          skip-existing: true
 
   publish-pypi:
     name: Publish to PyPI
@@ -160,6 +163,9 @@ jobs:
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b   # v1.14.0
         with:
           attestations: true   # PEP 740 signed provenance, displayed on the PyPI page
+          # A re-run of a tag whose files already published should no-op, not hard-fail.
+          # (New versions still come from a new tag — PyPI rejects changed re-uploads.)
+          skip-existing: true
 
   github-release:
     name: Create GitHub Release
