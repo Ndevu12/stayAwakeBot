@@ -6,10 +6,9 @@ a trimmed machine-readable status, mirroring the availability split.
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
-from stayawake.core.io import read_json, write_json, resolve_writable_dir
+from stayawake.core.io import read_json, write_json, resolve_reports_dir
 
 
 def generate(latest_path: str | Path = "reports/security/latest.json",
@@ -28,9 +27,8 @@ def generate(latest_path: str | Path = "reports/security/latest.json",
             for r in latest.get("results", []) if r.get("infected")
         ],
     }
-    rdir = resolve_writable_dir(
-        reports_dir or os.environ.get("STAYAWAKE_REPORTS_DIR") or "reports/security",
-        label="security reports")
+    rdir = resolve_reports_dir(reports_dir, default="reports/security",
+                               label="security reports")
     write_json(rdir / "status.json", status)
     print(f"Security status updated ({summary.get('infected', 0)} infected, "
           f"{summary.get('findings', 0)} findings).")
