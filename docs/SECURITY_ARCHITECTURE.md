@@ -6,7 +6,7 @@ threats are added as configuration, not code.
 
 ## Pillars
 - **Detect** — scan local & remote repos for known indicators (IoCs) and evil merges.
-- **Report/Alert** — JSON + markdown + badge; Slack + GitHub issues.
+- **Report/Alert** — JSON + markdown; Slack + GitHub issues.
 - **Auto-fix** — quarantine/strip via PRs, never force-push (dry-run by default).
 - **Prevent** — reusable CI gate + pre-commit + CI-token hardening.
 
@@ -115,7 +115,7 @@ wasteful and reactive.
 | Where | Trigger | What runs |
 |-------|---------|-----------|
 | Hosted — gate | `pull_request` + `push` (code paths) | `worm-guard` blocks infection from landing (read-only, fail-on-findings) |
-| Hosted — sentinel | `push` to `main` (merge) + `workflow_dispatch` + weekly backstop | scan the repo, refresh badge/status, alert, commit report |
+| Hosted — sentinel | `push` to `main` (merge) + `workflow_dispatch` + weekly backstop | scan the repo, refresh status, alert, commit report |
 | Local — CLI | on demand | `stayawake-security-scan` over all dev roots; `stayawake-security-remediate [--apply] [--open-pr]` fixes each repo |
 | Availability | `schedule` (*/5) | uptime genuinely needs polling — the one place a clock is correct |
 

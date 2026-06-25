@@ -7,7 +7,7 @@ A distributable (`pip install`-able) toolkit: two bots as packages under one
 ```
 src/stayawake/                     ← single import root (installable; no name clashes)
   core/        io · timeutil · config · git          # shared utilities (DRY)
-    adapters/  http_client · github_api · slack · badge   # external I/O, one per file (SRP)
+    adapters/  http_client · github_api · slack   # external I/O, one per file (SRP)
   bots/
     health/    models · config · checker · reporter · alerter · service · cli/   # uptime sentinel
     security/  models · signatures · scanner · service · reporter · alerter · remediator · pr

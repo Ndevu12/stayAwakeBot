@@ -75,5 +75,5 @@ Reports are written under `reports/` and committed back to the repo.
 | `reports/security/latest.{json,md}` | latest security scan results |
 
 The checker writes `latest.json` and appends to `history.json`; the **reporter** produces
-`status.json`, the dated markdown report, and the badge. (The checker does not write per-run
+`status.json` and the dated markdown report. (The checker does not write per-run
 JSON files.)
