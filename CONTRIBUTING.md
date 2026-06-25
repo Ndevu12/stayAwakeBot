@@ -17,7 +17,8 @@ ships — so the matrix evolves on its own. The packaged **floor** is `requires-
 `pyproject.toml`; keep the classifiers and the CI matrix in sync with it. The CI/dev toolchain
 default lives in one place, [`.python-version`](.python-version) (read by `actions/setup-python`) —
 bump it there, not in workflow files. (The `worm-scan` action stays pinned explicitly so it
-remains self-contained for repos that adopt the gate.)
+remains self-contained for repos that adopt the gate.) The user-facing version requirement
+lives in [`docs/PREREQUISITES.md`](docs/PREREQUISITES.md).
 
 ## Layout (one responsibility per folder)
 ```
