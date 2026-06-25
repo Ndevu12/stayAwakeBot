@@ -63,12 +63,12 @@ the OIDC exchange is rejected.
    # TestPyPI lacks our deps, so allow PyPI as a fallback index:
    pip install --index-url https://test.pypi.org/simple/ \
                --extra-index-url https://pypi.org/simple/ stayawakebot
-   stayawake-security-scan --help
+   saw scan --help
    ```
 3. Tag and push:
    ```bash
-   git tag v0.1.0          # version is derived from this tag by hatch-vcs
-   git push origin v0.1.0
+   git tag v0.1.0          # MUST be vX.Y.Z (a malformed tag like v.1.4 yields a dev/local
+   git push origin v0.1.0  # version PyPI rejects); hatch-vcs derives the version from this tag
    ```
 4. Approve the `pypi` environment deployment when prompted.
 5. The workflow publishes to PyPI (with PEP 740 attestations) and creates the GitHub Release
@@ -80,7 +80,7 @@ the OIDC exchange is rejected.
 - Clean-room install:
   ```bash
   pip install stayawakebot==<version>
-  stayawake-security-scan --help
+  saw scan --help
   ```
 - `pip download stayawakebot==<version>` then `twine check` the artifacts.
 
@@ -142,7 +142,7 @@ version via `--build-arg VERSION` → `SETUPTOOLS_SCM_PRETEND_VERSION` (the gene
 
 Verify a published image:
 ```bash
-docker run --rm ghcr.io/ndevu12/stayawakebot:<version> stayawake-security-scan --help
+docker run --rm ghcr.io/ndevu12/stayawakebot:<version> saw scan --help
 docker buildx imagetools inspect ghcr.io/ndevu12/stayawakebot:<version>   # see provenance/SBOM
 ```
 

@@ -63,8 +63,10 @@ signatures (data) ─► signature engine ─► matchers ─► findings ─►
 - `security/cli/report.py` · `security/cli/alert.py` · `security/cli/remediate.py` — report, alert, remediate.
 - `security/cli/audit.py` (+ `security/hygiene.py`) — local posture + branch-protection audit.
 
-Installed as console scripts: `stayawake-security-scan` · `-report` · `-alert` · `-remediate` · `-audit`
-(or `python -m stayawake.bots.security.cli.<action>`).
+Run via the terse **`saw`** CLI: `saw scan` · `saw report` · `saw alert` · `saw fix` · `saw audit`
+(and `saw run` for the scan→report→alert pipeline) — see the [CLI guide](CLI.md). The legacy
+`stayawake-security-*` console scripts remain installed (frozen for CI/Docker) and route to the
+same code.
 
 ## Testing
 `tests/bots/security/` — inert fixtures (clean vs infected) covering every matcher, plus a real
@@ -72,19 +74,19 @@ evil-merge git fixture. Run (package installed): `python -m unittest discover -s
 
 ## Remediation
 
-`stayawake-security-remediate [--apply]` — dry-run by default. With
+`saw fix [--apply]` — dry-run by default. With
 `--apply` it strips/quarantines worm artifacts (originals backed up to `.malware-quarantine/`)
 and commits the fix to a `security/auto-clean-<stamp>` branch — never main, never force-pushed.
 Evil-merge findings are reported as manual (need a history rewrite).
 
-`--apply --open-pr` pushes a stable `security/auto-clean` branch and opens **one rolling
+`--apply --pr` pushes a stable `security/auto-clean` branch and opens **one rolling
 PR per repo**, targeting the default branch for review. Before opening it checks the API for
 an existing open PR from that branch and updates it instead of creating a duplicate. Work is
 isolated in a git worktree; it never commits to or force-pushes the default branch. After
 applying, it **re-scans and aborts (no PR) if anything is still detected**, and the commit
 message / PR body describe only what was *actually* changed.
 
-`stayawake-security-audit [--repo owner/name]` checks local posture (cached GitHub credential,
+`saw audit [--repo owner/name]` checks local posture (cached GitHub credential,
 VS Code auto-run / Workspace Trust) and, with a token + `--repo`, that the default branch is
 protected and the **Worm Guard** check is required.
 
@@ -116,7 +118,7 @@ wasteful and reactive.
 |-------|---------|-----------|
 | Hosted — gate | `pull_request` + `push` (code paths) | `worm-guard` blocks infection from landing (read-only, fail-on-findings) |
 | Hosted — sentinel | `push` to `main` (merge) + `workflow_dispatch` + weekly backstop | scan the repo, refresh status, alert, commit report |
-| Local — CLI | on demand | `stayawake-security-scan` over all dev roots; `stayawake-security-remediate [--apply] [--open-pr]` fixes each repo |
+| Local — CLI | on demand | `saw scan` over all dev roots; `saw fix [--apply] [--pr]` fixes each repo |
 | Availability | `schedule` (*/5) | uptime genuinely needs polling — the one place a clock is correct |
 
 Org-wide coverage is **distributed**: every repo runs its own `worm-guard` on its own

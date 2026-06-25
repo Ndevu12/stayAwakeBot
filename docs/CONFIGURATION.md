@@ -55,8 +55,8 @@ at a custom DB with `settings.signatures_path`. Full field reference and the lay
 design live in [SECURITY_ARCHITECTURE.md](SECURITY_ARCHITECTURE.md).
 
 `targets.local` is **optional**: for ad-hoc local scans you can pass paths on the command
-line (`stayawake-security-scan <path>…` / `--path`), and a bare `stayawake-security-scan`
-with nothing configured scans the current repository. A token is never needed for local
+line (`saw scan <path>…` / `--path`), and a bare `saw scan` with nothing configured scans
+the current repository. A token is never needed for local
 scanning — see [USAGE.md](USAGE.md#ad-hoc-local-scanning-no-token-no-config).
 
 Each `allowlist` entry **must name a `signature`** (optionally scoped by `path_glob`) — a
