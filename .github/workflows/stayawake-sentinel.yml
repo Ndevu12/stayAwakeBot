@@ -57,7 +57,7 @@ jobs:
         if: always()
         uses: ./.github/actions/commit-reports
         with:
-          paths: reports/ README.md
+          paths: reports/
           message-prefix: "chore(sentinel): availability report"
           author-name: StayAwakeBot Sentinel
           author-email: bot@stayawake.local

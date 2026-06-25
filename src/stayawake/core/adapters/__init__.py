@@ -1,1 +1,1 @@
-"""External I/O adapters (HTTP, GitHub, Slack, badge) — one integration per file."""
+"""External I/O adapters (HTTP, GitHub, Slack) — one integration per file."""

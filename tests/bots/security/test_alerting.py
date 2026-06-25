@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Security alerter (issue open/close decision) + security badge tests."""
+"""Security alerter: issue open/close decision tests."""
 from __future__ import annotations
 
 import json
@@ -10,7 +10,6 @@ from unittest import mock
 
 
 from stayawake.bots.security import alerter                       # noqa: E402
-from stayawake.core.adapters.badge import update_security_badge   # noqa: E402
 
 LATEST = {
     "generated_at": "t",
@@ -48,18 +47,6 @@ class TestAlerter(unittest.TestCase):
                         "should open an issue for the infected repo")
         self.assertTrue(any(m == "PATCH" and p.endswith("/issues/7") for m, p in self.calls),
                         "should close the stale issue for the now-clean repo")
-
-
-class TestSecurityBadge(unittest.TestCase):
-    def test_clean_vs_findings(self):
-        p = Path(tempfile.mkdtemp()) / "README.md"
-        p.write_text("# T\n")
-        update_security_badge(p, infected=0, findings=0)
-        self.assertIn("security-clean-brightgreen", p.read_text())
-        update_security_badge(p, infected=2, findings=5)
-        txt = p.read_text()
-        self.assertIn("security-5%20findings-red", txt)
-        self.assertNotIn("security-clean", txt)   # replaced, not duplicated
 
 
 if __name__ == "__main__":

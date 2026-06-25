@@ -2,7 +2,7 @@ name: Security Sentinel — scan, report, alert (event-driven)
 
 # Security state only changes when code changes, so this is EVENT-DRIVEN, not on a
 # clock. PRs/pushes are gated by worm-guard.yml; this runs after code lands on main
-# (and on demand) to refresh the badge/status, alert on anything that slipped the
+# (and on demand) to refresh status, alert on anything that slipped the
 # gate, and keep a committed report. Org-wide coverage is distributed: each repo runs
 # its own worm-guard on its own events. For bulk local scanning + fixes, use the CLI.
 on:
@@ -16,7 +16,7 @@ on:
     - cron: '0 6 * * 1'   # weekly backstop: catch new signatures applied to old code
 
 permissions:
-  contents: write                  # commit security reports + badge
+  contents: write                  # commit security reports
   issues: write                    # open/close finding issues
 
 # Shared with the availability sentinel so the two never push to main concurrently.
@@ -52,7 +52,7 @@ jobs:
           echo "SCAN_EXIT=$?" >> $GITHUB_ENV
           set -e
 
-      - name: Update badge + status
+      - name: Update status
         if: always()
         run: stayawake-security-report
 
@@ -64,11 +64,11 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: stayawake-security-alert
 
-      - name: Commit security reports + badge
+      - name: Commit security reports
         if: always()
         uses: ./.github/actions/commit-reports
         with:
-          paths: reports/security README.md
+          paths: reports/security
           message-prefix: "chore(security): scan report"
           author-name: StayAwakeBot Security Sentinel
           author-email: security-bot@stayawake.local

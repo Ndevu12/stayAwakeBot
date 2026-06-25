@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
-"""Availability unit tests (config merge, badge, uptime) — no network."""
+"""Availability unit tests (config merge, uptime) — no network."""
 from __future__ import annotations
 
-import tempfile
 import unittest
 from datetime import datetime, timezone, timedelta
-from pathlib import Path
 
 
 from stayawake.bots.health.config import merge_settings          # noqa: E402
 from stayawake.bots.health.reporter import compute_uptime        # noqa: E402
-from stayawake.core.adapters.badge import update_readme_badge          # noqa: E402
 
 
 class TestConfig(unittest.TestCase):
@@ -29,18 +26,6 @@ class TestUptime(unittest.TestCase):
             {"generated_at": now.isoformat(), "urls": [{"name": "a", "healthy": False}]},
         ]
         self.assertEqual(compute_uptime("a", history, now - timedelta(days=30)), 50.0)
-
-
-class TestBadge(unittest.TestCase):
-    def test_badge_inserted_and_colored(self):
-        p = Path(tempfile.mkdtemp()) / "README.md"
-        p.write_text("# Title\n")
-        update_readme_badge(p, 2, 2)
-        txt = p.read_text()
-        self.assertIn("STAYAWAKEBOT_BADGE", txt)
-        self.assertIn("brightgreen", txt)
-        update_readme_badge(p, 1, 2)
-        self.assertIn("-red", p.read_text())
 
 
 if __name__ == "__main__":
