@@ -30,6 +30,14 @@ All notable changes to this project are documented here. The format is based on
 - This changelog.
 
 ### Changed
+- **Health alerting now keeps one self-updating issue per project** instead of opening a new
+  `[DOWN]` issue every run. The GitHub issue is the source of truth (found by a stable hidden
+  marker, not a history flag), so a lost/rebuilt history can't produce duplicates: while a
+  project is down the body is refreshed **silently**, a comment is posted **only on state
+  transitions** (first DOWN, then recovery), and the issue is **closed on recovery** (with a
+  configurable `consecutive_healthy_before_recovery` debounce). The body now names the **failing
+  dimension** (status / latency / keyword / TLS) — previously a keyword/latency/TLS failure showed
+  a bare "DOWN" with no reason — and includes a collapsed incident log of recent transitions.
 - **Lowered the minimum Python to 3.13** (`requires-python >=3.13`, was `>=3.14`) — the code
   uses no 3.14-only features, so this widens who can `pip install stayawakebot`. Verified by
   running the full test suite on a real Python 3.13 interpreter (96/96 pass).
