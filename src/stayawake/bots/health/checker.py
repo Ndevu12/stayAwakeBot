@@ -24,7 +24,7 @@ async def check_one(session: aiohttp.ClientSession, cfg: UrlCheckConfig) -> dict
         "name": cfg.name, "url": cfg.url, "checked_at": now_iso(),
         "dns_ms": None, "status_code": None, "response_ms": None,
         "redirect_count": 0, "ssl": None, "keyword_found": None,
-        "healthy": False, "error": None, "attempt": 0, "tags": cfg.tags,
+        "healthy": False, "error": None, "reason": None, "attempt": 0, "tags": cfg.tags,
     }
     sp = urlsplit(cfg.url)
     host = sp.hostname
@@ -70,7 +70,31 @@ async def check_one(session: aiohttp.ClientSession, cfg: UrlCheckConfig) -> dict
             result["error"] = f"connection_error: {e}"
         except Exception as e:  # noqa: BLE001
             result["error"] = f"error: {e}"
+    result["reason"] = None if result["healthy"] else _derive_reason(result, cfg)
     return result
+
+
+def _derive_reason(result: dict, cfg: UrlCheckConfig) -> str:
+    """Human-readable explanation of WHY a check is unhealthy (named per failing
+    dimension), so an alert can say 'keyword not found' rather than a bare 'DOWN'."""
+    if result.get("error"):
+        return result["error"]
+    parts: list[str] = []
+    sc = result.get("status_code")
+    if cfg.expected_status is not None and sc is not None and sc != cfg.expected_status:
+        parts.append(f"HTTP {sc} (expected {cfg.expected_status})")
+    rm = result.get("response_ms")
+    if cfg.max_response_ms is not None and rm is not None and rm > cfg.max_response_ms:
+        parts.append(f"slow: {rm}ms > {cfg.max_response_ms}ms")
+    if cfg.keyword is not None and result.get("keyword_found") is False:
+        parts.append(f"keyword '{cfg.keyword}' not found in body")
+    if cfg.check_ssl and cfg.url.lower().startswith("https://"):
+        info = result.get("ssl")
+        if not (isinstance(info, dict) and info.get("valid")):
+            parts.append("TLS certificate invalid or expired")
+    if sc is None and not parts:
+        parts.append("no response")
+    return "; ".join(parts) or "unhealthy"
 
 
 async def run_checks(configs: list[UrlCheckConfig]) -> list[dict]:
@@ -107,6 +131,7 @@ def append_minimal_history(results: list[dict], generated_at: str, reports_dir: 
             "name": r.get("name"), "url": r.get("url"), "dns_ms": r.get("dns_ms"),
             "healthy": bool(r.get("healthy")), "status_code": r.get("status_code"),
             "response_ms": r.get("response_ms"), "error": r.get("error"),
+            "reason": r.get("reason"),
             "checked_at": r.get("checked_at"), "tags": r.get("tags", []), "alerted": False,
         } for r in results],
     })

@@ -145,6 +145,41 @@ def create_issue(owner: str, repo: str, title: str, body: str, token: str | None
     return request(f"/repos/{owner}/{repo}/issues", method="POST", token=token, data=data)
 
 
+def update_issue(owner: str, repo: str, number: int, token: str | None,
+                 title: str | None = None, body: str | None = None,
+                 state: str | None = None) -> dict | None:
+    """PATCH an existing issue (title/body/state). Editing the body sends NO
+    notification — used to refresh a self-updating status issue silently."""
+    data: dict = {}
+    if title is not None:
+        data["title"] = title
+    if body is not None:
+        data["body"] = body
+    if state is not None:
+        data["state"] = state
+    if not data:
+        return None
+    return request(f"/repos/{owner}/{repo}/issues/{number}", method="PATCH",
+                   token=token, data=data)
+
+
+def add_issue_comment(owner: str, repo: str, number: int, body: str,
+                      token: str | None) -> dict | None:
+    """POST a comment (this DOES notify subscribers — reserve for state changes)."""
+    return request(f"/repos/{owner}/{repo}/issues/{number}/comments", method="POST",
+                   token=token, data={"body": body})
+
+
+def find_issue_by_marker(owner: str, repo: str, marker: str, token: str | None,
+                         labels: str | None = None) -> dict | None:
+    """Find one open issue whose body contains `marker` (a stable hidden tag), so the
+    sentinel can update its single per-project issue regardless of title/status churn."""
+    for it in list_open_issues(owner, repo, token, labels=labels):
+        if marker in (it.get("body") or ""):
+            return it
+    return None
+
+
 def get_branch_protection(owner: str, repo: str, branch: str,
                           token: str | None) -> dict | None:
     """Branch-protection settings for a branch, or None if unprotected/inaccessible.
