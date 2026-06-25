@@ -59,7 +59,7 @@ the OIDC exchange is rejected.
 2. (Optional but recommended) Dry-run to TestPyPI: Actions → **Release** → *Run workflow*
    (this triggers `workflow_dispatch` → `publish-testpypi`). Then verify in a clean venv:
    ```bash
-   python3.13 -m venv /tmp/v && . /tmp/v/bin/activate
+   python3 -m venv /tmp/v && . /tmp/v/bin/activate   # any supported interpreter (>=3.11)
    # TestPyPI lacks our deps, so allow PyPI as a fallback index:
    pip install --index-url https://test.pypi.org/simple/ \
                --extra-index-url https://pypi.org/simple/ stayawakebot
@@ -119,8 +119,8 @@ than a subpath here.
 ### Scanner-version coupling
 Strix installs the scanner from PyPI via its `version` input (blank = latest; pin in production).
 Bump that pin in lockstep with the moving `v1` tag so the published Action references a known,
-attested release. Note: `stayawakebot 0.1.0` requires Python `>=3.14`, so Strix's `action.yml`
-sets up Python `3.14`; lower it to `3.13` once a release built on the `>=3.13` floor ships.
+attested release. Note: `stayawakebot` requires Python `>=3.11`, so Strix's `action.yml` only
+needs to set up a `>=3.11` interpreter to run the scanner (a newer minor such as 3.14 is fine).
 
 ## Container image (GHCR — P3)
 
