@@ -61,7 +61,9 @@ jobs:
           /tmp/appenv/bin/pip install --quiet --upgrade pip
           /tmp/appenv/bin/pip install dist/*.whl
           # Audit/SBOM the app's RESOLVED dependency set; drop our own dist (not on PyPI yet).
-          /tmp/appenv/bin/pip freeze | grep -ivE '^stayawakebot==' > /tmp/app-requirements.txt
+          # `--exclude` matches by name, so it drops the project whether `pip freeze` emits it
+          # as `stayawakebot==X` or, for a wheel installed by path, `stayawakebot @ file://…`.
+          /tmp/appenv/bin/pip freeze --exclude stayawakebot > /tmp/app-requirements.txt
 
       - name: Audit dependencies for known vulnerabilities (gate)
         run: |
