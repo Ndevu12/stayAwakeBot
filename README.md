@@ -18,6 +18,8 @@ commit reports back to the repository — the same packaged code in both places.
 
 ## Quick start
 
+> **Prerequisites:** Python 3.11+ — see [docs/PREREQUISITES.md](docs/PREREQUISITES.md).
+
 ```bash
 pip install stayawakebot                                            # from PyPI (released versions)
 # or the latest from source:
