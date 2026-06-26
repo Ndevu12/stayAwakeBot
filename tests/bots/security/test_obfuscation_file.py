@@ -64,6 +64,29 @@ class TestWholeFileObfuscation(unittest.TestCase):
         self.assertLess(max(len(l) for l in line.splitlines()), 2000)
         self.assertIn(OBF, _scan({"postcss.config.mjs": line}))
 
+    def test_mutated_loader_caught_via_constructor_exec(self):
+        # #1053 durability: a re-obfuscated variant renames EVERY literal fingerprint
+        # (no _$_, no sfL, no global['!'], no fromCharCode, no numeric array) and keeps
+        # every line short + low-density, so neither a loader content signature nor the
+        # packed/entropy heuristic can fire. The ONLY thing left to catch it is the
+        # structural exec-via-constructor sink — the name-agnostic Function-constructor
+        # smuggling (`dec['constructor'](...)`) the worm family cannot rename away.
+        variant = "\n".join([
+            "const cfg = { plugins: ['@tailwindcss/postcss'] };",
+            "export default cfg;",
+            "const seed = 'inert';",
+            "const dec = function (w) { return w; };",
+            "const run = dec['constructor']('return 1');",
+            "run();",
+        ])
+        self.assertLess(max(len(l) for l in variant.splitlines()), 400)
+        self.assertIn(OBF, _scan({"postcss.config.mjs": variant}))
+
+    def test_wrapped_constructor_exec_caught(self):
+        # The exec sink wrapped across a line break is still caught.
+        self.assertTrue(
+            analyze_file("var q=function(){};\nq['constructor']\n('return 3')();\n", ".js"))
+
     # ── False positives: legit dense source / vendored context stays clean ──────
     def test_normal_big_component_clean(self):
         body = "import React from 'react';\n" + "\n".join(
@@ -82,6 +105,35 @@ class TestWholeFileObfuscation(unittest.TestCase):
     def test_low_entropy_long_array_clean(self):
         self.assertNotIn(OBF, _scan({"postcss.config.mjs": "export default {p:[" + "0," * 900 + "]};\n"}))
 
+    def test_constructor_member_access_without_call_is_clean(self):
+        # Plain ['constructor'] access (no call) is ordinary reflection — the exec-sink
+        # arm requires the bracket-string *call* form (`]` then `(`), so `.name` access
+        # must NOT trip it. Guards the false-positive boundary of the #1053 change.
+        code = "const n = obj['constructor'].name;\nexport default n;\n"
+        self.assertNotIn(OBF, _scan({"util.ts": code}))
+        self.assertFalse(analyze_file(code, ".ts"))
+
+    def test_polymorphic_clone_new_constructor_is_clean(self):
+        # FP carve-out: `new <expr>['constructor'](...)` is the same-type clone idiom
+        # (value objects / ORM entities / immutable records and their tests). The worm
+        # never prefixes its exec with `new`, so this benign family must stay clean even
+        # though it contains the bracket-string constructor call.
+        for code in (
+            "export class Shape{constructor(p){this.p=p}\n"
+            "  clone(){return new this['constructor'](this.p)}}\n",
+            "export function clone(o){return new o['constructor'](o)}\n",
+            "const copy = new doc['constructor'](doc.toObject());\nexport default copy;\n",
+        ):
+            self.assertNotIn(OBF, _scan({"model.ts": code}), code)
+            self.assertFalse(analyze_file(code, ".ts"), code)
+
+    def test_constructor_exec_without_new_still_flagged(self):
+        # The carve-out is ONLY for a directly `new`-prefixed reflective constructor.
+        # A plain (non-new) call, and a comma/whitespace splice that tries to borrow a
+        # nearby `new`, must still flag (the worm's actual exec shape).
+        self.assertTrue(analyze_file("var f=q['constructor']('return 1');\n", ".js"))
+        self.assertTrue(analyze_file("new Date(), x['constructor'](decoded);\n", ".js"))
+
     def test_vendored_and_generated_paths_suppressed(self):
         arr = "var a=[" + ",".join(["0x68"] * 40) + "];String.fromCharCode(127)"
         for path in ("lib/app.min.js", ".pnp.cjs", ".yarn/releases/yarn.cjs",
@@ -98,6 +150,10 @@ class TestWholeFileObfuscation(unittest.TestCase):
     # ── analyze_file is line-agnostic (no single long line needed) ──────────────
     def test_analyze_file_catches_wrapped_exec_sink(self):
         self.assertTrue(analyze_file("const a=1\neval(\n  atob('x')\n)\n", ".js"))
+
+    def test_analyze_file_catches_constructor_exec_sink(self):
+        # Renamed decoder reaching the Function constructor via X['constructor'](...).
+        self.assertTrue(analyze_file("var q=function(){};q['constructor']('return 2')();\n", ".js"))
 
     def test_analyze_file_clean_on_ordinary_code(self):
         code = "function add(a, b) {\n    return a + b;\n}\nexport default add;\n"
