@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-06-26T21:21:10.263290+00:00",
+  "generated_at": "2026-06-26T23:57:37.806856+00:00",
   "summary": {
     "targets": 1,
     "infected": 1,
@@ -46,7 +46,7 @@
           "path": "reports/security/latest.json",
           "description": "Obfuscated loader fingerprint \u2014 fromCharCode(127) string shuffler",
           "remediation": "strip-appended-payload",
-          "line": 42,
+          "line": 50,
           "evidence": "]]= require;String.fromCharCode(127);                                           \u2026",
           "vector": "code-loader",
           "confidence": "confirmed"
@@ -58,7 +58,7 @@
           "path": "reports/security/latest.json",
           "description": "Obfuscated loader seed variable (var/let/const _$_xxxx=)",
           "remediation": "strip-appended-payload",
-          "line": 53,
+          "line": 62,
           "evidence": "!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; var x =sfL(\\\\\\\\\\\\\\\\\\\u2026",
           "vector": "code-loader",
           "confidence": "confirmed"
@@ -70,7 +70,7 @@
           "path": "reports/security/latest.md",
           "description": "Obfuscated loader fingerprint \u2014 fromCharCode(127) string shuffler",
           "remediation": "strip-appended-payload",
-          "line": 14,
+          "line": 16,
           "evidence": "]]= require;String.fromCharCode(127);                                           \u2026",
           "vector": "code-loader",
           "confidence": "confirmed"
@@ -82,7 +82,7 @@
           "path": "reports/security/latest.md",
           "description": "Obfuscated loader seed variable (var/let/const _$_xxxx=)",
           "remediation": "strip-appended-payload",
-          "line": 17,
+          "line": 19,
           "evidence": "!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; var x =sfL(\\\\\\\\\\\\\\\\\\\u2026",
           "vector": "code-loader",
           "confidence": "confirmed"
@@ -262,7 +262,7 @@
           "path": "reports/security/latest.json",
           "description": "Obfuscated loader decoder call \u2014 the sfL decoder function",
           "remediation": "strip-appended-payload",
-          "line": 53,
+          "line": 62,
           "evidence": "t';function sfL(w){return w}; var x =sfL(\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\u2026\",           \"v\u2026",
           "vector": "code-loader",
           "confidence": "confirmed"
@@ -274,7 +274,7 @@
           "path": "reports/security/latest.json",
           "description": "Loader bootstrap assigning global['!']",
           "remediation": "strip-appended-payload",
-          "line": 229,
+          "line": 278,
           "evidence": "ault config;global['!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; \u2026",
           "vector": "code-loader",
           "confidence": "confirmed"
@@ -286,7 +286,7 @@
           "path": "reports/security/latest.json",
           "description": "Loader reassigning global.require to smuggle CommonJS into ESM",
           "remediation": "strip-appended-payload",
-          "line": 240,
+          "line": 290,
           "evidence": "\\\\\\\\\\\\\\\\\"); global[_$_1e42[0]]= require;S\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\u2026",
           "vector": "code-loader",
           "confidence": "confirmed"
@@ -298,8 +298,8 @@
           "path": "reports/security/latest.md",
           "description": "Obfuscated loader decoder call \u2014 the sfL decoder function",
           "remediation": "strip-appended-payload",
-          "line": 17,
-          "evidence": "t';function sfL(w){return w}; var x =sfL(\\\\\\\\\\\\\\\\\\\u2026` - **[critical]** `loader-fr\u2026",
+          "line": 19,
+          "evidence": "t';function sfL(w){return w}; var x =sfL(\\\\\\\\\\\\\\\\\\\u2026` - **[critical \u00b7 confirmed]*\u2026",
           "vector": "code-loader",
           "confidence": "confirmed"
         },
@@ -310,7 +310,7 @@
           "path": "reports/security/latest.md",
           "description": "Loader bootstrap assigning global['!']",
           "remediation": "strip-appended-payload",
-          "line": 64,
+          "line": 72,
           "evidence": "ault config;global['!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; \u2026",
           "vector": "code-loader",
           "confidence": "confirmed"
@@ -322,7 +322,7 @@
           "path": "reports/security/latest.md",
           "description": "Loader reassigning global.require to smuggle CommonJS into ESM",
           "remediation": "strip-appended-payload",
-          "line": 67,
+          "line": 75,
           "evidence": "\\\\\\\\\\\\\\\\\"); global[_$_1e42[0]]= require;S\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\u2026",
           "vector": "code-loader",
           "confidence": "confirmed"
