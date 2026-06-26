@@ -32,6 +32,28 @@ def globs_ok(relpath: str, sig: dict[str, Any]) -> bool:
     return any(fnmatch(relpath, g) or fnmatch(base, g) for g in globs)
 
 
+def build_content_sig(signatures: list[dict[str, Any]]):
+    """Compile the worm CONTENT-loader fingerprints (the `content` matcher's code-loader
+    regex signatures) into one callable `check(text) -> signature_id | None`.
+
+    Matches against the text AND its newline-flattened form, so a payload wrapped across
+    lines still hits. Used wherever a matcher corroborates a structural signal (a long
+    line, a merge-introduced hunk) against "is this actually a known loader" without
+    re-running a full file scan. Patterns come from the live signature DB so the two never
+    drift. Shared by the evil-merge, heuristic and obfuscation matchers (one source)."""
+    pats = [(s["id"], re.compile(s["pattern"], re.IGNORECASE))
+            for s in signatures if s.get("pattern") and s.get("category") == "code-loader"]
+
+    def check(text: str):
+        flat = text.replace("\n", "").replace("\r", "")
+        for sid, rx in pats:
+            if rx.search(text) or rx.search(flat):
+                return sid
+        return None
+
+    return check
+
+
 def load_jsonc(text: str) -> Any:
     try:
         return json.loads(text)

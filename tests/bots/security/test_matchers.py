@@ -18,6 +18,7 @@ EXPECTED_IN_INFECTED = {
     "loader-global-bang", "loader-require-hijack",
     "fake-font-fa-solid-400", "fake-font-text-woff",
     "camouflage-blockchain-readme", "oversized-config-line",
+    "obfuscated-source-file",
     "vscode-task-folderopen-exec", "vscode-task-runs-font",
     "vscode-allow-automatic-tasks", "gitignore-autopush-markers",
 }
