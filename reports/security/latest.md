@@ -1,4 +1,4 @@
-# Security scan — 2026-06-26T16:45:22.617190+00:00
+# Security scan — 2026-06-26T18:45:01.593167+00:00
 
 **1 targets** · 1 infected · 33 findings (16 critical, 13 high)
 
@@ -44,7 +44,7 @@
 - **[critical]** `loader-seed-var` — tests/bots/security/test_evasions.py:28
   - Obfuscated loader seed variable (var/let/const _$_xxxx=)
   - evidence: `(b"/*\x00*/ var _$_1e42 = sfL(0); export default {};")         self.assertIn("lo…`
-- **[critical]** `loader-fromcharcode-127` — tests/bots/security/test_obfuscation_file.py:86
+- **[critical]** `loader-fromcharcode-127` — tests/bots/security/test_obfuscation_file.py:138
   - Obfuscated loader fingerprint — fromCharCode(127) string shuffler
   - evidence: ` * 40) + "];String.fromCharCode(127)"         for path in ("lib/app.min.js", ".p…`
 - **[critical]** `loader-seed-var` — tests/bots/security/test_obfuscation_file.py:47
@@ -59,19 +59,19 @@
 - **[high]** `loader-decoder-fn` — reports/security/latest.json:53
   - Obfuscated loader decoder call — the sfL decoder function
   - evidence: `t';function sfL(w){return w}; var x =sfL(\\\\\\\\\\\\\\\\\\\u2026",           "v…`
-- **[high]** `loader-global-bang` — reports/security/latest.json:207
+- **[high]** `loader-global-bang` — reports/security/latest.json:229
   - Loader bootstrap assigning global['!']
   - evidence: `ault config;global['!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; …`
-- **[high]** `loader-require-hijack` — reports/security/latest.json:218
+- **[high]** `loader-require-hijack` — reports/security/latest.json:240
   - Loader reassigning global.require to smuggle CommonJS into ESM
   - evidence: `\\\\\\\\"); global[_$_1e42[0]]= require;S\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\…`
 - **[high]** `loader-decoder-fn` — reports/security/latest.md:17
   - Obfuscated loader decoder call — the sfL decoder function
   - evidence: `t';function sfL(w){return w}; var x =sfL(\\\\\\\\\…` - **[critical]** `loader-fr…`
-- **[high]** `loader-global-bang` — reports/security/latest.md:58
+- **[high]** `loader-global-bang` — reports/security/latest.md:64
   - Loader bootstrap assigning global['!']
   - evidence: `ault config;global['!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; …`
-- **[high]** `loader-require-hijack` — reports/security/latest.md:61
+- **[high]** `loader-require-hijack` — reports/security/latest.md:67
   - Loader reassigning global.require to smuggle CommonJS into ESM
   - evidence: `\\\\\\\\"); global[_$_1e42[0]]= require;S\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\…`
 - **[high]** `vscode-allow-automatic-tasks` — tests/bots/security/fixtures/infected/.vscode/settings.json
