@@ -1,4 +1,4 @@
-# Security scan — 2026-06-26T21:21:10.263290+00:00
+# Security scan — 2026-06-26T23:57:37.806856+00:00
 
 **1 targets** · 1 infected · 0 suspicious · 36 findings (18 critical, 14 high)
 
@@ -11,16 +11,16 @@ _Verdict: **infected** = a confirmed (high-confidence) signature matched; **susp
 ## Findings
 
 ### ~/work/stayAwakeBot/stayAwakeBot
-- **[critical · confirmed]** `loader-fromcharcode-127` — reports/security/latest.json:42
+- **[critical · confirmed]** `loader-fromcharcode-127` — reports/security/latest.json:50
   - Obfuscated loader fingerprint — fromCharCode(127) string shuffler
   - evidence: `]]= require;String.fromCharCode(127);                                           …`
-- **[critical · confirmed]** `loader-seed-var` — reports/security/latest.json:53
+- **[critical · confirmed]** `loader-seed-var` — reports/security/latest.json:62
   - Obfuscated loader seed variable (var/let/const _$_xxxx=)
   - evidence: `!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; var x =sfL(\\\\\\\\\…`
-- **[critical · confirmed]** `loader-fromcharcode-127` — reports/security/latest.md:14
+- **[critical · confirmed]** `loader-fromcharcode-127` — reports/security/latest.md:16
   - Obfuscated loader fingerprint — fromCharCode(127) string shuffler
   - evidence: `]]= require;String.fromCharCode(127);                                           …`
-- **[critical · confirmed]** `loader-seed-var` — reports/security/latest.md:17
+- **[critical · confirmed]** `loader-seed-var` — reports/security/latest.md:19
   - Obfuscated loader seed variable (var/let/const _$_xxxx=)
   - evidence: `!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; var x =sfL(\\\\\\\\\…`
 - **[critical · confirmed]** `vscode-task-folderopen-exec` — tests/bots/security/fixtures/infected/.vscode/tasks.json
@@ -64,22 +64,22 @@ _Verdict: **infected** = a confirmed (high-confidence) signature matched; **susp
 - **[critical · confirmed]** `loader-seed-var` — tests/bots/security/test_verdict.py:102
   - Obfuscated loader seed variable (var/let/const _$_xxxx=)
   - evidence: `({"x.mjs": "var _$_1e42 = sfL(0); String.fromCharCode(127);\n"})         self.as…`
-- **[high · confirmed]** `loader-decoder-fn` — reports/security/latest.json:53
+- **[high · confirmed]** `loader-decoder-fn` — reports/security/latest.json:62
   - Obfuscated loader decoder call — the sfL decoder function
   - evidence: `t';function sfL(w){return w}; var x =sfL(\\\\\\\\\\\\\\\\\\\u2026",           "v…`
-- **[high · confirmed]** `loader-global-bang` — reports/security/latest.json:229
+- **[high · confirmed]** `loader-global-bang` — reports/security/latest.json:278
   - Loader bootstrap assigning global['!']
   - evidence: `ault config;global['!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; …`
-- **[high · confirmed]** `loader-require-hijack` — reports/security/latest.json:240
+- **[high · confirmed]** `loader-require-hijack` — reports/security/latest.json:290
   - Loader reassigning global.require to smuggle CommonJS into ESM
   - evidence: `\\\\\\\\"); global[_$_1e42[0]]= require;S\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\…`
-- **[high · confirmed]** `loader-decoder-fn` — reports/security/latest.md:17
+- **[high · confirmed]** `loader-decoder-fn` — reports/security/latest.md:19
   - Obfuscated loader decoder call — the sfL decoder function
-  - evidence: `t';function sfL(w){return w}; var x =sfL(\\\\\\\\\…` - **[critical]** `loader-fr…`
-- **[high · confirmed]** `loader-global-bang` — reports/security/latest.md:64
+  - evidence: `t';function sfL(w){return w}; var x =sfL(\\\\\\\\\…` - **[critical · confirmed]*…`
+- **[high · confirmed]** `loader-global-bang` — reports/security/latest.md:72
   - Loader bootstrap assigning global['!']
   - evidence: `ault config;global['!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; …`
-- **[high · confirmed]** `loader-require-hijack` — reports/security/latest.md:67
+- **[high · confirmed]** `loader-require-hijack` — reports/security/latest.md:75
   - Loader reassigning global.require to smuggle CommonJS into ESM
   - evidence: `\\\\\\\\"); global[_$_1e42[0]]= require;S\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\…`
 - **[high · confirmed]** `vscode-allow-automatic-tasks` — tests/bots/security/fixtures/infected/.vscode/settings.json
