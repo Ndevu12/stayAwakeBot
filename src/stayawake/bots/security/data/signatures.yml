@@ -96,6 +96,20 @@ signatures:
     description: "Config file with an abnormally long single line (likely appended payload)"
     remediation: strip-appended-payload
 
+  # ── Whole-file obfuscation (line-agnostic, context-scoped) ───────────────────
+  # Closes G4: a payload SPLIT/WRAPPED across many <2000-char lines, or living in
+  # .jsx/.tsx/.vue/.svelte, defeats the formatting-keyed oversized-config-line rule.
+  # This signature runs loader fingerprints + a context-scoped obfuscation detector
+  # over the RAW file content (not splitlines) for hand-authored source/config only;
+  # vendored/minified/generated paths are suppressed by the matcher's context gate.
+  - id: obfuscated-source-file
+    category: code-loader
+    severity: medium
+    matcher: obfuscation
+    kind: obfuscated-file
+    description: "Hand-authored source/config file containing packed/obfuscated payload (line-agnostic)"
+    remediation: strip-appended-payload
+
   # ── VS Code auto-run harness (structured JSON) ───────────────────────────────
   - id: vscode-task-folderopen-exec
     category: vscode-autorun

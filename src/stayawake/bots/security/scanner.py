@@ -6,11 +6,22 @@ executes scanned code). One responsibility: target in → ScanResult out.
 """
 from __future__ import annotations
 
+import inspect
 from fnmatch import fnmatch
 from typing import Any
 
 from stayawake.bots.security.models import Finding, ScanResult
 from stayawake.bots.security.matchers import REGISTRY
+
+
+def _accepts_all_signatures(matcher) -> bool:
+    """True if a matcher's `scan` opts into the cross-signature view (an
+    `all_signatures` keyword param). Keeps the call site backward-compatible with
+    matchers that take only (target, signatures)."""
+    try:
+        return "all_signatures" in inspect.signature(matcher.scan).parameters
+    except (ValueError, TypeError):
+        return False
 
 
 def _allowed(finding: Finding, allowlist: list[dict[str, Any]]) -> bool:
@@ -35,12 +46,19 @@ def _allowed(finding: Finding, allowlist: list[dict[str, Any]]) -> bool:
 def scan_target(target, signatures_by_matcher: dict[str, list[dict[str, Any]]],
                 allowlist: list[dict[str, Any]] | None = None) -> ScanResult:
     result = ScanResult(target=target.display, source=target.source)
+    # Flat view of every signature, so a matcher that corroborates against OTHER
+    # matchers' signatures (the evil-merge detector cross-checks the content-loader
+    # fingerprints) can reach them without re-loading the DB.
+    all_sigs = [s for group in signatures_by_matcher.values() for s in group]
     try:
         for matcher_name, sigs in signatures_by_matcher.items():
             matcher = REGISTRY.get(matcher_name)
             if not matcher:
                 continue
-            for finding in matcher.scan(target, sigs):
+            findings = (matcher.scan(target, sigs, all_signatures=all_sigs)
+                        if _accepts_all_signatures(matcher)
+                        else matcher.scan(target, sigs))
+            for finding in findings:
                 if not _allowed(finding, allowlist or []):
                     result.findings.append(finding)
         # Stable, useful ordering: severity desc, then path.
