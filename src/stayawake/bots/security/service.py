@@ -79,11 +79,17 @@ def _render_markdown(payload: dict) -> str:
     s = payload["summary"]
     out = [f"# Security scan — {payload['generated_at']}", "",
            f"**{s['targets']} targets** · {s['infected']} infected · "
+           f"{s.get('suspicious', 0)} suspicious · "
            f"{s['findings']} findings ({s['critical']} critical, {s['high']} high)", "",
+           "_Verdict: **infected** = a confirmed (high-confidence) signature matched; "
+           "**suspicious** = only heuristic match(es) that benign code can also produce — "
+           "review, not asserted as malware._", "",
            "| Target | Source | Status | Findings | Top severity |",
            "|--------|--------|--------|----------|--------------|"]
     for r in payload["results"]:
-        status = "❌ INFECTED" if r["infected"] else ("⚠️ error" if r["error"] else "✅ clean")
+        status = ("❌ INFECTED" if r["infected"]
+                  else "🟡 SUSPICIOUS" if r.get("suspicious")
+                  else "⚠️ error" if r["error"] else "✅ clean")
         out.append(f"| {r['target']} | {r['source']} | {status} | "
                    f"{r['summary']['total']} | {r['summary']['max_severity'] or '—'} |")
     out += ["", "## Findings", ""]
@@ -95,7 +101,8 @@ def _render_markdown(payload: dict) -> str:
         out.append(f"### {r['target']}")
         for f in r["findings"]:
             loc = f["path"] + (f":{f['line']}" if f.get("line") else "")
-            out.append(f"- **[{f['severity']}]** `{f['signature_id']}` — {loc}")
+            out.append(f"- **[{f['severity']} · {f.get('confidence', 'confirmed')}]** "
+                       f"`{f['signature_id']}` — {loc}")
             out.append(f"  - {f['description']}")
             if f.get("evidence"):
                 out.append(f"  - evidence: `{f['evidence']}`")
@@ -176,11 +183,13 @@ def scan(config_path: str | None = None, local_only: bool = False,
         "summary": {
             "targets": len(results),
             "infected": sum(1 for r in results if r.infected),
+            "suspicious": sum(1 for r in results if r.suspicious),
             "findings": sum(len(r.findings) for r in results),
             "critical": sum(1 for r in results for f in r.findings if f.severity.label() == "critical"),
             "high": sum(1 for r in results for f in r.findings if f.severity.label() == "high"),
         },
         "any_infected": any(r.infected for r in results),
+        "any_suspicious": any(r.suspicious for r in results),
         "results": [r.to_dict() for r in results],
     }
     rdir = resolve_reports_dir(reports_dir, settings_value=settings.get("reports_dir"),
@@ -190,9 +199,16 @@ def scan(config_path: str | None = None, local_only: bool = False,
 
     s = payload["summary"]
     print(f"Scanned {s['targets']} target(s): {s['infected']} infected, "
+          f"{s['suspicious']} suspicious, "
           f"{s['findings']} findings ({s['critical']} critical, {s['high']} high)")
     for r in results:
-        tag = "INFECTED" if r.infected else ("ERROR" if r.error else "clean")
+        tag = ("INFECTED" if r.infected else "SUSPECT" if r.suspicious
+               else "ERROR" if r.error else "clean")
         print(f"  [{tag:8}] {r.target}  ({len(r.findings)} findings)")
+    if s["suspicious"]:
+        print("  ↳ 'suspicious' = heuristic match(es) to review; not asserted as infected. "
+              "See reports/security/latest.md.")
 
+    # Gate fails on INFECTED only (confirmed findings). Whether SUSPICIOUS should also
+    # fail the gate is a CI policy decision tracked in #1058, intentionally not changed here.
     return 1 if (fail_on_findings and payload["any_infected"]) else 0
