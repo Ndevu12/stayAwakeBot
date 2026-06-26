@@ -23,7 +23,8 @@ from stayawake.bots.security import remediator
 
 def main() -> None:
     p = argparse.ArgumentParser(description="StayAwakeBot security remediator")
-    p.add_argument("--config", default="config/security.yml")
+    p.add_argument("--config", default=None,
+                   help="config file (default: config/security.yml when present, else the current repo)")
     p.add_argument("--apply", action="store_true", help="apply local fixes (default is dry-run)")
     p.add_argument("--open-pr", action="store_true",
                    help="with --apply: push a fix branch and open/update one PR per local repo")
