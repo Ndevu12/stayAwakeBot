@@ -18,8 +18,11 @@ we require either a *self-evidently executable* obfuscation construct OR a
   * charcode / hex numeric arrays  — `[104,116,116,112,...]`, `[0x68,0x74,...]`
     feeding String.fromCharCode / apply: the canonical Shai-Hulud string shuffler
     and the generic "build a string from numbers so no literal is greppable" trick.
-  * dynamic-exec sinks            — eval(, new Function(, atob(, Function(, the
-    require-hijack global['!']: code that turns decoded bytes back into execution.
+  * dynamic-exec sinks            — eval(, new Function(, atob(, fromCharCode, the
+    require-hijack global['!'], and reflective `x['constructor'](…)` Function-
+    constructor smuggling (name-agnostic catch for a renamed decoder, #1053; the
+    `new …` clone idiom is carved out): code that turns decoded bytes back into
+    execution.
   * long base64 blob              — a single >=120-char [A-Za-z0-9+/=] run that is
     not already plain text (most real code has spaces/punctuation breaking it up).
   * minification spike            — the introduced text is one (or few) very long
@@ -49,6 +52,41 @@ _EXEC_SINK = re.compile(
     r"String\s*[.\[]\s*[\"']?fromCharCode|global\s*\[\s*['\"]!['\"]\s*\]\s*=",
     re.IGNORECASE,
 )
+# Reflective Function-constructor smuggling: `x['constructor'](decoded)` reaches the
+# Function constructor through a bracket-string key, name-agnostically — so the worm's
+# exec step (#1053) survives renaming the literal `sfL`/`_$_`/`global['!']` fingerprints.
+# This is a DEFENSE-IN-DEPTH catch of the lazy variant, not a full closure: the same
+# capability is reachable by a computed key `(function(){})[k](code)`, the dot form
+# `[].constructor.constructor(code)`, `require('vm').runInThisContext`, or bare
+# `Function(code)()` — none of which any token blacklist can durably cover. The real
+# durable lever is the Tier-2 density anomaly, tracked separately.
+#
+# Gated apart from _EXEC_SINK (see _has_exec_sink) so we can carve out the one broad
+# benign collision: the polymorphic same-type clone `new <expr>['constructor'](...)`
+# used by value objects / ORM entities / immutable records (and their tests). The worm
+# NEVER prefixes with `new` (it calls the smuggled Function as a plain function on a
+# decoded variable), so excluding a `new`-prefixed reflective constructor drops that
+# false positive with zero loss of the catch. Plain `obj['constructor'].name` access
+# (no call) never matches — the arm requires `]` immediately followed by `(`.
+_CONSTRUCTOR_EXEC = re.compile(r"\[\s*[\"']constructor[\"']\s*\]\s*\(")
+# `new <ident/member-chain>` immediately before the bracket. The tight `[\w$.)\]]` class
+# (no space/comma/`(`) means only a direct `new a.b['constructor'](` is excluded; a
+# comma/whitespace splice like `new Date(), x['constructor'](p)` still flags.
+_NEW_CLONE_PREFIX = re.compile(r"\bnew\s+[\w$.)\]]*\s*$")
+
+
+def _has_exec_sink(s: str) -> bool:
+    """True if `s` contains a dynamic-execution sink: any literal _EXEC_SINK construct,
+    or a reflective `['constructor'](` call that is NOT a `new <expr>['constructor'](...)`
+    polymorphic clone (the benign idiom the worm never uses). Every constructor-call
+    occurrence is checked, so a `new`-clone earlier in the text can't mask a real sink
+    later."""
+    if _EXEC_SINK.search(s):
+        return True
+    return any(
+        not _NEW_CLONE_PREFIX.search(s[max(0, m.start() - 48):m.start()])
+        for m in _CONSTRUCTOR_EXEC.finditer(s)
+    )
 # A long unbroken base64-ish run not already broken up by code/prose punctuation.
 _B64_BLOB = re.compile(r"[A-Za-z0-9+/]{120,}={0,2}")
 # A self-describing inline asset (image/font/media data-URI). A base64 blob that is the
@@ -201,8 +239,10 @@ def analyze_file(text: str, ext: str = "") -> ObfuscationVerdict:
     flat = body.replace("\n", "").replace("\r", "")
     if _NUM_ARRAY.search(flat):
         return ObfuscationVerdict(True, "charcode/byte numeric-array literal (string shuffler)")
-    if _EXEC_SINK.search(body):
-        return ObfuscationVerdict(True, "dynamic-exec sink (eval/Function/atob/fromCharCode)")
+    # Search the raw body AND the newline-flattened form so an exec sink wrapped
+    # across line breaks (`sfL['constructor']\n(decoded)`) is still seen.
+    if _has_exec_sink(body) or _has_exec_sink(flat):
+        return ObfuscationVerdict(True, "dynamic-exec sink (eval/Function/atob/fromCharCode/constructor)")
     deassetted = _DATA_URI.sub("", flat)
     if _has_b64_payload(deassetted):
         return ObfuscationVerdict(True, "long unbroken base64 blob")
@@ -265,8 +305,8 @@ def analyze_delta(introduced: str, baseline: str = "") -> ObfuscationVerdict:
     # 1) Self-evidently executable obfuscation constructs — sufficient on their own.
     if _NUM_ARRAY.search(text):
         return ObfuscationVerdict(True, "charcode/byte numeric-array literal (string shuffler)")
-    if _EXEC_SINK.search(text):
-        return ObfuscationVerdict(True, "dynamic-exec sink (eval/Function/atob/fromCharCode)")
+    if _has_exec_sink(text):
+        return ObfuscationVerdict(True, "dynamic-exec sink (eval/Function/atob/fromCharCode/constructor)")
     # Strip self-describing inline assets (image/font data-URIs) before the base64 test:
     # a `data:...;base64,...` payload is a legitimate inlined asset, not packed code.
     deassetted = _DATA_URI.sub("", text)
