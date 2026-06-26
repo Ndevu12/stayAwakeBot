@@ -25,6 +25,12 @@ we require either a *self-evidently executable* obfuscation construct OR a
     execution.
   * long base64 blob              — a single >=120-char [A-Za-z0-9+/=] run that is
     not already plain text (most real code has spaces/punctuation breaking it up).
+  * concat/escape-encoded blob    — the SAME payload split into quoted chunks
+    (`"a"+"b"+…` or `["a","b"].join("")`) or written as a dense byte-range, high-
+    entropy `\\xNN`/`\\uNNNN` escape run; caught by normalizing the reassembly seams
+    away and re-testing the reassembled content (#1053). Residual boundaries:
+    template-literal `${a}${b}` reassembly (chunks live in variables) and `.concat`
+    via non-quote args are not statically reassembled.
   * minification spike            — the introduced text is one (or few) very long
     lines AND the file's baseline was normally-formatted (short lines): a
     previously hand-formatted file does not legitimately gain a 2 KB single line
@@ -100,6 +106,86 @@ _DATA_URI = re.compile(r"data:[\w.+-]+/[\w.+-]+;base64,[A-Za-z0-9+/]+={0,2}", re
 # encoded payload and must not trip the blob trigger. This gate closes the long-URL FP
 # (G5) without weakening detection of genuine base64 (which clears it by a wide margin).
 _B64_BLOB_MIN_ENTROPY = 4.5
+
+# ── Wrap/concat-resistant payload-at-rest detection (#1053 Tier-2 hardening) ──────
+# The blob/array detectors above key on a long UNBROKEN run, which an attacker defeats
+# two ways without changing the payload: (A) splitting it into short quoted chunks joined
+# by `+` (`"aaa" + "bbb"`), whose quote/plus/space seams break the run; and (B) encoding it
+# as a dense run of \xNN/\uNNNN escapes decoded at runtime (Buffer.from / fromCodePoint),
+# which carries no [A-Za-z0-9+/] run at all. Both are reversible by NORMALIZING the seams
+# away, then re-testing the reassembled content — what these two helpers add. Escape runs
+# are tested on the de-chunked form too, so a chunked escape payload is reassembled first.
+
+# A JS string-reassembly seam: a closing quote, a `+` (concat) OR `,` (array element /
+# .concat arg) separator, an opening quote — any whitespace/newlines between. Collapsing it
+# rejoins `"aaa" + "bbb"` AND `["aaa","bbb"].join("")` (the canonical obfuscator string-
+# array primitive) into one run. Only quote-SEP-quote seams match, so base64 `+` inside a
+# chunk, arithmetic `a + b`, a `["x", host]` array with a variable, and a list separator
+# in prose are all untouched. The downstream >=120-char + 4.5-bit blob gate is what keeps
+# this false-positive-safe: reassembling a legit short/low-entropy array trips nothing.
+_CONCAT_SEAM = re.compile(r"['\"]\s*[,+]\s*['\"]")
+
+# A contiguous run of >= _MIN_ESCAPE_RUN numeric escapes (hex byte, BMP unicode, unicode
+# code-point, or 3-digit octal). Length alone is NOT decisive (a 12-emoji row is 24 \uXXXX
+# surrogate escapes; a crypto/magic-byte fixture is a short \xNN run), so _escape_run also
+# applies a decoded byte-range + entropy gate — see there. 48 is the floor: above a
+# 12-emoji row and a 32-byte KAT vector, far below any real escape-encoded loader (hundreds
+# to thousands of bytes).
+_MIN_ESCAPE_RUN = 48
+_ESCAPE_RUN = re.compile(
+    r"(?:\\x[0-9a-fA-F]{2}|\\u[0-9a-fA-F]{4}|\\u\{[0-9a-fA-F]{1,6}\}|\\[0-3][0-7]{2})"
+    r"{%d,}" % _MIN_ESCAPE_RUN
+)
+# Single-escape capture (one alternative group populated per match) for decoding a run.
+_ESCAPE_TOKEN = re.compile(
+    r"\\x([0-9a-fA-F]{2})|\\u\{([0-9a-fA-F]{1,6})\}|\\u([0-9a-fA-F]{4})|\\([0-3][0-7]{2})")
+# A real escape-encoded payload decodes to BYTES (0-255) with high entropy. Benign runs
+# that clear the length bar do not: emoji/CJK/combining-mark tables decode to codepoints
+# >255 in a narrow Unicode block, and structured magic-byte/file headers are low-entropy.
+_ESCAPE_BYTE_FRAC = 0.8        # >=80% of decoded values must be in byte range (<=255)
+_ESCAPE_MIN_ENTROPY = 4.5      # decoded-value entropy, mirroring the base64-blob gate
+
+
+def _dechunk(s: str) -> str:
+    """Collapse JS string-reassembly seams so a payload split into quoted chunks
+    (`"aaa" + "bbb"` OR `["aaa","bbb"].join("")`) is rejoined into one run before the
+    blob/escape detectors see it. Cheap; a no-op on text with no quote-SEP-quote seams."""
+    return _CONCAT_SEAM.sub("", s)
+
+
+def _decode_escapes(run: str) -> list[int]:
+    """Decode an escape run to its numeric values (hex byte, code-point, BMP unit, octal)."""
+    out: list[int] = []
+    for hx, ucp, u4, oc in _ESCAPE_TOKEN.findall(run):
+        if hx:
+            out.append(int(hx, 16))
+        elif ucp:
+            out.append(int(ucp, 16))
+        elif u4:
+            out.append(int(u4, 16))
+        elif oc:
+            out.append(int(oc, 8))
+    return out
+
+
+def _escape_run(s: str) -> bool:
+    """True if `s` carries a contiguous run of >= _MIN_ESCAPE_RUN numeric escapes that
+    decode to a high-entropy BYTE payload. The byte-range + entropy gate separates a packed
+    worm payload (0-255 bytes, high entropy) from benign runs that merely clear the length
+    bar: emoji/CJK/combining-mark tables (codepoints >255, narrow blocks) and structured
+    magic-byte/file-header fixtures (low entropy). Every run is checked, so a benign run
+    earlier in the file cannot mask a real payload later. Residual (documented): a >=48-byte
+    high-entropy crypto KAT vector written as \\xNN is byte-range + high-entropy and stays a
+    (rare, medium-severity, human-triageable) finding."""
+    for m in _ESCAPE_RUN.finditer(s):
+        vals = _decode_escapes(m.group(0))
+        if not vals:
+            continue
+        byte_frac = sum(1 for v in vals if v <= 0xFF) / len(vals)
+        if byte_frac >= _ESCAPE_BYTE_FRAC and _shannon("".join(map(chr, vals))) >= _ESCAPE_MIN_ENTROPY:
+            return True
+    return False
+
 
 # Minification: a single introduced line at/above this length in a file whose
 # baseline lines were comfortably shorter. Kept well under the 2000-char long-line
@@ -220,7 +306,8 @@ def analyze_file(text: str, ext: str = "") -> ObfuscationVerdict:
 
     Two tiers, mirroring analyze_delta:
       1) self-evidently executable obfuscation (charcode/byte array, dynamic-exec sink,
-         long unbroken base64 blob) — sufficient on its own, line-independent.
+         long base64 blob — including one reassembled from concat-chunked chunks or a
+         dense escape-encoded run) — sufficient on its own, line-independent.
       2) a corroborated whole-file minification+entropy anomaly: the file carries an
          outlier-long line AND a dense packed region that dominates it AND the whole
          file reads as high-entropy. This is the in-file analogue of analyze_delta's
@@ -246,6 +333,14 @@ def analyze_file(text: str, ext: str = "") -> ObfuscationVerdict:
     deassetted = _DATA_URI.sub("", flat)
     if _has_b64_payload(deassetted):
         return ObfuscationVerdict(True, "long unbroken base64 blob")
+    # A+B (#1053): reassemble concat-chunked payloads, then re-test for a base64 blob or a
+    # dense escape-encoded byte run — both survive the attacker splitting/encoding the
+    # payload to dodge the unbroken-run detectors above (the merged-PR Tier-2 hardening).
+    dechunked = _dechunk(deassetted)
+    if _has_b64_payload(dechunked):
+        return ObfuscationVerdict(True, "reassembled chunked base64 blob (string-concat splitting)")
+    if _escape_run(dechunked):
+        return ObfuscationVerdict(True, "dense escape-encoded byte payload (\\xNN/\\uNNNN run)")
 
     # Tier 2 — corroborated whole-file minification anomaly (the split-line payload, and
     # G5: a loader-EVADED single long line in a real config file — packed/encoded content
