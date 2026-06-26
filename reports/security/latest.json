@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-06-25T20:28:36.655652+00:00",
+  "generated_at": "2026-06-26T16:45:22.617190+00:00",
   "summary": {
     "targets": 1,
     "infected": 1,
-    "findings": 29,
-    "critical": 14,
-    "high": 12
+    "findings": 33,
+    "critical": 16,
+    "high": 13
   },
   "any_infected": true,
   "results": [
@@ -15,14 +15,14 @@
       "infected": true,
       "error": null,
       "summary": {
-        "total": 29,
+        "total": 33,
         "by_severity": {
-          "critical": 14,
-          "high": 12,
-          "medium": 3
+          "critical": 16,
+          "high": 13,
+          "medium": 4
         },
         "by_category": {
-          "code-loader": 22,
+          "code-loader": 26,
           "vscode-autorun": 3,
           "fake-font": 2,
           "git-marker": 1,
@@ -161,6 +161,28 @@
           "remediation": "strip-appended-payload",
           "line": 28,
           "evidence": "(b\"/*\\x00*/ var _$_1e42 = sfL(0); export default {};\")         self.assertIn(\"lo\u2026",
+          "vector": "code-loader"
+        },
+        {
+          "signature_id": "loader-fromcharcode-127",
+          "category": "code-loader",
+          "severity": "critical",
+          "path": "tests/bots/security/test_obfuscation_file.py",
+          "description": "Obfuscated loader fingerprint \u2014 fromCharCode(127) string shuffler",
+          "remediation": "strip-appended-payload",
+          "line": 86,
+          "evidence": " * 40) + \"];String.fromCharCode(127)\"         for path in (\"lib/app.min.js\", \".p\u2026",
+          "vector": "code-loader"
+        },
+        {
+          "signature_id": "loader-seed-var",
+          "category": "code-loader",
+          "severity": "critical",
+          "path": "tests/bots/security/test_obfuscation_file.py",
+          "description": "Obfuscated loader seed variable (var/let/const _$_xxxx=)",
+          "remediation": "strip-appended-payload",
+          "line": 47,
+          "evidence": "om 'react'\\nvar _$_1e42='seed';\\n\" + packed         self.assertIn(OBF, _scan({\"C\u2026",
           "vector": "code-loader"
         },
         {
@@ -310,6 +332,17 @@
           "signature_id": "loader-decoder-fn",
           "category": "code-loader",
           "severity": "high",
+          "path": "tests/bots/security/test_obfuscation_file.py",
+          "description": "Obfuscated loader decoder call \u2014 the sfL decoder function",
+          "remediation": "strip-appended-payload",
+          "line": 63,
+          "evidence": "x';function sfL(w){return w}\"         self.assertLess(max(len(l) for l in line.s\u2026",
+          "vector": "code-loader"
+        },
+        {
+          "signature_id": "loader-decoder-fn",
+          "category": "code-loader",
+          "severity": "high",
           "path": "tests/bots/security/test_remediation.py",
           "description": "Obfuscated loader decoder call \u2014 the sfL decoder function",
           "remediation": "strip-appended-payload",
@@ -336,7 +369,18 @@
           "description": "Config file with an abnormally long single line (likely appended payload)",
           "remediation": "strip-appended-payload",
           "line": 2,
-          "evidence": "line 2: 2283 chars",
+          "evidence": "line 2: 2283 chars; loader fingerprint: loader-fromcharcode-127",
+          "vector": "code-loader"
+        },
+        {
+          "signature_id": "obfuscated-source-file",
+          "category": "code-loader",
+          "severity": "medium",
+          "path": "tests/bots/security/fixtures/infected/postcss.config.mjs",
+          "description": "Hand-authored source/config file containing packed/obfuscated payload (line-agnostic)",
+          "remediation": "strip-appended-payload",
+          "line": null,
+          "evidence": "loader fingerprint on raw content: loader-fromcharcode-127",
           "vector": "code-loader"
         },
         {
