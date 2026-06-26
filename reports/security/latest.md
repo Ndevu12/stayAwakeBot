@@ -1,10 +1,10 @@
-# Security scan — 2026-06-25T20:28:36.655652+00:00
+# Security scan — 2026-06-26T16:45:22.617190+00:00
 
-**1 targets** · 1 infected · 29 findings (14 critical, 12 high)
+**1 targets** · 1 infected · 33 findings (16 critical, 13 high)
 
 | Target | Source | Status | Findings | Top severity |
 |--------|--------|--------|----------|--------------|
-| ~/work/stayAwakeBot/stayAwakeBot | local | ❌ INFECTED | 29 | critical |
+| ~/work/stayAwakeBot/stayAwakeBot | local | ❌ INFECTED | 33 | critical |
 
 ## Findings
 
@@ -44,6 +44,12 @@
 - **[critical]** `loader-seed-var` — tests/bots/security/test_evasions.py:28
   - Obfuscated loader seed variable (var/let/const _$_xxxx=)
   - evidence: `(b"/*\x00*/ var _$_1e42 = sfL(0); export default {};")         self.assertIn("lo…`
+- **[critical]** `loader-fromcharcode-127` — tests/bots/security/test_obfuscation_file.py:86
+  - Obfuscated loader fingerprint — fromCharCode(127) string shuffler
+  - evidence: ` * 40) + "];String.fromCharCode(127)"         for path in ("lib/app.min.js", ".p…`
+- **[critical]** `loader-seed-var` — tests/bots/security/test_obfuscation_file.py:47
+  - Obfuscated loader seed variable (var/let/const _$_xxxx=)
+  - evidence: `om 'react'\nvar _$_1e42='seed';\n" + packed         self.assertIn(OBF, _scan({"C…`
 - **[critical]** `loader-fromcharcode-127` — tests/bots/security/test_remediation.py:84
   - Obfuscated loader fingerprint — fromCharCode(127) string shuffler
   - evidence: `d = sfL(0)\nString.fromCharCode(127)\nexport default {a:1};\n"         out = rem…`
@@ -83,6 +89,9 @@
 - **[high]** `loader-decoder-fn` — tests/bots/security/test_evasions.py:28
   - Obfuscated loader decoder call — the sfL decoder function
   - evidence: `r _$_1e42 = sfL(0); export default {};")         self.assertIn("loader-seed-var"…`
+- **[high]** `loader-decoder-fn` — tests/bots/security/test_obfuscation_file.py:63
+  - Obfuscated loader decoder call — the sfL decoder function
+  - evidence: `x';function sfL(w){return w}"         self.assertLess(max(len(l) for l in line.s…`
 - **[high]** `loader-decoder-fn` — tests/bots/security/test_remediation.py:84
   - Obfuscated loader decoder call — the sfL decoder function
   - evidence: `r _$_abcd = sfL(0)\nString.fromCharCode(127)\nexport default {a:1};\n"         o…`
@@ -91,7 +100,10 @@
   - evidence: `ode_modules branch_structure.json temp_auto_push.bat temp_interactive_push.bat `
 - **[medium]** `oversized-config-line` — tests/bots/security/fixtures/infected/postcss.config.mjs:2
   - Config file with an abnormally long single line (likely appended payload)
-  - evidence: `line 2: 2283 chars`
+  - evidence: `line 2: 2283 chars; loader fingerprint: loader-fromcharcode-127`
+- **[medium]** `obfuscated-source-file` — tests/bots/security/fixtures/infected/postcss.config.mjs
+  - Hand-authored source/config file containing packed/obfuscated payload (line-agnostic)
+  - evidence: `loader fingerprint on raw content: loader-fromcharcode-127`
 - **[medium]** `camouflage-blockchain-readme` — tests/bots/security/fixtures/infected/public/fonts/README.md:2
   - Fake 'Blockchain Explorer' fonts README used as camouflage (GlassWorm-family)
   - evidence: `nts for the Blockchain Explorer application. Required: BlockchainFont-Regular, T…`
