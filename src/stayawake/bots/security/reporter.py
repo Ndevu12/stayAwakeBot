@@ -18,17 +18,22 @@ def generate(latest_path: str | Path = "reports/security/latest.json",
         print("security latest.json not found; run the scanner first")
         return
     summary = latest.get("summary", {})
+    def _digest(r):
+        return {"target": r["target"], "source": r["source"],
+                "findings": r["summary"]["total"], "max_severity": r["summary"]["max_severity"]}
+
+    results = latest.get("results", [])
     status = {
         "generated_at": latest.get("generated_at"),
         "summary": summary,
-        "infected": [
-            {"target": r["target"], "source": r["source"],
-             "findings": r["summary"]["total"], "max_severity": r["summary"]["max_severity"]}
-            for r in latest.get("results", []) if r.get("infected")
-        ],
+        "infected": [_digest(r) for r in results if r.get("infected")],
+        # Surfaced for visibility (review), but distinct from infected — these are
+        # heuristic-only matches, never asserted as malware.
+        "suspicious": [_digest(r) for r in results if r.get("suspicious")],
     }
     rdir = resolve_reports_dir(reports_dir, default="reports/security",
                                label="security reports")
     write_json(rdir / "status.json", status)
     print(f"Security status updated ({summary.get('infected', 0)} infected, "
+          f"{summary.get('suspicious', 0)} suspicious, "
           f"{summary.get('findings', 0)} findings).")

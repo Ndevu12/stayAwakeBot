@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from stayawake.bots.security.matchers.base import load_jsonc
-from stayawake.bots.security.models import QUARANTINE_DIR
+from stayawake.bots.security.models import HEURISTIC, QUARANTINE_DIR
 
 # remediation id → internal action
 _ACTIONS = {
@@ -43,7 +43,13 @@ _QUARANTINE_PATTERNS = (QUARANTINE_DIR + "/",)
 
 
 def is_auto_fixable(finding) -> bool:
-    """True if a finding has a known automatic remediation (i.e. not `manual`)."""
+    """True if a finding has a known automatic remediation AND we are confident enough to
+    auto-edit. A HEURISTIC finding (a packed-blob / oversized-line shape a base64 asset or
+    crypto vector also produces) is surfaced but NEVER auto-stripped — auto-editing a file
+    we are not sure is malicious is exactly how a false positive becomes a corrupted file.
+    Such findings fall through to the manual list instead."""
+    if getattr(finding, "confidence", "confirmed") == HEURISTIC:
+        return False
     return getattr(finding, "remediation", "manual") in _ACTIONS
 
 
@@ -71,9 +77,9 @@ def plan(findings) -> list[Change]:
     """Map findings to a deduped list of changes (pure — no filesystem access)."""
     changes: dict[tuple[str, str], Change] = {}
     for f in findings:
-        action = _ACTIONS.get(getattr(f, "remediation", "manual"))
-        if action is None:
-            continue                      # manual (e.g. evil-merge) — not auto-fixed
+        if not is_auto_fixable(f):
+            continue                      # manual (e.g. evil-merge) or heuristic — not auto-fixed
+        action = _ACTIONS[getattr(f, "remediation", "manual")]
         path = f.path
         if f.remediation == "quarantine-dir":
             path = _fonts_dir(f.path)
