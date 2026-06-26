@@ -12,6 +12,11 @@
 #   description human-readable
 #   remediation strategy id (consumed in Phase 3): strip-appended-payload |
 #               quarantine-file | quarantine-dir | remove-foreign-vscode | strip-gitignore-markers | manual
+#   confidence  verdict weight (OPTIONAL, default `confirmed`): confirmed | heuristic.
+#               Orthogonal to severity. Only a `confirmed` match drives an INFECTED
+#               verdict; a `heuristic` match (a SHAPE benign code can share — a packed
+#               blob, an oversized line, a review-evading merge) surfaces as SUSPICIOUS
+#               so the user is informed without a false "infected" alarm. See models.py.
 version: 1
 
 signatures:
@@ -90,6 +95,7 @@ signatures:
     category: code-loader
     severity: medium
     matcher: heuristic
+    confidence: heuristic
     kind: long-line
     threshold: 2000
     file_globs: ["*.mjs", "*.cjs", "*.js", "*.ts", "postcss.config.*"]
@@ -106,6 +112,7 @@ signatures:
     category: code-loader
     severity: medium
     matcher: obfuscation
+    confidence: heuristic
     kind: obfuscated-file
     description: "Hand-authored source/config file containing packed/obfuscated payload (line-agnostic)"
     remediation: strip-appended-payload
@@ -150,6 +157,7 @@ signatures:
     category: evil-merge
     severity: high
     matcher: git-history
+    confidence: heuristic
     kind: evil-merge
     description: "Merge commit introducing content beyond a clean 3-way merge of its parents (review-evading)"
     remediation: manual

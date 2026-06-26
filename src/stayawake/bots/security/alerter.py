@@ -56,7 +56,11 @@ def run(latest_path: str | Path = "reports/security/latest.json") -> None:
 
     results = latest.get("results", [])
     infected = [r for r in results if r.get("infected")]
-    clean = [r for r in results if not r.get("infected") and not r.get("error")]
+    suspicious = [r for r in results if r.get("suspicious")]
+    # A suspicious repo is neither infected nor clean: don't auto-close its issue, and
+    # (below) don't open one either — only confirmed-infected repos get a GitHub issue.
+    clean = [r for r in results if not r.get("infected")
+             and not r.get("suspicious") and not r.get("error")]
 
     if infected and slack:
         send_slack(slack, {"text": "StayAwakeBot Security Sentinel", "attachments": [{
@@ -65,9 +69,18 @@ def run(latest_path: str | Path = "reports/security/latest.json") -> None:
             "text": "\n".join(f"• {r['target']} — {r['summary']['total']} findings "
                               f"({r['summary']['max_severity']})" for r in infected[:20]),
             "footer": f"StayAwakeBot Security Sentinel | {utc_stamp()}"}]})
+    if suspicious and slack:
+        # Softer, distinct alert — informs without crying "malware" on heuristic-only hits.
+        send_slack(slack, {"text": "StayAwakeBot Security Sentinel", "attachments": [{
+            "color": "#dbab09",
+            "title": f"🟡 {len(suspicious)} repo(s) with items to review (not confirmed)",
+            "text": "\n".join(f"• {r['target']} — {r['summary']['total']} heuristic finding(s)"
+                              for r in suspicious[:20]),
+            "footer": f"StayAwakeBot Security Sentinel | {utc_stamp()}"}]})
 
     if not (token and repo):
-        print(f"Security alerts: {len(infected)} infected (no token/repo — skipped GitHub issues).")
+        print(f"Security alerts: {len(infected)} infected, {len(suspicious)} suspicious "
+              "(no token/repo — skipped GitHub issues).")
         return
 
     owner, name = repo.split("/")
@@ -83,4 +96,5 @@ def run(latest_path: str | Path = "reports/security/latest.json") -> None:
         if it and it.get("number") is not None:
             github_api.request(f"/repos/{owner}/{name}/issues/{it['number']}",
                                method="PATCH", token=token, data={"state": "closed"})
-    print(f"Security alerts processed: {len(infected)} infected, {len(clean)} clean.")
+    print(f"Security alerts processed: {len(infected)} infected, "
+          f"{len(suspicious)} suspicious, {len(clean)} clean.")
