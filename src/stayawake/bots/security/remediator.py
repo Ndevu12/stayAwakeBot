@@ -84,7 +84,10 @@ def remediate(config_path: str = "config/security.yml", apply: bool = False,
     for repo in discover_local_repos(cfg.get("targets", {}).get("local", []), opts):
         result = scan_target(LocalRepoTarget(repo, str(repo), opts), sigs, allowlist)
         changes = remediation.plan(result.findings)
-        manual = [f for f in result.findings if f.remediation == "manual"]
+        # Everything not auto-fixed — true `manual` findings AND heuristic ones we refuse
+        # to auto-edit — surfaces here so a suspicious match is reviewed, never silently
+        # stripped or silently dropped.
+        manual = [f for f in result.findings if not remediation.is_auto_fixable(f)]
         if not changes and not manual:
             continue
         rel = str(repo).replace(str(Path.home()), "~")

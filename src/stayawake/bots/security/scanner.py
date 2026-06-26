@@ -10,7 +10,7 @@ import inspect
 from fnmatch import fnmatch
 from typing import Any
 
-from stayawake.bots.security.models import Finding, ScanResult
+from stayawake.bots.security.models import CONFIRMED, HEURISTIC, Finding, ScanResult
 from stayawake.bots.security.matchers import REGISTRY
 
 
@@ -50,6 +50,12 @@ def scan_target(target, signatures_by_matcher: dict[str, list[dict[str, Any]]],
     # matchers' signatures (the evil-merge detector cross-checks the content-loader
     # fingerprints) can reach them without re-loading the DB.
     all_sigs = [s for group in signatures_by_matcher.values() for s in group]
+    # Confidence is a property of the signature, not the matcher, so stamp it centrally
+    # here (one source of truth) rather than threading it through every matcher. Anything
+    # not explicitly marked `heuristic` is treated as `confirmed` — the conservative
+    # default, so a new signature can never silently downgrade itself out of INFECTED.
+    confidence_of = {s["id"]: (HEURISTIC if s.get("confidence") == HEURISTIC else CONFIRMED)
+                     for s in all_sigs}
     try:
         for matcher_name, sigs in signatures_by_matcher.items():
             matcher = REGISTRY.get(matcher_name)
@@ -60,6 +66,7 @@ def scan_target(target, signatures_by_matcher: dict[str, list[dict[str, Any]]],
                         else matcher.scan(target, sigs))
             for finding in findings:
                 if not _allowed(finding, allowlist or []):
+                    finding.confidence = confidence_of.get(finding.signature_id, CONFIRMED)
                     result.findings.append(finding)
         # Stable, useful ordering: severity desc, then path.
         result.findings.sort(key=lambda f: (-int(f.severity), f.path))
