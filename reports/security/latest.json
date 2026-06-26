@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-06-26T18:45:01.593167+00:00",
+  "generated_at": "2026-06-26T20:44:30.666497+00:00",
   "summary": {
     "targets": 1,
     "infected": 1,
@@ -170,7 +170,7 @@
           "path": "tests/bots/security/test_obfuscation_file.py",
           "description": "Obfuscated loader fingerprint \u2014 fromCharCode(127) string shuffler",
           "remediation": "strip-appended-payload",
-          "line": 138,
+          "line": 231,
           "evidence": " * 40) + \"];String.fromCharCode(127)\"         for path in (\"lib/app.min.js\", \".p\u2026",
           "vector": "code-loader"
         },

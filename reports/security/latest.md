@@ -1,4 +1,4 @@
-# Security scan — 2026-06-26T18:45:01.593167+00:00
+# Security scan — 2026-06-26T20:44:30.666497+00:00
 
 **1 targets** · 1 infected · 33 findings (16 critical, 13 high)
 
@@ -44,7 +44,7 @@
 - **[critical]** `loader-seed-var` — tests/bots/security/test_evasions.py:28
   - Obfuscated loader seed variable (var/let/const _$_xxxx=)
   - evidence: `(b"/*\x00*/ var _$_1e42 = sfL(0); export default {};")         self.assertIn("lo…`
-- **[critical]** `loader-fromcharcode-127` — tests/bots/security/test_obfuscation_file.py:138
+- **[critical]** `loader-fromcharcode-127` — tests/bots/security/test_obfuscation_file.py:231
   - Obfuscated loader fingerprint — fromCharCode(127) string shuffler
   - evidence: ` * 40) + "];String.fromCharCode(127)"         for path in ("lib/app.min.js", ".p…`
 - **[critical]** `loader-seed-var` — tests/bots/security/test_obfuscation_file.py:47
