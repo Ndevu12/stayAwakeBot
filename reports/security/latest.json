@@ -1,32 +1,40 @@
 {
-  "generated_at": "2026-06-26T20:44:30.666497+00:00",
+  "generated_at": "2026-06-26T21:21:10.263290+00:00",
   "summary": {
     "targets": 1,
     "infected": 1,
-    "findings": 33,
-    "critical": 16,
-    "high": 13
+    "suspicious": 0,
+    "findings": 36,
+    "critical": 18,
+    "high": 14
   },
   "any_infected": true,
+  "any_suspicious": false,
   "results": [
     {
       "target": "~/work/stayAwakeBot/stayAwakeBot",
       "source": "local",
+      "verdict": "infected",
       "infected": true,
+      "suspicious": false,
       "error": null,
       "summary": {
-        "total": 33,
+        "total": 36,
         "by_severity": {
-          "critical": 16,
-          "high": 13,
+          "critical": 18,
+          "high": 14,
           "medium": 4
         },
         "by_category": {
-          "code-loader": 26,
+          "code-loader": 29,
           "vscode-autorun": 3,
           "fake-font": 2,
           "git-marker": 1,
           "camouflage": 1
+        },
+        "by_confidence": {
+          "confirmed": 34,
+          "heuristic": 2
         },
         "max_severity": "critical"
       },
@@ -40,7 +48,8 @@
           "remediation": "strip-appended-payload",
           "line": 42,
           "evidence": "]]= require;String.fromCharCode(127);                                           \u2026",
-          "vector": "code-loader"
+          "vector": "code-loader",
+          "confidence": "confirmed"
         },
         {
           "signature_id": "loader-seed-var",
@@ -51,7 +60,8 @@
           "remediation": "strip-appended-payload",
           "line": 53,
           "evidence": "!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; var x =sfL(\\\\\\\\\\\\\\\\\\\u2026",
-          "vector": "code-loader"
+          "vector": "code-loader",
+          "confidence": "confirmed"
         },
         {
           "signature_id": "loader-fromcharcode-127",
@@ -62,7 +72,8 @@
           "remediation": "strip-appended-payload",
           "line": 14,
           "evidence": "]]= require;String.fromCharCode(127);                                           \u2026",
-          "vector": "code-loader"
+          "vector": "code-loader",
+          "confidence": "confirmed"
         },
         {
           "signature_id": "loader-seed-var",
@@ -73,7 +84,8 @@
           "remediation": "strip-appended-payload",
           "line": 17,
           "evidence": "!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; var x =sfL(\\\\\\\\\\\\\\\\\\\u2026",
-          "vector": "code-loader"
+          "vector": "code-loader",
+          "confidence": "confirmed"
         },
         {
           "signature_id": "vscode-task-folderopen-exec",
@@ -84,7 +96,8 @@
           "remediation": "remove-foreign-vscode",
           "line": null,
           "evidence": "task 'eslint-check' runOn=folderOpen",
-          "vector": "vscode-autorun"
+          "vector": "vscode-autorun",
+          "confidence": "confirmed"
         },
         {
           "signature_id": "vscode-task-runs-font",
@@ -95,7 +108,8 @@
           "remediation": "remove-foreign-vscode",
           "line": null,
           "evidence": "node ./public/fonts/fa-solid-400.woff2",
-          "vector": "vscode-autorun"
+          "vector": "vscode-autorun",
+          "confidence": "confirmed"
         },
         {
           "signature_id": "loader-fromcharcode-127",
@@ -106,7 +120,8 @@
           "remediation": "strip-appended-payload",
           "line": 2,
           "evidence": "]]= require;String.fromCharCode(127);                                           \u2026",
-          "vector": "code-loader"
+          "vector": "code-loader",
+          "confidence": "confirmed"
         },
         {
           "signature_id": "loader-seed-var",
@@ -117,7 +132,8 @@
           "remediation": "strip-appended-payload",
           "line": 2,
           "evidence": "!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; var x =sfL(\"inert\");\u2026",
-          "vector": "code-loader"
+          "vector": "code-loader",
+          "confidence": "confirmed"
         },
         {
           "signature_id": "fake-font-fa-solid-400",
@@ -128,7 +144,8 @@
           "remediation": "quarantine-dir",
           "line": null,
           "evidence": null,
-          "vector": "fake-font"
+          "vector": "fake-font",
+          "confidence": "confirmed"
         },
         {
           "signature_id": "fake-font-text-woff",
@@ -139,7 +156,8 @@
           "remediation": "quarantine-file",
           "line": null,
           "evidence": ".woff2 without b'wOF2' magic; content is text/JS",
-          "vector": "fake-font"
+          "vector": "fake-font",
+          "confidence": "confirmed"
         },
         {
           "signature_id": "loader-fromcharcode-127",
@@ -150,7 +168,8 @@
           "remediation": "strip-appended-payload",
           "line": 39,
           "evidence": "* 100 + b\"\\nString.fromCharCode(127);\\n\")         self.assertIn(\"loader-fromchar\u2026",
-          "vector": "code-loader"
+          "vector": "code-loader",
+          "confidence": "confirmed"
         },
         {
           "signature_id": "loader-seed-var",
@@ -161,7 +180,8 @@
           "remediation": "strip-appended-payload",
           "line": 28,
           "evidence": "(b\"/*\\x00*/ var _$_1e42 = sfL(0); export default {};\")         self.assertIn(\"lo\u2026",
-          "vector": "code-loader"
+          "vector": "code-loader",
+          "confidence": "confirmed"
         },
         {
           "signature_id": "loader-fromcharcode-127",
@@ -172,7 +192,8 @@
           "remediation": "strip-appended-payload",
           "line": 231,
           "evidence": " * 40) + \"];String.fromCharCode(127)\"         for path in (\"lib/app.min.js\", \".p\u2026",
-          "vector": "code-loader"
+          "vector": "code-loader",
+          "confidence": "confirmed"
         },
         {
           "signature_id": "loader-seed-var",
@@ -183,7 +204,8 @@
           "remediation": "strip-appended-payload",
           "line": 47,
           "evidence": "om 'react'\\nvar _$_1e42='seed';\\n\" + packed         self.assertIn(OBF, _scan({\"C\u2026",
-          "vector": "code-loader"
+          "vector": "code-loader",
+          "confidence": "confirmed"
         },
         {
           "signature_id": "loader-fromcharcode-127",
@@ -194,7 +216,8 @@
           "remediation": "strip-appended-payload",
           "line": 84,
           "evidence": "d = sfL(0)\\nString.fromCharCode(127)\\nexport default {a:1};\\n\"         out = rem\u2026",
-          "vector": "code-loader"
+          "vector": "code-loader",
+          "confidence": "confirmed"
         },
         {
           "signature_id": "loader-seed-var",
@@ -205,7 +228,32 @@
           "remediation": "strip-appended-payload",
           "line": 84,
           "evidence": "     txt = \"var _$_abcd = sfL(0)\\nString.fromCharCode(127)\\nexport default {a:1}\u2026",
-          "vector": "code-loader"
+          "vector": "code-loader",
+          "confidence": "confirmed"
+        },
+        {
+          "signature_id": "loader-fromcharcode-127",
+          "category": "code-loader",
+          "severity": "critical",
+          "path": "tests/bots/security/test_verdict.py",
+          "description": "Obfuscated loader fingerprint \u2014 fromCharCode(127) string shuffler",
+          "remediation": "strip-appended-payload",
+          "line": 102,
+          "evidence": "2 = sfL(0); String.fromCharCode(127);\\n\"})         self.assertEqual(r.verdict, I\u2026",
+          "vector": "code-loader",
+          "confidence": "confirmed"
+        },
+        {
+          "signature_id": "loader-seed-var",
+          "category": "code-loader",
+          "severity": "critical",
+          "path": "tests/bots/security/test_verdict.py",
+          "description": "Obfuscated loader seed variable (var/let/const _$_xxxx=)",
+          "remediation": "strip-appended-payload",
+          "line": 102,
+          "evidence": "({\"x.mjs\": \"var _$_1e42 = sfL(0); String.fromCharCode(127);\\n\"})         self.as\u2026",
+          "vector": "code-loader",
+          "confidence": "confirmed"
         },
         {
           "signature_id": "loader-decoder-fn",
@@ -216,7 +264,8 @@
           "remediation": "strip-appended-payload",
           "line": 53,
           "evidence": "t';function sfL(w){return w}; var x =sfL(\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\u2026\",           \"v\u2026",
-          "vector": "code-loader"
+          "vector": "code-loader",
+          "confidence": "confirmed"
         },
         {
           "signature_id": "loader-global-bang",
@@ -227,7 +276,8 @@
           "remediation": "strip-appended-payload",
           "line": 229,
           "evidence": "ault config;global['!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; \u2026",
-          "vector": "code-loader"
+          "vector": "code-loader",
+          "confidence": "confirmed"
         },
         {
           "signature_id": "loader-require-hijack",
@@ -238,7 +288,8 @@
           "remediation": "strip-appended-payload",
           "line": 240,
           "evidence": "\\\\\\\\\\\\\\\\\"); global[_$_1e42[0]]= require;S\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\u2026",
-          "vector": "code-loader"
+          "vector": "code-loader",
+          "confidence": "confirmed"
         },
         {
           "signature_id": "loader-decoder-fn",
@@ -249,7 +300,8 @@
           "remediation": "strip-appended-payload",
           "line": 17,
           "evidence": "t';function sfL(w){return w}; var x =sfL(\\\\\\\\\\\\\\\\\\\u2026` - **[critical]** `loader-fr\u2026",
-          "vector": "code-loader"
+          "vector": "code-loader",
+          "confidence": "confirmed"
         },
         {
           "signature_id": "loader-global-bang",
@@ -260,7 +312,8 @@
           "remediation": "strip-appended-payload",
           "line": 64,
           "evidence": "ault config;global['!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; \u2026",
-          "vector": "code-loader"
+          "vector": "code-loader",
+          "confidence": "confirmed"
         },
         {
           "signature_id": "loader-require-hijack",
@@ -271,7 +324,8 @@
           "remediation": "strip-appended-payload",
           "line": 67,
           "evidence": "\\\\\\\\\\\\\\\\\"); global[_$_1e42[0]]= require;S\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\u2026",
-          "vector": "code-loader"
+          "vector": "code-loader",
+          "confidence": "confirmed"
         },
         {
           "signature_id": "vscode-allow-automatic-tasks",
@@ -282,7 +336,8 @@
           "remediation": "remove-foreign-vscode",
           "line": null,
           "evidence": "task.allowAutomaticTasks: true",
-          "vector": "vscode-autorun"
+          "vector": "vscode-autorun",
+          "confidence": "confirmed"
         },
         {
           "signature_id": "loader-decoder-fn",
@@ -293,7 +348,8 @@
           "remediation": "strip-appended-payload",
           "line": 2,
           "evidence": "t';function sfL(w){return w}; var x =sfL(\"inert\"); global[_$_1e42[0]]= require;S\u2026",
-          "vector": "code-loader"
+          "vector": "code-loader",
+          "confidence": "confirmed"
         },
         {
           "signature_id": "loader-global-bang",
@@ -304,7 +360,8 @@
           "remediation": "strip-appended-payload",
           "line": 2,
           "evidence": "ault config;global['!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; \u2026",
-          "vector": "code-loader"
+          "vector": "code-loader",
+          "confidence": "confirmed"
         },
         {
           "signature_id": "loader-require-hijack",
@@ -315,7 +372,8 @@
           "remediation": "strip-appended-payload",
           "line": 2,
           "evidence": "L(\"inert\"); global[_$_1e42[0]]= require;String.fromCharCode(127);               \u2026",
-          "vector": "code-loader"
+          "vector": "code-loader",
+          "confidence": "confirmed"
         },
         {
           "signature_id": "loader-decoder-fn",
@@ -326,7 +384,8 @@
           "remediation": "strip-appended-payload",
           "line": 28,
           "evidence": "r _$_1e42 = sfL(0); export default {};\")         self.assertIn(\"loader-seed-var\"\u2026",
-          "vector": "code-loader"
+          "vector": "code-loader",
+          "confidence": "confirmed"
         },
         {
           "signature_id": "loader-decoder-fn",
@@ -337,7 +396,8 @@
           "remediation": "strip-appended-payload",
           "line": 63,
           "evidence": "x';function sfL(w){return w}\"         self.assertLess(max(len(l) for l in line.s\u2026",
-          "vector": "code-loader"
+          "vector": "code-loader",
+          "confidence": "confirmed"
         },
         {
           "signature_id": "loader-decoder-fn",
@@ -348,7 +408,20 @@
           "remediation": "strip-appended-payload",
           "line": 84,
           "evidence": "r _$_abcd = sfL(0)\\nString.fromCharCode(127)\\nexport default {a:1};\\n\"         o\u2026",
-          "vector": "code-loader"
+          "vector": "code-loader",
+          "confidence": "confirmed"
+        },
+        {
+          "signature_id": "loader-decoder-fn",
+          "category": "code-loader",
+          "severity": "high",
+          "path": "tests/bots/security/test_verdict.py",
+          "description": "Obfuscated loader decoder call \u2014 the sfL decoder function",
+          "remediation": "strip-appended-payload",
+          "line": 102,
+          "evidence": "r _$_1e42 = sfL(0); String.fromCharCode(127);\\n\"})         self.assertEqual(r.ve\u2026",
+          "vector": "code-loader",
+          "confidence": "confirmed"
         },
         {
           "signature_id": "gitignore-autopush-markers",
@@ -359,7 +432,8 @@
           "remediation": "strip-gitignore-markers",
           "line": 2,
           "evidence": "ode_modules branch_structure.json temp_auto_push.bat temp_interactive_push.bat ",
-          "vector": "git-marker"
+          "vector": "git-marker",
+          "confidence": "confirmed"
         },
         {
           "signature_id": "oversized-config-line",
@@ -370,7 +444,8 @@
           "remediation": "strip-appended-payload",
           "line": 2,
           "evidence": "line 2: 2283 chars; loader fingerprint: loader-fromcharcode-127",
-          "vector": "code-loader"
+          "vector": "code-loader",
+          "confidence": "heuristic"
         },
         {
           "signature_id": "obfuscated-source-file",
@@ -381,7 +456,8 @@
           "remediation": "strip-appended-payload",
           "line": null,
           "evidence": "loader fingerprint on raw content: loader-fromcharcode-127",
-          "vector": "code-loader"
+          "vector": "code-loader",
+          "confidence": "heuristic"
         },
         {
           "signature_id": "camouflage-blockchain-readme",
@@ -392,7 +468,8 @@
           "remediation": "quarantine-dir",
           "line": 2,
           "evidence": "nts for the Blockchain Explorer application. Required: BlockchainFont-Regular, T\u2026",
-          "vector": "camouflage"
+          "vector": "camouflage",
+          "confidence": "confirmed"
         }
       ]
     }
