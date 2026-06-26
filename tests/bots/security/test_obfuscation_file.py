@@ -87,6 +87,48 @@ class TestWholeFileObfuscation(unittest.TestCase):
         self.assertTrue(
             analyze_file("var q=function(){};\nq['constructor']\n('return 3')();\n", ".js"))
 
+    def test_chunked_base64_blob_reassembled(self):
+        # #1053 Tier-2 (signal A): a base64 payload split into short quoted chunks joined
+        # by `+` and WRAPPED to <400-char lines dodges the long-line + unbroken-run blob
+        # detectors. De-chunking the concat seams reassembles the blob and catches it.
+        random.seed(11)
+        alph = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+        blob = "".join(random.choice(alph) for _ in range(900))
+        chunks = " +\n  ".join('"%s"' % blob[i:i + 60] for i in range(0, len(blob), 60))
+        src = "const cfg = {};\nexport default cfg;\nconst b =\n  " + chunks + ";\n"
+        self.assertLess(max(len(l) for l in src.splitlines()), 400)  # evades old Tier-2
+        self.assertIn(OBF, _scan({"postcss.config.mjs": src}))
+
+    def test_escape_encoded_payload_flagged(self):
+        # #1053 Tier-2 (signal B): a payload written as a dense run of \xNN escapes carries
+        # no base64/charcode-array tell, but a long contiguous run of high-entropy BYTE
+        # escapes is an encoded blob. 64 bytes spread over 0-255 clears the 48-run length
+        # bar AND the byte-range + entropy gate.
+        esc = "".join("\\x%02x" % ((i * 7 + 3) % 256) for i in range(64))
+        src = 'const s = "' + esc + '";\nexport default s;\n'
+        self.assertLess(max(len(l) for l in src.splitlines()), 400)
+        self.assertIn(OBF, _scan({"x.js": src}))
+
+    def test_chunked_escape_payload_reassembled(self):
+        # A+B together: escapes split across concat chunks must be reassembled past the
+        # 48-run threshold before the byte/entropy gate sees them.
+        a = "".join("\\x%02x" % ((i * 5 + 1) % 256) for i in range(30))
+        b = "".join("\\x%02x" % ((i * 5 + 1) % 256) for i in range(30, 64))
+        src = 'const s = "' + a + '" +\n  "' + b + '";\nexport default s;\n'
+        self.assertIn(OBF, _scan({"x.mjs": src}))
+
+    def test_join_array_reassembly_caught(self):
+        # Signal A, the canonical obfuscator primitive: a base64 payload stored as a string
+        # ARRAY rejoined with .join("") — comma-quote seams, not `+`. _dechunk must collapse
+        # those too, else the most common off-the-shelf obfuscator output walks straight past.
+        random.seed(13)
+        alph = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+        blob = "".join(random.choice(alph) for _ in range(900))
+        arr = ",\n  ".join('"%s"' % blob[i:i + 50] for i in range(0, len(blob), 50))
+        src = "const p = [\n  " + arr + "\n].join('');\nexport default p;\n"
+        self.assertLess(max(len(l) for l in src.splitlines()), 400)
+        self.assertIn(OBF, _scan({"x.mjs": src}))
+
     # ── False positives: legit dense source / vendored context stays clean ──────
     def test_normal_big_component_clean(self):
         body = "import React from 'react';\n" + "\n".join(
@@ -104,6 +146,57 @@ class TestWholeFileObfuscation(unittest.TestCase):
 
     def test_low_entropy_long_array_clean(self):
         self.assertNotIn(OBF, _scan({"postcss.config.mjs": "export default {p:[" + "0," * 900 + "]};\n"}))
+
+    def test_short_literal_concat_clean(self):
+        # A's de-chunk must not manufacture a blob from ordinary short string concatenation
+        # — `"foo" + "bar"` reassembles to a short, low-entropy run that misses the blob gate.
+        code = ("export const url = 'https://' + 'api.' + 'example' + '.com' + '/v1';\n"
+                "export const msg = 'hello, ' + 'world' + '!';\n")
+        self.assertNotIn(OBF, _scan({"config.ts": code}))
+        self.assertFalse(analyze_file(code, ".ts"))
+
+    def test_few_escapes_clean(self):
+        # B requires a long contiguous escape RUN; a regex character class or a couple of
+        # unicode escapes (handfuls, not a payload) must stay clean.
+        code = ("export const re = /[\\x00-\\x1f\\u2028\\u2029]/g;\n"
+                "export const bullet = '\\u2022 item';\n")
+        self.assertNotIn(OBF, _scan({"util.js": code}))
+        self.assertFalse(analyze_file(code, ".js"))
+
+    def test_emoji_surrogate_escape_run_clean(self):
+        # FP guard (signal B): emoji written as \uXXXX surrogate pairs decode to codepoints
+        # >255 clustered in a narrow block — long enough to clear 48, but the byte-range gate
+        # keeps it clean. ASCII-only-source lint rules push devs toward exactly this form.
+        emoji = "".join("\\u%04x\\u%04x" % (0xD83D, 0xDE00 + (i % 60)) for i in range(40))
+        code = 'export const SMILEYS = "' + emoji + '";\n'
+        self.assertNotIn(OBF, _scan({"emojiData.ts": code}))
+        self.assertFalse(analyze_file(code, ".ts"))
+
+    def test_magic_byte_fixture_clean(self):
+        # FP guard (signal B): a structured file-header/magic-byte test fixture is short and
+        # low-entropy — below the 48-run bar and the entropy gate.
+        png = "\\x89\\x50\\x4e\\x47\\x0d\\x0a\\x1a\\x0a\\x49\\x48\\x44\\x52\\x00\\x00\\x00\\x10"
+        code = 'export const PNG_HEADER = Buffer.from("' + png + '", "binary");\n'
+        self.assertNotIn(OBF, _scan({"sniffer.test.js": code}))
+        self.assertFalse(analyze_file(code, ".js"))
+
+    def test_combining_marks_escape_run_clean(self):
+        # FP guard (signal B): a combining-diacritical block (U+0300..U+036F) is a contiguous
+        # \u run but a narrow >255 codepoint block — byte-range gate keeps it clean.
+        marks = "".join("\\u%04x" % (0x0300 + (i % 0x70)) for i in range(60))
+        code = 'export const COMBINING = "' + marks + '";\n'
+        self.assertNotIn(OBF, _scan({"normalize.test.ts": code}))
+        self.assertFalse(analyze_file(code, ".ts"))
+
+    def test_legit_string_array_clean(self):
+        # FP guard (signal A): de-chunking comma seams must not manufacture a blob from an
+        # ordinary string array — low-entropy words, and SRI/hex lists whose -/=/# separators
+        # break the base64 run, both reassemble to nothing that clears the 120/4.5 gate.
+        words = "export const C = [" + ",".join("'%s'" % w for w in
+                 ["apple", "banana", "cherry", "date", "fig", "grape"] * 30) + "];\n"
+        sri = "export const H = [" + ",".join("'sha384-%s'" % ("AbC9+/" * 14) for _ in range(8)) + "];\n"
+        self.assertNotIn(OBF, _scan({"data.ts": words}))
+        self.assertNotIn(OBF, _scan({"sri.ts": sri}))
 
     def test_constructor_member_access_without_call_is_clean(self):
         # Plain ['constructor'] access (no call) is ordinary reflection — the exec-sink
