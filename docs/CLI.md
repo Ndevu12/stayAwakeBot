@@ -95,7 +95,7 @@ something:
 Hunt for supply-chain worms across one or more repositories or directories.
 
 ```text
-saw scan [PATHS...] [-L] [-c FILE] [-p PATH] [-d DIR] [-f]
+saw scan [PATHS...] [-L] [-c FILE] [-p PATH] [-d DIR] [-f] [--fix [--apply [--pr]]]
 ```
 
 | Option | Description |
@@ -106,13 +106,24 @@ saw scan [PATHS...] [-L] [-c FILE] [-p PATH] [-d DIR] [-f]
 | `-L`, `--local` | Skip remote GitHub targets — scan local paths only. |
 | `-d`, `--reports-dir DIR` | Where to write reports (default: `reports/security`). Use a scratch dir to avoid touching committed reports. |
 | `-f`, `--fail` | Exit `1` if any scanned target is infected (for CI gating). |
+| `--fix` | **Remediate in the same pass** — reuse the scan's findings to fix the scanned local repo(s); no second scan. Dry-run unless `--apply`. |
+| `--apply` | With `--fix`: write fixes (originals backed up to quarantine) and commit them to a branch. Implies `--fix`. |
+| `--pr`, `--open-pr` | With `--fix --apply`: push a fix branch and open/update one rolling, de-duplicated PR per repo. Implies `--fix`. |
 
 ```bash
 saw scan                                  # scan the current repo
 saw scan ./service-a ./service-b          # scan specific paths
 saw scan -L -c config/security.yml        # local-only, configured targets
 saw scan -f                               # gate: non-zero exit on any finding
+saw scan --fix                            # scan AND preview fixes (dry-run), one pass
+saw scan --fix --apply                    # scan and apply fixes, commit to a branch
 ```
+
+> **`scan --fix` is the recommended remediation flow.** It runs detection and remediation
+> from a single analysis pass — there is no re-scan and no report file in between — so a fix
+> always acts on exactly what the scan just found. Only **confirmed** findings are auto-fixed;
+> **suspicious** (heuristic) matches are surfaced for review, never auto-edited. The standalone
+> [`saw fix`](#saw-fix) remains for the org-wide remote sweep and back-compat.
 
 ### `saw run`
 
@@ -160,7 +171,9 @@ Reads credentials from the environment: `SLACK_WEBHOOK_URL`, `GITHUB_TOKEN`, `GI
 ### `saw fix`
 
 Remediate detected worm findings. **Dry-run by default** — it shows what would change unless you
-pass `--apply`.
+pass `--apply`. For the common "scan then fix" flow prefer [`saw scan --fix`](#saw-scan), which
+remediates in the same pass without a second scan; `saw fix` is kept for the **org-wide remote
+sweep** (`--remote`) and back-compat.
 
 ```text
 saw fix [--apply] [--pr] [--remote] [-c FILE]
@@ -172,7 +185,7 @@ saw fix [--apply] [--pr] [--remote] [-c FILE]
 | `--apply` | Write fixes locally (originals backed up) and commit them to a branch. |
 | `--pr` | With `--apply`: push a stable `security/auto-clean` branch and open/update one rolling, de-duplicated PR per repo. |
 | `--remote` | Sweep the configured GitHub targets and open/update a dedup'd fix PR per repo. Needs a GitHub credential with repo + PR write scope (an env token or a `gh auth login` session). |
-| `-c`, `--config FILE` | Config file (default: `config/security.yml`). |
+| `-c`, `--config FILE` | Config file. **Optional** — defaults to `config/security.yml` when present, else the current repository. An explicitly-passed path that does not exist is a clear error (exit `2`), never a crash. |
 
 ```bash
 saw fix                       # dry-run — preview changes

@@ -26,9 +26,17 @@ def register(sub) -> None:
     add_scan_args(p)
     p.add_argument("-f", "--fail", "--fail-on-findings", action="store_true", dest="fail",
                    help="exit non-zero if any target is infected (CI gate)")
+    p.add_argument("--fix", action="store_true",
+                   help="also remediate the scanned local repo(s) in the same pass (dry-run)")
+    p.add_argument("--apply", action="store_true",
+                   help="with --fix: write fixes (backed up to quarantine) and commit to a branch")
+    p.add_argument("--pr", "--open-pr", action="store_true", dest="pr",
+                   help="with --fix --apply: push a fix branch and open/update one PR per repo")
     p.set_defaults(func=run)
 
 
 def run(a: argparse.Namespace) -> int:
     paths = [*a.paths, *a.extra_paths]
-    return service.scan(a.config, a.local, a.fail, a.reports_dir, paths or None)
+    fix = a.fix or a.apply or a.pr          # --apply/--pr imply --fix
+    return service.scan(a.config, a.local, a.fail, a.reports_dir, paths or None,
+                        fix=fix, apply=a.apply, open_pr=a.pr)

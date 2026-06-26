@@ -71,6 +71,23 @@ class TestScanRouting(unittest.TestCase):
         cli.main(["s", "-f"])
         self.assertTrue(m.call_args.args[2])
 
+    @mock.patch("stayawake.bots.security.service.scan", return_value=0)
+    def test_fix_flags_route_to_service(self, m):
+        cli.main(["scan", "--fix", "--apply", "--pr"])
+        self.assertEqual(m.call_args.kwargs, {"fix": True, "apply": True, "open_pr": True})
+
+    @mock.patch("stayawake.bots.security.service.scan", return_value=0)
+    def test_apply_or_pr_imply_fix(self, m):
+        cli.main(["scan", "--apply"])
+        self.assertTrue(m.call_args.kwargs["fix"])
+        cli.main(["scan", "--pr"])
+        self.assertTrue(m.call_args.kwargs["fix"])
+
+    @mock.patch("stayawake.bots.security.service.scan", return_value=0)
+    def test_bare_scan_does_not_fix(self, m):
+        cli.main(["scan"])
+        self.assertFalse(m.call_args.kwargs["fix"])
+
 
 class TestSecNamespace(unittest.TestCase):
     @mock.patch("stayawake.bots.security.service.scan", return_value=0)
@@ -109,13 +126,18 @@ class TestReportAlert(unittest.TestCase):
 
 
 class TestFix(unittest.TestCase):
-    @mock.patch("stayawake.bots.security.remediator.remediate")
+    @mock.patch("stayawake.bots.security.remediator.remediate", return_value=0)
     def test_local_apply_pr(self, m):
         rc = cli.main(["fix", "--apply", "--pr"])
-        self.assertEqual(rc, 0)
+        self.assertEqual(rc, 0)                  # fix now propagates remediate()'s exit code
         self.assertEqual(m.call_args.kwargs, {"apply": True, "open_pr": True})
 
-    @mock.patch("stayawake.bots.security.remediator.remediate")
+    @mock.patch("stayawake.bots.security.remediator.remediate", return_value=2)
+    def test_missing_explicit_config_exits_nonzero(self, _):
+        # #1054: a missing --config is a clean exit-2, not a crash; fix propagates it.
+        self.assertEqual(cli.main(["fix", "--config", "nope.yml"]), 2)
+
+    @mock.patch("stayawake.bots.security.remediator.remediate", return_value=0)
     def test_open_pr_legacy_alias(self, m):
         cli.main(["fix", "--apply", "--open-pr"])
         self.assertTrue(m.call_args.kwargs["open_pr"])
