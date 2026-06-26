@@ -8,8 +8,9 @@ from stayawake.bots.security import remediator
 
 
 def register(sub) -> None:
-    p = sub.add_parser("fix", help="remediate findings (dry-run by default)")
-    p.add_argument("-c", "--config", default="config/security.yml")
+    p = sub.add_parser("fix", help="remediate findings (dry-run by default; see also: scan --fix)")
+    p.add_argument("-c", "--config", default=None,
+                   help="config file (default: config/security.yml when present, else the current repo)")
     p.add_argument("--apply", action="store_true",
                    help="apply local fixes (backed up) and commit to a branch")
     p.add_argument("--pr", "--open-pr", action="store_true", dest="pr",
@@ -25,5 +26,5 @@ def run(a: argparse.Namespace) -> int:
         # a successful sweep must still exit 0 (matches the legacy remediate script).
         remediator.submit_org_prs(a.config)
         return 0
-    remediator.remediate(a.config, apply=a.apply, open_pr=a.pr)
-    return 0
+    # remediate() returns a process exit code (0 ok; 2 when an explicit --config is missing).
+    return remediator.remediate(a.config, apply=a.apply, open_pr=a.pr)
