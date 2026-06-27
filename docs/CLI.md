@@ -106,6 +106,7 @@ saw scan [PATHS...] [-L] [-c FILE] [-p PATH] [-d DIR] [-f] [--fix [--apply [--pr
 | `-L`, `--local` | Skip remote GitHub targets — scan local paths only. |
 | `-d`, `--reports-dir DIR` | Where to write reports (default: `reports/security`). Use a scratch dir to avoid touching committed reports. |
 | `-f`, `--fail` | Exit `1` if any scanned target is infected (for CI gating). |
+| `--no-stream` | Disable the live progress/typewriter output — plain, instant lines. (Auto-off already when piped, in CI, or with `STAYAWAKE_NO_STREAM=1`.) |
 | `--fix` | **Remediate in the same pass** — reuse the scan's findings to fix the scanned local repo(s); no second scan. Dry-run unless `--apply`. |
 | `--apply` | With `--fix`: write fixes (originals backed up to quarantine) and commit them to a branch. Implies `--fix`. |
 | `--pr`, `--open-pr` | With `--fix --apply`: push a fix branch and open/update one rolling, de-duplicated PR per repo. Implies `--fix`. |
@@ -119,6 +120,13 @@ saw scan --fix                            # scan AND preview fixes (dry-run), on
 saw scan --fix --apply                    # scan and apply fixes, commit to a branch
 ```
 
+> **Live progress.** On an interactive terminal, `scan` streams each target as it completes
+> (`[3/9] [INFECTED] …`) with a spinner over the actual work and a typewriter cadence, so a
+> long sweep never looks frozen. It's purely cosmetic pacing of deterministic results — and
+> it **auto-disables** when piped, in CI, with `--no-stream`, or `STAYAWAKE_NO_STREAM=1`, so
+> `stdout` and the report artifacts stay byte-for-byte unchanged. Progress goes to `stderr`;
+> results to `stdout`.
+>
 > **`scan --fix` is the recommended remediation flow.** It runs detection and remediation
 > from a single analysis pass — there is no re-scan and no report file in between — so a fix
 > always acts on exactly what the scan just found. Only **confirmed** findings are auto-fixed;

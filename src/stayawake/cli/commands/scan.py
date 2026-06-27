@@ -19,6 +19,8 @@ def add_scan_args(p: argparse.ArgumentParser) -> None:
                    help="skip remote GitHub targets — scan local paths only")
     p.add_argument("-d", "--reports-dir", default=None, dest="reports_dir",
                    help="where to write reports (default: reports/security)")
+    p.add_argument("--no-stream", action="store_true", dest="no_stream",
+                   help="disable live progress/typewriter output (plain, instant lines)")
 
 
 def register(sub) -> None:
@@ -39,4 +41,4 @@ def run(a: argparse.Namespace) -> int:
     paths = [*a.paths, *a.extra_paths]
     fix = a.fix or a.apply or a.pr          # --apply/--pr imply --fix
     return service.scan(a.config, a.local, a.fail, a.reports_dir, paths or None,
-                        fix=fix, apply=a.apply, open_pr=a.pr)
+                        fix=fix, apply=a.apply, open_pr=a.pr, no_stream=a.no_stream)

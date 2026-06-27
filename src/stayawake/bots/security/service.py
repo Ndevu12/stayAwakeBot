@@ -12,6 +12,7 @@ from pathlib import Path
 
 from stayawake.core.config import load_yaml
 from stayawake.core.io import write_json, resolve_reports_dir
+from stayawake.core.streaming import Streamer, status, stream_enabled
 from stayawake.core.timeutil import now_iso
 from stayawake.core.adapters import github_api
 from stayawake.core import auth
@@ -127,10 +128,22 @@ def _resolve_remote(cfg: dict, opts: ScanOptions):
     return sorted(set(slugs)), token, source
 
 
+def _status_tag(r: ScanResult) -> str:
+    """Bracketed, padded verdict tag for a per-target line (INFECTED / SUSPECT / clean)."""
+    tag = ("INFECTED" if r.infected else "SUSPECT" if r.suspicious
+           else "ERROR" if r.error else "clean")
+    return f"[{tag:8}]"
+
+
 def scan(config_path: str | None = None, local_only: bool = False,
          fail_on_findings: bool = False, reports_dir: str | Path | None = None,
          paths: list[str] | None = None, fix: bool = False, apply: bool = False,
-         open_pr: bool = False) -> int:
+         open_pr: bool = False, no_stream: bool = False) -> int:
+    # One streaming decision for the whole command: animate only on an interactive stdout
+    # TTY (and not --no-stream / env-disabled). When off, output is plain and instant and
+    # stdout is byte-identical for any consumer; the spinner (stderr) stays silent.
+    stream_on = stream_enabled(force_off=no_stream)
+    sw = Streamer(enabled=stream_on)
     cfg = _read_config(config_path)
     settings = cfg.get("settings", {})
     opts = _options(settings)
@@ -160,12 +173,20 @@ def scan(config_path: str | None = None, local_only: bool = False,
 
     results: list[ScanResult] = []
     local_scanned: list[tuple[Path, ScanResult]] = []   # (repo, result) for --fix (no re-scan)
-    for repo in discover_local_repos(local_patterns, opts):
+    # Discovery (the FS walk) is itself slow and silent — cover it with a spinner.
+    with status("Discovering repositories…", enabled=stream_on):
+        repos = discover_local_repos(local_patterns, opts)
+    if stream_on and repos:
+        sw.line(f"Found {len(repos)} repositor{'y' if len(repos) == 1 else 'ies'} to scan.")
+    n = len(repos)
+    for i, repo in enumerate(repos, 1):
         display = str(repo).replace(os.path.expanduser("~"), "~")
-        with LocalRepoTarget(repo, display, opts) as t:
-            res = scan_target(t, sigs, allowlist)
+        with status(f"[{i}/{n}] scanning {display}…", enabled=stream_on):  # spinner over real work
+            with LocalRepoTarget(repo, display, opts) as t:
+                res = scan_target(t, sigs, allowlist)
         results.append(res)
         local_scanned.append((repo, res))
+        sw.line(f"  [{i}/{n}] {_status_tag(res)}  {res.target}  ({len(res.findings)} findings)")
 
     if not local_only:
         slugs, token, source = _resolve_remote(cfg, opts)
@@ -174,13 +195,17 @@ def scan(config_path: str | None = None, local_only: bool = False,
         elif slugs:
             print("No GitHub credential found; scanning public remotes anonymously. "
                   "For private repos, run `gh auth login` or set GH_SECURITY_TOKEN.")
-        for slug in slugs:
+        m = len(slugs)
+        for j, slug in enumerate(slugs, 1):
             rt = RemoteRepoTarget(slug, opts, token)
             try:
-                results.append(scan_target(rt, sigs, allowlist) if rt.clone()
-                               else ScanResult(target=slug, source="remote", error="clone failed"))
+                with status(f"[{j}/{m}] cloning + scanning {slug}…", enabled=stream_on):
+                    res = (scan_target(rt, sigs, allowlist) if rt.clone()
+                           else ScanResult(target=slug, source="remote", error="clone failed"))
             finally:
                 rt.cleanup()
+            results.append(res)
+            sw.line(f"  [{j}/{m}] {_status_tag(res)}  {res.target}  ({len(res.findings)} findings)")
 
     payload = {
         "generated_at": now_iso(),
@@ -201,17 +226,15 @@ def scan(config_path: str | None = None, local_only: bool = False,
     write_json(rdir / "latest.json", payload)
     (rdir / "latest.md").write_text(_render_markdown(payload), encoding="utf-8")
 
+    # Per-target lines already streamed during the scan loops above; this is the
+    # authoritative end-of-run recap (unchanged content).
     s = payload["summary"]
-    print(f"Scanned {s['targets']} target(s): {s['infected']} infected, "
-          f"{s['suspicious']} suspicious, "
-          f"{s['findings']} findings ({s['critical']} critical, {s['high']} high)")
-    for r in results:
-        tag = ("INFECTED" if r.infected else "SUSPECT" if r.suspicious
-               else "ERROR" if r.error else "clean")
-        print(f"  [{tag:8}] {r.target}  ({len(r.findings)} findings)")
+    sw.line(f"\nScanned {s['targets']} target(s): {s['infected']} infected, "
+            f"{s['suspicious']} suspicious, "
+            f"{s['findings']} findings ({s['critical']} critical, {s['high']} high)")
     if s["suspicious"]:
-        print("  ↳ 'suspicious' = heuristic match(es) to review; not asserted as infected. "
-              "See reports/security/latest.md.")
+        sw.line("  ↳ 'suspicious' = heuristic match(es) to review; not asserted as infected. "
+                "See reports/security/latest.md.")
 
     # --- remediate in the SAME pass (saw scan --fix) — reuse the local results, no re-scan,
     #     no report-file coupling. Remediation is local-only here; the org-wide remote PR
