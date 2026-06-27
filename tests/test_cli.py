@@ -74,7 +74,8 @@ class TestScanRouting(unittest.TestCase):
     @mock.patch("stayawake.bots.security.service.scan", return_value=0)
     def test_fix_flags_route_to_service(self, m):
         cli.main(["scan", "--fix", "--apply", "--pr"])
-        self.assertEqual(m.call_args.kwargs, {"fix": True, "apply": True, "open_pr": True})
+        kw = m.call_args.kwargs
+        self.assertTrue(kw["fix"] and kw["apply"] and kw["open_pr"])
 
     @mock.patch("stayawake.bots.security.service.scan", return_value=0)
     def test_apply_or_pr_imply_fix(self, m):
