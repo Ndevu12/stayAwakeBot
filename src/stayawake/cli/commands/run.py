@@ -27,7 +27,8 @@ def register(sub) -> None:
 def run(a: argparse.Namespace) -> int:
     reports_dir = resolve_reports_dir(a.reports_dir, default=REPORTS_DIR)
     paths = [*a.paths, *a.extra_paths]
-    code = service.scan(a.config, a.local, a.fail, reports_dir, paths or None)
+    code = service.scan(a.config, a.local, a.fail, reports_dir, paths or None,
+                        no_stream=a.no_stream)
     latest = str(reports_dir / "latest.json")
     reporter.generate(latest_path=latest)
     alerter.run(latest_path=latest)
