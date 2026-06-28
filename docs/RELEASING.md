@@ -89,7 +89,8 @@ the OIDC exchange is rejected.
 The scanner is also a GitHub Action, and it now lives in **its own repository,
 [`Ndevu12/strix`](https://github.com/Ndevu12/strix)** ("StayAwakeBot Strix" on the Marketplace).
 Strix is a thin composite Action whose `action.yml` installs the published `stayawakebot` scanner
-from PyPI and runs `stayawake-security-scan` — the detection engine stays in the package. This
+from PyPI and runs `saw scan` (gating on its exit code) — the detection engine stays in the
+package. This
 repo no longer carries a root `action.yml`; the in-repo `.github/actions/worm-scan` composite is
 kept only for this project's own self-gating (`worm-guard.yml`) and from-source pins. Marketplace
 requires the metadata at the repo root, which is why the public Action is a separate repo rather

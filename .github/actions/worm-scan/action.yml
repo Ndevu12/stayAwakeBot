@@ -69,13 +69,19 @@ runs:
             done
           fi
         } > "$cfg"
-        flag=""
-        [ "${{ inputs.fail-on-findings }}" = "true" ] && flag="--fail-on-findings"
-        # Write reports to a deterministic, workspace-relative dir so the SARIF upload
-        # step below can find latest.sarif regardless of the gate's exit code.
+        # Write the SARIF to a deterministic, workspace-relative path so the upload
+        # step below can find it regardless of the scan's exit code.
         rdir="$GITHUB_WORKSPACE/reports/security"
-        # Installed console script; uses the packaged signature DB. No clone, no PYTHONPATH.
-        stayawake-security-scan --config "$cfg" --local-only --reports-dir "$rdir" $flag
+        mkdir -p "$rdir"
+        # Terminal-first CLI: `saw scan` ALWAYS exits non-zero on infected (no
+        # --fail-on-findings flag anymore). Capture the verdict and honour the action's
+        # fail-on-findings input ourselves: force a clean exit when it isn't 'true'.
+        set +e
+        saw scan -L -c "$cfg" --sarif "$rdir/latest.sarif"
+        rc=$?
+        set -e
+        [ "${{ inputs.fail-on-findings }}" = "true" ] || rc=0
+        exit $rc
 
     - name: Upload SARIF to code-scanning
       # always(): the scan above may exit non-zero (fail-on-findings) — we still want the

@@ -6,13 +6,14 @@ threats are added as configuration, not code.
 
 ## Pillars
 - **Detect** — scan local & remote repos for known indicators (IoCs) and evil merges.
-- **Report/Alert** — JSON + markdown; Slack + GitHub issues.
+- **Report/Alert** — terminal-first: full human report on `stdout` (full evidence); durable
+  records via opt-in sinks — `--json`, redacted `--sarif`/`-d`, and `--alert` (GitHub issue + Slack).
 - **Auto-fix** — quarantine/strip via PRs, never force-push (dry-run by default).
 - **Prevent** — reusable CI gate + pre-commit + CI-token hardening.
 
 ## Layers (SRP)
 ```
-signatures (data) ─► signature engine ─► matchers ─► findings ─► scanner ─► report/alert ─► remediator(PR)
+signatures (data) ─► signature engine ─► matchers ─► findings ─► scanner ─► sinks (terminal · json · sarif · alert) ─► remediator(PR)
 ```
 - **Signatures** (`src/stayawake/bots/security/data/signatures.yml`, packaged): IoCs as data. New threat = new entry.
 - **Matchers** (`security/matchers/`, Strategy): one technique each, selected by a
@@ -58,19 +59,36 @@ signatures (data) ─► signature engine ─► matchers ─► findings ─►
   is ignored — it would blanket-suppress every signature on that path, so a fresh payload dropped
   there would slip by. The reusable Action takes `path_glob|signature_id` entries.
 
-## CLI / pipeline scripts
-- `security/cli/scan.py` (+ `security/service.py`) — detect → `reports/security/latest.json` + `latest.md`
-  + `latest.sarif` (SARIF 2.1.0, via `security/sarif.py`).
-- `security/sarif.py` — maps the scan payload to a SARIF 2.1.0 log so the worm-scan Action can
-  upload it (`github/codeql-action/upload-sarif`); findings then surface in GitHub's Security tab and
-  as inline PR code-scanning annotations. Pure output layer — the build gate stays the exit code.
-- `security/cli/report.py` · `security/cli/alert.py` · `security/cli/remediate.py` — report, alert, remediate.
-- `security/cli/audit.py` (+ `security/hygiene.py`) — local posture + branch-protection audit.
+## CLI / pipeline (terminal-first sinks)
 
-Run via the terse **`saw`** CLI: `saw scan` · `saw report` · `saw alert` · `saw fix` · `saw audit`
-(and `saw run` for the scan→report→alert pipeline) — see the [CLI guide](CLI.md). The legacy
-`stayawake-security-*` console scripts remain installed (frozen for CI/Docker) and route to the
-same code.
+`saw scan` is **terminal-first**: it runs detection in one pass and renders a full human report
+(with full evidence) to `stdout`; it **persists nothing by default**, and its exit code **is**
+the verdict (`0` clean / `1` infected — no `--fail` flag). Output beyond the terminal is delivered
+through a Strategy **sink layer** (`security/sinks/`), each an opt-in flag:
+
+- **terminal** (default) — human report on `stdout`, progress on `stderr`. Full evidence.
+- **`--json`** — machine-readable JSON on `stdout`. Full evidence; ephemeral (pipe it).
+- **`--sarif FILE`** (`security/sinks/sarif.py`) — SARIF 2.1.0 log for upload to GitHub
+  code-scanning (`github/codeql-action/upload-sarif`); findings surface in the Security tab and as
+  inline PR annotations. **Evidence is redacted** (fingerprint only). Pure output layer — the gate
+  stays the exit code.
+- **`--alert`** — opens/closes a GitHub issue per infected repo and posts a Slack summary in the
+  same pass (reads `GITHUB_TOKEN`, `GITHUB_REPOSITORY`, `SLACK_WEBHOOK_URL`). Bodies are evidence-free.
+- **`-d/--reports-dir DIR`** — opt-in `latest.json` + `latest.md` in `DIR`. **Evidence redacted.**
+
+**Evidence redaction.** Any *persisted* artifact (SARIF, `-d` files) stores a fingerprint
+`{sha256, preview (first 24 chars), len}` instead of the raw payload — full evidence only ever
+appears on the live terminal (`stdout`/`--json`). In-tree report files were redundant, tamperable,
+and re-distributed live malware payloads, so durable records now live **outside the repo tree**:
+GitHub code-scanning (SARIF, uploaded not committed), issues + Slack, and CI artifacts. Security
+reports are **no longer committed**.
+
+`security/hygiene.py` backs `saw audit` (local posture + branch-protection); remediation is
+`saw fix` / `saw scan --fix` (see [Remediation](#remediation)).
+
+Run via the terse **`saw`** CLI: `saw scan` · `saw fix` · `saw audit` — see the
+[CLI guide](CLI.md). The legacy `stayawake-security-*` console scripts have been **removed**;
+`saw` is the only local security surface.
 
 ## Testing
 `tests/bots/security/` — inert fixtures (clean vs infected) covering every matcher, plus a real
@@ -109,8 +127,9 @@ as the package.
 Supply-chain hardening of the gate itself: pin `sentinel-ref` to a **commit SHA** (never `@main`,
 which is mutable) and SHA-pin every third-party action — a later compromise of an upstream tag
 or of `main` then can't silently change what the gate runs. Bump the pin deliberately after a
-reviewed scanner/signature update. The gate scans the whole tree (only `reports/**` is exempt,
-since the bot's own reports quote detected payloads).
+reviewed scanner/signature update. The gate scans the whole tree; `reports/**` (the availability
+cron's output) is the only exemption — security reports are no longer committed, and any persisted
+security artifact is evidence-redacted, so there is no in-tree payload for the gate to re-flag.
 
 ## Trigger model (event-driven, not scheduled)
 
@@ -120,9 +139,9 @@ wasteful and reactive.
 
 | Where | Trigger | What runs |
 |-------|---------|-----------|
-| Hosted — gate | `pull_request` + `push` (code paths) | `worm-guard` blocks infection from landing (read-only, fail-on-findings) |
-| Hosted — sentinel | `push` to `main` (merge) + `workflow_dispatch` + weekly backstop | scan the repo, refresh status, alert, commit report |
-| Local — CLI | on demand | `saw scan` over all dev roots; `saw fix [--apply] [--pr]` fixes each repo |
+| Hosted — gate | `pull_request` + `push` (code paths) | `worm-guard` blocks infection from landing (read-only; the exit code is the gate) |
+| Hosted — sentinel | `push` to `main` (merge) + `workflow_dispatch` + weekly backstop | scan the repo, then push durable records via `--alert` (issue + Slack) + `--sarif` (code-scanning) + CI artifacts — no report is committed |
+| Local — CLI | on demand | `saw scan` over all dev roots (report to the terminal); `saw fix [--apply] [--pr]` fixes each repo |
 | Availability | `schedule` (*/5) | uptime genuinely needs polling — the one place a clock is correct |
 
 Org-wide coverage is **distributed**: every repo runs its own `worm-guard` on its own

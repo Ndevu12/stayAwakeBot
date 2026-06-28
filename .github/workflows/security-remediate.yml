@@ -22,4 +22,4 @@ jobs:
       - name: Open remediation PRs
         env:
           GH_SECURITY_TOKEN: ${{ secrets.GH_SECURITY_TOKEN }}
-        run: stayawake-security-remediate --remote
+        run: saw fix --remote

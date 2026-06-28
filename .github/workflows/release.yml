@@ -52,7 +52,8 @@ jobs:
       - name: Smoke-test the built wheel (entry points + packaged signature DB)
         run: |
           pip install dist/*.whl
-          stayawake-security-scan --help
+          saw --help
+          saw scan --help
           stayawake-health-check --help
 
       - name: Resolve app dependencies in a clean venv (for audit + SBOM)
