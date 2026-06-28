@@ -33,10 +33,30 @@ targets:
 # Findings to ignore (tune false positives). Each rule MUST name a `signature`
 # (optionally scoped by `path_glob`); a bare `path_glob` is ignored so it can never
 # blanket-suppress a fresh payload dropped on that path.
-allowlist: []
-  # Example — allow the inert IoC strings in this repo's own test fixtures:
-  # - signature: fake-font-fa-solid-400
-  #   path_glob: "tests/**"
+#
+# These rules allow THIS repo's own intentional test material: the deliberately-infected
+# fixtures and the test files that assert on inert IoC literals. Each is signature-scoped to
+# `tests/**`, so a *real* payload dropped under tests/ that matches any OTHER signature is still
+# reported — and `saw scan --fix` no longer quarantines the security suite's own fixtures.
+allowlist:
+  # Camouflage / fake-font fixtures (tests/.../fixtures/infected/public/fonts/)
+  - {signature: fake-font-fa-solid-400, path_glob: "tests/**"}
+  - {signature: fake-font-text-woff, path_glob: "tests/**"}
+  - {signature: camouflage-blockchain-readme, path_glob: "tests/**"}
+  # VS Code auto-run + .gitignore autopush fixtures
+  - {signature: vscode-allow-automatic-tasks, path_glob: "tests/**"}
+  - {signature: vscode-task-folderopen-exec, path_glob: "tests/**"}
+  - {signature: vscode-task-runs-font, path_glob: "tests/**"}
+  - {signature: gitignore-autopush-markers, path_glob: "tests/**"}
+  # Code-loader IoC literals in the infected fixture + detector test files
+  - {signature: loader-seed-var, path_glob: "tests/**"}
+  - {signature: loader-decoder-fn, path_glob: "tests/**"}
+  - {signature: loader-fromcharcode-127, path_glob: "tests/**"}
+  - {signature: loader-global-bang, path_glob: "tests/**"}
+  - {signature: loader-require-hijack, path_glob: "tests/**"}
+  # Heuristic shapes of the same packed fixture (postcss.config.mjs)
+  - {signature: obfuscated-source-file, path_glob: "tests/**"}
+  - {signature: oversized-config-line, path_glob: "tests/**"}
 
 # Alerting. Channels read their secrets from env (SLACK_WEBHOOK_URL, GH_SECURITY_TOKEN).
 alerts:

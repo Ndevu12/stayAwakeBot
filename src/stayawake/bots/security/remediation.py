@@ -249,7 +249,8 @@ def _ext(path: str) -> str:
 
 def _carries_payload(text: str, content_sig) -> bool:
     """True if `text` still carries the worm — a known LOADER literal OR a dynamic-exec sink
-    (eval/Function/atob/fromCharCode/constructor/`global['!']=`). This is the yardstick for
+    (eval / Function / atob / fromCharCode / constructor / the require-hijack global assignment).
+    This is the yardstick for
     choosing a clean recovery target and for the post-restore verify.
 
     Why literal-OR-exec-sink, not just the literal: a confirmed finding's history can hold an
@@ -265,11 +266,11 @@ def _carries_payload(text: str, content_sig) -> bool:
 
 
 # A payload-blob line is long, dense (almost no whitespace) and high-entropy — the shape of
-# a packed loader. A *legit* statement that merely contains a loader token —
-# `export const DEL = String.fromCharCode(127);`, a `function sfL(...)`, or a line that
-# splices `global['!']=…` in front of real code — is short and readable and fails this gate.
-# That distinction is the whole point: content_sig() is a SUBSTRING match, so it can't tell a
-# packed payload from legit code that shares a byte sequence with one. Size+density+entropy can.
+# a packed loader. A *legit* statement that merely contains a loader token — a real DEL-char
+# fromCharCode call, a function carrying the worm's shuffler name, or a line that splices the
+# require-hijack global assignment in front of real code — is short and readable and fails this
+# gate. That distinction is the whole point: content_sig() is a SUBSTRING match, so it can't tell
+# a packed payload from legit code that shares a byte sequence with one. Size+density+entropy can.
 _MIN_PAYLOAD_LINE = 120
 
 
@@ -291,7 +292,7 @@ def _safe_to_recover(work: str, clean: str, content_sig) -> bool:
         AND carries a loader literal (`content_sig`).
 
     The conjunction is what makes it safe. Requiring `content_sig` alone dropped legit lines
-    byte-identical to a fingerprint (a real `String.fromCharCode(127)`) and lines that merely
+    byte-identical to a fingerprint (a real DEL-char fromCharCode call) and lines that merely
     spliced a loader token in front of real code (substring match). Requiring `_is_packed_line`
     alone would drop a legitimately-inlined base64 asset that landed in the same delta. Only a
     line that is BOTH packed AND fingerprinted is the worm's blob; anything else → return False
