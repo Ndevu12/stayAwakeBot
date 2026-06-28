@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Security alerter: issue open/close decision tests."""
+"""Security alerter: issue open/close decision tests.
+
+The alerter is now payload-driven — the `--alert` sinks hand it the in-memory scan
+payload directly (no intermediate latest.json on disk).
+"""
 from __future__ import annotations
 
-import json
-import tempfile
 import unittest
-from pathlib import Path
 from unittest import mock
 
 
@@ -26,8 +27,6 @@ LATEST = {
 
 class TestAlerter(unittest.TestCase):
     def setUp(self):
-        self.f = Path(tempfile.mkdtemp()) / "latest.json"
-        self.f.write_text(json.dumps(LATEST))
         self.calls = []
 
     def _fake_request(self, path, method="GET", token=None, data=None):
@@ -39,10 +38,9 @@ class TestAlerter(unittest.TestCase):
     def test_opens_for_infected_and_closes_for_clean(self):
         with mock.patch("stayawake.bots.security.alerter.github_api.request",
                         side_effect=self._fake_request), \
-             mock.patch("stayawake.bots.security.alerter.send_slack"), \
              mock.patch.dict("os.environ",
                              {"GITHUB_TOKEN": "t", "GITHUB_REPOSITORY": "o/r"}, clear=False):
-            alerter.run(self.f)
+            alerter.sync_github_issues(LATEST)
         self.assertTrue(any(m == "POST" and p.endswith("/issues") for m, p in self.calls),
                         "should open an issue for the infected repo")
         self.assertTrue(any(m == "PATCH" and p.endswith("/issues/7") for m, p in self.calls),

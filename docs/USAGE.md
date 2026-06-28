@@ -25,19 +25,20 @@ command; mount the repository to scan at `/repo`:
 
 ```bash
 docker run --rm -v "$PWD:/repo:ro" ghcr.io/ndevu12/stayawakebot \
-  saw scan --local --fail
+  saw scan --local
 docker run --rm ghcr.io/ndevu12/stayawakebot stayawake-health-check --help
 ```
 
-The container runs as a non-root user, so a host bind-mount isn't writable by it: the scan's
-verdict is its **exit code** (`0`/`1`), and by default the report is written to a container
-path (`STAYAWAKE_REPORTS_DIR`, `/tmp/stayawake` in the image) rather than the read-only mount.
-To keep the report on the host, mount a writable dir and run as your own user:
+`saw scan` is terminal-first: it renders the full report to `stdout` and **persists nothing by
+default**, and its verdict is its **exit code** (`0` clean / `1` infected). The read-only mount
+above is therefore all you need. To capture machine-readable output, pipe `--json`; to write the
+opt-in, evidence-redacted `latest.json` + `latest.md`, mount a writable dir, pass `-d`, and run
+as your own user:
 
 ```bash
 docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/repo" \
   ghcr.io/ndevu12/stayawakebot \
-  saw scan --local --reports-dir /repo/reports
+  saw scan --local -d /repo/reports
 ```
 
 Pin a version (`ghcr.io/ndevu12/stayawakebot:0.1.0`) or a commit (`:sha-<commit>`) for
@@ -66,14 +67,15 @@ stayawake-health-check --config config/urls.yml --fail-on-unhealthy
 
 ## Security bot — worm hunting
 
-The local security CLI is **`saw`** (see the [CLI guide](CLI.md)). Run the stages individually,
-or `saw run` to do scan → report → alert in one pass:
+The local security CLI is **`saw`** (see the [CLI guide](CLI.md)). `saw scan` is terminal-first
+— it renders a full report (with full evidence) to `stdout`, persists nothing by default, and its
+exit code is the verdict. Attach opt-in "sinks" for durable output:
 
 ```bash
-saw scan --config config/security.yml --local   # scan local repos → reports/security/latest.json
-saw report                                       # write security status.json
-saw alert                                        # Slack + GitHub issue on findings
-saw run                                          # …or all three at once
+saw scan --config config/security.yml --local   # full report to the terminal; exit code = verdict
+saw scan --local --json > report.json            # machine-readable, full evidence, to a pipe
+saw scan --local --alert                         # Slack summary + GitHub issue per infected repo
+saw scan --local --sarif scan.sarif              # redacted SARIF for GitHub code-scanning upload
 ```
 
 ### Ad-hoc local scanning (no token, no config)
@@ -117,16 +119,18 @@ So remediation always produces something actionable — a fork PR, a patch, a he
 some combination — even without write access to the target.
 
 Drop `--local` to also scan the GitHub users/orgs listed in `config/security.yml`.
-Use `--fail` to make `scan` exit non-zero (for CI gating).
-See [SECURITY_ARCHITECTURE.md](SECURITY_ARCHITECTURE.md) for how detection / remediation work.
+`saw scan`'s exit code **is** the verdict (`0`/`1`), so a CI gate just checks it — there is no
+`--fail` flag. See [SECURITY_ARCHITECTURE.md](SECURITY_ARCHITECTURE.md) for how detection /
+remediation work.
 
-Reports go to `reports/security/` by default. To run a scan **without touching the
-committed reports** (local experiments, CI, scanning someone else's repo), redirect the
-output — via `--reports-dir` or `settings.reports_dir` in config:
+**Security reports are no longer committed into the repo.** `saw scan` persists nothing by
+default — the report renders to the terminal. For a durable copy, reach for an opt-in sink:
+`--json` (full evidence, to a pipe), `--sarif FILE` (redacted, for code-scanning), `--alert`
+(GitHub issue + Slack), or `-d DIR` to write an evidence-redacted `latest.json` + `latest.md`:
 
 ```bash
-saw scan --local --reports-dir /tmp/sab-reports                      # writes only there
-stayawake-health-check  --reports-dir /tmp/sab-reports               # same for the health bot
+saw scan --local -d /tmp/sab-reports                                 # opt-in, redacted, writes only there
+stayawake-health-check  --reports-dir /tmp/sab-reports               # the health bot still writes reports
 ```
 
 ## Local defense-in-depth (hooks + audit)
@@ -202,7 +206,7 @@ scope is in parentheses):
 | `saw fix --pr` / `--remote` | write | Contents + Pull requests: R/W (`repo`) |
 | ↳ fork fallback (cross-fork PR when you can't push upstream) | fork + PR | Pull requests: R/W on your fork (`public_repo` / `repo`) |
 | ↳ patch/issue fallback (no write at all) | none / issues | Issues: R/W for the notify issue (`repo` / `public_repo`); patch needs nothing |
-| `saw alert` (GitHub issue) | write | Issues: R/W (`repo` / `public_repo`) |
+| `saw scan --alert` (GitHub issue) | write | Issues: R/W (`repo` / `public_repo`) |
 | `saw audit --repo` | read | Administration: Read (`repo`) |
 
 ### GitHub App (organization **or** personal account)

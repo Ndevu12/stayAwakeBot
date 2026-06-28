@@ -2,11 +2,11 @@
 """Tests for the unified `saw` dispatcher (stayawake.cli).
 
 These verify pure ROUTING — that each verb maps to the right service call with the
-right arguments — plus the back-compat guards the redesign promised:
+right arguments — plus the guards the redesign promised:
   * no subcommand/alias name collisions (so a future verb can't silently shadow one),
-  * legacy flag spellings (--fail-on-findings / --local-only / --open-pr) still parse,
+  * legacy flag spellings (--local-only / --open-pr) still parse,
   * the `saw sec <verb>` namespace seam is a transparent no-op today,
-  * pyproject keeps all 8 legacy console scripts AND adds saw/stayawake.
+  * pyproject ships saw/stayawake + the health scripts, and NO legacy security scripts.
 The real scanning/remediation functions are mocked; we assert how they are called.
 """
 from __future__ import annotations
@@ -16,7 +16,7 @@ import io
 import pathlib
 import tomllib
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from unittest import mock
 
 from stayawake import cli
@@ -43,33 +43,36 @@ class TestParserIntegrity(unittest.TestCase):
 class TestScanRouting(unittest.TestCase):
     @mock.patch("stayawake.bots.security.service.scan", return_value=0)
     def test_flags_map_to_service_signature(self, m):
-        rc = cli.main(["scan", "-f", "-L", "-c", "cfg.yml", "./repo", "-p", "extra"])
+        rc = cli.main(["scan", "-L", "-c", "cfg.yml", "./repo", "-p", "extra",
+                       "--json", "--sarif", "out.sarif", "-d", "rep", "--alert"])
         self.assertEqual(rc, 0)
-        config_path, local_only, fail_on_findings, reports_dir, paths = m.call_args.args
+        # config_path is the one positional; everything else is keyword-only now.
+        (config_path,) = m.call_args.args
+        kw = m.call_args.kwargs
         self.assertEqual(config_path, "cfg.yml")
-        self.assertTrue(local_only)
-        self.assertTrue(fail_on_findings)
-        self.assertIsNone(reports_dir)
-        self.assertIn("./repo", paths)
-        self.assertIn("extra", paths)
+        self.assertTrue(kw["local_only"])
+        self.assertTrue(kw["json_out"])
+        self.assertEqual(kw["sarif_path"], "out.sarif")
+        self.assertEqual(kw["reports_dir"], "rep")
+        self.assertTrue(kw["alert"])
+        self.assertIn("./repo", kw["paths"])
+        self.assertIn("extra", kw["paths"])
 
     @mock.patch("stayawake.bots.security.service.scan", return_value=1)
-    def test_legacy_flag_aliases_still_parse(self, m):
-        rc = cli.main(["scan", "--fail-on-findings", "--local-only"])
+    def test_legacy_local_only_alias_still_parses(self, m):
+        rc = cli.main(["scan", "--local-only"])
         self.assertEqual(rc, 1)
-        _, local_only, fail_on_findings, _, _ = m.call_args.args
-        self.assertTrue(local_only)
-        self.assertTrue(fail_on_findings)
+        self.assertTrue(m.call_args.kwargs["local_only"])
 
     @mock.patch("stayawake.bots.security.service.scan", return_value=0)
     def test_bare_scan_passes_no_paths(self, m):
         cli.main(["scan"])
-        self.assertIsNone(m.call_args.args[4])
+        self.assertIsNone(m.call_args.kwargs["paths"])
 
     @mock.patch("stayawake.bots.security.service.scan", return_value=0)
     def test_short_alias_routes_to_scan(self, m):
-        cli.main(["s", "-f"])
-        self.assertTrue(m.call_args.args[2])
+        cli.main(["s", "-L"])
+        self.assertTrue(m.call_args.kwargs["local_only"])
 
     @mock.patch("stayawake.bots.security.service.scan", return_value=0)
     def test_fix_flags_route_to_service(self, m):
@@ -89,41 +92,18 @@ class TestScanRouting(unittest.TestCase):
         cli.main(["scan"])
         self.assertFalse(m.call_args.kwargs["fix"])
 
+    @mock.patch("stayawake.bots.security.service.scan", return_value=0)
+    def test_scan_has_no_fail_flag(self, _m):
+        # The verdict is the exit code now; `-f`/`--fail`/`--fail-on-findings` are gone.
+        with self.assertRaises(SystemExit), redirect_stderr(io.StringIO()):
+            cli.main(["scan", "-f"])
+
 
 class TestSecNamespace(unittest.TestCase):
     @mock.patch("stayawake.bots.security.service.scan", return_value=0)
     def test_leading_sec_token_is_stripped(self, m):
-        cli.main(["sec", "scan", "-f"])
-        self.assertTrue(m.call_args.args[2])
-
-
-class TestRunPipeline(unittest.TestCase):
-    @mock.patch("stayawake.cli.commands.run.resolve_reports_dir",
-                return_value=pathlib.Path("/tmp/r"))
-    @mock.patch("stayawake.bots.security.alerter.run")
-    @mock.patch("stayawake.bots.security.reporter.generate")
-    @mock.patch("stayawake.bots.security.service.scan", return_value=1)
-    def test_run_threads_one_reports_dir_and_returns_scan_exit(
-            self, m_scan, m_report, m_alert, _resolve):
-        rc = cli.main(["run", "-f", "-d", "/tmp/r"])
-        self.assertEqual(rc, 1)
-        # The pipeline must resolve the reports dir ONCE and feed the same value to
-        # the scan (positional 4) and to report/alert, so all three stages agree.
-        self.assertEqual(m_scan.call_args.args[3], pathlib.Path("/tmp/r"))
-        self.assertEqual(m_report.call_args.kwargs["latest_path"], "/tmp/r/latest.json")
-        self.assertEqual(m_alert.call_args.kwargs["latest_path"], "/tmp/r/latest.json")
-
-
-class TestReportAlert(unittest.TestCase):
-    @mock.patch("stayawake.bots.security.reporter.generate")
-    def test_report_uses_latest_flag(self, m):
-        cli.main(["report", "-l", "x.json"])
-        self.assertEqual(m.call_args.kwargs["latest_path"], "x.json")
-
-    @mock.patch("stayawake.bots.security.alerter.run")
-    def test_alert_default_latest(self, m):
-        cli.main(["alert"])
-        self.assertEqual(m.call_args.kwargs["latest_path"], cli.DEFAULT_LATEST)
+        cli.main(["sec", "scan", "-L"])
+        self.assertTrue(m.call_args.kwargs["local_only"])
 
 
 class TestFix(unittest.TestCase):
@@ -217,13 +197,17 @@ class TestPyprojectScripts(unittest.TestCase):
     def test_entry_points(self):
         data = tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))
         scripts = data["project"]["scripts"]
-        for legacy in ("stayawake-health-check", "stayawake-health-report",
-                       "stayawake-health-alert", "stayawake-security-scan",
-                       "stayawake-security-report", "stayawake-security-alert",
-                       "stayawake-security-remediate", "stayawake-security-audit"):
-            self.assertIn(legacy, scripts, f"legacy script {legacy} must stay registered")
+        # The health bot is still driven by its console scripts (remote-only).
+        for health in ("stayawake-health-check", "stayawake-health-report",
+                       "stayawake-health-alert"):
+            self.assertIn(health, scripts, f"health script {health} must stay registered")
         self.assertEqual(scripts.get("saw"), "stayawake.cli:main")
         self.assertEqual(scripts.get("stayawake"), "stayawake.cli:main")
+        # The legacy security scripts are REMOVED — `saw` is the only security entry point.
+        for legacy in ("stayawake-security-scan", "stayawake-security-report",
+                       "stayawake-security-alert", "stayawake-security-remediate",
+                       "stayawake-security-audit"):
+            self.assertNotIn(legacy, scripts, f"legacy security script {legacy} must be gone")
 
 
 if __name__ == "__main__":

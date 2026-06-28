@@ -8,8 +8,8 @@ run on your own machine to detect, report, and auto-remediate self-propagating m
 > The `saw` CLI is implemented (`stayawake.cli`) and works when you install from source (or
 > editable, `pip install -e .`). It is **not in a tagged PyPI release yet**, so
 > `pip install stayawakebot` from PyPI does not include it until the next release. The legacy
-> `stayawake-security-*` scripts keep working everywhere — see [Migrating from the legacy
-> scripts](#migrating-from-the-legacy-scripts).
+> `stayawake-security-*` scripts have been **removed** — `saw` is the only local security
+> surface; see [Migrating from the legacy scripts](#migrating-from-the-legacy-scripts).
 
 ## Contents
 
@@ -18,8 +18,7 @@ run on your own machine to detect, report, and auto-remediate self-propagating m
 - [Synopsis](#synopsis)
 - [Global options](#global-options)
 - [Commands](#commands)
-  - [`saw scan`](#saw-scan) · [`saw run`](#saw-run) · [`saw report`](#saw-report) ·
-    [`saw alert`](#saw-alert) · [`saw fix`](#saw-fix) · [`saw audit`](#saw-audit) ·
+  - [`saw scan`](#saw-scan) · [`saw fix`](#saw-fix) · [`saw audit`](#saw-audit) ·
     [`saw search`](#saw-search) · [`saw doctor`](#saw-doctor) · [`saw completion`](#saw-completion)
 - [Exit codes](#exit-codes)
 - [Shell completion](#shell-completion)
@@ -80,22 +79,23 @@ something:
 
 | Option | Where | Description |
 | --- | --- | --- |
-| `-f`, `--fail` | `scan`, `run`, `audit` | Exit non-zero if the command found something actionable (findings or issues). The single unified gate flag for CI. Replaces the legacy `--fail-on-findings` / `--fail-on-issues`, which still parse. |
-| `--json` | `doctor`, `search` | Emit machine-readable JSON instead of human-formatted output. |
+| `-f`, `--fail` | `audit` | Exit non-zero if the audit found a warning-level issue (the CI gate for `saw audit`). **`saw scan` has no `--fail`** — its exit code is the verdict, unconditionally; see [Exit codes](#exit-codes). |
+| `--json` | `scan`, `doctor`, `search` | Emit machine-readable JSON to stdout instead of human-formatted output. On `scan` it carries full evidence (see [`saw scan`](#saw-scan)). |
 | `-q`, `--quiet` | `doctor`, `search` | Print only the essentials (problems / command names). |
-
-> Broader `--json` / `-q` coverage on the scan/report/fix commands is planned but not yet wired —
-> those forward to the existing report writers, which today emit human text and JSON report
-> *files* (not stdout JSON).
 
 ## Commands
 
 ### `saw scan`
 
-Hunt for supply-chain worms across one or more repositories or directories.
+Hunt for supply-chain worms across one or more repositories or directories. **`saw scan` is
+terminal-first: it renders a full human report — with full match evidence — to `stdout` and
+persists nothing by default.** Progress goes to `stderr`, and the **exit code is the verdict,
+unconditionally** (`0` clean / `1` infected) — there is no `--fail` flag; a CI gate simply
+checks the exit code. Output beyond the terminal is delivered through opt-in "sinks":
+`--json`, `--sarif`, `--alert`, and `-d`.
 
 ```text
-saw scan [PATHS...] [-L] [-c FILE] [-p PATH] [-d DIR] [-f] [--fix [--apply [--pr]]]
+saw scan [PATHS...] [-L] [-c FILE] [-p PATH] [--json] [--sarif FILE] [--alert] [-d DIR] [--no-stream] [--fix [--apply [--pr]]]
 ```
 
 | Option | Description |
@@ -104,28 +104,42 @@ saw scan [PATHS...] [-L] [-c FILE] [-p PATH] [-d DIR] [-f] [--fix [--apply [--pr
 | `-p`, `--path PATH` | Additional path to scan (repeatable); same effect as a positional path. |
 | `-c`, `--config FILE` | Config file (default: `config/security.yml` when present). |
 | `-L`, `--local` | Skip remote GitHub targets — scan local paths only. |
-| `-d`, `--reports-dir DIR` | Where to write reports (default: `reports/security`). Use a scratch dir to avoid touching committed reports. |
-| `-f`, `--fail` | Exit `1` if any scanned target is infected (for CI gating). |
+| `--json` | Emit a machine-readable JSON report to `stdout`, with **full evidence**. Ephemeral — pipe it; writes no file. |
+| `--sarif FILE` | Write a SARIF 2.1.0 report to `FILE` for upload to GitHub code-scanning. Evidence is **redacted** in the file (fingerprint only). |
+| `--alert` | Push the durable record **in this pass**: open/close a GitHub issue per infected repo and post a Slack summary. Reads `GITHUB_TOKEN`, `GITHUB_REPOSITORY`, `SLACK_WEBHOOK_URL` from the environment; issue/Slack bodies are **evidence-free**. |
+| `-d`, `--reports-dir DIR` | **Opt-in:** also write `latest.json` + `latest.md` into `DIR`. Evidence is **redacted** in these files (fingerprint only). |
 | `--no-stream` | Disable the live progress/typewriter output — plain, instant lines. (Auto-off already when piped, in CI, or with `STAYAWAKE_NO_STREAM=1`.) |
 | `--fix` | **Remediate in the same pass** — reuse the scan's findings to fix the scanned local repo(s); no second scan. Dry-run unless `--apply`. |
 | `--apply` | With `--fix`: write fixes (originals backed up to quarantine) and commit them to a branch. Implies `--fix`. |
 | `--pr`, `--open-pr` | With `--fix --apply`: push a fix branch and open/update one rolling, de-duplicated PR per repo. Implies `--fix`. |
 
 ```bash
-saw scan                                  # scan the current repo
+saw scan                                  # full report to the terminal; writes nothing
 saw scan ./service-a ./service-b          # scan specific paths
 saw scan -L -c config/security.yml        # local-only, configured targets
-saw scan -f                               # gate: non-zero exit on any finding
+saw scan; echo $?                         # gate: exit code is the verdict (0 clean / 1 infected)
+saw scan --json > report.json             # machine-readable, full evidence, to a pipe
+saw scan --sarif scan.sarif               # redacted SARIF for GitHub code-scanning upload
+saw scan --alert                          # open/close issues + Slack summary, in-pass
+saw scan -d /tmp/sab-reports              # opt-in redacted latest.json + latest.md
 saw scan --fix                            # scan AND preview fixes (dry-run), one pass
 saw scan --fix --apply                    # scan and apply fixes, commit to a branch
 ```
+
+> **A report is a message, not a file.** The full report — including full match evidence —
+> only ever appears on the live terminal (`stdout`) or via `--json`. Any **persisted** artifact
+> (`--sarif`, `-d`) stores a redacted fingerprint `{sha256, preview (first 24 chars), len}` in
+> place of the raw payload, so a security report on disk can never re-distribute a live malware
+> payload. Durable records live **outside the repo tree** — GitHub code-scanning (SARIF,
+> uploaded not committed), GitHub issues + Slack (`--alert`), and CI artifacts; security reports
+> are **no longer committed** into the repo.
 
 > **Live progress.** On an interactive terminal, `scan` streams each target as it completes
 > (`[3/9] [INFECTED] …`) with a spinner over the actual work and a typewriter cadence, so a
 > long sweep never looks frozen. It's purely cosmetic pacing of deterministic results — and
 > it **auto-disables** when piped, in CI, with `--no-stream`, or `STAYAWAKE_NO_STREAM=1`, so
-> `stdout` and the report artifacts stay byte-for-byte unchanged. Progress goes to `stderr`;
-> results to `stdout`.
+> `--json` and any persisted artifact stay byte-for-byte unchanged. Progress goes to `stderr`;
+> the report goes to `stdout`.
 >
 > **`scan --fix` is the recommended remediation flow.** It runs detection and remediation
 > from a single analysis pass — there is no re-scan and no report file in between — so a fix
@@ -140,49 +154,6 @@ saw scan --fix --apply                    # scan and apply fixes, commit to a br
 > scanner **never surgically edits a source file**, so a fix can never corrupt valid code; and
 > heuristic-only (`suspicious`) matches — e.g. an inlined base64 asset — are reviewed, never
 > auto-touched. Originals are always backed up to `.malware-quarantine/`.
-
-### `saw run`
-
-Run the full pipeline — **scan → report → alert** — in one process. Report paths are threaded
-internally, so you never pass intermediate JSON files by hand.
-
-```text
-saw run [PATHS...] [-L] [-c FILE] [-d DIR] [-f]
-```
-
-Accepts the same path/config/reports options as [`saw scan`](#saw-scan). Pass `-f` to gate the
-whole pipeline on findings.
-
-```bash
-saw run            # scan, render the report, send alerts — one command
-saw run -f         # same, but exit non-zero if anything was found
-```
-
-### `saw report`
-
-Render the latest scan results into a human-readable / markdown report.
-
-```text
-saw report [-l FILE]
-```
-
-| Option | Description |
-| --- | --- |
-| `-l`, `--latest FILE` | Latest results JSON to render (default: `reports/security/latest.json`). |
-
-### `saw alert`
-
-Emit alerts (Slack and/or GitHub issues) for the latest scan results.
-
-```text
-saw alert [-l FILE]
-```
-
-| Option | Description |
-| --- | --- |
-| `-l`, `--latest FILE` | Latest results JSON to alert on (default: `reports/security/latest.json`). |
-
-Reads credentials from the environment: `SLACK_WEBHOOK_URL`, `GITHUB_TOKEN`, `GITHUB_REPOSITORY`.
 
 ### `saw fix`
 
@@ -262,12 +233,13 @@ saw completion {bash,zsh,fish}
 
 ## Exit codes
 
-`saw` is quiet-friendly and scriptable — the exit code is the contract:
+`saw` is quiet-friendly and scriptable — the exit code is the contract. For **`saw scan` the
+exit code is the verdict, unconditionally** — a CI gate just checks it, no flag required:
 
 | Code | Meaning |
 | --- | --- |
-| `0` | Success / clean. (Also returned when findings exist but `-f/--fail` was not passed.) |
-| `1` | The gate tripped: actionable findings or issues were present **and** `-f/--fail` was set. |
+| `0` | Clean. For `saw scan`, no scanned target is infected. For `saw audit`, no warning-level issue (or issues found without `-f`). |
+| `1` | For `saw scan`, at least one target is **infected** — returned unconditionally (there is no `--fail` flag). For `saw audit`, a warning-level issue was found **and** `-f/--fail` was set. |
 | `2` | Usage error (unknown command, bad option). |
 
 ## Shell completion
@@ -285,47 +257,42 @@ saw completion zsh  > "${fpath[1]}/_saw"
 saw completion fish > ~/.config/fish/completions/saw.fish
 ```
 
-Verbs that share a first letter resolve at two characters: `re`→report, `ru`→run, `al`→alert,
-`au`→audit, `se`→search; `scan`→`s`, `doctor`→`d`, `fix`→`fix`.
+Verbs that share a first letter resolve at two characters: `sc`→scan, `se`→search; the rest are
+unambiguous at one — `a`→audit, `co`→completion, `d`→doctor, `f`→fix.
 
 ## Migrating from the legacy scripts
 
-Every legacy `stayawake-security-*` command has a shorter `saw` equivalent. **The legacy scripts
-keep working** (see [Compatibility & support](#compatibility--support)); migrate at your own pace.
+The legacy `stayawake-security-*` console scripts **have been removed** — `saw` is the only local
+security surface. Each old command maps to a `saw` equivalent:
 
-| Legacy command | `saw` equivalent |
+| Legacy command (removed) | `saw` equivalent |
 | --- | --- |
 | `stayawake-security-scan` | `saw scan` |
-| `stayawake-security-scan --fail-on-findings` | `saw scan -f` |
+| `stayawake-security-scan --fail-on-findings` | `saw scan` (the exit code **is** the verdict — no flag) |
 | `stayawake-security-scan --local-only --config config/security.yml` | `saw scan -L -c config/security.yml` |
-| `stayawake-security-report` | `saw report` |
-| `stayawake-security-alert` | `saw alert` |
+| `stayawake-security-report` | `saw scan` (the report renders to the terminal) |
+| `stayawake-security-alert` | `saw scan --alert` |
 | `stayawake-security-remediate` | `saw fix` |
 | `stayawake-security-remediate --apply --open-pr` | `saw fix --apply --pr` |
 | `stayawake-security-remediate --remote` | `saw fix --remote` |
 | `stayawake-security-audit --repo OWNER/NAME --fail-on-issues` | `saw audit --repo OWNER/NAME -f` |
 
-The renamed flags — `--local-only`→`--local`/`-L`, `--open-pr`→`--pr`, and the three
-`--fail-on-*` flags → `-f/--fail` — are also accepted under their old spellings as hidden
-aliases, so copy-pasted commands and existing scripts never break.
+The `stayawake-security-{scan,report,alert,remediate,audit}` entry points no longer exist; the
+`stayawake-health-*` scripts (the remote-only health bot) are unchanged.
 
 ## Compatibility & support
 
-- **Legacy scripts are frozen.** All eight `stayawake-*` console scripts (5 security, 3 health)
-  remain installed and accept their existing flags byte-for-byte. `saw` is **additive**; it never
-  removes or changes a legacy entry point.
-- **CI and Docker are unaffected.** The remote workflows
+- **Legacy security scripts are removed.** The five `stayawake-security-*` console scripts no
+  longer exist; `saw` is the only local security surface. Migrate using the table above.
+- **CI and Docker call `saw`.** The remote security workflows
   ([security-sentinel.yml](../.github/workflows/security-sentinel.yml),
   [security-remediate.yml](../.github/workflows/security-remediate.yml),
-  [worm-guard.yml](../.github/workflows/worm-guard.yml)) and the Docker image call the legacy
-  scripts and continue to work unchanged. The flags `--local-only` and `--fail-on-findings` are a
-  **frozen public contract** relied on by the SHA-pinned `worm-guard` scanner.
+  [worm-guard.yml](../.github/workflows/worm-guard.yml)) and the Docker image invoke `saw`
+  directly; the gate is `saw scan`'s **exit code**, and durable records are pushed via
+  `--alert`, `--sarif` (uploaded to code-scanning), and CI artifacts rather than committed files.
 - **Health stays remote-only.** The `stayawake-health-*` scripts powering the `*/5` uptime cron
   ([stayawake-sentinel.yml](../.github/workflows/stayawake-sentinel.yml)) are untouched and are
   intentionally not exposed as `saw` subcommands.
-- **Deprecation.** A future major release may remove the legacy *security* scripts and old flag
-  spellings; they will warn (to stderr, suppressible via `STAYAWAKE_NO_DEPRECATION=1`) before
-  removal. `pip install stayawakebot` remains stable throughout.
 
 ## Appendix: design rationale
 
@@ -342,10 +309,10 @@ ships alongside it as a collision-proof fallback.
 
 ### Keystroke comparison
 
-| Operation | Legacy | `saw` | Reduction |
+| Operation | Legacy (removed) | `saw` | Reduction |
 | --- | --- | --- | --- |
-| Scan + CI gate | `stayawake-security-scan --fail-on-findings` | `saw scan -f` | −74% |
-| Full pipeline | `…scan && …report && …alert` | `saw run` | −91% |
+| Scan + CI gate | `stayawake-security-scan --fail-on-findings` | `saw scan` | −86% |
+| Scan + alert | `…scan && …alert` | `saw scan --alert` | −68% |
 | Remediate + PR | `stayawake-security-remediate --apply --open-pr` | `saw fix --apply --pr` | −57% |
 | Audit + gate | `stayawake-security-audit --repo … --fail-on-issues` | `saw audit --repo … -f` | −46% |
 
@@ -356,11 +323,11 @@ ships alongside it as a collision-proof fallback.
 | Scope | Security-only CLI; health stays remote-only, scripts unchanged |
 | Binary | `saw` (+ `stayawake` collision-proof long alias) |
 | Command shape | Flat top-level verbs; hidden reserved `saw sec <verb>` seam for a future 2nd local bot |
-| Fail flag | Single `-f`/`--fail`; legacy `--fail-on-*` kept as hidden aliases |
-| Pipeline | `run` (no scope arg — one bot) |
+| Output | Terminal-first — `saw scan` renders the report to `stdout` and persists nothing by default; durable records via opt-in sinks (`--json`, `--sarif`, `--alert`, `-d`) |
+| Gate | `saw scan`'s exit code **is** the verdict (no `--fail`); `saw audit` keeps `-f`/`--fail` |
 | `remediate` → `fix`; `find` → `search` | Terser verbs; `search` avoids the `fix` prefix clash |
-| `alias` | Full-word only, so `al` resolves to `alert` |
-| Back-compat | All 8 `stayawake-*` scripts frozen byte-for-byte; new flag spellings additive |
+| Evidence | Full evidence only on the live terminal / `--json`; persisted artifacts store a redacted fingerprint |
+| Back-compat | Legacy `stayawake-security-*` scripts removed; `stayawake-health-*` unchanged |
 
 ### Reserved for the future
 

@@ -28,11 +28,11 @@ jobs:
         with:
           # Pin the scanner to a known-good SHA, never @main (SECURITY_BASELINE doctrine):
           # a later compromise of main cannot silently change what the gate runs.
-          # The pinned scanner's requires-python must satisfy the CI runner's Python, so
-          # this points at the commit that lowered that floor; it descends from #1004, so
-          # it keeps the corrected evil-merge detector (byte-identical to the previous
-          # pin). Re-pin to a main SHA after merge.
-          sentinel-ref: 48837942ca136fb4af66d36d79dcbbd73d37f314   # lowered-floor commit + #1004 evil-merge fix
+          # This action now invokes the terminal-first `saw scan --sarif` CLI, which only
+          # exists from this PR's refactor commit onward, so the pin points at that commit
+          # (it carries the whole new scanner; requires-python >=3.11 satisfies the 3.13
+          # runner). Re-pin to the post-merge main SHA once this lands.
+          sentinel-ref: fecb7c4de4377ae3c25a6a11f92808bb66b0384d   # PR #1066: terminal-first saw scan --sarif
           fail-on-findings: 'true'
           # Fixture allowlist is signature-scoped (glob|signature): a fresh payload
           # under fixtures/ using any OTHER signature is still flagged.

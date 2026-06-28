@@ -2,14 +2,17 @@
 """SARIF 2.1.0 emitter: maps the scan payload to a code-scanning log.
 
 Pure output layer — these assert the mapping (severity→level, rule dedup, region
-omission, fingerprints, remote URIs) and that `service.scan` drops a latest.sarif
-alongside latest.json without touching the committed reports dir.
+omission, fingerprints, remote URIs), that evidence is REDACTED in the message (a SARIF
+is uploaded, so it must not re-ship the payload), and that `service.scan` writes SARIF
+only at the requested --sarif path without touching the committed reports dir.
 """
 from __future__ import annotations
 
+import io
 import json
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 
 from stayawake.bots.security import sarif
@@ -77,10 +80,19 @@ class TestSarifBuild(unittest.TestCase):
         self.assertEqual(loc["region"], {"startLine": 7})
         self.assertNotIn("region", res["noline"]["locations"][0]["physicalLocation"])
 
-    def test_message_includes_evidence(self):
-        res = sarif.build_sarif(_payload([_result(findings=[_finding("s")])]))["runs"][0]["results"][0]
-        self.assertIn("desc s", res["message"]["text"])
-        self.assertIn("blob", res["message"]["text"])
+    def test_message_redacts_evidence(self):
+        # A SARIF is an uploaded artifact: the message must fingerprint the payload, not
+        # quote it. Use a long payload so the 24-char preview can't contain the whole thing.
+        payload_text = "EVIL_" + ("A" * 100) + "_TAIL"
+        res = sarif.build_sarif(
+            _payload([_result(findings=[_finding("s", evidence=payload_text)])])
+        )["runs"][0]["results"][0]
+        msg = res["message"]["text"]
+        self.assertIn("desc s", msg)
+        self.assertIn("redacted", msg)
+        self.assertIn("sha256:", msg)
+        self.assertNotIn(payload_text, msg)     # the full payload is never shipped
+        self.assertNotIn("_TAIL", msg)
 
     def test_fingerprint_is_stable_and_location_sensitive(self):
         a = sarif.build_sarif(_payload([_result(findings=[_finding("s", line=1)])]))
@@ -102,20 +114,20 @@ class TestSarifBuild(unittest.TestCase):
 
 
 class TestSarifWiredIntoScan(unittest.TestCase):
-    def test_scan_writes_valid_sarif_only_in_reports_dir(self):
+    def test_scan_writes_sarif_only_at_requested_path(self):
         work = Path(tempfile.mkdtemp())
         cfg = work / "security.yml"
         cfg.write_text("settings: {}\ntargets: { local: [] }\n", encoding="utf-8")
-        out = work / "out"
+        sarif_out = work / "out" / "x.sarif"
 
         def snap(d):
             return {str(p) for p in d.rglob("*")} if d.exists() else set()
         before = snap(sec_service.REPORTS_DIR)
-        sec_service.scan(str(cfg), local_only=True, reports_dir=str(out))
+        with redirect_stdout(io.StringIO()):     # swallow the terminal-sink report
+            sec_service.scan(str(cfg), local_only=True, sarif_path=str(sarif_out))
 
-        sarif_path = out / "latest.sarif"
-        self.assertTrue(sarif_path.is_file())
-        log = json.loads(sarif_path.read_text(encoding="utf-8"))
+        self.assertTrue(sarif_out.is_file())
+        log = json.loads(sarif_out.read_text(encoding="utf-8"))
         self.assertEqual(log["version"], "2.1.0")
         self.assertIn("runs", log)
         self.assertEqual(before, snap(sec_service.REPORTS_DIR),

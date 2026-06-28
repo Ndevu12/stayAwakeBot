@@ -8,6 +8,6 @@ The list order controls help-display order.
 """
 from __future__ import annotations
 
-from . import alert, audit, completion, doctor, fix, report, run, scan, search
+from . import audit, completion, doctor, fix, scan, search
 
-REGISTRARS = [scan, run, report, alert, fix, audit, search, doctor, completion]
+REGISTRARS = [scan, fix, audit, search, doctor, completion]

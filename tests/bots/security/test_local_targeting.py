@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local-path targeting: explicit paths / CWD default for `stayawake-security-scan`.
+"""Local-path targeting: explicit paths / CWD default for `saw scan`.
 
 Targets (what to scan) are orthogonal to auth (how to access): local scanning needs
 no token. These tests pin the target-resolution precedence and the config/CWD
