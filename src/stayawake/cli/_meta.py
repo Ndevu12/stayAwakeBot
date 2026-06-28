@@ -14,7 +14,6 @@ except PackageNotFoundError:               # running from a source tree without 
     __version__ = "0+unknown"
 
 DEFAULT_REPORTS = "reports/security"
-DEFAULT_LATEST = "reports/security/latest.json"
 
 # Canonical verbs in display order — used by `completion` and the conflict-guard test.
-VERBS = ["scan", "run", "report", "alert", "fix", "audit", "search", "doctor", "completion"]
+VERBS = ["scan", "fix", "audit", "search", "doctor", "completion"]

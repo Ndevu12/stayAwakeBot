@@ -16,8 +16,9 @@ on:
     - cron: '0 6 * * 1'   # weekly backstop: catch new signatures applied to old code
 
 permissions:
-  contents: write                  # commit security reports
-  issues: write                    # open/close finding issues
+  contents: read                   # checkout only — nothing is committed back
+  issues: write                    # --alert opens/closes finding issues
+  security-events: write           # upload SARIF to the code-scanning / Security tab
 
 # Shared with the availability sentinel so the two never push to main concurrently.
 concurrency:
@@ -36,9 +37,12 @@ jobs:
       - name: Set up toolchain
         uses: ./.github/actions/setup
 
-      - name: Scan this repository
+      - name: Scan, alert, and emit SARIF
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
-          set +e
           {
             echo "settings:"
             echo "  exclude_dirs: [\".git\", \"node_modules\", \".next\", \"dist\", \"build\", \".malware-quarantine\", \".venv\"]"
@@ -48,27 +52,24 @@ jobs:
             echo "allowlist:"
             echo "  - path_glob: \"tests/bots/security/fixtures/**\""
           } > "$RUNNER_TEMP/ci-security.yml"
-          stayawake-security-scan --config "$RUNNER_TEMP/ci-security.yml" --local-only
-          echo "SCAN_EXIT=$?" >> $GITHUB_ENV
-          set -e
+          # Terminal-first: one pass scans, pushes GitHub-issue + Slack alerts (--alert),
+          # and writes the SARIF. Exit code is the verdict (non-zero on infected), which
+          # surfaces an infected main as a failed run.
+          saw scan -L -c "$RUNNER_TEMP/ci-security.yml" --alert --sarif "$RUNNER_TEMP/latest.sarif"
 
-      - name: Update status
-        if: always()
-        run: stayawake-security-report
-
-      - name: Send security alerts
-        if: always()
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-        run: stayawake-security-alert
-
-      - name: Commit security reports
-        if: always()
-        uses: ./.github/actions/commit-reports
+      - name: Upload SARIF to code-scanning
+        # always(): the scan above exits non-zero when infected — we still want the
+        # findings in the Security tab. The SARIF is written before that verdict.
+        if: ${{ always() && hashFiles(format('{0}/latest.sarif', runner.temp)) != '' }}
+        uses: github/codeql-action/upload-sarif@v3
         with:
-          paths: reports/security
-          message-prefix: "chore(security): scan report"
-          author-name: StayAwakeBot Security Sentinel
-          author-email: security-bot@stayawake.local
+          sarif_file: ${{ runner.temp }}/latest.sarif
+          category: saw-security-sentinel
+
+      - name: Upload SARIF as build artifact
+        if: ${{ always() && hashFiles(format('{0}/latest.sarif', runner.temp)) != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7.0.1
+        with:
+          name: security-sarif
+          path: ${{ runner.temp }}/latest.sarif
+          if-no-files-found: warn

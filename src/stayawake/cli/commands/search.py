@@ -10,14 +10,8 @@ import json
 
 # (command, summary, extra search keywords)
 _INDEX = [
-    ("saw scan", "hunt supply-chain worms in repos/dirs",
-     "scan check find worm malware detect virus infect supply chain"),
-    ("saw run", "scan, then report, then alert in one pass",
-     "run pipeline all everything chain"),
-    ("saw report", "render the latest scan into a report",
-     "report render status markdown output html"),
-    ("saw alert", "send Slack / GitHub alerts for the latest scan",
-     "alert notify slack issue warn ping"),
+    ("saw scan", "hunt supply-chain worms; terminal-first (--json/--sarif/--alert/-d to persist)",
+     "scan check find worm malware detect virus infect supply chain json sarif alert report"),
     ("saw fix", "remediate findings (dry-run unless --apply); --pr opens a PR",
      "fix remediate clean repair remove pr pull request open"),
     ("saw audit", "credential + editor + branch-protection hygiene audit",

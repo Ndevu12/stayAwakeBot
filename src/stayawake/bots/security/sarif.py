@@ -17,6 +17,7 @@ from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from pathlib import Path
 from typing import Any
 
+from stayawake.bots.security import redaction
 from stayawake.core.io import write_json
 
 try:                                       # version is derived from the git tag at build time
@@ -79,9 +80,12 @@ def _rule(finding: dict) -> dict[str, Any]:
 
 
 def _message(finding: dict) -> str:
+    # SARIF is a persisted, uploaded artifact — redact the evidence (fingerprint, not the
+    # raw payload) so the report never re-ships the malware it detected. Redacting here
+    # (not just at the caller) keeps every SARIF the emitter produces safe by construction.
     text = finding.get("description") or finding["signature_id"]
-    evidence = finding.get("evidence")
-    return f"{text}\n\nEvidence: {evidence}" if evidence else text
+    fp = redaction.redact(finding.get("evidence"))
+    return f"{text}\n\nEvidence (redacted): {redaction.render_redacted(fp)}" if fp else text
 
 
 def _result(result: dict, finding: dict, rule_index: int) -> dict[str, Any]:

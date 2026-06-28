@@ -54,14 +54,14 @@ An existing non-StayAwakeBot hook is backed up to `<hook>.pre-stayawake.bak` rat
 destroyed. Also audit the machine's posture (cached GitHub credential, VS Code auto-run /
 Workspace Trust):
 ```bash
-stayawake-security-audit            # advisory; add --fail-on-issues for scripts/CI
+saw audit            # advisory; add -f for scripts/CI
 ```
 
 ## 3. Branch protection (defense in depth)
 - Require pull-request review before merging to `main`; **disable auto-merge**.
 - Require the **Worm Guard** status check to pass.
 - Restrict who can push to `main`; require linear history (blocks surprise merge commits).
-- Verify it's actually enforced: `stayawake-security-audit --repo owner/name` (needs a token)
+- Verify it's actually enforced: `saw audit --repo owner/name` (needs a token)
   warns if the branch is unprotected or Worm Guard isn't a required check.
 
 ## 4. Token & Action hardening
@@ -76,7 +76,7 @@ stayawake-security-audit            # advisory; add --fail-on-issues for scripts
 ## 5. Recovery
 If the gate flags a repo, clean it:
 ```bash
-stayawake-security-remediate --apply   # dry-run first (omit --apply)
+saw fix --apply   # dry-run first (omit --apply)
 ```
 Evil merges already in history need a `git filter-repo` purge + force-push after everyone
 on the team has cleaned their machines.

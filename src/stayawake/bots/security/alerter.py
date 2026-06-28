@@ -3,17 +3,17 @@
 and post a Slack summary.
 
 Single responsibility: alerting policy + dispatch. Idempotent — it keys off the
-existence of an open, labelled issue per target, so re-runs don't spam.
+existence of an open, labelled issue per target, so re-runs don't spam. Both entry
+points take an in-memory scan payload (the `--alert` sinks pass it straight from the
+scan, no intermediate report file on disk).
 """
 from __future__ import annotations
 
 import os
 import urllib.parse
-from pathlib import Path
 
 from stayawake.core.adapters.slack import send_slack
 from stayawake.core.adapters import github_api
-from stayawake.core.io import read_json
 from stayawake.core.timeutil import utc_stamp
 
 LABEL = "stayawakebot-security"
@@ -44,32 +44,24 @@ def _issue_body(result: dict) -> str:
     return "\n".join(lines)
 
 
-def run(latest_path: str | Path = "reports/security/latest.json") -> None:
-    latest = read_json(latest_path)
-    if latest is None:
-        print("security latest.json not found; run the scanner first")
-        return
-
-    token = os.environ.get("GITHUB_TOKEN")
-    repo = os.environ.get("GITHUB_REPOSITORY")
+def post_slack_summary(payload: dict) -> None:
+    """Post the infected / suspicious Slack summaries for a scan payload (no-op without
+    SLACK_WEBHOOK_URL). Bodies are evidence-free."""
     slack = os.environ.get("SLACK_WEBHOOK_URL")
-
-    results = latest.get("results", [])
+    if not slack:
+        return
+    results = payload.get("results", [])
     infected = [r for r in results if r.get("infected")]
     suspicious = [r for r in results if r.get("suspicious")]
-    # A suspicious repo is neither infected nor clean: don't auto-close its issue, and
-    # (below) don't open one either — only confirmed-infected repos get a GitHub issue.
-    clean = [r for r in results if not r.get("infected")
-             and not r.get("suspicious") and not r.get("error")]
 
-    if infected and slack:
+    if infected:
         send_slack(slack, {"text": "StayAwakeBot Security Sentinel", "attachments": [{
             "color": "#ff0000",
             "title": f"⚠️ Worm indicators in {len(infected)} repo(s)",
             "text": "\n".join(f"• {r['target']} — {r['summary']['total']} findings "
                               f"({r['summary']['max_severity']})" for r in infected[:20]),
             "footer": f"StayAwakeBot Security Sentinel | {utc_stamp()}"}]})
-    if suspicious and slack:
+    if suspicious:
         # Softer, distinct alert — informs without crying "malware" on heuristic-only hits.
         send_slack(slack, {"text": "StayAwakeBot Security Sentinel", "attachments": [{
             "color": "#dbab09",
@@ -77,6 +69,21 @@ def run(latest_path: str | Path = "reports/security/latest.json") -> None:
             "text": "\n".join(f"• {r['target']} — {r['summary']['total']} heuristic finding(s)"
                               for r in suspicious[:20]),
             "footer": f"StayAwakeBot Security Sentinel | {utc_stamp()}"}]})
+
+
+def sync_github_issues(payload: dict) -> None:
+    """Open one labelled issue per infected repo and close it on recovery (idempotent,
+    keyed on the open issue's title). No-op with a note when no GITHUB_TOKEN/REPOSITORY."""
+    token = os.environ.get("GITHUB_TOKEN")
+    repo = os.environ.get("GITHUB_REPOSITORY")
+
+    results = payload.get("results", [])
+    infected = [r for r in results if r.get("infected")]
+    suspicious = [r for r in results if r.get("suspicious")]
+    # A suspicious repo is neither infected nor clean: don't auto-close its issue, and
+    # don't open one either — only confirmed-infected repos get a GitHub issue.
+    clean = [r for r in results if not r.get("infected")
+             and not r.get("suspicious") and not r.get("error")]
 
     if not (token and repo):
         print(f"Security alerts: {len(infected)} infected, {len(suspicious)} suspicious "
