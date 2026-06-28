@@ -16,6 +16,7 @@ from stayawake.core.streaming import Streamer, status, stream_enabled
 from stayawake.core.timeutil import now_iso
 from stayawake.core.adapters import github_api
 from stayawake.core import auth
+from stayawake.bots.security import sarif
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.models import ScanResult
@@ -225,6 +226,10 @@ def scan(config_path: str | None = None, local_only: bool = False,
                                default=REPORTS_DIR, label="security reports")
     write_json(rdir / "latest.json", payload)
     (rdir / "latest.md").write_text(_render_markdown(payload), encoding="utf-8")
+    # SARIF sits alongside the JSON/MD: a CI upload step (codeql-action/upload-sarif)
+    # surfaces these findings in the Security tab + inline PR annotations. Pure output —
+    # no GitHub env needed to write it, so local/piped runs are unaffected.
+    sarif.write_sarif(payload, rdir / "latest.sarif")
 
     # Per-target lines already streamed during the scan loops above; this is the
     # authoritative end-of-run recap (unchanged content).
