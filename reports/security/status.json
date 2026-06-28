@@ -1,18 +1,18 @@
 {
-  "generated_at": "2026-06-28T16:42:45.021779+00:00",
+  "generated_at": "2026-06-28T20:29:27.491595+00:00",
   "summary": {
     "targets": 1,
     "infected": 1,
     "suspicious": 0,
-    "findings": 36,
-    "critical": 18,
-    "high": 14
+    "findings": 43,
+    "critical": 20,
+    "high": 19
   },
   "infected": [
     {
       "target": "~/work/stayAwakeBot/stayAwakeBot",
       "source": "local",
-      "findings": 36,
+      "findings": 43,
       "max_severity": "critical"
     }
   ],

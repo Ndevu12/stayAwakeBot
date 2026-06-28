@@ -1,12 +1,12 @@
-# Security scan — 2026-06-28T16:42:45.021779+00:00
+# Security scan — 2026-06-28T20:29:27.491595+00:00
 
-**1 targets** · 1 infected · 0 suspicious · 36 findings (18 critical, 14 high)
+**1 targets** · 1 infected · 0 suspicious · 43 findings (20 critical, 19 high)
 
 _Verdict: **infected** = a confirmed (high-confidence) signature matched; **suspicious** = only heuristic match(es) that benign code can also produce — review, not asserted as malware._
 
 | Target | Source | Status | Findings | Top severity |
 |--------|--------|--------|----------|--------------|
-| ~/work/stayAwakeBot/stayAwakeBot | local | ❌ INFECTED | 36 | critical |
+| ~/work/stayAwakeBot/stayAwakeBot | local | ❌ INFECTED | 43 | critical |
 
 ## Findings
 
@@ -21,6 +21,12 @@ _Verdict: **infected** = a confirmed (high-confidence) signature matched; **susp
   - Obfuscated loader fingerprint — fromCharCode(127) string shuffler
   - evidence: `]]= require;String.fromCharCode(127);                                           …`
 - **[critical · confirmed]** `loader-seed-var` — reports/security/latest.md:19
+  - Obfuscated loader seed variable (var/let/const _$_xxxx=)
+  - evidence: `!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; var x =sfL(\\\\\\\\\…`
+- **[critical · confirmed]** `loader-fromcharcode-127` — reports/security/latest.sarif:329
+  - Obfuscated loader fingerprint — fromCharCode(127) string shuffler
+  - evidence: `]]= require;String.fromCharCode(127);                                           …`
+- **[critical · confirmed]** `loader-seed-var` — reports/security/latest.sarif:361
   - Obfuscated loader seed variable (var/let/const _$_xxxx=)
   - evidence: `!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; var x =sfL(\\\\\\\\\…`
 - **[critical · confirmed]** `vscode-task-folderopen-exec` — tests/bots/security/fixtures/infected/.vscode/tasks.json
@@ -52,12 +58,12 @@ _Verdict: **infected** = a confirmed (high-confidence) signature matched; **susp
 - **[critical · confirmed]** `loader-seed-var` — tests/bots/security/test_obfuscation_file.py:47
   - Obfuscated loader seed variable (var/let/const _$_xxxx=)
   - evidence: `om 'react'\nvar _$_1e42='seed';\n" + packed         self.assertIn(OBF, _scan({"C…`
-- **[critical · confirmed]** `loader-fromcharcode-127` — tests/bots/security/test_remediation.py:84
+- **[critical · confirmed]** `loader-fromcharcode-127` — tests/bots/security/test_recovery.py:31
   - Obfuscated loader fingerprint — fromCharCode(127) string shuffler
-  - evidence: `d = sfL(0)\nString.fromCharCode(127)\nexport default {a:1};\n"         out = rem…`
-- **[critical · confirmed]** `loader-seed-var` — tests/bots/security/test_remediation.py:84
+  - evidence: `1e42=sfL(0);String.fromCharCode(127);global['!']='x';" + _HIENT # The only auto-…`
+- **[critical · confirmed]** `loader-seed-var` — tests/bots/security/test_recovery.py:31
   - Obfuscated loader seed variable (var/let/const _$_xxxx=)
-  - evidence: `     txt = "var _$_abcd = sfL(0)\nString.fromCharCode(127)\nexport default {a:1}…`
+  - evidence: ` PAYLOAD = "var _$_1e42=sfL(0);String.fromCharCode(127);global['!']='x';" + _HIE…`
 - **[critical · confirmed]** `loader-fromcharcode-127` — tests/bots/security/test_verdict.py:102
   - Obfuscated loader fingerprint — fromCharCode(127) string shuffler
   - evidence: `2 = sfL(0); String.fromCharCode(127);\n"})         self.assertEqual(r.verdict, I…`
@@ -82,6 +88,15 @@ _Verdict: **infected** = a confirmed (high-confidence) signature matched; **susp
 - **[high · confirmed]** `loader-require-hijack` — reports/security/latest.md:75
   - Loader reassigning global.require to smuggle CommonJS into ESM
   - evidence: `\\\\\\\\"); global[_$_1e42[0]]= require;S\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\…`
+- **[high · confirmed]** `loader-decoder-fn` — reports/security/latest.sarif:361
+  - Obfuscated loader decoder call — the sfL decoder function
+  - evidence: `t';function sfL(w){return w}; var x =sfL(\\\\\\\\\\\\\\\\\\\u2026"           }, …`
+- **[high · confirmed]** `loader-global-bang` — reports/security/latest.sarif:925
+  - Loader bootstrap assigning global['!']
+  - evidence: `ault config;global['!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; …`
+- **[high · confirmed]** `loader-require-hijack` — reports/security/latest.sarif:957
+  - Loader reassigning global.require to smuggle CommonJS into ESM
+  - evidence: `\\\\\\\\"); global[_$_1e42[0]]= require;S\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\…`
 - **[high · confirmed]** `vscode-allow-automatic-tasks` — tests/bots/security/fixtures/infected/.vscode/settings.json
   - settings.json enables task.allowAutomaticTasks (required for folderOpen abuse)
   - evidence: `task.allowAutomaticTasks: true`
@@ -100,9 +115,15 @@ _Verdict: **infected** = a confirmed (high-confidence) signature matched; **susp
 - **[high · confirmed]** `loader-decoder-fn` — tests/bots/security/test_obfuscation_file.py:63
   - Obfuscated loader decoder call — the sfL decoder function
   - evidence: `x';function sfL(w){return w}"         self.assertLess(max(len(l) for l in line.s…`
-- **[high · confirmed]** `loader-decoder-fn` — tests/bots/security/test_remediation.py:84
+- **[high · confirmed]** `loader-decoder-fn` — tests/bots/security/test_recovery.py:31
   - Obfuscated loader decoder call — the sfL decoder function
-  - evidence: `r _$_abcd = sfL(0)\nString.fromCharCode(127)\nexport default {a:1};\n"         o…`
+  - evidence: `var _$_1e42=sfL(0);String.fromCharCode(127);global['!']='x';" + _HIENT # The onl…`
+- **[high · confirmed]** `loader-global-bang` — tests/bots/security/test_recovery.py:31
+  - Loader bootstrap assigning global['!']
+  - evidence: `arCode(127);global['!']='x';" + _HIENT # The only auto-recoverable shape: the pa…`
+- **[high · confirmed]** `loader-decoder-fn` — tests/bots/security/test_remediation.py:94
+  - Obfuscated loader decoder call — the sfL decoder function
+  - evidence: `e.exports = sfL(0)\n", encoding="utf-8")         q = remediation.quarantine_path…`
 - **[high · confirmed]** `loader-decoder-fn` — tests/bots/security/test_verdict.py:102
   - Obfuscated loader decoder call — the sfL decoder function
   - evidence: `r _$_1e42 = sfL(0); String.fromCharCode(127);\n"})         self.assertEqual(r.ve…`

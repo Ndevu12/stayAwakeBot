@@ -7,7 +7,7 @@
         "driver": {
           "name": "saw",
           "informationUri": "https://github.com/Ndevu12/stayAwakeBot",
-          "version": "0.1.5.dev57+g46a15ec",
+          "version": "0.1.5.dev65+g0a06632",
           "rules": [
             {
               "id": "loader-fromcharcode-127",
@@ -348,7 +348,7 @@
             "confidence": "confirmed",
             "category": "code-loader",
             "vector": "code-loader",
-            "remediation": "strip-appended-payload",
+            "remediation": "recover",
             "target": "~/work/stayAwakeBot/stayAwakeBot",
             "source": "local"
           }
@@ -380,7 +380,7 @@
             "confidence": "confirmed",
             "category": "code-loader",
             "vector": "code-loader",
-            "remediation": "strip-appended-payload",
+            "remediation": "recover",
             "target": "~/work/stayAwakeBot/stayAwakeBot",
             "source": "local"
           }
@@ -412,7 +412,7 @@
             "confidence": "confirmed",
             "category": "code-loader",
             "vector": "code-loader",
-            "remediation": "strip-appended-payload",
+            "remediation": "recover",
             "target": "~/work/stayAwakeBot/stayAwakeBot",
             "source": "local"
           }
@@ -444,7 +444,71 @@
             "confidence": "confirmed",
             "category": "code-loader",
             "vector": "code-loader",
-            "remediation": "strip-appended-payload",
+            "remediation": "recover",
+            "target": "~/work/stayAwakeBot/stayAwakeBot",
+            "source": "local"
+          }
+        },
+        {
+          "ruleId": "loader-fromcharcode-127",
+          "ruleIndex": 0,
+          "level": "error",
+          "message": {
+            "text": "Obfuscated loader fingerprint \u2014 fromCharCode(127) string shuffler\n\nEvidence: ]]= require;String.fromCharCode(127);                                           \u2026"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "reports/security/latest.sarif"
+                },
+                "region": {
+                  "startLine": 329
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "sawSignatureLocation/v1": "27682d3160b2e032a606989312dba531715beda2532d2c03ad52a5630ca1899e"
+          },
+          "properties": {
+            "severity": "critical",
+            "confidence": "confirmed",
+            "category": "code-loader",
+            "vector": "code-loader",
+            "remediation": "recover",
+            "target": "~/work/stayAwakeBot/stayAwakeBot",
+            "source": "local"
+          }
+        },
+        {
+          "ruleId": "loader-seed-var",
+          "ruleIndex": 1,
+          "level": "error",
+          "message": {
+            "text": "Obfuscated loader seed variable (var/let/const _$_xxxx=)\n\nEvidence: !']='inert';var _$_1e42= 'inert';function sfL(w){return w}; var x =sfL(\\\\\\\\\\\\\\\\\\\u2026"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "reports/security/latest.sarif"
+                },
+                "region": {
+                  "startLine": 361
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "sawSignatureLocation/v1": "da653c5f86f80df71f9d67e92c84152199fb9eaa79d5b7d32d41ba9f0e4a1432"
+          },
+          "properties": {
+            "severity": "critical",
+            "confidence": "confirmed",
+            "category": "code-loader",
+            "vector": "code-loader",
+            "remediation": "recover",
             "target": "~/work/stayAwakeBot/stayAwakeBot",
             "source": "local"
           }
@@ -534,7 +598,7 @@
             "confidence": "confirmed",
             "category": "code-loader",
             "vector": "code-loader",
-            "remediation": "strip-appended-payload",
+            "remediation": "recover",
             "target": "~/work/stayAwakeBot/stayAwakeBot",
             "source": "local"
           }
@@ -566,7 +630,7 @@
             "confidence": "confirmed",
             "category": "code-loader",
             "vector": "code-loader",
-            "remediation": "strip-appended-payload",
+            "remediation": "recover",
             "target": "~/work/stayAwakeBot/stayAwakeBot",
             "source": "local"
           }
@@ -656,7 +720,7 @@
             "confidence": "confirmed",
             "category": "code-loader",
             "vector": "code-loader",
-            "remediation": "strip-appended-payload",
+            "remediation": "recover",
             "target": "~/work/stayAwakeBot/stayAwakeBot",
             "source": "local"
           }
@@ -688,7 +752,7 @@
             "confidence": "confirmed",
             "category": "code-loader",
             "vector": "code-loader",
-            "remediation": "strip-appended-payload",
+            "remediation": "recover",
             "target": "~/work/stayAwakeBot/stayAwakeBot",
             "source": "local"
           }
@@ -720,7 +784,7 @@
             "confidence": "confirmed",
             "category": "code-loader",
             "vector": "code-loader",
-            "remediation": "strip-appended-payload",
+            "remediation": "recover",
             "target": "~/work/stayAwakeBot/stayAwakeBot",
             "source": "local"
           }
@@ -752,7 +816,7 @@
             "confidence": "confirmed",
             "category": "code-loader",
             "vector": "code-loader",
-            "remediation": "strip-appended-payload",
+            "remediation": "recover",
             "target": "~/work/stayAwakeBot/stayAwakeBot",
             "source": "local"
           }
@@ -762,29 +826,29 @@
           "ruleIndex": 0,
           "level": "error",
           "message": {
-            "text": "Obfuscated loader fingerprint \u2014 fromCharCode(127) string shuffler\n\nEvidence: d = sfL(0)\\nString.fromCharCode(127)\\nexport default {a:1};\\n\"         out = rem\u2026"
+            "text": "Obfuscated loader fingerprint \u2014 fromCharCode(127) string shuffler\n\nEvidence: 1e42=sfL(0);String.fromCharCode(127);global['!']='x';\" + _HIENT # The only auto-\u2026"
           },
           "locations": [
             {
               "physicalLocation": {
                 "artifactLocation": {
-                  "uri": "tests/bots/security/test_remediation.py"
+                  "uri": "tests/bots/security/test_recovery.py"
                 },
                 "region": {
-                  "startLine": 84
+                  "startLine": 31
                 }
               }
             }
           ],
           "partialFingerprints": {
-            "sawSignatureLocation/v1": "d082711a62ff0b5e1e2e1f9123b5121617a86bd006e75c8d2788aecd2602f3c4"
+            "sawSignatureLocation/v1": "40e11281df1b84e407f2009f6eb8e0c89c90e3bbdd35633cc27af14ad77c7d0b"
           },
           "properties": {
             "severity": "critical",
             "confidence": "confirmed",
             "category": "code-loader",
             "vector": "code-loader",
-            "remediation": "strip-appended-payload",
+            "remediation": "recover",
             "target": "~/work/stayAwakeBot/stayAwakeBot",
             "source": "local"
           }
@@ -794,29 +858,29 @@
           "ruleIndex": 1,
           "level": "error",
           "message": {
-            "text": "Obfuscated loader seed variable (var/let/const _$_xxxx=)\n\nEvidence:      txt = \"var _$_abcd = sfL(0)\\nString.fromCharCode(127)\\nexport default {a:1}\u2026"
+            "text": "Obfuscated loader seed variable (var/let/const _$_xxxx=)\n\nEvidence:  PAYLOAD = \"var _$_1e42=sfL(0);String.fromCharCode(127);global['!']='x';\" + _HIE\u2026"
           },
           "locations": [
             {
               "physicalLocation": {
                 "artifactLocation": {
-                  "uri": "tests/bots/security/test_remediation.py"
+                  "uri": "tests/bots/security/test_recovery.py"
                 },
                 "region": {
-                  "startLine": 84
+                  "startLine": 31
                 }
               }
             }
           ],
           "partialFingerprints": {
-            "sawSignatureLocation/v1": "8abfb6ef19635c055a1709324fd2be18f107966119ab57beba86dbd8f0d4b628"
+            "sawSignatureLocation/v1": "46da3af1b186d57046935d0445ea37a0468d691e72d96d8b24d3917febfcd357"
           },
           "properties": {
             "severity": "critical",
             "confidence": "confirmed",
             "category": "code-loader",
             "vector": "code-loader",
-            "remediation": "strip-appended-payload",
+            "remediation": "recover",
             "target": "~/work/stayAwakeBot/stayAwakeBot",
             "source": "local"
           }
@@ -848,7 +912,7 @@
             "confidence": "confirmed",
             "category": "code-loader",
             "vector": "code-loader",
-            "remediation": "strip-appended-payload",
+            "remediation": "recover",
             "target": "~/work/stayAwakeBot/stayAwakeBot",
             "source": "local"
           }
@@ -880,7 +944,7 @@
             "confidence": "confirmed",
             "category": "code-loader",
             "vector": "code-loader",
-            "remediation": "strip-appended-payload",
+            "remediation": "recover",
             "target": "~/work/stayAwakeBot/stayAwakeBot",
             "source": "local"
           }
@@ -912,7 +976,7 @@
             "confidence": "confirmed",
             "category": "code-loader",
             "vector": "code-loader",
-            "remediation": "strip-appended-payload",
+            "remediation": "recover",
             "target": "~/work/stayAwakeBot/stayAwakeBot",
             "source": "local"
           }
@@ -944,7 +1008,7 @@
             "confidence": "confirmed",
             "category": "code-loader",
             "vector": "code-loader",
-            "remediation": "strip-appended-payload",
+            "remediation": "recover",
             "target": "~/work/stayAwakeBot/stayAwakeBot",
             "source": "local"
           }
@@ -976,7 +1040,7 @@
             "confidence": "confirmed",
             "category": "code-loader",
             "vector": "code-loader",
-            "remediation": "strip-appended-payload",
+            "remediation": "recover",
             "target": "~/work/stayAwakeBot/stayAwakeBot",
             "source": "local"
           }
@@ -1008,7 +1072,7 @@
             "confidence": "confirmed",
             "category": "code-loader",
             "vector": "code-loader",
-            "remediation": "strip-appended-payload",
+            "remediation": "recover",
             "target": "~/work/stayAwakeBot/stayAwakeBot",
             "source": "local"
           }
@@ -1040,7 +1104,7 @@
             "confidence": "confirmed",
             "category": "code-loader",
             "vector": "code-loader",
-            "remediation": "strip-appended-payload",
+            "remediation": "recover",
             "target": "~/work/stayAwakeBot/stayAwakeBot",
             "source": "local"
           }
@@ -1072,7 +1136,103 @@
             "confidence": "confirmed",
             "category": "code-loader",
             "vector": "code-loader",
-            "remediation": "strip-appended-payload",
+            "remediation": "recover",
+            "target": "~/work/stayAwakeBot/stayAwakeBot",
+            "source": "local"
+          }
+        },
+        {
+          "ruleId": "loader-decoder-fn",
+          "ruleIndex": 6,
+          "level": "error",
+          "message": {
+            "text": "Obfuscated loader decoder call \u2014 the sfL decoder function\n\nEvidence: t';function sfL(w){return w}; var x =sfL(\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\u2026\"           }, \u2026"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "reports/security/latest.sarif"
+                },
+                "region": {
+                  "startLine": 361
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "sawSignatureLocation/v1": "f295a2fecda42bbc1837bea9740011466bb855dd14adae8e73e3f17ca0e2e1e3"
+          },
+          "properties": {
+            "severity": "high",
+            "confidence": "confirmed",
+            "category": "code-loader",
+            "vector": "code-loader",
+            "remediation": "recover",
+            "target": "~/work/stayAwakeBot/stayAwakeBot",
+            "source": "local"
+          }
+        },
+        {
+          "ruleId": "loader-global-bang",
+          "ruleIndex": 7,
+          "level": "error",
+          "message": {
+            "text": "Loader bootstrap assigning global['!']\n\nEvidence: ault config;global['!']='inert';var _$_1e42= 'inert';function sfL(w){return w}; \u2026"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "reports/security/latest.sarif"
+                },
+                "region": {
+                  "startLine": 925
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "sawSignatureLocation/v1": "287d860cba21107f3282dd115b7c0c76ad0bd3a72576ab4d685fc916361f5458"
+          },
+          "properties": {
+            "severity": "high",
+            "confidence": "confirmed",
+            "category": "code-loader",
+            "vector": "code-loader",
+            "remediation": "recover",
+            "target": "~/work/stayAwakeBot/stayAwakeBot",
+            "source": "local"
+          }
+        },
+        {
+          "ruleId": "loader-require-hijack",
+          "ruleIndex": 8,
+          "level": "error",
+          "message": {
+            "text": "Loader reassigning global.require to smuggle CommonJS into ESM\n\nEvidence: \\\\\\\\\\\\\\\\\"); global[_$_1e42[0]]= require;S\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\u2026"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "reports/security/latest.sarif"
+                },
+                "region": {
+                  "startLine": 957
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "sawSignatureLocation/v1": "3bd029650eb2aeebf90d5925047379907391234a0d9a4ae7bdb4547eb0e2f40f"
+          },
+          "properties": {
+            "severity": "high",
+            "confidence": "confirmed",
+            "category": "code-loader",
+            "vector": "code-loader",
+            "remediation": "recover",
             "target": "~/work/stayAwakeBot/stayAwakeBot",
             "source": "local"
           }
@@ -1133,7 +1293,7 @@
             "confidence": "confirmed",
             "category": "code-loader",
             "vector": "code-loader",
-            "remediation": "strip-appended-payload",
+            "remediation": "recover",
             "target": "~/work/stayAwakeBot/stayAwakeBot",
             "source": "local"
           }
@@ -1165,7 +1325,7 @@
             "confidence": "confirmed",
             "category": "code-loader",
             "vector": "code-loader",
-            "remediation": "strip-appended-payload",
+            "remediation": "recover",
             "target": "~/work/stayAwakeBot/stayAwakeBot",
             "source": "local"
           }
@@ -1197,7 +1357,7 @@
             "confidence": "confirmed",
             "category": "code-loader",
             "vector": "code-loader",
-            "remediation": "strip-appended-payload",
+            "remediation": "recover",
             "target": "~/work/stayAwakeBot/stayAwakeBot",
             "source": "local"
           }
@@ -1229,7 +1389,7 @@
             "confidence": "confirmed",
             "category": "code-loader",
             "vector": "code-loader",
-            "remediation": "strip-appended-payload",
+            "remediation": "recover",
             "target": "~/work/stayAwakeBot/stayAwakeBot",
             "source": "local"
           }
@@ -1261,7 +1421,7 @@
             "confidence": "confirmed",
             "category": "code-loader",
             "vector": "code-loader",
-            "remediation": "strip-appended-payload",
+            "remediation": "recover",
             "target": "~/work/stayAwakeBot/stayAwakeBot",
             "source": "local"
           }
@@ -1271,7 +1431,71 @@
           "ruleIndex": 6,
           "level": "error",
           "message": {
-            "text": "Obfuscated loader decoder call \u2014 the sfL decoder function\n\nEvidence: r _$_abcd = sfL(0)\\nString.fromCharCode(127)\\nexport default {a:1};\\n\"         o\u2026"
+            "text": "Obfuscated loader decoder call \u2014 the sfL decoder function\n\nEvidence: var _$_1e42=sfL(0);String.fromCharCode(127);global['!']='x';\" + _HIENT # The onl\u2026"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "tests/bots/security/test_recovery.py"
+                },
+                "region": {
+                  "startLine": 31
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "sawSignatureLocation/v1": "5e2cd59d6cc22193535ac281be2a615fcac244aeabe87a24f71e5877db7b5775"
+          },
+          "properties": {
+            "severity": "high",
+            "confidence": "confirmed",
+            "category": "code-loader",
+            "vector": "code-loader",
+            "remediation": "recover",
+            "target": "~/work/stayAwakeBot/stayAwakeBot",
+            "source": "local"
+          }
+        },
+        {
+          "ruleId": "loader-global-bang",
+          "ruleIndex": 7,
+          "level": "error",
+          "message": {
+            "text": "Loader bootstrap assigning global['!']\n\nEvidence: arCode(127);global['!']='x';\" + _HIENT # The only auto-recoverable shape: the pa\u2026"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "tests/bots/security/test_recovery.py"
+                },
+                "region": {
+                  "startLine": 31
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "sawSignatureLocation/v1": "6b87880f6f75e7f4f2e9203ee2d19b2f8ee6c4c83b216fc640a556087e6510d7"
+          },
+          "properties": {
+            "severity": "high",
+            "confidence": "confirmed",
+            "category": "code-loader",
+            "vector": "code-loader",
+            "remediation": "recover",
+            "target": "~/work/stayAwakeBot/stayAwakeBot",
+            "source": "local"
+          }
+        },
+        {
+          "ruleId": "loader-decoder-fn",
+          "ruleIndex": 6,
+          "level": "error",
+          "message": {
+            "text": "Obfuscated loader decoder call \u2014 the sfL decoder function\n\nEvidence: e.exports = sfL(0)\\n\", encoding=\"utf-8\")         q = remediation.quarantine_path\u2026"
           },
           "locations": [
             {
@@ -1280,20 +1504,20 @@
                   "uri": "tests/bots/security/test_remediation.py"
                 },
                 "region": {
-                  "startLine": 84
+                  "startLine": 94
                 }
               }
             }
           ],
           "partialFingerprints": {
-            "sawSignatureLocation/v1": "5af9427cdd3593319aa5fc68a4a479adf7e478a86de34f6f4cb7e8b0a88a250f"
+            "sawSignatureLocation/v1": "cfed5e0f915c03892f0a62088c53fccbaf88c943638dcd1b4ea5c73e1588b2f9"
           },
           "properties": {
             "severity": "high",
             "confidence": "confirmed",
             "category": "code-loader",
             "vector": "code-loader",
-            "remediation": "strip-appended-payload",
+            "remediation": "recover",
             "target": "~/work/stayAwakeBot/stayAwakeBot",
             "source": "local"
           }
@@ -1325,7 +1549,7 @@
             "confidence": "confirmed",
             "category": "code-loader",
             "vector": "code-loader",
-            "remediation": "strip-appended-payload",
+            "remediation": "recover",
             "target": "~/work/stayAwakeBot/stayAwakeBot",
             "source": "local"
           }
@@ -1389,7 +1613,7 @@
             "confidence": "heuristic",
             "category": "code-loader",
             "vector": "code-loader",
-            "remediation": "strip-appended-payload",
+            "remediation": "recover",
             "target": "~/work/stayAwakeBot/stayAwakeBot",
             "source": "local"
           }
@@ -1418,7 +1642,7 @@
             "confidence": "heuristic",
             "category": "code-loader",
             "vector": "code-loader",
-            "remediation": "strip-appended-payload",
+            "remediation": "recover",
             "target": "~/work/stayAwakeBot/stayAwakeBot",
             "source": "local"
           }
