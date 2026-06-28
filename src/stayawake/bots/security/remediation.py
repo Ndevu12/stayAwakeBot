@@ -8,32 +8,36 @@ side-effecting apply so dry-run is trivial.
 """
 from __future__ import annotations
 
+import difflib
+import hashlib
 import json
-import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from stayawake.bots.security.matchers.base import load_jsonc
-from stayawake.bots.security.models import HEURISTIC, QUARANTINE_DIR
+from stayawake.core import git as gitutil
+from stayawake.bots.security.matchers.base import load_jsonc, build_content_sig
+from stayawake.bots.security.models import (
+    HEURISTIC, QUARANTINE_DIR,
+    BORN_INFECTED, INTRINSIC_MATCH, LEGIT_CHANGES, UNTRACKED, NO_VCS, INSPECT_FAILED,
+)
+from stayawake.bots.security.obfuscation import (
+    analyze_file, _has_exec_sink, _shannon, _ENTROPY_ABS, _MAX_PROSE_SPACE_FRAC,
+)
 
-# remediation id → internal action
+# remediation id → internal action. NOTE: the code-loader family (`strip-appended-payload`)
+# is deliberately ABSENT here — those findings are NEVER surgically edited (that is what
+# corrupted valid files: a textual transform can't reliably excise a polymorphic payload).
+# Instead they go through git RECOVERY (restore the file's last clean committed version) or
+# are deferred to manual review — see classify_recovery(). The actions below are the
+# reliable, structure-safe ones: whole-file quarantine, exact-line / JSON-key removal.
 _ACTIONS = {
-    "strip-appended-payload": "strip-payload",
     "quarantine-file": "quarantine",
     "quarantine-dir": "quarantine",
     "remove-foreign-vscode": "vscode",
     "strip-gitignore-markers": "strip-gitignore",
 }
 _GITIGNORE_MARKERS = {"branch_structure.json", "temp_auto_push.bat", "temp_interactive_push.bat"}
-
-# Loader fingerprints (mirror the content signatures) used to drop payload lines
-# wherever they sit — not only when appended after `export default`.
-_LOADER_LINE = re.compile(
-    r"createRequire\(|String\s*[.\[]\s*['\"]?fromCharCode['\"]?\]?\s*\(\s*(?:127|0x7f)"
-    r"|(?:var|let|const)\s+_\$_[0-9a-f]{2,}\s*=|=\s*sfL\(|global\s*\[\s*(?:_\$_|['\"]!['\"])",
-    re.IGNORECASE,
-)
 
 # Quarantine / remediation backups must stay local and never be committed.
 # `ensure_ignored` guarantees a target repo's .gitignore carries this before we
@@ -96,25 +100,7 @@ def plan(findings) -> list[Change]:
     return list(changes.values())
 
 
-# ── individual transforms ────────────────────────────────────────────────────
-
-def strip_payload_text(text: str) -> str:
-    """Remove worm loader lines wherever they sit (not only appended after the
-    config) and cut any payload appended past the first `export default ...;`.
-
-    Best-effort: a post-apply re-scan (see `verify_clean`) is the real guarantee —
-    if any signature still fires the caller quarantines the whole file."""
-    out: list[str] = []
-    for line in text.splitlines():
-        if _LOADER_LINE.search(line):
-            continue                      # drop loader / createRequire lines at any position
-        if "export default" in line:
-            idx = line.find(";")
-            out.append(line[: idx + 1] if idx != -1 else line)
-            return "\n".join(out).rstrip("\n") + "\n"
-        out.append(line)
-    return "\n".join(out).rstrip("\n") + "\n"
-
+# ── individual transforms (structure-safe: exact-line / JSON-key removal only) ──
 
 def strip_gitignore_text(text: str) -> str:
     return "\n".join(l for l in text.splitlines()
@@ -204,13 +190,11 @@ def apply(root: Path, changes: list[Change], quarantine: Path) -> list[Change]:
                 else:
                     target.unlink()
                 applied.append(c)
-        elif c.action in ("strip-payload", "strip-gitignore", "strip-settings"):
+        elif c.action in ("strip-gitignore", "strip-settings"):
             if not target.exists():
                 continue
             original = target.read_text(encoding="utf-8", errors="replace")
-            if c.action == "strip-payload":
-                new = strip_payload_text(original)
-            elif c.action == "strip-gitignore":
+            if c.action == "strip-gitignore":
                 new = strip_gitignore_text(original)
             else:
                 new = strip_settings_autorun(original)
@@ -219,3 +203,217 @@ def apply(root: Path, changes: list[Change], quarantine: Path) -> list[Change]:
                 target.write_text(new, encoding="utf-8")
                 applied.append(c)
     return applied
+
+
+# ── code-loader remediation: git recovery, or deferred manual review ─────────────
+# A code-loader payload is polymorphic and embedded in arbitrary code, so it cannot be
+# reliably excised by a textual transform — that is exactly what corrupted valid files.
+# The source of truth for "what this file should be" is git history, so we either RECOVER
+# the file's most recent committed version that scans clean, or — when no safe recovery
+# exists — defer to a human with a specific reason + recommended action. Never a heuristic
+# edit, so a fix can never leave a syntactically broken file. The manual-review reason
+# constants live in models.py (the shared domain-constants home).
+
+
+@dataclass(frozen=True)
+class Recovery:
+    """A reliable fix: restore `path` to its last clean committed version. `diff` is a
+    redaction-aware preview (payload never printed raw); `clean_text` is what gets written."""
+    path: str
+    clean_rev: str
+    label: str          # e.g. 'a1b2c3d ("chore: tailwind v4", 2026-05-12)'
+    diff: str
+    clean_text: str
+
+
+@dataclass(frozen=True)
+class Manual:
+    """A finding auto-fix can't safely act on — surfaced with WHY and the recommended action."""
+    path: str
+    signature_id: str
+    reason: str
+    action: str
+    line: int | None = None
+
+
+def codeloader_content_sig(all_signatures):
+    """Compile the code-loader CONTENT fingerprints into check(text) -> id|None — the
+    yardstick for deciding whether a (possibly historical) version of a file is clean."""
+    return build_content_sig(all_signatures)
+
+
+def _ext(path: str) -> str:
+    i = path.rfind(".")
+    return path[i:].lower() if i != -1 else ""
+
+
+def _carries_payload(text: str, content_sig) -> bool:
+    """True if `text` still carries the worm — a known LOADER literal OR a dynamic-exec sink
+    (eval / Function / atob / fromCharCode / constructor / the require-hijack global assignment).
+    This is the yardstick for
+    choosing a clean recovery target and for the post-restore verify.
+
+    Why literal-OR-exec-sink, not just the literal: a confirmed finding's history can hold an
+    EARLIER obfuscation stage where the literal isn't present yet but an `eval(atob(...))`
+    loader already is (#1053). Keying on the literal alone would mark that stage 'clean' and
+    restore a live payload. Why NOT the full analyze_file() packed/base64 verdict: that
+    false-positives on legitimately inlined base64 assets / minified lines, and a FP here
+    (marking a clean version 'infected') would push recovery onto an older revision — so we
+    stop at the exec sink, which every executing payload must reach but a static asset never
+    does. A base64-at-rest payload with no sink is caught by the scanner as a (heuristic)
+    obfuscation finding and routed to manual review, never to recovery."""
+    return bool(text) and (bool(content_sig(text)) or _has_exec_sink(text))
+
+
+# A payload-blob line is long, dense (almost no whitespace) and high-entropy — the shape of
+# a packed loader. A *legit* statement that merely contains a loader token — a real DEL-char
+# fromCharCode call, a function carrying the worm's shuffler name, or a line that splices the
+# require-hijack global assignment in front of real code — is short and readable and fails this
+# gate. That distinction is the whole point: content_sig() is a SUBSTRING match, so it can't tell
+# a packed payload from legit code that shares a byte sequence with one. Size+density+entropy can.
+_MIN_PAYLOAD_LINE = 120
+
+
+def _is_packed_line(line: str) -> bool:
+    s = line.strip()
+    if len(s) < _MIN_PAYLOAD_LINE:
+        return False
+    space_frac = sum(1 for ch in s if ch == " " or ch == "\t") / len(s)
+    return _shannon(s) >= _ENTROPY_ABS and space_frac <= _MAX_PROSE_SPACE_FRAC
+
+
+def _safe_to_recover(work: str, clean: str, content_sig) -> bool:
+    """True ONLY when restoring `clean` provably loses no legitimate code. Every requirement
+    is a guard the adversarial passes proved necessary:
+
+      * the SOLE diff is ADDED lines — no clean line modified or deleted (a modified line
+        could carry interleaved legit edits we can't separate), AND
+      * EVERY added non-blank line is BOTH a dense packed-payload line (`_is_packed_line`)
+        AND carries a loader literal (`content_sig`).
+
+    The conjunction is what makes it safe. Requiring `content_sig` alone dropped legit lines
+    byte-identical to a fingerprint (a real DEL-char fromCharCode call) and lines that merely
+    spliced a loader token in front of real code (substring match). Requiring `_is_packed_line`
+    alone would drop a legitimately-inlined base64 asset that landed in the same delta. Only a
+    line that is BOTH packed AND fingerprinted is the worm's blob; anything else → return False
+    → caller defers to manual with the exact `git checkout` command. Conservative by design: a
+    payload split across short bootstrap lines defers rather than risk co-located real code."""
+    w, c = work.splitlines(), clean.splitlines()
+    saw_payload = False
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(a=c, b=w, autojunk=False).get_opcodes():
+        if tag == "equal":
+            continue
+        if tag != "insert":              # a clean line was modified/deleted → not provably safe
+            return False
+        for ln in w[j1:j2]:
+            if not ln.strip():
+                continue
+            if not (_is_packed_line(ln) and content_sig(ln)):
+                return False             # not a packed loader blob → could be legit → unsafe
+            saw_payload = True
+    return saw_payload                    # ≥1 packed payload line, and every add is payload/blank
+
+
+def _short(s: str, n: int = 100) -> str:
+    s = s.rstrip("\n")
+    return s if len(s) <= n else s[:n] + "…"
+
+
+def _redact(body: str) -> str:
+    """Redact a payload line to a digest — never print raw malware to a terminal/report."""
+    h = hashlib.sha256(body.encode("utf-8", "replace")).hexdigest()[:8]
+    return f"[obfuscated payload · {len(body)} chars · sha256 {h}…]"
+
+
+def _recovery_diff(work: str, clean: str, content_sig, context: int = 1) -> str:
+    """Compact, redaction-aware preview of what recovery removes. Recovery only ever drops
+    whole packed payload lines that carry a loader literal (see _safe_to_recover), so each
+    removed line matches content_sig and is redacted to a digest, while the surrounding clean
+    lines are shown verbatim — the payload is never printed raw to a terminal or report."""
+    out: list[str] = []
+    for ln in difflib.unified_diff(work.splitlines(), clean.splitlines(), lineterm="", n=context):
+        if ln[:3] in ("---", "+++") or ln.startswith("@@"):
+            continue
+        if ln.startswith("-"):
+            body = ln[1:]
+            out.append("    - " + (_redact(body) if content_sig(body) else _short(body)))
+        elif ln.startswith("+"):
+            out.append("    + " + _short(ln[1:]))
+        else:
+            out.append("      " + _short(ln[1:]))
+    return "\n".join(out)
+
+
+def classify_recovery(repo, finding, content_sig):
+    """Decide how to remediate ONE (confirmed) code-loader finding: a Recovery (git restore)
+    when it is PROVABLY safe (a clean committed version exists and the only delta is appended
+    loader lines), else a Manual with a specific reason + recommended action. Never edits."""
+    root = Path(repo)
+    path, ext = finding.path, _ext(finding.path)
+    line = getattr(finding, "line", None)
+    sig = finding.signature_id
+    target = root / path
+    work = target.read_text(encoding="utf-8", errors="replace") if target.exists() else ""
+
+    if not gitutil.is_git_repo(repo):
+        return Manual(path, sig, NO_VCS,
+                      "Not a git repository — no clean version to recover. Review and remove "
+                      "the payload manually, or delete the file.", line)
+    if not gitutil.tracked(repo, path):
+        return Manual(path, sig, UNTRACKED,
+                      "Not tracked in git — no committed clean version to recover. Review and "
+                      "remove the payload, or delete the file.", line)
+
+    # The history walk touches git for every commit that changed the file. Any failure here
+    # (a corrupt object, an unreadable blob, an OS error) must NOT crash the caller — that
+    # would abort remediation for this repo and, in the org sweep, every repo after it. On
+    # failure we defer this one finding to manual review and carry on.
+    try:
+        clean = None
+        for sha in gitutil.file_commits(repo, path):
+            c = gitutil.file_at(repo, sha, path)
+            if c and not _carries_payload(c, content_sig):   # first version with no payload = clean
+                clean = (sha, c)
+                break
+
+        if clean is None:
+            if analyze_file(work, ext):       # packed/obfuscated → looks born-infected
+                return Manual(path, sig, BORN_INFECTED,
+                              "No clean version in git history and the content is packed/obfuscated "
+                              "— likely born infected. Review and, if confirmed, remove/quarantine it.", line)
+            return Manual(path, sig, INTRINSIC_MATCH,
+                          "No clean version in history, but it is a plain literal — likely intentional "
+                          f"(test/research data). If so, allowlist `{sig}` for `{path}`.", line)
+
+        sha, clean_text = clean
+        if _safe_to_recover(work, clean_text, content_sig):
+            meta = gitutil.commit_meta(repo, sha)
+            label = f'{sha[:7]} ("{_short(meta.get("subject", ""), 40)}", {meta.get("date", "")[:10]})'
+            return Recovery(path, sha, label, _recovery_diff(work, clean_text, content_sig), clean_text)
+        return Manual(path, sig, LEGIT_CHANGES,
+                      f"A clean version exists ({sha[:7]}) but the payload shares a line with, or is "
+                      "interleaved with, other code — auto-recovery could lose legitimate work. Recover "
+                      f"it yourself and review the diff: `git checkout {sha[:7]} -- {path}`.", line)
+    except Exception:  # noqa: BLE001 — never let one file's history quirk abort the sweep
+        return Manual(path, sig, INSPECT_FAILED,
+                      "Could not read this file's git history to find a clean version. Inspect it "
+                      f"manually and recover from a known-good commit: `git log -- {path}`.", line)
+
+
+def apply_recovery(repo, rec: Recovery, quarantine: Path, content_sig) -> bool:
+    """Restore the file to its clean committed version (after backing up the infected one).
+    Verify-or-revert: the restored file MUST carry neither a loader literal nor a dynamic-exec
+    sink (`_carries_payload`), else the original is put back. Because we write a real committed
+    blob, the file is never left syntactically corrupt."""
+    root = Path(repo)
+    target = root / rec.path
+    if not target.exists() or _carries_payload(rec.clean_text, content_sig):
+        return False                      # never write a version that still carries the payload
+    _backup(root, rec.path, quarantine)
+    target.write_text(rec.clean_text, encoding="utf-8")
+    if _carries_payload(target.read_text(encoding="utf-8", errors="replace"), content_sig):
+        backup = quarantine / rec.path    # verify failed → revert to the original
+        if backup.exists():
+            shutil.copy2(backup, target)
+        return False
+    return True

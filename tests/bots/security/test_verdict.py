@@ -104,15 +104,14 @@ class TestVerdict(unittest.TestCase):
         self.assertTrue(any(f.confidence == CONFIRMED for f in r.findings))
 
     # ── Remediation safety: heuristic findings never auto-strip ─────────────────
-    def test_heuristic_finding_is_not_auto_fixable(self):
-        heur = _finding("obfuscated-source-file", remediation="strip-appended-payload",
-                        confidence=HEURISTIC)
-        conf = _finding("obfuscated-source-file", remediation="strip-appended-payload",
-                        confidence=CONFIRMED)
-        self.assertFalse(remediation.is_auto_fixable(heur))
-        self.assertTrue(remediation.is_auto_fixable(conf))
-        self.assertEqual(remediation.plan([heur]), [])      # no auto-edit planned
-        self.assertTrue(remediation.plan([conf]))           # confirmed one is planned
+    def test_codeloader_is_never_plan_auto_fixed(self):
+        # Code-loader findings are NEVER surgically edited via plan/apply (that corrupted
+        # valid files) — they route to git recovery instead. So at EITHER confidence they
+        # are not "auto-fixable" and produce no plan() change.
+        for conf in (HEURISTIC, CONFIRMED):
+            f = _finding("obfuscated-source-file", remediation="recover", confidence=conf)
+            self.assertFalse(remediation.is_auto_fixable(f), conf)
+            self.assertEqual(remediation.plan([f]), [], conf)
 
 
 class TestConfidenceSignatureValidation(unittest.TestCase):
