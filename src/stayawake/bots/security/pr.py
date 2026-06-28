@@ -188,27 +188,44 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
             return f"{slug}: could not create worktree"
 
         findings = scan_target(LocalRepoTarget(wt, slug, opts), signatures, allowlist).findings
+        content_sig = remediation.codeloader_content_sig([s for g in signatures.values() for s in g])
         changes = remediation.plan(findings)
-        if not changes:
-            return f"{slug}: '{base}' already clean — nothing to PR"
 
         applied = remediation.apply(wt, changes, quarantine)
+        # CONFIRMED code-loader findings are RECOVERED from git history (the clone has it),
+        # never surgically edited — so a fix PR can never carry corrupted code. Heuristic-only
+        # matches (asset/minified shape) are left for human review, never auto-recovered.
+        seen_cl: set = set()
+        for f in findings:
+            if (f.category != "code-loader"
+                    or getattr(f, "confidence", "confirmed") != "confirmed"
+                    or f.path in seen_cl):
+                continue
+            seen_cl.add(f.path)
+            disp = remediation.classify_recovery(wt, f, content_sig)
+            if isinstance(disp, remediation.Recovery) and \
+                    remediation.apply_recovery(wt, disp, quarantine, content_sig):
+                applied.append(remediation.Change("recover", disp.path, disp.label))
 
-        # Post-apply verification — a worm-killer must never open a PR over a file
-        # that is still infected. Re-scan; quarantine any residual auto-fixable
-        # finding outright; abort the PR if the tree still is not clean.
+        # Post-apply verification — a worm-killer must never open a PR over a tree that is
+        # still infected. Residual = anything still auto-fixable OR any CONFIRMED code-loader
+        # payload we could not recover; quarantine the auto-fixable, and ABORT if a confirmed
+        # infection remains (a born-infected / legit-edits case needs manual review, not a PR).
         def _residual():
             fs = scan_target(LocalRepoTarget(wt, slug, opts), signatures, allowlist).findings
-            return [f for f in fs if remediation.is_auto_fixable(f)]
+            return [f for f in fs if remediation.is_auto_fixable(f)
+                    or (f.category == "code-loader"
+                        and getattr(f, "confidence", "confirmed") == "confirmed")]
         residual = _residual()
-        if residual:
-            applied += remediation.quarantine_residual(wt, residual, quarantine)
+        auto = [f for f in residual if remediation.is_auto_fixable(f)]
+        if auto:
+            applied += remediation.quarantine_residual(wt, auto, quarantine)
             residual = _residual()
         if residual:
             return (f"{slug}: ABORTED — {len(residual)} finding(s) still present after "
                     f"remediation; no PR opened (needs manual review)")
         if not applied:
-            return f"{slug}: nothing was actually remediated — no PR"
+            return f"{slug}: '{base}' already clean — nothing to PR"
 
         # quarantine backups live in an out-of-tree tempdir here; still untrack any
         # pre-existing TRACKED quarantine dir so live-malware backups never ship.

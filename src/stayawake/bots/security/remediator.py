@@ -11,6 +11,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import tempfile
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -22,7 +23,7 @@ from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.service import discover_local_repos, _enclosing_repo_root, DEFAULT_CONFIG
 from stayawake.bots.security.targets import ScanOptions, LocalRepoTarget
-from stayawake.bots.security.models import QUARANTINE_DIR
+from stayawake.bots.security.models import CONFIRMED, SUSPECT_HEURISTIC, QUARANTINE_DIR
 from stayawake.bots.security import remediation
 from stayawake.bots.security import pr as pr_submit
 
@@ -87,68 +88,149 @@ def _resolve_config(config_path: str | None):
     return load_yaml(config_path)
 
 
+def _classify(repo: Path, result, content_sig):
+    """Split a repo's findings into the three reliable dispositions:
+      - recoveries: code-loader findings whose clean version we can safely restore from git,
+      - changes:    structure-safe auto-fixes (quarantine fonts / strip exact gitignore lines /
+                    drop autorun JSON keys) — never a content reconstruction,
+      - manuals:    everything we cannot safely auto-fix, each with a reason + recommended action.
+    """
+    others = [f for f in result.findings if f.category != "code-loader"]
+    changes = remediation.plan(others)
+    recoveries: list = []
+    manuals: list = []
+    # Code-loader findings grouped by PATH (many signatures hit one file). A path with ANY
+    # CONFIRMED loader literal is a recovery candidate; a heuristic-ONLY match (a packed/
+    # encoded shape that legit inlined assets and minified files also have) is NEVER
+    # auto-recovered — it goes to manual review. This mirrors is_auto_fixable's confidence
+    # gate and is what prevents destroying a legitimate file when no malware is present.
+    cl_by_path: dict = {}
+    for f in result.findings:
+        if f.category == "code-loader":
+            cl_by_path.setdefault(f.path, []).append(f)
+    for path, fs in cl_by_path.items():
+        confirmed = next((f for f in fs if getattr(f, "confidence", CONFIRMED) == CONFIRMED), None)
+        if confirmed is None:                 # heuristic-only → review, never auto-recover
+            f = fs[0]
+            manuals.append(remediation.Manual(
+                path, f.signature_id, SUSPECT_HEURISTIC,
+                "heuristic match (a packed/encoded shape that legitimate assets and minified "
+                f"files also have) — review. If legitimate, allowlist `{f.signature_id}`; if "
+                "malicious, remove it or recover from a clean commit.", getattr(f, "line", None)))
+            continue
+        disp = remediation.classify_recovery(repo, confirmed, content_sig)
+        (recoveries if isinstance(disp, remediation.Recovery) else manuals).append(disp)
+    seen_other: set = set()
+    for f in others:                          # non-code-loader with no safe auto-fix (evil-merge…)
+        if remediation.is_auto_fixable(f) or f.path in cl_by_path or f.path in seen_other:
+            continue
+        seen_other.add(f.path)
+        is_merge = f.category == "evil-merge"
+        manuals.append(remediation.Manual(
+            f.path, f.signature_id,
+            "history-rewrite" if is_merge else "review",
+            ("introduced content beyond a clean 3-way merge — needs a history rewrite "
+             "(interactive rebase); not auto-fixable."
+             if is_merge else f"{f.description[:80]} — review manually."),
+            getattr(f, "line", None)))
+    return recoveries, changes, manuals
+
+
 def remediate_scanned(repo: Path, result, *, sigs, allowlist, opts,
                       apply: bool = False, open_pr: bool = False,
-                      token: str | None = None) -> int:
-    """Plan — and with `apply`, write — fixes for ONE already-scanned repo, returning the
-    number of auto-fix changes. The caller supplies the `ScanResult`, so the SAME analysis
-    that produced the report drives the fix: no re-scan, no report-file coupling. Shared by
-    `saw scan --fix` (scans once, then calls this) and `saw fix` (scans, then calls this)."""
-    changes = remediation.plan(result.findings)
-    # Everything not auto-fixed — true `manual` findings AND heuristic ones we refuse to
-    # auto-edit — surfaces here so a suspicious match is reviewed, never silently stripped.
-    manual = [f for f in result.findings if not remediation.is_auto_fixable(f)]
-    if not changes and not manual:
-        return 0
+                      token: str | None = None) -> Counter:
+    """Remediate ONE already-scanned repo and return a Counter of dispositions
+    (recover/quarantine/strip/manual). Code-loader findings are RECOVERED from git (the
+    file's last clean committed version) or deferred to manual — never surgically edited, so
+    a fix can never corrupt valid code. The caller supplies the `ScanResult`, so the same
+    analysis that produced the report drives the fix (no re-scan, no report-file coupling)."""
+    content_sig = remediation.codeloader_content_sig([s for g in sigs.values() for s in g])
+    recoveries, changes, manuals = _classify(repo, result, content_sig)
+
+    tally: Counter = Counter()
+    if not (recoveries or changes or manuals):
+        return tally
+
     rel = str(repo).replace(str(Path.home()), "~")
     print(f"\n■ {rel}")
+    for rec in recoveries:
+        print(f"    recover     {rec.path}   → restore to {rec.label}")
+        if rec.diff:
+            print(rec.diff)
     for c in changes:
-        print(f"    fix  {c.action:14} {c.path}")
-    for f in manual:
-        print(f"    ⚠ manual {f.signature_id}: {f.path} ({f.description[:50]})")
-    if not (apply and changes):
-        return len(changes)
+        print(f"    {c.action:11} {c.path}")
+    if manuals:
+        print("    ⚠ NEEDS REVIEW (auto-fix won't guess):")
+        for m in manuals:
+            loc = m.path + (f":{m.line}" if m.line else "")
+            print(f"      • {loc} — {m.reason}: {m.action}")
+
+    tally["recover"] = len(recoveries)
+    tally["quarantine"] = sum(1 for c in changes if c.action == "quarantine")
+    tally["strip"] = sum(1 for c in changes if c.action in ("strip-gitignore", "strip-settings"))
+    tally["manual"] = len(manuals)
+
+    if not apply:
+        return tally
     if open_pr:
         if not token:
             print("    → " + auth.no_credential_hint("opening pull requests") + " Skipped.")
         else:
             print(f"    → {pr_submit.submit_fix_pr(repo, opts, sigs, allowlist, token)}")
-        return len(changes)
+        return tally
+
+    # --- local apply: recover (git restore + verify) then the structure-safe changes ---
     was_clean = _is_clean(repo)
     quarantine = remediation.quarantine_path(repo)
-    applied = remediation.apply(repo, changes, quarantine)
-    # Post-apply verification: quarantine anything still flagged; never present an
-    # incompletely-cleaned repo as remediated.
+    applied: list = []
+    for rec in recoveries:
+        if remediation.apply_recovery(repo, rec, quarantine, content_sig):
+            applied.append(remediation.Change("recover", rec.path, rec.label))
+            print(f"    → recovered {rec.path} from {rec.clean_rev[:7]} "
+                  f"(original in {QUARANTINE_DIR}/)")
+        else:
+            print(f"    → could not safely recover {rec.path}; left for manual review.")
+    applied += remediation.apply(repo, changes, quarantine)
+    # Quarantine any STILL-auto-fixable residue (structure-safe failsafe); code-loader that
+    # we couldn't recover stays put and is reported under NEEDS REVIEW (never force-edited).
     residual = _residual_auto_fixable(repo, sigs, allowlist, opts)
     if residual:
         applied += remediation.quarantine_residual(repo, residual, quarantine)
-        residual = _residual_auto_fixable(repo, sigs, allowlist, opts)
-    remediation.ensure_ignored(repo)       # keep quarantine artifacts out of any commit
+    remediation.ensure_ignored(repo)
+    if not applied:
+        return tally
     print(f"    → applied {len(applied)} change(s); originals in {QUARANTINE_DIR}/")
-    if residual:
-        print(f"    → ⚠ {len(residual)} finding(s) still present after remediation; "
-              "left in the working tree for manual review (NOT committed).")
-    elif was_clean:
+    if was_clean:
         branch = _commit_branch(repo, applied)
         print(f"    → committed to branch '{branch}'. Review and open a PR (do NOT push to main)."
               if branch else "    → could not create branch; review `git diff` and commit manually.")
     else:
         print("    → repo had uncommitted changes; left in working tree. Review `git diff`, "
               "then commit to a branch + open a PR.")
-    return len(changes)
+    return tally
 
 
-def remediation_summary(total: int, apply: bool) -> None:
-    """Print the dry-run / applied footer. Shared by `saw fix` and `saw scan --fix`."""
-    if total == 0:
-        print("No auto-remediable findings.")
-    elif not apply:
-        print(f"\nDRY-RUN: {total} change(s) planned across the repos above. Re-run with "
-              "--apply (local branch) or --apply --pr (push a fix branch + open one rolling "
-              "PR per repo, de-duplicated).")
-    else:
-        print(f"\nApplied remediation for {total} change(s). Review the branches/diffs, then open PRs. "
-              "Evil-merge findings (⚠ manual) need a history rewrite — not auto-fixed.")
+def remediation_summary(tally: Counter, apply: bool) -> None:
+    """Print the dry-run / applied footer + tally. Shared by `saw fix` and `saw scan --fix`."""
+    auto = tally["recover"] + tally["quarantine"] + tally["strip"]
+    if auto == 0 and tally["manual"] == 0:
+        print("\nNo remediable findings.")
+        return
+    parts = []
+    if tally["recover"]:
+        parts.append(f"{tally['recover']} recover")
+    if tally["quarantine"]:
+        parts.append(f"{tally['quarantine']} quarantine")
+    if tally["strip"]:
+        parts.append(f"{tally['strip']} strip")
+    if tally["manual"]:
+        parts.append(f"{tally['manual']} need review")
+    print(f"\n{'Applied' if apply else 'DRY-RUN'}: " + " · ".join(parts) + ".")
+    if not apply and auto:
+        print(f"Re-run with --apply (recover/quarantine; originals backed up to {QUARANTINE_DIR}/) "
+              "or --apply --pr (push a fix branch + open one PR per repo).")
+    if tally["manual"]:
+        print("⚠ 'need review' items were NOT auto-fixed — see the reasons above.")
 
 
 def remediate(config_path: str | None = None, apply: bool = False,
@@ -167,12 +249,12 @@ def remediate(config_path: str | None = None, apply: bool = False,
 
     # No configured local targets → remediate the repo we're standing in (mirrors `saw scan`).
     local_patterns = cfg.get("targets", {}).get("local", []) or [str(_enclosing_repo_root())]
-    total = 0
+    tally: Counter = Counter()
     for repo in discover_local_repos(local_patterns, opts):
         result = scan_target(LocalRepoTarget(repo, str(repo), opts), sigs, allowlist)
-        total += remediate_scanned(repo, result, sigs=sigs, allowlist=allowlist, opts=opts,
+        tally += remediate_scanned(repo, result, sigs=sigs, allowlist=allowlist, opts=opts,
                                    apply=apply, open_pr=open_pr, token=token)
-    remediation_summary(total, apply)
+    remediation_summary(tally, apply)
     return 0
 
 
