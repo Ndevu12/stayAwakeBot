@@ -226,6 +226,19 @@ def file_at(repo: str | Path, treeish: str, path: str) -> str:
     return res.stdout
 
 
+def tracked(repo: str | Path, path: str) -> bool:
+    """True if `path` is tracked in git — i.e. has committed history we could recover from."""
+    res = _run_full(repo, ["ls-files", "--error-unmatch", "--", path])
+    return res is not None and res.returncode == 0
+
+
+def file_commits(repo: str | Path, path: str, limit: int = 50) -> list[str]:
+    """Commit SHAs that touched `path`, newest first (bounded). The walk that the
+    remediator uses to find the most recent committed version that scans clean."""
+    out = _run(repo, ["log", f"-n{limit}", "--format=%H", "--", path])
+    return [ln.strip() for ln in out.splitlines() if ln.strip()]
+
+
 def introduced_added_text(repo: str | Path, base_tree: str, target: str, path: str) -> str:
     """The text the diff `base_tree..target` ADDS to `path` — i.e. the merge-introduced
     hunk's `+` lines, with the leading `+` stripped and diff `+++` headers excluded.

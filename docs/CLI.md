@@ -129,9 +129,17 @@ saw scan --fix --apply                    # scan and apply fixes, commit to a br
 >
 > **`scan --fix` is the recommended remediation flow.** It runs detection and remediation
 > from a single analysis pass — there is no re-scan and no report file in between — so a fix
-> always acts on exactly what the scan just found. Only **confirmed** findings are auto-fixed;
-> **suspicious** (heuristic) matches are surfaced for review, never auto-edited. The standalone
-> [`saw fix`](#saw-fix) remains for the org-wide remote sweep and back-compat.
+> always acts on exactly what the scan just found. The standalone [`saw fix`](#saw-fix) remains
+> for the org-wide remote sweep and back-compat.
+>
+> **How fixes are applied — reliably, never by guessing.** An injected payload is **recovered
+> from git** (the file's last clean committed version is restored — the real original, not a
+> reconstruction), or, when that can't be proven safe (born-infected, untracked, or legit edits
+> sit on the payload), it is **deferred to manual review** with the exact reason and command.
+> Fonts/markers/VS-Code-autorun use reliable whole-file-quarantine / exact-line removal. The
+> scanner **never surgically edits a source file**, so a fix can never corrupt valid code; and
+> heuristic-only (`suspicious`) matches — e.g. an inlined base64 asset — are reviewed, never
+> auto-touched. Originals are always backed up to `.malware-quarantine/`.
 
 ### `saw run`
 
