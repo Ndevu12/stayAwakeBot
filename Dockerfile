@@ -60,20 +60,22 @@ RUN pip install --no-cache-dir /tmp/*.whl && rm -f /tmp/*.whl
 
 WORKDIR /repo
 
-# Default reports to a container-internal path the runtime user can always write — a host
-# bind-mount (e.g. -v "$PWD:/repo:ro") is owned by the host uid and isn't writable by
-# `sentinel`, so the verdict (exit code) shouldn't depend on persisting a report there.
-# Override with --reports-dir or this var; report writing also degrades gracefully if the
-# chosen dir turns out unwritable.
+# A bare `saw scan` persists nothing; reports are written only when you ask for them with
+# `-d/--reports-dir` (or via this var, which supplies the default for that flag). This points
+# at a container-internal path the runtime user can always write — a host bind-mount
+# (e.g. -v "$PWD:/repo:ro") is owned by the host uid and isn't writable by `sentinel`, so the
+# verdict (exit code) shouldn't depend on persisting a report there. Report writing also
+# degrades gracefully if the chosen dir turns out unwritable.
 ENV STAYAWAKE_REPORTS_DIR=/tmp/stayawake
 
 # Mount the repository to scan at /repo (read-only is fine for scanning), e.g.:
 #   docker run --rm -v "$PWD:/repo:ro" ghcr.io/ndevu12/stayawakebot \
-#     saw scan --local --fail
-# To keep the report on the host, mount a writable dir and run as your own uid so the
+#     saw scan --local
+# `saw scan` exits non-zero when infected (the exit code is the verdict), so it gates CI
+# directly. To keep a report on the host, mount a writable dir and run as your own uid so the
 # bind-mount is writable:
 #   docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/repo" \
 #     ghcr.io/ndevu12/stayawakebot saw scan --local --reports-dir /repo/reports
-# The package ships several console scripts (saw, plus the legacy stayawake-*), so there is no
+# The package ships the `saw` CLI plus the stayawake-health-* console scripts, so there is no
 # single ENTRYPOINT — name the command you want. A bare `docker run` prints the saw CLI help.
 CMD ["saw", "--help"]

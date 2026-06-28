@@ -7,6 +7,19 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **Readable terminal report.** The interactive scan output is an aligned, colour-coded table
+  (red INFECTED / yellow SUSPECT / green clean on a TTY; honours `NO_COLOR`) listing every
+  scanned target, sorted worst-first. Findings are detailed per infected/suspect repo in spaced
+  blocks: an underlined project header, then one bulleted finding per line with the severity tags
+  aligned and evidence on its own indented line. (The earlier raw markdown pipe-table dumped to
+  the terminal is gone; the `-d` markdown bundle keeps full markdown.)
+- **Terminal-first `saw scan` — "a report is a message, not a file".** `scan` now renders a full
+  human report (with full evidence) to `stdout` and **persists nothing by default**; progress goes
+  to `stderr`. Output beyond the terminal is delivered through opt-in Strategy "sinks":
+  **`--json`** (machine-readable, full evidence, to a pipe), **`--sarif FILE`** (SARIF 2.1.0 for
+  GitHub code-scanning upload, evidence redacted), **`--alert`** (open/close a GitHub issue per
+  infected repo + post a Slack summary, in-pass, evidence-free), and **`-d/--reports-dir DIR`**
+  (opt-in, evidence-redacted `latest.json` + `latest.md`).
 - **Release-pipeline hardening:** a **CycloneDX SBOM** of the wheel's resolved dependencies,
   generated in the build job and attached to each GitHub Release; a **`pip-audit` gate** that
   fails the release on a known-vulnerable dependency; and the container scan is now a **Trivy
@@ -14,8 +27,8 @@ All notable changes to this project are documented here. The format is based on
 - **Public GitHub Action moved to its own repository, [`Ndevu12/strix`](https://github.com/Ndevu12/strix)**
   ("StayAwakeBot Strix" on the Marketplace): adopt the security sentinel with
   `uses: Ndevu12/strix@v1`. Strix is a thin composite Action that installs the published
-  `stayawakebot` scanner from PyPI and runs `stayawake-security-scan` — the detection engine
-  stays in the package, so no scan logic is duplicated. The in-repo `.github/actions/worm-scan`
+  `stayawakebot` scanner from PyPI and runs `saw scan` (gating on its exit code) — the detection
+  engine stays in the package, so no scan logic is duplicated. The in-repo `.github/actions/worm-scan`
   composite is kept for this project's own self-gating (`worm-guard.yml`) and from-source pins;
   the superseded root `action.yml` wrapper was removed.
 - **Container image on GHCR** (`ghcr.io/ndevu12/stayawakebot`), built and published by the
@@ -30,6 +43,12 @@ All notable changes to this project are documented here. The format is based on
 - This changelog.
 
 ### Changed
+- **`saw scan`'s exit code is now the verdict, unconditionally** (`0` clean / `1` infected) — the
+  `-f/--fail` (and legacy `--fail-on-findings`) flag is gone; a CI gate just checks the exit code.
+  `saw audit` keeps its own `-f/--fail`.
+- **Security reports are no longer committed into the repo.** Durable records now live outside the
+  repo tree — GitHub code-scanning (SARIF, uploaded not committed), GitHub issues + Slack, and CI
+  artifacts.
 - **Minimum Python lowered to 3.11** (`requires-python >=3.11`, was `>=3.13`), with a CI test
   matrix across **3.11–3.14** so the supported range is verified on every push. The code never
   needed 3.13, so this fixes the confusing `pip install` failure on 3.11/3.12. The published
@@ -55,6 +74,12 @@ All notable changes to this project are documented here. The format is based on
 - `hatch-vcs` now derives the version only from `vX.Y.Z` tags (`git_describe_command` match),
   so the moving Marketplace major tag (`v1`) cannot be mistaken for the package version.
 
+### Removed
+- The `saw run`, `saw report`, and standalone `saw alert` verbs. The scan→report→alert pipeline is
+  gone: `scan` renders to the terminal and `--alert` pushes the durable record in the same pass.
+- The legacy `stayawake-security-{scan,report,alert,remediate,audit}` console scripts. `saw` is now
+  the only local security surface; the `stayawake-health-*` scripts are unchanged.
+
 ### Fixed
 - **Report writing no longer crashes a completed scan when the reports directory is
   unwritable** (read-only filesystem or a bind-mount owned by another user — e.g. the
@@ -63,6 +88,13 @@ All notable changes to this project are documented here. The format is based on
   prints a warning and falls back to a temp dir instead of raising. The container also
   defaults reports to a writable path (`STAYAWAKE_REPORTS_DIR`), and the docs show a
   `--user "$(id -u):$(id -g)"` invocation for writing the report back to the host.
+
+### Security
+- **Evidence redaction in persisted artifacts.** Any report written to disk (`--sarif`, `-d`) now
+  stores a fingerprint `{sha256, preview (first 24 chars), len}` instead of the raw payload; full
+  evidence appears only on the live terminal (`stdout`/`--json`). In-tree report files were
+  redundant, tamperable, and re-distributed live malware payloads — hence terminal-first output and
+  no committed security reports.
 
 ## [0.1.0] - Unreleased
 

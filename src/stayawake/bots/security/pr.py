@@ -68,7 +68,7 @@ def _issue_body(slug: str, findings) -> str:
         lines.append(f"- **[{f.severity.label()}]** `{f.signature_id}` — `{loc}`")
     lines += ["", "A remediation has been generated. To apply it, grant the scanner repo + "
               "pull-request write access for an automated PR, or run "
-              "`stayawake-security-remediate` against a local clone to produce a patch.", "",
+              "`saw fix --apply` against a local clone to produce a patch.", "",
               "_Opened by StayAwakeBot Security. De-duplicated — re-runs won't open another._"]
     return "\n".join(lines)
 

@@ -149,3 +149,44 @@ class ScanResult:
             "summary": self.summary(),
             "findings": [f.to_dict() for f in self.findings],
         }
+
+
+@dataclass
+class ScanReport:
+    """A whole scan run: all per-target results plus the run timestamp.
+
+    The single in-memory object the scanner hands to its output sinks. `to_payload()` is
+    the one serialization point every sink shares (terminal, json, sarif, file, alert), so
+    they can never disagree on the shape — and the scanner itself performs no output I/O.
+    """
+
+    generated_at: str
+    results: list[ScanResult] = field(default_factory=list)
+
+    @property
+    def any_infected(self) -> bool:
+        return any(r.infected for r in self.results)
+
+    @property
+    def any_suspicious(self) -> bool:
+        return any(r.suspicious for r in self.results)
+
+    def to_payload(self) -> dict[str, Any]:
+        """The canonical scan payload dict consumed by every sink."""
+        results = self.results
+        return {
+            "generated_at": self.generated_at,
+            "summary": {
+                "targets": len(results),
+                "infected": sum(1 for r in results if r.infected),
+                "suspicious": sum(1 for r in results if r.suspicious),
+                "findings": sum(len(r.findings) for r in results),
+                "critical": sum(1 for r in results for f in r.findings
+                                if f.severity.label() == "critical"),
+                "high": sum(1 for r in results for f in r.findings
+                            if f.severity.label() == "high"),
+            },
+            "any_infected": self.any_infected,
+            "any_suspicious": self.any_suspicious,
+            "results": [r.to_dict() for r in results],
+        }
