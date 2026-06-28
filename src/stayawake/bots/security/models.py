@@ -31,6 +31,18 @@ CLEAN = "clean"
 SUSPICIOUS = "suspicious"
 INFECTED = "infected"
 
+# ── Remediation manual-review reasons ────────────────────────────────────────────
+# Why an auto-fix deferred a code-loader finding to a human instead of acting on it. Each
+# maps to a specific recommended action in the remediator. Kept here (with the other domain
+# constants) so producers and tests share one source of truth, not an inline literal.
+BORN_INFECTED = "born-infected"             # no clean version in history AND content is packed
+INTRINSIC_MATCH = "intrinsic-match"         # signature is part of committed content (likely test/research)
+LEGIT_CHANGES = "legit-changes"             # clean version exists but payload isn't a separable append
+UNTRACKED = "untracked"                     # file not tracked in git → no clean version to recover
+NO_VCS = "no-vcs"                           # not a git repository
+SUSPECT_HEURISTIC = "suspicious-heuristic"  # heuristic-only match (asset/minified shape) → review, never auto-recover
+INSPECT_FAILED = "inspect-failed"           # git history could not be read (e.g. corrupt repo) → defer, never guess
+
 
 class Severity(IntEnum):
     """Ordered so thresholds can compare numerically (CRITICAL is highest)."""

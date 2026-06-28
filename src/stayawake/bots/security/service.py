@@ -245,13 +245,14 @@ def scan(config_path: str | None = None, local_only: bool = False,
     #     no report-file coupling. Remediation is local-only here; the org-wide remote PR
     #     sweep stays on `saw fix --remote`. Lazy import avoids a service↔remediator cycle.
     if fix:
+        from collections import Counter
         from stayawake.bots.security import remediator
         token = auth.resolve_token()[0] if open_pr else None
-        total = 0
+        tally: Counter = Counter()
         for repo, res in local_scanned:
-            total += remediator.remediate_scanned(repo, res, sigs=sigs, allowlist=allowlist,
-                                                   opts=opts, apply=apply, open_pr=open_pr, token=token)
-        remediator.remediation_summary(total, apply)
+            tally += remediator.remediate_scanned(repo, res, sigs=sigs, allowlist=allowlist,
+                                                  opts=opts, apply=apply, open_pr=open_pr, token=token)
+        remediator.remediation_summary(tally, apply)
 
     # Gate fails on INFECTED only (confirmed findings). Whether SUSPICIOUS should also
     # fail the gate is a CI policy decision tracked in #1058, intentionally not changed here.

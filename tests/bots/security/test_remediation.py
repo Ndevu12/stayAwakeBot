@@ -26,25 +26,25 @@ class TestRemediation(unittest.TestCase):
     def _findings(self):
         return scan_target(LocalRepoTarget(self.repo, "t", ScanOptions()), SIGS, []).findings
 
-    def test_apply_makes_tree_clean(self):
+    def test_structural_apply_cleans_nonloader_findings(self):
+        # plan/apply handles only the reliable STRUCTURAL actions (quarantine fonts, strip
+        # exact .gitignore lines, drop autorun JSON keys). The code-loader payload is NOT
+        # surgically edited — it is handled by git recovery — so it remains after a bare
+        # plan/apply on this (non-git) fixture.
         before = self._findings()
         self.assertTrue(before, "fixture should start infected")
         applied = remediation.apply(self.repo, remediation.plan(before), self.q)
-        self.assertTrue(applied, "should apply changes")
-        remaining = {f.signature_id for f in self._findings()}
-        self.assertEqual(remaining, set(), f"still infected after remediation: {remaining}")
-        # originals preserved in quarantine
-        self.assertTrue(self.q.exists())
+        self.assertTrue(applied, "should apply the structural changes")
+        remaining = {f.category for f in self._findings()}
+        self.assertEqual(remaining, {"code-loader"},
+                         f"only code-loader (recovery-handled) should remain: {remaining}")
+        self.assertTrue(self.q.exists())            # originals preserved in quarantine
 
     def test_idempotent(self):
         remediation.apply(self.repo, remediation.plan(self._findings()), self.q)
+        # second pass plans nothing: structural findings are gone and code-loader never
+        # produces a plan() change (it routes to recovery, not surgical edit).
         self.assertEqual(remediation.plan(self._findings()), [], "second pass should be a no-op")
-
-    def test_strip_payload_keeps_legit_config(self):
-        text = 'const config = { plugins: [] };\nexport default config;PAYLOAD_JUNK_HERE\n'
-        out = remediation.strip_payload_text(text)
-        self.assertIn("export default config;", out)
-        self.assertNotIn("PAYLOAD_JUNK_HERE", out)
 
 
 class TestEnsureIgnored(unittest.TestCase):
@@ -79,18 +79,14 @@ class TestEnsureIgnored(unittest.TestCase):
 
 
 class TestStripAndResidual(unittest.TestCase):
-    def test_strip_removes_loader_above_export(self):
-        # A1: loader prepended ABOVE export default must be removed, not preserved.
-        txt = "var _$_abcd = sfL(0)\nString.fromCharCode(127)\nexport default {a:1};\n"
-        out = remediation.strip_payload_text(txt)
-        self.assertNotIn("sfL(", out)
-        self.assertNotIn("fromCharCode", out)
-        self.assertIn("export default", out)
-
     def test_is_auto_fixable(self):
-        good = type("F", (), {"remediation": "strip-appended-payload"})()
+        # Only the structure-safe actions are "auto-fixable" via plan/apply. Code-loader
+        # (remediation `recover`) is NOT — it goes through git recovery, never a surgical edit.
+        good = type("F", (), {"remediation": "strip-gitignore-markers", "confidence": "confirmed"})()
+        code_loader = type("F", (), {"remediation": "recover", "confidence": "confirmed"})()
         manual = type("F", (), {"remediation": "manual"})()
         self.assertTrue(remediation.is_auto_fixable(good))
+        self.assertFalse(remediation.is_auto_fixable(code_loader))
         self.assertFalse(remediation.is_auto_fixable(manual))
 
     def test_quarantine_residual_removes_and_backs_up(self):

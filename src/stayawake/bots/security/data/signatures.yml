@@ -10,7 +10,7 @@
 #   severity    critical | high | medium | low
 #   matcher     content | filename | structural-json | git-history | heuristic
 #   description human-readable
-#   remediation strategy id (consumed in Phase 3): strip-appended-payload |
+#   remediation strategy id (consumed in Phase 3): recover (git restore, code-loader) |
 #               quarantine-file | quarantine-dir | remove-foreign-vscode | strip-gitignore-markers | manual
 #   confidence  verdict weight (OPTIONAL, default `confirmed`): confirmed | heuristic.
 #               Orthogonal to severity. Only a `confirmed` match drives an INFECTED
@@ -28,7 +28,7 @@ signatures:
     # Tolerate member-access (String['fromCharCode']) and hex args (0x7f) too.
     pattern: 'String\s*[.\[]\s*[''"]?fromCharCode[''"]?\]?\s*\(\s*(?:127|0x7f)\s*\)'
     description: "Obfuscated loader fingerprint — fromCharCode(127) string shuffler"
-    remediation: strip-appended-payload
+    remediation: recover
 
   - id: loader-seed-var
     category: code-loader
@@ -36,7 +36,7 @@ signatures:
     matcher: content
     pattern: '(?:var|let|const)\s+_\$_[0-9a-f]{2,}\s*='
     description: "Obfuscated loader seed variable (var/let/const _$_xxxx=)"
-    remediation: strip-appended-payload
+    remediation: recover
 
   - id: loader-decoder-fn
     category: code-loader
@@ -44,7 +44,7 @@ signatures:
     matcher: content
     pattern: '\bsfL\s*\('
     description: "Obfuscated loader decoder call — the sfL decoder function"
-    remediation: strip-appended-payload
+    remediation: recover
 
   - id: loader-global-bang
     category: code-loader
@@ -52,7 +52,7 @@ signatures:
     matcher: content
     pattern: "global\\['!'\\]\\s*="
     description: "Loader bootstrap assigning global['!']"
-    remediation: strip-appended-payload
+    remediation: recover
 
   - id: loader-require-hijack
     category: code-loader
@@ -60,7 +60,7 @@ signatures:
     matcher: content
     pattern: 'global\[_\$_[0-9a-f]+\[0\]\]\s*=\s*require'
     description: "Loader reassigning global.require to smuggle CommonJS into ESM"
-    remediation: strip-appended-payload
+    remediation: recover
 
   # ── Camouflage README (heuristic content) ────────────────────────────────────
   - id: camouflage-blockchain-readme
@@ -100,7 +100,7 @@ signatures:
     threshold: 2000
     file_globs: ["*.mjs", "*.cjs", "*.js", "*.ts", "postcss.config.*"]
     description: "Config file with an abnormally long single line (likely appended payload)"
-    remediation: strip-appended-payload
+    remediation: recover
 
   # ── Whole-file obfuscation (line-agnostic, context-scoped) ───────────────────
   # Closes G4: a payload SPLIT/WRAPPED across many <2000-char lines, or living in
@@ -115,7 +115,7 @@ signatures:
     confidence: heuristic
     kind: obfuscated-file
     description: "Hand-authored source/config file containing packed/obfuscated payload (line-agnostic)"
-    remediation: strip-appended-payload
+    remediation: recover
 
   # ── VS Code auto-run harness (structured JSON) ───────────────────────────────
   - id: vscode-task-folderopen-exec

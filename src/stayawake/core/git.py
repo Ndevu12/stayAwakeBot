@@ -67,6 +67,12 @@ def _run_full(repo: str | Path, args: list[str]) -> subprocess.CompletedProcess 
             ["git", "-C", str(repo), *args],
             capture_output=True,
             text=True,
+            # Decode tolerantly: history can hold non-UTF-8 blobs (a binary file, a
+            # mojibake commit) and `cat-file -p` would otherwise raise UnicodeDecodeError
+            # mid-read, aborting the caller (and, for the remediator's recovery walk, the
+            # whole sweep). `errors="replace"` keeps the binary→empty contract of file_at()
+            # (a replaced-char blob still scans clean) without ever crashing.
+            errors="replace",
             timeout=60,
             check=False,
         )
@@ -224,6 +230,19 @@ def file_at(repo: str | Path, treeish: str, path: str) -> str:
     if res is None or res.returncode != 0 or not res.stdout:
         return ""
     return res.stdout
+
+
+def tracked(repo: str | Path, path: str) -> bool:
+    """True if `path` is tracked in git — i.e. has committed history we could recover from."""
+    res = _run_full(repo, ["ls-files", "--error-unmatch", "--", path])
+    return res is not None and res.returncode == 0
+
+
+def file_commits(repo: str | Path, path: str, limit: int = 50) -> list[str]:
+    """Commit SHAs that touched `path`, newest first (bounded). The walk that the
+    remediator uses to find the most recent committed version that scans clean."""
+    out = _run(repo, ["log", f"-n{limit}", "--format=%H", "--", path])
+    return [ln.strip() for ln in out.splitlines() if ln.strip()]
 
 
 def introduced_added_text(repo: str | Path, base_tree: str, target: str, path: str) -> str:
