@@ -32,7 +32,7 @@ jobs:
           # exists from this PR's refactor commit onward, so the pin points at that commit
           # (it carries the whole new scanner; requires-python >=3.11 satisfies the 3.13
           # runner). Re-pin to the post-merge main SHA once this lands.
-          sentinel-ref: d06e7fd77009297dfd6aa37ee948149fbf7cfa2f   # PR #1066: terminal-first saw scan --sarif
+          sentinel-ref: fecb7c4de4377ae3c25a6a11f92808bb66b0384d   # PR #1066: terminal-first saw scan --sarif
           fail-on-findings: 'true'
           # Fixture allowlist is signature-scoped (glob|signature): a fresh payload
           # under fixtures/ using any OTHER signature is still flagged.
