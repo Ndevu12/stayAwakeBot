@@ -59,7 +59,11 @@ signatures (data) ─► signature engine ─► matchers ─► findings ─►
   there would slip by. The reusable Action takes `path_glob|signature_id` entries.
 
 ## CLI / pipeline scripts
-- `security/cli/scan.py` (+ `security/service.py`) — detect → `reports/security/latest.json` + `latest.md`.
+- `security/cli/scan.py` (+ `security/service.py`) — detect → `reports/security/latest.json` + `latest.md`
+  + `latest.sarif` (SARIF 2.1.0, via `security/sarif.py`).
+- `security/sarif.py` — maps the scan payload to a SARIF 2.1.0 log so the worm-scan Action can
+  upload it (`github/codeql-action/upload-sarif`); findings then surface in GitHub's Security tab and
+  as inline PR code-scanning annotations. Pure output layer — the build gate stays the exit code.
 - `security/cli/report.py` · `security/cli/alert.py` · `security/cli/remediate.py` — report, alert, remediate.
 - `security/cli/audit.py` (+ `security/hygiene.py`) — local posture + branch-protection audit.
 
