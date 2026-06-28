@@ -101,7 +101,7 @@ def _wait_for_fork(slug: str, token: str) -> bool:
     return False
 
 
-def _fork_and_pr(wt: Path, owner: str, name: str, base: str, applied, token: str) -> str | None:
+def _fork_and_pr(wt: Path, owner: str, name: str, base: str, applied, suspicious, token: str) -> str | None:
     """When we can't push to the upstream, push the fix to a fork under the authenticated
     user and open a cross-fork PR. Returns an outcome string when forking is viable
     (success OR a post-fork failure worth reporting), or None when forking isn't possible
@@ -132,7 +132,7 @@ def _fork_and_pr(wt: Path, owner: str, name: str, base: str, applied, token: str
                 f"({pr.get('html_url', '')}) from {fork_slug}")
     pr = github_api.create_pull(owner, name, title="security: auto-remediate worm indicators",
                                 head=f"{fork_owner}:{FIX_BRANCH}", base=base,
-                                body=_pr_body(f"{owner}/{name}", applied), token=token)
+                                body=_pr_body(f"{owner}/{name}", applied, suspicious), token=token)
     if pr and pr.get("number"):
         return (f"{owner}/{name}: opened fork PR #{pr['number']} ({pr.get('html_url', '')}) "
                 f"from {fork_slug}")
@@ -155,10 +155,21 @@ def default_branch(repo: Path) -> str:
     return out.rsplit("/", 1)[-1] if out else "main"
 
 
-def _pr_body(slug: str, changes) -> str:
+def _pr_body(slug: str, changes, suspicious=()) -> str:
     lines = [f"Automated worm remediation for `{slug}` by StayAwakeBot Security Sentinel.",
              "", "## Changes", ""]
     lines += [f"- `{c.action}` — `{c.path}`" for c in changes]
+    if suspicious:
+        # Honest disclosure: these are heuristic/suspicious findings (a packed/encoded shape a
+        # legitimate asset can also have) that were NOT auto-fixed. The confirmed malware above
+        # is cleaned; these still need a human eye, so the tree is never presented as fully clean.
+        lines += ["", "## ⚠ Still needs review (not auto-fixed)",
+                  "", "These are *suspicious* (heuristic) matches — possibly a legitimate inlined "
+                  "asset/minified file, possibly a payload the confirmed signatures didn't name. "
+                  "Review each; allowlist if legitimate, or remove if not.", ""]
+        for f in suspicious[:50]:
+            loc = f.path + (f":{f.line}" if getattr(f, "line", None) else "")
+            lines.append(f"- `{f.signature_id}` — `{loc}`")
     lines += ["", "Originals are recoverable from git history. Evil-merge findings (if any) "
               "are reported separately and need a manual history rewrite.", "",
               "_Review and merge if correct. This is a single rolling PR — re-runs update it "
@@ -208,24 +219,33 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
                 applied.append(remediation.Change("recover", disp.path, disp.label))
 
         # Post-apply verification — a worm-killer must never open a PR over a tree that is
-        # still infected. Residual = anything still auto-fixable OR any CONFIRMED code-loader
-        # payload we could not recover; quarantine the auto-fixable, and ABORT if a confirmed
-        # infection remains (a born-infected / legit-edits case needs manual review, not a PR).
-        def _residual():
-            fs = scan_target(LocalRepoTarget(wt, slug, opts), signatures, allowlist).findings
+        # still infected. BLOCKING residual = anything still auto-fixable OR any CONFIRMED
+        # code-loader payload we could not recover; quarantine the auto-fixable, and ABORT if a
+        # confirmed infection remains (a born-infected / legit-edits case needs manual review).
+        def _scan():
+            return scan_target(LocalRepoTarget(wt, slug, opts), signatures, allowlist).findings
+
+        def _blocking(fs):
             return [f for f in fs if remediation.is_auto_fixable(f)
                     or (f.category == "code-loader"
                         and getattr(f, "confidence", "confirmed") == "confirmed")]
-        residual = _residual()
-        auto = [f for f in residual if remediation.is_auto_fixable(f)]
+
+        fs = _scan()
+        auto = [f for f in _blocking(fs) if remediation.is_auto_fixable(f)]
         if auto:
             applied += remediation.quarantine_residual(wt, auto, quarantine)
-            residual = _residual()
-        if residual:
-            return (f"{slug}: ABORTED — {len(residual)} finding(s) still present after "
+            fs = _scan()
+        blocking = _blocking(fs)
+        if blocking:
+            return (f"{slug}: ABORTED — {len(blocking)} finding(s) still present after "
                     f"remediation; no PR opened (needs manual review)")
         if not applied:
             return f"{slug}: '{base}' already clean — nothing to PR"
+        # Whatever remains is heuristic/suspicious only (the blocking set is empty): a packed/
+        # encoded shape that may be a legitimate asset OR a payload the confirmed signatures
+        # didn't name. Don't block the confirmed cleanup on a possible false positive, but
+        # DISCLOSE it in the PR body so the tree is never presented as fully clean when it isn't.
+        suspicious = list(fs)
 
         # quarantine backups live in an out-of-tree tempdir here; still untrack any
         # pre-existing TRACKED quarantine dir so live-malware backups never ship.
@@ -245,7 +265,7 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
             #   1) push to a fork under our account and open a cross-fork PR,
             #   2) else save the fix as a patch (needs no permissions) AND
             #      notify the repo via a de-duplicated issue (needs only issues:write).
-            forked = _fork_and_pr(wt, owner, name, base, applied, token)
+            forked = _fork_and_pr(wt, owner, name, base, applied, suspicious, token)
             if forked:
                 return forked
             patch = _save_patch(wt, slug, Path(patches_dir) if patches_dir else PATCHES_DIR)
@@ -266,7 +286,7 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
         pr = github_api.create_pull(owner, name,
                                     title="security: auto-remediate worm indicators",
                                     head=FIX_BRANCH, base=base,
-                                    body=_pr_body(slug, applied), token=token)
+                                    body=_pr_body(slug, applied, suspicious), token=token)
         if pr and pr.get("number"):
             return f"{slug}: opened PR #{pr['number']} ({pr.get('html_url','')})"
         return f"{slug}: branch pushed but PR creation failed (check token scope)"
