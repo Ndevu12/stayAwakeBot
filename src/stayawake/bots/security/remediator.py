@@ -251,9 +251,14 @@ def remediate(config_path: str | None = None, apply: bool = False,
     local_patterns = cfg.get("targets", {}).get("local", []) or [str(_enclosing_repo_root())]
     tally: Counter = Counter()
     for repo in discover_local_repos(local_patterns, opts):
-        result = scan_target(LocalRepoTarget(repo, str(repo), opts), sigs, allowlist)
-        tally += remediate_scanned(repo, result, sigs=sigs, allowlist=allowlist, opts=opts,
-                                   apply=apply, open_pr=open_pr, token=token)
+        # One repo's failure (unreadable history, a transient git/OS error) must never abort
+        # the sweep and leave the remaining repos unscanned — isolate it and keep going.
+        try:
+            result = scan_target(LocalRepoTarget(repo, str(repo), opts), sigs, allowlist)
+            tally += remediate_scanned(repo, result, sigs=sigs, allowlist=allowlist, opts=opts,
+                                       apply=apply, open_pr=open_pr, token=token)
+        except Exception as exc:  # noqa: BLE001 — isolate a repo failure, never abort the sweep
+            print(f"\n■ {repo}\n    → error: could not remediate ({exc}); skipped.")
     remediation_summary(tally, apply)
     return 0
 

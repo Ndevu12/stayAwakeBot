@@ -67,6 +67,12 @@ def _run_full(repo: str | Path, args: list[str]) -> subprocess.CompletedProcess 
             ["git", "-C", str(repo), *args],
             capture_output=True,
             text=True,
+            # Decode tolerantly: history can hold non-UTF-8 blobs (a binary file, a
+            # mojibake commit) and `cat-file -p` would otherwise raise UnicodeDecodeError
+            # mid-read, aborting the caller (and, for the remediator's recovery walk, the
+            # whole sweep). `errors="replace"` keeps the binary→empty contract of file_at()
+            # (a replaced-char blob still scans clean) without ever crashing.
+            errors="replace",
             timeout=60,
             check=False,
         )

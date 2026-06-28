@@ -9,6 +9,8 @@ test/research content.
 """
 from __future__ import annotations
 
+import base64
+import hashlib
 import subprocess
 import tempfile
 import unittest
@@ -22,15 +24,19 @@ _SIGS_FLAT = [s for group in load_signatures().values() for s in group]
 SIG = remediation.codeloader_content_sig(_SIGS_FLAT)
 
 CLEAN = 'const config = { plugins: ["@tailwindcss/postcss"] };\nexport default config;\n'
+# A deterministic high-entropy blob (base64 of sha256 digests) — stands in for a real packed
+# payload's randomness without Math.random/Date in the test.
+_HIENT = "".join(base64.b64encode(hashlib.sha256(str(i).encode()).digest()).decode() for i in range(8))
 # A loader payload: appended after `export default config;` (the worm's shape).
-PAYLOAD = "var _$_1e42=sfL(0);String.fromCharCode(127);global['!']='x';" + "A1b2C3d4" * 30
-# Payload appended as WHOLE NEW LINES, each an independent loader literal — the only
-# provably-separable (auto-recoverable) shape.
-PAYLOAD_LINES = "var _$_1e42=sfL(0);\nglobal['!']=require;\nString.fromCharCode(127);\n"
+PAYLOAD = "var _$_1e42=sfL(0);String.fromCharCode(127);global['!']='x';" + _HIENT
+# The only auto-recoverable shape: the payload appended as ONE dense, high-entropy line that
+# both reads as a packed blob (`_is_packed_line`) AND carries a loader literal (`content_sig`).
+# A short loader line (e.g. a legit `String.fromCharCode(127)`) deliberately does NOT qualify.
+PACKED_PAYLOAD = "var _$_1e42=sfL(0);global['!']=require;String.fromCharCode(127);" + _HIENT
 
 
 def _infected_newlines() -> str:
-    return CLEAN + PAYLOAD_LINES
+    return CLEAN + PACKED_PAYLOAD + "\n"
 
 
 def _git(d: Path, *args: str) -> None:
@@ -97,12 +103,12 @@ class TestRecovery(unittest.TestCase):
         self.assertIn("sfL", (d / "postcss.config.mjs").read_text())     # file untouched
 
     def test_legit_line_adjacent_to_payload_is_manual(self):
-        # A legit new line lands in the SAME appended block as the payload → recovery would
-        # drop it → defer to manual (data-loss prevention, must-fix from the adversarial pass).
+        # A legit new line lands in the SAME appended block as a (recoverable-shaped) payload →
+        # recovery would drop it → defer to manual (data-loss prevention from the adversarial pass).
         d = _repo()
         _commit(d, "app.mjs", CLEAN, "add config")
         (d / "app.mjs").write_text(CLEAN + "export function ready(){ return true; }\n"
-                                   + PAYLOAD_LINES, encoding="utf-8")
+                                   + PACKED_PAYLOAD + "\n", encoding="utf-8")
         disp = remediation.classify_recovery(d, _finding("app.mjs"), SIG)
         self.assertIsInstance(disp, remediation.Manual)            # NOT a Recovery
         self.assertIn("ready", (d / "app.mjs").read_text())        # legit code still present
@@ -174,6 +180,66 @@ class TestRecovery(unittest.TestCase):
         self.assertFalse(remediation.apply_recovery(d, bad, remediation.quarantine_path(d), SIG))
         # the working file is left untouched (no half-write)
         self.assertIn("sfL", (d / "postcss.config.mjs").read_text())
+
+    # ── regressions for the second adversarial pass (data-loss + missed-infection) ────
+    def test_short_loader_literal_line_is_not_dropped(self):
+        # Holes A/B: a SHORT line that merely contains a loader fingerprint — a real
+        # `String.fromCharCode(127)` (DEL handling), a `function sfL(...)` — must NEVER be
+        # auto-dropped. It isn't a packed blob, so recovery defers to manual and leaves it intact.
+        d = _repo()
+        _commit(d, "term.mjs", CLEAN, "add config")
+        legit = CLEAN + "export const DEL = String.fromCharCode(127); // erase char\n"
+        (d / "term.mjs").write_text(legit, encoding="utf-8")
+        disp = remediation.classify_recovery(d, _finding("term.mjs"), SIG)
+        self.assertIsInstance(disp, remediation.Manual)                       # NOT a Recovery
+        self.assertIn("String.fromCharCode(127)", (d / "term.mjs").read_text())  # legit line intact
+
+    def test_payload_spliced_onto_legit_code_line_is_manual(self):
+        # Hole C: content_sig is a SUBSTRING match, so a line that splices a loader token in
+        # front of real code matches — but it is short/readable, not a packed blob, so it is
+        # never dropped whole (which would take `export const PORT` with it).
+        d = _repo()
+        _commit(d, "srv.mjs", CLEAN, "add config")
+        spliced = CLEAN + "global['!']=boot(); export const PORT = 3000;\n"
+        (d / "srv.mjs").write_text(spliced, encoding="utf-8")
+        disp = remediation.classify_recovery(d, _finding("srv.mjs"), SIG)
+        self.assertIsInstance(disp, remediation.Manual)
+        self.assertIn("export const PORT", (d / "srv.mjs").read_text())       # legit code intact
+
+    def test_obfuscated_intermediate_version_is_not_treated_as_clean(self):
+        # Hole D: history is clean → an eval(atob(...)) stage (a live payload with NO loader
+        # literal yet) → the loader literal. The clean-rev walk must SKIP the eval/atob stage
+        # (the broadened yardstick catches the exec sink) and recover to the truly-clean root.
+        d = _repo()
+        _commit(d, "loader.mjs", CLEAN, "v0 clean")
+        _commit(d, "loader.mjs", CLEAN + "eval(atob('" + _HIENT + "'));\n", "v1 obfuscated")
+        _commit(d, "loader.mjs", CLEAN + PACKED_PAYLOAD + "\n", "v2 loader")
+        disp = remediation.classify_recovery(d, _finding("loader.mjs"), SIG)
+        self.assertIsInstance(disp, remediation.Recovery)
+        self.assertEqual(disp.clean_text, CLEAN)        # the v0 root, NOT the v1 eval/atob stage
+        self.assertNotIn("atob", disp.clean_text)
+
+    def test_non_utf8_blob_in_history_does_not_crash(self):
+        # Hole 1: a non-UTF-8 blob in history must not raise UnicodeDecodeError mid-walk (which
+        # aborted remediation for the repo and the rest of the sweep). It degrades gracefully.
+        d = _repo()
+        (d / "data.mjs").write_bytes(b"const x = '\xff\xfe\x80\x81';\n")   # invalid UTF-8
+        _git(d, "add", "data.mjs")
+        _git(d, "commit", "-q", "-m", "binary-ish blob")
+        (d / "data.mjs").write_text(CLEAN + PACKED_PAYLOAD + "\n", encoding="utf-8")
+        disp = remediation.classify_recovery(d, _finding("data.mjs"), SIG)   # must not raise
+        self.assertIsInstance(disp, (remediation.Recovery, remediation.Manual))
+
+    # ── white-box guards for the two key predicates ──────────────────────────────────
+    def test_carries_payload_flags_exec_sink_without_literal(self):
+        self.assertTrue(remediation._carries_payload("eval(atob('QUFB'))", SIG))   # sink, no literal
+        self.assertTrue(remediation._carries_payload("var _$_=sfL(0)", SIG))       # loader literal
+        self.assertFalse(remediation._carries_payload("export const x = 1;", SIG)) # clean code
+
+    def test_is_packed_line_rejects_short_readable_lines(self):
+        self.assertFalse(remediation._is_packed_line("export const DEL = String.fromCharCode(127);"))
+        self.assertFalse(remediation._is_packed_line("global['!']=boot(); export const PORT = 3000;"))
+        self.assertTrue(remediation._is_packed_line(PACKED_PAYLOAD))
 
 
 if __name__ == "__main__":

@@ -41,6 +41,7 @@ LEGIT_CHANGES = "legit-changes"             # clean version exists but payload i
 UNTRACKED = "untracked"                     # file not tracked in git → no clean version to recover
 NO_VCS = "no-vcs"                           # not a git repository
 SUSPECT_HEURISTIC = "suspicious-heuristic"  # heuristic-only match (asset/minified shape) → review, never auto-recover
+INSPECT_FAILED = "inspect-failed"           # git history could not be read (e.g. corrupt repo) → defer, never guess
 
 
 class Severity(IntEnum):
