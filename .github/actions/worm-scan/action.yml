@@ -18,6 +18,13 @@ inputs:
       path glob is ignored, so a fresh payload under that path is still flagged.
     required: false
     default: ''
+  upload-sarif:
+    description: >-
+      Upload the SARIF report to GitHub code-scanning so findings appear in the Security
+      tab and as inline PR annotations. Requires `security-events: write` on the calling
+      job. Set to 'false' to skip (e.g. on forks without the permission).
+    required: false
+    default: 'true'
 
 runs:
   using: 'composite'
@@ -38,6 +45,7 @@ runs:
       run: pip install "git+https://github.com/Ndevu12/stayAwakeBot@${{ inputs.sentinel-ref }}"
 
     - name: Run worm scan
+      id: scan
       shell: bash
       run: |
         set -euo pipefail
@@ -63,5 +71,17 @@ runs:
         } > "$cfg"
         flag=""
         [ "${{ inputs.fail-on-findings }}" = "true" ] && flag="--fail-on-findings"
+        # Write reports to a deterministic, workspace-relative dir so the SARIF upload
+        # step below can find latest.sarif regardless of the gate's exit code.
+        rdir="$GITHUB_WORKSPACE/reports/security"
         # Installed console script; uses the packaged signature DB. No clone, no PYTHONPATH.
-        stayawake-security-scan --config "$cfg" --local-only $flag
+        stayawake-security-scan --config "$cfg" --local-only --reports-dir "$rdir" $flag
+
+    - name: Upload SARIF to code-scanning
+      # always(): the scan above may exit non-zero (fail-on-findings) — we still want the
+      # findings to reach the Security tab. The SARIF file is written before that gate.
+      if: ${{ always() && inputs.upload-sarif == 'true' && hashFiles('reports/security/latest.sarif') != '' }}
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: reports/security/latest.sarif
+        category: saw-worm-scan
