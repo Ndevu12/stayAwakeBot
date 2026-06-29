@@ -131,6 +131,18 @@ reviewed scanner/signature update. The gate scans the whole tree; `reports/**` (
 cron's output) is the only exemption — security reports are no longer committed, and any persisted
 security artifact is evidence-redacted, so there is no in-tree payload for the gate to re-flag.
 
+A pin is only as good as its freshness, so two guards keep it honest without weakening the
+tamper-resistance the pin buys:
+- **Capability-assert** (`worm-scan` action): after installing the pinned scanner, the action
+  verifies it actually supports the CLI flags the action invokes (e.g. `saw scan --sarif`) and
+  fails fast with the fix when the pin is too old — instead of an opaque mid-run argparse error.
+- **Drift alarm** (`scanner-pin-drift.yml`): weekly, it compares the pinned SHA's engine subtree
+  (`src/stayawake/bots/security/**`) against `main` and opens a self-closing issue when they
+  diverge, so a stale pin can't silently run an out-of-date engine. It is subtree-scoped, so the
+  `chore(sentinel)` report commits never raise a false alarm. (This is the seam a future
+  engine/signatures cadence split builds on: a slow, pinned engine; fast, separately-distributed
+  signatures.)
+
 ## Trigger model (event-driven, not scheduled)
 
 Uptime monitoring needs polling; **security state only changes when code changes**, so
