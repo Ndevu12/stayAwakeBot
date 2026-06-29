@@ -84,7 +84,7 @@ GitHub code-scanning (SARIF, uploaded not committed), issues + Slack, and CI art
 reports are **no longer committed**.
 
 `security/hygiene.py` backs `saw audit` (local posture + branch-protection); remediation is
-`saw fix` / `saw scan --fix` (see [Remediation](#remediation)).
+`saw fix` (see [Remediation](#remediation)).
 
 Run via the terse **`saw`** CLI: `saw scan` · `saw fix` · `saw audit` — see the
 [CLI guide](CLI.md). The legacy `stayawake-security-*` console scripts have been **removed**;
@@ -96,17 +96,21 @@ evil-merge git fixture. Run (package installed): `python -m unittest discover -s
 
 ## Remediation
 
-`saw fix [--apply]` — dry-run by default. With
-`--apply` it strips/quarantines worm artifacts (originals backed up to `.malware-quarantine/`)
-and commits the fix to a `security/auto-clean-<stamp>` branch — never main, never force-pushed.
-Evil-merge findings are reported as manual (need a history rewrite).
+`saw fix` — cleanup is delivered as a **pull request**, never an in-place edit (so it can't
+corrupt a working tree, and nothing reaches a default branch until a human merges). Scope is
+**local by default**; `--remote` sweeps the configured GitHub targets. Each repo's outcome
+**streams live** as its PR is opened/updated. Evil-merge findings are reported as manual (need a
+history rewrite).
 
-`--apply --pr` pushes a stable `security/auto-clean` branch and opens **one rolling
-PR per repo**, targeting the default branch for review. Before opening it checks the API for
-an existing open PR from that branch and updates it instead of creating a duplicate. Work is
-isolated in a git worktree; it never commits to or force-pushes the default branch. After
-applying, it **re-scans and aborts (no PR) if anything is still detected**, and the commit
-message / PR body describe only what was *actually* changed.
+For each infected repo it pushes a stable `security/auto-clean` branch and opens **one rolling
+PR**, targeting the default branch for review. Before opening it checks the API for an existing
+open PR from that branch and **updates it instead of creating a duplicate**. Work is isolated in
+a git worktree; it never commits to or force-pushes the default branch. After applying, it
+**re-scans and aborts (no PR) if a confirmed infection is still detected**, discloses any
+remaining heuristic/suspicious findings in the PR body, and the commit message / PR body
+describe only what was *actually* changed. An injected payload is recovered from git (the
+file's last clean committed version), or deferred to manual review with the exact command —
+never reconstructed.
 
 `saw audit [--repo owner/name]` checks local posture (cached GitHub credential,
 VS Code auto-run / Workspace Trust) and, with a token + `--repo`, that the default branch is
@@ -153,7 +157,7 @@ wasteful and reactive.
 |-------|---------|-----------|
 | Hosted — gate | `pull_request` + `push` (code paths) | `worm-guard` blocks infection from landing (read-only; the exit code is the gate) |
 | Hosted — sentinel | `push` to `main` (merge) + `workflow_dispatch` + weekly backstop | scan the repo, then push durable records via `--alert` (issue + Slack) + `--sarif` (code-scanning) + CI artifacts — no report is committed |
-| Local — CLI | on demand | `saw scan` over all dev roots (report to the terminal); `saw fix [--apply] [--pr]` fixes each repo |
+| Local — CLI | on demand | `saw scan` over all dev roots (report to the terminal); `saw fix` opens a cleanup PR per infected repo |
 | Availability | `schedule` (*/5) | uptime genuinely needs polling — the one place a clock is correct |
 
 Org-wide coverage is **distributed**: every repo runs its own `worm-guard` on its own

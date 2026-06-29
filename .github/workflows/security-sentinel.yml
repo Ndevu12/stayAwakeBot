@@ -55,7 +55,7 @@ jobs:
           # Terminal-first: one pass scans, pushes GitHub-issue + Slack alerts (--alert),
           # and writes the SARIF. Exit code is the verdict (non-zero on infected), which
           # surfaces an infected main as a failed run.
-          saw scan -L -c "$RUNNER_TEMP/ci-security.yml" --alert --sarif "$RUNNER_TEMP/latest.sarif"
+          saw scan -c "$RUNNER_TEMP/ci-security.yml" --alert --sarif "$RUNNER_TEMP/latest.sarif"
 
       - name: Upload SARIF to code-scanning
         # always(): the scan above exits non-zero when infected — we still want the

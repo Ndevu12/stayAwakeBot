@@ -41,25 +41,32 @@ class TestTargetResolution(unittest.TestCase):
         cfg.write_text(body, encoding="utf-8")
         return str(cfg)
 
-    def test_explicit_paths_force_local_only(self):
+    def test_explicit_paths_scan_local(self):
         cap = self._capture(config_path=None, paths=["/tmp/a", "/tmp/b"])
         self.assertEqual(cap["patterns"], ["/tmp/a", "/tmp/b"])
-        self.assertNotIn("remote_called", cap)  # explicit paths ⇒ local-only, no token
+        self.assertNotIn("remote_called", cap)  # explicit paths ⇒ local, no token
 
     def test_config_local_globs_used(self):
-        cap = self._capture(config_path=self._cfg('settings: {}\ntargets: { local: ["~/dev/**"] }\n'),
-                            local_only=True)
+        cap = self._capture(config_path=self._cfg('settings: {}\ntargets: { local: ["~/dev/**"] }\n'))
         self.assertEqual(cap["patterns"], ["~/dev/**"])
 
     def test_cwd_default_when_nothing_configured(self):
         cap = self._capture(config_path=self._cfg("settings: {}\ntargets: { local: [] }\n"))
         self.assertEqual(cap["patterns"], [str(svc._enclosing_repo_root())])
 
-    def test_remote_only_config_has_no_cwd_default(self):
+    def test_default_scope_is_local_even_with_github_configured(self):
+        # #1069: scope is LOCAL by default — a configured GitHub target is NOT scanned
+        # unless `--remote` (remote=True) is given.
         cfg = self._cfg("settings: {}\ntargets:\n  local: []\n  github: { users: [octocat] }\n")
-        cap = self._capture(config_path=cfg, local_only=False)
-        self.assertEqual(cap["patterns"], [])        # current repo NOT added to a remote scan
-        self.assertTrue(cap.get("remote_called"))    # remote still enumerated
+        cap = self._capture(config_path=cfg)                      # no remote=True
+        self.assertNotIn("remote_called", cap)                   # GitHub NOT enumerated
+        self.assertEqual(cap["patterns"], [str(svc._enclosing_repo_root())])  # cwd fallback
+
+    def test_remote_scope_scans_github_not_local(self):
+        cfg = self._cfg("settings: {}\ntargets:\n  github: { users: [octocat] }\n")
+        cap = self._capture(config_path=cfg, remote=True)
+        self.assertTrue(cap.get("remote_called"))                # remote enumerated
+        self.assertNotIn("patterns", cap)                       # local discovery NOT run
 
 
 class TestHelpers(unittest.TestCase):
