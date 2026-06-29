@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""`saw fix` — remediate findings (dry-run by default). Routes to remediator."""
+"""`saw fix` — clean up worm findings by opening a pull request. Routes to remediator.fix.
+
+Cleanup is delivered as a PR (the review gate), never an in-place edit — so there is no
+apply/preview flag: running `fix` opens (or updates) one rolling `security/auto-clean` PR
+per infected repo, and re-runs update it rather than opening duplicates. Scope is LOCAL by
+default (given paths / configured globs / the current repo); `--remote` sweeps the
+configured GitHub targets. Each repo's outcome streams live.
+"""
 from __future__ import annotations
 
 import argparse
@@ -8,23 +15,20 @@ from stayawake.bots.security import remediator
 
 
 def register(sub) -> None:
-    p = sub.add_parser("fix", help="remediate findings (dry-run by default; see also: scan --fix)")
+    p = sub.add_parser("fix", help="open/update a cleanup PR per infected repo")
+    p.add_argument("paths", nargs="*", metavar="PATHS",
+                   help="repo/dir paths to fix. Omit to fix configured targets or the current repo.")
+    p.add_argument("-p", "--path", action="append", default=[], dest="extra_paths",
+                   metavar="PATH", help="additional path to fix (repeatable)")
     p.add_argument("-c", "--config", default=None,
-                   help="config file (default: config/security.yml when present, else the current repo)")
-    p.add_argument("--apply", action="store_true",
-                   help="apply local fixes (backed up) and commit to a branch")
-    p.add_argument("--pr", "--open-pr", action="store_true", dest="pr",
-                   help="with --apply: push a fix branch and open/update one PR per repo")
-    p.add_argument("--remote", action="store_true",
-                   help="sweep configured GitHub targets and open/update a fix PR per repo")
+                   help="config file (default: config/security.yml when present)")
+    p.add_argument("-r", "--remote", action="store_true",
+                   help="fix the configured GitHub targets instead of local repos")
+    p.add_argument("--no-stream", action="store_true", dest="no_stream",
+                   help="disable live progress output (plain, instant lines)")
     p.set_defaults(func=run)
 
 
 def run(a: argparse.Namespace) -> int:
-    if a.remote:
-        # submit_org_prs returns the COUNT of repos that got a PR, not an exit code —
-        # a successful sweep must still exit 0 (matches the legacy remediate script).
-        remediator.submit_org_prs(a.config)
-        return 0
-    # remediate() returns a process exit code (0 ok; 2 when an explicit --config is missing).
-    return remediator.remediate(a.config, apply=a.apply, open_pr=a.pr)
+    paths = [*a.paths, *a.extra_paths]
+    return remediator.fix(a.config, remote=a.remote, paths=paths or None, no_stream=a.no_stream)

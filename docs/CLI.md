@@ -94,36 +94,34 @@ unconditionally** (`0` clean / `1` infected) — there is no `--fail` flag; a CI
 checks the exit code. Output beyond the terminal is delivered through opt-in "sinks":
 `--json`, `--sarif`, `--alert`, and `-d`.
 
+`scan` is **read-only** — it never changes a file. Remediation lives in [`saw fix`](#saw-fix).
+
 ```text
-saw scan [PATHS...] [-L] [-c FILE] [-p PATH] [--json] [--sarif FILE] [--alert] [-d DIR] [--no-stream] [--fix [--apply [--pr]]]
+saw scan [PATHS...] [-r] [-c FILE] [-p PATH] [--json] [--sarif FILE] [--alert] [-d DIR] [--no-stream]
 ```
 
 | Option | Description |
 | --- | --- |
-| `PATHS...` | Repo or directory paths to scan (ad-hoc, local). If omitted and nothing is configured, scans the current repository. |
+| `PATHS...` | Repo or directory paths to scan (local). If omitted and nothing is configured, scans the current repository. |
 | `-p`, `--path PATH` | Additional path to scan (repeatable); same effect as a positional path. |
 | `-c`, `--config FILE` | Config file (default: `config/security.yml` when present). |
-| `-L`, `--local` | Skip remote GitHub targets — scan local paths only. |
+| `-r`, `--remote` | Scan the configured GitHub targets instead of local repos. **Scope is local by default**; this switches it to remote. |
 | `--json` | Emit a machine-readable JSON report to `stdout`, with **full evidence**. Ephemeral — pipe it; writes no file. |
 | `--sarif FILE` | Write a SARIF 2.1.0 report to `FILE` for upload to GitHub code-scanning. Evidence is **redacted** in the file (fingerprint only). |
 | `--alert` | Push the durable record **in this pass**: open/close a GitHub issue per infected repo and post a Slack summary. Reads `GITHUB_TOKEN`, `GITHUB_REPOSITORY`, `SLACK_WEBHOOK_URL` from the environment; issue/Slack bodies are **evidence-free**. |
 | `-d`, `--reports-dir DIR` | **Opt-in:** also write `latest.json` + `latest.md` into `DIR`. Evidence is **redacted** in these files (fingerprint only). |
 | `--no-stream` | Disable the live progress/typewriter output — plain, instant lines. (Auto-off already when piped, in CI, or with `STAYAWAKE_NO_STREAM=1`.) |
-| `--fix` | **Remediate in the same pass** — reuse the scan's findings to fix the scanned local repo(s); no second scan. Dry-run unless `--apply`. |
-| `--apply` | With `--fix`: write fixes (originals backed up to quarantine) and commit them to a branch. Implies `--fix`. |
-| `--pr`, `--open-pr` | With `--fix --apply`: push a fix branch and open/update one rolling, de-duplicated PR per repo. Implies `--fix`. |
 
 ```bash
-saw scan                                  # full report to the terminal; writes nothing
+saw scan                                  # scan local targets; full report to terminal; writes nothing
 saw scan ./service-a ./service-b          # scan specific paths
-saw scan -L -c config/security.yml        # local-only, configured targets
+saw scan --remote                         # scan the configured GitHub targets instead
+saw scan -c config/security.yml           # use a specific config
 saw scan; echo $?                         # gate: exit code is the verdict (0 clean / 1 infected)
 saw scan --json > report.json             # machine-readable, full evidence, to a pipe
 saw scan --sarif scan.sarif               # redacted SARIF for GitHub code-scanning upload
 saw scan --alert                          # open/close issues + Slack summary, in-pass
 saw scan -d /tmp/sab-reports              # opt-in redacted latest.json + latest.md
-saw scan --fix                            # scan AND preview fixes (dry-run), one pass
-saw scan --fix --apply                    # scan and apply fixes, commit to a branch
 ```
 
 > **A report is a message, not a file.** The full report — including full match evidence —
@@ -141,45 +139,42 @@ saw scan --fix --apply                    # scan and apply fixes, commit to a br
 > `--json` and any persisted artifact stay byte-for-byte unchanged. Progress goes to `stderr`;
 > the report goes to `stdout`.
 >
-> **`scan --fix` is the recommended remediation flow.** It runs detection and remediation
-> from a single analysis pass — there is no re-scan and no report file in between — so a fix
-> always acts on exactly what the scan just found. The standalone [`saw fix`](#saw-fix) remains
-> for the org-wide remote sweep and back-compat.
->
-> **How fixes are applied — reliably, never by guessing.** An injected payload is **recovered
+### `saw fix`
+
+Clean up detected worm findings by opening a **pull request** — the review gate. There is no
+apply/preview flag: running `fix` opens (or updates) one rolling `security/auto-clean` PR per
+**infected** repo, and re-runs **update** that PR rather than opening duplicates. Cleanup is
+never an in-place edit, so it can't corrupt your working tree — and nothing reaches a default
+branch until you review and merge. Scope is **local by default** (given paths / configured
+globs / the current repo); `--remote` sweeps the configured GitHub targets. Each repo's outcome
+**streams live** as its PR is opened/updated.
+
+```text
+saw fix [PATHS...] [-r] [-p PATH] [-c FILE] [--no-stream]
+```
+
+| Option | Description |
+| --- | --- |
+| `PATHS...` | Repo/dir paths to fix (local). Omit to fix configured targets or the current repo. |
+| `-p`, `--path PATH` | Additional path to fix (repeatable). |
+| `-r`, `--remote` | Fix the configured GitHub targets instead of local repos. Needs a GitHub credential with repo + PR write scope (an env token or a `gh auth login` session). |
+| `-c`, `--config FILE` | Config file. **Optional** — defaults to `config/security.yml` when present, else the current repository. An explicitly-passed path that does not exist is a clear error (exit `2`), never a crash. |
+| `--no-stream` | Disable the live per-repo progress output — plain, instant lines. |
+
+```bash
+saw fix                       # open/update a cleanup PR for each local infected repo
+saw fix .                     # fix the current repository
+saw fix --remote              # sweep the configured GitHub targets, one rolling PR each
+```
+
+> **How fixes are built — reliably, never by guessing.** An injected payload is **recovered
 > from git** (the file's last clean committed version is restored — the real original, not a
 > reconstruction), or, when that can't be proven safe (born-infected, untracked, or legit edits
 > sit on the payload), it is **deferred to manual review** with the exact reason and command.
 > Fonts/markers/VS-Code-autorun use reliable whole-file-quarantine / exact-line removal. The
 > scanner **never surgically edits a source file**, so a fix can never corrupt valid code; and
-> heuristic-only (`suspicious`) matches — e.g. an inlined base64 asset — are reviewed, never
-> auto-touched. Originals are always backed up to `.malware-quarantine/`.
-
-### `saw fix`
-
-Remediate detected worm findings. **Dry-run by default** — it shows what would change unless you
-pass `--apply`. For the common "scan then fix" flow prefer [`saw scan --fix`](#saw-scan), which
-remediates in the same pass without a second scan; `saw fix` is kept for the **org-wide remote
-sweep** (`--remote`) and back-compat.
-
-```text
-saw fix [--apply] [--pr] [--remote] [-c FILE]
-```
-
-| Option | Description |
-| --- | --- |
-| *(no flags)* | Dry-run: report the fixes that would be applied. |
-| `--apply` | Write fixes locally (originals backed up) and commit them to a branch. |
-| `--pr` | With `--apply`: push a stable `security/auto-clean` branch and open/update one rolling, de-duplicated PR per repo. |
-| `--remote` | Sweep the configured GitHub targets and open/update a dedup'd fix PR per repo. Needs a GitHub credential with repo + PR write scope (an env token or a `gh auth login` session). |
-| `-c`, `--config FILE` | Config file. **Optional** — defaults to `config/security.yml` when present, else the current repository. An explicitly-passed path that does not exist is a clear error (exit `2`), never a crash. |
-
-```bash
-saw fix                       # dry-run — preview changes
-saw fix --apply               # apply fixes locally and commit to a branch
-saw fix --apply --pr          # apply + open/update one rolling PR per repo
-saw fix --remote              # open fix PRs across configured GitHub targets
-```
+> heuristic-only (`suspicious`) matches — e.g. an inlined base64 asset — are disclosed in the
+> PR for review, never auto-touched. The change is delivered as a PR; nothing lands until merged.
 
 ### `saw audit`
 
@@ -210,7 +205,7 @@ saw search <text>
 ```
 
 ```bash
-saw search "open a pr"     # → suggests `saw fix --apply --pr`
+saw search "open a pr"     # → suggests `saw fix`
 ```
 
 ### `saw doctor`
@@ -269,11 +264,11 @@ security surface. Each old command maps to a `saw` equivalent:
 | --- | --- |
 | `stayawake-security-scan` | `saw scan` |
 | `stayawake-security-scan --fail-on-findings` | `saw scan` (the exit code **is** the verdict — no flag) |
-| `stayawake-security-scan --local-only --config config/security.yml` | `saw scan -L -c config/security.yml` |
+| `stayawake-security-scan --local-only --config config/security.yml` | `saw scan -c config/security.yml` (local is the default) |
 | `stayawake-security-report` | `saw scan` (the report renders to the terminal) |
 | `stayawake-security-alert` | `saw scan --alert` |
 | `stayawake-security-remediate` | `saw fix` |
-| `stayawake-security-remediate --apply --open-pr` | `saw fix --apply --pr` |
+| `stayawake-security-remediate --apply --open-pr` | `saw fix` (cleanup is always a PR now) |
 | `stayawake-security-remediate --remote` | `saw fix --remote` |
 | `stayawake-security-audit --repo OWNER/NAME --fail-on-issues` | `saw audit --repo OWNER/NAME -f` |
 
@@ -313,7 +308,7 @@ ships alongside it as a collision-proof fallback.
 | --- | --- | --- | --- |
 | Scan + CI gate | `stayawake-security-scan --fail-on-findings` | `saw scan` | −86% |
 | Scan + alert | `…scan && …alert` | `saw scan --alert` | −68% |
-| Remediate + PR | `stayawake-security-remediate --apply --open-pr` | `saw fix --apply --pr` | −57% |
+| Remediate + PR | `stayawake-security-remediate --apply --open-pr` | `saw fix` | −74% |
 | Audit + gate | `stayawake-security-audit --repo … --fail-on-issues` | `saw audit --repo … -f` | −46% |
 
 ### Design decisions

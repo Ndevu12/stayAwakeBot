@@ -60,7 +60,7 @@ Prefer not to install a Python toolchain at all? Pull the image and scan a mount
 
 ```bash
 docker run --rm -v "$PWD:/repo:ro" ghcr.io/ndevu12/stayawakebot \
-  saw scan --local --fail
+  saw scan /repo
 ```
 
 The exit code is the verdict (`0` clean, `1` findings). To keep the report file too, mount a
@@ -69,7 +69,7 @@ writable dir and run as your own user so the bind-mount is writable:
 ```bash
 docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/repo" \
   ghcr.io/ndevu12/stayawakebot \
-  saw scan --local --reports-dir /repo/reports
+  saw scan /repo --reports-dir /repo/reports
 ```
 
 Tags: `:latest`, `:X.Y.Z`, `:X.Y`, and `:sha-<commit>`. The image runs as a non-root user, is

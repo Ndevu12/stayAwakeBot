@@ -138,7 +138,7 @@ class TestExitCodeVerdict(unittest.TestCase):
 
     def _scan(self, repo: Path) -> int:
         with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-            return sec_service.scan(None, local_only=True, paths=[str(repo)], no_stream=True)
+            return sec_service.scan(None, paths=[str(repo)], no_stream=True)
 
     def test_infected_exits_1(self):
         seed = Path(__file__).parent / "fixtures" / "infected"
