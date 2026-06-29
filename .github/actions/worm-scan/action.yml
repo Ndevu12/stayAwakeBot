@@ -44,6 +44,23 @@ runs:
       # package is on PyPI this becomes `pip install "stayawakebot==<version>"`.
       run: pip install "git+https://github.com/Ndevu12/stayAwakeBot@${{ inputs.sentinel-ref }}"
 
+    - name: Assert scanner capability
+      shell: bash
+      # The pinned scanner (sentinel-ref) is decoupled from this action, which lives at HEAD
+      # and evolves. If the pin predates a CLI flag the run step uses, the scan would fail
+      # mid-flight with an opaque argparse error. Fail FAST here instead, naming the fix —
+      # this is the guard for the exact skew that shipped a `--sarif`-less pin once before.
+      run: |
+        missing=""
+        for flag in --sarif --local; do
+          saw scan --help 2>&1 | grep -q -- "$flag" || missing="$missing $flag"
+        done
+        if [ -n "$missing" ]; then
+          echo "::error::pinned scanner (sentinel-ref) lacks 'saw scan'$missing — bump sentinel-ref in worm-guard.yml to a newer reviewed SHA." >&2
+          exit 1
+        fi
+        echo "Scanner capability OK (saw scan supports the flags this action uses)."
+
     - name: Run worm scan
       id: scan
       shell: bash
