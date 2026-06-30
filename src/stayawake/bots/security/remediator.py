@@ -26,6 +26,7 @@ from stayawake.core import auth
 from stayawake.core import git as gitutil
 from stayawake.core.adapters import github_api
 from stayawake.core.streaming import Streamer, stream_enabled, status
+from stayawake.core.timeutil import now_iso
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.service import (
     discover_local_repos, _enclosing_repo_root, _resolve_remote, DEFAULT_CONFIG)
@@ -169,6 +170,8 @@ def fix(config_path: str | None = None, *, pr: bool = False, remote: bool = Fals
     sigs = load_signatures(settings.get("signatures_path"))
     allowlist = cfg.get("allowlist", [])
     prog = Streamer(enabled=stream_enabled(sys.stderr, force_off=no_stream), out=sys.stderr)
+    prog.line(f"Security fix — {now_iso()}")
+    prog.line("")
 
     outcomes = (_fix_remote(cfg, opts, sigs, allowlist, prog) if remote
                 else _fix_local(cfg, opts, sigs, allowlist, paths, prog, publish=pr))
@@ -255,6 +258,8 @@ def discard(config_path: str | None = None, *, branch: bool = False, pr: bool = 
         return 2
     opts = _options(cfg.get("settings", {}))
     prog = Streamer(enabled=stream_enabled(sys.stderr, force_off=no_stream), out=sys.stderr)
+    prog.line(f"Security discard — {now_iso()}")
+    prog.line("")
 
     outcomes = (_discard_remote(cfg, opts, branch, pr, prog) if remote
                 else _discard_local(cfg, opts, branch, pr, paths, prog))
