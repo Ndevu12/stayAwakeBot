@@ -57,7 +57,7 @@ def _label_color(label: str) -> str | None:
 
 
 def render_terminal(payload: dict[str, Any], *, color: bool = False,
-                    collapse_clean_over: int = 0) -> str:
+                    collapse_clean_over: int = 0, detail: bool = True) -> str:
     s = payload["summary"]
     out = [f"Security scan — {payload['generated_at']}", "",
            f"{s['targets']} targets · {s['infected']} infected · "
@@ -101,10 +101,16 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False,
     # one block each. Within a block, severity tags are padded to a common width so the
     # signatures line up; evidence sits on its own, deeper-indented line. A blank line
     # separates the repo blocks.
-    detail = [r for r in ordered if (r["infected"] or r.get("suspicious")) and r["findings"]]
-    if detail:
+    flagged = [r for r in ordered if (r["infected"] or r.get("suspicious")) and r["findings"]]
+    if flagged and not detail:
+        # Large fleet: the per-finding evidence would bury the terminal (hundreds of lines),
+        # so the table above is the dashboard and the detail lives in the written report.
+        n = len(flagged)
+        out += ["", f"Per-finding detail for {n} flagged "
+                    f"repositor{'y' if n == 1 else 'ies'} is in the full report (path below)."]
+    elif flagged:
         out += ["", "Findings"]
-        for r in detail:
+        for r in flagged:
             label = _label(r)
             total = r["summary"]["total"]
             # Project header, then a rule under it so the project is clearly separated from

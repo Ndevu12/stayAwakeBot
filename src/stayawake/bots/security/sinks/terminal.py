@@ -33,18 +33,22 @@ def _color_enabled() -> bool:
 
 
 class TerminalSink(Sink):
-    def __init__(self, *, enabled: bool | None = None, pager: bool = False) -> None:
+    def __init__(self, *, enabled: bool | None = None, pager: bool = False,
+                 detail: bool = True) -> None:
         # Results go to stdout (the convention); progress lives on stderr in service.scan.
         self._stream = Streamer(enabled=enabled, out=sys.stdout)
         self._color = _color_enabled()
         self._pager = pager
+        self._detail = detail
 
     def emit(self, report: ScanReport) -> None:
         # Aligned table (clean rows collapse to a count on a large fleet; the -d/json bundle
-        # keeps the full inventory). When paging is allowed, hand a long report to $PAGER so a
-        # big sweep is never lost to terminal scrollback; otherwise write inline as before.
+        # keeps the full inventory). On a large fleet `detail=False` keeps the per-finding
+        # evidence out of the terminal (it lives in the written report) so the dashboard stays
+        # readable. When paging is allowed, hand a long report to $PAGER so a big sweep is
+        # never lost to terminal scrollback; otherwise write inline as before.
         text = render_terminal(report.to_payload(), color=self._color,
-                               collapse_clean_over=COLLAPSE_CLEAN_OVER)
+                               collapse_clean_over=COLLAPSE_CLEAN_OVER, detail=self._detail)
         if self._pager:
             page(text, enabled=True)
         else:

@@ -23,10 +23,13 @@ All notable changes to this project are documented here. The format is based on
   a GitHub App installation. `--user`/`--org` imply `--remote`; a non-`owner/repo` positional under
   `--remote` is a hard error.
 - **Large-fleet result presentation.** A report taller than the terminal is **paged** through
-  `$PAGER` (`--no-pager` to opt out); **clean rows collapse to a count** in the table once the fleet
-  is large (the full inventory stays in `--json`/`-d`); and a big sweep with no `-d`/`--json` writes
-  the **full Markdown + JSON to a temp dir and prints its path** — so a 200-repo result is never
-  lost to terminal scrollback.
+  `$PAGER` (`--no-pager` to opt out; the built-in default is plain `less -R`, which pages cleanly
+  on the alternate screen and treats Ctrl+C as "quit the pager"); **clean rows collapse to a
+  count** in the table once the fleet is large (the full inventory stays in `--json`/`-d`); and a
+  big sweep keeps the terminal a readable **dashboard** — the table only — by **moving the
+  per-finding evidence to the written report** (the full Markdown + JSON, to your `-d` dir or a
+  temp dir, with its path printed). So a 200-repo result is never lost to terminal scrollback or
+  buried under hundreds of evidence lines.
 - **Readable terminal report.** The interactive scan output is an aligned, colour-coded table
   (red INFECTED / yellow SUSPECT / green clean on a TTY; honours `NO_COLOR`) listing every
   scanned target, sorted worst-first. Findings are detailed per infected/suspect repo in spaced

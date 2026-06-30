@@ -235,32 +235,42 @@ def scan(config_path: str | None = None, *, remote: bool = False,
 
     report = ScanReport(generated_at=now_iso(), results=results)
 
+    # A large sweep can't fit a terminal's scrollback, and its per-finding evidence (hundreds
+    # of lines) would bury the table. So for a big fleet the terminal shows the dashboard only
+    # (table + collapsed clean) and the full per-finding detail moves to the written report.
+    # Only meaningful for the human surface — `--json` carries everything to its consumer.
+    large_fleet = not json_out and len(results) > LARGE_FLEET
+
     # --- compose the output sinks from the flags. Default is terminal-first and persists
     #     nothing; --json swaps the human report for machine JSON on stdout; --sarif / -d add
     #     redacted file artifacts; --alert pushes the durable GitHub-issue + Slack record.
+    report_path: Path | None = None   # where the full report landed, for the pointer below
     sinks: list[Sink] = [
         JsonSink() if json_out
-        else TerminalSink(enabled=report_on, pager=report_on and not no_pager)]
+        else TerminalSink(enabled=report_on, pager=report_on and not no_pager,
+                          detail=not large_fleet)]
     if sarif_path:
         sinks.append(SarifSink(sarif_path))
     if reports_dir:
         rdir = resolve_reports_dir(reports_dir, settings_value=settings.get("reports_dir"),
                                    default=REPORTS_DIR, label="security reports")
         sinks.append(FileSink(rdir))
+        report_path = Path(rdir) / "latest.md"
     if alert:
         sinks += [IssueSink(), SlackSink()]
     for sink in sinks:
         sink.emit(report)
 
-    # Large sweep, nothing persisted: a terminal's scrollback can't hold the whole report and
-    # the pager is transient, so drop the FULL Markdown+JSON (redacted) into a temp dir and
-    # point at it — the complete result is always recoverable off-terminal. Skipped when the
-    # user already persisted (-d) or asked for machine output (--json).
-    if not json_out and not reports_dir and len(results) > LARGE_FLEET:
-        tmp = Path(tempfile.mkdtemp(prefix="sab-report-"))
-        FileSink(tmp).emit(report)
-        print(f"Full report ({len(results)} repos): {tmp / 'latest.md'}  (+ latest.json)",
-              file=sys.stderr)
+    # Large sweep: guarantee the FULL report (with per-finding evidence) exists off-terminal
+    # and point at it — the complete result is always recoverable. If the user already
+    # persisted with -d we reuse that; otherwise drop the redacted Markdown+JSON in a temp dir.
+    if large_fleet:
+        if report_path is None:
+            tmp = Path(tempfile.mkdtemp(prefix="sab-report-"))
+            FileSink(tmp).emit(report)
+            report_path = tmp / "latest.md"
+        print(f"Full report ({len(results)} repos, with per-finding detail): {report_path}"
+              "  (+ latest.json)", file=sys.stderr)
 
     # Verdict as exit code: INFECTED (confirmed findings) → 1, else 0. Unconditional —
     # the CI gate is just this exit code; SUSPICIOUS (heuristic-only) does not fail it.

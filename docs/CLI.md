@@ -153,12 +153,15 @@ saw scan -d /tmp/sab-reports              # opt-in redacted latest.json + latest
 
 > **Large fleets — nothing lost to scrollback.** Scanning many repos (locally or `--remote`,
 > your own or an org) produces a report bigger than the terminal. Three things keep it readable
-> and complete: (1) a long report is **paged** through `$PAGER` (`less`-style) on an interactive
-> terminal, so you scroll the whole thing — disable with `--no-pager`; (2) **clean rows collapse
-> to a count** in the table once the fleet is large (the infected/suspect detail is never
-> collapsed); (3) for a big sweep with no `-d`/`--json`, the **full** Markdown + JSON report is
-> written to a temp dir and its path is printed (`Full report: …`), so the complete result is
-> always recoverable off-terminal. Paging auto-disables when piped, in CI, or with `--no-pager`.
+> and complete: (1) a long report is **paged** through `$PAGER` on an interactive terminal (the
+> built-in default is plain `less -R`, which pages on the alternate screen and treats Ctrl+C as
+> "quit the pager"), so you scroll the whole thing — disable with `--no-pager`; (2) **clean rows
+> collapse to a count** in the table once the fleet is large; (3) for a big sweep the terminal
+> stays a readable **dashboard** — the table only — and the **per-finding evidence moves to the
+> written report** (the full Markdown + JSON, in your `-d` dir or a temp dir, with its path
+> printed as `Full report: …`), so the complete result is always recoverable off-terminal
+> without burying the terminal under hundreds of evidence lines. Paging auto-disables when piped,
+> in CI, or with `--no-pager`.
 
 ### `saw fix`
 
