@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Org-wide auto-PR sweep orchestration (no real clone/network)."""
+"""Remote fix sweep orchestration — `saw fix --remote` (no real clone/network)."""
 from __future__ import annotations
 
+import contextlib
 import tempfile
 import unittest
-from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-
-from stayawake.bots.security import remediator                    # noqa: E402
+from stayawake.bots.security import remediator
+from stayawake.bots.security import service
 
 
 def _cfg(users):
@@ -20,25 +20,48 @@ def _cfg(users):
     return f.name
 
 
-class TestOrgSweep(unittest.TestCase):
+@contextlib.contextmanager
+def _fake_https_auth(_token):
+    yield ("https://x@github.com/", {})
+
+
+class TestRemoteFix(unittest.TestCase):
     def test_no_token_is_noop(self):
-        # No env token AND no gh session → no credential at all (hermetic: don't let a
-        # logged-in gh on the test machine supply a real token).
+        # No credential at all (hermetic: don't let a logged-in gh supply a real token).
         with mock.patch.dict("os.environ", {}, clear=True), \
-             mock.patch.object(remediator.auth, "resolve_token", return_value=(None, None)):
-            self.assertEqual(remediator.submit_org_prs(_cfg(["o"]), token=None), 0)
+             mock.patch.object(service.auth, "resolve_token", return_value=(None, None)), \
+             mock.patch.object(service.github_api, "list_repos", return_value=[]):
+            self.assertEqual(remediator.fix(_cfg(["o"]), remote=True, no_stream=True), 0)
 
     def test_no_targets_is_noop(self):
-        self.assertEqual(remediator.submit_org_prs(_cfg([]), token="t"), 0)
+        with mock.patch.object(service.auth, "resolve_token", return_value=("t", "env")), \
+             mock.patch.object(service.github_api, "list_repos", return_value=[]):
+            self.assertEqual(remediator.fix(_cfg([]), remote=True, no_stream=True), 0)
 
-    def test_opens_one_pr_per_infected_repo(self):
-        with mock.patch.object(remediator.github_api, "list_repos", return_value=["o/a", "o/b"]), \
+    def test_opens_one_pr_per_repo(self):
+        with mock.patch.object(service.auth, "resolve_token", return_value=("t", "env")), \
+             mock.patch.object(service.github_api, "list_repos", return_value=["o/a", "o/b"]), \
+             mock.patch.object(remediator.gitutil, "github_https_auth", _fake_https_auth), \
              mock.patch.object(remediator.subprocess, "run",
                                return_value=SimpleNamespace(returncode=0, stdout="", stderr="")), \
              mock.patch.object(remediator.pr_submit, "submit_fix_pr",
-                               return_value="opened PR #1 (url)"), \
+                               return_value="o/x: opened PR #1 (url)") as m_pr, \
              mock.patch.object(remediator.shutil, "rmtree"):
-            self.assertEqual(remediator.submit_org_prs(_cfg(["o"]), token="t"), 2)
+            # Two repos, both cloned + PR'd cleanly → no repo needs review → exit 0.
+            self.assertEqual(remediator.fix(_cfg(["o"]), remote=True, no_stream=True), 0)
+            self.assertEqual(m_pr.call_count, 2)   # one PR attempt per repo
+
+    def test_aborted_repo_makes_exit_one(self):
+        with mock.patch.object(service.auth, "resolve_token", return_value=("t", "env")), \
+             mock.patch.object(service.github_api, "list_repos", return_value=["o/a"]), \
+             mock.patch.object(remediator.gitutil, "github_https_auth", _fake_https_auth), \
+             mock.patch.object(remediator.subprocess, "run",
+                               return_value=SimpleNamespace(returncode=0, stdout="", stderr="")), \
+             mock.patch.object(remediator.pr_submit, "submit_fix_pr",
+                               return_value="o/a: ABORTED — 1 finding still present"), \
+             mock.patch.object(remediator.shutil, "rmtree"):
+            # A repo that couldn't be auto-cleaned (ABORTED) → exit 1 (needs manual review).
+            self.assertEqual(remediator.fix(_cfg(["o"]), remote=True, no_stream=True), 1)
 
 
 if __name__ == "__main__":

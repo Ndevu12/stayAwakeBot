@@ -37,7 +37,7 @@ stayawake-health-check   --config config/urls.yml    # health bot is remote-only
 stayawake-health-report
 stayawake-health-alert
 saw scan  --config config/security.yml               # local security CLI (see docs/CLI.md)
-saw fix [--apply] [--pr] [--remote]
+saw fix [--remote]                                   # cleanup → PR per infected repo
 python -m unittest discover -s tests      # tests (package must be installed)
 ```
 (The health bot's actions also run as `python -m stayawake.bots.health.cli.<action>`.)

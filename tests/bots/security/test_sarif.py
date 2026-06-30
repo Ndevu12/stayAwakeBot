@@ -124,7 +124,7 @@ class TestSarifWiredIntoScan(unittest.TestCase):
             return {str(p) for p in d.rglob("*")} if d.exists() else set()
         before = snap(sec_service.REPORTS_DIR)
         with redirect_stdout(io.StringIO()):     # swallow the terminal-sink report
-            sec_service.scan(str(cfg), local_only=True, sarif_path=str(sarif_out))
+            sec_service.scan(str(cfg), sarif_path=str(sarif_out))
 
         self.assertTrue(sarif_out.is_file())
         log = json.loads(sarif_out.read_text(encoding="utf-8"))
