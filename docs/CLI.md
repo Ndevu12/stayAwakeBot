@@ -97,26 +97,37 @@ checks the exit code. Output beyond the terminal is delivered through opt-in "si
 `scan` is **read-only** — it never changes a file. Remediation lives in [`saw fix`](#saw-fix).
 
 ```text
-saw scan [PATHS...] [-r] [-c FILE] [-p PATH] [--json] [--sarif FILE] [--alert] [-d DIR] [--no-stream]
+saw scan [TARGETS...] [-r] [--user U] [--org O] [-c FILE] [-p PATH] [--json] [--sarif FILE] [--alert] [-d DIR] [--no-stream]
 ```
 
 | Option | Description |
 | --- | --- |
-| `PATHS...` | Repo or directory paths to scan (local). If omitted and nothing is configured, scans the current repository. |
-| `-p`, `--path PATH` | Additional path to scan (repeatable); same effect as a positional path. |
+| `TARGETS...` | Local repo/dir paths — or, with `--remote`, `owner/repo` slugs. If omitted, scans configured targets or the current repository. |
+| `-p`, `--path PATH` | Additional target (repeatable); same effect as a positional. |
 | `-c`, `--config FILE` | Config file (default: `config/security.yml` when present). |
-| `-r`, `--remote` | Scan the configured GitHub targets instead of local repos. **Scope is local by default**; this switches it to remote. |
+| `-r`, `--remote` | Scan GitHub repos instead of local. **Scope is local by default.** Remote targets resolve by a ladder (below). |
+| `--user USER` | Scan this GitHub user's repos (repeatable; **implies `--remote`**). |
+| `--org ORG` | Scan this GitHub org's repos (repeatable; **implies `--remote`**). |
 | `--json` | Emit a machine-readable JSON report to `stdout`, with **full evidence**. Ephemeral — pipe it; writes no file. |
 | `--sarif FILE` | Write a SARIF 2.1.0 report to `FILE` for upload to GitHub code-scanning. Evidence is **redacted** in the file (fingerprint only). |
 | `--alert` | Push the durable record **in this pass**: open/close a GitHub issue per infected repo and post a Slack summary. Reads `GITHUB_TOKEN`, `GITHUB_REPOSITORY`, `SLACK_WEBHOOK_URL` from the environment; issue/Slack bodies are **evidence-free**. |
 | `-d`, `--reports-dir DIR` | **Opt-in:** also write `latest.json` + `latest.md` into `DIR`. Evidence is **redacted** in these files (fingerprint only). |
 | `--no-stream` | Disable the live progress/typewriter output — plain, instant lines. (Auto-off already when piped, in CI, or with `STAYAWAKE_NO_STREAM=1`.) |
 
+**Remote target resolution** (`--remote`), first match wins — shared by `scan`, `fix`, `discard`:
+
+1. **ad-hoc selectors** — `--user`/`--org` and `owner/repo` positionals (these **override** config);
+2. **configured** `targets.github.users/orgs`;
+3. **your own repos** — the authenticated user's *owned* repos (private-inclusive, via `/user/repos`), or a GitHub App installation's repos.
+
+A non-`owner/repo` positional under `--remote` is a hard error (it isn't silently treated as a path).
+
 ```bash
 saw scan                                  # scan local targets; full report to terminal; writes nothing
-saw scan ./service-a ./service-b          # scan specific paths
-saw scan --remote                         # scan the configured GitHub targets instead
-saw scan -c config/security.yml           # use a specific config
+saw scan ./service-a ./service-b          # scan specific local paths
+saw scan --remote                         # scan your own GitHub repos (or configured targets)
+saw scan --org UB-TechDEV                 # an org (implies --remote)
+saw scan --remote Ndevu12/strix           # one specific GitHub repo
 saw scan; echo $?                         # gate: exit code is the verdict (0 clean / 1 infected)
 saw scan --json > report.json             # machine-readable, full evidence, to a pipe
 saw scan --sarif scan.sarif               # redacted SARIF for GitHub code-scanning upload
@@ -150,15 +161,16 @@ sweeps the configured GitHub targets (clone → fix → PR). Scope is **local by
 repo's outcome **streams live**.
 
 ```text
-saw fix [PATHS...] [--pr] [-r] [-p PATH] [-c FILE] [--no-stream]
+saw fix [TARGETS...] [--pr] [-r] [--user U] [--org O] [-p PATH] [-c FILE] [--no-stream]
 ```
 
 | Option | Description |
 | --- | --- |
-| `PATHS...` | Repo/dir paths to fix (local). Omit to fix configured targets or the current repo. |
-| `-p`, `--path PATH` | Additional path to fix (repeatable). |
+| `TARGETS...` | Local repo/dir paths — or, with `--remote`, `owner/repo` slugs. Omit to fix configured targets or the current repo. |
+| `-p`, `--path PATH` | Additional target (repeatable). |
 | `--pr`, `--open-pr` | Also **push** the branch and open/update one rolling, de-duplicated PR per repo. Needs a GitHub credential with repo + PR write scope; the API is **pre-flighted** before any push. |
-| `-r`, `--remote` | Sweep the configured GitHub targets (clone → fix → PR) instead of local repos. |
+| `-r`, `--remote` | Sweep GitHub repos (clone → fix → PR) instead of local. Targets resolve by the [remote ladder](#saw-scan) (selectors → config → your own repos). |
+| `--user USER` / `--org ORG` | Fix this GitHub user's / org's repos (repeatable; **implies `--remote`**). |
 | `-c`, `--config FILE` | Config file. **Optional** — defaults to `config/security.yml` when present, else the current repository. A missing explicit path is a clear error (exit `2`), never a crash. |
 | `--no-stream` | Disable the live per-repo progress output — plain, instant lines. |
 
@@ -185,15 +197,15 @@ The inverse of `saw fix`: remove what it produced. Only ever touches the auto-ge
 required. Scope is **local by default**; `--remote` sweeps the configured GitHub targets.
 
 ```text
-saw discard (--branch | --pr) [-r] [PATHS...] [-c FILE] [--no-stream]
+saw discard (--branch | --pr) [-r] [--user U] [--org O] [TARGETS...] [-c FILE] [--no-stream]
 ```
 
 | Option | Description |
 | --- | --- |
 | `-br`, `--branch` | Delete the `security/auto-clean` branch **locally and on its remote** (pure git — works even when the GitHub API is unreachable; deleting the remote branch auto-closes its PR). |
 | `--pr`, `--close-pr` | **Close** the open `security/auto-clean` PR via the API (leaves the branch). |
-| `-r`, `--remote` | Sweep the configured GitHub targets instead of local repos. |
-| `PATHS...` / `-p` / `-c` / `--no-stream` | As for `saw fix`. |
+| `-r`, `--remote` / `--user` / `--org` | Sweep GitHub repos instead of local, resolved by the [remote ladder](#saw-scan) (selectors → config → your own repos). `--user`/`--org` imply `--remote`. |
+| `TARGETS...` / `-p` / `-c` / `--no-stream` | As for `saw fix` (positionals are `owner/repo` slugs under `--remote`). |
 
 ```bash
 saw discard --branch          # delete the auto-clean branch (local + remote) for each repo

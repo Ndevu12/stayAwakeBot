@@ -25,8 +25,9 @@ class TestTargetResolution(unittest.TestCase):
             cap["patterns"] = patterns
             return []
 
-        def fake_remote(cfg, opts):
+        def fake_remote(cfg, opts, **kw):
             cap["remote_called"] = True
+            cap["remote_kw"] = kw   # users/orgs/slugs selectors (the #1075 ladder inputs)
             return [], None, None   # mirror _resolve_remote's (slugs, token, source) 3-tuple
 
         with mock.patch.object(svc, "discover_local_repos", side_effect=fake_discover), \

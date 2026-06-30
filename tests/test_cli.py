@@ -43,20 +43,40 @@ class TestParserIntegrity(unittest.TestCase):
 class TestScanRouting(unittest.TestCase):
     @mock.patch("stayawake.bots.security.service.scan", return_value=0)
     def test_flags_map_to_service_signature(self, m):
-        rc = cli.main(["scan", "-r", "-c", "cfg.yml", "./repo", "-p", "extra",
+        # Local scan: positionals are PATHS; output flags route through.
+        rc = cli.main(["scan", "-c", "cfg.yml", "./repo", "-p", "extra",
                        "--json", "--sarif", "out.sarif", "-d", "rep", "--alert"])
         self.assertEqual(rc, 0)
         # config_path is the one positional; everything else is keyword-only now.
         (config_path,) = m.call_args.args
         kw = m.call_args.kwargs
         self.assertEqual(config_path, "cfg.yml")
-        self.assertTrue(kw["remote"])
+        self.assertFalse(kw["remote"])
         self.assertTrue(kw["json_out"])
         self.assertEqual(kw["sarif_path"], "out.sarif")
         self.assertEqual(kw["reports_dir"], "rep")
         self.assertTrue(kw["alert"])
         self.assertIn("./repo", kw["paths"])
         self.assertIn("extra", kw["paths"])
+        self.assertIsNone(kw["slugs"])
+
+    @mock.patch("stayawake.bots.security.service.scan", return_value=0)
+    def test_remote_positionals_are_slugs_with_selectors(self, m):
+        # Under --remote, positionals route to `slugs`; --user/--org route to selectors.
+        cli.main(["scan", "--remote", "owner/repo", "--user", "alice", "--org", "acme"])
+        kw = m.call_args.kwargs
+        self.assertTrue(kw["remote"])
+        self.assertIn("owner/repo", kw["slugs"])
+        self.assertEqual(kw["users"], ["alice"])
+        self.assertEqual(kw["orgs"], ["acme"])
+        self.assertIsNone(kw["paths"])
+
+    @mock.patch("stayawake.bots.security.service.scan", return_value=0)
+    def test_user_or_org_implies_remote(self, m):
+        cli.main(["scan", "--user", "alice"])
+        self.assertTrue(m.call_args.kwargs["remote"])      # naming an account ⇒ remote
+        cli.main(["scan", "--org", "acme"])
+        self.assertTrue(m.call_args.kwargs["remote"])
 
     @mock.patch("stayawake.bots.security.service.scan", return_value=0)
     def test_scan_defaults_to_local(self, m):

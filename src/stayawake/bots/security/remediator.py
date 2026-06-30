@@ -29,7 +29,8 @@ from stayawake.core.streaming import Streamer, stream_enabled, status
 from stayawake.core.timeutil import now_iso
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.service import (
-    discover_local_repos, _enclosing_repo_root, _resolve_remote, DEFAULT_CONFIG)
+    discover_local_repos, _enclosing_repo_root, _resolve_remote, _remote_scope,
+    invalid_slugs, REMOTE_EMPTY_HINT, DEFAULT_CONFIG)
 from stayawake.bots.security.targets import ScanOptions
 from stayawake.bots.security import pr as pr_submit
 
@@ -122,21 +123,28 @@ def _fix_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *, publish: bo
     return outcomes
 
 
-def _fix_remote(cfg, opts, sigs, allowlist, prog: Streamer) -> list[str]:
-    """Fix REMOTE repositories: clone each configured GitHub target and open/update its PR
-    (no local copy exists, so a PR is the only output). Unchanged from the original sweep."""
-    slugs, token, _source = _resolve_remote(cfg, opts)
+def _fix_remote(cfg, opts, sigs, allowlist, prog: Streamer, *,
+                users=None, orgs=None, slugs=None) -> list[str]:
+    """Fix REMOTE repositories: resolve targets via the #1075 ladder (ad-hoc `--user`/`--org`
+    /`owner/repo` selectors → config → your own repos), clone each, and open/update its PR
+    (no local copy exists, so a PR is the only output)."""
+    bad = invalid_slugs(slugs)
+    if bad:
+        prog.line(f"error: --remote targets must be owner/repo slugs; got {bad}")
+        return []
+    resolved, token, _source = _resolve_remote(cfg, opts, users=users, orgs=orgs, slugs=slugs)
     err = _preflight(token)
     if err:
         prog.line(err)
         return []
-    if not slugs:
-        prog.line("No GitHub targets configured (targets.github.users/orgs or a GitHub App install).")
+    if not resolved:
+        prog.line(REMOTE_EMPTY_HINT)
         return []
-    prog.line(f"Sweeping {len(slugs)} GitHub repositor{'y' if len(slugs) == 1 else 'ies'}…")
+    prog.line(f"Sweeping {len(resolved)} GitHub repositor{'y' if len(resolved) == 1 else 'ies'} "
+              f"({_remote_scope(cfg, users, orgs, slugs)})…")
     outcomes: list[str] = []
-    for i, slug in enumerate(slugs, 1):
-        prog.line(f"  [{i}/{len(slugs)}] {slug}")
+    for i, slug in enumerate(resolved, 1):
+        prog.line(f"  [{i}/{len(resolved)}] {slug}")
         tmp = Path(tempfile.mkdtemp(prefix="sab-fix-"))
         clone = tmp / "repo"
         try:
@@ -157,11 +165,14 @@ def _fix_remote(cfg, opts, sigs, allowlist, prog: Streamer) -> list[str]:
 
 
 def fix(config_path: str | None = None, *, pr: bool = False, remote: bool = False,
-        paths: list[str] | None = None, no_stream: bool = False) -> int:
+        paths: list[str] | None = None, users: list[str] | None = None,
+        orgs: list[str] | None = None, slugs: list[str] | None = None,
+        no_stream: bool = False) -> int:
     """`saw fix`: prepare a `security/auto-clean` branch per infected repo (no push). With
     `pr=True` (`--pr`) also push + open/update one rolling PR each; with `remote=True`
-    (`--remote`) sweep the configured GitHub targets. Streams each repo's outcome. Returns 2
-    if an explicit --config is missing, 1 if any repo needs manual review, else 0."""
+    (`--remote`) sweep GitHub targets resolved by the #1075 ladder (ad-hoc `users`/`orgs`/
+    `slugs` → config → your own repos). Streams each repo's outcome. Returns 2 if an explicit
+    --config is missing, 1 if any repo needs manual review, else 0."""
     cfg = _resolve_config(config_path)
     if cfg is None:
         return 2
@@ -173,7 +184,8 @@ def fix(config_path: str | None = None, *, pr: bool = False, remote: bool = Fals
     prog.line(f"Security fix — {now_iso()}")
     prog.line("")
 
-    outcomes = (_fix_remote(cfg, opts, sigs, allowlist, prog) if remote
+    outcomes = (_fix_remote(cfg, opts, sigs, allowlist, prog, users=users, orgs=orgs, slugs=slugs)
+                if remote
                 else _fix_local(cfg, opts, sigs, allowlist, paths, prog, publish=pr))
     if not outcomes:
         prog.line("No repositories to fix.")
@@ -218,19 +230,25 @@ def _discard_local(cfg, opts, branch: bool, pr: bool, paths, prog: Streamer) -> 
     return outcomes
 
 
-def _discard_remote(cfg, opts, branch: bool, pr: bool, prog: Streamer) -> list[str]:
-    slugs, token, _source = _resolve_remote(cfg, opts)
+def _discard_remote(cfg, opts, branch: bool, pr: bool, prog: Streamer, *,
+                    users=None, orgs=None, slugs=None) -> list[str]:
+    bad = invalid_slugs(slugs)
+    if bad:
+        prog.line(f"error: --remote targets must be owner/repo slugs; got {bad}")
+        return []
+    resolved, token, _source = _resolve_remote(cfg, opts, users=users, orgs=orgs, slugs=slugs)
     err = _preflight(token)
     if err:
         prog.line(err)
         return []
-    if not slugs:
-        prog.line("No GitHub targets configured (targets.github.users/orgs or a GitHub App install).")
+    if not resolved:
+        prog.line(REMOTE_EMPTY_HINT)
         return []
-    prog.line(f"Discarding across {len(slugs)} GitHub repositor{'y' if len(slugs) == 1 else 'ies'}…")
+    prog.line(f"Discarding across {len(resolved)} GitHub repositor{'y' if len(resolved) == 1 else 'ies'} "
+              f"({_remote_scope(cfg, users, orgs, slugs)})…")
     outcomes: list[str] = []
-    for i, slug in enumerate(slugs, 1):
-        prog.line(f"  [{i}/{len(slugs)}] {slug}")
+    for i, slug in enumerate(resolved, 1):
+        prog.line(f"  [{i}/{len(resolved)}] {slug}")
         parts: list[str] = []
         with status(f"discarding {slug}…", enabled=prog.enabled):
             if branch:
@@ -244,11 +262,14 @@ def _discard_remote(cfg, opts, branch: bool, pr: bool, prog: Streamer) -> list[s
 
 
 def discard(config_path: str | None = None, *, branch: bool = False, pr: bool = False,
-            remote: bool = False, paths: list[str] | None = None, no_stream: bool = False) -> int:
+            remote: bool = False, paths: list[str] | None = None, users: list[str] | None = None,
+            orgs: list[str] | None = None, slugs: list[str] | None = None,
+            no_stream: bool = False) -> int:
     """`saw discard`: remove what `fix` produced — the `security/auto-clean` branch
     (`--branch`: local + remote, pure git, SSL-immune) and/or its PR (`--pr`: API). LOCAL by
-    default; `--remote` sweeps the configured GitHub targets. Requires at least one of
-    `--branch`/`--pr`. Returns 2 on a usage/config error, else 0."""
+    default; `--remote` sweeps GitHub targets resolved by the #1075 ladder (ad-hoc selectors →
+    config → your own repos). Requires at least one of `--branch`/`--pr`. Returns 2 on a
+    usage/config error, else 0."""
     if not (branch or pr):
         print("Nothing to discard: pass --branch (delete the fix branch) and/or --pr "
               "(close the fix PR).", file=sys.stderr)
@@ -261,7 +282,8 @@ def discard(config_path: str | None = None, *, branch: bool = False, pr: bool = 
     prog.line(f"Security discard — {now_iso()}")
     prog.line("")
 
-    outcomes = (_discard_remote(cfg, opts, branch, pr, prog) if remote
+    outcomes = (_discard_remote(cfg, opts, branch, pr, prog, users=users, orgs=orgs, slugs=slugs)
+                if remote
                 else _discard_local(cfg, opts, branch, pr, paths, prog))
     if not outcomes:
         prog.line("No repositories to discard.")

@@ -76,8 +76,14 @@ saw scan --config config/security.yml            # full report to the terminal; 
 saw scan --json > report.json                    # machine-readable, full evidence, to a pipe
 saw scan --alert                                 # Slack summary + GitHub issue per infected repo
 saw scan --sarif scan.sarif                      # redacted SARIF for GitHub code-scanning upload
-saw scan --remote                                # scan the configured GitHub targets instead of local
+saw scan --remote                                # scan your own GitHub repos (or configured targets)
+saw scan --org UB-TechDEV                         # an org's repos (implies --remote)
+saw scan --remote Ndevu12/strix                   # one specific GitHub repo (owner/repo slug)
 ```
+
+Under `--remote`, targets resolve by a ladder: **ad-hoc selectors** (`--user`/`--org`/`owner/repo`)
+override **configured** `targets.github`, which falls back to **your own repos** (the authenticated
+user's owned repos, private-inclusive). Same ladder for `saw fix --remote` and `saw discard --remote`.
 
 ### Ad-hoc local scanning (no token, no config)
 

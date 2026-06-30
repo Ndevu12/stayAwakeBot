@@ -100,6 +100,30 @@ def list_repos(account: str, kind: str, token: str | None,
     return slugs
 
 
+def list_my_repos(token: str | None, include_forks: bool = False,
+                  include_archived: bool = False, affiliation: str = "owner") -> list[str]:
+    """Repos the AUTHENTICATED user owns ('owner/name', ...), paginated. Uses `/user/repos`
+    — which is **private-inclusive** — NOT `/users/{me}/repos`, which returns only PUBLIC
+    repos even with your token (so the latter would silently miss your private repos). Default
+    `affiliation='owner'` (just yours); pass `'owner,collaborator,organization_member'` for
+    everything you can touch."""
+    slugs: list[str] = []
+    page = 1
+    while True:
+        batch = request(f"/user/repos?per_page=100&page={page}&affiliation={affiliation}", token=token)
+        if not isinstance(batch, list) or not batch:
+            break
+        for r in batch:
+            if (not include_forks and r.get("fork")) or (not include_archived and r.get("archived")):
+                continue
+            if r.get("full_name"):
+                slugs.append(r["full_name"])
+        if len(batch) < 100:
+            break
+        page += 1
+    return slugs
+
+
 def list_installation_repos(token: str | None, include_archived: bool = False) -> list[str]:
     """Repos a GitHub App installation can access ('owner/name', ...), paginated.
     `token` must be an installation access token (see core.github_app)."""
