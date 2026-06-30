@@ -2,11 +2,11 @@
 """`saw scan` — hunt supply-chain worms (READ-ONLY). Routes to security.service.scan.
 
 Terminal-first: by default the result is rendered to the terminal and NOTHING is written to
-disk. The verdict is the exit code (0 clean / 1 infected), unconditionally. Scope is LOCAL
-by default (given paths / configured globs / the current repo); `--remote` scans the
-configured GitHub targets instead. Persisting or alerting is opt-in: --json (machine
-stdout), --sarif FILE, -d DIR (both redacted), --alert (GitHub issue + Slack). Remediation
-lives in `saw fix`, never here.
+disk. The verdict is the exit code (0 clean / 1 infected), unconditionally. Scope is LOCAL by
+default (given paths / configured globs / the current repo); `--remote` (or naming `--user`/
+`--org`) scans GitHub repos instead — ad-hoc selectors, else configured targets, else your own
+repos. Persisting/alerting is opt-in: --json, --sarif FILE, -d DIR (redacted), --alert.
+Remediation lives in `saw fix`, never here.
 """
 from __future__ import annotations
 
@@ -17,14 +17,20 @@ from stayawake.bots.security import service
 
 def register(sub) -> None:
     p = sub.add_parser("scan", aliases=["s", "sc"], help="hunt supply-chain worms (read-only)")
-    p.add_argument("paths", nargs="*", metavar="PATHS",
-                   help="repo/dir paths to scan. Omit to scan configured targets or the current repo.")
+    p.add_argument("paths", nargs="*", metavar="TARGETS",
+                   help="local repo/dir paths — or, with --remote, owner/repo slugs. "
+                        "Omit to scan configured targets or the current repo.")
     p.add_argument("-p", "--path", action="append", default=[], dest="extra_paths",
-                   metavar="PATH", help="additional path to scan (repeatable)")
+                   metavar="PATH", help="additional target (repeatable)")
     p.add_argument("-c", "--config", default=None,
                    help="config file (default: config/security.yml when present)")
     p.add_argument("-r", "--remote", action="store_true",
-                   help="scan the configured GitHub targets instead of local repos")
+                   help="scan GitHub repos instead of local: ad-hoc --user/--org/owner-repo, "
+                        "else configured targets, else your own repos")
+    p.add_argument("--user", action="append", default=[], metavar="USER",
+                   help="scan this GitHub user's repos (repeatable; implies --remote)")
+    p.add_argument("--org", action="append", default=[], metavar="ORG",
+                   help="scan this GitHub org's repos (repeatable; implies --remote)")
     p.add_argument("--no-stream", action="store_true", dest="no_stream",
                    help="disable live progress/typewriter output (plain, instant lines)")
     # Opt-in output surfaces (terminal-first: none of these is on by default).
@@ -40,7 +46,11 @@ def register(sub) -> None:
 
 
 def run(a: argparse.Namespace) -> int:
-    paths = [*a.paths, *a.extra_paths]
-    return service.scan(a.config, remote=a.remote, paths=paths or None,
+    positionals = [*a.paths, *a.extra_paths]
+    remote = a.remote or bool(a.user) or bool(a.org)   # naming a GitHub account implies --remote
+    return service.scan(a.config, remote=remote,
+                        paths=None if remote else (positionals or None),
+                        slugs=(positionals or None) if remote else None,
+                        users=a.user or None, orgs=a.org or None,
                         json_out=a.json, sarif_path=a.sarif, reports_dir=a.reports_dir,
                         alert=a.alert, no_stream=a.no_stream)

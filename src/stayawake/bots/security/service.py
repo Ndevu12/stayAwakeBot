@@ -9,6 +9,7 @@ scanned code; remote repos are cloned read-only into sandboxes and removed after
 from __future__ import annotations
 
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -80,19 +81,69 @@ def discover_local_repos(patterns: list[str], opts: ScanOptions) -> list[Path]:
     return repos
 
 
-def _resolve_remote(cfg: dict, opts: ScanOptions):
+def _remote_scope(cfg: dict, users, orgs, slugs) -> str:
+    """A short label for the per-run line, describing WHICH remote repos a `--remote` run
+    resolved (mirrors the ladder in `_resolve_remote`). Pure — no API calls."""
+    if users or orgs or slugs:
+        bits = []
+        if users:
+            bits.append("user " + ", ".join(users))
+        if orgs:
+            bits.append("org " + ", ".join(orgs))
+        if slugs:
+            bits.append(f"{len(slugs)} named repo(s)")
+        return "; ".join(bits)
     gconf = cfg.get("targets", {}).get("github", {}) or {}
+    if gconf.get("users") or gconf.get("orgs"):
+        return "configured targets"
+    return "your own repos"
+
+
+def _resolve_remote(cfg: dict, opts: ScanOptions, *, users=None, orgs=None, slugs=None):
+    """Resolve `--remote` targets to ('owner/name', ...). Ladder, first match wins (#1075):
+      1. ad-hoc CLI selectors — `slugs` (named repos), `--user`/`--org` enumerations — which
+         OVERRIDE config so you can target anything without editing a file;
+      2. configured `targets.github.users/orgs`;
+      3. infer "my repos" — the authenticated user's OWNED repos (private-inclusive via
+         /user/repos), or a GitHub App installation's repos.
+    Returns (sorted unique slugs, token, source)."""
+    gconf = cfg.get("targets", {}).get("github", {}) or {}
+    inc_forks = gconf.get("include_forks", False)
+    inc_arch = gconf.get("include_archived", False)
     token, source = auth.resolve_token()
-    slugs: list[str] = []
-    for kind in ("users", "orgs"):
-        for acct in gconf.get(kind, []) or []:
-            slugs += github_api.list_repos(acct, kind, token,
-                                           gconf.get("include_forks", False),
-                                           gconf.get("include_archived", False))
-    # With a GitHub App and no explicit accounts, scan everything the install can see.
-    if source == "github-app" and not slugs:
-        slugs += github_api.list_installation_repos(token, gconf.get("include_archived", False))
-    return sorted(set(slugs)), token, source
+    resolved: list[str] = []
+
+    if users or orgs or slugs:                       # 1. ad-hoc selectors override everything
+        resolved += list(slugs or [])
+        for u in users or []:
+            resolved += github_api.list_repos(u, "users", token, inc_forks, inc_arch)
+        for o in orgs or []:
+            resolved += github_api.list_repos(o, "orgs", token, inc_forks, inc_arch)
+    else:
+        for kind in ("users", "orgs"):               # 2. configured targets
+            for acct in gconf.get(kind, []) or []:
+                resolved += github_api.list_repos(acct, kind, token, inc_forks, inc_arch)
+        if not resolved and token:                   # 3. infer "my repos"
+            resolved += (github_api.list_installation_repos(token, inc_arch)
+                         if source == "github-app"
+                         else github_api.list_my_repos(token, inc_forks, inc_arch))
+    return sorted(set(resolved)), token, source
+
+
+_SLUG_RE = re.compile(r"^[^/\s]+/[^/\s]+$")
+
+
+def invalid_slugs(slugs) -> list[str]:
+    """The entries that aren't a valid `owner/name` — so `--remote` positionals (which are
+    slugs, not local paths) fail loudly instead of silently resolving to nothing."""
+    return [s for s in (slugs or []) if not _SLUG_RE.match(s)]
+
+
+# Shared actionable message when a `--remote` run resolves zero repositories.
+REMOTE_EMPTY_HINT = (
+    "No GitHub repositories resolved. Name targets with `--user U` / `--org O` / `owner/repo`, "
+    "set `targets.github` in the config, or authenticate (`gh auth login` or GH_SECURITY_TOKEN) "
+    "to act on your own repos.")
 
 
 def _status_tag(r: ScanResult) -> str:
@@ -103,13 +154,16 @@ def _status_tag(r: ScanResult) -> str:
 
 
 def scan(config_path: str | None = None, *, remote: bool = False,
-         paths: list[str] | None = None, json_out: bool = False,
-         sarif_path: str | Path | None = None, reports_dir: str | Path | None = None,
-         alert: bool = False, no_stream: bool = False) -> int:
+         paths: list[str] | None = None, users: list[str] | None = None,
+         orgs: list[str] | None = None, slugs: list[str] | None = None,
+         json_out: bool = False, sarif_path: str | Path | None = None,
+         reports_dir: str | Path | None = None, alert: bool = False,
+         no_stream: bool = False) -> int:
     """Scan targets (READ-ONLY) and deliver the result through sinks. Scope is LOCAL by
-    default — explicit `paths`, the configured local globs, or the current repo; pass
-    remote=True (`saw scan --remote`) to scan the configured GitHub targets instead. One
-    scope per run. Persists NOTHING by default (terminal-first); files/alerts are opt-in.
+    default — explicit `paths`, the configured local globs, or the current repo. With
+    remote=True (`saw scan --remote`) it scans GitHub repos resolved by the #1075 ladder:
+    ad-hoc `users`/`orgs`/`slugs` selectors → configured `targets.github` → your own repos.
+    One scope per run. Persists NOTHING by default (terminal-first); files/alerts are opt-in.
     Remediation lives in `saw fix`, never here. Returns the verdict as an exit code: 1 if
     any target is INFECTED, else 0 — unconditionally (a CI gate just reads it)."""
     # Animate each stream by ITS OWN tty-ness (and not --no-stream / env-disabled). The
@@ -129,17 +183,19 @@ def scan(config_path: str | None = None, *, remote: bool = False,
     #     `--remote` switches scope to the configured GitHub targets. One scope per run.
     results: list[ScanResult] = []
     if remote:
-        slugs, token, source = _resolve_remote(cfg, opts)
-        if not slugs:
-            print("No GitHub targets configured (set targets.github.users/orgs).", file=sys.stderr)
-        elif source:
-            print(f"GitHub credential: using {source}.", file=sys.stderr)
+        bad = invalid_slugs(slugs)
+        if bad:
+            print(f"error: --remote targets must be owner/repo slugs; got {bad}", file=sys.stderr)
+            return 2
+        resolved, token, source = _resolve_remote(cfg, opts, users=users, orgs=orgs, slugs=slugs)
+        if not resolved:
+            print(REMOTE_EMPTY_HINT, file=sys.stderr)
         else:
-            print("No GitHub credential found; scanning public remotes anonymously. "
-                  "For private repos, run `gh auth login` or set GH_SECURITY_TOKEN.",
+            print(f"Scanning {len(resolved)} GitHub repositor{'y' if len(resolved) == 1 else 'ies'} "
+                  f"({_remote_scope(cfg, users, orgs, slugs)}, via {source or 'anonymous'}).",
                   file=sys.stderr)
-        m = len(slugs)
-        for j, slug in enumerate(slugs, 1):
+        m = len(resolved)
+        for j, slug in enumerate(resolved, 1):
             rt = RemoteRepoTarget(slug, opts, token)
             try:
                 with status(f"[{j}/{m}] cloning + scanning {slug}…", enabled=progress_on):
