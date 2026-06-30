@@ -131,6 +131,8 @@ saw scan --remote Ndevu12/strix           # one specific GitHub repo
 saw scan; echo $?                         # gate: exit code is the verdict (0 clean / 1 infected)
 saw scan --json > report.json             # machine-readable, full evidence, to a pipe
 saw scan --sarif scan.sarif               # redacted SARIF for GitHub code-scanning upload
+saw scan --alert                          # open/close issues + Slack summary, in-pass
+saw scan -d /tmp/sab-reports              # opt-in redacted latest.json + latest.md
 ```
 
 > **A report is a message, not a file.** The full report — including full match evidence —
