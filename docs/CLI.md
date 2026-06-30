@@ -18,7 +18,7 @@ run on your own machine to detect, report, and auto-remediate self-propagating m
 - [Synopsis](#synopsis)
 - [Global options](#global-options)
 - [Commands](#commands)
-  - [`saw scan`](#saw-scan) · [`saw fix`](#saw-fix) · [`saw audit`](#saw-audit) ·
+  - [`saw scan`](#saw-scan) · [`saw fix`](#saw-fix) · [`saw discard`](#saw-discard) · [`saw audit`](#saw-audit) ·
     [`saw search`](#saw-search) · [`saw doctor`](#saw-doctor) · [`saw completion`](#saw-completion)
 - [Exit codes](#exit-codes)
 - [Shell completion](#shell-completion)
@@ -141,29 +141,31 @@ saw scan -d /tmp/sab-reports              # opt-in redacted latest.json + latest
 >
 ### `saw fix`
 
-Clean up detected worm findings by opening a **pull request** — the review gate. There is no
-apply/preview flag: running `fix` opens (or updates) one rolling `security/auto-clean` PR per
-**infected** repo, and re-runs **update** that PR rather than opening duplicates. Cleanup is
-never an in-place edit, so it can't corrupt your working tree — and nothing reaches a default
-branch until you review and merge. Scope is **local by default** (given paths / configured
-globs / the current repo); `--remote` sweeps the configured GitHub targets. Each repo's outcome
-**streams live** as its PR is opened/updated.
+Clean up detected worm findings on a branch. **By default `fix` PREPARES the fix on a local
+`security/auto-clean` branch and stops** — no push, no PR, no network — leaving it for you to
+review and push. It never edits your working tree (the fix lives on the branch), so it can't
+corrupt code and makes zero surprise remote writes. `--pr` additionally **pushes** the branch
+and opens/updates one rolling PR per repo (re-runs update it, never duplicate). `--remote`
+sweeps the configured GitHub targets (clone → fix → PR). Scope is **local by default**; each
+repo's outcome **streams live**.
 
 ```text
-saw fix [PATHS...] [-r] [-p PATH] [-c FILE] [--no-stream]
+saw fix [PATHS...] [--pr] [-r] [-p PATH] [-c FILE] [--no-stream]
 ```
 
 | Option | Description |
 | --- | --- |
 | `PATHS...` | Repo/dir paths to fix (local). Omit to fix configured targets or the current repo. |
 | `-p`, `--path PATH` | Additional path to fix (repeatable). |
-| `-r`, `--remote` | Fix the configured GitHub targets instead of local repos. Needs a GitHub credential with repo + PR write scope (an env token or a `gh auth login` session). |
-| `-c`, `--config FILE` | Config file. **Optional** — defaults to `config/security.yml` when present, else the current repository. An explicitly-passed path that does not exist is a clear error (exit `2`), never a crash. |
+| `--pr`, `--open-pr` | Also **push** the branch and open/update one rolling, de-duplicated PR per repo. Needs a GitHub credential with repo + PR write scope; the API is **pre-flighted** before any push. |
+| `-r`, `--remote` | Sweep the configured GitHub targets (clone → fix → PR) instead of local repos. |
+| `-c`, `--config FILE` | Config file. **Optional** — defaults to `config/security.yml` when present, else the current repository. A missing explicit path is a clear error (exit `2`), never a crash. |
 | `--no-stream` | Disable the live per-repo progress output — plain, instant lines. |
 
 ```bash
-saw fix                       # open/update a cleanup PR for each local infected repo
-saw fix .                     # fix the current repository
+saw fix                       # prepare a security/auto-clean branch per local infected repo (no push)
+saw fix .                     # prepare a branch for the current repo; review the diff, then push
+saw fix --pr                  # also push + open/update one rolling PR per repo
 saw fix --remote              # sweep the configured GitHub targets, one rolling PR each
 ```
 
@@ -174,7 +176,30 @@ saw fix --remote              # sweep the configured GitHub targets, one rolling
 > Fonts/markers/VS-Code-autorun use reliable whole-file-quarantine / exact-line removal. The
 > scanner **never surgically edits a source file**, so a fix can never corrupt valid code; and
 > heuristic-only (`suspicious`) matches — e.g. an inlined base64 asset — are disclosed in the
-> PR for review, never auto-touched. The change is delivered as a PR; nothing lands until merged.
+> PR for review, never auto-touched. The fix lives on a branch; nothing lands until you merge.
+
+### `saw discard`
+
+The inverse of `saw fix`: remove what it produced. Only ever touches the auto-generated
+`security/auto-clean` branch — never a real branch. At least one of `--branch`/`--pr` is
+required. Scope is **local by default**; `--remote` sweeps the configured GitHub targets.
+
+```text
+saw discard (--branch | --pr) [-r] [PATHS...] [-c FILE] [--no-stream]
+```
+
+| Option | Description |
+| --- | --- |
+| `-br`, `--branch` | Delete the `security/auto-clean` branch **locally and on its remote** (pure git — works even when the GitHub API is unreachable; deleting the remote branch auto-closes its PR). |
+| `--pr`, `--close-pr` | **Close** the open `security/auto-clean` PR via the API (leaves the branch). |
+| `-r`, `--remote` | Sweep the configured GitHub targets instead of local repos. |
+| `PATHS...` / `-p` / `-c` / `--no-stream` | As for `saw fix`. |
+
+```bash
+saw discard --branch          # delete the auto-clean branch (local + remote) for each repo
+saw discard --pr              # close the auto-clean PRs (keep the branches)
+saw discard --branch --remote # delete the branch across the configured GitHub targets
+```
 
 ### `saw audit`
 

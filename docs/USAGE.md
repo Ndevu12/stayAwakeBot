@@ -96,14 +96,18 @@ for git repos. Scanning is **local by default** (nothing is sent to GitHub unles
 `--remote`). With no paths and nothing configured, it scans the current repository (found by
 walking up to the nearest `.git`), so a bare `saw scan` "just works" after `pip install`.
 
-Cleanup is delivered as a **pull request** (the review gate) — never an in-place edit, and
-re-runs **update** the one rolling PR per repo rather than duplicating it. Each repo's outcome
-streams live:
+By default `saw fix` PREPARES the cleanup on a local `security/auto-clean` branch and stops —
+no push, no PR, no network — so it never edits your working tree and makes zero surprise remote
+writes. Review the branch, then publish with `--pr` (push + one rolling, de-duplicated PR per
+repo). `saw discard` is the inverse. Each repo's outcome streams live:
 
 ```bash
-saw fix                    # open/update a cleanup PR for each local infected repo
-saw fix .                  # fix the current repository
+saw fix                    # prepare a security/auto-clean branch per local infected repo (no push)
+saw fix .                  # prepare a branch for the current repo; review `git diff main...security/auto-clean`
+saw fix --pr               # also push + open/update one rolling PR per repo
 saw fix --remote           # sweep the configured GitHub targets, one rolling PR each
+saw discard --branch       # undo: delete the auto-clean branch (local + remote)
+saw discard --pr           # undo: close the auto-clean PRs
 ```
 
 **Read-only fallback (remediation ladder):** when `fix` can't push a fix branch (you only

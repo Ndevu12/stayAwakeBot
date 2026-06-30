@@ -14,6 +14,7 @@ import re
 import subprocess
 import tempfile
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from stayawake.core.adapters import github_api
@@ -68,7 +69,7 @@ def _issue_body(slug: str, findings) -> str:
         lines.append(f"- **[{f.severity.label()}]** `{f.signature_id}` — `{loc}`")
     lines += ["", "A remediation has been generated. To apply it, grant the scanner repo + "
               "pull-request write access for an automated PR, or run "
-              "`saw fix --apply` against a local clone to produce a patch.", "",
+              "`saw fix --pr` against a local clone to produce a patch.", "",
               "_Opened by StayAwakeBot Security. De-duplicated — re-runs won't open another._"]
     return "\n".join(lines)
 
@@ -177,99 +178,136 @@ def _pr_body(slug: str, changes, suspicious=()) -> str:
     return "\n".join(lines)
 
 
+@dataclass(frozen=True)
+class _Fix:
+    """The result of building a fix: the base branch it sits on, and the changes/findings
+    used to commit it to FIX_BRANCH and to write the PR body."""
+    base: str
+    applied: list
+    suspicious: list
+    findings: list
+
+
+def _build_fix(repo: Path, opts, signatures, allowlist) -> tuple["_Fix | None", str, Path | None]:
+    """Compute the remediation in a throwaway worktree off the default branch and commit it
+    to the local `security/auto-clean` branch. Pure git + scan — **no network, no GitHub
+    API** — so it works offline and never force-pushes. Returns `(fix, outcome, wt)`:
+    `fix` is None for skip/clean/abort (with `outcome` explaining), else the committed fix.
+    The CALLER owns the returned worktree `wt` and MUST remove it (the branch ref persists
+    after removal, ready to review or push)."""
+    base = default_branch(repo)
+    # Prefer origin/<base> (fresh if the caller fetched) but fall back to the LOCAL base so
+    # `saw fix` works offline / without a remote.
+    baseref = (f"origin/{base}"
+               if _git(repo, "rev-parse", "--verify", "--quiet", f"origin/{base}").returncode == 0
+               else base)
+    if _git(repo, "rev-parse", "--verify", "--quiet", baseref).returncode != 0:
+        return None, "no default branch to build a fix from — skipped", None
+
+    wt = Path(tempfile.mkdtemp(prefix="sab-fix-"))
+    quarantine = Path(tempfile.mkdtemp(prefix="sab-bak-"))  # backups kept OUT of the branch
+    if _git(repo, "worktree", "add", "-f", "-B", FIX_BRANCH, str(wt), baseref).returncode != 0:
+        return None, "could not create worktree", wt
+
+    findings = scan_target(LocalRepoTarget(wt, str(repo), opts), signatures, allowlist).findings
+    content_sig = remediation.codeloader_content_sig([s for g in signatures.values() for s in g])
+    applied = remediation.apply(wt, remediation.plan(findings), quarantine)
+    # CONFIRMED code-loader findings are RECOVERED from git history, never surgically edited —
+    # so the fix can never carry corrupted code. Heuristic-only matches are left for review.
+    seen_cl: set = set()
+    for f in findings:
+        if (f.category != "code-loader" or getattr(f, "confidence", "confirmed") != "confirmed"
+                or f.path in seen_cl):
+            continue
+        seen_cl.add(f.path)
+        disp = remediation.classify_recovery(wt, f, content_sig)
+        if isinstance(disp, remediation.Recovery) and \
+                remediation.apply_recovery(wt, disp, quarantine, content_sig):
+            applied.append(remediation.Change("recover", disp.path, disp.label))
+
+    # Post-apply verification — never leave a fix that is still infected. BLOCKING = anything
+    # still auto-fixable OR any CONFIRMED code-loader we couldn't recover; quarantine the
+    # auto-fixable, and ABORT if a confirmed infection remains (needs manual review).
+    def _scan():
+        return scan_target(LocalRepoTarget(wt, str(repo), opts), signatures, allowlist).findings
+
+    def _blocking(fs):
+        return [f for f in fs if remediation.is_auto_fixable(f)
+                or (f.category == "code-loader"
+                    and getattr(f, "confidence", "confirmed") == "confirmed")]
+
+    fs = _scan()
+    auto = [f for f in _blocking(fs) if remediation.is_auto_fixable(f)]
+    if auto:
+        applied += remediation.quarantine_residual(wt, auto, quarantine)
+        fs = _scan()
+    if _blocking(fs):
+        return None, (f"ABORTED — {len(_blocking(fs))} finding(s) still present after "
+                      "remediation; needs manual review"), wt
+    if not applied:
+        return None, f"'{base}' already clean — nothing to fix", wt
+    suspicious = list(fs)   # heuristic-only residue, disclosed in the PR body
+
+    if not _untrack_quarantine(wt):
+        return None, f"ABORTED — could not untrack {QUARANTINE_DIR}/ (would commit backups)", wt
+    _git(wt, "add", "-A")
+    msg = "security: auto-remediate worm indicators\n\n" + \
+          "\n".join(f"- {c.action}: {c.path}" for c in applied)
+    _git(wt, *_BOT, "commit", "-m", msg)
+    return _Fix(base, applied, suspicious, findings), "", wt
+
+
+def prepare_fix(repo: Path, opts, signatures, allowlist) -> str:
+    """`saw fix` (no --pr): build the fix on the local `security/auto-clean` branch and STOP.
+    No push, no PR, no GitHub API — offline-safe, zero remote writes. The branch is left in
+    the repo for the user to review and push (or publish with `saw fix --pr`)."""
+    slug = origin_slug(repo) or str(repo).replace(str(Path.home()), "~")
+    fix, outcome, wt = _build_fix(repo, opts, signatures, allowlist)
+    try:
+        if fix is None:
+            return f"{slug}: {outcome}"
+        return (f"{slug}: prepared {len(fix.applied)} change(s) on '{FIX_BRANCH}' — review "
+                f"`git -C {repo} diff {fix.base}...{FIX_BRANCH}`, then `saw fix --pr` to open a PR")
+    finally:
+        if wt:
+            _git(repo, "worktree", "remove", "--force", str(wt))
+
+
 def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
                   patches_dir: Path | None = None) -> str:
-    """Open (or update) one dedup'd remediation PR for `repo`. Returns an outcome string.
-    If the branch can't be pushed (read-only access), falls back to writing a patch file
-    instead of discarding the fix when the worktree is torn down."""
+    """`saw fix --pr` (and the `--remote` sweep): build the fix, then PUSH `security/auto-clean`
+    and open/update one dedup'd PR. If the branch can't be pushed (read-only access), walks the
+    fork → patch → issue fallback ladder. Returns an outcome string."""
     slug = origin_slug(repo)
     if not slug:
-        return "no GitHub origin remote — skipped"
+        # No origin to PR against — still prepare the local branch so the work isn't lost.
+        fix, outcome, wt = _build_fix(repo, opts, signatures, allowlist)
+        try:
+            if fix is None:
+                return outcome
+            return f"no GitHub origin — prepared on '{FIX_BRANCH}'; add a remote and push to open a PR"
+        finally:
+            if wt:
+                _git(repo, "worktree", "remove", "--force", str(wt))
+
     owner, name = slug.split("/", 1)
-    base = default_branch(repo)
-
-    existing = github_api.list_open_pulls(owner, name, FIX_BRANCH, token)
-
-    _git(repo, "fetch", "--quiet", "origin", base)
-    wt = Path(tempfile.mkdtemp(prefix="sab-fix-"))
-    quarantine = Path(tempfile.mkdtemp(prefix="sab-bak-"))  # backups kept OUT of the PR
+    _git(repo, "fetch", "--quiet", "origin", default_branch(repo))
+    fix, outcome, wt = _build_fix(repo, opts, signatures, allowlist)
     try:
-        if _git(repo, "worktree", "add", "-f", "-B", FIX_BRANCH, str(wt),
-                f"origin/{base}").returncode != 0:
-            return f"{slug}: could not create worktree"
-
-        findings = scan_target(LocalRepoTarget(wt, slug, opts), signatures, allowlist).findings
-        content_sig = remediation.codeloader_content_sig([s for g in signatures.values() for s in g])
-        changes = remediation.plan(findings)
-
-        applied = remediation.apply(wt, changes, quarantine)
-        # CONFIRMED code-loader findings are RECOVERED from git history (the clone has it),
-        # never surgically edited — so a fix PR can never carry corrupted code. Heuristic-only
-        # matches (asset/minified shape) are left for human review, never auto-recovered.
-        seen_cl: set = set()
-        for f in findings:
-            if (f.category != "code-loader"
-                    or getattr(f, "confidence", "confirmed") != "confirmed"
-                    or f.path in seen_cl):
-                continue
-            seen_cl.add(f.path)
-            disp = remediation.classify_recovery(wt, f, content_sig)
-            if isinstance(disp, remediation.Recovery) and \
-                    remediation.apply_recovery(wt, disp, quarantine, content_sig):
-                applied.append(remediation.Change("recover", disp.path, disp.label))
-
-        # Post-apply verification — a worm-killer must never open a PR over a tree that is
-        # still infected. BLOCKING residual = anything still auto-fixable OR any CONFIRMED
-        # code-loader payload we could not recover; quarantine the auto-fixable, and ABORT if a
-        # confirmed infection remains (a born-infected / legit-edits case needs manual review).
-        def _scan():
-            return scan_target(LocalRepoTarget(wt, slug, opts), signatures, allowlist).findings
-
-        def _blocking(fs):
-            return [f for f in fs if remediation.is_auto_fixable(f)
-                    or (f.category == "code-loader"
-                        and getattr(f, "confidence", "confirmed") == "confirmed")]
-
-        fs = _scan()
-        auto = [f for f in _blocking(fs) if remediation.is_auto_fixable(f)]
-        if auto:
-            applied += remediation.quarantine_residual(wt, auto, quarantine)
-            fs = _scan()
-        blocking = _blocking(fs)
-        if blocking:
-            return (f"{slug}: ABORTED — {len(blocking)} finding(s) still present after "
-                    f"remediation; no PR opened (needs manual review)")
-        if not applied:
-            return f"{slug}: '{base}' already clean — nothing to PR"
-        # Whatever remains is heuristic/suspicious only (the blocking set is empty): a packed/
-        # encoded shape that may be a legitimate asset OR a payload the confirmed signatures
-        # didn't name. Don't block the confirmed cleanup on a possible false positive, but
-        # DISCLOSE it in the PR body so the tree is never presented as fully clean when it isn't.
-        suspicious = list(fs)
-
-        # quarantine backups live in an out-of-tree tempdir here; still untrack any
-        # pre-existing TRACKED quarantine dir so live-malware backups never ship.
-        if not _untrack_quarantine(wt):
-            return f"{slug}: ABORTED — could not untrack {QUARANTINE_DIR}/ (would commit backups)"
-        _git(wt, "add", "-A")
-        msg = "security: auto-remediate worm indicators\n\n" + \
-              "\n".join(f"- {c.action}: {c.path}" for c in applied)
-        _git(wt, *_BOT, "commit", "-m", msg)
-
-        # Token is passed via GIT_ASKPASS (env), never embedded in the push URL/argv.
+        if fix is None:
+            return f"{slug}: {outcome}"
+        base = fix.base
+        # Token via GIT_ASKPASS (env), never in the URL/argv. Push the FIX_BRANCH ref.
         with gitutil.github_https_auth(token) as (prefix, env):
             pushed = _git(wt, "push", "--force", f"{prefix}{slug}.git",
                           f"{FIX_BRANCH}:{FIX_BRANCH}", env=env).returncode == 0
         if not pushed:
-            # No write access — walk down the remediation ladder:
-            #   1) push to a fork under our account and open a cross-fork PR,
-            #   2) else save the fix as a patch (needs no permissions) AND
-            #      notify the repo via a de-duplicated issue (needs only issues:write).
-            forked = _fork_and_pr(wt, owner, name, base, applied, suspicious, token)
+            # No write access — fork→PR, else patch + de-duplicated issue.
+            forked = _fork_and_pr(wt, owner, name, base, fix.applied, fix.suspicious, token)
             if forked:
                 return forked
             patch = _save_patch(wt, slug, Path(patches_dir) if patches_dir else PATCHES_DIR)
-            issue = _open_issue_fallback(owner, name, findings, token)
+            issue = _open_issue_fallback(owner, name, fix.findings, token)
             bits = []
             if patch:
                 bits.append(f"saved the fix as a patch at {patch} "
@@ -280,15 +318,70 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
                 return f"{slug}: branch push failed (check token write scope)"
             return f"{slug}: push rejected (no write access?) — " + "; ".join(bits) + "."
 
+        existing = github_api.list_open_pulls(owner, name, FIX_BRANCH, token)
         if existing:
             pr = existing[0]
             return f"{slug}: updated existing PR #{pr['number']} ({pr.get('html_url','')}) — no duplicate"
         pr = github_api.create_pull(owner, name,
                                     title="security: auto-remediate worm indicators",
                                     head=FIX_BRANCH, base=base,
-                                    body=_pr_body(slug, applied, suspicious), token=token)
+                                    body=_pr_body(slug, fix.applied, fix.suspicious), token=token)
         if pr and pr.get("number"):
             return f"{slug}: opened PR #{pr['number']} ({pr.get('html_url','')})"
-        return f"{slug}: branch pushed but PR creation failed (check token scope)"
+        return f"{slug}: branch pushed but PR API call failed (network/SSL or token scope)"
     finally:
-        _git(repo, "worktree", "remove", "--force", str(wt))
+        if wt:
+            _git(repo, "worktree", "remove", "--force", str(wt))
+
+
+# ── discard: the inverse of fix (`saw discard`) ──────────────────────────────────
+# Only ever touches the auto-generated FIX_BRANCH — never a real branch. `--branch` is pure
+# git (SSL-immune; deleting the remote branch auto-closes its PR); `--pr` uses the API.
+
+def discard_branch(repo: Path) -> str:
+    """Delete the local `security/auto-clean` branch and origin's copy, using the repo's own
+    `origin` auth (SSH key / credential helper) — no GitHub API, so it works even when the
+    API is unreachable. Deleting the remote branch auto-closes any PR opened from it."""
+    slug = origin_slug(repo) or str(repo).replace(str(Path.home()), "~")
+    did: list[str] = []
+    if _git(repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{FIX_BRANCH}").returncode == 0:
+        if _git(repo, "branch", "-D", FIX_BRANCH).returncode == 0:
+            did.append("local")
+    if _git(repo, "ls-remote", "--exit-code", "--heads", "origin", FIX_BRANCH).returncode == 0:
+        did.append("remote (PR auto-closed)" if _git(repo, "push", "origin", "--delete",
+                   FIX_BRANCH).returncode == 0 else "remote delete FAILED")
+    return (f"{slug}: discarded {FIX_BRANCH} ({', '.join(did)})" if did
+            else f"{slug}: no '{FIX_BRANCH}' branch — nothing to discard")
+
+
+def discard_pr(repo: Path, token: str) -> str:
+    """Close the open `security/auto-clean` PR on the repo's origin (API), leaving the branch."""
+    slug = origin_slug(repo)
+    if not slug:
+        return f"{str(repo).replace(str(Path.home()), '~')}: no GitHub origin — no PR to discard"
+    return discard_remote_pr(slug, token)
+
+
+def discard_remote_branch(slug: str, token: str) -> str:
+    """Delete FIX_BRANCH on a remote repo by slug, with no local clone — `git push --delete`
+    straight to the authed URL (git TLS, SSL-immune). Auto-closes any PR from the branch."""
+    with gitutil.github_https_auth(token) as (prefix, env):
+        ls = subprocess.run(["git", "ls-remote", "--heads", f"{prefix}{slug}.git", FIX_BRANCH],
+                            capture_output=True, text=True, env=env, check=False)
+        if not ls.stdout.strip():
+            return f"{slug}: no '{FIX_BRANCH}' branch — nothing to discard"
+        ok = subprocess.run(["git", "push", f"{prefix}{slug}.git", "--delete", FIX_BRANCH],
+                            capture_output=True, text=True, env=env, check=False).returncode == 0
+    return f"{slug}: deleted {FIX_BRANCH} (PR auto-closed)" if ok else f"{slug}: remote delete failed"
+
+
+def discard_remote_pr(slug: str, token: str) -> str:
+    """Close the open FIX_BRANCH PR(s) on a remote repo by slug (API)."""
+    owner, name = slug.split("/", 1)
+    existing = github_api.list_open_pulls(owner, name, FIX_BRANCH, token)
+    if not existing:
+        return f"{slug}: no open '{FIX_BRANCH}' PR"
+    closed = [f"#{p['number']}" for p in existing
+              if github_api.close_pull(owner, name, p["number"], token)]
+    return (f"{slug}: closed PR {', '.join(closed)}" if closed
+            else f"{slug}: failed to close PR (network/SSL or token scope)")

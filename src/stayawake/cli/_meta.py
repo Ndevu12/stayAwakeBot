@@ -16,4 +16,4 @@ except PackageNotFoundError:               # running from a source tree without 
 DEFAULT_REPORTS = "reports/security"
 
 # Canonical verbs in display order — used by `completion` and the conflict-guard test.
-VERBS = ["scan", "fix", "audit", "search", "doctor", "completion"]
+VERBS = ["scan", "fix", "discard", "audit", "search", "doctor", "completion"]
