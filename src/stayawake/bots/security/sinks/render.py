@@ -56,7 +56,8 @@ def _label_color(label: str) -> str | None:
     return _STATUS_COLOR.get(label) or (_GREEN if label == "clean" else None)
 
 
-def render_terminal(payload: dict[str, Any], *, color: bool = False) -> str:
+def render_terminal(payload: dict[str, Any], *, color: bool = False,
+                    collapse_clean_over: int = 0, detail: bool = True) -> str:
     s = payload["summary"]
     out = [f"Security scan — {payload['generated_at']}", "",
            f"{s['targets']} targets · {s['infected']} infected · "
@@ -68,33 +69,48 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False) -> str:
         out.append("No targets scanned.")
         return "\n".join(out) + "\n"
 
-    # Table: EVERY scanned target, worst-first (infected → suspect → error → clean), then
-    # by finding count, then name — problems sit at the top, but the full inventory shows.
+    # Table, worst-first (infected → suspect → error → clean), then by finding count, then
+    # name — problems sit at the top. For a LARGE fleet the clean rows are collapsed to a
+    # count (clean = nothing to look at); the full inventory still lives in --json / -d.
     def sort_key(r):
         v = _verdict(r)
         return (v[0] if v else 3, -r["summary"]["total"], r["target"])
 
     ordered = sorted(results, key=sort_key)
-    headers = ("STATUS", "FINDINGS", "SEVERITY", "TARGET")
-    body = [(_label(r), str(r["summary"]["total"]),
-             r["summary"]["max_severity"] or "—", r["target"]) for r in ordered]
-    widths = [max(len(headers[i]), *(len(row[i]) for row in body)) for i in range(4)]
-    out.append("  ".join(headers[i].ljust(widths[i]) for i in range(4)))
-    out.append("  ".join("─" * w for w in widths))
-    for label, total, sev, target in body:
-        cells = [label.ljust(widths[0]), total.ljust(widths[1]),
-                 sev.ljust(widths[2]), target]
-        cells[0] = _c(cells[0], _label_color(label), color)      # pad first, then colour
-        out.append("  ".join(cells))
+    collapse = bool(collapse_clean_over) and len(results) > collapse_clean_over
+    rows = [r for r in ordered if _verdict(r) is not None] if collapse else ordered
+    clean_n = len(results) - len(rows)
+
+    if rows:
+        headers = ("STATUS", "FINDINGS", "SEVERITY", "TARGET")
+        body = [(_label(r), str(r["summary"]["total"]),
+                 r["summary"]["max_severity"] or "—", r["target"]) for r in rows]
+        widths = [max(len(headers[i]), *(len(row[i]) for row in body)) for i in range(4)]
+        out.append("  ".join(headers[i].ljust(widths[i]) for i in range(4)))
+        out.append("  ".join("─" * w for w in widths))
+        for label, total, sev, target in body:
+            cells = [label.ljust(widths[0]), total.ljust(widths[1]),
+                     sev.ljust(widths[2]), target]
+            cells[0] = _c(cells[0], _label_color(label), color)  # pad first, then colour
+            out.append("  ".join(cells))
+    if clean_n:
+        out.append(_c(f"… and {clean_n} clean repositor{'y' if clean_n == 1 else 'ies'} "
+                      "— full inventory in the --json / -d report", _GREEN, color))
 
     # Findings detail — only the INFECTED and SUSPECT repos (never clean/error), worst-first,
     # one block each. Within a block, severity tags are padded to a common width so the
     # signatures line up; evidence sits on its own, deeper-indented line. A blank line
     # separates the repo blocks.
-    detail = [r for r in ordered if (r["infected"] or r.get("suspicious")) and r["findings"]]
-    if detail:
+    flagged = [r for r in ordered if (r["infected"] or r.get("suspicious")) and r["findings"]]
+    if flagged and not detail:
+        # Large fleet: the per-finding evidence would bury the terminal (hundreds of lines),
+        # so the table above is the dashboard and the detail lives in the written report.
+        n = len(flagged)
+        out += ["", f"Per-finding detail for {n} flagged "
+                    f"repositor{'y' if n == 1 else 'ies'} is in the full report (path below)."]
+    elif flagged:
         out += ["", "Findings"]
-        for r in detail:
+        for r in flagged:
             label = _label(r)
             total = r["summary"]["total"]
             # Project header, then a rule under it so the project is clearly separated from

@@ -7,6 +7,29 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **`saw fix` — remediate on a branch; `--pr` to publish.** `saw fix` prepares the cleanup on a
+  local `security/auto-clean` branch and stops (no push, no network) — review it and push when
+  ready; **`--pr`** also pushes and opens/updates one rolling, de-duplicated PR per repo;
+  **`--remote`** sweeps configured GitHub repos (clone → fix → PR). Cleanup is delivered as a
+  branch/PR, never an in-place edit, so it can't corrupt your working tree. Each repo's outcome
+  streams live (scanning → fixing → opening PR) under a `Security fix — <timestamp>` header.
+- **`saw discard` — undo a fix.** Removes only the auto-generated `security/auto-clean` branch:
+  **`--branch`** deletes it locally and on its remote (pure git — works even when the GitHub API
+  is unreachable; deleting the remote branch auto-closes its PR), **`--pr`** closes the PR via the
+  API. Local by default; `--remote` sweeps the fleet.
+- **Discoverable remote targeting.** `scan`/`fix`/`discard --remote` resolve GitHub targets by a
+  ladder — ad-hoc **`--user`/`--org`** and `owner/repo` selectors (which override config) →
+  configured `targets.github` → **your own repos** (owned, private-inclusive via `/user/repos`) or
+  a GitHub App installation. `--user`/`--org` imply `--remote`; a non-`owner/repo` positional under
+  `--remote` is a hard error.
+- **Large-fleet result presentation.** A big sweep keeps the terminal a bounded, readable
+  **dashboard** — the table only — by **moving the per-finding evidence to the written report**
+  (the full Markdown + JSON, to your `-d` dir or a temp dir, with its path printed); **clean rows
+  collapse to a count** in the table once the fleet is large (the full inventory stays in
+  `--json`/`-d`). So a 200-repo result is never lost to terminal scrollback or buried under
+  hundreds of evidence lines — **with no pager by default**, so you're never dropped into `less`.
+  `--pager` opts into paging through `$PAGER` (built-in default `less -R`: alternate screen,
+  Ctrl+C quits the pager).
 - **Readable terminal report.** The interactive scan output is an aligned, colour-coded table
   (red INFECTED / yellow SUSPECT / green clean on a TTY; honours `NO_COLOR`) listing every
   scanned target, sorted worst-first. Findings are detailed per infected/suspect repo in spaced
@@ -43,6 +66,9 @@ All notable changes to this project are documented here. The format is based on
 - This changelog.
 
 ### Changed
+- **`saw scan` is read-only — detection only.** Remediation moved out of `scan` into `saw fix`
+  (the old `scan --fix`/`--apply`/`--pr` are gone). Scope is **local by default**; `--remote`
+  (or naming `--user`/`--org`) scans GitHub instead of local — one scope per run.
 - **`saw scan`'s exit code is now the verdict, unconditionally** (`0` clean / `1` infected) — the
   `-f/--fail` (and legacy `--fail-on-findings`) flag is gone; a CI gate just checks the exit code.
   `saw audit` keeps its own `-f/--fail`.
@@ -75,6 +101,8 @@ All notable changes to this project are documented here. The format is based on
   so the moving Marketplace major tag (`v1`) cannot be mistaken for the package version.
 
 ### Removed
+- **`saw scan --fix` / `--apply` / `--pr`** (remediation is now `saw fix` / `saw discard`) and
+  **`saw scan --local` / `--local-only`** (local is the default; `--remote` is the scope toggle).
 - The `saw run`, `saw report`, and standalone `saw alert` verbs. The scan→report→alert pipeline is
   gone: `scan` renders to the terminal and `--alert` pushes the durable record in the same pass.
 - The legacy `stayawake-security-{scan,report,alert,remediate,audit}` console scripts. `saw` is now
@@ -90,6 +118,17 @@ All notable changes to this project are documented here. The format is based on
   `--user "$(id -u):$(id -g)"` invocation for writing the report back to the host.
 
 ### Security
+- **Git-recovery remediation — never corrupts valid code.** An injected code-loader payload is
+  recovered from the file's last clean committed version (the real original), or deferred to manual
+  review with the exact `git checkout` command — the scanner never surgically edits a source file,
+  so a fix can't leave broken code. Only a dense packed payload line carrying a known loader literal
+  is auto-dropped; anything that might be legitimate (a real `fromCharCode` line, mixed code) defers.
+  Originals are backed up to `.malware-quarantine/`, and a fix PR aborts rather than open over a
+  still-infected tree.
+- **Remediation TLS + safety hardening.** The GitHub API verifies TLS against a bundled `certifi`
+  CA set (fixes `CERTIFICATE_VERIFY_FAILED`); API errors go to `stderr` only (never pollute
+  `--json`/reports); and the API is **pre-flighted before any push**, so a broken environment or
+  bad token fails fast instead of force-pushing branches to every repo.
 - **Evidence redaction in persisted artifacts.** Any report written to disk (`--sarif`, `-d`) now
   stores a fingerprint `{sha256, preview (first 24 chars), len}` instead of the raw payload; full
   evidence appears only on the live terminal (`stdout`/`--json`). In-tree report files were

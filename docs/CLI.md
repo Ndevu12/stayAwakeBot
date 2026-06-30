@@ -113,6 +113,7 @@ saw scan [TARGETS...] [-r] [--user U] [--org O] [-c FILE] [-p PATH] [--json] [--
 | `--alert` | Push the durable record **in this pass**: open/close a GitHub issue per infected repo and post a Slack summary. Reads `GITHUB_TOKEN`, `GITHUB_REPOSITORY`, `SLACK_WEBHOOK_URL` from the environment; issue/Slack bodies are **evidence-free**. |
 | `-d`, `--reports-dir DIR` | **Opt-in:** also write `latest.json` + `latest.md` into `DIR`. Evidence is **redacted** in these files (fingerprint only). |
 | `--no-stream` | Disable the live progress/typewriter output — plain, instant lines. (Auto-off already when piped, in CI, or with `STAYAWAKE_NO_STREAM=1`.) |
+| `--pager` | Page the report through `$PAGER` (`less`). **Off by default** — the report prints straight through, and a big sweep's full per-finding detail goes to a written report file (path printed). |
 
 **Remote target resolution** (`--remote`), first match wins — shared by `scan`, `fix`, `discard`:
 
@@ -149,7 +150,17 @@ saw scan -d /tmp/sab-reports              # opt-in redacted latest.json + latest
 > it **auto-disables** when piped, in CI, with `--no-stream`, or `STAYAWAKE_NO_STREAM=1`, so
 > `--json` and any persisted artifact stay byte-for-byte unchanged. Progress goes to `stderr`;
 > the report goes to `stdout`.
->
+
+> **Large fleets — nothing lost to scrollback.** Scanning many repos (locally or `--remote`,
+> your own or an org) produces a report bigger than the terminal. Three things keep it readable
+> and complete, with **no pager by default** (so you're never dropped into `less`): (1) for a big
+> sweep the terminal stays a bounded, readable **dashboard** — the table only — and the
+> **per-finding evidence moves to the written report** (the full Markdown + JSON, in your `-d` dir
+> or a temp dir, with its path printed as `Full report: …`), so the complete result is always
+> recoverable off-terminal; (2) **clean rows collapse to a count** in the table once the fleet is
+> large; (3) if you *do* want to scroll the report in place, `--pager` pipes it through `$PAGER`
+> (the built-in default is plain `less -R` — alternate screen, Ctrl+C quits the pager).
+
 ### `saw fix`
 
 Clean up detected worm findings on a branch. **By default `fix` PREPARES the fix on a local
