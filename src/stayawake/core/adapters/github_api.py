@@ -7,11 +7,23 @@ Single responsibility: talk to the GitHub API. Used by the availability alerter
 from __future__ import annotations
 
 import json
+import ssl
+import sys
 import urllib.error
 import urllib.request
 from typing import Any
 
 _API = "https://api.github.com"
+
+# Verify TLS against a real CA bundle. Python's default context trusts the OS store, which on
+# common macOS (python.org) builds isn't wired to OpenSSL — so every call dies with
+# CERTIFICATE_VERIFY_FAILED. certifi ships a portable bundle; fall back to the system default
+# if it's somehow absent (the dependency makes that unlikely).
+try:
+    import certifi
+    _SSL_CTX: ssl.SSLContext = ssl.create_default_context(cafile=certifi.where())
+except Exception:  # noqa: BLE001 — a TLS-setup hiccup must never crash import
+    _SSL_CTX = ssl.create_default_context()
 
 
 def request(path: str, method: str = "GET", token: str | None = None,
@@ -28,7 +40,7 @@ def request(path: str, method: str = "GET", token: str | None = None,
         headers["Authorization"] = f"Bearer {token}"
     req = urllib.request.Request(_API + path, data=body, headers=headers, method=method)
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=15, context=_SSL_CTX) as resp:
             return json.loads(resp.read().decode())
     except urllib.error.HTTPError as he:
         if not quiet:
@@ -36,11 +48,12 @@ def request(path: str, method: str = "GET", token: str | None = None,
                 detail = he.read().decode()
             except Exception:
                 detail = str(he)
-            print(f"GitHub API error: {he.code} {detail}")
+            # stderr, never stdout — stdout carries `saw scan --json` / piped report output.
+            print(f"GitHub API error: {he.code} {detail}", file=sys.stderr)
         return None
     except Exception as e:  # noqa: BLE001
         if not quiet:
-            print(f"GitHub API request failed: {e}")
+            print(f"GitHub API request failed: {e}", file=sys.stderr)
         return None
 
 
@@ -123,6 +136,14 @@ def create_pull(owner: str, repo: str, title: str, head: str, base: str,
                    data={"title": title, "head": head, "base": base, "body": body})
 
 
+def close_pull(owner: str, repo: str, number: int, token: str | None) -> dict | None:
+    """Close an open PR (PATCH state=closed) — used by `saw discard --pr`. Returns the
+    updated PR dict or None. (Deleting the head branch also auto-closes a PR, so the
+    `discard --branch` path doesn't need this.)"""
+    return request(f"/repos/{owner}/{repo}/pulls/{number}", method="PATCH", token=token,
+                   data={"state": "closed"})
+
+
 def list_open_issues(owner: str, repo: str, token: str | None,
                      labels: str | None = None) -> list[dict]:
     """Open issues (PRs filtered out), optionally restricted to a label. Used to
@@ -191,7 +212,7 @@ def get_branch_protection(owner: str, repo: str, branch: str,
         f"{_API}/repos/{owner}/{repo}/branches/{branch}/protection",
         headers=headers, method="GET")
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=15, context=_SSL_CTX) as resp:
             return json.loads(resp.read().decode())
     except Exception:  # noqa: BLE001 — 404/403/network all mean "treat as unprotected"
         return None

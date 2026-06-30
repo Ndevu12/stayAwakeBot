@@ -28,6 +28,7 @@ classifiers = [
 dependencies = [
   "aiohttp",
   "pyyaml",
+  "certifi",   # portable CA bundle for GitHub API TLS (the OS store isn't always wired to OpenSSL)
 ]
 
 [project.optional-dependencies]

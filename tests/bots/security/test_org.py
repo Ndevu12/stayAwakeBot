@@ -35,11 +35,13 @@ class TestRemoteFix(unittest.TestCase):
 
     def test_no_targets_is_noop(self):
         with mock.patch.object(service.auth, "resolve_token", return_value=("t", "env")), \
+             mock.patch.object(remediator.github_api, "get_authenticated_user", return_value={"login": "o"}), \
              mock.patch.object(service.github_api, "list_repos", return_value=[]):
             self.assertEqual(remediator.fix(_cfg([]), remote=True, no_stream=True), 0)
 
     def test_opens_one_pr_per_repo(self):
         with mock.patch.object(service.auth, "resolve_token", return_value=("t", "env")), \
+             mock.patch.object(remediator.github_api, "get_authenticated_user", return_value={"login": "o"}), \
              mock.patch.object(service.github_api, "list_repos", return_value=["o/a", "o/b"]), \
              mock.patch.object(remediator.gitutil, "github_https_auth", _fake_https_auth), \
              mock.patch.object(remediator.subprocess, "run",
@@ -53,6 +55,7 @@ class TestRemoteFix(unittest.TestCase):
 
     def test_aborted_repo_makes_exit_one(self):
         with mock.patch.object(service.auth, "resolve_token", return_value=("t", "env")), \
+             mock.patch.object(remediator.github_api, "get_authenticated_user", return_value={"login": "o"}), \
              mock.patch.object(service.github_api, "list_repos", return_value=["o/a"]), \
              mock.patch.object(remediator.gitutil, "github_https_auth", _fake_https_auth), \
              mock.patch.object(remediator.subprocess, "run",
@@ -62,6 +65,15 @@ class TestRemoteFix(unittest.TestCase):
              mock.patch.object(remediator.shutil, "rmtree"):
             # A repo that couldn't be auto-cleaned (ABORTED) → exit 1 (needs manual review).
             self.assertEqual(remediator.fix(_cfg(["o"]), remote=True, no_stream=True), 1)
+
+    def test_preflight_failure_pushes_nothing(self):
+        # API unreachable / bad token → pre-flight aborts BEFORE any clone or push.
+        with mock.patch.object(service.auth, "resolve_token", return_value=("t", "env")), \
+             mock.patch.object(remediator.github_api, "get_authenticated_user", return_value=None), \
+             mock.patch.object(service.github_api, "list_repos", return_value=["o/a"]), \
+             mock.patch.object(remediator.pr_submit, "submit_fix_pr") as m_pr:
+            self.assertEqual(remediator.fix(_cfg(["o"]), remote=True, no_stream=True), 0)
+            m_pr.assert_not_called()               # nothing pushed when pre-flight fails
 
 
 if __name__ == "__main__":

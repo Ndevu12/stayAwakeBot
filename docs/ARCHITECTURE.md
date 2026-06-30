@@ -24,7 +24,7 @@ docs/  prevent/  reports/  .github/  CONTRIBUTING.md
 
 ## Principles
 - **SRP** — `core` (utilities) · `bots/*` (each bot) · `cli/` (entrypoints) · `data/` (signatures) are separate.
-- **Unified CLI** — the top-level `stayawake.cli` package is the terse, security-only `saw` (and `stayawake`) command; one module per verb under `cli/commands/` (`scan`, `fix`, `audit`, `search`, `doctor`, `completion`), each routing to the **same** `bots/security` service. `saw scan` is **terminal-first** — it renders the report to the terminal and delivers durable output through the opt-in `bots/security/sinks/` (`--json`, `--sarif`, `--alert`, `-d`). The legacy `stayawake-security-*` scripts have been **removed**; health remains remote-only. See [CLI command guide](CLI.md).
+- **Unified CLI** — the top-level `stayawake.cli` package is the terse, security-only `saw` (and `stayawake`) command; one module per verb under `cli/commands/` (`scan`, `fix`, `discard`, `audit`, `search`, `doctor`, `completion`), each routing to the **same** `bots/security` service. `saw scan` is **terminal-first** — it renders the report to the terminal and delivers durable output through the opt-in `bots/security/sinks/` (`--json`, `--sarif`, `--alert`, `-d`). The legacy `stayawake-security-*` scripts have been **removed**; health remains remote-only. See [CLI command guide](CLI.md).
 - **DRY** — `core` (+ `core/adapters`) is reused by both bots; console scripts reuse the thin `main()`s; one packaged signature source.
 - **Reusability / distributability** — `pip install stayawakebot` gives a self-contained scanner with console commands; the worm-scan Action installs it instead of cloning.
 - **Maintainability / collaboration** — standard modern `src/` layout, `pyproject.toml` single source of truth, `CONTRIBUTING.md`, tests mirror `src`, importable without path tricks.
@@ -37,7 +37,8 @@ stayawake-health-check   --config config/urls.yml    # health bot is remote-only
 stayawake-health-report
 stayawake-health-alert
 saw scan  --config config/security.yml               # local security CLI (see docs/CLI.md)
-saw fix [--remote]                                   # cleanup → PR per infected repo
+saw fix [--pr] [--remote]                            # prepare a security/auto-clean branch (--pr to PR)
+saw discard (--branch | --pr) [--remote]             # undo: delete the branch / close the PR
 python -m unittest discover -s tests      # tests (package must be installed)
 ```
 (The health bot's actions also run as `python -m stayawake.bots.health.cli.<action>`.)
