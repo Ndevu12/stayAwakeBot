@@ -69,11 +69,13 @@ def get_repo(owner: str, repo: str, token: str | None) -> dict | None:
     return res if isinstance(res, dict) else None
 
 
-def create_fork(owner: str, repo: str, token: str | None) -> dict | None:
+def create_fork(owner: str, repo: str, token: str | None, quiet: bool = False) -> dict | None:
     """Fork a repo under the authenticated account (idempotent: returns the existing fork
     if present). Creation is asynchronous — poll get_repo() for readiness. Returns the
-    fork object (with 'full_name') or None if forking isn't permitted."""
-    res = request(f"/repos/{owner}/{repo}/forks", method="POST", token=token)
+    fork object (with 'full_name') or None if forking isn't permitted. `quiet` suppresses
+    error logging — the remediation fallback EXPECTS a 403 (forking disabled) and reports
+    the outcome itself, so the raw error mustn't collide with a progress spinner."""
+    res = request(f"/repos/{owner}/{repo}/forks", method="POST", token=token, quiet=quiet)
     return res if isinstance(res, dict) else None
 
 
@@ -145,25 +147,27 @@ def close_pull(owner: str, repo: str, number: int, token: str | None) -> dict | 
 
 
 def list_open_issues(owner: str, repo: str, token: str | None,
-                     labels: str | None = None) -> list[dict]:
+                     labels: str | None = None, quiet: bool = False) -> list[dict]:
     """Open issues (PRs filtered out), optionally restricted to a label. Used to
     de-duplicate the remediation issue fallback."""
     path = f"/repos/{owner}/{repo}/issues?state=open&per_page=100"
     if labels:
         path += f"&labels={labels}"
-    res = request(path, token=token)
+    res = request(path, token=token, quiet=quiet)
     # The issues endpoint also returns PRs; real issues lack a 'pull_request' key.
     return [i for i in res if isinstance(i, dict) and "pull_request" not in i] \
         if isinstance(res, list) else []
 
 
 def create_issue(owner: str, repo: str, title: str, body: str, token: str | None,
-                 labels: list[str] | None = None) -> dict | None:
-    """Open an issue. Returns the created issue dict (with 'number','html_url') or None."""
+                 labels: list[str] | None = None, quiet: bool = False) -> dict | None:
+    """Open an issue. Returns the created issue dict (with 'number','html_url') or None.
+    `quiet` suppresses error logging — the issue fallback expects a possible 403 (no
+    issues/label permission) and reports the patch outcome itself."""
     data: dict = {"title": title, "body": body}
     if labels:
         data["labels"] = labels
-    return request(f"/repos/{owner}/{repo}/issues", method="POST", token=token, data=data)
+    return request(f"/repos/{owner}/{repo}/issues", method="POST", token=token, data=data, quiet=quiet)
 
 
 def update_issue(owner: str, repo: str, number: int, token: str | None,

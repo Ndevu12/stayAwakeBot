@@ -19,6 +19,7 @@ from pathlib import Path
 
 from stayawake.core.adapters import github_api
 from stayawake.core import git as gitutil
+from stayawake.core.streaming import status
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.targets import LocalRepoTarget
 from stayawake.bots.security.models import QUARANTINE_DIR
@@ -78,12 +79,12 @@ def _open_issue_fallback(owner: str, name: str, findings, token: str) -> str | N
     """Notify the repo via a de-duplicated issue when a fix can't be PR'd. Needs only
     `issues: write`; returns a short outcome, or None if it couldn't open one."""
     try:
-        existing = github_api.list_open_issues(owner, name, token, labels=ISSUE_LABEL)
+        existing = github_api.list_open_issues(owner, name, token, labels=ISSUE_LABEL, quiet=True)
         if existing:
             return f"an open issue already tracks this (#{existing[0].get('number')})"
         issue = github_api.create_issue(
             owner, name, f"StayAwakeBot: worm indicators detected in {owner}/{name}",
-            _issue_body(f"{owner}/{name}", findings), token, labels=[ISSUE_LABEL])
+            _issue_body(f"{owner}/{name}", findings), token, labels=[ISSUE_LABEL], quiet=True)
         if issue and issue.get("number"):
             return f"opened issue #{issue['number']} ({issue.get('html_url', '')})"
     except Exception:  # noqa: BLE001 — notification is best-effort; never mask the patch result
@@ -113,7 +114,7 @@ def _fork_and_pr(wt: Path, owner: str, name: str, base: str, applied, suspicious
     me = (github_api.get_authenticated_user(token) or {}).get("login")
     if not me or me.lower() == owner.lower():
         return None  # no identity, or it's our own repo (a fork wouldn't help)
-    fork = github_api.create_fork(owner, name, token)
+    fork = github_api.create_fork(owner, name, token, quiet=True)
     fork_slug = fork.get("full_name") if isinstance(fork, dict) else None
     if not fork_slug or "/" not in fork_slug:
         return None  # forking not permitted → fall back
@@ -188,13 +189,15 @@ class _Fix:
     findings: list
 
 
-def _build_fix(repo: Path, opts, signatures, allowlist) -> tuple["_Fix | None", str, Path | None]:
+def _build_fix(repo: Path, opts, signatures, allowlist, *,
+               label: str = "", spin: bool = False) -> tuple["_Fix | None", str, Path | None]:
     """Compute the remediation in a throwaway worktree off the default branch and commit it
     to the local `security/auto-clean` branch. Pure git + scan — **no network, no GitHub
     API** — so it works offline and never force-pushes. Returns `(fix, outcome, wt)`:
     `fix` is None for skip/clean/abort (with `outcome` explaining), else the committed fix.
     The CALLER owns the returned worktree `wt` and MUST remove it (the branch ref persists
-    after removal, ready to review or push)."""
+    after removal, ready to review or push). `label`/`spin` drive phase-accurate spinners
+    (`scanning …` then `fixing …`) so a long sweep shows what it's actually doing."""
     base = default_branch(repo)
     # Prefer origin/<base> (fresh if the caller fetched) but fall back to the LOCAL base so
     # `saw fix` works offline / without a remote.
@@ -209,25 +212,8 @@ def _build_fix(repo: Path, opts, signatures, allowlist) -> tuple["_Fix | None", 
     if _git(repo, "worktree", "add", "-f", "-B", FIX_BRANCH, str(wt), baseref).returncode != 0:
         return None, "could not create worktree", wt
 
-    findings = scan_target(LocalRepoTarget(wt, str(repo), opts), signatures, allowlist).findings
     content_sig = remediation.codeloader_content_sig([s for g in signatures.values() for s in g])
-    applied = remediation.apply(wt, remediation.plan(findings), quarantine)
-    # CONFIRMED code-loader findings are RECOVERED from git history, never surgically edited —
-    # so the fix can never carry corrupted code. Heuristic-only matches are left for review.
-    seen_cl: set = set()
-    for f in findings:
-        if (f.category != "code-loader" or getattr(f, "confidence", "confirmed") != "confirmed"
-                or f.path in seen_cl):
-            continue
-        seen_cl.add(f.path)
-        disp = remediation.classify_recovery(wt, f, content_sig)
-        if isinstance(disp, remediation.Recovery) and \
-                remediation.apply_recovery(wt, disp, quarantine, content_sig):
-            applied.append(remediation.Change("recover", disp.path, disp.label))
 
-    # Post-apply verification — never leave a fix that is still infected. BLOCKING = anything
-    # still auto-fixable OR any CONFIRMED code-loader we couldn't recover; quarantine the
-    # auto-fixable, and ABORT if a confirmed infection remains (needs manual review).
     def _scan():
         return scan_target(LocalRepoTarget(wt, str(repo), opts), signatures, allowlist).findings
 
@@ -236,33 +222,55 @@ def _build_fix(repo: Path, opts, signatures, allowlist) -> tuple["_Fix | None", 
                 or (f.category == "code-loader"
                     and getattr(f, "confidence", "confirmed") == "confirmed")]
 
-    fs = _scan()
-    auto = [f for f in _blocking(fs) if remediation.is_auto_fixable(f)]
-    if auto:
-        applied += remediation.quarantine_residual(wt, auto, quarantine)
-        fs = _scan()
-    if _blocking(fs):
-        return None, (f"ABORTED — {len(_blocking(fs))} finding(s) still present after "
-                      "remediation; needs manual review"), wt
-    if not applied:
-        return None, f"'{base}' already clean — nothing to fix", wt
-    suspicious = list(fs)   # heuristic-only residue, disclosed in the PR body
+    with status(f"scanning {label}…", enabled=spin):       # phase 1: detection (the slow part)
+        findings = _scan()
 
-    if not _untrack_quarantine(wt):
-        return None, f"ABORTED — could not untrack {QUARANTINE_DIR}/ (would commit backups)", wt
-    _git(wt, "add", "-A")
-    msg = "security: auto-remediate worm indicators\n\n" + \
-          "\n".join(f"- {c.action}: {c.path}" for c in applied)
-    _git(wt, *_BOT, "commit", "-m", msg)
+    # phase 2: apply structure-safe fixes, recover code-loaders from git, verify, commit.
+    with status(f"fixing {label}…", enabled=spin):
+        applied = remediation.apply(wt, remediation.plan(findings), quarantine)
+        # CONFIRMED code-loader findings are RECOVERED from git history, never surgically edited
+        # — so the fix can never carry corrupted code. Heuristic-only matches are left for review.
+        seen_cl: set = set()
+        for f in findings:
+            if (f.category != "code-loader" or getattr(f, "confidence", "confirmed") != "confirmed"
+                    or f.path in seen_cl):
+                continue
+            seen_cl.add(f.path)
+            disp = remediation.classify_recovery(wt, f, content_sig)
+            if isinstance(disp, remediation.Recovery) and \
+                    remediation.apply_recovery(wt, disp, quarantine, content_sig):
+                applied.append(remediation.Change("recover", disp.path, disp.label))
+
+        # Post-apply verification — never leave a fix that is still infected. BLOCKING = anything
+        # still auto-fixable OR any CONFIRMED code-loader we couldn't recover; quarantine the
+        # auto-fixable, and ABORT if a confirmed infection remains (needs manual review).
+        fs = _scan()
+        auto = [f for f in _blocking(fs) if remediation.is_auto_fixable(f)]
+        if auto:
+            applied += remediation.quarantine_residual(wt, auto, quarantine)
+            fs = _scan()
+        if _blocking(fs):
+            return None, (f"ABORTED — {len(_blocking(fs))} finding(s) still present after "
+                          "remediation; needs manual review"), wt
+        if not applied:
+            return None, f"'{base}' already clean — nothing to fix", wt
+        suspicious = list(fs)   # heuristic-only residue, disclosed in the PR body
+
+        if not _untrack_quarantine(wt):
+            return None, f"ABORTED — could not untrack {QUARANTINE_DIR}/ (would commit backups)", wt
+        _git(wt, "add", "-A")
+        msg = "security: auto-remediate worm indicators\n\n" + \
+              "\n".join(f"- {c.action}: {c.path}" for c in applied)
+        _git(wt, *_BOT, "commit", "-m", msg)
     return _Fix(base, applied, suspicious, findings), "", wt
 
 
-def prepare_fix(repo: Path, opts, signatures, allowlist) -> str:
+def prepare_fix(repo: Path, opts, signatures, allowlist, *, spin: bool = False) -> str:
     """`saw fix` (no --pr): build the fix on the local `security/auto-clean` branch and STOP.
     No push, no PR, no GitHub API — offline-safe, zero remote writes. The branch is left in
     the repo for the user to review and push (or publish with `saw fix --pr`)."""
     slug = origin_slug(repo) or str(repo).replace(str(Path.home()), "~")
-    fix, outcome, wt = _build_fix(repo, opts, signatures, allowlist)
+    fix, outcome, wt = _build_fix(repo, opts, signatures, allowlist, label=slug, spin=spin)
     try:
         if fix is None:
             return f"{slug}: {outcome}"
@@ -274,14 +282,15 @@ def prepare_fix(repo: Path, opts, signatures, allowlist) -> str:
 
 
 def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
-                  patches_dir: Path | None = None) -> str:
+                  patches_dir: Path | None = None, *, spin: bool = False) -> str:
     """`saw fix --pr` (and the `--remote` sweep): build the fix, then PUSH `security/auto-clean`
     and open/update one dedup'd PR. If the branch can't be pushed (read-only access), walks the
     fork → patch → issue fallback ladder. Returns an outcome string."""
     slug = origin_slug(repo)
     if not slug:
         # No origin to PR against — still prepare the local branch so the work isn't lost.
-        fix, outcome, wt = _build_fix(repo, opts, signatures, allowlist)
+        fix, outcome, wt = _build_fix(repo, opts, signatures, allowlist,
+                                      label=str(repo).replace(str(Path.home()), "~"), spin=spin)
         try:
             if fix is None:
                 return outcome
@@ -292,43 +301,44 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
 
     owner, name = slug.split("/", 1)
     _git(repo, "fetch", "--quiet", "origin", default_branch(repo))
-    fix, outcome, wt = _build_fix(repo, opts, signatures, allowlist)
+    fix, outcome, wt = _build_fix(repo, opts, signatures, allowlist, label=slug, spin=spin)
     try:
         if fix is None:
             return f"{slug}: {outcome}"
         base = fix.base
-        # Token via GIT_ASKPASS (env), never in the URL/argv. Push the FIX_BRANCH ref.
-        with gitutil.github_https_auth(token) as (prefix, env):
-            pushed = _git(wt, "push", "--force", f"{prefix}{slug}.git",
-                          f"{FIX_BRANCH}:{FIX_BRANCH}", env=env).returncode == 0
-        if not pushed:
-            # No write access — fork→PR, else patch + de-duplicated issue.
-            forked = _fork_and_pr(wt, owner, name, base, fix.applied, fix.suspicious, token)
-            if forked:
-                return forked
-            patch = _save_patch(wt, slug, Path(patches_dir) if patches_dir else PATCHES_DIR)
-            issue = _open_issue_fallback(owner, name, fix.findings, token)
-            bits = []
-            if patch:
-                bits.append(f"saved the fix as a patch at {patch} "
-                            f"(apply on '{base}' with `git am {patch.name}`)")
-            if issue:
-                bits.append(issue)
-            if not bits:
-                return f"{slug}: branch push failed (check token write scope)"
-            return f"{slug}: push rejected (no write access?) — " + "; ".join(bits) + "."
+        with status(f"opening PR for {slug}…", enabled=spin):   # phase 3: push + PR / fallback
+            # Token via GIT_ASKPASS (env), never in the URL/argv. Push the FIX_BRANCH ref.
+            with gitutil.github_https_auth(token) as (prefix, env):
+                pushed = _git(wt, "push", "--force", f"{prefix}{slug}.git",
+                              f"{FIX_BRANCH}:{FIX_BRANCH}", env=env).returncode == 0
+            if not pushed:
+                # No write access — fork→PR, else patch + de-duplicated issue.
+                forked = _fork_and_pr(wt, owner, name, base, fix.applied, fix.suspicious, token)
+                if forked:
+                    return forked
+                patch = _save_patch(wt, slug, Path(patches_dir) if patches_dir else PATCHES_DIR)
+                issue = _open_issue_fallback(owner, name, fix.findings, token)
+                bits = []
+                if patch:
+                    bits.append(f"saved the fix as a patch at {patch} "
+                                f"(apply on '{base}' with `git am {patch.name}`)")
+                if issue:
+                    bits.append(issue)
+                if not bits:
+                    return f"{slug}: branch push failed (check token write scope)"
+                return f"{slug}: push rejected (no write access?) — " + "; ".join(bits) + "."
 
-        existing = github_api.list_open_pulls(owner, name, FIX_BRANCH, token)
-        if existing:
-            pr = existing[0]
-            return f"{slug}: updated existing PR #{pr['number']} ({pr.get('html_url','')}) — no duplicate"
-        pr = github_api.create_pull(owner, name,
-                                    title="security: auto-remediate worm indicators",
-                                    head=FIX_BRANCH, base=base,
-                                    body=_pr_body(slug, fix.applied, fix.suspicious), token=token)
-        if pr and pr.get("number"):
-            return f"{slug}: opened PR #{pr['number']} ({pr.get('html_url','')})"
-        return f"{slug}: branch pushed but PR API call failed (network/SSL or token scope)"
+            existing = github_api.list_open_pulls(owner, name, FIX_BRANCH, token)
+            if existing:
+                pr = existing[0]
+                return f"{slug}: updated existing PR #{pr['number']} ({pr.get('html_url','')}) — no duplicate"
+            pr = github_api.create_pull(owner, name,
+                                        title="security: auto-remediate worm indicators",
+                                        head=FIX_BRANCH, base=base,
+                                        body=_pr_body(slug, fix.applied, fix.suspicious), token=token)
+            if pr and pr.get("number"):
+                return f"{slug}: opened PR #{pr['number']} ({pr.get('html_url','')})"
+            return f"{slug}: branch pushed but PR API call failed (network/SSL or token scope)"
     finally:
         if wt:
             _git(repo, "worktree", "remove", "--force", str(wt))
