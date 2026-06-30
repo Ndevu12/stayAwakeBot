@@ -109,11 +109,13 @@ def _fix_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *, publish: bo
     for i, repo in enumerate(repos, 1):
         display = _disp(repo)
         prog.line(f"  [{i}/{len(repos)}] {display}")
-        label = f"{'opening PR for' if publish else 'preparing fix for'} {display}…"
-        with status(label, enabled=prog.enabled):
-            outcome = _safe(
-                (lambda r=repo: pr_submit.submit_fix_pr(r, opts, sigs, allowlist, token)) if publish
-                else (lambda r=repo: pr_submit.prepare_fix(r, opts, sigs, allowlist)), display)
+        # No wrapping spinner here — pr.{prepare_fix,submit_fix_pr} drive their OWN
+        # phase-accurate spinners (scanning → fixing → opening PR), so the label always
+        # reflects what's actually happening.
+        outcome = _safe(
+            (lambda r=repo: pr_submit.submit_fix_pr(r, opts, sigs, allowlist, token, spin=prog.enabled))
+            if publish else
+            (lambda r=repo: pr_submit.prepare_fix(r, opts, sigs, allowlist, spin=prog.enabled)), display)
         prog.line(f"      → {outcome}")
         outcomes.append(outcome)
     return outcomes
@@ -137,13 +139,15 @@ def _fix_remote(cfg, opts, sigs, allowlist, prog: Streamer) -> list[str]:
         tmp = Path(tempfile.mkdtemp(prefix="sab-fix-"))
         clone = tmp / "repo"
         try:
-            with status(f"cloning + fixing {slug}…", enabled=prog.enabled):
+            with status(f"cloning {slug}…", enabled=prog.enabled):   # phase 0: clone only
                 with gitutil.github_https_auth(token) as (prefix, env):
                     r = subprocess.run(["git", "clone", "--quiet", "--depth", "50",
                                         f"{prefix}{slug}.git", str(clone)],
                                        capture_output=True, text=True, check=False, env=env)
-                outcome = (f"{slug}: clone failed (check token access)" if r.returncode != 0
-                           else _safe(lambda: pr_submit.submit_fix_pr(clone, opts, sigs, allowlist, token), slug))
+            # submit_fix_pr then drives its own scanning → fixing → opening-PR spinners.
+            outcome = (f"{slug}: clone failed (check token access)" if r.returncode != 0
+                       else _safe(lambda: pr_submit.submit_fix_pr(clone, opts, sigs, allowlist,
+                                                                  token, spin=prog.enabled), slug))
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
         prog.line(f"      → {outcome}")
