@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-"""Remediator service — `saw fix`.
+"""Remediator service — `saw fix` and `saw discard`.
 
-Remediation is delivered as a PULL REQUEST, never an in-place edit: for each INFECTED
-repository, `fix()` opens (or updates) one rolling `security/auto-clean` PR via
-`pr.submit_fix_pr`. The PR is the review gate, so there is no separate apply/preview step —
-opening the proposal IS the action, and nothing reaches a default branch until a human
-merges it. Scope is LOCAL by default (current repo / configured globs / explicit paths);
-`--remote` targets the configured GitHub repositories instead. Each repo's outcome streams
-live, and one repo's failure never aborts the run.
+`saw fix` (default) PREPARES the fix on a local `security/auto-clean` branch and stops —
+no push, no PR, no network — leaving the branch for the user to review and push. `saw fix
+--pr` additionally pushes and opens/updates one rolling PR per repo; `saw fix --remote`
+sweeps the configured GitHub targets (clone → fix → PR). `saw discard` is the inverse:
+`--branch` deletes the auto-clean branch (local + remote, git only), `--pr` closes its PR.
+
+Scope is LOCAL by default; `--remote` targets the configured GitHub repositories. Anything
+that touches the GitHub API (publish/remote, `discard --pr`) is PRE-FLIGHTED once — a broken
+env (e.g. SSL) or bad token fails fast instead of force-pushing branches. Each repo's outcome
+streams live, and one repo's failure never aborts the run.
 """
 from __future__ import annotations
 
@@ -21,6 +24,7 @@ from pathlib import Path
 from stayawake.core.config import load_yaml
 from stayawake.core import auth
 from stayawake.core import git as gitutil
+from stayawake.core.adapters import github_api
 from stayawake.core.streaming import Streamer, stream_enabled, status
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.service import (
@@ -39,61 +43,89 @@ def _options(settings: dict) -> ScanOptions:
 
 
 def _resolve_config(config_path: str | None):
-    """Load the remediation config without ever crashing on a missing file (#1054).
-    None → the packaged default if it exists, else an empty config — so `saw fix` works on
-    the current repo with no config, mirroring `saw scan`. An explicitly-passed --config
-    that is missing prints a clear, actionable error and returns None (the caller exits
-    non-zero) instead of a raw FileNotFoundError."""
+    """Load the config without ever crashing on a missing file (#1054). None → the packaged
+    default if it exists, else an empty config — so `saw fix`/`saw discard` work on the
+    current repo with no config. An explicit --config that is missing is a clear error."""
     if config_path is None:
         p = Path(DEFAULT_CONFIG)
         return load_yaml(p) if p.exists() else {}
     if not Path(config_path).is_file():
         print(f"error: config '{config_path}' not found. Pass --config <path>, or omit it "
-              "to fix the current repository.", file=sys.stderr)
+              "to act on the current repository.", file=sys.stderr)
         return None
     return load_yaml(config_path)
 
 
-def _safe_pr(repo: Path, display: str, opts, sigs, allowlist, token) -> str:
-    """Open/update one repo's rolling fix PR, never raising — one repo's failure (an
-    unreadable history, a transient git/API error) must not abort the whole run."""
+def _safe(fn, display: str) -> str:
+    """Run one repo's operation, never raising — one repo's failure must not abort the run."""
     try:
-        return pr_submit.submit_fix_pr(repo, opts, sigs, allowlist, token)
-    except Exception as exc:  # noqa: BLE001 — isolate a single repo, keep the sweep going
-        return f"{display}: error — could not fix ({exc})"
+        return fn()
+    except Exception as exc:  # noqa: BLE001 — isolate a single repo, keep the run going
+        return f"{display}: error — {exc}"
 
 
-def _fix_local(cfg, opts, sigs, allowlist, paths, prog: Streamer) -> list[str]:
-    """Fix LOCAL repositories: explicit `paths`, the configured local globs, or — failing
-    both — the current repository. Each repo's cleanup lands as a PR on its own origin."""
-    token, _ = auth.resolve_token()
+def _preflight(token: str | None) -> str | None:
+    """Verify the GitHub API is reachable AND the token is valid BEFORE any push/close, so a
+    broken env (e.g. SSL) or bad token fails fast instead of force-pushing branches to every
+    repo. Returns an error message, or None when good to go."""
     if not token:
-        prog.line(auth.no_credential_hint("opening pull requests")
-                  + " Where a repo can't be PR'd, the fix is saved as a patch instead.")
+        return (auth.no_credential_hint("opening pull requests")
+                + " A token with repo + pull-request write scope is required.")
+    if github_api.get_authenticated_user(token) is None:
+        return ("GitHub API unreachable or token rejected — nothing pushed. Check connectivity "
+                "and token scope; on macOS a missing CA bundle causes this (the `certifi` "
+                "dependency fixes it; reinstall if needed).")
+    return None
+
+
+def _local_repos(cfg: dict, opts: ScanOptions, paths) -> list[Path]:
     cfg_local = (cfg.get("targets", {}) or {}).get("local", []) or []
     patterns = list(paths) if paths else (list(cfg_local) or [str(_enclosing_repo_root())])
-    repos = discover_local_repos(patterns, opts)
+    return discover_local_repos(patterns, opts)
+
+
+def _disp(repo: Path) -> str:
+    return str(repo).replace(os.path.expanduser("~"), "~")
+
+
+# ── saw fix ──────────────────────────────────────────────────────────────────────
+
+def _fix_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *, publish: bool) -> list[str]:
+    """Fix LOCAL repositories. Default: PREPARE a `security/auto-clean` branch per repo (no
+    push, no network). `publish` (`--pr`): also push + open/update a PR (pre-flighted)."""
+    token = None
+    if publish:
+        token, _ = auth.resolve_token()
+        err = _preflight(token)
+        if err:
+            prog.line(err)
+            return []
+    repos = _local_repos(cfg, opts, paths)
     if not repos:
         return []
-    prog.line(f"Fixing {len(repos)} local repositor{'y' if len(repos) == 1 else 'ies'}…")
+    verb = "Opening PRs for" if publish else "Preparing fixes for"
+    prog.line(f"{verb} {len(repos)} local repositor{'y' if len(repos) == 1 else 'ies'}…")
     outcomes: list[str] = []
     for i, repo in enumerate(repos, 1):
-        display = str(repo).replace(os.path.expanduser("~"), "~")
+        display = _disp(repo)
         prog.line(f"  [{i}/{len(repos)}] {display}")
-        with status(f"opening PR for {display}…", enabled=prog.enabled):
-            outcome = _safe_pr(repo, display, opts, sigs, allowlist, token)
+        label = f"{'opening PR for' if publish else 'preparing fix for'} {display}…"
+        with status(label, enabled=prog.enabled):
+            outcome = _safe(
+                (lambda r=repo: pr_submit.submit_fix_pr(r, opts, sigs, allowlist, token)) if publish
+                else (lambda r=repo: pr_submit.prepare_fix(r, opts, sigs, allowlist)), display)
         prog.line(f"      → {outcome}")
         outcomes.append(outcome)
     return outcomes
 
 
 def _fix_remote(cfg, opts, sigs, allowlist, prog: Streamer) -> list[str]:
-    """Fix REMOTE repositories: enumerate the configured GitHub users/orgs (or a GitHub
-    App's installation), clone each to a tempdir, and open/update its rolling fix PR."""
+    """Fix REMOTE repositories: clone each configured GitHub target and open/update its PR
+    (no local copy exists, so a PR is the only output). Unchanged from the original sweep."""
     slugs, token, _source = _resolve_remote(cfg, opts)
-    if not token:
-        prog.line(auth.no_credential_hint("remote remediation PRs")
-                  + " The token needs repo + pull-request write scope.")
+    err = _preflight(token)
+    if err:
+        prog.line(err)
         return []
     if not slugs:
         prog.line("No GitHub targets configured (targets.github.users/orgs or a GitHub App install).")
@@ -106,13 +138,12 @@ def _fix_remote(cfg, opts, sigs, allowlist, prog: Streamer) -> list[str]:
         clone = tmp / "repo"
         try:
             with status(f"cloning + fixing {slug}…", enabled=prog.enabled):
-                # Token via GIT_ASKPASS (env), never in the clone URL/argv.
                 with gitutil.github_https_auth(token) as (prefix, env):
                     r = subprocess.run(["git", "clone", "--quiet", "--depth", "50",
                                         f"{prefix}{slug}.git", str(clone)],
                                        capture_output=True, text=True, check=False, env=env)
                 outcome = (f"{slug}: clone failed (check token access)" if r.returncode != 0
-                           else _safe_pr(clone, slug, opts, sigs, allowlist, token))
+                           else _safe(lambda: pr_submit.submit_fix_pr(clone, opts, sigs, allowlist, token), slug))
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
         prog.line(f"      → {outcome}")
@@ -120,14 +151,12 @@ def _fix_remote(cfg, opts, sigs, allowlist, prog: Streamer) -> list[str]:
     return outcomes
 
 
-def fix(config_path: str | None = None, *, remote: bool = False,
+def fix(config_path: str | None = None, *, pr: bool = False, remote: bool = False,
         paths: list[str] | None = None, no_stream: bool = False) -> int:
-    """`saw fix`: open/update one rolling cleanup PR per INFECTED repository.
-
-    LOCAL by default; `remote=True` sweeps the configured GitHub targets. Auto-remediates —
-    the PR is the review gate, so there is no apply/preview flag. Streams each repo's outcome
-    live (progress on stderr). Returns 2 if an explicit --config is missing, 1 if any repo
-    needs manual review (couldn't be auto-cleaned), else 0."""
+    """`saw fix`: prepare a `security/auto-clean` branch per infected repo (no push). With
+    `pr=True` (`--pr`) also push + open/update one rolling PR each; with `remote=True`
+    (`--remote`) sweep the configured GitHub targets. Streams each repo's outcome. Returns 2
+    if an explicit --config is missing, 1 if any repo needs manual review, else 0."""
     cfg = _resolve_config(config_path)
     if cfg is None:
         return 2
@@ -138,16 +167,96 @@ def fix(config_path: str | None = None, *, remote: bool = False,
     prog = Streamer(enabled=stream_enabled(sys.stderr, force_off=no_stream), out=sys.stderr)
 
     outcomes = (_fix_remote(cfg, opts, sigs, allowlist, prog) if remote
-                else _fix_local(cfg, opts, sigs, allowlist, paths, prog))
+                else _fix_local(cfg, opts, sigs, allowlist, paths, prog, publish=pr))
     if not outcomes:
         prog.line("No repositories to fix.")
         return 0
-    # A repo "needs review" when no PR could clean it: an abort (residual infection) or an
-    # error. submit_fix_pr's success strings ("opened PR", "updated", "already clean") don't
-    # contain these markers, so this is a stable signal for a CI gate.
     needs_review = sum(1 for o in outcomes if "ABORTED" in o or ": error" in o)
     n = len(outcomes)
     plural = "y" if n == 1 else "ies"
     prog.line(f"\nProcessed {n} repositor{plural}"
               + (f"; {needs_review} need manual review." if needs_review else "."))
     return 1 if needs_review else 0
+
+
+# ── saw discard ──────────────────────────────────────────────────────────────────
+
+def _discard_local(cfg, opts, branch: bool, pr: bool, paths, prog: Streamer) -> list[str]:
+    token = None
+    if pr:
+        token, _ = auth.resolve_token()
+        err = _preflight(token)
+        if err:
+            prog.line(err)
+            if not branch:
+                return []
+            pr = False   # can't close PRs, but --branch (pure git) can still run
+    repos = _local_repos(cfg, opts, paths)
+    if not repos:
+        return []
+    prog.line(f"Discarding in {len(repos)} local repositor{'y' if len(repos) == 1 else 'ies'}…")
+    outcomes: list[str] = []
+    for i, repo in enumerate(repos, 1):
+        display = _disp(repo)
+        prog.line(f"  [{i}/{len(repos)}] {display}")
+        parts: list[str] = []
+        with status(f"discarding in {display}…", enabled=prog.enabled):
+            if branch:
+                parts.append(_safe(lambda r=repo: pr_submit.discard_branch(r), display))
+            if pr:
+                parts.append(_safe(lambda r=repo: pr_submit.discard_pr(r, token), display))
+        outcome = "  ·  ".join(parts)
+        prog.line(f"      → {outcome}")
+        outcomes.append(outcome)
+    return outcomes
+
+
+def _discard_remote(cfg, opts, branch: bool, pr: bool, prog: Streamer) -> list[str]:
+    slugs, token, _source = _resolve_remote(cfg, opts)
+    err = _preflight(token)
+    if err:
+        prog.line(err)
+        return []
+    if not slugs:
+        prog.line("No GitHub targets configured (targets.github.users/orgs or a GitHub App install).")
+        return []
+    prog.line(f"Discarding across {len(slugs)} GitHub repositor{'y' if len(slugs) == 1 else 'ies'}…")
+    outcomes: list[str] = []
+    for i, slug in enumerate(slugs, 1):
+        prog.line(f"  [{i}/{len(slugs)}] {slug}")
+        parts: list[str] = []
+        with status(f"discarding {slug}…", enabled=prog.enabled):
+            if branch:
+                parts.append(_safe(lambda s=slug: pr_submit.discard_remote_branch(s, token), slug))
+            if pr:
+                parts.append(_safe(lambda s=slug: pr_submit.discard_remote_pr(s, token), slug))
+        outcome = "  ·  ".join(parts)
+        prog.line(f"      → {outcome}")
+        outcomes.append(outcome)
+    return outcomes
+
+
+def discard(config_path: str | None = None, *, branch: bool = False, pr: bool = False,
+            remote: bool = False, paths: list[str] | None = None, no_stream: bool = False) -> int:
+    """`saw discard`: remove what `fix` produced — the `security/auto-clean` branch
+    (`--branch`: local + remote, pure git, SSL-immune) and/or its PR (`--pr`: API). LOCAL by
+    default; `--remote` sweeps the configured GitHub targets. Requires at least one of
+    `--branch`/`--pr`. Returns 2 on a usage/config error, else 0."""
+    if not (branch or pr):
+        print("Nothing to discard: pass --branch (delete the fix branch) and/or --pr "
+              "(close the fix PR).", file=sys.stderr)
+        return 2
+    cfg = _resolve_config(config_path)
+    if cfg is None:
+        return 2
+    opts = _options(cfg.get("settings", {}))
+    prog = Streamer(enabled=stream_enabled(sys.stderr, force_off=no_stream), out=sys.stderr)
+
+    outcomes = (_discard_remote(cfg, opts, branch, pr, prog) if remote
+                else _discard_local(cfg, opts, branch, pr, paths, prog))
+    if not outcomes:
+        prog.line("No repositories to discard.")
+        return 0
+    n = len(outcomes)
+    prog.line(f"\nProcessed {n} repositor{'y' if n == 1 else 'ies'}.")
+    return 0

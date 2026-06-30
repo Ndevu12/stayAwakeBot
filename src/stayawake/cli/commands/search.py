@@ -12,8 +12,10 @@ import json
 _INDEX = [
     ("saw scan", "hunt supply-chain worms (read-only); local by default, --remote for GitHub",
      "scan check find worm malware detect virus infect supply chain json sarif alert report remote local"),
-    ("saw fix", "open/update a cleanup PR per infected repo; local by default, --remote for GitHub",
-     "fix remediate clean repair remove pr pull request open remote local sweep"),
+    ("saw fix", "prepare a cleanup branch per infected repo; --pr to open a PR; --remote sweeps GitHub",
+     "fix remediate clean repair remove branch pr pull request open publish remote local sweep"),
+    ("saw discard", "undo `saw fix`: --branch deletes the auto-clean branch, --pr closes its PR",
+     "discard undo revert cleanup delete branch close pr abandon drop remove remote local"),
     ("saw audit", "credential + editor + branch-protection hygiene audit",
      "audit hygiene credential token branch protection vscode editor"),
     ("saw doctor", "self-check the install and credentials",
