@@ -43,19 +43,17 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
-          {
-            echo "settings:"
-            echo "  exclude_dirs: [\".git\", \"node_modules\", \".next\", \"dist\", \"build\", \".malware-quarantine\", \".venv\"]"
-            echo "targets:"
-            echo "  local: [\"${{ github.workspace }}\"]"
-            echo "  github: { users: [], orgs: [] }"
-            echo "allowlist:"
-            echo "  - path_glob: \"tests/bots/security/fixtures/**\""
-          } > "$RUNNER_TEMP/ci-security.yml"
+          # Use the committed config/security.yml as the single source of truth for the
+          # allowlist: its rules are signature-scoped to tests/** (a bare path_glob is
+          # intentionally ignored by the scanner, so the old inline path-only rule
+          # suppressed nothing and this repo's own intentional test IoCs failed the run).
+          # Scan the checked-out workspace explicitly — a positional path overrides the
+          # config's local globs (~/dev/**), so it targets this repo, not the runner home.
           # Terminal-first: one pass scans, pushes GitHub-issue + Slack alerts (--alert),
           # and writes the SARIF. Exit code is the verdict (non-zero on infected), which
           # surfaces an infected main as a failed run.
-          saw scan -c "$RUNNER_TEMP/ci-security.yml" --alert --sarif "$RUNNER_TEMP/latest.sarif"
+          saw scan "${{ github.workspace }}" -c "${{ github.workspace }}/config/security.yml" \
+            --alert --sarif "$RUNNER_TEMP/latest.sarif"
 
       - name: Upload SARIF to code-scanning
         # always(): the scan above exits non-zero when infected — we still want the
