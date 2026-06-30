@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 from stayawake.core.config import load_yaml
@@ -28,6 +29,9 @@ from stayawake.bots.security.targets import ScanOptions, LocalRepoTarget, Remote
 
 REPORTS_DIR = Path("reports/security")
 DEFAULT_CONFIG = "config/security.yml"
+# Above this many targets, a terminal can't hold the whole report — if the user didn't
+# already persist it (-d/--json), we drop the full Markdown+JSON in a temp dir and point there.
+LARGE_FLEET = 25
 
 
 def _read_config(config_path: str | None) -> dict:
@@ -158,7 +162,7 @@ def scan(config_path: str | None = None, *, remote: bool = False,
          orgs: list[str] | None = None, slugs: list[str] | None = None,
          json_out: bool = False, sarif_path: str | Path | None = None,
          reports_dir: str | Path | None = None, alert: bool = False,
-         no_stream: bool = False) -> int:
+         no_stream: bool = False, no_pager: bool = False) -> int:
     """Scan targets (READ-ONLY) and deliver the result through sinks. Scope is LOCAL by
     default — explicit `paths`, the configured local globs, or the current repo. With
     remote=True (`saw scan --remote`) it scans GitHub repos resolved by the #1075 ladder:
@@ -234,7 +238,9 @@ def scan(config_path: str | None = None, *, remote: bool = False,
     # --- compose the output sinks from the flags. Default is terminal-first and persists
     #     nothing; --json swaps the human report for machine JSON on stdout; --sarif / -d add
     #     redacted file artifacts; --alert pushes the durable GitHub-issue + Slack record.
-    sinks: list[Sink] = [JsonSink() if json_out else TerminalSink(enabled=report_on)]
+    sinks: list[Sink] = [
+        JsonSink() if json_out
+        else TerminalSink(enabled=report_on, pager=report_on and not no_pager)]
     if sarif_path:
         sinks.append(SarifSink(sarif_path))
     if reports_dir:
@@ -245,6 +251,16 @@ def scan(config_path: str | None = None, *, remote: bool = False,
         sinks += [IssueSink(), SlackSink()]
     for sink in sinks:
         sink.emit(report)
+
+    # Large sweep, nothing persisted: a terminal's scrollback can't hold the whole report and
+    # the pager is transient, so drop the FULL Markdown+JSON (redacted) into a temp dir and
+    # point at it — the complete result is always recoverable off-terminal. Skipped when the
+    # user already persisted (-d) or asked for machine output (--json).
+    if not json_out and not reports_dir and len(results) > LARGE_FLEET:
+        tmp = Path(tempfile.mkdtemp(prefix="sab-report-"))
+        FileSink(tmp).emit(report)
+        print(f"Full report ({len(results)} repos): {tmp / 'latest.md'}  (+ latest.json)",
+              file=sys.stderr)
 
     # Verdict as exit code: INFECTED (confirmed findings) → 1, else 0. Unconditional —
     # the CI gate is just this exit code; SUSPICIOUS (heuristic-only) does not fail it.

@@ -113,6 +113,7 @@ saw scan [TARGETS...] [-r] [--user U] [--org O] [-c FILE] [-p PATH] [--json] [--
 | `--alert` | Push the durable record **in this pass**: open/close a GitHub issue per infected repo and post a Slack summary. Reads `GITHUB_TOKEN`, `GITHUB_REPOSITORY`, `SLACK_WEBHOOK_URL` from the environment; issue/Slack bodies are **evidence-free**. |
 | `-d`, `--reports-dir DIR` | **Opt-in:** also write `latest.json` + `latest.md` into `DIR`. Evidence is **redacted** in these files (fingerprint only). |
 | `--no-stream` | Disable the live progress/typewriter output — plain, instant lines. (Auto-off already when piped, in CI, or with `STAYAWAKE_NO_STREAM=1`.) |
+| `--no-pager` | Don't page a long report through `$PAGER` — print it straight through. |
 
 **Remote target resolution** (`--remote`), first match wins — shared by `scan`, `fix`, `discard`:
 
@@ -149,7 +150,16 @@ saw scan -d /tmp/sab-reports              # opt-in redacted latest.json + latest
 > it **auto-disables** when piped, in CI, with `--no-stream`, or `STAYAWAKE_NO_STREAM=1`, so
 > `--json` and any persisted artifact stay byte-for-byte unchanged. Progress goes to `stderr`;
 > the report goes to `stdout`.
->
+
+> **Large fleets — nothing lost to scrollback.** Scanning many repos (locally or `--remote`,
+> your own or an org) produces a report bigger than the terminal. Three things keep it readable
+> and complete: (1) a long report is **paged** through `$PAGER` (`less`-style) on an interactive
+> terminal, so you scroll the whole thing — disable with `--no-pager`; (2) **clean rows collapse
+> to a count** in the table once the fleet is large (the infected/suspect detail is never
+> collapsed); (3) for a big sweep with no `-d`/`--json`, the **full** Markdown + JSON report is
+> written to a temp dir and its path is printed (`Full report: …`), so the complete result is
+> always recoverable off-terminal. Paging auto-disables when piped, in CI, or with `--no-pager`.
+
 ### `saw fix`
 
 Clean up detected worm findings on a branch. **By default `fix` PREPARES the fix on a local

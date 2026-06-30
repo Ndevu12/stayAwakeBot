@@ -33,6 +33,8 @@ def register(sub) -> None:
                    help="scan this GitHub org's repos (repeatable; implies --remote)")
     p.add_argument("--no-stream", action="store_true", dest="no_stream",
                    help="disable live progress/typewriter output (plain, instant lines)")
+    p.add_argument("--no-pager", action="store_true", dest="no_pager",
+                   help="don't page a long report through $PAGER — print it straight through")
     # Opt-in output surfaces (terminal-first: none of these is on by default).
     p.add_argument("--json", action="store_true",
                    help="emit machine-readable JSON to stdout (full evidence; progress on stderr)")
@@ -53,4 +55,4 @@ def run(a: argparse.Namespace) -> int:
                         slugs=(positionals or None) if remote else None,
                         users=a.user or None, orgs=a.org or None,
                         json_out=a.json, sarif_path=a.sarif, reports_dir=a.reports_dir,
-                        alert=a.alert, no_stream=a.no_stream)
+                        alert=a.alert, no_stream=a.no_stream, no_pager=a.no_pager)
