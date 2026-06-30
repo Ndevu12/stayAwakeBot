@@ -162,7 +162,7 @@ def scan(config_path: str | None = None, *, remote: bool = False,
          orgs: list[str] | None = None, slugs: list[str] | None = None,
          json_out: bool = False, sarif_path: str | Path | None = None,
          reports_dir: str | Path | None = None, alert: bool = False,
-         no_stream: bool = False, no_pager: bool = False) -> int:
+         no_stream: bool = False, pager: bool = False) -> int:
     """Scan targets (READ-ONLY) and deliver the result through sinks. Scope is LOCAL by
     default — explicit `paths`, the configured local globs, or the current repo. With
     remote=True (`saw scan --remote`) it scans GitHub repos resolved by the #1075 ladder:
@@ -247,7 +247,7 @@ def scan(config_path: str | None = None, *, remote: bool = False,
     report_path: Path | None = None   # where the full report landed, for the pointer below
     sinks: list[Sink] = [
         JsonSink() if json_out
-        else TerminalSink(enabled=report_on, pager=report_on and not no_pager,
+        else TerminalSink(enabled=report_on, pager=report_on and pager,
                           detail=not large_fleet)]
     if sarif_path:
         sinks.append(SarifSink(sarif_path))

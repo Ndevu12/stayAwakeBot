@@ -3,8 +3,9 @@
 terminal's finite scrollback.
 
 A deliberate no-op — a direct write — when paging is disabled, when the text already fits the
-screen, or when no pager can be launched. So piped / CI / `--no-pager` output stays
-byte-for-byte plain, and a small report prints inline exactly as before.
+screen, or when no pager can be launched. Paging is OPT-IN (`saw scan --pager`); by default,
+and always when piped / in CI, output stays byte-for-byte plain so nothing surprises a script
+or a user who didn't ask for a pager.
 """
 from __future__ import annotations
 
@@ -27,8 +28,8 @@ _DEFAULT_PAGER = "less -R"
 def page(text: str, *, enabled: bool, out: TextIO | None = None) -> None:
     """Show `text` through a pager when `enabled` AND it's taller than the terminal AND a pager
     launches; otherwise write it straight to `out` (default stdout). The caller sets `enabled`
-    False when piped / CI / `--no-pager`. Never raises — any pager failure falls back to a
-    direct write, so output is never dropped."""
+    False unless `saw scan --pager` was given (and never when piped / CI). Never raises — any
+    pager failure falls back to a direct write, so output is never dropped."""
     out = out or sys.stdout
     if not text:
         return
