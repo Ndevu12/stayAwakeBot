@@ -10,10 +10,10 @@ import json
 
 # (command, summary, extra search keywords)
 _INDEX = [
-    ("saw scan", "hunt supply-chain worms; terminal-first (--json/--sarif/--alert/-d to persist)",
-     "scan check find worm malware detect virus infect supply chain json sarif alert report"),
-    ("saw fix", "remediate findings (dry-run unless --apply); --pr opens a PR",
-     "fix remediate clean repair remove pr pull request open"),
+    ("saw scan", "hunt supply-chain worms (read-only); local by default, --remote for GitHub",
+     "scan check find worm malware detect virus infect supply chain json sarif alert report remote local"),
+    ("saw fix", "open/update a cleanup PR per infected repo; local by default, --remote for GitHub",
+     "fix remediate clean repair remove pr pull request open remote local sweep"),
     ("saw audit", "credential + editor + branch-protection hygiene audit",
      "audit hygiene credential token branch protection vscode editor"),
     ("saw doctor", "self-check the install and credentials",

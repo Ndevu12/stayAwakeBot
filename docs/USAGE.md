@@ -25,7 +25,7 @@ command; mount the repository to scan at `/repo`:
 
 ```bash
 docker run --rm -v "$PWD:/repo:ro" ghcr.io/ndevu12/stayawakebot \
-  saw scan --local
+  saw scan /repo
 docker run --rm ghcr.io/ndevu12/stayawakebot stayawake-health-check --help
 ```
 
@@ -38,7 +38,7 @@ as your own user:
 ```bash
 docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/repo" \
   ghcr.io/ndevu12/stayawakebot \
-  saw scan --local -d /repo/reports
+  saw scan /repo -d /repo/reports
 ```
 
 Pin a version (`ghcr.io/ndevu12/stayawakebot:0.1.0`) or a commit (`:sha-<commit>`) for
@@ -72,10 +72,11 @@ The local security CLI is **`saw`** (see the [CLI guide](CLI.md)). `saw scan` is
 exit code is the verdict. Attach opt-in "sinks" for durable output:
 
 ```bash
-saw scan --config config/security.yml --local   # full report to the terminal; exit code = verdict
-saw scan --local --json > report.json            # machine-readable, full evidence, to a pipe
-saw scan --local --alert                         # Slack summary + GitHub issue per infected repo
-saw scan --local --sarif scan.sarif              # redacted SARIF for GitHub code-scanning upload
+saw scan --config config/security.yml            # full report to the terminal; exit code = verdict
+saw scan --json > report.json                    # machine-readable, full evidence, to a pipe
+saw scan --alert                                 # Slack summary + GitHub issue per infected repo
+saw scan --sarif scan.sarif                      # redacted SARIF for GitHub code-scanning upload
+saw scan --remote                                # scan the configured GitHub targets instead of local
 ```
 
 ### Ad-hoc local scanning (no token, no config)
@@ -91,22 +92,23 @@ saw scan ./a ./b --path ./c   # several at once (positional and/or --path)
 ```
 
 A path may be a single repository or a directory containing many — the scanner walks it
-for git repos. Explicit paths imply `--local` (nothing is sent to GitHub). With no
-paths and nothing configured, it scans the current repository (found by walking up to the
-nearest `.git`), so a bare `saw scan` "just works" after `pip install`.
+for git repos. Scanning is **local by default** (nothing is sent to GitHub unless you pass
+`--remote`). With no paths and nothing configured, it scans the current repository (found by
+walking up to the nearest `.git`), so a bare `saw scan` "just works" after `pip install`.
 
-Remediation is **safe by default (dry-run)**:
+Cleanup is delivered as a **pull request** (the review gate) — never an in-place edit, and
+re-runs **update** the one rolling PR per repo rather than duplicating it. Each repo's outcome
+streams live:
 
 ```bash
-saw fix                    # dry-run: show what would be fixed
-saw fix --apply            # strip/quarantine worm artifacts on a security/auto-clean branch
-saw fix --apply --pr       # also open one rolling PR per repo
-saw fix --remote           # operate on remote GitHub targets from config
+saw fix                    # open/update a cleanup PR for each local infected repo
+saw fix .                  # fix the current repository
+saw fix --remote           # sweep the configured GitHub targets, one rolling PR each
 ```
 
-**Read-only fallback (remediation ladder):** when `--pr` / `--remote` can't push a
-fix branch (you only have read access to the target), StayAwakeBot doesn't discard the
-fix — it degrades down a ladder:
+**Read-only fallback (remediation ladder):** when `fix` can't push a fix branch (you only
+have read access to the target), StayAwakeBot doesn't discard the fix — it degrades down a
+ladder:
 
 1. **Fork → cross-fork PR** — if the token can fork, it pushes the fix to a fork under
    your account and opens a PR from the fork into the upstream (de-duplicated; handles
@@ -129,7 +131,7 @@ default — the report renders to the terminal. For a durable copy, reach for an
 (GitHub issue + Slack), or `-d DIR` to write an evidence-redacted `latest.json` + `latest.md`:
 
 ```bash
-saw scan --local -d /tmp/sab-reports                                 # opt-in, redacted, writes only there
+saw scan -d /tmp/sab-reports                                         # opt-in, redacted, writes only there
 stayawake-health-check  --reports-dir /tmp/sab-reports               # the health bot still writes reports
 ```
 
@@ -202,8 +204,8 @@ scope is in parentheses):
 | Command | Needs a token? | Permission (classic) |
 | --- | --- | --- |
 | `saw scan <path>` / public remotes | no | — |
-| `saw scan` private remotes | read | Contents + Metadata: Read (`repo`) |
-| `saw fix --pr` / `--remote` | write | Contents + Pull requests: R/W (`repo`) |
+| `saw scan --remote` (private) | read | Contents + Metadata: Read (`repo`) |
+| `saw fix` / `saw fix --remote` | write | Contents + Pull requests: R/W (`repo`) |
 | ↳ fork fallback (cross-fork PR when you can't push upstream) | fork + PR | Pull requests: R/W on your fork (`public_repo` / `repo`) |
 | ↳ patch/issue fallback (no write at all) | none / issues | Issues: R/W for the notify issue (`repo` / `public_repo`); patch needs nothing |
 | `saw scan --alert` (GitHub issue) | write | Issues: R/W (`repo` / `public_repo`) |
@@ -232,7 +234,7 @@ export GH_APP_ID=123456
 export GH_APP_PRIVATE_KEY="$(cat your-app.private-key.pem)"   # or GH_APP_PRIVATE_KEY_PATH=…
 # optional; auto-detected when the App has exactly one installation:
 export GH_APP_INSTALLATION_ID=98765
-saw scan               # scans every repo the installation can see
+saw scan --remote      # scans every repo the installation can see
 saw fix --remote       # opens a dedup'd fix PR per infected install repo
 ```
 

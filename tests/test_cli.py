@@ -43,14 +43,14 @@ class TestParserIntegrity(unittest.TestCase):
 class TestScanRouting(unittest.TestCase):
     @mock.patch("stayawake.bots.security.service.scan", return_value=0)
     def test_flags_map_to_service_signature(self, m):
-        rc = cli.main(["scan", "-L", "-c", "cfg.yml", "./repo", "-p", "extra",
+        rc = cli.main(["scan", "-r", "-c", "cfg.yml", "./repo", "-p", "extra",
                        "--json", "--sarif", "out.sarif", "-d", "rep", "--alert"])
         self.assertEqual(rc, 0)
         # config_path is the one positional; everything else is keyword-only now.
         (config_path,) = m.call_args.args
         kw = m.call_args.kwargs
         self.assertEqual(config_path, "cfg.yml")
-        self.assertTrue(kw["local_only"])
+        self.assertTrue(kw["remote"])
         self.assertTrue(kw["json_out"])
         self.assertEqual(kw["sarif_path"], "out.sarif")
         self.assertEqual(kw["reports_dir"], "rep")
@@ -58,11 +58,10 @@ class TestScanRouting(unittest.TestCase):
         self.assertIn("./repo", kw["paths"])
         self.assertIn("extra", kw["paths"])
 
-    @mock.patch("stayawake.bots.security.service.scan", return_value=1)
-    def test_legacy_local_only_alias_still_parses(self, m):
-        rc = cli.main(["scan", "--local-only"])
-        self.assertEqual(rc, 1)
-        self.assertTrue(m.call_args.kwargs["local_only"])
+    @mock.patch("stayawake.bots.security.service.scan", return_value=0)
+    def test_scan_defaults_to_local(self, m):
+        cli.main(["scan"])
+        self.assertFalse(m.call_args.kwargs["remote"])
 
     @mock.patch("stayawake.bots.security.service.scan", return_value=0)
     def test_bare_scan_passes_no_paths(self, m):
@@ -71,69 +70,63 @@ class TestScanRouting(unittest.TestCase):
 
     @mock.patch("stayawake.bots.security.service.scan", return_value=0)
     def test_short_alias_routes_to_scan(self, m):
-        cli.main(["s", "-L"])
-        self.assertTrue(m.call_args.kwargs["local_only"])
+        cli.main(["s", "-r"])
+        self.assertTrue(m.call_args.kwargs["remote"])
 
-    @mock.patch("stayawake.bots.security.service.scan", return_value=0)
-    def test_fix_flags_route_to_service(self, m):
-        cli.main(["scan", "--fix", "--apply", "--pr"])
-        kw = m.call_args.kwargs
-        self.assertTrue(kw["fix"] and kw["apply"] and kw["open_pr"])
-
-    @mock.patch("stayawake.bots.security.service.scan", return_value=0)
-    def test_apply_or_pr_imply_fix(self, m):
-        cli.main(["scan", "--apply"])
-        self.assertTrue(m.call_args.kwargs["fix"])
-        cli.main(["scan", "--pr"])
-        self.assertTrue(m.call_args.kwargs["fix"])
-
-    @mock.patch("stayawake.bots.security.service.scan", return_value=0)
-    def test_bare_scan_does_not_fix(self, m):
-        cli.main(["scan"])
-        self.assertFalse(m.call_args.kwargs["fix"])
-
-    @mock.patch("stayawake.bots.security.service.scan", return_value=0)
-    def test_scan_has_no_fail_flag(self, _m):
-        # The verdict is the exit code now; `-f`/`--fail`/`--fail-on-findings` are gone.
-        with self.assertRaises(SystemExit), redirect_stderr(io.StringIO()):
-            cli.main(["scan", "-f"])
+    def test_scan_is_read_only_no_remediation_or_legacy_flags(self):
+        # The redesign removed --fix/--apply/--pr (remediation → `saw fix`) and the
+        # --local/--fail flags (local is the default; the verdict IS the exit code).
+        for flag in ("--fix", "--apply", "--pr", "--local", "--local-only", "-f"):
+            with self.assertRaises(SystemExit), redirect_stderr(io.StringIO()):
+                cli.main(["scan", flag])
 
 
 class TestSecNamespace(unittest.TestCase):
     @mock.patch("stayawake.bots.security.service.scan", return_value=0)
     def test_leading_sec_token_is_stripped(self, m):
-        cli.main(["sec", "scan", "-L"])
-        self.assertTrue(m.call_args.kwargs["local_only"])
+        cli.main(["sec", "scan", "-r"])
+        self.assertTrue(m.call_args.kwargs["remote"])
 
 
 class TestFix(unittest.TestCase):
-    @mock.patch("stayawake.bots.security.remediator.remediate", return_value=0)
-    def test_local_apply_pr(self, m):
-        rc = cli.main(["fix", "--apply", "--pr"])
-        self.assertEqual(rc, 0)                  # fix now propagates remediate()'s exit code
-        self.assertEqual(m.call_args.kwargs, {"apply": True, "open_pr": True})
+    @mock.patch("stayawake.bots.security.remediator.fix", return_value=0)
+    def test_fix_routes_to_remediator_fix(self, m):
+        rc = cli.main(["fix"])
+        self.assertEqual(rc, 0)
+        (config_path,) = m.call_args.args
+        kw = m.call_args.kwargs
+        self.assertIsNone(config_path)
+        self.assertFalse(kw["remote"])      # local by default
+        self.assertIsNone(kw["paths"])
+        self.assertFalse(kw["no_stream"])
 
-    @mock.patch("stayawake.bots.security.remediator.remediate", return_value=2)
+    @mock.patch("stayawake.bots.security.remediator.fix", return_value=0)
+    def test_remote_scope(self, m):
+        cli.main(["fix", "--remote"])
+        self.assertTrue(m.call_args.kwargs["remote"])
+
+    @mock.patch("stayawake.bots.security.remediator.fix", return_value=0)
+    def test_paths_route_through(self, m):
+        cli.main(["fix", "./repo", "-p", "extra"])
+        paths = m.call_args.kwargs["paths"]
+        self.assertIn("./repo", paths)
+        self.assertIn("extra", paths)
+
+    def test_fix_has_no_apply_or_pr_flags(self):
+        # Cleanup is always a PR (the review gate) — there is no apply/preview/--pr to stack.
+        for flag in ("--apply", "--pr", "--open-pr"):
+            with self.assertRaises(SystemExit), redirect_stderr(io.StringIO()):
+                cli.main(["fix", flag])
+
+    @mock.patch("stayawake.bots.security.remediator.fix", return_value=2)
     def test_missing_explicit_config_exits_nonzero(self, _):
         # #1054: a missing --config is a clean exit-2, not a crash; fix propagates it.
         self.assertEqual(cli.main(["fix", "--config", "nope.yml"]), 2)
 
-    @mock.patch("stayawake.bots.security.remediator.remediate", return_value=0)
-    def test_open_pr_legacy_alias(self, m):
-        cli.main(["fix", "--apply", "--open-pr"])
-        self.assertTrue(m.call_args.kwargs["open_pr"])
-
-    @mock.patch("stayawake.bots.security.remediator.submit_org_prs", return_value=0)
-    def test_remote_routes_to_org_prs(self, m):
-        rc = cli.main(["fix", "--remote"])
-        self.assertEqual(rc, 0)
-        m.assert_called_once()
-
-    @mock.patch("stayawake.bots.security.remediator.submit_org_prs", return_value=3)
-    def test_remote_exit_zero_even_when_prs_opened(self, _):
-        # submit_org_prs returns a COUNT of repos, not an exit code; a successful
-        # sweep that opens 3 PRs must still exit 0, not 3.
-        self.assertEqual(cli.main(["fix", "--remote"]), 0)
+    @mock.patch("stayawake.bots.security.remediator.fix", return_value=1)
+    def test_needs_review_propagates_exit_one(self, _):
+        # A repo that couldn't be auto-cleaned makes fix exit 1 (a CI signal).
+        self.assertEqual(cli.main(["fix"]), 1)
 
 
 class TestAudit(unittest.TestCase):
