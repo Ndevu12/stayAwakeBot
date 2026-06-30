@@ -14,6 +14,7 @@ on:
 
 permissions:
   contents: read
+  security-events: write   # the action uploads SARIF to the Security tab / PR annotations
 
 jobs:
   worm-guard:
@@ -42,6 +43,7 @@ jobs:
             tests/**|loader-global-bang,
             tests/**|loader-require-hijack,
             tests/**|oversized-config-line,
+            tests/**|obfuscated-source-file,
             tests/**|fake-font-fa-solid-400,
             tests/**|fake-font-text-woff,
             tests/**|camouflage-blockchain-readme,
