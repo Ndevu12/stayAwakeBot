@@ -51,12 +51,16 @@ runs:
       # mid-flight with an opaque argparse error. Fail FAST here instead, naming the fix —
       # this is the guard for the exact skew that shipped a `--sarif`-less pin once before.
       run: |
+        # Only --sarif is REQUIRED: the run step always uses it. Local scope is handled
+        # version-agnostically below (-L is passed only when the scanner still supports
+        # --local), so it must NOT be asserted here — the #1069 CLI redesign made local the
+        # default and removed --local, and asserting it would wrongly fail every post-#1069 pin.
         missing=""
-        for flag in --sarif --local; do
+        for flag in --sarif; do
           saw scan --help 2>&1 | grep -q -- "$flag" || missing="$missing $flag"
         done
         if [ -n "$missing" ]; then
-          echo "::error::pinned scanner (sentinel-ref) lacks 'saw scan'$missing — bump sentinel-ref in worm-guard.yml to a newer reviewed SHA." >&2
+          echo "::error::pinned scanner (sentinel-ref) lacks 'saw scan'$missing — bump sentinel-ref to a newer reviewed SHA." >&2
           exit 1
         fi
         echo "Scanner capability OK (saw scan supports the flags this action uses)."
@@ -90,11 +94,17 @@ runs:
         # step below can find it regardless of the scan's exit code.
         rdir="$GITHUB_WORKSPACE/reports/security"
         mkdir -p "$rdir"
+        # Local scope, version-agnostically: older scanners used -L/--local for local-only;
+        # the #1069 CLI redesign made local the DEFAULT and removed --local. Pass -L only when
+        # this (pinned) scanner still supports it, so the action works across that redesign
+        # regardless of sentinel-ref.
+        lflag=""
+        saw scan --help 2>&1 | grep -q -- "--local" && lflag="-L"
         # Terminal-first CLI: `saw scan` ALWAYS exits non-zero on infected (no
         # --fail-on-findings flag anymore). Capture the verdict and honour the action's
         # fail-on-findings input ourselves: force a clean exit when it isn't 'true'.
         set +e
-        saw scan -L -c "$cfg" --sarif "$rdir/latest.sarif"
+        saw scan $lflag -c "$cfg" --sarif "$rdir/latest.sarif"
         rc=$?
         set -e
         [ "${{ inputs.fail-on-findings }}" = "true" ] || rc=0
