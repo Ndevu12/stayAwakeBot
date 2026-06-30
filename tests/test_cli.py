@@ -112,11 +112,19 @@ class TestFix(unittest.TestCase):
         self.assertIn("./repo", paths)
         self.assertIn("extra", paths)
 
-    def test_fix_has_no_apply_or_pr_flags(self):
-        # Cleanup is always a PR (the review gate) — there is no apply/preview/--pr to stack.
-        for flag in ("--apply", "--pr", "--open-pr"):
-            with self.assertRaises(SystemExit), redirect_stderr(io.StringIO()):
-                cli.main(["fix", flag])
+    @mock.patch("stayawake.bots.security.remediator.fix", return_value=0)
+    def test_pr_flag_routes_publish(self, m):
+        cli.main(["fix"])
+        self.assertFalse(m.call_args.kwargs["pr"])      # default = prepare a branch, no PR
+        cli.main(["fix", "--pr"])
+        self.assertTrue(m.call_args.kwargs["pr"])       # --pr = publish
+        cli.main(["fix", "--open-pr"])                  # accepted alias
+        self.assertTrue(m.call_args.kwargs["pr"])
+
+    def test_fix_rejects_apply(self):
+        # --apply is gone: cleanup is a branch (default) or a PR (--pr), never an in-place apply.
+        with self.assertRaises(SystemExit), redirect_stderr(io.StringIO()):
+            cli.main(["fix", "--apply"])
 
     @mock.patch("stayawake.bots.security.remediator.fix", return_value=2)
     def test_missing_explicit_config_exits_nonzero(self, _):
@@ -127,6 +135,23 @@ class TestFix(unittest.TestCase):
     def test_needs_review_propagates_exit_one(self, _):
         # A repo that couldn't be auto-cleaned makes fix exit 1 (a CI signal).
         self.assertEqual(cli.main(["fix"]), 1)
+
+
+class TestDiscard(unittest.TestCase):
+    @mock.patch("stayawake.bots.security.remediator.discard", return_value=0)
+    def test_branch_pr_remote_route(self, m):
+        cli.main(["discard", "--branch"])
+        self.assertTrue(m.call_args.kwargs["branch"])
+        self.assertFalse(m.call_args.kwargs["pr"])
+        cli.main(["discard", "--pr", "--remote"])
+        self.assertTrue(m.call_args.kwargs["pr"] and m.call_args.kwargs["remote"])
+        cli.main(["discard", "-br"])                    # short alias for --branch
+        self.assertTrue(m.call_args.kwargs["branch"])
+
+    @mock.patch("stayawake.bots.security.remediator.discard", return_value=2)
+    def test_bare_discard_propagates_exit(self, _):
+        # No flag → remediator.discard returns 2 (usage error); the CLI propagates it.
+        self.assertEqual(cli.main(["discard"]), 2)
 
 
 class TestAudit(unittest.TestCase):
