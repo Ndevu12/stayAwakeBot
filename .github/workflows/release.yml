@@ -108,6 +108,10 @@ jobs:
           # scanner/signature update (kept in sync with worm-guard.yml).
           sentinel-ref: a2dc06f2a993c05b1706faacbca5bdcde37bee3f   # merge of #1066 (terminal-first saw scan --sarif) — in sync with worm-guard.yml
           fail-on-findings: 'true'
+          # This job is a pure pass/fail release GATE; worm-guard.yml and security-sentinel.yml
+          # already publish SARIF to code-scanning. Skip the upload here so the release workflow
+          # needs no security-events: write (least privilege) and the gate can't fail on it.
+          upload-sarif: 'false'
           allowlist-globs: >-
             tests/**|loader-fromcharcode-127,
             tests/**|loader-seed-var,
