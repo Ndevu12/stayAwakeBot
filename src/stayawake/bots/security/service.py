@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 from stayawake.core.config import load_yaml
@@ -28,6 +29,9 @@ from stayawake.bots.security.targets import ScanOptions, LocalRepoTarget, Remote
 
 REPORTS_DIR = Path("reports/security")
 DEFAULT_CONFIG = "config/security.yml"
+# Above this many targets, a terminal can't hold the whole report — if the user didn't
+# already persist it (-d/--json), we drop the full Markdown+JSON in a temp dir and point there.
+LARGE_FLEET = 25
 
 
 def _read_config(config_path: str | None) -> dict:
@@ -158,7 +162,7 @@ def scan(config_path: str | None = None, *, remote: bool = False,
          orgs: list[str] | None = None, slugs: list[str] | None = None,
          json_out: bool = False, sarif_path: str | Path | None = None,
          reports_dir: str | Path | None = None, alert: bool = False,
-         no_stream: bool = False) -> int:
+         no_stream: bool = False, pager: bool = False) -> int:
     """Scan targets (READ-ONLY) and deliver the result through sinks. Scope is LOCAL by
     default — explicit `paths`, the configured local globs, or the current repo. With
     remote=True (`saw scan --remote`) it scans GitHub repos resolved by the #1075 ladder:
@@ -231,20 +235,42 @@ def scan(config_path: str | None = None, *, remote: bool = False,
 
     report = ScanReport(generated_at=now_iso(), results=results)
 
+    # A large sweep can't fit a terminal's scrollback, and its per-finding evidence (hundreds
+    # of lines) would bury the table. So for a big fleet the terminal shows the dashboard only
+    # (table + collapsed clean) and the full per-finding detail moves to the written report.
+    # Only meaningful for the human surface — `--json` carries everything to its consumer.
+    large_fleet = not json_out and len(results) > LARGE_FLEET
+
     # --- compose the output sinks from the flags. Default is terminal-first and persists
     #     nothing; --json swaps the human report for machine JSON on stdout; --sarif / -d add
     #     redacted file artifacts; --alert pushes the durable GitHub-issue + Slack record.
-    sinks: list[Sink] = [JsonSink() if json_out else TerminalSink(enabled=report_on)]
+    report_path: Path | None = None   # where the full report landed, for the pointer below
+    sinks: list[Sink] = [
+        JsonSink() if json_out
+        else TerminalSink(enabled=report_on, pager=report_on and pager,
+                          detail=not large_fleet)]
     if sarif_path:
         sinks.append(SarifSink(sarif_path))
     if reports_dir:
         rdir = resolve_reports_dir(reports_dir, settings_value=settings.get("reports_dir"),
                                    default=REPORTS_DIR, label="security reports")
         sinks.append(FileSink(rdir))
+        report_path = Path(rdir) / "latest.md"
     if alert:
         sinks += [IssueSink(), SlackSink()]
     for sink in sinks:
         sink.emit(report)
+
+    # Large sweep: guarantee the FULL report (with per-finding evidence) exists off-terminal
+    # and point at it — the complete result is always recoverable. If the user already
+    # persisted with -d we reuse that; otherwise drop the redacted Markdown+JSON in a temp dir.
+    if large_fleet:
+        if report_path is None:
+            tmp = Path(tempfile.mkdtemp(prefix="sab-report-"))
+            FileSink(tmp).emit(report)
+            report_path = tmp / "latest.md"
+        print(f"Full report ({len(results)} repos, with per-finding detail): {report_path}"
+              "  (+ latest.json)", file=sys.stderr)
 
     # Verdict as exit code: INFECTED (confirmed findings) → 1, else 0. Unconditional —
     # the CI gate is just this exit code; SUSPICIOUS (heuristic-only) does not fail it.
