@@ -26,6 +26,7 @@ from stayawake.core import auth
 from stayawake.core import git as gitutil
 from stayawake.core.adapters import github_api
 from stayawake.core.streaming import Streamer, stream_enabled, status
+from stayawake.core.timeutil import now_iso
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.service import (
     discover_local_repos, _enclosing_repo_root, _resolve_remote, DEFAULT_CONFIG)
@@ -109,11 +110,13 @@ def _fix_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *, publish: bo
     for i, repo in enumerate(repos, 1):
         display = _disp(repo)
         prog.line(f"  [{i}/{len(repos)}] {display}")
-        label = f"{'opening PR for' if publish else 'preparing fix for'} {display}…"
-        with status(label, enabled=prog.enabled):
-            outcome = _safe(
-                (lambda r=repo: pr_submit.submit_fix_pr(r, opts, sigs, allowlist, token)) if publish
-                else (lambda r=repo: pr_submit.prepare_fix(r, opts, sigs, allowlist)), display)
+        # No wrapping spinner here — pr.{prepare_fix,submit_fix_pr} drive their OWN
+        # phase-accurate spinners (scanning → fixing → opening PR), so the label always
+        # reflects what's actually happening.
+        outcome = _safe(
+            (lambda r=repo: pr_submit.submit_fix_pr(r, opts, sigs, allowlist, token, spin=prog.enabled))
+            if publish else
+            (lambda r=repo: pr_submit.prepare_fix(r, opts, sigs, allowlist, spin=prog.enabled)), display)
         prog.line(f"      → {outcome}")
         outcomes.append(outcome)
     return outcomes
@@ -137,13 +140,15 @@ def _fix_remote(cfg, opts, sigs, allowlist, prog: Streamer) -> list[str]:
         tmp = Path(tempfile.mkdtemp(prefix="sab-fix-"))
         clone = tmp / "repo"
         try:
-            with status(f"cloning + fixing {slug}…", enabled=prog.enabled):
+            with status(f"cloning {slug}…", enabled=prog.enabled):   # phase 0: clone only
                 with gitutil.github_https_auth(token) as (prefix, env):
                     r = subprocess.run(["git", "clone", "--quiet", "--depth", "50",
                                         f"{prefix}{slug}.git", str(clone)],
                                        capture_output=True, text=True, check=False, env=env)
-                outcome = (f"{slug}: clone failed (check token access)" if r.returncode != 0
-                           else _safe(lambda: pr_submit.submit_fix_pr(clone, opts, sigs, allowlist, token), slug))
+            # submit_fix_pr then drives its own scanning → fixing → opening-PR spinners.
+            outcome = (f"{slug}: clone failed (check token access)" if r.returncode != 0
+                       else _safe(lambda: pr_submit.submit_fix_pr(clone, opts, sigs, allowlist,
+                                                                  token, spin=prog.enabled), slug))
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
         prog.line(f"      → {outcome}")
@@ -165,6 +170,8 @@ def fix(config_path: str | None = None, *, pr: bool = False, remote: bool = Fals
     sigs = load_signatures(settings.get("signatures_path"))
     allowlist = cfg.get("allowlist", [])
     prog = Streamer(enabled=stream_enabled(sys.stderr, force_off=no_stream), out=sys.stderr)
+    prog.line(f"Security fix — {now_iso()}")
+    prog.line("")
 
     outcomes = (_fix_remote(cfg, opts, sigs, allowlist, prog) if remote
                 else _fix_local(cfg, opts, sigs, allowlist, paths, prog, publish=pr))
@@ -251,6 +258,8 @@ def discard(config_path: str | None = None, *, branch: bool = False, pr: bool = 
         return 2
     opts = _options(cfg.get("settings", {}))
     prog = Streamer(enabled=stream_enabled(sys.stderr, force_off=no_stream), out=sys.stderr)
+    prog.line(f"Security discard — {now_iso()}")
+    prog.line("")
 
     outcomes = (_discard_remote(cfg, opts, branch, pr, prog) if remote
                 else _discard_local(cfg, opts, branch, pr, paths, prog))
