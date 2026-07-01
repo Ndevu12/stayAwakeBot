@@ -66,6 +66,11 @@ All notable changes to this project are documented here. The format is based on
 - This changelog.
 
 ### Changed
+- **`saw` CLI guide rewritten for scannability** ([docs/CLI.md](docs/CLI.md)). Leads with a
+  cheat-sheet (command table + copy-paste examples); factors the shared **remote targeting**
+  ladder and **evidence/redaction** rules into their own sections instead of repeating them under
+  each command; documents the built-in **command aliases** (`s`/`sc`, `au`, `se`, `d`/`doc`,
+  `comp`); and gives every command a tight purpose + synopsis + options table. No behaviour change.
 - **`saw scan` is read-only — detection only.** Remediation moved out of `scan` into `saw fix`
   (the old `scan --fix`/`--apply`/`--pr` are gone). Scope is **local by default**; `--remote`
   (or naming `--user`/`--org`) scans GitHub instead of local — one scope per run.
@@ -109,6 +114,11 @@ All notable changes to this project are documented here. The format is based on
   the only local security surface; the `stayawake-health-*` scripts are unchanged.
 
 ### Fixed
+- **Usage docs corrected** ([docs/USAGE.md](docs/USAGE.md)). The App-auth install used a
+  non-existent package (`pip install "stayawake[app]"`) — the distribution is `stayawakebot`, so
+  the extra is **`stayawakebot[app]`**. And a stale instruction to "drop `--local`" to scan remotes
+  referenced a flag that no longer exists — scope is local by default, and **`--remote`** opts into
+  GitHub (one scope per run).
 - **Report writing no longer crashes a completed scan when the reports directory is
   unwritable** (read-only filesystem or a bind-mount owned by another user — e.g. the
   documented `docker run -v "$PWD:/repo:ro" …` as the image's non-root user). A scan's

@@ -13,18 +13,54 @@ run on your own machine to detect, report, and auto-remediate self-propagating m
 
 ## Contents
 
+- [Cheat sheet](#cheat-sheet)
 - [Overview](#overview)
 - [Install](#install)
-- [Synopsis](#synopsis)
-- [Global options](#global-options)
+- [Synopsis & global options](#synopsis--global-options)
 - [Commands](#commands)
-  - [`saw scan`](#saw-scan) · [`saw fix`](#saw-fix) · [`saw discard`](#saw-discard) · [`saw audit`](#saw-audit) ·
-    [`saw search`](#saw-search) · [`saw doctor`](#saw-doctor) · [`saw completion`](#saw-completion)
+  - [`saw scan`](#saw-scan) · [`saw fix`](#saw-fix) · [`saw discard`](#saw-discard) ·
+    [`saw audit`](#saw-audit) · [`saw search`](#saw-search) · [`saw doctor`](#saw-doctor) ·
+    [`saw completion`](#saw-completion)
+- [Remote targeting (`--remote`)](#remote-targeting---remote)
+- [How reports are stored (evidence & redaction)](#how-reports-are-stored-evidence--redaction)
 - [Exit codes](#exit-codes)
-- [Shell completion](#shell-completion)
+- [Command aliases & shell completion](#command-aliases--shell-completion)
 - [Migrating from the legacy scripts](#migrating-from-the-legacy-scripts)
 - [Compatibility & support](#compatibility--support)
 - [Appendix: design rationale](#appendix-design-rationale)
+
+## Cheat sheet
+
+```text
+saw <command> [options] [TARGETS...]      # no command → prints help;  -h/--help on any command
+```
+
+| Command | What it does | Touches files? |
+| --- | --- | --- |
+| [`saw scan`](#saw-scan) | Hunt for worms; render a full report to the terminal | **Read-only** |
+| [`saw fix`](#saw-fix) | Clean findings onto a `security/auto-clean` branch | Branch only (never your working tree); no push unless `--pr` |
+| [`saw discard`](#saw-discard) | Undo `saw fix`: delete the branch and/or close its PR | git / GitHub API |
+| [`saw audit`](#saw-audit) | Local hygiene: credentials, VS Code settings, branch protection | Read-only |
+| [`saw search`](#saw-search) | Fuzzy "what's the command for…?" lookup | — |
+| [`saw doctor`](#saw-doctor) | Self-check: install resolution + credentials | — |
+| [`saw completion`](#saw-completion) | Print a shell-completion script | — |
+
+```bash
+# Everyday (local is always the default)
+saw scan                          # scan local targets → full report to terminal, persists nothing
+saw scan ./svc-a ./svc-b          # scan specific paths
+saw scan; echo $?                 # CI gate: the exit code IS the verdict (0 clean / 1 infected)
+saw fix .                         # prepare a clean branch for this repo; review the diff, then push
+saw fix --pr                      # also push + open/update one rolling PR per repo
+saw discard --branch              # delete the auto-clean branch (local + remote)
+saw audit                         # local credential + editor hygiene
+
+# Remote (GitHub) sweeps — see "Remote targeting"
+saw scan --remote                 # your own GitHub repos (or configured targets)
+saw scan --org UB-TechDEV         # a whole org (implies --remote)
+saw scan --remote Ndevu12/strix   # one specific repo (owner/repo)
+saw fix --remote                  # clone → fix → one rolling PR per repo
+```
 
 ## Overview
 
@@ -32,7 +68,7 @@ run on your own machine to detect, report, and auto-remediate self-propagating m
 - **The health (uptime) bot is not part of this CLI.** It runs remotely-only (a GitHub Actions
   `*/5` cron) via its own `stayawake-health-*` console scripts; those are unaffected by `saw`.
 - **One scanner, two surfaces.** The same engine runs locally as `saw` and in CI as the
-  published `strix` GitHub Action. How the names relate:
+  published `strix` GitHub Action:
 
   ```text
   stayawakebot   the product / PyPI distribution        (pip install stayawakebot)
@@ -56,48 +92,47 @@ Installing provides two equivalent binaries:
 
 Verify your install with [`saw doctor`](#saw-doctor).
 
-## Synopsis
+## Synopsis & global options
 
 ```text
-saw <command> [options] [PATHS...]
+saw <command> [options] [TARGETS...]
 ```
 
 `saw` with no command prints help. Every command supports `-h/--help`, which documents that
-command's options.
-
-## Global options
-
-Available on `saw` itself:
+command's options. These options apply to `saw` itself, before any command:
 
 | Option | Description |
 | --- | --- |
 | `-h`, `--help` | Show help for `saw` or any command. |
 | `--version` | Print the package version and a capability inventory (`security: local + CI; health: CI-only`). |
 
-A few flags recur across commands but are **not** universal — they only exist where they mean
+A few flags recur across commands but are **not** universal — they exist only where they mean
 something:
 
 | Option | Where | Description |
 | --- | --- | --- |
-| `-f`, `--fail` | `audit` | Exit non-zero if the audit found a warning-level issue (the CI gate for `saw audit`). **`saw scan` has no `--fail`** — its exit code is the verdict, unconditionally; see [Exit codes](#exit-codes). |
-| `--json` | `scan`, `doctor`, `search` | Emit machine-readable JSON to stdout instead of human-formatted output. On `scan` it carries full evidence (see [`saw scan`](#saw-scan)). |
+| `--json` | `scan`, `doctor`, `search` | Emit machine-readable JSON to stdout. On `scan` it carries **full evidence**. |
 | `-q`, `--quiet` | `doctor`, `search` | Print only the essentials (problems / command names). |
+| `-f`, `--fail` | `audit` only | Exit non-zero on a warning-level issue. **`saw scan` has no `--fail`** — its exit code is the verdict unconditionally (see [Exit codes](#exit-codes)). |
+| `--no-stream` | `scan`, `fix`, `discard` | Disable the live progress/typewriter output — plain, instant lines. |
 
 ## Commands
 
 ### `saw scan`
 
-Hunt for supply-chain worms across one or more repositories or directories. **`saw scan` is
-terminal-first: it renders a full human report — with full match evidence — to `stdout` and
-persists nothing by default.** Progress goes to `stderr`, and the **exit code is the verdict,
-unconditionally** (`0` clean / `1` infected) — there is no `--fail` flag; a CI gate simply
-checks the exit code. Output beyond the terminal is delivered through opt-in "sinks":
-`--json`, `--sarif`, `--alert`, and `-d`.
+Hunt for supply-chain worms across one or more repositories or directories. **Terminal-first:**
+`scan` renders a full human report — with full match evidence — to `stdout` and **persists
+nothing by default**. Progress goes to `stderr`, and the **exit code is the verdict,
+unconditionally** (`0` clean / `1` infected) — there is no `--fail` flag; a CI gate just checks
+the exit code.
 
 `scan` is **read-only** — it never changes a file. Remediation lives in [`saw fix`](#saw-fix).
+Durable output beyond the terminal is opt-in via "sinks": `--json`, `--sarif`, `--alert`, `-d`
+(see [How reports are stored](#how-reports-are-stored-evidence--redaction)).
 
 ```text
-saw scan [TARGETS...] [-r] [--user U] [--org O] [-c FILE] [-p PATH] [--json] [--sarif FILE] [--alert] [-d DIR] [--no-stream]
+saw scan [TARGETS...] [-r] [--user U] [--org O] [-c FILE] [-p PATH]
+         [--json] [--sarif FILE] [--alert] [-d DIR] [--no-stream] [--pager]
 ```
 
 | Option | Description |
@@ -105,23 +140,15 @@ saw scan [TARGETS...] [-r] [--user U] [--org O] [-c FILE] [-p PATH] [--json] [--
 | `TARGETS...` | Local repo/dir paths — or, with `--remote`, `owner/repo` slugs. If omitted, scans configured targets or the current repository. |
 | `-p`, `--path PATH` | Additional target (repeatable); same effect as a positional. |
 | `-c`, `--config FILE` | Config file (default: `config/security.yml` when present). |
-| `-r`, `--remote` | Scan GitHub repos instead of local. **Scope is local by default.** Remote targets resolve by a ladder (below). |
+| `-r`, `--remote` | Scan GitHub repos instead of local. **Scope is local by default.** See [Remote targeting](#remote-targeting---remote). |
 | `--user USER` | Scan this GitHub user's repos (repeatable; **implies `--remote`**). |
 | `--org ORG` | Scan this GitHub org's repos (repeatable; **implies `--remote`**). |
-| `--json` | Emit a machine-readable JSON report to `stdout`, with **full evidence**. Ephemeral — pipe it; writes no file. |
-| `--sarif FILE` | Write a SARIF 2.1.0 report to `FILE` for upload to GitHub code-scanning. Evidence is **redacted** in the file (fingerprint only). |
-| `--alert` | Push the durable record **in this pass**: open/close a GitHub issue per infected repo and post a Slack summary. Reads `GITHUB_TOKEN`, `GITHUB_REPOSITORY`, `SLACK_WEBHOOK_URL` from the environment; issue/Slack bodies are **evidence-free**. |
-| `-d`, `--reports-dir DIR` | **Opt-in:** also write `latest.json` + `latest.md` into `DIR`. Evidence is **redacted** in these files (fingerprint only). |
-| `--no-stream` | Disable the live progress/typewriter output — plain, instant lines. (Auto-off already when piped, in CI, or with `STAYAWAKE_NO_STREAM=1`.) |
-| `--pager` | Page the report through `$PAGER` (`less`). **Off by default** — the report prints straight through, and a big sweep's full per-finding detail goes to a written report file (path printed). |
-
-**Remote target resolution** (`--remote`), first match wins — shared by `scan`, `fix`, `discard`:
-
-1. **ad-hoc selectors** — `--user`/`--org` and `owner/repo` positionals (these **override** config);
-2. **configured** `targets.github.users/orgs`;
-3. **your own repos** — the authenticated user's *owned* repos (private-inclusive, via `/user/repos`), or a GitHub App installation's repos.
-
-A non-`owner/repo` positional under `--remote` is a hard error (it isn't silently treated as a path).
+| `--json` | Machine-readable JSON report to `stdout`, with **full evidence**. Ephemeral — pipe it; writes no file. |
+| `--sarif FILE` | Write a SARIF 2.1.0 report to `FILE` for GitHub code-scanning upload. Evidence is **redacted** (fingerprint only). |
+| `--alert` | Push the durable record **in this pass**: open/close a GitHub issue per infected repo and post a Slack summary. Reads `GITHUB_TOKEN`, `GITHUB_REPOSITORY`, `SLACK_WEBHOOK_URL` from the environment; bodies are **evidence-free**. |
+| `-d`, `--reports-dir DIR` | **Opt-in:** also write `latest.json` + `latest.md` into `DIR`. Evidence is **redacted** (fingerprint only). |
+| `--no-stream` | Disable the live progress/typewriter output. (Auto-off already when piped, in CI, or with `STAYAWAKE_NO_STREAM=1`.) |
+| `--pager` | Page the report through `$PAGER` (default `less -R`). **Off by default** — the report prints straight through. |
 
 ```bash
 saw scan                                  # scan local targets; full report to terminal; writes nothing
@@ -136,30 +163,19 @@ saw scan --alert                          # open/close issues + Slack summary, i
 saw scan -d /tmp/sab-reports              # opt-in redacted latest.json + latest.md
 ```
 
-> **A report is a message, not a file.** The full report — including full match evidence —
-> only ever appears on the live terminal (`stdout`) or via `--json`. Any **persisted** artifact
-> (`--sarif`, `-d`) stores a redacted fingerprint `{sha256, preview (first 24 chars), len}` in
-> place of the raw payload, so a security report on disk can never re-distribute a live malware
-> payload. Durable records live **outside the repo tree** — GitHub code-scanning (SARIF,
-> uploaded not committed), GitHub issues + Slack (`--alert`), and CI artifacts; security reports
-> are **no longer committed** into the repo.
-
 > **Live progress.** On an interactive terminal, `scan` streams each target as it completes
-> (`[3/9] [INFECTED] …`) with a spinner over the actual work and a typewriter cadence, so a
-> long sweep never looks frozen. It's purely cosmetic pacing of deterministic results — and
-> it **auto-disables** when piped, in CI, with `--no-stream`, or `STAYAWAKE_NO_STREAM=1`, so
-> `--json` and any persisted artifact stay byte-for-byte unchanged. Progress goes to `stderr`;
-> the report goes to `stdout`.
-
-> **Large fleets — nothing lost to scrollback.** Scanning many repos (locally or `--remote`,
-> your own or an org) produces a report bigger than the terminal. Three things keep it readable
-> and complete, with **no pager by default** (so you're never dropped into `less`): (1) for a big
-> sweep the terminal stays a bounded, readable **dashboard** — the table only — and the
-> **per-finding evidence moves to the written report** (the full Markdown + JSON, in your `-d` dir
-> or a temp dir, with its path printed as `Full report: …`), so the complete result is always
-> recoverable off-terminal; (2) **clean rows collapse to a count** in the table once the fleet is
-> large; (3) if you *do* want to scroll the report in place, `--pager` pipes it through `$PAGER`
-> (the built-in default is plain `less -R` — alternate screen, Ctrl+C quits the pager).
+> (`[3/9] [INFECTED] …`) with a spinner and a typewriter cadence, so a long sweep never looks
+> frozen. It's purely cosmetic pacing of deterministic results, and **auto-disables** when piped,
+> in CI, with `--no-stream`, or `STAYAWAKE_NO_STREAM=1` — so `--json` and any persisted artifact
+> stay byte-for-byte unchanged. Progress → `stderr`; report → `stdout`.
+>
+> **Large fleets — nothing lost to scrollback.** Scanning many repos produces a report bigger
+> than the terminal. Three things keep it readable and complete, **with no pager by default**
+> (you're never dropped into `less`): (1) a big sweep keeps the terminal a bounded **dashboard**
+> — the table only — and moves **per-finding evidence to the written report** (full Markdown +
+> JSON in your `-d` dir or a temp dir, path printed as `Full report: …`), so the complete result
+> is always recoverable off-terminal; (2) **clean rows collapse to a count** once the fleet is
+> large; (3) `--pager` opts into scrolling the report in place through `$PAGER`.
 
 ### `saw fix`
 
@@ -168,8 +184,8 @@ Clean up detected worm findings on a branch. **By default `fix` PREPARES the fix
 review and push. It never edits your working tree (the fix lives on the branch), so it can't
 corrupt code and makes zero surprise remote writes. `--pr` additionally **pushes** the branch
 and opens/updates one rolling PR per repo (re-runs update it, never duplicate). `--remote`
-sweeps the configured GitHub targets (clone → fix → PR). Scope is **local by default**; each
-repo's outcome **streams live**.
+sweeps GitHub targets (clone → fix → PR). Scope is **local by default**; each repo's outcome
+**streams live**.
 
 ```text
 saw fix [TARGETS...] [--pr] [-r] [--user U] [--org O] [-p PATH] [-c FILE] [--no-stream]
@@ -180,10 +196,10 @@ saw fix [TARGETS...] [--pr] [-r] [--user U] [--org O] [-p PATH] [-c FILE] [--no-
 | `TARGETS...` | Local repo/dir paths — or, with `--remote`, `owner/repo` slugs. Omit to fix configured targets or the current repo. |
 | `-p`, `--path PATH` | Additional target (repeatable). |
 | `--pr`, `--open-pr` | Also **push** the branch and open/update one rolling, de-duplicated PR per repo. Needs a GitHub credential with repo + PR write scope; the API is **pre-flighted** before any push. |
-| `-r`, `--remote` | Sweep GitHub repos (clone → fix → PR) instead of local. Targets resolve by the [remote ladder](#saw-scan) (selectors → config → your own repos). |
+| `-r`, `--remote` | Sweep GitHub repos (clone → fix → PR) instead of local. See [Remote targeting](#remote-targeting---remote). |
 | `--user USER` / `--org ORG` | Fix this GitHub user's / org's repos (repeatable; **implies `--remote`**). |
-| `-c`, `--config FILE` | Config file. **Optional** — defaults to `config/security.yml` when present, else the current repository. A missing explicit path is a clear error (exit `2`), never a crash. |
-| `--no-stream` | Disable the live per-repo progress output — plain, instant lines. |
+| `-c`, `--config FILE` | Config file. **Optional** — defaults to `config/security.yml` when present, else the current repository. A missing *explicit* path is a clear error (exit `2`), never a crash. |
+| `--no-stream` | Disable the live per-repo progress output. |
 
 ```bash
 saw fix                       # prepare a security/auto-clean branch per local infected repo (no push)
@@ -192,20 +208,20 @@ saw fix --pr                  # also push + open/update one rolling PR per repo
 saw fix --remote              # sweep the configured GitHub targets, one rolling PR each
 ```
 
-> **How fixes are built — reliably, never by guessing.** An injected payload is **recovered
-> from git** (the file's last clean committed version is restored — the real original, not a
+> **How fixes are built — reliably, never by guessing.** An injected payload is **recovered from
+> git** (the file's last clean committed version is restored — the real original, not a
 > reconstruction), or, when that can't be proven safe (born-infected, untracked, or legit edits
 > sit on the payload), it is **deferred to manual review** with the exact reason and command.
 > Fonts/markers/VS-Code-autorun use reliable whole-file-quarantine / exact-line removal. The
 > scanner **never surgically edits a source file**, so a fix can never corrupt valid code; and
-> heuristic-only (`suspicious`) matches — e.g. an inlined base64 asset — are disclosed in the
-> PR for review, never auto-touched. The fix lives on a branch; nothing lands until you merge.
+> heuristic-only (`suspicious`) matches — e.g. an inlined base64 asset — are disclosed in the PR
+> for review, never auto-touched. The fix lives on a branch; nothing lands until you merge.
 
 ### `saw discard`
 
 The inverse of `saw fix`: remove what it produced. Only ever touches the auto-generated
-`security/auto-clean` branch — never a real branch. At least one of `--branch`/`--pr` is
-required. Scope is **local by default**; `--remote` sweeps the configured GitHub targets.
+`security/auto-clean` branch — never a real branch. **At least one of `--branch` / `--pr` is
+required.** Scope is **local by default**; `--remote` sweeps GitHub targets.
 
 ```text
 saw discard (--branch | --pr) [-r] [--user U] [--org O] [TARGETS...] [-c FILE] [--no-stream]
@@ -215,8 +231,8 @@ saw discard (--branch | --pr) [-r] [--user U] [--org O] [TARGETS...] [-c FILE] [
 | --- | --- |
 | `-br`, `--branch` | Delete the `security/auto-clean` branch **locally and on its remote** (pure git — works even when the GitHub API is unreachable; deleting the remote branch auto-closes its PR). |
 | `--pr`, `--close-pr` | **Close** the open `security/auto-clean` PR via the API (leaves the branch). |
-| `-r`, `--remote` / `--user` / `--org` | Sweep GitHub repos instead of local, resolved by the [remote ladder](#saw-scan) (selectors → config → your own repos). `--user`/`--org` imply `--remote`. |
-| `TARGETS...` / `-p` / `-c` / `--no-stream` | As for `saw fix` (positionals are `owner/repo` slugs under `--remote`). |
+| `-r`, `--remote` / `--user` / `--org` | Sweep GitHub repos instead of local. See [Remote targeting](#remote-targeting---remote). `--user`/`--org` imply `--remote`. |
+| `TARGETS...` / `-p` / `-c` / `--no-stream` | As for [`saw fix`](#saw-fix) (positionals are `owner/repo` slugs under `--remote`). |
 
 ```bash
 saw discard --branch          # delete the auto-clean branch (local + remote) for each repo
@@ -237,7 +253,7 @@ saw audit [--repo OWNER/NAME] [-b BRANCH] [-f]
 | --- | --- |
 | `--repo OWNER/NAME` | Also audit this repository's branch protection (needs a token). |
 | `-b`, `--branch NAME` | Branch to check protection for (default: `main`). |
-| `-f`, `--fail` | Exit `1` if any warning-level issue is found. |
+| `-f`, `--fail` | Exit `1` if any warning-level issue is found. (Also accepts `--fail-on-issues`.) |
 
 ```bash
 saw audit                                       # local credential + editor hygiene
@@ -249,8 +265,14 @@ saw audit --repo Ndevu12/strix -f               # also gate on branch-protection
 Fuzzy "what's the command for…?" lookup over the whole command tree.
 
 ```text
-saw search <text>
+saw search <text...> [--json] [-q]
 ```
+
+| Option | Description |
+| --- | --- |
+| `<text...>` | One or more search terms (required). |
+| `--json` | Machine-readable results. |
+| `-q`, `--quiet` | Print only the matching command names. |
 
 ```bash
 saw search "open a pr"     # → suggests `saw fix`
@@ -263,31 +285,92 @@ Slack credential is present, and note that the health entry points (`stayawake-h
 installed even though they are not `saw` subcommands.
 
 ```text
-saw doctor
+saw doctor [--json] [-q]
 ```
+
+| Option | Description |
+| --- | --- |
+| `--json` | Machine-readable output. |
+| `-q`, `--quiet` | Print only problems. |
 
 ### `saw completion`
 
-Print a shell-completion script for your shell. See [Shell completion](#shell-completion).
+Print a shell-completion script for your shell. See
+[Command aliases & shell completion](#command-aliases--shell-completion).
 
 ```text
 saw completion {bash,zsh,fish}
 ```
 
+## Remote targeting (`--remote`)
+
+`--remote` switches `scan`, `fix`, and `discard` from your local disk to GitHub repositories.
+**Scope is local by default** — you always opt in. `--user`/`--org` imply `--remote`, and under
+`--remote` a positional is an `owner/repo` slug (a non-`owner/repo` positional is a **hard
+error**, never silently treated as a path).
+
+Targets resolve by this ladder — **first match wins**:
+
+1. **ad-hoc selectors** — `--user` / `--org` and `owner/repo` positionals (these **override**
+   config);
+2. **configured** `targets.github.users` / `orgs`;
+3. **your own repos** — the authenticated user's *owned* repos (private-inclusive, via
+   `/user/repos`), or a GitHub App installation's repos.
+
+```bash
+saw scan --remote                 # ladder rung 2/3: configured targets, else your own repos
+saw scan --org UB-TechDEV         # rung 1: an org (implies --remote)
+saw fix --remote Ndevu12/strix    # rung 1: one specific repo
+```
+
+## How reports are stored (evidence & redaction)
+
+**A report is a message, not a file.** The full report — including full match evidence — only
+ever appears on the live terminal (`stdout`) or via `--json`. Any **persisted** artifact
+(`--sarif`, `-d`) stores a redacted fingerprint `{sha256, preview (first 24 chars), len}` in
+place of the raw payload, so a security report on disk can never re-distribute a live malware
+payload.
+
+Durable records live **outside the repo tree** — GitHub code-scanning (SARIF, uploaded not
+committed), GitHub issues + Slack (`--alert`), and CI artifacts. Security reports are **no longer
+committed** into the repo.
+
+| Sink | Flag | Evidence | Destination |
+| --- | --- | --- | --- |
+| Terminal | (default) | **Full** | `stdout` (ephemeral) |
+| JSON | `--json` | **Full** | `stdout` (pipe it; no file) |
+| SARIF | `--sarif FILE` | Redacted | `FILE`, for GitHub code-scanning |
+| Alert | `--alert` | Evidence-free | GitHub issue + Slack |
+| Reports dir | `-d DIR` | Redacted | `DIR/latest.{json,md}` |
+
 ## Exit codes
 
-`saw` is quiet-friendly and scriptable — the exit code is the contract. For **`saw scan` the
-exit code is the verdict, unconditionally** — a CI gate just checks it, no flag required:
+`saw` is quiet-friendly and scriptable — the exit code is the contract. For **`saw scan` the exit
+code is the verdict, unconditionally** — a CI gate just checks it, no flag required:
 
 | Code | Meaning |
 | --- | --- |
 | `0` | Clean. For `saw scan`, no scanned target is infected. For `saw audit`, no warning-level issue (or issues found without `-f`). |
-| `1` | For `saw scan`, at least one target is **infected** — returned unconditionally (there is no `--fail` flag). For `saw audit`, a warning-level issue was found **and** `-f/--fail` was set. |
-| `2` | Usage error (unknown command, bad option). |
+| `1` | For `saw scan`, at least one target is **infected** — returned unconditionally (there is no `--fail`). For `saw audit`, a warning-level issue was found **and** `-f/--fail` was set. |
+| `2` | Usage error (unknown command, bad option, or a missing explicit `--config` path). |
 
-## Shell completion
+## Command aliases & shell completion
 
-Because the short verbs are easiest to use with `<Tab>`, install completion once:
+Two independent shortcuts help you type less.
+
+**Built-in command aliases** (accepted anywhere the full verb is):
+
+| Command | Aliases |
+| --- | --- |
+| `scan` | `s`, `sc` |
+| `audit` | `au` |
+| `search` | `se` |
+| `doctor` | `d`, `doc` |
+| `completion` | `comp` |
+| `fix`, `discard` | *(none — always spelled out)* |
+
+**Shell completion.** Because the short verbs are easiest to use with `<Tab>`, install completion
+once:
 
 ```bash
 # bash
@@ -299,9 +382,6 @@ saw completion zsh  > "${fpath[1]}/_saw"
 # fish
 saw completion fish > ~/.config/fish/completions/saw.fish
 ```
-
-Verbs that share a first letter resolve at two characters: `sc`→scan, `se`→search; the rest are
-unambiguous at one — `a`→audit, `co`→completion, `d`→doctor, `f`→fix.
 
 ## Migrating from the legacy scripts
 
@@ -316,7 +396,7 @@ security surface. Each old command maps to a `saw` equivalent:
 | `stayawake-security-report` | `saw scan` (the report renders to the terminal) |
 | `stayawake-security-alert` | `saw scan --alert` |
 | `stayawake-security-remediate` | `saw fix` |
-| `stayawake-security-remediate --apply --open-pr` | `saw fix` (cleanup is always a PR now) |
+| `stayawake-security-remediate --apply --open-pr` | `saw fix --pr` |
 | `stayawake-security-remediate --remote` | `saw fix --remote` |
 | `stayawake-security-audit --repo OWNER/NAME --fail-on-issues` | `saw audit --repo OWNER/NAME -f` |
 
@@ -331,8 +411,8 @@ The `stayawake-security-{scan,report,alert,remediate,audit}` entry points no lon
   ([security-sentinel.yml](../.github/workflows/security-sentinel.yml),
   [security-remediate.yml](../.github/workflows/security-remediate.yml),
   [worm-guard.yml](../.github/workflows/worm-guard.yml)) and the Docker image invoke `saw`
-  directly; the gate is `saw scan`'s **exit code**, and durable records are pushed via
-  `--alert`, `--sarif` (uploaded to code-scanning), and CI artifacts rather than committed files.
+  directly; the gate is `saw scan`'s **exit code**, and durable records are pushed via `--alert`,
+  `--sarif` (uploaded to code-scanning), and CI artifacts rather than committed files.
 - **Health stays remote-only.** The `stayawake-health-*` scripts powering the `*/5` uptime cron
   ([stayawake-sentinel.yml](../.github/workflows/stayawake-sentinel.yml)) are untouched and are
   intentionally not exposed as `saw` subcommands.
@@ -356,7 +436,7 @@ ships alongside it as a collision-proof fallback.
 | --- | --- | --- | --- |
 | Scan + CI gate | `stayawake-security-scan --fail-on-findings` | `saw scan` | −86% |
 | Scan + alert | `…scan && …alert` | `saw scan --alert` | −68% |
-| Remediate + PR | `stayawake-security-remediate --apply --open-pr` | `saw fix` | −74% |
+| Remediate + PR | `stayawake-security-remediate --apply --open-pr` | `saw fix --pr` | −74% |
 | Audit + gate | `stayawake-security-audit --repo … --fail-on-issues` | `saw audit --repo … -f` | −46% |
 
 ### Design decisions
