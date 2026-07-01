@@ -98,6 +98,3 @@ built from the same wheel published to PyPI, and ships SLSA provenance + SBOM at
 - [Releasing](docs/RELEASING.md) — maintainer runbook: tags, PyPI Trusted Publishing, verification
 - [Contributing](CONTRIBUTING.md) — development setup and guidelines
 
-## License
-
-MIT — see [LICENSE](LICENSE).
