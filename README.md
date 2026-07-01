@@ -14,7 +14,7 @@ commit reports back to the repository — the same packaged code in both places.
 
 ## Architecture
 
-![StayAwakeBot architecture](public/stayawakebot_architecture.svg)
+Coming soon
 
 ## Quick start
 
@@ -22,15 +22,27 @@ commit reports back to the repository — the same packaged code in both places.
 
 ```bash
 pip install stayawakebot                                            # from PyPI (released versions)
-# or the latest from source:
+```
+
+Or the latest from source:
+```bash
 pip install "stayawakebot @ git+https://github.com/Ndevu12/stayAwakeBot@main"
-stayawake-health-check  --config config/urls.yml                    # uptime check (remote-only bot)
+```
+
+Health check
+
+```bash
+stayawake-health-check  --config config/urls.yml      
+```
+
+Uptime check (remote-only bot)
+
+```bash
 saw scan --config config/security.yml --local                       # worm scan (local security CLI)
 ```
 
-> The distribution is published as **`stayawakebot`** (the name `stayawake` is taken on PyPI by
-> an unrelated project). Local security runs through the terse **`saw`** command (see the
-> [CLI guide](docs/CLI.md)); the legacy `stayawake-*` console scripts are unchanged and still work.
+> The distribution is published as **`stayawakebot`**. Local security runs through the terse **`saw`** command (see the
+> [CLI guide](docs/CLI.md)).
 
 ## Gate any repo's CI (GitHub Action)
 
