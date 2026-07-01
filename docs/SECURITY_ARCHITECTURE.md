@@ -48,6 +48,25 @@ signatures (data) ─► signature engine ─► matchers ─► findings ─►
 5. `.gitignore` worm markers (content)
 6. **Evil merges** — content a merge introduces beyond a clean 3-way merge of its parents (git-history)
 
+## Incident response — rotate credentials LAST
+**Do not rotate credentials first.** The Mini Shai-Hulud variant is reported to install a host
+service (`gh-token-monitor.service` on Linux) that watches for credential rotation and, if a token
+is rotated while the persistence is still live, **wipes the home directory** (MITRE T1485). The
+reflexive "rotate everything now" reaction is exactly what arms that tripwire — turning containment
+into data loss. Respond in this order:
+
+1. **Isolate** the host from the network before anything else.
+2. **Rebuild from clean images** — take self-hosted CI runners offline and rebuild affected hosts
+   from known-good images (watch for a runner named `SHA1HULUD`).
+3. **Neutralize per-host persistence** — rogue OS services (e.g. `gh-token-monitor.service`),
+   planted CI workflows, and editor/AI-agent auto-run hooks (`.vscode/`, `.claude/`).
+4. **Only then rotate** credentials, in order: npm → GitHub PATs → cloud keys → SSH keys.
+
+`saw audit` enforces this in its output: whenever it finds credential exposure it leads with this
+ordered runbook, and its rotation remediation is phrased as the **last** step with the wiper
+warning — never "rotate now". (This is distinct from the GitHub **App** installation-token
+auto-rotation in `docs/USAGE.md`, which is a routine hardening feature, not incident response.)
+
 ## Config
 - `config/security.yml` — targets (local globs + GitHub users/orgs), exclude dirs, remediation mode,
   allowlist, alert routing. `exclude_dirs` defaults already skip `.git`, `node_modules`, build

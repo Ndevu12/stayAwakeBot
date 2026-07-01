@@ -33,6 +33,39 @@ class HygieneIssue:
         return asdict(self)
 
 
+# --- incident-response sequencing (SAFETY: rotate credentials LAST) ---------
+#
+# Rotating a token while worm persistence is still live on a host can arm a reported
+# destructive tripwire: the Mini Shai-Hulud variant is reported to install a service
+# (gh-token-monitor.service) that WIPES the home directory when it detects credential
+# rotation (MITRE T1485). So the reflexive "rotate everything now" reaction is exactly
+# what turns containment into data loss — isolate and neutralize persistence FIRST.
+
+# Naming the tripwire once, reused in the rotation remediation and the runbook below.
+_WIPER_NOTE = ("Mini Shai-Hulud is reported to install a service (gh-token-monitor.service) "
+               "that wipes the home directory when it detects credential rotation")
+
+# Issues whose presence means the ordered incident-response runbook must be surfaced —
+# credential exposure (a user seeing this will want to rotate) or host persistence. When
+# later host-service / host-artifact persistence checks are added, add their ids here.
+INCIDENT_TRIGGER_IDS = {"cached-github-keychain", "git-credentials-plaintext"}
+
+
+def incident_response_sequence() -> list[str]:
+    """The canonical order for responding to a suspected worm compromise. Rotation is
+    ALWAYS the last step: rotating while persistence is live can trigger the reported
+    home-directory wiper. Isolate → rebuild → neutralize → THEN rotate."""
+    return [
+        "1. Isolate the host from the network before doing anything else.",
+        "2. Take self-hosted CI runners offline and rebuild affected hosts from known-clean "
+        "images (watch for a runner named SHA1HULUD).",
+        "3. Neutralize per-host persistence: rogue OS services (e.g. gh-token-monitor.service), "
+        "planted CI workflows, and editor/AI-agent auto-run hooks (.vscode/, .claude/).",
+        "4. ONLY THEN rotate credentials, in order: npm → GitHub PATs → cloud keys → SSH keys. "
+        f"Rotating earlier is dangerous — {_WIPER_NOTE}.",
+    ]
+
+
 # --- credential hygiene -----------------------------------------------------
 
 def _macos_keychain_has_github() -> bool:
@@ -77,8 +110,9 @@ def check_credentials() -> list[HygieneIssue]:
             severity="warning",
             title="Plaintext GitHub credential in ~/.git-credentials",
             detail=f"{cred_file} stores a github.com credential in plaintext (credential.helper=store).",
-            remediation="Delete the file and switch to an OS keychain helper or SSH; "
-                        "rotate the exposed token on GitHub.",
+            remediation="Delete the file and switch to an OS keychain helper or SSH now. "
+                        "Rotate the exposed token LAST — only after isolating the host and "
+                        f"neutralizing any persistence (see the incident-response steps): {_WIPER_NOTE}.",
         ))
     return issues
 
@@ -194,6 +228,12 @@ def render(issues: list[HygieneIssue]) -> str:
         return "✓ Local security hygiene: no issues found."
     icon = {"warning": "⚠️", "info": "•"}
     lines = [f"Local security hygiene — {len(issues)} item(s):", ""]
+    # Credential exposure / persistence present → lead with the ordered runbook so the
+    # user rotates LAST (rotating while persistence is live can trip the wiper).
+    if any(i.id in INCIDENT_TRIGGER_IDS for i in issues):
+        lines.append("⚠️  Credential exposure detected — respond in THIS order (rotate LAST):")
+        lines += [f"     {step}" for step in incident_response_sequence()]
+        lines.append("")
     for i in issues:
         lines.append(f"{icon.get(i.severity, '•')}  [{i.severity}] {i.title}")
         lines.append(f"     {i.detail}")
