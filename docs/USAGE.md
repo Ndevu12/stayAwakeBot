@@ -102,6 +102,8 @@ for git repos. Scanning is **local by default** (nothing is sent to GitHub unles
 `--remote`). With no paths and nothing configured, it scans the current repository (found by
 walking up to the nearest `.git`), so a bare `saw scan` "just works" after `pip install`.
 
+### Fixing findings (fix / discard)
+
 By default `saw fix` PREPARES the cleanup on a local `security/auto-clean` branch and stops —
 no push, no PR, no network — so it never edits your working tree and makes zero surprise remote
 writes. Review the branch, then publish with `--pr` (push + one rolling, de-duplicated PR per
@@ -130,10 +132,11 @@ ladder:
 So remediation always produces something actionable — a fork PR, a patch, a heads-up, or
 some combination — even without write access to the target.
 
-Drop `--local` to also scan the GitHub users/orgs listed in `config/security.yml`.
-`saw scan`'s exit code **is** the verdict (`0`/`1`), so a CI gate just checks it — there is no
-`--fail` flag. See [SECURITY_ARCHITECTURE.md](SECURITY_ARCHITECTURE.md) for how detection /
-remediation work.
+Pass `--remote` to scan the GitHub users/orgs listed in `config/security.yml` instead of local
+paths (scope is local **or** remote — one per run). `saw scan`'s exit code **is** the verdict
+(`0`/`1`), so a CI gate just checks it — there is no `--fail` flag. See
+[SECURITY_ARCHITECTURE.md](SECURITY_ARCHITECTURE.md) for how detection / remediation work, and the
+[`saw` CLI guide](CLI.md) for every command and flag.
 
 **Security reports are no longer committed into the repo.** `saw scan` persists nothing by
 default — the report renders to the terminal. For a durable copy, reach for an opt-in sink:
@@ -239,7 +242,7 @@ token model on your own repos — or when you manage many.
 It's an **opt-in extra** so the base install stays stdlib-only:
 
 ```bash
-pip install "stayawake[app]"          # adds PyJWT[crypto] — only needed for App auth
+pip install "stayawakebot[app]"       # adds PyJWT[crypto] — only needed for App auth
 export GH_APP_ID=123456
 export GH_APP_PRIVATE_KEY="$(cat your-app.private-key.pem)"   # or GH_APP_PRIVATE_KEY_PATH=…
 # optional; auto-detected when the App has exactly one installation:
@@ -249,7 +252,7 @@ saw fix --remote       # opens a dedup'd fix PR per infected install repo
 ```
 
 If the App env is set without the extra installed, StayAwakeBot prints a clear
-`pip install "stayawake[app]"` hint rather than failing obscurely. An explicit
+`pip install "stayawakebot[app]"` hint rather than failing obscurely. An explicit
 `GH_SECURITY_TOKEN` still takes precedence (handy for a one-off human override).
 
 **Minimal App permissions** (Repository permissions): **Metadata: Read** (always) +
