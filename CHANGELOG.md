@@ -128,6 +128,14 @@ All notable changes to this project are documented here. The format is based on
   `--user "$(id -u):$(id -g)"` invocation for writing the report back to the host.
 
 ### Security
+- **Incident-response guidance rotates credentials LAST (wiper-safe).** `saw audit`'s hygiene
+  output no longer tells you to rotate an exposed token outright. The Mini Shai-Hulud variant is
+  reported to install a host service (`gh-token-monitor.service`) that **wipes the home directory
+  when it detects credential rotation**, so rotating while persistence is still live turns
+  containment into data loss. When credential exposure is found, the audit now leads with an ordered
+  runbook — **isolate → rebuild from clean images → neutralize per-host persistence → then rotate** —
+  and the rotation remediation is phrased as the last step with the wiper warning. Documented in
+  `docs/SECURITY_ARCHITECTURE.md`.
 - **Git-recovery remediation — never corrupts valid code.** An injected code-loader payload is
   recovered from the file's last clean committed version (the real original), or deferred to manual
   review with the exact `git checkout` command — the scanner never surgically edits a source file,
