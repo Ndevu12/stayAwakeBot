@@ -29,15 +29,16 @@ class TestRemediation(unittest.TestCase):
     def test_structural_apply_cleans_nonloader_findings(self):
         # plan/apply handles only the reliable STRUCTURAL actions (quarantine fonts, strip
         # exact .gitignore lines, drop autorun JSON keys). Categories with remediation=manual
-        # are NOT surgically edited — code-loader routes to git recovery, and npm-lifecycle
-        # hooks aren't safely strippable (the manifest may be legit) — so both remain after a
+        # are NOT surgically edited — code-loader routes to git recovery, npm-lifecycle hooks
+        # aren't safely strippable (the manifest may be legit), and agent-autorun (.claude hooks)
+        # defers to review (the file may hold legit permissions) — so all three remain after a
         # bare plan/apply on this (non-git) fixture.
         before = self._findings()
         self.assertTrue(before, "fixture should start infected")
         applied = remediation.apply(self.repo, remediation.plan(before), self.q)
         self.assertTrue(applied, "should apply the structural changes")
         remaining = {f.category for f in self._findings()}
-        self.assertEqual(remaining, {"code-loader", "npm-lifecycle"},
+        self.assertEqual(remaining, {"code-loader", "npm-lifecycle", "agent-autorun"},
                          f"only manual-remediation categories should remain: {remaining}")
         self.assertTrue(self.q.exists())            # originals preserved in quarantine
 

@@ -128,6 +128,16 @@ All notable changes to this project are documented here. The format is based on
   `--user "$(id -u):$(id -g)"` invocation for writing the report back to the host.
 
 ### Security
+- **Extends auto-run detection to AI/agent config — Claude Code hooks (`.claude/settings.json`).**
+  The structural matcher previously only understood `.vscode/`; it now also inspects
+  `.claude/settings.json` (and `settings.local.json`) and parses the Claude Code `hooks` schema —
+  the same auto-execute threat class one config layer over (T1546). A command hook on a
+  lifecycle/open event (`SessionStart` etc. — the `runOn: folderOpen` analogue) is **heuristic**
+  (SUSPICIOUS — legit projects ship benign hooks); a hook whose command runs a disguised payload
+  (remote-fetch → interpreter, a font/binary, or a known loader fingerprint) is **confirmed**
+  (INFECTED) on any event. Active-tool-use hooks (`PostToolUse` formatters/linters) and
+  permissions-only configs stay clean, and only `.claude/` files are inspected. The existing VS
+  Code detection is unchanged.
 - **Detects self-hosted GitHub Actions runner persistence — the worm's most durable foothold.**
   Two complementary additions. (1) The repo scanner detects committed runner-registration artifacts,
   two-tier to keep the verdict honest: a file merely *named* `.runner`/`.credentials` is a
