@@ -31,6 +31,18 @@ class TestCredentials(unittest.TestCase):
             with mock.patch.object(hygiene.Path, "home", return_value=Path(d)):
                 self.assertEqual(hygiene._git_credentials_file_with_github(), cred)
 
+    def test_plaintext_remediation_is_wiper_safe(self):
+        # The rotation advice must sequence rotation LAST and name the wiper tripwire —
+        # never the old unconditional "rotate the exposed token on GitHub" (#1088).
+        with mock.patch.object(hygiene, "_macos_keychain_has_github", return_value=False), \
+             mock.patch.object(hygiene, "_git_credentials_file_with_github",
+                               return_value=Path("/home/u/.git-credentials")):
+            issues = hygiene.check_credentials()
+        rem = next(i.remediation for i in issues if i.id == "git-credentials-plaintext")
+        self.assertIn("gh-token-monitor.service", rem)          # names the wiper tripwire
+        self.assertIn("Rotate the exposed token LAST", rem)     # rotation is sequenced last
+        self.assertNotIn("rotate the exposed token on GitHub", rem)  # old unsafe wording gone
+
 
 class TestVSCode(unittest.TestCase):
     def _settings(self, body: str) -> Path:
@@ -100,6 +112,22 @@ class TestAuditRender(unittest.TestCase):
         out = hygiene.render([issue])
         self.assertIn("Title", out)
         self.assertIn("fix: Fix", out)
+
+    def test_render_surfaces_incident_sequence_on_credential_exposure(self):
+        issue = hygiene.HygieneIssue("git-credentials-plaintext", "warning", "T", "D", "F")
+        out = hygiene.render([issue]).lower()
+        self.assertIn("rotate last", out)                              # runbook header
+        self.assertLess(out.index("isolate the host"), out.index("rotate credentials"))
+
+    def test_render_omits_incident_sequence_for_non_trigger_issue(self):
+        issue = hygiene.HygieneIssue("vscode-autotasks-on", "warning", "T", "D", "F")
+        self.assertNotIn("respond in THIS order", hygiene.render([issue]))
+
+    def test_incident_response_sequence_orders_rotation_last(self):
+        joined = " ".join(hygiene.incident_response_sequence()).lower()
+        self.assertLess(joined.index("isolate"), joined.index("rotate"))
+        self.assertLess(joined.index("neutralize"), joined.index("rotate"))
+        self.assertIn("gh-token-monitor.service", joined)
 
 
 if __name__ == "__main__":
