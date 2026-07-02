@@ -72,6 +72,9 @@ allowlist:
   - {signature: npm-lifecycle-dropper, path_glob: "tests/**"}
   - {signature: npm-lifecycle-remote-fetch, path_glob: "tests/**"}
   - {signature: npm-lifecycle-exec, path_glob: "tests/**"}
+  # Claude Code agent-autorun fixtures (tests/.../fixtures/{infected,clean}/.claude/settings.json)
+  - {signature: claude-hook-autorun, path_glob: "tests/**"}
+  - {signature: claude-hook-runs-payload, path_glob: "tests/**"}
 
 # Alerting. Channels read their secrets from env (SLACK_WEBHOOK_URL, GH_SECURITY_TOKEN).
 alerts:

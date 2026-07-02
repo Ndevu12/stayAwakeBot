@@ -22,6 +22,7 @@ EXPECTED_IN_INFECTED = {
     "vscode-task-folderopen-exec", "vscode-task-runs-font",
     "vscode-allow-automatic-tasks", "gitignore-autopush-markers",
     "npm-lifecycle-dropper", "npm-lifecycle-remote-fetch",
+    "claude-hook-autorun", "claude-hook-runs-payload",
 }
 
 
