@@ -128,6 +128,17 @@ All notable changes to this project are documented here. The format is based on
   `--user "$(id -u):$(id -g)"` invocation for writing the report back to the host.
 
 ### Security
+- **Scans `.github/workflows/*.yml` for planted / impersonated Actions workflows.** A new
+  YAML-aware `workflow-yaml` matcher closes the Shai-Hulud 2.0 / Mini CI-persistence blind spot —
+  workflow files were walked but never inspected. It flags two **heuristic** (SUSPICIOUS, not
+  INFECTED) shapes: an injection-prone trigger (`pull_request_target` / `issue_comment` / `issues` /
+  `discussion` / `discussion_comment` / `workflow_run`) that reaches a `run:` step interpolating an
+  untrusted `${{ github.event.* }}` field — the "open a Discussion → payload fires" weakness — and a
+  workflow masquerading as Dependabot that also uses a self-hosted runner, a remote-fetch-into-
+  interpreter `run:`, or an injection expression. A normal `push`/`pull_request` CI workflow that
+  only reads vetted inputs stays clean, and the notorious PyYAML `on:` → boolean-`True` key is
+  handled so detection isn't silently bypassed. Malformed workflow YAML is skipped, never crashes a
+  scan.
 - **Detects malicious npm lifecycle hooks in `package.json`.** A new `npm-manifest` matcher reads
   the keys npm auto-runs on `npm install` — `preinstall`/`install`/`postinstall`/`prepare` — and
   flags the Shai-Hulud install-time execution vector: `node setup_bun.js` (dropper) and a remote
