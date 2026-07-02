@@ -6,7 +6,7 @@
 #
 # Fields (common):
 #   id          unique, kebab-case
-#   category    grouping (code-loader | fake-font | vscode-autorun | git-marker | camouflage | evil-merge | exfil | npm-lifecycle)
+#   category    grouping (code-loader | fake-font | vscode-autorun | git-marker | camouflage | evil-merge | exfil | npm-lifecycle | workflow-autorun)
 #   severity    critical | high | medium | low
 #   matcher     content | filename | structural-json | git-history | heuristic
 #   description human-readable
@@ -226,4 +226,28 @@ signatures:
     # runs node) — the confirmed dropper/remote-fetch signatures above catch the real payloads.
     pattern: '\b(?:bun|bunx|deno|curl|wget)\b'
     description: "npm install-time lifecycle hook invokes Bun/Deno or a remote fetch (review)"
+    remediation: manual
+
+  # ── GitHub Actions workflow persistence / camouflage (.github/workflows/*.yml) ───
+  # The workflow-yaml matcher parses each workflow with yaml.safe_load and dispatches by `kind`.
+  # Both are confidence: heuristic → SUSPICIOUS (a repo can legitimately own such a workflow);
+  # remediation: manual — a planted/impersonated workflow is recovered from git or reviewed by a
+  # human, never surgically stripped. (Self-hosted-runner registration inside a workflow is left
+  # to the runner-persistence hardening in #1092 to avoid overlap.)
+  - id: workflow-injection-run
+    category: workflow-autorun
+    severity: high
+    matcher: workflow-yaml
+    confidence: heuristic
+    kind: dangerous-trigger-run-injection
+    description: "Workflow with an injection-prone trigger (pull_request_target/issue_comment/discussion/workflow_run) interpolates untrusted github.event.* into a run step (script injection / secret theft)"
+    remediation: manual
+
+  - id: workflow-dependabot-impersonation
+    category: workflow-autorun
+    severity: high
+    matcher: workflow-yaml
+    confidence: heuristic
+    kind: dependabot-impersonation
+    description: "Workflow masquerading as Dependabot (name/filename) while using self-hosted runners, a remote-fetch-into-interpreter run step, or an untrusted-injection expression (T1036 camouflage)"
     remediation: manual
