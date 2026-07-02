@@ -6,7 +6,7 @@
 #
 # Fields (common):
 #   id          unique, kebab-case
-#   category    grouping (code-loader | fake-font | vscode-autorun | git-marker | camouflage | evil-merge)
+#   category    grouping (code-loader | fake-font | vscode-autorun | git-marker | camouflage | evil-merge | exfil)
 #   severity    critical | high | medium | low
 #   matcher     content | filename | structural-json | git-history | heuristic
 #   description human-readable
@@ -160,4 +160,37 @@ signatures:
     confidence: heuristic
     kind: evil-merge
     description: "Merge commit introducing content beyond a clean 3-way merge of its parents (review-evading)"
+    remediation: manual
+
+  # ── Shai-Hulud exfiltration / persistence branding (content) ─────────────────
+  # The worm's own vanity labels — cheap, high-signal plain-text matches for the
+  # exfiltration (attacker-repo/commit) and self-hosted-runner persistence stages.
+  # remediation: manual — an external attacker repo / registered runner can't be
+  # fixed by a file edit; the response is host isolation + rotate-LAST (see hygiene).
+  - id: exfil-shai-hulud-branding
+    category: exfil
+    severity: critical
+    matcher: content
+    pattern: 'Sha1-Hulud:\s*The Second Coming|A Mini Shai-Hulud has Appeared'
+    description: "Shai-Hulud exfil branding — attacker repo/commit vanity label (Second Coming / Mini variant)"
+    remediation: manual
+
+  - id: exfil-sha1hulud-runner
+    category: exfil
+    severity: critical
+    matcher: content
+    pattern: '\bSHA1HULUD\b'
+    # Scoped to runner / workflow / service surfaces so a prose mention of the name
+    # (e.g. a threat writeup) is NOT flagged — only the IoC where it actually lives.
+    file_globs: [".github/**", "**/.github/**", ".runner", "**/.runner", "**/actions-runner/**", "*.service"]
+    description: "Shai-Hulud persistence — self-hosted runner named SHA1HULUD in runner/workflow config"
+    remediation: manual
+
+  - id: exfil-shai-hulud-token
+    category: exfil
+    severity: high
+    matcher: content
+    confidence: heuristic
+    pattern: 'Sha[i1]-Hulud'
+    description: "Shai-Hulud vanity token (bare mention — heuristic; benign in security write-ups)"
     remediation: manual
