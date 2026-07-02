@@ -44,6 +44,94 @@ class TestCredentials(unittest.TestCase):
         self.assertNotIn("rotate the exposed token on GitHub", rem)  # old unsafe wording gone
 
 
+class TestRunnerPersistence(unittest.TestCase):
+    def test_installed_runner_is_a_warning(self):
+        with mock.patch.object(hygiene, "_installed_runner_dir",
+                               return_value=Path("/home/u/actions-runner")), \
+             mock.patch.object(hygiene, "_runner_services", return_value=[]):
+            issues = hygiene.check_runner_persistence()
+        self.assertIn("self-hosted-runner-persistence", [i.id for i in issues])
+        self.assertTrue(all(i.severity == "warning" for i in issues))
+
+    def test_registered_service_alone_is_detected(self):
+        with mock.patch.object(hygiene, "_installed_runner_dir", return_value=None), \
+             mock.patch.object(hygiene, "_runner_services",
+                               return_value=["actions.runner.org-repo.host"]):
+            ids = [i.id for i in hygiene.check_runner_persistence()]
+        self.assertEqual(ids, ["self-hosted-runner-persistence"])
+
+    def test_wiper_service_is_a_distinct_warning(self):
+        with mock.patch.object(hygiene, "_installed_runner_dir", return_value=None), \
+             mock.patch.object(hygiene, "_runner_services",
+                               return_value=["gh-token-monitor.service"]):
+            ids = [i.id for i in hygiene.check_runner_persistence()]
+        self.assertIn("wiper-service-present", ids)
+
+    def test_remediation_is_wiper_safe(self):
+        # Must sequence rotation LAST and never tell the user to rotate first — rotating while
+        # the runner/wiper persistence is live can trip the home-dir wiper (#1088 ordering).
+        with mock.patch.object(hygiene, "_installed_runner_dir",
+                               return_value=Path("/home/u/actions-runner")), \
+             mock.patch.object(hygiene, "_runner_services",
+                               return_value=["gh-token-monitor.service"]):
+            issues = hygiene.check_runner_persistence()
+        self.assertEqual({"self-hosted-runner-persistence", "wiper-service-present"},
+                         {i.id for i in issues})
+        for i in issues:
+            rem = i.remediation.lower()
+            self.assertIn("do not rotate credentials", rem)          # leads with the guardrail
+            self.assertTrue("rotate credentials last" in rem or "only then rotate" in rem)
+            # The rotation ACTION (the LAST 'rotate' — not the "Do NOT rotate" guardrail) is
+            # sequenced AFTER isolation: a meaningful ordering check, not a phrase that never appears.
+            self.assertLess(rem.index("isolate the host"), rem.rindex("rotate"))
+
+    def test_macos_launchd_wiper_is_captured(self):
+        # Regression: the launchd branch must collect the gh-token-monitor wiper label too, not
+        # only actions.runner labels — the safety-critical wiper must not be Linux-only.
+        def fake_run(cmd, **kw):
+            if cmd[0] == "launchctl":
+                return mock.Mock(returncode=0,
+                                 stdout="-\t0\tgh-token-monitor\n"
+                                        "501\t0\tactions.runner.acme-app.buildbox\n")
+            raise FileNotFoundError                       # no systemctl on macOS
+        with mock.patch.object(hygiene.subprocess, "run", side_effect=fake_run):
+            services = hygiene._runner_services()
+        self.assertIn("gh-token-monitor", services)
+        self.assertIn("actions.runner.acme-app.buildbox", services)
+
+    def test_service_label_matcher_precision(self):
+        # Runner/wiper labels match; an unrelated label that merely CONTAINS "actions.runner"
+        # (a third-party helper) must NOT — the old whole-line substring test over-matched.
+        self.assertTrue(hygiene._is_runner_or_wiper("actions.runner.acme-app.host"))
+        self.assertTrue(hygiene._is_runner_or_wiper("gh-token-monitor.service"))
+        self.assertFalse(hygiene._is_runner_or_wiper("com.vendor.actions.runner-helper"))
+        self.assertFalse(hygiene._is_runner_or_wiper("com.apple.Spotlight"))
+
+    def test_clean_host_has_no_runner_issue(self):
+        with mock.patch.object(hygiene, "_installed_runner_dir", return_value=None), \
+             mock.patch.object(hygiene, "_runner_services", return_value=[]):
+            self.assertEqual(hygiene.check_runner_persistence(), [])
+
+    def test_runner_persistence_triggers_incident_runbook(self):
+        # Host persistence is an INCIDENT_TRIGGER, so render() must lead with the rotate-LAST
+        # runbook (a user's reflex on seeing a rogue runner is to rotate — the wiper tripwire).
+        issue = hygiene.HygieneIssue("self-hosted-runner-persistence", "warning", "T", "D", "F")
+        out = hygiene.render([issue]).lower()
+        self.assertIn("rotate last", out)
+        self.assertLess(out.index("isolate the host"), out.index("rotate credentials"))
+
+    def test_audit_composes_runner_persistence(self):
+        # Regression: audit() is the SINGLE composition site and must include the runner probe,
+        # so a probe added there is never silently dropped by a caller that hand-assembles checks.
+        sentinel = hygiene.HygieneIssue("self-hosted-runner-persistence", "warning", "T", "D", "F")
+        with mock.patch.object(hygiene, "check_credentials", return_value=[]), \
+             mock.patch.object(hygiene, "check_vscode", return_value=[]), \
+             mock.patch.object(hygiene, "check_branch_protection", return_value=[]), \
+             mock.patch.object(hygiene, "check_runner_persistence", return_value=[sentinel]):
+            ids = [i.id for i in hygiene.audit()]
+        self.assertIn("self-hosted-runner-persistence", ids)
+
+
 class TestVSCode(unittest.TestCase):
     def _settings(self, body: str) -> Path:
         f = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
