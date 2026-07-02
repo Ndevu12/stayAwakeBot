@@ -6,7 +6,7 @@
 #
 # Fields (common):
 #   id          unique, kebab-case
-#   category    grouping (code-loader | fake-font | vscode-autorun | git-marker | camouflage | evil-merge | exfil | npm-lifecycle | workflow-autorun | runner-persistence)
+#   category    grouping (code-loader | fake-font | vscode-autorun | git-marker | camouflage | evil-merge | exfil | npm-lifecycle | workflow-autorun | runner-persistence | agent-autorun)
 #   severity    critical | high | medium | low
 #   matcher     content | filename | structural-json | git-history | heuristic
 #   description human-readable
@@ -141,6 +141,28 @@ signatures:
     kind: vscode-allow-automatic-tasks
     description: "settings.json enables task.allowAutomaticTasks (required for folderOpen abuse)"
     remediation: remove-foreign-vscode
+
+  # ── AI/agent config auto-run — Claude Code hooks (.claude/settings.json) ──────
+  # Same threat class as the VS Code autorun above (T1546), one config layer over. A `hooks`
+  # entry runs a command on a Claude Code lifecycle event; SessionStart is the folderOpen
+  # analogue (fires on opening the project). remediation: manual — the file can hold legit
+  # config (permissions), so recovery is a reviewed edit, never an auto-strip.
+  - id: claude-hook-autorun
+    category: agent-autorun
+    severity: high
+    matcher: structural-json
+    confidence: heuristic
+    kind: claude-hook-autorun
+    description: "Claude Code hook auto-runs a command on a lifecycle/open event (SessionStart etc.) — agent auto-execute foothold (review)"
+    remediation: manual
+
+  - id: claude-hook-runs-payload
+    category: agent-autorun
+    severity: critical
+    matcher: structural-json
+    kind: claude-hook-runs-payload
+    description: "Claude Code hook command executes a disguised payload (remote-fetch→interpreter, font/binary, or a known loader fingerprint)"
+    remediation: manual
 
   # ── .gitignore camouflage markers (content) ──────────────────────────────────
   - id: gitignore-autopush-markers

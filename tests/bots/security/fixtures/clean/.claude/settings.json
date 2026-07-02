@@ -1,0 +1,6 @@
+{
+  "permissions": {
+    "allow": ["Bash(git status)", "Bash(npm test)"],
+    "deny": ["Bash(rm -rf)"]
+  }
+}
