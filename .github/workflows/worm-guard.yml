@@ -13,8 +13,9 @@ on:
       - 'reports/**'
 
 permissions:
-  contents: read
-  security-events: write   # the action uploads SARIF to the Security tab / PR annotations
+  contents: read   # pure exit-code gate: green=clean / red=infected, keyed ONLY on the scan verdict.
+                   # Code-scanning delivery lives on the non-gating security-sentinel (behind
+                   # vars.ENABLE_CODE_SCANNING), so nothing but the scan can ever color this gate.
 
 jobs:
   worm-guard:
@@ -34,6 +35,9 @@ jobs:
           # this deliberately after a reviewed scanner/signature update.
           sentinel-ref: a2dc06f2a993c05b1706faacbca5bdcde37bee3f   # merge of #1066 (terminal-first saw scan --sarif)
           fail-on-findings: 'true'
+          # This gate never uploads SARIF — the job conclusion is the scan's exit code, nothing
+          # else. Code-scanning delivery is owned solely by security-sentinel.yml.
+          upload-sarif: 'false'
           # Fixture allowlist is signature-scoped (glob|signature): a fresh payload
           # under fixtures/ using any OTHER signature is still flagged.
           allowlist-globs: >-

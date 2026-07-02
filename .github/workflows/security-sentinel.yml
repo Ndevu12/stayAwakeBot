@@ -18,7 +18,8 @@ on:
 permissions:
   contents: read                   # checkout only — nothing is committed back
   issues: write                    # --alert opens/closes finding issues
-  security-events: write           # upload SARIF to the code-scanning / Security tab
+  security-events: write           # upload SARIF to the code-scanning / Security tab (when available)
+  actions: read                    # private repos: codeql-action/upload-sarif reads run metadata
 
 # Shared with the availability sentinel so the two never push to main concurrently.
 concurrency:
@@ -55,14 +56,30 @@ jobs:
           saw scan "${{ github.workspace }}" -c "${{ github.workspace }}/config/security.yml" \
             --alert --sarif "$RUNNER_TEMP/latest.sarif"
 
+      # security-sentinel is the SOLE owner of code-scanning delivery (the merge/publish gates
+      # never upload). It's gated by an explicit, declared capability flag — `vars.ENABLE_CODE_SCANNING`
+      # — not a per-run probe: a private repo without Advanced Security has no code-scanning
+      # PERMANENTLY, so that's a config choice stated once, not transient unavailability rediscovered
+      # each run. Unset → the upload SKIPS as a labeled, deliberate-config skip (findings are NOT
+      # lost: run log + the SARIF build artifact below + `--alert` issues/Slack). Set to 'true' but
+      # the upload genuinely fails → this NON-GATING job goes RED honestly (blocks no merge/publish).
+      # always(): the scan exits non-zero when infected, but the SARIF is written before that verdict.
       - name: Upload SARIF to code-scanning
-        # always(): the scan above exits non-zero when infected — we still want the
-        # findings in the Security tab. The SARIF is written before that verdict.
-        if: ${{ always() && hashFiles(format('{0}/latest.sarif', runner.temp)) != '' }}
+        if: ${{ always() && vars.ENABLE_CODE_SCANNING == 'true' && hashFiles(format('{0}/latest.sarif', runner.temp)) != '' }}
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: ${{ runner.temp }}/latest.sarif
           category: saw-security-sentinel
+
+      - name: Note code-scanning delivery status
+        if: ${{ always() }}
+        run: |
+          if [ "${{ vars.ENABLE_CODE_SCANNING }}" = "true" ]; then
+            echo "SARIF → code-scanning: attempted (see the Upload step; a failure there turns THIS non-gating job red)."
+          else
+            echo "::notice:: SARIF → code-scanning is deliberately OFF (repo variable ENABLE_CODE_SCANNING is unset). Findings are still delivered via the run log, the SARIF build artifact below, and --alert (issues + Slack). Set vars.ENABLE_CODE_SCANNING=true after enabling GitHub Advanced Security or making the repo public."
+            echo "ℹ️ SARIF → code-scanning off by config (ENABLE_CODE_SCANNING unset); findings delivered via artifact + issues/Slack." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Upload SARIF as build artifact
         if: ${{ always() && hashFiles(format('{0}/latest.sarif', runner.temp)) != '' }}
