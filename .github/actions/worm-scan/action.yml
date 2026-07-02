@@ -39,10 +39,21 @@ runs:
 
     - name: Install scanner
       shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
       # Name-agnostic git install: works whether the pinned ref predates or follows
       # the PyPI rename (the dist name changed; the console scripts did not). Once the
       # package is on PyPI this becomes `pip install "stayawakebot==<version>"`.
-      run: pip install "git+https://github.com/Ndevu12/stayAwakeBot@${{ inputs.sentinel-ref }}"
+      #
+      # When the repo is PRIVATE, pip's anonymous clone of the pinned SHA fails (git exit
+      # 128). Rewrite github.com HTTPS clones to carry the job token (ephemeral, log-masked,
+      # needs only contents:read) so the install works; harmless when the repo is public.
+      run: |
+        if [ -n "${GH_TOKEN:-}" ]; then
+          git config --global \
+            url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
+        fi
+        pip install "git+https://github.com/Ndevu12/stayAwakeBot@${{ inputs.sentinel-ref }}"
 
     - name: Assert scanner capability
       shell: bash
