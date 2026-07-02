@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""`saw audit` — credential + editor + branch-protection hygiene audit."""
+"""`saw audit` — credential + editor + runner-persistence + branch-protection hygiene audit."""
 from __future__ import annotations
 
 import argparse
@@ -24,8 +24,9 @@ def run(a: argparse.Namespace) -> int:
     if a.repo and not token:
         print(auth.no_credential_hint("auditing branch protection") +
               " Skipping the branch-protection check.\n")
-    issues = (hygiene.check_credentials() + hygiene.check_vscode()
-              + hygiene.check_branch_protection(a.repo, token, a.branch))
+    # Delegate to hygiene.audit() — the single composition site — so every probe (including
+    # runner-persistence) is always included; never hand-assemble a subset here.
+    issues = hygiene.audit(a.repo, token, a.branch)
     print(hygiene.render(issues))
     warnings = [i for i in issues if i.severity == "warning"]
     return 1 if (a.fail and warnings) else 0

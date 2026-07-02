@@ -6,7 +6,7 @@
 #
 # Fields (common):
 #   id          unique, kebab-case
-#   category    grouping (code-loader | fake-font | vscode-autorun | git-marker | camouflage | evil-merge | exfil | npm-lifecycle | workflow-autorun)
+#   category    grouping (code-loader | fake-font | vscode-autorun | git-marker | camouflage | evil-merge | exfil | npm-lifecycle | workflow-autorun | runner-persistence)
 #   severity    critical | high | medium | low
 #   matcher     content | filename | structural-json | git-history | heuristic
 #   description human-readable
@@ -194,6 +194,45 @@ signatures:
     pattern: 'Sha[i1]-Hulud'
     description: "Shai-Hulud vanity token (bare mention — heuristic; benign in security write-ups)"
     remediation: manual
+
+  # ── Self-hosted runner persistence — committed install artifacts ─────────────────
+  # The worm registers the host as a self-hosted GitHub Actions runner (reported name
+  # SHA1HULUD) for durable, credential-rotation-surviving persistence (T1543/T1546). A
+  # *registered* runner writes `.runner` (registration config) and `.credentials`; committing
+  # either into a source repo captures that install. Two-tier to stay honest about confidence:
+  # a *file named* `.runner`/`.credentials` is a review signal (heuristic → SUSPICIOUS — the file
+  # could be empty or unrelated), while a `.runner` whose CONTENT is an actual registration
+  # (the serverUrl/gitHubUrl endpoint) is decisive (confirmed → INFECTED). Basename patterns
+  # match at any depth. The SHA1HULUD name string inside such an install is caught by
+  # exfil-sha1hulud-runner (content, path-scoped) above — defined once there, not duplicated.
+  - id: runner-registration-config
+    category: runner-persistence
+    severity: high
+    matcher: filename
+    confidence: heuristic
+    pattern: '.runner'
+    description: "Committed file named .runner — likely a self-hosted runner registration config (review)"
+    remediation: quarantine-file
+
+  - id: runner-registration-content
+    category: runner-persistence
+    severity: critical
+    matcher: content
+    # A GitHub Actions runner .runner config always carries its registration endpoint. Scoped to
+    # the runner artifact paths so the string can't false-positive on unrelated JSON elsewhere.
+    pattern: '"(?:gitHubUrl|serverUrl)"\s*:\s*"https'
+    file_globs: ['.runner', '**/.runner', '**/actions-runner/**']
+    description: "Committed self-hosted runner registration (.runner with a live registration endpoint) — durable CI persistence foothold"
+    remediation: quarantine-file
+
+  - id: runner-credentials-committed
+    category: runner-persistence
+    severity: high
+    matcher: filename
+    confidence: heuristic
+    pattern: '.credentials'
+    description: "Committed .credentials file — pairs with a self-hosted runner install (review; benign alone)"
+    remediation: quarantine-file
 
   # ── npm install-time lifecycle-hook execution (package.json) ─────────────────
   # The npm-manifest matcher inspects ONLY the keys npm auto-runs on `npm install`

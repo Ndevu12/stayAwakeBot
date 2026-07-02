@@ -128,6 +128,21 @@ All notable changes to this project are documented here. The format is based on
   `--user "$(id -u):$(id -g)"` invocation for writing the report back to the host.
 
 ### Security
+- **Detects self-hosted GitHub Actions runner persistence — the worm's most durable foothold.**
+  Two complementary additions. (1) The repo scanner detects committed runner-registration artifacts,
+  two-tier to keep the verdict honest: a file merely *named* `.runner`/`.credentials` is a
+  **heuristic** review signal (SUSPICIOUS — it could be empty or unrelated), while a `.runner` whose
+  *content* is a real registration (a live `serverUrl`/`gitHubUrl` endpoint) is **confirmed**
+  (INFECTED). Basenames match at any depth without firing on near-miss names like `aws.credentials`.
+  (2) `saw audit` gains `check_runner_persistence()`, which finds an installed `actions-runner`
+  (`.runner` config) and a registered runner / `gh-token-monitor.service` wiper across launchd
+  (macOS) and systemd (Linux) — system *and* user scope, including installed-but-not-started units —
+  degrading to a no-op when those tools are absent. Because a rogue runner tempts an immediate
+  credential rotation — which is exactly the reported wiper tripwire — the finding is wired into the
+  incident runbook so the output leads with **isolate → runner offline + registration removed →
+  rebuild → then rotate LAST**, never immediate rotation. `saw audit` now composes its checks through
+  a single site so the probe can't be silently dropped, and the `SHA1HULUD` runner name in a
+  committed install is still covered by the existing exfil content signature (not duplicated).
 - **Scans `.github/workflows/*.yml` for planted / impersonated Actions workflows.** A new
   YAML-aware `workflow-yaml` matcher closes the Shai-Hulud 2.0 / Mini CI-persistence blind spot —
   workflow files were walked but never inspected. It flags two **heuristic** (SUSPICIOUS, not

@@ -6,7 +6,9 @@ worm's entry and propagation surfaces, and report actionable hygiene issues:
 
   * a cached GitHub credential (the worm steals the macOS Keychain / git-credentials
     token; it survives SSH-key rotation and is how it pushed as you),
-  * VS Code automatic-task execution + Workspace Trust disabled (the auto-run vector).
+  * VS Code automatic-task execution + Workspace Trust disabled (the auto-run vector),
+  * a self-hosted GitHub Actions runner / rotation-wiper service (the worm's most durable,
+    credential-rotation-surviving foothold).
 
 Repository indicator scanning lives in the scanner/service; this is complementary.
 Stdlib only; every probe degrades gracefully when a path/tool is absent.
@@ -46,9 +48,11 @@ _WIPER_NOTE = ("Mini Shai-Hulud is reported to install a service (gh-token-monit
                "that wipes the home directory when it detects credential rotation")
 
 # Issues whose presence means the ordered incident-response runbook must be surfaced —
-# credential exposure (a user seeing this will want to rotate) or host persistence. When
-# later host-service / host-artifact persistence checks are added, add their ids here.
-INCIDENT_TRIGGER_IDS = {"cached-github-keychain", "git-credentials-plaintext"}
+# credential exposure (a user seeing this will want to rotate) or host persistence. Host
+# runner/service persistence belongs here too: seeing it, a user's reflex is to rotate, which
+# is exactly the wiper tripwire — so the rotate-LAST runbook must lead.
+INCIDENT_TRIGGER_IDS = {"cached-github-keychain", "git-credentials-plaintext",
+                        "self-hosted-runner-persistence", "wiper-service-present"}
 
 
 def incident_response_sequence() -> list[str]:
@@ -113,6 +117,144 @@ def check_credentials() -> list[HygieneIssue]:
             remediation="Delete the file and switch to an OS keychain helper or SSH now. "
                         "Rotate the exposed token LAST — only after isolating the host and "
                         f"neutralizing any persistence (see the incident-response steps): {_WIPER_NOTE}.",
+        ))
+    return issues
+
+
+# --- self-hosted runner persistence (the worm's most durable foothold) ------
+#
+# Shai-Hulud 2.0 / Mini registers the compromised host as a self-hosted GitHub Actions
+# runner (reported name SHA1HULUD) so attacker workflows keep executing on the host —
+# surviving credential rotation and CI re-provisioning (T1543/T1546). It is also reported
+# to install an OS-service foothold (gh-token-monitor.service, the rotation wiper). Both
+# leave detectable host artifacts: an installed runner dir with a `.runner` config, and/or
+# a registered runner/service. Every probe degrades to a no-op when a tool/path is absent.
+
+# Common self-hosted-runner install locations (the runner may live anywhere, but these
+# cover the documented defaults). We treat a dir as an install only if it holds a `.runner`
+# config — i.e. an actually *registered* runner, not just an extracted tarball. A runner
+# under a dedicated service account or on Windows is a known coverage gap (see the service
+# probe, which is the primary signal); this is a fast best-effort corroborator.
+_RUNNER_DIR_CANDIDATES = (
+    Path.home() / "actions-runner",
+    Path.home() / "runner",
+    Path("/opt/actions-runner"),
+    Path("/actions-runner"),
+)
+
+# The reported rotation-wiper unit, matched by substring so a `@template` / case variant also
+# hits. On-disk unit paths are checked directly so an INSTALLED-but-not-started wiper (which
+# `systemctl list-units` would not show) is still caught — it's the safety-critical signal.
+_WIPER_UNIT_PATHS = (
+    Path("/etc/systemd/system/gh-token-monitor.service"),
+    Path("/usr/lib/systemd/system/gh-token-monitor.service"),
+    Path.home() / ".config/systemd/user/gh-token-monitor.service",
+)
+
+
+def _installed_runner_dir() -> Path | None:
+    for d in _RUNNER_DIR_CANDIDATES:
+        try:
+            if (d / ".runner").is_file():
+                return d
+        except OSError:
+            continue
+    return None
+
+
+def _is_runner_or_wiper(name: str) -> bool:
+    return name.startswith("actions.runner.") or "gh-token-monitor" in name
+
+
+def _runner_services() -> list[str]:
+    """Best-effort list of registered-runner / known-wiper service labels on this host.
+
+    Reads launchd (macOS) and systemd (Linux) — the latter in BOTH system and user scope and
+    via `list-unit-files` too, so an installed-but-not-started unit (e.g. a dropped wiper) is
+    seen, not just running ones. Absent tools / missing session buses degrade to a no-op. The
+    wiper is matched on both launchd and systemd (the safety-critical signal must not be
+    platform-dependent). Order-preserving de-dup at the end."""
+    found: list[str] = []
+    try:                                    # macOS launchd — actions.runner.<...> + wiper job
+        r = subprocess.run(["launchctl", "list"], capture_output=True, text=True, timeout=10)
+        if r.returncode == 0:
+            for ln in r.stdout.splitlines():
+                parts = ln.split()
+                if parts and _is_runner_or_wiper(parts[-1]):
+                    found.append(parts[-1])
+    except (FileNotFoundError, OSError, subprocess.SubprocessError, IndexError):
+        pass
+    for scope in (["--system"], ["--user"]):    # Linux systemd — system + user managers
+        for verb in ("list-units", "list-unit-files"):
+            try:
+                r = subprocess.run(
+                    ["systemctl", *scope, verb, "--type=service", "--all",
+                     "--no-legend", "--plain"],
+                    capture_output=True, text=True, timeout=10)
+            except (FileNotFoundError, OSError, subprocess.SubprocessError):
+                scope = None                    # systemctl absent — stop probing systemd
+                break
+            if r.returncode != 0:
+                continue
+            for ln in r.stdout.splitlines():
+                parts = ln.split()
+                if parts and _is_runner_or_wiper(parts[0]):
+                    found.append(parts[0])
+        if scope is None:
+            break
+    for p in _WIPER_UNIT_PATHS:                  # installed-but-not-started wiper unit file
+        try:
+            if p.is_file():
+                found.append(p.name)
+        except OSError:
+            continue
+    return list(dict.fromkeys(found))            # de-dup, preserve order
+
+
+def check_runner_persistence() -> list[HygieneIssue]:
+    """Detect a self-hosted runner install and/or the reported wiper service on this host.
+
+    SAFETY: the remediation must NOT tell the user to rotate credentials first — rotating
+    while the runner/wiper persistence is still live can trip the reported home-dir wiper.
+    Advise isolate → runner offline + registration/service removed → rebuild → THEN rotate."""
+    runner_dir = _installed_runner_dir()
+    services = _runner_services()
+    wiper = [s for s in services if "gh-token-monitor" in s]
+    runner_services = [s for s in services if s.startswith("actions.runner")]
+
+    issues: list[HygieneIssue] = []
+    if runner_dir is not None or runner_services:
+        where = []
+        if runner_dir is not None:
+            where.append(f"install at {runner_dir} (.runner config present)")
+        if runner_services:
+            where.append(f"registered service(s): {', '.join(sorted(runner_services))}")
+        issues.append(HygieneIssue(
+            id="self-hosted-runner-persistence",
+            severity="warning",
+            title="Self-hosted GitHub Actions runner registered on this host",
+            # Conditional framing — a legitimately-operated runner is not itself malicious; we
+            # flag it because an UNEXPECTED one is the worm's persistence (reported name SHA1HULUD).
+            detail="A self-hosted runner is installed/registered — " + "; ".join(where) + ". "
+                   "If you did not intentionally set this up, it is the worm's most durable "
+                   "foothold (reported runner name SHA1HULUD): attacker workflows keep executing "
+                   "here and it survives credential rotation.",
+            remediation="Do NOT rotate credentials first. Isolate the host, take the runner "
+                        "offline and remove its registration (./config.sh remove) and service, "
+                        "rebuild from a known-clean image, and rotate credentials LAST — "
+                        f"{_WIPER_NOTE}.",
+        ))
+    if wiper:
+        issues.append(HygieneIssue(
+            id="wiper-service-present",
+            severity="warning",
+            title="Reported credential-rotation wiper service is installed",
+            detail=f"Found {', '.join(sorted(wiper))} — the Mini Shai-Hulud service reported to "
+                   "WIPE the home directory when it detects credential rotation (T1485). Rotating "
+                   "any token while this is live can destroy data.",
+            remediation="Do NOT rotate credentials while this service exists. Isolate the host, "
+                        "disable and remove the service, rebuild from a known-clean image, and "
+                        "only THEN rotate credentials (see the incident-response order).",
         ))
     return issues
 
@@ -217,10 +359,14 @@ def check_branch_protection(slug: str | None, token: str | None,
 
 # --- orchestration ----------------------------------------------------------
 
-def audit(slug: str | None = None, token: str | None = None) -> list[HygieneIssue]:
-    """Run every local-posture check and return the combined issue list. When a repo
-    `slug` and `token` are supplied, also audit the branch-protection gate."""
-    return check_credentials() + check_vscode() + check_branch_protection(slug, token)
+def audit(slug: str | None = None, token: str | None = None,
+          branch: str = "main") -> list[HygieneIssue]:
+    """Run every local-posture check and return the combined issue list — the SINGLE place the
+    checks are composed, so a new probe is picked up everywhere (the `saw audit` CLI calls this,
+    it must never hand-assemble its own subset). When a repo `slug` and `token` are supplied,
+    also audit the branch-protection gate on `branch`."""
+    return (check_credentials() + check_vscode() + check_runner_persistence()
+            + check_branch_protection(slug, token, branch))
 
 
 def render(issues: list[HygieneIssue]) -> str:
@@ -228,10 +374,11 @@ def render(issues: list[HygieneIssue]) -> str:
         return "✓ Local security hygiene: no issues found."
     icon = {"warning": "⚠️", "info": "•"}
     lines = [f"Local security hygiene — {len(issues)} item(s):", ""]
-    # Credential exposure / persistence present → lead with the ordered runbook so the
+    # Credential exposure / host persistence present → lead with the ordered runbook so the
     # user rotates LAST (rotating while persistence is live can trip the wiper).
     if any(i.id in INCIDENT_TRIGGER_IDS for i in issues):
-        lines.append("⚠️  Credential exposure detected — respond in THIS order (rotate LAST):")
+        lines.append("⚠️  Credential exposure or active host persistence detected — "
+                     "respond in THIS order (rotate LAST):")
         lines += [f"     {step}" for step in incident_response_sequence()]
         lines.append("")
     for i in issues:
