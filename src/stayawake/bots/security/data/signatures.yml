@@ -6,7 +6,7 @@
 #
 # Fields (common):
 #   id          unique, kebab-case
-#   category    grouping (code-loader | fake-font | vscode-autorun | git-marker | camouflage | evil-merge | exfil)
+#   category    grouping (code-loader | fake-font | vscode-autorun | git-marker | camouflage | evil-merge | exfil | npm-lifecycle)
 #   severity    critical | high | medium | low
 #   matcher     content | filename | structural-json | git-history | heuristic
 #   description human-readable
@@ -193,4 +193,37 @@ signatures:
     confidence: heuristic
     pattern: 'Sha[i1]-Hulud'
     description: "Shai-Hulud vanity token (bare mention — heuristic; benign in security write-ups)"
+    remediation: manual
+
+  # ── npm install-time lifecycle-hook execution (package.json) ─────────────────
+  # The npm-manifest matcher inspects ONLY the keys npm auto-runs on `npm install`
+  # (preinstall/install/postinstall/prepare) — never user scripts like test/build — and
+  # tests each signature's `pattern` against those command strings. remediation: manual:
+  # the manifest as a whole may be legitimate, so recovery is a reviewed edit, not a strip.
+  - id: npm-lifecycle-dropper
+    category: npm-lifecycle
+    severity: critical
+    matcher: npm-manifest
+    pattern: '\bsetup_bun\b'
+    description: "npm lifecycle hook runs the setup_bun.js dropper (Shai-Hulud install-time exec)"
+    remediation: manual
+
+  - id: npm-lifecycle-remote-fetch
+    category: npm-lifecycle
+    severity: critical
+    matcher: npm-manifest
+    pattern: '\b(?:curl|wget)\b[^|]*\|\s*(?:sh|bash|node|bun|bunx|deno)\b'
+    description: "npm lifecycle hook pipes a remote fetch into an interpreter (curl|wget → sh/bun/node)"
+    remediation: manual
+
+  - id: npm-lifecycle-exec
+    category: npm-lifecycle
+    severity: high
+    matcher: npm-manifest
+    confidence: heuristic
+    # Unusual-at-install-time runtimes/fetchers: Bun/Deno smuggling (EDR evasion) or a remote
+    # fetch in an install hook. Deliberately NOT bare `node` (legit native-module postinstall
+    # runs node) — the confirmed dropper/remote-fetch signatures above catch the real payloads.
+    pattern: '\b(?:bun|bunx|deno|curl|wget)\b'
+    description: "npm install-time lifecycle hook invokes Bun/Deno or a remote fetch (review)"
     remediation: manual

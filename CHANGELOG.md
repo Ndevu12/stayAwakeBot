@@ -128,6 +128,13 @@ All notable changes to this project are documented here. The format is based on
   `--user "$(id -u):$(id -g)"` invocation for writing the report back to the host.
 
 ### Security
+- **Detects malicious npm lifecycle hooks in `package.json`.** A new `npm-manifest` matcher reads
+  the keys npm auto-runs on `npm install` — `preinstall`/`install`/`postinstall`/`prepare` — and
+  flags the Shai-Hulud install-time execution vector: `node setup_bun.js` (dropper) and a remote
+  fetch piped into an interpreter (`curl … | bun`) are **confirmed** (INFECTED); Bun/Deno smuggling
+  or a bare fetch in an install hook is **heuristic** (SUSPICIOUS). User scripts like `test`/`build`
+  and a plain `node` build step are deliberately not flagged, so normal manifests stay clean. Closes
+  a gap where an install-time dropper passed a scan cleanly.
 - **Detects the Shai-Hulud exfiltration / persistence stage.** New content signatures flag the
   worm's own vanity labels: the attacker-repo/commit branding `Sha1-Hulud: The Second Coming` and
   `A Mini Shai-Hulud has Appeared` (confirmed → INFECTED), and the self-hosted runner name

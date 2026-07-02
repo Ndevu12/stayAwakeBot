@@ -68,6 +68,10 @@ allowlist:
   - {signature: exfil-shai-hulud-token, path_glob: "CHANGELOG.md"}          # changelog
   - {signature: exfil-shai-hulud-token, path_glob: "tests/**"}              # detector test literals
   - {signature: exfil-shai-hulud-token, path_glob: "config/**"}             # these allowlist rules name the sig IDs
+  # npm lifecycle-hook fixtures (tests/.../fixtures/infected/package.json)
+  - {signature: npm-lifecycle-dropper, path_glob: "tests/**"}
+  - {signature: npm-lifecycle-remote-fetch, path_glob: "tests/**"}
+  - {signature: npm-lifecycle-exec, path_glob: "tests/**"}
 
 # Alerting. Channels read their secrets from env (SLACK_WEBHOOK_URL, GH_SECURITY_TOKEN).
 alerts:
