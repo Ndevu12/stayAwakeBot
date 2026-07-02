@@ -12,11 +12,13 @@ from stayawake.bots.security.matchers.structural import StructuralJsonMatcher
 from stayawake.bots.security.matchers.heuristic import HeuristicMatcher
 from stayawake.bots.security.matchers.git_history import GitHistoryMatcher
 from stayawake.bots.security.matchers.obfuscation import ObfuscationMatcher
+from stayawake.bots.security.matchers.npm_manifest import NpmManifestMatcher
 
 REGISTRY: dict[str, Matcher] = {
     m.handles: m for m in (
         ContentMatcher(), FilenameMatcher(), StructuralJsonMatcher(),
         HeuristicMatcher(), GitHistoryMatcher(), ObfuscationMatcher(),
+        NpmManifestMatcher(),
     )
 }
 

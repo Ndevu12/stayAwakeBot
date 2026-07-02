@@ -1,0 +1,12 @@
+{
+  "name": "normal-app",
+  "version": "1.0.0",
+  "description": "benign manifest — legit lifecycle hooks must NOT trigger",
+  "scripts": {
+    "test": "jest",
+    "build": "tsc -p .",
+    "prepare": "husky install",
+    "postinstall": "node ./scripts/build.js",
+    "start": "node server.js"
+  }
+}
