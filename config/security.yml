@@ -57,6 +57,17 @@ allowlist:
   # Heuristic shapes of the same packed fixture (postcss.config.mjs)
   - {signature: obfuscated-source-file, path_glob: "tests/**"}
   - {signature: oversized-config-line, path_glob: "tests/**"}
+  # Exfil-branding signatures — this repo is a scanner, so its signature DB names the worm's own
+  # IoC phrases and its threat-intel prose legitimately references them. Suppress ONLY this repo's
+  # own mentions (self-scoped). The runner signature is file_globs-scoped, so it needs no rule.
+  - {signature: exfil-shai-hulud-branding, path_glob: "**/signatures.yml"}  # the DB names its own IoC phrase
+  - {signature: exfil-shai-hulud-branding, path_glob: "tests/**"}           # detector test literals
+  - {signature: exfil-shai-hulud-branding, path_glob: "CHANGELOG.md"}       # changelog documents the exact IoC
+  - {signature: exfil-shai-hulud-token, path_glob: "src/**"}                # obfuscation.py / hygiene.py / DB
+  - {signature: exfil-shai-hulud-token, path_glob: "docs/**"}               # security docs
+  - {signature: exfil-shai-hulud-token, path_glob: "CHANGELOG.md"}          # changelog
+  - {signature: exfil-shai-hulud-token, path_glob: "tests/**"}              # detector test literals
+  - {signature: exfil-shai-hulud-token, path_glob: "config/**"}             # these allowlist rules name the sig IDs
 
 # Alerting. Channels read their secrets from env (SLACK_WEBHOOK_URL, GH_SECURITY_TOKEN).
 alerts:

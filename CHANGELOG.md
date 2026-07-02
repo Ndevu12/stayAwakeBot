@@ -128,6 +128,13 @@ All notable changes to this project are documented here. The format is based on
   `--user "$(id -u):$(id -g)"` invocation for writing the report back to the host.
 
 ### Security
+- **Detects the Shai-Hulud exfiltration / persistence stage.** New content signatures flag the
+  worm's own vanity labels: the attacker-repo/commit branding `Sha1-Hulud: The Second Coming` and
+  `A Mini Shai-Hulud has Appeared` (confirmed → INFECTED), and the self-hosted runner name
+  `SHA1HULUD` in runner/workflow/service config (confirmed, path-scoped so a prose mention isn't
+  flagged). A bare `Shai-Hulud` mention is a separate **heuristic** signal (SUSPICIOUS, not
+  INFECTED — benign in write-ups). Closes a gap where a repo already carrying the worm's exfil
+  branding or runner registration produced zero signal.
 - **Incident-response guidance rotates credentials LAST (wiper-safe).** `saw audit`'s hygiene
   output no longer tells you to rotate an exposed token outright. The Mini Shai-Hulud variant is
   reported to install a host service (`gh-token-monitor.service`) that **wipes the home directory
