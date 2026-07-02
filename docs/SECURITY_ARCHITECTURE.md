@@ -91,6 +91,17 @@ through a Strategy **sink layer** (`security/sinks/`), each an opt-in flag:
   code-scanning (`github/codeql-action/upload-sarif`); findings surface in the Security tab and as
   inline PR annotations. **Evidence is redacted** (fingerprint only). Pure output layer — the gate
   stays the exit code.
+
+  **CI delivery model.** Code-scanning (SARIF upload) needs GitHub Advanced Security on a private
+  repo, so it is **owned solely by `security-sentinel.yml`** (the non-gating, post-merge reporter),
+  gated by an explicit repo variable **`vars.ENABLE_CODE_SCANNING`**. The **gates** (`worm-guard.yml`,
+  `release.yml` self-scan) **never upload** — their check colour is the `saw scan` exit code and
+  nothing else, so a SARIF upload issue can never flip a required merge/publish gate red. When
+  `ENABLE_CODE_SCANNING` is unset the upload is a **deliberate, labeled skip** (findings still reach
+  the run log, the SARIF **build artifact**, and `--alert` issues/Slack); when it is `true` and the
+  upload genuinely fails, the **sentinel** job goes red (a red *Upload SARIF* step means "upload
+  broken/misconfigured", **not** "worm found"). Set `vars.ENABLE_CODE_SCANNING=true` after enabling
+  Advanced Security or making the repo public.
 - **`--alert`** — opens/closes a GitHub issue per infected repo and posts a Slack summary in the
   same pass (reads `GITHUB_TOKEN`, `GITHUB_REPOSITORY`, `SLACK_WEBHOOK_URL`). Bodies are evidence-free.
 - **`-d/--reports-dir DIR`** — opt-in `latest.json` + `latest.md` in `DIR`. **Evidence redacted.**
