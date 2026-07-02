@@ -176,6 +176,7 @@ class TestDiscard(unittest.TestCase):
 
 class TestAudit(unittest.TestCase):
     @mock.patch("stayawake.bots.security.hygiene.render", return_value="")
+    @mock.patch("stayawake.bots.security.hygiene.check_runner_persistence", return_value=[])
     @mock.patch("stayawake.bots.security.hygiene.check_branch_protection", return_value=[])
     @mock.patch("stayawake.bots.security.hygiene.check_vscode", return_value=[])
     @mock.patch("stayawake.bots.security.hygiene.check_credentials", return_value=[])
@@ -185,6 +186,7 @@ class TestAudit(unittest.TestCase):
             self.assertEqual(cli.main(["audit"]), 0)
 
     @mock.patch("stayawake.bots.security.hygiene.render", return_value="")
+    @mock.patch("stayawake.bots.security.hygiene.check_runner_persistence", return_value=[])
     @mock.patch("stayawake.bots.security.hygiene.check_branch_protection", return_value=[])
     @mock.patch("stayawake.bots.security.hygiene.check_vscode", return_value=[])
     @mock.patch("stayawake.bots.security.hygiene.check_credentials")
@@ -195,6 +197,18 @@ class TestAudit(unittest.TestCase):
         m_cred.return_value = [warning]
         with redirect_stdout(io.StringIO()):
             self.assertEqual(cli.main(["audit", "-f"]), 1)
+
+    @mock.patch("stayawake.bots.security.hygiene.render", return_value="")
+    @mock.patch("stayawake.bots.security.hygiene.audit", return_value=[])
+    @mock.patch("stayawake.core.auth.resolve_token", return_value=(None, None))
+    def test_cli_delegates_to_hygiene_audit(self, _tok, m_audit, _render):
+        # Regression: `saw audit` must delegate to hygiene.audit() (the single composition site),
+        # NOT hand-assemble a subset of checks — that omission is exactly how the runner-persistence
+        # probe was silently dropped from the CLI. Locks the delegation + that branch is forwarded.
+        with redirect_stdout(io.StringIO()):
+            cli.main(["audit", "--repo", "o/r", "-b", "dev"])
+        m_audit.assert_called_once()
+        self.assertEqual(m_audit.call_args.args[2], "dev")   # branch forwarded through
 
 
 class TestDispatcherOwnedCommands(unittest.TestCase):
