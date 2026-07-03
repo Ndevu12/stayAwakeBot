@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import sys
 
 from stayawake.bots.security import hygiene
 from stayawake.core import auth
+from stayawake.core.streaming import Streamer, status, stream_enabled
 
 
 def register(sub) -> None:
@@ -16,6 +18,8 @@ def register(sub) -> None:
                    help="branch to check protection for (default: main)")
     p.add_argument("-f", "--fail", "--fail-on-issues", action="store_true", dest="fail",
                    help="exit non-zero if any warning-level issue is found")
+    p.add_argument("--no-stream", action="store_true", dest="no_stream",
+                   help="disable the per-check spinner and typewriter output (plain, instant)")
     p.set_defaults(func=run)
 
 
@@ -24,9 +28,15 @@ def run(a: argparse.Namespace) -> int:
     if a.repo and not token:
         print(auth.no_credential_hint("auditing branch protection") +
               " Skipping the branch-protection check.\n")
-    # Delegate to hygiene.audit() — the single composition site — so every probe (including
-    # runner-persistence) is always included; never hand-assemble a subset here.
-    issues = hygiene.audit(a.repo, token, a.branch)
-    print(hygiene.render(issues))
+    # Stream like `saw scan`: a spinner over each probe's silent compute (some shell out to
+    # launchctl/systemctl/the GitHub API), then the report typed out. Progress lives on stderr,
+    # the report on stdout — each keys off its own tty-ness so a piped report stays clean.
+    progress_on = stream_enabled(sys.stderr, force_off=a.no_stream)
+    # Iterate hygiene.audit_checks() — the single composition site — never hand-assemble a subset.
+    issues: list[hygiene.HygieneIssue] = []
+    for label, check in hygiene.audit_checks(a.repo, token, a.branch):
+        with status(f"checking {label}…", enabled=progress_on):
+            issues += check()
+    Streamer(enabled=stream_enabled(sys.stdout, force_off=a.no_stream)).line(hygiene.render(issues))
     warnings = [i for i in issues if i.severity == "warning"]
     return 1 if (a.fail and warnings) else 0
