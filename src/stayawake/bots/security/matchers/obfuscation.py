@@ -35,7 +35,10 @@ class ObfuscationMatcher(Matcher):
 
     def scan(self, target, signatures, all_signatures=None):
         sig = next((s for s in signatures if s.get("kind") == "obfuscated-file"), None)
-        if not sig:
+        build_sig = next((s for s in signatures if s.get("kind") == "obfuscated-build-artifact"), None)
+        # Opt-in (config `scan_build_outputs`): also run Tier-1 constructs on generated/build paths.
+        scan_builds = bool(getattr(target.opts, "scan_build_outputs", False)) and build_sig is not None
+        if not sig and not scan_builds:
             return []
         content_sig = build_content_sig(all_signatures or signatures)
         findings: list[Finding] = []
@@ -43,6 +46,15 @@ class ObfuscationMatcher(Matcher):
             if _ext(rel) not in _AUTHORED_OBFUSCATABLE_EXTS:
                 continue
             if is_generated_context(rel):       # vendored/minified/generated → obfuscation expected
+                if scan_builds:
+                    # Build-output mode: Tier-1 self-evident constructs ONLY (density stays
+                    # suppressed — it is expected in bundles); heuristic, never confirmed.
+                    text = target.read_text(rel)
+                    verdict = analyze_file(text, _ext(rel), tier1_only=True) if text else None
+                    if verdict:
+                        findings.append(self._emit(build_sig, rel, verdict.reason))
+                continue                        # default: build outputs are suppressed entirely
+            if not sig:
                 continue
             text = target.read_text(rel)
             if not text:

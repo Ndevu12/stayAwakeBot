@@ -289,5 +289,55 @@ class TestWholeFileObfuscation(unittest.TestCase):
         self.assertFalse(analyze_file(code, ".js"))
 
 
+class TestOptInBuildScan(unittest.TestCase):
+    """Opt-in `scan_build_outputs` (#1095b): Tier-1 self-evident constructs surface in build/
+    minified artifacts as a heuristic `obfuscated-build-artifact` (SUSPICIOUS, never confirmed),
+    while the Tier-2 density heuristic stays suppressed there (density is expected in bundles)."""
+    _NUM = "const d = String.fromCharCode.apply(0, [" + ",".join(["0x68"] * 40) + "]);\n"
+
+    def _scan(self, files, scan_build_outputs, exclude=(".git",)):
+        d = Path(tempfile.mkdtemp())
+        for rel, content in files.items():
+            p = d / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(content, encoding="utf-8")
+        opts = ScanOptions(exclude_dirs=set(exclude), scan_build_outputs=scan_build_outputs)
+        return scan_target(LocalRepoTarget(d, "t", opts), SIGS, []).findings
+
+    def test_optin_surfaces_tier1_construct_as_heuristic(self):
+        for path in ("dist/main.js", "build/bundle.js", "app.min.js"):
+            fs = self._scan({path: self._NUM}, scan_build_outputs=True)
+            ids = {f.signature_id for f in fs}
+            self.assertIn("obfuscated-build-artifact", ids, path)
+            self.assertNotIn("obfuscated-source-file", ids, path)      # build sig, not the source one
+            self.assertTrue(all(f.confidence == "heuristic" for f in fs), path)   # never confirmed
+
+    def test_optin_dense_bundle_without_construct_stays_clean(self):
+        # A dense/minified bundle with NO self-evident Tier-1 construct: Tier-2 density is suppressed
+        # in build-output mode, so it stays clean — the key false-positive guard.
+        dense = "var a=" + "+".join("f%d()" % i for i in range(500)) + ";\n"
+        self.assertEqual(self._scan({"dist/vendor.min.js": dense}, scan_build_outputs=True), [])
+
+    def test_flag_off_suppresses_build_outputs_even_if_traversed(self):
+        fs = self._scan({"dist/main.js": self._NUM, "x.min.js": self._NUM}, scan_build_outputs=False)
+        self.assertEqual([f.signature_id for f in fs], [])
+
+    def test_hand_authored_source_unaffected_by_flag(self):
+        ids = {f.signature_id for f in self._scan({"src/loader.js": self._NUM}, scan_build_outputs=True)}
+        self.assertIn("obfuscated-source-file", ids)
+        self.assertNotIn("obfuscated-build-artifact", ids)
+
+    def test_options_unprunes_build_dirs_only_when_enabled(self):
+        from stayawake.bots.security.service import _options
+        on = _options({"scan_build_outputs": True})
+        self.assertTrue(on.scan_build_outputs)
+        self.assertNotIn("dist", on.exclude_dirs)
+        self.assertNotIn("build", on.exclude_dirs)
+        self.assertIn("node_modules", on.exclude_dirs)     # third-party stays pruned
+        off = _options({})
+        self.assertFalse(off.scan_build_outputs)
+        self.assertIn("dist", off.exclude_dirs)            # FP-safe default unchanged
+
+
 if __name__ == "__main__":
     unittest.main()

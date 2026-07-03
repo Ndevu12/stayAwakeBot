@@ -64,6 +64,14 @@ provenance-trusting and CVE-anchored tooling produced zero signal.
   the point *before* the worm's payload is baked into a post-build artifact — not on compiled outputs.
   Scanning the source a build is produced from is strictly stronger than trusting the artifact's
   attestation.
+- **Opt-in build scanning (`scan_build_outputs: true` in `config/security.yml`).** For deliberate
+  inspection you can un-suppress build outputs: the build-output dirs are un-pruned and the
+  obfuscation matcher runs only its **Tier-1 self-evident constructs** (charcode array, exec sink,
+  base64/escape blob) on generated/minified paths — the Tier-2 density heuristic stays suppressed
+  (density is *expected* in bundles). Findings are `obfuscated-build-artifact` at **`heuristic`**
+  confidence (SUSPICIOUS, never INFECTED); a legit dense bundle with no such construct stays clean.
+  This is noisier by design (an `atob`/`fromCharCode` in a bundle will flag) and does **not** close
+  the residual above — it is an inspection aid, not the durable guarantee.
 
 ## Detected vectors (from the live incident)
 1. Obfuscated loader in `postcss.config.*` (content + oversized-line heuristic)

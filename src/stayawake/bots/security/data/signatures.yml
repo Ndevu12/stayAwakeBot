@@ -117,6 +117,20 @@ signatures:
     description: "Hand-authored source/config file containing packed/obfuscated payload (line-agnostic)"
     remediation: recover
 
+  # Opt-in only (config `scan_build_outputs: true`, #1095b): a self-evident Tier-1 construct
+  # (charcode array / exec sink / base64 / escape run) found in a build/minified artifact. Density
+  # (Tier-2) is NOT run there — it is expected in bundles — so this stays heuristic → SUSPICIOUS,
+  # never confirmed (a bundle can carry these legitimately). remediation: manual — a build output
+  # is regenerated from source, not recovered; review the source it was built from.
+  - id: obfuscated-build-artifact
+    category: code-loader
+    severity: medium
+    matcher: obfuscation
+    confidence: heuristic
+    kind: obfuscated-build-artifact
+    description: "Build/minified artifact carries a self-evident obfuscation construct (opt-in scan_build_outputs; review the source it was built from)"
+    remediation: manual
+
   # ── VS Code auto-run harness (structured JSON) ───────────────────────────────
   - id: vscode-task-folderopen-exec
     category: vscode-autorun
