@@ -200,6 +200,10 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+# Claude Code — commit the team-shared config (.claude/settings.json), but keep the
+# per-user, auto-recorded permission approvals local (they quote one-off command strings).
+.claude/settings.local.json
+
 # Marimo
 marimo/_static/
 marimo/_lsp/
