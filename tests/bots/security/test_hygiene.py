@@ -194,6 +194,86 @@ class TestPersistence(unittest.TestCase):
         self.assertIn("os-service-persistence", ids)
 
 
+class TestHostArtifacts(unittest.TestCase):
+    """Host filesystem drop-file probe (#1100) — ingress tooling / staged data. FP-bounded: a lone
+    weak indicator is info, a strong/corroborated set is a warning; both point to rotate-LAST."""
+
+    # ── severity / remediation logic (mock the probe to control the artifact set) ──
+    def test_lone_weak_indicator_is_info(self):
+        with mock.patch.object(hygiene, "_host_artifacts", return_value=([], ["~/.node_modules"])):
+            issues = hygiene.check_host_artifacts()
+        self.assertEqual([(i.id, i.severity) for i in issues], [("host-drop-artifact-weak", "info")])
+
+    def test_strong_ioc_is_warning(self):
+        with mock.patch.object(hygiene, "_host_artifacts",
+                               return_value=(["host$user exfil archive"], [])):
+            issues = hygiene.check_host_artifacts()
+        self.assertEqual([(i.id, i.severity) for i in issues], [("host-drop-artifacts", "warning")])
+
+    def test_two_weak_indicators_corroborate_to_warning(self):
+        with mock.patch.object(hygiene, "_host_artifacts",
+                               return_value=([], ["~/.node_modules", "/tmp/.npm"])):
+            issues = hygiene.check_host_artifacts()
+        self.assertEqual([i.severity for i in issues], ["warning"])
+
+    def test_clean_host_has_no_issue(self):
+        with mock.patch.object(hygiene, "_host_artifacts", return_value=([], [])):
+            self.assertEqual(hygiene.check_host_artifacts(), [])
+
+    def test_remediation_is_rotate_last(self):
+        for probe in (([], ["~/.node_modules"]), (["host$user archive"], [])):
+            with mock.patch.object(hygiene, "_host_artifacts", return_value=probe):
+                rem = hygiene.check_host_artifacts()[0].remediation.lower()
+            # Rotation is sequenced last / after isolation (warning says "LAST"; info "BEFORE
+            # rotating") — and the rotation ACTION comes after "isolate", not before it.
+            self.assertTrue("rotate credentials last" in rem or "before rotating" in rem)
+            self.assertLess(rem.index("isolate"), rem.rindex("rotat"))
+
+    def test_warning_triggers_incident_runbook_but_info_does_not(self):
+        warn = hygiene.HygieneIssue("host-drop-artifacts", "warning", "T", "D", "F")
+        info = hygiene.HygieneIssue("host-drop-artifact-weak", "info", "T", "D", "F")
+        self.assertIn("respond in this order", hygiene.render([warn]).lower())
+        self.assertNotIn("respond in this order", hygiene.render([info]).lower())
+
+    # ── detection against a fake $HOME ─────────────────────────────────────────────
+    def test_detects_node_modules_as_weak(self):
+        d = Path(tempfile.mkdtemp())
+        (d / ".node_modules").mkdir()
+        with mock.patch.object(hygiene.Path, "home", return_value=d):
+            strong, weak = hygiene._host_artifacts()
+        self.assertTrue(any(".node_modules" in w for w in weak))
+        self.assertEqual(strong, [])
+
+    def test_detects_host_user_exfil_archive_as_strong(self):
+        d = Path(tempfile.mkdtemp())
+        tag = hygiene._host_user_tag()
+        (d / (tag + ".tar.gz")).write_text("x", encoding="utf-8")
+        with mock.patch.object(hygiene.Path, "home", return_value=d):
+            strong, _ = hygiene._host_artifacts()
+        self.assertTrue(any("exfil staging archive" in s for s in strong))
+
+    def test_trufflehog_dir_is_not_flagged_but_binary_is(self):
+        # A trufflehog CACHE DIR (legit user) must not hit; a staged trufflehog FILE must.
+        d = Path(tempfile.mkdtemp())
+        (d / ".cache").mkdir()
+        (d / ".cache" / "trufflehog").mkdir()          # legit cache dir
+        self.assertIsNone(hygiene._staged_secret_scanner((d / ".cache",)))
+        (d / ".npm").mkdir()
+        (d / ".npm" / "trufflehog").write_text("bin", encoding="utf-8")   # staged binary FILE
+        self.assertIsNotNone(hygiene._staged_secret_scanner((d / ".npm",)))
+
+    def test_audit_composes_host_artifacts(self):
+        sentinel = hygiene.HygieneIssue("host-drop-artifacts", "warning", "T", "D", "F")
+        with mock.patch.object(hygiene, "check_credentials", return_value=[]), \
+             mock.patch.object(hygiene, "check_vscode", return_value=[]), \
+             mock.patch.object(hygiene, "check_runner_persistence", return_value=[]), \
+             mock.patch.object(hygiene, "check_persistence", return_value=[]), \
+             mock.patch.object(hygiene, "check_branch_protection", return_value=[]), \
+             mock.patch.object(hygiene, "check_host_artifacts", return_value=[sentinel]):
+            ids = [i.id for i in hygiene.audit()]
+        self.assertIn("host-drop-artifacts", ids)
+
+
 class TestVSCode(unittest.TestCase):
     def _settings(self, body: str) -> Path:
         f = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)

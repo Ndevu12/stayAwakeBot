@@ -135,6 +135,16 @@ All notable changes to this project are documented here. The format is based on
   `--user "$(id -u):$(id -g)"` invocation for writing the report back to the host.
 
 ### Security
+- **`saw audit` detects host filesystem drop-file artifacts.** A new `check_host_artifacts()` probe
+  looks for the ingress-tooling / data-staging files this wave leaves on a developer workstation
+  (T1105/T1074): `~/.node_modules`, `/tmp/.npm`, `/tmp/get-pip.py`, a `<hostname>$<username>` staged
+  exfil archive, the Windows `Python3127` sideloaded-interpreter layout, and a staged `trufflehog`
+  secret-scanner **binary** (not a legit user's `~/.cache/trufflehog` cache dir). It is **FP-bounded
+  by corroboration** — a lone weak indicator (a stray `~/.node_modules`) is `info`, while a strong,
+  specific IoC or a corroborated set is a `warning`. Because a positive means persistence may be
+  live, the finding is wired into the incident runbook and its remediation follows the **rotate-LAST**
+  order (isolate → neutralize → then rotate), never rotate-first. Distinct from the runner /
+  OS-service *persistence* probes; stdlib-only and degrades to a no-op when paths are absent.
 - **Detects whitespace / invisible-character concealment.** A new `whitespace-concealment`
   heuristic flags the *technique*, not just the payload: content pushed off-screen behind a long
   run of horizontal whitespace (the fake-font / `postcss.config` sample buried its payload behind
