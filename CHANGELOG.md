@@ -66,6 +66,12 @@ All notable changes to this project are documented here. The format is based on
 - This changelog.
 
 ### Changed
+- **`saw audit` now streams like `saw scan`.** Each probe (some shell out to launchctl / systemctl /
+  the GitHub API) runs under a per-check spinner on stderr, and the hygiene report types out on
+  stdout — so the audit *unfolds* instead of pausing then dumping. Streaming auto-disables when the
+  output is piped / in CI (the report stays byte-for-byte identical), and `--no-stream` forces
+  plain, instant output. The probe set is now defined once in `hygiene.audit_checks()`, shared by
+  `hygiene.audit()` and the CLI, so the two can't drift.
 - **`saw` CLI guide rewritten for scannability** ([docs/CLI.md](docs/CLI.md)). Leads with a
   cheat-sheet (command table + copy-paste examples); factors the shared **remote targeting**
   ladder and **evidence/redaction** rules into their own sections instead of repeating them under

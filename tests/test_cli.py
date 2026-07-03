@@ -203,16 +203,16 @@ class TestAudit(unittest.TestCase):
             self.assertEqual(cli.main(["audit", "-f"]), 1)
 
     @mock.patch("stayawake.bots.security.hygiene.render", return_value="")
-    @mock.patch("stayawake.bots.security.hygiene.audit", return_value=[])
+    @mock.patch("stayawake.bots.security.hygiene.audit_checks", return_value=[])
     @mock.patch("stayawake.core.auth.resolve_token", return_value=(None, None))
-    def test_cli_delegates_to_hygiene_audit(self, _tok, m_audit, _render):
-        # Regression: `saw audit` must delegate to hygiene.audit() (the single composition site),
-        # NOT hand-assemble a subset of checks — that omission is exactly how the runner-persistence
-        # probe was silently dropped from the CLI. Locks the delegation + that branch is forwarded.
+    def test_cli_delegates_to_hygiene_audit_checks(self, _tok, m_checks, _render):
+        # Regression: `saw audit` must get its checks from hygiene.audit_checks() (the single
+        # composition site) — NOT hand-assemble a subset, which is how the runner-persistence probe
+        # was once silently dropped from the CLI. Locks the delegation + that branch is forwarded.
         with redirect_stdout(io.StringIO()):
             cli.main(["audit", "--repo", "o/r", "-b", "dev"])
-        m_audit.assert_called_once()
-        self.assertEqual(m_audit.call_args.args[2], "dev")   # branch forwarded through
+        m_checks.assert_called_once()
+        self.assertEqual(m_checks.call_args.args[2], "dev")   # branch forwarded through
 
 
 class TestDispatcherOwnedCommands(unittest.TestCase):

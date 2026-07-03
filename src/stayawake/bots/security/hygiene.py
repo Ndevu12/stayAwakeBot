@@ -24,7 +24,7 @@ import subprocess
 import tempfile
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 @dataclass
@@ -547,13 +547,31 @@ def check_branch_protection(slug: str | None, token: str | None,
 
 def audit(slug: str | None = None, token: str | None = None,
           branch: str = "main") -> list[HygieneIssue]:
-    """Run every local-posture check and return the combined issue list — the SINGLE place the
-    checks are composed, so a new probe is picked up everywhere (the `saw audit` CLI calls this,
-    it must never hand-assemble its own subset). When a repo `slug` and `token` are supplied,
-    also audit the branch-protection gate on `branch`."""
-    return (check_credentials() + check_vscode() + check_runner_persistence()
-            + check_persistence() + check_host_artifacts()
-            + check_branch_protection(slug, token, branch))
+    """Run every local-posture check and return the combined issue list (non-streaming).
+
+    Delegates to audit_checks() so the SINGLE definition of what an audit runs is shared with the
+    streaming CLI — neither may hand-assemble its own subset (that omission is how a probe once got
+    silently dropped)."""
+    issues: list[HygieneIssue] = []
+    for _label, check in audit_checks(slug, token, branch):
+        issues += check()
+    return issues
+
+
+def audit_checks(slug: str | None = None, token: str | None = None,
+                 branch: str = "main") -> list[tuple[str, Callable[[], list[HygieneIssue]]]]:
+    """The ordered (label, check) probes that make up an audit — the ONE definition of what
+    `saw audit` runs, consumed by both audit() (all-at-once) and the streaming CLI (per-check
+    spinner). Each `check` is a zero-arg callable returning list[HygieneIssue]. When a repo `slug`
+    and `token` are supplied, the branch-protection gate on `branch` is included."""
+    return [
+        ("cached credentials", check_credentials),
+        ("VS Code settings", check_vscode),
+        ("self-hosted runner", check_runner_persistence),
+        ("OS-service persistence", check_persistence),
+        ("host drop-files", check_host_artifacts),
+        ("branch protection", lambda: check_branch_protection(slug, token, branch)),
+    ]
 
 
 def render(issues: list[HygieneIssue]) -> str:
