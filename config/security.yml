@@ -68,6 +68,7 @@ allowlist:
   - {signature: exfil-shai-hulud-token, path_glob: "CHANGELOG.md"}          # changelog
   - {signature: exfil-shai-hulud-token, path_glob: "tests/**"}              # detector test literals
   - {signature: exfil-shai-hulud-token, path_glob: "config/**"}             # these allowlist rules name the sig IDs
+  - {signature: exfil-shai-hulud-token, path_glob: ".claude/**"}            # Claude Code permission rules quote this repo's own "Shai-Hulud" commit messages
   # npm lifecycle-hook fixtures (tests/.../fixtures/infected/package.json)
   - {signature: npm-lifecycle-dropper, path_glob: "tests/**"}
   - {signature: npm-lifecycle-remote-fetch, path_glob: "tests/**"}
