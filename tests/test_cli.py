@@ -176,6 +176,7 @@ class TestDiscard(unittest.TestCase):
 
 class TestAudit(unittest.TestCase):
     @mock.patch("stayawake.bots.security.hygiene.render", return_value="")
+    @mock.patch("stayawake.bots.security.hygiene.check_persistence", return_value=[])
     @mock.patch("stayawake.bots.security.hygiene.check_runner_persistence", return_value=[])
     @mock.patch("stayawake.bots.security.hygiene.check_branch_protection", return_value=[])
     @mock.patch("stayawake.bots.security.hygiene.check_vscode", return_value=[])
@@ -186,6 +187,7 @@ class TestAudit(unittest.TestCase):
             self.assertEqual(cli.main(["audit"]), 0)
 
     @mock.patch("stayawake.bots.security.hygiene.render", return_value="")
+    @mock.patch("stayawake.bots.security.hygiene.check_persistence", return_value=[])
     @mock.patch("stayawake.bots.security.hygiene.check_runner_persistence", return_value=[])
     @mock.patch("stayawake.bots.security.hygiene.check_branch_protection", return_value=[])
     @mock.patch("stayawake.bots.security.hygiene.check_vscode", return_value=[])
