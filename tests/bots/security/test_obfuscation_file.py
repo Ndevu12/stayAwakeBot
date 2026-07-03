@@ -233,6 +233,42 @@ class TestWholeFileObfuscation(unittest.TestCase):
                      "dist/main.js", "src/gql.generated.ts", "proto/__generated__/x.pb.js"):
             self.assertNotIn(OBF, _scan({path: arr}), f"{path} should be suppressed (generated context)")
 
+    # ── Build-artifact blind spot (#1095): both suppression layers, documented ──
+    # An obfuscation-ONLY payload: a numeric array fed to fromCharCode.apply — trips the density/
+    # exec-sink heuristic but carries NO known loader content literal (no fromCharCode(127), _$_,
+    # sfL, …), so it isolates the OBFUSCATION path from the content signatures.
+    _OBF_ONLY = "const d = String.fromCharCode.apply(0, [" + ",".join(["0x68"] * 40) + "]);\n"
+
+    def test_build_payload_flags_in_hand_authored_source(self):
+        # Sanity: the detector DOES catch this payload in ordinary source — the suppression below
+        # is about WHERE it runs, not whether it works.
+        self.assertIn(OBF, _scan({"src/loader.js": self._OBF_ONLY}))
+
+    def test_layer1_traversal_prune_drops_dist_and_build(self):
+        # Layer 1: dist/ and build/ are pruned from os.walk before any matcher runs (default opts),
+        # so a payload there is never even yielded → no finding. (docs: "Provenance is not trust".)
+        self.assertNotIn(OBF, _scan({"dist/main.js": self._OBF_ONLY}))
+        self.assertNotIn(OBF, _scan({"build/bundle.js": self._OBF_ONLY}))
+
+    def test_layer2_generated_context_suppresses_when_not_pruned(self):
+        # Layer 2 (independent of layer 1): even with dist/build NOT pruned, is_generated_context
+        # suppresses the obfuscation heuristic on build/minified outputs. A *.min.js at repo root
+        # (a path traversal never prunes) exercises this layer on its own.
+        def _scan_no_prune(files):
+            d = Path(tempfile.mkdtemp())
+            for rel, content in files.items():
+                p = d / rel
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_text(content, encoding="utf-8")
+            opts = ScanOptions(exclude_dirs={".git"})     # deliberately keep dist/build in scope
+            return {f.signature_id for f in scan_target(LocalRepoTarget(d, "t", opts), SIGS, []).findings}
+
+        self.assertNotIn(OBF, _scan_no_prune({"dist/main.js": self._OBF_ONLY}))   # dir arm
+        self.assertNotIn(OBF, _scan_no_prune({"app.min.js": self._OBF_ONLY}))     # filename arm, root
+        # Contrast: the SAME payload in a hand-authored file under the same (un-pruned) scan flags,
+        # proving the suppression is context-specific, not a dead detector.
+        self.assertIn(OBF, _scan_no_prune({"src/loader.js": self._OBF_ONLY}))
+
     # ── The shared context predicate (regression for the mid-path anchor bug) ───
     def test_generated_context_matches_mid_path_filename_tokens(self):
         for p in ("src/gql.generated.ts", "a/app.min.js", "x/y.pb.js", "z/q.graphql.ts", "out/b.map"):

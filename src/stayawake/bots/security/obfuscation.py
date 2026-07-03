@@ -43,6 +43,16 @@ The verdict requires a dynamic-exec sink, OR a charcode/hex array, OR a base64
 blob, OR (minification spike AND entropy spike together). A lone high-entropy or
 lone long-line signal is NOT enough — that is exactly the benign "long config
 value" / "generated data line" shape, and is left to corroborate elsewhere.
+
+Build-artifact blind spot (deliberate; see docs/SECURITY_ARCHITECTURE.md → "Provenance is
+not trust"). This heuristic is suppressed on generated/build/minified paths
+(`is_generated_context`), because minification there IS obfuscation and flagging it would be
+all false positives. RESIDUAL: a payload minified into a legitimate-looking bundle can be
+statistically indistinguishable from a normal bundle and evade content detection. `saw`'s
+durable guarantee is therefore on HAND-AUTHORED SOURCE plus git-history / evil-merge
+corroboration — the point before a payload is baked into a post-build artifact — not on the
+compiled output. This is a content decision, not a provenance one: `saw` never treats a
+target's SLSA / PEP-740 attestation as trust; provenance attests the build, not the source.
 """
 from __future__ import annotations
 
@@ -224,6 +234,10 @@ _GENERATED_PATH = re.compile(
     r"(?:(?:^|/)("
     r"\.yarn/(?:cache|releases|unplugged)/|"
     r"node_modules/|vendor/|third[_-]?party/|"
+    # BUILD OUTPUT DIRS — a deliberate build-artifact trust decision (NOT provenance): in a
+    # compiled bundle minification IS obfuscation, so the density heuristic here would be all
+    # false positives. A payload minified into such a bundle is the documented residual (see the
+    # module docstring). Some of these are ALSO pruned at traversal in ScanOptions.exclude_dirs.
     r"dist/|build/|out/|coverage/|storybook-static/|\.output/|\.svelte-kit/|\.nuxt/|\.next/|"
     r"generated/|__generated__/|"
     # Machine-generated dependency lockfiles (exact basenames only — NOT all *.json/*.yaml).

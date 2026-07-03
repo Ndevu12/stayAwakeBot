@@ -30,9 +30,17 @@ def _ext(rel: str) -> str:
 
 @dataclass
 class ScanOptions:
-    # "reports" and "sab-patches" are excluded so the scanner never re-flags its OWN
-    # output: a report quotes a detected payload's evidence and a remediation patch
-    # contains the removed payload lines as diff deletions — scanning either self-triggers.
+    # Two kinds of exclusion, both deliberate (see docs/SECURITY_ARCHITECTURE.md → "Provenance is
+    # not trust"):
+    #  * BUILD OUTPUTS — "node_modules", ".next", "dist", "build": compiled/vendored artifacts where
+    #    minification IS obfuscation, so the density heuristic there would be all false positives.
+    #    This is a build-artifact trust decision, NOT a provenance one — `saw` never trusts an
+    #    attestation; it just doesn't judge post-build shape. A payload minified into a bundle is a
+    #    documented residual (obfuscation.py docstring), and settings can override this set to include
+    #    them. Known loader FINGERPRINTS still match anywhere that IS traversed.
+    #  * SELF-OUTPUT — "reports", "sab-patches", ".malware-quarantine": the scanner's own output
+    #    (a report quotes a payload's evidence; a remediation patch/quarantine holds the removed
+    #    payload lines), so scanning them self-triggers.
     exclude_dirs: set[str] = field(default_factory=lambda: {
         ".git", "node_modules", ".next", "dist", "build", ".malware-quarantine",
         "reports", "sab-patches"})
