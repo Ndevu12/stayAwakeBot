@@ -128,6 +128,16 @@ All notable changes to this project are documented here. The format is based on
   `--user "$(id -u):$(id -g)"` invocation for writing the report back to the host.
 
 ### Security
+- **Detects planted OS-service persistence — the credential-rotation wiper.** `saw audit` gains a
+  `check_persistence()` machine probe that finds the reported `gh-token-monitor` service (and
+  lookalikes) by name across the standard systemd unit directories (user + system) and macOS
+  `LaunchAgents`/`LaunchDaemons` — a read-only directory listing, so it needs no `systemctl`/
+  `launchctl` and degrades to a no-op when those directories are absent, including
+  installed-but-not-started units. Because the service is a wiper tripwire (it destroys `$HOME`
+  when it detects a credential rotation), the finding leads the incident runbook: **isolate →
+  neutralize the service → then rotate credentials LAST**, never immediate rotation. This
+  consolidates all wiper/OS-service detection in one probe — the self-hosted-runner check
+  (added previously) is now solely about the runner and no longer double-reports the wiper.
 - **Extends auto-run detection to AI/agent config — Claude Code hooks (`.claude/settings.json`).**
   The structural matcher previously only understood `.vscode/`; it now also inspects
   `.claude/settings.json` (and `settings.local.json`) and parses the Claude Code `hooks` schema —
