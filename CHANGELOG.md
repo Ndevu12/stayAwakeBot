@@ -114,6 +114,13 @@ All notable changes to this project are documented here. The format is based on
   the only local security surface; the `stayawake-health-*` scripts are unchanged.
 
 ### Fixed
+- **`vscode-allow-automatic-tasks` now matches VS Code's real string value.** The signal only
+  matched the boolean `true`, but VS Code writes `"task.allowAutomaticTasks": "on"` (the string
+  enum, historically `"auto"`) — so on genuine `settings.json` it silently never fired. It now
+  fires for boolean `true` **and** any enabling string (anything but `"off"`), aligned with
+  `hygiene.check_vscode()`'s `!= "off"` semantics, and does not fire on `"off"`/`false`/absent. (The
+  primary `folderOpen`/font autorun signatures already caught the attack, so this restores a
+  silently-ineffective corroborator.)
 - **Usage docs corrected** ([docs/USAGE.md](docs/USAGE.md)). The App-auth install used a
   non-existent package (`pip install "stayawake[app]"`) — the distribution is `stayawakebot`, so
   the extra is **`stayawakebot[app]`**. And a stale instruction to "drop `--local`" to scan remotes
