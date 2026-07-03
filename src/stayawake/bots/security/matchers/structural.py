@@ -74,10 +74,15 @@ class StructuralJsonMatcher(Matcher):
                                       f"task '{task.get('label','?')}' runOn=folderOpen"))
             if re.search(r"\.(woff2?|ttf|otf)\b", cmd) and "vscode-task-runs-font" in by_kind:
                 out.append(self._emit(by_kind["vscode-task-runs-font"], rel, cmd[:90]))
-        if base == "settings.json" and data.get("task.allowAutomaticTasks") is True \
-                and "vscode-allow-automatic-tasks" in by_kind:
-            out.append(self._emit(by_kind["vscode-allow-automatic-tasks"], rel,
-                                  "task.allowAutomaticTasks: true"))
+        if base == "settings.json" and "vscode-allow-automatic-tasks" in by_kind:
+            # `task.allowAutomaticTasks` enables folder-open autorun for boolean true OR the string
+            # enum value ("on"/"auto") — anything but "off". VS Code actually writes the STRING form,
+            # so the old `is True` check silently missed real settings (#1099). Mirrors
+            # hygiene.check_vscode()'s `!= "off"` semantics so the two surfaces agree.
+            value = data.get("task.allowAutomaticTasks")
+            if value is True or (isinstance(value, str) and value != "off"):
+                out.append(self._emit(by_kind["vscode-allow-automatic-tasks"], rel,
+                                      f"task.allowAutomaticTasks: {value!r}"))
         return out
 
     # ── Claude Code hooks ──────────────────────────────────────────────────────────
