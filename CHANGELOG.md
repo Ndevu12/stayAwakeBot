@@ -128,6 +128,16 @@ All notable changes to this project are documented here. The format is based on
   `--user "$(id -u):$(id -g)"` invocation for writing the report back to the host.
 
 ### Security
+- **Documented that provenance is not trust, and named the build-artifact residual.** A new
+  "Provenance is not trust" section in `docs/SECURITY_ARCHITECTURE.md` (plus a README note) makes
+  explicit that `saw` is purely behavioral — it never treats a scanned target's SLSA / PEP-740 /
+  sigstore attestation as a trust signal (Shai-Hulud 2.0 shipped valid SLSA Build L3 provenance with
+  no CVE). The two intentional build-output suppressions (traversal-pruned `dist`/`build`, and the
+  `is_generated_context` obfuscation-heuristic suppression on minified/bundled paths) now carry
+  inline rationale, and the residual — a payload minified into a legitimate-looking bundle can evade
+  content detection, so the durable guarantee is on hand-authored source + git-history corroboration
+  — is recorded in the `obfuscation.py` docstring. A test locks the current default suppression on
+  `dist`/`build`/`*.min.js`. No behavior change (opt-in build scanning deferred).
 - **Detects planted OS-service persistence — the credential-rotation wiper.** `saw audit` gains a
   `check_persistence()` machine probe that finds the reported `gh-token-monitor` service (and
   lookalikes) by name across the standard systemd unit directories (user + system) and macOS

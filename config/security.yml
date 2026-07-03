@@ -66,6 +66,7 @@ allowlist:
   - {signature: exfil-shai-hulud-token, path_glob: "src/**"}                # obfuscation.py / hygiene.py / DB
   - {signature: exfil-shai-hulud-token, path_glob: "docs/**"}               # security docs
   - {signature: exfil-shai-hulud-token, path_glob: "CHANGELOG.md"}          # changelog
+  - {signature: exfil-shai-hulud-token, path_glob: "README.md"}             # README documents the worm it detects
   - {signature: exfil-shai-hulud-token, path_glob: "tests/**"}              # detector test literals
   - {signature: exfil-shai-hulud-token, path_glob: "config/**"}             # these allowlist rules name the sig IDs
   - {signature: exfil-shai-hulud-token, path_glob: ".claude/**"}            # Claude Code permission rules quote this repo's own "Shai-Hulud" commit messages
