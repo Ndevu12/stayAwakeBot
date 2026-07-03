@@ -84,6 +84,9 @@ allowlist:
   # Claude Code agent-autorun fixtures (tests/.../fixtures/{infected,clean}/.claude/settings.json)
   - {signature: claude-hook-autorun, path_glob: "tests/**"}
   - {signature: claude-hook-runs-payload, path_glob: "tests/**"}
+  # Whitespace-concealment fixture — the infected postcss.config.mjs buries its payload behind a
+  # long space run (and dedicated test fixtures do the same).
+  - {signature: whitespace-concealment, path_glob: "tests/**"}
 
 # Alerting. Channels read their secrets from env (SLACK_WEBHOOK_URL, GH_SECURITY_TOKEN).
 alerts:

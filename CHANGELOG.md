@@ -128,6 +128,16 @@ All notable changes to this project are documented here. The format is based on
   `--user "$(id -u):$(id -g)"` invocation for writing the report back to the host.
 
 ### Security
+- **Detects whitespace / invisible-character concealment.** A new `whitespace-concealment`
+  heuristic flags the *technique*, not just the payload: content pushed off-screen behind a long
+  run of horizontal whitespace (the fake-font / `postcss.config` sample buried its payload behind
+  ~752 spaces so the line looks empty), or hidden with zero-width / bidi-control characters (the
+  "Trojan Source" attack, CVE-2021-42574). It fires even when the concealed payload matches no
+  fingerprint and the line is **under** the 2000-char long-line threshold — the previously-confirmed
+  blind spot — across `*.js`/`*.mjs`/`*.ts`/`*.json` (incl. a space-padded `.vscode/tasks.json`
+  command) and font-as-text files. It is **heuristic → SUSPICIOUS** (wide alignment can rarely
+  produce a long run), context-scoped so minified/generated bundles are suppressed, and bounded so
+  short alignment, lone aligned characters, and legit emoji zero-width joiners stay clean.
 - **Opt-in build-output scanning (`scan_build_outputs`).** Set `scan_build_outputs: true` in
   `config/security.yml` to also inspect build outputs: the project build-output dirs
   (`dist`/`build`/`out`/`.next`) are un-pruned and the obfuscation matcher runs only its
