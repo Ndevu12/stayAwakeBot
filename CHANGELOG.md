@@ -128,6 +128,16 @@ All notable changes to this project are documented here. The format is based on
   `--user "$(id -u):$(id -g)"` invocation for writing the report back to the host.
 
 ### Security
+- **Opt-in build-output scanning (`scan_build_outputs`).** Set `scan_build_outputs: true` in
+  `config/security.yml` to also inspect build outputs: the project build-output dirs
+  (`dist`/`build`/`out`/`.next`) are un-pruned and the obfuscation matcher runs only its
+  **self-evident construct checks** (charcode array, exec sink, base64/escape blob) on
+  generated/minified paths — the **whole-file density heuristic stays suppressed** (density is
+  expected in bundles) —
+  emitting an `obfuscated-build-artifact` finding at **`heuristic`** confidence (SUSPICIOUS, never
+  INFECTED). A legit dense bundle with no such construct stays clean. Off by default, so the
+  FP-safe defaults for ordinary scans are unchanged; this is an inspection aid and does not close
+  the documented build-artifact residual.
 - **Documented that provenance is not trust, and named the build-artifact residual.** A new
   "Provenance is not trust" section in `docs/SECURITY_ARCHITECTURE.md` (plus a README note) makes
   explicit that `saw` is purely behavioral — it never treats a scanned target's SLSA / PEP-740 /
