@@ -66,9 +66,9 @@ provenance-trusting and CVE-anchored tooling produced zero signal.
   attestation.
 - **Opt-in build scanning (`scan_build_outputs: true` in `config/security.yml`).** For deliberate
   inspection you can un-suppress build outputs: the build-output dirs are un-pruned and the
-  obfuscation matcher runs only its **Tier-1 self-evident constructs** (charcode array, exec sink,
-  base64/escape blob) on generated/minified paths — the Tier-2 density heuristic stays suppressed
-  (density is *expected* in bundles). Findings are `obfuscated-build-artifact` at **`heuristic`**
+  obfuscation matcher runs only its **self-evident construct checks** (charcode array, exec sink,
+  base64/escape blob) on generated/minified paths — the **whole-file density heuristic stays
+  suppressed** (density is *expected* in bundles). Findings are `obfuscated-build-artifact` at **`heuristic`**
   confidence (SUSPICIOUS, never INFECTED); a legit dense bundle with no such construct stays clean.
   This is noisier by design (an `atob`/`fromCharCode` in a bundle will flag) and does **not** close
   the residual above — it is an inspection aid, not the durable guarantee.

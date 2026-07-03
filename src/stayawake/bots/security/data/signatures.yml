@@ -117,11 +117,11 @@ signatures:
     description: "Hand-authored source/config file containing packed/obfuscated payload (line-agnostic)"
     remediation: recover
 
-  # Opt-in only (config `scan_build_outputs: true`, #1095b): a self-evident Tier-1 construct
-  # (charcode array / exec sink / base64 / escape run) found in a build/minified artifact. Density
-  # (Tier-2) is NOT run there — it is expected in bundles — so this stays heuristic → SUSPICIOUS,
-  # never confirmed (a bundle can carry these legitimately). remediation: manual — a build output
-  # is regenerated from source, not recovered; review the source it was built from.
+  # Opt-in only (config `scan_build_outputs: true`, #1095b): a self-evident obfuscation construct
+  # (charcode array / exec sink / base64 / escape run) found in a build/minified artifact. The
+  # whole-file density heuristic is NOT run there — density is expected in bundles — so this stays
+  # heuristic → SUSPICIOUS, never confirmed (a bundle can carry these legitimately). remediation:
+  # manual — a build output is regenerated from source, not recovered; review the source instead.
   - id: obfuscated-build-artifact
     category: code-loader
     severity: medium

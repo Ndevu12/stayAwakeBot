@@ -62,14 +62,14 @@ _BUILD_OUTPUT_DIRS = {"dist", "build", "out", ".next"}
 def _options(settings: dict) -> ScanOptions:
     base = ScanOptions()
     exclude = set(settings.get("exclude_dirs", base.exclude_dirs))
-    scan_builds = bool(settings.get("scan_build_outputs", base.scan_build_outputs))
-    if scan_builds:
+    scan_build_outputs = bool(settings.get("scan_build_outputs", base.scan_build_outputs))
+    if scan_build_outputs:
         exclude -= _BUILD_OUTPUT_DIRS          # let build outputs be traversed (matcher gates the rest)
     return ScanOptions(
         exclude_dirs=exclude,
         max_file_bytes=int(settings.get("max_file_bytes", base.max_file_bytes)),
         remote_clone_depth=int(settings.get("remote_clone_depth", base.remote_clone_depth)),
-        scan_build_outputs=scan_builds,
+        scan_build_outputs=scan_build_outputs,
     )
 
 

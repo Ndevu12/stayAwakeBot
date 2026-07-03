@@ -53,9 +53,10 @@ durable guarantee is therefore on HAND-AUTHORED SOURCE plus git-history / evil-m
 corroboration — the point before a payload is baked into a post-build artifact — not on the
 compiled output. This is a content decision, not a provenance one: `saw` never treats a
 target's SLSA / PEP-740 attestation as trust; provenance attests the build, not the source. An
-opt-in `scan_build_outputs` mode (analyze_file `tier1_only=True`) runs ONLY the self-evident Tier-1
-constructs on build outputs at `heuristic` confidence as an inspection aid — it does not close the
-residual (a construct-free minified payload still evades it).
+opt-in `scan_build_outputs` mode (analyze_file `constructs_only=True`) runs ONLY the self-evident
+obfuscation-construct checks (charcode array / exec sink / base64 / escape run) on build outputs at
+`heuristic` confidence as an inspection aid — it does not close the residual (a construct-free
+minified payload still evades it).
 """
 from __future__ import annotations
 
@@ -315,7 +316,7 @@ def _longest_nonspace_run(s: str) -> int:
     return best
 
 
-def analyze_file(text: str, ext: str = "", tier1_only: bool = False) -> ObfuscationVerdict:
+def analyze_file(text: str, ext: str = "", constructs_only: bool = False) -> ObfuscationVerdict:
     """Line-AGNOSTIC, baseline-free obfuscation verdict for a whole hand-authored
     source/config file (G4). Run on the RAW concatenated content so a payload that is
     SPLIT/WRAPPED across many <2000-char lines — which defeats the formatting-keyed
@@ -334,11 +335,13 @@ def analyze_file(text: str, ext: str = "", tier1_only: bool = False) -> Obfuscat
     Caller is responsible for context-scoping (skip is_generated_context paths) and
     for restricting to authored extensions; this function judges content only.
 
-    `tier1_only=True` runs ONLY the self-evident Tier-1 constructs and skips the Tier-2 density
-    heuristic. This is the opt-in build-output mode (`scan_build_outputs`): on a generated/minified
-    path, density IS expected and would be all false positives, but a self-evident construct (a
-    charcode array, an exec sink, a base64/escape blob) is still worth surfacing as a heuristic
-    signal. Never used on hand-authored source, where Tier-2 is the durable lever.
+    `constructs_only=True` runs ONLY the self-evident construct checks (the charcode/byte array,
+    dynamic-exec sink, and base64/escape-blob detectors above) and skips the whole-file
+    density/entropy heuristic below. This is the opt-in build-output mode (`scan_build_outputs`):
+    on a generated/minified path density IS expected and would be all false positives, but a
+    self-evident construct (a charcode array, an exec sink, a base64/escape blob) is still worth
+    surfacing as a heuristic signal. Never used on hand-authored source, where the whole-file
+    density heuristic is the durable lever.
     """
     body = text or ""
     if not body.strip():
@@ -365,8 +368,10 @@ def analyze_file(text: str, ext: str = "", tier1_only: bool = False) -> Obfuscat
     if _escape_run(dechunked):
         return ObfuscationVerdict(True, "dense escape-encoded byte payload (\\xNN/\\uNNNN run)")
 
-    if tier1_only:
-        return ObfuscationVerdict(False, "")   # build-output mode: density (Tier 2) stays suppressed
+    if constructs_only:
+        # Build-output mode: stop here — skip the whole-file density heuristic below (density is
+        # expected in a bundle, so running it there would be all false positives).
+        return ObfuscationVerdict(False, "")
 
     # Tier 2 — corroborated whole-file minification anomaly (the split-line payload, and
     # G5: a loader-EVADED single long line in a real config file — packed/encoded content

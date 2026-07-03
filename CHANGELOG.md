@@ -130,9 +130,10 @@ All notable changes to this project are documented here. The format is based on
 ### Security
 - **Opt-in build-output scanning (`scan_build_outputs`).** Set `scan_build_outputs: true` in
   `config/security.yml` to also inspect build outputs: the project build-output dirs
-  (`dist`/`build`/`out`/`.next`) are un-pruned and the obfuscation matcher runs only its **Tier-1
-  self-evident constructs** (charcode array, exec sink, base64/escape blob) on generated/minified
-  paths — the **Tier-2 density heuristic stays suppressed** (density is expected in bundles) —
+  (`dist`/`build`/`out`/`.next`) are un-pruned and the obfuscation matcher runs only its
+  **self-evident construct checks** (charcode array, exec sink, base64/escape blob) on
+  generated/minified paths — the **whole-file density heuristic stays suppressed** (density is
+  expected in bundles) —
   emitting an `obfuscated-build-artifact` finding at **`heuristic`** confidence (SUSPICIOUS, never
   INFECTED). A legit dense bundle with no such construct stays clean. Off by default, so the
   FP-safe defaults for ordinary scans are unchanged; this is an inspection aid and does not close
