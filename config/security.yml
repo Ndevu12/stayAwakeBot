@@ -12,6 +12,13 @@ settings:
   max_file_bytes: 2000000
   # Shallow-clone depth for remote targets (history matchers need a few commits).
   remote_clone_depth: 50
+  # Opt-in: also scan build outputs (default false). When true, the project build-output dirs
+  # (dist/build/out/.next) are un-pruned AND the obfuscation matcher runs its self-evident construct
+  # checks (charcode array / exec sink / base64 / escape run) on generated/minified paths — NOT the
+  # whole-file density heuristic (density is expected in bundles) — emitting a `heuristic`
+  # (SUSPICIOUS) `obfuscated-build-artifact`, never `confirmed`. Noisier by design; provenance is
+  # never a trust signal (see docs/SECURITY_ARCHITECTURE.md → "Provenance is not trust").
+  # scan_build_outputs: false
   # Optional: where reports are written (default: reports/security). Override per run
   # with --reports-dir; set a scratch path here to keep committed reports untouched.
   # reports_dir: reports/security

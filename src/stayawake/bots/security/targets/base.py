@@ -46,6 +46,13 @@ class ScanOptions:
         "reports", "sab-patches"})
     max_file_bytes: int = 2_000_000
     remote_clone_depth: int = 50
+    # Opt-in (config `scan_build_outputs: true`): also scan build outputs. When set, the service
+    # un-prunes the build-output dirs above AND the obfuscation matcher runs its self-evident
+    # construct checks (numeric array / exec sink / base64 / escape run) on generated paths — but
+    # NOT the whole-file density heuristic (density is genuinely expected in bundles) — emitting a
+    # `heuristic` `obfuscated-build-artifact` finding, never `confirmed`. Default off (FP-safe
+    # defaults unchanged).
+    scan_build_outputs: bool = False
 
 
 class Target:

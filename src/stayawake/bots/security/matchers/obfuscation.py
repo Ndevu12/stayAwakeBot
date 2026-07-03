@@ -34,8 +34,14 @@ class ObfuscationMatcher(Matcher):
     handles = "obfuscation"
 
     def scan(self, target, signatures, all_signatures=None):
-        sig = next((s for s in signatures if s.get("kind") == "obfuscated-file"), None)
-        if not sig:
+        source_sig = next((s for s in signatures if s.get("kind") == "obfuscated-file"), None)
+        build_artifact_sig = next(
+            (s for s in signatures if s.get("kind") == "obfuscated-build-artifact"), None)
+        # Opt-in (config `scan_build_outputs`): also inspect build/minified outputs, but only for
+        # the self-evident obfuscation constructs (not the whole-file density heuristic).
+        inspect_build_outputs = (bool(getattr(target.opts, "scan_build_outputs", False))
+                                 and build_artifact_sig is not None)
+        if not source_sig and not inspect_build_outputs:
             return []
         content_sig = build_content_sig(all_signatures or signatures)
         findings: list[Finding] = []
@@ -43,6 +49,16 @@ class ObfuscationMatcher(Matcher):
             if _ext(rel) not in _AUTHORED_OBFUSCATABLE_EXTS:
                 continue
             if is_generated_context(rel):       # vendored/minified/generated → obfuscation expected
+                if inspect_build_outputs:
+                    # Run only the self-evident construct checks here (a charcode array, exec sink,
+                    # or base64/escape blob); the whole-file density heuristic stays off — density is
+                    # expected in a bundle. Emitted as heuristic, never confirmed.
+                    text = target.read_text(rel)
+                    verdict = analyze_file(text, _ext(rel), constructs_only=True) if text else None
+                    if verdict:
+                        findings.append(self._emit(build_artifact_sig, rel, verdict.reason))
+                continue                        # default: build outputs are suppressed entirely
+            if not source_sig:
                 continue
             text = target.read_text(rel)
             if not text:
@@ -50,12 +66,12 @@ class ObfuscationMatcher(Matcher):
             # (a) line-agnostic loader fingerprint on the raw content.
             hit = content_sig(text)
             if hit:
-                findings.append(self._emit(sig, rel, f"loader fingerprint on raw content: {hit}"))
+                findings.append(self._emit(source_sig, rel, f"loader fingerprint on raw content: {hit}"))
                 continue
             # (b) context-scoped whole-file obfuscation (split/wrapped packed payload).
             verdict = analyze_file(text, _ext(rel))
             if verdict:
-                findings.append(self._emit(sig, rel, verdict.reason))
+                findings.append(self._emit(source_sig, rel, verdict.reason))
         return findings
 
     @staticmethod
