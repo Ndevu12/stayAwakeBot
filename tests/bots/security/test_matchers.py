@@ -23,6 +23,7 @@ EXPECTED_IN_INFECTED = {
     "vscode-allow-automatic-tasks", "gitignore-autopush-markers",
     "npm-lifecycle-dropper", "npm-lifecycle-remote-fetch",
     "claude-hook-autorun", "claude-hook-runs-payload",
+    "whitespace-concealment",
 }
 
 

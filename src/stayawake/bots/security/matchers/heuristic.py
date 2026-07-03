@@ -13,12 +13,36 @@ generated paths are suppressed there, so dense bundles never reach this rule.
 """
 from __future__ import annotations
 
+import re
+
 from stayawake.bots.security.models import Finding, Severity
 from stayawake.bots.security.matchers.base import Matcher, globs_ok, FONT_MAGIC, build_content_sig
 from stayawake.bots.security.obfuscation import (
     analyze_file, is_generated_context, _AUTHORED_OBFUSCATABLE_EXTS,
 )
 from stayawake.bots.security.matchers.obfuscation import _ext
+
+# Whitespace concealment (T1027/T1564): a payload pushed off-screen behind a long run of
+# horizontal whitespace so the line looks empty in an editor without word-wrap.
+# 120 = content beyond a typical editor width (~80-120 cols) is off-screen; set below the
+# report's `{200,}` grep so an attacker padding to just-under-200 is still caught. The trailing
+# content must be non-trivial (a lone aligned `{` / `*` is not concealment).
+_MIN_HIDDEN_WHITESPACE_RUN = 120
+_MIN_CONCEALED_CONTENT = 4
+# A run of >=120 space / tab / no-break-space chars, then non-whitespace content. Escapes only
+# — a security tool must not carry literal invisible chars in its own source.
+_HIDDEN_WHITESPACE_RUN = re.compile(
+    r"(?P<run>[ \t\u00A0]{%d,})(?P<hidden>\S.*)$" % _MIN_HIDDEN_WHITESPACE_RUN)
+
+# Zero-width / bidi-control characters that hide or reorder source text (the "Trojan Source"
+# attack, CVE-2021-42574) and are essentially never legitimate in hand-authored code. Written as
+# escapes on purpose. Deliberately EXCLUDES the emoji zero-width joiner (U+200D), ZWNJ (U+200C),
+# variation selectors, and the BOM (U+FEFF, a legitimate file prefix) — those appear in real
+# string data and would false-positive.
+_CONCEALMENT_CHARS = re.compile(
+    "[\u200b\u2060"                          # zero-width space, word joiner
+    "\u202a\u202b\u202c\u202d\u202e"       # bidi embeddings/overrides (LRE RLE PDF LRO RLO)
+    "\u2066\u2067\u2068\u2069]")            # bidi isolates (LRI RLI FSI PDI)
 
 
 class HeuristicMatcher(Matcher):
@@ -28,6 +52,7 @@ class HeuristicMatcher(Matcher):
         findings: list[Finding] = []
         long_line = next((s for s in signatures if s.get("kind") == "long-line"), None)
         text_font = next((s for s in signatures if s.get("kind") == "text-in-fontfile"), None)
+        concealment = next((s for s in signatures if s.get("kind") == "whitespace-concealment"), None)
         content_sig = build_content_sig(all_signatures or signatures)
         for rel in target.iter_files():
             if long_line and globs_ok(rel, long_line):
@@ -36,6 +61,10 @@ class HeuristicMatcher(Matcher):
                     findings.append(f)
             if text_font and globs_ok(rel, text_font):
                 f = self._disguised_font(target, rel, text_font)
+                if f:
+                    findings.append(f)
+            if concealment and globs_ok(rel, concealment):
+                f = self._whitespace_concealment(target, rel, concealment)
                 if f:
                     findings.append(f)
         return findings
@@ -70,6 +99,27 @@ class HeuristicMatcher(Matcher):
             verdict = analyze_file(text, _ext(rel))
             if verdict:
                 return self._emit(sig, rel, f"line {i}: {n} chars; {verdict.reason}", i)
+        return None
+
+    def _whitespace_concealment(self, target, rel, sig):
+        """Flag a line that hides content off-screen — a long run of horizontal whitespace
+        followed by non-trivial content, or a zero-width / bidi-control character (Trojan
+        Source). Context-gated so minified/generated paths (where long runs are expected) are
+        suppressed. Heuristic → SUSPICIOUS: long runs can rarely be benign (wide alignment)."""
+        if is_generated_context(rel):
+            return None
+        text = target.read_text(rel)
+        if text is None:
+            return None
+        for i, line in enumerate(text.splitlines(), 1):
+            run = _HIDDEN_WHITESPACE_RUN.search(line)
+            if run and len(run.group("hidden").strip()) >= _MIN_CONCEALED_CONTENT:
+                return self._emit(
+                    sig, rel, f"line {i}: {len(run.group('run'))}-char whitespace run hides content", i)
+            invisible = _CONCEALMENT_CHARS.search(line)
+            if invisible and line.strip():
+                return self._emit(
+                    sig, rel, f"line {i}: zero-width/bidi char U+{ord(invisible.group()):04X}", i)
         return None
 
     @staticmethod
