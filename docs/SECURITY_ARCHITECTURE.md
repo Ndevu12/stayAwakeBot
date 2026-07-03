@@ -40,6 +40,31 @@ signatures (data) ─► signature engine ─► matchers ─► findings ─►
 - The bot's `contents: write` token is high-value — the prevention layer scopes it and hardens the
   auto-commit step (this is the exact surface the worm used to inject its payload via an evil merge).
 
+## Provenance is not trust (and the build-artifact blind spot)
+`saw` is a **behavioral** scanner: it judges *content*, never *pedigree*. A valid SLSA / PEP-740 /
+sigstore attestation proves a build pipeline ran over some input — it says **nothing** about whether
+that input source was clean. The Shai-Hulud 2.0 wave made this concrete: compromised packages were
+republished carrying **valid SLSA Build L3 provenance** and **no CVE was issued**, so both
+provenance-trusting and CVE-anchored tooling produced zero signal.
+
+- **`saw` never treats a scanned target's attestation as a reason to skip or trust it.** There is no
+  "has provenance → skip scanning" path anywhere in the scanner, and none should be added. Provenance
+  is provenance-of-build, not trust-of-content.
+- **Build outputs are deliberately out of scope for the obfuscation heuristic** — via two independent
+  layers: (1) `dist/`/`build/` (and peers) are pruned from traversal in `ScanOptions.exclude_dirs`
+  before any matcher runs, and (2) `is_generated_context()` (the `_GENERATED_PATH` predicate in
+  `obfuscation.py`) suppresses the density/entropy obfuscation heuristic on minified/bundled/generated
+  paths (`*.min.js`, `*.bundle.js`, source maps, lockfiles, …). Minification *is* obfuscation in those
+  places, so flagging it would be all false positives. (Known **loader fingerprints** — the content
+  signatures — still match anywhere they are actually traversed; only the shape-based heuristic is
+  suppressed.) Both `exclude_dirs` are settings-overridable in `config/security.yml`.
+- **Residual (named, not a bug):** a payload minified into a legitimate-looking bundle can be
+  statistically indistinguishable from a normal bundle, so it can evade content detection. `saw`'s
+  durable guarantee is on **hand-authored source** plus **git-history / evil-merge corroboration** —
+  the point *before* the worm's payload is baked into a post-build artifact — not on compiled outputs.
+  Scanning the source a build is produced from is strictly stronger than trusting the artifact's
+  attestation.
+
 ## Detected vectors (from the live incident)
 1. Obfuscated loader in `postcss.config.*` (content + oversized-line heuristic)
 2. Fake font payload `public/fonts/fa-solid-400.woff2` (filename + text-in-fontfile heuristic)

@@ -87,6 +87,11 @@ docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/repo" \
 Tags: `:latest`, `:X.Y.Z`, `:X.Y`, and `:sha-<commit>`. The image runs as a non-root user, is
 built from the same wheel published to PyPI, and ships SLSA provenance + SBOM attestations.
 
+> Note: that provenance attests **`saw`'s own** build. When `saw` *scans* a target it is purely
+> behavioral — it never treats a scanned package's SLSA / PEP-740 / sigstore attestation as a trust
+> signal (Shai-Hulud 2.0 shipped valid provenance). See
+> [SECURITY_ARCHITECTURE.md → Provenance is not trust](docs/SECURITY_ARCHITECTURE.md#provenance-is-not-trust-and-the-build-artifact-blind-spot).
+
 ## Documentation
 
 - [CLI command guide](docs/CLI.md) — the `saw` security commands (scan, run, fix, audit, …)
