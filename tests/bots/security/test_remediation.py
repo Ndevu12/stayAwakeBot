@@ -28,17 +28,18 @@ class TestRemediation(unittest.TestCase):
 
     def test_structural_apply_cleans_nonloader_findings(self):
         # plan/apply handles only the reliable STRUCTURAL actions (quarantine fonts, strip
-        # exact .gitignore lines, drop autorun JSON keys). Categories with remediation=manual
-        # are NOT surgically edited — code-loader routes to git recovery, npm-lifecycle hooks
-        # aren't safely strippable (the manifest may be legit), and agent-autorun (.claude hooks)
-        # defers to review (the file may hold legit permissions) — so all three remain after a
-        # bare plan/apply on this (non-git) fixture.
+        # exact .gitignore lines, drop autorun JSON keys). Categories with remediation=manual (or
+        # heuristic confidence) are NOT surgically edited and remain after a bare plan/apply on this
+        # (non-git) fixture: code-loader routes to git recovery; npm-lifecycle hooks aren't safely
+        # strippable (the manifest may be legit); agent-autorun (.claude hooks) defers to review; and
+        # camouflage here is the whitespace-concealment tell in postcss.config.mjs (a hidden payload
+        # is reviewed/recovered by hand, not auto-stripped).
         before = self._findings()
         self.assertTrue(before, "fixture should start infected")
         applied = remediation.apply(self.repo, remediation.plan(before), self.q)
         self.assertTrue(applied, "should apply the structural changes")
         remaining = {f.category for f in self._findings()}
-        self.assertEqual(remaining, {"code-loader", "npm-lifecycle", "agent-autorun"},
+        self.assertEqual(remaining, {"code-loader", "npm-lifecycle", "agent-autorun", "camouflage"},
                          f"only manual-remediation categories should remain: {remaining}")
         self.assertTrue(self.q.exists())            # originals preserved in quarantine
 

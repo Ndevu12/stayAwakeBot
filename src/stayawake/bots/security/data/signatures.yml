@@ -102,6 +102,24 @@ signatures:
     description: "Config file with an abnormally long single line (likely appended payload)"
     remediation: recover
 
+  # ── Whitespace / invisible-character concealment (T1027/T1564) ────────────────
+  # The technique, not the payload: content pushed off-screen behind a long horizontal-whitespace
+  # run (the fake-font / postcss.config sample buried its payload behind ~752 spaces), or hidden
+  # with zero-width / bidi-control chars (Trojan Source). Catches the tell even when the concealed
+  # payload itself matches no fingerprint and the line is under the 2000-char long-line threshold.
+  # Context-scoped (minified/generated suppressed) and heuristic → SUSPICIOUS (wide alignment can
+  # rarely produce a long run). remediation: manual — review/recover the concealed content by hand.
+  - id: whitespace-concealment
+    category: camouflage
+    severity: high
+    matcher: heuristic
+    confidence: heuristic
+    kind: whitespace-concealment
+    file_globs: ["*.mjs", "*.cjs", "*.js", "*.jsx", "*.ts", "*.tsx", "*.vue", "*.svelte", "*.json",
+                 "*.woff2", "*.woff", "*.ttf", "*.otf"]
+    description: "Content concealed behind a long whitespace run or zero-width/bidi-control characters (off-screen hiding)"
+    remediation: manual
+
   # ── Whole-file obfuscation (line-agnostic, context-scoped) ───────────────────
   # Closes G4: a payload SPLIT/WRAPPED across many <2000-char lines, or living in
   # .jsx/.tsx/.vue/.svelte, defeats the formatting-keyed oversized-config-line rule.
