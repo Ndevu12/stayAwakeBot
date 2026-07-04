@@ -14,12 +14,13 @@ from stayawake.bots.security.matchers.git_history import GitHistoryMatcher
 from stayawake.bots.security.matchers.obfuscation import ObfuscationMatcher
 from stayawake.bots.security.matchers.npm_manifest import NpmManifestMatcher
 from stayawake.bots.security.matchers.workflow import WorkflowYamlMatcher
+from stayawake.bots.security.matchers.dependency_audit import DependencyAuditMatcher
 
 REGISTRY: dict[str, Matcher] = {
     m.handles: m for m in (
         ContentMatcher(), FilenameMatcher(), StructuralJsonMatcher(),
         HeuristicMatcher(), GitHistoryMatcher(), ObfuscationMatcher(),
-        NpmManifestMatcher(), WorkflowYamlMatcher(),
+        NpmManifestMatcher(), WorkflowYamlMatcher(), DependencyAuditMatcher(),
     )
 }
 
