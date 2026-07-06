@@ -6,9 +6,10 @@
 #
 # Fields (common):
 #   id          unique, kebab-case
-#   category    grouping (code-loader | fake-font | vscode-autorun | git-marker | camouflage | evil-merge | exfil | npm-lifecycle | workflow-autorun | runner-persistence | agent-autorun)
+#   category    grouping (code-loader | fake-font | vscode-autorun | git-marker | camouflage | evil-merge | exfil | npm-lifecycle | workflow-autorun | runner-persistence | agent-autorun | supply-chain-dep)
 #   severity    critical | high | medium | low
-#   matcher     content | filename | structural-json | git-history | heuristic
+#   matcher     content | filename | structural-json | git-history | heuristic | obfuscation |
+#               npm-manifest | workflow-yaml | dependency-audit
 #   description human-readable
 #   remediation strategy id (consumed in Phase 3): recover (git restore, code-loader) |
 #               quarantine-file | quarantine-dir | remove-foreign-vscode | strip-gitignore-markers | manual
@@ -320,6 +321,27 @@ signatures:
     pattern: '\b(?:bun|bunx|deno|curl|wget)\b'
     description: "npm install-time lifecycle hook invokes Bun/Deno or a remote fetch (review)"
     remediation: manual
+
+  # ── Malicious upstream dependency (package.json + lockfiles, T1195.001) ───────────
+  # The campaign's PRIMARY spread: a backdoored package version pulled by `npm install`. The
+  # dependency-audit matcher parses package.json (exact-pinned deps only — ranges defer to the
+  # lockfile) and the npm/yarn/pnpm lockfiles (direct + transitive) and flags any dependency whose
+  # exact name@version is on this data-driven blocklist. An exact match is decisive → confirmed
+  # (INFECTED). remediation: manual — remove/replace the package; a dependency can't be auto-fixed.
+  #
+  # REFRESH PATH: append known-malicious `name@version` entries to `known_bad`, sourced from public
+  # advisories — JFrog, GitHub Security Advisories, and OSV — for the Shai-Hulud / Miasma campaign.
+  # (Behaviorally scanning node_modules content is deliberately deferred — off by default, see
+  # docs/SECURITY_ARCHITECTURE.md → "Malicious upstream dependencies".)
+  - id: malicious-dependency
+    category: supply-chain-dep
+    severity: critical
+    matcher: dependency-audit
+    description: "Declared/locked dependency matches a known-malicious upstream package@version (T1195.001)"
+    remediation: manual
+    known_bad:
+      - "html-to-gutenberg@4.2.11"
+      - "fetch-page-assets@1.2.9"
 
   # ── GitHub Actions workflow persistence / camouflage (.github/workflows/*.yml) ───
   # The workflow-yaml matcher parses each workflow with yaml.safe_load and dispatches by `kind`.
