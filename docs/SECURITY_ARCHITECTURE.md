@@ -73,6 +73,32 @@ provenance-trusting and CVE-anchored tooling produced zero signal.
   This is noisier by design (an `atob`/`fromCharCode` in a bundle will flag) and does **not** close
   the residual above — it is an inspection aid, not the durable guarantee.
 
+## Malicious upstream dependencies (T1195.001)
+The campaign's *primary* spread is republishing backdoored package versions, so the next
+`npm install` is the next victim — the payload lands in `node_modules` (which `saw` excludes) and
+never touches the repo tree. `saw` audits what a repo **declares and locks**: the `dependency-audit`
+matcher parses `package.json` and the npm / yarn / pnpm lockfiles and flags any dependency — direct
+**or** lockfile-transitive — whose exact `name@version` is on a **data-driven known-bad blocklist**
+(the `malicious-dependency` signature's `known_bad` list in `signatures.yml`). An exact match is
+decisive → **confirmed** (INFECTED).
+
+- **Refresh path:** append known-malicious `name@version` entries to that `known_bad` list, sourced
+  from public advisories — **JFrog**, **GitHub Security Advisories**, and **OSV** — for the
+  Shai-Hulud / Miasma campaign. It complements (not replaces) the behavioral engine, which stays the
+  backbone (no CVE is issued for these, so a curated list is the reliable IoC).
+- **Decisions / residuals (deliberate):**
+  - A `package.json` **version range** (`^4.2.11`) is ambiguous — it may or may not resolve to the
+    bad version — so ranges are **not** matched; the lockfile's resolved version is the source of
+    truth. A range-only project with no lockfile is a documented residual.
+  - **Scanning `node_modules` content behaviorally is deferred** (off by default) — it is expensive
+    and noisy, and the lockfile audit already names exactly what is installed. The behavioral engine
+    covers a payload that reaches the *repo tree*; installed dependency *content* is out of scope by
+    default.
+  - Lockfiles are read **whole** (up to 32 MB, bypassing the scan's head/tail truncation so a large
+    `package-lock.json` still parses); a pathological lockfile beyond that cap, and an aliased
+    dependency in a *yarn/pnpm* lockfile (npm aliases are resolved via the lockfile's `name` field),
+    are residuals.
+
 ## Detected vectors (from the live incident)
 1. Obfuscated loader in `postcss.config.*` (content + oversized-line heuristic)
 2. Fake font payload `public/fonts/fa-solid-400.woff2` (filename + text-in-fontfile heuristic)

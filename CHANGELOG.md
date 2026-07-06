@@ -141,6 +141,16 @@ All notable changes to this project are documented here. The format is based on
   `--user "$(id -u):$(id -g)"` invocation for writing the report back to the host.
 
 ### Security
+- **Detects malicious upstream dependencies (T1195.001).** A new `dependency-audit` matcher parses
+  `package.json` and the npm / yarn / pnpm lockfiles and flags any dependency — direct **or**
+  lockfile-transitive — whose exact `name@version` is on a **data-driven known-bad blocklist** (the
+  `malicious-dependency` signature's `known_bad` list in `signatures.yml`, refreshable from JFrog /
+  GitHub Security Advisories / OSV). An exact match is **confirmed** (INFECTED). This closes the
+  campaign's primary spread vector — a poisoned dependency pulled by `npm install` lands in
+  `node_modules` (excluded from scanning) and never touches the repo tree, so an org infected purely
+  through a dependency would otherwise scan clean. A `package.json` version *range* is ambiguous and
+  deliberately deferred to the lockfile's resolved version (no false positive); behaviorally scanning
+  `node_modules` content stays off by default (documented residual).
 - **`saw audit` detects host filesystem drop-file artifacts.** A new `check_host_artifacts()` probe
   looks for the ingress-tooling / data-staging files this wave leaves on a developer workstation
   (T1105/T1074): `~/.node_modules`, `/tmp/.npm`, `/tmp/get-pip.py`, a `<hostname>$<username>` staged
