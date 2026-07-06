@@ -66,6 +66,13 @@ All notable changes to this project are documented here. The format is based on
 - This changelog.
 
 ### Changed
+- **Dependency audit refactored onto a PURL spine (internal; no behaviour change).** The
+  `dependency-audit` matcher is now a thin coordinator over a new `bots/security/dependencies/`
+  package — a normalized **`Purl`** identity, per-ecosystem **resolvers** (`resolve(target)` →
+  `Purl`s; npm/yarn/pnpm moved verbatim into `NpmResolver`), and an injectable **`AdvisoryStore`**
+  (still backed by the inline `known_bad` seed). This is the groundwork for dynamic, all-ecosystem,
+  offline-first dependency auditing; detection results are byte-for-byte identical. (`load_jsonc`
+  moved to a neutral `jsonc` module and is re-exported from `matchers.base`.)
 - **`saw audit` now streams like `saw scan`.** Each probe (some shell out to launchctl / systemctl /
   the GitHub API) runs under a per-check spinner on stderr, and the hygiene report types out on
   stdout — so the audit *unfolds* instead of pausing then dumping. Streaming auto-disables when the
