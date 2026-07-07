@@ -74,10 +74,16 @@ class TestAdvisoryTier(unittest.TestCase):
         self.assertTrue(r.advisories[0].advisory_only)
         self.assertIn("CVE-2024-9", r.advisories[0].evidence)
 
-    def test_advisory_tier_is_off_by_default(self):
-        r = self._scan("shaky", "2.0.0", advisories=False)
+    def test_advisories_on_by_default(self):
+        # ScanOptions() default → the offline CVE tier is part of a plain scan.
+        r = scan_target(LocalRepoTarget(_lock("shaky", "2.0.0"), "t", ScanOptions()),
+                        {"dependency-audit": SIGS}, [])
+        self.assertEqual([a.signature_id for a in r.advisories], ["vulnerable-dependency"])
+
+    def test_no_advisories_suppresses_the_section(self):
+        r = self._scan("shaky", "2.0.0", advisories=False)     # ← --no-advisories path
         self.assertEqual(r.verdict, CLEAN)
-        self.assertEqual(r.advisories, [])                 # opt-in — nothing surfaced
+        self.assertEqual(r.advisories, [])
 
     def test_malware_still_infects_regardless_of_flag(self):
         for advisories in (False, True):
@@ -109,17 +115,31 @@ class TestAdvisoryTier(unittest.TestCase):
         self.assertIn("Dependency advisories", render_markdown(payload))
 
 
-class TestAdvisoryOptInWiring(unittest.TestCase):
-    def test_options_enabled_by_flag_or_config(self):
+class TestAdvisoryWiring(unittest.TestCase):
+    def test_advisories_default_on_and_opt_out(self):
         from stayawake.bots.security import service
-        self.assertTrue(service._options({}, dependency_advisories=True).dependency_advisories)
-        self.assertTrue(service._options({"dependency_advisories": True}).dependency_advisories)
-        self.assertFalse(service._options({}).dependency_advisories)
+        self.assertTrue(service._options({}).dependency_advisories)                         # default ON
+        self.assertFalse(service._options({}, no_advisories=True).dependency_advisories)    # --no-advisories
+        self.assertFalse(service._options({"dependency_advisories": False}).dependency_advisories)  # config off
+        self.assertFalse(service._options({}).external_audit)                               # external opt-in
 
-    def test_scan_cli_exposes_advisories_flag(self):
+    def test_scan_cli_flags(self):
         from stayawake.cli.dispatch import build_parser
-        self.assertTrue(build_parser().parse_args(["scan", "--advisories"]).advisories)
-        self.assertFalse(build_parser().parse_args(["scan"]).advisories)
+        p = build_parser()
+        self.assertFalse(p.parse_args(["scan"]).no_advisories)                 # advisories on by default
+        self.assertTrue(p.parse_args(["scan", "--no-advisories"]).no_advisories)
+        self.assertTrue(p.parse_args(["scan", "-x"]).external_audit)
+        self.assertTrue(p.parse_args(["scan", "--external"]).external_audit)
+
+    def test_config_string_cannot_flip_the_sandbox(self):
+        # A quoted YAML string must NOT be truthy — a config typo can't silently leave the offline
+        # sandbox (`bool("false")` is True; the strict coercion prevents that).
+        from stayawake.bots.security import service
+        for falsy in ("false", "no", "off", "0", ""):
+            self.assertFalse(service._options({"external_audit": falsy}).external_audit, falsy)
+        self.assertFalse(service._options({"dependency_advisories": "false"}).dependency_advisories)
+        self.assertTrue(service._options({"external_audit": True}).external_audit)      # real bool works
+        self.assertTrue(service._options({"external_audit": "yes"}).external_audit)     # explicit truthy
 
 
 if __name__ == "__main__":
