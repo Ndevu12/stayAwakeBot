@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+"""AdvisoryStore + matcher over the offline corpus (#1120) — inline seed and corpus together,
+and the full scan path resolving to INFECTED via the default cache."""
+from __future__ import annotations
+
+import json
+import os
+import tempfile
+import unittest
+from pathlib import Path
+
+from stayawake.bots.security.dependencies import AdvisoryStore, db
+from stayawake.bots.security.dependencies.purl import Purl
+from stayawake.bots.security.matchers.dependency_audit import DependencyAuditMatcher
+from stayawake.bots.security.models import INFECTED
+from stayawake.bots.security.scanner import scan_target
+from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions
+from tests.bots.security._osv_fixtures import mal_record, osv_zip
+
+# A malicious-dependency-shaped signature: opts into the corpus AND carries an inline seed.
+SIG = {"id": "malicious-dependency", "category": "supply-chain-dep", "severity": "critical",
+       "matcher": "dependency-audit", "description": "known-malicious upstream package",
+       "remediation": "manual", "corpus": True, "known_bad": ["html-to-gutenberg@4.2.11"]}
+
+
+def _target(files):
+    d = Path(tempfile.mkdtemp())
+    for rel, content in files.items():
+        (d / rel).parent.mkdir(parents=True, exist_ok=True)
+        (d / rel).write_text(content, encoding="utf-8")
+    return LocalRepoTarget(d, "t", ScanOptions())
+
+
+class TestStoreCorpus(unittest.TestCase):
+    def setUp(self):
+        self.cache = Path(tempfile.mkdtemp())
+        db._CORPUS_MEMO.clear()
+        z = osv_zip({"MAL-1.json": mal_record("evil-lib", ["9.9.9"], rid="MAL-2024-777")})
+        db.write_manifest(self.cache, [db.update_ecosystem("npm", self.cache, fetch=lambda b: z)])
+
+    def tearDown(self):
+        db._CORPUS_MEMO.clear()
+
+    def test_default_store_matches_corpus_with_osv_id(self):
+        store = AdvisoryStore.default([SIG], cache_dir=self.cache)
+        adv = store.advisory_for(Purl("npm", "evil-lib", "9.9.9"))
+        self.assertIsNotNone(adv)
+        self.assertEqual(adv.osv_id, "MAL-2024-777")
+
+    def test_inline_seed_still_matches_and_has_no_osv_id(self):
+        store = AdvisoryStore.default([SIG], cache_dir=self.cache)
+        adv = store.advisory_for(Purl("npm", "html-to-gutenberg", "4.2.11"))
+        self.assertIsNotNone(adv)
+        self.assertIsNone(adv.osv_id)
+
+    def test_no_corpus_signature_disables_corpus(self):
+        # A signature without `corpus: true` (and no known_bad) never consults the cache.
+        store = AdvisoryStore.default([{"id": "x"}], cache_dir=self.cache)
+        self.assertTrue(store.is_empty())
+        self.assertIsNone(store.advisory_for(Purl("npm", "evil-lib", "9.9.9")))
+
+    def test_matcher_corpus_hit_cites_osv_id(self):
+        matcher = DependencyAuditMatcher(
+            store_factory=lambda s: AdvisoryStore.default(s, cache_dir=self.cache))
+        target = _target({"package-lock.json": json.dumps(
+            {"packages": {"node_modules/evil-lib": {"version": "9.9.9"}}})})
+        findings = matcher.scan(target, [SIG])
+        self.assertEqual([f.signature_id for f in findings], ["malicious-dependency"])
+        self.assertIn("MAL-2024-777", findings[0].evidence)
+
+    def test_full_scan_path_is_infected_via_default_cache_env(self):
+        # Prove the REGISTRY default matcher (no explicit cache_dir) reads the cache through the
+        # SAW_ADVISORY_CACHE_DIR override and reaches an INFECTED verdict end-to-end.
+        old = os.environ.get("SAW_ADVISORY_CACHE_DIR")
+        os.environ["SAW_ADVISORY_CACHE_DIR"] = str(self.cache)
+        db._CORPUS_MEMO.clear()
+        try:
+            target = _target({"package-lock.json": json.dumps(
+                {"packages": {"node_modules/evil-lib": {"version": "9.9.9"}}})})
+            r = scan_target(target, {"dependency-audit": [SIG]}, [])
+            self.assertEqual(r.verdict, INFECTED)
+            self.assertIn("MAL-2024-777", r.findings[0].evidence)
+        finally:
+            if old is None:
+                os.environ.pop("SAW_ADVISORY_CACHE_DIR", None)
+            else:
+                os.environ["SAW_ADVISORY_CACHE_DIR"] = old
+            db._CORPUS_MEMO.clear()
+
+
+if __name__ == "__main__":
+    unittest.main()

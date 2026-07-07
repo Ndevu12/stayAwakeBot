@@ -7,6 +7,16 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **`saw db update` — dynamic, offline malicious-dependency detection.** The dependency audit no
+  longer relies only on a hand-maintained blocklist: `saw db update` bulk-downloads the OSV
+  malicious-package corpus (OpenSSF malicious-packages, the **GitHub Advisory Database** incl. its
+  malware advisories, and OSV.dev) into a local cache — **thousands** of known-bad `name@version`
+  records instead of a handful — and every scan then matches against it **offline**. The download
+  names only the *ecosystem*, never a package, so it can't leak your dependency graph; scans stay
+  network-free and deterministic. The inline seed still ships in the wheel, so detection works with
+  **zero setup** — the DB is a superset, never a prerequisite (no cache → seed-only, exactly as
+  before). Corpus hits cite their advisory id (e.g. `[GHSA-…]` / `[MAL-…]`) in the finding. Phase 1b
+  of the dynamic dependency-audit epic; npm today, more ecosystems to follow.
 - **`saw fix` — remediate on a branch; `--pr` to publish.** `saw fix` prepares the cleanup on a
   local `security/auto-clean` branch and stops (no push, no network) — review it and push when
   ready; **`--pr`** also pushes and opens/updates one rolling, de-duplicated PR per repo;

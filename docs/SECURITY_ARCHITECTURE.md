@@ -82,10 +82,19 @@ matcher parses `package.json` and the npm / yarn / pnpm lockfiles and flags any 
 (the `malicious-dependency` signature's `known_bad` list in `signatures.yml`). An exact match is
 decisive → **confirmed** (INFECTED).
 
-- **Refresh path:** append known-malicious `name@version` entries to that `known_bad` list, sourced
-  from public advisories — **JFrog**, **GitHub Security Advisories**, and **OSV** — for the
-  Shai-Hulud / Miasma campaign. It complements (not replaces) the behavioral engine, which stays the
-  backbone (no CVE is issued for these, so a curated list is the reliable IoC).
+- **Two layers of known-bad data (both offline at scan time):**
+  - **Inline seed** — the `malicious-dependency` signature's `known_bad` list in `signatures.yml`,
+    which always ships in the wheel. Append `name@version` entries from public advisories (**JFrog**,
+    **GitHub Advisories**, **OSV**) for the Shai-Hulud / Miasma campaign. Zero-setup, zero-network.
+  - **Dynamic corpus** — `saw db update` bulk-downloads the OSV malicious-package corpus (**OpenSSF
+    malicious-packages**, the **GitHub Advisory Database** incl. its malware advisories, and
+    **OSV.dev**) into a local cache; scans then match resolved dependencies against it too. The
+    corpus is a *superset* of the seed, never a prerequisite (no cache → seed-only). **Trust model:**
+    the DATA is dynamic but the SCAN stays offline — `saw db update` is the only network egress, and
+    it names only the *ecosystem* (`…/npm/all.zip`), never a package, so it can't leak your
+    dependency graph; we never query per-package online. Records are normalized OSV JSON de-duped on
+    `id`+`aliases` (OSV.dev already re-exports GHSA). It complements (not replaces) the behavioral
+    engine, which stays the backbone.
 - **Decisions / residuals (deliberate):**
   - A `package.json` **version range** (`^4.2.11`) is ambiguous — it may or may not resolve to the
     bad version — so ranges are **not** matched; the lockfile's resolved version is the source of
@@ -98,6 +107,13 @@ decisive → **confirmed** (INFECTED).
     `package-lock.json` still parses); a pathological lockfile beyond that cap, and an aliased
     dependency in a *yarn/pnpm* lockfile (npm aliases are resolved via the lockfile's `name` field),
     are residuals.
+  - The dynamic corpus matches on an advisory's **explicit affected-version list** only; advisories
+    that encode affected **ranges** are deferred to the per-ecosystem version-range comparators
+    (later phase). Cache **snapshot pinning + signature/checksum verification** (against a poisoned
+    feed) and the global-vs-repo-pinned cache location are deferred to the trust-hardening phase; a
+    stale/unverified cache is a documented residual until then. The engine is architected as a
+    resolver → store → matcher spine (`bots/security/dependencies/`) so more ecosystems (PyPI, Go,
+    Rust, …) become new resolvers without touching the matcher.
 
 ## Detected vectors (from the live incident)
 1. Obfuscated loader in `postcss.config.*` (content + oversized-line heuristic)

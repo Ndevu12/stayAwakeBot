@@ -329,8 +329,12 @@ signatures:
   # exact name@version is on this data-driven blocklist. An exact match is decisive → confirmed
   # (INFECTED). remediation: manual — remove/replace the package; a dependency can't be auto-fixed.
   #
-  # REFRESH PATH: append known-malicious `name@version` entries to `known_bad`, sourced from public
-  # advisories — JFrog, GitHub Security Advisories, and OSV — for the Shai-Hulud / Miasma campaign.
+  # REFRESH PATH: two layers. (1) The inline `known_bad` seed below always ships in the wheel — a
+  # zero-setup, zero-network baseline; append `name@version` entries from public advisories (JFrog,
+  # GitHub Advisories, OSV) for the Shai-Hulud / Miasma campaign. (2) `corpus: true` opts this
+  # signature into the DYNAMIC offline corpus: `saw db update` downloads the OpenSSF / GitHub
+  # Advisories / OSV.dev malicious-package records into a local cache, and scans match resolved
+  # dependencies against it too (#1120). The corpus is a superset of the seed, never a prerequisite.
   # (Behaviorally scanning node_modules content is deliberately deferred — off by default, see
   # docs/SECURITY_ARCHITECTURE.md → "Malicious upstream dependencies".)
   - id: malicious-dependency
@@ -339,6 +343,7 @@ signatures:
     matcher: dependency-audit
     description: "Declared/locked dependency matches a known-malicious upstream package@version (T1195.001)"
     remediation: manual
+    corpus: true
     known_bad:
       - "html-to-gutenberg@4.2.11"
       - "fetch-page-assets@1.2.9"
