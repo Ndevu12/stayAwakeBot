@@ -6,7 +6,7 @@
 #
 # Fields (common):
 #   id          unique, kebab-case
-#   category    grouping (code-loader | fake-font | vscode-autorun | git-marker | camouflage | evil-merge | exfil | npm-lifecycle | workflow-autorun | runner-persistence | agent-autorun | supply-chain-dep)
+#   category    grouping (code-loader | fake-font | vscode-autorun | git-marker | camouflage | evil-merge | exfil | npm-lifecycle | workflow-autorun | runner-persistence | agent-autorun | supply-chain-dep | supply-chain-vuln)
 #   severity    critical | high | medium | low
 #   matcher     content | filename | structural-json | git-history | heuristic | obfuscation |
 #               npm-manifest | workflow-yaml | dependency-audit
@@ -347,6 +347,22 @@ signatures:
     known_bad:
       - "html-to-gutenberg@4.2.11"
       - "fetch-page-assets@1.2.9"
+
+  # ── Vulnerable (but not malicious) upstream dependency — the OPT-IN advisory tier ─────────────
+  # `advisory_corpus: true` opts this signature into the CVE side of the offline corpus. A match is
+  # an ordinary security advisory (CVE/GHSA) on a declared dependency — NOT malware — so it is
+  # emitted as an ADVISORY (`advisory_only`), routed out of the worm verdict: reported in its own
+  # section, never makes a repo INFECTED. Off by default; enabled per scan via `saw scan
+  # --advisories` (or config `dependency_advisories: true`). severity here is nominal — the tier is
+  # informational, so it never gates. (Phase 1b matches explicit affected versions only; range-based
+  # advisories — the majority of CVEs — light up when the version-range comparators land, #1124.)
+  - id: vulnerable-dependency
+    category: supply-chain-vuln
+    severity: medium
+    matcher: dependency-audit
+    description: "Declared/locked dependency has a known security advisory (CVE/GHSA) — informational"
+    remediation: manual
+    advisory_corpus: true
 
   # ── GitHub Actions workflow persistence / camouflage (.github/workflows/*.yml) ───
   # The workflow-yaml matcher parses each workflow with yaml.safe_load and dispatches by `kind`.

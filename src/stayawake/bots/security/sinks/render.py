@@ -59,10 +59,12 @@ def _label_color(label: str) -> str | None:
 def render_terminal(payload: dict[str, Any], *, color: bool = False,
                     collapse_clean_over: int = 0, detail: bool = True) -> str:
     s = payload["summary"]
-    out = [f"Security scan — {payload['generated_at']}", "",
-           f"{s['targets']} targets · {s['infected']} infected · "
-           f"{s.get('suspicious', 0)} suspicious · "
-           f"{s['findings']} findings ({s['critical']} critical, {s['high']} high)", ""]
+    header = (f"{s['targets']} targets · {s['infected']} infected · "
+              f"{s.get('suspicious', 0)} suspicious · "
+              f"{s['findings']} findings ({s['critical']} critical, {s['high']} high)")
+    if s.get("advisories"):
+        header += f" · {s['advisories']} advisories"
+    out = [f"Security scan — {payload['generated_at']}", "", header, ""]
 
     results = payload["results"]
     if not results:
@@ -131,6 +133,23 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False,
                 out.append(f"    • {colored}  {f['signature_id']}  —  {loc}")
                 if f.get("evidence"):
                     out.append(f"        evidence: {_fmt_evidence(f['evidence'])}")
+    # Dependency advisories — a SEPARATE, opt-in tier (ordinary CVEs). Listed for any target that
+    # has them, including clean ones, and explicitly labelled as not affecting the verdict.
+    advised = [r for r in ordered if r.get("advisories")]
+    if advised:
+        total_adv = sum(len(r["advisories"]) for r in advised)
+        out += ["", f"Dependency advisories ({total_adv}) — informational; do not affect the verdict"]
+        if not detail:
+            out.append("Per-advisory detail is in the full report (path below).")
+        else:
+            for r in advised:
+                out += ["", f"  {r['target']} — {len(r['advisories'])} advisor"
+                            f"{'y' if len(r['advisories']) == 1 else 'ies'}"]
+                for a in r["advisories"]:
+                    loc = a["path"] + (f":{a['line']}" if a.get("line") else "")
+                    out.append(f"    • [{a['severity']}]  {a['signature_id']}  —  {loc}")
+                    if a.get("evidence"):
+                        out.append(f"        {_fmt_evidence(a['evidence'])}")
     if s.get("suspicious"):
         out += ["", "suspicious = heuristic match(es) to review; not asserted as malware."]
     return "\n".join(out) + "\n"
@@ -170,4 +189,20 @@ def render_markdown(payload: dict[str, Any]) -> str:
         out.append("")
     if not any_f:
         out.append("_No findings — all scanned targets are clean._")
+
+    # Dependency advisories — separate, opt-in, and explicitly non-gating.
+    advised = [r for r in payload["results"] if r.get("advisories")]
+    if advised:
+        out += ["", "## Dependency advisories", "",
+                "_Informational (ordinary CVEs on declared dependencies). These do **not** affect "
+                "the verdict and never gate a scan._", ""]
+        for r in advised:
+            out.append(f"### {r['target']}")
+            for a in r["advisories"]:
+                loc = a["path"] + (f":{a['line']}" if a.get("line") else "")
+                out.append(f"- **[{a['severity']}]** `{a['signature_id']}` — {loc}")
+                out.append(f"  - {a['description']}")
+                if a.get("evidence"):
+                    out.append(f"  - evidence: {_fmt_evidence(a['evidence'])}")
+            out.append("")
     return "\n".join(out) + "\n"

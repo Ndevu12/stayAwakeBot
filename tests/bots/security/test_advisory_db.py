@@ -23,10 +23,10 @@ class TestAdvisoryDb(unittest.TestCase):
         self.cache = Path(tempfile.mkdtemp())
         db._CORPUS_MEMO.clear()
 
-    def test_update_keeps_only_malicious_with_explicit_versions(self):
+    def test_update_keeps_both_tiers_with_explicit_versions(self):
         z = osv_zip({
             "MAL-1.json": mal_record("evil-pkg", ["1.0.0"], rid="MAL-2024-1"),
-            # an ordinary CVE — not malware → dropped
+            # an ordinary CVE — kept as the vulnerability tier (not malware)
             "GHSA-cve.json": {"id": "GHSA-x", "aliases": ["CVE-2024-9"],
                               "affected": [{"package": {"ecosystem": "npm", "name": "legit"},
                                             "versions": ["2.0.0"]}]},
@@ -37,12 +37,13 @@ class TestAdvisoryDb(unittest.TestCase):
                                                          "events": [{"introduced": "0"}]}]}]},
         })
         res = db.update_ecosystem("npm", self.cache, fetch=_fetch(z))
-        self.assertEqual(res["count"], 1)
+        self.assertEqual((res["count"], res["malicious"], res["vulnerabilities"]), (2, 1, 1))
         db.write_manifest(self.cache, [res])
         corpus = db.load_corpus(self.cache)
-        self.assertIsNotNone(corpus.match(Purl("npm", "evil-pkg", "1.0.0")))
-        self.assertIsNone(corpus.match(Purl("npm", "legit", "2.0.0")))
-        self.assertIsNone(corpus.match(Purl("npm", "rangeonly", "0.5.0")))
+        self.assertIsNotNone(corpus.malicious_match(Purl("npm", "evil-pkg", "1.0.0")))
+        self.assertIsNone(corpus.malicious_match(Purl("npm", "legit", "2.0.0")))    # a CVE, not malware
+        self.assertTrue(corpus.vulnerability_matches(Purl("npm", "legit", "2.0.0")))
+        self.assertIsNone(corpus.malicious_match(Purl("npm", "rangeonly", "0.5.0")))  # dropped
 
     def test_cache_is_deterministic(self):
         z = osv_zip({"MAL-b.json": mal_record("b", ["2.0.0"], rid="MAL-2024-2"),
@@ -67,7 +68,7 @@ class TestAdvisoryDb(unittest.TestCase):
         manifest = db.update(["npm"], self.cache, fetch=_fetch(z))
         self.assertIn("npm", manifest["ecosystems"])
         self.assertTrue((self.cache / "manifest.json").exists())
-        self.assertIsNotNone(db.load_corpus(self.cache).match(Purl("npm", "evil", "1.0.0")))
+        self.assertIsNotNone(db.load_corpus(self.cache).malicious_match(Purl("npm", "evil", "1.0.0")))
 
     def test_malformed_zip_member_is_skipped(self):
         z = osv_zip({"good.json": mal_record("evil", ["1.0.0"])})
