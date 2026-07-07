@@ -68,6 +68,27 @@ class TestStoreCorpus(unittest.TestCase):
         self.assertEqual([f.signature_id for f in findings], ["malicious-dependency"])
         self.assertIn("MAL-2024-777", findings[0].evidence)
 
+    def test_range_matched_malware_is_infected(self):
+        # #1124: a package matched ONLY by a range (no explicit version) → INFECTED in range, clean
+        # outside it. Exercises resolver → corpus range eval → verdict, offline.
+        cache = Path(tempfile.mkdtemp())
+        db._CORPUS_MEMO.clear()
+        z = osv_zip({"MAL.json": {"id": "MAL-2024-99", "affected": [
+            {"package": {"ecosystem": "npm", "name": "range-evil"},
+             "ranges": [{"type": "SEMVER", "events": [{"introduced": "1.0.0"}, {"fixed": "2.0.0"}]}]}]}})
+        db.write_manifest(cache, [db.update_ecosystem("npm", cache, fetch=lambda b: z)])
+        matcher = DependencyAuditMatcher(store_factory=lambda s: AdvisoryStore.default(s, cache_dir=cache))
+
+        def scan(ver):
+            t = _target({"package-lock.json": json.dumps(
+                {"packages": {"node_modules/range-evil": {"version": ver}}})})
+            return [f.signature_id for f in matcher.scan(t, [SIG])]
+
+        self.assertEqual(scan("1.5.0"), ["malicious-dependency"])   # in [1.0.0, 2.0.0)
+        self.assertEqual(scan("2.0.0"), [])                          # fixed → out of range
+        self.assertEqual(scan("0.9.0"), [])                          # before introduced
+        db._CORPUS_MEMO.clear()
+
     def test_full_scan_path_is_infected_via_default_cache_env(self):
         # Prove the REGISTRY default matcher (no explicit cache_dir) reads the cache through the
         # SAW_ADVISORY_CACHE_DIR override and reaches an INFECTED verdict end-to-end.

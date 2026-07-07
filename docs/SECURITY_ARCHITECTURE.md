@@ -122,13 +122,20 @@ frozen (Open/Closed), so a new ecosystem is just another resolver. The blocklist
     `package-lock.json` still parses); a pathological lockfile beyond that cap, and an aliased
     dependency in a *yarn/pnpm* lockfile (npm aliases are resolved via the lockfile's `name` field),
     are residuals.
-  - The dynamic corpus matches on an advisory's **explicit affected-version list** only; advisories
-    that encode affected **ranges** are deferred to the per-ecosystem version-range comparators
-    (later phase). Cache **snapshot pinning + signature/checksum verification** (against a poisoned
-    feed) and the global-vs-repo-pinned cache location are deferred to the trust-hardening phase; a
-    stale/unverified cache is a documented residual until then. The engine is architected as a
-    resolver → store → matcher spine (`bots/security/dependencies/`) so more ecosystems (PyPI, Go,
-    Rust, …) become new resolvers without touching the matcher.
+  - The dynamic corpus matches an advisory by its **explicit versions** *or* its **ranges**. Ranges
+    are evaluated per-ecosystem by self-contained comparators (`comparators.py`, no third-party dep):
+    **semver** (`SEMVER`-typed + npm/Cargo/Go/Composer/NuGet), **PEP 440** (PyPI), **Gem::Version**
+    (RubyGems) and a best-effort **Maven** ordering. A range whose type has no comparator (`GIT`) or
+    whose bound a comparator can't parse conservatively does **not** match, so an undecidable range
+    never raises a false INFECTED. Because most
+    malware says "malware at *every* version" (a lone `introduced: "0"` range), those are held in a
+    compact **whole-package** index and the cache streams as **JSON Lines**, so a fully-populated
+    corpus (npm alone ≈ 216k malicious packages) loads in ~160 MB rather than ~575 MB.
+  - Cache **snapshot pinning + signature/checksum verification** (against a poisoned feed) and the
+    global-vs-repo-pinned cache location are deferred to the trust-hardening phase; a stale/unverified
+    cache is a documented residual until then. The engine is a resolver → store → matcher spine
+    (`bots/security/dependencies/`) so more ecosystems and comparators slot in without touching the
+    matcher.
 
 ## Detected vectors (from the live incident)
 1. Obfuscated loader in `postcss.config.*` (content + oversized-line heuristic)

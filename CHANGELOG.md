@@ -7,6 +7,18 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **Version-range advisory matching — ~12× more malware coverage.** Advisories mostly encode
+  *ranges* (`introduced`/`fixed`/`last_affected`), not explicit version lists — and the dominant
+  malware shape is "this package is malware at **every** version." `saw db update` now keeps and
+  evaluates those ranges via a self-contained **semver comparator** (covering npm, Cargo, Go,
+  Composer, NuGet and all `SEMVER`-typed ranges). Effect on npm alone: the malicious set jumps from
+  ~18k to **~216k** packages. To keep a fully-populated corpus lean, the cache is streamed as JSON
+  Lines and "whole-package" malware is held in a compact index — a complete npm corpus loads in
+  ~**160 MB** (down from ~575 MB naïvely), and only when you've opted into `saw db update`.
+  Range evaluation covers **all eight ecosystems** via self-contained comparators (no new
+  dependency): semver, **PEP 440** (PyPI), **Gem::Version** (RubyGems) and a best-effort **Maven**
+  ordering — all validated on live OSV data. A version a comparator can't parse simply doesn't match,
+  so an undecidable bound never raises a false INFECTED. Phase 4 of the dependency-audit epic.
 - **Dependency auditing across six more ecosystems.** The dynamic dependency audit now resolves and
   matches **Rust** (`Cargo.lock`), **Go** (`go.sum` / `go.mod`), **Ruby** (`Gemfile.lock`), **PHP /
   Composer** (`composer.lock`), **.NET** (`packages.lock.json`) and **Java** (all Gradle lock formats

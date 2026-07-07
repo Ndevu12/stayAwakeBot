@@ -30,7 +30,8 @@ from typing import Any, Callable, Iterator
 
 from stayawake.bots.security.dependencies.corpus import AdvisoryCorpus
 from stayawake.bots.security.dependencies.ecosystems import PURL_TO_OSV
-from stayawake.bots.security.dependencies.osv import OsvAffected, OsvRecord, parse_osv_record
+from stayawake.bots.security.dependencies.osv import (
+    OsvAffected, OsvRange, OsvRecord, parse_osv_record)
 
 _SCHEMA = 1
 _OSV_EXPORT_BASE = "https://osv-vulnerabilities.storage.googleapis.com"
@@ -64,7 +65,10 @@ def default_cache_dir() -> Path:
 
 
 def _records_path(cache_dir: Path, eco: str) -> Path:
-    return cache_dir / "records" / f"{eco}.json"
+    # JSON Lines (one record per line) so the corpus streams record-by-record at scan time — a
+    # fully-populated ecosystem is hundreds of thousands of records, far too many to hold as one
+    # parsed list. Determinism: records are sorted before writing, so the bytes are reproducible.
+    return cache_dir / "records" / f"{eco}.jsonl"
 
 
 def _manifest_path(cache_dir: Path) -> Path:
@@ -117,21 +121,26 @@ def update_ecosystem(eco: str, cache_dir: str | Path | None = None, *,
     (cache_dir / "records").mkdir(parents=True, exist_ok=True)
 
     # Keep every record with an explicit affected-version list — BOTH malware (drives the verdict)
-    # and ordinary CVEs (the opt-in advisory tier). Each is tagged with its `malicious` flag so the
-    # corpus can serve the two tiers separately. Range-only advisories are dropped (→ #1124).
+    # and ordinary CVEs (the opt-in advisory tier), including range-based ones (#1124). Each is
+    # tagged with its `malicious` flag so the corpus can serve the two tiers separately.
     records: list[dict[str, Any]] = []
     for raw in _iter_zip_records(fetch(bucket)):
         rec = parse_osv_record(raw)
         if rec is not None:
             records.append(_record_to_json(rec))
-    # Deterministic on-disk bytes: same export → same file → same sha256 (reproducible CI, #1126).
+    # Deterministic on-disk bytes (reproducible CI, #1126): sort, then write one record per line and
+    # hash incrementally — never materialize the whole file as a single string.
     records.sort(key=lambda r: (r["id"], r["affected"][0]["name"] if r["affected"] else ""))
-    blob = json.dumps({"ecosystem": eco, "records": records}, sort_keys=True, ensure_ascii=False)
-    _records_path(cache_dir, eco).write_text(blob, encoding="utf-8")
+    hasher = hashlib.sha256()
+    with _records_path(cache_dir, eco).open("w", encoding="utf-8") as fh:
+        for r in records:
+            line = json.dumps(r, sort_keys=True, ensure_ascii=False) + "\n"
+            fh.write(line)
+            hasher.update(line.encode("utf-8"))
     malicious = sum(1 for r in records if r["malicious"])
     return {"ecosystem": eco, "count": len(records), "malicious": malicious,
             "vulnerabilities": len(records) - malicious,
-            "sha256": hashlib.sha256(blob.encode("utf-8")).hexdigest(),
+            "sha256": hasher.hexdigest(),
             "source": f"{_OSV_EXPORT_BASE}/{bucket}/all.zip"}
 
 
@@ -180,38 +189,62 @@ def load_corpus(cache_dir: str | Path | None = None) -> AdvisoryCorpus | None:
     return _CORPUS_MEMO[key]
 
 
+def _stream_records(cache_dir: Path, manifest: dict[str, Any]):
+    """Yield OsvRecords across the manifest's ecosystems, one JSONL line at a time — so a corpus of
+    hundreds of thousands of records never exists as a single parsed list (bounded peak memory)."""
+    for eco in (manifest.get("ecosystems") or {}):
+        try:
+            fh = _records_path(cache_dir, eco).open(encoding="utf-8")
+        except OSError:
+            continue
+        with fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    raw = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                rec = _record_from_json(raw)
+                if rec is not None:
+                    yield rec
+
+
 def _build_corpus(cache_dir: Path, manifest_path: Path) -> AdvisoryCorpus | None:
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
-    records: list[OsvRecord] = []
-    for eco in (manifest.get("ecosystems") or {}):
-        try:
-            payload = json.loads(_records_path(cache_dir, eco).read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        for raw in payload.get("records", []) or []:
-            rec = _record_from_json(raw)
-            if rec is not None:
-                records.append(rec)
-    return AdvisoryCorpus.from_records(records)
+    return AdvisoryCorpus.from_records(_stream_records(cache_dir, manifest))
 
 
 # ── on-disk record shape (normalized, minimal) ───────────────────────────────────────────
 def _record_to_json(rec: OsvRecord) -> dict[str, Any]:
     return {"id": rec.id, "aliases": list(rec.aliases), "malicious": rec.malicious,
-            "affected": [{"ecosystem": a.ecosystem, "name": a.name, "versions": sorted(a.versions)}
+            "affected": [{"ecosystem": a.ecosystem, "name": a.name, "versions": sorted(a.versions),
+                          "ranges": [{"type": r.type, "events": [list(e) for e in r.events]}
+                                     for r in a.ranges]}
                          for a in rec.affected]}
+
+
+def _affected_from_json(a: dict[str, Any]) -> OsvAffected | None:
+    if not (isinstance(a, dict) and a.get("name")):
+        return None
+    versions = frozenset(a.get("versions", []) or [])
+    ranges = tuple(
+        OsvRange(str(r.get("type", "")), tuple(tuple(e) for e in (r.get("events", []) or [])))
+        for r in (a.get("ranges", []) or []) if isinstance(r, dict) and r.get("events"))
+    if not versions and not ranges:
+        return None
+    return OsvAffected(str(a.get("ecosystem", "")), str(a["name"]), versions, ranges)
 
 
 def _record_from_json(raw: dict[str, Any]) -> OsvRecord | None:
     if not isinstance(raw, dict):
         return None
-    affected = tuple(
-        OsvAffected(str(a.get("ecosystem", "")), str(a["name"]), frozenset(a.get("versions", []) or []))
-        for a in (raw.get("affected", []) or [])
-        if isinstance(a, dict) and a.get("name") and a.get("versions"))
+    affected = tuple(x for x in (_affected_from_json(a) for a in (raw.get("affected", []) or []))
+                     if x is not None)
     if not affected:
         return None
     # `malicious` defaults True for back-compat with a #1120 cache (which stored malware only).
