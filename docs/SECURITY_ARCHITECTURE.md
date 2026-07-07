@@ -123,11 +123,11 @@ frozen (Open/Closed), so a new ecosystem is just another resolver. The blocklist
     dependency in a *yarn/pnpm* lockfile (npm aliases are resolved via the lockfile's `name` field),
     are residuals.
   - The dynamic corpus matches an advisory by its **explicit versions** *or* its **ranges**. Ranges
-    are evaluated per-ecosystem (`comparators.py`): a self-contained **semver** comparator covers
-    `SEMVER`-typed ranges and the semver ecosystems (npm, Cargo, Go, Composer, NuGet). **PyPI**
-    (PEP 440), **RubyGems** and **Maven** range evaluation are deferred — a range with no comparator
-    (or an unparseable bound) conservatively does **not** match, so an undecidable range never raises
-    a false INFECTED; explicit-version and whole-package matching still cover them. Because most
+    are evaluated per-ecosystem by self-contained comparators (`comparators.py`, no third-party dep):
+    **semver** (`SEMVER`-typed + npm/Cargo/Go/Composer/NuGet), **PEP 440** (PyPI), **Gem::Version**
+    (RubyGems) and a best-effort **Maven** ordering. A range whose type has no comparator (`GIT`) or
+    whose bound a comparator can't parse conservatively does **not** match, so an undecidable range
+    never raises a false INFECTED. Because most
     malware says "malware at *every* version" (a lone `introduced: "0"` range), those are held in a
     compact **whole-package** index and the cache streams as **JSON Lines**, so a fully-populated
     corpus (npm alone ≈ 216k malicious packages) loads in ~160 MB rather than ~575 MB.

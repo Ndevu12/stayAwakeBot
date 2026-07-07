@@ -15,9 +15,10 @@ All notable changes to this project are documented here. The format is based on
   ~18k to **~216k** packages. To keep a fully-populated corpus lean, the cache is streamed as JSON
   Lines and "whole-package" malware is held in a compact index — a complete npm corpus loads in
   ~**160 MB** (down from ~575 MB naïvely), and only when you've opted into `saw db update`.
-  PyPI (needs PEP 440), Ruby and Maven range evaluation are deferred — their explicit-version and
-  whole-package matching is unaffected; unevaluable ranges never raise a false INFECTED. Phase 4 of
-  the dependency-audit epic.
+  Range evaluation covers **all eight ecosystems** via self-contained comparators (no new
+  dependency): semver, **PEP 440** (PyPI), **Gem::Version** (RubyGems) and a best-effort **Maven**
+  ordering — all validated on live OSV data. A version a comparator can't parse simply doesn't match,
+  so an undecidable bound never raises a false INFECTED. Phase 4 of the dependency-audit epic.
 - **Dependency auditing across six more ecosystems.** The dynamic dependency audit now resolves and
   matches **Rust** (`Cargo.lock`), **Go** (`go.sum` / `go.mod`), **Ruby** (`Gemfile.lock`), **PHP /
   Composer** (`composer.lock`), **.NET** (`packages.lock.json`) and **Java** (all Gradle lock formats
