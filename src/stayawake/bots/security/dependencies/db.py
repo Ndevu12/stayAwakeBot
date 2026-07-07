@@ -1,0 +1,214 @@
+#!/usr/bin/env python3
+"""Offline advisory database — cache + `saw db update` fetch (#1120).
+
+The ONE network egress in the whole scanner. `saw db update` bulk-downloads the OSV per-ecosystem
+export (`<base>/<bucket>/all.zip`) into a local cache; every scan then reads only that cache, so
+detection stays offline and deterministic. The download URL names only the **ecosystem** — never
+a package — so an update can't leak the dependency graph (we pull advisories, not your manifest,
+and never query per-package online).
+
+Phase 1b keeps only **malicious** records with an **explicit affected-version list** (see
+`osv.is_malicious` / `parse_osv_record`); ordinary CVEs and range-only advisories are deferred to
+the vulnerability tier (#1121) and the range comparators (#1124). The inline `known_bad` seed in
+signatures.yml always ships, so the DB is a *superset*, never a prerequisite — no cache → scans
+fall back to the seed, exactly as before.
+
+Cache location and snapshot pinning/verification are finalized in the trust-hardening phase
+(#1126); today the cache is a plain user-cache directory with a basic per-ecosystem manifest.
+"""
+from __future__ import annotations
+
+import hashlib
+import io
+import json
+import os
+import ssl
+import urllib.request
+import zipfile
+from pathlib import Path
+from typing import Any, Callable, Iterator
+
+from stayawake.bots.security.dependencies.corpus import AdvisoryCorpus
+from stayawake.bots.security.dependencies.osv import (
+    OsvAffected, OsvRecord, is_malicious, parse_osv_record,
+)
+
+_SCHEMA = 1
+_OSV_EXPORT_BASE = "https://osv-vulnerabilities.storage.googleapis.com"
+# Our ecosystem token → the OSV export bucket name. Grows with the resolvers (#1123): PyPI, Go,
+# crates.io, RubyGems, Packagist, NuGet, Maven. npm's token and bucket happen to coincide.
+_OSV_BUCKETS = {"npm": "npm"}
+
+# Verify TLS against certifi's portable CA bundle (the OS store isn't always wired to OpenSSL on
+# python.org builds) — the same rationale as core/adapters/github_api.py.
+try:
+    import certifi
+    _SSL_CTX: ssl.SSLContext = ssl.create_default_context(cafile=certifi.where())
+except Exception:  # noqa: BLE001 — a TLS-setup hiccup must never crash import
+    _SSL_CTX = ssl.create_default_context()
+
+# load_corpus is called once per scanned target; memoize by (cache dir, manifest mtime) so a
+# fleet sweep parses the cache once, and a fresh `db update` (which rewrites the manifest, bumping
+# mtime, and clears this) is picked up.
+_CORPUS_MEMO: dict[tuple[str, float], AdvisoryCorpus | None] = {}
+
+
+# ── cache location ────────────────────────────────────────────────────────────────────
+def default_cache_dir() -> Path:
+    """`$SAW_ADVISORY_CACHE_DIR`, else `$XDG_CACHE_HOME/saw/advisories`, else
+    `~/.cache/saw/advisories`. (The global-vs-repo-pinned decision is #1126.)"""
+    env = os.environ.get("SAW_ADVISORY_CACHE_DIR")
+    if env:
+        return Path(env).expanduser()
+    base = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
+    return Path(base) / "saw" / "advisories"
+
+
+def _records_path(cache_dir: Path, eco: str) -> Path:
+    return cache_dir / "records" / f"{eco}.json"
+
+
+def _manifest_path(cache_dir: Path) -> Path:
+    return cache_dir / "manifest.json"
+
+
+# ── fetch (the only network egress) ─────────────────────────────────────────────────────
+def fetch_ecosystem_zip(bucket: str, *, timeout: int = 120) -> bytes:
+    """Download an OSV per-ecosystem export. Names only the ecosystem — graph-blind."""
+    url = f"{_OSV_EXPORT_BASE}/{bucket}/all.zip"
+    req = urllib.request.Request(url, headers={"User-Agent": "StayAwakeBot/1.0 (saw db update)"})
+    with urllib.request.urlopen(req, timeout=timeout, context=_SSL_CTX) as resp:
+        return resp.read()
+
+
+def _iter_zip_records(zip_bytes: bytes) -> Iterator[dict[str, Any]]:
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+        for name in zf.namelist():
+            if not name.endswith(".json"):
+                continue
+            try:
+                obj = json.loads(zf.read(name))
+            except (json.JSONDecodeError, OSError, KeyError):
+                continue
+            if isinstance(obj, dict):
+                yield obj
+
+
+# ── update ──────────────────────────────────────────────────────────────────────────────
+def supported_ecosystems() -> list[str]:
+    return list(_OSV_BUCKETS.keys())
+
+
+def resolved_ecosystems(names: list[str] | None = None) -> list[str]:
+    """The ecosystems to update: the requested subset, or all supported ones."""
+    return list(names) if names else supported_ecosystems()
+
+
+def update_ecosystem(eco: str, cache_dir: str | Path | None = None, *,
+                     fetch: Callable[[str], bytes] | None = None) -> dict[str, Any]:
+    """Fetch one ecosystem's export, keep the malicious+explicit-version records, write its cache
+    file, and return its manifest entry. `fetch` is injectable so tests never touch the network;
+    when None it resolves to the module-level `fetch_ecosystem_zip` (so a monkeypatch of that
+    attribute is also honored)."""
+    fetch = fetch or fetch_ecosystem_zip
+    cache_dir = Path(cache_dir or default_cache_dir())
+    bucket = _OSV_BUCKETS.get(eco)
+    if bucket is None:
+        raise ValueError(f"unsupported ecosystem: {eco!r} (supported: {supported_ecosystems()})")
+    (cache_dir / "records").mkdir(parents=True, exist_ok=True)
+
+    records: list[dict[str, Any]] = []
+    for raw in _iter_zip_records(fetch(bucket)):
+        if not is_malicious(raw):
+            continue
+        rec = parse_osv_record(raw)
+        if rec is not None:            # None → no explicit versions (deferred to #1124)
+            records.append(_record_to_json(rec))
+    # Deterministic on-disk bytes: same export → same file → same sha256 (reproducible CI, #1126).
+    records.sort(key=lambda r: (r["id"], r["affected"][0]["name"] if r["affected"] else ""))
+    blob = json.dumps({"ecosystem": eco, "records": records}, sort_keys=True, ensure_ascii=False)
+    _records_path(cache_dir, eco).write_text(blob, encoding="utf-8")
+    return {"ecosystem": eco, "count": len(records),
+            "sha256": hashlib.sha256(blob.encode("utf-8")).hexdigest(),
+            "source": f"{_OSV_EXPORT_BASE}/{bucket}/all.zip"}
+
+
+def write_manifest(cache_dir: str | Path | None, results: list[dict[str, Any]]) -> dict[str, Any]:
+    """Write the manifest that stitches the per-ecosystem cache files together, and invalidate the
+    in-process corpus memo so the next scan sees the fresh data."""
+    cache_dir = Path(cache_dir or default_cache_dir())
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    manifest = {"schema": _SCHEMA,
+                "ecosystems": {r["ecosystem"]: {k: r[k] for k in ("count", "sha256", "source")}
+                               for r in results}}
+    _manifest_path(cache_dir).write_text(json.dumps(manifest, sort_keys=True, indent=2),
+                                         encoding="utf-8")
+    _CORPUS_MEMO.clear()
+    return manifest
+
+
+def update(ecosystems: list[str] | None = None, cache_dir: str | Path | None = None, *,
+           fetch: Callable[[str], bytes] | None = None,
+           log: Callable[[str], None] | None = None) -> dict[str, Any]:
+    """Update every requested ecosystem and write the manifest (programmatic entry point)."""
+    results = []
+    for eco in resolved_ecosystems(ecosystems):
+        if log:
+            log(f"updating {eco}…")
+        results.append(update_ecosystem(eco, cache_dir, fetch=fetch))
+    return write_manifest(cache_dir, results)
+
+
+# ── load (scan-time, offline) ────────────────────────────────────────────────────────────
+def load_corpus(cache_dir: str | Path | None = None) -> AdvisoryCorpus | None:
+    """The cached malicious-package corpus, or None when no cache exists (→ inline-seed only).
+
+    Reads only local files; never touches the network. Memoized by (dir, manifest mtime)."""
+    cache_dir = Path(cache_dir or default_cache_dir())
+    manifest_path = _manifest_path(cache_dir)
+    try:
+        mtime = manifest_path.stat().st_mtime
+    except OSError:
+        return None                    # no cache → caller falls back to the inline seed
+    key = (str(cache_dir), mtime)
+    if key not in _CORPUS_MEMO:
+        _CORPUS_MEMO[key] = _build_corpus(cache_dir, manifest_path)
+    return _CORPUS_MEMO[key]
+
+
+def _build_corpus(cache_dir: Path, manifest_path: Path) -> AdvisoryCorpus | None:
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    records: list[OsvRecord] = []
+    for eco in (manifest.get("ecosystems") or {}):
+        try:
+            payload = json.loads(_records_path(cache_dir, eco).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        for raw in payload.get("records", []) or []:
+            rec = _record_from_json(raw)
+            if rec is not None:
+                records.append(rec)
+    return AdvisoryCorpus.from_records(records)
+
+
+# ── on-disk record shape (normalized, minimal) ───────────────────────────────────────────
+def _record_to_json(rec: OsvRecord) -> dict[str, Any]:
+    return {"id": rec.id, "aliases": list(rec.aliases),
+            "affected": [{"ecosystem": a.ecosystem, "name": a.name, "versions": sorted(a.versions)}
+                         for a in rec.affected]}
+
+
+def _record_from_json(raw: dict[str, Any]) -> OsvRecord | None:
+    if not isinstance(raw, dict):
+        return None
+    affected = tuple(
+        OsvAffected(str(a.get("ecosystem", "")), str(a["name"]), frozenset(a.get("versions", []) or []))
+        for a in (raw.get("affected", []) or [])
+        if isinstance(a, dict) and a.get("name") and a.get("versions"))
+    if not affected:
+        return None
+    return OsvRecord(id=str(raw.get("id", "")), aliases=tuple(raw.get("aliases", []) or []),
+                     malicious=True, affected=affected)

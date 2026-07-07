@@ -11,21 +11,22 @@ contract unchanged.
 Exactness is the point (preserved from the original): an exact-locked (or exact-pinned)
 `name@version` match is decisive (`confirmed` → INFECTED). Offline, deterministic, cheap; the
 behavioral engine stays the backbone. The store is injectable (`store_factory`) so tests can
-supply an in-memory corpus and phase 1b (#1120) can swap the inline seed for the offline OSV
-DB without touching this coordinator.
+supply an in-memory corpus; the default (`AdvisoryStore.default`) is the inline seed **plus** the
+offline OSV corpus (#1120) when `saw db update` has populated a cache — absent a cache it is the
+seed alone, so scans stay offline and zero-setup.
 """
 from __future__ import annotations
 
 from stayawake.bots.security.models import Finding, Severity
 from stayawake.bots.security.matchers.base import Matcher
-from stayawake.bots.security.dependencies import RESOLVERS, AdvisoryStore
+from stayawake.bots.security.dependencies import RESOLVERS, Advisory, AdvisoryStore
 from stayawake.bots.security.dependencies.purl import ResolvedDependency
 
 
 class DependencyAuditMatcher(Matcher):
     handles = "dependency-audit"
 
-    def __init__(self, resolvers=RESOLVERS, store_factory=AdvisoryStore.from_signatures):
+    def __init__(self, resolvers=RESOLVERS, store_factory=AdvisoryStore.default):
         self._resolvers = resolvers
         self._store_factory = store_factory
 
@@ -44,14 +45,16 @@ class DependencyAuditMatcher(Matcher):
                 if key in seen:
                     continue
                 seen.add(key)
-                findings.append(_emit(advisory.signature, dep))
+                findings.append(_emit(advisory, dep))
         return findings
 
 
-def _emit(sig: dict, dep: ResolvedDependency) -> Finding:
+def _emit(advisory: Advisory, dep: ResolvedDependency) -> Finding:
+    sig = advisory.signature
+    cite = f" [{advisory.osv_id}]" if advisory.osv_id else ""      # corpus hits carry an OSV id
     return Finding(
         signature_id=sig["id"], category=sig["category"],
         severity=Severity.parse(sig["severity"]), path=dep.source_path,
         description=sig["description"], remediation=sig.get("remediation", "manual"),
-        evidence=f"{dep.purl.coordinate} — known-malicious upstream package ({dep.source_name})",
+        evidence=f"{dep.purl.coordinate} — known-malicious upstream package{cite} ({dep.source_name})",
         vector=sig["category"])
