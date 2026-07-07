@@ -32,10 +32,6 @@ _NPM_LOCKS = ("package-lock.json", "npm-shrinkwrap.json")
 _EXACT_VERSION = re.compile(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.\-]+)?$")
 _DECLARED_DEP_FIELDS = ("dependencies", "devDependencies",
                         "optionalDependencies", "peerDependencies")
-# Lockfiles must be parsed WHOLE (a head/tail-truncated lockfile is invalid JSON/YAML and
-# yields nothing), so read up to this generous cap instead of the scan's default source cap.
-# 32 MB covers any realistic lockfile while bounding memory on a pathological one.
-_MAX_LOCKFILE_BYTES = 32_000_000
 _MAX_NPM_V1_DEPTH = 100          # guard the recursive v1 `dependencies` walk against a crafted tree
 # A pnpm `packages:` key: an optional leading '/', a name, then '@version' (v6+/v9) or '/version'
 # (v5), then the version stops before a peer suffix ('(...)' or '_...'). The name capture is
@@ -50,26 +46,17 @@ class NpmResolver(Resolver):
         for rel in target.iter_files():
             base = rel.rsplit("/", 1)[-1]
             if base == _MANIFEST:
-                deps = self._manifest_deps(self._read(target, rel))
+                deps = self._manifest_deps(self._read_whole(target, rel))
             elif base in _NPM_LOCKS:
-                deps = self._npm_lock_deps(self._read(target, rel))
+                deps = self._npm_lock_deps(self._read_whole(target, rel))
             elif base == "yarn.lock":
-                deps = self._yarn_lock_deps(self._read(target, rel))
+                deps = self._yarn_lock_deps(self._read_whole(target, rel))
             elif base == "pnpm-lock.yaml":
-                deps = self._pnpm_lock_deps(self._read(target, rel))
+                deps = self._pnpm_lock_deps(self._read_whole(target, rel))
             else:
                 continue
             for name, version in deps:
                 yield ResolvedDependency(Purl(self.ecosystem, name, version), rel)
-
-    @staticmethod
-    def _read(target, rel) -> str | None:
-        """Read a manifest/lockfile WHOLE (bypassing the scan's head/tail truncation, which
-        would turn a large lockfile into unparseable JSON/YAML). Falls back to read_text."""
-        raw = target.read_bytes(rel, limit=_MAX_LOCKFILE_BYTES)
-        if raw is not None:
-            return raw.decode("utf-8", errors="replace")
-        return target.read_text(rel)
 
     # ── package.json — exact-pinned declared deps only (ranges defer to the lockfile) ──
     def _manifest_deps(self, text) -> list[tuple[str, str]]:

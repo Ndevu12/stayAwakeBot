@@ -33,9 +33,10 @@ from stayawake.bots.security.dependencies.osv import OsvAffected, OsvRecord, par
 
 _SCHEMA = 1
 _OSV_EXPORT_BASE = "https://osv-vulnerabilities.storage.googleapis.com"
-# Our ecosystem token → the OSV export bucket name. Grows with the resolvers (#1123): PyPI, Go,
-# crates.io, RubyGems, Packagist, NuGet, Maven. npm's token and bucket happen to coincide.
-_OSV_BUCKETS = {"npm": "npm"}
+# Our ecosystem token → the OSV export bucket name. Grows with the resolvers (#1123): Go,
+# crates.io, RubyGems, Packagist, NuGet, Maven. npm's token and bucket coincide; PyPI's bucket is
+# capitalized (the corpus lookup is case-insensitive, so "pypi" Purls still match).
+_OSV_BUCKETS = {"npm": "npm", "pypi": "PyPI"}
 
 # Verify TLS against certifi's portable CA bundle (the OS store isn't always wired to OpenSSL on
 # python.org builds) — the same rationale as core/adapters/github_api.py.
