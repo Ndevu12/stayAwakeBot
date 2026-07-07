@@ -66,7 +66,7 @@ jobs:
       # always(): the scan exits non-zero when infected, but the SARIF is written before that verdict.
       - name: Upload SARIF to code-scanning
         if: ${{ always() && vars.ENABLE_CODE_SCANNING == 'true' && hashFiles(format('{0}/latest.sarif', runner.temp)) != '' }}
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: ${{ runner.temp }}/latest.sarif
           category: saw-security-sentinel
