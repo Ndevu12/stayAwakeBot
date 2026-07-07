@@ -191,6 +191,19 @@ All notable changes to this project are documented here. The format is based on
   the only local security surface; the `stayawake-health-*` scripts are unchanged.
 
 ### Fixed
+- **A stale-format advisory cache no longer cries "tampered."** After a `saw` upgrade bumps the
+  cache schema, the previous cache (an honest DB written by an older `saw`) tripped the byte-level
+  integrity gate, printing `advisory-cache integrity check FAILED … corrupted or tampered` for every
+  ecosystem — and `saw db status` / `saw scan --require-db` reported the same. That conflated a
+  benign version skew with a genuine tamper; in a security tool, crying wolf on an upgrade trains
+  users to ignore the *real* alarm. The load and status paths now check the manifest `schema` first:
+  an incompatible cache is diagnosed as **"older format — run `saw db update`"** (one calm line;
+  still falls back to the always-shipped inline seed and still fails closed for `--require-db`/CI),
+  while `integrity check FAILED / tampered` is now reserved strictly for a **schema-matching** cache
+  whose contents don't hash-match the manifest. A **corrupt manifest** — valid JSON but not an
+  object, a malformed `ecosystems` map, or non-numeric count fields — now degrades to the inline
+  seed / fail-closed gate instead of crashing the scan or `saw db status` on an `AttributeError` /
+  `TypeError` (#1137).
 - **`vscode-allow-automatic-tasks` now matches VS Code's real string value.** The signal only
   matched the boolean `true`, but VS Code writes `"task.allowAutomaticTasks": "on"` (the string
   enum, historically `"auto"`) — so on genuine `settings.json` it silently never fired. It now

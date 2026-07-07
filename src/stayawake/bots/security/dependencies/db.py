@@ -217,6 +217,24 @@ def load_corpus(cache_dir: str | Path | None = None) -> AdvisoryCorpus | None:
     return _CORPUS_MEMO[key]
 
 
+def _int(value: Any) -> int:
+    """A non-negative int from an untrusted manifest field: 0 for missing/None/bool/float/str/list.
+    A corrupt count (`"malicious": null` from a partial write or tamper) must never crash the status
+    report's `sum()` with a `TypeError` — it degrades to 0, like every other malformed field (#1137)."""
+    return value if type(value) is int and value >= 0 else 0
+
+
+def _ecosystems(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """The manifest's per-ecosystem metadata, defensively normalized. A corrupt/tampered manifest
+    may hold a non-dict `ecosystems`, or non-dict entries — coerce to `{}` / drop them so every
+    consumer that iterates the cache degrades to the inline seed instead of crashing on a
+    malformed cache (`.items()`/`.get()` on a non-dict)."""
+    ecosystems = manifest.get("ecosystems")
+    if not isinstance(ecosystems, dict):
+        return {}
+    return {eco: meta for eco, meta in ecosystems.items() if isinstance(meta, dict)}
+
+
 def _stream_records(cache_dir: Path, manifest: dict[str, Any]):
     """Yield OsvRecords across the manifest's ecosystems, one JSONL line at a time — so a corpus of
     hundreds of thousands of records never exists as a single parsed list (bounded peak memory).
@@ -224,9 +242,9 @@ def _stream_records(cache_dir: Path, manifest: dict[str, Any]):
     Integrity gate: a records file is trusted only if its content hash matches the manifest. A
     mismatch means the cache was corrupted or tampered after `db update` — we skip it (falling back
     to the always-shipped inline seed) and warn loudly, never silently trusting bad data."""
-    for eco, meta in (manifest.get("ecosystems") or {}).items():
+    for eco, meta in _ecosystems(manifest).items():
         path = _records_path(cache_dir, eco)
-        expected = (meta or {}).get("sha256")
+        expected = meta.get("sha256")
         if expected and _file_sha256(path) != expected:
             print(f"⚠️  saw: advisory-cache integrity check FAILED for {eco} "
                   f"({path.name}) — ignoring it; run `saw db update`.", file=sys.stderr)
@@ -249,10 +267,37 @@ def _stream_records(cache_dir: Path, manifest: dict[str, Any]):
                     yield rec
 
 
-def _build_corpus(cache_dir: Path, manifest_path: Path) -> AdvisoryCorpus | None:
+def _schema_compatible(manifest: dict[str, Any]) -> bool:
+    """True only if the on-disk manifest was written by *this* schema. An older `saw` used a
+    different record layout (schema 1: `records/*.json`; schema 2: `records/*.jsonl`), so a
+    schema mismatch is a benign *version skew* — NOT tampering — and must be diagnosed as such:
+    the byte-level integrity gate would spuriously fire, crying "tampered" at every ecosystem."""
+    return manifest.get("schema") == _SCHEMA
+
+
+def _load_manifest(manifest_path: Path) -> dict[str, Any] | None:
+    """Parse the manifest, or None if it's missing, unparseable, or not a JSON object. A corrupt
+    manifest — including valid-JSON-but-not-a-dict (`null`, `[…]`, `42`, from a partial write or a
+    tamper) — must degrade to 'no usable cache' (→ inline seed / fail-closed gate), never crash the
+    scan on an `AttributeError` from `.get()` on a non-dict."""
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
+        return None
+    return manifest if isinstance(manifest, dict) else None
+
+
+def _build_corpus(cache_dir: Path, manifest_path: Path) -> AdvisoryCorpus | None:
+    manifest = _load_manifest(manifest_path)
+    if manifest is None:
+        return None
+    if not _schema_compatible(manifest):
+        # Old cache from a prior `saw` — a version upgrade, not corruption. Say so calmly (once,
+        # thanks to the corpus memo) and fall back to the inline seed; do NOT run the integrity
+        # gate, whose "tampered" alarm must stay reserved for a schema-matching cache (#1137).
+        print(f"⚠️  saw: advisory cache is an older format (schema {manifest.get('schema')}; "
+              f"this saw expects {_SCHEMA}) — using the inline seed. Run `saw db update` to rebuild.",
+              file=sys.stderr)
         return None
     return AdvisoryCorpus.from_records(_stream_records(cache_dir, manifest))
 
@@ -274,28 +319,35 @@ def cache_status(cache_dir: str | Path | None = None) -> dict[str, Any]:
     """A health report for the advisory cache: presence, snapshot fingerprint, age, per-ecosystem
     counts, and a per-file integrity check (content hash vs. manifest). Reads only local files."""
     cache_dir = Path(cache_dir or default_cache_dir())
-    try:
-        manifest = json.loads(_manifest_path(cache_dir).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    manifest = _load_manifest(_manifest_path(cache_dir))
+    if manifest is None:                       # absent, unparseable, or not a JSON object
         return {"present": False, "cache_dir": str(cache_dir)}
-    ecosystems = manifest.get("ecosystems") or {}
+    ecosystems = _ecosystems(manifest)
+    schema_compatible = _schema_compatible(manifest)
+    # Only run the byte-level integrity gate on a schema-matching cache — the record filenames
+    # differ across schemas, so hashing across a version skew yields spurious "mismatches" that
+    # read as tampering. Callers branch on `schema_compatible` BEFORE `integrity_ok` (#1137).
     mismatches = [eco for eco, meta in ecosystems.items()
-                  if (meta or {}).get("sha256")
-                  and _file_sha256(_records_path(cache_dir, eco)) != meta["sha256"]]
+                  if meta.get("sha256")
+                  and _file_sha256(_records_path(cache_dir, eco)) != meta["sha256"]] \
+        if schema_compatible else []
     return {
         "present": True,
         "cache_dir": str(cache_dir),
         "schema": manifest.get("schema"),
+        "schema_compatible": schema_compatible,
         "snapshot": manifest.get("snapshot"),
         "generated_at": manifest.get("generated_at"),
         "age_days": _age_days(manifest.get("generated_at")),
-        "ecosystems": {eco: {k: (meta or {}).get(k, 0)
+        "ecosystems": {eco: {k: _int(meta.get(k))
                              for k in ("count", "malicious", "vulnerabilities")}
                        for eco, meta in ecosystems.items()},
-        "total_malicious": sum((meta or {}).get("malicious", 0) for meta in ecosystems.values()),
-        "total_vulnerabilities": sum((meta or {}).get("vulnerabilities", 0)
+        "total_malicious": sum(_int(meta.get("malicious")) for meta in ecosystems.values()),
+        "total_vulnerabilities": sum(_int(meta.get("vulnerabilities"))
                                      for meta in ecosystems.values()),
-        "integrity_ok": not mismatches,
+        # Fail-closed for naive callers: an incompatible cache is unusable, so integrity is not OK.
+        # `mismatches` still lists only *genuine* hash mismatches (empty on pure schema skew).
+        "integrity_ok": schema_compatible and not mismatches,
         "mismatches": mismatches,
     }
 
