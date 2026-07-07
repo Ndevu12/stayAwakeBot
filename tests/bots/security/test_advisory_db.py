@@ -57,8 +57,8 @@ class TestAdvisoryDb(unittest.TestCase):
 
     def test_unsupported_ecosystem_raises_before_fetch(self):
         called = []
-        with self.assertRaises(ValueError):
-            db.update_ecosystem("cargo", self.cache, fetch=lambda b: called.append(b) or b"")
+        with self.assertRaises(ValueError):        # "hex" (Elixir) is not a supported ecosystem
+            db.update_ecosystem("hex", self.cache, fetch=lambda b: called.append(b) or b"")
         self.assertEqual(called, [])
 
     def test_update_writes_manifest_and_invalidates_memo(self):

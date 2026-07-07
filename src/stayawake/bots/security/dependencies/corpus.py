@@ -11,11 +11,8 @@ from __future__ import annotations
 
 from typing import Iterable
 
+from stayawake.bots.security.dependencies.ecosystems import canonical_ecosystem as _eco
 from stayawake.bots.security.dependencies.osv import OsvRecord
-
-
-def _eco(ecosystem: str) -> str:
-    return ecosystem.lower().split(":", 1)[0]
 
 
 class AdvisoryCorpus:

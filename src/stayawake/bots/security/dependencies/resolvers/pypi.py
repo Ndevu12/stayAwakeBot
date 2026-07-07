@@ -14,11 +14,11 @@ collapsed to `-`) — the same normalization OSV/PyPI advisories use — so a `F
 from __future__ import annotations
 
 import re
-import tomllib          # stdlib ≥ 3.11 (this package requires-python >=3.11)
 from typing import Iterator
 
 from stayawake.bots.security.dependencies.purl import Purl, ResolvedDependency
 from stayawake.bots.security.dependencies.resolvers.base import Resolver
+from stayawake.bots.security.dependencies.resolvers._lockfiles import toml_packages
 from stayawake.bots.security.jsonc import load_jsonc
 
 _TOML_LOCKS = ("poetry.lock", "uv.lock")     # both: TOML with a [[package]] array of {name, version}
@@ -49,7 +49,7 @@ class PyPiResolver(Resolver):
             if _is_requirements(base):
                 deps = _requirements_deps(self._read_whole(target, rel))
             elif base in _TOML_LOCKS:
-                deps = _toml_package_deps(self._read_whole(target, rel))
+                deps = toml_packages(self._read_whole(target, rel))
             elif base == _PIPFILE_LOCK:
                 deps = _pipfile_lock_deps(self._read_whole(target, rel))
             else:
@@ -74,19 +74,7 @@ def _requirements_deps(text) -> list[tuple[str, str]]:
     return out
 
 
-# ── poetry.lock / uv.lock — TOML [[package]] with name + version ──
-def _toml_package_deps(text) -> list[tuple[str, str]]:
-    try:
-        data = tomllib.loads(text or "")
-    except (tomllib.TOMLDecodeError, ValueError):
-        return []
-    out: list[tuple[str, str]] = []
-    for pkg in (data.get("package") or []):
-        if isinstance(pkg, dict):
-            name, version = pkg.get("name"), pkg.get("version")
-            if isinstance(name, str) and isinstance(version, str):
-                out.append((name, version))
-    return out
+# poetry.lock / uv.lock are parsed by the shared `toml_packages` helper (see resolve() above).
 
 
 # ── Pipfile.lock — JSON default/develop with a "==x.y.z" version string ──

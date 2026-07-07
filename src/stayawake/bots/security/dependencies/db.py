@@ -29,14 +29,14 @@ from pathlib import Path
 from typing import Any, Callable, Iterator
 
 from stayawake.bots.security.dependencies.corpus import AdvisoryCorpus
+from stayawake.bots.security.dependencies.ecosystems import PURL_TO_OSV
 from stayawake.bots.security.dependencies.osv import OsvAffected, OsvRecord, parse_osv_record
 
 _SCHEMA = 1
 _OSV_EXPORT_BASE = "https://osv-vulnerabilities.storage.googleapis.com"
-# Our ecosystem token → the OSV export bucket name. Grows with the resolvers (#1123): Go,
-# crates.io, RubyGems, Packagist, NuGet, Maven. npm's token and bucket coincide; PyPI's bucket is
-# capitalized (the corpus lookup is case-insensitive, so "pypi" Purls still match).
-_OSV_BUCKETS = {"npm": "npm", "pypi": "PyPI"}
+# PURL type → OSV export bucket. The single source of truth lives in `ecosystems.py` (the corpus
+# canonicalizes the other direction from the same table, so they can't drift).
+_OSV_BUCKETS = PURL_TO_OSV
 
 # Verify TLS against certifi's portable CA bundle (the OS store isn't always wired to OpenSSL on
 # python.org builds) — the same rationale as core/adapters/github_api.py.
