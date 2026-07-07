@@ -58,6 +58,11 @@ class ScanOptions:
     # NEVER move the worm verdict (see ScanResult.advisories); off by default so a scan's INFECTED /
     # SUSPICIOUS / CLEAN meaning is unchanged.
     dependency_advisories: bool = False
+    # Opt-in (`saw scan --audit-external` / config `external_audit: true`): additionally run INSTALLED
+    # external auditors (osv-scanner, …) over the target and fold their vulns into the advisory tier.
+    # Crosses the offline default (subprocess, possibly the tool's own network) — hence opt-in, off by
+    # default; also never moves the worm verdict.
+    external_audit: bool = False
 
 
 class Target:

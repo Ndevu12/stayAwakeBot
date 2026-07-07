@@ -7,6 +7,15 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **`saw scan --audit-external` — run installed vulnerability auditors, no verdict impact.** Opt in
+  and `saw` will run **installed** external auditors (osv-scanner today; the adapter interface makes
+  pip-audit / cargo-audit / bundler-audit / govulncheck / npm audit thin additions) over the target
+  and fold their findings into the **advisory tier** — so you don't run the tools by hand. Results
+  are attributed to their tool (`… (via osv-scanner)`) and de-duped against the offline corpus.
+  Deliberately crossing the offline default: it's **off by default**, a tool that isn't installed is
+  skipped silently, tool output is parsed as **data** (never executed), and it **never** changes the
+  verdict or exit code. `saw` itself sends nothing over the network — a tool's own registry/API calls
+  are the tool's behaviour, which you opted into. Phase 5 of the dependency-audit epic.
 - **Version-range advisory matching — ~12× more malware coverage.** Advisories mostly encode
   *ranges* (`introduced`/`fixed`/`last_affected`), not explicit version lists — and the dominant
   malware shape is "this package is malware at **every** version." `saw db update` now keeps and

@@ -110,6 +110,14 @@ frozen (Open/Closed), so a new ecosystem is just another resolver. The blocklist
   reported in their own section, routed out of the verdict (`ScanResult.advisories`, `advisory_only`
   findings), and they never change the exit code. Malware is classified by structured signals only
   (`MAL-` id/alias, `database_specific.type == malware`, CWE-506) — never free text.
+- **External auditors (opt-in, `--audit-external`):** `saw` can additionally run *installed*
+  vulnerability tools (osv-scanner today; the `dependencies/external/` adapter interface makes
+  pip-audit / cargo-audit / … thin additions) and fold their results into the same advisory tier,
+  de-duped against the offline corpus and attributed to their tool. This deliberately crosses the
+  offline default, so: off by default; absent tools skipped silently; tool output parsed as **data**,
+  never executed; subprocesses spawned with an argv list (no shell) + timeout, in the target's dir
+  (a remote target's clone sandbox). `saw` itself exfiltrates nothing — a tool's own network calls
+  are the tool's behaviour, opted into. Still never moves the verdict.
 - **Decisions / residuals (deliberate):**
   - A `package.json` **version range** (`^4.2.11`) is ambiguous — it may or may not resolve to the
     bad version — so ranges are **not** matched; the lockfile's resolved version is the source of
