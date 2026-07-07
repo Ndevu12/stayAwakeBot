@@ -80,11 +80,14 @@ never touches the repo tree. `saw` audits what a repo **declares and locks**: th
 matcher runs per-ecosystem **resolvers** that turn manifests/lockfiles into normalized package
 identities (PURLs) and flags any dependency — direct **or** lockfile-transitive — whose
 `name@version` is on a **data-driven known-bad blocklist**. An exact match is decisive → **confirmed**
-(INFECTED). Ecosystems today: **npm** (`package.json` + npm / yarn / pnpm lockfiles) and **PyPI**
-(`requirements.txt` + `poetry.lock` / `Pipfile.lock` / `uv.lock`, PEP 503-normalized names); the
-resolver interface is frozen, so Go / Rust / Ruby / Composer / .NET / Maven are each just another
-resolver (Open/Closed). The blocklist is the `malicious-dependency` signature's `known_bad` seed
-plus the offline corpus below.
+(INFECTED). Ecosystems today (eight): **npm** (`package.json` + npm/yarn/pnpm locks), **PyPI**
+(`requirements.txt` + poetry/Pipfile/uv locks), **Rust** (`Cargo.lock`), **Go** (`go.sum`/`go.mod`),
+**Ruby** (`Gemfile.lock`), **PHP/Composer** (`composer.lock`), **.NET** (`packages.lock.json`) and
+**Java** (`gradle.lockfile`/`pom.xml`). Each ecosystem's version format is normalized to the OSV
+form (e.g. Go's/Composer's leading `v`, RubyGems platform suffixes) and a canonical PURL-type ↔
+OSV-name table (`ecosystems.py`) bridges e.g. `pkg:cargo` ↔ `crates.io`. The resolver interface is
+frozen (Open/Closed), so a new ecosystem is just another resolver. The blocklist is the
+`malicious-dependency` seed plus the offline corpus below.
 
 - **Two layers of known-bad data (both offline at scan time):**
   - **Inline seed** — the `malicious-dependency` signature's `known_bad` list in `signatures.yml`,
