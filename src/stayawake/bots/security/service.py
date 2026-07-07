@@ -59,7 +59,7 @@ def _enclosing_repo_root(start: Path | None = None) -> Path:
 _BUILD_OUTPUT_DIRS = {"dist", "build", "out", ".next"}
 
 
-def _options(settings: dict, *, dependency_advisories: bool = False,
+def _options(settings: dict, *, no_advisories: bool = False,
              external_audit: bool = False) -> ScanOptions:
     base = ScanOptions()
     exclude = set(settings.get("exclude_dirs", base.exclude_dirs))
@@ -71,9 +71,12 @@ def _options(settings: dict, *, dependency_advisories: bool = False,
         max_file_bytes=int(settings.get("max_file_bytes", base.max_file_bytes)),
         remote_clone_depth=int(settings.get("remote_clone_depth", base.remote_clone_depth)),
         scan_build_outputs=scan_build_outputs,
-        # Config OR the CLI flag enables each opt-in tier.
-        dependency_advisories=dependency_advisories or bool(
+        # The offline CVE-advisory tier is ON by default; `--no-advisories` or config
+        # `dependency_advisories: false` turns the section off.
+        dependency_advisories=(not no_advisories) and bool(
             settings.get("dependency_advisories", base.dependency_advisories)),
+        # External auditors are the one opt-in that leaves the offline sandbox (subprocess + a tool's
+        # own network) — CLI flag OR config, off by default.
         external_audit=external_audit or bool(
             settings.get("external_audit", base.external_audit)),
     )
@@ -178,7 +181,7 @@ def scan(config_path: str | None = None, *, remote: bool = False,
          json_out: bool = False, sarif_path: str | Path | None = None,
          reports_dir: str | Path | None = None, alert: bool = False,
          no_stream: bool = False, pager: bool = False,
-         dependency_advisories: bool = False, external_audit: bool = False) -> int:
+         no_advisories: bool = False, external_audit: bool = False) -> int:
     """Scan targets (READ-ONLY) and deliver the result through sinks. Scope is LOCAL by
     default — explicit `paths`, the configured local globs, or the current repo. With
     remote=True (`saw scan --remote`) it scans GitHub repos resolved by the #1075 ladder:
@@ -195,8 +198,7 @@ def scan(config_path: str | None = None, *, remote: bool = False,
     prog = Streamer(enabled=progress_on, out=sys.stderr)
     cfg = _read_config(config_path)
     settings = cfg.get("settings", {})
-    opts = _options(settings, dependency_advisories=dependency_advisories,
-                    external_audit=external_audit)
+    opts = _options(settings, no_advisories=no_advisories, external_audit=external_audit)
     sigs = load_signatures(settings.get("signatures_path"))
     allowlist = cfg.get("allowlist", [])
 

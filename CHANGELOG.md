@@ -7,15 +7,15 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
-- **`saw scan -x` / `--audit-external` — run installed vulnerability auditors, no verdict impact.** Opt in
-  and `saw` will run **installed** external auditors (osv-scanner today; the adapter interface makes
-  pip-audit / cargo-audit / bundler-audit / govulncheck / npm audit thin additions) over the target
-  and fold their findings into the **advisory tier** — so you don't run the tools by hand. Results
-  are attributed to their tool (`… (via osv-scanner)`) and de-duped against the offline corpus.
-  Deliberately crossing the offline default: it's **off by default**, a tool that isn't installed is
-  skipped silently, tool output is parsed as **data** (never executed), and it **never** changes the
-  verdict or exit code. `saw` itself sends nothing over the network — a tool's own registry/API calls
-  are the tool's behaviour, which you opted into. Phase 5 of the dependency-audit epic.
+- **`saw scan -x` / `--external` — the one opt-in that leaves the offline sandbox.** Pass it and `saw`
+  runs **installed** external auditors (osv-scanner today; the adapter interface makes pip-audit /
+  cargo-audit / bundler-audit / govulncheck / npm audit thin additions) and folds their findings into
+  the advisory tier, attributed to their tool (`… (via osv-scanner)`) and de-duped against the offline
+  corpus. It's **off by default and stays a deliberate, explicit choice** — not for ergonomics but
+  because it's the single thing that crosses the offline guarantee: it spawns subprocesses and a tool
+  may send your dependency list to its own servers. Absent tools are skipped; output is parsed as
+  **data** (never executed); it **never** changes the verdict or exit code. Phase 5 of the
+  dependency-audit epic.
 - **Version-range advisory matching — ~12× more malware coverage.** Advisories mostly encode
   *ranges* (`introduced`/`fixed`/`last_affected`), not explicit version lists — and the dominant
   malware shape is "this package is malware at **every** version." `saw db update` now keeps and
@@ -44,14 +44,13 @@ All notable changes to this project are documented here. The format is based on
   Verified on live data (a real malicious PyPI pin → INFECTED). This is the second resolver, which
   **freezes the resolver interface** (`resolve(target) → Purl`s) for the coming Go / Rust / Ruby /
   Composer / .NET / Maven fan-out — each is a new resolver, no matcher change. Phase 3a of the epic.
-- **`saw scan -a` / `--advisories` — a separate, opt-in dependency-CVE tier that never gates.** Malicious
-  packages stay in the worm verdict (→ INFECTED, unchanged); ordinary vulnerabilities (CVE/GHSA on a
-  declared dependency) are now surfaced in their **own report section**, explicitly marked
-  informational — they **never** move the verdict or the exit code. Off by default (so "INFECTED"
-  keeps meaning "carrying the worm", not "has any known CVE"); enable per scan with `--advisories`
-  or config `dependency_advisories: true` (needs `saw db update`). The advisory corpus matches
-  explicit affected versions today; range-based advisories (most CVEs) light up when the version-range
-  comparators land. Phase 2 of the dynamic dependency-audit epic.
+- **Dependency CVE advisories — part of a plain scan, never gating.** Malicious packages stay in the
+  worm verdict (→ INFECTED, unchanged); ordinary vulnerabilities (CVE/GHSA on a declared dependency)
+  are surfaced **by default** in their **own report section**, explicitly informational — they
+  **never** move the verdict or the exit code (so "INFECTED" still means "carrying the worm", not
+  "has any known CVE"). This is free and offline (the corpus is already loaded for malware, and it
+  only appears once `saw db update` has populated a cache); `saw scan --no-advisories` (or config
+  `dependency_advisories: false`) suppresses the section. Phase 2 of the dynamic dependency-audit epic.
 - **`saw db update` — dynamic, offline malicious-dependency detection.** The dependency audit no
   longer relies only on a hand-maintained blocklist: `saw db update` bulk-downloads the OSV
   malicious-package corpus (OpenSSF malicious-packages, the **GitHub Advisory Database** incl. its

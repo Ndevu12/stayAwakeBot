@@ -31,13 +31,15 @@ def register(sub) -> None:
                    help="scan this GitHub user's repos (repeatable; implies --remote)")
     p.add_argument("--org", action="append", default=[], metavar="ORG",
                    help="scan this GitHub org's repos (repeatable; implies --remote)")
-    p.add_argument("-a", "--advisories", action="store_true", dest="advisories",
-                   help="also report ordinary dependency CVEs (needs `saw db update`); these are "
-                        "informational and NEVER change the verdict/exit code. Off by default.")
-    p.add_argument("-x", "--audit-external", action="store_true", dest="audit_external",
+    p.add_argument("--no-advisories", action="store_true", dest="no_advisories",
+                   help="suppress the dependency CVE-advisory section. A scan reports malware AND "
+                        "known CVEs (from the offline DB) by default; advisories never change the "
+                        "verdict/exit code, so this only quiets the output.")
+    p.add_argument("-x", "--external", action="store_true", dest="external_audit",
                    help="also run INSTALLED external auditors (osv-scanner, …) and fold their vulns "
-                        "into the advisory tier. Opt-in — runs subprocesses (a tool may reach its own "
-                        "network); absent tools are skipped. Never changes the verdict/exit code.")
+                        "into the advisory tier. OPT-IN — this leaves the offline sandbox: it spawns "
+                        "subprocesses and a tool may send your dependency list to its own servers. "
+                        "Absent tools are skipped; never changes the verdict/exit code.")
     p.add_argument("--no-stream", action="store_true", dest="no_stream",
                    help="disable live progress/typewriter output (plain, instant lines)")
     p.add_argument("--pager", action="store_true", dest="pager",
@@ -64,4 +66,4 @@ def run(a: argparse.Namespace) -> int:
                         users=a.user or None, orgs=a.org or None,
                         json_out=a.json, sarif_path=a.sarif, reports_dir=a.reports_dir,
                         alert=a.alert, no_stream=a.no_stream, pager=a.pager,
-                        dependency_advisories=a.advisories, external_audit=a.audit_external)
+                        no_advisories=a.no_advisories, external_audit=a.external_audit)

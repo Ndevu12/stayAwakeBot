@@ -105,19 +105,23 @@ frozen (Open/Closed), so a new ecosystem is just another resolver. The blocklist
 - **Two tiers, one verdict (mission honesty):** a **malicious** package (OpenSSF / a GHSA *malware*
   advisory) is the worm → it drives the verdict (`confirmed` → INFECTED). A merely **vulnerable**
   package (an ordinary CVE on a legit library) is *not* the worm; surfacing it as INFECTED would
-  degrade the verdict to "has any known CVE" and bury real worm signal. So CVEs are an **opt-in
-  advisory tier** (`saw scan --advisories` / config `dependency_advisories: true`, off by default):
-  reported in their own section, routed out of the verdict (`ScanResult.advisories`, `advisory_only`
-  findings), and they never change the exit code. Malware is classified by structured signals only
+  degrade the verdict to "has any known CVE" and bury real worm signal. So CVEs are a separate
+  **advisory tier**, reported in their own section and routed out of the verdict
+  (`ScanResult.advisories`, `advisory_only` findings) — they never change the exit code. This tier is
+  **on by default** (it's offline and free — the corpus is already loaded for malware); it only
+  appears once `saw db update` has populated a cache, and `--no-advisories` / config
+  `dependency_advisories: false` suppresses it. Malware is classified by structured signals only
   (`MAL-` id/alias, `database_specific.type == malware`, CWE-506) — never free text.
-- **External auditors (opt-in, `--audit-external`):** `saw` can additionally run *installed*
-  vulnerability tools (osv-scanner today; the `dependencies/external/` adapter interface makes
-  pip-audit / cargo-audit / … thin additions) and fold their results into the same advisory tier,
-  de-duped against the offline corpus and attributed to their tool. This deliberately crosses the
-  offline default, so: off by default; absent tools skipped silently; tool output parsed as **data**,
-  never executed; subprocesses spawned with an argv list (no shell) + timeout, in the target's dir
-  (a remote target's clone sandbox). `saw` itself exfiltrates nothing — a tool's own network calls
-  are the tool's behaviour, opted into. Still never moves the verdict.
+- **External auditors — the ONE opt-in that leaves the offline sandbox (`saw scan --external`):**
+  `saw` can additionally run *installed* vulnerability tools (osv-scanner today; the
+  `dependencies/external/` adapter interface makes pip-audit / cargo-audit / … thin additions) and
+  fold their results into the same advisory tier, de-duped against the offline corpus and attributed
+  to their tool. It stays **off by default and explicit** — not for ergonomics but because it is the
+  single thing that breaks the offline guarantee: it spawns subprocesses, and a tool may send the
+  dependency graph to its own servers. Everything else in a scan is offline. When invoked: absent
+  tools skipped silently; tool output parsed as **data**, never executed; subprocess is an argv list
+  (no shell) + timeout, in the target's dir (a remote target's clone sandbox). Still never moves the
+  verdict.
 - **Decisions / residuals (deliberate):**
   - A `package.json` **version range** (`^4.2.11`) is ambiguous — it may or may not resolve to the
     bad version — so ranges are **not** matched; the lockfile's resolved version is the source of

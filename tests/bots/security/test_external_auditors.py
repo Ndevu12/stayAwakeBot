@@ -118,18 +118,13 @@ class TestMatcherIntegration(unittest.TestCase):
 
 
 class TestScanFlags(unittest.TestCase):
-    def test_short_and_long_forms(self):
+    def test_external_flag_forms(self):
         from stayawake.cli.dispatch import build_parser
         p = build_parser()
-        # gh-style: single-letter shorts + descriptive long names, both set the same dest.
-        self.assertTrue(p.parse_args(["scan", "-a"]).advisories)
-        self.assertTrue(p.parse_args(["scan", "--advisories"]).advisories)
-        self.assertTrue(p.parse_args(["scan", "-x"]).audit_external)
-        self.assertTrue(p.parse_args(["scan", "--audit-external"]).audit_external)
-        both = p.parse_args(["scan", "-a", "-x"])
-        self.assertTrue(both.advisories and both.audit_external)
-        off = p.parse_args(["scan"])
-        self.assertFalse(off.advisories or off.audit_external)
+        # gh-style short + descriptive long, same dest; external audit is the lone opt-in.
+        self.assertTrue(p.parse_args(["scan", "-x"]).external_audit)
+        self.assertTrue(p.parse_args(["scan", "--external"]).external_audit)
+        self.assertFalse(p.parse_args(["scan"]).external_audit)      # off by default
 
 
 if __name__ == "__main__":
