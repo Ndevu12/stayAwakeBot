@@ -57,7 +57,8 @@ def run_update(a: argparse.Namespace) -> int:
              *(f"  {r['ecosystem']:<10} {r['malicious']:>6} malicious · "
                f"{r['vulnerabilities']:>6} vulnerabilities" for r in results),
              f"  {'total':<10} {mal:>6} malicious · {vuln:>6} vulnerabilities",
-             "  (vulnerabilities are opt-in at scan time: `saw scan --advisories`)",
+             "  (malware gates the verdict; vulnerabilities show as advisories in `saw scan` — "
+             "`--no-advisories` to hide, `--external` to also run installed auditors)",
              f"cache: {db.default_cache_dir() if not a.cache_dir else a.cache_dir}"]
     Streamer(enabled=stream_enabled(sys.stdout, force_off=a.no_stream)).line("\n".join(lines))
     return 0

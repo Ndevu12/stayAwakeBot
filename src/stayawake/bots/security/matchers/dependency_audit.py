@@ -15,9 +15,9 @@ supply an in-memory corpus; the default (`AdvisoryStore.default`) is the inline 
 offline OSV corpus (#1120) when `saw db update` has populated a cache — absent a cache it is the
 seed alone, so scans stay offline and zero-setup.
 
-Two opt-in additions feed the advisory tier (never the verdict): the offline CVE corpus
-(`--advisories`) and, deliberately crossing the offline default, INSTALLED external auditors
-(`--audit-external`, #1125).
+Two things feed the advisory tier (never the verdict): the offline CVE corpus (on by default;
+`--no-advisories` to suppress) and, deliberately crossing the offline default, INSTALLED external
+auditors (`--external`, opt-in, #1125).
 """
 from __future__ import annotations
 

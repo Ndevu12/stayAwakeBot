@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """External-auditor adapter interface (#1125).
 
-`saw` is offline and never executes scanned code — but a user can *opt in* (`saw scan
---audit-external`) to having it run **installed** vulnerability auditors (osv-scanner, pip-audit, …)
-over the target and fold their results into the advisory tier, so they don't have to run the tools
-by hand. This module is the seam; concrete adapters are one small class each.
+`saw` is offline and never executes scanned code — but a user can *opt in* (`saw scan --external`)
+to having it run **installed** vulnerability auditors (osv-scanner, pip-audit, …) over the target
+and fold their results into the advisory tier, so they don't have to run the tools by hand. This
+module is the seam; concrete adapters are one small class each.
 
 Guardrails (this crosses the offline default deliberately, so they matter):
   * OFF by default — nothing here runs unless the user passes the flag.

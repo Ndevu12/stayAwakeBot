@@ -131,6 +131,16 @@ class TestAdvisoryWiring(unittest.TestCase):
         self.assertTrue(p.parse_args(["scan", "-x"]).external_audit)
         self.assertTrue(p.parse_args(["scan", "--external"]).external_audit)
 
+    def test_config_string_cannot_flip_the_sandbox(self):
+        # A quoted YAML string must NOT be truthy — a config typo can't silently leave the offline
+        # sandbox (`bool("false")` is True; the strict coercion prevents that).
+        from stayawake.bots.security import service
+        for falsy in ("false", "no", "off", "0", ""):
+            self.assertFalse(service._options({"external_audit": falsy}).external_audit, falsy)
+        self.assertFalse(service._options({"dependency_advisories": "false"}).dependency_advisories)
+        self.assertTrue(service._options({"external_audit": True}).external_audit)      # real bool works
+        self.assertTrue(service._options({"external_audit": "yes"}).external_audit)     # explicit truthy
+
 
 if __name__ == "__main__":
     unittest.main()

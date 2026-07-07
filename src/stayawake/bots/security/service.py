@@ -59,11 +59,31 @@ def _enclosing_repo_root(start: Path | None = None) -> Path:
 _BUILD_OUTPUT_DIRS = {"dist", "build", "out", ".next"}
 
 
+def _as_bool(value, default: bool) -> bool:
+    """Coerce a config value to bool WITHOUT the string footgun — `bool("false")` is True, so a
+    quoted YAML `external_audit: "false"` (or `"no"`/`"off"`/`"0"`) would otherwise read as True and
+    silently ENABLE a security-sensitive option (external audit leaves the offline sandbox). A value
+    that isn't a recognizable boolean falls back to `default`."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        s = value.strip().lower()
+        if s in ("true", "1", "yes", "on"):
+            return True
+        if s in ("false", "0", "no", "off", ""):
+            return False
+    return default
+
+
 def _options(settings: dict, *, no_advisories: bool = False,
              external_audit: bool = False) -> ScanOptions:
     base = ScanOptions()
     exclude = set(settings.get("exclude_dirs", base.exclude_dirs))
-    scan_build_outputs = bool(settings.get("scan_build_outputs", base.scan_build_outputs))
+    scan_build_outputs = _as_bool(settings.get("scan_build_outputs"), base.scan_build_outputs)
     if scan_build_outputs:
         exclude -= _BUILD_OUTPUT_DIRS          # let build outputs be traversed (matcher gates the rest)
     return ScanOptions(
@@ -73,12 +93,13 @@ def _options(settings: dict, *, no_advisories: bool = False,
         scan_build_outputs=scan_build_outputs,
         # The offline CVE-advisory tier is ON by default; `--no-advisories` or config
         # `dependency_advisories: false` turns the section off.
-        dependency_advisories=(not no_advisories) and bool(
-            settings.get("dependency_advisories", base.dependency_advisories)),
+        dependency_advisories=(not no_advisories) and _as_bool(
+            settings.get("dependency_advisories"), base.dependency_advisories),
         # External auditors are the one opt-in that leaves the offline sandbox (subprocess + a tool's
-        # own network) — CLI flag OR config, off by default.
-        external_audit=external_audit or bool(
-            settings.get("external_audit", base.external_audit)),
+        # own network) — CLI flag OR config, off by default. Strict bool coercion so a quoted
+        # `"false"` can't silently enable it.
+        external_audit=external_audit or _as_bool(
+            settings.get("external_audit"), base.external_audit),
     )
 
 
