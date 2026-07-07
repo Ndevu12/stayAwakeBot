@@ -143,11 +143,28 @@ frozen (Open/Closed), so a new ecosystem is just another resolver. The blocklist
     malware says "malware at *every* version" (a lone `introduced: "0"` range), those are held in a
     compact **whole-package** index and the cache streams as **JSON Lines**, so a fully-populated
     corpus (npm alone ≈ 216k malicious packages) loads in ~160 MB rather than ~575 MB.
-  - Cache **snapshot pinning + signature/checksum verification** (against a poisoned feed) and the
-    global-vs-repo-pinned cache location are deferred to the trust-hardening phase; a stale/unverified
-    cache is a documented residual until then. The engine is a resolver → store → matcher spine
-    (`bots/security/dependencies/`) so more ecosystems and comparators slot in without touching the
-    matcher.
+  - **Cache trust (the DB is itself a supply-chain surface).** Because `saw db update` pulls a
+    third-party feed to decide what's malicious, the cache is defended:
+    - **Content-hash integrity.** The manifest stores a SHA-256 per ecosystem records file; every
+      load re-hashes the file and trusts it ONLY on a match. A corrupted/tampered file is skipped
+      (falling back to the always-shipped inline seed) with a loud stderr warning — a tampered cache
+      can neither inject false malware nor hide real malware; it is rejected wholesale.
+    - **Snapshot pinning.** The manifest carries a deterministic `snapshot` fingerprint (from the
+      per-ecosystem content hashes). `saw db status --require-snapshot <digest>` (and `--max-age-days`)
+      lets CI pin a reproducible DB; `generated_at` is informational and deliberately outside the
+      snapshot so it never perturbs the fingerprint.
+    - **Fail-open by default, fail-closed on request.** A missing/corrupt DB degrades to the inline
+      seed (never blind on the known campaign) — the safe default. `saw scan --require-db` (or config
+      `require_db: true`) instead fails **closed** (exit 2) for CI gates that must not silently lose
+      coverage. `saw db status` reports presence, snapshot, age, counts and integrity.
+    - **Cache location.** Global by default (`$SAW_ADVISORY_CACHE_DIR` → `$XDG_CACHE_HOME/saw` →
+      `~/.cache/saw`); point the env (or `db update --cache-dir`) at a repo-committed dir to pin a
+      snapshot for CI.
+    - **Residual (honest):** the content hash catches corruption and naive tampering, not a
+      sophisticated local attacker who rewrites BOTH a records file and its manifest hash — but that
+      requires write access to the cache, i.e. the host is already compromised. Upstream
+      *cryptographic* signing is not verified: the OSV exports expose no signature we hold a trust
+      anchor for; the download itself is TLS-verified (certifi) from trusted infrastructure.
 
 ## Detected vectors (from the live incident)
 1. Obfuscated loader in `postcss.config.*` (content + oversized-line heuristic)

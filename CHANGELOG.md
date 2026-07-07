@@ -7,6 +7,16 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **Advisory-DB trust hardening + `saw db status`.** The offline advisory cache is now defended as
+  the supply-chain surface it is: the manifest carries a SHA-256 per ecosystem file and every scan
+  **verifies it before trusting the data** — a corrupted/tampered cache is skipped (falling back to
+  the inline seed) with a loud warning, so it can neither inject false malware nor hide real malware.
+  The manifest also carries a deterministic **`snapshot`** fingerprint and a `generated_at` timestamp;
+  **`saw db status`** reports snapshot / age / counts / integrity and, with `--require-snapshot` /
+  `--max-age-days`, lets CI **pin a reproducible DB**. Behaviour is **fail-open by default** (a
+  missing/corrupt DB degrades to the inline seed — never blind on the known campaign); **`saw scan
+  --require-db`** (or config `require_db: true`) instead fails **closed** (exit 2) for gates that must
+  not silently lose coverage. Phase 6 (final) of the dependency-audit epic.
 - **`saw scan -x` / `--external` — the one opt-in that leaves the offline sandbox.** Pass it and `saw`
   runs **installed** external auditors (osv-scanner today; the adapter interface makes pip-audit /
   cargo-audit / bundler-audit / govulncheck / npm audit thin additions) and folds their findings into
