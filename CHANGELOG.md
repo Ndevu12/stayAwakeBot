@@ -7,6 +7,13 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **PyPI dependency auditing.** The dependency audit now covers Python projects: a `PyPiResolver`
+  reads `requirements.txt` (exact `==` pins), `poetry.lock`, `Pipfile.lock` and `uv.lock`, resolves
+  each package (PEP 503-normalized names, so `Flask_Foo` matches a `flask-foo` advisory), and matches
+  it against the same seed + offline corpus as npm — `saw db update` now fetches PyPI advisories too.
+  Verified on live data (a real malicious PyPI pin → INFECTED). This is the second resolver, which
+  **freezes the resolver interface** (`resolve(target) → Purl`s) for the coming Go / Rust / Ruby /
+  Composer / .NET / Maven fan-out — each is a new resolver, no matcher change. Phase 3a of the epic.
 - **`saw scan --advisories` — a separate, opt-in dependency-CVE tier that never gates.** Malicious
   packages stay in the worm verdict (→ INFECTED, unchanged); ordinary vulnerabilities (CVE/GHSA on a
   declared dependency) are now surfaced in their **own report section**, explicitly marked

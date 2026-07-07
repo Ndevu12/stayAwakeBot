@@ -77,10 +77,14 @@ provenance-trusting and CVE-anchored tooling produced zero signal.
 The campaign's *primary* spread is republishing backdoored package versions, so the next
 `npm install` is the next victim — the payload lands in `node_modules` (which `saw` excludes) and
 never touches the repo tree. `saw` audits what a repo **declares and locks**: the `dependency-audit`
-matcher parses `package.json` and the npm / yarn / pnpm lockfiles and flags any dependency — direct
-**or** lockfile-transitive — whose exact `name@version` is on a **data-driven known-bad blocklist**
-(the `malicious-dependency` signature's `known_bad` list in `signatures.yml`). An exact match is
-decisive → **confirmed** (INFECTED).
+matcher runs per-ecosystem **resolvers** that turn manifests/lockfiles into normalized package
+identities (PURLs) and flags any dependency — direct **or** lockfile-transitive — whose
+`name@version` is on a **data-driven known-bad blocklist**. An exact match is decisive → **confirmed**
+(INFECTED). Ecosystems today: **npm** (`package.json` + npm / yarn / pnpm lockfiles) and **PyPI**
+(`requirements.txt` + `poetry.lock` / `Pipfile.lock` / `uv.lock`, PEP 503-normalized names); the
+resolver interface is frozen, so Go / Rust / Ruby / Composer / .NET / Maven are each just another
+resolver (Open/Closed). The blocklist is the `malicious-dependency` signature's `known_bad` seed
+plus the offline corpus below.
 
 - **Two layers of known-bad data (both offline at scan time):**
   - **Inline seed** — the `malicious-dependency` signature's `known_bad` list in `signatures.yml`,
