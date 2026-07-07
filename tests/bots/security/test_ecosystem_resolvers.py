@@ -83,6 +83,21 @@ class TestMaven(unittest.TestCase):
         self.assertEqual(_resolve(MavenResolver(), {"gradle.lockfile": lock}),
                          {("maven", "com.google.guava:guava", "31.0.1-jre")})
 
+    def test_buildscript_gradle_lockfile(self):
+        self.assertEqual(_resolve(MavenResolver(), {"buildscript-gradle.lockfile":
+                                                    "com.example:plugin:2.0.0=classpath\n"}),
+                         {("maven", "com.example:plugin", "2.0.0")})
+
+    def test_legacy_dependency_locks_bare_lines(self):
+        # Gradle 4.8–6.7: gradle/dependency-locks/<config>.lockfile — bare `group:artifact:version`.
+        lock = ("# This is a Gradle generated file for dependency locking.\n"
+                "com.google.guava:guava:31.0.1-jre\n"
+                "org.slf4j:slf4j-api:1.7.36\n")
+        got = _resolve(MavenResolver(),
+                       {"gradle/dependency-locks/compileClasspath.lockfile": lock})
+        self.assertEqual(got, {("maven", "com.google.guava:guava", "31.0.1-jre"),
+                               ("maven", "org.slf4j:slf4j-api", "1.7.36")})
+
     def test_pom_literal_versions_only(self):
         pom = ('<project><dependencies>'
                '<dependency><groupId>org.springframework</groupId>'

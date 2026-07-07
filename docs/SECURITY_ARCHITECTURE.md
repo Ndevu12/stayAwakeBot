@@ -83,7 +83,7 @@ identities (PURLs) and flags any dependency — direct **or** lockfile-transitiv
 (INFECTED). Ecosystems today (eight): **npm** (`package.json` + npm/yarn/pnpm locks), **PyPI**
 (`requirements.txt` + poetry/Pipfile/uv locks), **Rust** (`Cargo.lock`), **Go** (`go.sum`/`go.mod`),
 **Ruby** (`Gemfile.lock`), **PHP/Composer** (`composer.lock`), **.NET** (`packages.lock.json`) and
-**Java** (`gradle.lockfile`/`pom.xml`). Each ecosystem's version format is normalized to the OSV
+**Java** (all Gradle lock formats + `pom.xml` literal versions). Each ecosystem's version format is normalized to the OSV
 form (e.g. Go's/Composer's leading `v`, RubyGems platform suffixes) and a canonical PURL-type ↔
 OSV-name table (`ecosystems.py`) bridges e.g. `pkg:cargo` ↔ `crates.io`. The resolver interface is
 frozen (Open/Closed), so a new ecosystem is just another resolver. The blocklist is the

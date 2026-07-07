@@ -9,8 +9,9 @@ All notable changes to this project are documented here. The format is based on
 ### Added
 - **Dependency auditing across six more ecosystems.** The dynamic dependency audit now resolves and
   matches **Rust** (`Cargo.lock`), **Go** (`go.sum` / `go.mod`), **Ruby** (`Gemfile.lock`), **PHP /
-  Composer** (`composer.lock`), **.NET** (`packages.lock.json`) and **Java** (`gradle.lockfile` /
-  `pom.xml`) — eight ecosystems in all (with npm + PyPI). Each is a small resolver against the frozen
+  Composer** (`composer.lock`), **.NET** (`packages.lock.json`) and **Java** (all Gradle lock formats
+  — `gradle.lockfile`, `buildscript-gradle.lockfile`, legacy `gradle/dependency-locks/*.lockfile` —
+  plus `pom.xml`) — eight ecosystems in all (with npm + PyPI). Each is a small resolver against the frozen
   interface (Open/Closed: no matcher/store change), and `saw db update` now fetches every ecosystem's
   advisories. Validated on live OSV data (a real malicious package per ecosystem → INFECTED, with
   version formats normalized to the OSV form — Go's `v` prefix, Composer's `v` tag, RubyGems platform

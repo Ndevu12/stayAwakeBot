@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Java / Maven resolver — gradle.lockfile / pom.xml → `pkg:maven/…` PURLs (#1123).
+"""Java / Maven resolver — Gradle lockfiles / pom.xml → `pkg:maven/…` PURLs (#1123).
 
-`gradle.lockfile` lists fully-resolved `group:artifact:version=configs` lines — the authoritative
-source. `pom.xml` declares `<dependency>` coordinates; only *literal* versions are taken (a
-`${property}` or a Maven version range is unresolved → deferred). The OSV `Maven` ecosystem names a
-package `groupId:artifactId`.
+Fully-resolved Gradle locks are the authoritative source, across all three formats:
+  * `gradle.lockfile` and `buildscript-gradle.lockfile` (Gradle ≥ 6.8): `group:artifact:version=configs`
+  * legacy `gradle/dependency-locks/<config>.lockfile` (Gradle 4.8–6.7): bare `group:artifact:version`
+`pom.xml` declares `<dependency>` coordinates; only *literal* versions are taken (a `${property}`,
+a `<dependencyManagement>`/BOM-managed version, or a Maven range is unresolved → deferred). The OSV
+`Maven` ecosystem names a package `groupId:artifactId`.
 
 pom.xml is parsed by regex, NOT an XML parser: `saw` must never be DoS'd by a hostile scanned file,
 and XML entity-expansion ("billion laughs") / XXE are exactly that risk. Regex extraction has no
@@ -19,7 +21,15 @@ from stayawake.bots.security.dependencies.purl import Purl, ResolvedDependency
 from stayawake.bots.security.dependencies.resolvers.base import Resolver
 
 _DEP_BLOCK = re.compile(r"<dependency\b[^>]*>(.*?)</dependency>", re.S | re.I)
-_GRADLE_LINE = re.compile(r"^(?P<group>[^:\s#]+):(?P<artifact>[^:\s]+):(?P<version>[^=\s]+)=")
+# `group:artifact:version`, with the version terminated by `=configs` (new format) OR end-of-line
+# (legacy per-configuration format). Comment/`empty=` lines don't start with a coordinate → skipped.
+_GRADLE_LINE = re.compile(r"^(?P<group>[^:\s#]+):(?P<artifact>[^:\s]+):(?P<version>[^=\s]+)(?:=|$)")
+_GRADLE_LOCK_NAMES = ("gradle.lockfile", "buildscript-gradle.lockfile")
+
+
+def _is_gradle_lock(rel: str, base: str) -> bool:
+    return (base in _GRADLE_LOCK_NAMES
+            or (base.endswith(".lockfile") and "gradle/dependency-locks/" in rel))
 
 
 def _tag(block: str, tag: str) -> str | None:
@@ -38,7 +48,7 @@ class MavenResolver(Resolver):
     def resolve(self, target) -> Iterator[ResolvedDependency]:
         for rel in target.iter_files():
             base = rel.rsplit("/", 1)[-1]
-            if base == "gradle.lockfile":
+            if _is_gradle_lock(rel, base):
                 deps = _gradle_lock_deps(self._read_whole(target, rel))
             elif base == "pom.xml":
                 deps = _pom_deps(self._read_whole(target, rel))
