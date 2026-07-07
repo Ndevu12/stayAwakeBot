@@ -9,7 +9,8 @@ from __future__ import annotations
 
 from stayawake.bots.security.dependencies.resolvers.base import Resolver
 from stayawake.bots.security.dependencies.resolvers.npm import NpmResolver
+from stayawake.bots.security.dependencies.resolvers.pypi import PyPiResolver
 
-RESOLVERS: tuple[Resolver, ...] = (NpmResolver(),)
+RESOLVERS: tuple[Resolver, ...] = (NpmResolver(), PyPiResolver())
 
-__all__ = ["Resolver", "NpmResolver", "RESOLVERS"]
+__all__ = ["Resolver", "NpmResolver", "PyPiResolver", "RESOLVERS"]
