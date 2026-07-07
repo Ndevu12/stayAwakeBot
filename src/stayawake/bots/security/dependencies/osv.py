@@ -7,14 +7,13 @@ parser here, not three. `parse_osv_record` normalizes a raw OSV object into the 
 the corpus matches on; `is_malicious` classifies a record as malware (as opposed to an ordinary
 CVE) using structured signals only — never free-text — so the classification stays honest.
 
-Phase 1b matches on an advisory's **explicit affected-version list** only (`affected[].versions`).
-Records whose `affected` entries carry only `ranges` (no explicit versions) are dropped here —
-they are deferred to the per-ecosystem version-range comparators in #1124. Pure and I/O-free;
-all reading/caching lives in `db.py`.
+A record matches either by an **explicit affected-version list** (`affected[].versions`) or by an
+affected **range** (`affected[].ranges[]`, evaluated by the per-ecosystem comparators in #1124).
+Pure and I/O-free; all reading/caching lives in `db.py`.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 # Embedded Malicious Code — the CWE GitHub tags on malware advisories; a strong, structured
@@ -23,18 +22,28 @@ _MALWARE_CWE = "CWE-506"
 
 
 @dataclass(frozen=True)
+class OsvRange:
+    """One affected range: its comparator `type` (SEMVER | ECOSYSTEM | GIT) and its ordered
+    `events` (`introduced`/`fixed`/`last_affected` → version), which define the affected intervals."""
+
+    type: str
+    events: tuple[tuple[str, str], ...]
+
+
+@dataclass(frozen=True)
 class OsvAffected:
-    """One `affected` package entry, reduced to its explicit-version match surface."""
+    """One `affected` package entry: its explicit versions and/or version ranges."""
 
     ecosystem: str
     name: str
     versions: frozenset[str]
+    ranges: tuple[OsvRange, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)
 class OsvRecord:
     """A normalized OSV advisory: its id, cross-source aliases, malware flag, and the packages
-    (with explicit affected versions) it names."""
+    (with affected versions/ranges) it names."""
 
     id: str
     aliases: tuple[str, ...]
@@ -66,9 +75,26 @@ def is_malicious(rec: dict[str, Any]) -> bool:
     return False
 
 
+def _parse_ranges(entry: dict[str, Any]) -> tuple[OsvRange, ...]:
+    out: list[OsvRange] = []
+    for r in (entry.get("ranges", []) or []):
+        if not isinstance(r, dict):
+            continue
+        rtype = str(r.get("type", "")).strip().upper()
+        events: list[tuple[str, str]] = []
+        for ev in (r.get("events", []) or []):
+            if isinstance(ev, dict):
+                for kind in ("introduced", "fixed", "last_affected"):
+                    if kind in ev:
+                        events.append((kind, str(ev[kind])))
+        if rtype and events:
+            out.append(OsvRange(rtype, tuple(events)))
+    return tuple(out)
+
+
 def parse_osv_record(rec: dict[str, Any]) -> OsvRecord | None:
-    """Normalize one raw OSV object → `OsvRecord`, or None when it carries nothing matchable in
-    this phase (no id, or no `affected` entry with an explicit version list)."""
+    """Normalize one raw OSV object → `OsvRecord`, or None when it carries nothing matchable
+    (no id, or no `affected` entry with either explicit versions or a range)."""
     if not isinstance(rec, dict):
         return None
     rid = str(rec.get("id", "")).strip()
@@ -84,8 +110,9 @@ def parse_osv_record(rec: dict[str, Any]) -> OsvRecord | None:
         ecosystem = str(pkg.get("ecosystem", "")).strip()
         name = str(pkg.get("name", "")).strip()
         versions = frozenset(v for v in (entry.get("versions", []) or []) if isinstance(v, str))
-        if name and versions:          # ranges-only entries are deferred to #1124
-            affected.append(OsvAffected(ecosystem, name, versions))
+        ranges = _parse_ranges(entry)
+        if name and (versions or ranges):
+            affected.append(OsvAffected(ecosystem, name, versions, ranges))
     if not affected:
         return None
     return OsvRecord(id=rid, aliases=aliases, malicious=is_malicious(rec), affected=tuple(affected))

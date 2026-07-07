@@ -23,27 +23,29 @@ class TestAdvisoryDb(unittest.TestCase):
         self.cache = Path(tempfile.mkdtemp())
         db._CORPUS_MEMO.clear()
 
-    def test_update_keeps_both_tiers_with_explicit_versions(self):
+    def test_update_keeps_both_tiers_and_ranges(self):
         z = osv_zip({
             "MAL-1.json": mal_record("evil-pkg", ["1.0.0"], rid="MAL-2024-1"),
             # an ordinary CVE — kept as the vulnerability tier (not malware)
             "GHSA-cve.json": {"id": "GHSA-x", "aliases": ["CVE-2024-9"],
                               "affected": [{"package": {"ecosystem": "npm", "name": "legit"},
                                             "versions": ["2.0.0"]}]},
-            # malicious but range-only (no explicit versions) → deferred to #1124 → dropped
+            # malicious, range-only — #1124 keeps it and range-matches (affected [1.0.0, 2.0.0))
             "MAL-range.json": {"id": "MAL-2024-2",
                                "affected": [{"package": {"ecosystem": "npm", "name": "rangeonly"},
                                              "ranges": [{"type": "SEMVER",
-                                                         "events": [{"introduced": "0"}]}]}]},
+                                                         "events": [{"introduced": "1.0.0"},
+                                                                    {"fixed": "2.0.0"}]}]}]},
         })
         res = db.update_ecosystem("npm", self.cache, fetch=_fetch(z))
-        self.assertEqual((res["count"], res["malicious"], res["vulnerabilities"]), (2, 1, 1))
+        self.assertEqual((res["count"], res["malicious"], res["vulnerabilities"]), (3, 2, 1))
         db.write_manifest(self.cache, [res])
         corpus = db.load_corpus(self.cache)
         self.assertIsNotNone(corpus.malicious_match(Purl("npm", "evil-pkg", "1.0.0")))
         self.assertIsNone(corpus.malicious_match(Purl("npm", "legit", "2.0.0")))    # a CVE, not malware
         self.assertTrue(corpus.vulnerability_matches(Purl("npm", "legit", "2.0.0")))
-        self.assertIsNone(corpus.malicious_match(Purl("npm", "rangeonly", "0.5.0")))  # dropped
+        self.assertIsNotNone(corpus.malicious_match(Purl("npm", "rangeonly", "1.5.0")))  # in range
+        self.assertIsNone(corpus.malicious_match(Purl("npm", "rangeonly", "2.0.0")))     # fixed → out
 
     def test_cache_is_deterministic(self):
         z = osv_zip({"MAL-b.json": mal_record("b", ["2.0.0"], rid="MAL-2024-2"),
