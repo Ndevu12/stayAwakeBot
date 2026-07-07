@@ -31,10 +31,10 @@ def register(sub) -> None:
                    help="scan this GitHub user's repos (repeatable; implies --remote)")
     p.add_argument("--org", action="append", default=[], metavar="ORG",
                    help="scan this GitHub org's repos (repeatable; implies --remote)")
-    p.add_argument("--advisories", action="store_true", dest="advisories",
+    p.add_argument("-a", "--advisories", action="store_true", dest="advisories",
                    help="also report ordinary dependency CVEs (needs `saw db update`); these are "
                         "informational and NEVER change the verdict/exit code. Off by default.")
-    p.add_argument("--audit-external", action="store_true", dest="audit_external",
+    p.add_argument("-x", "--audit-external", action="store_true", dest="audit_external",
                    help="also run INSTALLED external auditors (osv-scanner, …) and fold their vulns "
                         "into the advisory tier. Opt-in — runs subprocesses (a tool may reach its own "
                         "network); absent tools are skipped. Never changes the verdict/exit code.")

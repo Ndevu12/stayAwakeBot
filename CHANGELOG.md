@@ -7,7 +7,7 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
-- **`saw scan --audit-external` — run installed vulnerability auditors, no verdict impact.** Opt in
+- **`saw scan -x` / `--audit-external` — run installed vulnerability auditors, no verdict impact.** Opt in
   and `saw` will run **installed** external auditors (osv-scanner today; the adapter interface makes
   pip-audit / cargo-audit / bundler-audit / govulncheck / npm audit thin additions) over the target
   and fold their findings into the **advisory tier** — so you don't run the tools by hand. Results
@@ -44,7 +44,7 @@ All notable changes to this project are documented here. The format is based on
   Verified on live data (a real malicious PyPI pin → INFECTED). This is the second resolver, which
   **freezes the resolver interface** (`resolve(target) → Purl`s) for the coming Go / Rust / Ruby /
   Composer / .NET / Maven fan-out — each is a new resolver, no matcher change. Phase 3a of the epic.
-- **`saw scan --advisories` — a separate, opt-in dependency-CVE tier that never gates.** Malicious
+- **`saw scan -a` / `--advisories` — a separate, opt-in dependency-CVE tier that never gates.** Malicious
   packages stay in the worm verdict (→ INFECTED, unchanged); ordinary vulnerabilities (CVE/GHSA on a
   declared dependency) are now surfaced in their **own report section**, explicitly marked
   informational — they **never** move the verdict or the exit code. Off by default (so "INFECTED"

@@ -117,5 +117,20 @@ class TestMatcherIntegration(unittest.TestCase):
         self.assertIn("via osv-scanner", r.advisories[0].evidence)
 
 
+class TestScanFlags(unittest.TestCase):
+    def test_short_and_long_forms(self):
+        from stayawake.cli.dispatch import build_parser
+        p = build_parser()
+        # gh-style: single-letter shorts + descriptive long names, both set the same dest.
+        self.assertTrue(p.parse_args(["scan", "-a"]).advisories)
+        self.assertTrue(p.parse_args(["scan", "--advisories"]).advisories)
+        self.assertTrue(p.parse_args(["scan", "-x"]).audit_external)
+        self.assertTrue(p.parse_args(["scan", "--audit-external"]).audit_external)
+        both = p.parse_args(["scan", "-a", "-x"])
+        self.assertTrue(both.advisories and both.audit_external)
+        off = p.parse_args(["scan"])
+        self.assertFalse(off.advisories or off.audit_external)
+
+
 if __name__ == "__main__":
     unittest.main()
