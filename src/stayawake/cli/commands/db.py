@@ -30,6 +30,19 @@ def register(sub) -> None:
                     help="disable the per-ecosystem spinner and typewriter output")
     up.set_defaults(func=run_update)
 
+    st = dbsub.add_parser(
+        "status", help="show the advisory DB's snapshot, age, counts and integrity",
+        description="Report the offline advisory cache: snapshot fingerprint, age, per-ecosystem "
+                    "counts, and a content-hash integrity check. Exits non-zero if the DB is absent, "
+                    "fails integrity, is older than --max-age-days, or doesn't match --require-snapshot "
+                    "— so CI can pin a reproducible DB.")
+    st.add_argument("--cache-dir", default=None, help="advisory cache location")
+    st.add_argument("--require-snapshot", metavar="DIGEST", default=None,
+                    help="exit non-zero unless the DB's snapshot equals DIGEST (pin for reproducible CI)")
+    st.add_argument("--max-age-days", type=int, default=None, metavar="N",
+                    help="exit non-zero if the DB is older than N days")
+    st.set_defaults(func=run_status)
+
 
 def run_update(a: argparse.Namespace) -> int:
     # Imported here (not at module load) so the CLI stays light and the network/zip machinery is
@@ -62,3 +75,44 @@ def run_update(a: argparse.Namespace) -> int:
              f"cache: {db.default_cache_dir() if not a.cache_dir else a.cache_dir}"]
     Streamer(enabled=stream_enabled(sys.stdout, force_off=a.no_stream)).line("\n".join(lines))
     return 0
+
+
+def run_status(a: argparse.Namespace) -> int:
+    from stayawake.bots.security.dependencies import db
+
+    s = db.cache_status(a.cache_dir)
+    if not s["present"]:
+        print(f"Advisory DB: not found at {s['cache_dir']}\n"
+              "  run `saw db update` — scans fall back to the inline malware seed until then.")
+        return 1
+
+    age = s["age_days"]
+    lines = [f"Advisory DB @ {s['cache_dir']}",
+             f"  snapshot   {s['snapshot'] or '(legacy — re-run db update)'}",
+             f"  generated  {s['generated_at'] or '?'}"
+             + (f"  ({age} day(s) ago)" if age is not None else ""),
+             f"  integrity  {'OK' if s['integrity_ok'] else 'FAILED: ' + ', '.join(s['mismatches'])}",
+             f"  totals     {s['total_malicious']} malicious · {s['total_vulnerabilities']} vulnerabilities",
+             *(f"    {eco:<10} {c['malicious']:>7} malicious · {c['vulnerabilities']:>7} vulnerabilities"
+               for eco, c in s["ecosystems"].items())]
+    print("\n".join(lines))
+
+    # CI gates — each prints why it failed and returns non-zero.
+    rc = 0
+    if not s["integrity_ok"]:
+        print("✗ integrity check failed — the cache was corrupted or tampered.", file=sys.stderr)
+        rc = 2
+    if a.require_snapshot and s["snapshot"] != a.require_snapshot:
+        print(f"✗ snapshot {s['snapshot']} != required {a.require_snapshot}.", file=sys.stderr)
+        rc = rc or 3
+    if a.max_age_days is not None:
+        if age is None:
+            # Freshness was explicitly requested but can't be verified (legacy/missing/invalid
+            # generated_at) → fail CLOSED, never pass a DB of unknown age.
+            print("✗ DB age is unknown (missing/invalid generated_at) — cannot honor "
+                  "--max-age-days; run `saw db update`.", file=sys.stderr)
+            rc = rc or 3
+        elif age > a.max_age_days:
+            print(f"✗ DB is {age} day(s) old (> {a.max_age_days}).", file=sys.stderr)
+            rc = rc or 3
+    return rc

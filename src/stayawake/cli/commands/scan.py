@@ -40,6 +40,10 @@ def register(sub) -> None:
                         "into the advisory tier. OPT-IN — this leaves the offline sandbox: it spawns "
                         "subprocesses and a tool may send your dependency list to its own servers. "
                         "Absent tools are skipped; never changes the verdict/exit code.")
+    p.add_argument("--require-db", action="store_true", dest="require_db",
+                   help="fail (exit 2) if the advisory DB is absent or fails its integrity check, "
+                        "instead of falling back to the inline malware seed — for CI gates that must "
+                        "not silently lose coverage. Default is fail-open (degrade to the seed).")
     p.add_argument("--no-stream", action="store_true", dest="no_stream",
                    help="disable live progress/typewriter output (plain, instant lines)")
     p.add_argument("--pager", action="store_true", dest="pager",
@@ -66,4 +70,5 @@ def run(a: argparse.Namespace) -> int:
                         users=a.user or None, orgs=a.org or None,
                         json_out=a.json, sarif_path=a.sarif, reports_dir=a.reports_dir,
                         alert=a.alert, no_stream=a.no_stream, pager=a.pager,
-                        no_advisories=a.no_advisories, external_audit=a.external_audit)
+                        no_advisories=a.no_advisories, external_audit=a.external_audit,
+                        require_db=a.require_db)

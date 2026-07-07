@@ -23,6 +23,7 @@ import io
 import json
 import os
 import ssl
+import sys
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -32,8 +33,9 @@ from stayawake.bots.security.dependencies.corpus import AdvisoryCorpus
 from stayawake.bots.security.dependencies.ecosystems import PURL_TO_OSV
 from stayawake.bots.security.dependencies.osv import (
     OsvAffected, OsvRange, OsvRecord, parse_osv_record)
+from stayawake.core.timeutil import now_iso
 
-_SCHEMA = 1
+_SCHEMA = 2   # bumped for the #1126 manifest (snapshot + generated_at); older caches lack these
 _OSV_EXPORT_BASE = "https://osv-vulnerabilities.storage.googleapis.com"
 # PURL type → OSV export bucket. The single source of truth lives in `ecosystems.py` (the corpus
 # canonicalizes the other direction from the same table, so they can't drift).
@@ -149,15 +151,41 @@ def write_manifest(cache_dir: str | Path | None, results: list[dict[str, Any]]) 
     in-process corpus memo so the next scan sees the fresh data."""
     cache_dir = Path(cache_dir or default_cache_dir())
     cache_dir.mkdir(parents=True, exist_ok=True)
+    ecosystems = {r["ecosystem"]: {k: r[k] for k in
+                                   ("count", "malicious", "vulnerabilities", "sha256", "source")}
+                  for r in results}
     manifest = {"schema": _SCHEMA,
-                "ecosystems": {r["ecosystem"]: {k: r[k] for k in
-                                                ("count", "malicious", "vulnerabilities",
-                                                 "sha256", "source")}
-                               for r in results}}
+                # `snapshot` is a deterministic fingerprint of the whole DB (from the per-ecosystem
+                # content hashes) — pin it in CI for reproducible gates. `generated_at` is
+                # informational (staleness) and deliberately OUTSIDE the snapshot, so it doesn't
+                # perturb the fingerprint.
+                "snapshot": snapshot_digest(ecosystems),
+                "generated_at": now_iso(),
+                "ecosystems": ecosystems}
     _manifest_path(cache_dir).write_text(json.dumps(manifest, sort_keys=True, indent=2),
                                          encoding="utf-8")
     _CORPUS_MEMO.clear()
     return manifest
+
+
+def snapshot_digest(ecosystems: dict[str, Any]) -> str:
+    """A short, deterministic fingerprint of a DB from its per-ecosystem content hashes — same data
+    → same snapshot, so CI can pin it."""
+    h = hashlib.sha256()
+    for eco in sorted(ecosystems):
+        h.update(f"{eco}:{ecosystems[eco].get('sha256', '')}\n".encode("utf-8"))
+    return h.hexdigest()[:16]
+
+
+def _file_sha256(path: Path) -> str | None:
+    try:
+        h = hashlib.sha256()
+        with path.open("rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 16), b""):
+                h.update(chunk)
+        return h.hexdigest()
+    except OSError:
+        return None
 
 
 def update(ecosystems: list[str] | None = None, cache_dir: str | Path | None = None, *,
@@ -191,10 +219,20 @@ def load_corpus(cache_dir: str | Path | None = None) -> AdvisoryCorpus | None:
 
 def _stream_records(cache_dir: Path, manifest: dict[str, Any]):
     """Yield OsvRecords across the manifest's ecosystems, one JSONL line at a time — so a corpus of
-    hundreds of thousands of records never exists as a single parsed list (bounded peak memory)."""
-    for eco in (manifest.get("ecosystems") or {}):
+    hundreds of thousands of records never exists as a single parsed list (bounded peak memory).
+
+    Integrity gate: a records file is trusted only if its content hash matches the manifest. A
+    mismatch means the cache was corrupted or tampered after `db update` — we skip it (falling back
+    to the always-shipped inline seed) and warn loudly, never silently trusting bad data."""
+    for eco, meta in (manifest.get("ecosystems") or {}).items():
+        path = _records_path(cache_dir, eco)
+        expected = (meta or {}).get("sha256")
+        if expected and _file_sha256(path) != expected:
+            print(f"⚠️  saw: advisory-cache integrity check FAILED for {eco} "
+                  f"({path.name}) — ignoring it; run `saw db update`.", file=sys.stderr)
+            continue
         try:
-            fh = _records_path(cache_dir, eco).open(encoding="utf-8")
+            fh = path.open(encoding="utf-8")
         except OSError:
             continue
         with fh:
@@ -217,6 +255,49 @@ def _build_corpus(cache_dir: Path, manifest_path: Path) -> AdvisoryCorpus | None
     except (OSError, json.JSONDecodeError):
         return None
     return AdvisoryCorpus.from_records(_stream_records(cache_dir, manifest))
+
+
+# ── health / trust (saw db status, scan --require-db) ────────────────────────────────────
+def _age_days(generated_at) -> int | None:
+    if not generated_at:
+        return None
+    try:
+        from datetime import datetime
+        dt = datetime.fromisoformat(str(generated_at))
+    except (ValueError, TypeError):
+        return None
+    now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.now()
+    return max(0, (now - dt).days)
+
+
+def cache_status(cache_dir: str | Path | None = None) -> dict[str, Any]:
+    """A health report for the advisory cache: presence, snapshot fingerprint, age, per-ecosystem
+    counts, and a per-file integrity check (content hash vs. manifest). Reads only local files."""
+    cache_dir = Path(cache_dir or default_cache_dir())
+    try:
+        manifest = json.loads(_manifest_path(cache_dir).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"present": False, "cache_dir": str(cache_dir)}
+    ecosystems = manifest.get("ecosystems") or {}
+    mismatches = [eco for eco, meta in ecosystems.items()
+                  if (meta or {}).get("sha256")
+                  and _file_sha256(_records_path(cache_dir, eco)) != meta["sha256"]]
+    return {
+        "present": True,
+        "cache_dir": str(cache_dir),
+        "schema": manifest.get("schema"),
+        "snapshot": manifest.get("snapshot"),
+        "generated_at": manifest.get("generated_at"),
+        "age_days": _age_days(manifest.get("generated_at")),
+        "ecosystems": {eco: {k: (meta or {}).get(k, 0)
+                             for k in ("count", "malicious", "vulnerabilities")}
+                       for eco, meta in ecosystems.items()},
+        "total_malicious": sum((meta or {}).get("malicious", 0) for meta in ecosystems.values()),
+        "total_vulnerabilities": sum((meta or {}).get("vulnerabilities", 0)
+                                     for meta in ecosystems.values()),
+        "integrity_ok": not mismatches,
+        "mismatches": mismatches,
+    }
 
 
 # ── on-disk record shape (normalized, minimal) ───────────────────────────────────────────
