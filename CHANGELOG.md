@@ -7,6 +7,15 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **Dependency auditing across six more ecosystems.** The dynamic dependency audit now resolves and
+  matches **Rust** (`Cargo.lock`), **Go** (`go.sum` / `go.mod`), **Ruby** (`Gemfile.lock`), **PHP /
+  Composer** (`composer.lock`), **.NET** (`packages.lock.json`) and **Java** (all Gradle lock formats
+  — `gradle.lockfile`, `buildscript-gradle.lockfile`, legacy `gradle/dependency-locks/*.lockfile` —
+  plus `pom.xml`) — eight ecosystems in all (with npm + PyPI). Each is a small resolver against the frozen
+  interface (Open/Closed: no matcher/store change), and `saw db update` now fetches every ecosystem's
+  advisories. Validated on live OSV data (a real malicious package per ecosystem → INFECTED, with
+  version formats normalized to the OSV form — Go's `v` prefix, Composer's `v` tag, RubyGems platform
+  suffixes, `pkg:cargo`↔`crates.io` naming, …). Phase 3b of the dependency-audit epic.
 - **PyPI dependency auditing.** The dependency audit now covers Python projects: a `PyPiResolver`
   reads `requirements.txt` (exact `==` pins), `poetry.lock`, `Pipfile.lock` and `uv.lock`, resolves
   each package (PEP 503-normalized names, so `Flask_Foo` matches a `flask-foo` advisory), and matches
