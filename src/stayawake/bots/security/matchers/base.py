@@ -6,10 +6,14 @@ signature `matcher` value it serves.
 """
 from __future__ import annotations
 
-import json
 import re
 from fnmatch import fnmatch
 from typing import Any
+
+# Re-exported from the neutral leaf module so this file's existing importers (structural,
+# npm_manifest, remediation) keep `from ...matchers.base import load_jsonc`, while the
+# `dependencies/` package imports it directly and avoids a matchers↔dependencies cycle.
+from stayawake.bots.security.jsonc import load_jsonc  # noqa: F401  (re-export)
 
 # Font-format magic bytes; a "font" lacking these but carrying text is a payload.
 FONT_MAGIC = {
@@ -52,19 +56,6 @@ def build_content_sig(signatures: list[dict[str, Any]]):
         return None
 
     return check
-
-
-def load_jsonc(text: str) -> Any:
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        cleaned = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
-        cleaned = re.sub(r"(^|[^:])//.*$", r"\1", cleaned, flags=re.M)
-        cleaned = re.sub(r",(\s*[}\]])", r"\1", cleaned)
-        try:
-            return json.loads(cleaned)
-        except json.JSONDecodeError:
-            return None
 
 
 class Matcher:

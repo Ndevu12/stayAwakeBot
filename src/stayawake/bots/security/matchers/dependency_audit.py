@@ -1,214 +1,57 @@
 #!/usr/bin/env python3
-"""Malicious-upstream-dependency audit (#1101, T1195.001).
+"""Malicious-upstream-dependency audit — the coordinator (#1101, T1195.001; #1119 refactor).
 
-The campaign's PRIMARY spread is republishing backdoored versions of packages, so the next
-`npm install` is the next victim — the payload lands in `node_modules` (which `saw` excludes) and
-never touches the repo tree. This matcher audits what a repo DECLARES and LOCKS: it parses
-`package.json` and the npm/yarn/pnpm lockfiles and flags any dependency — direct OR
-lockfile-transitive — whose exact `name@version` is on a data-driven known-bad blocklist.
+This matcher is now a thin orchestrator: it asks each ecosystem **resolver** for the packages
+a repo declares/locks (as `Purl`s), asks the **advisory store** whether any is known-bad, and
+emits a `Finding` anchored to the source file. All parsing lives in `dependencies/resolvers/`
+and all "is this bad, and why" lives in `dependencies/store.py` — this file owns only the
+workflow, so `handles = "dependency-audit"` keeps the scanner/REGISTRY/verdict/allowlist
+contract unchanged.
 
-Exactness is the point: an exact-locked (or exact-pinned) `name@version` match is decisive
-(`confirmed` → INFECTED). A package.json RANGE (`^4.2.11`) is ambiguous — it may or may not resolve
-to the bad version — so ranges are deliberately NOT matched here; the lockfile's resolved version
-is the source of truth. Offline, deterministic, cheap; the behavioral engine stays the backbone.
-
-Supported lockfiles: npm `package-lock.json` / `npm-shrinkwrap.json` (v1 `dependencies` tree +
-v2/v3 `packages`), `yarn.lock` (classic v1 `version "x"` AND berry v2+ `version: x`), and
-`pnpm-lock.yaml` (v5 `/name/version`, v6+/v9 `/name@version`, with `(peer)` or `_peer` suffixes).
-
-The blocklist is data-driven: the `dependency-audit` signature(s) in signatures.yml carry a
-`known_bad` list of exact `name@version` strings, refreshed from public advisories (JFrog / GitHub
-Security Advisories / OSV). Scanning `node_modules` content behaviorally is deliberately deferred
-(expensive/noisy, off by default) — see docs/SECURITY_ARCHITECTURE.md.
+Exactness is the point (preserved from the original): an exact-locked (or exact-pinned)
+`name@version` match is decisive (`confirmed` → INFECTED). Offline, deterministic, cheap; the
+behavioral engine stays the backbone. The store is injectable (`store_factory`) so tests can
+supply an in-memory corpus and phase 1b (#1120) can swap the inline seed for the offline OSV
+DB without touching this coordinator.
 """
 from __future__ import annotations
 
-import re
-
-import yaml
-
 from stayawake.bots.security.models import Finding, Severity
-from stayawake.bots.security.matchers.base import Matcher, load_jsonc
-
-_MANIFEST = "package.json"
-_NPM_LOCKS = ("package-lock.json", "npm-shrinkwrap.json")
-_EXACT_VERSION = re.compile(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.\-]+)?$")
-_DECLARED_DEP_FIELDS = ("dependencies", "devDependencies",
-                        "optionalDependencies", "peerDependencies")
-# Lockfiles must be parsed WHOLE (a head/tail-truncated lockfile is invalid JSON/YAML and yields
-# nothing), so read up to this generous cap instead of the scan's default source cap. 32 MB covers
-# any realistic lockfile while bounding memory on a pathological one.
-_MAX_LOCKFILE_BYTES = 32_000_000
-_MAX_NPM_V1_DEPTH = 100          # guard the recursive v1 `dependencies` walk against a crafted tree
-# A pnpm `packages:` key: an optional leading '/', a name, then '@version' (v6+/v9) or '/version'
-# (v5), then the version stops before a peer suffix ('(...)' or '_...'). The name capture is
-# non-greedy so the version separator lands on the FIRST '@'/'/' that precedes a digit.
-_PNPM_KEY = re.compile(r"^/?(?P<name>.+?)[@/](?P<version>\d+\.\d+\.\d+[0-9A-Za-z.\-+]*)")
+from stayawake.bots.security.matchers.base import Matcher
+from stayawake.bots.security.dependencies import RESOLVERS, AdvisoryStore
+from stayawake.bots.security.dependencies.purl import ResolvedDependency
 
 
 class DependencyAuditMatcher(Matcher):
     handles = "dependency-audit"
 
-    def scan(self, target, signatures):
-        # blocklist: exact "name@version" → the signature that owns it. Entries must carry a version
-        # separator ('@' past a leading scope), so a malformed bare-name entry can't match everything.
-        blocklist: dict[str, dict] = {}
-        for sig in signatures:
-            for entry in sig.get("known_bad", []) or []:
-                if isinstance(entry, str) and entry.strip().rfind("@") > 0:
-                    blocklist[entry.strip()] = sig
-        if not blocklist:
-            return []
+    def __init__(self, resolvers=RESOLVERS, store_factory=AdvisoryStore.from_signatures):
+        self._resolvers = resolvers
+        self._store_factory = store_factory
 
+    def scan(self, target, signatures):
+        store = self._store_factory(signatures)
+        if store.is_empty():
+            return []
         findings: list[Finding] = []
-        for rel in target.iter_files():
-            base = rel.rsplit("/", 1)[-1]
-            if base == _MANIFEST:
-                deps = self._manifest_deps(self._read(target, rel))
-            elif base in _NPM_LOCKS:
-                deps = self._npm_lock_deps(self._read(target, rel))
-            elif base == "yarn.lock":
-                deps = self._yarn_lock_deps(self._read(target, rel))
-            elif base == "pnpm-lock.yaml":
-                deps = self._pnpm_lock_deps(self._read(target, rel))
-            else:
-                continue
-            seen: set[str] = set()
-            for name, version in deps:
-                key = f"{name}@{version}"
-                if key in blocklist and key not in seen:
-                    seen.add(key)
-                    findings.append(self._emit(blocklist[key], rel,
-                                               f"{key} — known-malicious upstream package ({base})"))
+        seen: set[tuple[str, str]] = set()          # (source_path, coordinate) — dedup within a file
+        for resolver in self._resolvers:
+            for dep in resolver.resolve(target):
+                advisory = store.advisory_for(dep.purl)
+                if advisory is None:
+                    continue
+                key = (dep.source_path, dep.purl.coordinate)
+                if key in seen:
+                    continue
+                seen.add(key)
+                findings.append(_emit(advisory.signature, dep))
         return findings
 
-    @staticmethod
-    def _read(target, rel) -> str | None:
-        """Read a manifest/lockfile WHOLE (bypassing the scan's head/tail truncation, which would
-        turn a large lockfile into unparseable JSON/YAML). Falls back to read_text on any issue."""
-        raw = target.read_bytes(rel, limit=_MAX_LOCKFILE_BYTES)
-        if raw is not None:
-            return raw.decode("utf-8", errors="replace")
-        return target.read_text(rel)
 
-    # ── package.json — exact-pinned declared deps only (ranges defer to the lockfile) ──
-    def _manifest_deps(self, text) -> list[tuple[str, str]]:
-        data = load_jsonc(text or "")
-        if not isinstance(data, dict):
-            return []
-        out = []
-        for field in _DECLARED_DEP_FIELDS:
-            deps = data.get(field)
-            if not isinstance(deps, dict):
-                continue
-            for name, spec in deps.items():
-                if isinstance(name, str) and isinstance(spec, str):
-                    version = _exact_version(spec)
-                    if version:
-                        out.append((name, version))
-        return out
-
-    # ── npm — package-lock.json / npm-shrinkwrap.json (v2/v3 `packages` + v1 `dependencies`) ──
-    def _npm_lock_deps(self, text) -> list[tuple[str, str]]:
-        data = load_jsonc(text or "")
-        if not isinstance(data, dict):
-            return []
-        out: list[tuple[str, str]] = []
-        packages = data.get("packages")            # lockfile v2/v3: keyed by install path
-        if isinstance(packages, dict):
-            for path, meta in packages.items():
-                if not (isinstance(path, str) and isinstance(meta, dict)):
-                    continue
-                version = meta.get("version")
-                if "node_modules/" not in path or not isinstance(version, str):
-                    continue
-                # Prefer the authoritative `name` (set for aliased installs, where the install-path
-                # segment is the ALIAS, not the real package); fall back to the path segment.
-                name = meta.get("name") or path.rsplit("node_modules/", 1)[-1]
-                if isinstance(name, str) and name:
-                    out.append((name, version))
-        self._walk_npm_v1(data.get("dependencies"), out, 0)   # lockfile v1: nested tree
-        return out
-
-    def _walk_npm_v1(self, deps, out, depth) -> None:
-        if not isinstance(deps, dict) or depth > _MAX_NPM_V1_DEPTH:
-            return
-        for name, meta in deps.items():
-            if not (isinstance(name, str) and isinstance(meta, dict)):
-                continue
-            version = meta.get("version")
-            if isinstance(version, str):
-                out.append((name, version))
-            self._walk_npm_v1(meta.get("dependencies"), out, depth + 1)
-
-    # ── yarn.lock — classic (`version "x"`) and berry (`version: x`) ──
-    def _yarn_lock_deps(self, text) -> list[tuple[str, str]]:
-        out: list[tuple[str, str]] = []
-        names: list[str] = []
-        for line in (text or "").splitlines():
-            stripped = line.strip()
-            if line and not line[0].isspace() and line.rstrip().endswith(":"):
-                header = line.rstrip()[:-1]                  # drop trailing ':'
-                names = [_yarn_spec_name(part.strip().strip('"'))
-                         for part in header.split(",")]
-            elif stripped.startswith("version"):
-                # classic: `version "4.2.11"`  |  berry: `version: 4.2.11`
-                m = re.match(r'version:?\s+"?([^"\s]+)"?', stripped)
-                if m:
-                    for name in names:
-                        if name:
-                            out.append((name, m.group(1)))
-        return out
-
-    # ── pnpm-lock.yaml (`packages:` keyed by /name@version(peers) or /name/version_peer) ──
-    def _pnpm_lock_deps(self, text) -> list[tuple[str, str]]:
-        try:
-            data = yaml.safe_load(text or "")
-        except yaml.YAMLError:
-            return []
-        if not isinstance(data, dict):
-            return []
-        out: list[tuple[str, str]] = []
-        for section in ("packages", "snapshots"):        # v9 splits packages/snapshots
-            block = data.get(section)
-            if isinstance(block, dict):
-                for key in block:
-                    nv = _pnpm_key_name_version(key)
-                    if nv:
-                        out.append(nv)
-        return out
-
-    @staticmethod
-    def _emit(sig, rel, ev):
-        return Finding(signature_id=sig["id"], category=sig["category"],
-                       severity=Severity.parse(sig["severity"]), path=rel,
-                       description=sig["description"], remediation=sig.get("remediation", "manual"),
-                       evidence=ev, vector=sig["category"])
-
-
-def _exact_version(spec: str) -> str | None:
-    """An exactly-pinned semver (no range operator) → the version, else None. `^`/`~`/`>`/`<`/`*`/
-    `x`/`||`/url/git/`npm:`alias specs are ranges/indirections and are left to the lockfile."""
-    s = spec.strip().lstrip("=").strip()
-    if s[:1] == "v" and s[1:2].isdigit():          # a `v1.2.3` pin → drop the leading v
-        s = s[1:]
-    return s if _EXACT_VERSION.match(s) else None
-
-
-def _yarn_spec_name(spec: str) -> str:
-    """`name` from a yarn `name@range` / `@scope/name@range` header spec — everything before the
-    LAST '@' (a lone leading scope '@' is kept). Handles berry's `name@npm:^1.2.3` too."""
-    at = spec.rfind("@")
-    return spec[:at] if at > 0 else spec
-
-
-def _pnpm_key_name_version(key) -> tuple[str, str] | None:
-    """(name, version) from a pnpm `packages:`/`snapshots:` key across v5 (`/name/version[_peer]`)
-    and v6+/v9 (`/name@version[(peer)]`, leading '/' optional), scoped or not. The version is the
-    semver at the first '@'/'/' boundary that precedes a digit; peer suffixes are excluded."""
-    if not isinstance(key, str):
-        return None
-    m = _PNPM_KEY.match(key)
-    if not m:
-        return None
-    return (m.group("name"), m.group("version"))
+def _emit(sig: dict, dep: ResolvedDependency) -> Finding:
+    return Finding(
+        signature_id=sig["id"], category=sig["category"],
+        severity=Severity.parse(sig["severity"]), path=dep.source_path,
+        description=sig["description"], remediation=sig.get("remediation", "manual"),
+        evidence=f"{dep.purl.coordinate} — known-malicious upstream package ({dep.source_name})",
+        vector=sig["category"])
