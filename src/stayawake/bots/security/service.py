@@ -59,7 +59,7 @@ def _enclosing_repo_root(start: Path | None = None) -> Path:
 _BUILD_OUTPUT_DIRS = {"dist", "build", "out", ".next"}
 
 
-def _options(settings: dict) -> ScanOptions:
+def _options(settings: dict, *, dependency_advisories: bool = False) -> ScanOptions:
     base = ScanOptions()
     exclude = set(settings.get("exclude_dirs", base.exclude_dirs))
     scan_build_outputs = bool(settings.get("scan_build_outputs", base.scan_build_outputs))
@@ -70,6 +70,9 @@ def _options(settings: dict) -> ScanOptions:
         max_file_bytes=int(settings.get("max_file_bytes", base.max_file_bytes)),
         remote_clone_depth=int(settings.get("remote_clone_depth", base.remote_clone_depth)),
         scan_build_outputs=scan_build_outputs,
+        # Config OR the CLI flag enables the opt-in dependency-advisory tier.
+        dependency_advisories=dependency_advisories or bool(
+            settings.get("dependency_advisories", base.dependency_advisories)),
     )
 
 
@@ -171,7 +174,8 @@ def scan(config_path: str | None = None, *, remote: bool = False,
          orgs: list[str] | None = None, slugs: list[str] | None = None,
          json_out: bool = False, sarif_path: str | Path | None = None,
          reports_dir: str | Path | None = None, alert: bool = False,
-         no_stream: bool = False, pager: bool = False) -> int:
+         no_stream: bool = False, pager: bool = False,
+         dependency_advisories: bool = False) -> int:
     """Scan targets (READ-ONLY) and deliver the result through sinks. Scope is LOCAL by
     default — explicit `paths`, the configured local globs, or the current repo. With
     remote=True (`saw scan --remote`) it scans GitHub repos resolved by the #1075 ladder:
@@ -188,7 +192,7 @@ def scan(config_path: str | None = None, *, remote: bool = False,
     prog = Streamer(enabled=progress_on, out=sys.stderr)
     cfg = _read_config(config_path)
     settings = cfg.get("settings", {})
-    opts = _options(settings)
+    opts = _options(settings, dependency_advisories=dependency_advisories)
     sigs = load_signatures(settings.get("signatures_path"))
     allowlist = cfg.get("allowlist", [])
 

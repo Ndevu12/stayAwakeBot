@@ -51,10 +51,13 @@ def run_update(a: argparse.Namespace) -> int:
         print(f"saw db update failed: {type(e).__name__}: {e}", file=sys.stderr)
         return 1
 
-    total = sum(r["count"] for r in results)
+    mal = sum(r["malicious"] for r in results)
+    vuln = sum(r["vulnerabilities"] for r in results)
     lines = ["Advisory database updated.",
-             *(f"  {r['ecosystem']:<10} {r['count']:>6} malicious packages" for r in results),
-             f"  {'total':<10} {total:>6}",
+             *(f"  {r['ecosystem']:<10} {r['malicious']:>6} malicious · "
+               f"{r['vulnerabilities']:>6} vulnerabilities" for r in results),
+             f"  {'total':<10} {mal:>6} malicious · {vuln:>6} vulnerabilities",
+             "  (vulnerabilities are opt-in at scan time: `saw scan --advisories`)",
              f"cache: {db.default_cache_dir() if not a.cache_dir else a.cache_dir}"]
     Streamer(enabled=stream_enabled(sys.stdout, force_off=a.no_stream)).line("\n".join(lines))
     return 0

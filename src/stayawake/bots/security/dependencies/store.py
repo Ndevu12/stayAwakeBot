@@ -39,10 +39,12 @@ class AdvisoryStore:
     """Package `Purl` → `Advisory`. Built from the data, queried by the matcher."""
 
     def __init__(self, by_coordinate: dict[str, Advisory], corpus=None,
-                 corpus_signature: dict[str, Any] | None = None):
+                 corpus_signature: dict[str, Any] | None = None,
+                 vulnerability_signature: dict[str, Any] | None = None):
         self._by_coordinate = by_coordinate
         self._corpus = corpus                       # AdvisoryCorpus | None
-        self._corpus_signature = corpus_signature   # signature to stamp corpus hits with
+        self._corpus_signature = corpus_signature   # stamps MALWARE (verdict) corpus hits
+        self._vulnerability_signature = vulnerability_signature   # stamps CVE (advisory) hits
 
     @classmethod
     def from_signatures(cls, signatures: list[dict[str, Any]]) -> "AdvisoryStore":
@@ -53,17 +55,18 @@ class AdvisoryStore:
     def default(cls, signatures: list[dict[str, Any]], cache_dir=None) -> "AdvisoryStore":
         """The scan-time store: inline seed **plus** the offline corpus, if a cache exists.
 
-        The corpus is stamped with the `dependency-audit` signature that opts in via `corpus: true`
-        so its findings share the `malicious-dependency` id/category/severity (allowlist and verdict
-        behave identically to the seed). No opted-in signature, or no cache → corpus disabled and
-        this is exactly `from_signatures`.
+        Malware hits are stamped with the signature that opts in via `corpus: true` (the
+        `malicious-dependency` id → same verdict/allowlist as the seed); CVE hits are stamped with
+        the `advisory_corpus: true` signature (`vulnerable-dependency`). No opted-in signature, or
+        no cache → that tier is disabled; with neither, this is exactly `from_signatures`.
         """
         # Local import: db imports this package's siblings; importing it here (not at module load)
         # keeps the dependencies package's import graph acyclic.
         from stayawake.bots.security.dependencies import db
         corpus_sig = next((s for s in signatures if s.get("corpus")), None)
-        corpus = db.load_corpus(cache_dir) if corpus_sig else None
-        return cls(cls._inline_index(signatures), corpus, corpus_sig)
+        vuln_sig = next((s for s in signatures if s.get("advisory_corpus")), None)
+        corpus = db.load_corpus(cache_dir) if (corpus_sig or vuln_sig) else None
+        return cls(cls._inline_index(signatures), corpus, corpus_sig, vuln_sig)
 
     @staticmethod
     def _inline_index(signatures: list[dict[str, Any]]) -> dict[str, Advisory]:
@@ -78,16 +81,26 @@ class AdvisoryStore:
         return by_coordinate
 
     def advisory_for(self, purl: Purl) -> Advisory | None:
-        """The advisory flagging this package (inline seed first, then corpus), or None."""
+        """The MALWARE advisory flagging this package (inline seed first, then corpus), or None.
+        This is the verdict-driving tier (→ INFECTED)."""
         advisory = self._by_coordinate.get(purl.coordinate)
         if advisory is not None:
             return advisory
         if self._corpus is not None and self._corpus_signature is not None:
-            rec = self._corpus.match(purl)
+            rec = self._corpus.malicious_match(purl)
             if rec is not None:
                 return Advisory(signature=self._corpus_signature,
                                 osv_id=rec.id, aliases=rec.aliases)
         return None
+
+    def vulnerabilities_for(self, purl: Purl) -> list[Advisory]:
+        """Non-malware advisories (CVEs) affecting this package — the opt-in advisory tier that
+        never moves the verdict. Empty unless a `vulnerable-dependency` signature and a corpus
+        are both present."""
+        if self._corpus is None or self._vulnerability_signature is None:
+            return []
+        return [Advisory(signature=self._vulnerability_signature, osv_id=rec.id, aliases=rec.aliases)
+                for rec in self._corpus.vulnerability_matches(purl)]
 
     def is_empty(self) -> bool:
         """True when there is nothing to match against — the matcher then short-circuits."""

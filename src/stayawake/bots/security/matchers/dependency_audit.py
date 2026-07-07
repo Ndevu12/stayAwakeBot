@@ -34,18 +34,27 @@ class DependencyAuditMatcher(Matcher):
         store = self._store_factory(signatures)
         if store.is_empty():
             return []
+        # The vulnerability (CVE) tier is opt-in and never affects the verdict; the malware tier is
+        # always on. `advisory_only` findings are routed out of the verdict by the scanner.
+        advisories_on = bool(getattr(target.opts, "dependency_advisories", False))
         findings: list[Finding] = []
-        seen: set[tuple[str, str]] = set()          # (source_path, coordinate) — dedup within a file
+        seen_malware: set[tuple[str, str]] = set()          # (source_path, coordinate)
+        seen_vuln: set[tuple[str, str, str]] = set()        # + advisory id
         for resolver in self._resolvers:
             for dep in resolver.resolve(target):
                 advisory = store.advisory_for(dep.purl)
-                if advisory is None:
-                    continue
-                key = (dep.source_path, dep.purl.coordinate)
-                if key in seen:
-                    continue
-                seen.add(key)
-                findings.append(_emit(advisory, dep))
+                if advisory is not None:
+                    key = (dep.source_path, dep.purl.coordinate)
+                    if key not in seen_malware:
+                        seen_malware.add(key)
+                        findings.append(_emit(advisory, dep))
+                    continue          # a malware hit dominates — don't also list the package's CVEs
+                if advisories_on:
+                    for vuln in store.vulnerabilities_for(dep.purl):
+                        vkey = (dep.source_path, dep.purl.coordinate, vuln.osv_id or "")
+                        if vkey not in seen_vuln:
+                            seen_vuln.add(vkey)
+                            findings.append(_emit_advisory(vuln, dep))
         return findings
 
 
@@ -58,3 +67,15 @@ def _emit(advisory: Advisory, dep: ResolvedDependency) -> Finding:
         description=sig["description"], remediation=sig.get("remediation", "manual"),
         evidence=f"{dep.purl.coordinate} — known-malicious upstream package{cite} ({dep.source_name})",
         vector=sig["category"])
+
+
+def _emit_advisory(advisory: Advisory, dep: ResolvedDependency) -> Finding:
+    """A CVE/GHSA advisory on a declared dependency — informational, routed OUT of the verdict."""
+    sig = advisory.signature
+    cite = f" [{advisory.osv_id}]" if advisory.osv_id else ""
+    return Finding(
+        signature_id=sig["id"], category=sig["category"],
+        severity=Severity.parse(sig["severity"]), path=dep.source_path,
+        description=sig["description"], remediation=sig.get("remediation", "manual"),
+        evidence=f"{dep.purl.coordinate} — known security advisory{cite} ({dep.source_name})",
+        vector=sig["category"], advisory_only=True)

@@ -53,6 +53,11 @@ class ScanOptions:
     # `heuristic` `obfuscated-build-artifact` finding, never `confirmed`. Default off (FP-safe
     # defaults unchanged).
     scan_build_outputs: bool = False
+    # Opt-in (`saw scan --advisories` / config `dependency_advisories: true`): also surface ordinary
+    # dependency CVEs (the `vulnerable-dependency` advisory tier). These are reported separately and
+    # NEVER move the worm verdict (see ScanResult.advisories); off by default so a scan's INFECTED /
+    # SUSPICIOUS / CLEAN meaning is unchanged.
+    dependency_advisories: bool = False
 
 
 class Target:

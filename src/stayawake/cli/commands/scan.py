@@ -31,6 +31,9 @@ def register(sub) -> None:
                    help="scan this GitHub user's repos (repeatable; implies --remote)")
     p.add_argument("--org", action="append", default=[], metavar="ORG",
                    help="scan this GitHub org's repos (repeatable; implies --remote)")
+    p.add_argument("--advisories", action="store_true", dest="advisories",
+                   help="also report ordinary dependency CVEs (needs `saw db update`); these are "
+                        "informational and NEVER change the verdict/exit code. Off by default.")
     p.add_argument("--no-stream", action="store_true", dest="no_stream",
                    help="disable live progress/typewriter output (plain, instant lines)")
     p.add_argument("--pager", action="store_true", dest="pager",
@@ -56,4 +59,5 @@ def run(a: argparse.Namespace) -> int:
                         slugs=(positionals or None) if remote else None,
                         users=a.user or None, orgs=a.org or None,
                         json_out=a.json, sarif_path=a.sarif, reports_dir=a.reports_dir,
-                        alert=a.alert, no_stream=a.no_stream, pager=a.pager)
+                        alert=a.alert, no_stream=a.no_stream, pager=a.pager,
+                        dependency_advisories=a.advisories)

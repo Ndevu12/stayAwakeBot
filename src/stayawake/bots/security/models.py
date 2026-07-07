@@ -77,6 +77,9 @@ class Finding:
     evidence: str | None = None
     vector: str | None = None      # e.g. "vscode-autorun", "evil-merge"
     confidence: str = CONFIRMED    # confirmed | heuristic — stamped by the scanner from the signature
+    advisory_only: bool = False    # informational (e.g. a dependency CVE) — the scanner routes these
+                                   # OUT of the worm verdict into ScanResult.advisories; a repo with
+                                   # only advisory_only findings stays CLEAN (reported, never gated).
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -92,6 +95,9 @@ class ScanResult:
     source: str                    # "local" | "remote"
     findings: list[Finding] = field(default_factory=list)
     error: str | None = None
+    # Advisory-tier results (dependency CVEs, opt-in) — deliberately NOT part of `findings`, so the
+    # verdict below can never see them. Reported in their own section; they never gate a scan.
+    advisories: list[Finding] = field(default_factory=list)
 
     @property
     def verdict(self) -> str:
@@ -136,6 +142,7 @@ class ScanResult:
             "by_category": by_cat,
             "by_confidence": by_conf,
             "max_severity": self.max_severity.label() if self.max_severity else None,
+            "advisories": len(self.advisories),
         }
 
     def to_dict(self) -> dict[str, Any]:
@@ -148,6 +155,7 @@ class ScanResult:
             "error": self.error,
             "summary": self.summary(),
             "findings": [f.to_dict() for f in self.findings],
+            "advisories": [a.to_dict() for a in self.advisories],
         }
 
 
@@ -185,6 +193,7 @@ class ScanReport:
                                 if f.severity.label() == "critical"),
                 "high": sum(1 for r in results for f in r.findings
                             if f.severity.label() == "high"),
+                "advisories": sum(len(r.advisories) for r in results),
             },
             "any_infected": self.any_infected,
             "any_suspicious": self.any_suspicious,

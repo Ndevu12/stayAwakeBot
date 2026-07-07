@@ -35,7 +35,7 @@ class TestCliDb(unittest.TestCase):
             rc = db_cmd.run_update(args)
         self.assertEqual(rc, 0)
         self.assertIn("Advisory database updated", out.getvalue())
-        self.assertIsNotNone(db.load_corpus(self.cache).match(Purl("npm", "evil", "1.0.0")))
+        self.assertIsNotNone(db.load_corpus(self.cache).malicious_match(Purl("npm", "evil", "1.0.0")))
 
     def test_unsupported_ecosystem_exit_2(self):
         args = argparse.Namespace(ecosystems=["cargo"], cache_dir=str(self.cache), no_stream=True)

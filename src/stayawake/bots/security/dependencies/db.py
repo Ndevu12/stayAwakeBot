@@ -29,9 +29,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterator
 
 from stayawake.bots.security.dependencies.corpus import AdvisoryCorpus
-from stayawake.bots.security.dependencies.osv import (
-    OsvAffected, OsvRecord, is_malicious, parse_osv_record,
-)
+from stayawake.bots.security.dependencies.osv import OsvAffected, OsvRecord, parse_osv_record
 
 _SCHEMA = 1
 _OSV_EXPORT_BASE = "https://osv-vulnerabilities.storage.googleapis.com"
@@ -117,18 +115,21 @@ def update_ecosystem(eco: str, cache_dir: str | Path | None = None, *,
         raise ValueError(f"unsupported ecosystem: {eco!r} (supported: {supported_ecosystems()})")
     (cache_dir / "records").mkdir(parents=True, exist_ok=True)
 
+    # Keep every record with an explicit affected-version list — BOTH malware (drives the verdict)
+    # and ordinary CVEs (the opt-in advisory tier). Each is tagged with its `malicious` flag so the
+    # corpus can serve the two tiers separately. Range-only advisories are dropped (→ #1124).
     records: list[dict[str, Any]] = []
     for raw in _iter_zip_records(fetch(bucket)):
-        if not is_malicious(raw):
-            continue
         rec = parse_osv_record(raw)
-        if rec is not None:            # None → no explicit versions (deferred to #1124)
+        if rec is not None:
             records.append(_record_to_json(rec))
     # Deterministic on-disk bytes: same export → same file → same sha256 (reproducible CI, #1126).
     records.sort(key=lambda r: (r["id"], r["affected"][0]["name"] if r["affected"] else ""))
     blob = json.dumps({"ecosystem": eco, "records": records}, sort_keys=True, ensure_ascii=False)
     _records_path(cache_dir, eco).write_text(blob, encoding="utf-8")
-    return {"ecosystem": eco, "count": len(records),
+    malicious = sum(1 for r in records if r["malicious"])
+    return {"ecosystem": eco, "count": len(records), "malicious": malicious,
+            "vulnerabilities": len(records) - malicious,
             "sha256": hashlib.sha256(blob.encode("utf-8")).hexdigest(),
             "source": f"{_OSV_EXPORT_BASE}/{bucket}/all.zip"}
 
@@ -139,7 +140,9 @@ def write_manifest(cache_dir: str | Path | None, results: list[dict[str, Any]]) 
     cache_dir = Path(cache_dir or default_cache_dir())
     cache_dir.mkdir(parents=True, exist_ok=True)
     manifest = {"schema": _SCHEMA,
-                "ecosystems": {r["ecosystem"]: {k: r[k] for k in ("count", "sha256", "source")}
+                "ecosystems": {r["ecosystem"]: {k: r[k] for k in
+                                                ("count", "malicious", "vulnerabilities",
+                                                 "sha256", "source")}
                                for r in results}}
     _manifest_path(cache_dir).write_text(json.dumps(manifest, sort_keys=True, indent=2),
                                          encoding="utf-8")
@@ -196,7 +199,7 @@ def _build_corpus(cache_dir: Path, manifest_path: Path) -> AdvisoryCorpus | None
 
 # ── on-disk record shape (normalized, minimal) ───────────────────────────────────────────
 def _record_to_json(rec: OsvRecord) -> dict[str, Any]:
-    return {"id": rec.id, "aliases": list(rec.aliases),
+    return {"id": rec.id, "aliases": list(rec.aliases), "malicious": rec.malicious,
             "affected": [{"ecosystem": a.ecosystem, "name": a.name, "versions": sorted(a.versions)}
                          for a in rec.affected]}
 
@@ -210,5 +213,6 @@ def _record_from_json(raw: dict[str, Any]) -> OsvRecord | None:
         if isinstance(a, dict) and a.get("name") and a.get("versions"))
     if not affected:
         return None
+    # `malicious` defaults True for back-compat with a #1120 cache (which stored malware only).
     return OsvRecord(id=str(raw.get("id", "")), aliases=tuple(raw.get("aliases", []) or []),
-                     malicious=True, affected=affected)
+                     malicious=bool(raw.get("malicious", True)), affected=affected)

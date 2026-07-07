@@ -32,12 +32,19 @@ class AdvisoryCorpus:
                 by_package.setdefault((_eco(aff.ecosystem), aff.name), []).append((aff.versions, rec))
         return cls(by_package)
 
-    def match(self, purl) -> OsvRecord | None:
-        """The advisory whose explicit version set contains `purl.version`, or None."""
+    def malicious_match(self, purl) -> OsvRecord | None:
+        """The first MALWARE advisory whose explicit version set contains `purl.version` (drives the
+        worm verdict → INFECTED), or None."""
         for versions, rec in self._by_package.get((_eco(purl.type), purl.name), ()):
-            if purl.version in versions:
+            if rec.malicious and purl.version in versions:
                 return rec
         return None
+
+    def vulnerability_matches(self, purl) -> list[OsvRecord]:
+        """All NON-malware advisories (ordinary CVEs) whose explicit version set contains
+        `purl.version` — the opt-in advisory tier, which never moves the worm verdict."""
+        return [rec for versions, rec in self._by_package.get((_eco(purl.type), purl.name), ())
+                if not rec.malicious and purl.version in versions]
 
     def is_empty(self) -> bool:
         return not self._by_package
