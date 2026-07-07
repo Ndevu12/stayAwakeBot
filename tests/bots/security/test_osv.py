@@ -39,12 +39,18 @@ class TestParseOsvRecord(unittest.TestCase):
         self.assertEqual(rec.affected[0].name, "evil")
         self.assertEqual(rec.affected[0].versions, frozenset({"1.0.0", "1.0.1"}))
 
-    def test_ranges_only_entry_is_dropped(self):
-        # No explicit versions → nothing matchable in phase 1b → None (deferred to #1124).
-        self.assertIsNone(parse_osv_record(
+    def test_ranges_only_entry_is_kept(self):
+        # #1124: a range-only entry is now kept (evaluated by the comparators), not dropped.
+        rec = parse_osv_record(
             {"id": "MAL-2024-2",
              "affected": [{"package": {"ecosystem": "npm", "name": "r"},
-                           "ranges": [{"type": "SEMVER", "events": [{"introduced": "0"}]}]}]}))
+                           "ranges": [{"type": "SEMVER",
+                                       "events": [{"introduced": "1.0.0"}, {"fixed": "2.0.0"}]}]}]})
+        self.assertIsNotNone(rec)
+        self.assertEqual(rec.affected[0].versions, frozenset())
+        self.assertEqual(rec.affected[0].ranges[0].type, "SEMVER")
+        self.assertEqual(rec.affected[0].ranges[0].events,
+                         (("introduced", "1.0.0"), ("fixed", "2.0.0")))
 
     def test_no_id_is_none(self):
         self.assertIsNone(parse_osv_record({"affected": [{"package": {"ecosystem": "npm",
