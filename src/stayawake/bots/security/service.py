@@ -103,6 +103,21 @@ def _options(settings: dict, *, no_advisories: bool = False,
     )
 
 
+def _require_db_or_error() -> int | None:
+    """`--require-db` gate: a non-zero exit (with a stderr reason) if the advisory DB is absent or
+    fails its content-hash integrity check; None if it's present and valid."""
+    from stayawake.bots.security.dependencies import db
+    st = db.cache_status()
+    if not st.get("present"):
+        print("saw scan --require-db: advisory DB not found — run `saw db update`.", file=sys.stderr)
+        return 2
+    if not st.get("integrity_ok"):
+        print("saw scan --require-db: advisory DB integrity check FAILED "
+              f"({', '.join(st.get('mismatches', []))}) — run `saw db update`.", file=sys.stderr)
+        return 2
+    return None
+
+
 def discover_local_repos(patterns: list[str], opts: ScanOptions) -> list[Path]:
     repos: list[Path] = []
     seen: set[str] = set()
@@ -202,7 +217,8 @@ def scan(config_path: str | None = None, *, remote: bool = False,
          json_out: bool = False, sarif_path: str | Path | None = None,
          reports_dir: str | Path | None = None, alert: bool = False,
          no_stream: bool = False, pager: bool = False,
-         no_advisories: bool = False, external_audit: bool = False) -> int:
+         no_advisories: bool = False, external_audit: bool = False,
+         require_db: bool = False) -> int:
     """Scan targets (READ-ONLY) and deliver the result through sinks. Scope is LOCAL by
     default — explicit `paths`, the configured local globs, or the current repo. With
     remote=True (`saw scan --remote`) it scans GitHub repos resolved by the #1075 ladder:
@@ -222,6 +238,13 @@ def scan(config_path: str | None = None, *, remote: bool = False,
     opts = _options(settings, no_advisories=no_advisories, external_audit=external_audit)
     sigs = load_signatures(settings.get("signatures_path"))
     allowlist = cfg.get("allowlist", [])
+
+    # Fail-closed gate (opt-in): a CI scan that must not silently lose malware coverage. Default is
+    # fail-open — a missing/corrupt DB degrades to the always-shipped inline seed (never blind).
+    if require_db or _as_bool(settings.get("require_db"), False):
+        rc = _require_db_or_error()
+        if rc is not None:
+            return rc
 
     # --- WHAT to scan. LOCAL by default (explicit paths / configured globs / current repo);
     #     `--remote` switches scope to the configured GitHub targets. One scope per run.
