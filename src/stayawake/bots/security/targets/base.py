@@ -53,11 +53,17 @@ class ScanOptions:
     # `heuristic` `obfuscated-build-artifact` finding, never `confirmed`. Default off (FP-safe
     # defaults unchanged).
     scan_build_outputs: bool = False
-    # Opt-in (`saw scan --advisories` / config `dependency_advisories: true`): also surface ordinary
-    # dependency CVEs (the `vulnerable-dependency` advisory tier). These are reported separately and
-    # NEVER move the worm verdict (see ScanResult.advisories); off by default so a scan's INFECTED /
-    # SUSPICIOUS / CLEAN meaning is unchanged.
-    dependency_advisories: bool = False
+    # ON by default — offline, deterministic and free (the corpus is already loaded for malware):
+    # surface ordinary dependency CVEs (the `vulnerable-dependency` tier) alongside malware, in their
+    # own section, NEVER moving the worm verdict (see ScanResult.advisories). Only produces output
+    # when a `saw db update` cache exists. `saw scan --no-advisories` (or config
+    # `dependency_advisories: false`) suppresses the section.
+    dependency_advisories: bool = True
+    # OPT-IN, off by default (`saw scan --external` / config `external_audit: true`): additionally run
+    # INSTALLED external auditors (osv-scanner, …). This is the ONE thing that crosses the offline
+    # guarantee — it spawns subprocesses and a tool may send the dependency graph to its own servers —
+    # so it must be requested explicitly. Also never moves the worm verdict.
+    external_audit: bool = False
 
 
 class Target:

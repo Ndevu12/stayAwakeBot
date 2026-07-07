@@ -14,6 +14,10 @@ behavioral engine stays the backbone. The store is injectable (`store_factory`) 
 supply an in-memory corpus; the default (`AdvisoryStore.default`) is the inline seed **plus** the
 offline OSV corpus (#1120) when `saw db update` has populated a cache — absent a cache it is the
 seed alone, so scans stay offline and zero-setup.
+
+Two things feed the advisory tier (never the verdict): the offline CVE corpus (on by default;
+`--no-advisories` to suppress) and, deliberately crossing the offline default, INSTALLED external
+auditors (`--external`, opt-in, #1125).
 """
 from __future__ import annotations
 
@@ -31,8 +35,9 @@ class DependencyAuditMatcher(Matcher):
         self._store_factory = store_factory
 
     def scan(self, target, signatures):
+        external_on = bool(getattr(target.opts, "external_audit", False))
         store = self._store_factory(signatures)
-        if store.is_empty():
+        if store.is_empty() and not external_on:
             return []
         # The vulnerability (CVE) tier is opt-in and never affects the verdict; the malware tier is
         # always on. `advisory_only` findings are routed out of the verdict by the scanner.
@@ -40,21 +45,26 @@ class DependencyAuditMatcher(Matcher):
         findings: list[Finding] = []
         seen_malware: set[tuple[str, str]] = set()          # (source_path, coordinate)
         seen_vuln: set[tuple[str, str, str]] = set()        # + advisory id
-        for resolver in self._resolvers:
-            for dep in resolver.resolve(target):
-                advisory = store.advisory_for(dep.purl)
-                if advisory is not None:
-                    key = (dep.source_path, dep.purl.coordinate)
-                    if key not in seen_malware:
-                        seen_malware.add(key)
-                        findings.append(_emit(advisory, dep))
-                    continue          # a malware hit dominates — don't also list the package's CVEs
-                if advisories_on:
-                    for vuln in store.vulnerabilities_for(dep.purl):
-                        vkey = (dep.source_path, dep.purl.coordinate, vuln.osv_id or "")
-                        if vkey not in seen_vuln:
-                            seen_vuln.add(vkey)
-                            findings.append(_emit_advisory(vuln, dep))
+        emitted: set[tuple[str, str]] = set()               # (advisory id, coordinate) for external dedup
+        if not store.is_empty():
+            for resolver in self._resolvers:
+                for dep in resolver.resolve(target):
+                    advisory = store.advisory_for(dep.purl)
+                    if advisory is not None:
+                        key = (dep.source_path, dep.purl.coordinate)
+                        if key not in seen_malware:
+                            seen_malware.add(key)
+                            findings.append(_emit(advisory, dep))
+                        continue      # a malware hit dominates — don't also list the package's CVEs
+                    if advisories_on:
+                        for vuln in store.vulnerabilities_for(dep.purl):
+                            vkey = (dep.source_path, dep.purl.coordinate, vuln.osv_id or "")
+                            if vkey not in seen_vuln:
+                                seen_vuln.add(vkey)
+                                findings.append(_emit_advisory(vuln, dep))
+                                emitted.add((vuln.osv_id or "", dep.purl.coordinate))
+        if external_on:
+            findings.extend(_external_findings(target, signatures, emitted))
         return findings
 
 
@@ -78,4 +88,27 @@ def _emit_advisory(advisory: Advisory, dep: ResolvedDependency) -> Finding:
         severity=Severity.parse(sig["severity"]), path=dep.source_path,
         description=sig["description"], remediation=sig.get("remediation", "manual"),
         evidence=f"{dep.purl.coordinate} — known security advisory{cite} ({dep.source_name})",
+        vector=sig["category"], advisory_only=True)
+
+
+def _external_findings(target, signatures, seen: set[tuple[str, str]]) -> list[Finding]:
+    """Run the opt-in external auditors over the target and normalize into advisory-tier findings,
+    stamped with the `vulnerable-dependency` signature. Lazily imported so the subprocess machinery
+    loads only when the user opted in."""
+    vuln_sig = next((s for s in signatures if s.get("advisory_corpus")), None)
+    if vuln_sig is None:
+        return []
+    from stayawake.bots.security.dependencies.external import run_external_audit
+    return [_emit_external(vuln_sig, ef)
+            for ef in run_external_audit(target.repo_root, seen=seen)]
+
+
+def _emit_external(sig: dict, finding) -> Finding:
+    """An external auditor's vulnerability → an advisory-tier finding, attributing the tool."""
+    return Finding(
+        signature_id=sig["id"], category=sig["category"],
+        severity=Severity.parse(finding.severity), path=finding.source_path or ".",
+        description=sig["description"], remediation=sig.get("remediation", "manual"),
+        evidence=(f"{finding.package}@{finding.version} — {finding.advisory_id} "
+                  f"(via {finding.source_tool})"),
         vector=sig["category"], advisory_only=True)

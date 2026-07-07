@@ -352,10 +352,10 @@ signatures:
   # `advisory_corpus: true` opts this signature into the CVE side of the offline corpus. A match is
   # an ordinary security advisory (CVE/GHSA) on a declared dependency — NOT malware — so it is
   # emitted as an ADVISORY (`advisory_only`), routed out of the worm verdict: reported in its own
-  # section, never makes a repo INFECTED. Off by default; enabled per scan via `saw scan
-  # --advisories` (or config `dependency_advisories: true`). severity here is nominal — the tier is
-  # informational, so it never gates. (Phase 1b matches explicit affected versions only; range-based
-  # advisories — the majority of CVEs — light up when the version-range comparators land, #1124.)
+  # section, never makes a repo INFECTED. On by default (offline, non-gating); `saw scan
+  # --no-advisories` or config `dependency_advisories: false` suppresses it. severity here is nominal
+  # — the tier is informational, so it never gates. (Range-based advisories light up via the
+  # per-ecosystem version-range comparators, #1124.)
   - id: vulnerable-dependency
     category: supply-chain-vuln
     severity: medium

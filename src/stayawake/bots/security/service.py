@@ -59,10 +59,31 @@ def _enclosing_repo_root(start: Path | None = None) -> Path:
 _BUILD_OUTPUT_DIRS = {"dist", "build", "out", ".next"}
 
 
-def _options(settings: dict, *, dependency_advisories: bool = False) -> ScanOptions:
+def _as_bool(value, default: bool) -> bool:
+    """Coerce a config value to bool WITHOUT the string footgun — `bool("false")` is True, so a
+    quoted YAML `external_audit: "false"` (or `"no"`/`"off"`/`"0"`) would otherwise read as True and
+    silently ENABLE a security-sensitive option (external audit leaves the offline sandbox). A value
+    that isn't a recognizable boolean falls back to `default`."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        s = value.strip().lower()
+        if s in ("true", "1", "yes", "on"):
+            return True
+        if s in ("false", "0", "no", "off", ""):
+            return False
+    return default
+
+
+def _options(settings: dict, *, no_advisories: bool = False,
+             external_audit: bool = False) -> ScanOptions:
     base = ScanOptions()
     exclude = set(settings.get("exclude_dirs", base.exclude_dirs))
-    scan_build_outputs = bool(settings.get("scan_build_outputs", base.scan_build_outputs))
+    scan_build_outputs = _as_bool(settings.get("scan_build_outputs"), base.scan_build_outputs)
     if scan_build_outputs:
         exclude -= _BUILD_OUTPUT_DIRS          # let build outputs be traversed (matcher gates the rest)
     return ScanOptions(
@@ -70,9 +91,15 @@ def _options(settings: dict, *, dependency_advisories: bool = False) -> ScanOpti
         max_file_bytes=int(settings.get("max_file_bytes", base.max_file_bytes)),
         remote_clone_depth=int(settings.get("remote_clone_depth", base.remote_clone_depth)),
         scan_build_outputs=scan_build_outputs,
-        # Config OR the CLI flag enables the opt-in dependency-advisory tier.
-        dependency_advisories=dependency_advisories or bool(
-            settings.get("dependency_advisories", base.dependency_advisories)),
+        # The offline CVE-advisory tier is ON by default; `--no-advisories` or config
+        # `dependency_advisories: false` turns the section off.
+        dependency_advisories=(not no_advisories) and _as_bool(
+            settings.get("dependency_advisories"), base.dependency_advisories),
+        # External auditors are the one opt-in that leaves the offline sandbox (subprocess + a tool's
+        # own network) — CLI flag OR config, off by default. Strict bool coercion so a quoted
+        # `"false"` can't silently enable it.
+        external_audit=external_audit or _as_bool(
+            settings.get("external_audit"), base.external_audit),
     )
 
 
@@ -175,7 +202,7 @@ def scan(config_path: str | None = None, *, remote: bool = False,
          json_out: bool = False, sarif_path: str | Path | None = None,
          reports_dir: str | Path | None = None, alert: bool = False,
          no_stream: bool = False, pager: bool = False,
-         dependency_advisories: bool = False) -> int:
+         no_advisories: bool = False, external_audit: bool = False) -> int:
     """Scan targets (READ-ONLY) and deliver the result through sinks. Scope is LOCAL by
     default — explicit `paths`, the configured local globs, or the current repo. With
     remote=True (`saw scan --remote`) it scans GitHub repos resolved by the #1075 ladder:
@@ -192,7 +219,7 @@ def scan(config_path: str | None = None, *, remote: bool = False,
     prog = Streamer(enabled=progress_on, out=sys.stderr)
     cfg = _read_config(config_path)
     settings = cfg.get("settings", {})
-    opts = _options(settings, dependency_advisories=dependency_advisories)
+    opts = _options(settings, no_advisories=no_advisories, external_audit=external_audit)
     sigs = load_signatures(settings.get("signatures_path"))
     allowlist = cfg.get("allowlist", [])
 
