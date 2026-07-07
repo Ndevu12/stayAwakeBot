@@ -114,6 +114,17 @@ class TestDbStatusCli(unittest.TestCase):
         mp.write_text(json.dumps(m))
         self.assertEqual(self._run(cache, max_age_days=7), 3)
 
+    def test_max_age_unknown_fails_closed(self):
+        # --max-age-days requested but age unknown (legacy manifest, no generated_at) → fail closed,
+        # never silently pass a DB of unknown freshness.
+        cache = Path(tempfile.mkdtemp())
+        _build(cache, {"MAL.json": mal_record("evil", ["1.0.0"])})
+        mp = cache / "manifest.json"
+        m = json.loads(mp.read_text()); m.pop("generated_at", None)
+        mp.write_text(json.dumps(m))
+        self.assertEqual(self._run(cache, max_age_days=7), 3)             # not 0
+        self.assertEqual(self._run(cache), 0)                            # no --max-age-days → healthy
+
 
 class TestRequireDbGate(unittest.TestCase):
     def _with_cache_env(self, cache):

@@ -105,7 +105,14 @@ def run_status(a: argparse.Namespace) -> int:
     if a.require_snapshot and s["snapshot"] != a.require_snapshot:
         print(f"✗ snapshot {s['snapshot']} != required {a.require_snapshot}.", file=sys.stderr)
         rc = rc or 3
-    if a.max_age_days is not None and age is not None and age > a.max_age_days:
-        print(f"✗ DB is {age} day(s) old (> {a.max_age_days}).", file=sys.stderr)
-        rc = rc or 3
+    if a.max_age_days is not None:
+        if age is None:
+            # Freshness was explicitly requested but can't be verified (legacy/missing/invalid
+            # generated_at) → fail CLOSED, never pass a DB of unknown age.
+            print("✗ DB age is unknown (missing/invalid generated_at) — cannot honor "
+                  "--max-age-days; run `saw db update`.", file=sys.stderr)
+            rc = rc or 3
+        elif age > a.max_age_days:
+            print(f"✗ DB is {age} day(s) old (> {a.max_age_days}).", file=sys.stderr)
+            rc = rc or 3
     return rc
