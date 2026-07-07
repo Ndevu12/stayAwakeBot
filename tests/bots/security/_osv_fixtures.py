@@ -25,3 +25,11 @@ def mal_record(name: str, versions: list[str], *, rid: str = "MAL-2024-0001",
     return {"id": rid, "aliases": list(aliases or []),
             "affected": [{"package": {"ecosystem": ecosystem, "name": name},
                           "versions": list(versions)}]}
+
+
+def vuln_record(name: str, versions: list[str], *, rid: str = "CVE-2024-0001",
+                ecosystem: str = "npm", aliases: list[str] | None = None) -> dict[str, Any]:
+    """A minimal ordinary-vulnerability OSV record (no malware signals) — the advisory tier."""
+    return {"id": rid, "aliases": list(aliases or []),
+            "affected": [{"package": {"ecosystem": ecosystem, "name": name},
+                          "versions": list(versions)}]}

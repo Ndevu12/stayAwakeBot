@@ -95,6 +95,14 @@ decisive → **confirmed** (INFECTED).
     dependency graph; we never query per-package online. Records are normalized OSV JSON de-duped on
     `id`+`aliases` (OSV.dev already re-exports GHSA). It complements (not replaces) the behavioral
     engine, which stays the backbone.
+- **Two tiers, one verdict (mission honesty):** a **malicious** package (OpenSSF / a GHSA *malware*
+  advisory) is the worm → it drives the verdict (`confirmed` → INFECTED). A merely **vulnerable**
+  package (an ordinary CVE on a legit library) is *not* the worm; surfacing it as INFECTED would
+  degrade the verdict to "has any known CVE" and bury real worm signal. So CVEs are an **opt-in
+  advisory tier** (`saw scan --advisories` / config `dependency_advisories: true`, off by default):
+  reported in their own section, routed out of the verdict (`ScanResult.advisories`, `advisory_only`
+  findings), and they never change the exit code. Malware is classified by structured signals only
+  (`MAL-` id/alias, `database_specific.type == malware`, CWE-506) — never free text.
 - **Decisions / residuals (deliberate):**
   - A `package.json` **version range** (`^4.2.11`) is ambiguous — it may or may not resolve to the
     bad version — so ranges are **not** matched; the lockfile's resolved version is the source of

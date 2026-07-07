@@ -7,6 +7,14 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **`saw scan --advisories` — a separate, opt-in dependency-CVE tier that never gates.** Malicious
+  packages stay in the worm verdict (→ INFECTED, unchanged); ordinary vulnerabilities (CVE/GHSA on a
+  declared dependency) are now surfaced in their **own report section**, explicitly marked
+  informational — they **never** move the verdict or the exit code. Off by default (so "INFECTED"
+  keeps meaning "carrying the worm", not "has any known CVE"); enable per scan with `--advisories`
+  or config `dependency_advisories: true` (needs `saw db update`). The advisory corpus matches
+  explicit affected versions today; range-based advisories (most CVEs) light up when the version-range
+  comparators land. Phase 2 of the dynamic dependency-audit epic.
 - **`saw db update` — dynamic, offline malicious-dependency detection.** The dependency audit no
   longer relies only on a hand-maintained blocklist: `saw db update` bulk-downloads the OSV
   malicious-package corpus (OpenSSF malicious-packages, the **GitHub Advisory Database** incl. its

@@ -65,11 +65,18 @@ def scan_target(target, signatures_by_matcher: dict[str, list[dict[str, Any]]],
                         if _accepts_all_signatures(matcher)
                         else matcher.scan(target, sigs))
             for finding in findings:
-                if not _allowed(finding, allowlist or []):
+                if _allowed(finding, allowlist or []):
+                    continue
+                if finding.advisory_only:
+                    # Advisory-tier (e.g. a dependency CVE): route OUT of `findings` so the
+                    # verdict never sees it — reported separately, never gates the scan.
+                    result.advisories.append(finding)
+                else:
                     finding.confidence = confidence_of.get(finding.signature_id, CONFIRMED)
                     result.findings.append(finding)
         # Stable, useful ordering: severity desc, then path.
         result.findings.sort(key=lambda f: (-int(f.severity), f.path))
+        result.advisories.sort(key=lambda f: (-int(f.severity), f.path))
     except Exception as exc:  # never let one bad repo abort the whole sweep
         result.error = f"{type(exc).__name__}: {exc}"
     return result
