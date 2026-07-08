@@ -10,17 +10,18 @@ on:
         required: false
         default: 'config/urls.yml'
   push:
-    branches: [main]      # only on main — never commit reports onto feature/PR branches
+    branches: [main]
     paths:
       - 'config/urls.yml'
 
 permissions:
-  contents: write
-  issues: write
+  contents: read     # the sentinel commits NOTHING — status lives in ONE self-updating issue (#1149)
+  issues: write      # find-or-update the single 'Availability status' dashboard issue
 
-# Serialize commits to main across both sentinel workflows to avoid push races.
+# One run at a time so two overlapping cron ticks can't race the issue update (save() self-heals
+# any duplicate anyway; this just avoids the churn).
 concurrency:
-  group: stayawake-main-writer
+  group: ${{ github.workflow }}
   cancel-in-progress: false
 
 jobs:
@@ -29,57 +30,16 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0   # v7.0.0
-        with:
-          fetch-depth: 0
 
       - name: Set up toolchain
         uses: ./.github/actions/setup
 
-      - name: Run checker
-        run: |
-          set +e
-          stayawake-health-check --config config/urls.yml
-          echo "CHECKER_EXIT=$?" >> $GITHUB_ENV
-          set -e
-
-      - name: Generate report
-        if: always()
-        run: stayawake-health-report
-
-      - name: Send alerts
-        if: always()
+      - name: Check availability + refresh the status issue
+        # One command: check every URL, fold the result into the single dashboard issue (the whole
+        # store — debounce + incidents live in its hidden state block), Slack on transitions, then
+        # exit non-zero if anything is down. No report files, no commits.
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-        run: stayawake-health-alert
-
-      - name: Commit reports
-        if: always()
-        uses: ./.github/actions/commit-reports
-        with:
-          paths: reports/
-          message-prefix: "chore(sentinel): availability report"
-          author-name: StayAwakeBot Sentinel
-          author-email: bot@stayawake.local
-
-      - name: Backup reports history
-        if: always()
-        run: |
-          # Make a timestamped backup of reports/history.json before any repo changes
-          TS=$(date -u +"%Y%m%d%H%M%S")
-          if [ -f reports/history.json ]; then
-            cp reports/history.json reports/history.json.bak.$TS
-            echo "Backed up reports/history.json to reports/history.json.bak.$TS"
-          else
-            echo "No reports/history.json to back up"
-          fi
-
-      - name: Enforce checker exit code
-        if: always()
-        run: |
-          # Fail the job after reports/alerts/commit ran if the checker detected failures.
-          if [ "${CHECKER_EXIT:-0}" != "0" ]; then
-            echo "Checker reported failures (exit ${CHECKER_EXIT})."
-            exit 1
-          fi
+        run: stayawake-health-check --config config/urls.yml --fail-on-unhealthy

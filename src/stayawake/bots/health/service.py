@@ -1,29 +1,21 @@
 #!/usr/bin/env python3
-"""Availability orchestration: check → report → alert.
+"""Availability orchestration: check → refresh the one status issue.
 
-Single responsibility: wire the stages together. The CLI calls these; they hold
-no detection/formatting logic of their own.
+Single responsibility: wire the stages together. The renewed sentinel writes NO report files and
+commits NOTHING — the single 'Availability status' issue (see `alerter`) is the whole store.
 """
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 
-from stayawake.bots.health import checker, reporter, alerter
+from stayawake.bots.health import checker, alerter
 from stayawake.bots.health.config import load_config
-from stayawake.core.io import write_json, resolve_reports_dir
-
-REPORTS_DIR = Path("reports")
 
 
-async def _check_async(config_path: str, reports_dir: str | Path | None = None) -> bool:
+async def _check_async(config_path: str) -> bool:
     settings, configs = load_config(config_path)
     results = await checker.run_checks(configs)
-    payload = checker.build_latest_payload(results)
-    rdir = resolve_reports_dir(reports_dir, settings_value=settings.get("reports_dir"),
-                               default=REPORTS_DIR, label="health reports")
-    write_json(rdir / "latest.json", payload)
-    checker.append_minimal_history(results, payload["generated_at"], rdir)
+    alerter.publish(results, settings)   # the one dashboard issue IS the store — no files, no commit
     any_unhealthy = False
     for r in results:
         print(checker.format_console_line(r))
@@ -31,16 +23,7 @@ async def _check_async(config_path: str, reports_dir: str | Path | None = None) 
     return any_unhealthy
 
 
-def run_check(config_path: str = "config/urls.yml", fail_on_unhealthy: bool = False,
-              reports_dir: str | Path | None = None) -> int:
-    """Returns a process exit code (non-fatal by default, like the original)."""
-    any_unhealthy = asyncio.run(_check_async(config_path, reports_dir))
-    return 1 if (fail_on_unhealthy and any_unhealthy) else 0
-
-
-def run_report(latest: str = "reports/latest.json") -> None:
-    reporter.generate(latest_path=latest)
-
-
-def run_alert(latest: str = "reports/latest.json", history: str = "reports/history.json") -> None:
-    alerter.run(latest, history)
+def run_check(config_path: str = "config/urls.yml", fail_on_unhealthy: bool = False) -> int:
+    """Check every URL and refresh the one dashboard issue. Returns a process exit code
+    (non-fatal by default)."""
+    return 1 if (fail_on_unhealthy and asyncio.run(_check_async(config_path))) else 0

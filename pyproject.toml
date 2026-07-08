@@ -49,8 +49,6 @@ stayawake                  = "stayawake.cli:main"
 # Health bot per-command scripts — FROZEN: remote workflows + Docker depend on these
 # byte-for-byte. (The security bot is driven entirely through the terminal-first `saw` CLI.)
 stayawake-health-check     = "stayawake.bots.health.cli.check:main"
-stayawake-health-report    = "stayawake.bots.health.cli.report:main"
-stayawake-health-alert     = "stayawake.bots.health.cli.alert:main"
 
 # Derive the version from the git tag (e.g. tag `v0.1.0` -> version `0.1.0`).
 [tool.hatch.version]
