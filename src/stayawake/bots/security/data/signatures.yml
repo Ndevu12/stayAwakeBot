@@ -9,7 +9,7 @@
 #   category    grouping (code-loader | fake-font | vscode-autorun | git-marker | camouflage | evil-merge | exfil | npm-lifecycle | workflow-autorun | runner-persistence | agent-autorun | supply-chain-dep | supply-chain-vuln)
 #   severity    critical | high | medium | low
 #   matcher     content | filename | structural-json | git-history | heuristic | obfuscation |
-#               npm-manifest | workflow-yaml | dependency-audit
+#               npm-manifest | workflow-yaml | dependency-audit | installed-package-audit
 #   description human-readable
 #   remediation strategy id (consumed in Phase 3): recover (git restore, code-loader) |
 #               quarantine-file | quarantine-dir | remove-foreign-vscode | strip-gitignore-markers | manual
@@ -356,6 +356,27 @@ signatures:
     known_bad:
       - "html-to-gutenberg@4.2.11"
       - "fetch-page-assets@1.2.9"
+
+  # ── Installed-tree audit — what's ACTUALLY on disk, reconciled against the lockfile (#1144) ────
+  # The dependency-audit above sees only the DECLARED lockfile. These catch a package a postinstall
+  # dropped into the installed tree (node_modules) WITHOUT editing the lockfile — invisible to a
+  # lockfile-only audit. Run only when a project-local installed tree exists (skipped on a remote
+  # clone). See matchers/installed_package_audit.py + dependencies/installed.py.
+  - id: malicious-installed-package
+    category: supply-chain-dep
+    severity: critical
+    matcher: installed-package-audit
+    description: "A package INSTALLED on disk matches a known-malicious upstream package@version — caught even if the lockfile was not edited (T1195.001)"
+    remediation: manual
+    corpus: true          # reuses the SAME offline malware corpus as malicious-dependency (memoized)
+  - id: ghost-package
+    category: supply-chain-dep
+    severity: high
+    matcher: installed-package-audit
+    confidence: heuristic  # SUSPICIOUS — npm writes every install to the lockfile, so off-lockfile is
+                           # anomalous, but a benign locally-linked pkg (symlink, skipped) could differ
+    description: "A package is present in the installed tree but absent from the lockfile — a postinstall may have dropped it off-lockfile"
+    remediation: manual
 
   # ── Vulnerable (but not malicious) upstream dependency — the OPT-IN advisory tier ─────────────
   # `advisory_corpus: true` opts this signature into the CVE side of the offline corpus. A match is
