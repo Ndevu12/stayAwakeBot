@@ -61,6 +61,32 @@ class TestScanFailClosed(unittest.TestCase):
             (Path(d) / ".gitignore").write_text("temp_auto_push.bat\n")
             self.assertEqual(_scan("allowlist: []\n", d), 1)   # infected fixture -> 1, not swallowed
 
+    def test_null_allowlist_is_valid_no_suppressions(self):
+        # A bare `allowlist:` (YAML null) means "no suppressions" — it must NOT be over-rejected.
+        with tempfile.TemporaryDirectory() as d:
+            subprocess.run(["git", "init", "-q", d], check=True)
+            (Path(d) / "readme.md").write_text("ok\n")
+            self.assertEqual(_scan("allowlist:\n", d), 0)      # clean repo -> 0, not 2
+
+    def test_explicit_target_with_no_repo_fails_closed(self):
+        # An explicit target that resolves to NO git repo scanned NOTHING — never read as clean.
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / ".gitignore").write_text("temp_auto_push.bat\n")   # malware present, but no .git
+            self.assertEqual(_scan("allowlist: []\n", d), 2)
+
+    @unittest.skipIf(getattr(os, "geteuid", lambda: 1)() == 0, "root can read mode-000 files")
+    def test_unreadable_file_fails_closed(self):
+        # A file that exists but can't be read is a scan GAP, not a clean skip -> fail closed.
+        with tempfile.TemporaryDirectory() as d:
+            subprocess.run(["git", "init", "-q", d], check=True)
+            f = Path(d) / "loader.js"
+            f.write_text("var _$_ab12 = 1;\n")                 # loader-seed-var (confirmed signature)
+            os.chmod(f, 0o000)
+            try:
+                self.assertEqual(_scan("allowlist: []\n", d), 2)
+            finally:
+                os.chmod(f, 0o644)
+
     def test_any_error_property(self):
         clean = ScanResult(target="a", source="local")
         errd = ScanResult(target="b", source="local", error="x")
