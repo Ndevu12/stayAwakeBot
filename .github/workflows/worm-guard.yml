@@ -30,28 +30,17 @@ jobs:
         with:
           # Pin the scanner to a known-good SHA, never @main (SECURITY_BASELINE doctrine):
           # a later compromise of main cannot silently change what the gate runs. This points
-          # at the merge commit of #1066 (terminal-first `saw scan --sarif`), the integrated
-          # main state the gate runs; requires-python >=3.11 satisfies the 3.13 runner. Bump
-          # this deliberately after a reviewed scanner/signature update.
-          sentinel-ref: a2dc06f2a993c05b1706faacbca5bdcde37bee3f   # merge of #1066 (terminal-first saw scan --sarif)
+          # at the merge commit of #1138 — the integrated main state after the dependency-audit
+          # epic (#1127: dynamic all-ecosystem auditing, offline advisory corpus, DB trust) — the
+          # main state the gate runs; requires-python >=3.11 satisfies the 3.13 runner. Bump this
+          # deliberately after a reviewed scanner/signature update (#1118 tracks pin drift).
+          sentinel-ref: 5e28e6548d2275ee7cec3a0e141a9b53f6544bcb   # merge of #1138 (dep-audit epic #1127 + stale-schema fix)
           fail-on-findings: 'true'
           # This gate never uploads SARIF — the job conclusion is the scan's exit code, nothing
           # else. Code-scanning delivery is owned solely by security-sentinel.yml.
           upload-sarif: 'false'
-          # Fixture allowlist is signature-scoped (glob|signature): a fresh payload
-          # under fixtures/ using any OTHER signature is still flagged.
-          allowlist-globs: >-
-            tests/**|loader-fromcharcode-127,
-            tests/**|loader-seed-var,
-            tests/**|loader-decoder-fn,
-            tests/**|loader-global-bang,
-            tests/**|loader-require-hijack,
-            tests/**|oversized-config-line,
-            tests/**|obfuscated-source-file,
-            tests/**|fake-font-fa-solid-400,
-            tests/**|fake-font-text-woff,
-            tests/**|camouflage-blockchain-readme,
-            tests/**|vscode-task-folderopen-exec,
-            tests/**|vscode-task-runs-font,
-            tests/**|vscode-allow-automatic-tasks,
-            tests/**|gitignore-autopush-markers
+          # SINGLE SOURCE OF TRUTH for the allowlist: the repo's committed, signature-scoped
+          # config/security.yml (guarded by CODEOWNERS). No hand-copied allowlist-globs here —
+          # `tests/test_self_scan_clean.py` runs this very scan in CI, so a drift between the
+          # config and the gate is impossible (green `CI — install & test` ⇒ green gate).
+          config-file: config/security.yml

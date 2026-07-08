@@ -108,27 +108,15 @@ jobs:
           # Pin the scanner to a known-good SHA, NEVER the commit under test: a compromised
           # release commit must not be able to certify itself. Bump after an intentional
           # scanner/signature update (kept in sync with worm-guard.yml).
-          sentinel-ref: a2dc06f2a993c05b1706faacbca5bdcde37bee3f   # merge of #1066 (terminal-first saw scan --sarif) — in sync with worm-guard.yml
+          sentinel-ref: 5e28e6548d2275ee7cec3a0e141a9b53f6544bcb   # merge of #1138 (dep-audit epic #1127 + stale-schema fix) — in sync with worm-guard.yml
           fail-on-findings: 'true'
           # Pure exit-code gate: the job conclusion is the scan verdict, nothing else. This
           # commit is also scanned (and, when enabled, uploaded) by worm-guard + security-sentinel,
           # so a redundant code-scanning copy here is dropped.
           upload-sarif: 'false'
-          allowlist-globs: >-
-            tests/**|loader-fromcharcode-127,
-            tests/**|loader-seed-var,
-            tests/**|loader-decoder-fn,
-            tests/**|loader-global-bang,
-            tests/**|loader-require-hijack,
-            tests/**|oversized-config-line,
-            tests/**|obfuscated-source-file,
-            tests/**|fake-font-fa-solid-400,
-            tests/**|fake-font-text-woff,
-            tests/**|camouflage-blockchain-readme,
-            tests/**|vscode-task-folderopen-exec,
-            tests/**|vscode-task-runs-font,
-            tests/**|vscode-allow-automatic-tasks,
-            tests/**|gitignore-autopush-markers
+          # SINGLE SOURCE OF TRUTH: same committed, CODEOWNERS-guarded config/security.yml as
+          # worm-guard.yml — no hand-copied allowlist to drift out of sync between the two gates.
+          config-file: config/security.yml
 
   publish-testpypi:
     name: Publish to TestPyPI (manual dry-run)
