@@ -243,7 +243,9 @@ def scan(config_path: str | None = None, *, remote: bool = False,
     settings = cfg.get("settings", {})
     opts = _options(settings, no_advisories=no_advisories, external_audit=external_audit)
     sigs = load_signatures(settings.get("signatures_path"))
-    allowlist = cfg.get("allowlist", [])
+    # A null/absent `allowlist` (the common `allowlist:` bare key, or no key) means "no
+    # suppressions" → normalize to []. Only a genuinely wrong SHAPE is rejected below.
+    allowlist = cfg.get("allowlist") or []
     # Fail CLOSED on a config we can't apply: an `allowlist` that isn't a list of mappings would
     # otherwise crash the per-target scan (caught as an ERROR with an empty, clean-looking result).
     # Reject it up front with a clear message rather than scanning under an unusable allowlist.
@@ -298,6 +300,14 @@ def scan(config_path: str | None = None, *, remote: bool = False,
         # Discovery (the FS walk) is itself slow and silent — cover it with a spinner.
         with status("Discovering repositories…", enabled=progress_on):
             repos = discover_local_repos(local_patterns, opts)
+        # Fail CLOSED when EXPLICIT targets (ad-hoc paths or configured globs) resolve to zero
+        # repositories — a stale glob or a checkout with no `.git` scanned NOTHING, which must not
+        # read as a clean pass. (A bare run has no explicit target, so it keeps its current-repo
+        # fallback above and is unaffected.)
+        if (paths or cfg_local) and not repos:
+            print("error: the requested target(s) resolved to 0 repositories — nothing was "
+                  "scanned; failing closed (not reporting 'clean').", file=sys.stderr)
+            return 2
         if progress_on and repos:
             prog.line(f"Found {len(repos)} repositor{'y' if len(repos) == 1 else 'ies'} to scan.")
         n = len(repos)

@@ -79,6 +79,13 @@ def scan_target(target, signatures_by_matcher: dict[str, list[dict[str, Any]]],
         # Stable, useful ordering: severity desc, then path.
         result.findings.sort(key=lambda f: (-int(f.severity), f.path))
         result.advisories.sort(key=lambda f: (-int(f.severity), f.path))
+        # A file that EXISTED but could not be read is a scan GAP, not a clean result — surface it so
+        # the run fails CLOSED (service.scan turns any errored target into a non-zero exit). Findings
+        # from the readable files are kept; the target is still marked errored.
+        read_errors = getattr(target, "read_errors", None)
+        if read_errors and not result.error:
+            shown = ", ".join(read_errors[:5]) + (" …" if len(read_errors) > 5 else "")
+            result.error = f"{len(read_errors)} file(s) unreadable: {shown}"
     except Exception as exc:  # never let one bad repo abort the whole sweep
         result.error = f"{type(exc).__name__}: {exc}"
     return result
