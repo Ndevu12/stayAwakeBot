@@ -1,0 +1,30 @@
+# Code owners — REVIEW GATE for the security-critical, single-source files.
+#
+# The worm-guard / release gates decide what to DETECT from a pinned scanner (sentinel-ref)
+# and what to IGNORE from ONE allowlist (config/security.yml). Because that allowlist is a
+# single source of truth (no duplicated copies to drift), it is protected by ownership rather
+# than duplication: any change to the allowlist, the signature DB, the gates, or the shared
+# scan action must be approved by the security owner.
+#
+# For this to have teeth, enable branch protection on `main`:
+#   Settings → Branches → main → "Require a pull request before merging"
+#     ↳ "Require review from Code Owners"
+# Without that setting, CODEOWNERS only auto-requests review; it does not block merges.
+
+# The allowlist — the single "what to ignore". A malicious over-broadening here would blind
+# the gate, so it must never merge without owner review.
+/config/security.yml                              @Ndevu12
+
+# The signature database — the "what to detect". Weakening or removing a signature is a
+# detection regression.
+/src/stayawake/bots/security/data/signatures.yml  @Ndevu12
+
+# The gates and the shared scan action — the wiring that pins the scanner and points at the
+# allowlist. Editing these could silently change what the gate runs or trusts.
+/.github/workflows/worm-guard.yml                 @Ndevu12
+/.github/workflows/release.yml                    @Ndevu12
+/.github/workflows/security-sentinel.yml          @Ndevu12
+/.github/actions/worm-scan/                       @Ndevu12
+
+# This ownership file itself.
+/.github/CODEOWNERS                               @Ndevu12
