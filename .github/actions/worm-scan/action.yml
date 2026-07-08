@@ -109,7 +109,7 @@ runs:
           cfg="$(mktemp)"
           {
             echo "settings:"
-            echo "  exclude_dirs: [\".git\", \"node_modules\", \".next\", \"dist\", \"build\", \".malware-quarantine\", \".venv\", \"reports\"]"
+            echo "  exclude_dirs: [\".git\", \"node_modules\", \".next\", \"dist\", \"build\", \".malware-quarantine\", \".venv\"]"
             echo "targets:"
             echo "  local: [\"$GITHUB_WORKSPACE\"]"
             echo "  github: { users: [], orgs: [] }"
