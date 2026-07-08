@@ -33,9 +33,7 @@ docs/  prevent/  reports/  .github/  CONTRIBUTING.md
 ## Install & run
 ```bash
 pip install -e .            # or: pip install .
-stayawake-health-check   --config config/urls.yml    # health bot is remote-only; scripts kept for CI
-stayawake-health-report
-stayawake-health-alert
+stayawake-health-check   --config config/urls.yml    # check URLs → refresh the ONE status issue
 saw scan  --config config/security.yml               # local security CLI (see docs/CLI.md)
 saw fix [--pr] [--remote]                            # prepare a security/auto-clean branch (--pr to PR)
 saw discard (--branch | --pr) [--remote]             # undo: delete the branch / close the PR

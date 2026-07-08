@@ -8,13 +8,11 @@ from __future__ import annotations
 
 import asyncio
 import time
-from pathlib import Path
 from urllib.parse import urlsplit
 
 import aiohttp
 
 from stayawake.core.adapters.http_client import resolve_dns, inspect_cert
-from stayawake.core.io import read_json, write_json
 from stayawake.core.timeutil import now_iso
 from stayawake.bots.health.models import UrlCheckConfig
 
@@ -102,40 +100,6 @@ async def run_checks(configs: list[UrlCheckConfig]) -> list[dict]:
     timeout = aiohttp.ClientTimeout(total=None)
     async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
         return await asyncio.gather(*(check_one(session, c) for c in configs))
-
-
-def build_latest_payload(results: list[dict]) -> dict:
-    total = len(results)
-    healthy = sum(1 for r in results if r.get("healthy"))
-    resp_vals = [int(r["response_ms"]) for r in results if r.get("response_ms") is not None]
-    return {
-        "generated_at": now_iso(),
-        "results": results,
-        "summary": {
-            "total": total, "healthy": healthy, "unhealthy": total - healthy,
-            "avg_response_ms": int(sum(resp_vals) / len(resp_vals)) if resp_vals else None,
-        },
-        "any_unhealthy": any(r.get("healthy") is not True for r in results),
-    }
-
-
-def append_minimal_history(results: list[dict], generated_at: str, reports_dir: Path) -> None:
-    """Persist a minimal run entry so history survives even if the reporter fails."""
-    history_path = reports_dir / "history.json"
-    history = read_json(history_path, []) or []
-    if any(h.get("generated_at") == generated_at for h in history):
-        return
-    history.append({
-        "generated_at": generated_at,
-        "urls": [{
-            "name": r.get("name"), "url": r.get("url"), "dns_ms": r.get("dns_ms"),
-            "healthy": bool(r.get("healthy")), "status_code": r.get("status_code"),
-            "response_ms": r.get("response_ms"), "error": r.get("error"),
-            "reason": r.get("reason"),
-            "checked_at": r.get("checked_at"), "tags": r.get("tags", []), "alerted": False,
-        } for r in results],
-    })
-    write_json(history_path, history)
 
 
 def format_console_line(r: dict) -> str:

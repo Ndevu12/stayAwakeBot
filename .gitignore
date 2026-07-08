@@ -222,3 +222,6 @@ dist/
 *.egg-info/
 src/*.egg-info/
 .venv/
+
+# Runtime output — the sentinel keeps status in ONE GitHub issue, never files (#1149).
+reports/
