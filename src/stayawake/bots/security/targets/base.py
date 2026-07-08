@@ -38,12 +38,14 @@ class ScanOptions:
     #    attestation; it just doesn't judge post-build shape. A payload minified into a bundle is a
     #    documented residual (obfuscation.py docstring), and settings can override this set to include
     #    them. Known loader FINGERPRINTS still match anywhere that IS traversed.
-    #  * SELF-OUTPUT — "reports", "sab-patches", ".malware-quarantine": the scanner's own output
-    #    (a report quotes a payload's evidence; a remediation patch/quarantine holds the removed
-    #    payload lines), so scanning them self-triggers.
+    #  * SELF-OUTPUT — ".malware-quarantine": the scanner's own quarantine holds removed payload
+    #    lines verbatim, so scanning it self-triggers. ("reports"/"sab-patches" are NO LONGER
+    #    excluded (#1143): the health sentinel commits no reports (its status is one GitHub issue),
+    #    and a security report/patch stores REDACTED evidence (sha256 + short preview), not the raw
+    #    IoC — so they don't self-trigger. Excluding those common dir names globally was just a
+    #    hiding spot when scanning a target repo.)
     exclude_dirs: set[str] = field(default_factory=lambda: {
-        ".git", "node_modules", ".next", "dist", "build", ".malware-quarantine",
-        "reports", "sab-patches"})
+        ".git", "node_modules", ".next", "dist", "build", ".malware-quarantine"})
     max_file_bytes: int = 2_000_000
     remote_clone_depth: int = 50
     # Opt-in (config `scan_build_outputs: true`): also scan build outputs. When set, the service
