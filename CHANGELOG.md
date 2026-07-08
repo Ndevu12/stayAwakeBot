@@ -130,6 +130,14 @@ All notable changes to this project are documented here. The format is based on
 - This changelog.
 
 ### Changed
+- **The scanner no longer skips `reports/` and `sab-patches/` (#1143).** These were excluded as
+  "self-output", but a security report/patch stores **redacted** evidence (sha256 + a short preview),
+  not the raw IoC, so scanning them doesn't self-trigger (verified: a target repo containing a real
+  saw report scans clean) — and the health sentinel now commits no reports at all (#1149). Excluding
+  those two common directory names *globally* was just a free hiding spot when scanning someone
+  else's repo, so they're dropped from all three parity sites (`base.py`, `config/security.yml`, the
+  worm-scan action fallback). `.malware-quarantine` stays excluded (it holds removed payloads
+  verbatim). First step of the epic-#1141 "scan everywhere" un-prune.
 - **Dependency audit refactored onto a PURL spine (internal; no behaviour change).** The
   `dependency-audit` matcher is now a thin coordinator over a new `bots/security/dependencies/`
   package — a normalized **`Purl`** identity, per-ecosystem **resolvers** (`resolve(target)` →
