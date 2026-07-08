@@ -5,8 +5,16 @@
 # need a custom DB via `signatures_path` below.
 
 settings:
-  # Directories never traversed during scanning.
-  exclude_dirs: [".git", "node_modules", ".next", "dist", "build", ".malware-quarantine", "reports", "sab-patches", ".venv", "venv"]
+  # Directories never traversed during scanning. This list is shared with the CI worm-guard /
+  # release gates (they scan with `-c` this file), so every name here is a spot a committed payload
+  # could hide from the gate — keep it MINIMAL and payload-safe:
+  #   * self-output ("reports", "sab-patches", ".malware-quarantine") — the scanner's own artifacts
+  #     quote removed payloads, so scanning them self-triggers (matches the base.py default set).
+  #   * non-source vendored/build dirs (node_modules, dist, build, .next) — never committed source.
+  #   * ".venv" — the conventional local virtualenv. NOT bare "venv": that name is a plausible place
+  #     to smuggle a committed payload past the gate, and dropping it costs only a little local-scan
+  #     noise, so the gate errs toward scanning it.
+  exclude_dirs: [".git", "node_modules", ".next", "dist", "build", ".malware-quarantine", "reports", "sab-patches", ".venv"]
   # Max file size (bytes) to read for content matching. Source files larger than this
   # are still scanned head+tail; only non-source assets are skipped.
   max_file_bytes: 2000000

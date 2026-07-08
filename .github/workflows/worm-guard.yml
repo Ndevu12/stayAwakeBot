@@ -39,20 +39,8 @@ jobs:
           # This gate never uploads SARIF — the job conclusion is the scan's exit code, nothing
           # else. Code-scanning delivery is owned solely by security-sentinel.yml.
           upload-sarif: 'false'
-          # Fixture allowlist is signature-scoped (glob|signature): a fresh payload
-          # under fixtures/ using any OTHER signature is still flagged.
-          allowlist-globs: >-
-            tests/**|loader-fromcharcode-127,
-            tests/**|loader-seed-var,
-            tests/**|loader-decoder-fn,
-            tests/**|loader-global-bang,
-            tests/**|loader-require-hijack,
-            tests/**|oversized-config-line,
-            tests/**|obfuscated-source-file,
-            tests/**|fake-font-fa-solid-400,
-            tests/**|fake-font-text-woff,
-            tests/**|camouflage-blockchain-readme,
-            tests/**|vscode-task-folderopen-exec,
-            tests/**|vscode-task-runs-font,
-            tests/**|vscode-allow-automatic-tasks,
-            tests/**|gitignore-autopush-markers
+          # SINGLE SOURCE OF TRUTH for the allowlist: the repo's committed, signature-scoped
+          # config/security.yml (guarded by CODEOWNERS). No hand-copied allowlist-globs here —
+          # `tests/test_self_scan_clean.py` runs this very scan in CI, so a drift between the
+          # config and the gate is impossible (green `CI — install & test` ⇒ green gate).
+          config-file: config/security.yml

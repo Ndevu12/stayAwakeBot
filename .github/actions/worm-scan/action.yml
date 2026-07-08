@@ -11,11 +11,23 @@ inputs:
     description: 'Fail the job when indicators are found.'
     required: false
     default: 'true'
+  config-file:
+    description: >-
+      Repo-relative path to a `saw` config (e.g. `config/security.yml`) whose `allowlist`
+      and `settings` the scan should use — the SINGLE SOURCE OF TRUTH for a repo that ships
+      one. When set, the scan runs `saw scan <workspace> -c <config-file>` (the positional
+      target overrides the config's own `targets`, so only the checked-out repo is scanned)
+      and `allowlist-globs` is ignored. Leave empty for a generic repo without a saw config,
+      which then falls back to `allowlist-globs` below.
+    required: false
+    default: ''
   allowlist-globs:
     description: >-
       Comma-separated allowlist entries of the form `path_glob|signature_id` (e.g.
       `tests/fixtures/**|fake-font-fa-solid-400`). A signature id is REQUIRED — a bare
-      path glob is ignored, so a fresh payload under that path is still flagged.
+      path glob is ignored, so a fresh payload under that path is still flagged. Used ONLY
+      when `config-file` is empty (a repo that maintains its allowlist in a saw config
+      should point `config-file` at it instead of duplicating entries here).
     required: false
     default: ''
   upload-sarif:
@@ -81,26 +93,40 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        cfg="$(mktemp)"
-        {
-          echo "settings:"
-          echo "  exclude_dirs: [\".git\", \"node_modules\", \".next\", \"dist\", \"build\", \".malware-quarantine\", \".venv\", \"reports\"]"
-          echo "targets:"
-          echo "  local: [\"$GITHUB_WORKSPACE\"]"
-          echo "  github: { users: [], orgs: [] }"
-          if [ -n "${{ inputs.allowlist-globs }}" ]; then
-            echo "allowlist:"
-            IFS=',' read -ra G <<< "${{ inputs.allowlist-globs }}"
-            for entry in "${G[@]}"; do
-              glob="$(echo "${entry%%|*}" | xargs)"
-              echo "  - path_glob: \"$glob\""
-              if [ "$entry" != "${entry%%|*}" ]; then
-                sig="$(echo "${entry#*|}" | xargs)"
-                [ -n "$sig" ] && echo "    signature: \"$sig\""
-              fi
-            done
+        # Allowlist source — SINGLE SOURCE OF TRUTH when `config-file` is set: use the repo's
+        # committed saw config (its `allowlist` + `settings`) and scan ONLY the workspace via a
+        # positional target that overrides the config's own `targets`. Otherwise (generic repo,
+        # no saw config) fall back to synthesizing a minimal config from `allowlist-globs`.
+        target=""
+        if [ -n "${{ inputs.config-file }}" ]; then
+          cfg="$GITHUB_WORKSPACE/${{ inputs.config-file }}"
+          if [ ! -f "$cfg" ]; then
+            echo "::error::config-file '${{ inputs.config-file }}' not found in the repo — check the path or leave it empty to use allowlist-globs." >&2
+            exit 1
           fi
-        } > "$cfg"
+          target="$GITHUB_WORKSPACE"
+        else
+          cfg="$(mktemp)"
+          {
+            echo "settings:"
+            echo "  exclude_dirs: [\".git\", \"node_modules\", \".next\", \"dist\", \"build\", \".malware-quarantine\", \".venv\", \"reports\"]"
+            echo "targets:"
+            echo "  local: [\"$GITHUB_WORKSPACE\"]"
+            echo "  github: { users: [], orgs: [] }"
+            if [ -n "${{ inputs.allowlist-globs }}" ]; then
+              echo "allowlist:"
+              IFS=',' read -ra G <<< "${{ inputs.allowlist-globs }}"
+              for entry in "${G[@]}"; do
+                glob="$(echo "${entry%%|*}" | xargs)"
+                echo "  - path_glob: \"$glob\""
+                if [ "$entry" != "${entry%%|*}" ]; then
+                  sig="$(echo "${entry#*|}" | xargs)"
+                  [ -n "$sig" ] && echo "    signature: \"$sig\""
+                fi
+              done
+            fi
+          } > "$cfg"
+        fi
         # Write the SARIF to a deterministic, workspace-relative path so the upload
         # step below can find it regardless of the scan's exit code.
         rdir="$GITHUB_WORKSPACE/reports/security"
@@ -115,7 +141,7 @@ runs:
         # --fail-on-findings flag anymore). Capture the verdict and honour the action's
         # fail-on-findings input ourselves: force a clean exit when it isn't 'true'.
         set +e
-        saw scan $lflag -c "$cfg" --sarif "$rdir/latest.sarif"
+        saw scan $lflag ${target:+"$target"} -c "$cfg" --sarif "$rdir/latest.sarif"
         rc=$?
         set -e
         [ "${{ inputs.fail-on-findings }}" = "true" ] || rc=0
