@@ -7,6 +7,18 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **Audits the INSTALLED dependency tree, not just the lockfile (#1144).** The dependency audit sees only
+  what a repo *declares*; the worm's real move is a postinstall that drops a package into `node_modules`
+  **without editing the lockfile** — invisible to a lockfile-only audit. A new `installed-package-audit`
+  matcher reads what's actually on disk and reconciles it: **identity-on-disk** (an installed
+  `name@version` is known-malicious → INFECTED, caught even though the lockfile was untouched) and **ghost
+  detection** (a package present on disk but absent from the lockfile → SUSPICIOUS — a near-free set-diff).
+  This is the deliberately *targeted* alternative to brute-force scanning every file in `node_modules`,
+  which a value study measured as 7–10× more I/O for hundreds of false positives and one narrow catch. It
+  runs only when a project-local installed tree exists (a remote clone with no install falls back to the
+  lockfile audit), is fully offline, and adds **no dependency** — it reuses the existing resolvers, the
+  memoized malware corpus, and the confidence-graded verdict. npm today (`node_modules`); the `InstalledTree`
+  provider is the Open/Closed seam for Python (`site-packages`) and Composer (`vendor/`) next.
 - **Advisory-DB trust hardening + `saw db status`.** The offline advisory cache is now defended as
   the supply-chain surface it is: the manifest carries a SHA-256 per ecosystem file and every scan
   **verifies it before trusting the data** — a corrupted/tampered cache is skipped (falling back to
