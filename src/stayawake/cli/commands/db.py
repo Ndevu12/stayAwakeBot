@@ -87,11 +87,19 @@ def run_status(a: argparse.Namespace) -> int:
         return 1
 
     age = s["age_days"]
+    schema_ok = s.get("schema_compatible", True)
+    # Distinguish a benign version skew from tampering: an older-format cache is not "FAILED".
+    if not schema_ok:
+        integrity = f"older format (schema {s['schema']}) — run `saw db update`"
+    elif s["integrity_ok"]:
+        integrity = "OK"
+    else:
+        integrity = "FAILED: " + ", ".join(s["mismatches"])
     lines = [f"Advisory DB @ {s['cache_dir']}",
              f"  snapshot   {s['snapshot'] or '(legacy — re-run db update)'}",
              f"  generated  {s['generated_at'] or '?'}"
              + (f"  ({age} day(s) ago)" if age is not None else ""),
-             f"  integrity  {'OK' if s['integrity_ok'] else 'FAILED: ' + ', '.join(s['mismatches'])}",
+             f"  integrity  {integrity}",
              f"  totals     {s['total_malicious']} malicious · {s['total_vulnerabilities']} vulnerabilities",
              *(f"    {eco:<10} {c['malicious']:>7} malicious · {c['vulnerabilities']:>7} vulnerabilities"
                for eco, c in s["ecosystems"].items())]
@@ -99,7 +107,12 @@ def run_status(a: argparse.Namespace) -> int:
 
     # CI gates — each prints why it failed and returns non-zero.
     rc = 0
-    if not s["integrity_ok"]:
+    if not schema_ok:
+        # Unusable cache (falls back to the inline seed), but NOT a security incident.
+        print(f"✗ advisory DB is an older format (schema {s['schema']}) — run `saw db update`.",
+              file=sys.stderr)
+        rc = 2
+    elif not s["integrity_ok"]:
         print("✗ integrity check failed — the cache was corrupted or tampered.", file=sys.stderr)
         rc = 2
     if a.require_snapshot and s["snapshot"] != a.require_snapshot:

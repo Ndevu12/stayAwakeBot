@@ -9,7 +9,7 @@ import json
 import os
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 from stayawake.bots.security.dependencies import db
@@ -83,6 +83,150 @@ class TestIntegrity(unittest.TestCase):
             sys.stderr = old
         self.assertIn("integrity check FAILED", buf.getvalue())
         self.assertTrue(corpus is None or corpus.malicious_match(Purl("npm", "injected", "1.0.0")) is None)
+
+
+class TestSchemaSkew(unittest.TestCase):
+    """#1137 — an older-format cache (manifest schema ≠ this saw's) is a benign version skew, NOT
+    tampering. It must be diagnosed as "older format, run db update", never trip the
+    "integrity check FAILED / tampered" alarm (which would train users to ignore the real one),
+    and still fail closed (falls back to the inline seed)."""
+
+    def _make_old(self, cache, *, tamper=False):
+        # a valid schema-2 cache, then downgrade the manifest's schema to mimic an older `saw`
+        _build(cache, {"MAL.json": mal_record("evil", ["1.0.0"])})
+        if tamper:                                    # mutate a records file too — schema gate must WIN
+            rec = cache / "records" / "npm.jsonl"
+            rec.write_text(rec.read_text() + "garbage\n")
+        mp = cache / "manifest.json"
+        m = json.loads(mp.read_text()); m["schema"] = 1
+        mp.write_text(json.dumps(m))
+        db._CORPUS_MEMO.clear()
+
+    def test_load_falls_back_to_seed_without_crying_tamper(self):
+        cache = Path(tempfile.mkdtemp())
+        self._make_old(cache, tamper=True)            # even mutated records → still "older", not "tampered"
+        buf = io.StringIO()
+        with redirect_stderr(buf):
+            corpus = db.load_corpus(cache)
+        out = buf.getvalue()
+        self.assertIsNone(corpus)                     # → inline seed
+        self.assertIn("older format", out)
+        self.assertNotIn("integrity check FAILED", out)
+
+    def test_cache_status_reports_incompatible_not_tampered(self):
+        cache = Path(tempfile.mkdtemp())
+        self._make_old(cache)
+        s = db.cache_status(cache)
+        self.assertTrue(s["present"])
+        self.assertFalse(s["schema_compatible"])
+        self.assertFalse(s["integrity_ok"])           # unusable → fail-closed for naive callers
+        self.assertEqual(s["mismatches"], [])         # but NO spurious per-ecosystem "tamper" list
+
+    def test_db_status_cli_says_older_format(self):
+        cache = Path(tempfile.mkdtemp())
+        self._make_old(cache)
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = db_cmd.run_status(argparse.Namespace(
+                cache_dir=str(cache), require_snapshot=None, max_age_days=None))
+        self.assertEqual(rc, 2)                        # fail closed for CI
+        self.assertIn("older format", out.getvalue())
+        self.assertNotIn("tampered", out.getvalue() + err.getvalue())
+
+    def test_require_db_gate_says_older_format(self):
+        from stayawake.bots.security import service
+        cache = Path(tempfile.mkdtemp())
+        self._make_old(cache)
+        os.environ["SAW_ADVISORY_CACHE_DIR"] = str(cache)
+        db._CORPUS_MEMO.clear()
+        try:
+            err = io.StringIO()
+            with redirect_stderr(err):
+                rc = service._require_db_or_error()
+            self.assertEqual(rc, 2)                     # fail closed
+            self.assertIn("older format", err.getvalue())
+            self.assertNotIn("integrity check FAILED", err.getvalue())
+        finally:
+            os.environ.pop("SAW_ADVISORY_CACHE_DIR", None)
+            db._CORPUS_MEMO.clear()
+
+
+class TestCorruptManifest(unittest.TestCase):
+    """#1137 (adversarial follow-up) — a manifest that parses as valid JSON but is NOT an object
+    (`null`, an array, a scalar — from a partial write or a tamper) must degrade to 'no usable
+    cache', never crash the scan with an AttributeError from `.get()` on a non-dict."""
+
+    def _cache_with_manifest(self, raw_text):
+        cache = Path(tempfile.mkdtemp())
+        _build(cache, {"MAL.json": mal_record("evil", ["1.0.0"])})
+        (cache / "manifest.json").write_text(raw_text)
+        db._CORPUS_MEMO.clear()
+        return cache
+
+    def test_non_dict_manifest_does_not_crash_load(self):
+        for raw in ("null", "[1, 2, 3]", "42", "\"hi\""):
+            cache = self._cache_with_manifest(raw)
+            with redirect_stderr(io.StringIO()):
+                self.assertIsNone(db.load_corpus(cache))         # → inline seed, no AttributeError
+
+    def test_non_dict_manifest_reads_as_absent(self):
+        for raw in ("null", "[1, 2, 3]", "42"):
+            s = db.cache_status(self._cache_with_manifest(raw))
+            self.assertFalse(s["present"])                       # treated like a missing cache
+
+    def test_malformed_ecosystems_shape_does_not_crash(self):
+        # manifest IS a dict (schema 2) but the ecosystems it iterates are malformed — a non-dict
+        # `ecosystems`, or a non-dict entry. Must degrade (dropped/empty), never crash `.items()`.
+        for eco_val in ("[1, 2, 3]", "\"oops\"", "{\"npm\": [1, 2]}", "{\"npm\": null}"):
+            cache = Path(tempfile.mkdtemp())
+            _build(cache, {"MAL.json": mal_record("evil", ["1.0.0"])})
+            mp = cache / "manifest.json"
+            m = json.loads(mp.read_text()); m["ecosystems"] = json.loads(eco_val)
+            mp.write_text(json.dumps(m)); db._CORPUS_MEMO.clear()
+            with redirect_stderr(io.StringIO()):
+                corpus = db.load_corpus(cache)           # no AttributeError from .items()/.get()
+            s = db.cache_status(cache)                    # nor here
+            self.assertTrue(s["present"])
+            self.assertEqual(s["ecosystems"], {})         # malformed entries dropped
+            # empty corpus → nothing trusted from the malformed cache
+            self.assertTrue(corpus is None
+                            or corpus.malicious_match(Purl("npm", "evil", "1.0.0")) is None)
+
+    def test_non_numeric_counts_do_not_crash_status(self):
+        # a structurally-valid schema-2 manifest whose count fields are corrupt (null/str/list) must
+        # not crash the status / --require-db surface on a sum() TypeError — coerce each to 0. (The
+        # records sha256 is untouched, so integrity stays OK and this isolates the numeric path.)
+        for bad in (None, "lots", [1, 2]):
+            cache = Path(tempfile.mkdtemp())
+            _build(cache, {"MAL.json": mal_record("evil", ["1.0.0"])})
+            mp = cache / "manifest.json"
+            m = json.loads(mp.read_text())
+            m["ecosystems"]["npm"]["malicious"] = bad
+            m["ecosystems"]["npm"]["vulnerabilities"] = bad
+            mp.write_text(json.dumps(m)); db._CORPUS_MEMO.clear()
+            s = db.cache_status(cache)                    # no TypeError
+            self.assertIsInstance(s["total_malicious"], int)
+            self.assertEqual((s["total_malicious"], s["total_vulnerabilities"]), (0, 0))
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                rc = db_cmd.run_status(argparse.Namespace(
+                    cache_dir=str(cache), require_snapshot=None, max_age_days=None))
+            self.assertEqual(rc, 0)                        # runs to completion, integrity still OK
+
+    def test_gates_fail_closed_on_non_dict_manifest(self):
+        from stayawake.bots.security import service
+        cache = self._cache_with_manifest("null")
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            rc = db_cmd.run_status(argparse.Namespace(
+                cache_dir=str(cache), require_snapshot=None, max_age_days=None))
+        self.assertEqual(rc, 1)                                  # db status: not found
+        os.environ["SAW_ADVISORY_CACHE_DIR"] = str(cache)
+        db._CORPUS_MEMO.clear()
+        try:
+            with redirect_stderr(io.StringIO()):
+                self.assertEqual(service._require_db_or_error(), 2)   # --require-db: fail closed
+        finally:
+            os.environ.pop("SAW_ADVISORY_CACHE_DIR", None)
+            db._CORPUS_MEMO.clear()
 
 
 class TestDbStatusCli(unittest.TestCase):
