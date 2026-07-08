@@ -352,7 +352,7 @@ code is the verdict, unconditionally** — a CI gate just checks it, no flag req
 | --- | --- |
 | `0` | Clean. For `saw scan`, no scanned target is infected. For `saw audit`, no warning-level issue (or issues found without `-f`). |
 | `1` | For `saw scan`, at least one target is **infected** — returned unconditionally (there is no `--fail`). For `saw audit`, a warning-level issue was found **and** `-f/--fail` was set. |
-| `2` | Usage error (unknown command, bad option, or a missing explicit `--config` path). |
+| `2` | Usage error (unknown command, bad option, or a missing explicit `--config` path), **or** a scan that could not complete — a malformed config (e.g. an `allowlist` that isn't a list of mappings) or a target that errored during scanning. `saw scan` fails **closed** here: a target it could not scan is never reported as clean. |
 
 ## Command aliases & shell completion
 
