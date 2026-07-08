@@ -243,7 +243,16 @@ def scan(config_path: str | None = None, *, remote: bool = False,
     settings = cfg.get("settings", {})
     opts = _options(settings, no_advisories=no_advisories, external_audit=external_audit)
     sigs = load_signatures(settings.get("signatures_path"))
-    allowlist = cfg.get("allowlist", [])
+    # A null/absent `allowlist` (the common `allowlist:` bare key, or no key) means "no
+    # suppressions" → normalize to []. Only a genuinely wrong SHAPE is rejected below.
+    allowlist = cfg.get("allowlist") or []
+    # Fail CLOSED on a config we can't apply: an `allowlist` that isn't a list of mappings would
+    # otherwise crash the per-target scan (caught as an ERROR with an empty, clean-looking result).
+    # Reject it up front with a clear message rather than scanning under an unusable allowlist.
+    if not (isinstance(allowlist, list) and all(isinstance(r, dict) for r in allowlist)):
+        print("error: config `allowlist` must be a list of {signature, path_glob} mappings.",
+              file=sys.stderr)
+        return 2
 
     # Fail-closed gate (opt-in): a CI scan that must not silently lose malware coverage. Default is
     # fail-open — a missing/corrupt DB degrades to the always-shipped inline seed (never blind).
@@ -291,6 +300,14 @@ def scan(config_path: str | None = None, *, remote: bool = False,
         # Discovery (the FS walk) is itself slow and silent — cover it with a spinner.
         with status("Discovering repositories…", enabled=progress_on):
             repos = discover_local_repos(local_patterns, opts)
+        # Fail CLOSED when EXPLICIT targets (ad-hoc paths or configured globs) resolve to zero
+        # repositories — a stale glob or a checkout with no `.git` scanned NOTHING, which must not
+        # read as a clean pass. (A bare run has no explicit target, so it keeps its current-repo
+        # fallback above and is unaffected.)
+        if (paths or cfg_local) and not repos:
+            print("error: the requested target(s) resolved to 0 repositories — nothing was "
+                  "scanned; failing closed (not reporting 'clean').", file=sys.stderr)
+            return 2
         if progress_on and repos:
             prog.line(f"Found {len(repos)} repositor{'y' if len(repos) == 1 else 'ies'} to scan.")
         n = len(repos)
@@ -341,6 +358,15 @@ def scan(config_path: str | None = None, *, remote: bool = False,
         print(f"Full report ({len(results)} repos, with per-finding detail): {report_path}"
               "  (+ latest.json)", file=sys.stderr)
 
-    # Verdict as exit code: INFECTED (confirmed findings) → 1, else 0. Unconditional —
+    # Verdict as exit code. INFECTED (confirmed findings) → 1. A target that ERRORED (could not be
+    # scanned at all — an unreadable/malformed config, a read failure, a failed clone) carries no
+    # verdict, so it must NEVER read as clean: fail CLOSED → 2. Otherwise clean → 0. Unconditional —
     # the CI gate is just this exit code; SUSPICIOUS (heuristic-only) does not fail it.
-    return 1 if report.any_infected else 0
+    if report.any_infected:
+        return 1
+    if report.any_error:
+        errored = [r.target for r in results if r.error]
+        print(f"error: {len(errored)} target(s) could not be scanned — failing closed (not "
+              f"reporting 'clean'): {', '.join(errored)}", file=sys.stderr)
+        return 2
+    return 0

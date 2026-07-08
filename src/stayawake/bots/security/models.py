@@ -179,6 +179,13 @@ class ScanReport:
     def any_suspicious(self) -> bool:
         return any(r.suspicious for r in self.results)
 
+    @property
+    def any_error(self) -> bool:
+        """True if any target could not be scanned (an unreadable/malformed config, a read
+        failure, a failed clone). Such a target carries NO verdict — the gate must fail closed
+        on it rather than read the absence of findings as 'clean'."""
+        return any(r.error for r in self.results)
+
     def to_payload(self) -> dict[str, Any]:
         """The canonical scan payload dict consumed by every sink."""
         results = self.results
@@ -197,5 +204,6 @@ class ScanReport:
             },
             "any_infected": self.any_infected,
             "any_suspicious": self.any_suspicious,
+            "any_error": self.any_error,
             "results": [r.to_dict() for r in results],
         }

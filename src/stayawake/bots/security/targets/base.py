@@ -38,12 +38,14 @@ class ScanOptions:
     #    attestation; it just doesn't judge post-build shape. A payload minified into a bundle is a
     #    documented residual (obfuscation.py docstring), and settings can override this set to include
     #    them. Known loader FINGERPRINTS still match anywhere that IS traversed.
-    #  * SELF-OUTPUT — "reports", "sab-patches", ".malware-quarantine": the scanner's own output
-    #    (a report quotes a payload's evidence; a remediation patch/quarantine holds the removed
-    #    payload lines), so scanning them self-triggers.
+    #  * SELF-OUTPUT — ".malware-quarantine": the scanner's own quarantine holds removed payload
+    #    lines verbatim, so scanning it self-triggers. ("reports"/"sab-patches" are NO LONGER
+    #    excluded (#1143): the health sentinel commits no reports (its status is one GitHub issue),
+    #    and a security report/patch stores REDACTED evidence (sha256 + short preview), not the raw
+    #    IoC — so they don't self-trigger. Excluding those common dir names globally was just a
+    #    hiding spot when scanning a target repo.)
     exclude_dirs: set[str] = field(default_factory=lambda: {
-        ".git", "node_modules", ".next", "dist", "build", ".malware-quarantine",
-        "reports", "sab-patches"})
+        ".git", "node_modules", ".next", "dist", "build", ".malware-quarantine"})
     max_file_bytes: int = 2_000_000
     remote_clone_depth: int = 50
     # Opt-in (config `scan_build_outputs: true`): also scan build outputs. When set, the service
@@ -73,6 +75,11 @@ class Target:
         self.root = Path(root)
         self.display = display
         self.opts = opts
+        # Files that EXIST (os.walk yielded them) but could not be READ — a permission error, a
+        # restrictive ACL, etc. These are scan GAPS, not benign skips: scan_target promotes them to
+        # result.error so the run fails CLOSED. A payload behind an unreadable file must never be
+        # silently skipped and read as clean.
+        self.read_errors: list[str] = []
 
     @property
     def repo_root(self) -> Path:
@@ -88,10 +95,15 @@ class Target:
         p = self.root / rel
         try:
             if limit is None and p.stat().st_size > self.opts.max_file_bytes:
-                return None
+                return None                       # policy skip (too large) — a benign skip
+        except OSError:
+            return None                           # can't stat (vanished / race) — treat as absent
+        try:
             with p.open("rb") as fh:
                 return fh.read(limit) if limit else fh.read()
-        except OSError:
+        except OSError as exc:
+            # Present but unreadable — a scan GAP, not a benign skip. Record it (fail closed).
+            self.read_errors.append(f"{rel}: {type(exc).__name__}")
             return None
 
     def _head_tail(self, p: Path, half: int) -> bytes:
@@ -106,7 +118,8 @@ class Target:
                     fh.seek(0)
                 tail = fh.read(half)
             return head + b"\n/*\xe2\x80\xa6stayawake-truncated\xe2\x80\xa6*/\n" + tail
-        except OSError:
+        except OSError as exc:
+            self.read_errors.append(f"{p.name}: {type(exc).__name__}")   # unreadable oversized file — a gap
             return b""
 
     def read_text(self, rel: str) -> str | None:
@@ -114,7 +127,10 @@ class Target:
         ext = _ext(rel)
         try:
             size = p.stat().st_size
-        except OSError:
+        except FileNotFoundError:
+            return None                           # vanished (race) — benign skip
+        except OSError as exc:
+            self.read_errors.append(f"{rel}: {type(exc).__name__}")      # present but unstattable — a gap
             return None
         if size > self.opts.max_file_bytes:
             if ext not in SOURCE_EXTS:

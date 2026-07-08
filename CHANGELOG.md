@@ -142,6 +142,14 @@ All notable changes to this project are documented here. The format is based on
 - This changelog.
 
 ### Changed
+- **The scanner no longer skips `reports/` and `sab-patches/` (#1143).** These were excluded as
+  "self-output", but a security report/patch stores **redacted** evidence (sha256 + a short preview),
+  not the raw IoC, so scanning them doesn't self-trigger (verified: a target repo containing a real
+  saw report scans clean) — and the health sentinel now commits no reports at all (#1149). Excluding
+  those two common directory names *globally* was just a free hiding spot when scanning someone
+  else's repo, so they're dropped from all three parity sites (`base.py`, `config/security.yml`, the
+  worm-scan action fallback). `.malware-quarantine` stays excluded (it holds removed payloads
+  verbatim). First step of the epic-#1141 "scan everywhere" un-prune.
 - **Dependency audit refactored onto a PURL spine (internal; no behaviour change).** The
   `dependency-audit` matcher is now a thin coordinator over a new `bots/security/dependencies/`
   package — a normalized **`Purl`** identity, per-ecosystem **resolvers** (`resolve(target)` →
@@ -245,6 +253,17 @@ All notable changes to this project are documented here. The format is based on
   `--user "$(id -u):$(id -g)"` invocation for writing the report back to the host.
 
 ### Security
+- **`saw scan` fails CLOSED when a target can't be scanned (was a fail-open).** A per-target scan
+  error — an unreadable or malformed config (e.g. an `allowlist` that isn't a list of mappings), a
+  read failure (a file present but unreadable — permission error / restrictive ACL), or a failed
+  clone — used to be caught into an empty, clean-looking result while the run exited `0`, so a
+  broken config or unreadable target could silently pass a CI gate. Now a malformed `allowlist` is
+  rejected up front with a clear message; any **errored** target (including an unreadable file)
+  makes `saw scan` exit `2` (never `0`); and an **explicitly-requested target that resolves to zero
+  repositories** (a stale glob, or a checkout with no `.git`) fails closed rather than reporting a
+  green no-op. A clean scan still exits `0`, an infected one `1`; a bare `allowlist:` (null) is
+  accepted as "no suppressions". Surfaced (and re-verified) by adversarial review of the `strix`
+  self-gate.
 - **Detects malicious upstream dependencies (T1195.001).** A new `dependency-audit` matcher parses
   `package.json` and the npm / yarn / pnpm lockfiles and flags any dependency — direct **or**
   lockfile-transitive — whose exact `name@version` is on a **data-driven known-bad blocklist** (the
