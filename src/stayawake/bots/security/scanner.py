@@ -33,6 +33,8 @@ def _allowed(finding: Finding, allowlist: list[dict[str, Any]]) -> bool:
     through silently. Fixture allowlisting therefore requires `signature` (+ optional
     `path_glob` to scope it)."""
     for rule in allowlist or []:
+        if not isinstance(rule, dict):
+            continue                       # defensive: skip a non-mapping rule (config is validated upstream)
         sig = rule.get("signature")
         glob = rule.get("path_glob")
         if not sig or sig != finding.signature_id:

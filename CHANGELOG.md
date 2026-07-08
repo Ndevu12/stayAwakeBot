@@ -241,6 +241,13 @@ All notable changes to this project are documented here. The format is based on
   `--user "$(id -u):$(id -g)"` invocation for writing the report back to the host.
 
 ### Security
+- **`saw scan` fails CLOSED when a target can't be scanned (was a fail-open).** A per-target scan
+  error — an unreadable or malformed config (e.g. an `allowlist` that isn't a list of mappings), a
+  read failure, or a failed clone — used to be caught into an empty, clean-looking result while the
+  run exited `0`, so a broken config or unreadable target could silently pass a CI gate. Now a
+  malformed `allowlist` is rejected up front with a clear message, and any **errored** target makes
+  `saw scan` exit `2` (never `0`). A clean scan still exits `0` and an infected one `1`. Surfaced by
+  an adversarial review of the `strix` self-gate.
 - **Detects malicious upstream dependencies (T1195.001).** A new `dependency-audit` matcher parses
   `package.json` and the npm / yarn / pnpm lockfiles and flags any dependency — direct **or**
   lockfile-transitive — whose exact `name@version` is on a **data-driven known-bad blocklist** (the
