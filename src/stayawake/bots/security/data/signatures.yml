@@ -28,6 +28,7 @@ signatures:
     matcher: content
     # Tolerate member-access (String['fromCharCode']) and hex args (0x7f) too.
     pattern: 'String\s*[.\[]\s*[''"]?fromCharCode[''"]?\]?\s*\(\s*(?:127|0x7f)\s*\)'
+    prefilter: "fromcharcode"   # cheap required-literal reject before the regex
     description: "Obfuscated loader fingerprint — fromCharCode(127) string shuffler"
     remediation: recover
 
@@ -36,6 +37,7 @@ signatures:
     severity: critical
     matcher: content
     pattern: '(?:var|let|const)\s+_\$_[0-9a-f]{2,}\s*='
+    prefilter: "_$_"   # cheap required-literal reject before the regex
     description: "Obfuscated loader seed variable (var/let/const _$_xxxx=)"
     remediation: recover
 
@@ -44,6 +46,7 @@ signatures:
     severity: high
     matcher: content
     pattern: '\bsfL\s*\('
+    prefilter: "sfl"   # cheap required-literal reject before the regex
     description: "Obfuscated loader decoder call — the sfL decoder function"
     remediation: recover
 
@@ -52,6 +55,7 @@ signatures:
     severity: high
     matcher: content
     pattern: "global\\['!'\\]\\s*="
+    prefilter: "global['!']"   # cheap required-literal reject before the regex
     description: "Loader bootstrap assigning global['!']"
     remediation: recover
 
@@ -60,6 +64,7 @@ signatures:
     severity: high
     matcher: content
     pattern: 'global\[_\$_[0-9a-f]+\[0\]\]\s*=\s*require'
+    prefilter: "_$_"   # cheap required-literal reject before the regex
     description: "Loader reassigning global.require to smuggle CommonJS into ESM"
     remediation: recover
 
@@ -227,6 +232,7 @@ signatures:
     severity: critical
     matcher: content
     pattern: 'Sha1-Hulud:\s*The Second Coming|A Mini Shai-Hulud has Appeared'
+    prefilter: "hulud"   # cheap required-literal reject before the regex
     description: "Shai-Hulud exfil branding — attacker repo/commit vanity label (Second Coming / Mini variant)"
     remediation: manual
 
@@ -235,6 +241,7 @@ signatures:
     severity: critical
     matcher: content
     pattern: '\bSHA1HULUD\b'
+    prefilter: "sha1hulud"   # cheap required-literal reject before the regex
     # Scoped to runner / workflow / service surfaces so a prose mention of the name
     # (e.g. a threat writeup) is NOT flagged — only the IoC where it actually lives.
     file_globs: [".github/**", "**/.github/**", ".runner", "**/.runner", "**/actions-runner/**", "*.service"]
@@ -247,6 +254,7 @@ signatures:
     matcher: content
     confidence: heuristic
     pattern: 'Sha[i1]-Hulud'
+    prefilter: "-hulud"   # cheap required-literal reject before the regex
     description: "Shai-Hulud vanity token (bare mention — heuristic; benign in security write-ups)"
     remediation: manual
 
@@ -276,6 +284,7 @@ signatures:
     # A GitHub Actions runner .runner config always carries its registration endpoint. Scoped to
     # the runner artifact paths so the string can't false-positive on unrelated JSON elsewhere.
     pattern: '"(?:gitHubUrl|serverUrl)"\s*:\s*"https'
+    prefilter: "url"   # cheap required-literal reject before the regex
     file_globs: ['.runner', '**/.runner', '**/actions-runner/**']
     description: "Committed self-hosted runner registration (.runner with a live registration endpoint) — durable CI persistence foothold"
     remediation: quarantine-file
