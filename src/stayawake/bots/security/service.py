@@ -111,6 +111,12 @@ def _require_db_or_error() -> int | None:
     if not st.get("present"):
         print("saw scan --require-db: advisory DB not found — run `saw db update`.", file=sys.stderr)
         return 2
+    if not st.get("schema_compatible", True):
+        # Unusable (older format → scan falls back to the inline seed), but not tampering. Fail
+        # closed for CI, with the honest reason so it's not mistaken for a security incident (#1137).
+        print(f"saw scan --require-db: advisory DB is an older format (schema {st.get('schema')}) "
+              "— run `saw db update`.", file=sys.stderr)
+        return 2
     if not st.get("integrity_ok"):
         print("saw scan --require-db: advisory DB integrity check FAILED "
               f"({', '.join(st.get('mismatches', []))}) — run `saw db update`.", file=sys.stderr)
