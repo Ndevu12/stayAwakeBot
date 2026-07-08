@@ -253,10 +253,11 @@ class TestPyprojectScripts(unittest.TestCase):
     def test_entry_points(self):
         data = tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))
         scripts = data["project"]["scripts"]
-        # The health bot is still driven by its console scripts (remote-only).
-        for health in ("stayawake-health-check", "stayawake-health-report",
-                       "stayawake-health-alert"):
-            self.assertIn(health, scripts, f"health script {health} must stay registered")
+        # The renewed sentinel is ONE command: check → refresh the single status issue (#1149).
+        # The separate -report / -alert scripts were removed with file-based reporting.
+        self.assertIn("stayawake-health-check", scripts, "health checker script must stay registered")
+        for gone in ("stayawake-health-report", "stayawake-health-alert"):
+            self.assertNotIn(gone, scripts, f"{gone} was removed with file-based reporting")
         self.assertEqual(scripts.get("saw"), "stayawake.cli:main")
         self.assertEqual(scripts.get("stayawake"), "stayawake.cli:main")
         # The legacy security scripts are REMOVED — `saw` is the only security entry point.

@@ -9,7 +9,6 @@ import unittest
 from pathlib import Path
 
 from stayawake.bots.security import service as sec_service
-from stayawake.bots.health import service as health_service
 
 
 def _snapshot(d: Path) -> dict:
@@ -17,6 +16,8 @@ def _snapshot(d: Path) -> dict:
 
 
 class TestReportsIsolation(unittest.TestCase):
+    # (The health check no longer writes ANY files — its status lives in one GitHub issue, #1149 —
+    # so only the security scan's report-dir isolation remains to guard.)
     def test_security_scan_writes_only_to_reports_dir(self):
         work = Path(tempfile.mkdtemp())
         cfg = work / "security.yml"
@@ -28,17 +29,6 @@ class TestReportsIsolation(unittest.TestCase):
         self.assertTrue((out / "latest.md").is_file())
         self.assertEqual(before, _snapshot(sec_service.REPORTS_DIR),
                          "scan must not touch the default reports/security dir")
-
-    def test_health_check_writes_only_to_reports_dir(self):
-        work = Path(tempfile.mkdtemp())
-        cfg = work / "urls.yml"
-        cfg.write_text("settings: {}\nurls: []\n", encoding="utf-8")
-        out = work / "out"
-        before = _snapshot(health_service.REPORTS_DIR)
-        health_service.run_check(str(cfg), reports_dir=str(out))
-        self.assertTrue((out / "latest.json").is_file())
-        self.assertEqual(before, _snapshot(health_service.REPORTS_DIR),
-                         "check must not touch the default reports dir")
 
 
 if __name__ == "__main__":

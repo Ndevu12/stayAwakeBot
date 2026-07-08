@@ -53,9 +53,8 @@ docker build --build-arg VERSION=0.1.0 -t stayawakebot:local .
 Run the pipeline against `config/urls.yml`:
 
 ```bash
-stayawake-health-check  --config config/urls.yml   # probe URLs → reports/latest.json
-stayawake-health-report                            # build status.json, history, dated .md
-stayawake-health-alert                             # Slack alert on failures / recoveries
+stayawake-health-check  --config config/urls.yml   # probe URLs → refresh the ONE status issue
+                                                   # (+ Slack on transitions). No files, no commits.
 ```
 
 By default `check` is **non-fatal** (exits 0) so reporting/alerting always run in CI.

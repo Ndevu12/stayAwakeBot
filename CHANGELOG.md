@@ -183,6 +183,14 @@ All notable changes to this project are documented here. The format is based on
   so the moving Marketplace major tag (`v1`) cannot be mistaken for the package version.
 
 ### Removed
+- **The availability sentinel's file-based reporting.** No more committed `reports/` tree (1,048+
+  dated `.md` + `status.json`/`history.json`), no `reporter.py`, no `stayawake-health-report` /
+  `-alert` scripts, no `commit-reports` action, and the workflow no longer commits (`contents:
+  read`). The sentinel is now ONE command — `stayawake-health-check` checks the URLs and refreshes a
+  single self-updating **"Availability status"** GitHub issue whose hidden state block is the whole
+  store (debounce counters + recent incidents); Slack + the 🔴/🟢 title are the alert. The reusable
+  *"issue as a durable, file-less state store"* mechanism lives in **`core/issue_state.py`** (shared,
+  not duplicated). (#1149)
 - **`saw scan --fix` / `--apply` / `--pr`** (remediation is now `saw fix` / `saw discard`) and
   **`saw scan --local` / `--local-only`** (local is the default; `--remote` is the scope toggle).
 - The `saw run`, `saw report`, and standalone `saw alert` verbs. The scan→report→alert pipeline is
