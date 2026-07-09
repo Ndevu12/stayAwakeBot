@@ -23,6 +23,22 @@ SOURCE_EXTS = {
 }
 
 
+# Consecutive interior windows (read_source_windows) overlap by this many bytes so a match spanning a
+# window boundary is still seen whole in one window. The guarantee is EXACT for any match up to
+# _SOURCE_WINDOW_OVERLAP bytes long; every shipped content signature is line-local and matches far less
+# than this (< ~1 KB even with whitespace tolerance), so in practice no real payload straddles. A match
+# LONGER than the overlap is only constructible with a pathological multi-KB run of whitespace/hex
+# inside the pattern — a documented residual, not a realistic evasion. 64 KiB costs ~3% re-read on a
+# 2 MB window.
+_SOURCE_WINDOW_OVERLAP = 65_536
+
+# Full-interior windowing is bounded to files up to this size; a larger file falls back to the head+tail
+# read (as any oversized file does), so a hostile target cannot force unbounded scan work with a single
+# enormous file. 64 MB comfortably covers every realistic source file (the largest real minified bundles
+# are ~25 MB); the deep middle of a file larger than this is a documented residual.
+_MAX_INTERIOR_SCAN_BYTES = 64_000_000
+
+
 def _ext(rel: str) -> str:
     i = rel.rfind(".")
     return rel[i:].lower() if i != -1 else ""
@@ -146,6 +162,70 @@ class Target:
             else:
                 return None                       # real binary asset
         return raw.decode("utf-8", errors="replace")
+
+    def read_source_windows(self, rel: str) -> Iterator[tuple[int, str]]:
+        """Yield ``(line_offset, text)`` chunks covering the WHOLE body of a source file.
+
+        ``read_text`` truncates an oversized source file to head+tail, so the interior (offset
+        ~1 MB .. size-1 MB) is unscanned — a payload buried there is invisible to every matcher
+        (#1145, blind spot #5 of #1141). This reader streams the full file in overlapping windows
+        so no interior region is skipped. It is for the CHEAP, line-local confirmed content-regex
+        tier ONLY (ContentMatcher). The expensive whole-file density heuristic deliberately stays
+        head/tail-bounded via ``read_text`` — do NOT route it through here (it is FP-prone on the
+        large minified bundles this method now reads in full).
+
+        Memory stays bounded: at most one window is resident (``max_file_bytes`` bytes), regardless
+        of file size — a 500 MB source file is scanned in ~2 MB working-set chunks, never read whole.
+        Total work is bounded too: files larger than ``_MAX_INTERIOR_SCAN_BYTES`` fall back to the
+        head+tail read so a hostile target can't force unbounded scanning with one enormous file.
+        ``line_offset`` is the count of newlines BEFORE the window's first byte, computed in the byte
+        domain (a caller adds ``text.count("\\n", 0, match)`` to it for the absolute 1-based line).
+        Small files (<= cap) yield exactly one ``(0, text)`` window equal to ``read_text`` — the
+        common path is byte-for-byte unchanged (verdict-identical).
+        """
+        p = self.root / rel
+        ext = _ext(rel)
+        try:
+            size = p.stat().st_size
+        except FileNotFoundError:
+            return                                # vanished (race) — benign skip
+        except OSError as exc:
+            self.read_errors.append(f"{rel}: {type(exc).__name__}")      # unstattable — a gap
+            return
+        if size <= self.opts.max_file_bytes:
+            text = self.read_text(rel)            # reuse the exact small-file semantics (NUL/decode)
+            if text is not None:
+                yield (0, text)
+            return
+        if ext not in SOURCE_EXTS:
+            return                                # genuinely large binary — skip (as read_text does)
+        if size > _MAX_INTERIOR_SCAN_BYTES:
+            # Too large to window in full without becoming a DoS surface — fall back to the head+tail
+            # read (preserves appended-payload/tail coverage); the deep middle is a documented residual.
+            text = self.read_text(rel)
+            if text is not None:
+                yield (0, text)
+            return
+        window = self.opts.max_file_bytes
+        # Clamp the step so a tiny cap (overlap >= window, e.g. tests) can't yield a non-positive
+        # step and loop forever.
+        step = max(1, window - min(_SOURCE_WINDOW_OVERLAP, window // 2))
+        nl_before = 0
+        pos = 0
+        try:
+            with p.open("rb") as fh:
+                while pos < size:
+                    fh.seek(pos)
+                    raw = fh.read(window)
+                    if not raw:
+                        break
+                    chunk = raw.replace(b"\x00", b"")   # NUL-laden source is scanned anyway (as read_text)
+                    yield (nl_before, chunk.decode("utf-8", errors="replace"))
+                    nl_before += raw.count(b"\n", 0, step)   # newlines we step past (byte domain — exact)
+                    pos += step
+        except OSError as exc:
+            self.read_errors.append(f"{rel}: {type(exc).__name__}")      # unreadable oversized file — a gap
+            return
 
     def cleanup(self) -> None:
         pass
