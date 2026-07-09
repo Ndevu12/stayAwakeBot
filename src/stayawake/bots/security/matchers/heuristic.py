@@ -31,8 +31,13 @@ _MIN_HIDDEN_WHITESPACE_RUN = 120
 _MIN_CONCEALED_CONTENT = 4
 # A run of >=120 space / tab / no-break-space chars, then non-whitespace content. Escapes only
 # — a security tool must not carry literal invisible chars in its own source.
+# The leading `(?<![ \t\u00A0])` anchors the run to a line-start / after-non-whitespace boundary, so
+# on an all-whitespace line `re.search` doesn't retry the run at every offset (that O(n) of retries x
+# the O(n) greedy match was an O(n^2) ReDoS \u2014 #1158). `{...,}+` is possessive: the maximal run never
+# backtracks. Detection is identical (a real concealment run always follows a non-whitespace char or
+# the line start; verified parity on every case) \u2014 a 2 MB all-whitespace line ~20 s -> 0.05 s.
 _HIDDEN_WHITESPACE_RUN = re.compile(
-    r"(?P<run>[ \t\u00A0]{%d,})(?P<hidden>\S.*)$" % _MIN_HIDDEN_WHITESPACE_RUN)
+    r"(?<![ \t\u00A0])(?P<run>[ \t\u00A0]{%d,}+)(?P<hidden>\S.*)$" % _MIN_HIDDEN_WHITESPACE_RUN)
 
 # Zero-width / bidi-control characters that hide or reorder source text (the "Trojan Source"
 # attack, CVE-2021-42574) and are essentially never legitimate in hand-authored code. Written as
