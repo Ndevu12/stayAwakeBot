@@ -7,6 +7,20 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **Scans the interior of oversized source files, not just head+tail (#1145).** A source file larger
+  than `max_file_bytes` (2 MB) was read **head + tail only**, so a payload buried in the *middle* (e.g.
+  at ~1.5 MB behind benign padding) was invisible to every matcher — a cost-free evasion (empirically:
+  a 3 MB bundle with a `fromCharCode(127)` loader fingerprint spliced at offset 1.5 MB scanned
+  **clean**). The
+  ContentMatcher now streams the **whole body** in overlapping windows via a new
+  `Target.read_source_windows`, so no interior region is skipped. Only the **cheap, line-local confirmed
+  content-regex tier** goes full-file; the FP-prone whole-file **density heuristic stays head/tail-bounded**
+  as before. Memory stays bounded (one ~2 MB window resident regardless of file size — a 500 MB file is
+  never read whole) and **total work is bounded** (files above a 64 MB ceiling fall back to head+tail, so
+  a hostile target can't weaponize windowing with one enormous file), line numbers stay exact, and it's
+  **verdict-identical** on every existing fixture
+  (a ≤ 2 MB file yields a single window equal to the old read). Verified FP-safe against 86 real minified
+  bundles > 2 MB (0 false matches across their full interior). Closes blind spot #5 of epic #1141.
 - **Audits the INSTALLED dependency tree, not just the lockfile (#1144).** The dependency audit sees only
   what a repo *declares*; the worm's real move is a postinstall that drops a package into `node_modules`
   **without editing the lockfile** — invisible to a lockfile-only audit. A new `installed-package-audit`
