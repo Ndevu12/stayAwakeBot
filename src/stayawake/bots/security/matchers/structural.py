@@ -11,7 +11,8 @@ from __future__ import annotations
 import re
 
 from stayawake.bots.security.models import Finding, Severity
-from stayawake.bots.security.matchers.base import Matcher, load_jsonc, build_content_sig
+from stayawake.bots.security.matchers.base import (
+    Matcher, load_jsonc, build_content_sig, REMOTE_FETCH_INTO_INTERPRETER)
 
 # Claude Code lifecycle events that fire WITHOUT the user invoking a specific tool — the agent
 # analogue of runOn:folderOpen. (PreToolUse/PostToolUse/UserPromptSubmit fire only during active
@@ -19,11 +20,11 @@ from stayawake.bots.security.matchers.base import Matcher, load_jsonc, build_con
 # flagged, to avoid false positives; a hook there running a PAYLOAD is still caught, below.)
 _CLAUDE_OPEN_EVENTS = {"SessionStart", "SessionEnd", "Notification", "PreCompact"}
 
-# Unmistakable payload shapes in a hook command → confirmed (INFECTED). Remote-fetch reuses the
-# shape shared with the npm/workflow matchers; font-exec mirrors the VS Code vscode-task-runs-font
-# signal (a disguised font/binary run via node). Loader fingerprints are corroborated separately.
-_REMOTE_FETCH = re.compile(
-    r"\b(?:curl|wget)\b[^|]*\|\s*(?:sh|bash|node|bun|bunx|deno)\b", re.IGNORECASE)
+# Unmistakable payload shapes in a hook command → confirmed (INFECTED). Remote-fetch is the shared
+# (bounded) shape from base.py — used by the npm/workflow matchers too, so it can't drift; font-exec
+# mirrors the VS Code vscode-task-runs-font signal (a disguised font/binary run via node). Loader
+# fingerprints are corroborated separately.
+_REMOTE_FETCH = REMOTE_FETCH_INTO_INTERPRETER
 _FONT_EXEC = re.compile(r"\.(?:woff2?|ttf|otf)\b", re.IGNORECASE)
 
 

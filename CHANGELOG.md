@@ -267,6 +267,18 @@ All notable changes to this project are documented here. The format is based on
   `--user "$(id -u):$(id -g)"` invocation for writing the report back to the host.
 
 ### Security
+- **Fixed a ReDoS: a crafted repo could hang the scanner (#1156).** The remote-fetch-into-interpreter
+  signature (`curl|wget → sh/bash/node/…`) used an unbounded `[^|]*`, which scans to end-of-string at
+  every `curl`/`wget` when no pipe follows → **O(n²)**. A hostile target with a large no-pipe
+  `curl`-spam string — a `package.json` install hook, a `.github/workflows/*.yml` run step, or a
+  `.claude/settings.json` hook command (each under the read cap) — could pin a core for **minutes** in
+  a single `re.search`: a cost-free denial of service. The gap is now **bounded** (`[^|]{0,2048}`,
+  detection-identical — a real `curl URL | sh` is far shorter). The shape was **copied in three places**
+  (the npm-lifecycle signature plus the workflow and structural-json matchers, with comments saying it
+  must "never drift"); it is now a **single shared, bounded source** (`REMOTE_FETCH_INTO_INTERPRETER`)
+  so it can't drift again. Found during the adversarial verification of #1145 (a pre-existing bug,
+  unrelated to that change). Regression tests assert the pathological input scans in well under a second
+  on all three paths and that real `curl … | sh` payloads still fire.
 - **`saw scan` fails CLOSED when a target can't be scanned (was a fail-open).** A per-target scan
   error — an unreadable or malformed config (e.g. an `allowlist` that isn't a list of mappings), a
   read failure (a file present but unreadable — permission error / restrictive ACL), or a failed
