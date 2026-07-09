@@ -28,7 +28,7 @@ import re
 import yaml
 
 from stayawake.bots.security.models import Finding, Severity
-from stayawake.bots.security.matchers.base import Matcher
+from stayawake.bots.security.matchers.base import Matcher, REMOTE_FETCH_INTO_INTERPRETER
 
 # Triggers that run with the BASE repo's write-scoped token while carrying attacker-controllable
 # event payloads — the injection-prone set (GitHub's own "script injection" guidance).
@@ -52,10 +52,9 @@ UNTRUSTED_EXPR = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
-# A remote fetch piped straight into an interpreter — reused shape from the npm-lifecycle
-# remote-fetch signature so the two never drift.
-REMOTE_FETCH = re.compile(
-    r"\b(?:curl|wget)\b[^|]*\|\s*(?:sh|bash|node|bun|bunx|deno)\b", re.IGNORECASE)
+# A remote fetch piped straight into an interpreter — the shared (bounded) shape from base.py, used
+# by the npm-lifecycle and structural-json matchers too, so it can't drift.
+REMOTE_FETCH = REMOTE_FETCH_INTO_INTERPRETER
 SELF_HOSTED = re.compile(r"\bself-hosted\b", re.IGNORECASE)
 DEPENDABOT = re.compile(r"dependabot", re.IGNORECASE)
 

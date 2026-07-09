@@ -315,7 +315,10 @@ signatures:
     category: npm-lifecycle
     severity: critical
     matcher: npm-manifest
-    pattern: '\b(?:curl|wget)\b[^|]*\|\s*(?:sh|bash|node|bun|bunx|deno)\b'
+    # `[^|]{0,2048}` is BOUNDED, not `[^|]*`: an unbounded run scans to end-of-string at every curl/wget
+    # anchor when no pipe follows → O(n^2) ReDoS on a crafted command (#1156). A real `curl URL | sh`
+    # one-liner is far under 2048 chars, so the bound is detection-identical.
+    pattern: '\b(?:curl|wget)\b[^|]{0,2048}\|\s*(?:sh|bash|node|bun|bunx|deno)\b'
     description: "npm lifecycle hook pipes a remote fetch into an interpreter (curl|wget → sh/bun/node)"
     remediation: manual
 
