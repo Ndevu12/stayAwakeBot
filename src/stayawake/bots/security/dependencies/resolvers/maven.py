@@ -9,8 +9,11 @@ a `<dependencyManagement>`/BOM-managed version, or a Maven range is unresolved �
 `Maven` ecosystem names a package `groupId:artifactId`.
 
 pom.xml is parsed by regex, NOT an XML parser: `saw` must never be DoS'd by a hostile scanned file,
-and XML entity-expansion ("billion laughs") / XXE are exactly that risk. Regex extraction has no
-such attack surface.
+and XML entity-expansion ("billion laughs") / XXE are exactly that risk. The extraction regex must
+itself be ReDoS-safe — the block body is a TEMPERED run (non-`</dependency>` chars that also don't
+start a NEW `<dependency`), so an opener with no closer can't scan to end-of-file at every opener
+(a plain `(.*?)` did → O(n^2) on `<dependency>`-spam, #1158). `<dependency>` blocks never nest, so
+the tempering is detection-identical.
 """
 from __future__ import annotations
 
@@ -20,7 +23,8 @@ from typing import Iterator
 from stayawake.bots.security.dependencies.purl import Purl, ResolvedDependency
 from stayawake.bots.security.dependencies.resolvers.base import Resolver
 
-_DEP_BLOCK = re.compile(r"<dependency\b[^>]*>(.*?)</dependency>", re.S | re.I)
+_DEP_BLOCK = re.compile(
+    r"<dependency\b[^>]*>((?:(?!</dependency>)(?!<dependency\b)[\s\S])*)</dependency>", re.S | re.I)
 # `group:artifact:version`, with the version terminated by `=configs` (new format) OR end-of-line
 # (legacy per-configuration format). Comment/`empty=` lines don't start with a coordinate → skipped.
 _GRADLE_LINE = re.compile(r"^(?P<group>[^:\s#]+):(?P<artifact>[^:\s]+):(?P<version>[^=\s]+)(?:=|$)")
@@ -32,9 +36,19 @@ def _is_gradle_lock(rel: str, base: str) -> bool:
             or (base.endswith(".lockfile") and "gradle/dependency-locks/" in rel))
 
 
+# Per-tag body extractors, PRECOMPILED at module level (not built per call) — both so the ReDoS guard
+# enumerates them and so the body is unambiguous: `([^<]*)` is greedy with no overlapping `\s*` wrappers.
+# The old `>\s*([^<]+?)\s*<` had THREE whitespace-capable quantifiers around the body → ~O(n^3)
+# catastrophic backtracking on a whitespace-filled tag with no closer (a ~2 KB pom.xml hung the scan,
+# #1158). `[^<]` never matches `<`, so the greedy body can't backtrack across it — linear. Python
+# `.strip()` reproduces the trimming the wrapping `\s*` used to do.
+_TAG_RE = {t: re.compile(rf"<{t}\b[^>]*>([^<]*)</{t}>", re.I)
+           for t in ("groupId", "artifactId", "version")}
+
+
 def _tag(block: str, tag: str) -> str | None:
-    m = re.search(rf"<{tag}\b[^>]*>\s*([^<]+?)\s*</{tag}>", block, re.I)
-    return m.group(1).strip() if m else None
+    m = _TAG_RE[tag].search(block)
+    return (m.group(1).strip() or None) if m else None
 
 
 def _is_literal_version(v: str) -> bool:

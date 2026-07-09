@@ -7,7 +7,6 @@ safety + allowlist, all against inert workflow YAML.
 from __future__ import annotations
 
 import tempfile
-import time
 import unittest
 from pathlib import Path
 
@@ -90,17 +89,6 @@ class TestWorkflowMatcher(unittest.TestCase):
         r = _scan({".github/workflows/ci.yml": CLEAN_PUSH})
         self.assertEqual([f.signature_id for f in r.findings], [])
         self.assertEqual(r.verdict, CLEAN)
-
-    def test_crafted_giant_run_step_does_not_redos(self):
-        # #1156: the workflow remote-fetch check shares the (now bounded) curl→interpreter shape,
-        # reached via a Dependabot-named workflow's run steps. A giant no-pipe `curl`-spam run step
-        # (kept under the 2 MB cap so it really reaches the regex) must not drive it into an O(n^2)
-        # hang. Old unbounded pattern → ~minutes; bounded → seconds.
-        wf = ("name: dependabot\non: push\njobs:\n  j:\n    runs-on: ubuntu-latest\n"
-              "    steps:\n      - run: " + "curl " * 380_000 + "\n")   # ~1.9 MB (< 2 MB cap)
-        t0 = time.time()
-        _scan({".github/workflows/dependabot.yml": wf})
-        self.assertLess(time.time() - t0, 30.0, "workflow remote-fetch regex ReDoS: giant run not bounded")
 
     def test_safe_leaf_under_dangerous_trigger_is_clean(self):
         # Dangerous trigger but the interpolated field is a non-injectable id (.number) → no fire.

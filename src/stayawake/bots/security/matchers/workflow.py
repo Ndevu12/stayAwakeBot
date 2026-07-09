@@ -37,20 +37,43 @@ DANGEROUS_TRIGGERS = frozenset({
     "discussion", "discussion_comment", "workflow_run",
 })
 
-# An untrusted `${{ github.event.<obj>...<leaf> }}` (or `github.head_ref`) interpolation. The
-# object must be an attacker-writable event field and the leaf a free-text value (title/body/
-# message/ref/...). `[^}]*` between them stays inside ONE interpolation (never crosses `}`), so
-# it spans `.head.ref` / `commits[0].message` yet not a neighbouring expression. Numeric/id leaves
-# (`.number`, `.id`, `.sha`) are deliberately excluded — they are not injectable → fewer FPs.
-UNTRUSTED_EXPR = re.compile(
-    r"\$\{\{[^}]*\bgithub\.(?:"
+# An untrusted `github.event.<obj>...<leaf>` (or `github.head_ref`) reference where the object is an
+# attacker-writable event field and the leaf a free-text value (title/body/message/ref/...). Numeric/id
+# leaves (`.number`, `.id`, `.sha`) are deliberately excluded — not injectable → fewer FPs. The gap
+# between the object and the leaf is bounded `[^}]{0,256}` — a real nested access (`commits[0]`,
+# `.head.ref`) is short, and the bound keeps this pattern linear even when tested on hostile input in
+# isolation (the ReDoS guard runs it standalone).
+_INJECTION_IN_EXPR = re.compile(
+    r"\bgithub\.(?:"
     r"head_ref"
     r"|event\.(?:issue|pull_request|comment|discussion|review|review_comment|"
-    r"head_commit|commits|pages|workflow_run)\b[^}]*"
+    r"head_commit|commits|pages|workflow_run)\b[^}]{0,256}"
     r"\.(?:title|body|message|ref|label|name|email|page_name|default_branch|login)"
-    r")[^}]*\}\}",
+    r")",
     re.IGNORECASE | re.DOTALL,
 )
+
+
+def untrusted_expr(text: str) -> str | None:
+    """Return the first `${{ … }}` interpolation in `text` that reads an untrusted github.event field,
+    or None. `${{ … }}` blocks are extracted by a LINEAR str.find scan, then the injection shape is
+    matched inside each BOUNDED block. This is both ReDoS-safe — a `${{`-spam run step can't drive a
+    scan-to-end-of-string retried at every `${{` (the O(n^2) a single `\\$\\{\\{[^}]*…` regex had,
+    #1158) — and DETECTION-COMPLETE: the outer condition can be arbitrarily long or contain a literal
+    `${{`, and the interpolation is still caught (which no fixed gap-bound or tempered run achieves,
+    since the attacker authors the workflow)."""
+    i = 0
+    while True:
+        start = text.find("${{", i)
+        if start == -1:
+            return None
+        end = text.find("}}", start + 3)
+        if end == -1:
+            return None                          # unterminated — not a real interpolation
+        block = text[start:end + 2]
+        if _INJECTION_IN_EXPR.search(block):
+            return block
+        i = end + 2
 
 # A remote fetch piped straight into an interpreter — the shared (bounded) shape from base.py, used
 # by the npm-lifecycle and structural-json matchers too, so it can't drift.
@@ -125,9 +148,8 @@ class WorkflowYamlMatcher(Matcher):
         sig = by_kind.get("dangerous-trigger-run-injection")
         if sig:
             triggers = self._triggers(data) & DANGEROUS_TRIGGERS
-            hit = next((r for r in runs if UNTRUSTED_EXPR.search(r)), None)
-            if triggers and hit is not None:
-                expr = UNTRUSTED_EXPR.search(hit).group(0)
+            expr = next((e for e in (untrusted_expr(r) for r in runs) if e), None)
+            if triggers and expr is not None:
                 out.append(self._emit(sig, rel,
                                       f"trigger {sorted(triggers)} → run interpolates {expr[:70]}"))
 
@@ -139,7 +161,7 @@ class WorkflowYamlMatcher(Matcher):
                 reason = "self-hosted runs-on"
             elif any(REMOTE_FETCH.search(r) for r in runs):
                 reason = "remote-fetch|interpreter in run"
-            elif any(UNTRUSTED_EXPR.search(r) for r in runs):
+            elif any(untrusted_expr(r) for r in runs):
                 reason = "untrusted github.event.* in run"
             if reason:
                 out.append(self._emit(sig, rel, f"Dependabot-named workflow with {reason}"))

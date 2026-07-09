@@ -277,8 +277,25 @@ All notable changes to this project are documented here. The format is based on
   (the npm-lifecycle signature plus the workflow and structural-json matchers, with comments saying it
   must "never drift"); it is now a **single shared, bounded source** (`REMOTE_FETCH_INTO_INTERPRETER`)
   so it can't drift again. Found during the adversarial verification of #1145 (a pre-existing bug,
-  unrelated to that change). Regression tests assert the pathological input scans in well under a second
-  on all three paths and that real `curl … | sh` payloads still fire.
+  unrelated to that change). Real `curl … | sh` payloads still fire (detection-identical).
+- **Eliminated ReDoS as a class: five catastrophic-backtracking patterns fixed + one guard that enforces
+  it everywhere (#1158).** A hostile repo could hang `saw scan` for minutes-to-hours in a single
+  `re.search` via any of five patterns — each a scan-to-end-of-string retried at every anchor when a
+  delimiter is absent: the hidden-whitespace-concealment run (a ~40 KB whitespace line → >20 s), the
+  untrusted-`${{ }}`-expression check (`${{`-spam → ~12 s), the Maven `pom.xml` `<dependency>` block
+  extractor (`<dependency>`-spam → minutes) and its per-tag `<version>…</version>` extractor (a ~2 KB
+  whitespace-filled tag → an O(n³) hang), and the JSONC `/* */` comment stripper reached on every
+  `package.json` / `settings.json` (`/*`-spam → hours). Each is fixed **structurally, detection-complete,
+  and without an attacker-evadable length cap** (the attacker authors these files, so a fixed bound would
+  just be padded past): a boundary-anchor + possessive run for the whitespace case; **linear `str.find`
+  extraction** of `${{ … }}` blocks / block comments for the workflow and JSONC cases (an injection with
+  an arbitrarily long condition or a literal `${{` in its body is still caught); a *tempered* run that
+  stays inside one `<dependency>` block, and a non-overlapping `[^<]*` tag body, for Maven. Crucially,
+  instead of a per-matcher ReDoS test (which drifts and misses the *next* pattern), there is now **one
+  shared guard** — `test_redos_safety.py` walks the **entire** `stayawake.bots.security` package, collects
+  **every** compiled regex (matchers, resolvers, signatures, and ones nested in a dict/list — 48 today)
+  and asserts each stays bounded on a battery of hostile inputs, cutting off a runaway with a hard timeout.
+  A new quadratic pattern anywhere fails that one test — no new test to write.
 - **`saw scan` fails CLOSED when a target can't be scanned (was a fail-open).** A per-target scan
   error — an unreadable or malformed config (e.g. an `allowlist` that isn't a list of mappings), a
   read failure (a file present but unreadable — permission error / restrictive ACL), or a failed

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import tempfile
-import time
 import unittest
 from pathlib import Path
 
@@ -52,14 +51,6 @@ class TestClaudeAutorun(unittest.TestCase):
         self.assertIn("claude-hook-runs-payload", {f.signature_id for f in r.findings})
         self.assertEqual(r.verdict, INFECTED)          # payload is confirmed
 
-    def test_crafted_giant_hook_command_does_not_redos(self):
-        # #1156: the hook remote-fetch check shares the (now bounded) curl→interpreter shape. A giant
-        # no-pipe `curl`-spam hook command (kept under the 2 MB cap so it really reaches the regex)
-        # must not drive it into an O(n^2) hang. Old unbounded pattern → ~minutes; bounded → seconds.
-        t0 = time.time()
-        r = _scan({".claude/settings.json": _hooks({"SessionStart": "curl " * 380_000})})
-        self.assertLess(time.time() - t0, 30.0, "hook remote-fetch regex ReDoS: giant command not bounded")
-        self.assertNotIn("claude-hook-runs-payload", {f.signature_id for f in r.findings})  # no pipe
 
     def test_payload_flagged_on_any_event_even_active_use(self):
         # A payload is decisive regardless of the trigger event — a PostToolUse hook running a
