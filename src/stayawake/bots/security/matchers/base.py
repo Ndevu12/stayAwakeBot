@@ -21,6 +21,15 @@ FONT_MAGIC = {
     ".ttf": b"\x00\x01\x00\x00", ".otf": b"OTTO",
 }
 
+# A remote fetch piped straight into an interpreter (curl|wget → sh/bash/node/…). ONE source, shared
+# by the workflow and structural-json matchers (a run step / a hook command) so the shape can't drift;
+# the npm-lifecycle-remote-fetch signature carries the same shape in signatures.yml (data-driven) —
+# keep the three consistent. The gap is `[^|]{0,2048}`, BOUNDED not `[^|]*`: an unbounded run scans to
+# end-of-string at every curl/wget anchor when no pipe follows → O(n²) ReDoS on a crafted command
+# (#1156). A real `curl URL | sh` one-liner is far under 2048 chars, so the bound is detection-identical.
+REMOTE_FETCH_INTO_INTERPRETER = re.compile(
+    r"\b(?:curl|wget)\b[^|]{0,2048}\|\s*(?:sh|bash|node|bun|bunx|deno)\b", re.IGNORECASE)
+
 
 def evidence(text: str, start: int, end: int, width: int = 80) -> str:
     s = max(0, start - 12)
