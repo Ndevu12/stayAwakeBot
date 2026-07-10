@@ -42,13 +42,13 @@ class InstalledPackageAuditMatcher(Matcher):
             installed = list(tree.read(target))
             if not installed:
                 continue                              # no installed tree present → lockfile audit only
-            locked = self._locked_names(tree.ecosystem, target)
+            locked = self._locked_names(tree.ecosystem, target) if tree.ghost_reconcilable else set()
             for pkg in installed:
                 advisory = (store.advisory_for(Purl(tree.ecosystem, pkg.name, pkg.version))
                             if (pkg.version and not store.is_empty()) else None)
                 if advisory is not None:
                     findings.append(_malicious(advisory, pkg))
-                elif pkg.name not in locked:
+                elif tree.ghost_reconcilable and pkg.name not in locked:
                     findings.append(_ghost(by_id.get("ghost-package"), pkg))
         return [f for f in findings if f is not None]
 

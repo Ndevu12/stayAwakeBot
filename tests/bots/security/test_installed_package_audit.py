@@ -70,5 +70,53 @@ class TestInstalledPackageAudit(unittest.TestCase):
         self.assertEqual(_scan(Target(d, str(d), ScanOptions())), [])
 
 
+def _venv(installed, venv=".venv", info="dist-info") -> Path:
+    """A repo with a venv site-packages: {dist_name: version} → `<name>-<ver>.<dist-info|egg-info>/`."""
+    d = Path(tempfile.mkdtemp())
+    sp = d / venv / "lib" / "python3.11" / "site-packages"
+    for name, ver in installed.items():
+        di = sp / f"{name}-{ver}.{info}"
+        di.mkdir(parents=True)
+        meta = "PKG-INFO" if info == "egg-info" else "METADATA"
+        (di / meta).write_text(f"Metadata-Version: 2.1\nName: {name}\nVersion: {ver}\nSummary: x\n\nbody")
+    return d
+
+
+class TestPythonInstalledTree(unittest.TestCase):
+    def test_identity_on_disk_is_infected_tier(self):
+        # A known-malicious package installed in the venv → INFECTED tier, even with no lockfile.
+        t = Target(_venv({"evil": "9.9.9", "requests": "2.31.0"}), "t", ScanOptions())
+        by = {f.signature_id for f in _scan(t, malicious={"evil@9.9.9"})}
+        self.assertIn("malicious-installed-package", by)
+
+    def test_pep503_name_normalization(self):
+        # `Flask_Foo` on disk must reconcile with a `flask-foo` advisory (PEP 503, as the resolver does).
+        t = Target(_venv({"Flask_Foo": "1.0.0"}), "t", ScanOptions())
+        by = {f.signature_id for f in _scan(t, malicious={"flask-foo@1.0.0"})}
+        self.assertIn("malicious-installed-package", by)
+
+    def test_egg_info_is_read(self):
+        t = Target(_venv({"evil": "9.9.9"}, info="egg-info"), "t", ScanOptions())
+        self.assertIn("malicious-installed-package",
+                      {f.signature_id for f in _scan(t, malicious={"evil@9.9.9"})})
+
+    def test_ghost_is_suppressed_for_python(self):
+        # THE FP guarantee: requirements.txt lists only direct deps, so transitive site-packages must
+        # NOT flag as ghosts (unlike npm). A clean venv package (not malicious) → no finding at all.
+        t = Target(_venv({"some-transitive-dep": "1.2.3"}), "t", ScanOptions())
+        self.assertEqual(_scan(t, malicious=set()), [], "python transitive install must not ghost")
+
+    def test_site_packages_found_at_nested_venv(self):
+        d = _venv({"evil": "9.9.9"}, venv="backend/env")     # non-root, non-standard venv name
+        t = Target(d, "t", ScanOptions())
+        self.assertIn("malicious-installed-package",
+                      {f.signature_id for f in _scan(t, malicious={"evil@9.9.9"})})
+
+    def test_no_venv_is_a_noop(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "requirements.txt").write_text("requests==2.31.0\n")
+        self.assertEqual(_scan(Target(d, str(d), ScanOptions())), [])
+
+
 if __name__ == "__main__":
     unittest.main()

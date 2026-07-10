@@ -31,7 +31,11 @@ _NAME_SEP = re.compile(r"[-_.]+")
 _EXACT_PIN = re.compile(r"^(?P<name>[A-Za-z0-9._-]+)(?:\[[^\]]*\])?==(?P<version>[A-Za-z0-9._!+-]+)$")
 
 
-def _normalize(name: str) -> str:
+def normalize_pypi_name(name: str) -> str:
+    """PEP 503 normalization (case-insensitive, runs of `-_.` → a single `-`) — the form OSV/PyPI
+    advisories and this resolver both key on. Public so the Python installed-tree provider normalizes
+    identically (a `Flask_Foo` on disk reconciles with a `flask-foo` lock/advisory) — one shared
+    function, not a copied regex (extract-after-2nd-use)."""
     return _NAME_SEP.sub("-", name.strip()).lower()
 
 
@@ -55,7 +59,7 @@ class PyPiResolver(Resolver):
             else:
                 continue
             for name, version in deps:
-                yield ResolvedDependency(Purl(self.ecosystem, _normalize(name), version), rel)
+                yield ResolvedDependency(Purl(self.ecosystem, normalize_pypi_name(name), version), rel)
 
 
 # ── requirements.txt — exact `==` pins only (ranges defer to the lockfile) ──
