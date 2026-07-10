@@ -4,7 +4,7 @@
 # worm-guard.yml). If a PR changes the engine subtree but doesn't bump that pin, the gate keeps
 # running an out-of-date scanner — the exact silent drift #1172 fixes. This decides, from a PR's
 # diff alone, whether that invariant is violated. Kept as a standalone, GitHub-free script so the
-# logic is unit-testable (tests/test_pin_freshness.py) instead of buried in workflow YAML.
+# logic is unit-testable (tests/test_pin_tooling.py) instead of buried in workflow YAML.
 #
 # Usage: check_pin_freshness.sh <changed-files> <unified-diff>
 #   <changed-files>  file with one changed path per line   (from: gh pr diff --name-only)
@@ -18,14 +18,15 @@ changed_files="${1:?usage: check_pin_freshness.sh <changed-files> <unified-diff>
 unified_diff="${2:?usage: check_pin_freshness.sh <changed-files> <unified-diff>}"
 deferred="${DEFERRED:-no}"
 
-# The detection-engine subtree — the SAME seam the weekly drift job compares (engine only, so
-# report-only or signature-doc commits never trip it). --name-only gives bare paths (no a/ b/
-# prefix); the trailing slash keeps it from matching a sibling like `.../security_helpers/`.
-engine_re='^src/stayawake/bots/security/'
-# An ADDED (+) sentinel-ref line carrying a 40-char SHA = a deliberate pin bump. Requiring the SHA
-# form also rejects a sneaky reset to a floating ref (`sentinel-ref: main`), which the pin doctrine
-# forbids and which must NOT count as satisfying the check.
-pin_re='^\+[[:space:]]*sentinel-ref:[[:space:]]*[0-9a-f]{40}'
+# Shared definitions (engine subtree + pin token) — one source, also used by check_pin_drift.sh.
+source "$(dirname "${BASH_SOURCE[0]}")/_pin_lib.sh"
+
+# The engine seam as a --name-only path anchor. --name-only gives bare paths (no a/ b/ prefix);
+# the trailing slash keeps it from matching a sibling like `.../security_helpers/`.
+engine_re="^${PIN_ENGINE_SUBTREE}/"
+# An ADDED (+) pin line carrying a 40-char SHA = a deliberate bump. Reusing PIN_TOKEN_RE means the
+# floating-ref rejection (`sentinel-ref: main` doesn't count) is defined once, for both paths.
+pin_re="^\\+[[:space:]]*${PIN_TOKEN_RE}"
 
 engine_changed=no
 if grep -qE "$engine_re" "$changed_files"; then engine_changed=yes; fi

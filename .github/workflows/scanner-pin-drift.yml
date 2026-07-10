@@ -3,12 +3,15 @@ name: Scanner pin drift
 # The worm-guard gate pins its scanner to a reviewed SHA (sentinel-ref) so a later
 # compromise of main can't silently change what the gate runs. The cost of a pin is that
 # it goes stale — and a stale pin runs an out-of-date DETECTION ENGINE while you think
-# you're covered. This job makes that impossible to forget: weekly (and on demand) it
-# compares the pinned engine against main and opens an actionable issue if they diverge.
+# you're covered. This is the OUT-OF-BAND backstop: weekly (and on demand) it compares the
+# pinned engine against main and opens an actionable issue if they diverge. The IN-BAND gate
+# (scanner-pin-freshness.yml) is what fails a PR at merge time; this catches drift that never
+# went through a PR (e.g. an admin direct-push).
 #
 # It compares ONLY the engine subtree (src/stayawake/bots/security/**), so the constant
 # chore(sentinel) report commits never raise a false alarm — drift fires only when the
-# scanner itself has actually moved. This is the seam the engine/signatures split builds on.
+# scanner itself has actually moved. The logic lives in .github/scripts/check_pin_drift.sh,
+# which shares its engine-subtree + pin definitions with the freshness check via _pin_lib.sh.
 
 on:
   schedule:
@@ -31,41 +34,4 @@ jobs:
       - name: Detect engine drift from the worm-guard pin
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          guard=.github/workflows/worm-guard.yml
-          engine=src/stayawake/bots/security
-          pin="$(grep -oE 'sentinel-ref:[[:space:]]*[0-9a-f]{40}' "$guard" | grep -oE '[0-9a-f]{40}' | head -1)"
-          if [ -z "$pin" ]; then
-            echo "::error::could not read a 40-char sentinel-ref SHA from $guard"; exit 1
-          fi
-          echo "Pinned scanner: $pin"
-
-          title="worm-guard scanner pin is behind main"
-          existing="$(gh issue list --state open --search "$title in:title" \
-                       --json number,title --jq ".[] | select(.title==\"$title\") | .number" | head -1)"
-
-          if git diff --quiet "$pin" HEAD -- "$engine"; then
-            echo "Engine pin is current with main — no drift."
-            if [ -n "$existing" ]; then
-              gh issue close "$existing" --comment "Engine pin is current again (resolved automatically)."
-            fi
-            exit 0
-          fi
-
-          echo "::warning::engine has drifted from the pinned scanner ($pin)"
-          changed="$(git diff --name-only "$pin" HEAD -- "$engine" | sed 's/^/- /')"
-          # Build the body with printf so no YAML/heredoc indentation leaks in as leading
-          # spaces (which markdown would render as a code block).
-          body="$(printf '%s\n\n%s\n\n%s\n%s\n\n%s' \
-            "The worm-guard gate pins \`sentinel-ref: $pin\`, but the detection engine (\`$engine/\`) on \`main\` has changed since. **The gate is running an out-of-date scanner.**" \
-            "Bump \`sentinel-ref\` in \`$guard\` to a current reviewed \`main\` SHA (after confirming the change is intended), then merge." \
-            "Engine files changed since the pin:" \
-            "$changed" \
-            "_Auto-opened by the \`scanner-pin-drift\` workflow; it closes itself when the pin catches up._")"
-
-          if [ -n "$existing" ]; then
-            gh issue comment "$existing" --body "Still drifting as of $(git rev-parse --short HEAD)."
-          else
-            gh issue create --title "$title" --body "$body"
-          fi
+        run: bash .github/scripts/check_pin_drift.sh

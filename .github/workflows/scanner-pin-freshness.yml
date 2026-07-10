@@ -6,7 +6,7 @@ name: Scanner pin freshness
 # at PR time, on the exact event that breaks the invariant, instead of surfacing up to a week later
 # as a human-closeable issue. Deliberate deferral (e.g. one bump at the end of an epic) is allowed
 # via the 'pin-bump-deferred' label. The decision lives in .github/scripts/check_pin_freshness.sh
-# (unit-tested by tests/test_pin_freshness.py); this workflow only feeds it the PR diff. (#1172)
+# (unit-tested by tests/test_pin_tooling.py); this workflow only feeds it the PR diff. (#1172)
 
 on:
   pull_request:
