@@ -347,6 +347,19 @@ All notable changes to this project are documented here. The format is based on
   The pin had drifted 20 engine files behind (all of the scan-everywhere epic #1141, the ReDoS-class
   elimination #1156/#1158, and the installed-dependency audit #1144/#1164 landed after it), so the gate
   was scanning every PR with a #1138-era engine. It now points at the current reviewed `main` tip.
+- **In-band pin-freshness check so the pin can't silently drift again (#1172).** The pin above lagged
+  20 files because the only drift signal was `scanner-pin-drift` — a **weekly** job whose alert is a
+  **human-closeable issue**, and which is fully **out-of-band from the merges that cause drift**: it
+  can't warn until the next Monday, and closing its issue (as happened) silences it without moving the
+  pin. A new `Scanner pin freshness` workflow runs **on every PR**: if the diff changes the detection
+  engine (`src/stayawake/bots/security/**`) but does **not** bump `sentinel-ref` in `worm-guard.yml`,
+  the check **fails at PR time** — on the exact event that breaks the invariant, not up to a week later.
+  Deliberate deferral (e.g. one bump at the end of an epic) is allowed via a `pin-bump-deferred` label.
+  The decision is a standalone, GitHub-free script (`.github/scripts/check_pin_freshness.sh`) so its
+  logic — including that a floating `sentinel-ref: main` reset does **not** count as a bump — is
+  unit-tested (`tests/test_pin_freshness.py`), not buried in YAML. The weekly job stays as a backstop
+  for drift from direct pushes that bypass PRs. (Verified against real diffs: the engine PRs #1166–#1170
+  that slipped the old pin would each have failed this check.)
 - **Fixed a ReDoS: a crafted repo could hang the scanner (#1156).** The remote-fetch-into-interpreter
   signature (`curl|wget → sh/bash/node/…`) used an unbounded `[^|]*`, which scans to end-of-string at
   every `curl`/`wget` when no pipe follows → **O(n²)**. A hostile target with a large no-pipe
