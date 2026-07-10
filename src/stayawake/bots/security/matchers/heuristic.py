@@ -16,7 +16,8 @@ from __future__ import annotations
 import re
 
 from stayawake.bots.security.models import Finding, Severity
-from stayawake.bots.security.matchers.base import Matcher, globs_ok, FONT_MAGIC, build_content_sig
+from stayawake.bots.security.matchers.base import (
+    Matcher, globs_ok, FONT_MAGIC, BINARY_MAGIC, build_content_sig)
 from stayawake.bots.security.obfuscation import (
     analyze_file, is_generated_context, _AUTHORED_OBFUSCATABLE_EXTS,
 )
@@ -56,7 +57,7 @@ class HeuristicMatcher(Matcher):
     def scan(self, target, signatures, all_signatures=None):
         findings: list[Finding] = []
         long_line = next((s for s in signatures if s.get("kind") == "long-line"), None)
-        text_font = next((s for s in signatures if s.get("kind") == "text-in-fontfile"), None)
+        masquerade = [s for s in signatures if s.get("kind") == "magic-byte-masquerade"]
         concealment = next((s for s in signatures if s.get("kind") == "whitespace-concealment"), None)
         content_sig = build_content_sig(all_signatures or signatures)
         for rel in target.iter_files():
@@ -64,10 +65,11 @@ class HeuristicMatcher(Matcher):
                 f = self._oversized_line(target, rel, long_line, content_sig)
                 if f:
                     findings.append(f)
-            if text_font and globs_ok(rel, text_font):
-                f = self._disguised_font(target, rel, text_font)
-                if f:
-                    findings.append(f)
+            for sig in masquerade:                # fonts + images/wasm/pdf, disjoint globs → ≤1 fires
+                if globs_ok(rel, sig):
+                    f = self._magic_byte_masquerade(target, rel, sig)
+                    if f:
+                        findings.append(f)
             if concealment and globs_ok(rel, concealment):
                 f = self._whitespace_concealment(target, rel, concealment)
                 if f:
@@ -134,9 +136,12 @@ class HeuristicMatcher(Matcher):
                        description=sig["description"], remediation=sig.get("remediation", "manual"),
                        line=line, evidence=ev, vector=sig["category"])
 
-    def _disguised_font(self, target, rel, sig):
+    def _magic_byte_masquerade(self, target, rel, sig):
+        """A file whose EXTENSION claims a binary format (font/image/wasm/pdf) but whose head lacks
+        that format's magic bytes AND reads as text/JS → a payload disguised under a benign extension.
+        A real binary starts with its magic, so `startswith(magic)` short-circuits (0 FP on real files)."""
         ext = "." + rel.rsplit(".", 1)[-1].lower() if "." in rel else ""
-        magic = FONT_MAGIC.get(ext)
+        magic = FONT_MAGIC.get(ext) or BINARY_MAGIC.get(ext)
         raw = target.read_bytes(rel, limit=512)
         if not raw or not magic or raw.startswith(magic):
             return None
