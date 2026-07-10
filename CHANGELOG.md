@@ -341,6 +341,12 @@ All notable changes to this project are documented here. The format is based on
   `--user "$(id -u):$(id -g)"` invocation for writing the report back to the host.
 
 ### Security
+- **Bumped the worm-guard gate's pinned scanner to current main (`sentinel-ref` → merge of #1170).**
+  The gate pins its detection engine to a reviewed SHA so a later compromise of `main` can't silently
+  change what it runs — but a pin that lags runs an out-of-date engine while you believe you're covered.
+  The pin had drifted 20 engine files behind (all of the scan-everywhere epic #1141, the ReDoS-class
+  elimination #1156/#1158, and the installed-dependency audit #1144/#1164 landed after it), so the gate
+  was scanning every PR with a #1138-era engine. It now points at the current reviewed `main` tip.
 - **Fixed a ReDoS: a crafted repo could hang the scanner (#1156).** The remote-fetch-into-interpreter
   signature (`curl|wget → sh/bash/node/…`) used an unbounded `[^|]*`, which scans to end-of-string at
   every `curl`/`wget` when no pipe follows → **O(n²)**. A hostile target with a large no-pipe
