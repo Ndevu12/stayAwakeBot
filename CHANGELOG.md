@@ -216,6 +216,16 @@ All notable changes to this project are documented here. The format is based on
 - This changelog.
 
 ### Changed
+- **Relicensed to AGPL-3.0-or-later + a commercial license (dual licensing), from v0.1.9 onward.**
+  stayAwakeBot moves off MIT to a **dual-license** model: **AGPL-3.0-or-later** (free, open source —
+  attribution required, and network/hosted use of a modified version must release its source under
+  the AGPL) **or** a **paid commercial license** for closed-source / proprietary-SaaS use without the
+  AGPL's source-disclosure obligations (see [`COMMERCIAL-LICENSE.md`](COMMERCIAL-LICENSE.md)). The full
+  AGPL text now ships as [`LICENSE`](LICENSE) — which also **fixes the container image build**, whose
+  `Dockerfile` copied a `LICENSE` that had been deleted (so the GHCR publish failed on every release).
+  `pyproject.toml` (`license`, `license-files`) and the image's OCI `licenses` label are updated to
+  match. **Releases up to and including v0.1.8 were MIT and remain MIT for those versions** — the new
+  license governs v0.1.9+. (Not legal advice; the commercial agreement's terms are separate.)
 - **A Python venv's `site-packages` is treated as generated context, like `node_modules`.** Third-party
   installed code where a package can legitimately ship a minified `.js`/data blob — the density /
   whitespace / oversized-line heuristics would false-positive there, exactly as in `node_modules`/`dist`.
