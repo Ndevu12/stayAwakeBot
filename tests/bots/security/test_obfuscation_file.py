@@ -230,8 +230,18 @@ class TestWholeFileObfuscation(unittest.TestCase):
     def test_vendored_and_generated_paths_suppressed(self):
         arr = "var a=[" + ",".join(["0x68"] * 40) + "];String.fromCharCode(127)"
         for path in ("lib/app.min.js", ".pnp.cjs", ".yarn/releases/yarn.cjs",
-                     "dist/main.js", "src/gql.generated.ts", "proto/__generated__/x.pb.js"):
+                     "dist/main.js", "src/gql.generated.ts", "proto/__generated__/x.pb.js",
+                     ".venv/lib/python3.11/site-packages/pkg/mod.py"):   # a Python venv (third-party code)
             self.assertNotIn(OBF, _scan({path: arr}), f"{path} should be suppressed (generated context)")
+
+    def test_site_packages_suppresses_density_but_not_the_confirmed_loader(self):
+        # THE no-blind-spot guarantee: marking a venv's site-packages generated context suppresses only
+        # the FP-prone density heuristic — the CONFIRMED loader tier is ungated and STILL scans there, so
+        # a novel / off-manifest malicious file in a venv is caught. (A dense construct is NOT flagged;
+        # a real loader fingerprint IS.)
+        sp = ".venv/lib/python3.11/site-packages/evilpkg/"
+        self.assertNotIn(OBF, _scan({sp + "dense.py": self._OBF_ONLY}))            # density suppressed
+        self.assertIn("loader-seed-var", _scan({sp + "loader.py": "var _$_1e42 = sfL(0);\n"}))  # still caught
 
     # ── Build-artifact blind spot (#1095): both suppression layers, documented ──
     # An obfuscation-ONLY payload: a numeric array fed to fromCharCode.apply — trips the density/
