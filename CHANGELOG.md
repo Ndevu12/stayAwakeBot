@@ -197,6 +197,13 @@ All notable changes to this project are documented here. The format is based on
 - This changelog.
 
 ### Changed
+- **A Python venv's `site-packages` is treated as generated context, like `node_modules`.** Third-party
+  installed code where a package can legitimately ship a minified `.js`/data blob — the density /
+  whitespace / oversized-line heuristics would false-positive there, exactly as in `node_modules`/`dist`.
+  This suppresses **only** those FP-prone heuristics; the **confirmed loader-fingerprint tier is ungated
+  and still scans** `site-packages`, so a novel or off-manifest malicious file in a venv is still caught
+  (with `InstalledPackageAudit`'s corpus-identity + RECORD-tamper on top). It is *not* an exclusion —
+  nothing is pruned from traversal, so there is no name-based hiding spot (the epic #1141 rule).
 - **~10s faster scans of repos with no dependency files: the OSV corpus loads lazily (#1163).** The
   dependency audit used to build the offline malware/CVE corpus (`db.load_corpus`, ~273k records, ~10s)
   on **every** scan — even for a repo with no lockfile/manifest to audit. The `AdvisoryStore` now defers
