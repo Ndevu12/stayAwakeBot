@@ -7,7 +7,25 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
-- **Scans the interior of oversized source files, not just head+tail (#1145).** A source file larger
+- **Closes the last read-guard blind spots: non-source bodies, disguised binaries, escaping symlinks
+  (#1146).** Three residual ways a payload could sit in a spot the scanner skipped, each closed without
+  introducing false positives (a value study first dropped the FP-prone parts):
+  - **Non-source file bodies** — an oversized (`>2 MB`) or NUL-laden file under a benign extension
+    (`.bin`, `.log`, a fake `.png`) used to be skipped wholesale, so a payload there was invisible. The
+    **confirmed content-loader tier** now scans a bounded, NUL-stripped head+tail of these files. Only
+    that tier runs here — the density/whitespace heuristics stay extension-gated to source, because the
+    confirmed regexes are FP-safe on real binary bytes (measured ~0 FP) while the heuristics are not.
+  - **Magic-byte masquerade** — the existing "font whose bytes are actually a script" check is extended
+    from fonts to images/wasm/pdf (`BINARY_MAGIC`): a file whose extension claims a binary format but
+    whose head lacks that format's magic bytes and reads as text/JS is flagged. Real files start with
+    their magic, so the check short-circuits (measured 0 FP on 534 real binaries). SVG is excluded (it
+    is legitimately text).
+  - **Symlink escape** — a **directory** symlink resolving OUTSIDE the repo root is reported (heuristic
+    → SUSPICIOUS): `followlinks=False` means its contents are never walked, so it can hide a code subtree
+    from the scan. It is never followed (`realpath` only canonicalizes — no traversal, loop-safe), and a
+    symlink loop/broken link is now a benign skip instead of a fail-closed "unreadable file". Scope is
+    directory symlinks by design — escaping *file* symlinks (a venv's `bin/python`, tool shims) are
+    overwhelmingly benign and are a documented residual, not a finding.
   than `max_file_bytes` (2 MB) was read **head + tail only**, so a payload buried in the *middle* (e.g.
   at ~1.5 MB behind benign padding) was invisible to every matcher — a cost-free evasion (empirically:
   a 3 MB bundle with a `fromCharCode(127)` loader fingerprint spliced at offset 1.5 MB scanned
