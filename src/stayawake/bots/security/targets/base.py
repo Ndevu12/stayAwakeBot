@@ -107,6 +107,18 @@ class Target:
             for fn in filenames:
                 yield str((Path(dirpath) / fn).relative_to(self.root))
 
+    def _note_unreadable(self, name: str, p: Path, exc: OSError) -> None:
+        """A file present but unreadable is a scan GAP → recorded so the run fails CLOSED — EXCEPT a
+        SYMLINK, whose read failure is a loop (ELOOP), an escape, or a broken/dangling target: a benign
+        skip, not scannable content (an escaping link is surfaced separately by the symlink matcher).
+        Recording a symlink cycle as an 'unreadable file' would wrongly fail the whole scan (#1146)."""
+        try:
+            if p.is_symlink():
+                return                            # symlink loop/escape/broken → benign skip
+        except OSError:
+            pass                                  # can't tell (e.g. EACCES on 3.11) → be conservative
+        self.read_errors.append(f"{name}: {type(exc).__name__}")   # genuine gap → fail CLOSED
+
     def read_bytes(self, rel: str, limit: int | None = None) -> bytes | None:
         p = self.root / rel
         try:
@@ -119,8 +131,22 @@ class Target:
                 return fh.read(limit) if limit else fh.read()
         except OSError as exc:
             # Present but unreadable — a scan GAP, not a benign skip. Record it (fail closed).
-            self.read_errors.append(f"{rel}: {type(exc).__name__}")
+            self._note_unreadable(rel, p, exc)
             return None
+
+    def _nonsource_scan_text(self, rel: str, p: Path, size: int) -> str | None:
+        """A NUL-stripped, bounded head+tail of a NON-source file for the confirmed content tier only.
+        A payload under a non-source extension (an oversized `.bin`, a NUL-laden fake `.png`) is skipped
+        by ``read_text``; this lets the cheap line-local content regexes still see a bounded window of
+        it. Head+tail (not head-only) so an appended payload is covered too, matching the oversized
+        source read. NUL bytes are stripped so 'binary' bytes decode to scannable text."""
+        if size > self.opts.max_file_bytes:
+            raw = self._head_tail(p, max(1, self.opts.max_file_bytes // 2))
+        else:
+            raw = self.read_bytes(rel)
+        if not raw:
+            return None
+        return raw.replace(b"\x00", b"").decode("utf-8", errors="replace")
 
     def _head_tail(self, p: Path, half: int) -> bytes:
         """Read a bounded head+tail of an oversized file (payload is usually
@@ -135,7 +161,7 @@ class Target:
                 tail = fh.read(half)
             return head + b"\n/*\xe2\x80\xa6stayawake-truncated\xe2\x80\xa6*/\n" + tail
         except OSError as exc:
-            self.read_errors.append(f"{p.name}: {type(exc).__name__}")   # unreadable oversized file — a gap
+            self._note_unreadable(p.name, p, exc)   # unreadable oversized file — a gap (unless a symlink)
             return b""
 
     def read_text(self, rel: str) -> str | None:
@@ -146,7 +172,7 @@ class Target:
         except FileNotFoundError:
             return None                           # vanished (race) — benign skip
         except OSError as exc:
-            self.read_errors.append(f"{rel}: {type(exc).__name__}")      # present but unstattable — a gap
+            self._note_unreadable(rel, p, exc)    # present but unstattable — a gap (unless a symlink)
             return None
         if size > self.opts.max_file_bytes:
             if ext not in SOURCE_EXTS:
@@ -190,15 +216,24 @@ class Target:
         except FileNotFoundError:
             return                                # vanished (race) — benign skip
         except OSError as exc:
-            self.read_errors.append(f"{rel}: {type(exc).__name__}")      # unstattable — a gap
+            self._note_unreadable(rel, p, exc)    # unstattable — a gap (unless a symlink loop/escape)
+            return
+        if ext not in SOURCE_EXTS:
+            # NON-source file: the confirmed content tier (this reader's ONLY consumer) scans a bounded,
+            # NUL-stripped head+tail so a payload hidden under a benign extension — an oversized `.bin`,
+            # a NUL-laden `.png` — isn't invisible (#6/#7 of #1141). read_text skips these, so ONLY the
+            # cheap FP-safe content-loader regexes see this text; the density/whitespace heuristics are
+            # extension-gated to source and never run here (measured: the confirmed tier ~0 FP on real
+            # binaries, the density tier 12-33% — so scanning binary heads adds catch, not false results).
+            text = self._nonsource_scan_text(rel, p, size)
+            if text is not None:
+                yield (0, text)
             return
         if size <= self.opts.max_file_bytes:
             text = self.read_text(rel)            # reuse the exact small-file semantics (NUL/decode)
             if text is not None:
                 yield (0, text)
             return
-        if ext not in SOURCE_EXTS:
-            return                                # genuinely large binary — skip (as read_text does)
         if size > _MAX_INTERIOR_SCAN_BYTES:
             # Too large to window in full without becoming a DoS surface — fall back to the head+tail
             # read (preserves appended-payload/tail coverage); the deep middle is a documented residual.
@@ -224,7 +259,7 @@ class Target:
                     nl_before += raw.count(b"\n", 0, step)   # newlines we step past (byte domain — exact)
                     pos += step
         except OSError as exc:
-            self.read_errors.append(f"{rel}: {type(exc).__name__}")      # unreadable oversized file — a gap
+            self._note_unreadable(rel, p, exc)    # unreadable oversized file — a gap (unless a symlink)
             return
 
     def cleanup(self) -> None:

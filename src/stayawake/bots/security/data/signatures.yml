@@ -9,7 +9,7 @@
 #   category    grouping (code-loader | fake-font | vscode-autorun | git-marker | camouflage | evil-merge | exfil | npm-lifecycle | workflow-autorun | runner-persistence | agent-autorun | supply-chain-dep | supply-chain-vuln)
 #   severity    critical | high | medium | low
 #   matcher     content | filename | structural-json | git-history | heuristic | obfuscation |
-#               npm-manifest | workflow-yaml | dependency-audit | installed-package-audit
+#               npm-manifest | workflow-yaml | dependency-audit | installed-package-audit | symlink
 #   description human-readable
 #   remediation strategy id (consumed in Phase 3): recover (git restore, code-loader) |
 #               quarantine-file | quarantine-dir | remove-foreign-vscode | strip-gitignore-markers | manual
@@ -91,9 +91,20 @@ signatures:
     category: fake-font
     severity: critical
     matcher: heuristic
-    kind: text-in-fontfile
+    kind: magic-byte-masquerade
     file_globs: ["*.woff", "*.woff2", "*.ttf", "*.otf"]
     description: "Font file whose bytes are actually JavaScript/text (disguised payload)"
+    remediation: quarantine-file
+
+  - id: disguised-binary-file
+    category: fake-font
+    severity: critical
+    matcher: heuristic
+    kind: magic-byte-masquerade
+    # Same masquerade as fake-font, extended to image/wasm/pdf: an ext claiming a binary format whose
+    # head lacks its magic bytes and reads as text/JS. SVG is excluded (real XML/text). #1146 blind #7.
+    file_globs: ["*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp", "*.bmp", "*.ico", "*.wasm", "*.pdf"]
+    description: "Image/wasm/pdf file whose bytes are actually JavaScript/text (disguised payload)"
     remediation: quarantine-file
 
   # ── Oversized single line in a config file (obfuscation heuristic) ────────────
@@ -419,4 +430,13 @@ signatures:
     confidence: heuristic
     kind: dependabot-impersonation
     description: "Workflow masquerading as Dependabot (name/filename) while using self-hosted runners, a remote-fetch-into-interpreter run step, or an untrusted-injection expression (T1036 camouflage)"
+    remediation: manual
+
+  # ── Symlink escaping the repo root (traversal / scan-evasion anomaly) ─────────
+  - id: symlink-escapes-repo
+    category: symlink-escape
+    severity: high
+    matcher: symlink
+    confidence: heuristic   # SUSPICIOUS — an anomaly, not a payload; legit escaping links exist
+    description: "A symlink resolves OUTSIDE the repository root — hides code behind an un-followed link (followlinks=False) or escapes the repo (T1564 defense evasion). Contents behind the link stay unscanned."
     remediation: manual

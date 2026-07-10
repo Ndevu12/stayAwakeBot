@@ -21,6 +21,17 @@ FONT_MAGIC = {
     ".ttf": b"\x00\x01\x00\x00", ".otf": b"OTTO",
 }
 
+# Other binary-format magic bytes — an image/wasm/pdf whose bytes are actually a script is a disguised
+# payload, the same masquerade the font check catches. Deliberately excludes text-based formats (SVG is
+# real XML/text and would flag on every file). A file with one of these extensions whose head lacks its
+# magic and reads as text/JS is flagged (see heuristic `_magic_byte_masquerade`). Measured 0 FP on 534
+# real image/font/wasm/pdf files (real ones start with their magic → the check short-circuits).
+BINARY_MAGIC = {
+    ".png": b"\x89PNG\r\n\x1a\n", ".jpg": b"\xff\xd8\xff", ".jpeg": b"\xff\xd8\xff",
+    ".gif": b"GIF8", ".webp": b"RIFF", ".bmp": b"BM", ".ico": b"\x00\x00\x01\x00",
+    ".wasm": b"\x00asm", ".pdf": b"%PDF-",
+}
+
 # A remote fetch piped straight into an interpreter (curl|wget → sh/bash/node/…). ONE source, shared
 # by the workflow and structural-json matchers (a run step / a hook command) so the shape can't drift;
 # the npm-lifecycle-remote-fetch signature carries the same shape in signatures.yml (data-driven) —
