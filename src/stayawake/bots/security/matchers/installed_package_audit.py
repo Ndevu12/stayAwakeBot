@@ -21,7 +21,7 @@ from __future__ import annotations
 import re
 
 from stayawake.bots.security.models import Finding, Severity
-from stayawake.bots.security.matchers.base import Matcher
+from stayawake.bots.security.matchers.base import Matcher, build_content_sig
 from stayawake.bots.security.dependencies import RESOLVERS, AdvisoryStore
 from stayawake.bots.security.dependencies.installed import INSTALLED_TREES
 from stayawake.bots.security.dependencies.purl import Purl
@@ -41,11 +41,16 @@ class InstalledPackageAuditMatcher(Matcher):
         store = self._store_factory(signatures)
         tamper_sig = by_id.get("tampered-installed-package")
         hook_sig = by_id.get("installed-lifecycle-hook")
+        entry_sig = by_id.get("installed-entry-loader")
         # Reuse the CONFIRMED npm-lifecycle patterns from the signature DB (setup_bun dropper,
         # curl|wget→interpreter) — one source, applied to INSTALLED package.json hooks that the
         # npm-manifest matcher can't reach (node_modules is pruned). The heuristic exec pattern is
         # excluded: it FPs on legit curl/bun/deno across hundreds of third-party packages.
         hook_patterns = _confirmed_lifecycle_patterns(all_signatures) if hook_sig is not None else []
+        # The confirmed code-loader fingerprints (build_content_sig, one callable) run on each installed
+        # package's ENTRY file(s) — the FP-safe tier, targeted to main/bin so it isn't the brute-force
+        # node_modules scan PR3 rejected. A novel malicious package's runtime loader is otherwise pruned.
+        entry_check = build_content_sig(all_signatures) if (entry_sig is not None and all_signatures) else None
         findings: list[Finding] = []
         for tree in self._trees:
             installed = list(tree.read(target))
@@ -60,6 +65,8 @@ class InstalledPackageAuditMatcher(Matcher):
                     findings.append(_ghost(by_id.get("ghost-package"), pkg))
                 if hook_patterns and pkg.hooks:
                     findings.append(_lifecycle_hook(hook_sig, hook_patterns, pkg))
+                if entry_check is not None and pkg.entries:
+                    findings.append(_entry_loader(entry_sig, entry_check, target, pkg))
             if tamper_sig is not None:                # RECORD sha256 integrity (Python provides it)
                 for t in tree.tampered(target):
                     findings.append(_tampered(tamper_sig, t))
@@ -113,6 +120,22 @@ def _confirmed_lifecycle_patterns(all_signatures):
             for s in (all_signatures or [])
             if s.get("matcher") == "npm-manifest" and s.get("confidence") != "heuristic"
             and s.get("pattern")]
+
+
+def _entry_loader(sig, check, target, pkg) -> Finding | None:
+    for rel in pkg.entries:
+        text = target.read_text(rel)
+        if text is None:
+            continue
+        hit = check(text)
+        if hit:
+            return Finding(
+                signature_id=sig["id"], category=sig["category"],
+                severity=Severity.parse(sig["severity"]), path=rel,
+                description=sig["description"], remediation=sig.get("remediation", "manual"),
+                evidence=f"{pkg.name}@{pkg.version or '?'} entry {rel} carries loader fingerprint {hit}",
+                vector=sig["category"])
+    return None
 
 
 def _lifecycle_hook(sig, patterns, pkg) -> Finding | None:

@@ -7,6 +7,15 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **Sweeps INSTALLED dependencies' entry files for loader fingerprints — a novel malicious package
+  whose payload runs on `require` (#1164).** A malicious npm package can carry no known-bad identity
+  and no postinstall, yet still run on import via a loader in its **main/bin entry file**. `node_modules`
+  is content-pruned, so that entry is invisible today. The installed-package audit now runs **only the
+  confirmed code-loader fingerprints** (reused via `build_content_sig`) on each installed package's
+  resolved entry file(s), flagging a match as `installed-entry-loader` (INFECTED). Targeted, not the
+  brute-force node_modules scan an earlier value study rejected: **0 FP across 800 real entry files in
+  ~0.5s** (vs ~40–60s to scan every file). Entry paths that escape the package dir are dropped (never
+  read); bounded to 16 entries per manifest. Python wheels expose no such entry → nothing to sweep.
 - **Scans INSTALLED dependencies' npm lifecycle hooks — the postinstall vector the lockfile audit
   can't see (#1164).** A malicious dependency's `postinstall` lives in `node_modules/<dep>/package.json`,
   which is pruned from traversal, so the npm-manifest matcher (which only sees the root manifest) never
