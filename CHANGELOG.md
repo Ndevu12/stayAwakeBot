@@ -357,9 +357,20 @@ All notable changes to this project are documented here. The format is based on
   Deliberate deferral (e.g. one bump at the end of an epic) is allowed via a `pin-bump-deferred` label.
   The decision is a standalone, GitHub-free script (`.github/scripts/check_pin_freshness.sh`) so its
   logic — including that a floating `sentinel-ref: main` reset does **not** count as a bump — is
-  unit-tested (`tests/test_pin_freshness.py`), not buried in YAML. The weekly job stays as a backstop
+  unit-tested (`tests/test_pin_tooling.py`), not buried in YAML. The weekly job stays as a backstop
   for drift from direct pushes that bypass PRs. (Verified against real diffs: the engine PRs #1166–#1170
   that slipped the old pin would each have failed this check.)
+- **Made the pin-freshness gate *enforced* and *single-sourced* (#1172).** Two gaps in the check above:
+  it wasn't actually blocking anything, and it duplicated the engine-subtree + `sentinel-ref` definitions
+  that the weekly drift job also hardcodes. Both closed: (1) **`pin-freshness` is now a required status
+  check** in the active `common` ruleset — a bad engine PR is blocked from merging at the same tier as a
+  force-push (`non_fast_forward`), not merely shown a red X; the `pin-bump-deferred` label is the
+  reviewed escape hatch. (2) The engine subtree, the guard file, and the `sentinel-ref: <40-hex>` token
+  now live in **one shared source** (`.github/scripts/_pin_lib.sh`); both the in-band freshness check and
+  the out-of-band drift detector (whose logic moved out of workflow YAML into
+  `.github/scripts/check_pin_drift.sh`) build on it, so the two paths can't disagree on "what is the
+  engine" or "what is a valid pin" — the floating-ref rejection is defined once and covered by
+  `tests/test_pin_tooling.py`.
 - **Fixed a ReDoS: a crafted repo could hang the scanner (#1156).** The remote-fetch-into-interpreter
   signature (`curl|wget → sh/bash/node/…`) used an unbounded `[^|]*`, which scans to end-of-string at
   every `curl`/`wget` when no pipe follows → **O(n²)**. A hostile target with a large no-pipe
