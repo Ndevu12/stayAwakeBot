@@ -174,6 +174,13 @@ All notable changes to this project are documented here. The format is based on
 - This changelog.
 
 ### Changed
+- **~10s faster scans of repos with no dependency files: the OSV corpus loads lazily (#1163).** The
+  dependency audit used to build the offline malware/CVE corpus (`db.load_corpus`, ~273k records, ~10s)
+  on **every** scan — even for a repo with no lockfile/manifest to audit. The `AdvisoryStore` now defers
+  the build to the first package query, so a repo that resolves no dependencies never pays it (a
+  no-lockfile dependency-audit dropped from ~10s to ~0.3s). Both dependency matchers benefit with no
+  behavior change; `is_empty()` and inline-seed hits also skip the load. A repo **with** dependencies
+  still builds the corpus once (memoized) and produces identical verdicts.
 - **The scanner no longer skips `reports/` and `sab-patches/` (#1143).** These were excluded as
   "self-output", but a security report/patch stores **redacted** evidence (sha256 + a short preview),
   not the raw IoC, so scanning them doesn't self-trigger (verified: a target repo containing a real
