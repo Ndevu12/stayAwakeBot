@@ -237,7 +237,13 @@ _GENERATED_PATH = re.compile(
     #      mid-filename (`gql.generated.ts`, `app.min.js`) where no `/` precedes the token.
     r"(?:(?:^|/)("
     r"\.yarn/(?:cache|releases|unplugged)/|"
-    r"node_modules/|vendor/|third[_-]?party/|"
+    # THIRD-PARTY INSTALLED CODE — node_modules (npm) and site-packages (a Python venv). Vendored
+    # dependency code, where a package legitimately ships a minified `.js`/data blob → the density
+    # heuristic would false-positive. Suppresses ONLY that heuristic (and the whitespace/oversized-line
+    # corroborators); the CONFIRMED loader-fingerprint tier is ungated and STILL scans here, so a novel
+    # or off-manifest malicious file in a venv is still caught (the InstalledPackageAudit adds identity +
+    # RECORD-tamper on top). Structural, not a name-only exclusion: nothing here is pruned from traversal.
+    r"node_modules/|site-packages/|vendor/|third[_-]?party/|"
     # BUILD OUTPUT DIRS — a deliberate build-artifact trust decision (NOT provenance): in a
     # compiled bundle minification IS obfuscation, so the density heuristic here would be all
     # false positives. A payload minified into such a bundle is the documented residual (see the
