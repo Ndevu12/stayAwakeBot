@@ -22,6 +22,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
 
+from stayawake.bots.security.dependencies.resolvers.pypi import normalize_pypi_name
+
 
 @dataclass
 class InstalledPackage:
@@ -37,6 +39,12 @@ class InstalledTree:
     (workspace/local links are benign, and following them risks loops / repo escape)."""
     ecosystem: str = ""
     _MAX_DEPTH = 8            # bound a pathological nested tree
+    # Whether an on-disk package ABSENT from the lock reliably means a GHOST. True only when the
+    # ecosystem's lock lists the FULL (transitive) install set — npm's package-lock does, so an
+    # off-lock package is genuinely anomalous. A provider sets this False when the common lock is
+    # incomplete (PyPI's requirements.txt lists only DIRECT deps → every transitive install would
+    # false-positive as a ghost); identity-on-disk still runs there, ghost is suppressed.
+    ghost_reconcilable: bool = True
 
     def read(self, target) -> Iterator[InstalledPackage]:
         raise NotImplementedError
@@ -96,5 +104,94 @@ class NpmInstalledTree(InstalledTree):
             yield from self._walk(nested, repo_root, depth + 1)
 
 
-# Registered providers (Open/Closed — add an ecosystem's tree here). npm first; Python/Composer next.
-INSTALLED_TREES = (NpmInstalledTree(),)
+class PythonInstalledTree(InstalledTree):
+    """Python's project-local installed tree = a venv's `site-packages`, where each installed package is
+    a `<name>-<version>.dist-info/` (wheel install) or `<name>.egg-info/` (legacy/editable) dir carrying
+    a `METADATA`/`PKG-INFO` header block. The 2nd `InstalledTree` implementation — building it against the
+    npm-era interface froze that interface (it fit without change). Names are PEP 503-normalized so a
+    `Flask_Foo` on disk reconciles with a `flask-foo` lock/advisory, exactly as the resolver does.
+
+    GHOST detection is deferred for Python (identity-on-disk still runs): the common lock,
+    `requirements.txt`, lists only DIRECT deps, so every transitive package in site-packages would
+    false-positive as off-lock. A follow-up can enable ghost reconciliation only when a COMPLETE lock
+    (poetry.lock / uv.lock / Pipfile.lock) is present — until then it stays off to avoid the FP."""
+    ecosystem = "pypi"
+    ghost_reconcilable = False
+
+    def read(self, target) -> Iterator[InstalledPackage]:
+        exclude = getattr(target.opts, "exclude_dirs", set())
+        seen: set[str] = set()
+        for sp in self._find_site_packages(target.root, exclude):
+            try:
+                key = str(sp.resolve())
+            except OSError:
+                continue
+            if key in seen:
+                continue
+            seen.add(key)
+            yield from self._read_dist_infos(sp, target.root)
+
+    def _find_site_packages(self, root: Path, exclude) -> Iterator[Path]:
+        """Bounded walk for directories named `site-packages` (a venv can live anywhere / be named
+        anything — `.venv`, `backend/env`, …). Prunes excluded/VCS/symlinked dirs, never descends INTO a
+        found site-packages, and bounds depth — so a non-Python or huge repo can't make this expensive."""
+        for dirpath, dirnames, _ in os.walk(root):     # followlinks=False (default)
+            if len(Path(dirpath).relative_to(root).parts) >= self._MAX_DEPTH:
+                dirnames[:] = []
+                continue
+            kept = []
+            for d in dirnames:
+                if d in exclude or d == ".git":
+                    continue
+                full = os.path.join(dirpath, d)
+                if os.path.islink(full):               # don't follow symlinked dirs (escape / loop)
+                    continue
+                if d == "site-packages":
+                    yield Path(full)                   # read it, but don't walk its package subtree
+                    continue
+                kept.append(d)
+            dirnames[:] = kept
+
+    def _read_dist_infos(self, sp_dir: Path, repo_root: Path) -> Iterator[InstalledPackage]:
+        try:
+            entries = sorted(os.scandir(sp_dir), key=lambda e: e.name)
+        except OSError:
+            return
+        for e in entries:
+            if not e.is_dir(follow_symlinks=False):
+                continue
+            if e.name.endswith(".dist-info"):
+                pkg = self._read_metadata(os.path.join(e.path, "METADATA"), repo_root)
+            elif e.name.endswith(".egg-info"):
+                pkg = self._read_metadata(os.path.join(e.path, "PKG-INFO"), repo_root)
+            else:
+                continue
+            if pkg is not None:
+                yield pkg
+
+    def _read_metadata(self, meta_path: str, repo_root: Path) -> InstalledPackage | None:
+        """Parse the `Name:`/`Version:` headers of a METADATA/PKG-INFO block (RFC822-style; headers end
+        at the first blank line)."""
+        name = version = None
+        try:
+            with open(meta_path, encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    if not line.strip():
+                        break
+                    low = line.lower()
+                    if low.startswith("name:") and name is None:
+                        name = line.split(":", 1)[1].strip()
+                    elif low.startswith("version:") and version is None:
+                        version = line.split(":", 1)[1].strip()
+                    if name and version:
+                        break
+        except OSError:
+            return None
+        if not name:
+            return None
+        return InstalledPackage(self.ecosystem, normalize_pypi_name(name),
+                                version or None, str(Path(meta_path).relative_to(repo_root)))
+
+
+# Registered providers (Open/Closed — add an ecosystem's tree here). npm + Python now; Composer next.
+INSTALLED_TREES = (NpmInstalledTree(), PythonInstalledTree())
