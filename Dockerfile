@@ -32,7 +32,7 @@ ARG VERSION=0.0.0.dev0+docker
 ENV SETUPTOOLS_SCM_PRETEND_VERSION=${VERSION}
 
 # Copy only what the wheel build needs (matches the Dockerfile's whitelist .dockerignore).
-COPY --chown=builder:builder pyproject.toml README.md LICENSE CHANGELOG.md ./
+COPY --chown=builder:builder pyproject.toml README.md LICENSE COMMERCIAL-LICENSE.md CHANGELOG.md ./
 COPY --chown=builder:builder src ./src
 
 RUN pip install --no-cache-dir --user build \
@@ -43,7 +43,7 @@ FROM ${PYTHON_IMAGE} AS runtime
 
 LABEL org.opencontainers.image.source="https://github.com/Ndevu12/stayAwakeBot" \
       org.opencontainers.image.description="StayAwakeBot — supply-chain worm hunter + uptime sentinel" \
-      org.opencontainers.image.licenses="MIT"
+      org.opencontainers.image.licenses="AGPL-3.0-or-later"
 
 # The scanner only ever reads code and never needs root; run as an unprivileged user, and
 # install the wheel into a user-owned virtualenv so pip runs as `sentinel`, never root. The

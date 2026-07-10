@@ -11,7 +11,11 @@ dynamic = ["version"]
 description = "Distributable monitoring & security sentinel toolkit — uptime checks plus self-propagating-worm detection, remediation, and prevention."
 readme = "README.md"
 requires-python = ">=3.11"
-license = "MIT"
+# Dual-licensed: AGPL-3.0-or-later (open source) OR a paid commercial license — see
+# COMMERCIAL-LICENSE.md. The SPDX field names the open-source option; the commercial notice
+# ships alongside LICENSE so it reaches everyone who installs the package.
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE", "COMMERCIAL-LICENSE.md"]
 authors = [{ name = "Jean Paul Elisa NIYOKWIZERWA" }]
 keywords = ["monitoring", "uptime", "security", "sentinel", "worm", "supply-chain", "github-actions"]
 classifiers = [
