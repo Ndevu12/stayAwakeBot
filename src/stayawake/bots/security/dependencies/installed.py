@@ -39,6 +39,7 @@ class InstalledPackage:
     version: str | None       # installed version from the on-disk manifest; None if unreadable
     path: str                 # rel path of the package's manifest, for anchoring a finding
     hooks: dict[str, str] | None = None   # install-time lifecycle scripts (npm), for the hook scan
+    entries: tuple[str, ...] = ()         # rel paths of the package's entry files (main/bin), for the sweep
 
 
 @dataclass
@@ -83,6 +84,36 @@ def _read_manifest(path: str) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
+_MAX_ENTRIES = 16          # bound the bins a pathological manifest can list
+
+
+def _npm_entry_files(data: dict, pkg_dir: str, repo_root: Path) -> tuple[str, ...]:
+    """Rel paths of a package's ENTRY files — `main` (default `index.js`) + `bin` (a string or
+    `{name: path}`). These run on `require`/exec, so a novel malicious package hides its loader here;
+    node_modules is content-pruned, so the entry sweep is the only thing that reads them. Kept WITHIN
+    the package dir (a `main: "../../x"` escaping it is dropped); `.js` is assumed when an entry has no
+    extension. Bounded to `_MAX_ENTRIES`."""
+    cands: list[str] = [data["main"] if isinstance(data.get("main"), str) else "index.js"]
+    b = data.get("bin")
+    if isinstance(b, str):
+        cands.append(b)
+    elif isinstance(b, dict):
+        cands += [v for v in b.values() if isinstance(v, str)]
+    pkg_abs = os.path.abspath(pkg_dir)
+    out: list[str] = []
+    for c in cands[:_MAX_ENTRIES]:
+        fp = os.path.normpath(os.path.join(pkg_dir, c))
+        if not os.path.splitext(fp)[1]:
+            fp += ".js"
+        try:
+            if os.path.commonpath([os.path.abspath(fp), pkg_abs]) != pkg_abs:
+                continue                       # entry escapes the package dir → ignore
+            out.append(str(Path(fp).relative_to(repo_root)))
+        except ValueError:
+            continue                           # not under repo_root / undecidable → skip
+    return tuple(dict.fromkeys(out))           # dedup, preserve order
+
+
 class NpmInstalledTree(InstalledTree):
     ecosystem = "npm"
 
@@ -125,7 +156,8 @@ class NpmInstalledTree(InstalledTree):
                       if isinstance(scripts.get(k), str)} or None) if isinstance(scripts, dict) else None
             yield InstalledPackage(self.ecosystem, data["name"],
                                    version if isinstance(version, str) else None,
-                                   str(Path(manifest).relative_to(repo_root)), hooks)
+                                   str(Path(manifest).relative_to(repo_root)), hooks,
+                                   _npm_entry_files(data, pkg_dir, repo_root))
         nested = Path(pkg_dir) / "node_modules"            # nested (dedupe-miss) installs
         if nested.is_dir():
             yield from self._walk(nested, repo_root, depth + 1)

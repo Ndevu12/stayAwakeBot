@@ -242,5 +242,61 @@ class TestInstalledLifecycleHook(unittest.TestCase):
         self.assertNotIn("installed-lifecycle-hook", _scan_hooks(t))
 
 
+def _npm_entry_repo(pkgs: dict) -> Target:
+    """node_modules deps (locked) each with `main` = pkgs[name][0] and that file's content = [1]."""
+    from stayawake.bots.security.signatures import load_signatures   # noqa: F401 (imported for parity)
+    d = Path(tempfile.mkdtemp())
+    packages = {"": {"name": "app"}}
+    for name in pkgs:
+        packages[f"node_modules/{name}"] = {"version": "1.0.0"}
+    (d / "package-lock.json").write_text(json.dumps({"lockfileVersion": 3, "packages": packages}))
+    for name, (mainf, content) in pkgs.items():
+        pd = d / "node_modules" / name
+        pd.mkdir(parents=True)
+        (pd / "package.json").write_text(json.dumps({"name": name, "version": "1.0.0", "main": mainf}))
+        f = pd / mainf
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(content)
+    return Target(d, str(d), ScanOptions())
+
+
+def _scan_entries(target):
+    from stayawake.bots.security.signatures import load_signatures
+    s = load_signatures()
+    ipa = s.get("installed-package-audit", [])                 # includes installed-entry-loader
+    allsigs = [x for g in s.values() for x in g]               # includes the content code-loaders
+    m = InstalledPackageAuditMatcher(store_factory=lambda _: _FakeStore(()))
+    return {f.signature_id for f in m.scan(target, ipa, all_signatures=allsigs)}
+
+
+class TestInstalledEntryLoader(unittest.TestCase):
+    def test_loader_in_main_entry_flagged(self):
+        t = _npm_entry_repo({"evil": ("index.js", "var _$_1e42 = sfL(0);\nString.fromCharCode(127);\n")})
+        self.assertIn("installed-entry-loader", _scan_entries(t))
+
+    def test_loader_in_nested_main_flagged(self):
+        t = _npm_entry_repo({"evil": ("lib/main.js", "global['!'] = 1; var _$_a = sfL(0);\n")})
+        self.assertIn("installed-entry-loader", _scan_entries(t))
+
+    def test_legit_entries_are_clean(self):
+        t = _npm_entry_repo({"a": ("index.js", "module.exports = require('./x')\n"),
+                             "b": ("index.js", "'use strict';\nexports.f = () => 1\n")})
+        self.assertNotIn("installed-entry-loader", _scan_entries(t))
+
+    def test_entry_escaping_package_dir_is_ignored(self):
+        # A `main` that points outside the package (repo/host escape) must be dropped, never read.
+        d = Path(tempfile.mkdtemp())
+        (d / "package-lock.json").write_text(
+            '{"lockfileVersion":3,"packages":{"node_modules/c":{"version":"1.0.0"}}}')
+        pd = d / "node_modules" / "c"
+        pd.mkdir(parents=True)
+        (pd / "package.json").write_text(json.dumps(
+            {"name": "c", "version": "1.0.0", "main": "../../../../../../etc/hosts"}))
+        self.assertNotIn("installed-entry-loader", _scan_entries(Target(d, str(d), ScanOptions())))
+
+    def test_python_wheels_have_no_entries(self):
+        self.assertNotIn("installed-entry-loader", _scan_entries(Target(_venv({"requests": "2.31.0"}), "t", ScanOptions())))
+
+
 if __name__ == "__main__":
     unittest.main()

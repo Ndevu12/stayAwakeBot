@@ -414,6 +414,18 @@ signatures:
     description: "An INSTALLED dependency's npm lifecycle hook runs a known install-time payload (setup_bun dropper or remote-fetch→interpreter) — invisible to the lockfile/root-manifest audit (T1195.001)"
     remediation: manual
 
+  - id: installed-entry-loader
+    category: supply-chain-dep
+    severity: critical
+    matcher: installed-package-audit
+    # No `confidence` → confirmed/INFECTED. The matcher runs ONLY the confirmed code-loader fingerprints
+    # (the FP-safe tier, reused via build_content_sig) on an installed package's ENTRY files (main/bin).
+    # node_modules is content-pruned, so a novel malicious package's runtime loader in its main entry is
+    # otherwise invisible. TARGETED (entry files only, not brute-force all of node_modules): measured 0
+    # FP over 800 real entry files, ~0.5s.
+    description: "An INSTALLED dependency's entry file (main/bin) carries a known code-loader fingerprint — a novel malicious package whose payload runs on require, invisible to the lockfile audit (T1195.001)"
+    remediation: manual
+
   # ── Vulnerable (but not malicious) upstream dependency — the OPT-IN advisory tier ─────────────
   # `advisory_corpus: true` opts this signature into the CVE side of the offline corpus. A match is
   # an ordinary security advisory (CVE/GHSA) on a declared dependency — NOT malware — so it is
