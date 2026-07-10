@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Guard for the in-band scanner-pin freshness check (.github/scripts/check_pin_freshness.sh).
+"""Guards for the scanner-pin tooling under .github/scripts/.
 
-That script is what stops the worm-guard gate's pinned scanner (`sentinel-ref`) from silently
-drifting behind the detection engine: a PR that changes `src/stayawake/bots/security/**` must also
-bump the pin, or carry the `pin-bump-deferred` label. A bug here fails OPEN (drift sails through)
-or fails CLOSED (blocks unrelated PRs), so the decision logic — and its fiddly boundaries — is
-pinned by these cases. The script is GitHub-free (diff files + one env var in, exit code out)
-precisely so it can be tested here instead of only in CI.
+These scripts stop the worm-guard gate's pinned scanner (`sentinel-ref`) from silently drifting
+behind the detection engine. Both build on the shared _pin_lib.sh (single source of the engine
+subtree + pin token), so a bug there — or in the in-band freshness decision — fails OPEN (drift
+sails through) or CLOSED (blocks unrelated PRs). The scripts are deliberately GitHub-free (diff
+files / a file path + one env var in, exit code / stdout out) so the logic and its fiddly
+boundaries are pinned here instead of only in CI:
+  - TestPinLib       — the shared extraction (40-hex only; floating `main` rejected).
+  - TestPinFreshness — the in-band PR gate (check_pin_freshness.sh).
 """
 from __future__ import annotations
 
@@ -16,7 +18,46 @@ import unittest
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-SCRIPT = REPO / ".github" / "scripts" / "check_pin_freshness.sh"
+SCRIPTS = REPO / ".github" / "scripts"
+SCRIPT = SCRIPTS / "check_pin_freshness.sh"
+PIN_LIB = SCRIPTS / "_pin_lib.sh"
+
+
+class TestPinLib(unittest.TestCase):
+    """The single source of truth both enforcement paths share."""
+
+    def _extract(self, content: str) -> str:
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "worm-guard.yml"
+            f.write_text(content)
+            r = subprocess.run(
+                ["bash", "-c", f'source "{PIN_LIB}"; extract_pin "{f}"'],
+                capture_output=True, text=True, env={"PATH": "/usr/bin:/bin"})
+            self.assertEqual(r.returncode, 0, r.stderr)
+            return r.stdout.strip()
+
+    def test_extracts_40hex_sha(self):
+        sha = "050f3b6e4557629493177b5eea39867e31ed4173"
+        self.assertEqual(self._extract(f"          sentinel-ref: {sha}   # merge of #1170\n"), sha)
+
+    def test_floating_ref_yields_no_pin(self):
+        self.assertEqual(self._extract("          sentinel-ref: main\n"), "")
+
+    def test_constants_are_the_expected_single_source(self):
+        r = subprocess.run(
+            ["bash", "-c",
+             f'source "{PIN_LIB}"; printf "%s|%s" "$PIN_ENGINE_SUBTREE" "$PIN_GUARD_FILE"'],
+            capture_output=True, text=True, env={"PATH": "/usr/bin:/bin"})
+        self.assertEqual(r.stdout.strip(),
+                         "src/stayawake/bots/security|.github/workflows/worm-guard.yml", r.stderr)
+
+    def test_double_source_is_safe(self):
+        # The include guard must let a script source the lib twice without a readonly error.
+        r = subprocess.run(
+            ["bash", "-c", f'source "{PIN_LIB}"; source "{PIN_LIB}"; echo ok'],
+            capture_output=True, text=True, env={"PATH": "/usr/bin:/bin"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("ok", r.stdout)
 
 # A real +sentinel-ref bump hunk (added line, 40-char SHA), as it appears in `gh pr diff`.
 PIN_BUMP_DIFF = (
