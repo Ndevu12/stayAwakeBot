@@ -109,5 +109,67 @@ class TestStoreCorpus(unittest.TestCase):
             db._CORPUS_MEMO.clear()
 
 
+class _StubCorpus:
+    def malicious_match(self, purl):
+        return None
+
+    def vulnerability_matches(self, purl):
+        return []
+
+    def is_empty(self):
+        return True
+
+
+class TestLazyCorpusLoad(unittest.TestCase):
+    """The ~10s corpus build must be DEFERRED to first query — a repo with no dependency files never
+    resolves a package, so it must never pay the load (#1163)."""
+
+    def _counting_store(self):
+        calls = {"n": 0}
+
+        def loader():
+            calls["n"] += 1
+            return _StubCorpus()
+        store = AdvisoryStore(AdvisoryStore._inline_index([SIG]), corpus_signature=SIG,
+                              corpus_loader=loader)
+        return store, calls
+
+    def test_construction_does_not_load(self):
+        _, calls = self._counting_store()
+        self.assertEqual(calls["n"], 0)
+
+    def test_is_empty_does_not_load_with_a_seed(self):
+        store, calls = self._counting_store()
+        self.assertFalse(store.is_empty())          # inline seed present
+        self.assertEqual(calls["n"], 0, "is_empty must short-circuit on the seed, not build the corpus")
+
+    def test_seed_hit_does_not_load(self):
+        store, calls = self._counting_store()
+        self.assertIsNotNone(store.advisory_for(Purl("npm", "html-to-gutenberg", "4.2.11")))
+        self.assertEqual(calls["n"], 0, "an inline-seed hit needs no corpus")
+
+    def test_seed_miss_loads_once(self):
+        store, calls = self._counting_store()
+        store.advisory_for(Purl("npm", "some-other-pkg", "1.0.0"))
+        store.advisory_for(Purl("npm", "yet-another", "2.0.0"))
+        self.assertEqual(calls["n"], 1, "corpus builds on first miss, then is cached")
+
+    def test_no_lockfile_scan_never_builds_corpus(self):
+        # End-to-end: the matcher over a repo with NO lockfile must not trigger db.load_corpus.
+        calls = {"n": 0}
+        real = db.load_corpus
+
+        def spy(*a, **k):
+            calls["n"] += 1
+            return real(*a, **k)
+        db.load_corpus = spy
+        try:
+            target = _target({"src/app.js": "const x = 1;\n"})     # no lockfile / manifest
+            DependencyAuditMatcher().scan(target, [SIG])
+            self.assertEqual(calls["n"], 0, "no dependency files → corpus must never be built")
+        finally:
+            db.load_corpus = real
+
+
 if __name__ == "__main__":
     unittest.main()
