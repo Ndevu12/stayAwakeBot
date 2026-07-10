@@ -392,6 +392,16 @@ signatures:
     description: "A package is present in the installed tree but absent from the lockfile — a postinstall may have dropped it off-lockfile"
     remediation: manual
 
+  - id: tampered-installed-package
+    category: supply-chain-dep
+    severity: critical
+    matcher: installed-package-audit
+    confidence: heuristic  # SUSPICIOUS — a byte mismatch vs the package's OWN RECORD sha256 is a strong
+                           # post-install-modification signal, but a local hotfix/monkeypatch on disk can
+                           # also differ; surface for review rather than assert malware (T1195.001)
+    description: "An installed file's bytes differ from its package's .dist-info/RECORD sha256 — modified after install (a payload injected into a dependency)"
+    remediation: manual
+
   # ── Vulnerable (but not malicious) upstream dependency — the OPT-IN advisory tier ─────────────
   # `advisory_corpus: true` opts this signature into the CVE side of the offline corpus. A match is
   # an ordinary security advisory (CVE/GHSA) on a declared dependency — NOT malware — so it is

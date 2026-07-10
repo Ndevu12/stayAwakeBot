@@ -16,6 +16,9 @@ no provider where there's no local tree to check. Offline, stdlib only, no new d
 """
 from __future__ import annotations
 
+import base64
+import csv
+import hashlib
 import json
 import os
 from dataclasses import dataclass
@@ -33,6 +36,14 @@ class InstalledPackage:
     path: str                 # rel path of the package's manifest, for anchoring a finding
 
 
+@dataclass
+class TamperedFile:
+    ecosystem: str
+    package: str              # name@version the file belongs to
+    path: str                 # rel path of the file whose bytes changed — anchors the finding
+    detail: str
+
+
 class InstalledTree:
     """Read one ecosystem's PROJECT-LOCAL installed tree. Yields NOTHING when the tree is absent (e.g. a
     remote clone with no install) — the lockfile audit stays the coverage there. Never follows symlinks
@@ -48,6 +59,14 @@ class InstalledTree:
 
     def read(self, target) -> Iterator[InstalledPackage]:
         raise NotImplementedError
+
+    def tampered(self, target) -> Iterator[TamperedFile]:
+        """Installed files whose on-disk bytes no longer match the package's OWN per-file integrity
+        manifest → modified AFTER install (a payload injected into a dependency). Default: none — an
+        ecosystem without an on-disk per-file manifest (npm's lockfile `integrity` hashes the published
+        TARBALL, not the extracted tree, so it can't verify the installed files offline)."""
+        return
+        yield
 
 
 def _read_manifest(path: str) -> dict | None:
@@ -117,8 +136,11 @@ class PythonInstalledTree(InstalledTree):
     (poetry.lock / uv.lock / Pipfile.lock) is present — until then it stays off to avoid the FP."""
     ecosystem = "pypi"
     ghost_reconcilable = False
+    _MAX_HASH_BYTES = 4_000_000          # skip hashing a single huge (data) file — the tamper vector is
+                                         # a payload in a SOURCE file, which is small; bounds per-file work
+    _INTEGRITY_BUDGET = 500_000_000      # total bytes hashed per scan — a DoS backstop for a giant tree
 
-    def read(self, target) -> Iterator[InstalledPackage]:
+    def _site_packages(self, target) -> Iterator[Path]:
         exclude = getattr(target.opts, "exclude_dirs", set())
         seen: set[str] = set()
         for sp in self._find_site_packages(target.root, exclude):
@@ -126,9 +148,12 @@ class PythonInstalledTree(InstalledTree):
                 key = str(sp.resolve())
             except OSError:
                 continue
-            if key in seen:
-                continue
-            seen.add(key)
+            if key not in seen:
+                seen.add(key)
+                yield sp
+
+    def read(self, target) -> Iterator[InstalledPackage]:
+        for sp in self._site_packages(target):
             yield from self._read_dist_infos(sp, target.root)
 
     def _find_site_packages(self, root: Path, exclude) -> Iterator[Path]:
@@ -191,6 +216,72 @@ class PythonInstalledTree(InstalledTree):
             return None
         return InstalledPackage(self.ecosystem, normalize_pypi_name(name),
                                 version or None, str(Path(meta_path).relative_to(repo_root)))
+
+    def tampered(self, target) -> Iterator[TamperedFile]:
+        """Verify each installed file against its package's `.dist-info/RECORD` sha256 — a Python-unique
+        offline tamper check (a wheel's RECORD carries a per-file hash; npm has no on-disk equivalent).
+        A mismatch means the file was modified AFTER install: a payload injected into a dependency. Only
+        entries WITH a `sha256=` hash are checked, so `.pyc`/`__pycache__`/RECORD-self (no hash) are
+        skipped → 0 false positives on a clean install (measured). Per-file and total hashing is bounded."""
+        budget = self._INTEGRITY_BUDGET
+        for sp in self._site_packages(target):
+            try:
+                entries = sorted(os.scandir(sp), key=lambda e: e.name)
+            except OSError:
+                continue
+            for e in entries:
+                if not (e.name.endswith(".dist-info") and e.is_dir(follow_symlinks=False)):
+                    continue
+                pkg = self._read_metadata(os.path.join(e.path, "METADATA"), target.root)
+                label = f"{pkg.name}@{pkg.version}" if pkg else e.name[:-len(".dist-info")]
+                sp_abs = os.path.abspath(sp)
+                for rel, expected in _record_hashes(os.path.join(e.path, "RECORD")):
+                    fp = os.path.normpath(os.path.join(sp, rel))   # matches sp's abs/rel form (for read + path)
+                    # A RECORD path must stay INSIDE site-packages — a crafted `../../etc/passwd` or an
+                    # absolute path must never be read. abspath BOTH sides for the check so commonpath can't
+                    # ValueError on an absolute-vs-relative mix (a relative scan root + absolute RECORD entry).
+                    try:
+                        inside = os.path.commonpath([os.path.abspath(fp), sp_abs]) == sp_abs
+                    except ValueError:
+                        inside = False                    # different drives / undecidable → treat as escape
+                    if not inside:
+                        continue
+                    try:
+                        size = os.path.getsize(fp)
+                    except OSError:
+                        continue                          # listed-but-absent file → not a tamper signal
+                    if os.path.islink(fp) or size > self._MAX_HASH_BYTES:
+                        continue                          # skip symlinks + huge data files (bounded)
+                    if size > budget:
+                        return                            # total hashing budget spent (DoS backstop)
+                    budget -= size
+                    got = _sha256_record(fp)
+                    if got is not None and got != expected:
+                        yield TamperedFile(self.ecosystem, label,
+                                           str(Path(fp).relative_to(target.root)),
+                                           "on-disk bytes differ from the package's RECORD sha256")
+
+
+def _record_hashes(record_path: str) -> Iterator[tuple[str, str]]:
+    """`(relpath, "sha256=<b64>")` for each RECORD row that carries a sha256 (CSV — a path may be
+    quoted). Rows with no hash (`.pyc`, RECORD itself) are skipped."""
+    try:
+        with open(record_path, encoding="utf-8", errors="replace", newline="") as fh:
+            for row in csv.reader(fh):
+                if len(row) >= 2 and row[1].startswith("sha256="):
+                    yield row[0], row[1]
+    except OSError:
+        return
+
+
+def _sha256_record(path: str) -> str | None:
+    """`sha256=<urlsafe-b64-no-pad>` of a file's bytes — the exact form RECORD stores."""
+    try:
+        with open(path, "rb") as fh:
+            digest = hashlib.sha256(fh.read()).digest()
+    except OSError:
+        return None
+    return "sha256=" + base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
 
 
 # Registered providers (Open/Closed — add an ecosystem's tree here). npm + Python now; Composer next.

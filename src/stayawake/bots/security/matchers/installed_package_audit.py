@@ -37,12 +37,12 @@ class InstalledPackageAuditMatcher(Matcher):
     def scan(self, target, signatures):
         by_id = {s["id"]: s for s in signatures}
         store = self._store_factory(signatures)
+        tamper_sig = by_id.get("tampered-installed-package")
         findings: list[Finding] = []
         for tree in self._trees:
             installed = list(tree.read(target))
-            if not installed:
-                continue                              # no installed tree present → lockfile audit only
-            locked = self._locked_names(tree.ecosystem, target) if tree.ghost_reconcilable else set()
+            locked = (self._locked_names(tree.ecosystem, target)
+                      if (installed and tree.ghost_reconcilable) else set())
             for pkg in installed:
                 advisory = (store.advisory_for(Purl(tree.ecosystem, pkg.name, pkg.version))
                             if (pkg.version and not store.is_empty()) else None)
@@ -50,6 +50,9 @@ class InstalledPackageAuditMatcher(Matcher):
                     findings.append(_malicious(advisory, pkg))
                 elif tree.ghost_reconcilable and pkg.name not in locked:
                     findings.append(_ghost(by_id.get("ghost-package"), pkg))
+            if tamper_sig is not None:                # RECORD sha256 integrity (Python provides it)
+                for t in tree.tampered(target):
+                    findings.append(_tampered(tamper_sig, t))
         return [f for f in findings if f is not None]
 
     def _locked_names(self, ecosystem: str, target) -> set[str]:
@@ -83,3 +86,11 @@ def _ghost(sig, pkg) -> Finding | None:
         evidence=f"{pkg.name}@{pkg.version or '?'} is installed but absent from the lockfile — "
                  f"a postinstall may have dropped it off-lockfile",
         vector=sig["category"])
+
+
+def _tampered(sig, t) -> Finding:
+    return Finding(
+        signature_id=sig["id"], category=sig["category"],
+        severity=Severity.parse(sig["severity"]), path=t.path,
+        description=sig["description"], remediation=sig.get("remediation", "manual"),
+        evidence=f"{t.package}: {t.detail} — installed file modified after install", vector=sig["category"])
