@@ -103,3 +103,15 @@ built from the same wheel published to PyPI, and ships SLSA provenance + SBOM at
 - [Releasing](docs/RELEASING.md) — maintainer runbook: tags, PyPI Trusted Publishing, verification
 - [Contributing](CONTRIBUTING.md) — development setup and guidelines
 
+## License
+
+stayAwakeBot is **dual-licensed** (from v0.1.9 onward):
+
+- **[AGPL-3.0-or-later](LICENSE)** — free and open source. You must preserve attribution, and if you
+  modify it and convey it or offer it over a network (e.g. as a hosted service), you must release
+  your corresponding source under the AGPL too.
+- **[Commercial license](COMMERCIAL-LICENSE.md)** — a paid, proprietary-use option for closed-source
+  or proprietary-SaaS use without the AGPL's source-disclosure obligations. Contact the author for terms.
+
+Releases up to and including v0.1.8 were published under the MIT license and remain MIT for those versions.
+
