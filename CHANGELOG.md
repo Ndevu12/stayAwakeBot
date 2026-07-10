@@ -7,6 +7,16 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **Detects tampered installed Python packages via `.dist-info/RECORD` sha256 (#1164).** A wheel ships a
+  `RECORD` with a per-file sha256 — a per-file integrity manifest npm has no offline equivalent for (its
+  lockfile hash is over the published tarball, not the extracted tree). The installed-package audit now
+  verifies each installed file against its package's own RECORD: a byte mismatch means the file was
+  **modified after install** — a payload injected into a dependency — surfaced as SUSPICIOUS
+  (`tampered-installed-package`; a local hotfix can also differ, so it's for review, not auto-INFECTED).
+  Only entries carrying a `sha256=` hash are checked, so `.pyc`/`__pycache__`/RECORD-self are skipped →
+  **0 false positives on a clean install** (measured: 1,332 files, incl. after import generates `.pyc`).
+  Fast and RECORD-guided (not a brute-force hash-everything): ~0.4s for a typical venv, with per-file and
+  total hashing bounds as a DoS backstop, and RECORD paths that escape site-packages are ignored.
 - **Audits the INSTALLED Python tree, not just the lockfile (#1164).** The installed-package audit now
   has a **Python `site-packages` provider** alongside npm — the 2nd `InstalledTree` implementation, which
   froze that interface (it fit without change). It reads each `<name>-<ver>.dist-info/METADATA` (or
