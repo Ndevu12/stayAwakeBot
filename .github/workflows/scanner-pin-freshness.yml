@@ -1,0 +1,38 @@
+name: Scanner pin freshness
+
+# In-band companion to scanner-pin-drift.yml (the weekly, OUT-OF-BAND backstop). On every PR: if
+# the diff changes the detection engine (src/stayawake/bots/security/**) but does NOT bump the
+# worm-guard gate's pinned scanner (sentinel-ref in worm-guard.yml), fail — so pin drift is caught
+# at PR time, on the exact event that breaks the invariant, instead of surfacing up to a week later
+# as a human-closeable issue. Deliberate deferral (e.g. one bump at the end of an epic) is allowed
+# via the 'pin-bump-deferred' label. The decision lives in .github/scripts/check_pin_freshness.sh
+# (unit-tested by tests/test_pin_freshness.py); this workflow only feeds it the PR diff. (#1172)
+
+on:
+  pull_request:
+    # labeled/unlabeled so adding or removing 'pin-bump-deferred' re-runs the check immediately.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  pin-freshness:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (for the decision script)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0   # v7.0.0
+      - name: Enforce a pin bump when the engine changes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          DEFERRED: ${{ contains(github.event.pull_request.labels.*.name, 'pin-bump-deferred') && 'yes' || 'no' }}
+        run: |
+          set -euo pipefail
+          changed="$RUNNER_TEMP/pin-changed.txt"
+          full="$RUNNER_TEMP/pin.diff"
+          gh pr diff "$PR" --name-only > "$changed"
+          gh pr diff "$PR"             > "$full"
+          bash .github/scripts/check_pin_freshness.sh "$changed" "$full"
