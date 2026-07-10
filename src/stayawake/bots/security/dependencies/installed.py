@@ -28,12 +28,17 @@ from typing import Iterator
 from stayawake.bots.security.dependencies.resolvers.pypi import normalize_pypi_name
 
 
+# The keys npm runs AUTOMATICALLY on `npm install` (T1546) — one source, shared with NpmManifestMatcher.
+NPM_LIFECYCLE_KEYS = ("preinstall", "install", "postinstall", "prepare", "preprepare", "postprepare")
+
+
 @dataclass
 class InstalledPackage:
     ecosystem: str
     name: str
     version: str | None       # installed version from the on-disk manifest; None if unreadable
     path: str                 # rel path of the package's manifest, for anchoring a finding
+    hooks: dict[str, str] | None = None   # install-time lifecycle scripts (npm), for the hook scan
 
 
 @dataclass
@@ -115,9 +120,12 @@ class NpmInstalledTree(InstalledTree):
         data = _read_manifest(manifest)
         if data and isinstance(data.get("name"), str):
             version = data.get("version")
+            scripts = data.get("scripts")
+            hooks = ({k: scripts[k] for k in NPM_LIFECYCLE_KEYS
+                      if isinstance(scripts.get(k), str)} or None) if isinstance(scripts, dict) else None
             yield InstalledPackage(self.ecosystem, data["name"],
                                    version if isinstance(version, str) else None,
-                                   str(Path(manifest).relative_to(repo_root)))
+                                   str(Path(manifest).relative_to(repo_root)), hooks)
         nested = Path(pkg_dir) / "node_modules"            # nested (dedupe-miss) installs
         if nested.is_dir():
             yield from self._walk(nested, repo_root, depth + 1)

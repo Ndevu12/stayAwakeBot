@@ -402,6 +402,18 @@ signatures:
     description: "An installed file's bytes differ from its package's .dist-info/RECORD sha256 — modified after install (a payload injected into a dependency)"
     remediation: manual
 
+  - id: installed-lifecycle-hook
+    category: supply-chain-dep
+    severity: critical
+    matcher: installed-package-audit
+    # No `confidence` → confirmed/INFECTED. The matcher applies ONLY the CONFIRMED npm-lifecycle
+    # patterns (setup_bun dropper, curl|wget→interpreter) to an INSTALLED dependency's package.json —
+    # node_modules is pruned from traversal, so the npm-manifest matcher never sees these. Measured 0
+    # FP over realistic legit postinstalls (node-gyp/husky/binary-downloaders); the heuristic exec
+    # pattern is deliberately NOT applied at install-tree scale (it FPs on legit curl/bun/deno there).
+    description: "An INSTALLED dependency's npm lifecycle hook runs a known install-time payload (setup_bun dropper or remote-fetch→interpreter) — invisible to the lockfile/root-manifest audit (T1195.001)"
+    remediation: manual
+
   # ── Vulnerable (but not malicious) upstream dependency — the OPT-IN advisory tier ─────────────
   # `advisory_corpus: true` opts this signature into the CVE side of the offline corpus. A match is
   # an ordinary security advisory (CVE/GHSA) on a declared dependency — NOT malware — so it is
