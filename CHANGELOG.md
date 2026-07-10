@@ -7,6 +7,16 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **Scans INSTALLED dependencies' npm lifecycle hooks — the postinstall vector the lockfile audit
+  can't see (#1164).** A malicious dependency's `postinstall` lives in `node_modules/<dep>/package.json`,
+  which is pruned from traversal, so the npm-manifest matcher (which only sees the root manifest) never
+  reads it. The installed-package audit now checks each installed package's install-time lifecycle hooks
+  and flags a known install-time payload — a `setup_bun` dropper or a `curl|wget → sh/bun/node`
+  remote-fetch — as `installed-lifecycle-hook` (INFECTED). It applies **only the confirmed** lifecycle
+  patterns (reused from the signature DB, one source), **not** the heuristic exec pattern: measured 0 FP
+  across realistic legit postinstalls (`node-gyp`/`husky`/binary-downloaders), whereas the heuristic
+  `bun/deno/curl/wget` pattern that's fine on *your* root manifest false-positives across hundreds of
+  third-party packages. Python wheels carry no such hooks → nothing to scan there.
 - **Detects tampered installed Python packages via `.dist-info/RECORD` sha256 (#1164).** A wheel ships a
   `RECORD` with a per-file sha256 — a per-file integrity manifest npm has no offline equivalent for (its
   lockfile hash is over the published tarball, not the extracted tree). The installed-package audit now

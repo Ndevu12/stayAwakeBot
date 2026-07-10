@@ -18,6 +18,8 @@ memoized corpus as dependency_audit — no new parsing, no new deps.
 """
 from __future__ import annotations
 
+import re
+
 from stayawake.bots.security.models import Finding, Severity
 from stayawake.bots.security.matchers.base import Matcher
 from stayawake.bots.security.dependencies import RESOLVERS, AdvisoryStore
@@ -34,10 +36,16 @@ class InstalledPackageAuditMatcher(Matcher):
         self._resolvers = resolvers
         self._store_factory = store_factory
 
-    def scan(self, target, signatures):
+    def scan(self, target, signatures, all_signatures=None):
         by_id = {s["id"]: s for s in signatures}
         store = self._store_factory(signatures)
         tamper_sig = by_id.get("tampered-installed-package")
+        hook_sig = by_id.get("installed-lifecycle-hook")
+        # Reuse the CONFIRMED npm-lifecycle patterns from the signature DB (setup_bun dropper,
+        # curl|wget→interpreter) — one source, applied to INSTALLED package.json hooks that the
+        # npm-manifest matcher can't reach (node_modules is pruned). The heuristic exec pattern is
+        # excluded: it FPs on legit curl/bun/deno across hundreds of third-party packages.
+        hook_patterns = _confirmed_lifecycle_patterns(all_signatures) if hook_sig is not None else []
         findings: list[Finding] = []
         for tree in self._trees:
             installed = list(tree.read(target))
@@ -50,6 +58,8 @@ class InstalledPackageAuditMatcher(Matcher):
                     findings.append(_malicious(advisory, pkg))
                 elif tree.ghost_reconcilable and pkg.name not in locked:
                     findings.append(_ghost(by_id.get("ghost-package"), pkg))
+                if hook_patterns and pkg.hooks:
+                    findings.append(_lifecycle_hook(hook_sig, hook_patterns, pkg))
             if tamper_sig is not None:                # RECORD sha256 integrity (Python provides it)
                 for t in tree.tampered(target):
                     findings.append(_tampered(tamper_sig, t))
@@ -94,3 +104,25 @@ def _tampered(sig, t) -> Finding:
         severity=Severity.parse(sig["severity"]), path=t.path,
         description=sig["description"], remediation=sig.get("remediation", "manual"),
         evidence=f"{t.package}: {t.detail} — installed file modified after install", vector=sig["category"])
+
+
+def _confirmed_lifecycle_patterns(all_signatures):
+    """Compiled patterns of the CONFIRMED npm-lifecycle signatures (matcher `npm-manifest`, not
+    `heuristic`) — the FP-safe install-time IoCs, reused from the signature DB (one source, no copy)."""
+    return [(s["id"], re.compile(s["pattern"], re.IGNORECASE))
+            for s in (all_signatures or [])
+            if s.get("matcher") == "npm-manifest" and s.get("confidence") != "heuristic"
+            and s.get("pattern")]
+
+
+def _lifecycle_hook(sig, patterns, pkg) -> Finding | None:
+    for key, cmd in (pkg.hooks or {}).items():
+        for pid, rx in patterns:
+            if rx.search(cmd):
+                return Finding(
+                    signature_id=sig["id"], category=sig["category"],
+                    severity=Severity.parse(sig["severity"]), path=pkg.path,
+                    description=sig["description"], remediation=sig.get("remediation", "manual"),
+                    evidence=f"{pkg.name}@{pkg.version or '?'} {key}: {cmd[:80]} (matches {pid})",
+                    vector=sig["category"])
+    return None
