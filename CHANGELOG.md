@@ -7,6 +7,19 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **Audits the INSTALLED Python tree, not just the lockfile (#1164).** The installed-package audit now
+  has a **Python `site-packages` provider** alongside npm — the 2nd `InstalledTree` implementation, which
+  froze that interface (it fit without change). It reads each `<name>-<ver>.dist-info/METADATA` (or
+  legacy `.egg-info/PKG-INFO`) in a venv and **identity-on-disk**-checks it against the offline malware
+  corpus: a known-malicious PyPI package installed on disk is caught (INFECTED) **even if it's not in
+  the lockfile** — the postinstall-drop vector. Names are PEP 503-normalized (shared with the resolver),
+  and the `site-packages` walk is bounded and never follows symlinks. **GHOST detection is deliberately
+  deferred for Python**: `requirements.txt` lists only *direct* deps, so flagging off-lock transitive
+  installs would be all false positives (npm's `package-lock` lists transitive, so its ghost check
+  stays); identity-on-disk is the FP-safe, high-value half. Verified: 0 false positives across 29 real
+  venv packages against the 6,371-entry PyPI malware corpus. Go/Rust/NuGet stay lockfile-only (global
+  cache, no project-local tree). First increment of #1164; a complete-lock ghost reconciliation and a
+  `.dist-info/RECORD` sha256 integrity check are the noted follow-ups.
 - **Closes the last read-guard blind spots: non-source bodies, disguised binaries, escaping symlinks
   (#1146).** Three residual ways a payload could sit in a spot the scanner skipped, each closed without
   introducing false positives (a value study first dropped the FP-prone parts):
