@@ -69,14 +69,18 @@ def _safe(fn, display: str) -> str:
 def _preflight(token: str | None) -> str | None:
     """Verify the GitHub API is reachable AND the token is valid BEFORE any push/close, so a
     broken env (e.g. SSL) or bad token fails fast instead of force-pushing branches to every
-    repo. Returns an error message, or None when good to go."""
+    repo. Accepts BOTH a PAT and the Actions installation `GITHUB_TOKEN` — the latter can't
+    call `/user`, so it's validated against `$GITHUB_REPOSITORY` (see github_api.token_is_valid).
+    Returns an error message, or None when good to go."""
     if not token:
         return (auth.no_credential_hint("opening pull requests")
                 + " A token with repo + pull-request write scope is required.")
-    if github_api.get_authenticated_user(token) is None:
-        return ("GitHub API unreachable or token rejected — nothing pushed. Check connectivity "
-                "and token scope; on macOS a missing CA bundle causes this (the `certifi` "
-                "dependency fixes it; reinstall if needed).")
+    if not github_api.token_is_valid(token, os.environ.get("GITHUB_REPOSITORY")):
+        return ("GitHub API unreachable or the token was rejected — nothing pushed. Check "
+                "connectivity/TLS (on macOS a missing CA bundle causes this — the `certifi` "
+                "dependency fixes it) and that the token can reach the repository (in GitHub "
+                "Actions the default `GITHUB_TOKEN` works with `contents: write` + "
+                "`pull-requests: write`).")
     return None
 
 

@@ -317,6 +317,20 @@ All notable changes to this project are documented here. The format is based on
   the only local security surface; the `stayawake-health-*` scripts are unchanged.
 
 ### Fixed
+- **`saw fix --pr` / `--remote` now work under GitHub Actions with the default `GITHUB_TOKEN` (#1176).**
+  The remediation preflight validated the token by calling `GET /user`, which GitHub's API marks
+  `enabledForGitHubApps: false` — so the Actions `GITHUB_TOKEN` (a GitHub App **installation** token)
+  got `403 Resource not accessible by integration`, the preflight read that as "token rejected," and
+  auto-remediation aborted with *"No repositories to fix"* even though the token could push. This is
+  the exact CI environment the feature targets, so `--pr` never worked there without a PAT. The
+  preflight now uses a new `github_api.token_is_valid()` that validates **without** requiring
+  user-to-server scope: it accepts a PAT via `/user`, and an installation token via
+  `GET /repos/{$GITHUB_REPOSITORY}` (`enabledForGitHubApps: true`, needs only `metadata:read`), with
+  `GET /rate_limit` as a liveness floor. It stays **fail-closed** — GitHub validates the token before
+  resource visibility, so a bogus/expired token 401s on all three (even on a public repo) and an
+  unreachable/broken-TLS API yields nothing, both → rejected (still catches the SSL case the preflight
+  was built for). The spurious `403` log line on the happy path is gone (the expected `/user` probe is
+  now quiet). Ships in `stayawakebot`; the Strix action picks it up once released.
 - **A stale-format advisory cache no longer cries "tampered."** After a `saw` upgrade bumps the
   cache schema, the previous cache (an honest DB written by an older `saw`) tripped the byte-level
   integrity gate, printing `advisory-cache integrity check FAILED … corrupted or tampered` for every
