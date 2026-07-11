@@ -18,6 +18,7 @@ from unittest import mock
 
 from stayawake.bots.security import service, remediator
 from stayawake.bots.security import pr as pr_submit
+from stayawake.core.adapters import github_api
 
 # A CONFIRMED, auto-fixable finding: the worm's .gitignore auto-push markers.
 INFECTED_FILES = {".gitignore": "node_modules\ntemp_auto_push.bat\nbranch_structure.json\n"}
@@ -90,7 +91,7 @@ class TestFixLocal(unittest.TestCase):
     def test_pr_preflight_failure_publishes_nothing(self):
         d = _git_repo(INFECTED_FILES)
         with mock.patch.object(remediator.auth, "resolve_token", return_value=("t", "env")), \
-             mock.patch.object(remediator.github_api, "get_authenticated_user", return_value=None), \
+             mock.patch.object(remediator.github_api, "token_is_valid", return_value=False), \
              mock.patch.object(remediator.pr_submit, "submit_fix_pr") as m_pub:
             rc = remediator.fix(None, pr=True, paths=[str(d)], no_stream=True)
         self.assertEqual(rc, 0)
@@ -101,6 +102,70 @@ class TestFixLocal(unittest.TestCase):
         with mock.patch.object(remediator.pr_submit, "prepare_fix",
                                return_value="repo: ABORTED — 1 finding still present"):
             self.assertEqual(remediator.fix(None, paths=[str(d)], no_stream=True), 1)
+
+
+class TestTokenIsValid(unittest.TestCase):
+    """github_api.token_is_valid — the fail-closed preflight primitive (#1176).
+
+    `GET /user` is `enabledForGitHubApps: false`, so the Actions installation `GITHUB_TOKEN`
+    can't validate through it. token_is_valid falls back to `/repos/{slug}` and `/rate_limit`
+    (both `enabledForGitHubApps: true`). The invariant these lock: a live, GitHub-accepted token
+    passes; an empty/bogus token or an unreachable API is REJECTED (never fail-open)."""
+
+    def test_empty_token_rejected(self):
+        self.assertFalse(github_api.token_is_valid(None, "o/r"))
+        self.assertFalse(github_api.token_is_valid("", "o/r"))
+
+    def test_user_token_passes_via_user_and_short_circuits(self):
+        with mock.patch.object(github_api, "get_authenticated_user", return_value={"login": "me"}), \
+             mock.patch.object(github_api, "get_repo") as m_repo, \
+             mock.patch.object(github_api, "request") as m_req:
+            self.assertTrue(github_api.token_is_valid("pat", "o/r"))
+        m_repo.assert_not_called()      # /user succeeded → no further probes
+        m_req.assert_not_called()
+
+    def test_installation_token_passes_via_repo(self):
+        # The regression case: /user 403s (None) but the repo the token is scoped to resolves.
+        with mock.patch.object(github_api, "get_authenticated_user", return_value=None), \
+             mock.patch.object(github_api, "get_repo", return_value={"full_name": "o/r"}) as m_repo, \
+             mock.patch.object(github_api, "request") as m_req:
+            self.assertTrue(github_api.token_is_valid("ghs_inst", "o/r"))
+        m_repo.assert_called_once_with("o", "r", "ghs_inst")
+        m_req.assert_not_called()       # /repos succeeded → no need for the rate_limit floor
+
+    def test_installation_token_liveness_floor_when_no_repo_context(self):
+        # No repo_slug (e.g. GITHUB_REPOSITORY unset) but a live token → /rate_limit floor.
+        with mock.patch.object(github_api, "get_authenticated_user", return_value=None), \
+             mock.patch.object(github_api, "get_repo") as m_repo, \
+             mock.patch.object(github_api, "request", return_value={"rate": {}}) as m_req:
+            self.assertTrue(github_api.token_is_valid("ghs_inst", None))
+        m_repo.assert_not_called()      # no slug → skip the repo probe
+        m_req.assert_called_once()      # fell through to /rate_limit
+
+    def test_known_repo_context_requires_repo_access(self):
+        # When a repo context is known (repo_slug present), get_repo IS the check: a token that
+        # can't reach it (404/403 → None) is REJECTED, and we do NOT fall through to /rate_limit
+        # (caps probes at two, and requires real reachability when we have a repo to check).
+        with mock.patch.object(github_api, "get_authenticated_user", return_value=None), \
+             mock.patch.object(github_api, "get_repo", return_value=None), \
+             mock.patch.object(github_api, "request", return_value={"rate": {}}) as m_req:
+            self.assertFalse(github_api.token_is_valid("ghs_inst", "o/r"))
+        m_req.assert_not_called()       # no /rate_limit fall-through when a repo is known
+
+    def test_bogus_token_rejected_everywhere(self):
+        # The fail-open guard: a bogus token 401s on /user, /repos AND /rate_limit → all None.
+        with mock.patch.object(github_api, "get_authenticated_user", return_value=None), \
+             mock.patch.object(github_api, "get_repo", return_value=None), \
+             mock.patch.object(github_api, "request", return_value=None):
+            self.assertFalse(github_api.token_is_valid("bogus", "o/r"))
+
+    def test_unreachable_api_rejected(self):
+        # SSL/network failure: request() returns None everywhere → rejected, so the preflight
+        # still catches a broken environment before force-pushing anything.
+        with mock.patch.object(github_api, "get_authenticated_user", return_value=None), \
+             mock.patch.object(github_api, "get_repo", return_value=None), \
+             mock.patch.object(github_api, "request", return_value=None):
+            self.assertFalse(github_api.token_is_valid("t", None))
 
 
 class TestDiscard(unittest.TestCase):
@@ -132,7 +197,7 @@ class TestDiscard(unittest.TestCase):
     def test_discard_pr_preflight_failure_closes_nothing(self):
         d = _git_repo(INFECTED_FILES)
         with mock.patch.object(remediator.auth, "resolve_token", return_value=("t", "env")), \
-             mock.patch.object(remediator.github_api, "get_authenticated_user", return_value=None), \
+             mock.patch.object(remediator.github_api, "token_is_valid", return_value=False), \
              mock.patch.object(remediator.pr_submit, "discard_pr") as m:
             rc = remediator.discard(None, pr=True, paths=[str(d)], no_stream=True)
         self.assertEqual(rc, 0)

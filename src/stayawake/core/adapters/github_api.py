@@ -57,10 +57,52 @@ def request(path: str, method: str = "GET", token: str | None = None,
         return None
 
 
-def get_authenticated_user(token: str | None) -> dict | None:
-    """The account the token belongs to (its 'login' is the fork owner). None on failure."""
-    res = request("/user", token=token)
+def get_authenticated_user(token: str | None, quiet: bool = False) -> dict | None:
+    """The account the token belongs to (its 'login' is the fork owner). None on failure.
+
+    NOTE: `GET /user` is `enabledForGitHubApps: false` in GitHub's API — a GitHub App
+    **installation** token (which the Actions `GITHUB_TOKEN` is) is FORBIDDEN from it and
+    gets `403 Resource not accessible by integration`. So this returns None for an installation
+    token even when the token is perfectly valid. Callers that must accept installation tokens
+    should use `token_is_valid()` (validation) rather than gating on this. Pass `quiet=True` to
+    suppress the error log when a 403 here is expected (e.g. the preflight probe)."""
+    res = request("/user", token=token, quiet=quiet)
     return res if isinstance(res, dict) else None
+
+
+def token_is_valid(token: str | None, repo_slug: str | None = None) -> bool:
+    """Is `token` live and accepted by GitHub — WITHOUT requiring user-to-server scope?
+
+    The preflight before any push must accept BOTH a personal access token and the Actions
+    `GITHUB_TOKEN` (a GitHub App installation token). It can't just call `GET /user`: that is
+    `enabledForGitHubApps: false`, so an installation token 403s there even though it's valid.
+    Instead, probe endpoints an installation token CAN reach (both `enabledForGitHubApps: true`):
+
+      1. `GET /user` — greenlights a genuine user token / PAT (an installation token 403s → skip).
+      2. If a repo context is known (`repo_slug`, e.g. `$GITHUB_REPOSITORY` under Actions):
+         `GET /repos/{owner}/{repo}` is the check — it needs only `metadata:read` (always granted),
+         so a live installation token passes AND a token that can't reach the repo is rejected.
+         This is authoritative when we have a repo, so we do NOT also fall through to (3): if
+         get_repo failed it's either no-access (reject) or the API is down (a second probe would
+         only add another timeout).
+      3. No repo context (an App token used outside Actions): `GET /rate_limit` as a pure liveness
+         floor.
+
+    Fail-CLOSED by construction: GitHub validates the token BEFORE resource visibility, so a
+    bogus/expired token gets 401 on every probe (even on a public repo) → None → False; an empty
+    token or an unreachable/broken-TLS API likewise yields None → False (so the preflight still
+    catches the SSL case it was built for). At most two probes run, so a total outage fails in
+    ≤2×timeout. Only a genuinely live, GitHub-accepted token returns True. Like the old `/user`
+    gate, this asserts the token is live+accepted (and, when a repo is known, reachable) — not that
+    it has write scope; the push handles that, via the fork/patch/issue fallback ladder."""
+    if not token:
+        return False
+    if get_authenticated_user(token, quiet=True) is not None:
+        return True
+    if repo_slug and "/" in repo_slug:
+        owner, name = repo_slug.split("/", 1)
+        return get_repo(owner, name, token) is not None
+    return request("/rate_limit", token=token, quiet=True) is not None
 
 
 def get_repo(owner: str, repo: str, token: str | None) -> dict | None:
