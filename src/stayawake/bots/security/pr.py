@@ -111,7 +111,11 @@ def _fork_and_pr(wt: Path, owner: str, name: str, base: str, applied, suspicious
 
     Handles: no token identity, can't fork (permissions), forking your own repo, async
     fork not ready, push-to-fork failure, duplicate fork PR, and PR-creation failure."""
-    me = (github_api.get_authenticated_user(token) or {}).get("login")
+    # `get_authenticated_user` (GET /user) is enabledForGitHubApps=false, so an installation
+    # token (the Actions GITHUB_TOKEN) returns None here — no fork identity. That's fine: under
+    # Actions the upstream push succeeds with `contents: write`, so this fork fallback is never
+    # reached. The fork path is for a PAT that lacks upstream write but can fork.
+    me = (github_api.get_authenticated_user(token, quiet=True) or {}).get("login")
     if not me or me.lower() == owner.lower():
         return None  # no identity, or it's our own repo (a fork wouldn't help)
     fork = github_api.create_fork(owner, name, token, quiet=True)
