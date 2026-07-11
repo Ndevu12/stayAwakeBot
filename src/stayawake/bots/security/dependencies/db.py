@@ -21,7 +21,6 @@ from __future__ import annotations
 import hashlib
 import io
 import json
-import os
 import ssl
 import sys
 import urllib.request
@@ -29,6 +28,7 @@ import zipfile
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
+from stayawake.core import env
 from stayawake.bots.security.dependencies.corpus import AdvisoryCorpus
 from stayawake.bots.security.dependencies.ecosystems import PURL_TO_OSV
 from stayawake.bots.security.dependencies.osv import (
@@ -59,10 +59,10 @@ _CORPUS_MEMO: dict[tuple[str, float], AdvisoryCorpus | None] = {}
 def default_cache_dir() -> Path:
     """`$SAW_ADVISORY_CACHE_DIR`, else `$XDG_CACHE_HOME/saw/advisories`, else
     `~/.cache/saw/advisories`. (The global-vs-repo-pinned decision is #1126.)"""
-    env = os.environ.get("SAW_ADVISORY_CACHE_DIR")
-    if env:
-        return Path(env).expanduser()
-    base = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
+    override = env.get(env.SAW_ADVISORY_CACHE_DIR)
+    if override:
+        return Path(override).expanduser()
+    base = env.get(env.XDG_CACHE_HOME) or str(Path.home() / ".cache")
     return Path(base) / "saw" / "advisories"
 
 

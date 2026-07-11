@@ -14,11 +14,12 @@ hint. Stdlib only. Tokens are returned to callers but never logged here.
 """
 from __future__ import annotations
 
-import os
 import shutil
 import subprocess
 
-ENV_VARS = ("GH_SECURITY_TOKEN", "GITHUB_TOKEN")
+from stayawake.core import env
+
+ENV_VARS = (env.GH_SECURITY_TOKEN, env.GITHUB_TOKEN)
 _GH_TIMEOUT = 10  # gh auth token is a local keyring read; should be near-instant.
 
 
@@ -33,9 +34,9 @@ def gh_installed() -> bool:
 
 def _env_token() -> tuple[str | None, str | None]:
     for var in ENV_VARS:
-        val = os.environ.get(var)
-        if val and val.strip():
-            return val.strip(), var
+        val = env.get(var)   # strips; empty/whitespace → None
+        if val:
+            return val, var
     return None, None
 
 

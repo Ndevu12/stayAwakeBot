@@ -16,7 +16,6 @@ Convention: results go to stdout (Streamer), transient progress to stderr (statu
 from __future__ import annotations
 
 import itertools
-import os
 import re
 import sys
 import threading
@@ -24,12 +23,13 @@ import time
 from contextlib import contextmanager
 from typing import Iterator, TextIO
 
-_DISABLE_ENV = ("STAYAWAKE_NO_STREAM", "NO_STREAM")
+from stayawake.core import env
+
 _WORD = re.compile(r"\S+\s*|\s+")   # a word + its trailing ws, or a run of ws (keeps newlines)
 
 
 def _disabled_by_env() -> bool:
-    return any(os.environ.get(k) for k in _DISABLE_ENV)
+    return env.stream_disabled()
 
 
 def _auto_enabled(out: TextIO) -> bool:

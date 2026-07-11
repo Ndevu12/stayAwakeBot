@@ -216,6 +216,14 @@ All notable changes to this project are documented here. The format is based on
 - This changelog.
 
 ### Changed
+- **Centralized all environment-variable access behind one `core.env` helper.** Every env var the
+  app reads is now NAMED and READ in a single module (`stayawake/core/env.py`) instead of scattered
+  `os.environ.get("…")` magic strings — the alerters, remediator, advisory-cache dir, pager, colour
+  and streaming toggles, and token resolution all go through it, and the duplicated
+  `owner, name = GITHUB_REPOSITORY.split("/")` parse is now one `env.github_slug()` (which also can't
+  crash on a malformed value, unlike the old bare `split("/")`). One consistency change falls out:
+  an env var set to **empty/whitespace now reads as unset everywhere** (values are stripped), so a
+  stray blank no longer counts as "set." Internal refactor; no CLI/behaviour change beyond that.
 - **Relicensed to AGPL-3.0-or-later + a commercial license (dual licensing), from v0.1.9 onward.**
   stayAwakeBot moves off MIT to a **dual-license** model: **AGPL-3.0-or-later** (free, open source —
   attribution required, and network/hosted use of a modified version must release its source under

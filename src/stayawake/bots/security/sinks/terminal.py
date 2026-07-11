@@ -7,9 +7,9 @@ sanctioned, redacting persistence is the file/sarif sinks.
 """
 from __future__ import annotations
 
-import os
 import sys
 
+from stayawake.core import env
 from stayawake.bots.security.models import ScanReport
 from stayawake.bots.security.sinks.base import Sink
 from stayawake.bots.security.sinks.render import render_terminal
@@ -24,7 +24,7 @@ COLLAPSE_CLEAN_OVER = 40
 def _color_enabled() -> bool:
     """Colour only on a real stdout TTY, honouring the NO_COLOR convention. Off when
     piped/redirected/CI (isatty False) so captured output and tests stay plain text."""
-    if os.environ.get("NO_COLOR"):
+    if env.no_color():
         return False
     try:
         return bool(sys.stdout.isatty())
