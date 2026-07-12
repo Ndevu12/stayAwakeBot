@@ -373,6 +373,12 @@ All notable changes to this project are documented here. The format is based on
   `--user "$(id -u):$(id -g)"` invocation for writing the report back to the host.
 
 ### Security
+- **Bumped the worm-guard scanner pin to current main (`sentinel-ref` → merge of #1179).** Catches
+  the pin up to the two engine PRs that landed with a `pin-bump-deferred` label — the CI
+  installation-token remediation preflight fix (#1176/#1178) and the env-access centralization
+  (#1179) — so the gate again runs the current reviewed engine. Both were remediation/refactor
+  changes (no detection-logic change), which is why deferral was safe; this is the deliberate
+  catch-up bump the in-band pin-freshness gate (#1172) exists to force.
 - **Bumped the worm-guard gate's pinned scanner to current main (`sentinel-ref` → merge of #1170).**
   The gate pins its detection engine to a reviewed SHA so a later compromise of `main` can't silently
   change what it runs — but a pin that lags runs an out-of-date engine while you believe you're covered.
