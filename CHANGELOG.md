@@ -382,6 +382,10 @@ All notable changes to this project are documented here. The format is based on
   `--user "$(id -u):$(id -g)"` invocation for writing the report back to the host.
 
 ### Security
+- **Bumped the worm-guard scanner pin to current main (`sentinel-ref` → merge of #1181).** Catches
+  the pin up to the branded `saw` welcome / shared colour-decision work (#1177), whose only
+  engine-subtree change was `sinks/terminal.py` adopting `core.terminal` — a presentation change, no
+  detection-logic change — so the gate runs the current reviewed engine again.
 - **Bumped the worm-guard scanner pin to current main (`sentinel-ref` → merge of #1179).** Catches
   the pin up to the two engine PRs that landed with a `pin-bump-deferred` label — the CI
   installation-token remediation preflight fix (#1176/#1178) and the env-access centralization
