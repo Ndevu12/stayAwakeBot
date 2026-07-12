@@ -9,9 +9,9 @@ scan, no intermediate report file on disk).
 """
 from __future__ import annotations
 
-import os
 import urllib.parse
 
+from stayawake.core import env
 from stayawake.core.adapters.slack import send_slack
 from stayawake.core.adapters import github_api
 from stayawake.core.timeutil import utc_stamp
@@ -47,7 +47,7 @@ def _issue_body(result: dict) -> str:
 def post_slack_summary(payload: dict) -> None:
     """Post the infected / suspicious Slack summaries for a scan payload (no-op without
     SLACK_WEBHOOK_URL). Bodies are evidence-free."""
-    slack = os.environ.get("SLACK_WEBHOOK_URL")
+    slack = env.slack_webhook()
     if not slack:
         return
     results = payload.get("results", [])
@@ -74,8 +74,8 @@ def post_slack_summary(payload: dict) -> None:
 def sync_github_issues(payload: dict) -> None:
     """Open one labelled issue per infected repo and close it on recovery (idempotent,
     keyed on the open issue's title). No-op with a note when no GITHUB_TOKEN/REPOSITORY."""
-    token = os.environ.get("GITHUB_TOKEN")
-    repo = os.environ.get("GITHUB_REPOSITORY")
+    token = env.github_token()
+    slug = env.github_slug()
 
     results = payload.get("results", [])
     infected = [r for r in results if r.get("infected")]
@@ -85,12 +85,12 @@ def sync_github_issues(payload: dict) -> None:
     clean = [r for r in results if not r.get("infected")
              and not r.get("suspicious") and not r.get("error")]
 
-    if not (token and repo):
+    if not (token and slug):
         print(f"Security alerts: {len(infected)} infected, {len(suspicious)} suspicious "
               "(no token/repo — skipped GitHub issues).")
         return
 
-    owner, name = repo.split("/")
+    owner, name = slug
     open_by_title = {it.get("title"): it for it in _open_issues(owner, name, token)}
 
     for r in infected:

@@ -9,12 +9,13 @@ or a user who didn't ask for a pager.
 """
 from __future__ import annotations
 
-import os
 import shutil
 import signal
 import subprocess
 import sys
 from typing import TextIO
+
+from stayawake.core import env
 
 # `-R` keeps colour escapes; we deliberately DON'T pass `-F`/`-X`. `-F` ("quit if it fits one
 # screen") is redundant — we already write short reports straight through, below — and the
@@ -42,7 +43,7 @@ def page(text: str, *, enabled: bool, out: TextIO | None = None) -> None:
         out.write(text)
         out.flush()
         return
-    cmd = os.environ.get("PAGER") or _DEFAULT_PAGER
+    cmd = env.get(env.PAGER, _DEFAULT_PAGER)
     # While the pager owns the terminal, ignore SIGINT in THIS process: a Ctrl+C is the user
     # quitting the pager, not killing us. Without this the interrupt hits the whole foreground
     # process group, so we'd die before printing the post-report pointer (the bug where the

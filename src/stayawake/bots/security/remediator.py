@@ -23,6 +23,7 @@ from pathlib import Path
 
 from stayawake.core.config import load_yaml
 from stayawake.core import auth
+from stayawake.core import env
 from stayawake.core import git as gitutil
 from stayawake.core.adapters import github_api
 from stayawake.core.streaming import Streamer, stream_enabled, status
@@ -75,7 +76,7 @@ def _preflight(token: str | None) -> str | None:
     if not token:
         return (auth.no_credential_hint("opening pull requests")
                 + " A token with repo + pull-request write scope is required.")
-    if not github_api.token_is_valid(token, os.environ.get("GITHUB_REPOSITORY")):
+    if not github_api.token_is_valid(token, env.github_repository()):
         return ("GitHub API unreachable or the token was rejected — nothing pushed. Check "
                 "connectivity/TLS (on macOS a missing CA bundle causes this — the `certifi` "
                 "dependency fixes it) and that the token can reach the repository (in GitHub "

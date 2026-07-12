@@ -9,8 +9,7 @@ alert channel. Best-effort — a missing token / unreachable GitHub never affect
 """
 from __future__ import annotations
 
-import os
-
+from stayawake.core import env
 from stayawake.core import issue_state
 from stayawake.core.adapters.slack import send_slack
 from stayawake.core.timeutil import now_iso, utc_stamp
@@ -123,12 +122,12 @@ def _render(state: dict, results: list[dict]) -> tuple[str, str]:
 def publish(results: list[dict], settings: dict | None = None) -> None:
     """Refresh the one dashboard issue from `results` and Slack any DOWN/RECOVERY transition."""
     settings = settings or {}
-    token = os.environ.get("GITHUB_TOKEN")
-    repo = os.environ.get("GITHUB_REPOSITORY")
-    if not (token and repo and "/" in repo):
+    token = env.github_token()
+    slug = env.github_slug()
+    if not (token and slug):
         print("alerter: GITHUB_TOKEN/GITHUB_REPOSITORY unset — skipping issue update", flush=True)
         return
-    owner, repo_name = repo.split("/", 1)
+    owner, repo_name = slug
     fail_threshold = int(settings.get("consecutive_failures_before_alert", 2) or 1)
     recovery_threshold = int(settings.get("consecutive_healthy_before_recovery", fail_threshold) or 1)
 
@@ -137,7 +136,7 @@ def publish(results: list[dict], settings: dict | None = None) -> None:
     title, body = _render(state, results)
     issue_state.save(owner, repo_name, MARKER, token, title=title, body=body, label=LABEL)
 
-    webhook = os.environ.get("SLACK_WEBHOOK_URL")
+    webhook = env.slack_webhook()
     if webhook:
         for ev in events:
             if ev["kind"] == "down" and settings.get("alert_on_failure", True):
