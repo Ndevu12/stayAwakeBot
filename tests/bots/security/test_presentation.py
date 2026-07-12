@@ -5,6 +5,7 @@ temp-report pointer — so a big sweep's full result is never lost to terminal s
 from __future__ import annotations
 
 import io
+import os
 import signal
 import unittest
 from pathlib import Path
@@ -52,8 +53,8 @@ class TestPager(unittest.TestCase):
         # `-F`/`-X` are the garble footgun on multi-screen piped input — the default must not
         # use them; plain `less -R` pages cleanly on the alternate screen.
         captured, big = {}, "x\n" * 1000
-        env = {k: v for k, v in pager.os.environ.items() if k != "PAGER"}
-        with mock.patch.dict(pager.os.environ, env, clear=True), \
+        without_pager = {k: v for k, v in os.environ.items() if k != "PAGER"}
+        with mock.patch.dict("os.environ", without_pager, clear=True), \
              mock.patch.object(pager.subprocess, "Popen",
                                side_effect=lambda cmd, **kw: captured.update(cmd=cmd)
                                or mock.Mock(communicate=lambda text: None)):

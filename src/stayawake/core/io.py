@@ -9,6 +9,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from stayawake.core import env
+
 
 def resolve_writable_dir(preferred: str | Path, *, label: str = "reports") -> Path:
     """Return a directory we can actually write into, preferring `preferred`.
@@ -53,7 +55,7 @@ def resolve_reports_dir(explicit: str | Path | None = None, *,
     → `default`. The chosen dir is then passed through `resolve_writable_dir`, so an
     unwritable choice falls back to a temp dir instead of crashing a completed run.
     """
-    chosen = explicit or os.environ.get("STAYAWAKE_REPORTS_DIR") or settings_value or default
+    chosen = explicit or env.get(env.STAYAWAKE_REPORTS_DIR) or settings_value or default
     return resolve_writable_dir(chosen, label=label)
 
 
