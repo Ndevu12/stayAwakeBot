@@ -238,10 +238,26 @@ class TestDispatcherOwnedCommands(unittest.TestCase):
 
 
 class TestTopLevel(unittest.TestCase):
-    def test_no_command_prints_help(self):
+    def test_no_command_prints_welcome(self):
+        # Bare `saw` now shows the branded welcome (#1177), not the argparse dump. Captured
+        # stdout is not a TTY → plain text with NO ANSI, so scripted callers stay clean.
         with redirect_stdout(io.StringIO()) as buf:
             self.assertEqual(cli.main([]), 0)
-        self.assertIn("usage", buf.getvalue().lower())
+        out = buf.getvalue()
+        self.assertIn("Get started", out)
+        self.assertIn("saw scan", out)
+        self.assertNotIn("\033", out)              # no colour when captured
+        # The full command list still lives at `saw -h`, which argparse owns.
+
+    def test_intro_prints_tour(self):
+        with redirect_stdout(io.StringIO()) as buf:
+            self.assertEqual(cli.main(["intro"]), 0)
+        self.assertIn("Three verbs", buf.getvalue())
+
+    def test_welcome_alias_routes_to_intro(self):
+        with redirect_stdout(io.StringIO()) as buf:
+            self.assertEqual(cli.main(["welcome"]), 0)
+        self.assertIn("What it is", buf.getvalue())
 
     def test_version_exits_zero(self):
         with self.assertRaises(SystemExit) as cm, redirect_stdout(io.StringIO()):

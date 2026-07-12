@@ -19,8 +19,8 @@ run on your own machine to detect, report, and auto-remediate self-propagating m
 - [Synopsis & global options](#synopsis--global-options)
 - [Commands](#commands)
   - [`saw scan`](#saw-scan) · [`saw fix`](#saw-fix) · [`saw discard`](#saw-discard) ·
-    [`saw audit`](#saw-audit) · [`saw search`](#saw-search) · [`saw doctor`](#saw-doctor) ·
-    [`saw completion`](#saw-completion)
+    [`saw audit`](#saw-audit) · [`saw search`](#saw-search) · [`saw intro`](#saw-intro) ·
+    [`saw doctor`](#saw-doctor) · [`saw completion`](#saw-completion)
 - [Remote targeting (`--remote`)](#remote-targeting---remote)
 - [How reports are stored (evidence & redaction)](#how-reports-are-stored-evidence--redaction)
 - [Exit codes](#exit-codes)
@@ -32,7 +32,7 @@ run on your own machine to detect, report, and auto-remediate self-propagating m
 ## Cheat sheet
 
 ```text
-saw <command> [options] [TARGETS...]      # no command → prints help;  -h/--help on any command
+saw <command> [options] [TARGETS...]      # no command → welcome banner;  -h/--help on any command
 ```
 
 | Command | What it does | Touches files? |
@@ -42,6 +42,7 @@ saw <command> [options] [TARGETS...]      # no command → prints help;  -h/--he
 | [`saw discard`](#saw-discard) | Undo `saw fix`: delete the branch and/or close its PR | git / GitHub API |
 | [`saw audit`](#saw-audit) | Local hygiene: credentials, VS Code settings, branch protection | Read-only |
 | [`saw search`](#saw-search) | Fuzzy "what's the command for…?" lookup | — |
+| [`saw intro`](#saw-intro) | Branded tour (also the bare-`saw` welcome) | — |
 | [`saw doctor`](#saw-doctor) | Self-check: install resolution + credentials | — |
 | [`saw completion`](#saw-completion) | Print a shell-completion script | — |
 
@@ -98,8 +99,9 @@ Verify your install with [`saw doctor`](#saw-doctor).
 saw <command> [options] [TARGETS...]
 ```
 
-`saw` with no command prints help. Every command supports `-h/--help`, which documents that
-command's options. These options apply to `saw` itself, before any command:
+`saw` with no command prints the [welcome banner](#saw-intro) (a branded first-contact screen);
+the full command list still lives at `saw -h`. Every command supports `-h/--help`, which documents
+that command's options. These options apply to `saw` itself, before any command:
 
 | Option | Description |
 | --- | --- |
@@ -277,6 +279,26 @@ saw search <text...> [--json] [-q]
 ```bash
 saw search "open a pr"     # → suggests `saw fix`
 ```
+
+### `saw intro`
+
+A branded first-contact screen. Running `saw` with **no command** prints the short **welcome**
+(the "SAW" wordmark, tagline, a *Get started* block, and links) instead of the argparse help;
+`saw intro` (alias `saw welcome`) prints the **fuller tour** — what saw is, the three verbs, why
+it's safe, and how to gate CI. Both run no scan and touch nothing.
+
+Because `saw` is a supply-chain tool, the welcome leans into a real property: **zero code runs at
+install** — `pip install` has no post-install hook (the very vector saw hunts), so first contact is
+your first *invocation*, not install time.
+
+```text
+saw intro          # or: saw welcome  ·  or just: saw
+```
+
+Colour degrades to the terminal's capability (truecolor → 256 → 16) and is **dropped entirely**
+when output is piped/redirected, when `NO_COLOR` is set, under `CI`, or on a `TERM=dumb` terminal —
+so scripted and CI output stays clean plain text. `CLICOLOR_FORCE=1` forces colour on (handy for
+recording). The full command list is always at `saw -h`.
 
 ### `saw doctor`
 
