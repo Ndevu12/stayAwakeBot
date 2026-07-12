@@ -7,6 +7,15 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **Branded first-run welcome for `saw`, plus a `saw intro` tour (#1177).** Bare `saw` now prints a
+  designed welcome — the mint "SAW" wordmark, tagline, a *Get started* block, and links — instead of
+  the plain argparse dump; `saw intro` (alias `welcome`) gives the fuller tour. In the spirit of a
+  supply-chain tool, the welcome flexes the constraint: **zero code runs at install** (pip has no
+  post-install hook — the very vector `saw` hunts), so first contact is the first *invocation*, not
+  install time. No state files, **no new dependencies** (pure ANSI + `print`). Colour is decided by a
+  new single source of truth, `core.terminal.color_level()` (truecolor → 256 → 16 → none), which the
+  security report sink now shares too: it honours `NO_COLOR`, `CLICOLOR_FORCE`, `CI`, `TERM=dumb`, and
+  a real TTY — so piped / scripted / CI `saw` stays clean plain text, and `saw <cmd> -h` is untouched.
 - **Sweeps INSTALLED dependencies' entry files for loader fingerprints — a novel malicious package
   whose payload runs on `require` (#1164).** A malicious npm package can carry no known-bad identity
   and no postinstall, yet still run on import via a loader in its **main/bin entry file**. `node_modules`

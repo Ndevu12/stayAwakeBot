@@ -20,6 +20,8 @@ _INDEX = [
      "audit hygiene credential token branch protection vscode editor runner self-hosted persistence"),
     ("saw doctor", "self-check the install and credentials",
      "doctor diagnose verify install check health"),
+    ("saw intro", "a branded tour of what saw is and how to get started",
+     "intro welcome tour guide getting started banner logo about help onboarding"),
     ("saw completion", "emit a shell-completion script",
      "completion shell bash zsh fish autocomplete tab"),
 ]
