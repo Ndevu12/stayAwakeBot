@@ -26,6 +26,10 @@ STAYAWAKE_REPORTS_DIR = "STAYAWAKE_REPORTS_DIR"
 SAW_ADVISORY_CACHE_DIR = "SAW_ADVISORY_CACHE_DIR"
 XDG_CACHE_HOME = "XDG_CACHE_HOME"
 NO_COLOR = "NO_COLOR"
+CLICOLOR_FORCE = "CLICOLOR_FORCE"   # force colour on even when stdout is not a TTY (e.g. recording)
+CI = "CI"                           # set by CI runners → suppress colour so captured logs stay plain
+TERM = "TERM"                       # terminal type ('xterm-256color', 'dumb', …); read by core.terminal
+COLORTERM = "COLORTERM"             # 'truecolor' / '24bit' when 24-bit colour is available
 PAGER = "PAGER"
 # any of these set (to a non-empty value) disables live streaming
 NO_STREAM = ("STAYAWAKE_NO_STREAM", "NO_STREAM")
@@ -71,9 +75,24 @@ def slack_webhook() -> str | None:
 
 
 # ── behaviour toggles ──────────────────────────────────────────────────────────────────
+def _truthy(value: str | None) -> bool:
+    """A conventional on/off flag: on unless empty or an explicit off word (0/false/no/off)."""
+    return (value or "").lower() not in ("", "0", "false", "no", "off")
+
+
 def no_color() -> bool:
     """The NO_COLOR convention: any non-empty value disables colour output."""
     return bool(get(NO_COLOR))
+
+
+def clicolor_force() -> bool:
+    """CLICOLOR_FORCE: force colour on even when the stream is not a TTY (0/false/no/off = off)."""
+    return _truthy(get(CLICOLOR_FORCE))
+
+
+def is_ci() -> bool:
+    """Running under a CI runner — suppress colour so captured logs stay plain text."""
+    return _truthy(get(CI))
 
 
 def stream_disabled() -> bool:

@@ -9,27 +9,16 @@ from __future__ import annotations
 
 import sys
 
-from stayawake.core import env
 from stayawake.bots.security.models import ScanReport
 from stayawake.bots.security.sinks.base import Sink
 from stayawake.bots.security.sinks.render import render_terminal
 from stayawake.core.pager import page
 from stayawake.core.streaming import Streamer
+from stayawake.core.terminal import supports_color
 
 # Fleets bigger than this collapse their CLEAN rows to a count in the terminal table (the
 # full inventory still ships in the --json / -d artifact). Keeps a 200-repo sweep readable.
 COLLAPSE_CLEAN_OVER = 40
-
-
-def _color_enabled() -> bool:
-    """Colour only on a real stdout TTY, honouring the NO_COLOR convention. Off when
-    piped/redirected/CI (isatty False) so captured output and tests stay plain text."""
-    if env.no_color():
-        return False
-    try:
-        return bool(sys.stdout.isatty())
-    except Exception:
-        return False
 
 
 class TerminalSink(Sink):
@@ -37,7 +26,9 @@ class TerminalSink(Sink):
                  detail: bool = True) -> None:
         # Results go to stdout (the convention); progress lives on stderr in service.scan.
         self._stream = Streamer(enabled=enabled, out=sys.stdout)
-        self._color = _color_enabled()
+        # One shared decision (core.terminal): colour only on a real stdout TTY, honouring
+        # NO_COLOR / CLICOLOR_FORCE / CI / TERM=dumb. Off when piped/captured so tests stay plain.
+        self._color = supports_color(sys.stdout)
         self._pager = pager
         self._detail = detail
 
