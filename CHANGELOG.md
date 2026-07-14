@@ -414,6 +414,13 @@ All notable changes to this project are documented here. The format is based on
   `--user "$(id -u):$(id -g)"` invocation for writing the report back to the host.
 
 ### Security
+- **Bumped the worm-guard scanner pin to current main (`sentinel-ref` → merge of #1193).** Catches
+  the pin up to the five remediation PRs that landed with a `pin-bump-deferred` label — partial
+  fixes (#1183), per-finding manual-review guidance (#1184), recovery source-trust + post-condition
+  hardening (#1185/#1191), surgical same-line defer guidance (#1189/#1192), and the insert-branch
+  per-statement gate (#1190/#1193) — so the gate again runs the current reviewed engine. All were
+  remediation changes (no detection-logic change), which is why deferral was safe; this is the
+  deliberate catch-up bump the in-band pin-freshness gate (#1172) exists to force.
 - **`saw fix` git-recovery no longer drops legit code hidden on a new payload line (#1190).** The
   recovery `insert` branch previously accepted an added line for removal if the *whole line* was
   dense and carried a loader fingerprint — so a newly-committed line that concatenates legit code
