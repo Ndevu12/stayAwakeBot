@@ -43,6 +43,11 @@ def _git(d: Path, *args: str) -> None:
     subprocess.run(["git", "-C", str(d), *args], check=True, capture_output=True)
 
 
+def _git_out(d: Path, *args: str) -> str:
+    return subprocess.run(["git", "-C", str(d), *args], check=True,
+                          capture_output=True, text=True).stdout.strip()
+
+
 def _repo() -> Path:
     d = Path(tempfile.mkdtemp())
     _git(d, "init", "-q")
@@ -240,6 +245,59 @@ class TestRecovery(unittest.TestCase):
         self.assertFalse(remediation._is_packed_line("export const DEL = String.fromCharCode(127);"))
         self.assertFalse(remediation._is_packed_line("global['!']=boot(); export const PORT = 3000;"))
         self.assertTrue(remediation._is_packed_line(PACKED_PAYLOAD))
+
+
+class TestRecoveryHardening(unittest.TestCase):
+    """#1185 shipped two provable hardenings to the recovery engine: the recovery SOURCE is
+    selected from first-parent (mainline) history only, and apply re-proves the delta is
+    payload-only + a subsequence of the working file before writing (verify-or-revert)."""
+
+    def test_clean_source_only_via_second_parent_is_not_trusted(self):
+        # Evil-merge topology: the file is introduced onto mainline THROUGH the merge, taking the
+        # payload from the second (malicious) parent, whose branch also carries an attacker-staged
+        # "clean" blob. Default git-log simplification follows the second parent (the merge is
+        # TREESAME to it) and would surface that off-mainline clean blob as a recovery source.
+        # The first-parent walk must refuse it: mainline never held a clean version of this file.
+        d = _repo()
+        _commit(d, "README.md", "# repo\n", "init (no m.mjs on mainline)")
+        branch = _git_out(d, "rev-parse", "--abbrev-ref", "HEAD") or "master"
+        _git(d, "checkout", "-q", "-b", "side")
+        _commit(d, "m.mjs", CLEAN, "attacker-staged clean-looking blob (side only)")
+        _commit(d, "m.mjs", CLEAN + PACKED_PAYLOAD + "\n", "side tip: payload")
+        _git(d, "checkout", "-q", branch)
+        _git(d, "merge", "--no-ff", "-m", "merge side (brings payload onto mainline)", "side")
+
+        # The clean blob IS reachable via the default (simplified) walk, but NOT via first-parent.
+        full = remediation.gitutil.file_commits(d, "m.mjs")
+        fp = remediation.gitutil.file_commits(d, "m.mjs", first_parent=True)
+        self.assertTrue(any(remediation.gitutil.file_at(d, s, "m.mjs") == CLEAN for s in full))
+        self.assertFalse(any(remediation.gitutil.file_at(d, s, "m.mjs") == CLEAN for s in fp))
+
+        disp = remediation.classify_recovery(d, _finding("m.mjs"), SIG)
+        self.assertIsInstance(disp, remediation.Manual)                 # never recovers to the side blob
+        self.assertIn("global", (d / "m.mjs").read_text())              # file untouched, still infected
+
+    def test_first_parent_recovery_still_works_on_linear_history(self):
+        # Sanity: the first-parent narrowing must not break the ordinary linear-history recovery.
+        d = _repo()
+        _commit(d, "postcss.config.mjs", CLEAN, "add config")
+        _commit(d, "postcss.config.mjs", _infected_newlines(), "feat: landing page")
+        disp = remediation.classify_recovery(d, _finding("postcss.config.mjs"), SIG)
+        self.assertIsInstance(disp, remediation.Recovery)
+        self.assertTrue(remediation.apply_recovery(d, disp, remediation.quarantine_path(d), SIG))
+        self.assertEqual((d / "postcss.config.mjs").read_text(), CLEAN)
+
+    def test_apply_reverts_when_clean_text_would_fabricate_or_drop_bytes(self):
+        # Strengthened post-condition: a Recovery whose clean_text scans clean but is NOT 'the
+        # working file minus payload' (fabricated / would drop legit code) is refused BEFORE any
+        # write — proven at apply time independently of the planner.
+        d = _repo()
+        _commit(d, "a.mjs", CLEAN, "add config")
+        (d / "a.mjs").write_text(_infected_newlines(), encoding="utf-8")
+        fabricated = remediation.Recovery("a.mjs", "deadbeef", "x", "", "export const HACKED = 1;\n")
+        self.assertFalse(remediation.apply_recovery(d, fabricated, remediation.quarantine_path(d), SIG))
+        self.assertIn("global", (d / "a.mjs").read_text())              # untouched, payload intact
+        self.assertNotIn("HACKED", (d / "a.mjs").read_text())           # fabricated text never written
 
 
 if __name__ == "__main__":

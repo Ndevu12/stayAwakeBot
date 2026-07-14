@@ -414,6 +414,25 @@ All notable changes to this project are documented here. The format is based on
   `--user "$(id -u):$(id -g)"` invocation for writing the report back to the host.
 
 ### Security
+- **Hardened `saw fix` git-recovery source trust and post-condition (#1185).** Two provable
+  strengthenings to the code-loader recovery path:
+  - **Recovery source is now a trust decision.** The clean version is selected from **first-parent
+    (mainline) history only**. Previously the walk followed default git history simplification, which
+    can descend into a merge's *second* parent — so a "clean-looking" blob staged only on the malicious
+    side of an **evil merge** could be chosen as the recovery source. It never is now; the mainline walk
+    only selects a version that actually landed on the default branch, re-validated by `_carries_payload`.
+  - **Apply re-proves before writing.** `apply_recovery` now independently re-proves against the file on
+    disk that `clean_text` is exactly *the working file with only payload removed* — the delta is
+    payload-only **and** `clean_text` is a subsequence of the infected file (no fabricated *or* dropped
+    legit byte) — before writing, and verify-or-reverts on any post-write mismatch.
+
+  This issue also **scoped out** its headline feature — auto-recovering a payload that *shares a line*
+  with real code. Adversarial verification proved it can't be made safe: a confirmed loader payload
+  always contains a readable loader statement — a char-code decode call, a decoder-function invocation,
+  a require-hijack global assignment — whose exact tokens legit code can mimic byte-for-byte, so neither
+  byte analysis nor git ancestry can separate them on a shared line. Same-line payloads therefore
+  continue to **defer to manual** with the exact `git checkout` command (#1184) — the engine stays
+  strictly no-less-conservative.
 - **Bumped the worm-guard scanner pin to current main (`sentinel-ref` → merge of #1181).** Catches
   the pin up to the branded `saw` welcome / shared colour-decision work (#1177), whose only
   engine-subtree change was `sinks/terminal.py` adopting `core.terminal` — a presentation change, no

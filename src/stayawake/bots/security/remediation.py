@@ -314,6 +314,15 @@ def _safe_to_recover(work: str, clean: str, content_sig) -> bool:
     return saw_payload                    # ≥1 packed payload line, and every add is payload/blank
 
 
+def _is_subsequence(sub: str, whole: str) -> bool:
+    """True if every character of `sub` appears in `whole` in order (a greedy O(len(whole))
+    scan). The independent 'no fabricated byte' check: recovery only ever REMOVES payload lines,
+    so the clean text it writes must be a subsequence of the working file — a clean_text
+    carrying any byte not present in-order in the infected file would be fabricated content."""
+    it = iter(whole)
+    return all(ch in it for ch in sub)
+
+
 def _short(s: str, n: int = 100) -> str:
     s = s.rstrip("\n")
     return s if len(s) <= n else s[:n] + "…"
@@ -370,7 +379,11 @@ def classify_recovery(repo, finding, content_sig):
     # failure we defer this one finding to manual review and carry on.
     try:
         clean = None
-        for sha in gitutil.file_commits(repo, path):
+        # first_parent=True: the recovery source is a trust decision. An evil merge can make a
+        # "clean-looking" blob reachable only through its malicious second parent; walking the
+        # mainline (first-parent) chain only ever selects a version that actually landed on the
+        # default branch, then `_carries_payload` re-validates it.
+        for sha in gitutil.file_commits(repo, path, first_parent=True):
             c = gitutil.file_at(repo, sha, path)
             if c and not _carries_payload(c, content_sig):   # first version with no payload = clean
                 clean = (sha, c)
@@ -402,16 +415,33 @@ def classify_recovery(repo, finding, content_sig):
 
 def apply_recovery(repo, rec: Recovery, quarantine: Path, content_sig) -> bool:
     """Restore the file to its clean committed version (after backing up the infected one).
-    Verify-or-revert: the restored file MUST carry neither a loader literal nor a dynamic-exec
-    sink (`_carries_payload`), else the original is put back. Because we write a real committed
-    blob, the file is never left syntactically corrupt."""
+    Because we write a real committed blob, the file is never left syntactically corrupt.
+
+    Positive post-conditions (verify-or-refuse/revert, proven independently of the planner so a
+    stale or mismatched `clean_text` can never slip through):
+
+      * BEFORE writing, re-prove against the file on disk NOW that `clean_text` is exactly 'the
+        working file with only payload removed' — `_safe_to_recover(current, clean_text)` (no
+        dropped legit byte) AND `_is_subsequence(clean_text, current)` (no fabricated byte).
+      * AFTER writing, the restored file MUST carry neither a loader literal nor a dynamic-exec
+        sink (`_carries_payload`) and must match `clean_text` byte-for-byte, else the original
+        is put back."""
     root = Path(repo)
     target = root / rec.path
     if not target.exists() or _carries_payload(rec.clean_text, content_sig):
         return False                      # never write a version that still carries the payload
+    current = target.read_text(encoding="utf-8", errors="replace")
+    # No legit byte dropped (delta is provably payload-only) and no fabricated byte (clean_text
+    # is a subsequence of what's on disk). Either failing means clean_text is not 'current minus
+    # payload' → refuse rather than risk reverting legitimate work.
+    if not _safe_to_recover(current, rec.clean_text, content_sig):
+        return False
+    if not _is_subsequence(rec.clean_text, current):
+        return False
     _backup(root, rec.path, quarantine)
     target.write_text(rec.clean_text, encoding="utf-8")
-    if _carries_payload(target.read_text(encoding="utf-8", errors="replace"), content_sig):
+    restored = target.read_text(encoding="utf-8", errors="replace")
+    if restored != rec.clean_text or _carries_payload(restored, content_sig):
         backup = quarantine / rec.path    # verify failed → revert to the original
         if backup.exists():
             shutil.copy2(backup, target)
