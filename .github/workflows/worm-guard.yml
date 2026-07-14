@@ -37,7 +37,7 @@ jobs:
           # (#1177/#1181); requires-python >=3.11 satisfies the 3.13 runner. Bump this deliberately
           # after reviewed engine changes — the in-band pin-freshness gate (#1172) fails an engine
           # PR that doesn't bump this, and scanner-pin-drift opens an issue if it falls behind.
-          sentinel-ref: ccdf9f8f08c1d00f9665ea4d073fb768fe6785d0   # merge of #1181 (branded saw welcome + shared colour decision #1177)
+          sentinel-ref: 1602997cd2baa9713ad05707479e259d4b2dfe98   # merge of #1193 — catches up remediation PRs #1183/#1184/#1191/#1192/#1193 (all pin-bump-deferred)
           fail-on-findings: 'true'
           # This gate never uploads SARIF — the job conclusion is the scan's exit code, nothing
           # else. Code-scanning delivery is owned solely by security-sentinel.yml.
