@@ -10,6 +10,7 @@ import json
 import ssl
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any
 
@@ -43,11 +44,15 @@ def request(path: str, method: str = "GET", token: str | None = None,
         with urllib.request.urlopen(req, timeout=15, context=_SSL_CTX) as resp:
             return json.loads(resp.read().decode())
     except urllib.error.HTTPError as he:
+        # Always drain + close the error response (even when quiet) so it doesn't linger as an
+        # unclosed socket → ResourceWarning; only PRINT the detail when not quiet.
+        try:
+            detail = he.read().decode()
+        except Exception:
+            detail = str(he)
+        finally:
+            he.close()
         if not quiet:
-            try:
-                detail = he.read().decode()
-            except Exception:
-                detail = str(he)
             # stderr, never stdout — stdout carries `saw scan --json` / piped report output.
             print(f"GitHub API error: {he.code} {detail}", file=sys.stderr)
         return None
@@ -202,6 +207,25 @@ def create_pull(owner: str, repo: str, title: str, head: str, base: str,
     """Open a PR. Returns the created PR dict (with 'number','html_url') or None."""
     return request(f"/repos/{owner}/{repo}/pulls", method="POST", token=token,
                    data={"title": title, "head": head, "base": base, "body": body})
+
+
+def add_labels(owner: str, repo: str, number: int, labels: list[str],
+               token: str | None, quiet: bool = False) -> list | None:
+    """Add labels to an issue OR pull request (a PR is an issue). Idempotent — GitHub ignores
+    labels already present and AUTO-CREATES any that don't exist yet. Returns the resulting
+    label list, or None on failure."""
+    return request(f"/repos/{owner}/{repo}/issues/{number}/labels", method="POST",
+                   token=token, data={"labels": labels}, quiet=quiet)
+
+
+def remove_label(owner: str, repo: str, number: int, label: str,
+                 token: str | None, quiet: bool = True) -> bool:
+    """Remove one label from an issue/PR — best-effort (a 404 = 'wasn't set' → False, fine).
+    Quiet by default: reconciling a label that isn't there is a no-op, not an error."""
+    enc = urllib.parse.quote(label, safe="")
+    res = request(f"/repos/{owner}/{repo}/issues/{number}/labels/{enc}", method="DELETE",
+                  token=token, quiet=quiet)
+    return res is not None
 
 
 def close_pull(owner: str, repo: str, number: int, token: str | None) -> dict | None:

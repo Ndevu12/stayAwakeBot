@@ -103,6 +103,13 @@ class TestFixLocal(unittest.TestCase):
                                return_value="repo: ABORTED — 1 finding still present"):
             self.assertEqual(remediator.fix(None, paths=[str(d)], no_stream=True), 1)
 
+    def test_partial_repo_makes_exit_one(self):
+        # A PARTIAL fix (#1183) shipped safe changes but the tree isn't clean → exit non-zero.
+        d = _git_repo(INFECTED_FILES)
+        with mock.patch.object(remediator.pr_submit, "prepare_fix",
+                               return_value="repo: PARTIAL — prepared 1 safe change(s), 2 need review"):
+            self.assertEqual(remediator.fix(None, paths=[str(d)], no_stream=True), 1)
+
 
 class TestTokenIsValid(unittest.TestCase):
     """github_api.token_is_valid — the fail-closed preflight primitive (#1176).

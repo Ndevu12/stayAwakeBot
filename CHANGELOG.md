@@ -7,6 +7,24 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **`saw fix` ships provably-safe partial fixes instead of discarding everything on the first
+  unrecoverable finding (#1183).** Remediation was all-or-nothing: if *any* confirmed indicator
+  survived post-apply verification (e.g. a code-loader with no safe git recovery), the whole repo
+  fix aborted — throwing away the fixes that *were* safely applied (a stripped `.gitignore`, a
+  recovered loader). Now it commits the verified fixes and opens/updates the rolling
+  `security/auto-clean` PR with them, rendering each residual confirmed finding as a **"🚨 still
+  infected — manual action required"** checklist (path · signature · reason · recommended command).
+  Safety is preserved, not weakened: the tree is **never presented as clean** — the run **exits
+  non-zero**, the branch still carries the residual so the worm-guard gate scans it **red**, and the
+  PR is unmistakably marked (distinct title + a `security: partial` label). Each committed change is
+  still independently verified (structure-safe transform or verify-or-revert git recovery); the
+  residual is left in place and flagged, never silently committed as a fix. The rolling PR is
+  idempotent — re-runs recompute residuals and **refresh the PR title/body/label** (and drop the
+  label once a re-run comes back fully clean). When *nothing* is safely fixable but confirmed
+  indicators remain, it files a **de-duplicated manual-review issue** and then aborts (no empty PR),
+  rather than a silent dead-end. Untrusted paths/reasons rendered into the PR **and issue** bodies are neutralized
+  against Markdown/HTML injection. (Pairs with #1184 for richer guidance and #1185 for recovering
+  more loaders.)
 - **Branded first-run welcome for `saw`, plus a `saw intro` tour (#1177).** Bare `saw` now prints a
   designed welcome — the mint "SAW" wordmark, tagline, a *Get started* block, and links — instead of
   the plain argparse dump; `saw intro` (alias `welcome`) gives the fuller tour. In the spirit of a
