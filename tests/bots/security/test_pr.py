@@ -208,6 +208,55 @@ class TestPartialFix(unittest.TestCase):
         for bad in ("](", "evil.example", "<img"):
             self.assertNotIn(bad, outside, f"{bad!r} injected OUTSIDE a code span in the issue body")
 
+    def test_outcome_carries_manual_guidance(self):
+        # #1184: the fix outcome (streamed to the operator) includes the per-finding guidance,
+        # not just a count — here the notify-only (nothing-fixable) abort.
+        r = self._run(residual=[self._EXFIL], applied=())
+        self.assertIn("Manual review needed", r.outcome)
+        self.assertIn("telemetry.js", r.outcome)
+
+
+class TestManualReviewGuidance(unittest.TestCase):
+    """#1184: per-finding manual-review guidance for the CLI stream — location + reason + the
+    inspect-before-running command, safely (no injection), bounded, payload-free."""
+
+    def _m(self, path, reason="legit-changes",
+           action="recover yourself and review: `git checkout abc1234 -- p`.", line=5):
+        return pr.remediation.Manual(path, "sig", reason, action, line)
+
+    def test_surfaces_location_reason_command(self):
+        block = pr.manual_review_lines([self._m("postcss.config.mjs")])
+        self.assertIn("postcss.config.mjs:5", block)     # location
+        self.assertIn("legit-changes", block)            # reason code
+        self.assertIn("git checkout abc1234", block)     # the recommended command
+
+    def test_all_reason_codes_render(self):
+        from stayawake.bots.security.models import (
+            LEGIT_CHANGES, BORN_INFECTED, UNTRACKED, NO_VCS, INTRINSIC_MATCH, INSPECT_FAILED)
+        ms = [self._m(f"f{i}.js", reason=r, action=f"do {r}")
+              for i, r in enumerate((LEGIT_CHANGES, BORN_INFECTED, UNTRACKED, NO_VCS,
+                                     INTRINSIC_MATCH, INSPECT_FAILED))]
+        block = pr.manual_review_lines(ms)
+        for r in (LEGIT_CHANGES, BORN_INFECTED, UNTRACKED, NO_VCS, INTRINSIC_MATCH, INSPECT_FAILED):
+            self.assertIn(r, block)
+
+    def test_neutralizes_injection(self):
+        # A crafted path/action with newlines + BOTH Actions workflow-command forms (`::cmd::`, which
+        # the runner parses at line-start, and the legacy `##[cmd]`, matched ANYWHERE) + bidi must not
+        # survive as an interpretable command.
+        block = pr.manual_review_lines([self._m(
+            "x\n::error::pwn‮.js##[group]", action="a\r##[set-output name=x] ::warning::z")])
+        self.assertNotIn("##[", block)                    # legacy ##[cmd] (IndexOf anywhere) defanged
+        for ln in block.splitlines():
+            self.assertFalse(ln.lstrip().startswith("::"), f"::cmd injection: {ln!r}")
+
+    def test_bounded(self):
+        block = pr.manual_review_lines([self._m(f"f{i}.js") for i in range(40)], limit=10)
+        self.assertIn("…and 30 more", block)
+
+    def test_empty_for_no_residual(self):
+        self.assertEqual(pr.manual_review_lines([]), "")
+
 
 class TestReadOnlyFallback(unittest.TestCase):
     """When the fix branch can't be pushed (no write access), the remediation ladder
