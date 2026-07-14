@@ -238,10 +238,24 @@ def tracked(repo: str | Path, path: str) -> bool:
     return res is not None and res.returncode == 0
 
 
-def file_commits(repo: str | Path, path: str, limit: int = 50) -> list[str]:
+def file_commits(repo: str | Path, path: str, limit: int = 50,
+                 first_parent: bool = False) -> list[str]:
     """Commit SHAs that touched `path`, newest first (bounded). The walk that the
-    remediator uses to find the most recent committed version that scans clean."""
-    out = _run(repo, ["log", f"-n{limit}", "--format=%H", "--", path])
+    remediator uses to find the most recent committed version that scans clean.
+
+    `first_parent=True` restricts the walk to the mainline (first-parent) chain from HEAD:
+    a change brought in through a merge is attributed to the merge commit (whose tree at
+    `path` is the version that actually landed on mainline), and a blob that only ever
+    existed on a merged-in SECOND parent — never on the mainline tree — is not enumerated.
+    The recovery source is itself a trust decision (an evil merge can make a "clean-looking"
+    blob reachable only through its malicious side), so recovery uses this mode; the default
+    keeps the full history walk for callers that want every version.
+    """
+    args = ["log", f"-n{limit}", "--format=%H"]
+    if first_parent:
+        args.append("--first-parent")
+    args += ["--", path]
+    out = _run(repo, args)
     return [ln.strip() for ln in out.splitlines() if ln.strip()]
 
 
