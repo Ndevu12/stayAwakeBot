@@ -7,6 +7,20 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **`saw fix` surfaces per-finding manual-review guidance, not just a count (#1184).** On a partial
+  or aborted fix the operator used to see only `N finding(s) still present` — while `classify_recovery`
+  had already computed, per finding, a **reason** and a **specific recommended command** (e.g.
+  `git checkout <sha> -- postcss.config.mjs`). That guidance now streams to the CLI too (it was
+  already in the #1183 PR/issue checklist): each residual as **location · reason · inspect-before-
+  running command**, for every reason code (`legit-changes`, `born-infected`, `untracked`, `no-vcs`,
+  `intrinsic-match`, `inspect-failed`). Purely additive — verdicts and exit codes are unchanged.
+  Hardened per the issue's invariants: untrusted paths are plain-text-sanitized so a crafted filename
+  can't break a log line, spoof text direction, or inject a GitHub Actions workflow-command —
+  **both** the `::cmd::` form (runner-parsed at line-start) **and** the legacy `##[cmd]` form (which
+  the runner matches *anywhere* in a line, per `actions/runner`, e.g. `##[group]` to fold findings
+  out of the CI log) are defanged; the list is **bounded** (`…and N more`); and only
+  locations/reasons/commands are shown — **never the payload bytes**. Recovery commands keep their "review the diff before running"
+  framing (validating a recovery sha's ancestry is #1185's source-trust rule).
 - **`saw fix` ships provably-safe partial fixes instead of discarding everything on the first
   unrecoverable finding (#1183).** Remediation was all-or-nothing: if *any* confirmed indicator
   survived post-apply verification (e.g. a code-loader with no safe git recovery), the whole repo

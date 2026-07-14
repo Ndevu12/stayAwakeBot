@@ -66,6 +66,44 @@ def _mark_partial(outcome: str, partial: bool) -> str:
     return outcome if (not partial or "PARTIAL" in outcome) else f"{outcome}  [PARTIAL — manual review required]"
 
 
+def _plain(s: str, limit: int = 300) -> str:
+    """Sanitize an untrusted string (a repo path, a finding reason/command) for a PLAIN-TEXT line
+    on the terminal or a GitHub Actions log — safe to print ANYWHERE, including at line-start.
+    Control chars, newlines, line/paragraph separators and bidi (Unicode C*/Zl/Zp) all become spaces
+    (no line break / direction spoof), and the two GitHub Actions workflow-command introducers are
+    defanged. Authoritatively (actions/runner `ActionCommand.cs`): the `::cmd::` form is parsed only
+    when a line StartsWith `::`, but the legacy `##[cmd]` form is matched ANYWHERE in a line
+    (`IndexOf("##[")`) — so a crafted path could inject `##[error]`/`##[group]` MID-line. Breaking
+    both tokens means neither can form regardless of position or runner version. Bounded. Sibling of
+    _sanitize (which targets Markdown code spans)."""
+    out = "".join(" " if (unicodedata.category(ch)[0] == "C"
+                          or unicodedata.category(ch) in ("Zl", "Zp")) else ch
+                  for ch in str(s))
+    return out.replace("##[", "##(").replace("::", ": :").strip()[:limit]
+
+
+def manual_review_lines(manual, limit: int = 20) -> str:
+    """Per-finding manual-review guidance for `saw fix`'s CLI stream (#1184): each residual as
+    location + reason-code + the recommended (inspect-before-running) command classify_recovery
+    already computed. Empty when there is no residual. Every field is `_plain`-sanitized (a crafted
+    path can't inject terminal/Actions control sequences), the list is bounded (`…and N more`), and
+    only locations / reasons / commands are shown — the payload bytes are NEVER echoed (#1184
+    invariants 2–4). Recovery commands keep their 'review the diff before running' framing;
+    validating a recovery sha's ancestry is #1185's source-trust rule."""
+    if not manual:
+        return ""
+    lines = ["", "    Manual review needed (inspect before running any command):"]
+    for m in manual[:limit]:
+        loc = m.path + (f":{m.line}" if getattr(m, "line", None) else "")
+        lines.append(f"      • {_plain(loc)}  ({_plain(getattr(m, 'reason', ''), 40)})")
+        action = _plain(getattr(m, "action", ""), 300)
+        if action:
+            lines.append(f"        {action}")
+    if len(manual) > limit:
+        lines.append(f"      …and {len(manual) - limit} more")
+    return "\n".join(lines)
+
+
 def _git(cwd: Path, *args: str, env: dict | None = None) -> subprocess.CompletedProcess:
     return subprocess.run(["git", "-C", str(cwd), *args],
                           capture_output=True, text=True, check=False, env=env)
@@ -401,11 +439,11 @@ def prepare_fix(repo: Path, opts, signatures, allowlist, *, spin: bool = False) 
             # Nothing safely fixable, confirmed findings remain (#1183). `saw fix` (no --pr) does no
             # network, so it just reports the abort; `saw fix --pr` additionally files an issue.
             return (f"{slug}: ABORTED — nothing auto-fixable; {len(fix.manual)} confirmed finding(s) "
-                    "need manual review")
+                    "need manual review") + manual_review_lines(fix.manual)
         if fix.partial:
             return (f"{slug}: PARTIAL — prepared {len(fix.applied)} safe change(s) on '{FIX_BRANCH}', "
                     f"but {len(fix.manual)} confirmed finding(s) still need manual review "
-                    f"(`git -C {repo} diff {fix.base}...{FIX_BRANCH}`)")
+                    f"(`git -C {repo} diff {fix.base}...{FIX_BRANCH}`)") + manual_review_lines(fix.manual)
         return (f"{slug}: prepared {len(fix.applied)} change(s) on '{FIX_BRANCH}' — review "
                 f"`git -C {repo} diff {fix.base}...{FIX_BRANCH}`, then `saw fix --pr` to open a PR")
     finally:
@@ -428,10 +466,11 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
                 return outcome
             if not fix.applied:
                 return (f"ABORTED — nothing auto-fixable; {len(fix.manual)} confirmed finding(s) "
-                        "need manual review (no GitHub origin — cannot file an issue)")
+                        "need manual review (no GitHub origin — cannot file an issue)"
+                        ) + manual_review_lines(fix.manual)
             return _mark_partial(
                 f"no GitHub origin — prepared on '{FIX_BRANCH}'; add a remote and push to open a PR",
-                fix.partial)
+                fix.partial) + manual_review_lines(fix.manual)
         finally:
             if wt:
                 _git(repo, "worktree", "remove", "--force", str(wt))
@@ -451,7 +490,7 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
                 issue = _open_issue_fallback(owner, name, fix.findings, token)
             note = f"; {issue}" if issue else ""
             return (f"{slug}: ABORTED — nothing auto-fixable; {len(fix.manual)} confirmed finding(s) "
-                    f"need manual review{note}")
+                    f"need manual review{note}") + manual_review_lines(fix.manual)
         base = fix.base
 
         def _publish() -> str:
@@ -502,9 +541,10 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
                 return f"{slug}: {tag}opened PR #{pr['number']} ({pr.get('html_url','')})"
             return f"{slug}: branch pushed but PR API call failed (network/SSL or token scope)"
 
-        # Single choke point: whatever branch _publish() returned, a PARTIAL fix is guaranteed to
-        # be marked needs-review here (#1183 invariant #1) — no fallback path can silently pass clean.
-        return _mark_partial(_publish(), fix.partial)
+        # Single choke point: whatever branch _publish() returned, a PARTIAL fix is guaranteed to be
+        # marked needs-review here (#1183 invariant #1) — no fallback path can silently pass clean —
+        # and the per-finding manual-review guidance is appended (#1184; empty for a full/clean fix).
+        return _mark_partial(_publish(), fix.partial) + manual_review_lines(fix.manual)
     finally:
         if wt:
             _git(repo, "worktree", "remove", "--force", str(wt))
