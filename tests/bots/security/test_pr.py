@@ -46,23 +46,27 @@ class TestNoDuplicatePr(unittest.TestCase):
              mock.patch.object(pr.remediation, "apply",
                                return_value=[Change("strip-payload", "postcss.config.mjs")]), \
              mock.patch.object(pr.github_api, "list_open_pulls", return_value=existing_pulls), \
+             mock.patch.object(pr.github_api, "update_issue", return_value={"number": 7}) as update, \
+             mock.patch.object(pr.github_api, "add_labels"), \
+             mock.patch.object(pr.github_api, "remove_label"), \
              mock.patch.object(pr.github_api, "create_pull",
                                return_value={"number": 99, "html_url": "u"}) as create:
             outcome = pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t")
-        return outcome, create
+        return outcome, create, update
 
     def test_opens_pr_when_none_exists(self):
-        outcome, create = self._run(existing_pulls=[])
+        outcome, create, _ = self._run(existing_pulls=[])
         create.assert_called_once()
         self.assertIn("opened PR #99", outcome)
 
     def test_updates_not_duplicates_when_pr_open(self):
-        outcome, create = self._run(existing_pulls=[{"number": 7, "html_url": "u7"}])
+        outcome, create, update = self._run(existing_pulls=[{"number": 7, "html_url": "u7"}])
         create.assert_not_called()                       # <-- no duplicate PR
+        update.assert_called_once()                      # rolling PR body refreshed each run (#1183)
         self.assertIn("updated existing PR #7", outcome)
 
-    def test_aborts_when_payload_survives_remediation(self):
-        # A2: if the tree is still infected after apply+quarantine, NO PR is opened.
+    def test_aborts_when_nothing_safe_and_payload_survives(self):
+        # applied == 0 AND the tree is still infected → NO PR (unchanged: nothing safe to ship).
         finding = Finding("x", "code-loader", Severity.CRITICAL, "evil.cjs",
                           "loader", remediation="strip-appended-payload")
         infected = ScanResult("owner/repo", "local", [finding])
@@ -73,10 +77,136 @@ class TestNoDuplicatePr(unittest.TestCase):
              mock.patch.object(pr.remediation, "apply", return_value=[]), \
              mock.patch.object(pr.remediation, "quarantine_residual", return_value=[]), \
              mock.patch.object(pr.github_api, "list_open_pulls", return_value=[]), \
+             mock.patch.object(pr.github_api, "list_open_issues", return_value=[]), \
+             mock.patch.object(pr.github_api, "create_issue",
+                               return_value={"number": 9, "html_url": "iu"}), \
              mock.patch.object(pr.github_api, "create_pull") as create:
             outcome = pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t")
-        create.assert_not_called()
+        create.assert_not_called()                         # no fix PR
         self.assertIn("ABORTED", outcome)
+
+
+class TestPartialFix(unittest.TestCase):
+    """#1183: a safe fix is SHIPPED even when a confirmed finding can't be auto-recovered, but the
+    tree is never presented as clean — partial PR + label + non-zero exit, residual listed."""
+
+    # A confirmed code-loader (deferred to git-recovery/manual) and a confirmed exfil finding
+    # (remediation: manual, NOT a code-loader) — both must count as still-infecting.
+    _LOADER = Finding("x", "code-loader", Severity.CRITICAL, "postcss.config.mjs",
+                      "loader", remediation="strip-appended-payload")
+    _EXFIL = Finding("x", "exfil", Severity.CRITICAL, "telemetry.js",
+                     "shai-hulud", remediation="manual")
+    _SAFE = Change("strip-gitignore", ".gitignore")
+
+    def _run(self, *, residual, applied=(_SAFE,), existing_pulls=(),
+             create_pull_result={"number": 42, "html_url": "u"}):
+        # `applied` is what apply() safely applied; `residual` stays infected across every re-scan.
+        infected = ScanResult("owner/repo", "local", list(residual))
+        with mock.patch.object(pr, "_git", side_effect=_fake_git), \
+             mock.patch.object(pr, "scan_target", return_value=infected), \
+             mock.patch.object(pr.remediation, "plan", return_value=list(applied)), \
+             mock.patch.object(pr.remediation, "apply", return_value=list(applied)), \
+             mock.patch.object(pr.remediation, "quarantine_residual", return_value=[]), \
+             mock.patch.object(pr.github_api, "list_open_pulls", return_value=list(existing_pulls)), \
+             mock.patch.object(pr.github_api, "update_issue", return_value={"number": 7}) as update, \
+             mock.patch.object(pr.github_api, "add_labels") as add_labels, \
+             mock.patch.object(pr.github_api, "remove_label") as remove_label, \
+             mock.patch.object(pr.github_api, "list_open_issues", return_value=[]), \
+             mock.patch.object(pr.github_api, "create_issue",
+                               return_value={"number": 9, "html_url": "iu"}) as create_issue, \
+             mock.patch.object(pr.github_api, "create_pull", return_value=create_pull_result) as create:
+            outcome = pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t")
+        return SimpleNamespace(outcome=outcome, create=create, update=update, add_labels=add_labels,
+                               remove_label=remove_label, create_issue=create_issue)
+
+    def test_codeloader_residual_ships_partial(self):
+        r = self._run(residual=[self._LOADER])
+        r.create.assert_called_once()                       # a PR IS opened (not aborted)
+        kw = r.create.call_args.kwargs
+        self.assertIn("PARTIAL", kw["title"])               # title says partial
+        self.assertIn("PARTIAL", kw["body"])
+        self.assertIn("postcss.config.mjs", kw["body"])     # the residual is listed
+        self.assertIn("strip-gitignore", kw["body"])        # the safe fix is listed as applied
+        r.add_labels.assert_called_once()
+        self.assertEqual(r.add_labels.call_args.args[3], [pr.PARTIAL_LABEL])
+        self.assertIn("PARTIAL", r.outcome)                 # → remediator counts needs-review
+
+    def test_confirmed_non_codeloader_residual_ships_partial(self):
+        # Verifier-2 fix: a confirmed exfil (remediation: manual, category != code-loader) must
+        # block — never demoted to "suspicious" or "already clean".
+        r = self._run(residual=[self._EXFIL])
+        r.create.assert_called_once()
+        self.assertIn("PARTIAL", r.create.call_args.kwargs["title"])
+        self.assertIn("telemetry.js", r.create.call_args.kwargs["body"])
+        self.assertIn("PARTIAL", r.outcome)
+
+    def test_confirmed_non_codeloader_alone_files_issue_and_aborts(self):
+        # Confirmed exfil ALONE (nothing safely applied) → no PR, but FILE a manual-review issue,
+        # then abort (never "already clean"). Gate stays red (outcome carries ABORTED).
+        r = self._run(residual=[self._EXFIL], applied=())
+        r.create.assert_not_called()                        # no fix PR (nothing to commit)
+        r.create_issue.assert_called_once()                 # but a manual-review issue IS filed
+        self.assertIn("ABORTED", r.outcome)
+        self.assertIn("#9", r.outcome)                      # the filed issue is reported
+        self.assertNotIn("already clean", r.outcome)
+
+    def test_nothing_fixable_dedups_issue(self):
+        # A re-run with an existing open issue must not open a duplicate (idempotent notify).
+        with mock.patch.object(pr, "_git", side_effect=_fake_git), \
+             mock.patch.object(pr, "scan_target",
+                               return_value=ScanResult("owner/repo", "local", [self._EXFIL])), \
+             mock.patch.object(pr.remediation, "plan", return_value=[]), \
+             mock.patch.object(pr.remediation, "apply", return_value=[]), \
+             mock.patch.object(pr.remediation, "quarantine_residual", return_value=[]), \
+             mock.patch.object(pr.github_api, "list_open_issues",
+                               return_value=[{"number": 3}]), \
+             mock.patch.object(pr.github_api, "create_issue") as create_issue:
+            outcome = pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t")
+        create_issue.assert_not_called()                    # existing issue → no duplicate
+        self.assertIn("ABORTED", outcome)
+        self.assertIn("already tracks", outcome)
+
+    def test_partial_marked_even_when_pr_api_fails_after_push(self):
+        # Verifier-1 fix: push succeeds but create_pull returns None → the outcome STILL carries
+        # PARTIAL via the single choke point (no fallback path silently passes clean).
+        r = self._run(residual=[self._LOADER], create_pull_result=None)
+        self.assertIn("PARTIAL", r.outcome)
+
+    def test_partial_updates_existing_pr_idempotently(self):
+        r = self._run(residual=[self._LOADER], existing_pulls=[{"number": 7, "html_url": "u7"}])
+        r.create.assert_not_called()                        # no duplicate
+        r.update.assert_called_once()                       # title/body refreshed each run
+        self.assertIn("PARTIAL", r.update.call_args.kwargs["title"])
+        r.add_labels.assert_called_once()
+        self.assertIn("updated existing PR #7", r.outcome)
+
+    def test_pr_body_neutralizes_injection(self):
+        # A malicious path/reason/action cannot inject active Markdown/HTML: every attacker field
+        # is _code-wrapped, so dangerous sequences appear ONLY inside code spans, never bare.
+        evil = "src/[CLICK](https://evil.example)/x`.js\n## PWNED"
+        m = pr.remediation.Manual(
+            evil, "s`ig", "residual",
+            "run `git checkout abc -- src/[CLICK](https://evil.example)`.js` <img src=x onerror=1> ‮evil",
+            1)
+        body = pr._pr_body("owner/repo", [Change("strip-gitignore", ".gitignore")], manual=[m])
+        # _sanitize turns interior backticks into a look-alike, so spans stay balanced; a
+        # single-backtick split alternates OUTSIDE(even)/INSIDE(odd) code spans.
+        self.assertEqual(body.count("`") % 2, 0, "unbalanced code spans → a span was left open")
+        outside = "".join(body.split("`")[0::2])
+        for bad in ("](", "<img", "onerror", "evil.example", "PWNED", "‮"):
+            self.assertNotIn(bad, outside, f"{bad!r} injected OUTSIDE a code span")
+        self.assertIn("PARTIAL", body)
+
+    def test_issue_body_neutralizes_injection(self):
+        # The read-only issue fallback (#1183 invariant #5 covers "PR/issue body") must escape
+        # attacker paths/signatures the same way — a backtick is a legal filename char.
+        f = Finding("s`ig", "code-loader", Severity.CRITICAL,
+                    "app`[CLICK](http://evil.example)`x.js", "d", remediation="strip-appended-payload")
+        body = pr._issue_body("owner/repo", [f])
+        self.assertEqual(body.count("`") % 2, 0, "unbalanced code spans in the issue body")
+        outside = "".join(body.split("`")[0::2])
+        for bad in ("](", "evil.example", "<img"):
+            self.assertNotIn(bad, outside, f"{bad!r} injected OUTSIDE a code span in the issue body")
 
 
 class TestReadOnlyFallback(unittest.TestCase):
@@ -182,6 +312,9 @@ class TestForkPr(unittest.TestCase):
              mock.patch.object(pr.github_api, "list_open_pulls",
                                return_value=existing_fork_pulls or []), \
              mock.patch.object(pr.github_api, "create_pull", return_value=created_pr) as create_pull, \
+             mock.patch.object(pr.github_api, "update_issue", return_value={"number": 1}), \
+             mock.patch.object(pr.github_api, "add_labels"), \
+             mock.patch.object(pr.github_api, "remove_label"), \
              mock.patch.object(pr.github_api, "list_open_issues", return_value=[]), \
              mock.patch.object(pr.github_api, "create_issue",
                                return_value={"number": 1, "html_url": "iu"}) as create_issue:
