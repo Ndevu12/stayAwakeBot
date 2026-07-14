@@ -404,9 +404,10 @@ def classify_recovery(repo, finding, content_sig):
             label = f'{sha[:7]} ("{_short(meta.get("subject", ""), 40)}", {meta.get("date", "")[:10]})'
             return Recovery(path, sha, label, _recovery_diff(work, clean_text, content_sig), clean_text)
         return Manual(path, sig, LEGIT_CHANGES,
-                      f"A clean version exists ({sha[:7]}) but the payload shares a line with, or is "
-                      "interleaved with, other code — auto-recovery could lose legitimate work. Recover "
-                      f"it yourself and review the diff: `git checkout {sha[:7]} -- {path}`.", line)
+                      f"Payload shares a line with real code — can't auto-separate it safely. Delete "
+                      f"just the payload run from that line, keeping the rest. Note `git checkout "
+                      f"{sha[:7]} -- {path}` reverts the ENTIRE file to {sha[:7]} (diff it first so you "
+                      f"don't lose other edits made since then).", line)
     except Exception:  # noqa: BLE001 — never let one file's history quirk abort the sweep
         return Manual(path, sig, INSPECT_FAILED,
                       "Could not read this file's git history to find a clean version. Inspect it "

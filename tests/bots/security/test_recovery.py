@@ -95,16 +95,20 @@ class TestRecovery(unittest.TestCase):
         self.assertTrue(remediation.apply_recovery(d, disp, remediation.quarantine_path(d), SIG))
         self.assertEqual((d / "postcss.config.mjs").read_text(), CLEAN)
 
-    def test_same_line_payload_append_is_manual_not_recovered(self):
-        # The payload shares the `export default config;` line → not provably separable from
-        # any legit edit to that line → MANUAL with the exact recover command (never auto-edit).
+    def test_same_line_payload_append_is_manual_with_surgical_guidance(self):
+        # The payload shares the `export default config;` line → not provably separable from any
+        # legit edit to that line → MANUAL (never auto-edit). The guidance is SURGICAL and SAFE
+        # (#1189): remove just the payload from the line, and it WARNS that `git checkout` reverts
+        # the whole file (a footgun that could itself drop legit edits made since the clean sha).
         d = _repo()
         _commit(d, "postcss.config.mjs", CLEAN, "add config")
         (d / "postcss.config.mjs").write_text(_infected_line(), encoding="utf-8")
         disp = remediation.classify_recovery(d, _finding("postcss.config.mjs"), SIG)
         self.assertIsInstance(disp, remediation.Manual)
         self.assertEqual(disp.reason, remediation.LEGIT_CHANGES)
-        self.assertIn("git checkout", disp.action)
+        self.assertIn("Delete just the payload", disp.action)            # surgical: keep the rest
+        self.assertIn("reverts the ENTIRE file", disp.action)            # whole-file-revert footgun warned
+        self.assertIn("git checkout", disp.action)                       # command still offered (as fallback)
         self.assertIn("sfL", (d / "postcss.config.mjs").read_text())     # file untouched
 
     def test_legit_line_adjacent_to_payload_is_manual(self):
