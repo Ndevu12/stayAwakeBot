@@ -414,6 +414,18 @@ All notable changes to this project are documented here. The format is based on
   `--user "$(id -u):$(id -g)"` invocation for writing the report back to the host.
 
 ### Security
+- **`saw fix` git-recovery no longer drops legit code hidden on a new payload line (#1190).** The
+  recovery `insert` branch previously accepted an added line for removal if the *whole line* was
+  dense and carried a loader fingerprint — so a newly-committed line that concatenates legit code
+  with an appended blob (`module.exports=runServer;<blob>`) rode on the blob's average density and
+  was dropped whole, reverting the legit statement. Recovery now requires each `;`-delimited
+  statement of an added line to be **individually** provable payload (a fingerprinted loader
+  statement, a bounded base64/hex blob, or concealment); a readable non-payload statement makes the
+  line **defer to manual** instead. This is strictly more conservative — it only ever *defers* more,
+  never drops more. **Known residual** (the same irreducible class as #1189, and why the original
+  is always backed up to quarantine first): a legit statement that *mimics* a loader token, or
+  minified legit code that reads as a base64 run, still can't be separated from the worm's own
+  connective code on a shared line — no byte rule can.
 - **Hardened `saw fix` git-recovery source trust and post-condition (#1185).** Two provable
   strengthenings to the code-loader recovery path:
   - **Recovery source is now a trust decision.** The clean version is selected from **first-parent

@@ -11,7 +11,9 @@ from __future__ import annotations
 import difflib
 import hashlib
 import json
+import re
 import shutil
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -282,6 +284,65 @@ def _is_packed_line(line: str) -> bool:
     return _shannon(s) >= _ENTROPY_ABS and space_frac <= _MAX_PROSE_SPACE_FRAC
 
 
+def _is_concealment(ch: str) -> bool:
+    """True for a character used only to pad/hide a seam: ASCII whitespace plus every Unicode
+    control/format (C*), line/paragraph separator (Zl/Zp) and space separator (Zs)."""
+    if ch == " " or ch == "\t":
+        return True
+    cat = unicodedata.category(ch)
+    return cat[0] == "C" or cat in ("Zl", "Zp", "Zs")
+
+
+def _strip_concealment(s: str) -> str:
+    """Drop leading and trailing concealment runs, keeping the core intact."""
+    i, j = 0, len(s)
+    while i < j and _is_concealment(s[i]):
+        i += 1
+    while j > i and _is_concealment(s[j - 1]):
+        j -= 1
+    return s[i:j]
+
+
+# A base64/hex-ish run — the shape of a packed payload's encoded data. Used to bound a blob's
+# EXTENT so trailing legit code abutting it isn't absorbed. Bounded char class → linear scan.
+_BLOB_RUN = re.compile(r"[A-Za-z0-9+/=]{40,}")
+
+
+def _stmt_is_payload(stmt: str, content_sig) -> bool:
+    """True when one `;`-delimited statement of a packed line is provably payload — nothing a
+    developer would keep: concealment-only, a whole loader statement carrying a fingerprint
+    (`content_sig` on the FULL statement), or a pure encoded blob (nothing readable remains after
+    removing concealment + maximal base64/hex runs). A readable, non-fingerprinted statement like
+    `module.exports=runServer` is legit code → NOT payload."""
+    s = _strip_concealment(stmt)
+    if not s:
+        return True
+    if content_sig(s):
+        return True
+    return _strip_concealment(_BLOB_RUN.sub("", s)) == ""
+
+
+def _line_is_pure_payload(ln: str, content_sig) -> bool:
+    """True ONLY when an added line is provably payload END-TO-END, safe to drop on recovery. It
+    must be a dense packed blob (`_is_packed_line`) carrying a loader fingerprint (`content_sig`),
+    AND every `;`-statement of it must itself be provably payload (`_stmt_is_payload`).
+
+    The per-statement gate is what closes the mixed-line hole (#1190): span-aggregate density is
+    NOT enough — a legit statement concatenated with an appended blob (`module.exports=runServer;
+    <blob>`) rides on the blob's average density + a substring fingerprint match and would be
+    dropped whole. Requiring each statement to be individually payload defers that instead.
+
+    KNOWN RESIDUAL (same irreducible class as #1189, mitigated by the quarantine backup): this
+    still can't separate a legit statement that *mimics* a loader token (a real DEL-char char-code
+    handler, a function carrying the worm's decoder name) or minified legit code that reads as a
+    base64 run, from the worm's own connective code — no byte rule can, on a shared line. It
+    strictly REDUCES the exposure (it only ever DEFERS more, never drops more than the prior
+    density-only check); it does not eliminate the class. See #1190."""
+    if not (_is_packed_line(ln) and content_sig(ln)):
+        return False
+    return all(_stmt_is_payload(stmt, content_sig) for stmt in ln.split(";"))
+
+
 def _safe_to_recover(work: str, clean: str, content_sig) -> bool:
     """True ONLY when restoring `clean` provably loses no legitimate code. Every requirement
     is a guard the adversarial passes proved necessary:
@@ -291,13 +352,15 @@ def _safe_to_recover(work: str, clean: str, content_sig) -> bool:
       * EVERY added non-blank line is BOTH a dense packed-payload line (`_is_packed_line`)
         AND carries a loader literal (`content_sig`).
 
-    The conjunction is what makes it safe. Requiring `content_sig` alone dropped legit lines
-    byte-identical to a fingerprint (a real DEL-char fromCharCode call) and lines that merely
-    spliced a loader token in front of real code (substring match). Requiring `_is_packed_line`
-    alone would drop a legitimately-inlined base64 asset that landed in the same delta. Only a
-    line that is BOTH packed AND fingerprinted is the worm's blob; anything else → return False
-    → caller defers to manual with the exact `git checkout` command. Conservative by design: a
-    payload split across short bootstrap lines defers rather than risk co-located real code."""
+    An added line is only dropped when it is provably payload END-TO-END (`_line_is_pure_payload`:
+    dense + fingerprinted AND every `;`-statement individually payload). Requiring `content_sig`
+    alone dropped legit lines byte-identical to a fingerprint (a real DEL-char fromCharCode call)
+    and lines that spliced a loader token in front of real code (substring match); `_is_packed_line`
+    alone would drop a legitimately-inlined base64 asset; and density-of-the-whole-line alone let a
+    legit statement concatenated with an appended blob (`module.exports=runServer;<blob>`) ride
+    along and be dropped (#1190). The per-statement gate closes that. Conservative by design: a
+    payload split across short bootstrap lines, or any line with a readable non-payload statement,
+    defers to manual rather than risk co-located real code."""
     w, c = work.splitlines(), clean.splitlines()
     saw_payload = False
     for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(a=c, b=w, autojunk=False).get_opcodes():
@@ -308,8 +371,8 @@ def _safe_to_recover(work: str, clean: str, content_sig) -> bool:
         for ln in w[j1:j2]:
             if not ln.strip():
                 continue
-            if not (_is_packed_line(ln) and content_sig(ln)):
-                return False             # not a packed loader blob → could be legit → unsafe
+            if not _line_is_pure_payload(ln, content_sig):
+                return False             # not provably payload end-to-end → could be legit → unsafe
             saw_payload = True
     return saw_payload                    # ≥1 packed payload line, and every add is payload/blank
 
