@@ -195,7 +195,9 @@ def fix(config_path: str | None = None, *, pr: bool = False, remote: bool = Fals
     if not outcomes:
         prog.line("No repositories to fix.")
         return 0
-    needs_review = sum(1 for o in outcomes if "ABORTED" in o or ": error" in o)
+    # A PARTIAL fix (#1183) shipped SOME safe changes but confirmed findings remain — the tree is
+    # not clean, so it counts as needs-review and the run exits non-zero (invariant #1).
+    needs_review = sum(1 for o in outcomes if "ABORTED" in o or ": error" in o or "PARTIAL" in o)
     n = len(outcomes)
     plural = "y" if n == 1 else "ies"
     prog.line(f"\nProcessed {n} repositor{plural}"
