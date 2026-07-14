@@ -431,8 +431,11 @@ All notable changes to this project are documented here. The format is based on
   always contains a readable loader statement — a char-code decode call, a decoder-function invocation,
   a require-hijack global assignment — whose exact tokens legit code can mimic byte-for-byte, so neither
   byte analysis nor git ancestry can separate them on a shared line. Same-line payloads therefore
-  continue to **defer to manual** with the exact `git checkout` command (#1184) — the engine stays
-  strictly no-less-conservative.
+  continue to **defer to manual** — and that manual guidance is now **surgical and safe** (#1189): it
+  tells the operator to remove *just the payload run* from the affected line (keeping the rest), and
+  **warns that `git checkout <sha> -- <path>` reverts the *entire* file** to `<sha>` (diff it first, so a
+  blanket revert doesn't itself drop legit edits made since then). The engine stays strictly
+  no-less-conservative.
 - **Bumped the worm-guard scanner pin to current main (`sentinel-ref` → merge of #1181).** Catches
   the pin up to the branded `saw` welcome / shared colour-decision work (#1177), whose only
   engine-subtree change was `sinks/terminal.py` adopting `core.terminal` — a presentation change, no
