@@ -215,6 +215,27 @@ class TestRecovery(unittest.TestCase):
         self.assertIsInstance(disp, remediation.Manual)
         self.assertIn("export const PORT", (d / "srv.mjs").read_text())       # legit code intact
 
+    def test_mixed_legit_and_payload_on_new_line_defers(self):
+        # #1190: a NEW line that concatenates legit code with an appended packed loader is dense +
+        # fingerprinted, so the old density-only insert check would DROP it whole — reverting the
+        # legit statement. Per-statement accounting refuses it (the readable statement isn't
+        # payload). Covered end-to-end for legit BEFORE and legit AFTER the blob.
+        for label, line in (("before", "module.exports=runServer;" + PACKED_PAYLOAD),
+                            ("after", PACKED_PAYLOAD + "doLegit();")):
+            with self.subTest(shape=label):
+                d = _repo()
+                _commit(d, "app.mjs", CLEAN, "add config")
+                _commit(d, "app.mjs", CLEAN + line + "\n", "add export (worm appended payload)")
+                disp = remediation.classify_recovery(d, _finding("app.mjs"), SIG)
+                self.assertIsInstance(disp, remediation.Manual)          # NOT a Recovery
+                self.assertEqual(disp.reason, remediation.LEGIT_CHANGES)  # defers as legit-changes
+                # apply must NOT drop the legit statement even if a Recovery were forced.
+                self.assertFalse(remediation.apply_recovery(
+                    d, remediation.Recovery("app.mjs", "x", "x", "", CLEAN),
+                    remediation.quarantine_path(d), SIG))
+                self.assertIn("runServer" if label == "before" else "doLegit",
+                              (d / "app.mjs").read_text())               # legit code intact
+
     def test_obfuscated_intermediate_version_is_not_treated_as_clean(self):
         # Hole D: history is clean → an eval(atob(...)) stage (a live payload with NO loader
         # literal yet) → the loader literal. The clean-rev walk must SKIP the eval/atob stage
@@ -244,6 +265,21 @@ class TestRecovery(unittest.TestCase):
         self.assertTrue(remediation._carries_payload("eval(atob('QUFB'))", SIG))   # sink, no literal
         self.assertTrue(remediation._carries_payload("var _$_=sfL(0)", SIG))       # loader literal
         self.assertFalse(remediation._carries_payload("export const x = 1;", SIG)) # clean code
+
+    def test_line_is_pure_payload_accepts_pure_refuses_mixed(self):
+        # #1190 per-statement gate: a pure packed loader line is payload; the SAME blob with a
+        # legit statement concatenated in front is NOT (that statement is readable, not payload).
+        self.assertTrue(remediation._line_is_pure_payload(PACKED_PAYLOAD, SIG))
+        self.assertFalse(remediation._line_is_pure_payload("module.exports=runServer;" + PACKED_PAYLOAD, SIG))
+        self.assertFalse(remediation._line_is_pure_payload(PACKED_PAYLOAD + "doLegit();", SIG))  # trailing legit
+        # a legit inlined base64 ASSET (no loader fingerprint) is refused, never dropped.
+        self.assertFalse(remediation._line_is_pure_payload('const IMG="' + _HIENT + '";', SIG))
+
+    def test_stmt_is_payload_classifies_statements(self):
+        self.assertTrue(remediation._stmt_is_payload("var _$_1e42=sfL(0)", SIG))   # fingerprinted loader
+        self.assertTrue(remediation._stmt_is_payload(_HIENT, SIG))                 # pure encoded blob
+        self.assertTrue(remediation._stmt_is_payload("   ", SIG))                  # concealment-only
+        self.assertFalse(remediation._stmt_is_payload("module.exports=runServer", SIG))  # legit statement
 
     def test_is_packed_line_rejects_short_readable_lines(self):
         self.assertFalse(remediation._is_packed_line("export const DEL = String.fromCharCode(127);"))
