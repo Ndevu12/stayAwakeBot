@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.1.12] - 2026-07-15
+
 ### Added
 - **`saw fix` surfaces per-finding manual-review guidance, not just a count (#1184).** On a partial
   or aborted fix the operator used to see only `N finding(s) still present` — while `classify_recovery`
@@ -39,6 +41,55 @@ All notable changes to this project are documented here. The format is based on
   rather than a silent dead-end. Untrusted paths/reasons rendered into the PR **and issue** bodies are neutralized
   against Markdown/HTML injection. (Pairs with #1184 for richer guidance and #1185 for recovering
   more loaders.)
+
+### Security
+- **Patched a fixable CVE in the container base image so the GHCR image publishes again.** The
+  release Docker job's Trivy vulnerability gate (`severity: CRITICAL,HIGH`, `ignore-unfixed`,
+  `exit-code: 1`) blocked the v0.1.11 image on **CVE-2026-34743** — a fixable HIGH/CRITICAL in the
+  OS package `liblzma5` (`5.8.1-1` → `5.8.1-1+deb13u1`) carried by the stale `python:3.14-slim` base
+  digest. Bumped the SHA-pinned base image to the current Debian 13 (trixie) point-release digest,
+  which ships the patched `liblzma5`; the built image now clears the gate with **zero fixable
+  CRITICAL/HIGH**. The gate was **not** weakened (no ignore-list, no severity/exit-code change) and
+  the base stays pinned by full digest. Restores the Docker half of the release pipeline (PyPI +
+  GitHub Release were already shipping); GHCR had been stuck at v0.1.10.
+- **`saw fix` git-recovery no longer drops legit code hidden on a new payload line (#1190).** The
+  recovery `insert` branch previously accepted an added line for removal if the *whole line* was
+  dense and carried a loader fingerprint — so a newly-committed line that concatenates legit code
+  with an appended blob (`module.exports=runServer;<blob>`) rode on the blob's average density and
+  was dropped whole, reverting the legit statement. Recovery now requires each `;`-delimited
+  statement of an added line to be **individually** provable payload (a fingerprinted loader
+  statement, a bounded base64/hex blob, or concealment); a readable non-payload statement makes the
+  line **defer to manual** instead. This is strictly more conservative — it only ever *defers* more,
+  never drops more. **Known residual** (the same irreducible class as #1189, and why the original
+  is always backed up to quarantine first): a legit statement that *mimics* a loader token, or
+  minified legit code that reads as a base64 run, still can't be separated from the worm's own
+  connective code on a shared line — no byte rule can.
+- **Hardened `saw fix` git-recovery source trust and post-condition (#1185).** Two provable
+  strengthenings to the code-loader recovery path:
+  - **Recovery source is now a trust decision.** The clean version is selected from **first-parent
+    (mainline) history only**. Previously the walk followed default git history simplification, which
+    can descend into a merge's *second* parent — so a "clean-looking" blob staged only on the malicious
+    side of an **evil merge** could be chosen as the recovery source. It never is now; the mainline walk
+    only selects a version that actually landed on the default branch, re-validated by `_carries_payload`.
+  - **Apply re-proves before writing.** `apply_recovery` now independently re-proves against the file on
+    disk that `clean_text` is exactly *the working file with only payload removed* — the delta is
+    payload-only **and** `clean_text` is a subsequence of the infected file (no fabricated *or* dropped
+    legit byte) — before writing, and verify-or-reverts on any post-write mismatch.
+
+  This issue also **scoped out** its headline feature — auto-recovering a payload that *shares a line*
+  with real code. Adversarial verification proved it can't be made safe: a confirmed loader payload
+  always contains a readable loader statement — a char-code decode call, a decoder-function invocation,
+  a require-hijack global assignment — whose exact tokens legit code can mimic byte-for-byte, so neither
+  byte analysis nor git ancestry can separate them on a shared line. Same-line payloads therefore
+  continue to **defer to manual** — and that manual guidance is now **surgical and safe** (#1189): it
+  tells the operator to remove *just the payload run* from the affected line (keeping the rest), and
+  **warns that `git checkout <sha> -- <path>` reverts the *entire* file** to `<sha>` (diff it first, so a
+  blanket revert doesn't itself drop legit edits made since then). The engine stays strictly
+  no-less-conservative.
+
+## [0.1.11] - 2026-07-12
+
+### Added
 - **Branded first-run welcome for `saw`, plus a `saw intro` tour (#1177).** Bare `saw` now prints a
   designed welcome — the mint "SAW" wordmark, tagline, a *Get started* block, and links — instead of
   the plain argparse dump; `saw intro` (alias `welcome`) gives the fuller tour. In the spirit of a
@@ -48,6 +99,71 @@ All notable changes to this project are documented here. The format is based on
   new single source of truth, `core.terminal.color_level()` (truecolor → 256 → 16 → none), which the
   security report sink now shares too: it honours `NO_COLOR`, `CLICOLOR_FORCE`, `CI`, `TERM=dumb`, and
   a real TTY — so piped / scripted / CI `saw` stays clean plain text, and `saw <cmd> -h` is untouched.
+
+### Changed
+- **Centralized all environment-variable access behind one `core.env` helper.** Every env var the
+  app reads is now NAMED and READ in a single module (`stayawake/core/env.py`) instead of scattered
+  `os.environ.get("…")` magic strings — the alerters, remediator, advisory-cache dir, pager, colour
+  and streaming toggles, and token resolution all go through it, and the duplicated
+  `owner, name = GITHUB_REPOSITORY.split("/")` parse is now one `env.github_slug()` (which also can't
+  crash on a malformed value, unlike the old bare `split("/")`). One consistency change falls out:
+  an env var set to **empty/whitespace now reads as unset everywhere** (values are stripped), so a
+  stray blank no longer counts as "set." Internal refactor; no CLI/behaviour change beyond that.
+
+### Security
+- **Bumped the worm-guard scanner pin to current main (`sentinel-ref` → merge of #1193).** Catches
+  the pin up to the five remediation PRs that landed with a `pin-bump-deferred` label — partial
+  fixes (#1183), per-finding manual-review guidance (#1184), recovery source-trust + post-condition
+  hardening (#1185/#1191), surgical same-line defer guidance (#1189/#1192), and the insert-branch
+  per-statement gate (#1190/#1193) — so the gate again runs the current reviewed engine. All were
+  remediation changes (no detection-logic change), which is why deferral was safe; this is the
+  deliberate catch-up bump the in-band pin-freshness gate (#1172) exists to force.
+- **Bumped the worm-guard scanner pin to current main (`sentinel-ref` → merge of #1181).** Catches
+  the pin up to the branded `saw` welcome / shared colour-decision work (#1177), whose only
+  engine-subtree change was `sinks/terminal.py` adopting `core.terminal` — a presentation change, no
+  detection-logic change — so the gate runs the current reviewed engine again.
+- **Bumped the worm-guard scanner pin to current main (`sentinel-ref` → merge of #1179).** Catches
+  the pin up to the two engine PRs that landed with a `pin-bump-deferred` label — the CI
+  installation-token remediation preflight fix (#1176/#1178) and the env-access centralization
+  (#1179) — so the gate again runs the current reviewed engine. Both were remediation/refactor
+  changes (no detection-logic change), which is why deferral was safe; this is the deliberate
+  catch-up bump the in-band pin-freshness gate (#1172) exists to force.
+
+## [0.1.10] - 2026-07-11
+
+### Fixed
+- **`saw fix --pr` / `--remote` now work under GitHub Actions with the default `GITHUB_TOKEN` (#1176).**
+  The remediation preflight validated the token by calling `GET /user`, which GitHub's API marks
+  `enabledForGitHubApps: false` — so the Actions `GITHUB_TOKEN` (a GitHub App **installation** token)
+  got `403 Resource not accessible by integration`, the preflight read that as "token rejected," and
+  auto-remediation aborted with *"No repositories to fix"* even though the token could push. This is
+  the exact CI environment the feature targets, so `--pr` never worked there without a PAT. The
+  preflight now uses a new `github_api.token_is_valid()` that validates **without** requiring
+  user-to-server scope: it accepts a PAT via `/user`, and an installation token via
+  `GET /repos/{$GITHUB_REPOSITORY}` (`enabledForGitHubApps: true`, needs only `metadata:read`), with
+  `GET /rate_limit` as a liveness floor. It stays **fail-closed** — GitHub validates the token before
+  resource visibility, so a bogus/expired token 401s on all three (even on a public repo) and an
+  unreachable/broken-TLS API yields nothing, both → rejected (still catches the SSL case the preflight
+  was built for). The spurious `403` log line on the happy path is gone (the expected `/user` probe is
+  now quiet). Ships in `stayawakebot`; the Strix action picks it up once released.
+
+## [0.1.9] - 2026-07-10
+
+### Changed
+- **Relicensed to AGPL-3.0-or-later + a commercial license (dual licensing), from v0.1.9 onward.**
+  stayAwakeBot moves off MIT to a **dual-license** model: **AGPL-3.0-or-later** (free, open source —
+  attribution required, and network/hosted use of a modified version must release its source under
+  the AGPL) **or** a **paid commercial license** for closed-source / proprietary-SaaS use without the
+  AGPL's source-disclosure obligations (see [`COMMERCIAL-LICENSE.md`](COMMERCIAL-LICENSE.md)). The full
+  AGPL text now ships as [`LICENSE`](LICENSE) — which also **fixes the container image build**, whose
+  `Dockerfile` copied a `LICENSE` that had been deleted (so the GHCR publish failed on every release).
+  `pyproject.toml` (`license`, `license-files`) and the image's OCI `licenses` label are updated to
+  match. **Releases up to and including v0.1.8 were MIT and remain MIT for those versions** — the new
+  license governs v0.1.9+. (Not legal advice; the commercial agreement's terms are separate.)
+
+## [0.1.8] - 2026-07-10
+
+### Added
 - **Sweeps INSTALLED dependencies' entry files for loader fingerprints — a novel malicious package
   whose payload runs on `require` (#1164).** A malicious npm package can carry no known-bad identity
   and no postinstall, yet still run on import via a loader in its **main/bin entry file**. `node_modules`
@@ -198,83 +314,8 @@ All notable changes to this project are documented here. The format is based on
   **zero setup** — the DB is a superset, never a prerequisite (no cache → seed-only, exactly as
   before). Corpus hits cite their advisory id (e.g. `[GHSA-…]` / `[MAL-…]`) in the finding. Phase 1b
   of the dynamic dependency-audit epic; npm today, more ecosystems to follow.
-- **`saw fix` — remediate on a branch; `--pr` to publish.** `saw fix` prepares the cleanup on a
-  local `security/auto-clean` branch and stops (no push, no network) — review it and push when
-  ready; **`--pr`** also pushes and opens/updates one rolling, de-duplicated PR per repo;
-  **`--remote`** sweeps configured GitHub repos (clone → fix → PR). Cleanup is delivered as a
-  branch/PR, never an in-place edit, so it can't corrupt your working tree. Each repo's outcome
-  streams live (scanning → fixing → opening PR) under a `Security fix — <timestamp>` header.
-- **`saw discard` — undo a fix.** Removes only the auto-generated `security/auto-clean` branch:
-  **`--branch`** deletes it locally and on its remote (pure git — works even when the GitHub API
-  is unreachable; deleting the remote branch auto-closes its PR), **`--pr`** closes the PR via the
-  API. Local by default; `--remote` sweeps the fleet.
-- **Discoverable remote targeting.** `scan`/`fix`/`discard --remote` resolve GitHub targets by a
-  ladder — ad-hoc **`--user`/`--org`** and `owner/repo` selectors (which override config) →
-  configured `targets.github` → **your own repos** (owned, private-inclusive via `/user/repos`) or
-  a GitHub App installation. `--user`/`--org` imply `--remote`; a non-`owner/repo` positional under
-  `--remote` is a hard error.
-- **Large-fleet result presentation.** A big sweep keeps the terminal a bounded, readable
-  **dashboard** — the table only — by **moving the per-finding evidence to the written report**
-  (the full Markdown + JSON, to your `-d` dir or a temp dir, with its path printed); **clean rows
-  collapse to a count** in the table once the fleet is large (the full inventory stays in
-  `--json`/`-d`). So a 200-repo result is never lost to terminal scrollback or buried under
-  hundreds of evidence lines — **with no pager by default**, so you're never dropped into `less`.
-  `--pager` opts into paging through `$PAGER` (built-in default `less -R`: alternate screen,
-  Ctrl+C quits the pager).
-- **Readable terminal report.** The interactive scan output is an aligned, colour-coded table
-  (red INFECTED / yellow SUSPECT / green clean on a TTY; honours `NO_COLOR`) listing every
-  scanned target, sorted worst-first. Findings are detailed per infected/suspect repo in spaced
-  blocks: an underlined project header, then one bulleted finding per line with the severity tags
-  aligned and evidence on its own indented line. (The earlier raw markdown pipe-table dumped to
-  the terminal is gone; the `-d` markdown bundle keeps full markdown.)
-- **Terminal-first `saw scan` — "a report is a message, not a file".** `scan` now renders a full
-  human report (with full evidence) to `stdout` and **persists nothing by default**; progress goes
-  to `stderr`. Output beyond the terminal is delivered through opt-in Strategy "sinks":
-  **`--json`** (machine-readable, full evidence, to a pipe), **`--sarif FILE`** (SARIF 2.1.0 for
-  GitHub code-scanning upload, evidence redacted), **`--alert`** (open/close a GitHub issue per
-  infected repo + post a Slack summary, in-pass, evidence-free), and **`-d/--reports-dir DIR`**
-  (opt-in, evidence-redacted `latest.json` + `latest.md`).
-- **Release-pipeline hardening:** a **CycloneDX SBOM** of the wheel's resolved dependencies,
-  generated in the build job and attached to each GitHub Release; a **`pip-audit` gate** that
-  fails the release on a known-vulnerable dependency; and the container scan is now a **Trivy
-  gate** (build → scan → push) that blocks a fixable critical/high *before* the image is pushed.
-- **Public GitHub Action moved to its own repository, [`Ndevu12/strix`](https://github.com/Ndevu12/strix)**
-  ("StayAwakeBot Strix" on the Marketplace): adopt the security sentinel with
-  `uses: Ndevu12/strix@v1`. Strix is a thin composite Action that installs the published
-  `stayawakebot` scanner from PyPI and runs `saw scan` (gating on its exit code) — the detection
-  engine stays in the package, so no scan logic is duplicated. The in-repo `.github/actions/worm-scan`
-  composite is kept for this project's own self-gating (`worm-guard.yml`) and from-source pins;
-  the superseded root `action.yml` wrapper was removed.
-- **Container image on GHCR** (`ghcr.io/ndevu12/stayawakebot`), built and published by the
-  release pipeline's `docker` job on each `v*` tag — removes the host Python 3.14 prerequisite.
-  Multi-stage, digest-pinned base, non-root, built from the same wheel as PyPI, with SLSA
-  provenance + SBOM attestations and a Trivy scan. Adds `Dockerfile` and `.dockerignore`.
-- Versioned-release pipeline (`.github/workflows/release.yml`): tag-triggered build →
-  self-scan gate → PyPI publish via Trusted Publishing (OIDC, no stored token) with PEP 740
-  attestations → GitHub Release. Manual `workflow_dispatch` path publishes to TestPyPI.
-- `docs/RELEASING.md` maintainer runbook (one-time PyPI/TestPyPI Trusted-Publisher setup,
-  release steps, and the remaining hardening backlog: SBOM, protected-environment reviewers).
-- This changelog.
 
 ### Changed
-- **Centralized all environment-variable access behind one `core.env` helper.** Every env var the
-  app reads is now NAMED and READ in a single module (`stayawake/core/env.py`) instead of scattered
-  `os.environ.get("…")` magic strings — the alerters, remediator, advisory-cache dir, pager, colour
-  and streaming toggles, and token resolution all go through it, and the duplicated
-  `owner, name = GITHUB_REPOSITORY.split("/")` parse is now one `env.github_slug()` (which also can't
-  crash on a malformed value, unlike the old bare `split("/")`). One consistency change falls out:
-  an env var set to **empty/whitespace now reads as unset everywhere** (values are stripped), so a
-  stray blank no longer counts as "set." Internal refactor; no CLI/behaviour change beyond that.
-- **Relicensed to AGPL-3.0-or-later + a commercial license (dual licensing), from v0.1.9 onward.**
-  stayAwakeBot moves off MIT to a **dual-license** model: **AGPL-3.0-or-later** (free, open source —
-  attribution required, and network/hosted use of a modified version must release its source under
-  the AGPL) **or** a **paid commercial license** for closed-source / proprietary-SaaS use without the
-  AGPL's source-disclosure obligations (see [`COMMERCIAL-LICENSE.md`](COMMERCIAL-LICENSE.md)). The full
-  AGPL text now ships as [`LICENSE`](LICENSE) — which also **fixes the container image build**, whose
-  `Dockerfile` copied a `LICENSE` that had been deleted (so the GHCR publish failed on every release).
-  `pyproject.toml` (`license`, `license-files`) and the image's OCI `licenses` label are updated to
-  match. **Releases up to and including v0.1.8 were MIT and remain MIT for those versions** — the new
-  license governs v0.1.9+. (Not legal advice; the commercial agreement's terms are separate.)
 - **A Python venv's `site-packages` is treated as generated context, like `node_modules`.** Third-party
   installed code where a package can legitimately ship a minified `.js`/data blob — the density /
   whitespace / oversized-line heuristics would false-positive there, exactly as in `node_modules`/`dist`.
@@ -315,39 +356,6 @@ All notable changes to this project are documented here. The format is based on
   ladder and **evidence/redaction** rules into their own sections instead of repeating them under
   each command; documents the built-in **command aliases** (`s`/`sc`, `au`, `se`, `d`/`doc`,
   `comp`); and gives every command a tight purpose + synopsis + options table. No behaviour change.
-- **`saw scan` is read-only — detection only.** Remediation moved out of `scan` into `saw fix`
-  (the old `scan --fix`/`--apply`/`--pr` are gone). Scope is **local by default**; `--remote`
-  (or naming `--user`/`--org`) scans GitHub instead of local — one scope per run.
-- **`saw scan`'s exit code is now the verdict, unconditionally** (`0` clean / `1` infected) — the
-  `-f/--fail` (and legacy `--fail-on-findings`) flag is gone; a CI gate just checks the exit code.
-  `saw audit` keeps its own `-f/--fail`.
-- **Security reports are no longer committed into the repo.** Durable records now live outside the
-  repo tree — GitHub code-scanning (SARIF, uploaded not committed), GitHub issues + Slack, and CI
-  artifacts.
-- **Minimum Python lowered to 3.11** (`requires-python >=3.11`, was `>=3.13`), with a CI test
-  matrix across **3.11–3.14** so the supported range is verified on every push. The code never
-  needed 3.13, so this fixes the confusing `pip install` failure on 3.11/3.12. The published
-  wheel is unchanged (pure-Python — one artifact for every supported version).
-- **Health alerting now keeps one self-updating issue per project** instead of opening a new
-  `[DOWN]` issue every run. The GitHub issue is the source of truth (found by a stable hidden
-  marker, not a history flag), so a lost/rebuilt history can't produce duplicates: while a
-  project is down the body is refreshed **silently**, a comment is posted **only on state
-  transitions** (first DOWN, then recovery), and the issue is **closed on recovery** (with a
-  configurable `consecutive_healthy_before_recovery` debounce). The body now names the **failing
-  dimension** (status / latency / keyword / TLS) — previously a keyword/latency/TLS failure showed
-  a bare "DOWN" with no reason — and includes a collapsed incident log of recent transitions.
-- **Lowered the minimum Python to 3.13** (`requires-python >=3.13`, was `>=3.14`) — the code
-  uses no 3.14-only features, so this widens who can `pip install stayawakebot`. Verified by
-  running the full test suite on a real Python 3.13 interpreter (96/96 pass).
-- **Distribution renamed to `stayawakebot`** on PyPI (`stayawake` is owned by an unrelated
-  project). The import package and console scripts are unchanged — only `pip install <name>`
-  differs.
-- Version is now derived from the git tag via `hatch-vcs` instead of being hand-edited in
-  `pyproject.toml`.
-- The source distribution (sdist) is now an explicit allowlist (`src/`, README, LICENSE,
-  CHANGELOG, pyproject) so it no longer ships `reports/`, `.github/`, or local config.
-- `hatch-vcs` now derives the version only from `vX.Y.Z` tags (`git_describe_command` match),
-  so the moving Marketplace major tag (`v1`) cannot be mistaken for the package version.
 
 ### Removed
 - **The availability sentinel's file-based reporting.** No more committed `reports/` tree (1,048+
@@ -358,28 +366,8 @@ All notable changes to this project are documented here. The format is based on
   store (debounce counters + recent incidents); Slack + the 🔴/🟢 title are the alert. The reusable
   *"issue as a durable, file-less state store"* mechanism lives in **`core/issue_state.py`** (shared,
   not duplicated). (#1149)
-- **`saw scan --fix` / `--apply` / `--pr`** (remediation is now `saw fix` / `saw discard`) and
-  **`saw scan --local` / `--local-only`** (local is the default; `--remote` is the scope toggle).
-- The `saw run`, `saw report`, and standalone `saw alert` verbs. The scan→report→alert pipeline is
-  gone: `scan` renders to the terminal and `--alert` pushes the durable record in the same pass.
-- The legacy `stayawake-security-{scan,report,alert,remediate,audit}` console scripts. `saw` is now
-  the only local security surface; the `stayawake-health-*` scripts are unchanged.
 
 ### Fixed
-- **`saw fix --pr` / `--remote` now work under GitHub Actions with the default `GITHUB_TOKEN` (#1176).**
-  The remediation preflight validated the token by calling `GET /user`, which GitHub's API marks
-  `enabledForGitHubApps: false` — so the Actions `GITHUB_TOKEN` (a GitHub App **installation** token)
-  got `403 Resource not accessible by integration`, the preflight read that as "token rejected," and
-  auto-remediation aborted with *"No repositories to fix"* even though the token could push. This is
-  the exact CI environment the feature targets, so `--pr` never worked there without a PAT. The
-  preflight now uses a new `github_api.token_is_valid()` that validates **without** requiring
-  user-to-server scope: it accepts a PAT via `/user`, and an installation token via
-  `GET /repos/{$GITHUB_REPOSITORY}` (`enabledForGitHubApps: true`, needs only `metadata:read`), with
-  `GET /rate_limit` as a liveness floor. It stays **fail-closed** — GitHub validates the token before
-  resource visibility, so a bogus/expired token 401s on all three (even on a public repo) and an
-  unreachable/broken-TLS API yields nothing, both → rejected (still catches the SSL case the preflight
-  was built for). The spurious `403` log line on the happy path is gone (the expected `/user` probe is
-  now quiet). Ships in `stayawakebot`; the Strix action picks it up once released.
 - **A stale-format advisory cache no longer cries "tampered."** After a `saw` upgrade bumps the
   cache schema, the previous cache (an honest DB written by an older `saw`) tripped the byte-level
   integrity gate, printing `advisory-cache integrity check FAILED … corrupted or tampered` for every
@@ -405,75 +393,8 @@ All notable changes to this project are documented here. The format is based on
   the extra is **`stayawakebot[app]`**. And a stale instruction to "drop `--local`" to scan remotes
   referenced a flag that no longer exists — scope is local by default, and **`--remote`** opts into
   GitHub (one scope per run).
-- **Report writing no longer crashes a completed scan when the reports directory is
-  unwritable** (read-only filesystem or a bind-mount owned by another user — e.g. the
-  documented `docker run -v "$PWD:/repo:ro" …` as the image's non-root user). A scan's
-  verdict is its exit code; report persistence is best-effort, so an unwritable directory now
-  prints a warning and falls back to a temp dir instead of raising. The container also
-  defaults reports to a writable path (`STAYAWAKE_REPORTS_DIR`), and the docs show a
-  `--user "$(id -u):$(id -g)"` invocation for writing the report back to the host.
 
 ### Security
-- **Patched a fixable CVE in the container base image so the GHCR image publishes again.** The
-  release Docker job's Trivy vulnerability gate (`severity: CRITICAL,HIGH`, `ignore-unfixed`,
-  `exit-code: 1`) blocked the v0.1.11 image on **CVE-2026-34743** — a fixable HIGH/CRITICAL in the
-  OS package `liblzma5` (`5.8.1-1` → `5.8.1-1+deb13u1`) carried by the stale `python:3.14-slim` base
-  digest. Bumped the SHA-pinned base image to the current Debian 13 (trixie) point-release digest,
-  which ships the patched `liblzma5`; the built image now clears the gate with **zero fixable
-  CRITICAL/HIGH**. The gate was **not** weakened (no ignore-list, no severity/exit-code change) and
-  the base stays pinned by full digest. Restores the Docker half of the release pipeline (PyPI +
-  GitHub Release were already shipping); GHCR had been stuck at v0.1.10.
-- **Bumped the worm-guard scanner pin to current main (`sentinel-ref` → merge of #1193).** Catches
-  the pin up to the five remediation PRs that landed with a `pin-bump-deferred` label — partial
-  fixes (#1183), per-finding manual-review guidance (#1184), recovery source-trust + post-condition
-  hardening (#1185/#1191), surgical same-line defer guidance (#1189/#1192), and the insert-branch
-  per-statement gate (#1190/#1193) — so the gate again runs the current reviewed engine. All were
-  remediation changes (no detection-logic change), which is why deferral was safe; this is the
-  deliberate catch-up bump the in-band pin-freshness gate (#1172) exists to force.
-- **`saw fix` git-recovery no longer drops legit code hidden on a new payload line (#1190).** The
-  recovery `insert` branch previously accepted an added line for removal if the *whole line* was
-  dense and carried a loader fingerprint — so a newly-committed line that concatenates legit code
-  with an appended blob (`module.exports=runServer;<blob>`) rode on the blob's average density and
-  was dropped whole, reverting the legit statement. Recovery now requires each `;`-delimited
-  statement of an added line to be **individually** provable payload (a fingerprinted loader
-  statement, a bounded base64/hex blob, or concealment); a readable non-payload statement makes the
-  line **defer to manual** instead. This is strictly more conservative — it only ever *defers* more,
-  never drops more. **Known residual** (the same irreducible class as #1189, and why the original
-  is always backed up to quarantine first): a legit statement that *mimics* a loader token, or
-  minified legit code that reads as a base64 run, still can't be separated from the worm's own
-  connective code on a shared line — no byte rule can.
-- **Hardened `saw fix` git-recovery source trust and post-condition (#1185).** Two provable
-  strengthenings to the code-loader recovery path:
-  - **Recovery source is now a trust decision.** The clean version is selected from **first-parent
-    (mainline) history only**. Previously the walk followed default git history simplification, which
-    can descend into a merge's *second* parent — so a "clean-looking" blob staged only on the malicious
-    side of an **evil merge** could be chosen as the recovery source. It never is now; the mainline walk
-    only selects a version that actually landed on the default branch, re-validated by `_carries_payload`.
-  - **Apply re-proves before writing.** `apply_recovery` now independently re-proves against the file on
-    disk that `clean_text` is exactly *the working file with only payload removed* — the delta is
-    payload-only **and** `clean_text` is a subsequence of the infected file (no fabricated *or* dropped
-    legit byte) — before writing, and verify-or-reverts on any post-write mismatch.
-
-  This issue also **scoped out** its headline feature — auto-recovering a payload that *shares a line*
-  with real code. Adversarial verification proved it can't be made safe: a confirmed loader payload
-  always contains a readable loader statement — a char-code decode call, a decoder-function invocation,
-  a require-hijack global assignment — whose exact tokens legit code can mimic byte-for-byte, so neither
-  byte analysis nor git ancestry can separate them on a shared line. Same-line payloads therefore
-  continue to **defer to manual** — and that manual guidance is now **surgical and safe** (#1189): it
-  tells the operator to remove *just the payload run* from the affected line (keeping the rest), and
-  **warns that `git checkout <sha> -- <path>` reverts the *entire* file** to `<sha>` (diff it first, so a
-  blanket revert doesn't itself drop legit edits made since then). The engine stays strictly
-  no-less-conservative.
-- **Bumped the worm-guard scanner pin to current main (`sentinel-ref` → merge of #1181).** Catches
-  the pin up to the branded `saw` welcome / shared colour-decision work (#1177), whose only
-  engine-subtree change was `sinks/terminal.py` adopting `core.terminal` — a presentation change, no
-  detection-logic change — so the gate runs the current reviewed engine again.
-- **Bumped the worm-guard scanner pin to current main (`sentinel-ref` → merge of #1179).** Catches
-  the pin up to the two engine PRs that landed with a `pin-bump-deferred` label — the CI
-  installation-token remediation preflight fix (#1176/#1178) and the env-access centralization
-  (#1179) — so the gate again runs the current reviewed engine. Both were remediation/refactor
-  changes (no detection-logic change), which is why deferral was safe; this is the deliberate
-  catch-up bump the in-band pin-freshness gate (#1172) exists to force.
 - **Bumped the worm-guard gate's pinned scanner to current main (`sentinel-ref` → merge of #1170).**
   The gate pins its detection engine to a reviewed SHA so a later compromise of `main` can't silently
   change what it runs — but a pin that lags runs an out-of-date engine while you believe you're covered.
@@ -662,6 +583,50 @@ All notable changes to this project are documented here. The format is based on
   runbook — **isolate → rebuild from clean images → neutralize per-host persistence → then rotate** —
   and the rotation remediation is phrased as the last step with the wiper warning. Documented in
   `docs/SECURITY_ARCHITECTURE.md`.
+
+## [0.1.7] - 2026-06-30
+
+_No CHANGELOG entries were recorded at release time. CI-only: unblock the release
+self-scan — make the `worm-scan` action CLI-redesign-proof, and skip the SARIF upload in
+the pure exit-code gate (#1085, #1086)._
+
+## [0.1.6] - 2026-06-30
+
+### Added
+- **`saw fix` — remediate on a branch; `--pr` to publish.** `saw fix` prepares the cleanup on a
+  local `security/auto-clean` branch and stops (no push, no network) — review it and push when
+  ready; **`--pr`** also pushes and opens/updates one rolling, de-duplicated PR per repo;
+  **`--remote`** sweeps configured GitHub repos (clone → fix → PR). Cleanup is delivered as a
+  branch/PR, never an in-place edit, so it can't corrupt your working tree. Each repo's outcome
+  streams live (scanning → fixing → opening PR) under a `Security fix — <timestamp>` header.
+- **`saw discard` — undo a fix.** Removes only the auto-generated `security/auto-clean` branch:
+  **`--branch`** deletes it locally and on its remote (pure git — works even when the GitHub API
+  is unreachable; deleting the remote branch auto-closes its PR), **`--pr`** closes the PR via the
+  API. Local by default; `--remote` sweeps the fleet.
+- **Discoverable remote targeting.** `scan`/`fix`/`discard --remote` resolve GitHub targets by a
+  ladder — ad-hoc **`--user`/`--org`** and `owner/repo` selectors (which override config) →
+  configured `targets.github` → **your own repos** (owned, private-inclusive via `/user/repos`) or
+  a GitHub App installation. `--user`/`--org` imply `--remote`; a non-`owner/repo` positional under
+  `--remote` is a hard error.
+- **Large-fleet result presentation.** A big sweep keeps the terminal a bounded, readable
+  **dashboard** — the table only — by **moving the per-finding evidence to the written report**
+  (the full Markdown + JSON, to your `-d` dir or a temp dir, with its path printed); **clean rows
+  collapse to a count** in the table once the fleet is large (the full inventory stays in
+  `--json`/`-d`). So a 200-repo result is never lost to terminal scrollback or buried under
+  hundreds of evidence lines — **with no pager by default**, so you're never dropped into `less`.
+  `--pager` opts into paging through `$PAGER` (built-in default `less -R`: alternate screen,
+  Ctrl+C quits the pager).
+
+### Changed
+- **`saw scan` is read-only — detection only.** Remediation moved out of `scan` into `saw fix`
+  (the old `scan --fix`/`--apply`/`--pr` are gone). Scope is **local by default**; `--remote`
+  (or naming `--user`/`--org`) scans GitHub instead of local — one scope per run.
+
+### Removed
+- **`saw scan --fix` / `--apply` / `--pr`** (remediation is now `saw fix` / `saw discard`) and
+  **`saw scan --local` / `--local-only`** (local is the default; `--remote` is the scope toggle).
+
+### Security
 - **Git-recovery remediation — never corrupts valid code.** An injected code-loader payload is
   recovered from the file's last clean committed version (the real original), or deferred to manual
   review with the exact `git checkout` command — the scanner never surgically edits a source file,
@@ -673,16 +638,137 @@ All notable changes to this project are documented here. The format is based on
   CA set (fixes `CERTIFICATE_VERIFY_FAILED`); API errors go to `stderr` only (never pollute
   `--json`/reports); and the API is **pre-flighted before any push**, so a broken environment or
   bad token fails fast instead of force-pushing branches to every repo.
+
+## [0.1.5] - 2026-06-29
+
+### Added
+- **Readable terminal report.** The interactive scan output is an aligned, colour-coded table
+  (red INFECTED / yellow SUSPECT / green clean on a TTY; honours `NO_COLOR`) listing every
+  scanned target, sorted worst-first. Findings are detailed per infected/suspect repo in spaced
+  blocks: an underlined project header, then one bulleted finding per line with the severity tags
+  aligned and evidence on its own indented line. (The earlier raw markdown pipe-table dumped to
+  the terminal is gone; the `-d` markdown bundle keeps full markdown.)
+- **Terminal-first `saw scan` — "a report is a message, not a file".** `scan` now renders a full
+  human report (with full evidence) to `stdout` and **persists nothing by default**; progress goes
+  to `stderr`. Output beyond the terminal is delivered through opt-in Strategy "sinks":
+  **`--json`** (machine-readable, full evidence, to a pipe), **`--sarif FILE`** (SARIF 2.1.0 for
+  GitHub code-scanning upload, evidence redacted), **`--alert`** (open/close a GitHub issue per
+  infected repo + post a Slack summary, in-pass, evidence-free), and **`-d/--reports-dir DIR`**
+  (opt-in, evidence-redacted `latest.json` + `latest.md`).
+
+### Changed
+- **`saw scan`'s exit code is now the verdict, unconditionally** (`0` clean / `1` infected) — the
+  `-f/--fail` (and legacy `--fail-on-findings`) flag is gone; a CI gate just checks the exit code.
+  `saw audit` keeps its own `-f/--fail`.
+- **Security reports are no longer committed into the repo.** Durable records now live outside the
+  repo tree — GitHub code-scanning (SARIF, uploaded not committed), GitHub issues + Slack, and CI
+  artifacts.
+
+### Removed
+- The `saw run`, `saw report`, and standalone `saw alert` verbs. The scan→report→alert pipeline is
+  gone: `scan` renders to the terminal and `--alert` pushes the durable record in the same pass.
+- The legacy `stayawake-security-{scan,report,alert,remediate,audit}` console scripts. `saw` is now
+  the only local security surface; the `stayawake-health-*` scripts are unchanged.
+
+### Security
 - **Evidence redaction in persisted artifacts.** Any report written to disk (`--sarif`, `-d`) now
   stores a fingerprint `{sha256, preview (first 24 chars), len}` instead of the raw payload; full
   evidence appears only on the live terminal (`stdout`/`--json`). In-tree report files were
   redundant, tamperable, and re-distributed live malware payloads — hence terminal-first output and
   no committed security reports.
 
-## [0.1.0] - Unreleased
+## [0.1.4] - 2026-06-25
+
+_No CHANGELOG entries were recorded at release time, but this is where the unified `saw`
+security CLI first shipped (#1050) — its changelog entries were written up under 0.1.5
+below. Also: shared reports-directory resolution (`resolve_reports_dir`, #1049)._
+
+## [0.1.3] - 2026-06-25
+
+### Changed
+- **Minimum Python lowered to 3.11** (`requires-python >=3.11`, was `>=3.13`), with a CI test
+  matrix across **3.11–3.14** so the supported range is verified on every push. The code never
+  needed 3.13, so this fixes the confusing `pip install` failure on 3.11/3.12. The published
+  wheel is unchanged (pure-Python — one artifact for every supported version).
+- **Health alerting now keeps one self-updating issue per project** instead of opening a new
+  `[DOWN]` issue every run. The GitHub issue is the source of truth (found by a stable hidden
+  marker, not a history flag), so a lost/rebuilt history can't produce duplicates: while a
+  project is down the body is refreshed **silently**, a comment is posted **only on state
+  transitions** (first DOWN, then recovery), and the issue is **closed on recovery** (with a
+  configurable `consecutive_healthy_before_recovery` debounce). The body now names the **failing
+  dimension** (status / latency / keyword / TLS) — previously a keyword/latency/TLS failure showed
+  a bare "DOWN" with no reason — and includes a collapsed incident log of recent transitions.
+
+### Fixed
+- **Report writing no longer crashes a completed scan when the reports directory is
+  unwritable** (read-only filesystem or a bind-mount owned by another user — e.g. the
+  documented `docker run -v "$PWD:/repo:ro" …` as the image's non-root user). A scan's
+  verdict is its exit code; report persistence is best-effort, so an unwritable directory now
+  prints a warning and falls back to a temp dir instead of raising. The container also
+  defaults reports to a writable path (`STAYAWAKE_REPORTS_DIR`), and the docs show a
+  `--user "$(id -u):$(id -g)"` invocation for writing the report back to the host.
+
+## [0.1.2] - 2026-06-25
+
+_No CHANGELOG entries were recorded at release time. Shipped: Docker builds run `pip` as
+non-root in both build stages (#1029), plus removal of misleading README report badges and
+release-publish hardening._
+
+## [0.1.1] - 2026-06-25
+
+### Added
+- **Release-pipeline hardening:** a **CycloneDX SBOM** of the wheel's resolved dependencies,
+  generated in the build job and attached to each GitHub Release; a **`pip-audit` gate** that
+  fails the release on a known-vulnerable dependency; and the container scan is now a **Trivy
+  gate** (build → scan → push) that blocks a fixable critical/high *before* the image is pushed.
+- **Public GitHub Action moved to its own repository, [`Ndevu12/strix`](https://github.com/Ndevu12/strix)**
+  ("StayAwakeBot Strix" on the Marketplace): adopt the security sentinel with
+  `uses: Ndevu12/strix@v1`. Strix is a thin composite Action that installs the published
+  `stayawakebot` scanner from PyPI and runs `saw scan` (gating on its exit code) — the detection
+  engine stays in the package, so no scan logic is duplicated. The in-repo `.github/actions/worm-scan`
+  composite is kept for this project's own self-gating (`worm-guard.yml`) and from-source pins;
+  the superseded root `action.yml` wrapper was removed.
+- **Container image on GHCR** (`ghcr.io/ndevu12/stayawakebot`), built and published by the
+  release pipeline's `docker` job on each `v*` tag — removes the host Python 3.14 prerequisite.
+  Multi-stage, digest-pinned base, non-root, built from the same wheel as PyPI, with SLSA
+  provenance + SBOM attestations and a Trivy scan. Adds `Dockerfile` and `.dockerignore`.
+- Versioned-release pipeline (`.github/workflows/release.yml`): tag-triggered build →
+  self-scan gate → PyPI publish via Trusted Publishing (OIDC, no stored token) with PEP 740
+  attestations → GitHub Release. Manual `workflow_dispatch` path publishes to TestPyPI.
+- `docs/RELEASING.md` maintainer runbook (one-time PyPI/TestPyPI Trusted-Publisher setup,
+  release steps, and the remaining hardening backlog: SBOM, protected-environment reviewers).
+- This changelog.
+
+### Changed
+- **Lowered the minimum Python to 3.13** (`requires-python >=3.13`, was `>=3.14`) — the code
+  uses no 3.14-only features, so this widens who can `pip install stayawakebot`. Verified by
+  running the full test suite on a real Python 3.13 interpreter (96/96 pass).
+- **Distribution renamed to `stayawakebot`** on PyPI (`stayawake` is owned by an unrelated
+  project). The import package and console scripts are unchanged — only `pip install <name>`
+  differs.
+- Version is now derived from the git tag via `hatch-vcs` instead of being hand-edited in
+  `pyproject.toml`.
+- The source distribution (sdist) is now an explicit allowlist (`src/`, README, LICENSE,
+  CHANGELOG, pyproject) so it no longer ships `reports/`, `.github/`, or local config.
+- `hatch-vcs` now derives the version only from `vX.Y.Z` tags (`git_describe_command` match),
+  so the moving Marketplace major tag (`v1`) cannot be mistaken for the package version.
+
+## [0.1.0] - 2026-06-19
 
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel
 (supply-chain worm detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.12...HEAD
+[0.1.12]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.11...v0.1.12
+[0.1.11]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.10...v0.1.11
+[0.1.10]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.9...v0.1.10
+[0.1.9]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.8...v0.1.9
+[0.1.8]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.7...v0.1.8
+[0.1.7]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.6...v0.1.7
+[0.1.6]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.5...v0.1.6
+[0.1.5]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.4...v0.1.5
+[0.1.4]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.3...v0.1.4
+[0.1.3]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.2...v0.1.3
+[0.1.2]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.1...v0.1.2
+[0.1.1]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Ndevu12/stayAwakeBot/releases/tag/v0.1.0
