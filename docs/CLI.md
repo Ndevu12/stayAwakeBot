@@ -19,8 +19,8 @@ run on your own machine to detect, report, and auto-remediate self-propagating m
 - [Synopsis & global options](#synopsis--global-options)
 - [Commands](#commands)
   - [`saw scan`](#saw-scan) · [`saw fix`](#saw-fix) · [`saw discard`](#saw-discard) ·
-    [`saw audit`](#saw-audit) · [`saw search`](#saw-search) · [`saw intro`](#saw-intro) ·
-    [`saw doctor`](#saw-doctor) · [`saw completion`](#saw-completion)
+    [`saw audit`](#saw-audit) · [`saw db`](#saw-db) · [`saw search`](#saw-search) ·
+    [`saw intro`](#saw-intro) · [`saw doctor`](#saw-doctor) · [`saw completion`](#saw-completion)
 - [Remote targeting (`--remote`)](#remote-targeting---remote)
 - [How reports are stored (evidence & redaction)](#how-reports-are-stored-evidence--redaction)
 - [Exit codes](#exit-codes)
@@ -41,6 +41,7 @@ saw <command> [options] [TARGETS...]      # no command → welcome banner;  -h/-
 | [`saw fix`](#saw-fix) | Clean findings onto a `security/auto-clean` branch | Branch only (never your working tree); no push unless `--pr` |
 | [`saw discard`](#saw-discard) | Undo `saw fix`: delete the branch and/or close its PR | git / GitHub API |
 | [`saw audit`](#saw-audit) | Local hygiene: credentials, VS Code settings, branch protection | Read-only |
+| [`saw db`](#saw-db) | Manage the offline advisory DB (malicious-package + CVE corpus) a scan consults | Cache only (`~/.cache/saw/advisories`) |
 | [`saw search`](#saw-search) | Fuzzy "what's the command for…?" lookup | — |
 | [`saw intro`](#saw-intro) | Branded tour (also the bare-`saw` welcome) | — |
 | [`saw doctor`](#saw-doctor) | Self-check: install resolution + credentials | — |
@@ -116,7 +117,7 @@ something:
 | `--json` | `scan`, `doctor`, `search` | Emit machine-readable JSON to stdout. On `scan` it carries **full evidence**. |
 | `-q`, `--quiet` | `doctor`, `search` | Print only the essentials (problems / command names). |
 | `-f`, `--fail` | `audit` only | Exit non-zero on a warning-level issue. **`saw scan` has no `--fail`** — its exit code is the verdict unconditionally (see [Exit codes](#exit-codes)). |
-| `--no-stream` | `scan`, `fix`, `discard` | Disable the live progress/typewriter output — plain, instant lines. |
+| `--no-stream` | `scan`, `fix`, `discard`, `audit`, `db` | Disable the live progress/typewriter output — plain, instant lines. |
 
 ## Commands
 
@@ -135,6 +136,7 @@ Durable output beyond the terminal is opt-in via "sinks": `--json`, `--sarif`, `
 ```text
 saw scan [TARGETS...] [-r] [--user U] [--org O] [-c FILE] [-p PATH]
          [--json] [--sarif FILE] [--alert] [-d DIR] [--no-stream] [--pager]
+         [--no-advisories] [-x | --external] [--require-db]
 ```
 
 | Option | Description |
@@ -151,6 +153,9 @@ saw scan [TARGETS...] [-r] [--user U] [--org O] [-c FILE] [-p PATH]
 | `-d`, `--reports-dir DIR` | **Opt-in:** also write `latest.json` + `latest.md` into `DIR`. Evidence is **redacted** (fingerprint only). |
 | `--no-stream` | Disable the live progress/typewriter output. (Auto-off already when piped, in CI, or with `STAYAWAKE_NO_STREAM=1`.) |
 | `--pager` | Page the report through `$PAGER` (default `less -R`). **Off by default** — the report prints straight through. |
+| `--no-advisories` | Suppress the dependency **CVE-advisory** section. A scan reports malware **and** known CVEs (from the offline [advisory DB](#saw-db)) by default; advisories never change the verdict/exit code, so this only quiets the output. |
+| `-x`, `--external` | **Opt-in — leaves the offline sandbox.** Also run *installed* external auditors (`osv-scanner`, …) and fold their vulns into the advisory tier. Spawns subprocesses and a tool may send your dependency list to its own servers; absent tools are skipped, and it never changes the verdict/exit code. |
+| `--require-db` | Fail (**exit 2**) if the [advisory DB](#saw-db) is absent or fails its integrity check, instead of degrading to the inline malware seed — for CI gates that must not silently lose coverage. Default is **fail-open** (degrade to the seed). |
 
 ```bash
 saw scan                                  # scan local targets; full report to terminal; writes nothing
@@ -260,6 +265,51 @@ saw audit [--repo OWNER/NAME] [-b BRANCH] [-f]
 ```bash
 saw audit                                       # local credential + editor hygiene
 saw audit --repo Ndevu12/strix -f               # also gate on branch-protection issues
+```
+
+### `saw db`
+
+Manage the **offline advisory database** — the malicious-package + CVE corpus (OpenSSF, GitHub
+Advisories, OSV.dev) that a scan's advisory tier consults to flag known-bad dependencies. It is
+cached locally (default `~/.cache/saw/advisories`) and used fully offline; a `saw scan` degrades
+gracefully when it is absent, unless you pass `saw scan --require-db` to make it mandatory. Two
+subcommands:
+
+#### `saw db update`
+
+Download or refresh the corpus so later scans need no network.
+
+```text
+saw db update [-e ECO ...] [--cache-dir DIR] [--no-stream]
+```
+
+| Option | Description |
+| --- | --- |
+| `-e`, `--ecosystem ECO` | Limit to an ecosystem (repeatable); default: all supported. |
+| `--cache-dir DIR` | Advisory cache location (default: `~/.cache/saw/advisories`). |
+| `--no-stream` | Disable the per-ecosystem spinner / typewriter output (for logs & CI). |
+
+#### `saw db status`
+
+Report the cache's snapshot fingerprint, age, per-ecosystem counts, and integrity — and optionally
+**gate** on freshness or a pinned snapshot. It exits non-zero on failure, so it drops straight into
+CI.
+
+```text
+saw db status [--cache-dir DIR] [--require-snapshot DIGEST] [--max-age-days N]
+```
+
+| Option | Description |
+| --- | --- |
+| `--cache-dir DIR` | Advisory cache location. |
+| `--require-snapshot DIGEST` | Exit non-zero unless the DB's snapshot equals `DIGEST` (pin for reproducible CI). |
+| `--max-age-days N` | Exit non-zero if the DB is older than `N` days. Unknown age **fails closed** (treated as stale). |
+
+```bash
+saw db update                         # fetch/refresh the corpus (all ecosystems)
+saw db update -e npm -e pypi          # just npm + PyPI
+saw db status --max-age-days 30       # CI gate: fail if the corpus is stale (or missing)
+saw scan --require-db                 # make a scan hard-require a healthy advisory DB
 ```
 
 ### `saw search`
