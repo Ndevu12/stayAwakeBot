@@ -6,7 +6,9 @@
 #
 # Base is pinned by DIGEST, never a mutable tag (same doctrine as the SHA-pinned Actions).
 # Refresh the digest deliberately:  docker buildx imagetools inspect python:3.14-slim
-ARG PYTHON_IMAGE=python:3.14-slim@sha256:63a4c7f612a00f92042cbdcc7cdc6a306f38485af0a200b9c89de7d9b1607d15
+# Bumped 2026-07 → the deb13u1 point release, which ships liblzma5 5.8.1-1+deb13u1 and clears the
+# release Trivy gate's fixable CRITICAL/HIGH (CVE-2026-34743 in liblzma5). Multi-arch index digest.
+ARG PYTHON_IMAGE=python:3.14-slim@sha256:d3400aa122fa42cf0af0dbe8ec3091b047eac5c8f7e3539f7135e86d855dc015
 
 # ───────────────────────── builder: build the wheel from source ─────────────────────────
 FROM ${PYTHON_IMAGE} AS builder

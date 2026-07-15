@@ -414,6 +414,15 @@ All notable changes to this project are documented here. The format is based on
   `--user "$(id -u):$(id -g)"` invocation for writing the report back to the host.
 
 ### Security
+- **Patched a fixable CVE in the container base image so the GHCR image publishes again.** The
+  release Docker job's Trivy vulnerability gate (`severity: CRITICAL,HIGH`, `ignore-unfixed`,
+  `exit-code: 1`) blocked the v0.1.11 image on **CVE-2026-34743** — a fixable HIGH/CRITICAL in the
+  OS package `liblzma5` (`5.8.1-1` → `5.8.1-1+deb13u1`) carried by the stale `python:3.14-slim` base
+  digest. Bumped the SHA-pinned base image to the current Debian 13 (trixie) point-release digest,
+  which ships the patched `liblzma5`; the built image now clears the gate with **zero fixable
+  CRITICAL/HIGH**. The gate was **not** weakened (no ignore-list, no severity/exit-code change) and
+  the base stays pinned by full digest. Restores the Docker half of the release pipeline (PyPI +
+  GitHub Release were already shipping); GHCR had been stuck at v0.1.10.
 - **Bumped the worm-guard scanner pin to current main (`sentinel-ref` → merge of #1193).** Catches
   the pin up to the five remediation PRs that landed with a `pin-bump-deferred` label — partial
   fixes (#1183), per-finding manual-review guidance (#1184), recovery source-trust + post-condition
