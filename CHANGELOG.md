@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.1.13] - 2026-07-15
+
 ### Added
 - **The scanner now recognizes several reflective / dynamic ways of executing code that the
   classic `eval`/`Function`/`atob` set missed** — surfaced as **heuristic (SUSPICIOUS)** signals, so
@@ -80,6 +82,17 @@ All notable changes to this project are documented here. The format is based on
   remote arm already reported its failures). Part of the same no-silent-failures sweep.
 - The shareable **open-or-update-PR** mechanic (don't duplicate a rolling PR) now lives once in
   `core.adapters.github_api.open_or_update_pr`, used by both the same-repo and cross-fork PR paths.
+
+### Security
+- **Bumped the pinned self-scan engine to current main (`sentinel-ref` → merge of #1206), and
+  re-synced the release gate's pin.** Catches the worm-guard gate up to the detection/remediation
+  work that shipped `pin-bump-deferred` — the partial-remediation series (#1183–#1193), the
+  config-seam auto-clean (#1204), and the new reflective/dynamic exec-sink detection (#1206) — so
+  the gate scans with the current reviewed engine rather than a stale one. Also corrects a drift
+  where `release.yml`'s self-scan pin had fallen behind at #1138 while its comment claimed to be in
+  sync; the worm-guard gate and the release self-scan now pin the **same** current-main SHA. The
+  pin is never the commit under test — a compromised release can't certify itself. Deliberate
+  catch-up bump per the in-band pin-freshness cadence (#1172).
 
 ## [0.1.12] - 2026-07-15
 
@@ -833,7 +846,8 @@ release-publish hardening._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel
 (supply-chain worm detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.12...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.13...HEAD
+[0.1.13]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.12...v0.1.13
 [0.1.12]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.11...v0.1.12
 [0.1.11]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.10...v0.1.11
 [0.1.10]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.9...v0.1.10
