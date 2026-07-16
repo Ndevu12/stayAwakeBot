@@ -6,6 +6,30 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- **`saw fix` now auto-cleans a payload hidden behind a whitespace-concealment seam on a line of
+  real code, instead of always deferring it to manual review — when, and only when, doing so
+  reproduces a clean committed version exactly.** The worm's favourite shape on a config file
+  (`postcss.config.mjs`, `next.config.mjs`, …) is to append its loader onto an existing line — e.g.
+  `export default config;` — after a long run of whitespace, and to prepend a `createRequire`
+  require-bridge at the top. A plain git restore can't fix that (the payload rides a line of real
+  code and the prepend isn't a clean append), so it fell to a manual checklist every time. Now the
+  loader suffix is **excised** and a now-**dead** `createRequire` shim (nothing left references
+  `require`) is removed — and the result is accepted **only if it byte-for-byte equals the file's
+  last clean committed version**. Generalised to the **pattern**, not the filename, so it covers
+  every config the worm hits this way.
+
+  That corroboration is the safety guarantee: because the excised result must equal trusted
+  committed history, **nothing injected can ride along in the kept code** — any stray edit, or an
+  RCE the scanner can't even see (`require('vm')`, reflective `constructor`, computed/split `eval`,
+  dynamic `import`), would make the result differ from the ancestor and is therefore refused to
+  manual review. So this needs a clean committed ancestor (no-history / born-infected / untracked
+  findings still defer), and a legit edit made *after* infection defers rather than being dropped.
+  Re-proven against the on-disk bytes at apply time, symlink-guarded (never writes through a link or
+  outside the worktree), quarantine-backed, and reverted if the write doesn't verify. The mixed-line
+  cases that must stay manual (a legit statement spliced before a blob, a real char-code call, an
+  adjacent line with no concealment seam) are unchanged and still defer.
+
 ### Fixed
 - **`saw fix` no longer reports a fix it didn't make when commit signing fails.** The fix is
   built in a throwaway git worktree and committed to the `security/auto-clean` branch — but that
