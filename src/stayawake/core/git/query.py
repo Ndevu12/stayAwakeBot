@@ -3,13 +3,57 @@
 ever executing repository code. The evil-merge detector and the recovery walks build on these."""
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
-from stayawake.core.git.run import run, stdout
+from stayawake.core.git.run import run, stdout, NETWORK_TIMEOUT
 
 
 def is_git_repo(repo: str | Path) -> bool:
     return stdout(repo, ["rev-parse", "--is-inside-work-tree"]).strip() == "true"
+
+
+def slug_from_url(url: str) -> str | None:
+    """Parse 'owner/name' from a GitHub SSH or HTTPS remote URL (pure — no git call).
+    Returns None for a non-GitHub URL, so callers can tell 'not GitHub' from a parse error."""
+    m = re.search(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?$", url.strip())
+    return m.group(1) if m else None
+
+
+def origin_slug(repo: str | Path) -> str | None:
+    """'owner/name' for the repo's `origin` remote (SSH or HTTPS), else None (no origin,
+    or a non-GitHub origin)."""
+    return slug_from_url(stdout(repo, ["remote", "get-url", "origin"]))
+
+
+def default_branch(repo: str | Path) -> str:
+    """The remote's default branch (via `origin/HEAD`), falling back to 'main' when there is
+    no origin / it isn't resolvable — so `saw fix` still has a base branch to build on offline."""
+    out = stdout(repo, ["symbolic-ref", "refs/remotes/origin/HEAD"]).strip()
+    return out.rsplit("/", 1)[-1] if out else "main"
+
+
+def ref_exists(repo: str | Path, ref: str) -> bool:
+    """True if `ref` resolves in `repo` (a branch, tag, or `origin/<branch>`). Used to prefer a
+    fresh `origin/<base>` but fall back to the local base so remediation works offline."""
+    res = run(repo, ["rev-parse", "--verify", "--quiet", ref])
+    return res is not None and res.returncode == 0
+
+
+def tracked_under(repo: str | Path, pathspec: str | Path) -> list[str]:
+    """Tracked paths under `pathspec` (empty if none). Distinct from `tracked` (one exact path):
+    this answers 'is ANYTHING under this directory still tracked?' — the quarantine-clean check."""
+    out = stdout(repo, ["ls-files", "--", str(pathspec)])
+    return [ln for ln in out.splitlines() if ln.strip()]
+
+
+def remote_has_branch(remote: str, branch: str, *, repo: str | Path | None = None,
+                      env: dict | None = None) -> bool:
+    """True if `branch` exists on `remote` (a remote name like 'origin', or an explicit URL).
+    `repo=None` runs `ls-remote` against an explicit URL with no local clone (the by-slug
+    discard path); `env` carries credential-safe auth (see `github_https_auth`)."""
+    res = run(repo, ["ls-remote", "--heads", remote, branch], env=env, timeout=NETWORK_TIMEOUT)
+    return res is not None and res.returncode == 0 and bool(res.stdout.strip())
 
 
 def parents(repo: str | Path, sha: str) -> list[str]:

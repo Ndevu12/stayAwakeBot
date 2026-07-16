@@ -10,8 +10,6 @@ never commits to or force-pushes main.
 """
 from __future__ import annotations
 
-import re
-import subprocess
 import tempfile
 import time
 import unicodedata
@@ -32,7 +30,6 @@ ISSUE_LABEL = "stayawake-security"  # de-dup marker for the issue fallback
 PARTIAL_LABEL = "security: partial" # marks a PR that fixes SOME but not all indicators (#1183)
 _FORK_POLL_TRIES = 10               # async fork readiness: poll up to ~30s
 _FORK_POLL_DELAY = 3
-_BOT = ("-c", "user.name=StayAwakeBot Security", "-c", "user.email=security-bot@stayawake.local")
 
 
 def _sanitize(s: str, limit: int = 300) -> str:
@@ -104,29 +101,24 @@ def manual_review_lines(manual, limit: int = 20) -> str:
     return "\n".join(lines)
 
 
-def _git(cwd: Path, *args: str, env: dict | None = None) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", "-C", str(cwd), *args],
-                          capture_output=True, text=True, check=False, env=env)
-
-
 def _untrack_quarantine(repo: Path) -> bool:
     """git only ignores UNTRACKED paths, so untrack any pre-existing tracked
     quarantine dir before staging. Returns True if the quarantine is clean after."""
-    _git(repo, "rm", "-r", "--cached", "--ignore-unmatch", QUARANTINE_DIR)
-    return not _git(repo, "ls-files", QUARANTINE_DIR).stdout.strip()
+    gitutil.unstage_cached(repo, QUARANTINE_DIR)
+    return not gitutil.tracked_under(repo, QUARANTINE_DIR)
 
 
 def _save_patch(wt: Path, slug: str, out_dir: Path) -> Path | None:
     """Capture the fix commit as a git-am-able patch so a read-only run (no write access)
     never loses the work when the branch can't be pushed. Returns the path, or None on
     failure. This is the no-write floor of the remediation ladder."""
-    r = _git(wt, "format-patch", "-1", "HEAD", "--stdout")
-    if r.returncode != 0 or not r.stdout.strip():
+    patch = gitutil.format_patch(wt, "HEAD")
+    if not patch:
         return None
     try:
         out_dir.mkdir(parents=True, exist_ok=True)
         dest = (out_dir / (slug.replace("/", "-") + ".patch")).resolve()
-        dest.write_text(r.stdout, encoding="utf-8")
+        dest.write_text(patch, encoding="utf-8")
     except OSError:
         return None
     return dest
@@ -209,10 +201,7 @@ def _fork_and_pr(wt: Path, owner: str, name: str, base: str, applied, suspicious
     if not _wait_for_fork(fork_slug, token):
         return f"{owner}/{name}: forked to {fork_slug} but it wasn't ready in time — retry later"
     # Push the fix branch to the fork (token via GIT_ASKPASS, never in URL/argv).
-    with gitutil.github_https_auth(token) as (prefix, env):
-        pushed = _git(wt, "push", "--force", f"{prefix}{fork_slug}.git",
-                      f"{FIX_BRANCH}:{FIX_BRANCH}", env=env).returncode == 0
-    if not pushed:
+    if not gitutil.push_branch(wt, fork_slug, FIX_BRANCH, token):
         return None  # couldn't push to the fork either → fall back to patch/issue
     fork_owner = fork_slug.split("/", 1)[0]
     partial = bool(manual)
@@ -220,36 +209,14 @@ def _fork_and_pr(wt: Path, owner: str, name: str, base: str, applied, suspicious
              else "security: auto-remediate worm indicators")
     body = _pr_body(f"{owner}/{name}", applied, suspicious, manual)
     tag = "PARTIAL (manual review required) — " if partial else ""
-    existing = github_api.list_open_pulls(owner, name, FIX_BRANCH, token, head_owner=fork_owner)
-    if existing:
-        pr = existing[0]
-        github_api.update_issue(owner, name, pr["number"], token, title=title, body=body)
-        _reconcile_partial_label(owner, name, pr["number"], partial, token)
-        return (f"{owner}/{name}: {tag}updated existing fork PR #{pr['number']} "
-                f"({pr.get('html_url', '')}) from {fork_slug}")
-    pr = github_api.create_pull(owner, name, title=title,
-                                head=f"{fork_owner}:{FIX_BRANCH}", base=base, body=body, token=token)
-    if pr and pr.get("number"):
-        _reconcile_partial_label(owner, name, pr["number"], partial, token)
-        return (f"{owner}/{name}: {tag}opened fork PR #{pr['number']} ({pr.get('html_url', '')}) "
-                f"from {fork_slug}")
-    return f"{owner}/{name}: pushed to fork {fork_slug} but PR creation failed (check token scope)"
-
-
-def slug_from_url(url: str) -> str | None:
-    """Parse 'owner/name' from a GitHub SSH or HTTPS remote URL (pure)."""
-    m = re.search(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?$", url.strip())
-    return m.group(1) if m else None
-
-
-def origin_slug(repo: Path) -> str | None:
-    """Return 'owner/name' from the origin remote (SSH or HTTPS), else None."""
-    return slug_from_url(_git(repo, "remote", "get-url", "origin").stdout)
-
-
-def default_branch(repo: Path) -> str:
-    out = _git(repo, "symbolic-ref", "refs/remotes/origin/HEAD").stdout.strip()
-    return out.rsplit("/", 1)[-1] if out else "main"
+    result = github_api.open_or_update_pr(owner, name, head_branch=FIX_BRANCH, base=base,
+                                          title=title, body=body, token=token, head_owner=fork_owner)
+    if not result:
+        return f"{owner}/{name}: pushed to fork {fork_slug} but PR creation failed (check token scope)"
+    _reconcile_partial_label(owner, name, result["number"], partial, token)
+    verb = "updated existing fork PR" if result["action"] == "updated" else "opened fork PR"
+    return (f"{owner}/{name}: {tag}{verb} #{result['number']} ({result.get('html_url', '')}) "
+            f"from {fork_slug}")
 
 
 def _pr_body(slug: str, changes, suspicious=(), manual=()) -> str:
@@ -306,16 +273,31 @@ class _Fix:
     """The result of building a fix: the base branch it sits on, and the changes/findings
     used to commit it to FIX_BRANCH and to write the PR body. `manual` holds the residual
     CONFIRMED findings that could NOT be auto-fixed — non-empty means a PARTIAL fix (#1183):
-    the safe changes still ship, but the tree is not clean and the PR/gate must say so."""
+    the safe changes still ship, but the tree is not clean and the PR/gate must say so.
+    `signed` is False when the fix commit had to be landed with signing forced OFF (the repo
+    wanted signed commits but signing couldn't complete in the worktree)."""
     base: str
     applied: list
     suspicious: list
     findings: list
     manual: tuple = ()
+    signed: bool = True
 
     @property
     def partial(self) -> bool:
         return bool(self.manual)
+
+
+def _signing_note(fix: "_Fix | None") -> str:
+    """A one-line ⚠ warning appended to the operator's outcome when the fix commit is UNSIGNED
+    (signing failed in the worktree, so it was committed with `commit.gpgsign=false`). Empty
+    otherwise. The fix still lands — but a repo that enforces signed commits will reject the
+    push/merge until the branch is re-signed, so the operator must be told rather than left to
+    wonder why the push bounced."""
+    if fix is None or fix.signed:
+        return ""
+    return (f"\n    ⚠ the fix commit on '{FIX_BRANCH}' is UNSIGNED (commit signing failed in the "
+            "worktree); if this repo enforces signed commits, re-sign it before pushing/merging.")
 
 
 def _build_fix(repo: Path, opts, signatures, allowlist, *,
@@ -327,18 +309,16 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *,
     The CALLER owns the returned worktree `wt` and MUST remove it (the branch ref persists
     after removal, ready to review or push). `label`/`spin` drive phase-accurate spinners
     (`scanning …` then `fixing …`) so a long sweep shows what it's actually doing."""
-    base = default_branch(repo)
+    base = gitutil.default_branch(repo)
     # Prefer origin/<base> (fresh if the caller fetched) but fall back to the LOCAL base so
     # `saw fix` works offline / without a remote.
-    baseref = (f"origin/{base}"
-               if _git(repo, "rev-parse", "--verify", "--quiet", f"origin/{base}").returncode == 0
-               else base)
-    if _git(repo, "rev-parse", "--verify", "--quiet", baseref).returncode != 0:
+    baseref = f"origin/{base}" if gitutil.ref_exists(repo, f"origin/{base}") else base
+    if not gitutil.ref_exists(repo, baseref):
         return None, "no default branch to build a fix from — skipped", None
 
     wt = Path(tempfile.mkdtemp(prefix="sab-fix-"))
     quarantine = Path(tempfile.mkdtemp(prefix="sab-bak-"))  # backups kept OUT of the branch
-    if _git(repo, "worktree", "add", "-f", "-B", FIX_BRANCH, str(wt), baseref).returncode != 0:
+    if not gitutil.add_worktree(repo, wt, FIX_BRANCH, baseref):
         return None, "could not create worktree", wt
 
     content_sig = remediation.codeloader_content_sig([s for g in signatures.values() for s in g])
@@ -418,19 +398,25 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *,
         # changes and list every residual as manual-review work. The tree is never called clean.
         if not _untrack_quarantine(wt):
             return None, f"ABORTED — could not untrack {QUARANTINE_DIR}/ (would commit backups)", wt
-        _git(wt, "add", "-A")
+        if not gitutil.stage_all(wt):
+            return None, "ABORTED — could not stage the fix (git add failed)", wt
         subject = ("security: partial auto-remediation (manual review required)" if manual
                    else "security: auto-remediate worm indicators")
         msg = subject + "\n\n" + "\n".join(f"- {c.action}: {c.path}" for c in applied)
-        _git(wt, *_BOT, "commit", "-m", msg)
-    return _Fix(base, applied, suspicious, findings, tuple(manual)), "", wt
+        # commit_fix checks the result and retries UNSIGNED if signing fails — so the branch
+        # always advances (no phantom "prepared N" on an empty branch) and we learn whether the
+        # commit is unsigned (surfaced to the operator via `_signing_note`).
+        commit = gitutil.commit_fix(wt, msg)
+        if not commit.committed:
+            return None, "ABORTED — could not commit the fix (git commit failed)", wt
+    return _Fix(base, applied, suspicious, findings, tuple(manual), signed=commit.signed), "", wt
 
 
 def prepare_fix(repo: Path, opts, signatures, allowlist, *, spin: bool = False) -> str:
     """`saw fix` (no --pr): build the fix on the local `security/auto-clean` branch and STOP.
     No push, no PR, no GitHub API — offline-safe, zero remote writes. The branch is left in
     the repo for the user to review and push (or publish with `saw fix --pr`)."""
-    slug = origin_slug(repo) or str(repo).replace(str(Path.home()), "~")
+    slug = gitutil.origin_slug(repo) or str(repo).replace(str(Path.home()), "~")
     fix, outcome, wt = _build_fix(repo, opts, signatures, allowlist, label=slug, spin=spin)
     try:
         if fix is None:
@@ -443,12 +429,14 @@ def prepare_fix(repo: Path, opts, signatures, allowlist, *, spin: bool = False) 
         if fix.partial:
             return (f"{slug}: PARTIAL — prepared {len(fix.applied)} safe change(s) on '{FIX_BRANCH}', "
                     f"but {len(fix.manual)} confirmed finding(s) still need manual review "
-                    f"(`git -C {repo} diff {fix.base}...{FIX_BRANCH}`)") + manual_review_lines(fix.manual)
+                    f"(`git -C {repo} diff {fix.base}...{FIX_BRANCH}`)"
+                    ) + _signing_note(fix) + manual_review_lines(fix.manual)
         return (f"{slug}: prepared {len(fix.applied)} change(s) on '{FIX_BRANCH}' — review "
-                f"`git -C {repo} diff {fix.base}...{FIX_BRANCH}`, then `saw fix --pr` to open a PR")
+                f"`git -C {repo} diff {fix.base}...{FIX_BRANCH}`, then `saw fix --pr` to open a PR"
+                ) + _signing_note(fix)
     finally:
         if wt:
-            _git(repo, "worktree", "remove", "--force", str(wt))
+            gitutil.remove_worktree(repo, wt)
 
 
 def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
@@ -456,7 +444,7 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
     """`saw fix --pr` (and the `--remote` sweep): build the fix, then PUSH `security/auto-clean`
     and open/update one dedup'd PR. If the branch can't be pushed (read-only access), walks the
     fork → patch → issue fallback ladder. Returns an outcome string."""
-    slug = origin_slug(repo)
+    slug = gitutil.origin_slug(repo)
     if not slug:
         # No origin to PR against — still prepare the local branch so the work isn't lost.
         fix, outcome, wt = _build_fix(repo, opts, signatures, allowlist,
@@ -470,13 +458,13 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
                         ) + manual_review_lines(fix.manual)
             return _mark_partial(
                 f"no GitHub origin — prepared on '{FIX_BRANCH}'; add a remote and push to open a PR",
-                fix.partial) + manual_review_lines(fix.manual)
+                fix.partial) + _signing_note(fix) + manual_review_lines(fix.manual)
         finally:
             if wt:
-                _git(repo, "worktree", "remove", "--force", str(wt))
+                gitutil.remove_worktree(repo, wt)
 
     owner, name = slug.split("/", 1)
-    _git(repo, "fetch", "--quiet", "origin", default_branch(repo))
+    gitutil.fetch(repo, "origin", gitutil.default_branch(repo))
     fix, outcome, wt = _build_fix(repo, opts, signatures, allowlist, label=slug, spin=spin)
     try:
         if fix is None:
@@ -496,11 +484,10 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
         def _publish() -> str:
           with status(f"opening PR for {slug}…", enabled=spin):   # phase 3: push + PR / fallback
             # Token via GIT_ASKPASS (env), never in the URL/argv. Push the FIX_BRANCH ref.
-            with gitutil.github_https_auth(token) as (prefix, env):
-                pushed = _git(wt, "push", "--force", f"{prefix}{slug}.git",
-                              f"{FIX_BRANCH}:{FIX_BRANCH}", env=env).returncode == 0
-            if not pushed:
-                # No write access — fork→PR, else patch + de-duplicated issue.
+            if not gitutil.push_branch(wt, slug, FIX_BRANCH, token):
+                # Push rejected — usually no write access, but a branch that REQUIRES SIGNED
+                # COMMITS also rejects our (possibly unsigned) commit here. Either way, fall
+                # back: fork→PR, else patch + de-duplicated issue so the work is never lost.
                 forked = _fork_and_pr(wt, owner, name, base, fix.applied, fix.suspicious,
                                       fix.manual, token)
                 if forked:
@@ -516,7 +503,8 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
                 if not bits:
                     return f"{slug}: branch push failed (check token write scope)"
                 tag = "PARTIAL (manual review required) — " if fix.partial else ""
-                return f"{slug}: {tag}push rejected (no write access?) — " + "; ".join(bits) + "."
+                return (f"{slug}: {tag}push rejected (no write access, or the branch requires "
+                        f"signed commits?) — " + "; ".join(bits) + ".")
 
             # PARTIAL (#1183): the safe changes are pushed, but confirmed findings remain. Say so
             # in the title/body/label; the outcome carries 'PARTIAL' so the run exits non-zero.
@@ -525,29 +513,26 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
                      else "security: auto-remediate worm indicators")
             body = _pr_body(slug, fix.applied, fix.suspicious, fix.manual)
             tag = "PARTIAL (manual review required); " if partial else ""
-            existing = github_api.list_open_pulls(owner, name, FIX_BRANCH, token)
-            if existing:
-                pr = existing[0]
-                num = pr["number"]
-                # Refresh the rolling PR so its title/body/label reflect THIS run's residuals
-                # (idempotency, #1183 invariant #4) — the force-pushed branch alone wouldn't.
-                github_api.update_issue(owner, name, num, token, title=title, body=body)
-                _reconcile_partial_label(owner, name, num, partial, token)
-                return f"{slug}: {tag}updated existing PR #{num} ({pr.get('html_url','')}) — no duplicate"
-            pr = github_api.create_pull(owner, name, title=title, head=FIX_BRANCH, base=base,
-                                        body=body, token=token)
-            if pr and pr.get("number"):
-                _reconcile_partial_label(owner, name, pr["number"], partial, token)
-                return f"{slug}: {tag}opened PR #{pr['number']} ({pr.get('html_url','')})"
-            return f"{slug}: branch pushed but PR API call failed (network/SSL or token scope)"
+            # Open the rolling PR or refresh the existing one (idempotency, #1183 invariant #4) —
+            # dedup lives in github_api.open_or_update_pr; labels/outcome stay here.
+            result = github_api.open_or_update_pr(owner, name, head_branch=FIX_BRANCH, base=base,
+                                                  title=title, body=body, token=token)
+            if not result:
+                return f"{slug}: branch pushed but PR API call failed (network/SSL or token scope)"
+            _reconcile_partial_label(owner, name, result["number"], partial, token)
+            if result["action"] == "updated":
+                return (f"{slug}: {tag}updated existing PR #{result['number']} "
+                        f"({result.get('html_url','')}) — no duplicate")
+            return f"{slug}: {tag}opened PR #{result['number']} ({result.get('html_url','')})"
 
         # Single choke point: whatever branch _publish() returned, a PARTIAL fix is guaranteed to be
         # marked needs-review here (#1183 invariant #1) — no fallback path can silently pass clean —
-        # and the per-finding manual-review guidance is appended (#1184; empty for a full/clean fix).
-        return _mark_partial(_publish(), fix.partial) + manual_review_lines(fix.manual)
+        # and the per-finding manual-review guidance + any unsigned-commit warning are appended.
+        return (_mark_partial(_publish(), fix.partial)
+                + _signing_note(fix) + manual_review_lines(fix.manual))
     finally:
         if wt:
-            _git(repo, "worktree", "remove", "--force", str(wt))
+            gitutil.remove_worktree(repo, wt)
 
 
 # ── discard: the inverse of fix (`saw discard`) ──────────────────────────────────
@@ -558,21 +543,30 @@ def discard_branch(repo: Path) -> str:
     """Delete the local `security/auto-clean` branch and origin's copy, using the repo's own
     `origin` auth (SSH key / credential helper) — no GitHub API, so it works even when the
     API is unreachable. Deleting the remote branch auto-closes any PR opened from it."""
-    slug = origin_slug(repo) or str(repo).replace(str(Path.home()), "~")
+    slug = gitutil.origin_slug(repo) or str(repo).replace(str(Path.home()), "~")
     did: list[str] = []
-    if _git(repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{FIX_BRANCH}").returncode == 0:
-        if _git(repo, "branch", "-D", FIX_BRANCH).returncode == 0:
-            did.append("local")
-    if _git(repo, "ls-remote", "--exit-code", "--heads", "origin", FIX_BRANCH).returncode == 0:
-        did.append("remote (PR auto-closed)" if _git(repo, "push", "origin", "--delete",
-                   FIX_BRANCH).returncode == 0 else "remote delete FAILED")
-    return (f"{slug}: discarded {FIX_BRANCH} ({', '.join(did)})" if did
-            else f"{slug}: no '{FIX_BRANCH}' branch — nothing to discard")
+    failed: list[str] = []
+    if gitutil.ref_exists(repo, f"refs/heads/{FIX_BRANCH}"):
+        # Fail loud: a local `git branch -D` can be REFUSED (the branch is checked out — in the
+        # working tree or a leftover fix worktree), and swallowing that used to report success.
+        (did if gitutil.delete_branch(repo, FIX_BRANCH) else failed).append("local")
+    if gitutil.remote_has_branch("origin", FIX_BRANCH, repo=repo):
+        (did if gitutil.delete_remote_branch("origin", FIX_BRANCH, repo=repo)
+         else failed).append("remote")
+    if failed:
+        # Never claim a discard we didn't make. Note any arm that DID succeed so a partial is honest.
+        done = f"; deleted {', '.join(did)}" if did else ""
+        return (f"{slug}: FAILED to delete {FIX_BRANCH} ({', '.join(failed)}) — "
+                f"is it checked out?{done}")
+    if did:
+        note = " (PR auto-closed)" if "remote" in did else ""
+        return f"{slug}: discarded {FIX_BRANCH} ({', '.join(did)}){note}"
+    return f"{slug}: no '{FIX_BRANCH}' branch — nothing to discard"
 
 
 def discard_pr(repo: Path, token: str) -> str:
     """Close the open `security/auto-clean` PR on the repo's origin (API), leaving the branch."""
-    slug = origin_slug(repo)
+    slug = gitutil.origin_slug(repo)
     if not slug:
         return f"{str(repo).replace(str(Path.home()), '~')}: no GitHub origin — no PR to discard"
     return discard_remote_pr(slug, token)
@@ -582,12 +576,10 @@ def discard_remote_branch(slug: str, token: str) -> str:
     """Delete FIX_BRANCH on a remote repo by slug, with no local clone — `git push --delete`
     straight to the authed URL (git TLS, SSL-immune). Auto-closes any PR from the branch."""
     with gitutil.github_https_auth(token) as (prefix, env):
-        ls = subprocess.run(["git", "ls-remote", "--heads", f"{prefix}{slug}.git", FIX_BRANCH],
-                            capture_output=True, text=True, env=env, check=False)
-        if not ls.stdout.strip():
+        url = f"{prefix}{slug}.git"
+        if not gitutil.remote_has_branch(url, FIX_BRANCH, env=env):
             return f"{slug}: no '{FIX_BRANCH}' branch — nothing to discard"
-        ok = subprocess.run(["git", "push", f"{prefix}{slug}.git", "--delete", FIX_BRANCH],
-                            capture_output=True, text=True, env=env, check=False).returncode == 0
+        ok = gitutil.delete_remote_branch(url, FIX_BRANCH, env=env)
     return f"{slug}: deleted {FIX_BRANCH} (PR auto-closed)" if ok else f"{slug}: remote delete failed"
 
 
