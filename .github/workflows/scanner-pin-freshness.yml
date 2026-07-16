@@ -36,3 +36,9 @@ jobs:
           gh pr diff "$PR" --name-only > "$changed"
           gh pr diff "$PR"             > "$full"
           bash .github/scripts/check_pin_freshness.sh "$changed" "$full"
+      # Freshness only requires *a* bump on engine changes — it does NOT check that the two pin
+      # copies (worm-guard gate + release self-scan) AGREE. This closes that gap: both must pin the
+      # same SHA, so a bump can't land in one file and leave the other stranded (as #1138 vs #1193
+      # did). Repo-state check on the checked-out head — no PR diff needed.
+      - name: Enforce both scanner pins stay in sync
+        run: bash .github/scripts/check_pins_synced.sh
