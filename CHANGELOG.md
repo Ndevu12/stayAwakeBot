@@ -93,6 +93,12 @@ All notable changes to this project are documented here. The format is based on
   sync; the worm-guard gate and the release self-scan now pin the **same** current-main SHA. The
   pin is never the commit under test — a compromised release can't certify itself. Deliberate
   catch-up bump per the in-band pin-freshness cadence (#1172).
+- **Both scanner pins are now gated, so they can't silently drift apart again.** The drift above was
+  possible because the pin-freshness gate only required *a* bump on engine changes — it never checked
+  that the worm-guard gate's pin and the release self-scan's pin **agree**. A new
+  `check_pins_synced.sh` (single-sourced on the `PIN_FILES` set in `_pin_lib.sh`, unit-tested) fails
+  the required `pin-freshness` job whenever any pin carrier holds a different — or floating — SHA. A
+  bump must now update every carrier or CI goes red.
 
 ## [0.1.12] - 2026-07-15
 
