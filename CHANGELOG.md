@@ -6,6 +6,39 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+- **`saw fix` no longer reports a fix it didn't make when commit signing fails.** The fix is
+  built in a throwaway git worktree and committed to the `security/auto-clean` branch — but that
+  commit inherited the repo's `commit.gpgsign=true`, and when signing couldn't complete in the
+  non-interactive worktree (no agent/key/prompt) `git commit` failed. Its return code went
+  **unchecked**, so the failure was swallowed: `saw fix` printed *"prepared N change(s) on
+  'security/auto-clean'"* while the branch had **zero commits** — a phantom success with an empty
+  branch (which is also why `saw fix --pr` "worked" but the plain `saw fix` branch looked empty).
+  The commit is now checked; if signing can't complete it is retried **once with signing forced
+  off** so the review branch always receives the fix, and the operator is **warned** the commit is
+  unsigned (re-sign before pushing/merging if the repo enforces signed commits). A commit that
+  genuinely can't be made now reports an honest failure instead of an empty branch.
+
+### Changed
+- **All git operations are consolidated in one `core/git/` package, split per concern** —
+  `run` (the single subprocess runner, with a shared timeout + tolerant decoding), `auth`,
+  `query` (read-only), `merge` (evil-merge analysis), and now `write` (worktree · stage · commit ·
+  push · patch · fetch · branch, one file per operation). Every mutation goes through the checked
+  runner, so a failing `git add`/`commit`/`push` can no longer be silently ignored anywhere in the
+  remediation ladder. The security feature's `pr.py` no longer carries its own duplicate git runner.
+  The public API is unchanged — helpers are re-exported flat (`git.commit_fix(...)`,
+  `git.push_branch(...)`). The only intended output change is the signing fix above; as a side
+  effect, git subprocesses that `pr.py` previously ran **unbounded** now share the runner's
+  timeout (local ops 60s; network push/fetch/ls-remote a generous 180s) and tolerant decoding —
+  a hang/robustness hardening, not a functional change.
+- **`saw discard --branch` now reports a failed local branch delete instead of silently claiming
+  success.** If `git branch -D security/auto-clean` was refused (e.g. the branch is checked out in
+  a leftover fix worktree), the outcome used to omit it and could read "discarded" / "nothing to
+  discard" while the branch persisted; it now says `FAILED to delete … — is it checked out?` (the
+  remote arm already reported its failures). Part of the same no-silent-failures sweep.
+- The shareable **open-or-update-PR** mechanic (don't duplicate a rolling PR) now lives once in
+  `core.adapters.github_api.open_or_update_pr`, used by both the same-repo and cross-fork PR paths.
+
 ## [0.1.12] - 2026-07-15
 
 ### Added

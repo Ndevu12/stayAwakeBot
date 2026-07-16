@@ -209,6 +209,29 @@ def create_pull(owner: str, repo: str, title: str, head: str, base: str,
                    data={"title": title, "head": head, "base": base, "body": body})
 
 
+def open_or_update_pr(owner: str, repo: str, *, head_branch: str, base: str, title: str,
+                      body: str, token: str | None, head_owner: str | None = None) -> dict | None:
+    """Open a rolling PR from `head_branch`, or UPDATE the one that's already open instead of
+    duplicating it. Returns the PR dict augmented with `'action'` ('opened' | 'updated'), or
+    None if the API call failed. `head_owner` (a fork owner) makes it a cross-fork PR.
+
+    The shareable open-or-update mechanic — the security feature's `saw fix` (same-repo) and its
+    fork fallback (cross-fork) both route through this, so 'don't open a duplicate' is enforced
+    in ONE place. Editing the existing PR sends no notification (`update_issue`), which is what a
+    single rolling per-repo PR wants. Caller-specific concerns (labels, outcome strings) stay
+    with the caller; this only decides open-vs-update and performs it."""
+    existing = list_open_pulls(owner, repo, head_branch, token, head_owner=head_owner)
+    if existing:
+        pr = existing[0]
+        update_issue(owner, repo, pr["number"], token, title=title, body=body)
+        return {**pr, "action": "updated"}
+    head = f"{head_owner}:{head_branch}" if head_owner else head_branch
+    created = create_pull(owner, repo, title=title, head=head, base=base, body=body, token=token)
+    if created and created.get("number"):
+        return {**created, "action": "opened"}
+    return None
+
+
 def add_labels(owner: str, repo: str, number: int, labels: list[str],
                token: str | None, quiet: bool = False) -> list | None:
     """Add labels to an issue OR pull request (a PR is an issue). Idempotent — GitHub ignores

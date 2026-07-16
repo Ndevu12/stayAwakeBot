@@ -193,6 +193,19 @@ class TestDiscard(unittest.TestCase):
         d = _commit_repo(INFECTED_FILES)
         self.assertIn("nothing to discard", pr_submit.discard_branch(d))
 
+    def test_discard_branch_surfaces_local_delete_failure(self):
+        # Fail loud: if the branch is CHECKED OUT, `git branch -D` is refused — discard must say
+        # so, never claim "discarded"/"nothing to discard" while the branch still exists.
+        d = _commit_repo(INFECTED_FILES)
+        subprocess.run(["git", "-C", str(d), "checkout", "-q", "-b", pr_submit.FIX_BRANCH],
+                       check=True, capture_output=True)                 # now checked out
+        out = pr_submit.discard_branch(d)
+        self.assertIn("FAILED", out)
+        self.assertNotIn("discarded", out)                              # no false success
+        still = subprocess.run(["git", "-C", str(d), "rev-parse", "--verify", "--quiet",
+                                f"refs/heads/{pr_submit.FIX_BRANCH}"], capture_output=True)
+        self.assertEqual(still.returncode, 0)                           # branch is still there
+
     def test_discard_branch_routes_per_repo(self):
         d = _git_repo(INFECTED_FILES)
         with mock.patch.object(remediator.pr_submit, "discard_branch",
