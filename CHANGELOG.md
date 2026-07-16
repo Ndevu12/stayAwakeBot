@@ -6,6 +6,36 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- **`saw audit` now hunts host persistence by MECHANISM, not just by the current campaign's
+  names** — closing the gap that let a renamed next-wave variant (or a `GhostApproval`/`SymJacking`
+  write-redirect that lands a payload in one of your own config files) persist unnoticed. The
+  existing probes match reported IoCs by name (a specific runner, a specific rotation-wiper
+  service); these new ones match the *shape* that outlives any one campaign, so they still fire when
+  the names change. Three sinks are covered:
+  - **`~/.ssh/authorized_keys`** — the classic SSH-persistence target. A key entry that forces a
+    fetch-/decode-/scratch-dir command on connect is flagged as an active backdoor (**warning**);
+    a plain restricted key (rsync/borg/git-shell) is an **info** to eyeball; and a world-writable
+    `~/.ssh` or `authorized_keys` (which lets any local user or a redirected write add a key) is a
+    **warning**.
+  - **Shell startup files** (`.bashrc`/`.zshrc`/`.profile`/… and fish) — a line that downloads and
+    pipes/`eval`s code into a shell, decodes-then-executes, or runs a script out of a world-writable
+    scratch dir is flagged (**warning**). Ordinary tool init (`rbenv`/`pyenv`/`direnv`/`brew`) does
+    not fetch-and-run, so it stays clean.
+  - **Global git config** — a `core.fsmonitor` whose value fetch-/decode-execs or runs from a scratch
+    dir (git runs it on *every* operation), a `core.hooksPath` under a world-writable/scratch
+    directory, or any exec-capable key (aliases, filters, pagers, …) whose value fetch-/decode-execs
+    (**warning**). A legitimate external file-system monitor (Watchman / `rs-git-fsmonitor`) or a
+    `core.hooksPath` you set yourself is a gentle **info** to confirm, not an alarm. Repo-local
+    `.git/config` RCE is the scan-side complement, deliberately out of scope for this host-hygiene
+    command.
+
+  Because these are user-owned files with legitimate content, grading is **signal-strength based**
+  (an unambiguous backdoor shape warns; a review-worthy anomaly informs) rather than asserting
+  malware — and an *active* backdoor leads the existing **rotate-credentials-LAST** incident runbook,
+  since neutralizing persistence before rotation avoids the reported home-directory wiper. All checks
+  are read-only and degrade to nothing when a path/tool is absent.
+
 ## [0.1.13] - 2026-07-15
 
 ### Added

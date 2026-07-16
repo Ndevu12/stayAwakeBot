@@ -39,6 +39,7 @@ _HOSTILE_INPUTS = [
     ("${{ github.event.issue" + "x" * 60) * (_N // 80),   # nested-anchor backtrack stress
     "curl " * (_N // 5),                        # curl->interpreter spam (no pipe)
     "curl " * (_N // 10) + "| ",                # ...with a late pipe
+    "base64 -d " * (_N // 10),                  # base64-decode MULTI-ANCHOR spam (hygiene arm 4)
     "<dependency>" * (_N // 12),                # `<opener>` with no closer (maven pom.xml class)
     "/* " * (_N // 3),                          # `/*` with no closer (jsonc block-comment class)
     "<version>" + " " * _N, "<groupId>" + "\t" * _N,      # `<tag>` + whitespace body, no closer

