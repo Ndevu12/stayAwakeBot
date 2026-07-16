@@ -35,6 +35,23 @@ All notable changes to this project are documented here. The format is based on
   malware — and an *active* backdoor leads the existing **rotate-credentials-LAST** incident runbook,
   since neutralizing persistence before rotation avoids the reported home-directory wiper. All checks
   are read-only and degrade to nothing when a path/tool is absent.
+- **`saw scan` now flags a repo that ships a write-redirect symlink** — the scan-side,
+  *before-you-run-anything* complement to the `saw audit` checks above, closing the same
+  `GhostApproval` / `SymJacking` class from the other end (#1161). A committed symlink (file or
+  directory) whose target escapes the repo into a **$HOME/system write-sink** — `~/.ssh/authorized_keys`
+  or an SSH key, a shell / editor / REPL startup file, git/cloud/service credentials, a GPG keyring, a
+  PATH executable dir (`~/.local/bin`), or an OS-persistence directory (LaunchAgents, systemd,
+  autostart, cron, `/etc/profile.d`) — is reported **INFECTED (critical)**. When a tool or coding agent
+  is asked to write the link's path, it writes *through* the link into that sink (planting an attacker
+  SSH key, a shell backdoor, a persistence unit) before you're meaningfully prompted. The link is
+  **never followed** (targets stay unscanned; loops and dangling links are safe) — only its metadata is
+  inspected; a **dangling** link (the usual attack state, where your write *creates* the target) is
+  still caught, and matching is **case-insensitive** so a `~/.SSH` flip can't evade on macOS. Scoped to
+  a precise, path-component-bounded set of sinks a repo would *never* legitimately point at: a config
+  that also exists as a shared **project** artifact (`.npmrc`, `.vscode/`, `.docker/config.json`) is
+  deliberately excluded, so a polyrepo workspace sharing those via symlink stays clean — as does an
+  escaping non-sink link (a venv `bin/python` shim) or a link to the repo's *own* dotfile. The
+  pre-existing directory-escape scan-evasion heuristic is unchanged.
 
 ## [0.1.13] - 2026-07-15
 
