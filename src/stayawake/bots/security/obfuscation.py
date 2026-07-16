@@ -95,16 +95,21 @@ _CONSTRUCTOR_EXEC = re.compile(r"\[\s*[\"']constructor[\"']\s*\]\s*\(")
 _NEW_CLONE_PREFIX = re.compile(r"\bnew\s+[\w$.)\]]*\s*$")
 
 
-def _has_exec_sink(s: str) -> bool:
+def _has_exec_sink(s: str, strict: bool = False) -> bool:
     """True if `s` contains a dynamic-execution sink: any literal _EXEC_SINK construct,
     or a reflective `['constructor'](` call that is NOT a `new <expr>['constructor'](...)`
     polymorphic clone (the benign idiom the worm never uses). Every constructor-call
     occurrence is checked, so a `new`-clone earlier in the text can't mask a real sink
-    later."""
+    later.
+
+    `strict=True` DROPS the `new`-clone carve-out — every `['constructor'](` counts. This is
+    for gates that must not KEEP a possibly-hostile reflective constructor (e.g. deciding a
+    surgically-excised file is benign enough to auto-clean): there, deferring on the benign
+    idiom is a safe false-positive, whereas trusting it could pass an RCE hidden in kept code."""
     if _EXEC_SINK.search(s):
         return True
     return any(
-        not _NEW_CLONE_PREFIX.search(s[max(0, m.start() - 48):m.start()])
+        strict or not _NEW_CLONE_PREFIX.search(s[max(0, m.start() - 48):m.start()])
         for m in _CONSTRUCTOR_EXEC.finditer(s)
     )
 # A long unbroken base64-ish run not already broken up by code/prose punctuation.

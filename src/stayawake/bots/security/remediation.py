@@ -28,11 +28,13 @@ from stayawake.bots.security.obfuscation import (
 )
 
 # remediation id → internal action. NOTE: the code-loader family (`strip-appended-payload`)
-# is deliberately ABSENT here — those findings are NEVER surgically edited (that is what
-# corrupted valid files: a textual transform can't reliably excise a polymorphic payload).
-# Instead they go through git RECOVERY (restore the file's last clean committed version) or
-# are deferred to manual review — see classify_recovery(). The actions below are the
-# reliable, structure-safe ones: whole-file quarantine, exact-line / JSON-key removal.
+# is deliberately ABSENT here — those findings are NEVER fixed by an UNBOUNDED textual transform
+# (that is what corrupted valid files: a substring/regex edit can't reliably excise a polymorphic
+# payload). They go through git RECOVERY (restore the last clean committed version), else the ONE
+# narrowly-gated surgical case — excising a payload hidden behind a concealment SEAM on a line of
+# real code (`_seam_strip`: a provable separator, a packed+confirmed suffix, a non-packed result,
+# re-proven at apply time, original quarantined) — else manual review. See classify_recovery().
+# The actions below are the reliable, structure-safe ones: whole-file quarantine, line/JSON-key removal.
 _ACTIONS = {
     "quarantine-file": "quarantine",
     "quarantine-dir": "quarantine",
@@ -219,13 +221,18 @@ def apply(root: Path, changes: list[Change], quarantine: Path) -> list[Change]:
 
 @dataclass(frozen=True)
 class Recovery:
-    """A reliable fix: restore `path` to its last clean committed version. `diff` is a
-    redaction-aware preview (payload never printed raw); `clean_text` is what gets written."""
+    """A reliable fix: `clean_text` is what gets written. Normally that is the file's last clean
+    committed version (a git restore); when `excised` is True it is instead the WORKING file with a
+    concealment-hidden same-line payload surgically cut out (see `_seam_strip`) — every other byte
+    preserved, so no legit edit is lost. `diff` is a redaction-aware preview (payload never printed
+    raw). `excised` recoveries carry an extra apply-time gate (the result must not itself be packed).
+    `clean_rev` is the source commit for a restore, or a marker for an excision."""
     path: str
     clean_rev: str
     label: str          # e.g. 'a1b2c3d ("chore: tailwind v4", 2026-05-12)'
     diff: str
     clean_text: str
+    excised: bool = False
 
 
 @dataclass(frozen=True)
@@ -343,9 +350,83 @@ def _line_is_pure_payload(ln: str, content_sig) -> bool:
     return all(_stmt_is_payload(stmt, content_sig) for stmt in ln.split(";"))
 
 
+# A concealment SEAM: a run of this many consecutive concealment chars mid-line. Hand-authored
+# code never puts real code, 16+ hiding chars, then MORE code — so a seam is a provable boundary
+# between legit code and an appended payload, which is exactly what the general same-line case
+# (#1185) lacks. The worm uses hundreds; 16 is far above any legit indentation/alignment and far
+# below the worm's runs, so the exact value is not load-bearing (the multi-condition gate below is).
+_MIN_CONCEALMENT_SEAM = 16
+
+
+def _concealment_seam(line: str, content_sig) -> str | None:
+    """If `line` hides a payload behind a whitespace-concealment seam —
+    `<clean prefix><concealment run ≥ _MIN_CONCEALMENT_SEAM><packed confirmed-payload suffix>` —
+    return the CLEAN PREFIX to keep (payload excised). Else None.
+
+    This is the ONE same-line subclass that is provably separable, and every clause is a guard:
+      * a substantial CONCEALMENT run is the separator the general same-line case lacks — the split
+        point is unambiguous, not a byte-boundary guess;
+      * the PREFIX must be non-blank and carry no payload (`_carries_payload`) — we keep it verbatim,
+        so it must already be clean;
+      * the SUFFIX must be a dense packed blob (`_is_packed_line`) that carries a CONFIRMED loader
+        LITERAL (`content_sig`, NOT the broader `_carries_payload`) — requiring the specific worm
+        fingerprint, not a generic dynamic-exec sink, is what stops a legit dense line that merely
+        USES `atob`/`eval`/`Function` (e.g. a hand-aligned inlined-asset decoder) from being excised
+        as if it were payload (adversarial catch — the exec-sink gate dropped real code).
+    The residual (same irreducible class as #1189/#1190): a genuinely packed suffix that carries an
+    actual worm literal yet is legit minified code would be excised — bounded by the caller's
+    `analyze_file` 'result is normal, not packed' gate, the re-scan-to-confirm, and the quarantine."""
+    n, i = len(line), 0
+    while i < n:
+        if not _is_concealment(line[i]):
+            i += 1
+            continue
+        j = i
+        while j < n and _is_concealment(line[j]):
+            j += 1
+        if j - i >= _MIN_CONCEALMENT_SEAM:      # the first real seam is the boundary
+            prefix, suffix = line[:i], line[j:]
+            if (prefix.strip() and not _carries_payload(prefix, content_sig)
+                    and _is_packed_line(suffix) and content_sig(suffix)):
+                return prefix
+            return None                          # the seam didn't validate → no safe split
+        i = j
+    return None
+
+
+# The worm's require-SHIM: an ESM file has no CommonJS `require`, so before a `require`-based
+# payload it prepends `import { createRequire } from 'module'; const require = createRequire(
+# import.meta.url);`. Matched ONLY at the very start of the file (the worm prepends it). Kept
+# tolerant of quote/`node:module`/spacing variants but anchored on the two exact statements.
+_WORM_SHIM = re.compile(
+    r"^\s*import\s*\{\s*createRequire\s*\}\s*from\s*['\"](?:node:)?module['\"]\s*;?[ \t]*\r?\n"
+    r"(?:[ \t]*\r?\n)*"
+    r"[ \t]*const\s+require\s*=\s*createRequire\s*\(\s*import\.meta\.url\s*\)\s*;?[ \t]*\r?\n"
+    r"(?:[ \t]*\r?\n)*"
+)
+
+
+def _worm_shim_block(text: str) -> str | None:
+    """The leading require-shim block the worm prepends (see `_WORM_SHIM`), or None. Returns the
+    exact leading text (including its trailing blank lines) so it can be removed verbatim."""
+    m = _WORM_SHIM.match(text)
+    return m.group(0) if m else None
+
+
+def _shim_is_dead(rest: str) -> bool:
+    """True when the require-shim is UNUSED by `rest` (the file minus the shim, payload already
+    excised) — no reference to `require`/`createRequire` remains. Removing an unused binding is a
+    semantic no-op, so this is the only condition under which excising the shim is provably safe;
+    a config that legitimately calls `require(...)` keeps its shim. Conservative (a substring match
+    in a comment/string counts as 'used' → keep the shim) — we only ever remove a provably-dead one."""
+    return "require" not in rest and "createRequire" not in rest
+
+
 def _safe_to_recover(work: str, clean: str, content_sig) -> bool:
-    """True ONLY when restoring `clean` provably loses no legitimate code. Every requirement
-    is a guard the adversarial passes proved necessary:
+    """True ONLY when restoring `clean` (a whole clean COMMITTED version) provably loses no
+    legitimate code. This is the git-RESTORE proof; the surgical-excision path re-proves itself by
+    re-running `_seam_strip`, so this stays deliberately narrow. Every requirement is a guard the
+    adversarial passes proved necessary:
 
       * the SOLE diff is ADDED lines — no clean line modified or deleted (a modified line
         could carry interleaved legit edits we can't separate), AND
@@ -360,7 +441,7 @@ def _safe_to_recover(work: str, clean: str, content_sig) -> bool:
     legit statement concatenated with an appended blob (`module.exports=runServer;<blob>`) ride
     along and be dropped (#1190). The per-statement gate closes that. Conservative by design: a
     payload split across short bootstrap lines, or any line with a readable non-payload statement,
-    defers to manual rather than risk co-located real code."""
+    defers to manual (the concealment-seam same-line case is handled by the excision path instead)."""
     w, c = work.splitlines(), clean.splitlines()
     saw_payload = False
     for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(a=c, b=w, autojunk=False).get_opcodes():
@@ -416,10 +497,84 @@ def _recovery_diff(work: str, clean: str, content_sig, context: int = 1) -> str:
     return "\n".join(out)
 
 
+def _seam_strip(work: str, ext: str, content_sig) -> str | None:
+    """Build the payload-EXCISED version of `work`: every line hiding a payload behind a
+    concealment seam (`_concealment_seam`) is cut back to its clean prefix; EVERY OTHER BYTE is
+    preserved — so, unlike a git restore of an older revision, this can never drop a legit edit
+    made since infection. Returns the stripped text, or None when there is nothing to cut or the
+    result isn't provably safe. Gates (each independently necessary):
+      * ≥1 seam was excised, AND
+      * the result carries NO payload (`_carries_payload` — the loader is gone), AND
+      * the result does NOT itself read as packed/obfuscated (`analyze_file`) — this rejects a
+        genuinely minified/packed file (where the excised suffix could be legit dense content) and
+        confines the mechanism to hand-authored source/config the worm appended to, AND
+      * the result is a SUBSEQUENCE of the working file — we only ever removed bytes, never
+        fabricated any.
+    When a payload seam is excised, a now-DEAD require-shim the worm prepended is removed too
+    (`_worm_shim_block` + `_shim_is_dead`) — a semantic no-op that restores the original byte-for-
+    byte; a shim a config actually uses is kept. Deterministic, so apply_recovery re-proves the
+    excision by simply re-running this on the on-disk file and requiring the same result; the
+    original is quarantined first, so a mis-cut is recoverable."""
+    changed = False
+    out: list[str] = []
+    for raw in work.splitlines(keepends=True):
+        body = raw.rstrip("\r\n")
+        eol = raw[len(body):]
+        prefix = _concealment_seam(body, content_sig)
+        if prefix is not None:
+            out.append(prefix + eol)      # keep the clean prefix + original line ending
+            changed = True
+        else:
+            out.append(raw)
+    if not changed:
+        return None                        # no concealment-seam payload here → not our pattern
+    stripped = "".join(out)
+    # With the payload gone, drop the worm's require-shim IFF nothing left uses `require` — an
+    # unused binding, so removing it can't change behaviour (a config that calls require keeps it).
+    shim = _worm_shim_block(stripped)
+    if shim is not None and _shim_is_dead(stripped[len(shim):]):
+        stripped = stripped[len(shim):]
+    if _carries_payload(stripped, content_sig):
+        return None                        # excision didn't fully remove the loader → not safe
+    if _has_exec_sink(stripped, strict=True):
+        # We KEEP the prefix and every other line verbatim; a dynamic-exec sink surviving in that
+        # kept code — including a reflective `['constructor'](` the normal detector carves out as a
+        # benign clone — could be a separate RCE the excision would auto-"clean" past manual review.
+        # Refuse: only auto-clean when what remains has no *detectable* exec sink (adversarial catch).
+        # NOTE: this is NOT a general RCE guard — it is the same token-blacklist the whole scanner
+        # uses (`_has_exec_sink`), so a sink it can't see (`require('vm')`, dot-form
+        # `.constructor.constructor`, computed/split `eval`, dynamic `import`) would still slip
+        # through in kept code. That is the pre-existing scanner blind spot, not new here; the PR
+        # this fix lands in is human-reviewed, and the original is quarantined.
+        return None
+    if analyze_file(stripped, ext):        # result still looks packed → not a clean hand-authored file
+        return None
+    if not _is_subsequence(stripped, work):
+        return None                        # fabricated a byte → refuse (defensive; can't happen here)
+    return stripped
+
+
 def classify_recovery(repo, finding, content_sig):
-    """Decide how to remediate ONE (confirmed) code-loader finding: a Recovery (git restore)
-    when it is PROVABLY safe (a clean committed version exists and the only delta is appended
-    loader lines), else a Manual with a specific reason + recommended action. Never edits."""
+    """Decide how to remediate ONE (confirmed) code-loader finding — always to a CLEAN COMMITTED
+    version, so the result is trusted history rather than anything we synthesized. Two proofs that
+    restoring the last clean first-parent version is safe:
+
+      1. `_safe_to_recover` — the delta is a provably payload-only append (the ordinary shape), or
+      2. a concealment-seam EXCISION of the working file REPRODUCES that clean version byte-for-byte
+         (`_seam_strip(work) == clean_text`) — the worm's config shape (a payload hidden after a
+         whitespace seam on a real line, plus a prepended require-shim) isn't a clean append, so (1)
+         defers it; but if excising the seam + a now-dead shim yields EXACTLY the committed clean
+         file, restoring it loses nothing and keeps nothing INJECTED — anything the worm added to
+         the kept code (a stray edit, or an RCE the scanner can't see) would make the excised result
+         DIFFER from the ancestor and is therefore refused. This is what makes the excision safe
+         without a complete exec-sink detector. (It does trust committed history to the same degree
+         a plain `git checkout` does: a scanner-invisible payload ALREADY committed to the mainline
+         clean version would be restored as-is — the same irreducible residual the restore path has,
+         reachable only by an attacker who already controls the repo's commits.)
+
+    Else defer to Manual (with a specific reason). A clean committed ancestor is REQUIRED for both
+    paths, so no-history / born-infected / untracked findings defer. Never edits a file except by
+    writing a re-proven result through apply_recovery."""
     root = Path(repo)
     path, ext = finding.path, _ext(finding.path)
     line = getattr(finding, "line", None)
@@ -462,15 +617,22 @@ def classify_recovery(repo, finding, content_sig):
                           f"(test/research data). If so, allowlist `{sig}` for `{path}`.", line)
 
         sha, clean_text = clean
+        meta = gitutil.commit_meta(repo, sha)
+        label = f'{sha[:7]} ("{_short(meta.get("subject", ""), 40)}", {meta.get("date", "")[:10]})'
         if _safe_to_recover(work, clean_text, content_sig):
-            meta = gitutil.commit_meta(repo, sha)
-            label = f'{sha[:7]} ("{_short(meta.get("subject", ""), 40)}", {meta.get("date", "")[:10]})'
             return Recovery(path, sha, label, _recovery_diff(work, clean_text, content_sig), clean_text)
+        # Excision, corroborated by the clean ancestor: only when the payload-stripped working file
+        # equals `clean_text` EXACTLY. (`_seam_strip` returns None when there is no safe seam, and
+        # None never equals a real clean_text, so a no-seam file falls through to Manual.)
+        if _seam_strip(work, ext, content_sig) == clean_text:
+            return Recovery(path, sha, label, _recovery_diff(work, clean_text, content_sig),
+                            clean_text, excised=True)
         return Manual(path, sig, LEGIT_CHANGES,
-                      f"Payload shares a line with real code — can't auto-separate it safely. Delete "
-                      f"just the payload run from that line, keeping the rest. Note `git checkout "
-                      f"{sha[:7]} -- {path}` reverts the ENTIRE file to {sha[:7]} (diff it first so you "
-                      f"don't lose other edits made since then).", line)
+                      f"Payload shares a line with real code and the payload-stripped file doesn't "
+                      f"match a clean commit — can't auto-separate it safely. Delete just the payload "
+                      f"run from that line, keeping the rest. Note `git checkout {sha[:7]} -- {path}` "
+                      f"reverts the ENTIRE file to {sha[:7]} (diff it first so you don't lose other "
+                      f"edits made since then).", line)
     except Exception:  # noqa: BLE001 — never let one file's history quirk abort the sweep
         return Manual(path, sig, INSPECT_FAILED,
                       "Could not read this file's git history to find a clean version. Inspect it "
@@ -478,30 +640,46 @@ def classify_recovery(repo, finding, content_sig):
 
 
 def apply_recovery(repo, rec: Recovery, quarantine: Path, content_sig) -> bool:
-    """Restore the file to its clean committed version (after backing up the infected one).
-    Because we write a real committed blob, the file is never left syntactically corrupt.
+    """Write `rec.clean_text` (after backing up the infected file), re-proving safety against the
+    bytes on disk NOW — proven independently of the planner, so a stale/mismatched `clean_text`
+    can never slip through — and reverting if the write doesn't verify.
 
-    Positive post-conditions (verify-or-refuse/revert, proven independently of the planner so a
-    stale or mismatched `clean_text` can never slip through):
-
-      * BEFORE writing, re-prove against the file on disk NOW that `clean_text` is exactly 'the
-        working file with only payload removed' — `_safe_to_recover(current, clean_text)` (no
-        dropped legit byte) AND `_is_subsequence(clean_text, current)` (no fabricated byte).
-      * AFTER writing, the restored file MUST carry neither a loader literal nor a dynamic-exec
-        sink (`_carries_payload`) and must match `clean_text` byte-for-byte, else the original
-        is put back."""
+    BEFORE writing, the pre-proof depends on how `clean_text` was derived:
+      * a git RESTORE (`rec.excised` is False): the delta must be provably payload-only
+        (`_safe_to_recover`) AND `clean_text` a subsequence of the file (`_is_subsequence`, no
+        fabricated byte).
+      * a surgical EXCISION (`rec.excised`): re-run the deterministic `_seam_strip` on the CURRENT
+        file — it must reproduce `clean_text` exactly. That single equality re-checks every gate
+        (each seam still validates, the shim is still dead, the result carries no payload and is
+        not packed, subsequence) against the live bytes; if the file changed since classify, the
+        strip differs and we refuse.
+    AFTER writing, the restored file must match `clean_text` byte-for-byte and carry neither a
+    loader literal nor an exec sink (`_carries_payload`), else the original is put back."""
     root = Path(repo)
     target = root / rec.path
+    if not rec.clean_text or target.is_symlink() \
+            or not target.resolve().is_relative_to(root.resolve()):
+        # Refuse an empty result, and NEVER write through a symlink or outside the worktree:
+        # `write_text` follows the link (could clobber a file outside the worktree) and `_backup`
+        # skips symlinks, so the quarantine + verify-or-revert net would be dead. The `resolve()`
+        # containment check also closes a symlinked ANCESTOR dir or a `..` in the path, so this
+        # write-confinement is self-contained here rather than relying on how the caller sourced
+        # the path. A symlinked / escaping finding defers to manual.
+        return False
     if not target.exists() or _carries_payload(rec.clean_text, content_sig):
         return False                      # never write a version that still carries the payload
     current = target.read_text(encoding="utf-8", errors="replace")
-    # No legit byte dropped (delta is provably payload-only) and no fabricated byte (clean_text
-    # is a subsequence of what's on disk). Either failing means clean_text is not 'current minus
-    # payload' → refuse rather than risk reverting legitimate work.
-    if not _safe_to_recover(current, rec.clean_text, content_sig):
-        return False
-    if not _is_subsequence(rec.clean_text, current):
-        return False
+    if rec.excised:
+        if _seam_strip(current, _ext(rec.path), content_sig) != rec.clean_text:
+            return False                  # the canonical strip no longer reproduces it → refuse
+    else:
+        # No legit byte dropped (delta provably payload-only) and no fabricated byte. Either
+        # failing means clean_text is not 'current minus payload' → refuse rather than risk
+        # reverting legitimate work.
+        if not _safe_to_recover(current, rec.clean_text, content_sig):
+            return False
+        if not _is_subsequence(rec.clean_text, current):
+            return False
     _backup(root, rec.path, quarantine)
     target.write_text(rec.clean_text, encoding="utf-8")
     restored = target.read_text(encoding="utf-8", errors="replace")
