@@ -7,6 +7,24 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **The scanner now recognizes several reflective / dynamic ways of executing code that the
+  classic `eval`/`Function`/`atob` set missed** — surfaced as **heuristic (SUSPICIOUS)** signals, so
+  they inform without failing CI or triggering auto-remediation. Our own adversarial verification
+  (of the config-payload excision) kept exposing these as scanner blind spots: the Function
+  constructor reached through the **prototype chain** (a double-`constructor` access, in any
+  dot/bracket mix), a dangerous global reached through a **computed string key**, a timer scheduled
+  with a **string body**, Node's **vm context-run**, and a **`Reflect` apply/construct** whose target
+  is the eval or Function global. Because this detector is shared, the improvement sharpens **both**
+  the scanner *and* the recovery engine's "is this committed version actually clean?" yardstick.
+
+  Chosen for **strong-malware-signal / rare-in-legit-code**, and deliberately *not* comprehensive:
+  the common-and-often-legit forms (bare dynamic `import()`, a plain `child_process`/`vm` require
+  with no exec call, a timer given a function) are **not** flagged, and a determined attacker can
+  still split a token to evade any static check — the honest, documented limit (the durable lever
+  remains the density/entropy anomaly). The computed-key form is matched **case-sensitively** so an
+  ordinary lowercase data key is never mistaken for the global, the double-constructor form needs no
+  `new`-clone carve-out (a double access is always the Function constructor), and every added form
+  ships with legit counter-examples proving it stays clean.
 - **`saw fix` now auto-cleans a payload hidden behind a whitespace-concealment seam on a line of
   real code, instead of always deferring it to manual review — when, and only when, doing so
   reproduces a clean committed version exactly.** The worm's favourite shape on a config file

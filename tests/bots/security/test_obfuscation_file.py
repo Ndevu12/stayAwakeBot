@@ -227,6 +227,60 @@ class TestWholeFileObfuscation(unittest.TestCase):
         self.assertTrue(analyze_file("var f=q['constructor']('return 1');\n", ".js"))
         self.assertTrue(analyze_file("new Date(), x['constructor'](decoded);\n", ".js"))
 
+    # ── Reflective / dynamic exec sinks the classic set missed (adversarial-verification
+    #    follow-up): high-signal, rare-in-legit forms, surfaced as HEURISTIC (SUSPICIOUS). ──
+    def test_dot_form_double_constructor_flagged(self):
+        # The Function constructor reached through the prototype CHAIN (dot form or any dot/bracket
+        # mix) — the gap the single bracket-constructor arm missed. A DOUBLE access is always Function.
+        self.assertTrue(analyze_file("const f=[].constructor.constructor('return process')();\n", ".js"))
+        self.assertTrue(analyze_file("var g=x.constructor['constructor']('code')();\n", ".js"))
+        self.assertTrue(analyze_file("y['constructor'].constructor(payload)();\n", ".js"))
+
+    def test_computed_key_dangerous_global_flagged(self):
+        # A dangerous global reached through a computed string key AND CALLED hides WHICH global
+        # runs. A CALL is required, so a bare registry lookup (see the FP test) stays clean.
+        self.assertTrue(analyze_file("window['eval'](p);\n", ".js"))
+        self.assertTrue(analyze_file("globalThis['Function']('return 1')();\n", ".js"))
+
+    def test_string_body_timer_flagged(self):
+        # A GLOBAL setTimeout/setInterval with a STRING/template body is the deprecated eval-form
+        # (a member `.setTimeout('30s')` duration setter is excluded — see the FP test).
+        self.assertTrue(analyze_file("setTimeout('runEvil()', 0);\n", ".js"))
+        self.assertTrue(analyze_file("setInterval(`tick()`, 100);\n", ".js"))
+
+    def test_reflect_and_vm_exec_flagged(self):
+        self.assertTrue(analyze_file("Reflect.apply(eval, null, [s]);\n", ".js"))
+        self.assertTrue(analyze_file("Reflect.construct(Function, [body]);\n", ".js"))
+        # `runInThisContext` (run in the current global) is vm-specific; bare `runInContext` is NOT
+        # matched — lodash ships a public `_.runInContext()`, so it would false-positive.
+        self.assertTrue(analyze_file("require('vm').runInThisContext(code);\n", ".js"))
+
+    def test_renamed_loader_via_dot_constructor_surfaces(self):
+        # End-to-end: a renamed loader whose ONLY tell is a dot-form Function-constructor reach
+        # (no literal fingerprint, short lines) now surfaces as an obfuscation finding.
+        variant = ("const cfg={plugins:['@tailwindcss/postcss']};\nexport default cfg;\n"
+                   "const run=[].constructor.constructor(seed);\nrun();\n")
+        self.assertIn(OBF, _scan({"postcss.config.mjs": variant}))
+
+    def test_reflective_exec_false_positive_boundaries_clean(self):
+        # The FP boundaries the case-sensitivity + call-required + global-only + carve-out design
+        # protects — including the realistic collisions an adversarial FP pass surfaced:
+        for code in (
+            "const n = obj.constructor.name;\n",       # single .constructor access, no call
+            "export default El.constructor;\n",        # single .constructor reference
+            "const h = handlers['function'];\n",       # lowercase 'function' DATA key, not the global
+            "const f = registry['Function'];\n",       # bare registry LOOKUP of 'Function' (no call)
+            "const g = visitors['eval'];\n",           # bare AST-visitor lookup of 'eval' (no call)
+            "setTimeout(() => tick(), 100);\n",        # timer with a function, not a string
+            "client.setTimeout('30s');\n",             # MEMBER timer with a string DURATION, not code
+            "job.setInterval('*/5 * * * *', run);\n",  # MEMBER setInterval with a cron string
+            "const _ = require('lodash').runInContext();\n",   # lodash's runInContext, not vm
+            "Reflect.apply(myFunc, ctx, args);\n",     # Reflect.apply on a normal function
+            "const vm = require('vm');\n",             # vm imported but no exec call
+            "return new o['constructor'](o.props);\n", # polymorphic same-type clone (new-prefixed)
+        ):
+            self.assertFalse(analyze_file(code, ".ts"), code)
+
     def test_vendored_and_generated_paths_suppressed(self):
         arr = "var a=[" + ",".join(["0x68"] * 40) + "];String.fromCharCode(127)"
         for path in ("lib/app.min.js", ".pnp.cjs", ".yarn/releases/yarn.cjs",
