@@ -66,28 +66,46 @@ from dataclasses import dataclass
 
 # A numeric array literal of >=8 elements, decimal or hex — the charcode/byte shuffler.
 _NUM_ARRAY = re.compile(r"\[\s*(?:0x[0-9a-fA-F]+|\d{1,3})\s*(?:,\s*(?:0x[0-9a-fA-F]+|\d{1,3})\s*){7,}\]")
-# Dynamic-execution sinks that turn decoded bytes back into running code.
+# Dynamic-execution sinks that turn decoded bytes back into running code. IGNORECASE-safe forms
+# only (constructs with no common case-variant collision); the case-SENSITIVE reflective forms live
+# in _REFLECTIVE_EXEC below. Beyond the classic eval/Function/atob/fromCharCode: vm's
+# run-in-THIS-context (running code in the current global — a strong signal, and NOT a lodash
+# method, unlike bare `runInContext`), and a Reflect apply/construct whose target is the eval or
+# Function global. Surfaced as a HEURISTIC obfuscation verdict (SUSPICIOUS).
 _EXEC_SINK = re.compile(
     r"\beval\s*\(|new\s+Function\s*\(|\bFunction\s*\(\s*[\"']|\batob\s*\(|"
-    r"String\s*[.\[]\s*[\"']?fromCharCode|global\s*\[\s*['\"]!['\"]\s*\]\s*=",
+    r"String\s*[.\[]\s*[\"']?fromCharCode|global\s*\[\s*['\"]!['\"]\s*\]\s*=|"
+    r"\brunInThisContext\s*\(|"
+    r"\bReflect\s*\.\s*(?:apply|construct)\s*\(\s*(?:eval|Function)\b",
     re.IGNORECASE,
 )
-# Reflective Function-constructor smuggling: `x['constructor'](decoded)` reaches the
-# Function constructor through a bracket-string key, name-agnostically — so the worm's
-# exec step (#1053) survives renaming the literal `sfL`/`_$_`/`global['!']` fingerprints.
-# This is a DEFENSE-IN-DEPTH catch of the lazy variant, not a full closure: the same
-# capability is reachable by a computed key `(function(){})[k](code)`, the dot form
-# `[].constructor.constructor(code)`, `require('vm').runInThisContext`, or bare
-# `Function(code)()` — none of which any token blacklist can durably cover. The real
-# durable lever is the Tier-2 density anomaly, tracked separately.
-#
-# Gated apart from _EXEC_SINK (see _has_exec_sink) so we can carve out the one broad
-# benign collision: the polymorphic same-type clone `new <expr>['constructor'](...)`
-# used by value objects / ORM entities / immutable records (and their tests). The worm
-# NEVER prefixes with `new` (it calls the smuggled Function as a plain function on a
-# decoded variable), so excluding a `new`-prefixed reflective constructor drops that
-# false positive with zero loss of the catch. Plain `obj['constructor'].name` access
-# (no call) never matches — the arm requires `]` immediately followed by `(`.
+# One reflective access to the `constructor` property — via a dot OR a bracket-string key.
+_CTOR_ACCESS = r"(?:\.\s*constructor\b|\[\s*[\"']constructor[\"']\s*\])"
+# Reflective sinks the literal set misses, kept CASE-SENSITIVE on purpose (the real globals are
+# `eval`/`Function`, the keyword is `constructor`; a lowercase `function` key is DATA, and a
+# wrong-cased `SETTIMEOUT` is non-functional). Each requires a CALL / global position so an ordinary
+# lookup or member method is never mistaken for an exec (the FP fixes the adversarial pass found):
+#   • a dangerous global reached through a computed string key AND CALLED — `x['eval'](…)` — hides
+#     WHICH global runs (a bare `handlers['Function']` registry lookup is NOT flagged);
+#   • a DOUBLE constructor access then a call (`…constructor…constructor(`) — the constructor of the
+#     constructor is the Function global → arbitrary code, in any dot/bracket mix; always Function,
+#     so unlike the single-constructor clone below it needs no `new`-carve-out;
+#   • a GLOBAL timer given a STRING/template body — `set(Timeout|Interval)('code', …)` — the
+#     deprecated eval-form. The `(?<![.\w$])` keeps it to the global, so a member
+#     `client.setTimeout('30s')` / `job.setInterval(cron)` duration setter is NOT flagged.
+# Still not a full closure: a split-token/runtime-built key evades any token check; the durable
+# lever is the Tier-2 density anomaly.
+_REFLECTIVE_EXEC = re.compile(
+    r"\[\s*[\"'](?:eval|Function)[\"']\s*\]\s*\("
+    r"|" + _CTOR_ACCESS + r"\s*" + _CTOR_ACCESS + r"\s*\("
+    r"|(?<![.\w$])set(?:Timeout|Interval)\s*\(\s*[\"'\x60]")
+# Reflective Function-constructor smuggling via a SINGLE bracket-string key: reaches the Function
+# constructor name-agnostically, so the worm's exec step (#1053) survives renaming the literal
+# `sfL`/`_$_`/`global` fingerprints. Gated apart from _EXEC_SINK (see _has_exec_sink) so we carve
+# out the one broad benign collision: the polymorphic same-type clone (a `new`-prefixed reflective
+# constructor) used by value objects / ORM entities / immutable records. The worm NEVER prefixes
+# with `new`, so excluding that drops the FP with zero loss. Plain `.name` access (no call) never
+# matches — the arm requires `]` immediately followed by `(`.
 _CONSTRUCTOR_EXEC = re.compile(r"\[\s*[\"']constructor[\"']\s*\]\s*\(")
 # `new <ident/member-chain>` immediately before the bracket. The tight `[\w$.)\]]` class
 # (no space/comma/`(`) means only a direct `new a.b['constructor'](` is excluded; a
@@ -96,17 +114,17 @@ _NEW_CLONE_PREFIX = re.compile(r"\bnew\s+[\w$.)\]]*\s*$")
 
 
 def _has_exec_sink(s: str, strict: bool = False) -> bool:
-    """True if `s` contains a dynamic-execution sink: any literal _EXEC_SINK construct,
-    or a reflective `['constructor'](` call that is NOT a `new <expr>['constructor'](...)`
-    polymorphic clone (the benign idiom the worm never uses). Every constructor-call
-    occurrence is checked, so a `new`-clone earlier in the text can't mask a real sink
-    later.
+    """True if `s` contains a dynamic-execution sink: any literal `_EXEC_SINK` construct, a
+    case-sensitive `_REFLECTIVE_EXEC` form (computed-key access to a dangerous global, or a
+    double-constructor Function reach), or a SINGLE reflective bracket-constructor call that is
+    NOT a `new`-prefixed polymorphic clone (the benign idiom the worm never uses). Every
+    single-constructor occurrence is checked, so a `new`-clone earlier can't mask a real sink later.
 
-    `strict=True` DROPS the `new`-clone carve-out — every `['constructor'](` counts. This is
-    for gates that must not KEEP a possibly-hostile reflective constructor (e.g. deciding a
-    surgically-excised file is benign enough to auto-clean): there, deferring on the benign
-    idiom is a safe false-positive, whereas trusting it could pass an RCE hidden in kept code."""
-    if _EXEC_SINK.search(s):
+    `strict=True` DROPS the `new`-clone carve-out — every single bracket-constructor call counts.
+    This is for gates that must not KEEP a possibly-hostile reflective constructor (e.g. deciding a
+    surgically-excised file is benign enough to auto-clean): there, deferring on the benign idiom is
+    a safe false-positive, whereas trusting it could pass an RCE hidden in kept code."""
+    if _EXEC_SINK.search(s) or _REFLECTIVE_EXEC.search(s):
         return True
     return any(
         strict or not _NEW_CLONE_PREFIX.search(s[max(0, m.start() - 48):m.start()])
