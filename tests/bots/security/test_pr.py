@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
-"""PR submission: slug parsing + duplicate-PR avoidance (no real git/network)."""
+"""PR submission: slug parsing + duplicate-PR avoidance (no real git/network).
+
+Git is faked at the TYPED-helper seam (`pr.gitutil.*`) — `commit_fix` returns a `CommitResult`,
+`push_branch` a bool, etc. — not at a raw-subprocess boundary. `_patch_git` installs sensible
+defaults so a test only names the behaviour it cares about (a push that fails, a slug)."""
 from __future__ import annotations
 
+import contextlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,22 +17,46 @@ from unittest import mock
 from stayawake.bots.security import pr                              # noqa: E402
 from stayawake.bots.security.models import Finding, Severity, ScanResult  # noqa: E402
 from stayawake.bots.security.remediation import Change             # noqa: E402
+from stayawake.core.git.write.commit import CommitResult          # noqa: E402
+
+
+# Default behaviour for every typed git helper `_build_fix`/`submit_fix_pr` touch: the happy
+# path (a real repo with a clean origin, a signed commit that lands, a push that succeeds).
+def _git_defaults() -> dict:
+    return dict(
+        origin_slug=lambda repo: "owner/repo",
+        default_branch=lambda repo: "main",
+        ref_exists=lambda repo, ref: True,
+        add_worktree=lambda repo, path, branch, baseref: True,
+        remove_worktree=lambda repo, path: True,
+        stage_all=lambda repo: True,
+        unstage_cached=lambda repo, spec: True,
+        tracked_under=lambda repo, spec: [],
+        fetch=lambda repo, remote, ref: True,
+        commit_fix=lambda repo, msg: CommitResult(committed=True, signed=True),
+        format_patch=lambda repo, ref="HEAD": None,
+        push_branch=lambda repo, slug, branch, token, **kw: True,
+    )
+
+
+@contextlib.contextmanager
+def _patch_git(**overrides):
+    """Patch pr.gitutil's typed helpers with the happy-path defaults, plus any overrides."""
+    cfg = {**_git_defaults(), **overrides}
+    with contextlib.ExitStack() as stack:
+        for name, fn in cfg.items():
+            stack.enter_context(mock.patch.object(pr.gitutil, name, fn))
+        yield
 
 
 class TestSlug(unittest.TestCase):
     def test_parses_ssh_and_https(self):
-        self.assertEqual(pr.slug_from_url("git@github.com:Ndevu12/stayAwakeBot.git"), "Ndevu12/stayAwakeBot")
-        self.assertEqual(pr.slug_from_url("https://github.com/Ndevu12/stayAwakeBot"), "Ndevu12/stayAwakeBot")
-        self.assertIsNone(pr.slug_from_url("git@gitlab.com:x/y.git"))
-
-
-def _fake_git(cwd, *args, **kwargs):   # **kwargs tolerates _git(..., env=…) on push
-    cp = SimpleNamespace(returncode=0, stdout="", stderr="")
-    if args[:2] == ("remote", "get-url"):
-        cp.stdout = "git@github.com:owner/repo.git"
-    elif args[:1] == ("symbolic-ref",):
-        cp.stdout = "refs/remotes/origin/main"
-    return cp
+        # slug parsing now lives in core.git.query (flat-exported); pr reaches it via gitutil.
+        self.assertEqual(pr.gitutil.slug_from_url("git@github.com:Ndevu12/stayAwakeBot.git"),
+                         "Ndevu12/stayAwakeBot")
+        self.assertEqual(pr.gitutil.slug_from_url("https://github.com/Ndevu12/stayAwakeBot"),
+                         "Ndevu12/stayAwakeBot")
+        self.assertIsNone(pr.gitutil.slug_from_url("git@gitlab.com:x/y.git"))
 
 
 class TestNoDuplicatePr(unittest.TestCase):
@@ -38,7 +67,7 @@ class TestNoDuplicatePr(unittest.TestCase):
         clean = ScanResult("owner/repo", "local", [])
         # First scan finds the payload; the post-apply re-scan(s) come back clean.
         scans = [infected, clean, clean]
-        with mock.patch.object(pr, "_git", side_effect=_fake_git), \
+        with _patch_git(), \
              mock.patch.object(pr, "scan_target",
                                side_effect=lambda *a, **k: scans.pop(0) if scans else clean), \
              mock.patch.object(pr.remediation, "plan",
@@ -70,7 +99,7 @@ class TestNoDuplicatePr(unittest.TestCase):
         finding = Finding("x", "code-loader", Severity.CRITICAL, "evil.cjs",
                           "loader", remediation="strip-appended-payload")
         infected = ScanResult("owner/repo", "local", [finding])
-        with mock.patch.object(pr, "_git", side_effect=_fake_git), \
+        with _patch_git(), \
              mock.patch.object(pr, "scan_target", return_value=infected), \
              mock.patch.object(pr.remediation, "plan",
                                return_value=[Change("strip-payload", "evil.cjs")]), \
@@ -102,7 +131,7 @@ class TestPartialFix(unittest.TestCase):
              create_pull_result={"number": 42, "html_url": "u"}):
         # `applied` is what apply() safely applied; `residual` stays infected across every re-scan.
         infected = ScanResult("owner/repo", "local", list(residual))
-        with mock.patch.object(pr, "_git", side_effect=_fake_git), \
+        with _patch_git(), \
              mock.patch.object(pr, "scan_target", return_value=infected), \
              mock.patch.object(pr.remediation, "plan", return_value=list(applied)), \
              mock.patch.object(pr.remediation, "apply", return_value=list(applied)), \
@@ -152,7 +181,7 @@ class TestPartialFix(unittest.TestCase):
 
     def test_nothing_fixable_dedups_issue(self):
         # A re-run with an existing open issue must not open a duplicate (idempotent notify).
-        with mock.patch.object(pr, "_git", side_effect=_fake_git), \
+        with _patch_git(), \
              mock.patch.object(pr, "scan_target",
                                return_value=ScanResult("owner/repo", "local", [self._EXFIL])), \
              mock.patch.object(pr.remediation, "plan", return_value=[]), \
@@ -216,6 +245,57 @@ class TestPartialFix(unittest.TestCase):
         self.assertIn("telemetry.js", r.outcome)
 
 
+class TestSigningWarning(unittest.TestCase):
+    """The saw-fix signing fix: when the fix commit can't be signed in the worktree, commit_fix
+    lands it UNSIGNED (never a phantom empty branch) and the outcome carries a ⚠ warning."""
+
+    _SAFE = Change("strip-gitignore", ".gitignore")
+
+    def _run_pr(self, commit_result):
+        clean = ScanResult("owner/repo", "local", [])
+        scans = [ScanResult("owner/repo", "local", []), clean, clean]
+        with _patch_git(commit_fix=lambda repo, msg: commit_result), \
+             mock.patch.object(pr, "scan_target",
+                               side_effect=lambda *a, **k: scans.pop(0) if scans else clean), \
+             mock.patch.object(pr.remediation, "plan", return_value=[self._SAFE]), \
+             mock.patch.object(pr.remediation, "apply", return_value=[self._SAFE]), \
+             mock.patch.object(pr.github_api, "list_open_pulls", return_value=[]), \
+             mock.patch.object(pr.github_api, "add_labels"), \
+             mock.patch.object(pr.github_api, "remove_label"), \
+             mock.patch.object(pr.github_api, "create_pull",
+                               return_value={"number": 5, "html_url": "u"}):
+            return pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t")
+
+    def test_unsigned_commit_warns_but_still_opens_pr(self):
+        outcome = self._run_pr(CommitResult(committed=True, signed=False))
+        self.assertIn("opened PR #5", outcome)              # the fix DID land + PR opened
+        self.assertIn("UNSIGNED", outcome)                  # …but the operator is warned
+
+    def test_signed_commit_no_warning(self):
+        outcome = self._run_pr(CommitResult(committed=True, signed=True))
+        self.assertIn("opened PR #5", outcome)
+        self.assertNotIn("UNSIGNED", outcome)
+
+    def test_commit_failure_aborts_no_phantom_branch(self):
+        # Even the unsigned retry failed → NOTHING is reported as prepared; the run aborts.
+        outcome = self._run_pr(CommitResult(committed=False, signed=False))
+        self.assertNotIn("opened PR", outcome)
+        self.assertIn("could not commit", outcome)
+
+    def test_prepare_fix_warns_on_unsigned(self):
+        # `saw fix` (local, no push): the ⚠ note reaches the operator who will push manually.
+        clean = ScanResult("owner/repo", "local", [])
+        scans = [ScanResult("owner/repo", "local", []), clean, clean]
+        with _patch_git(commit_fix=lambda repo, msg: CommitResult(committed=True, signed=False)), \
+             mock.patch.object(pr, "scan_target",
+                               side_effect=lambda *a, **k: scans.pop(0) if scans else clean), \
+             mock.patch.object(pr.remediation, "plan", return_value=[self._SAFE]), \
+             mock.patch.object(pr.remediation, "apply", return_value=[self._SAFE]):
+            outcome = pr.prepare_fix(Path("/repo"), object(), {}, [])
+        self.assertIn("prepared 1 change", outcome)
+        self.assertIn("UNSIGNED", outcome)
+
+
 class TestManualReviewGuidance(unittest.TestCase):
     """#1184: per-finding manual-review guidance for the CLI stream — location + reason + the
     inspect-before-running command, safely (no injection), bounded, payload-free."""
@@ -268,20 +348,8 @@ class TestReadOnlyFallback(unittest.TestCase):
         scans = [ScanResult("owner/repo", "local", [finding]),   # worktree scan: infected
                  ScanResult("owner/repo", "local", []),          # post-apply re-scan: clean
                  ScanResult("owner/repo", "local", [])]
-
-        def fake_git(cwd, *args, **kwargs):   # **kwargs tolerates _git(..., env=…) on push
-            cp = SimpleNamespace(returncode=0, stdout="", stderr="")
-            if args[:2] == ("remote", "get-url"):
-                cp.stdout = "git@github.com:owner/repo.git"
-            elif args[:1] == ("symbolic-ref",):
-                cp.stdout = "refs/remotes/origin/main"
-            elif args[:1] == ("push",):
-                cp.returncode = 1                       # <-- read-only: push rejected
-            elif args[:1] == ("format-patch",):
-                cp.stdout = "From abc\nSubject: fix\n\npatch-body\n"
-            return cp
-
-        with mock.patch.object(pr, "_git", side_effect=fake_git), \
+        with _patch_git(push_branch=lambda repo, slug, branch, token, **kw: False,   # read-only
+                        format_patch=lambda repo, ref="HEAD": "From abc\nSubject: fix\n\npatch-body\n"), \
              mock.patch.object(pr, "scan_target",
                                side_effect=lambda *a, **k: scans.pop(0) if scans else scans), \
              mock.patch.object(pr.remediation, "plan",
@@ -329,24 +397,13 @@ class TestForkPr(unittest.TestCase):
                  ScanResult("up/repo", "local", []),
                  ScanResult("up/repo", "local", [])]
 
-        def fake_git(cwd, *args, **kwargs):
-            cp = SimpleNamespace(returncode=0, stdout="", stderr="")
-            if args[:2] == ("remote", "get-url"):
-                cp.stdout = "git@github.com:up/repo.git"
-            elif args[:1] == ("symbolic-ref",):
-                cp.stdout = "refs/remotes/origin/main"
-            elif args[:1] == ("push",):
-                url = next((a for a in args if ".git" in a), "")
-                if "up/repo.git" in url:
-                    cp.returncode = 1                    # upstream push rejected (no write)
-                else:
-                    cp.returncode = 0 if fork_push_ok else 1   # push to the fork
-            elif args[:1] == ("format-patch",):
-                cp.stdout = "patch-body\n"
-            return cp
+        # Upstream push (slug 'up/repo') is rejected; the fork push succeeds iff fork_push_ok.
+        def fake_push(repo, slug, branch, token, **kw):
+            return slug != "up/repo" and fork_push_ok
 
         out = Path(tempfile.mkdtemp())
-        with mock.patch.object(pr, "_git", side_effect=fake_git), \
+        with _patch_git(origin_slug=lambda repo: "up/repo", push_branch=fake_push,
+                        format_patch=lambda repo, ref="HEAD": "patch-body\n"), \
              mock.patch.object(pr.time, "sleep", return_value=None), \
              mock.patch.object(pr, "scan_target",
                                side_effect=lambda *a, **k: scans.pop(0) if scans else scans), \
