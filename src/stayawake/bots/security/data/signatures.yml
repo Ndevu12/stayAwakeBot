@@ -474,3 +474,15 @@ signatures:
     confidence: heuristic   # SUSPICIOUS — an anomaly, not a payload; legit escaping links exist
     description: "A symlink resolves OUTSIDE the repository root — hides code behind an un-followed link (followlinks=False) or escapes the repo (T1564 defense evasion). Contents behind the link stay unscanned."
     remediation: manual
+
+  # ── Symlink redirecting a WRITE into a sensitive sink (GhostApproval / SymJacking, #1161) ──
+  - id: symlink-write-redirect
+    category: symlink-write-redirect
+    severity: critical
+    matcher: symlink
+    confidence: confirmed   # INFECTED — a committed symlink whose target is ~/.ssh, a shell startup
+                            # file, git/cloud credentials, or an OS-persistence dir has no legitimate
+                            # purpose; a tool/agent told to write the link's path writes THROUGH it
+                            # into the sink (T1547/T1098 persistence, T1564.009 symlink attack).
+    description: "A committed symlink points at a sensitive write-target outside the repo (SSH authorized_keys/keys, a shell/editor/REPL startup file, git/cloud/service credentials, a GPG keyring, a PATH executable dir, or an OS-persistence directory such as LaunchAgents/systemd/cron). A tool or agent asked to write the link's path writes THROUGH it into that sink — the GhostApproval / SymJacking write-redirect (#1161)."
+    remediation: manual
