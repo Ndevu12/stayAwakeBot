@@ -32,6 +32,7 @@ from .host_artifacts import check_host_artifacts
 from .editor import check_vscode
 from .mechanism import check_ssh_authorized_keys, check_shell_profile, check_git_config_execution
 from .remote import check_branch_protection
+from stayawake.core.render import SEVERITY, block, marked_list, paint
 
 __all__ = [
     "HygieneIssue", "INCIDENT_TRIGGER_IDS", "incident_response_sequence",
@@ -72,27 +73,68 @@ def audit_checks(slug: str | None = None, token: str | None = None,
     ]
 
 
-def render(issues: list[HygieneIssue]) -> str:
-    if not issues:
-        return "✓ Local security hygiene: no issues found."
-    icon = {"warning": "⚠️", "info": "•"}
-    lines = [f"Local security hygiene — {len(issues)} item(s):", ""]
-    # Right-size the incident framing to the EVIDENCE (proportionality): the full isolate → rebuild →
-    # rotate-LAST runbook leads ONLY when ACTIVE persistence is present; a credential EXPOSURE with no
-    # persistence gets a calm, proportionate note (don't cry "isolate and rebuild" over a cached token);
-    # hygiene / info-only findings get no incident banner at all — just their per-item fix.
-    issue_ids = {i.id for i in issues}
+_ICON = {"warning": "⚠️", "info": "•"}
+
+
+def _banner(issue_ids: set[str], *, color: bool, width: int) -> list[str]:
+    """The incident banner, GRADED to the evidence (proportionality — see models): the full
+    isolate → rebuild → rotate-LAST runbook leads ONLY on active host persistence; a lone
+    credential EXPOSURE gets a calm, proportionate note (not "isolate and rebuild" over a cached
+    token); hygiene / info-only findings get no banner. Empty list when none is warranted.
+
+    The runbook is a genuine ORDERED procedure (rotate LAST) → a NUMBERED list; the note is a set
+    of points/caveats, not a sequence → a BULLETED list. Both go through core.render.marked_list."""
     if issue_ids & ACTIVE_PERSISTENCE_IDS:
-        lines.append("⚠️  Active host persistence detected — respond in THIS order (rotate LAST):")
-        lines += [f"     {step}" for step in incident_response_sequence()]
-        lines.append("")
+        head = "⚠️  Active host persistence detected — respond in THIS order (rotate LAST):"
+        steps, ordered = incident_response_sequence(), True
     elif issue_ids & CREDENTIAL_EXPOSURE_IDS:
-        lines.append("⚠️  Credential exposure — no active host persistence detected:")
-        lines += [f"     {line}" for line in credential_exposure_note()]
-        lines.append("")
-    for i in issues:
-        lines.append(f"{icon.get(i.severity, '•')}  [{i.severity}] {i.title}")
-        lines.append(f"     {i.detail}")
-        lines.append(f"     fix: {i.remediation}")
-        lines.append("")
+        head = "⚠️  Credential exposure — no active host persistence detected:"
+        steps, ordered = credential_exposure_note(), False
+    else:
+        return []
+    return ([paint(head, SEVERITY["warning"], on=color)] +
+            marked_list(steps, ordered=ordered, indent=5, width=width))
+
+
+def render(issues: list[HygieneIssue], *, color: bool = False, width: int = 80) -> str:
+    """Human-facing audit report. `color` (ANSI, gated by the caller via
+    core.terminal.supports_color) and `width` (terminal columns, from core.render.term_width)
+    default to plain/80 so a piped or test invocation is deterministic. Findings are grouped
+    worst-first (warnings to act on, then weaker items to review); long detail/fix/runbook lines
+    wrap to `width` with a hanging indent."""
+    if not issues:
+        return paint("✓ Local security hygiene: no issues found.", SEVERITY["ok"], on=color)
+
+    warnings = [i for i in issues if i.severity == "warning"]
+    reviews = [i for i in issues if i.severity != "warning"]
+    counts = []
+    if warnings:
+        counts.append(f"{len(warnings)} warning{'' if len(warnings) == 1 else 's'}")
+    if reviews:
+        counts.append(f"{len(reviews)} to review")
+    n = len(issues)
+    lines = [f"Local security hygiene — {n} finding{'' if n == 1 else 's'}: " + ", ".join(counts), ""]
+
+    banner = _banner({i.id for i in issues}, color=color, width=width)
+    if banner:
+        lines += banner + [""]
+
+    # Group headers only when BOTH tiers are present (otherwise the counts line already says which).
+    show_headers = bool(warnings) and bool(reviews)
+    for gtitle, gsub, gsev, items in (
+            ("WARNINGS", "act on these", "warning", warnings),
+            ("TO REVIEW", "weaker signals to verify / hygiene", "info", reviews)):
+        if not items:
+            continue
+        if show_headers:
+            lines.append(paint(gtitle, SEVERITY[gsev], on=color) +
+                         paint(f"  · {gsub}", SEVERITY["info"], on=color))
+        for i in items:
+            code = SEVERITY.get(i.severity)
+            icon = _ICON.get(i.severity, "•")
+            lines.append(f"  {paint(icon, code, on=color)} {paint(i.title, code, on=color)}")
+            lines += block(i.detail, indent=5, width=width)
+            lines += block(i.remediation, indent=5, width=width, marker="→ fix  ",
+                           code=SEVERITY["info"], color=color)
+            lines.append("")
     return "\n".join(lines).rstrip()

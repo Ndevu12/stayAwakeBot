@@ -742,8 +742,10 @@ class TestAuditRender(unittest.TestCase):
     def test_render_lists_issues(self):
         issue = hygiene.HygieneIssue("x", "warning", "Title", "Detail", "Fix")
         out = hygiene.render([issue])
-        self.assertIn("Title", out)
-        self.assertIn("fix: Fix", out)
+        self.assertIn("Title", out)          # title, detail and the fix line all render
+        self.assertIn("Detail", out)
+        self.assertIn("→ fix", out)
+        self.assertIn("Fix", out)
 
     def test_credential_exposure_only_is_calm_not_full_runbook(self):
         # Proportionality: a lone credential EXPOSURE (no active persistence) gets a calm note, NOT the
