@@ -53,6 +53,23 @@ All notable changes to this project are documented here. The format is based on
   escaping non-sink link (a venv `bin/python` shim) or a link to the repo's *own* dotfile. The
   pre-existing directory-escape scan-evasion heuristic is unchanged.
 
+### Changed
+- **`saw audit` now right-sizes its incident response to the evidence.** The full "isolate → rebuild
+  → rotate-credentials-LAST" runbook leads **only when active host persistence is actually detected**
+  (a self-hosted runner, the rotation-wiper service, an SSH/shell backdoor, an exec-on-git-command
+  config, or a strong drop-artifact). A host whose worst finding is a **cached/exposed credential**
+  now gets a calm, proportionate note — move the token to a safer store; don't make a bulk rotation
+  your first move (a hidden rotation-wiper can't be fully excluded) — instead of an alarming "isolate
+  and rebuild your machine" over what is usually a hygiene nudge. Hygiene/info-only findings get no
+  incident banner at all. Safety is preserved: any active-persistence indicator still escalates to
+  the full runbook, and a credential exposure *alongside* persistence still gets it.
+- **Weak host-artifact indicators are described honestly, not accusingly.** A lone `~/.node_modules`
+  (or similar) is a location the worm *sometimes* uses — but a manual `npm install` in your home dir
+  makes the same thing, and existence alone can't tell them apart. It's now surfaced as an **unusual,
+  weak, unverified** indicator to verify (inspect it / recall creating it), not a "payload-created
+  supply-chain drop-file." (Tool-assisted content verification of such a directory is tracked
+  separately — it needs the scanner to target a non-repo dir and to look *inside* `node_modules`.)
+
 ## [0.1.13] - 2026-07-15
 
 ### Added
