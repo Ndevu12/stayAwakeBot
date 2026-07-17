@@ -39,6 +39,8 @@ _WIPER_NOTE = ("Mini Shai-Hulud is reported to install a service (gh-token-monit
 # → rotate-LAST runbook is warranted. These are the findings that justify "isolate and rebuild".
 ACTIVE_PERSISTENCE_IDS = {"self-hosted-runner-persistence", "os-service-persistence",
                           "host-drop-artifacts",
+                          # a content-scan (--verify) found CONFIRMED worm code on the host
+                          "host-artifact-content-infected",
                           # active mechanism-based persistence (a live backdoor, not just hardening)
                           "ssh-authorized-keys-forced-command", "shell-profile-fetch-exec",
                           "git-fsmonitor-command", "git-hookspath-unsafe", "git-config-fetch-exec"}

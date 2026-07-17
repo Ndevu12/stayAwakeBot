@@ -7,6 +7,18 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **`saw audit --verify` content-scans a suspicious host artifact** to turn a *weak* indicator into
+  an actual verdict (#1221). When the audit flags a lone `~/.node_modules` (a place the worm
+  sometimes stages, but a manual `npm install` in `$HOME` produces identically), `--verify` looks
+  INSIDE it — scanning with the worm signatures but with the everyday `exclude_dirs` turned off, so
+  `node_modules/` is examined rather than skipped. Graded honestly: CONFIRMED worm markers → a
+  `warning` that leads the rotate-credentials-LAST runbook; scanned clean → a reassuring note ("looks
+  like a normal npm tree — still confirm you created it"); too large to fully scan or unreadable →
+  the same honest "verify it yourself" (never a partial scan claiming "clean"). It is opt-in and
+  bounded, grades on **CONFIRMED signatures only** (a tree of minified libraries is not mistaken for
+  malware on heuristic density alone), and is **fully decoupled from `saw scan`** — it calls the
+  engine directly on the one directory and never goes through repository discovery, so the
+  repo-scanning behaviour of `saw scan` is completely unchanged.
 - **`saw audit` now hunts host persistence by MECHANISM, not just by the current campaign's
   names** — closing the gap that let a renamed next-wave variant (or a `GhostApproval`/`SymJacking`
   write-redirect that lands a payload in one of your own config files) persist unnoticed. The
