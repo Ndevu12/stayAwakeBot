@@ -23,7 +23,8 @@ import subprocess          # noqa: F401  re-exported so tests can patch hygiene.
 from pathlib import Path   # noqa: F401  re-exported so tests can patch hygiene.Path.home globally
 from typing import Callable
 
-from .models import HygieneIssue, INCIDENT_TRIGGER_IDS, incident_response_sequence
+from .models import (HygieneIssue, INCIDENT_TRIGGER_IDS, ACTIVE_PERSISTENCE_IDS,
+                     CREDENTIAL_EXPOSURE_IDS, incident_response_sequence, credential_exposure_note)
 from .credentials import check_credentials
 from .runner import check_runner_persistence
 from .os_service import check_persistence
@@ -76,12 +77,18 @@ def render(issues: list[HygieneIssue]) -> str:
         return "✓ Local security hygiene: no issues found."
     icon = {"warning": "⚠️", "info": "•"}
     lines = [f"Local security hygiene — {len(issues)} item(s):", ""]
-    # Credential exposure / host persistence present → lead with the ordered runbook so the
-    # user rotates LAST (rotating while persistence is live can trip the wiper).
-    if any(i.id in INCIDENT_TRIGGER_IDS for i in issues):
-        lines.append("⚠️  Credential exposure or active host persistence detected — "
-                     "respond in THIS order (rotate LAST):")
+    # Right-size the incident framing to the EVIDENCE (proportionality): the full isolate → rebuild →
+    # rotate-LAST runbook leads ONLY when ACTIVE persistence is present; a credential EXPOSURE with no
+    # persistence gets a calm, proportionate note (don't cry "isolate and rebuild" over a cached token);
+    # hygiene / info-only findings get no incident banner at all — just their per-item fix.
+    issue_ids = {i.id for i in issues}
+    if issue_ids & ACTIVE_PERSISTENCE_IDS:
+        lines.append("⚠️  Active host persistence detected — respond in THIS order (rotate LAST):")
         lines += [f"     {step}" for step in incident_response_sequence()]
+        lines.append("")
+    elif issue_ids & CREDENTIAL_EXPOSURE_IDS:
+        lines.append("⚠️  Credential exposure — no active host persistence detected:")
+        lines += [f"     {line}" for line in credential_exposure_note()]
         lines.append("")
     for i in issues:
         lines.append(f"{icon.get(i.severity, '•')}  [{i.severity}] {i.title}")

@@ -33,16 +33,24 @@ class HygieneIssue:
 _WIPER_NOTE = ("Mini Shai-Hulud is reported to install a service (gh-token-monitor.service) "
                "that wipes the home directory when it detects credential rotation")
 
-# Issues whose presence means the ordered incident-response runbook must be surfaced —
-# credential exposure (a user seeing this will want to rotate) or host persistence. Host
-# runner/service persistence belongs here too: seeing it, a user's reflex is to rotate, which
-# is exactly the wiper tripwire — so the rotate-LAST runbook must lead.
-INCIDENT_TRIGGER_IDS = {"cached-github-keychain", "git-credentials-plaintext",
-                        "self-hosted-runner-persistence", "os-service-persistence",
-                        "host-drop-artifacts",
-                        # active mechanism-based persistence (a live backdoor, not just hardening)
-                        "ssh-authorized-keys-forced-command", "shell-profile-fetch-exec",
-                        "git-fsmonitor-command", "git-hookspath-unsafe", "git-config-fetch-exec"}
+# Response is GRADED to the evidence (proportionality — match the alarm to what was actually found):
+#
+# ACTIVE_PERSISTENCE — a live foothold/backdoor is present, so the full isolate → neutralize → rebuild
+# → rotate-LAST runbook is warranted. These are the findings that justify "isolate and rebuild".
+ACTIVE_PERSISTENCE_IDS = {"self-hosted-runner-persistence", "os-service-persistence",
+                          "host-drop-artifacts",
+                          # active mechanism-based persistence (a live backdoor, not just hardening)
+                          "ssh-authorized-keys-forced-command", "shell-profile-fetch-exec",
+                          "git-fsmonitor-command", "git-hookspath-unsafe", "git-config-fetch-exec"}
+
+# CREDENTIAL EXPOSURE — a cached/plaintext token is worth acting on, but is NOT proof of a compromised
+# host. When it is the WORST thing found (no active persistence alongside it), the response is a calm
+# credential note, NOT "isolate and rebuild" — while keeping the one caveat that matters: a hidden
+# rotation-wiper can't be fully excluded, so don't make bulk rotation the first move.
+CREDENTIAL_EXPOSURE_IDS = {"cached-github-keychain", "git-credentials-plaintext"}
+
+# Union kept for back-compat (any finding that carries an incident context, of either tier).
+INCIDENT_TRIGGER_IDS = ACTIVE_PERSISTENCE_IDS | CREDENTIAL_EXPOSURE_IDS
 
 
 def incident_response_sequence() -> list[str]:
@@ -57,4 +65,19 @@ def incident_response_sequence() -> list[str]:
         "planted CI workflows, and editor/AI-agent auto-run hooks (.vscode/, .claude/).",
         "4. ONLY THEN rotate credentials, in order: npm → GitHub PATs → cloud keys → SSH keys. "
         f"Rotating earlier is dangerous — {_WIPER_NOTE}.",
+    ]
+
+
+def credential_exposure_note() -> list[str]:
+    """Proportionate guidance when a credential is exposed but NO active persistence was detected —
+    exposure, not a confirmed compromise. Keeps the rotate-carefully caveat (a rotation-triggered
+    home-directory wiper can't be fully excluded) WITHOUT the alarmist isolate-and-rebuild runbook."""
+    return [
+        "Move the exposed credential to a safer store (see the fix on each item below).",
+        "No active host persistence was detected here — this is credential EXPOSURE, not a confirmed "
+        "compromise, so host isolation / rebuild isn't warranted on this evidence alone.",
+        "Detection is best-effort, though: if you have any OTHER reason to suspect this host, isolate "
+        "it first regardless.",
+        "Precaution: don't make a bulk credential rotation your first move — a rotation-triggered "
+        "home-directory wiper (not found here, but not fully excludable) is the reason.",
     ]

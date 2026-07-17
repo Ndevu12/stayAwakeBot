@@ -205,6 +205,15 @@ class TestHostArtifacts(unittest.TestCase):
             issues = hygiene.check_host_artifacts()
         self.assertEqual([(i.id, i.severity) for i in issues], [("host-drop-artifact-weak", "info")])
 
+    def test_weak_indicator_language_is_not_accusatory(self):
+        # Honesty (#1220): a lone WEAK indicator must not be described as a "payload" or accuse
+        # compromise — existence alone can't tell worm-staging from a manual npm install.
+        with mock.patch.object(hygiene.host_artifacts, "_host_artifacts", return_value=([], ["~/.node_modules"])):
+            f = hygiene.check_host_artifacts()[0]
+        self.assertEqual(f.severity, "info")
+        self.assertNotIn("payload", (f.title + " " + f.detail).lower())   # no "payload-created" accusation
+        self.assertIn("weak", f.detail.lower())                            # honest about the confidence
+
     def test_strong_ioc_is_warning(self):
         with mock.patch.object(hygiene.host_artifacts, "_host_artifacts",
                                return_value=(["host$user exfil archive"], [])):
@@ -736,11 +745,24 @@ class TestAuditRender(unittest.TestCase):
         self.assertIn("Title", out)
         self.assertIn("fix: Fix", out)
 
-    def test_render_surfaces_incident_sequence_on_credential_exposure(self):
-        issue = hygiene.HygieneIssue("git-credentials-plaintext", "warning", "T", "D", "F")
-        out = hygiene.render([issue]).lower()
-        self.assertIn("rotate last", out)                              # runbook header
-        self.assertLess(out.index("isolate the host"), out.index("rotate credentials"))
+    def test_credential_exposure_only_is_calm_not_full_runbook(self):
+        # Proportionality: a lone credential EXPOSURE (no active persistence) gets a calm note, NOT the
+        # isolate-and-rebuild runbook — while keeping the don't-bulk-rotate-first (wiper) caveat.
+        out = hygiene.render([hygiene.HygieneIssue("git-credentials-plaintext", "warning", "T", "D", "F")])
+        self.assertIn("no active host persistence", out.lower())       # honest: exposure, not compromise
+        self.assertIn("bulk credential rotation", out.lower())         # keeps the wiper caveat
+        self.assertNotIn("Isolate the host from the network", out)     # NOT the full incident runbook
+        self.assertNotIn("Take self-hosted CI runners offline", out)
+
+    def test_credential_plus_persistence_still_gets_full_runbook(self):
+        # SAFETY: when active persistence accompanies the exposure, the FULL rotate-LAST runbook must
+        # lead — the calm credential note must never suppress a real-compromise response.
+        out = hygiene.render([
+            hygiene.HygieneIssue("git-credentials-plaintext", "warning", "T", "D", "F"),
+            hygiene.HygieneIssue("self-hosted-runner-persistence", "warning", "T", "D", "F")])
+        self.assertIn("Isolate the host from the network", out)
+        self.assertIn("Active host persistence detected", out)
+        self.assertNotIn("no active host persistence", out.lower())
 
     def test_render_omits_incident_sequence_for_non_trigger_issue(self):
         issue = hygiene.HygieneIssue("vscode-autotasks-on", "warning", "T", "D", "F")

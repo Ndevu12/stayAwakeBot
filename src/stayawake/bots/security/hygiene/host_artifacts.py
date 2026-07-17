@@ -85,9 +85,11 @@ def _host_artifacts() -> tuple[list[str], list[str]]:
         except OSError:
             return False
 
-    # Weak drop-files — rarely benign, but each is a single low-confidence indicator.
+    # Weak drop-files — a single low-confidence indicator each. Described NEUTRALLY (not "payload"):
+    # each has a mundane explanation (a manual `npm install` in $HOME, a pip bootstrap) as well as the
+    # worm one, and existence alone can't tell them apart — so we surface, we don't accuse.
     if _present(home / ".node_modules"):
-        weak.append(f"{home}/.node_modules (payload-created)")
+        weak.append(f"{home}/.node_modules (an npm tree in your home dir — unusual location)")
     for t in tmp_dirs:
         if _present(t / ".npm"):
             weak.append(f"{t}/.npm")
@@ -132,14 +134,18 @@ def check_host_artifacts() -> list[HygieneIssue]:
                         "Isolate the host, neutralize any persistence, rebuild from a known-clean "
                         f"image, and rotate credentials LAST — {_WIPER_NOTE}.",
         )]
-    return [HygieneIssue(          # a single weak indicator — inform, don't alarm; still rotate-LAST
+    return [HygieneIssue(          # a single WEAK, unverified indicator — surface honestly, don't accuse
         id="host-drop-artifact-weak",
         severity="info",
-        title="Possible supply-chain drop-file on this host",
-        detail="Found: " + "; ".join(found) + ". Rarely benign, but only one weak indicator — "
-               "verify whether you created it.",
-        remediation="If you did not create it, treat as possible compromise: isolate the host and "
-                    f"neutralize any persistence BEFORE rotating any credential ({_WIPER_NOTE}).",
+        title="Unusual file/dir on this host (weak supply-chain indicator)",
+        detail="Found: " + "; ".join(found) + ". This is a WEAK, single indicator — a location the "
+               "worm sometimes uses, but a manual `npm install`/`pip` run from your home dir makes "
+               "the same thing. Existence alone can't tell them apart, so on its own it is not "
+               "evidence of malware.",
+        remediation="Verify it's yours: inspect the path (e.g. its package.json / contents) for "
+                    "anything you don't recognize, and recall whether you created it. If it is NOT "
+                    "yours, treat as possible compromise — isolate the host, neutralize any "
+                    f"persistence, and rotate credentials LAST ({_WIPER_NOTE}).",
     )]
 
 
