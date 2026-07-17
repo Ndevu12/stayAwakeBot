@@ -126,10 +126,13 @@ frozen (Open/Closed), so a new ecosystem is just another resolver. The blocklist
   - A `package.json` **version range** (`^4.2.11`) is ambiguous — it may or may not resolve to the
     bad version — so ranges are **not** matched; the lockfile's resolved version is the source of
     truth. A range-only project with no lockfile is a documented residual.
-  - **Scanning `node_modules` content behaviorally is deferred** (off by default) — it is expensive
-    and noisy, and the lockfile audit already names exactly what is installed. The behavioral engine
-    covers a payload that reaches the *repo tree*; installed dependency *content* is out of scope by
-    default.
+  - **Behaviorally scanning `node_modules` content stays off by DEFAULT** — it is expensive and
+    noisy, and the lockfile audit already names exactly what is installed. The behavioral engine
+    covers a payload that reaches the *repo tree*; installed dependency *content* is out of a normal
+    scan's scope. The one **opt-in** exception is `saw audit --verify`, which content-scans a *single
+    suspect directory* a host-artifact probe flagged (e.g. a `~/.node_modules` in `$HOME`) — excludes
+    off, bounded, CONFIRMED-only — to corroborate that lone weak indicator, without changing how
+    `saw scan` handles repositories.
   - Lockfiles are read **whole** (up to 32 MB, bypassing the scan's head/tail truncation so a large
     `package-lock.json` still parses); a pathological lockfile beyond that cap, and an aliased
     dependency in a *yarn/pnpm* lockfile (npm aliases are resolved via the lockfile's `name` field),
@@ -239,8 +242,9 @@ and re-distributed live malware payloads, so durable records now live **outside 
 GitHub code-scanning (SARIF, uploaded not committed), issues + Slack, and CI artifacts. Security
 reports are **no longer committed**.
 
-`security/hygiene.py` backs `saw audit` (local posture + branch-protection); remediation is
-`saw fix` (see [Remediation](#remediation)).
+the `security/hygiene/` package backs `saw audit` (local posture + branch-protection; the opt-in
+`--verify` delegates a single-directory content-scan to the engine); remediation is `saw fix` (see
+[Remediation](#remediation)).
 
 Run via the terse **`saw`** CLI: `saw scan` · `saw fix` · `saw audit` — see the
 [CLI guide](CLI.md). The legacy `stayawake-security-*` console scripts have been **removed**;
@@ -269,8 +273,9 @@ file's last clean committed version), or deferred to manual review with the exac
 never reconstructed.
 
 `saw audit [--repo owner/name]` checks local posture (cached GitHub credential,
-VS Code auto-run / Workspace Trust) and, with a token + `--repo`, that the default branch is
-protected and the **Worm Guard** check is required.
+VS Code auto-run / Workspace Trust, host persistence / drop-artifacts) and, with a token +
+`--repo`, that the default branch is protected and the **Worm Guard** check is required. Add
+`--verify` to content-scan a lone weak host artifact (e.g. `~/.node_modules`) and grade it honestly.
 
 ## Prevention
 
