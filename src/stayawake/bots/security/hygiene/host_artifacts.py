@@ -72,12 +72,13 @@ def _staged_secret_scanner(dirs) -> Path | None:
     return None
 
 
-def _host_artifacts() -> tuple[list[str], list[str]]:
-    """Return (strong, weak) descriptions of detected host-IoC drop artifacts."""
+def _host_artifacts() -> tuple[list[str], list[tuple[str, Path]]]:
+    """Return (strong, weak) detected host-IoC drop artifacts. `strong` are descriptions; `weak` are
+    (description, path) pairs so a caller can optionally content-scan the path to corroborate (#1221)."""
     home = Path.home()
     tmp_dirs = sorted({Path("/tmp"), Path(tempfile.gettempdir())}, key=str)
     strong: list[str] = []
-    weak: list[str] = []
+    weak: list[tuple[str, Path]] = []
 
     def _present(p: Path) -> bool:
         try:
@@ -87,14 +88,16 @@ def _host_artifacts() -> tuple[list[str], list[str]]:
 
     # Weak drop-files — a single low-confidence indicator each. Described NEUTRALLY (not "payload"):
     # each has a mundane explanation (a manual `npm install` in $HOME, a pip bootstrap) as well as the
-    # worm one, and existence alone can't tell them apart — so we surface, we don't accuse.
+    # worm one, and existence alone can't tell them apart — so we surface, we don't accuse. The path
+    # rides along so `--verify` can content-scan it (see check_host_artifacts).
     if _present(home / ".node_modules"):
-        weak.append(f"{home}/.node_modules (an npm tree in your home dir — unusual location)")
+        weak.append((f"{home}/.node_modules (an npm tree in your home dir — unusual location)",
+                     home / ".node_modules"))
     for t in tmp_dirs:
         if _present(t / ".npm"):
-            weak.append(f"{t}/.npm")
+            weak.append((f"{t}/.npm", t / ".npm"))
         if _present(t / "get-pip.py"):
-            weak.append(f"{t}/get-pip.py")
+            weak.append((f"{t}/get-pip.py", t / "get-pip.py"))
 
     # Strong, specific IoCs.
     tag = _host_user_tag()                                  # <host>$<user> staged exfil archive
@@ -113,14 +116,19 @@ def _host_artifacts() -> tuple[list[str], list[str]]:
     return strong, weak
 
 
-def check_host_artifacts() -> list[HygieneIssue]:
+def check_host_artifacts(verify: bool = False) -> list[HygieneIssue]:
     """Detect host filesystem drop-files this wave stages on a developer workstation.
 
     FP-bounded: a strong/specific IoC or a corroborated set (>=2) is a `warning`; a lone weak
     indicator is `info`. SAFETY: a positive means persistence may be live, so the remediation
-    follows the rotate-LAST order (#1088) — never advise rotating a credential first."""
+    follows the rotate-LAST order (#1088) — never advise rotating a credential first.
+
+    `verify=True` (the `saw audit --verify` opt-in) content-scans a lone weak *directory*
+    to turn it into an actual verdict (#1221): CONFIRMED worm markers inside → `warning`; scanned
+    clean → a reassuring `info`; too large / unreadable → the same honest 'verify it yourself'."""
     strong, weak = _host_artifacts()
-    found = strong + weak
+    weak_descs = [desc for desc, _ in weak]
+    found = strong + weak_descs
     if not found:
         return []
     if strong or len(found) >= 2:
@@ -134,6 +142,11 @@ def check_host_artifacts() -> list[HygieneIssue]:
                         "Isolate the host, neutralize any persistence, rebuild from a known-clean "
                         f"image, and rotate credentials LAST — {_WIPER_NOTE}.",
         )]
+    # Exactly one weak indicator, no strong. With --verify we can content-scan it.
+    if verify:
+        graded = _verify_weak_artifact(weak[0])
+        if graded is not None:
+            return graded
     return [HygieneIssue(          # a single WEAK, unverified indicator — surface honestly, don't accuse
         id="host-drop-artifact-weak",
         severity="info",
@@ -145,7 +158,65 @@ def check_host_artifacts() -> list[HygieneIssue]:
         remediation="Verify it's yours: inspect the path (e.g. its package.json / contents) for "
                     "anything you don't recognize, and recall whether you created it. If it is NOT "
                     "yours, treat as possible compromise — isolate the host, neutralize any "
-                    f"persistence, and rotate credentials LAST ({_WIPER_NOTE}).",
+                    f"persistence, and rotate credentials LAST ({_WIPER_NOTE}). Or run "
+                    "`saw audit --verify` to content-scan it.",
+    )]
+
+
+def _verify_weak_artifact(item: tuple[str, Path]) -> list[HygieneIssue] | None:
+    """Content-scan one lone weak artifact and grade honestly (#1221). Returns None when the artifact
+    is not a scannable directory (e.g. a lone `get-pip.py` file) so the caller falls back to the
+    honest 'verify it yourself' info. The scanner import is LOCAL so the default audit (no
+    `--verify`) never pulls the scan engine in."""
+    desc, path = item
+    try:
+        is_dir = path.is_dir()
+    except OSError:
+        is_dir = False
+    if not is_dir:
+        return None
+    from stayawake.bots.security.verify import verify_dir   # opt-in only — keep the default audit lean
+    v = verify_dir(path)
+    if v.has_markers:
+        return [HygieneIssue(
+            id="host-artifact-content-infected",
+            severity="warning",
+            title="Content scan found worm markers inside a host artifact",
+            detail=f"Scanned {path} ({v.files} files) and found CONFIRMED malware markers: "
+                   f"{', '.join(v.markers)}. This is no longer a weak indicator — there is worm "
+                   "loader code on this host.",
+            remediation="Treat as a LIVE compromise. Isolate the host, neutralize any persistence, "
+                        "rebuild from a known-clean image, and rotate credentials LAST — "
+                        f"{_WIPER_NOTE}.",
+        )]
+    if v.scanned_clean:
+        return [HygieneIssue(
+            id="host-artifact-scanned-clean",
+            severity="info",
+            title="Unusual dir on this host — content-scanned, no worm markers",
+            detail=f"{desc} — scanned {v.files} files inside and found no confirmed malware markers. "
+                   "Consistent with a normal npm tree in an unusual place, not evidence of the worm.",
+            remediation="Low concern. Still confirm you created it (recall the install); if you did "
+                        f"NOT, isolate the host and rotate credentials LAST ({_WIPER_NOTE}).",
+        )]
+    # Bounded out (too large), incomplete coverage, or a read gap — we did NOT fully look inside,
+    # so stay honest (never downgrade concern on a tree we couldn't fully read).
+    if v.too_large:
+        reason = "it is too large to auto-scan"
+    elif v.partial:
+        reason = "part of it could not be read (an oversize file, or a symlink leaving the folder)"
+    else:
+        reason = f"it could not be fully scanned ({v.error})"
+    return [HygieneIssue(
+        id="host-drop-artifact-weak",
+        severity="info",
+        title="Unusual file/dir on this host (weak supply-chain indicator)",
+        detail=f"Found: {desc}. WEAK, single indicator — {reason}, so it was not content-verified. "
+               "A manual `npm install` makes the same thing; existence alone is not evidence of "
+               "malware.",
+        remediation="Verify it's yours: inspect the path (e.g. its package.json / contents), and "
+                    "recall whether you created it. If it is NOT yours, isolate the host and rotate "
+                    f"credentials LAST ({_WIPER_NOTE}).",
     )]
 
 

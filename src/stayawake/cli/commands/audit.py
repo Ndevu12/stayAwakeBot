@@ -22,6 +22,9 @@ def register(sub) -> None:
                    help="exit non-zero if any warning-level issue is found")
     p.add_argument("--no-stream", action="store_true", dest="no_stream",
                    help="disable the per-check spinner and typewriter output (plain, instant)")
+    p.add_argument("--verify", action="store_true", dest="verify_artifacts",
+                   help="content-scan a lone weak host artifact (e.g. ~/.node_modules) to corroborate "
+                        "it — slower; bounded and scans inside node_modules (does not touch saw scan)")
     p.set_defaults(func=run)
 
 
@@ -36,7 +39,8 @@ def run(a: argparse.Namespace) -> int:
     progress_on = stream_enabled(sys.stderr, force_off=a.no_stream)
     # Iterate hygiene.audit_checks() — the single composition site — never hand-assemble a subset.
     issues: list[hygiene.HygieneIssue] = []
-    for label, check in hygiene.audit_checks(a.repo, token, a.branch):
+    for label, check in hygiene.audit_checks(a.repo, token, a.branch,
+                                             verify_artifacts=a.verify_artifacts):
         with status(f"checking {label}…", enabled=progress_on):
             issues += check()
     # Colour + wrap-width key off stdout the same way scan's TerminalSink does: colour only on a

@@ -201,14 +201,14 @@ class TestHostArtifacts(unittest.TestCase):
 
     # ── severity / remediation logic (mock the probe to control the artifact set) ──
     def test_lone_weak_indicator_is_info(self):
-        with mock.patch.object(hygiene.host_artifacts, "_host_artifacts", return_value=([], ["~/.node_modules"])):
+        with mock.patch.object(hygiene.host_artifacts, "_host_artifacts", return_value=([], [("~/.node_modules", Path("~/.node_modules"))])):
             issues = hygiene.check_host_artifacts()
         self.assertEqual([(i.id, i.severity) for i in issues], [("host-drop-artifact-weak", "info")])
 
     def test_weak_indicator_language_is_not_accusatory(self):
         # Honesty (#1220): a lone WEAK indicator must not be described as a "payload" or accuse
         # compromise — existence alone can't tell worm-staging from a manual npm install.
-        with mock.patch.object(hygiene.host_artifacts, "_host_artifacts", return_value=([], ["~/.node_modules"])):
+        with mock.patch.object(hygiene.host_artifacts, "_host_artifacts", return_value=([], [("~/.node_modules", Path("~/.node_modules"))])):
             f = hygiene.check_host_artifacts()[0]
         self.assertEqual(f.severity, "info")
         self.assertNotIn("payload", (f.title + " " + f.detail).lower())   # no "payload-created" accusation
@@ -222,7 +222,8 @@ class TestHostArtifacts(unittest.TestCase):
 
     def test_two_weak_indicators_corroborate_to_warning(self):
         with mock.patch.object(hygiene.host_artifacts, "_host_artifacts",
-                               return_value=([], ["~/.node_modules", "/tmp/.npm"])):
+                               return_value=([], [("~/.node_modules", Path("~/.node_modules")),
+                                                  ("/tmp/.npm", Path("/tmp/.npm"))])):
             issues = hygiene.check_host_artifacts()
         self.assertEqual([i.severity for i in issues], ["warning"])
 
@@ -231,7 +232,7 @@ class TestHostArtifacts(unittest.TestCase):
             self.assertEqual(hygiene.check_host_artifacts(), [])
 
     def test_remediation_is_rotate_last(self):
-        for probe in (([], ["~/.node_modules"]), (["host$user archive"], [])):
+        for probe in (([], [("~/.node_modules", Path("~/.node_modules"))]), (["host$user archive"], [])):
             with mock.patch.object(hygiene.host_artifacts, "_host_artifacts", return_value=probe):
                 rem = hygiene.check_host_artifacts()[0].remediation.lower()
             # Rotation is sequenced last / after isolation (warning says "LAST"; info "BEFORE
@@ -251,7 +252,7 @@ class TestHostArtifacts(unittest.TestCase):
         (d / ".node_modules").mkdir()
         with mock.patch.object(hygiene.Path, "home", return_value=d):
             strong, weak = hygiene.host_artifacts._host_artifacts()
-        self.assertTrue(any(".node_modules" in w for w in weak))
+        self.assertTrue(any(".node_modules" in desc for desc, _ in weak))
         self.assertEqual(strong, [])
 
     def test_detects_host_user_exfil_archive_as_strong(self):
@@ -282,6 +283,96 @@ class TestHostArtifacts(unittest.TestCase):
              mock.patch.object(hygiene, "check_host_artifacts", return_value=[sentinel]):
             ids = [i.id for i in hygiene.audit()]
         self.assertIn("host-drop-artifacts", ids)
+
+
+class TestVerifyArtifactsOptIn(unittest.TestCase):
+    """`--verify-artifacts` (#1221): content-scan a lone weak DIR to turn it into a real verdict.
+    `saw scan` is untouched — this only changes how the audit GRADES a weak host artifact. verify_dir
+    is mocked here (its own engine behaviour is covered in test_verify.py); these pin the wiring."""
+
+    def _weak_dir_probe(self):
+        d = Path(tempfile.mkdtemp())          # a real dir so path.is_dir() is True
+        return d, ([], [(f"{d} (an npm tree — unusual location)", d)])
+
+    def test_default_audit_does_not_scan(self):
+        # Without the flag the weak dir stays the honest info and verify_dir is NEVER called.
+        _, probe = self._weak_dir_probe()
+        with mock.patch.object(hygiene.host_artifacts, "_host_artifacts", return_value=probe), \
+             mock.patch("stayawake.bots.security.verify.verify_dir") as vd:
+            issues = hygiene.check_host_artifacts(verify=False)
+        vd.assert_not_called()
+        self.assertEqual([(i.id, i.severity) for i in issues], [("host-drop-artifact-weak", "info")])
+
+    def test_markers_found_escalates_to_warning(self):
+        from stayawake.bots.security.verify import DirVerdict
+        d, probe = self._weak_dir_probe()
+        verdict = DirVerdict(path=str(d), files=6, markers=["loader-fromcharcode-127"])
+        with mock.patch.object(hygiene.host_artifacts, "_host_artifacts", return_value=probe), \
+             mock.patch("stayawake.bots.security.verify.verify_dir", return_value=verdict):
+            issues = hygiene.check_host_artifacts(verify=True)
+        self.assertEqual([(i.id, i.severity) for i in issues],
+                         [("host-artifact-content-infected", "warning")])
+        self.assertIn("loader-fromcharcode-127", issues[0].detail)
+
+    def test_markers_found_triggers_incident_runbook(self):
+        # host-artifact-content-infected is ACTIVE persistence → the rotate-LAST runbook leads.
+        out = hygiene.render([hygiene.HygieneIssue("host-artifact-content-infected", "warning",
+                                                   "T", "D", "F")]).lower()
+        self.assertIn("respond in this order", out)
+
+    def test_scanned_clean_is_reassuring_info(self):
+        from stayawake.bots.security.verify import DirVerdict
+        d, probe = self._weak_dir_probe()
+        verdict = DirVerdict(path=str(d), files=120, scanned_clean=True)
+        with mock.patch.object(hygiene.host_artifacts, "_host_artifacts", return_value=probe), \
+             mock.patch("stayawake.bots.security.verify.verify_dir", return_value=verdict):
+            issues = hygiene.check_host_artifacts(verify=True)
+        self.assertEqual([(i.id, i.severity) for i in issues],
+                         [("host-artifact-scanned-clean", "info")])
+        self.assertIn("no confirmed malware markers", issues[0].detail.lower())
+
+    def test_too_large_stays_honest_never_claims_clean(self):
+        from stayawake.bots.security.verify import DirVerdict
+        d, probe = self._weak_dir_probe()
+        verdict = DirVerdict(path=str(d), too_large=True)
+        with mock.patch.object(hygiene.host_artifacts, "_host_artifacts", return_value=probe), \
+             mock.patch("stayawake.bots.security.verify.verify_dir", return_value=verdict):
+            issues = hygiene.check_host_artifacts(verify=True)
+        self.assertEqual([i.id for i in issues], ["host-drop-artifact-weak"])
+        self.assertNotIn("no confirmed malware markers", issues[0].detail.lower())
+
+    def test_read_gap_stays_honest(self):
+        from stayawake.bots.security.verify import DirVerdict
+        d, probe = self._weak_dir_probe()
+        verdict = DirVerdict(path=str(d), error="unreadable")
+        with mock.patch.object(hygiene.host_artifacts, "_host_artifacts", return_value=probe), \
+             mock.patch("stayawake.bots.security.verify.verify_dir", return_value=verdict):
+            issues = hygiene.check_host_artifacts(verify=True)
+        self.assertEqual([i.id for i in issues], ["host-drop-artifact-weak"])
+
+    def test_partial_coverage_stays_honest_not_clean(self):
+        # A tree we walked but could NOT fully read (oversize file / escaping symlink) must fall to
+        # the honest 'verify it yourself', never the reassuring scanned-clean note.
+        from stayawake.bots.security.verify import DirVerdict
+        d, probe = self._weak_dir_probe()
+        verdict = DirVerdict(path=str(d), files=50, partial=True)
+        with mock.patch.object(hygiene.host_artifacts, "_host_artifacts", return_value=probe), \
+             mock.patch("stayawake.bots.security.verify.verify_dir", return_value=verdict):
+            issues = hygiene.check_host_artifacts(verify=True)
+        self.assertEqual([i.id for i in issues], ["host-drop-artifact-weak"])
+        self.assertNotIn("no confirmed malware markers", issues[0].detail.lower())
+        self.assertIn("could not be read", issues[0].detail.lower())
+
+    def test_a_lone_weak_file_is_not_scanned(self):
+        # get-pip.py is a FILE, not a dir → can't content-scan → honest info; verify_dir not called.
+        f = Path(tempfile.mkdtemp()) / "get-pip.py"
+        f.write_text("x", encoding="utf-8")
+        with mock.patch.object(hygiene.host_artifacts, "_host_artifacts",
+                               return_value=([], [(str(f), f)])), \
+             mock.patch("stayawake.bots.security.verify.verify_dir") as vd:
+            issues = hygiene.check_host_artifacts(verify=True)
+        vd.assert_not_called()
+        self.assertEqual([i.id for i in issues], ["host-drop-artifact-weak"])
 
 
 class TestVSCode(unittest.TestCase):
