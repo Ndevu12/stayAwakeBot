@@ -171,7 +171,13 @@ Workspace Trust), and optionally a repo's branch-protection gate:
 ```bash
 saw audit                       # advisory; add --fail for scripts/CI
 saw audit --repo owner/name     # also check that Worm Guard is a required check
+saw audit --verify              # content-scan a flagged weak dir (e.g. ~/.node_modules)
 ```
+
+`--verify` is opt-in: when the audit flags a lone *weak* host artifact, it looks inside the
+directory (worm signatures, `node_modules` **not** skipped) and reports CONFIRMED markers → a
+warning, scanned-clean → a reassuring note, or too-large/unreadable → the honest "verify it
+yourself." It calls the scan engine on that one directory only and never touches `saw scan`.
 
 `--repo` needs a GitHub credential (an env token or a `gh auth login` session — see
 [Authentication](#authentication)) and warns if the default branch is unprotected or
