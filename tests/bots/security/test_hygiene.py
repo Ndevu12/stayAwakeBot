@@ -13,16 +13,16 @@ from stayawake.bots.security import hygiene
 
 class TestCredentials(unittest.TestCase):
     def test_keychain_hit_is_a_warning(self):
-        with mock.patch.object(hygiene, "_macos_keychain_has_github", return_value=True), \
-             mock.patch.object(hygiene, "_git_credentials_file_with_github", return_value=None):
+        with mock.patch.object(hygiene.credentials, "_macos_keychain_has_github", return_value=True), \
+             mock.patch.object(hygiene.credentials, "_git_credentials_file_with_github", return_value=None):
             issues = hygiene.check_credentials()
         ids = [i.id for i in issues]
         self.assertIn("cached-github-keychain", ids)
         self.assertTrue(all(i.severity == "warning" for i in issues))
 
     def test_clean_machine_has_no_credential_issues(self):
-        with mock.patch.object(hygiene, "_macos_keychain_has_github", return_value=False), \
-             mock.patch.object(hygiene, "_git_credentials_file_with_github", return_value=None):
+        with mock.patch.object(hygiene.credentials, "_macos_keychain_has_github", return_value=False), \
+             mock.patch.object(hygiene.credentials, "_git_credentials_file_with_github", return_value=None):
             self.assertEqual(hygiene.check_credentials(), [])
 
     def test_plaintext_git_credentials_detected(self):
@@ -30,13 +30,13 @@ class TestCredentials(unittest.TestCase):
             cred = Path(d) / ".git-credentials"
             cred.write_text("https://x:token@github.com\n", encoding="utf-8")
             with mock.patch.object(hygiene.Path, "home", return_value=Path(d)):
-                self.assertEqual(hygiene._git_credentials_file_with_github(), cred)
+                self.assertEqual(hygiene.credentials._git_credentials_file_with_github(), cred)
 
     def test_plaintext_remediation_is_wiper_safe(self):
         # The rotation advice must sequence rotation LAST and name the wiper tripwire —
         # never the old unconditional "rotate the exposed token on GitHub" (#1088).
-        with mock.patch.object(hygiene, "_macos_keychain_has_github", return_value=False), \
-             mock.patch.object(hygiene, "_git_credentials_file_with_github",
+        with mock.patch.object(hygiene.credentials, "_macos_keychain_has_github", return_value=False), \
+             mock.patch.object(hygiene.credentials, "_git_credentials_file_with_github",
                                return_value=Path("/home/u/.git-credentials")):
             issues = hygiene.check_credentials()
         rem = next(i.remediation for i in issues if i.id == "git-credentials-plaintext")
@@ -47,16 +47,16 @@ class TestCredentials(unittest.TestCase):
 
 class TestRunnerPersistence(unittest.TestCase):
     def test_installed_runner_is_a_warning(self):
-        with mock.patch.object(hygiene, "_installed_runner_dir",
+        with mock.patch.object(hygiene.runner, "_installed_runner_dir",
                                return_value=Path("/home/u/actions-runner")), \
-             mock.patch.object(hygiene, "_runner_services", return_value=[]):
+             mock.patch.object(hygiene.runner, "_runner_services", return_value=[]):
             issues = hygiene.check_runner_persistence()
         self.assertIn("self-hosted-runner-persistence", [i.id for i in issues])
         self.assertTrue(all(i.severity == "warning" for i in issues))
 
     def test_registered_service_alone_is_detected(self):
-        with mock.patch.object(hygiene, "_installed_runner_dir", return_value=None), \
-             mock.patch.object(hygiene, "_runner_services",
+        with mock.patch.object(hygiene.runner, "_installed_runner_dir", return_value=None), \
+             mock.patch.object(hygiene.runner, "_runner_services",
                                return_value=["actions.runner.org-repo.host"]):
             ids = [i.id for i in hygiene.check_runner_persistence()]
         self.assertEqual(ids, ["self-hosted-runner-persistence"])
@@ -64,9 +64,9 @@ class TestRunnerPersistence(unittest.TestCase):
     def test_remediation_is_wiper_safe(self):
         # Must sequence rotation LAST and never tell the user to rotate first — rotating while
         # runner persistence is live can trip the home-dir wiper (#1088 ordering).
-        with mock.patch.object(hygiene, "_installed_runner_dir",
+        with mock.patch.object(hygiene.runner, "_installed_runner_dir",
                                return_value=Path("/home/u/actions-runner")), \
-             mock.patch.object(hygiene, "_runner_services", return_value=[]):
+             mock.patch.object(hygiene.runner, "_runner_services", return_value=[]):
             issues = hygiene.check_runner_persistence()
         self.assertEqual({"self-hosted-runner-persistence"}, {i.id for i in issues})
         for i in issues:
@@ -87,21 +87,21 @@ class TestRunnerPersistence(unittest.TestCase):
                                         "501\t0\tactions.runner.acme-app.buildbox\n")
             raise FileNotFoundError                       # no systemctl on macOS
         with mock.patch.object(hygiene.subprocess, "run", side_effect=fake_run):
-            services = hygiene._runner_services()
+            services = hygiene.runner._runner_services()
         self.assertIn("actions.runner.acme-app.buildbox", services)
         self.assertNotIn("gh-token-monitor", services)    # wiper is not a runner label
 
     def test_runner_label_matcher_precision(self):
         # A runner label matches; an unrelated label that merely CONTAINS "actions.runner"
         # (a third-party helper) must NOT — the old whole-line substring test over-matched.
-        self.assertTrue(hygiene._is_runner_label("actions.runner.acme-app.host"))
-        self.assertFalse(hygiene._is_runner_label("gh-token-monitor.service"))
-        self.assertFalse(hygiene._is_runner_label("com.vendor.actions.runner-helper"))
-        self.assertFalse(hygiene._is_runner_label("com.apple.Spotlight"))
+        self.assertTrue(hygiene.runner._is_runner_label("actions.runner.acme-app.host"))
+        self.assertFalse(hygiene.runner._is_runner_label("gh-token-monitor.service"))
+        self.assertFalse(hygiene.runner._is_runner_label("com.vendor.actions.runner-helper"))
+        self.assertFalse(hygiene.runner._is_runner_label("com.apple.Spotlight"))
 
     def test_clean_host_has_no_runner_issue(self):
-        with mock.patch.object(hygiene, "_installed_runner_dir", return_value=None), \
-             mock.patch.object(hygiene, "_runner_services", return_value=[]):
+        with mock.patch.object(hygiene.runner, "_installed_runner_dir", return_value=None), \
+             mock.patch.object(hygiene.runner, "_runner_services", return_value=[]):
             self.assertEqual(hygiene.check_runner_persistence(), [])
 
     def test_runner_persistence_triggers_incident_runbook(self):
@@ -201,29 +201,29 @@ class TestHostArtifacts(unittest.TestCase):
 
     # ── severity / remediation logic (mock the probe to control the artifact set) ──
     def test_lone_weak_indicator_is_info(self):
-        with mock.patch.object(hygiene, "_host_artifacts", return_value=([], ["~/.node_modules"])):
+        with mock.patch.object(hygiene.host_artifacts, "_host_artifacts", return_value=([], ["~/.node_modules"])):
             issues = hygiene.check_host_artifacts()
         self.assertEqual([(i.id, i.severity) for i in issues], [("host-drop-artifact-weak", "info")])
 
     def test_strong_ioc_is_warning(self):
-        with mock.patch.object(hygiene, "_host_artifacts",
+        with mock.patch.object(hygiene.host_artifacts, "_host_artifacts",
                                return_value=(["host$user exfil archive"], [])):
             issues = hygiene.check_host_artifacts()
         self.assertEqual([(i.id, i.severity) for i in issues], [("host-drop-artifacts", "warning")])
 
     def test_two_weak_indicators_corroborate_to_warning(self):
-        with mock.patch.object(hygiene, "_host_artifacts",
+        with mock.patch.object(hygiene.host_artifacts, "_host_artifacts",
                                return_value=([], ["~/.node_modules", "/tmp/.npm"])):
             issues = hygiene.check_host_artifacts()
         self.assertEqual([i.severity for i in issues], ["warning"])
 
     def test_clean_host_has_no_issue(self):
-        with mock.patch.object(hygiene, "_host_artifacts", return_value=([], [])):
+        with mock.patch.object(hygiene.host_artifacts, "_host_artifacts", return_value=([], [])):
             self.assertEqual(hygiene.check_host_artifacts(), [])
 
     def test_remediation_is_rotate_last(self):
         for probe in (([], ["~/.node_modules"]), (["host$user archive"], [])):
-            with mock.patch.object(hygiene, "_host_artifacts", return_value=probe):
+            with mock.patch.object(hygiene.host_artifacts, "_host_artifacts", return_value=probe):
                 rem = hygiene.check_host_artifacts()[0].remediation.lower()
             # Rotation is sequenced last / after isolation (warning says "LAST"; info "BEFORE
             # rotating") — and the rotation ACTION comes after "isolate", not before it.
@@ -241,16 +241,16 @@ class TestHostArtifacts(unittest.TestCase):
         d = Path(tempfile.mkdtemp())
         (d / ".node_modules").mkdir()
         with mock.patch.object(hygiene.Path, "home", return_value=d):
-            strong, weak = hygiene._host_artifacts()
+            strong, weak = hygiene.host_artifacts._host_artifacts()
         self.assertTrue(any(".node_modules" in w for w in weak))
         self.assertEqual(strong, [])
 
     def test_detects_host_user_exfil_archive_as_strong(self):
         d = Path(tempfile.mkdtemp())
-        tag = hygiene._host_user_tag()
+        tag = hygiene.host_artifacts._host_user_tag()
         (d / (tag + ".tar.gz")).write_text("x", encoding="utf-8")
         with mock.patch.object(hygiene.Path, "home", return_value=d):
-            strong, _ = hygiene._host_artifacts()
+            strong, _ = hygiene.host_artifacts._host_artifacts()
         self.assertTrue(any("exfil staging archive" in s for s in strong))
 
     def test_trufflehog_dir_is_not_flagged_but_binary_is(self):
@@ -258,10 +258,10 @@ class TestHostArtifacts(unittest.TestCase):
         d = Path(tempfile.mkdtemp())
         (d / ".cache").mkdir()
         (d / ".cache" / "trufflehog").mkdir()          # legit cache dir
-        self.assertIsNone(hygiene._staged_secret_scanner((d / ".cache",)))
+        self.assertIsNone(hygiene.host_artifacts._staged_secret_scanner((d / ".cache",)))
         (d / ".npm").mkdir()
         (d / ".npm" / "trufflehog").write_text("bin", encoding="utf-8")   # staged binary FILE
-        self.assertIsNotNone(hygiene._staged_secret_scanner((d / ".npm",)))
+        self.assertIsNotNone(hygiene.host_artifacts._staged_secret_scanner((d / ".npm",)))
 
     def test_audit_composes_host_artifacts(self):
         sentinel = hygiene.HygieneIssue("host-drop-artifacts", "warning", "T", "D", "F")
@@ -305,7 +305,7 @@ class TestVSCode(unittest.TestCase):
 
     def test_no_vscode_settings_is_noop(self):
         # No path given → auto-detect; when VS Code isn't installed it returns None.
-        with mock.patch.object(hygiene, "_vscode_user_settings", return_value=None):
+        with mock.patch.object(hygiene.editor, "_vscode_user_settings", return_value=None):
             self.assertEqual(hygiene.check_vscode(), [])
 
 
@@ -529,7 +529,7 @@ class TestGitConfigExecution(unittest.TestCase):
     """Global git config that makes git exec an attacker command (T1546)."""
 
     def _with_config(self, pairs):
-        return mock.patch.object(hygiene, "_git_global_config", return_value=pairs)
+        return mock.patch.object(hygiene.mechanism, "_git_global_config", return_value=pairs)
 
     def test_fsmonitor_command_warns(self):
         with self._with_config([("core.fsmonitor", "/tmp/mon.sh")]):
@@ -565,13 +565,13 @@ class TestGitConfigExecution(unittest.TestCase):
         def boom(*a, **k):
             raise FileNotFoundError
         with mock.patch.object(hygiene.subprocess, "run", side_effect=boom):
-            self.assertEqual(hygiene._git_global_config(), [])
+            self.assertEqual(hygiene.mechanism._git_global_config(), [])
 
     def test_z_framing_parse(self):
         out = "core.pager\0alias.st\nstatus\0core.editor\nvim\0"
         with mock.patch.object(hygiene.subprocess, "run",
                                return_value=mock.Mock(returncode=0, stdout=out)):
-            pairs = hygiene._git_global_config()
+            pairs = hygiene.mechanism._git_global_config()
         self.assertEqual(pairs, [("core.pager", ""), ("alias.st", "status"),
                                  ("core.editor", "vim")])
 
@@ -653,7 +653,7 @@ class TestGitConfigExecution(unittest.TestCase):
             captured.update(kw)
             return mock.Mock(returncode=0, stdout="core.pager\0")
         with mock.patch.object(hygiene.subprocess, "run", side_effect=fake_run):
-            hygiene._git_global_config()
+            hygiene.mechanism._git_global_config()
         self.assertEqual(captured.get("errors"), "replace")
 
 
