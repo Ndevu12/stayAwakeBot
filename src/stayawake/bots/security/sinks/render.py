@@ -16,18 +16,13 @@ from __future__ import annotations
 from typing import Any
 
 from stayawake.bots.security.redaction import render_redacted
+from stayawake.core.render import SEVERITY, STATUS, paint, rule
 
-# ANSI colours — applied only when the terminal sink says stdout is a TTY (and NO_COLOR
-# isn't set). Status tokens and severity tags get the colour; padding is done on the
-# plain text first, so the escape codes never throw off column alignment.
-_RESET = "\033[0m"
-_GREEN = "\033[32m"
-_STATUS_COLOR = {"INFECTED": "\033[1;31m", "SUSPECT": "\033[33m", "ERROR": "\033[35m"}
-_SEV_COLOR = {"critical": "\033[1;31m", "high": "\033[31m", "medium": "\033[33m"}
-
-
-def _c(text: str, code: str | None, on: bool) -> str:
-    return f"{code}{text}{_RESET}" if on and code else text
+# Colour is emitted only when the terminal sink says stdout is a TTY (and NO_COLOR isn't set) —
+# the palette and `paint()` live in core.render so this surface and the audit report never drift
+# on "what colour is critical?". Scan colours only the three worst severities it grades; padding
+# is done on the PLAIN text first, so the escape codes never throw off column alignment.
+_SEV_COLOR = {s: SEVERITY[s] for s in ("critical", "high", "medium")}
 
 
 def _fmt_evidence(ev: Any) -> str:
@@ -53,7 +48,7 @@ def _label(r: dict[str, Any]) -> str:
 
 
 def _label_color(label: str) -> str | None:
-    return _STATUS_COLOR.get(label) or (_GREEN if label == "clean" else None)
+    return STATUS.get(label)     # INFECTED/SUSPECT/ERROR/clean → their code; anything else → None
 
 
 def render_terminal(payload: dict[str, Any], *, color: bool = False,
@@ -89,15 +84,15 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False,
                  r["summary"]["max_severity"] or "—", r["target"]) for r in rows]
         widths = [max(len(headers[i]), *(len(row[i]) for row in body)) for i in range(4)]
         out.append("  ".join(headers[i].ljust(widths[i]) for i in range(4)))
-        out.append("  ".join("─" * w for w in widths))
+        out.append("  ".join(rule(w) for w in widths))
         for label, total, sev, target in body:
             cells = [label.ljust(widths[0]), total.ljust(widths[1]),
                      sev.ljust(widths[2]), target]
-            cells[0] = _c(cells[0], _label_color(label), color)  # pad first, then colour
+            cells[0] = paint(cells[0], _label_color(label), on=color)  # pad first, then colour
             out.append("  ".join(cells))
     if clean_n:
-        out.append(_c(f"… and {clean_n} clean repositor{'y' if clean_n == 1 else 'ies'} "
-                      "— full inventory in the --json / -d report", _GREEN, color))
+        out.append(paint(f"… and {clean_n} clean repositor{'y' if clean_n == 1 else 'ies'} "
+                         "— full inventory in the --json / -d report", STATUS["clean"], on=color))
 
     # Findings detail — only the INFECTED and SUSPECT repos (never clean/error), worst-first,
     # one block each. Within a block, severity tags are padded to a common width so the
@@ -120,15 +115,15 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False,
             # have no display width), so it always matches the visible text.
             head_plain = f"{r['target']} — {label} · {total} finding(s)"
             out += ["",
-                    f"  {_c(r['target'], _label_color(label), color)} — {label} "
+                    f"  {paint(r['target'], _label_color(label), on=color)} — {label} "
                     f"· {total} finding(s)",
-                    "  " + "─" * len(head_plain)]
+                    "  " + rule(len(head_plain))]
             tags = [f"[{f['severity']} · {f.get('confidence', 'confirmed')}]"
                     for f in r["findings"]]
             tw = max(len(t) for t in tags)
             for f, tag in zip(r["findings"], tags):
                 loc = f["path"] + (f":{f['line']}" if f.get("line") else "")
-                colored = _c(tag.ljust(tw), _SEV_COLOR.get(f["severity"]), color)
+                colored = paint(tag.ljust(tw), _SEV_COLOR.get(f["severity"]), on=color)
                 # A visible bullet per finding; evidence sits under it, deeper-indented.
                 out.append(f"    • {colored}  {f['signature_id']}  —  {loc}")
                 if f.get("evidence"):

@@ -69,6 +69,15 @@ All notable changes to this project are documented here. The format is based on
   weak, unverified** indicator to verify (inspect it / recall creating it), not a "payload-created
   supply-chain drop-file." (Tool-assisted content verification of such a directory is tracked
   separately — it needs the scanner to target a non-repo dir and to look *inside* `node_modules`.)
+- **`saw audit`'s report is easier to read.** Findings are grouped worst-first (**warnings** to act
+  on, then weaker items **to review**) under a one-line count summary; long detail / fix / runbook
+  lines now **wrap to your terminal width** with a hanging indent instead of running off the screen;
+  severity is **colour-coded** on a real terminal (and stays plain when piped / `NO_COLOR` / CI); and
+  the incident runbook is a **numbered** list (order matters — rotate LAST) while the calm credential
+  note is a **bulleted** list (a set of points, no implied order). Wording and severities are
+  unchanged — only the presentation. Under the hood the colour/wrap/list machinery moved into a
+  shared `core.render` toolkit that the `saw scan` report also uses, so the two surfaces can't drift
+  (the scan output is byte-for-byte identical).
 
 ## [0.1.13] - 2026-07-15
 

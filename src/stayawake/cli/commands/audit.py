@@ -7,7 +7,9 @@ import sys
 
 from stayawake.bots.security import hygiene
 from stayawake.core import auth
+from stayawake.core.render import term_width
 from stayawake.core.streaming import Streamer, status, stream_enabled
+from stayawake.core.terminal import supports_color
 
 
 def register(sub) -> None:
@@ -37,6 +39,9 @@ def run(a: argparse.Namespace) -> int:
     for label, check in hygiene.audit_checks(a.repo, token, a.branch):
         with status(f"checking {label}…", enabled=progress_on):
             issues += check()
-    Streamer(enabled=stream_enabled(sys.stdout, force_off=a.no_stream)).line(hygiene.render(issues))
+    # Colour + wrap-width key off stdout the same way scan's TerminalSink does: colour only on a
+    # real TTY (NO_COLOR / CI / pipe → plain), wrapped to the live terminal width (80 when piped).
+    report = hygiene.render(issues, color=supports_color(sys.stdout), width=term_width())
+    Streamer(enabled=stream_enabled(sys.stdout, force_off=a.no_stream)).line(report)
     warnings = [i for i in issues if i.severity == "warning"]
     return 1 if (a.fail and warnings) else 0

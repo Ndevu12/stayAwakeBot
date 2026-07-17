@@ -57,13 +57,15 @@ def incident_response_sequence() -> list[str]:
     """The canonical order for responding to a suspected worm compromise. Rotation is
     ALWAYS the last step: rotating while persistence is live can trigger the reported
     home-directory wiper. Isolate → rebuild → neutralize → THEN rotate."""
+    # Steps only — no "1./2." prefixes: the renderer owns the numbering (core.render.marked_list),
+    # so this stays pure data (and a non-terminal consumer can renumber/reformat it freely).
     return [
-        "1. Isolate the host from the network before doing anything else.",
-        "2. Take self-hosted CI runners offline and rebuild affected hosts from known-clean "
+        "Isolate the host from the network before doing anything else.",
+        "Take self-hosted CI runners offline and rebuild affected hosts from known-clean "
         "images (watch for a runner named SHA1HULUD).",
-        "3. Neutralize per-host persistence: rogue OS services (e.g. gh-token-monitor.service), "
+        "Neutralize per-host persistence: rogue OS services (e.g. gh-token-monitor.service), "
         "planted CI workflows, and editor/AI-agent auto-run hooks (.vscode/, .claude/).",
-        "4. ONLY THEN rotate credentials, in order: npm → GitHub PATs → cloud keys → SSH keys. "
+        "ONLY THEN rotate credentials, in order: npm → GitHub PATs → cloud keys → SSH keys. "
         f"Rotating earlier is dangerous — {_WIPER_NOTE}.",
     ]
 
