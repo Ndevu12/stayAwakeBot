@@ -40,7 +40,7 @@ saw <command> [options] [TARGETS...]      # no command → welcome banner;  -h/-
 | [`saw scan`](#saw-scan) | Hunt for worms; render a full report to the terminal | **Read-only** |
 | [`saw fix`](#saw-fix) | Clean findings onto a `security/auto-clean` branch | Branch only (never your working tree); no push unless `--pr` |
 | [`saw discard`](#saw-discard) | Undo `saw fix`: delete the branch and/or close its PR | git / GitHub API |
-| [`saw audit`](#saw-audit) | Local hygiene: credentials, VS Code settings, branch protection | Read-only |
+| [`saw audit`](#saw-audit) | Local hygiene: credentials, editor, host artifacts, branch protection (`--verify` content-scans a suspect dir) | Read-only |
 | [`saw db`](#saw-db) | Manage the offline advisory DB (malicious-package + CVE corpus) a scan consults | Cache only (`~/.cache/saw/advisories`) |
 | [`saw search`](#saw-search) | Fuzzy "what's the command for…?" lookup | — |
 | [`saw intro`](#saw-intro) | Branded tour (also the bare-`saw` welcome) | — |
@@ -117,6 +117,7 @@ something:
 | `--json` | `scan`, `doctor`, `search` | Emit machine-readable JSON to stdout. On `scan` it carries **full evidence**. |
 | `-q`, `--quiet` | `doctor`, `search` | Print only the essentials (problems / command names). |
 | `-f`, `--fail` | `audit` only | Exit non-zero on a warning-level issue. **`saw scan` has no `--fail`** — its exit code is the verdict unconditionally (see [Exit codes](#exit-codes)). |
+| `--verify` | `audit` only | Content-scan a lone **weak** host artifact (e.g. `~/.node_modules`) to corroborate it — opt-in, bounded, CONFIRMED-only; **never touches `saw scan`**. See [`saw audit`](#saw-audit). |
 | `--no-stream` | `scan`, `fix`, `discard`, `audit`, `db` | Disable the live progress/typewriter output — plain, instant lines. |
 
 ## Commands
@@ -249,11 +250,11 @@ saw discard --branch --remote # delete the branch across the configured GitHub t
 
 ### `saw audit`
 
-Run a local security hygiene audit: credential exposure, editor (VS Code) settings, and —
-optionally — a repository's default-branch protection.
+Run a local security hygiene audit: credential exposure, editor (VS Code) settings, host
+persistence / drop-artifacts, and — optionally — a repository's default-branch protection.
 
 ```text
-saw audit [--repo OWNER/NAME] [-b BRANCH] [-f]
+saw audit [--repo OWNER/NAME] [-b BRANCH] [-f] [--verify]
 ```
 
 | Option | Description |
@@ -261,10 +262,12 @@ saw audit [--repo OWNER/NAME] [-b BRANCH] [-f]
 | `--repo OWNER/NAME` | Also audit this repository's branch protection (needs a token). |
 | `-b`, `--branch NAME` | Branch to check protection for (default: `main`). |
 | `-f`, `--fail` | Exit `1` if any warning-level issue is found. (Also accepts `--fail-on-issues`.) |
+| `--verify` | When the audit flags a lone **weak** host artifact (e.g. a `~/.node_modules` in `$HOME`), content-scan it to corroborate — it looks *inside* the directory (the everyday `node_modules`/`dist`/`build` excludes are turned off, so the tree is actually examined) and turns the weak indicator into a real verdict: CONFIRMED worm markers → a `warning`; fully scanned clean → a reassuring note; too large / unreadable → the same honest "verify it yourself." **Opt-in** (slower) and **bounded**; graded on CONFIRMED signatures only (a tree of minified libraries is not mistaken for malware). It calls the scan engine directly on that one directory and **never touches `saw scan`** — no repository discovery, no change to how `saw scan` finds or scans repos. |
 
 ```bash
-saw audit                                       # local credential + editor hygiene
+saw audit                                       # local credential + editor + host hygiene
 saw audit --repo Ndevu12/strix -f               # also gate on branch-protection issues
+saw audit --verify                              # also content-scan a weak ~/.node_modules
 ```
 
 ### `saw db`
