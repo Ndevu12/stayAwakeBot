@@ -14,8 +14,10 @@ propagation surfaces, and report actionable hygiene issues. Split per concern in
 
 `audit_checks()` here is the SINGLE composition site — neither `audit()` nor the streaming CLI may
 hand-assemble its own subset (that omission is how a probe once got silently dropped). Repository
-indicator scanning lives in the scanner/service; this is complementary. Stdlib only; every probe
-degrades gracefully when a path/tool is absent.
+indicator scanning lives in the scanner/service; this is complementary. Probes are stdlib-only and
+degrade gracefully when a path/tool is absent — the one exception is the opt-in
+`--verify` content-scan, which delegates to the scanner engine via a LAZY import so the
+default audit never pulls it in (see host_artifacts.check_host_artifacts).
 """
 from __future__ import annotations
 
@@ -42,30 +44,32 @@ __all__ = [
 ]
 
 def audit(slug: str | None = None, token: str | None = None,
-          branch: str = "main") -> list[HygieneIssue]:
+          branch: str = "main", *, verify_artifacts: bool = False) -> list[HygieneIssue]:
     """Run every local-posture check and return the combined issue list (non-streaming).
 
     Delegates to audit_checks() so the SINGLE definition of what an audit runs is shared with the
     streaming CLI — neither may hand-assemble its own subset (that omission is how a probe once got
     silently dropped)."""
     issues: list[HygieneIssue] = []
-    for _label, check in audit_checks(slug, token, branch):
+    for _label, check in audit_checks(slug, token, branch, verify_artifacts=verify_artifacts):
         issues += check()
     return issues
 
 
-def audit_checks(slug: str | None = None, token: str | None = None,
-                 branch: str = "main") -> list[tuple[str, Callable[[], list[HygieneIssue]]]]:
+def audit_checks(slug: str | None = None, token: str | None = None, branch: str = "main",
+                 *, verify_artifacts: bool = False
+                 ) -> list[tuple[str, Callable[[], list[HygieneIssue]]]]:
     """The ordered (label, check) probes that make up an audit — the ONE definition of what
     `saw audit` runs, consumed by both audit() (all-at-once) and the streaming CLI (per-check
     spinner). Each `check` is a zero-arg callable returning list[HygieneIssue]. When a repo `slug`
-    and `token` are supplied, the branch-protection gate on `branch` is included."""
+    and `token` are supplied, the branch-protection gate on `branch` is included. `verify_artifacts`
+    (the `--verify` opt-in) lets the host-artifact probe content-scan a lone weak dir."""
     return [
         ("cached credentials", check_credentials),
         ("VS Code settings", check_vscode),
         ("self-hosted runner", check_runner_persistence),
         ("OS-service persistence", check_persistence),
-        ("host drop-files", check_host_artifacts),
+        ("host drop-files", lambda: check_host_artifacts(verify=verify_artifacts)),
         ("SSH authorized_keys", check_ssh_authorized_keys),
         ("shell startup files", check_shell_profile),
         ("git exec config", check_git_config_execution),
