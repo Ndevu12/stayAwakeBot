@@ -164,6 +164,16 @@ def _context_required(prot: dict | None, context: str) -> bool:
     return context in contexts
 
 
+def remote_gate(slug: str, token: str | None) -> StrixRef | None:
+    """The Strix gate declared in a remote repo's (`owner/name`) workflows, or None. Read-only —
+    a thin public seam so other commands (e.g. `saw audit`) can ask "does this repo run Strix, and
+    under what status-check context?" without re-implementing the detection."""
+    if not slug or "/" not in slug:
+        return None
+    owner, _, name = slug.partition("/")
+    return find_strix(_remote_workflows(owner, name, token) or {})
+
+
 def check(*, repo: str | Path | None = None, slug: str | None = None, branch: str = "main",
           token: str | None = None, offline: bool = False) -> GuardStatus:
     """Inspect one repo's Strix gate. Local (a working-tree `repo` path) or remote (`slug`,
