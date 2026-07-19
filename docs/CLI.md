@@ -270,6 +270,59 @@ saw audit --repo Ndevu12/strix -f               # also gate on branch-protection
 saw audit --verify                              # also content-scan a weak ~/.node_modules
 ```
 
+### `saw guard`
+
+Install and verify the **Strix worm-guard CI gate** on a repo — the loop-closer: we scan, `saw
+audit` checks whether a repo is *protected*, `guard` installs and enforces the gate. The gate is
+always found by its **action reference** (`uses: Ndevu12/strix@…`), never the filename or job name.
+
+#### `saw guard check`
+
+Read-only. Report whether the gate is present, **SHA-pinned** (best), **behind** the latest Strix
+release, and — for a remote repo — whether branch protection **requires** its actual job context.
+
+```text
+saw guard check [--repo OWNER/NAME] [-b BRANCH] [-f] [--no-stream]
+```
+
+| Option | Description |
+| --- | --- |
+| `--repo OWNER/NAME` | Check a remote GitHub repo instead of the local working tree (needs a token for freshness + branch-protection checks). |
+| `-b`, `--branch` | Branch whose protection must require the gate (default: `main`). |
+| `-f`, `--fail` | Exit `1` when the gate is absent, unpinned, stale, or not required — for CI. |
+
+#### `saw guard setup`
+
+Install the gate, or **surgically bump an existing pin**. Resolves the **latest Strix release to a
+commit SHA** and writes a report-only, least-privilege workflow (or rewrites *only* the `uses:` ref
+of an existing gate — the rest of the file is untouched). **Idempotent** (create / bump / no-op) and
+**fails closed** if the SHA can't be resolved. It **never pushes to the default branch**: by default
+it writes into the working tree for you to review + commit + PR; `--pr` opens one rolling PR instead.
+
+```text
+saw guard setup [-p PATH] [--pr] [--ref SHA|TAG] [-b BRANCH] [--dry-run] [--no-stream]
+```
+
+| Option | Description |
+| --- | --- |
+| `-p`, `--path` | Repo to set up (default: the current directory). |
+| `--pr`, `--open-pr` | Open/update a rolling `security/guard-setup` PR via the shared proposal ladder, instead of writing to the working tree. Needs a token. |
+| `--ref SHA\|TAG` | Pin this Strix ref explicitly (offline / deterministic) instead of resolving the latest release. A tag is resolved to its immutable SHA; a SHA is used verbatim. |
+| `-b`, `--branch` | Default branch to target (default: auto-detect). |
+| `--dry-run` | Preview the change (the new file, or the rewritten `uses:` line) without writing anything. |
+
+```bash
+saw guard check                                 # is the local repo's gate present + SHA-pinned?
+saw guard check --repo Ndevu12/strix -f         # gate CI on a remote repo's protection
+saw guard setup --dry-run                       # preview the workflow that would be installed
+saw guard setup                                 # write it into the working tree to review + PR
+saw guard setup --pr                            # open a rolling install/bump PR (never pushes main)
+```
+
+Auto-remediation (a cleanup PR on an infected default branch) needs scoped write permissions and is
+deliberately **opt-in** — it is *not* enabled by `saw guard setup`; see the Strix README's
+Auto-remediation section.
+
 ### `saw db`
 
 Manage the **offline advisory database** — the malicious-package + CVE corpus (OpenSSF, GitHub
