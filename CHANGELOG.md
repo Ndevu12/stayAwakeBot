@@ -93,7 +93,14 @@ All notable changes to this project are documented here. The format is based on
   **once** for the whole run (freshness isn't re-fetched per repo). `-f/--fail` trips if **any** repo
   isn't a healthy SHA-pinned Strix gate; one repo's error never aborts the sweep. `--repo owner/name`
   still works as shorthand for a single remote target. (Built on the shared `resolution` seam from
-  #1238; `saw guard setup` gets the same sweep next.)
+  #1238.)
+- **`saw guard setup` gets the same sweep.** It takes the same `TARGETS`/`-p`/`-c`/`-r`/`--user`/
+  `--org` selectors and installs (or surgically bumps) the gate across the resolved repos: **local**
+  by default (discovers git repos and writes the workflow into each working tree for review, or
+  `--pr` to open one PR each), or **`--remote`** which clones each GitHub repo and opens a PR. Streams
+  per repo; one repo's error never aborts the run; the default branch is never pushed to. The remote
+  clone reuses the same helper as `saw fix --remote` (extracted to the shared `resolution` seam,
+  so the two can't drift).
 - **`saw audit` now right-sizes its incident response to the evidence.** The full "isolate → rebuild
   → rotate-credentials-LAST" runbook leads **only when active host persistence is actually detected**
   (a self-hosted runner, the rotation-wiper service, an SSH/shell backdoor, an exec-on-git-command
