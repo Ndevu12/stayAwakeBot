@@ -85,6 +85,15 @@ All notable changes to this project are documented here. The format is based on
   pre-existing directory-escape scan-evasion heuristic is unchanged.
 
 ### Changed
+- **`saw guard check` now discovers and sweeps repositories like `saw scan`/`saw fix`.** It takes
+  positional `TARGETS` (local repo/dir paths, or `owner/repo` slugs under `--remote`), `-p/--path`,
+  `-c/--config`, `-r/--remote`, and `--user`/`--org` — so `saw guard check .` (or a whole tree, or a
+  GitHub user's/org's repos, or your configured targets) checks **each** repo and streams a per-repo
+  verdict, instead of only ever inspecting a single `--repo`/CWD. The latest Strix release is resolved
+  **once** for the whole run (freshness isn't re-fetched per repo). `-f/--fail` trips if **any** repo
+  isn't a healthy SHA-pinned Strix gate; one repo's error never aborts the sweep. `--repo owner/name`
+  still works as shorthand for a single remote target. (Built on the shared `resolution` seam from
+  #1238; `saw guard setup` gets the same sweep next.)
 - **`saw audit` now right-sizes its incident response to the evidence.** The full "isolate → rebuild
   → rotate-credentials-LAST" runbook leads **only when active host persistence is actually detected**
   (a self-hosted runner, the rotation-wiper service, an SSH/shell backdoor, an exec-on-git-command
