@@ -333,3 +333,34 @@ def get_branch_protection(owner: str, repo: str, branch: str,
             return json.loads(resp.read().decode())
     except Exception:  # noqa: BLE001 — 404/403/network all mean "treat as unprotected"
         return None
+
+
+def latest_release(owner: str, repo: str, token: str | None = None) -> dict | None:
+    """The repo's latest published release object ({tag_name, …}), or None. Quiet."""
+    res = request(f"/repos/{owner}/{repo}/releases/latest", token=token, quiet=True)
+    return res if isinstance(res, dict) else None
+
+
+def ref_commit_sha(owner: str, repo: str, ref: str, token: str | None = None) -> str | None:
+    """Resolve a ref ('tags/v0.1.4', 'heads/main', a sha) to its COMMIT sha, dereferencing an
+    annotated tag. GET /commits/{ref} follows tags/branches. None on failure. Quiet."""
+    res = request(f"/repos/{owner}/{repo}/commits/{ref}", token=token, quiet=True)
+    return res["sha"] if isinstance(res, dict) and isinstance(res.get("sha"), str) else None
+
+
+def list_dir(owner: str, repo: str, path: str, token: str | None = None) -> list | None:
+    """Contents-API directory listing ([{name, path, type, …}]), or None. Quiet."""
+    res = request(f"/repos/{owner}/{repo}/contents/{path}", token=token, quiet=True)
+    return res if isinstance(res, list) else None
+
+
+def get_file_text(owner: str, repo: str, path: str, token: str | None = None) -> str | None:
+    """UTF-8 text of a repo file via the contents API, or None. Quiet."""
+    import base64
+    res = request(f"/repos/{owner}/{repo}/contents/{path}", token=token, quiet=True)
+    if isinstance(res, dict) and res.get("encoding") == "base64" and isinstance(res.get("content"), str):
+        try:
+            return base64.b64decode(res["content"]).decode("utf-8", "replace")
+        except Exception:  # noqa: BLE001
+            return None
+    return None
