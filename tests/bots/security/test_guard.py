@@ -10,10 +10,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from stayawake import guard
-from stayawake.guard import (Freshness, GuardStatus, StrixRef, classify_pin,
-                                           _context_required, find_strix)
-from stayawake.cli.commands import guard as guard_cli
+from stayawake.bots.security import guard
+from stayawake.bots.security.guard import (Freshness, GuardStatus, StrixRef, classify_pin,
+                             _context_required, find_strix)
 
 BLOG_WF = """name: Worm scan
 on: { push: { branches: [main] }, pull_request: {} }
@@ -171,7 +170,9 @@ class TestCheck(unittest.TestCase):
         self.assertIsNotNone(s.error)
 
 
-class TestIsOk(unittest.TestCase):
+class TestHealthy(unittest.TestCase):
+    """GuardStatus.healthy — the -f/--fail policy, a domain property (not CLI logic)."""
+
     def _status(self, **kw):
         base = dict(present=True, ref=StrixRef("w", "strix", "a" * 40, "sha"),
                     fresh=Freshness("fresh", "v0.1.4"), required=True, branch="main")
@@ -179,22 +180,44 @@ class TestIsOk(unittest.TestCase):
         return GuardStatus(**base)
 
     def test_healthy(self):
-        self.assertTrue(guard_cli._is_ok(self._status()))
+        self.assertTrue(self._status().healthy)
 
     def test_absent(self):
-        self.assertFalse(guard_cli._is_ok(self._status(present=False, ref=None)))
+        self.assertFalse(self._status(present=False, ref=None).healthy)
 
     def test_floating_pin(self):
-        self.assertFalse(guard_cli._is_ok(self._status(ref=StrixRef("w", "strix", "v0", "floating"))))
+        self.assertFalse(self._status(ref=StrixRef("w", "strix", "v0", "floating")).healthy)
 
     def test_behind(self):
-        self.assertFalse(guard_cli._is_ok(self._status(fresh=Freshness("behind", "v0.1.5"))))
+        self.assertFalse(self._status(fresh=Freshness("behind", "v0.1.5")).healthy)
 
     def test_not_required(self):
-        self.assertFalse(guard_cli._is_ok(self._status(required=False)))
+        self.assertFalse(self._status(required=False).healthy)
 
     def test_local_unchecked_required_is_ok(self):
-        self.assertTrue(guard_cli._is_ok(self._status(required=None)))
+        self.assertTrue(self._status(required=None).healthy)
+
+
+class TestRender(unittest.TestCase):
+    def test_absent_report(self):
+        self.assertIn("No Strix gate found", guard.render(GuardStatus(present=False)))
+
+    def test_present_report_is_plain_without_color(self):
+        s = GuardStatus(present=True, ref=StrixRef("wf.yml", "strix", "a" * 40, "sha"),
+                        fresh=Freshness("fresh", "v0.1.4"), required=True, branch="main")
+        out = guard.render(s, color=False)
+        self.assertIn("Strix gate found", out)
+        self.assertIn("pinned to a commit SHA", out)
+        self.assertIn("required", out)
+        self.assertNotIn("\033[", out)                 # color off → no ANSI escapes
+
+    def test_color_on_emits_ansi(self):
+        self.assertIn("\033[", guard.render(GuardStatus(present=False), color=True))
+
+    def test_required_line_only_for_remote(self):
+        local = GuardStatus(present=True, ref=StrixRef("wf.yml", "strix", "a" * 40, "sha"),
+                            fresh=Freshness("fresh", "v0.1.4"), required=None, branch=None)
+        self.assertNotIn("required", guard.render(local))    # no branch → local → no enforcement line
 
 
 if __name__ == "__main__":

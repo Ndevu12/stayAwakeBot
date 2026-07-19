@@ -19,6 +19,7 @@ from pathlib import Path
 import yaml
 
 from stayawake.core.adapters import github_api
+from stayawake.core.render import SEVERITY, paint
 
 # The canonical Strix action. Detection is scoped to it (a fork/mirror is out of scope for v1).
 STRIX_OWNER, STRIX_REPO = "Ndevu12", "strix"
@@ -113,8 +114,18 @@ class GuardStatus:
     ref: StrixRef | None = None
     fresh: Freshness | None = None
     required: bool | None = None       # None = not checked (local/no token); else branch-protection result
-    branch: str | None = None
+    branch: str | None = None          # set only for a remote check → also signals "remote" to render()
     error: str | None = None           # e.g. couldn't read a remote repo
+
+    @property
+    def healthy(self) -> bool:
+        """The gate passes: present, SHA-pinned, not stale, and (where we could check) required.
+        Drives the `saw guard check -f/--fail` exit code — a policy of the guard domain, not the CLI."""
+        if not self.present or self.ref is None or self.ref.pin != "sha":
+            return False
+        if self.fresh is not None and self.fresh.state == "behind":
+            return False
+        return self.required is not False
 
 
 def _local_workflows(repo: Path) -> dict[str, str]:
@@ -177,3 +188,52 @@ def check(*, repo: str | Path | None = None, slug: str | None = None, branch: st
         required = _context_required(prot, ref.job)
     return GuardStatus(present=True, ref=ref, fresh=fresh, required=required,
                        branch=branch if slug else None)
+
+
+def render(status: GuardStatus, *, color: bool = False) -> str:
+    """Human-facing report for a GuardStatus. Colour is gated by the caller (core.terminal). The
+    branch-protection line shows only for a remote check (signalled by `status.branch`)."""
+    ok, warn, dim = SEVERITY["ok"], SEVERITY["warning"], SEVERITY["info"]
+    remote = status.branch is not None
+    lines: list[str] = []
+
+    if not status.present:
+        if status.error:
+            return paint(f"⚠️  {status.error}", warn, on=color)
+        lines.append(paint("✗ No Strix gate found", warn, on=color) +
+                     " — no workflow uses `Ndevu12/strix`.")
+        lines.append(paint("     Run `saw guard setup` to add one.", dim, on=color))
+        return "\n".join(lines)
+
+    r = status.ref
+    lines.append(paint("✓ Strix gate found", ok, on=color) + f" — {r.workflow} (job “{r.job}”)")
+
+    if r.pin == "sha":
+        lines.append("  " + paint("✓ pinned to a commit SHA", ok, on=color) + f"  (@{r.ref[:12]}…)")
+    elif r.pin == "tag":
+        lines.append("  " + paint("• pinned to a release tag", dim, on=color) +
+                     f"  (@{r.ref}) — a SHA is immutable; `saw guard setup` can rewrite it")
+    else:
+        lines.append("  " + paint("⚠ floating ref", warn, on=color) +
+                     f"  (@{r.ref}) — the action's code can change under you; pin a SHA")
+
+    if status.fresh is not None:
+        f = status.fresh
+        if f.state == "fresh":
+            lines.append("  " + paint("✓ up to date", ok, on=color) + f"  (latest {f.latest_tag})")
+        elif f.state == "behind":
+            lines.append("  " + paint("⚠ behind latest", warn, on=color) + f"  — {f.detail}")
+        elif f.state == "floating":
+            lines.append("  " + paint("• moving alias", dim, on=color) + f"  — {f.detail}")
+        else:
+            lines.append("  " + paint("• freshness unknown", dim, on=color) + f"  — {f.detail}")
+
+    if remote:
+        if status.required is True:
+            lines.append("  " + paint("✓ required", ok, on=color) +
+                         f"  — branch protection on {status.branch} requires “{r.job}”")
+        elif status.required is False:
+            lines.append("  " + paint("⚠ not a required check", warn, on=color) +
+                         f"  — {status.branch} protection does NOT require “{r.job}”; an infected PR can still merge")
+        # status.required is None → no token, couldn't check → stay quiet
+    return "\n".join(lines)
