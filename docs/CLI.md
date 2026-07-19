@@ -278,18 +278,29 @@ always found by its **action reference** (`uses: Ndevu12/strix@…`), never the 
 
 #### `saw guard check`
 
-Read-only. Report whether the gate is present, **SHA-pinned** (best), **behind** the latest Strix
-release, and — for a remote repo — whether branch protection **requires** its actual job context.
+Read-only. Report, for **each** repo, whether a worm gate is present (the `Ndevu12/strix` action, a
+local scan action, or a direct `saw` step), whether a Strix pin is a **SHA** (best) or **behind** the
+latest release, and — for a remote repo — whether branch protection **requires** its actual job
+context. Discovers and sweeps repositories exactly like [`saw scan`](#saw-scan)/[`saw fix`](#saw-fix):
+**local by default**, `--remote` (or `--user`/`--org`) for GitHub. The latest Strix release is
+resolved **once** per run; one repo's error never aborts the sweep.
 
 ```text
-saw guard check [--repo OWNER/NAME] [-b BRANCH] [-f] [--no-stream]
+saw guard check [TARGETS...] [-p PATH] [-c FILE] [-r] [--user U] [--org O]
+                [--repo OWNER/NAME] [-b BRANCH] [-f] [--no-stream]
 ```
 
 | Option | Description |
 | --- | --- |
-| `--repo OWNER/NAME` | Check a remote GitHub repo instead of the local working tree (needs a token for freshness + branch-protection checks). |
+| `TARGETS...` / `-p` / `-c` / `-r` / `--user` / `--org` | Target selection, identical to [`saw scan`](#saw-scan): positionals are local paths (or `owner/repo` slugs under `--remote`); omit to use configured targets or the current repo. |
+| `--repo OWNER/NAME` | Shorthand for a single remote repo (same as `--remote owner/name`). |
 | `-b`, `--branch` | Branch whose protection must require the gate (default: `main`). |
-| `-f`, `--fail` | Exit `1` when the gate is absent, unpinned, stale, or not required — for CI. |
+| `-f`, `--fail` | Exit `1` when **any** repo's gate is absent, unpinned, stale, or not required — for CI. |
+
+```bash
+saw guard check .                    # every git repo under the current dir
+saw guard check --user Ndevu12 -f    # gate CI on all of a user's repos
+```
 
 #### `saw guard setup`
 

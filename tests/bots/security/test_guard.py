@@ -5,6 +5,7 @@ Network is mocked; the detection/grading logic is exercised offline against a fi
 the real `Ndevu12/ndevuspace-blog` gate (filename `worm-scan.yml`, job `strix`, `@v0.1.4`)."""
 from __future__ import annotations
 
+import contextlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -480,6 +481,77 @@ class TestRenderSetup(unittest.TestCase):
         out = guard.render_setup(guard.SetupResult(plan=p, dry_run=True))
         self.assertIn("dry run", out)
         self.assertIn("THE-FILE", out)
+
+
+class TestCheckSweep(unittest.TestCase):
+    """`saw guard check` sweeps many repos (local discovery / remote #1075 ladder), like scan/fix."""
+
+    def _healthy(self):
+        return GuardStatus(present=True, ref=StrixRef("w", "strix", SHA, "sha"),
+                           fresh=Freshness("fresh", "v1"), required=True, branch="o/r")
+
+    def _unguarded(self):
+        return GuardStatus(present=False)
+
+    def _mocks(self, *, discover=None, resolve=None, check_side=None, check_return=None,
+               token=("t", "env")):
+        cms = [mock.patch.object(guard, "latest_strix", return_value=guard.LatestStrix("v1", SHA)),
+               mock.patch.object(guard.auth, "resolve_token", return_value=token)]
+        if discover is not None:
+            cms.append(mock.patch.object(guard.resolution, "discover_local_repos", return_value=discover))
+        if resolve is not None:
+            cms.append(mock.patch.object(guard.resolution, "resolve_remote", return_value=resolve))
+        chk = mock.patch.object(guard, "check",
+                                side_effect=check_side) if check_side else \
+            mock.patch.object(guard, "check", return_value=check_return)
+        cms.append(chk)
+        return cms
+
+    def test_local_sweep_discovers_and_checks_each(self):
+        with self._patch(discover=[Path("/a"), Path("/b")], check_return=self._healthy()) as chk:
+            rc = guard.check_targets(paths=["~/dev"], no_stream=True)
+        self.assertEqual(rc, 0)
+        self.assertEqual(chk.call_count, 2)                     # both discovered repos checked
+        self.assertIsNotNone(chk.call_args.kwargs.get("latest"))  # freshness precomputed once, reused
+
+    def test_fail_flag_trips_when_any_unhealthy(self):
+        with self._patch(discover=[Path("/a")], check_return=self._unguarded()):
+            self.assertEqual(guard.check_targets(paths=["."], fail=True, no_stream=True), 1)
+        with self._patch(discover=[Path("/a")], check_return=self._unguarded()):
+            self.assertEqual(guard.check_targets(paths=["."], fail=False, no_stream=True), 0)
+
+    def test_remote_sweep_resolves_and_checks_slugs(self):
+        with self._patch(resolve=(["o/a", "o/b"], "t", "env"), check_return=self._healthy()) as chk:
+            rc = guard.check_targets(remote=True, no_stream=True)
+        self.assertEqual(rc, 0)
+        self.assertEqual(chk.call_count, 2)
+        self.assertIn("slug", chk.call_args.kwargs)            # remote → checked by slug, not path
+
+    def test_remote_invalid_slug_errors(self):
+        self.assertEqual(guard.check_targets(remote=True, slugs=["not-a-slug"], no_stream=True), 2)
+
+    def test_remote_empty_returns_zero(self):
+        with self._patch(resolve=([], None, None), check_return=self._healthy()):
+            self.assertEqual(guard.check_targets(remote=True, no_stream=True), 0)
+
+    def test_missing_explicit_config_exits_2(self):
+        self.assertEqual(guard.check_targets(config_path="/no/such/config.yml", no_stream=True), 2)
+
+    def test_one_repo_error_does_not_abort_the_sweep(self):
+        with self._patch(discover=[Path("/a"), Path("/b")],
+                         check_side=[RuntimeError("boom"), self._healthy()]) as chk:
+            rc = guard.check_targets(paths=["."], no_stream=True)   # first raises, second still runs
+        self.assertEqual(chk.call_count, 2)
+        self.assertEqual(rc, 0)
+
+    @contextlib.contextmanager
+    def _patch(self, **kw):
+        # Enter every mock; the `check` mock is always last in _mocks() — yield it for assertions.
+        with contextlib.ExitStack() as stack:
+            chk = None
+            for cm in self._mocks(**kw):
+                chk = stack.enter_context(cm)
+            yield chk
 
 
 if __name__ == "__main__":

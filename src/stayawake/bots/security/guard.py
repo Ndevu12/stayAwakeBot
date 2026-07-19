@@ -14,7 +14,9 @@ code.
 """
 from __future__ import annotations
 
+import os
 import re
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,11 +24,16 @@ from pathlib import Path
 import yaml
 
 from stayawake.core.adapters import github_api
+from stayawake.core import auth
 from stayawake.core import git as gitutil
 from stayawake.core import textsafe
+from stayawake.core.config import load_yaml
 from stayawake.core.render import SEVERITY, paint
-from stayawake.core.streaming import status as spin_status
+from stayawake.core.streaming import Streamer, stream_enabled, status as spin_status
+from stayawake.core.terminal import supports_color
 from stayawake.bots.security import proposal
+from stayawake.bots.security import resolution
+from stayawake.bots.security.targets import ScanOptions
 
 # The canonical Strix action. Detection is scoped to it (a fork/mirror is out of scope for v1).
 STRIX_OWNER, STRIX_REPO = "Ndevu12", "strix"
@@ -179,26 +186,47 @@ class Freshness:
     detail: str = ""
 
 
-def freshness(ref: StrixRef, token: str | None = None) -> Freshness:
-    """Best-effort: is `ref` behind the latest published Strix release? Network; degrades to
-    'unknown' (never raises, never guesses) when the releases API can't be reached."""
+@dataclass
+class LatestStrix:
+    """The latest published Strix release, resolved ONCE. A sweep precomputes this and passes it to
+    each repo's `freshness` so the releases API isn't re-hit per repo."""
+    tag: str | None = None
+    sha: str | None = None     # commit SHA of tags/<tag>
+
+
+def latest_strix(token: str | None = None) -> LatestStrix:
+    """Resolve the latest Strix release (tag + its commit SHA) once — for a `check` sweep."""
     rel = github_api.latest_release(STRIX_OWNER, STRIX_REPO, token)
-    latest_tag = rel.get("tag_name") if isinstance(rel, dict) else None
-    if not latest_tag:
+    tag = rel.get("tag_name") if isinstance(rel, dict) else None
+    if not tag:
+        return LatestStrix()
+    return LatestStrix(tag, github_api.ref_commit_sha(STRIX_OWNER, STRIX_REPO, f"tags/{tag}", token))
+
+
+def freshness(ref: StrixRef, token: str | None = None, *, latest: LatestStrix | None = None) -> Freshness:
+    """Best-effort: is `ref` behind the latest published Strix release? Network; degrades to
+    'unknown' (never raises, never guesses) when the releases API can't be reached. Pass a
+    precomputed `latest` (from `latest_strix`) to grade without a network call — used by the sweep."""
+    if latest is None:
+        rel = github_api.latest_release(STRIX_OWNER, STRIX_REPO, token)
+        tag = rel.get("tag_name") if isinstance(rel, dict) else None
+        latest = LatestStrix(tag)               # sha fetched lazily below, only if `ref` is SHA-pinned
+    if not latest.tag:
         return Freshness("unknown", detail="couldn't reach the Strix releases API")
     if ref.pin == "floating":
-        return Freshness("floating", latest_tag,
+        return Freshness("floating", latest.tag,
                          "a moving alias — tracks its line automatically; pin a SHA for reproducibility")
     if ref.pin == "tag":
-        ok = ref.ref == latest_tag
-        return Freshness("fresh" if ok else "behind", latest_tag,
-                         "" if ok else f"pinned {ref.ref}, latest release is {latest_tag}")
-    latest_sha = github_api.ref_commit_sha(STRIX_OWNER, STRIX_REPO, f"tags/{latest_tag}", token)
+        ok = ref.ref == latest.tag
+        return Freshness("fresh" if ok else "behind", latest.tag,
+                         "" if ok else f"pinned {ref.ref}, latest release is {latest.tag}")
+    latest_sha = latest.sha if latest.sha is not None else github_api.ref_commit_sha(
+        STRIX_OWNER, STRIX_REPO, f"tags/{latest.tag}", token)
     if not latest_sha:
-        return Freshness("unknown", latest_tag, "couldn't resolve the latest release commit")
+        return Freshness("unknown", latest.tag, "couldn't resolve the latest release commit")
     ok = ref.ref.lower() == latest_sha.lower()
-    return Freshness("fresh" if ok else "behind", latest_tag,
-                     "" if ok else f"pinned {ref.ref[:12]}…, {latest_tag} is {latest_sha[:12]}…")
+    return Freshness("fresh" if ok else "behind", latest.tag,
+                     "" if ok else f"pinned {ref.ref[:12]}…, {latest.tag} is {latest_sha[:12]}…")
 
 
 @dataclass
@@ -274,9 +302,11 @@ def remote_gate(slug: str, token: str | None) -> StrixRef | None:
 
 
 def check(*, repo: str | Path | None = None, slug: str | None = None, branch: str = "main",
-          token: str | None = None, offline: bool = False) -> GuardStatus:
+          token: str | None = None, offline: bool = False,
+          latest: "LatestStrix | None" = None) -> GuardStatus:
     """Inspect one repo's Strix gate. Local (a working-tree `repo` path) or remote (`slug`,
-    `owner/name`, via the API). `offline` skips the freshness network call."""
+    `owner/name`, via the API). `offline` skips the freshness network call; a sweep passes a
+    precomputed `latest` so freshness is graded without a per-repo release lookup."""
     if slug:
         owner, _, name = slug.partition("/")
         workflows = _remote_workflows(owner, name, token)
@@ -295,7 +325,7 @@ def check(*, repo: str | Path | None = None, slug: str | None = None, branch: st
                            branch=branch if slug else None)
 
     ref = gate.strix
-    fresh = None if offline else freshness(ref, token)
+    fresh = None if offline else freshness(ref, token, latest=latest)
     required: bool | None = None
     if slug and token:
         owner, _, name = slug.partition("/")
@@ -665,3 +695,98 @@ def _render_setup_submit(result: SetupResult, *, color: bool) -> str:
     # floor: no push access — the change is saved as a patch (issue floor not used for setup)
     where = f" (saved a patch at {res.patch_path})" if res.patch_path else ""
     return paint(f"⚠️  {slug}: no write access — could not open the guard PR{where}", warn, on=color) + sign
+
+
+# ── sweep: resolve targets (local repos / remote slugs) and check each — like saw scan/fix ────────
+# `saw guard check` takes positional TARGETS (local paths, or owner/repo slugs under --remote),
+# discovers local git repos, or resolves remote repos via the shared #1075 ladder (resolution.py).
+# Streams per repo; one repo's failure never aborts the run.
+
+def _guard_config(config_path: str | None):
+    """Load the config, tolerating a missing default (like `saw fix`). An explicitly-given --config
+    that is missing is an error (returns None → the caller exits 2)."""
+    if config_path is None:
+        p = Path(resolution.DEFAULT_CONFIG)
+        return load_yaml(p) if p.exists() else {}
+    if not Path(config_path).is_file():
+        print(f"error: config '{config_path}' not found. Pass --config <path>, or omit it to act on "
+              "the current repository.", file=sys.stderr)
+        return None
+    return load_yaml(config_path)
+
+
+def _local_patterns(cfg: dict, paths) -> list[str]:
+    cfg_local = (cfg.get("targets", {}) or {}).get("local", []) or []
+    return list(paths) if paths else (list(cfg_local) or [str(resolution.enclosing_repo_root())])
+
+
+def _disp(repo: Path) -> str:
+    return str(repo).replace(os.path.expanduser("~"), "~")
+
+
+def _indent(text: str) -> str:
+    return "\n".join("    " + ln for ln in text.splitlines())
+
+
+def _safe_check(**kw) -> GuardStatus:
+    """One repo's error must never abort the sweep — a failed check becomes an error status."""
+    try:
+        return check(**kw)
+    except Exception as exc:  # noqa: BLE001 — isolate one repo, keep the sweep going
+        return GuardStatus(present=False, error=f"check failed — {exc}")
+
+
+def check_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool = False,
+                  config_path: str | None = None, branch: str = "main",
+                  fail: bool = False, no_stream: bool = False) -> int:
+    """`saw guard check` across many repos. LOCAL by default (discover git repos under the given
+    paths / configured `targets.local` / the enclosing repo); `remote=True` (or naming users/orgs)
+    resolves GitHub repos via the #1075 ladder and checks each over the API. The latest Strix release
+    is resolved ONCE and reused for every repo's freshness. Streams per repo. Returns 2 on a missing
+    --config, 1 when `fail` and any gate isn't a healthy pinned Strix gate, else 0."""
+    cfg = _guard_config(config_path)
+    if cfg is None:
+        return 2
+    remote = remote or bool(users) or bool(orgs)
+    prog = Streamer(enabled=stream_enabled(sys.stdout, force_off=no_stream))
+    color = supports_color(sys.stdout)
+    statuses: list[GuardStatus] = []
+
+    if remote:
+        bad = resolution.invalid_slugs(slugs)
+        if bad:
+            prog.line(f"error: --remote targets must be owner/repo slugs; got {bad}")
+            return 2
+        resolved, token, _src = resolution.resolve_remote(cfg, ScanOptions(),
+                                                          users=users, orgs=orgs, slugs=slugs)
+        if not resolved:
+            prog.line(resolution.REMOTE_EMPTY_HINT)
+            return 0
+        latest = latest_strix(token)
+        prog.line(f"Checking {len(resolved)} GitHub repositor{'y' if len(resolved) == 1 else 'ies'}…")
+        for i, slug in enumerate(resolved, 1):
+            prog.line(f"  [{i}/{len(resolved)}] {slug}")
+            st = _safe_check(slug=slug, branch=branch, token=token, latest=latest)
+            prog.line(_indent(render(st, color=color)))
+            statuses.append(st)
+    else:
+        repos = resolution.discover_local_repos(_local_patterns(cfg, paths), ScanOptions())
+        if not repos:
+            prog.line("No local git repositories found.")
+            return 0
+        token, _ = auth.resolve_token()      # optional — eases freshness rate limits (public repo works without)
+        latest = latest_strix(token)
+        prog.line(f"Checking {len(repos)} local repositor{'y' if len(repos) == 1 else 'ies'}…")
+        for i, repo in enumerate(repos, 1):
+            prog.line(f"  [{i}/{len(repos)}] {_disp(repo)}")
+            st = _safe_check(repo=repo, token=token, latest=latest)
+            prog.line(_indent(render(st, color=color)))
+            statuses.append(st)
+
+    guarded = sum(1 for s in statuses if s.present)
+    verified = sum(1 for s in statuses if s.healthy)
+    unhealthy = [s for s in statuses if not s.healthy]
+    n = len(statuses)
+    prog.line(f"\nChecked {n} repositor{'y' if n == 1 else 'ies'}: {guarded} with a worm gate, "
+              f"{verified} a verified SHA-pinned Strix gate.")
+    return 1 if (fail and unhealthy) else 0
