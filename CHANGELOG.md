@@ -12,8 +12,20 @@ All notable changes to this project are documented here. The format is based on
   (a consumer may name either anything), then grades the pin (a commit **SHA** is best; an exact
   release tag is fine; a floating alias is weak), reports whether the pin is **behind** the latest
   Strix release, and — with `--repo owner/name` — whether branch protection **requires the gate's
-  actual job context** (precise, not a fuzzy name guess). Read-only; `-f/--fail` gates CI. `saw guard
-  setup` (installing/updating the workflow) follows.
+  actual job context** (precise, not a fuzzy name guess). Read-only; `-f/--fail` gates CI.
+- **`saw guard setup` installs or updates the Strix gate** (#1229) — completing the loop (we scan,
+  `saw audit` checks whether a repo is protected, `guard` installs/enforces it). It resolves the
+  **latest Strix release to a commit SHA** and writes a report-only, least-privilege worm-guard
+  workflow (or, when a gate already exists under *any* filename, **surgically bumps just its pin** —
+  the rest of the file is preserved byte-for-byte). It is **idempotent** (create / bump / no-op),
+  supports `--dry-run`, and **fails closed** if it can't resolve the SHA (offline → pass an explicit
+  `--ref <sha|tag>`, never a silent floating pin). Delivery always goes through **human review**:
+  by default it writes into the working tree for you to commit + PR; `--pr` opens one **rolling PR**
+  via the shared proposal ladder — it **never pushes to the default branch**, and the PR body
+  carries the hardening a file can't do itself (mark the check required, add CODEOWNERS).
+  Auto-remediation (which needs scoped write) is deliberately **opt-in** and not part of this
+  installer. Built on a reusable `core.textsafe` + `bots/security/proposal` extraction shared with
+  `saw fix` (#1234).
 - **`saw audit --verify` content-scans a suspicious host artifact** to turn a *weak* indicator into
   an actual verdict (#1221). When the audit flags a lone `~/.node_modules` (a place the worm
   sometimes stages, but a manual `npm install` in `$HOME` produces identically), `--verify` looks
