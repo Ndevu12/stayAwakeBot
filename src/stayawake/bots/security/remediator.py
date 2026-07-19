@@ -29,9 +29,10 @@ from stayawake.core.adapters import github_api
 from stayawake.core.streaming import Streamer, stream_enabled, status
 from stayawake.core.timeutil import now_iso
 from stayawake.bots.security.signatures import load_signatures
-from stayawake.bots.security.service import (
-    discover_local_repos, _enclosing_repo_root, _resolve_remote, _remote_scope,
-    invalid_slugs, REMOTE_EMPTY_HINT, DEFAULT_CONFIG)
+from stayawake.bots.security.resolution import (
+    discover_local_repos, invalid_slugs, REMOTE_EMPTY_HINT, DEFAULT_CONFIG,
+    enclosing_repo_root as _enclosing_repo_root, remote_scope as _remote_scope,
+    resolve_remote as _resolve_remote)
 from stayawake.bots.security.targets import ScanOptions
 from stayawake.bots.security import pr as pr_submit
 

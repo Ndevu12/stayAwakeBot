@@ -9,7 +9,6 @@ scanned code; remote repos are cloned read-only into sandboxes and removed after
 from __future__ import annotations
 
 import os
-import re
 import sys
 import tempfile
 from pathlib import Path
@@ -18,17 +17,25 @@ from stayawake.core.config import load_yaml
 from stayawake.core.io import resolve_reports_dir
 from stayawake.core.streaming import Streamer, status, stream_enabled
 from stayawake.core.timeutil import now_iso
-from stayawake.core.adapters import github_api
-from stayawake.core import auth
+# github_api/auth are consumed transitively through the resolution seam; kept imported so the
+# targeting tests can patch them at the service boundary (`service.github_api`/`service.auth`) —
+# they are the same module objects resolution.py uses, so the patches reach it.
+from stayawake.core.adapters import github_api  # noqa: F401
+from stayawake.core import auth  # noqa: F401
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.models import ScanResult, ScanReport
 from stayawake.bots.security.sinks import (
     Sink, TerminalSink, JsonSink, SarifSink, FileSink, IssueSink, SlackSink)
 from stayawake.bots.security.targets import ScanOptions, LocalRepoTarget, RemoteRepoTarget
+# Target resolution lives in one shared module (resolution.py); re-imported here under the names
+# service.scan's body and the targeting tests already use (the `_`-prefixed ones stay for compat).
+from stayawake.bots.security.resolution import (
+    DEFAULT_CONFIG, REMOTE_EMPTY_HINT, discover_local_repos, invalid_slugs,
+    enclosing_repo_root as _enclosing_repo_root, remote_scope as _remote_scope,
+    resolve_remote as _resolve_remote)
 
 REPORTS_DIR = Path("reports/security")
-DEFAULT_CONFIG = "config/security.yml"
 # Above this many targets, a terminal can't hold the whole report — if the user didn't
 # already persist it (-d/--json), we drop the full Markdown+JSON in a temp dir and point there.
 LARGE_FLEET = 25
@@ -42,17 +49,6 @@ def _read_config(config_path: str | None) -> dict:
         p = Path(DEFAULT_CONFIG)
         return load_yaml(p) if p.exists() else {}
     return load_yaml(config_path)
-
-
-def _enclosing_repo_root(start: Path | None = None) -> Path:
-    """Nearest ancestor of `start` (default: CWD) that contains a .git, else `start`.
-    Lets a bare invocation default to 'scan the repo I'm standing in', even from a
-    subdirectory."""
-    start = (start or Path.cwd()).resolve()
-    for d in (start, *start.parents):
-        if (d / ".git").exists():
-            return d
-    return start
 
 
 # Project build-output dirs (not third-party node_modules) that the opt-in build-scan un-prunes.
@@ -123,91 +119,6 @@ def _require_db_or_error() -> int | None:
         return 2
     return None
 
-
-def discover_local_repos(patterns: list[str], opts: ScanOptions) -> list[Path]:
-    repos: list[Path] = []
-    seen: set[str] = set()
-    for pat in patterns or []:
-        root = Path(os.path.expanduser(pat).split("*", 1)[0] or "/")
-        if not root.exists():
-            root = root.parent
-        if not root.exists():
-            continue
-        for dirpath, dirnames, _ in os.walk(root):
-            if (Path(dirpath) / ".git").exists():
-                rp = Path(dirpath).resolve()
-                if str(rp) not in seen:
-                    seen.add(str(rp))
-                    repos.append(rp)
-                dirnames[:] = []
-                continue
-            dirnames[:] = [d for d in dirnames if d not in opts.exclude_dirs]
-    return repos
-
-
-def _remote_scope(cfg: dict, users, orgs, slugs) -> str:
-    """A short label for the per-run line, describing WHICH remote repos a `--remote` run
-    resolved (mirrors the ladder in `_resolve_remote`). Pure — no API calls."""
-    if users or orgs or slugs:
-        bits = []
-        if users:
-            bits.append("user " + ", ".join(users))
-        if orgs:
-            bits.append("org " + ", ".join(orgs))
-        if slugs:
-            bits.append(f"{len(slugs)} named repo(s)")
-        return "; ".join(bits)
-    gconf = cfg.get("targets", {}).get("github", {}) or {}
-    if gconf.get("users") or gconf.get("orgs"):
-        return "configured targets"
-    return "your own repos"
-
-
-def _resolve_remote(cfg: dict, opts: ScanOptions, *, users=None, orgs=None, slugs=None):
-    """Resolve `--remote` targets to ('owner/name', ...). Ladder, first match wins (#1075):
-      1. ad-hoc CLI selectors — `slugs` (named repos), `--user`/`--org` enumerations — which
-         OVERRIDE config so you can target anything without editing a file;
-      2. configured `targets.github.users/orgs`;
-      3. infer "my repos" — the authenticated user's OWNED repos (private-inclusive via
-         /user/repos), or a GitHub App installation's repos.
-    Returns (sorted unique slugs, token, source)."""
-    gconf = cfg.get("targets", {}).get("github", {}) or {}
-    inc_forks = gconf.get("include_forks", False)
-    inc_arch = gconf.get("include_archived", False)
-    token, source = auth.resolve_token()
-    resolved: list[str] = []
-
-    if users or orgs or slugs:                       # 1. ad-hoc selectors override everything
-        resolved += list(slugs or [])
-        for u in users or []:
-            resolved += github_api.list_repos(u, "users", token, inc_forks, inc_arch)
-        for o in orgs or []:
-            resolved += github_api.list_repos(o, "orgs", token, inc_forks, inc_arch)
-    else:
-        for kind in ("users", "orgs"):               # 2. configured targets
-            for acct in gconf.get(kind, []) or []:
-                resolved += github_api.list_repos(acct, kind, token, inc_forks, inc_arch)
-        if not resolved and token:                   # 3. infer "my repos"
-            resolved += (github_api.list_installation_repos(token, inc_arch)
-                         if source == "github-app"
-                         else github_api.list_my_repos(token, inc_forks, inc_arch))
-    return sorted(set(resolved)), token, source
-
-
-_SLUG_RE = re.compile(r"^[^/\s]+/[^/\s]+$")
-
-
-def invalid_slugs(slugs) -> list[str]:
-    """The entries that aren't a valid `owner/name` — so `--remote` positionals (which are
-    slugs, not local paths) fail loudly instead of silently resolving to nothing."""
-    return [s for s in (slugs or []) if not _SLUG_RE.match(s)]
-
-
-# Shared actionable message when a `--remote` run resolves zero repositories.
-REMOTE_EMPTY_HINT = (
-    "No GitHub repositories resolved. Name targets with `--user U` / `--org O` / `owner/repo`, "
-    "set `targets.github` in the config, or authenticate (`gh auth login` or GH_SECURITY_TOKEN) "
-    "to act on your own repos.")
 
 
 def _status_tag(r: ScanResult) -> str:
