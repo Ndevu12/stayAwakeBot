@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from stayawake.bots.security import remediator
+from stayawake.bots.security import resolution
 from stayawake.bots.security import service
 
 
@@ -44,11 +45,11 @@ class TestRemoteFix(unittest.TestCase):
              mock.patch.object(remediator.github_api, "get_authenticated_user", return_value={"login": "o"}), \
              mock.patch.object(service.github_api, "list_repos", return_value=["o/a", "o/b"]), \
              mock.patch.object(remediator.gitutil, "github_https_auth", _fake_https_auth), \
-             mock.patch.object(remediator.subprocess, "run",
+             mock.patch.object(resolution.subprocess, "run",
                                return_value=SimpleNamespace(returncode=0, stdout="", stderr="")), \
              mock.patch.object(remediator.pr_submit, "submit_fix_pr",
                                return_value="o/x: opened PR #1 (url)") as m_pr, \
-             mock.patch.object(remediator.shutil, "rmtree"):
+             mock.patch.object(resolution.shutil, "rmtree"):
             # Two repos, both cloned + PR'd cleanly → no repo needs review → exit 0.
             self.assertEqual(remediator.fix(_cfg(["o"]), remote=True, no_stream=True), 0)
             self.assertEqual(m_pr.call_count, 2)   # one PR attempt per repo
@@ -58,11 +59,11 @@ class TestRemoteFix(unittest.TestCase):
              mock.patch.object(remediator.github_api, "get_authenticated_user", return_value={"login": "o"}), \
              mock.patch.object(service.github_api, "list_repos", return_value=["o/a"]), \
              mock.patch.object(remediator.gitutil, "github_https_auth", _fake_https_auth), \
-             mock.patch.object(remediator.subprocess, "run",
+             mock.patch.object(resolution.subprocess, "run",
                                return_value=SimpleNamespace(returncode=0, stdout="", stderr="")), \
              mock.patch.object(remediator.pr_submit, "submit_fix_pr",
                                return_value="o/a: ABORTED — 1 finding still present"), \
-             mock.patch.object(remediator.shutil, "rmtree"):
+             mock.patch.object(resolution.shutil, "rmtree"):
             # A repo that couldn't be auto-cleaned (ABORTED) → exit 1 (needs manual review).
             self.assertEqual(remediator.fix(_cfg(["o"]), remote=True, no_stream=True), 1)
 

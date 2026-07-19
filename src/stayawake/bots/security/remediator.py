@@ -15,10 +15,7 @@ streams live, and one repo's failure never aborts the run.
 from __future__ import annotations
 
 import os
-import shutil
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 from stayawake.core.config import load_yaml
@@ -29,6 +26,7 @@ from stayawake.core.adapters import github_api
 from stayawake.core.streaming import Streamer, stream_enabled, status
 from stayawake.core.timeutil import now_iso
 from stayawake.bots.security.signatures import load_signatures
+from stayawake.bots.security import resolution
 from stayawake.bots.security.resolution import (
     discover_local_repos, invalid_slugs, REMOTE_EMPTY_HINT, DEFAULT_CONFIG,
     enclosing_repo_root as _enclosing_repo_root, remote_scope as _remote_scope,
@@ -151,20 +149,12 @@ def _fix_remote(cfg, opts, sigs, allowlist, prog: Streamer, *,
     outcomes: list[str] = []
     for i, slug in enumerate(resolved, 1):
         prog.line(f"  [{i}/{len(resolved)}] {slug}")
-        tmp = Path(tempfile.mkdtemp(prefix="sab-fix-"))
-        clone = tmp / "repo"
-        try:
-            with status(f"cloning {slug}…", enabled=prog.enabled):   # phase 0: clone only
-                with gitutil.github_https_auth(token) as (prefix, env):
-                    r = subprocess.run(["git", "clone", "--quiet", "--depth", "50",
-                                        f"{prefix}{slug}.git", str(clone)],
-                                       capture_output=True, text=True, check=False, env=env)
+        with status(f"cloning {slug}…", enabled=prog.enabled), \
+                resolution.cloned_repo(slug, token) as clone:      # phase 0: clone (shared helper)
             # submit_fix_pr then drives its own scanning → fixing → opening-PR spinners.
-            outcome = (f"{slug}: clone failed (check token access)" if r.returncode != 0
-                       else _safe(lambda: pr_submit.submit_fix_pr(clone, opts, sigs, allowlist,
-                                                                  token, spin=prog.enabled), slug))
-        finally:
-            shutil.rmtree(tmp, ignore_errors=True)
+            outcome = (f"{slug}: clone failed (check token access)" if clone is None
+                       else _safe(lambda c=clone: pr_submit.submit_fix_pr(c, opts, sigs, allowlist,
+                                                                          token, spin=prog.enabled), slug))
         prog.line(f"      → {outcome}")
         outcomes.append(outcome)
     return outcomes

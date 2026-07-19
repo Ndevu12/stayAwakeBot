@@ -790,3 +790,73 @@ def check_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
     prog.line(f"\nChecked {n} repositor{'y' if n == 1 else 'ies'}: {guarded} with a worm gate, "
               f"{verified} a verified SHA-pinned Strix gate.")
     return 1 if (fail and unhealthy) else 0
+
+
+def _safe_setup(repo, **kw) -> SetupResult:
+    """One repo's error must never abort the setup sweep — a failure becomes an error result."""
+    try:
+        return setup(repo, **kw)
+    except Exception as exc:  # noqa: BLE001 — isolate one repo, keep the sweep going
+        return SetupResult(error=f"setup failed — {exc}")
+
+
+def setup_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool = False,
+                  config_path: str | None = None, ref: str | None = None, dry_run: bool = False,
+                  pr: bool = False, branch: str | None = None, no_stream: bool = False) -> int:
+    """`saw guard setup` across many repos, like `saw fix`. LOCAL by default (discover git repos;
+    write/prepare the gate into each working tree, or `--pr` to open a PR each); `remote=True`
+    resolves GitHub repos via the #1075 ladder, clones each, and opens a PR (a remote repo has no
+    working tree, so `--pr` is implied). Never pushes to a default branch. Streams per repo; one
+    repo's error never aborts the run. Returns 2 on a missing --config, 1 if any repo errored, else 0."""
+    cfg = _guard_config(config_path)
+    if cfg is None:
+        return 2
+    remote = remote or bool(users) or bool(orgs)
+    prog = Streamer(enabled=stream_enabled(sys.stdout, force_off=no_stream))
+    color = supports_color(sys.stdout)
+    results: list[SetupResult] = []
+
+    if remote:
+        bad = resolution.invalid_slugs(slugs)
+        if bad:
+            prog.line(f"error: --remote targets must be owner/repo slugs; got {bad}")
+            return 2
+        resolved, token, _src = resolution.resolve_remote(cfg, ScanOptions(),
+                                                          users=users, orgs=orgs, slugs=slugs)
+        if not token:
+            prog.line(auth.no_credential_hint("cloning and opening guard PRs") + "\n")
+            return 2
+        if not resolved:
+            prog.line(resolution.REMOTE_EMPTY_HINT)
+            return 0
+        prog.line(f"Setting up {len(resolved)} GitHub repositor{'y' if len(resolved) == 1 else 'ies'}…")
+        for i, slug in enumerate(resolved, 1):
+            prog.line(f"  [{i}/{len(resolved)}] {slug}")
+            with spin_status(f"cloning {slug}…", enabled=prog.enabled), \
+                    resolution.cloned_repo(slug, token) as clone:
+                if clone is None:
+                    res = SetupResult(error=f"{slug}: clone failed (check token access)")
+                else:                                    # a remote repo has no working tree → always PR
+                    res = _safe_setup(clone, token=token, ref=ref, dry_run=dry_run, pr=True,
+                                      branch=branch, spin=prog.enabled)
+            prog.line(_indent(render_setup(res, color=color)))
+            results.append(res)
+    else:
+        token, _ = auth.resolve_token() if (pr or not ref) else (None, None)
+        repos = resolution.discover_local_repos(_local_patterns(cfg, paths), ScanOptions())
+        if not repos:
+            prog.line("No local git repositories found.")
+            return 0
+        prog.line(f"Setting up {len(repos)} local repositor{'y' if len(repos) == 1 else 'ies'}…")
+        for i, repo in enumerate(repos, 1):
+            prog.line(f"  [{i}/{len(repos)}] {_disp(repo)}")
+            res = _safe_setup(repo, token=token, ref=ref, dry_run=dry_run, pr=pr,
+                              branch=branch, spin=prog.enabled)
+            prog.line(_indent(render_setup(res, color=color)))
+            results.append(res)
+
+    errored = [r for r in results if r.error]
+    n = len(results)
+    prog.line(f"\nSet up {n} repositor{'y' if n == 1 else 'ies'}"
+              + (f"; {len(errored)} errored." if errored else "."))
+    return 1 if errored else 0

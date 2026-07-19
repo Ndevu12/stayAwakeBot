@@ -304,20 +304,23 @@ saw guard check --user Ndevu12 -f    # gate CI on all of a user's repos
 
 #### `saw guard setup`
 
-Install the gate, or **surgically bump an existing pin**. Resolves the **latest Strix release to a
-commit SHA** and writes a report-only, least-privilege workflow (or rewrites *only* the `uses:` ref
-of an existing gate — the rest of the file is untouched). **Idempotent** (create / bump / no-op) and
-**fails closed** if the SHA can't be resolved. It **never pushes to the default branch**: by default
-it writes into the working tree for you to review + commit + PR; `--pr` opens one rolling PR instead.
+Install the gate, or **surgically bump an existing pin**, **across the resolved repos** — same target
+model as [`saw guard check`](#saw-guard-check) and `scan`/`fix`. Resolves the **latest Strix release
+to a commit SHA** and writes a report-only, least-privilege workflow (or rewrites *only* the `uses:`
+ref of an existing gate — the rest of the file is untouched). **Idempotent** (create / bump / no-op /
+already-guarded) and **fails closed** if the SHA can't be resolved. It **never pushes to a default
+branch**: **local** by default (writes into each working tree for you to review + commit + PR),
+`--pr` opens one PR per repo, and `--remote` clones each GitHub repo and opens a PR.
 
 ```text
-saw guard setup [-p PATH] [--pr] [--ref SHA|TAG] [-b BRANCH] [--dry-run] [--no-stream]
+saw guard setup [TARGETS...] [-p PATH] [-c FILE] [--pr] [-r] [--user U] [--org O]
+                [--ref SHA|TAG] [-b BRANCH] [--dry-run] [--no-stream]
 ```
 
 | Option | Description |
 | --- | --- |
-| `-p`, `--path` | Repo to set up (default: the current directory). |
-| `--pr`, `--open-pr` | Open/update a rolling `security/guard-setup` PR via the shared proposal ladder, instead of writing to the working tree. Needs a token. |
+| `TARGETS...` / `-p` / `-c` / `-r` / `--user` / `--org` | Target selection, identical to [`saw scan`](#saw-scan): positionals are local paths (or `owner/repo` slugs under `--remote`); omit to use configured targets or the current repo. |
+| `--pr`, `--open-pr` | Open/update a rolling `security/guard-setup` PR per repo (via the shared proposal ladder) instead of writing to the working tree. `--remote` always opens a PR. Needs a token. |
 | `--ref SHA\|TAG` | Pin this Strix ref explicitly (offline / deterministic) instead of resolving the latest release. A tag is resolved to its immutable SHA; a SHA is used verbatim. |
 | `-b`, `--branch` | Default branch to target (default: auto-detect). |
 | `--dry-run` | Preview the change (the new file, or the rewritten `uses:` line) without writing anything. |
@@ -328,6 +331,7 @@ saw guard check --repo Ndevu12/strix -f         # gate CI on a remote repo's pro
 saw guard setup --dry-run                       # preview the workflow that would be installed
 saw guard setup                                 # write it into the working tree to review + PR
 saw guard setup --pr                            # open a rolling install/bump PR (never pushes main)
+saw guard setup --user Ndevu12                  # clone each of a user's repos and open a gate PR
 ```
 
 Auto-remediation (a cleanup PR on an infected default branch) needs scoped write permissions and is

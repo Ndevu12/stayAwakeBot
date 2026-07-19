@@ -12,11 +12,16 @@ resolution logic lives in exactly one place instead of being copied per verb.
 """
 from __future__ import annotations
 
+import contextlib
 import os
 import re
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 
 from stayawake.core import auth
+from stayawake.core import git as gitutil
 from stayawake.core.adapters import github_api
 from stayawake.bots.security.targets import ScanOptions
 
@@ -119,3 +124,21 @@ def invalid_slugs(slugs) -> list[str]:
     """The entries that aren't a valid `owner/name` — so `--remote` positionals (which are
     slugs, not local paths) fail loudly instead of silently resolving to nothing."""
     return [s for s in (slugs or []) if not _SLUG_RE.match(s)]
+
+
+@contextlib.contextmanager
+def cloned_repo(slug: str, token: str | None, *, depth: int = 50):
+    """Shallow-clone a remote `owner/name` into a throwaway directory (authenticated HTTPS — the
+    token goes via the git-askpass env, never in the URL/argv), yield the clone `Path`, and remove
+    it on exit. Yields `None` if the clone fails. The one shared way a command (`saw fix`,
+    `saw guard setup`) acts on a remote repo it hasn't got checked out."""
+    tmp = Path(tempfile.mkdtemp(prefix="sab-clone-"))
+    clone = tmp / "repo"
+    try:
+        with gitutil.github_https_auth(token) as (prefix, env):
+            r = subprocess.run(["git", "clone", "--quiet", "--depth", str(depth),
+                                f"{prefix}{slug}.git", str(clone)],
+                               capture_output=True, text=True, check=False, env=env)
+        yield clone if r.returncode == 0 else None
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
