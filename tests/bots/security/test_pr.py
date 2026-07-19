@@ -15,6 +15,7 @@ from unittest import mock
 
 
 from stayawake.bots.security import pr                              # noqa: E402
+from stayawake.bots.security import proposal                        # noqa: E402
 from stayawake.bots.security.models import Finding, Severity, ScanResult  # noqa: E402
 from stayawake.bots.security.remediation import Change             # noqa: E402
 from stayawake.core.git.write.commit import CommitResult          # noqa: E402
@@ -404,7 +405,7 @@ class TestForkPr(unittest.TestCase):
         out = Path(tempfile.mkdtemp())
         with _patch_git(origin_slug=lambda repo: "up/repo", push_branch=fake_push,
                         format_patch=lambda repo, ref="HEAD": "patch-body\n"), \
-             mock.patch.object(pr.time, "sleep", return_value=None), \
+             mock.patch.object(proposal.time, "sleep", return_value=None), \
              mock.patch.object(pr, "scan_target",
                                side_effect=lambda *a, **k: scans.pop(0) if scans else scans), \
              mock.patch.object(pr.remediation, "plan",
