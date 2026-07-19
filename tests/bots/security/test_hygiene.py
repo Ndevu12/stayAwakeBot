@@ -814,16 +814,37 @@ class TestBranchProtection(unittest.TestCase):
 
     def test_worm_guard_not_required_warns(self):
         prot = {"required_status_checks": {"contexts": ["build", "lint"]}}
-        with mock.patch("stayawake.core.adapters.github_api.get_branch_protection",
-                        return_value=prot):
+        with mock.patch("stayawake.core.adapters.github_api.get_branch_protection", return_value=prot), \
+             mock.patch("stayawake.bots.security.guard.remote_gate", return_value=None):  # no strix wf
             issues = hygiene.check_branch_protection("o/r", "tok")
         self.assertEqual([i.id for i in issues], ["worm-guard-not-required"])
 
-    def test_worm_guard_required_is_clean(self):
+    def test_worm_guard_required_is_clean_via_heuristic(self):
+        # No Strix workflow found → fall back to the fuzzy "worm" context match.
         prot = {"required_status_checks": {"contexts": ["Worm Guard — block infected merges"]}}
-        with mock.patch("stayawake.core.adapters.github_api.get_branch_protection",
-                        return_value=prot):
+        with mock.patch("stayawake.core.adapters.github_api.get_branch_protection", return_value=prot), \
+             mock.patch("stayawake.bots.security.guard.remote_gate", return_value=None):
             self.assertEqual(hygiene.check_branch_protection("o/r", "tok"), [])
+
+    def test_derived_strix_context_required_is_clean(self):
+        # #1230: a job named `strix` produces the context `strix` (no "worm"). When branch protection
+        # requires THAT context the gate IS enforced — the old fuzzy match wrongly warned here.
+        from stayawake.bots.security.guard import StrixRef
+        prot = {"required_status_checks": {"contexts": ["strix"]}}
+        with mock.patch("stayawake.core.adapters.github_api.get_branch_protection", return_value=prot), \
+             mock.patch("stayawake.bots.security.guard.remote_gate",
+                        return_value=StrixRef(".github/workflows/worm-scan.yml", "strix", "v0.1.4", "tag")):
+            self.assertEqual(hygiene.check_branch_protection("o/r", "tok"), [])
+
+    def test_derived_strix_context_not_required_names_the_actual_context(self):
+        from stayawake.bots.security.guard import StrixRef
+        prot = {"required_status_checks": {"contexts": ["build"]}}
+        with mock.patch("stayawake.core.adapters.github_api.get_branch_protection", return_value=prot), \
+             mock.patch("stayawake.bots.security.guard.remote_gate",
+                        return_value=StrixRef(".github/workflows/w.yml", "strix", "v0.1.4", "tag")):
+            issues = hygiene.check_branch_protection("o/r", "tok")
+        self.assertEqual([i.id for i in issues], ["worm-guard-not-required"])
+        self.assertIn("strix", issues[0].title)      # names the ACTUAL context, not "worm"
 
 
 class TestAuditRender(unittest.TestCase):

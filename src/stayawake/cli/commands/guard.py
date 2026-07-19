@@ -10,7 +10,6 @@ import argparse
 import sys
 
 from stayawake.core import auth
-from stayawake.core.render import SEVERITY, paint
 from stayawake.core.streaming import Streamer, stream_enabled
 from stayawake.core.terminal import supports_color
 
@@ -39,7 +38,7 @@ def register(sub) -> None:
 
 
 def run_check(a: argparse.Namespace) -> int:
-    from stayawake import guard   # lazy: pull yaml/API in only when the command runs
+    from stayawake.bots.security import guard   # lazy: pull yaml/API in only when the command runs
 
     token = None
     if a.repo:
@@ -49,61 +48,6 @@ def run_check(a: argparse.Namespace) -> int:
                   " (branch-protection + freshness checks need it)\n", file=sys.stderr)
 
     status = guard.check(slug=a.repo, branch=a.branch, token=token)
-    report = _render(status, color=supports_color(sys.stdout), remote=bool(a.repo))
-    Streamer(enabled=stream_enabled(sys.stdout, force_off=a.no_stream)).line(report)
-    return 1 if (a.fail and not _is_ok(status)) else 0
-
-
-def _is_ok(s) -> bool:
-    """Gate is healthy: present, SHA-pinned, not stale, and (when we could check) required."""
-    if not s.present or s.ref is None or s.ref.pin != "sha":
-        return False
-    if s.fresh is not None and s.fresh.state == "behind":
-        return False
-    return s.required is not False
-
-
-def _render(s, *, color: bool, remote: bool) -> str:
-    ok, warn, dim = SEVERITY["ok"], SEVERITY["warning"], SEVERITY["info"]
-    lines: list[str] = []
-
-    if not s.present:
-        if s.error:
-            return paint(f"⚠️  {s.error}", warn, on=color)
-        lines.append(paint("✗ No Strix gate found", warn, on=color) +
-                     " — no workflow uses `Ndevu12/strix`.")
-        lines.append(paint("     Run `saw guard setup` to add one.", dim, on=color))
-        return "\n".join(lines)
-
-    r = s.ref
-    lines.append(paint("✓ Strix gate found", ok, on=color) + f" — {r.workflow} (job “{r.job}”)")
-
-    if r.pin == "sha":
-        lines.append("  " + paint("✓ pinned to a commit SHA", ok, on=color) + f"  (@{r.ref[:12]}…)")
-    elif r.pin == "tag":
-        lines.append("  " + paint("• pinned to a release tag", dim, on=color) +
-                     f"  (@{r.ref}) — a SHA is immutable; `saw guard setup` can rewrite it")
-    else:
-        lines.append("  " + paint("⚠ floating ref", warn, on=color) +
-                     f"  (@{r.ref}) — the action's code can change under you; pin a SHA")
-
-    if s.fresh is not None:
-        f = s.fresh
-        if f.state == "fresh":
-            lines.append("  " + paint("✓ up to date", ok, on=color) + f"  (latest {f.latest_tag})")
-        elif f.state == "behind":
-            lines.append("  " + paint("⚠ behind latest", warn, on=color) + f"  — {f.detail}")
-        elif f.state == "floating":
-            lines.append("  " + paint("• moving alias", dim, on=color) + f"  — {f.detail}")
-        else:
-            lines.append("  " + paint("• freshness unknown", dim, on=color) + f"  — {f.detail}")
-
-    if remote:
-        if s.required is True:
-            lines.append("  " + paint("✓ required", ok, on=color) +
-                         f"  — branch protection on {s.branch} requires “{r.job}”")
-        elif s.required is False:
-            lines.append("  " + paint("⚠ not a required check", warn, on=color) +
-                         f"  — {s.branch} protection does NOT require “{r.job}”; an infected PR can still merge")
-        # s.required is None → no token, couldn't check → stay quiet
-    return "\n".join(lines)
+    Streamer(enabled=stream_enabled(sys.stdout, force_off=a.no_stream)).line(
+        guard.render(status, color=supports_color(sys.stdout)))
+    return 1 if (a.fail and not status.healthy) else 0
