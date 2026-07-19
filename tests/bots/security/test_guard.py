@@ -299,6 +299,23 @@ class TestSetupLocal(unittest.TestCase):
         self.assertTrue((repo / guard.WORM_GUARD_FILE).is_file())
         self.assertEqual(res.wrote, repo / guard.WORM_GUARD_FILE)
 
+    def test_never_clobbers_an_existing_worm_guard_workflow(self):
+        # Regression: a repo running a worm gate by ANOTHER mechanism (a local `uses: ./…/worm-scan`
+        # action, undetectable by find_strix) under the conventional worm-guard.yml name must NOT be
+        # overwritten by `create`. setup errors and leaves the file byte-for-byte intact.
+        repo = _tmp_repo()
+        wf = repo / guard.WORKFLOW_DIR
+        wf.mkdir(parents=True)
+        original = ("name: Worm Guard\non: [pull_request]\njobs:\n  worm-guard:\n"
+                    "    steps:\n      - uses: ./.github/actions/worm-scan\n")
+        (wf / "worm-guard.yml").write_text(original)
+        with self._resolve(), mock.patch.object(guard.gitutil, "default_branch", return_value="main"):
+            res = guard.setup(repo)
+        self.assertEqual(res.plan.action, "conflict")
+        self.assertIsNotNone(res.error)
+        self.assertIn("not overwriting", res.error)
+        self.assertEqual((wf / "worm-guard.yml").read_text(), original)   # untouched
+
     def test_dry_run_writes_nothing(self):
         repo = _tmp_repo()
         with self._resolve(), mock.patch.object(guard.gitutil, "default_branch", return_value="main"):

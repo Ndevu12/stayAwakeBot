@@ -369,6 +369,11 @@ def plan_setup(workflows: dict[str, str], default_branch: str, pin: Pin) -> Setu
     pinned to the resolved SHA."""
     ref = find_strix(workflows)
     if ref is None:
+        # No Strix gate — install one. But NEVER clobber a workflow already at the create path: a
+        # repo may run a worm gate by another mechanism (a local `uses: ./…/worm-scan` action, which
+        # find_strix can't detect) under exactly this conventional name. Refuse rather than overwrite.
+        if WORM_GUARD_FILE in workflows:
+            return SetupPlan("conflict", WORM_GUARD_FILE)
         return SetupPlan("create", WORM_GUARD_FILE, render_workflow(pin, default_branch),
                          new_ref=pin.sha)
     if ref.pin == "sha" and ref.ref.lower() == pin.sha.lower():
@@ -447,6 +452,11 @@ def setup(repo: str | Path | None = None, *, token: str | None = None, ref: str 
                                  "(offline? pass --ref <sha|tag> to pin explicitly)")
     default_branch = branch or gitutil.default_branch(repo)
     plan = plan_setup(_local_workflows(repo), default_branch, pin)
+    if plan.action == "conflict":
+        # A non-Strix workflow already occupies the install path — refuse to overwrite it (data loss).
+        return SetupResult(plan=plan, error=f"a workflow already exists at {plan.path} and does not "
+                           "use Ndevu12/strix — not overwriting it. If it is a worm gate by another "
+                           "mechanism, leave it; otherwise remove/rename it and re-run `saw guard setup`.")
     if plan.action == "repin" and f"strix@{pin.sha}" not in (plan.content or ""):
         # find_strix (YAML-aware) saw a gate the line-surgical rewrite couldn't touch (an exotic
         # `uses:` form). Never claim a bump that changed nothing — tell the operator to edit it.
