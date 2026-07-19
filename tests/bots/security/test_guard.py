@@ -220,5 +220,179 @@ class TestRender(unittest.TestCase):
         self.assertNotIn("required", guard.render(local))    # no branch → local → no enforcement line
 
 
+SHA = "a" * 40
+
+
+class TestResolvePin(unittest.TestCase):
+    def test_explicit_sha_used_verbatim_no_network(self):
+        with mock.patch.object(guard.github_api, "ref_commit_sha") as rcs, \
+             mock.patch.object(guard.github_api, "latest_release") as lr:
+            pin = guard.resolve_pin(None, ref=SHA)
+        self.assertEqual((pin.sha, pin.tag), (SHA, None))
+        rcs.assert_not_called()                              # a SHA needs no resolution
+        lr.assert_not_called()
+
+    def test_explicit_tag_resolved_to_sha(self):
+        with mock.patch.object(guard.github_api, "ref_commit_sha", return_value=SHA):
+            pin = guard.resolve_pin("tok", ref="v0.1.4")
+        self.assertEqual((pin.sha, pin.tag), (SHA, "v0.1.4"))
+
+    def test_latest_release_resolved(self):
+        with mock.patch.object(guard.github_api, "latest_release", return_value={"tag_name": "v9.9.9"}), \
+             mock.patch.object(guard.github_api, "ref_commit_sha", return_value=SHA):
+            pin = guard.resolve_pin("tok")
+        self.assertEqual((pin.sha, pin.tag), (SHA, "v9.9.9"))
+
+    def test_fails_closed_when_unreachable(self):
+        # No release / no SHA → None, so setup never emits a floating pin silently.
+        with mock.patch.object(guard.github_api, "latest_release", return_value=None):
+            self.assertIsNone(guard.resolve_pin("tok"))
+
+
+class TestPlanSetup(unittest.TestCase):
+    PIN = guard.Pin(SHA, "v0.1.4")
+
+    def test_create_when_absent(self):
+        p = guard.plan_setup({}, "main", self.PIN)
+        self.assertEqual((p.action, p.path), ("create", guard.WORM_GUARD_FILE))
+        self.assertEqual(guard.find_strix({p.path: p.content}).pin, "sha")   # emitted file is detectable
+
+    def test_noop_when_already_latest_sha(self):
+        wf = guard.render_workflow(self.PIN, "main")
+        self.assertEqual(guard.plan_setup({"a.yml": wf}, "main", self.PIN).action, "noop")
+
+    def test_repin_is_surgical_and_filename_agnostic(self):
+        existing = ("name: keep-me\non: [push]\njobs:\n  strix:\n    steps:\n"
+                    "      - uses: Ndevu12/strix@v0  # old\n")
+        p = guard.plan_setup({".github/workflows/worm-scan.yml": existing}, "main", self.PIN)
+        self.assertEqual((p.action, p.path), ("repin", ".github/workflows/worm-scan.yml"))
+        self.assertIn(f"Ndevu12/strix@{SHA}", p.content)
+        self.assertIn("name: keep-me", p.content)                            # rest preserved
+        self.assertEqual(guard.find_strix({p.path: p.content}).pin, "sha")
+
+    def test_repin_handles_a_quoted_uses(self):
+        # A YAML-quoted ref is detected by find_strix; the rewrite must actually change it (not a
+        # silent no-op), normalizing to the conventional unquoted form.
+        existing = 'jobs:\n  s:\n    steps:\n      - uses: "Ndevu12/strix@v0"\n'
+        p = guard.plan_setup({"wf.yml": existing}, "main", self.PIN)
+        self.assertEqual(p.action, "repin")
+        self.assertIn(f"Ndevu12/strix@{SHA}", p.content)
+        self.assertNotIn('"Ndevu12/strix@v0"', p.content)
+
+
+def _tmp_repo():
+    import subprocess
+    d = Path(tempfile.mkdtemp())
+    subprocess.run(["git", "init", "-q", str(d)], check=True)
+    return d
+
+
+class TestSetupLocal(unittest.TestCase):
+    def _resolve(self):
+        return mock.patch.object(guard, "resolve_pin", return_value=guard.Pin(SHA, "v0.1.4"))
+
+    def test_writes_file_into_working_tree(self):
+        repo = _tmp_repo()
+        with self._resolve(), mock.patch.object(guard.gitutil, "default_branch", return_value="main"):
+            res = guard.setup(repo)
+        self.assertEqual(res.plan.action, "create")
+        self.assertTrue((repo / guard.WORM_GUARD_FILE).is_file())
+        self.assertEqual(res.wrote, repo / guard.WORM_GUARD_FILE)
+
+    def test_dry_run_writes_nothing(self):
+        repo = _tmp_repo()
+        with self._resolve(), mock.patch.object(guard.gitutil, "default_branch", return_value="main"):
+            res = guard.setup(repo, dry_run=True)
+        self.assertTrue(res.dry_run)
+        self.assertFalse((repo / guard.WORM_GUARD_FILE).exists())
+
+    def test_noop_when_already_pinned(self):
+        repo = _tmp_repo()
+        wf_dir = repo / guard.WORKFLOW_DIR
+        wf_dir.mkdir(parents=True)
+        (wf_dir / "worm-guard.yml").write_text(guard.render_workflow(guard.Pin(SHA, "v0.1.4"), "main"))
+        with self._resolve(), mock.patch.object(guard.gitutil, "default_branch", return_value="main"):
+            res = guard.setup(repo)
+        self.assertEqual(res.plan.action, "noop")
+        self.assertIsNone(res.wrote)
+
+    def test_fails_closed_when_pin_unresolved(self):
+        with mock.patch.object(guard, "resolve_pin", return_value=None):
+            res = guard.setup(_tmp_repo())
+        self.assertIsNotNone(res.error)
+        self.assertIn("--ref", res.error)
+
+    def test_refuses_silent_noop_repin_on_exotic_form(self):
+        # Flow-style: find_strix (YAML) sees the gate, but the line-surgical rewrite can't touch it.
+        # setup must ERROR (and write nothing), never claim a bump that changed nothing.
+        repo = _tmp_repo()
+        wf = repo / guard.WORKFLOW_DIR
+        wf.mkdir(parents=True)
+        (wf / "w.yml").write_text("jobs:\n  s:\n    steps: [{uses: Ndevu12/strix@v0}]\n")
+        with self._resolve(), mock.patch.object(guard.gitutil, "default_branch", return_value="main"):
+            res = guard.setup(repo)
+        self.assertIsNotNone(res.error)
+        self.assertIn("manually", res.error)
+        self.assertNotIn(SHA, (wf / "w.yml").read_text())               # file untouched
+
+
+class TestSetupPr(unittest.TestCase):
+    """`--pr`: build in a worktree off default and open a rolling PR via the shared proposal ladder."""
+    def _run(self, submit, *, signed=True, origin="up/repo"):
+        from stayawake.core.git.write.commit import CommitResult
+        with mock.patch.object(guard, "resolve_pin", return_value=guard.Pin(SHA, "v0.1.4")), \
+             mock.patch.object(guard.gitutil, "default_branch", return_value="main"), \
+             mock.patch.object(guard.gitutil, "origin_slug", return_value=origin), \
+             mock.patch.object(guard.gitutil, "ref_exists", return_value=False), \
+             mock.patch.object(guard.gitutil, "fetch", return_value=True), \
+             mock.patch.object(guard.gitutil, "add_worktree", return_value=True), \
+             mock.patch.object(guard.gitutil, "remove_worktree", return_value=True), \
+             mock.patch.object(guard.gitutil, "stage_all", return_value=True), \
+             mock.patch.object(guard.gitutil, "commit_fix",
+                               return_value=CommitResult(committed=True, signed=signed)), \
+             mock.patch.object(guard.proposal, "submit_change_pr", return_value=submit) as sub:
+            res = guard.setup(_tmp_repo(), token="tok", pr=True)
+        return res, sub
+
+    def test_opens_pr_via_ladder(self):
+        from stayawake.bots.security.proposal import SubmitResult
+        res, sub = self._run(SubmitResult("pr", action="opened", number=42, url="u"))
+        sub.assert_called_once()
+        self.assertEqual(sub.call_args.kwargs["branch"], guard.SETUP_BRANCH)
+        self.assertEqual(res.submit.number, 42)
+        self.assertIn("guard PR #42", guard.render_setup(res))
+
+    def test_no_origin_errors_before_touching_git(self):
+        res, sub = self._run(None, origin=None)
+        sub.assert_not_called()
+        self.assertIn("no GitHub origin", res.error)
+
+    def test_unsigned_commit_is_surfaced(self):
+        from stayawake.bots.security.proposal import SubmitResult
+        res, _ = self._run(SubmitResult("pr", action="opened", number=7, url="u"), signed=False)
+        self.assertFalse(res.signed)
+        self.assertIn("UNSIGNED", guard.render_setup(res))
+
+
+class TestRenderSetup(unittest.TestCase):
+    def test_error(self):
+        self.assertIn("boom", guard.render_setup(guard.SetupResult(error="boom")))
+
+    def test_noop(self):
+        p = guard.SetupPlan("noop", "wf.yml", new_ref=SHA)
+        self.assertIn("already up to date", guard.render_setup(guard.SetupResult(plan=p)))
+
+    def test_local_wrote_warns_against_pushing_main(self):
+        p = guard.SetupPlan("create", guard.WORM_GUARD_FILE, content="x", new_ref=SHA)
+        out = guard.render_setup(guard.SetupResult(plan=p, wrote=Path("/x")))
+        self.assertIn("do NOT push to the default branch", out)
+
+    def test_dry_run_previews_content(self):
+        p = guard.SetupPlan("create", guard.WORM_GUARD_FILE, content="THE-FILE", new_ref=SHA)
+        out = guard.render_setup(guard.SetupResult(plan=p, dry_run=True))
+        self.assertIn("dry run", out)
+        self.assertIn("THE-FILE", out)
+
+
 if __name__ == "__main__":
     unittest.main()
