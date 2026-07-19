@@ -98,6 +98,15 @@ All notable changes to this project are documented here. The format is based on
   shared `core.render` toolkit that the `saw scan` report also uses, so the two surfaces can't drift
   (the scan output is byte-for-byte identical).
 
+### Fixed
+- **`saw audit --repo` no longer wrongly reports a protected repo as unguarded** (#1230). Its
+  branch-protection check matched the fuzzy substring `"worm"` in the required-check names — but the
+  required context is the *job's* name/id, which may be anything (e.g. a job called `strix` produces
+  the context `strix`, with no "worm" in it). It now finds the repo's Strix gate by its
+  `uses: Ndevu12/strix@…` action reference (reusing `saw guard`'s detection), derives the job's
+  actual status-check context, and requires **that** — falling back to the fuzzy match only when no
+  Strix workflow is found.
+
 ## [0.1.13] - 2026-07-15
 
 ### Added
