@@ -80,6 +80,48 @@ class TestFindStrix(unittest.TestCase):
         self.assertEqual(r.workflow, "a.yml")
 
 
+class TestFindWormGate(unittest.TestCase):
+    """A worm gate is detected by ANY mechanism, not just the Ndevu12/strix action (#1239)."""
+
+    def test_strix_action_wins_and_is_gradeable(self):
+        g = guard.find_worm_gate({"w.yml": BLOG_WF})
+        self.assertEqual(g.mechanism, "strix")
+        self.assertIsNotNone(g.strix)                # carries the StrixRef for pin/freshness grading
+
+    def test_direct_saw_run_step(self):
+        for script in ("saw scan .", "pipx run stayawakebot saw scan $GITHUB_WORKSPACE",
+                       "python -m pip install stayawakebot && saw audit"):
+            wf = f"jobs:\n  g:\n    steps:\n      - run: {script}\n"
+            self.assertEqual(guard.find_worm_gate({"w.yml": wf}).mechanism, "saw-run", script)
+
+    def test_local_composite_action_that_runs_saw(self):
+        wf = "jobs:\n  g:\n    steps:\n      - uses: ./.github/actions/worm-scan\n"
+        reader = lambda uses: "runs:\n  steps:\n    - run: saw scan $GITHUB_WORKSPACE\n"
+        g = guard.find_worm_gate({"w.yml": wf}, read_action=reader)
+        self.assertEqual((g.mechanism, g.detail), ("local-action", "./.github/actions/worm-scan"))
+
+    def test_local_action_not_resolved_without_reader(self):
+        # Without a resolver we can't prove a local action runs saw → not detected (no false claim).
+        wf = "jobs:\n  g:\n    steps:\n      - uses: ./.github/actions/worm-scan\n"
+        self.assertIsNone(guard.find_worm_gate({"w.yml": wf}))
+
+    def test_local_action_that_does_not_run_saw_is_not_a_gate(self):
+        wf = "jobs:\n  g:\n    steps:\n      - uses: ./.github/actions/build\n"
+        reader = lambda uses: "runs:\n  steps:\n    - run: npm run build\n"
+        self.assertIsNone(guard.find_worm_gate({"w.yml": wf}, read_action=reader))
+
+    def test_ordinary_workflow_is_not_a_gate(self):
+        wf = "jobs:\n  g:\n    steps:\n      - run: echo building; make test\n"
+        self.assertIsNone(guard.find_worm_gate({"w.yml": wf}))
+
+    def test_saw_scan_only_in_a_comment_is_not_a_gate(self):
+        # FP guard: a documentation comment mentioning the scanner must not read as a gate (else
+        # setup would wrongly skip installing one).
+        wf = ("jobs:\n  g:\n    steps:\n      - run: |\n"
+              "          # to check locally, run: saw scan .\n          make build\n")
+        self.assertIsNone(guard.find_worm_gate({"w.yml": wf}))
+
+
 class TestContextRequired(unittest.TestCase):
     def test_legacy_contexts(self):
         self.assertTrue(_context_required({"required_status_checks": {"contexts": ["strix"]}}, "strix"))
@@ -145,6 +187,18 @@ class TestCheck(unittest.TestCase):
     def test_local_absent(self):
         self.assertFalse(guard.check(repo=Path(tempfile.mkdtemp()), offline=True).present)
 
+    def test_local_gate_by_non_strix_mechanism_is_present_but_ungraded(self):
+        # #1239: a repo guarded by a direct `saw` step is present (not falsely "no gate"), but has
+        # no StrixRef to grade — check must SAY it's protected and stop advising "add a gate".
+        d = self._repo_with("jobs:\n  g:\n    steps:\n      - run: saw scan $GITHUB_WORKSPACE\n")
+        s = guard.check(repo=d, offline=True)
+        self.assertTrue(s.present)
+        self.assertIsNone(s.ref)
+        self.assertEqual(s.mechanism, "saw-run")
+        out = guard.render(s)
+        self.assertIn("Worm gate found", out)
+        self.assertNotIn("No worm gate", out)
+
     def test_remote_required_uses_derived_context(self):
         with mock.patch.object(guard, "_remote_workflows", return_value={"w.yml": BLOG_WF}), \
              mock.patch.object(guard.github_api, "get_branch_protection",
@@ -200,7 +254,7 @@ class TestHealthy(unittest.TestCase):
 
 class TestRender(unittest.TestCase):
     def test_absent_report(self):
-        self.assertIn("No Strix gate found", guard.render(GuardStatus(present=False)))
+        self.assertIn("No worm gate found", guard.render(GuardStatus(present=False)))
 
     def test_present_report_is_plain_without_color(self):
         s = GuardStatus(present=True, ref=StrixRef("wf.yml", "strix", "a" * 40, "sha"),
@@ -299,22 +353,39 @@ class TestSetupLocal(unittest.TestCase):
         self.assertTrue((repo / guard.WORM_GUARD_FILE).is_file())
         self.assertEqual(res.wrote, repo / guard.WORM_GUARD_FILE)
 
-    def test_never_clobbers_an_existing_worm_guard_workflow(self):
-        # Regression: a repo running a worm gate by ANOTHER mechanism (a local `uses: ./…/worm-scan`
-        # action, undetectable by find_strix) under the conventional worm-guard.yml name must NOT be
-        # overwritten by `create`. setup errors and leaves the file byte-for-byte intact.
+    def test_never_clobbers_an_unrecognized_file_at_the_path(self):
+        # Regression (#1239 data-loss): a file at the conventional worm-guard.yml path that ISN'T a
+        # recognizable worm gate (here a local action whose action.yml we can't resolve to prove it
+        # runs saw) must NOT be overwritten by `create`. setup errors, file left byte-for-byte intact.
         repo = _tmp_repo()
         wf = repo / guard.WORKFLOW_DIR
         wf.mkdir(parents=True)
         original = ("name: Worm Guard\non: [pull_request]\njobs:\n  worm-guard:\n"
                     "    steps:\n      - uses: ./.github/actions/worm-scan\n")
-        (wf / "worm-guard.yml").write_text(original)
+        (wf / "worm-guard.yml").write_text(original)   # no action.yml on disk → can't confirm a gate
         with self._resolve(), mock.patch.object(guard.gitutil, "default_branch", return_value="main"):
             res = guard.setup(repo)
         self.assertEqual(res.plan.action, "conflict")
         self.assertIsNotNone(res.error)
         self.assertIn("not overwriting", res.error)
         self.assertEqual((wf / "worm-guard.yml").read_text(), original)   # untouched
+
+    def test_already_guarded_by_another_mechanism_is_present_not_install(self):
+        # #1239: a repo genuinely guarded by a local scan action (resolvable — its action.yml runs
+        # saw) is 'present' (already guarded), NOT a create/conflict — setup installs no duplicate.
+        repo = _tmp_repo()
+        (repo / guard.WORKFLOW_DIR).mkdir(parents=True)
+        (repo / guard.WORKFLOW_DIR / "ci.yml").write_text(
+            "jobs:\n  g:\n    steps:\n      - uses: ./.github/actions/worm-scan\n")
+        act = repo / ".github/actions/worm-scan"
+        act.mkdir(parents=True)
+        (act / "action.yml").write_text("runs:\n  steps:\n    - run: saw scan $GITHUB_WORKSPACE\n")
+        with self._resolve(), mock.patch.object(guard.gitutil, "default_branch", return_value="main"):
+            res = guard.setup(repo)
+        self.assertEqual(res.plan.action, "present")
+        self.assertIsNone(res.wrote)                              # nothing installed
+        self.assertFalse((repo / guard.WORM_GUARD_FILE).exists())
+        self.assertIn("already guarded", guard.render_setup(res))
 
     def test_dry_run_writes_nothing(self):
         repo = _tmp_repo()

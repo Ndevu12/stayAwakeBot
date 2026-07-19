@@ -88,6 +88,90 @@ def find_strix(workflows: dict[str, str]) -> StrixRef | None:
     return None
 
 
+# A step that runs the saw scanner directly — `saw scan`/`saw audit` at a command boundary, or the
+# `stayawakebot` package. This is the signal that a workflow (or a local composite action) IS a worm
+# gate even when it doesn't use the packaged `Ndevu12/strix` action.
+_RUNS_SAW = re.compile(r"(?:^|[\s;&|(])saw\s+(?:scan|audit)\b|\bstayawakebot\b", re.IGNORECASE)
+
+
+def _runs_saw(text: str) -> bool:
+    """Does `text` (a `run:` script or an action.yml) invoke the scanner? Comments are stripped first
+    so a documentation line like `# to run locally: saw scan .` can't false-positive as a gate — a
+    false 'guarded' would make `setup` wrongly skip installing one."""
+    uncommented = "\n".join(line.split("#", 1)[0] for line in text.splitlines())
+    return bool(_RUNS_SAW.search(uncommented))
+
+
+@dataclass
+class WormGate:
+    """A worm gate found by ANY mechanism — so `check`/`setup` reason about "is this repo guarded?",
+    not just "does it use Ndevu12/strix?". `mechanism` is "strix" (the packaged action — gradeable:
+    `strix` carries the StrixRef), "local-action" (a `uses: ./…` composite action that runs saw), or
+    "saw-run" (a `run:` step that invokes the scanner). Only "strix" can be pin/freshness-graded."""
+    mechanism: str
+    workflow: str
+    detail: str
+    strix: StrixRef | None = None
+
+
+def find_worm_gate(workflows: dict[str, str], *, read_action=None) -> WormGate | None:
+    """Detect a worm gate by any known mechanism. The packaged `Ndevu12/strix` action wins (it's the
+    one we can grade); otherwise look for a step that runs the scanner directly, or a local composite
+    action (`uses: ./…`) that does — resolved via the optional `read_action(uses) -> text|None`
+    (filesystem locally, the API for a remote repo; when absent, local-action gates aren't resolved)."""
+    ref = find_strix(workflows)
+    if ref is not None:
+        return WormGate("strix", ref.workflow, f"Ndevu12/strix@{ref.ref}", strix=ref)
+    for path in sorted(workflows):
+        try:
+            doc = yaml.safe_load(workflows[path])
+        except yaml.YAMLError:
+            continue
+        jobs = doc.get("jobs") if isinstance(doc, dict) else None
+        if not isinstance(jobs, dict):
+            continue
+        for job in jobs.values():
+            steps = job.get("steps") if isinstance(job, dict) else None
+            if not isinstance(steps, list):
+                continue
+            for step in steps:
+                if not isinstance(step, dict):
+                    continue
+                run = step.get("run")
+                if isinstance(run, str) and _runs_saw(run):
+                    return WormGate("saw-run", path, "a step runs the saw scanner")
+                uses = str(step.get("uses", "")).strip()
+                if uses.startswith("./") and read_action is not None:
+                    text = read_action(uses)
+                    if isinstance(text, str) and _runs_saw(text):
+                        return WormGate("local-action", path, uses)
+    return None
+
+
+def _local_action_reader(repo: Path):
+    """Resolve a `uses: ./path` local composite action to its action.yml text (or None)."""
+    def read(uses: str) -> str | None:
+        rel = uses[2:].strip("/")                      # "./.github/actions/x" → ".github/actions/x"
+        for fn in ("action.yml", "action.yaml"):
+            try:
+                return (repo / rel / fn).read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+        return None
+    return read
+
+
+def _remote_action_reader(owner: str, name: str, token: str | None):
+    def read(uses: str) -> str | None:
+        rel = uses[2:].strip("/")
+        for fn in ("action.yml", "action.yaml"):
+            text = github_api.get_file_text(owner, name, f"{rel}/{fn}", token)
+            if text is not None:
+                return text
+        return None
+    return read
+
+
 @dataclass
 class Freshness:
     state: str                 # "fresh" | "behind" | "floating" | "unknown"
@@ -125,11 +209,17 @@ class GuardStatus:
     required: bool | None = None       # None = not checked (local/no token); else branch-protection result
     branch: str | None = None          # set only for a remote check → also signals "remote" to render()
     error: str | None = None           # e.g. couldn't read a remote repo
+    # A worm gate present by a NON-Strix mechanism (a local composite action / a direct `saw` step):
+    # `present` is True but `ref` is None — the repo IS guarded, just not by the gradeable Strix action.
+    mechanism: str | None = None       # "local-action" | "saw-run" when ref is None; None otherwise
+    gate_file: str | None = None       # the workflow file that carries the non-Strix gate
 
     @property
     def healthy(self) -> bool:
-        """The gate passes: present, SHA-pinned, not stale, and (where we could check) required.
-        Drives the `saw guard check -f/--fail` exit code — a policy of the guard domain, not the CLI."""
+        """The gate passes verification: present, SHA-pinned, not stale, and (where we could check)
+        required. Only a Strix gate is *verifiable* — a non-Strix worm gate is protective but its pin
+        /freshness/required-status can't be tracked, so it is not 'healthy' for `-f/--fail` (the render
+        says so plainly). A guard-domain policy, not the CLI's."""
         if not self.present or self.ref is None or self.ref.pin != "sha":
             return False
         if self.fresh is not None and self.fresh.state == "behind":
@@ -192,13 +282,19 @@ def check(*, repo: str | Path | None = None, slug: str | None = None, branch: st
         workflows = _remote_workflows(owner, name, token)
         if workflows is None:
             return GuardStatus(present=False, error=f"could not read {slug} (missing/private/no token?)")
+        reader = _remote_action_reader(owner, name, token)
     else:
         workflows = _local_workflows(Path(repo or "."))
+        reader = _local_action_reader(Path(repo or "."))
 
-    ref = find_strix(workflows)
-    if ref is None:
+    gate = find_worm_gate(workflows, read_action=reader)
+    if gate is None:
         return GuardStatus(present=False)
+    if gate.mechanism != "strix":                      # guarded, but not by the gradeable Strix action
+        return GuardStatus(present=True, mechanism=gate.mechanism, gate_file=gate.workflow,
+                           branch=branch if slug else None)
 
+    ref = gate.strix
     fresh = None if offline else freshness(ref, token)
     required: bool | None = None
     if slug and token:
@@ -219,9 +315,19 @@ def render(status: GuardStatus, *, color: bool = False) -> str:
     if not status.present:
         if status.error:
             return paint(f"⚠️  {status.error}", warn, on=color)
-        lines.append(paint("✗ No Strix gate found", warn, on=color) +
-                     " — no workflow uses `Ndevu12/strix`.")
+        lines.append(paint("✗ No worm gate found", warn, on=color) +
+                     " — no workflow runs a worm scan (`Ndevu12/strix`, a local scan action, or `saw`).")
         lines.append(paint("     Run `saw guard setup` to add one.", dim, on=color))
+        return "\n".join(lines)
+
+    if status.ref is None:                             # guarded by a NON-Strix mechanism
+        how = {"local-action": "a local scan action", "saw-run": "a direct `saw` step"}.get(
+            status.mechanism, status.mechanism or "another mechanism")
+        lines.append(paint("✓ Worm gate found", ok, on=color) +
+                     f" — {status.gate_file} runs a worm scan via {how}.")
+        lines.append("  " + paint("• not the pinned Strix action", dim, on=color) +
+                     " — its pin, freshness, and required-status can't be tracked. `saw guard setup` "
+                     "can adopt the SHA-pinned `Ndevu12/strix` gate.")
         return "\n".join(lines)
 
     r = status.ref
@@ -285,12 +391,14 @@ class Pin:
 @dataclass
 class SetupPlan:
     """The minimal change setup will make. `content` is the full new file text (create/repin),
-    None for a no-op. `old_ref`/`new_ref` drive the human summary."""
-    action: str                       # "create" | "repin" | "noop"
+    None for a no-op/present/conflict. `old_ref`/`new_ref` drive the human summary; `detail`
+    describes an existing non-Strix gate for the `present` action."""
+    action: str                       # "create" | "repin" | "noop" | "present" | "conflict"
     path: str                         # workflow file, repo-relative
     content: str | None = None
     old_ref: str | None = None
     new_ref: str | None = None
+    detail: str | None = None         # for "present": how the existing gate runs (mechanism label)
 
 
 @dataclass
@@ -363,19 +471,27 @@ def _repin(text: str, pin: Pin) -> str:
         lambda m: f"{m.group('pre')}Ndevu12/strix@{pin.sha}{comment}", text)
 
 
-def plan_setup(workflows: dict[str, str], default_branch: str, pin: Pin) -> SetupPlan:
-    """Decide the minimal change: create the gate when none exists, surgically bump an existing pin
-    (regardless of its filename/job name — detection is by action reference), or no-op when already
-    pinned to the resolved SHA."""
-    ref = find_strix(workflows)
-    if ref is None:
-        # No Strix gate — install one. But NEVER clobber a workflow already at the create path: a
-        # repo may run a worm gate by another mechanism (a local `uses: ./…/worm-scan` action, which
-        # find_strix can't detect) under exactly this conventional name. Refuse rather than overwrite.
+_GATE_HOW = {"local-action": "a local scan action", "saw-run": "a direct `saw` step"}
+
+
+def plan_setup(workflows: dict[str, str], default_branch: str, pin: Pin, *,
+               read_action=None) -> SetupPlan:
+    """Decide the minimal change: bump an existing Strix pin, no-op when already at the resolved SHA,
+    leave an existing worm gate installed by ANOTHER mechanism alone ('present'), or create the gate
+    when the repo is genuinely unguarded — never clobbering a file already at the create path."""
+    gate = find_worm_gate(workflows, read_action=read_action)
+    if gate is None:
+        # Unguarded by any mechanism — install. But NEVER clobber a non-gate workflow already sitting
+        # at the conventional path (data-loss guard, #1239).
         if WORM_GUARD_FILE in workflows:
             return SetupPlan("conflict", WORM_GUARD_FILE)
         return SetupPlan("create", WORM_GUARD_FILE, render_workflow(pin, default_branch),
                          new_ref=pin.sha)
+    if gate.mechanism != "strix":
+        # Already guarded by a local scan action / a direct `saw` step — don't install a duplicate.
+        return SetupPlan("present", gate.workflow,
+                         detail=_GATE_HOW.get(gate.mechanism, gate.mechanism))
+    ref = gate.strix
     if ref.pin == "sha" and ref.ref.lower() == pin.sha.lower():
         return SetupPlan("noop", ref.workflow, old_ref=ref.ref, new_ref=pin.sha)
     return SetupPlan("repin", ref.workflow, _repin(workflows[ref.workflow], pin),
@@ -451,12 +567,17 @@ def setup(repo: str | Path | None = None, *, token: str | None = None, ref: str 
         return SetupResult(error="couldn't resolve the latest Strix release "
                                  "(offline? pass --ref <sha|tag> to pin explicitly)")
     default_branch = branch or gitutil.default_branch(repo)
-    plan = plan_setup(_local_workflows(repo), default_branch, pin)
+    plan = plan_setup(_local_workflows(repo), default_branch, pin,
+                      read_action=_local_action_reader(repo))
+    if plan.action == "present":
+        # Already guarded by another mechanism — nothing to install; render explains.
+        return SetupResult(plan=plan)
     if plan.action == "conflict":
-        # A non-Strix workflow already occupies the install path — refuse to overwrite it (data loss).
-        return SetupResult(plan=plan, error=f"a workflow already exists at {plan.path} and does not "
-                           "use Ndevu12/strix — not overwriting it. If it is a worm gate by another "
-                           "mechanism, leave it; otherwise remove/rename it and re-run `saw guard setup`.")
+        # A file already occupies the install path but isn't a recognizable worm gate — refuse to
+        # overwrite it (data loss, #1239). A real gate at that path resolves to "present" above.
+        return SetupResult(plan=plan, error=f"a workflow already exists at {plan.path} but isn't a "
+                           "recognizable worm gate — not overwriting it. Remove or rename it, then "
+                           "re-run `saw guard setup`.")
     if plan.action == "repin" and f"strix@{pin.sha}" not in (plan.content or ""):
         # find_strix (YAML-aware) saw a gate the line-surgical rewrite couldn't touch (an exotic
         # `uses:` form). Never claim a bump that changed nothing — tell the operator to edit it.
@@ -486,6 +607,10 @@ def render_setup(result: SetupResult, *, color: bool = False) -> str:
     if result.error:
         return paint(f"⚠️  {result.error}", warn, on=color)
     plan = result.plan
+    if plan.action == "present":
+        return (paint("✓ already guarded", ok, on=color) +
+                f" — {plan.path} already runs a worm scan via {plan.detail}. Not installing a "
+                "duplicate. To adopt the SHA-pinned `Ndevu12/strix` gate instead, remove it first.")
     if plan.action == "noop":
         return (paint("✓ already up to date", ok, on=color) +
                 f" — {plan.path} pins Ndevu12/strix@{_short(plan.new_ref)} (latest). Nothing to do.")
