@@ -1,17 +1,12 @@
 #!/usr/bin/env python3
-"""`saw guard` — install & verify the Strix CI gate on a repo (#1229).
+"""`saw guard` — install & verify the Strix CI gate across repos (#1229).
 
-This slice ships `saw guard check` (read-only). `saw guard setup` (writing/updating the workflow)
-builds on the same detection and follows.
+Thin CLI: parse args and delegate to `guard.check_targets` / `guard.setup_targets`, which resolve
+targets (local discovery / remote #1075 ladder), sweep, and stream — like `saw scan`/`saw fix`.
 """
 from __future__ import annotations
 
 import argparse
-import sys
-
-from stayawake.core import auth
-from stayawake.core.streaming import Streamer, stream_enabled
-from stayawake.core.terminal import supports_color
 
 
 def register(sub) -> None:
@@ -52,15 +47,29 @@ def register(sub) -> None:
     ck.set_defaults(func=run_check)
 
     st = gsub.add_parser(
-        "setup", help="install or update the Strix gate: write it locally, or --pr to open a PR",
+        "setup", help="install or update the Strix gate across repos: write locally, or --pr / --remote",
         description="Resolve the latest Strix release to a commit SHA, then install the worm-guard "
                     "workflow (or surgically bump an existing pin — found by its action reference, "
-                    "not filename). Writes into the working tree for you to review + commit + PR; "
-                    "with --pr, opens one rolling PR instead. Never pushes to the default branch.")
-    st.add_argument("-p", "--path", default=None,
-                    help="repo to set up (default: the current directory)")
+                    "not filename) across the resolved repos. LOCAL by default (discovers git repos; "
+                    "writes into each working tree for you to review + commit + PR, or --pr to open "
+                    "one PR each); --remote (or --user/--org) clones each GitHub repo and opens a PR. "
+                    "Never pushes to the default branch.")
+    st.add_argument("targets", nargs="*", metavar="TARGETS",
+                    help="local repo/dir paths — or, with --remote, owner/repo slugs. "
+                         "Omit to set up configured targets or the current repo.")
+    st.add_argument("-p", "--path", action="append", default=[], dest="extra_paths",
+                    metavar="PATH", help="additional target (repeatable)")
+    st.add_argument("-c", "--config", default=None,
+                    help="config file (default: config/security.yml when present)")
     st.add_argument("--pr", "--open-pr", action="store_true", dest="pr",
-                    help="open/update a rolling PR instead of writing to the working tree")
+                    help="open/update a rolling PR per repo instead of writing to the working tree")
+    st.add_argument("-r", "--remote", action="store_true",
+                    help="set up GitHub repos (clone → PR): ad-hoc --user/--org/owner-repo, "
+                         "else configured targets, else your own repos")
+    st.add_argument("--user", action="append", default=[], metavar="USER",
+                    help="set up this GitHub user's repos (repeatable; implies --remote)")
+    st.add_argument("--org", action="append", default=[], metavar="ORG",
+                    help="set up this GitHub org's repos (repeatable; implies --remote)")
     st.add_argument("--ref", default=None, metavar="SHA|TAG",
                     help="pin this Strix ref explicitly (offline/deterministic); default: latest release")
     st.add_argument("-b", "--branch", default=None,
@@ -89,15 +98,11 @@ def run_check(a: argparse.Namespace) -> int:
 def run_setup(a: argparse.Namespace) -> int:
     from stayawake.bots.security import guard   # lazy: pull yaml/API/git in only when the command runs
 
-    # Resolving the latest Strix SHA hits the API (public repo → works unauthenticated, but a token
-    # eases rate limits); --pr needs it to push and open the PR. --ref lets an operator pin offline.
-    token, _ = auth.resolve_token()
-    if a.pr and not token:
-        print(auth.no_credential_hint("opening the guard PR") +
-              " (pushing the branch and opening the PR need it)\n", file=sys.stderr)
-
-    stream = stream_enabled(sys.stdout, force_off=a.no_stream)
-    result = guard.setup(a.path, token=token, ref=a.ref, dry_run=a.dry_run, pr=a.pr,
-                         branch=a.branch, spin=stream)
-    Streamer(enabled=stream).line(guard.render_setup(result, color=supports_color(sys.stdout)))
-    return 1 if result.error else 0
+    positionals = [*a.targets, *a.extra_paths]
+    remote = a.remote or bool(a.user) or bool(a.org)
+    return guard.setup_targets(
+        paths=None if remote else (positionals or None),
+        slugs=list(positionals) if remote else None,
+        users=a.user or None, orgs=a.org or None, remote=remote,
+        config_path=a.config, ref=a.ref, dry_run=a.dry_run, pr=a.pr,
+        branch=a.branch, no_stream=a.no_stream)

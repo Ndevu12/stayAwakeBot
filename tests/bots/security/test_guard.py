@@ -554,5 +554,65 @@ class TestCheckSweep(unittest.TestCase):
             yield chk
 
 
+@contextlib.contextmanager
+def _fake_clone(path):
+    yield path
+
+
+class TestSetupSweep(unittest.TestCase):
+    """`saw guard setup` sweeps many repos: local discovery (write/PR each) or remote (clone → PR)."""
+
+    def _ok(self):
+        return guard.SetupResult(plan=guard.SetupPlan("create", "wf", new_ref=SHA), wrote=Path("/x"))
+
+    def test_local_sweep_sets_up_each_discovered_repo(self):
+        with mock.patch.object(guard.resolution, "discover_local_repos",
+                               return_value=[Path("/a"), Path("/b")]), \
+             mock.patch.object(guard.auth, "resolve_token", return_value=(None, None)), \
+             mock.patch.object(guard, "setup", side_effect=lambda *a, **k: self._ok()) as s:
+            rc = guard.setup_targets(paths=["."], no_stream=True)
+        self.assertEqual(rc, 0)
+        self.assertEqual(s.call_count, 2)
+
+    def test_one_repo_error_isolated_but_exits_one(self):
+        with mock.patch.object(guard.resolution, "discover_local_repos",
+                               return_value=[Path("/a"), Path("/b")]), \
+             mock.patch.object(guard.auth, "resolve_token", return_value=(None, None)), \
+             mock.patch.object(guard, "setup", side_effect=[RuntimeError("boom"), self._ok()]) as s:
+            rc = guard.setup_targets(paths=["."], no_stream=True)
+        self.assertEqual(s.call_count, 2)                    # second repo still attempted
+        self.assertEqual(rc, 1)                              # an errored repo → exit 1
+
+    def test_remote_clones_and_sets_up_with_pr_implied(self):
+        with mock.patch.object(guard.resolution, "resolve_remote",
+                               return_value=(["o/a", "o/b"], "t", "env")), \
+             mock.patch.object(guard.resolution, "cloned_repo",
+                               side_effect=lambda *a, **k: _fake_clone(Path("/clone"))), \
+             mock.patch.object(guard, "setup", side_effect=lambda *a, **k: self._ok()) as s:
+            rc = guard.setup_targets(remote=True, no_stream=True)
+        self.assertEqual(rc, 0)
+        self.assertEqual(s.call_count, 2)
+        self.assertTrue(s.call_args.kwargs.get("pr"))        # a remote repo has no working tree → always PR
+
+    def test_remote_without_token_exits_two(self):
+        with mock.patch.object(guard.resolution, "resolve_remote", return_value=(["o/a"], None, None)):
+            self.assertEqual(guard.setup_targets(remote=True, no_stream=True), 2)
+
+    def test_remote_clone_failure_is_an_error(self):
+        with mock.patch.object(guard.resolution, "resolve_remote", return_value=(["o/a"], "t", "env")), \
+             mock.patch.object(guard.resolution, "cloned_repo",
+                               side_effect=lambda *a, **k: _fake_clone(None)), \
+             mock.patch.object(guard, "setup") as s:
+            rc = guard.setup_targets(remote=True, no_stream=True)
+        self.assertEqual(rc, 1)                              # clone failed → error → exit 1
+        s.assert_not_called()                                # never setup on a failed clone
+
+    def test_invalid_slug_exits_two(self):
+        self.assertEqual(guard.setup_targets(remote=True, slugs=["not-a-slug"], no_stream=True), 2)
+
+    def test_missing_explicit_config_exits_two(self):
+        self.assertEqual(guard.setup_targets(config_path="/no/such.yml", no_stream=True), 2)
+
+
 if __name__ == "__main__":
     unittest.main()
