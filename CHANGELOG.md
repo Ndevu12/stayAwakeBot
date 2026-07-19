@@ -111,6 +111,12 @@ All notable changes to this project are documented here. The format is based on
   (the scan output is byte-for-byte identical).
 
 ### Fixed
+- **`saw guard setup` no longer overwrites an existing `worm-guard.yml`** — a data-loss fix. When a
+  repo already runs a worm gate by another mechanism (e.g. a local `uses: ./.github/actions/worm-scan`
+  action, which the Strix-reference detection can't see) under the conventional `worm-guard.yml` name,
+  `setup` used to treat it as "no gate present" and **clobber the file** with the Strix workflow. It
+  now detects the collision and **refuses to overwrite** — it reports the conflict and leaves the file
+  untouched, so you decide whether to keep the existing gate or remove/rename it first.
 - **`saw audit --repo` no longer wrongly reports a protected repo as unguarded** (#1230). Its
   branch-protection check matched the fuzzy substring `"worm"` in the required-check names — but the
   required context is the *job's* name/id, which may be anything (e.g. a job called `strix` produces
