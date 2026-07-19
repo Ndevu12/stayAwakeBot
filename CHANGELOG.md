@@ -111,6 +111,13 @@ All notable changes to this project are documented here. The format is based on
   (the scan output is byte-for-byte identical).
 
 ### Fixed
+- **`saw guard` now recognises a worm gate installed by *any* mechanism**, not just the packaged
+  `Ndevu12/strix` action. A repo that gates via a **local composite action** (`uses: ./…` whose
+  `action.yml` runs the scanner) or a **direct `saw scan`/`saw audit` step** used to be reported as
+  *unguarded* — `check` said "no gate, run setup" and `setup` treated the path as free. Now `check`
+  reports it as protected (noting it isn't the pin/freshness-tracked Strix gate), and `setup` sees it
+  as **already guarded** and installs no duplicate. Only the packaged Strix action is pin-graded; the
+  others are detected and respected. (Follow-up to the `worm-guard.yml` data-loss fix below.)
 - **`saw guard setup` no longer overwrites an existing `worm-guard.yml`** — a data-loss fix. When a
   repo already runs a worm gate by another mechanism (e.g. a local `uses: ./.github/actions/worm-scan`
   action, which the Strix-reference detection can't see) under the conventional `worm-guard.yml` name,
