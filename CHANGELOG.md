@@ -7,6 +7,13 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **`saw guard check` verifies the Strix CI gate on a repo** (#1229). It finds the gate by its
+  **action reference** — a `uses: Ndevu12/strix@…` step — not by the workflow filename or job name
+  (a consumer may name either anything), then grades the pin (a commit **SHA** is best; an exact
+  release tag is fine; a floating alias is weak), reports whether the pin is **behind** the latest
+  Strix release, and — with `--repo owner/name` — whether branch protection **requires the gate's
+  actual job context** (precise, not a fuzzy name guess). Read-only; `-f/--fail` gates CI. `saw guard
+  setup` (installing/updating the workflow) follows.
 - **`saw audit --verify` content-scans a suspicious host artifact** to turn a *weak* indicator into
   an actual verdict (#1221). When the audit flags a lone `~/.node_modules` (a place the worm
   sometimes stages, but a manual `npm install` in `$HOME` produces identically), `--verify` looks
