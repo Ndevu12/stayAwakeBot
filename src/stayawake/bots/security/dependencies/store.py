@@ -28,11 +28,15 @@ class Advisory:
     `signature` is the source of the finding's id/category/severity (the `malicious-dependency`
     signature, whether the hit came from the inline seed or the corpus). `osv_id`/`aliases` carry
     the advisory identity for corpus hits so the finding can cite it (e.g. `MAL-2024-1234`).
+    `fixed_version` is the first patched version to upgrade to (the remediation target, #1252), or
+    None when the advisory names no fix (whole-package/explicit-version/open-ended, or malware —
+    which is removed, not upgraded).
     """
 
     signature: dict[str, Any]
     osv_id: str | None = None
     aliases: tuple[str, ...] = field(default_factory=tuple)
+    fixed_version: str | None = None
 
 
 _CORPUS_UNSET = object()   # sentinel: "corpus not built yet" (distinct from a built-but-absent None)
@@ -126,8 +130,9 @@ class AdvisoryStore:
         corpus = self._corpus_or_load()
         if corpus is None:
             return []
-        return [Advisory(signature=self._vulnerability_signature, osv_id=rec.id, aliases=rec.aliases)
-                for rec in corpus.vulnerability_matches(purl)]
+        return [Advisory(signature=self._vulnerability_signature, osv_id=m.record.id,
+                         aliases=m.record.aliases, fixed_version=m.fixed)
+                for m in corpus.vulnerability_matches(purl)]
 
     def is_empty(self) -> bool:
         """True when there is nothing to match against — the matcher then short-circuits. The `and`

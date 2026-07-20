@@ -25,6 +25,7 @@ from stayawake.bots.security.matchers.base import Matcher, build_content_sig
 from stayawake.bots.security.dependencies import RESOLVERS, AdvisoryStore
 from stayawake.bots.security.dependencies.installed import INSTALLED_TREES
 from stayawake.bots.security.dependencies.purl import Purl
+from stayawake.bots.security.dependencies.remediation import advisory_reference, malware_fix
 
 
 class InstalledPackageAuditMatcher(Matcher):
@@ -90,7 +91,9 @@ def _malicious(advisory, pkg) -> Finding:
         description=sig["description"], remediation=sig.get("remediation", "manual"),
         evidence=f"{pkg.name}@{pkg.version} INSTALLED on disk is known-malicious{cite} "
                  f"(caught even if the lockfile was not edited)",
-        vector=sig["category"])
+        vector=sig["category"],
+        fix_advice=malware_fix(pkg.name),                         # remove from disk + lockfile, don't upgrade
+        reference=advisory_reference(advisory.osv_id, advisory.aliases))
 
 
 def _ghost(sig, pkg) -> Finding | None:
