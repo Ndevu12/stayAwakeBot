@@ -108,7 +108,7 @@ jobs:
           # Pin the scanner to a known-good SHA, NEVER the commit under test: a compromised
           # release commit must not be able to certify itself. Bump after an intentional
           # scanner/signature update (kept in sync with worm-guard.yml).
-          sentinel-ref: b9ecff97618df680db4f3dc21855cdefc5986936   # merge of #1206 — back in sync with worm-guard.yml (had drifted behind at #1138)
+          sentinel-ref: 29b1c3790936ab23dd87e3c1d52bafc8b6cd69ea   # merge of #1255 — kept identical to worm-guard.yml (enforced by check_pins_synced.sh, #1210)
           fail-on-findings: 'true'
           # Pure exit-code gate: the job conclusion is the scan verdict, nothing else. This
           # commit is also scanned (and, when enabled, uploaded) by worm-guard + security-sentinel,
