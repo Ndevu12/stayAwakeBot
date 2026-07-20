@@ -7,6 +7,7 @@ executes scanned code). One responsibility: target in → ScanResult out.
 from __future__ import annotations
 
 import inspect
+from pathlib import Path
 from fnmatch import fnmatch
 from typing import Any
 
@@ -86,6 +87,21 @@ def scan_target(target, signatures_by_matcher: dict[str, list[dict[str, Any]]],
         if read_errors and not result.error:
             shown = ", ".join(read_errors[:5]) + (" …" if len(read_errors) > 5 else "")
             result.error = f"{len(read_errors)} file(s) unreadable: {shown}"
+        # Coverage notes a matcher accumulated (e.g. a truncated --deep sweep, #1222) — non-gating.
+        result.notes.extend(getattr(target, "coverage_notes", None) or [])
+        # Honesty note (#1222): a normal scan does NOT content-scan vendored dependency CODE — only
+        # entry points — so a payload in a non-entry node_modules file reads clean. Say so, so `clean`
+        # isn't silently hollow, and point at the opt-in that does look. Coverage note, never gating.
+        opts, root = getattr(target, "opts", None), getattr(target, "root", None)
+        if opts is not None and root is not None and not getattr(opts, "deep", False):
+            try:
+                nm = Path(root) / "node_modules"
+                if nm.is_dir() and any(nm.iterdir()):        # present AND non-empty (nothing to note if bare)
+                    result.notes.append(
+                        "node_modules was not content-scanned (only dependency entry points + identity). "
+                        "Run `saw scan --deep` to scan vendored code for loader payloads.")
+            except OSError:
+                pass
     except Exception as exc:  # never let one bad repo abort the whole sweep
         result.error = f"{type(exc).__name__}: {exc}"
     return result

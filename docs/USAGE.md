@@ -101,6 +101,21 @@ for git repos. Scanning is **local by default** (nothing is sent to GitHub unles
 `--remote`). With no paths and nothing configured, it scans the current repository (found by
 walking up to the nearest `.git`), so a bare `saw scan` "just works" after `pip install`.
 
+**Scanning vendored dependency code (`--deep`).** A normal scan excludes `node_modules` (minified
+vendored code makes the density heuristic all false positives) and checks only each installed
+package's **entry points** — so a loader payload buried in a *non-entry* file of an on-lockfile
+package reads clean. To keep that from being a silent gap, a scan of a repo with `node_modules`
+prints an honest **coverage note** telling you it wasn't content-scanned. When you want that coverage,
+`saw scan --deep` runs the **FP-safe confirmed loader tier** (0 hits over 531 MB of real vendored
+code) over *every* source file of the installed npm packages — catching the non-entry payload. It is
+opt-in because reading every dependency file adds ~10–60s on a large `node_modules`; it is bounded and
+never runs the FP-prone heuristics. (For a *non-repo* suspect dir like a bare `~/.node_modules`, use
+`saw audit --verify` instead — see the [CLI guide](CLI.md#saw-scan).)
+
+```bash
+saw scan --deep               # content-scan node_modules for loader payloads (opt-in, ~10–60s)
+```
+
 ### Fixing findings (fix / discard)
 
 By default `saw fix` PREPARES the cleanup on a local `security/auto-clean` branch and stops —

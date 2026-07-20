@@ -105,6 +105,10 @@ class ScanResult:
     # Advisory-tier results (dependency CVEs, opt-in) — deliberately NOT part of `findings`, so the
     # verdict below can never see them. Reported in their own section; they never gate a scan.
     advisories: list[Finding] = field(default_factory=list)
+    # Non-gating COVERAGE notes — honest caveats about what this scan did NOT look at (e.g. vendored
+    # dependency code not deep-scanned, #1222), so a `clean` verdict is never silently hollow. Shown in
+    # the report footer + the JSON; never affect the verdict/exit code.
+    notes: list[str] = field(default_factory=list)
 
     @property
     def verdict(self) -> str:
@@ -163,6 +167,7 @@ class ScanResult:
             "summary": self.summary(),
             "findings": [f.to_dict() for f in self.findings],
             "advisories": [a.to_dict() for a in self.advisories],
+            "notes": list(self.notes),
         }
 
 

@@ -54,6 +54,7 @@ saw <command> [options] [TARGETS...]      # no command → welcome banner;  -h/-
 saw scan                          # scan local targets → full report to terminal, persists nothing
 saw scan ./svc-a ./svc-b          # scan specific paths
 saw scan; echo $?                 # CI gate: the exit code IS the verdict (0 clean / 1 infected)
+saw scan --deep                   # also content-scan node_modules (opt-in; catches non-entry payloads)
 saw fix .                         # prepare a clean branch for this repo; review the diff, then push
 saw fix --pr                      # also push + open/update one rolling PR per repo
 saw discard --branch              # delete the auto-clean branch (local + remote)
@@ -143,7 +144,7 @@ Durable output beyond the terminal is opt-in via "sinks": `--json`, `--sarif`, `
 ```text
 saw scan [TARGETS...] [-r] [--user U] [--org O] [-c FILE] [-p PATH]
          [--json] [--sarif FILE] [--alert] [-d DIR] [--no-stream] [--pager]
-         [--no-advisories] [-x | --external] [--require-db]
+         [--no-advisories] [-x | --external] [--deep] [--require-db]
 ```
 
 | Option | Description |
@@ -162,6 +163,7 @@ saw scan [TARGETS...] [-r] [--user U] [--org O] [-c FILE] [-p PATH]
 | `--pager` | Page the report through `$PAGER` (default `less -R`). **Off by default** — the report prints straight through. |
 | `--no-advisories` | Suppress the dependency **CVE-advisory** section. A scan reports malware **and** known CVEs (from the offline [advisory DB](#saw-db)) by default; advisories never change the verdict/exit code, so this only quiets the output. |
 | `-x`, `--external` | **Opt-in — leaves the offline sandbox.** Also run *installed* external auditors (`osv-scanner`, …) and fold their vulns into the advisory tier. Spawns subprocesses and a tool may send your dependency list to its own servers; absent tools are skipped, and it never changes the verdict/exit code. |
+| `--deep` | **Opt-in — content-scan installed dependency CODE.** A normal scan excludes `node_modules` (minified vendored code makes the density heuristic all false positives) and checks only each package's **entry points**, so a loader payload buried in a **non-entry** file of an on-lockfile package reads clean. `--deep` runs the **FP-safe confirmed loader tier** (the same fingerprints — **0 hits over 531 MB of real vendored code**) over *all* of a package's JS-family source files, catching it (INFECTED, offline, still deterministic). npm-only (the fingerprints are JS-shaped). It reads every dependency source file, so a large `node_modules` adds **~10–60s**; it is **bounded** (per-package file cap + a shared byte budget, whose exhaustion is reported as a partial-coverage note) and never runs the density/obfuscation heuristics. **Without `--deep`,** a scan of a repo with `node_modules` prints an honest **coverage note** — "node_modules was not content-scanned … run `saw scan --deep`" — so a `clean` verdict is never silently hollow. Contrast [`--verify`](#saw-audit) (that content-scans a **non-repo** suspect dir like `~/.node_modules`); `--deep` is for a repo's own vendored deps. |
 | `--require-db` | Fail (**exit 2**) if the [advisory DB](#saw-db) is absent or fails its integrity check, instead of degrading to the inline malware seed — for CI gates that must not silently lose coverage. Default is **fail-open** (degrade to the seed). |
 
 ```bash
@@ -171,6 +173,7 @@ saw scan --remote                         # scan your own GitHub repos (or confi
 saw scan --org UB-TechDEV                 # an org (implies --remote)
 saw scan --remote Ndevu12/strix           # one specific GitHub repo
 saw scan; echo $?                         # gate: exit code is the verdict (0 clean / 1 infected)
+saw scan --deep                           # also content-scan installed dependency code (node_modules)
 saw scan --json > report.json             # machine-readable, full evidence, to a pipe
 saw scan --sarif scan.sarif               # redacted SARIF for GitHub code-scanning upload
 saw scan --alert                          # open/close issues + Slack summary, in-pass

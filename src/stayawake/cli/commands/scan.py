@@ -40,6 +40,13 @@ def register(sub) -> None:
                         "into the advisory tier. OPT-IN — this leaves the offline sandbox: it spawns "
                         "subprocesses and a tool may send your dependency list to its own servers. "
                         "Absent tools are skipped; never changes the verdict/exit code.")
+    p.add_argument("--deep", action="store_true", dest="deep",
+                   help="also content-scan the CODE of installed npm dependency packages (node_modules), "
+                        "not just their entry points, for known loader fingerprints. Catches a payload "
+                        "buried in a non-entry file of a vendored package. OPT-IN — it reads every "
+                        "dependency source file, so a large node_modules adds 10–60s; FP-safe (confirmed "
+                        "fingerprints only, never the heuristics that flag minified code). Without it, "
+                        "the scan notes what it skipped.")
     p.add_argument("--require-db", action="store_true", dest="require_db",
                    help="fail (exit 2) if the advisory DB is absent or fails its integrity check, "
                         "instead of falling back to the inline malware seed — for CI gates that must "
@@ -71,4 +78,4 @@ def run(a: argparse.Namespace) -> int:
                         json_out=a.json, sarif_path=a.sarif, reports_dir=a.reports_dir,
                         alert=a.alert, no_stream=a.no_stream, pager=a.pager,
                         no_advisories=a.no_advisories, external_audit=a.external_audit,
-                        require_db=a.require_db)
+                        deep=a.deep, require_db=a.require_db)

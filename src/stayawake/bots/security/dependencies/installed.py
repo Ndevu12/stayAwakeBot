@@ -75,6 +75,14 @@ class InstalledTree:
         return
         yield
 
+    def source_files(self, target, pkg: "InstalledPackage",
+                     truncated: list | None = None) -> Iterator[str]:
+        """Rel paths of a package's own SOURCE files, for the opt-in `--deep` confirmed-loader sweep
+        (#1222). Default: none — an ecosystem whose loader fingerprints don't apply (the confirmed
+        content-sig tier is JS-shaped, so only npm overrides this). Never follows symlinks; bounded."""
+        return
+        yield
+
 
 def _is_regular(path: str) -> bool:
     """True only for a REGULAR file (following a symlink to its target). False for a FIFO/socket/device
@@ -175,6 +183,54 @@ class NpmInstalledTree(InstalledTree):
         nested = Path(pkg_dir) / "node_modules"            # nested (dedupe-miss) installs
         if nested.is_dir():
             yield from self._walk(nested, repo_root, depth + 1)
+
+    def source_files(self, target, pkg: "InstalledPackage",
+                     truncated: list | None = None) -> Iterator[str]:
+        """Rel paths of the package's own JS-family source files, for the `--deep` sweep. Walks the
+        package dir — INCLUDING dot-dirs (`.internal/`, a payload can hide there) — but SKIPS its nested
+        `node_modules` (those are separate packages, walked in their own right). Never follows a symlink
+        (escape/loop — and a symlinked/FIFO entry is not a regular file, so `is_file(follow_symlinks=
+        False)` drops it), bounded by depth + a per-package file cap. If the cap is hit, `True` is
+        appended to `truncated` so the caller can note the un-scanned tail honestly (#1222)."""
+        pkg_dir = target.root / os.path.dirname(pkg.path)  # the dir holding this package's package.json
+        yield from _walk_source(str(pkg_dir), target.root, truncated if truncated is not None else [])
+
+
+# JS-family extensions where a JS loader fingerprint can hide — compiled AND authored, so a payload in a
+# shipped `.ts`/`.jsx` isn't a blind spot. All are in the base SOURCE_EXTS, so `read_source_windows`
+# streams them in FULL (an oversized bundle's interior is covered, not just head+tail) (#1222 review).
+_SOURCE_EXTS = (".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".cts", ".mts")
+_MAX_PKG_SOURCE_FILES = 2000       # per-package file cap — the total byte budget is the primary DoS bound
+
+
+def _walk_source(pkg_dir: str, repo_root: Path, truncated: list) -> Iterator[str]:
+    count = 0
+    stack = [(pkg_dir, 0)]
+    while stack:
+        d, depth = stack.pop()
+        if depth > InstalledTree._MAX_DEPTH:
+            continue
+        try:
+            it = list(os.scandir(d))
+        except OSError:
+            continue
+        for e in it:
+            try:
+                if e.is_dir(follow_symlinks=False):
+                    if e.name == "node_modules":   # a nested package — walked in its own right
+                        continue
+                    stack.append((e.path, depth + 1))
+                elif e.is_file(follow_symlinks=False) and e.name.endswith(_SOURCE_EXTS):
+                    if count >= _MAX_PKG_SOURCE_FILES:
+                        truncated.append(True)     # capped → the rest of this package is un-scanned
+                        return
+                    count += 1
+                    try:
+                        yield str(Path(e.path).relative_to(repo_root))
+                    except ValueError:
+                        continue                   # outside the repo root (shouldn't happen) → skip
+            except OSError:
+                continue
 
 
 class PythonInstalledTree(InstalledTree):

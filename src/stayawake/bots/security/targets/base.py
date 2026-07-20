@@ -83,6 +83,15 @@ class ScanOptions:
     # guarantee — it spawns subprocesses and a tool may send the dependency graph to its own servers —
     # so it must be requested explicitly. Also never moves the worm verdict.
     external_audit: bool = False
+    # OPT-IN, off by default (`saw scan --deep` / config `deep: true`): content-scan the CODE of
+    # installed npm dependency packages (node_modules), not just their entry points, with the FP-SAFE
+    # confirmed loader tier. Closes the gap where a loader payload buried in a NON-entry file of an
+    # on-lockfile package reads clean (#1222). npm-only — the confirmed fingerprints are JS-shaped, so
+    # a Python site-packages sweep would match nothing. Off by default for PERF — a full vendored sweep
+    # is 10–60s on a big node_modules — and because the default scan surfaces an honest note pointing
+    # here. Never runs the density/obfuscation heuristics (those DO false-positive on minified vendored
+    # code — the reason node_modules is excluded); only the 0-FP confirmed fingerprints.
+    deep: bool = False
 
 
 class Target:
@@ -97,6 +106,9 @@ class Target:
         # result.error so the run fails CLOSED. A payload behind an unreadable file must never be
         # silently skipped and read as clean.
         self.read_errors: list[str] = []
+        # Non-gating COVERAGE notes a matcher wants surfaced (e.g. a `--deep` sweep truncated by its
+        # byte budget, #1222). scan_target folds these into ScanResult.notes; they never fail the scan.
+        self.coverage_notes: list[str] = []
 
     @property
     def repo_root(self) -> Path:

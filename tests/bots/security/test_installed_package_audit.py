@@ -11,10 +11,17 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from stayawake.bots.security.dependencies import Advisory
 from stayawake.bots.security.matchers.installed_package_audit import InstalledPackageAuditMatcher
+from stayawake.bots.security.scanner import scan_target
+from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.targets.base import ScanOptions, Target
+
+_REAL_SIGS = load_signatures()
+_MARKER = "String.fromCharCode(1" + "27)"          # a CONFIRMED code-loader fingerprint, assembled so
+#                                                    this test file itself never trips the self-scan
 
 _MAL_SIG = {"id": "malicious-installed-package", "category": "supply-chain-dep",
             "severity": "critical", "description": "malicious installed", "corpus": True}
@@ -315,6 +322,122 @@ class TestInstalledEntryLoader(unittest.TestCase):
 
     def test_python_wheels_have_no_entries(self):
         self.assertNotIn("installed-entry-loader", _scan_entries(Target(_venv({"requests": "2.31.0"}), "t", ScanOptions())))
+
+
+class TestDeepSweep(unittest.TestCase):
+    """#1222: `saw scan --deep` content-scans installed package CODE (not just entries) with the FP-safe
+    confirmed loader tier; the default leaves an honest coverage note instead of a silent 'clean'."""
+
+    def _repo(self, where):
+        """A repo with node_modules/leftpad carrying the loader marker in `where` (entry|nonentry|none)."""
+        d = Path(tempfile.mkdtemp())
+        (d / "package-lock.json").write_text(json.dumps(
+            {"lockfileVersion": 3, "packages": {"": {"name": "app"},
+                                                "node_modules/leftpad": {"version": "1.0.0"}}}))
+        nm = d / "node_modules" / "leftpad"; (nm / "lib").mkdir(parents=True)
+        (nm / "package.json").write_text(json.dumps({"name": "leftpad", "version": "1.0.0",
+                                                     "main": "index.js"}))
+        (nm / "index.js").write_text(f"const x = {_MARKER};\n" if where == "entry" else "module.exports=1;\n")
+        (nm / "lib" / "payload.js").write_text(f"const x = {_MARKER};\n" if where == "nonentry" else "ok;\n")
+        return d
+
+    def _scan(self, d, deep):
+        o = ScanOptions(); o.deep = deep
+        return scan_target(Target(d, str(d), o), _REAL_SIGS, [])
+
+    def test_default_misses_non_entry_but_says_so(self):
+        r = self._scan(self._repo("nonentry"), deep=False)
+        self.assertEqual(r.verdict, "clean")                       # non-entry payload invisible by default
+        self.assertTrue(any("node_modules" in n and "--deep" in n for n in r.notes))  # …but honestly noted
+
+    def test_deep_catches_non_entry_payload(self):
+        r = self._scan(self._repo("nonentry"), deep=True)
+        self.assertEqual(r.verdict, "infected")
+        f = next(f for f in r.findings if f.signature_id == "installed-entry-loader")
+        self.assertEqual(f.path, "node_modules/leftpad/lib/payload.js")   # the buried non-entry file
+        self.assertEqual(r.notes, [])                              # it WAS deep-scanned → no caveat
+
+    def test_entry_payload_caught_in_both_modes(self):
+        for deep in (False, True):
+            r = self._scan(self._repo("entry"), deep=deep)
+            self.assertEqual(r.verdict, "infected", f"entry loader missed (deep={deep})")
+
+    def test_clean_repo_deep_has_no_findings_and_no_note(self):
+        r = self._scan(self._repo("none"), deep=True)
+        self.assertEqual(r.verdict, "clean")
+        self.assertEqual(r.notes, [])
+
+    def test_no_note_when_there_is_no_node_modules(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "a.js").write_text("const x = 1;\n")
+        self.assertEqual(self._scan(d, deep=False).notes, [])
+
+    def _repo_payload_at(self, rel, big=False):
+        """A repo with the loader marker in node_modules/p/<rel> (optionally buried mid-large-file)."""
+        d = Path(tempfile.mkdtemp())
+        (d / "package-lock.json").write_text(json.dumps(
+            {"lockfileVersion": 3, "packages": {"": {"name": "app"},
+                                                "node_modules/p": {"version": "1.0.0"}}}))
+        nm = d / "node_modules" / "p"; nm.mkdir(parents=True)
+        (nm / "package.json").write_text(json.dumps({"name": "p", "version": "1.0.0", "main": "index.js"}))
+        (nm / "index.js").write_text("module.exports=1;\n")
+        f = nm / rel; f.parent.mkdir(parents=True, exist_ok=True)
+        body = f"const x = {_MARKER};\n"
+        f.write_text(("a=1;\n" * 500000 + body + "b=2;\n" * 500000) if big else body)
+        return d
+
+    def test_deep_catches_ts_dotdir_and_bundle_interior(self):
+        # review gaps: a .ts file, a dot-dir (.internal/), and a payload MID-large-bundle must all be
+        # caught by --deep (broadened extensions + dot-dir walk + full-interior windowed read).
+        for rel, big in [("lib/x.ts", False), (".internal/loader.js", False), ("bundle.js", True)]:
+            r = self._scan(self._repo_payload_at(rel, big), deep=True)
+            self.assertEqual(r.verdict, "infected", f"missed payload at {rel} (big={big})")
+            self.assertEqual([f.path for f in r.findings if f.signature_id == "installed-entry-loader"],
+                             [f"node_modules/p/{rel}"])
+
+    def test_deep_truncation_is_noted_not_silent(self):
+        # A coverage-honesty feature must NOT drop coverage silently: when the byte budget is exhausted
+        # with source files still un-scanned, the scan must carry a partial-coverage note.
+        import stayawake.bots.security.matchers.installed_package_audit as ipa
+        d = Path(tempfile.mkdtemp())
+        (d / "package-lock.json").write_text(json.dumps(
+            {"lockfileVersion": 3, "packages": {"": {"name": "app"},
+                                                "node_modules/p": {"version": "1.0.0"}}}))
+        nm = d / "node_modules" / "p"; nm.mkdir(parents=True)
+        (nm / "package.json").write_text(json.dumps({"name": "p", "version": "1.0.0", "main": "index.js"}))
+        (nm / "index.js").write_text("module.exports=1;\n")
+        for i in range(4):                                          # several non-entry files
+            (nm / f"m{i}.js").write_text("const ok = 1;\n")
+        with mock.patch.object(ipa, "_DEEP_SWEEP_BUDGET", 1):       # exhausts after the first file
+            r = self._scan(d, deep=True)
+        self.assertTrue(any("budget" in n and "partial" in n.lower() for n in r.notes),
+                        f"expected a truncation coverage note, got {r.notes}")
+
+    def test_coverage_note_renders_in_terminal_and_markdown(self):
+        from stayawake.bots.security.models import ScanReport
+        from stayawake.bots.security.sinks.render import render_markdown, render_terminal
+        from stayawake.utils.timeutil import now_iso
+        payload = ScanReport(now_iso(), [self._scan(self._repo("none"), deep=False)]).to_payload()
+        term, md = render_terminal(payload, detail=True), render_markdown(payload)
+        self.assertIn("Coverage notes", term)
+        self.assertIn("--deep", term)
+        self.assertIn("Coverage notes", md)
+
+    def test_source_files_skips_nested_node_modules_and_symlinks(self):
+        from stayawake.bots.security.dependencies.installed import NpmInstalledTree, InstalledPackage
+        d = Path(tempfile.mkdtemp())
+        pkg = d / "node_modules" / "p"; (pkg / "lib").mkdir(parents=True)
+        (pkg / "own.js").write_text("x")
+        (pkg / "lib" / "deep.js").write_text("x")
+        nested = pkg / "node_modules" / "child"; nested.mkdir(parents=True)
+        (nested / "child.js").write_text("x")                      # a SEPARATE package — must be excluded
+        (pkg / "linked.js").symlink_to(d / "outside.js")           # symlink — must be excluded
+        ip = InstalledPackage("npm", "p", "1.0.0", "node_modules/p/package.json")
+        got = set(NpmInstalledTree().source_files(Target(d, str(d), ScanOptions()), ip))
+        self.assertIn("node_modules/p/own.js", got)
+        self.assertIn("node_modules/p/lib/deep.js", got)
+        self.assertNotIn("node_modules/p/node_modules/child/child.js", got)   # nested pkg excluded
+        self.assertNotIn("node_modules/p/linked.js", got)          # symlink excluded
 
 
 if __name__ == "__main__":
