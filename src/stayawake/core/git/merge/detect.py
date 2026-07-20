@@ -10,7 +10,8 @@ from stayawake.core.git.merge.tree import auto_merge_tree
 from stayawake.core.git.merge.corroborate import corroborated
 
 
-def evil_merge_paths(repo: str | Path, merge_sha: str, content_sig=None) -> dict[str, str]:
+def evil_merge_paths(repo: str | Path, merge_sha: str, content_sig=None,
+                     obfuscation_reason=None) -> dict[str, str]:
     """Paths whose content the merge introduced BEYOND a clean 3-way merge of its parents
     AND for which that introduction is CORROBORATED as review-evading (see `corroborated`).
 
@@ -61,7 +62,8 @@ def evil_merge_paths(repo: str | Path, merge_sha: str, content_sig=None) -> dict
 
     flagged: dict[str, str] = {}
     for path in deviating:
-        ok, reason = corroborated(repo, base_tree, merge_sha, path, ps, content_sig)
+        ok, reason = corroborated(repo, base_tree, merge_sha, path, ps, content_sig,
+                                  obfuscation_reason)
         if ok:
             flagged[path] = reason
     return flagged
