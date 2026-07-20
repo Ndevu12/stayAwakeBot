@@ -17,7 +17,7 @@ import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
-from stayawake.core import git as gitutil
+from stayawake.lib import git as gitutil
 from stayawake.bots.security.matchers.base import load_jsonc, build_content_sig
 from stayawake.bots.security.models import (
     HEURISTIC, QUARANTINE_DIR,

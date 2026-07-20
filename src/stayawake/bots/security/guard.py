@@ -23,9 +23,9 @@ from pathlib import Path
 
 import yaml
 
-from stayawake.core.adapters import github_api
-from stayawake.core import auth
-from stayawake.core import git as gitutil
+from stayawake.lib.adapters import github_api
+from stayawake.lib import auth
+from stayawake.lib import git as gitutil
 from stayawake.utils import textsafe
 from stayawake.utils.config import load_yaml
 from stayawake.utils.render import SEVERITY, paint

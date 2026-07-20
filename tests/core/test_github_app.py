@@ -13,7 +13,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from unittest import mock
 
-from stayawake.core import github_app, auth
+from stayawake.lib import github_app, auth
 
 _FUTURE = "2099-01-01T00:00:00Z"   # far-future expiry → cache stays valid in-test
 _APP_ENV = {"GH_APP_ID": "123", "GH_APP_PRIVATE_KEY": "-----PEM-----",
@@ -135,7 +135,7 @@ class TestResolveTokenIntegration(unittest.TestCase):
 
 class TestInstallationRepos(unittest.TestCase):
     def test_list_installation_repos_paginates_and_skips_archived(self):
-        from stayawake.core.adapters import github_api
+        from stayawake.lib.adapters import github_api
         page1 = {"repositories": [{"full_name": f"o/r{i}"} for i in range(100)]}
         page2 = {"repositories": [{"full_name": "o/last"}, {"full_name": "o/arch", "archived": True}]}
         pages = [page1, page2]

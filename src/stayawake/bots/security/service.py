@@ -20,8 +20,8 @@ from stayawake.utils.timeutil import now_iso
 # github_api/auth are consumed transitively through the resolution seam; kept imported so the
 # targeting tests can patch them at the service boundary (`service.github_api`/`service.auth`) —
 # they are the same module objects resolution.py uses, so the patches reach it.
-from stayawake.core.adapters import github_api  # noqa: F401
-from stayawake.core import auth  # noqa: F401
+from stayawake.lib.adapters import github_api  # noqa: F401
+from stayawake.lib import auth  # noqa: F401
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.models import ScanResult, ScanReport

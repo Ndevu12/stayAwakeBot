@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from stayawake.core.git.run import run
+from stayawake.lib.git.run import run
 
 
 def format_patch(repo: str | Path, ref: str = "HEAD") -> str | None:

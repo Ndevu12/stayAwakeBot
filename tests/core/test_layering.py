@@ -19,7 +19,7 @@ import unittest
 _SRC = pathlib.Path(__file__).resolve().parents[2] / "src" / "stayawake"
 
 # Low → high. A package may import only from packages to its LEFT.
-_LAYERS = ["utils", "core", "bots", "cli"]
+_LAYERS = ["utils", "lib", "core", "bots", "cli"]
 
 
 def _imported_top_packages(pyfile: pathlib.Path) -> set[str]:

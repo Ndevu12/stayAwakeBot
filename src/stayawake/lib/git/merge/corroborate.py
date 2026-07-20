@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from stayawake.core.git.query import path_exists_at, introduced_added_text, file_at
+from stayawake.lib.git.query import path_exists_at, introduced_added_text, file_at
 
 
 def corroborated(repo: str | Path, base_tree: str, merge_sha: str, path: str,
