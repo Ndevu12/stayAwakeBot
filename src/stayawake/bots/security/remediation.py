@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from stayawake.lib import git as gitutil
+from stayawake.utils.pathsafe import is_safe_write_target
 from stayawake.bots.security.matchers.base import load_jsonc, build_content_sig
 from stayawake.bots.security.models import (
     HEURISTIC, QUARANTINE_DIR,
@@ -189,13 +190,18 @@ def apply(root: Path, changes: list[Change], quarantine: Path) -> list[Change]:
         if c.action == "quarantine":
             if target.exists():
                 _backup(root, c.path, quarantine)
-                if target.is_dir():
-                    shutil.rmtree(target)
+                if target.is_dir() and not target.is_symlink():
+                    shutil.rmtree(target)          # a symlinked dir → unlink the link, don't rmtree it
                 else:
                     target.unlink()
                 applied.append(c)
         elif c.action in ("strip-gitignore", "strip-settings"):
             if not target.exists():
+                continue
+            if not is_safe_write_target(target, root):
+                # NEVER read/strip/rewrite THROUGH a planted symlink or outside the worktree (#1218):
+                # `write_text` would follow the link into a sink and `_backup` skips symlinks, so the
+                # backup/verify net is dead. A symlinked/escaping finding defers to manual.
                 continue
             original = target.read_text(encoding="utf-8", errors="replace")
             if c.action == "strip-gitignore":
@@ -658,14 +664,11 @@ def apply_recovery(repo, rec: Recovery, quarantine: Path, content_sig) -> bool:
     loader literal nor an exec sink (`_carries_payload`), else the original is put back."""
     root = Path(repo)
     target = root / rec.path
-    if not rec.clean_text or target.is_symlink() \
-            or not target.resolve().is_relative_to(root.resolve()):
-        # Refuse an empty result, and NEVER write through a symlink or outside the worktree:
-        # `write_text` follows the link (could clobber a file outside the worktree) and `_backup`
-        # skips symlinks, so the quarantine + verify-or-revert net would be dead. The `resolve()`
-        # containment check also closes a symlinked ANCESTOR dir or a `..` in the path, so this
-        # write-confinement is self-contained here rather than relying on how the caller sourced
-        # the path. A symlinked / escaping finding defers to manual.
+    if not rec.clean_text or not is_safe_write_target(target, root):
+        # Refuse an empty result, and NEVER write through a symlink or outside the worktree (#1204,
+        # now the shared #1218 guard): `write_text` follows the link (could clobber a file outside the
+        # worktree) and `_backup` skips symlinks, so the quarantine + verify-or-revert net would be
+        # dead. The containment check also closes a symlinked ANCESTOR dir or a `..`. Defers to manual.
         return False
     if not target.exists() or _carries_payload(rec.clean_text, content_sig):
         return False                      # never write a version that still carries the payload
