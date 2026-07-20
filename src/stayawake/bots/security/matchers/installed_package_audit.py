@@ -52,6 +52,13 @@ class InstalledPackageAuditMatcher(Matcher):
         # package's ENTRY file(s) — the FP-safe tier, targeted to main/bin so it isn't the brute-force
         # node_modules scan PR3 rejected. A novel malicious package's runtime loader is otherwise pruned.
         entry_check = build_content_sig(all_signatures) if (entry_sig is not None and all_signatures) else None
+        # `--deep` (#1222): extend the SAME confirmed loader check from entry files to ALL of a package's
+        # source files, so a payload in a NON-entry file isn't invisible. Off by default (perf — a full
+        # vendored sweep is 10–60s); a shared byte BUDGET bounds a hostile/huge tree. FP-safe (confirmed
+        # fingerprints only — 0 hits over 531 MB of real vendored code; never the density heuristic).
+        deep = bool(getattr(target.opts, "deep", False))
+        budget = [_DEEP_SWEEP_BUDGET]                 # mutable: shared across packages, decremented as read
+        truncated: list = []                          # set if a cap/budget dropped un-scanned deep files
         findings: list[Finding] = []
         for tree in self._trees:
             installed = list(tree.read(target))
@@ -66,11 +73,17 @@ class InstalledPackageAuditMatcher(Matcher):
                     findings.append(_ghost(by_id.get("ghost-package"), pkg))
                 if hook_patterns and pkg.hooks:
                     findings.append(_lifecycle_hook(hook_sig, hook_patterns, pkg))
-                if entry_check is not None and pkg.entries:
-                    findings.append(_entry_loader(entry_sig, entry_check, target, pkg))
+                if entry_check is not None:
+                    findings.append(_loader_sweep(entry_sig, entry_check, target, tree, pkg,
+                                                  deep, budget, truncated))
             if tamper_sig is not None:                # RECORD sha256 integrity (Python provides it)
                 for t in tree.tampered(target):
                     findings.append(_tampered(tamper_sig, t))
+        if deep and truncated:                        # HONEST: a coverage feature must not truncate silently
+            notes = getattr(target, "coverage_notes", None)
+            if notes is not None:
+                notes.append("`--deep` sweep hit a size bound (byte budget or per-package file cap) — some "
+                             "vendored source files were NOT content-scanned. Coverage is partial, not clean.")
         return [f for f in findings if f is not None]
 
     def _locked_names(self, ecosystem: str, target) -> set[str]:
@@ -125,19 +138,55 @@ def _confirmed_lifecycle_patterns(all_signatures):
             and s.get("pattern")]
 
 
-def _entry_loader(sig, check, target, pkg) -> Finding | None:
-    for rel in pkg.entries:
-        text = target.read_text(rel)
-        if text is None:
-            continue
+_DEEP_SWEEP_BUDGET = 500_000_000     # total source bytes read across a `--deep` sweep — DoS backstop
+
+
+def _loader_finding(sig, pkg, rel, kind, hit) -> Finding:
+    return Finding(
+        signature_id=sig["id"], category=sig["category"],
+        severity=Severity.parse(sig["severity"]), path=rel,
+        description=sig["description"], remediation=sig.get("remediation", "manual"),
+        evidence=f"{pkg.name}@{pkg.version or '?'} {kind} {rel} carries loader fingerprint {hit}",
+        vector=sig["category"])
+
+
+def _scan_file(check, target, rel, budget) -> str | None:
+    """Run the confirmed loader check over the FULL body of `rel` — windowed via `read_source_windows`
+    so an oversized bundle's INTERIOR isn't a blind spot (the head+tail of `read_text` would miss a
+    payload buried mid-file). `read_source_windows` is FIFO-safe (#1226). Decrements `budget` (a mutable
+    1-elt list) by bytes read when given (entries pass None — always scanned). Returns the hit id / None."""
+    for _offset, text in target.read_source_windows(rel):
+        if budget is not None:
+            budget[0] -= len(text)
         hit = check(text)
         if hit:
-            return Finding(
-                signature_id=sig["id"], category=sig["category"],
-                severity=Severity.parse(sig["severity"]), path=rel,
-                description=sig["description"], remediation=sig.get("remediation", "manual"),
-                evidence=f"{pkg.name}@{pkg.version or '?'} entry {rel} carries loader fingerprint {hit}",
-                vector=sig["category"])
+            return hit
+    return None
+
+
+def _loader_sweep(sig, check, target, tree, pkg, deep, budget, truncated) -> Finding | None:
+    """Run the confirmed loader check over a package's ENTRY files (always — the classic entry-loader
+    tier, both modes), and — when `deep` (#1222) — over ALL its other JS-family source files too, so a
+    payload in a non-entry file isn't invisible. The non-entry portion draws on a shared byte `budget`
+    so a huge/hostile tree can't force unbounded reads; `truncated` is flagged when that (or the
+    per-package file cap) drops un-scanned files, so the caller can note the partial coverage. First
+    hit wins."""
+    for rel in pkg.entries:                       # entries: always scanned, never budget-limited
+        hit = _scan_file(check, target, rel, None)
+        if hit:
+            return _loader_finding(sig, pkg, rel, "entry", hit)
+    if not deep:
+        return None
+    entries = set(pkg.entries)
+    for rel in tree.source_files(target, pkg, truncated):
+        if rel in entries:
+            continue                              # already scanned as an entry above
+        if budget[0] <= 0:
+            truncated.append(True)                # byte budget spent → remaining files un-scanned
+            break
+        hit = _scan_file(check, target, rel, budget)
+        if hit:
+            return _loader_finding(sig, pkg, rel, "file", hit)
     return None
 
 
