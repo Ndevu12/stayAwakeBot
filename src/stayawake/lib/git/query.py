@@ -93,6 +93,16 @@ def file_at(repo: str | Path, treeish: str, path: str) -> str:
     return res.stdout
 
 
+def list_tree(repo: str | Path, treeish: str, path: str | Path) -> list[str]:
+    """Repo-relative paths of the files under `path` AT a git ref (recursive), or [] if the ref or
+    directory is absent. Lets a caller reason about what a ref/branch actually CONTAINS — e.g. what
+    the default branch has, independent of a dirty/untracked working tree."""
+    res = run(repo, ["ls-tree", "-r", "--name-only", treeish, "--", str(path)])
+    if res is None or res.returncode != 0 or not res.stdout:
+        return []
+    return [ln for ln in res.stdout.splitlines() if ln.strip()]
+
+
 def tracked(repo: str | Path, path: str) -> bool:
     """True if `path` is tracked in git — i.e. has committed history we could recover from."""
     res = run(repo, ["ls-files", "--error-unmatch", "--", path])
