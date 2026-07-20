@@ -8,20 +8,8 @@ from pathlib import Path
 from stayawake.core.git.query import path_exists_at, introduced_added_text, file_at
 
 
-def _is_generated_context(path: str) -> bool:
-    """True when `path` is a vendored/minified/generated location where obfuscation is
-    EXPECTED (the context-aware-confidence lever): suppress the obfuscation corroborator
-    there so legitimate dense bundles never become evil-merge findings.
-
-    Delegates to the single shared predicate in the security package so the merge
-    corroborator and the whole-file obfuscation matcher use ONE source of truth and
-    never drift. Imported lazily to keep core.git free of a hard security dependency."""
-    from stayawake.bots.security.obfuscation import is_generated_context
-    return is_generated_context(path)
-
-
 def corroborated(repo: str | Path, base_tree: str, merge_sha: str, path: str,
-                 parent_shas: list[str], content_sig=None) -> tuple[bool, str]:
+                 parent_shas: list[str], content_sig=None, obfuscation_reason=None) -> tuple[bool, str]:
     """Decide whether an introduced path is a CORROBORATED evil-merge signal, returning
     (corroborated, reason). A raw "this path deviates from the auto-merge" is NOT enough —
     benign conflict resolutions deviate too. We require one of:
@@ -34,8 +22,11 @@ def corroborated(repo: str | Path, base_tree: str, merge_sha: str, path: str,
           (G3) — context-aware: suppressed in vendored/generated paths where obfuscation
           is expected; applied only to the introduced delta in hand-authored source.
 
-    `content_sig` is an optional callable(text)->reason|None used for (b); kept injectable
-    so this module stays free of the signature-DB import.
+    Both content and obfuscation checks are INJECTED as callables so this module (in `core.git`)
+    stays free of any `bots.security` import — a lower layer must never depend up on the security
+    domain (#1236). `content_sig` is `callable(text) -> reason|None` for (b); `obfuscation_reason`
+    is `callable(path, delta, baseline_text) -> reason|None` for (c) (it owns the generated-context
+    suppression). Absent (None) → that signal is simply not evaluated.
     """
     # (a) new vs ALL parents — content-agnostic, formatting-agnostic (presence test, so a
     #     binary file present in a parent is never misread as absent).
@@ -66,12 +57,11 @@ def corroborated(repo: str | Path, base_tree: str, merge_sha: str, path: str,
             if hit:
                 return True, f"merge-introduced hunk matches signature: {hit}"
 
-    # (c) context-aware obfuscation of an introduced hunk (G3).
-    if not _is_generated_context(path):
-        # Import here to keep core.git free of a hard security-package dependency.
-        from stayawake.bots.security.obfuscation import analyze_delta
+    # (c) context-aware obfuscation of an introduced hunk (G3). The injected callable owns the
+    # generated-context suppression AND the delta analysis, so no security-package import lands here.
+    if obfuscation_reason is not None:
         for b, d in pairs:
-            verdict = analyze_delta(d, file_at(repo, b, path))
-            if verdict:
-                return True, f"obfuscated merge-introduced hunk: {verdict.reason}"
+            reason = obfuscation_reason(path, d, file_at(repo, b, path))
+            if reason:
+                return True, f"obfuscated merge-introduced hunk: {reason}"
     return False, ""
