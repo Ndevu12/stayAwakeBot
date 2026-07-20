@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -112,6 +113,45 @@ class TestStripAndResidual(unittest.TestCase):
         remediation._backup(repo, "link.txt", q)
         # the symlink target's contents must not be copied into quarantine
         self.assertFalse((q / "link.txt").exists())
+
+    def test_strip_refuses_write_through_a_planted_symlink(self):
+        # #1218: a committed symlink named settings.json pointing at an OUT-OF-TREE sink must NOT be
+        # written through by apply()'s strip path — the sink stays intact and the change is skipped.
+        repo = Path(tempfile.mkdtemp())
+        sink = Path(tempfile.mkdtemp()) / "victim.bashrc"
+        sink.write_text("SAFE ORIGINAL\n", encoding="utf-8")
+        (repo / ".vscode").mkdir()
+        (repo / ".vscode" / "settings.json").symlink_to(sink)
+        applied = remediation.apply(
+            repo, [remediation.Change("strip-settings", ".vscode/settings.json", "autorun")],
+            Path(tempfile.mkdtemp()))
+        self.assertEqual(applied, [])                            # refused — never written through
+        self.assertEqual(sink.read_text(), "SAFE ORIGINAL\n")   # the out-of-tree sink is untouched
+
+    def test_quarantine_of_a_symlinked_dir_unlinks_not_rmtrees(self):
+        # apply() quarantine of a symlink-to-directory must unlink the link, never rmtree THROUGH it.
+        repo = Path(tempfile.mkdtemp())
+        outside = Path(tempfile.mkdtemp()); (outside / "keep.txt").write_text("keep\n")
+        (repo / "linkdir").symlink_to(outside, target_is_directory=True)
+        remediation.apply(repo, [remediation.Change("quarantine", "linkdir", "x")],
+                          Path(tempfile.mkdtemp()))
+        self.assertFalse((repo / "linkdir").exists())           # the planted link is removed
+        self.assertTrue((outside / "keep.txt").exists())        # its target dir is untouched
+
+
+class TestPathSafe(unittest.TestCase):
+    """The shared SymJacking write-through guard (#1218)."""
+    def test_refuses_symlink_and_escape_allows_benign(self):
+        from stayawake.utils.pathsafe import is_safe_write_target
+        root = Path(tempfile.mkdtemp())
+        (root / "real.json").write_text("{}")
+        (root / "link").symlink_to(Path(tempfile.mkdtemp()) / "sink")     # symlinked leaf
+        os.symlink(tempfile.mkdtemp(), root / "escdir")                   # symlinked ancestor dir
+        self.assertFalse(is_safe_write_target(root / "link", root))
+        self.assertFalse(is_safe_write_target(root / "escdir" / "x.json", root))
+        self.assertFalse(is_safe_write_target(root / ".." / "x", root))  # .. escape
+        self.assertTrue(is_safe_write_target(root / "real.json", root))  # benign existing
+        self.assertTrue(is_safe_write_target(root / "new.json", root))   # benign new file
 
 
 if __name__ == "__main__":

@@ -23,6 +23,7 @@ from pathlib import Path
 
 from stayawake.lib.adapters import github_api
 from stayawake.lib import git as gitutil
+from stayawake.utils.pathsafe import is_safe_write_target
 
 PATCHES_DIR = Path("sab-patches")   # where the read-only floor writes .patch files
 _FORK_POLL_TRIES = 10               # async fork readiness: poll up to ~30s
@@ -79,8 +80,15 @@ def _save_patch(wt: Path, slug: str, out_dir: Path) -> Path | None:
     if not patch:
         return None
     try:
+        # `out_dir` itself must not be a planted symlink — is_safe_write_target resolves BOTH the
+        # target and the root, so a symlinked root would trivially "contain" itself; check it too so a
+        # committed `sab-patches -> $HOME` can't redirect the patch write out of the tree (#1218).
+        if out_dir.is_symlink():
+            return None
         out_dir.mkdir(parents=True, exist_ok=True)
-        dest = (out_dir / (slug.replace("/", "-") + ".patch")).resolve()
+        dest = out_dir / (slug.replace("/", "-") + ".patch")
+        if not is_safe_write_target(dest, out_dir):   # don't write the patch THROUGH a planted symlink (#1218)
+            return None
         dest.write_text(patch, encoding="utf-8")
     except OSError:
         return None
