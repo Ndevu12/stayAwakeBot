@@ -17,6 +17,7 @@ from typing import Any
 
 from stayawake.bots.security.redaction import render_redacted
 from stayawake.utils.render import SEVERITY, STATUS, paint, rule
+from stayawake.utils import textsafe
 
 # Colour is emitted only when the terminal sink says stdout is a TTY (and NO_COLOR isn't set) —
 # the palette and `paint()` live in core.render so this surface and the audit report never drift
@@ -128,6 +129,10 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False,
                 out.append(f"    • {colored}  {f['signature_id']}  —  {loc}")
                 if f.get("evidence"):
                     out.append(f"        evidence: {_fmt_evidence(f['evidence'])}")
+                if f.get("fix_advice"):                          # actionable remediation (#1252)
+                    out.append(f"        → fix: {textsafe.plain(f['fix_advice'])}")
+                if f.get("reference"):
+                    out.append(f"        → details: {textsafe.plain(f['reference'])}")
     # Dependency advisories — a SEPARATE, opt-in tier (ordinary CVEs). Listed for any target that
     # has them, including clean ones, and explicitly labelled as not affecting the verdict.
     advised = [r for r in ordered if r.get("advisories")]
@@ -145,6 +150,10 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False,
                     out.append(f"    • [{a['severity']}]  {a['signature_id']}  —  {loc}")
                     if a.get("evidence"):
                         out.append(f"        {_fmt_evidence(a['evidence'])}")
+                    if a.get("fix_advice"):                      # how to actually fix it (#1252)
+                        out.append(f"        → fix: {textsafe.plain(a['fix_advice'])}")
+                    if a.get("reference"):
+                        out.append(f"        → details: {textsafe.plain(a['reference'])}")
     if s.get("suspicious"):
         out += ["", "suspicious = heuristic match(es) to review; not asserted as malware."]
     return "\n".join(out) + "\n"
@@ -181,6 +190,12 @@ def render_markdown(payload: dict[str, Any]) -> str:
             out.append(f"  - {f['description']}")
             if f.get("evidence"):
                 out.append(f"  - evidence: {_fmt_evidence(f['evidence'])}")
+            if f.get("fix_advice"):                              # actionable remediation (#1252)
+                # code-span the advice: it embeds an unvalidated package name, and a bare Markdown
+                # string would let `x](http://evil)` render as an active link (textsafe.code contract).
+                out.append(f"  - **fix:** {textsafe.code(f['fix_advice'])}")
+            if f.get("reference"):
+                out.append(f"  - details: {textsafe.sanitize(f['reference'])}")
         out.append("")
     if not any_f:
         out.append("_No findings — all scanned targets are clean._")
@@ -199,5 +214,9 @@ def render_markdown(payload: dict[str, Any]) -> str:
                 out.append(f"  - {a['description']}")
                 if a.get("evidence"):
                     out.append(f"  - evidence: {_fmt_evidence(a['evidence'])}")
+                if a.get("fix_advice"):                          # how to actually fix it (#1252)
+                    out.append(f"  - **fix:** {textsafe.code(a['fix_advice'])}")   # code-span: see above
+                if a.get("reference"):
+                    out.append(f"  - details: {textsafe.sanitize(a['reference'])}")
             out.append("")
     return "\n".join(out) + "\n"

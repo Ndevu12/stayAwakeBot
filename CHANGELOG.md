@@ -7,6 +7,17 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **`saw scan` now tells you how to FIX a flagged dependency, not just that it's flagged** (#1252).
+  A vulnerable dependency finding now carries actionable remediation: the **first patched version** to
+  upgrade to (read from the OSV advisory's `fixed` range event, which the corpus already stored) plus
+  the **ecosystem's install command** (`npm install x@1.3.0`, `pip install 'x>=1.3.0'`, cargo/composer/
+  go/nuget/gem/maven), and a **link to the advisory** (GitHub Advisory when there's a GHSA, else the OSV
+  page). When no patched version is published it says so and suggests remove/replace/pin instead; a
+  known-**malicious** dependency is told to *remove* it (upgrading doesn't help), not upgrade. Rendered
+  as a `→ fix` / `→ details` line under the finding in the terminal and Markdown reports (untrusted
+  advisory text is output-encoded via `utils.textsafe`), and the structured `fixed_version`/`reference`/
+  `fix_advice` fields are in the JSON output. Advisory findings still never gate the verdict — this only
+  makes them actionable.
 - **`saw audit` detects a cached GitHub credential on Linux and Windows, not just macOS** (#1260). The
   reframed keychain finding (#1237) was macOS-only (`security find-internet-password`); it now also
   probes **Linux libsecret / gnome-keyring** (`secret-tool`) and the **Windows Credential Manager**
