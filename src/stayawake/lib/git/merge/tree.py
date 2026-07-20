@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from stayawake.core.git.run import run
+from stayawake.lib.git.run import run
 
 
 def auto_merge_tree(repo: str | Path, a: str, b: str) -> str | None:

@@ -2,7 +2,7 @@
 """Git plumbing — a shared subprocess runner + read-only queries + evil-merge analysis,
 split per concern under one package but exposed as ONE flat API so callers are unchanged:
 
-    from stayawake.core import git
+    from stayawake.lib import git
     git.file_at(repo, sha, path)   git.evil_merge_paths(repo, merge)   git.run_ok(repo, args)
 
 Submodules:
@@ -12,9 +12,9 @@ Submodules:
   merge   — evil-merge analysis (merge_commits, evil_merge_paths)
   write   — mutations (add_worktree, stage_all, commit_fix, push_branch, …)
 """
-from stayawake.core.git.run import run, run_ok, stdout
-from stayawake.core.git.auth import github_https_auth
-from stayawake.core.git.query import (
+from stayawake.lib.git.run import run, run_ok, stdout
+from stayawake.lib.git.auth import github_https_auth
+from stayawake.lib.git.query import (
     is_git_repo,
     slug_from_url,
     origin_slug,
@@ -31,8 +31,8 @@ from stayawake.core.git.query import (
     commit_meta,
     remote_has_branch,
 )
-from stayawake.core.git.merge import merge_commits, evil_merge_paths
-from stayawake.core.git.write import (
+from stayawake.lib.git.merge import merge_commits, evil_merge_paths
+from stayawake.lib.git.write import (
     add_worktree,
     remove_worktree,
     stage_all,

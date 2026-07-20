@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from stayawake.utils import env
 from stayawake.core import issue_state
-from stayawake.core.adapters.slack import send_slack
+from stayawake.lib.adapters.slack import send_slack
 from stayawake.utils.timeutil import now_iso, utc_stamp
 
 LABEL = "availability-status"

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from stayawake.core.git.run import run_ok, NETWORK_TIMEOUT
+from stayawake.lib.git.run import run_ok, NETWORK_TIMEOUT
 
 
 def fetch(repo: str | Path, remote: str, ref: str) -> bool:

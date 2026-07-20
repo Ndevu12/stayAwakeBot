@@ -5,9 +5,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from stayawake.core.git.query import parents, changed_paths
-from stayawake.core.git.merge.tree import auto_merge_tree
-from stayawake.core.git.merge.corroborate import corroborated
+from stayawake.lib.git.query import parents, changed_paths
+from stayawake.lib.git.merge.tree import auto_merge_tree
+from stayawake.lib.git.merge.corroborate import corroborated
 
 
 def evil_merge_paths(repo: str | Path, merge_sha: str, content_sig=None,

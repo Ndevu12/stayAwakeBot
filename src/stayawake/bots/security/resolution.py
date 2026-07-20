@@ -20,9 +20,9 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from stayawake.core import auth
-from stayawake.core import git as gitutil
-from stayawake.core.adapters import github_api
+from stayawake.lib import auth
+from stayawake.lib import git as gitutil
+from stayawake.lib.adapters import github_api
 from stayawake.bots.security.targets import ScanOptions
 
 DEFAULT_CONFIG = "config/security.yml"

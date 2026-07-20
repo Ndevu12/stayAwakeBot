@@ -21,8 +21,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from stayawake.core.adapters import github_api
-from stayawake.core import git as gitutil
+from stayawake.lib.adapters import github_api
+from stayawake.lib import git as gitutil
 
 PATCHES_DIR = Path("sab-patches")   # where the read-only floor writes .patch files
 _FORK_POLL_TRIES = 10               # async fork readiness: poll up to ~30s

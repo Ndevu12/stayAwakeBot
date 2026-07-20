@@ -12,7 +12,7 @@ def check_branch_protection(slug: str | None, token: str | None,
     No-op without a repo slug and token."""
     if not slug or "/" not in slug or not token:
         return []
-    from stayawake.core.adapters import github_api
+    from stayawake.lib.adapters import github_api
     owner, name = slug.split("/", 1)
     prot = github_api.get_branch_protection(owner, name, branch, token)
     if prot is None:

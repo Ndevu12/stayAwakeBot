@@ -6,7 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from stayawake.core.git.run import run
+from stayawake.lib.git.run import run
 
 # Author the fix as the bot (not the operator running `saw`) via `-c`, so the commit's identity
 # is stable and doesn't depend on the ambient git config of whoever runs the sweep.

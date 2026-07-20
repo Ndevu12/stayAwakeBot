@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from stayawake.core.git.run import stdout
+from stayawake.lib.git.run import stdout
 
 # Reachability scope for merge enumeration (G6 resolution).
 #

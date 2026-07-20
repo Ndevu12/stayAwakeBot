@@ -2,7 +2,7 @@
 """Git-history matcher — the evil-merge detector."""
 from __future__ import annotations
 
-from stayawake.core import git as gitutil
+from stayawake.lib import git as gitutil
 from stayawake.bots.security.models import Finding, Severity
 from stayawake.bots.security.matchers.base import Matcher, build_content_sig
 from stayawake.bots.security.obfuscation import is_generated_context, analyze_delta

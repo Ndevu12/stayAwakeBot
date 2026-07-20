@@ -6,7 +6,7 @@ import argparse
 import sys
 
 from stayawake.bots.security import hygiene
-from stayawake.core import auth
+from stayawake.lib import auth
 from stayawake.utils.render import term_width
 from stayawake.utils.streaming import Streamer, status, stream_enabled
 from stayawake.utils.terminal import supports_color

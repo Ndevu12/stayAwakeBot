@@ -6,7 +6,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from stayawake.core.git.run import run, stdout, NETWORK_TIMEOUT
+from stayawake.lib.git.run import run, stdout, NETWORK_TIMEOUT
 
 
 def is_git_repo(repo: str | Path) -> bool:

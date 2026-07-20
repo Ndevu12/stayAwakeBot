@@ -182,7 +182,7 @@ class TestAudit(unittest.TestCase):
     @mock.patch("stayawake.bots.security.hygiene.check_branch_protection", return_value=[])
     @mock.patch("stayawake.bots.security.hygiene.check_vscode", return_value=[])
     @mock.patch("stayawake.bots.security.hygiene.check_credentials", return_value=[])
-    @mock.patch("stayawake.core.auth.resolve_token", return_value=(None, None))
+    @mock.patch("stayawake.lib.auth.resolve_token", return_value=(None, None))
     def test_clean_audit_returns_zero(self, *_):
         with redirect_stdout(io.StringIO()):
             self.assertEqual(cli.main(["audit"]), 0)
@@ -194,7 +194,7 @@ class TestAudit(unittest.TestCase):
     @mock.patch("stayawake.bots.security.hygiene.check_branch_protection", return_value=[])
     @mock.patch("stayawake.bots.security.hygiene.check_vscode", return_value=[])
     @mock.patch("stayawake.bots.security.hygiene.check_credentials")
-    @mock.patch("stayawake.core.auth.resolve_token", return_value=(None, None))
+    @mock.patch("stayawake.lib.auth.resolve_token", return_value=(None, None))
     def test_fail_flag_gates_on_warning(self, _tok, m_cred, *_):
         warning = mock.Mock()
         warning.severity = "warning"
@@ -204,7 +204,7 @@ class TestAudit(unittest.TestCase):
 
     @mock.patch("stayawake.bots.security.hygiene.render", return_value="")
     @mock.patch("stayawake.bots.security.hygiene.audit_checks", return_value=[])
-    @mock.patch("stayawake.core.auth.resolve_token", return_value=(None, None))
+    @mock.patch("stayawake.lib.auth.resolve_token", return_value=(None, None))
     def test_cli_delegates_to_hygiene_audit_checks(self, _tok, m_checks, _render):
         # Regression: `saw audit` must get its checks from hygiene.audit_checks() (the single
         # composition site) — NOT hand-assemble a subset, which is how the runner-persistence probe
@@ -216,7 +216,7 @@ class TestAudit(unittest.TestCase):
 
 
 class TestDispatcherOwnedCommands(unittest.TestCase):
-    @mock.patch("stayawake.core.auth.resolve_token", return_value=(None, None))
+    @mock.patch("stayawake.lib.auth.resolve_token", return_value=(None, None))
     def test_doctor_runs(self, _):
         with redirect_stdout(io.StringIO()) as buf:
             self.assertEqual(cli.main(["doctor"]), 0)

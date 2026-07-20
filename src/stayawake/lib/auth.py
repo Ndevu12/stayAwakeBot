@@ -65,7 +65,7 @@ def _app_token() -> str | None:
     """A GitHub App installation token, or None if no App is configured. Never raises:
     a configured-but-broken App is reported and treated as 'no token' so resolution can
     fall through (the caller's hint then guides)."""
-    from stayawake.core import github_app  # lazy: keeps PyJWT fully optional
+    from stayawake.lib import github_app  # lazy: keeps PyJWT fully optional
     try:
         return github_app.installation_token()
     except github_app.GithubAppError as e:

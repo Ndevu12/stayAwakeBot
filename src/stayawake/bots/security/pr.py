@@ -14,8 +14,8 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from stayawake.core.adapters import github_api
-from stayawake.core import git as gitutil
+from stayawake.lib.adapters import github_api
+from stayawake.lib import git as gitutil
 from stayawake.utils import textsafe
 from stayawake.utils.streaming import status
 from stayawake.bots.security.scanner import scan_target

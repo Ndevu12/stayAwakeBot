@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from stayawake.core.git.run import run_ok
+from stayawake.lib.git.run import run_ok
 
 
 def add_worktree(repo: str | Path, path: str | Path, branch: str, baseref: str) -> bool:

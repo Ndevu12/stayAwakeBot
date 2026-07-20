@@ -13,8 +13,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from stayawake.core import git as gitutil
-from stayawake.core.git.write.commit import CommitResult
+from stayawake.lib import git as gitutil
+from stayawake.lib.git.write.commit import CommitResult
 
 
 def _init(files: dict[str, str]) -> Path:

@@ -11,13 +11,13 @@ concern, all built on the shared checked runner (`run_ok`) so a failure is never
     branch   — delete_branch                      (discard the fix branch)
 
 Exposed flat via `core.git` too, so callers use `git.commit_fix(...)`, `git.push_branch(...)`."""
-from stayawake.core.git.write.worktree import add_worktree, remove_worktree
-from stayawake.core.git.write.stage import stage_all, unstage_cached
-from stayawake.core.git.write.commit import commit_fix, CommitResult, BOT_AUTHOR
-from stayawake.core.git.write.push import push_branch, delete_remote_branch
-from stayawake.core.git.write.patch import format_patch
-from stayawake.core.git.write.fetch import fetch
-from stayawake.core.git.write.branch import delete_branch
+from stayawake.lib.git.write.worktree import add_worktree, remove_worktree
+from stayawake.lib.git.write.stage import stage_all, unstage_cached
+from stayawake.lib.git.write.commit import commit_fix, CommitResult, BOT_AUTHOR
+from stayawake.lib.git.write.push import push_branch, delete_remote_branch
+from stayawake.lib.git.write.patch import format_patch
+from stayawake.lib.git.write.fetch import fetch
+from stayawake.lib.git.write.branch import delete_branch
 
 __all__ = [
     "add_worktree", "remove_worktree",

@@ -241,7 +241,7 @@ class TestEvilMerge(unittest.TestCase):
         _git(self.d, "update-ref", "refs/remotes/origin/main", remote_sha)
         _git(self.d, "reset", "-q", "--hard", "HEAD~1")
         # Sanity: unreachable from --branches, reachable from --remotes.
-        from stayawake.core import git as gitutil
+        from stayawake.lib import git as gitutil
         self.assertNotIn(remote_sha, gitutil.merge_commits(self.d, refs=("--branches",)),
                          "precondition: evil merge is NOT on any local branch")
         findings = self._findings()
@@ -255,7 +255,7 @@ class TestEvilMerge(unittest.TestCase):
         # it, so a stash can never become an evil-merge candidate regardless of its content.
         (self.d / "a.txt").write_text("dirty change\n")   # working-tree dirt to stash
         _git(self.d, "stash", "-q")
-        from stayawake.core import git as gitutil
+        from stayawake.lib import git as gitutil
         stash_sha = subprocess.run(
             ["git", "-C", str(self.d), "rev-parse", "refs/stash"],
             capture_output=True, text=True, check=True).stdout.strip()
@@ -271,7 +271,7 @@ class TestEvilMerge(unittest.TestCase):
         head = subprocess.run(["git", "-C", str(self.d), "rev-parse", "HEAD"],
                               capture_output=True, text=True, check=True).stdout.strip()
         _git(self.d, "update-ref", "refs/remotes/origin/main", head)  # same SHA on both refs
-        from stayawake.core import git as gitutil
+        from stayawake.lib import git as gitutil
         cands = gitutil.merge_commits(self.d)
         self.assertEqual(cands.count(head), 1,
                          "a merge on both a local and a remote ref must appear once, not twice")
