@@ -52,6 +52,17 @@ All notable changes to this project are documented here. The format is based on
   rationale. The lone-Keychain token no longer triggers the credential-exposure banner or fails
   `saw audit --fail`.
 
+### Fixed
+- **A FIFO/socket/device in a scanned repo can no longer hang `saw scan`** (#1226). The engine's read
+  path did a blocking `open()` on whatever `os.walk` yielded, so a named pipe with a scannable name
+  (e.g. `evil.js`) blocked forever with no writer — hanging the whole scan (a DoS on any scan surface,
+  predating the `saw audit --verify` mitigation). The engine read path now `stat()`s first (already did)
+  and **skips a non-regular file before opening it** — a benign skip, not a recorded gap (a pipe/device
+  carries no static content to scan, so this is honest, not a false-clean). The installed-tree audit,
+  which walks `node_modules`/`site-packages` itself, guards its own reads the same way (a FIFO named
+  `package.json`/`METADATA`/`RECORD` no longer hangs it — found in adversarial review). Regular files,
+  including those reached through a symlink, are unaffected.
+
 ## [0.1.14] - 2026-07-20
 
 ### Added

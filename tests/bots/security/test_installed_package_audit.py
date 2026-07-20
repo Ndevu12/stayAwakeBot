@@ -7,6 +7,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -66,6 +67,24 @@ class TestInstalledPackageAudit(unittest.TestCase):
         self.assertEqual(len(f), 1)
         self.assertEqual((f[0].signature_id, f[0].path),
                          ("ghost-package", "node_modules/@scope/pkg/package.json"))
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "FIFOs need POSIX mkfifo")
+    def test_fifo_in_node_modules_does_not_hang(self):
+        # #1226: the installed-tree audit walks node_modules itself (not via the engine's guarded read
+        # path), so a FIFO named package.json must be skipped, not block open() forever.
+        import signal
+        signal.signal(signal.SIGALRM, lambda *_: (_ for _ in ()).throw(AssertionError("hung on a FIFO")))
+        signal.alarm(30)
+        self.addCleanup(signal.alarm, 0)
+        d = Path(tempfile.mkdtemp())
+        (d / "package-lock.json").write_text(json.dumps({"lockfileVersion": 3, "packages": {}}))
+        evil = d / "node_modules" / "evil"; evil.mkdir(parents=True)
+        os.mkfifo(evil / "package.json")                  # a FIFO where a manifest is expected
+        ok = d / "node_modules" / "ok"; ok.mkdir(parents=True)
+        (ok / "package.json").write_text(json.dumps({"name": "ok", "version": "1.0.0"}))
+        findings = _scan(Target(d, str(d), ScanOptions()))   # must simply COMPLETE
+        # the FIFO pkg is skipped (no manifest read → no name/version → not audited); the real one is seen
+        self.assertIn("ok", {f.path.split("/")[1] for f in findings if f.path.startswith("node_modules/")})
 
     def test_no_installed_tree_is_a_noop(self):
         # a remote clone with a lockfile but no node_modules → nothing (lockfile audit is the coverage)
