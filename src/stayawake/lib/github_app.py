@@ -25,7 +25,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from stayawake.core.adapters import github_api
+from stayawake.lib.adapters import github_api
 
 APP_ID_ENV = "GH_APP_ID"
 PRIVATE_KEY_ENV = "GH_APP_PRIVATE_KEY"

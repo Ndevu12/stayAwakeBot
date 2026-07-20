@@ -12,7 +12,7 @@ from unittest import mock
 
 from stayawake.bots.security import service
 from stayawake.bots.security.targets import ScanOptions
-from stayawake.core.adapters import github_api
+from stayawake.lib.adapters import github_api
 
 OPTS = ScanOptions()
 

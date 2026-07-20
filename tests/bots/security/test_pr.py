@@ -18,7 +18,7 @@ from stayawake.bots.security import pr                              # noqa: E402
 from stayawake.bots.security import proposal                        # noqa: E402
 from stayawake.bots.security.models import Finding, Severity, ScanResult  # noqa: E402
 from stayawake.bots.security.remediation import Change             # noqa: E402
-from stayawake.core.git.write.commit import CommitResult          # noqa: E402
+from stayawake.lib.git.write.commit import CommitResult          # noqa: E402
 
 
 # Default behaviour for every typed git helper `_build_fix`/`submit_fix_pr` touch: the happy

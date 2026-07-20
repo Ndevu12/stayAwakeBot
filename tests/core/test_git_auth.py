@@ -7,7 +7,7 @@ import os
 import unittest
 from pathlib import Path
 
-from stayawake.core import git as gitutil
+from stayawake.lib import git as gitutil
 
 
 @unittest.skipIf(os.name == "nt", "askpass path is POSIX-only; Windows keeps credential-in-URL")

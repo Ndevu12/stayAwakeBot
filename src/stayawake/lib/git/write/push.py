@@ -5,8 +5,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from stayawake.core.git.auth import github_https_auth
-from stayawake.core.git.run import run_ok, NETWORK_TIMEOUT
+from stayawake.lib.git.auth import github_https_auth
+from stayawake.lib.git.run import run_ok, NETWORK_TIMEOUT
 
 
 def push_branch(repo: str | Path, slug: str, branch: str, token: str | None,

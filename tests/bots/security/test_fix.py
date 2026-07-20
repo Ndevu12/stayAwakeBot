@@ -18,7 +18,7 @@ from unittest import mock
 
 from stayawake.bots.security import service, remediator
 from stayawake.bots.security import pr as pr_submit
-from stayawake.core.adapters import github_api
+from stayawake.lib.adapters import github_api
 
 # A CONFIRMED, auto-fixable finding: the worm's .gitignore auto-push markers.
 INFECTED_FILES = {".gitignore": "node_modules\ntemp_auto_push.bat\nbranch_structure.json\n"}

@@ -428,7 +428,7 @@ class TestSetupLocal(unittest.TestCase):
 class TestSetupPr(unittest.TestCase):
     """`--pr`: build in a worktree off default and open a rolling PR via the shared proposal ladder."""
     def _run(self, submit, *, signed=True, origin="up/repo"):
-        from stayawake.core.git.write.commit import CommitResult
+        from stayawake.lib.git.write.commit import CommitResult
         with mock.patch.object(guard, "resolve_pin", return_value=guard.Pin(SHA, "v0.1.4")), \
              mock.patch.object(guard.gitutil, "default_branch", return_value="main"), \
              mock.patch.object(guard.gitutil, "origin_slug", return_value=origin), \

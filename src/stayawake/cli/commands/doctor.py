@@ -11,7 +11,7 @@ import json
 import shutil
 
 from stayawake.cli._meta import __version__
-from stayawake.core import auth
+from stayawake.lib import auth
 
 
 def register(sub) -> None:

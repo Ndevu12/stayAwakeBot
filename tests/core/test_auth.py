@@ -9,7 +9,7 @@ import subprocess
 import unittest
 from unittest import mock
 
-from stayawake.core import auth
+from stayawake.lib import auth
 
 
 def _cp(returncode: int, stdout: str = "", stderr: str = "") -> subprocess.CompletedProcess:

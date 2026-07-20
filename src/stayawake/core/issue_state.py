@@ -18,7 +18,7 @@ import json
 import re
 from typing import Any
 
-from stayawake.core.adapters import github_api
+from stayawake.lib.adapters import github_api
 
 # The hidden state block: `<!-- state:{...json...} -->`. Non-greedy so it can sit anywhere in a body
 # that also contains a human dashboard.

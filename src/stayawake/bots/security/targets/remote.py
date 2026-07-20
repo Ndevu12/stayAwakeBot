@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from stayawake.core import git as gitutil
+from stayawake.lib import git as gitutil
 from stayawake.bots.security.targets.base import Target, ScanOptions
 
 
