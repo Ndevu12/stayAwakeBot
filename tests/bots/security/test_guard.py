@@ -201,7 +201,7 @@ class TestCheck(unittest.TestCase):
         self.assertNotIn("No worm gate", out)
 
     def test_remote_required_uses_derived_context(self):
-        with mock.patch.object(guard, "_remote_workflows", return_value={"w.yml": BLOG_WF}), \
+        with mock.patch.object(guard, "_remote_workflows", return_value=guard.RemoteRead({"w.yml": BLOG_WF})), \
              mock.patch.object(guard.github_api, "get_branch_protection",
                                return_value={"required_status_checks": {"contexts": ["strix"]}}), \
              mock.patch.object(guard, "freshness", return_value=Freshness("fresh", "v0.1.4")):
@@ -211,18 +211,44 @@ class TestCheck(unittest.TestCase):
 
     def test_remote_fuzzy_worm_does_not_satisfy_strix_context(self):
         # The #1230 point: require the ACTUAL job context (strix), not a name containing "worm".
-        with mock.patch.object(guard, "_remote_workflows", return_value={"w.yml": BLOG_WF}), \
+        with mock.patch.object(guard, "_remote_workflows", return_value=guard.RemoteRead({"w.yml": BLOG_WF})), \
              mock.patch.object(guard.github_api, "get_branch_protection",
                                return_value={"required_status_checks": {"contexts": ["Worm Guard"]}}), \
              mock.patch.object(guard, "freshness", return_value=Freshness("fresh", "v0.1.4")):
             s = guard.check(slug="o/r", token="t")
         self.assertFalse(s.required)
 
-    def test_remote_unreadable_is_error(self):
-        with mock.patch.object(guard, "_remote_workflows", return_value=None):
+    def test_remote_no_ci_is_calm_not_an_error(self):
+        # #1243: a 404 on .github/workflows = the repo has no CI — the NORMAL state, NOT a token error.
+        with mock.patch.object(guard, "_remote_workflows",
+                               return_value=guard.RemoteRead({}, cause="not_found")):
             s = guard.check(slug="o/r", token="t")
         self.assertFalse(s.present)
-        self.assertIsNotNone(s.error)
+        self.assertTrue(s.no_ci)
+        self.assertIsNone(s.error)                       # NOT an error
+        self.assertIn("no CI", guard.render(s))
+
+    def test_remote_real_read_failures_get_distinct_messages(self):
+        # #1243: each real cause → its own accurate message (never token-blaming for a 404).
+        cases = {
+            "unauthorized": "gh auth login",
+            "forbidden": "private",
+            "network": "network error",
+        }
+        for cause, needle in cases.items():
+            with mock.patch.object(guard, "_remote_workflows",
+                                   return_value=guard.RemoteRead({}, cause=cause)):
+                s = guard.check(slug="o/r", token="t")
+            self.assertFalse(s.present)
+            self.assertIsNotNone(s.error, cause)
+            self.assertIn(needle, s.error, cause)
+
+    def test_remote_rate_limited_names_the_retry(self):
+        with mock.patch.object(guard, "_remote_workflows",
+                               return_value=guard.RemoteRead({}, cause="rate_limited", retry_after=42)):
+            s = guard.check(slug="o/r", token="t")
+        self.assertIn("rate limit", s.error)
+        self.assertIn("42s", s.error)
 
 
 class TestHealthy(unittest.TestCase):

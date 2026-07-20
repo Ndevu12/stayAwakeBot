@@ -236,11 +236,13 @@ class GuardStatus:
     fresh: Freshness | None = None
     required: bool | None = None       # None = not checked (local/no token); else branch-protection result
     branch: str | None = None          # set only for a remote check → also signals "remote" to render()
-    error: str | None = None           # e.g. couldn't read a remote repo
+    error: str | None = None           # a REAL remote read failure (auth/scope/rate/network) — never a 404
     # A worm gate present by a NON-Strix mechanism (a local composite action / a direct `saw` step):
     # `present` is True but `ref` is None — the repo IS guarded, just not by the gradeable Strix action.
     mechanism: str | None = None       # "local-action" | "saw-run" when ref is None; None otherwise
     gate_file: str | None = None       # the workflow file that carries the non-Strix gate
+    no_ci: bool = False                # remote repo has no `.github/workflows/` (404) — the NORMAL
+                                       # "nothing to gate" state, NOT a read failure (#1243)
 
     @property
     def healthy(self) -> bool:
@@ -270,18 +272,46 @@ def _local_workflows(repo: Path) -> dict[str, str]:
     return out
 
 
-def _remote_workflows(owner: str, repo: str, token: str | None) -> dict[str, str] | None:
-    entries = github_api.list_dir(owner, repo, WORKFLOW_DIR, token)
-    if entries is None:
-        return None                    # dir missing / repo unreadable — distinct from "present, empty"
+@dataclass
+class RemoteRead:
+    """Result of reading a remote repo's `.github/workflows/` (#1243). `cause` distinguishes the
+    NORMAL 'no CI' (a 404 — the repo simply has no workflows dir) from a REAL read failure
+    (auth/scope/rate/network), which the old bare-`None` conflated into a token-blaming error."""
+    workflows: dict[str, str]          # the workflow files (empty when no CI / a real failure)
+    cause: str | None = None           # None = read OK; "not_found" = no CI (calm); else a real failure
+    retry_after: int | None = None     # seconds until rate-limit reset (for cause="rate_limited")
+
+
+def _remote_workflows(owner: str, repo: str, token: str | None) -> RemoteRead:
+    r = github_api.read_dir(owner, repo, WORKFLOW_DIR, token)
+    if r.cause == "not_found":
+        return RemoteRead({}, cause="not_found")            # no workflows dir → no CI, not an error
+    if r.cause is not None:
+        return RemoteRead({}, cause=r.cause, retry_after=r.retry_after)   # real read failure
     out: dict[str, str] = {}
-    for e in entries:
+    for e in r.value:
         if (isinstance(e, dict) and e.get("type") == "file"
                 and str(e.get("name", "")).endswith((".yml", ".yaml"))):
-            text = github_api.get_file_text(owner, repo, str(e.get("path")), token)
-            if text is not None:
-                out[str(e.get("path"))] = text
-    return out
+            fr = github_api.read_file(owner, repo, str(e.get("path")), token)
+            if fr.cause is None:
+                out[str(e.get("path"))] = fr.value
+    return RemoteRead(out)
+
+
+def _read_error(slug: str, cause: str, retry_after: int | None = None) -> str:
+    """Turn a real remote-read failure cause into an accurate, actionable message — never blaming the
+    token for what is usually just 'this repo has no CI' (#1243). `not_found` is handled upstream as
+    the calm no-CI state and never reaches here."""
+    if cause == "unauthorized":
+        return (f"not authenticated to read {slug} — run `gh auth login` or set GH_SECURITY_TOKEN")
+    if cause == "rate_limited":
+        when = f" — retry in {retry_after}s" if retry_after is not None else ""
+        return f"GitHub rate limit hit reading {slug}{when}"
+    if cause == "forbidden":
+        return f"can't read {slug} — is it private, or does the token lack repo scope?"
+    if cause == "network":
+        return f"network error reading {slug}"
+    return f"couldn't read {slug} ({cause})"
 
 
 def _context_required(prot: dict | None, context: str) -> bool:
@@ -291,14 +321,32 @@ def _context_required(prot: dict | None, context: str) -> bool:
     return context in contexts
 
 
-def remote_gate(slug: str, token: str | None) -> StrixRef | None:
-    """The Strix gate declared in a remote repo's (`owner/name`) workflows, or None. Read-only —
-    a thin public seam so other commands (e.g. `saw audit`) can ask "does this repo run Strix, and
-    under what status-check context?" without re-implementing the detection."""
+@dataclass
+class GateProbe:
+    """`probe_remote_gate` result: the Strix gate (or None if genuinely absent) AND whether the
+    workflows could be read. `cause` is set ONLY on a real read failure (auth/scope/rate/network) —
+    so a caller (e.g. `saw audit`) can tell 'this repo has no gate' apart from 'I couldn't read it',
+    instead of the old `or {}` that laundered a read failure into a false 'no gate' (#1243)."""
+    ref: StrixRef | None = None
+    cause: str | None = None           # None on read OK / 404-no-CI; else the real failure cause
+
+
+def probe_remote_gate(slug: str, token: str | None) -> GateProbe:
+    """Read-only public seam: does a remote repo run the Strix gate, under what status-check context,
+    and could we even read it? `saw audit` uses this so a read failure doesn't masquerade as 'no gate'."""
     if not slug or "/" not in slug:
-        return None
+        return GateProbe()
     owner, _, name = slug.partition("/")
-    return find_strix(_remote_workflows(owner, name, token) or {})
+    rr = _remote_workflows(owner, name, token)
+    if rr.cause is not None and rr.cause != "not_found":
+        return GateProbe(cause=rr.cause)                    # real read failure — NOT a "no gate" answer
+    return GateProbe(ref=find_strix(rr.workflows))
+
+
+def remote_gate(slug: str, token: str | None) -> StrixRef | None:
+    """The Strix gate in a remote repo's workflows, or None. Thin value wrapper over
+    `probe_remote_gate` (a read failure → None, same as before) for callers that don't need the cause."""
+    return probe_remote_gate(slug, token).ref
 
 
 def check(*, repo: str | Path | None = None, slug: str | None = None, branch: str = "main",
@@ -309,9 +357,13 @@ def check(*, repo: str | Path | None = None, slug: str | None = None, branch: st
     precomputed `latest` so freshness is graded without a per-repo release lookup."""
     if slug:
         owner, _, name = slug.partition("/")
-        workflows = _remote_workflows(owner, name, token)
-        if workflows is None:
-            return GuardStatus(present=False, error=f"could not read {slug} (missing/private/no token?)")
+        rr = _remote_workflows(owner, name, token)
+        if rr.cause == "not_found":
+            return GuardStatus(present=False, no_ci=True, branch=branch)   # no CI — calm, not an error
+        if rr.cause is not None:
+            return GuardStatus(present=False, branch=branch,
+                               error=_read_error(slug, rr.cause, rr.retry_after))
+        workflows = rr.workflows
         reader = _remote_action_reader(owner, name, token)
     else:
         workflows = _local_workflows(Path(repo or "."))
@@ -345,6 +397,8 @@ def render(status: GuardStatus, *, color: bool = False) -> str:
     if not status.present:
         if status.error:
             return paint(f"⚠️  {status.error}", warn, on=color)
+        if status.no_ci:                                   # 404 on .github/workflows — the normal state
+            return paint("• no CI workflows", dim, on=color) + " — nothing to gate here."
         lines.append(paint("✗ No worm gate found", warn, on=color) +
                      " — no workflow runs a worm scan (`Ndevu12/strix`, a local scan action, or `saw`).")
         lines.append(paint("     Run `saw guard setup` to add one.", dim, on=color))
@@ -785,10 +839,18 @@ def check_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
 
     guarded = sum(1 for s in statuses if s.present)
     verified = sum(1 for s in statuses if s.healthy)
+    no_ci = sum(1 for s in statuses if s.no_ci)                  # 404 — no workflows dir (#1243)
+    unreadable = sum(1 for s in statuses if s.error)            # real read failures only
     unhealthy = [s for s in statuses if not s.healthy]
     n = len(statuses)
-    prog.line(f"\nChecked {n} repositor{'y' if n == 1 else 'ies'}: {guarded} with a worm gate, "
-              f"{verified} a verified SHA-pinned Strix gate.")
+    # Count "no CI" (the benign normal state) separately from "unreadable" (a real failure) so the
+    # tally reflects reality instead of one scary bucket (#1243).
+    tail = "".join([
+        f", {verified} a verified SHA-pinned Strix gate" if guarded else "",
+        f", {no_ci} with no CI" if no_ci else "",
+        f", {unreadable} unreadable" if unreadable else "",
+    ])
+    prog.line(f"\nChecked {n} repositor{'y' if n == 1 else 'ies'}: {guarded} with a worm gate{tail}.")
     return 1 if (fail and unhealthy) else 0
 
 

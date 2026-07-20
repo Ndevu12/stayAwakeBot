@@ -9,9 +9,11 @@ from __future__ import annotations
 import json
 import ssl
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from dataclasses import dataclass
 from typing import Any
 
 _API = "https://api.github.com"
@@ -27,10 +29,48 @@ except Exception:  # noqa: BLE001 — a TLS-setup hiccup must never crash import
     _SSL_CTX = ssl.create_default_context()
 
 
-def request(path: str, method: str = "GET", token: str | None = None,
-            data: dict | None = None, quiet: bool = False) -> Any:
-    """Low-level call. `path` is the API path (leading slash). `quiet` suppresses error
-    logging (e.g. expected 404s while polling for an async fork to become available)."""
+@dataclass
+class ApiRead:
+    """Typed outcome of an API call — carries WHY it failed so callers can attribute a read
+    accurately instead of collapsing every failure to a bare `None` (#1243). `cause` is None on
+    success; otherwise one of `not_found` (404) · `unauthorized` (401) · `forbidden` (403, private /
+    scope) · `rate_limited` (403 with the primary quota exhausted) · `network` (connection/DNS/TLS/
+    timeout) · `http_error` (any other status). `retry_after` (seconds) is set for `rate_limited`."""
+    value: Any = None
+    cause: str | None = None
+    retry_after: int | None = None
+    status: int | None = None        # HTTP status on an HTTP error (for logging / http_error)
+    detail: str = ""                 # response body / error text (for logging)
+
+
+def _classify(he: "urllib.error.HTTPError", detail: str) -> ApiRead:
+    code = he.code
+    if code == 404:
+        return ApiRead(cause="not_found", status=code, detail=detail)
+    if code == 401:
+        return ApiRead(cause="unauthorized", status=code, detail=detail)
+    if code == 403:
+        # A 403 is EITHER a real rate-limit (primary quota exhausted) OR a permission/scope denial;
+        # only the header distinguishes them. Rate-limit → tell the user when it resets.
+        try:
+            remaining = he.headers.get("x-ratelimit-remaining")
+            reset = he.headers.get("x-ratelimit-reset")
+        except Exception:
+            remaining = reset = None
+        if remaining == "0":
+            try:
+                retry = max(0, int(reset) - int(time.time())) if reset else None
+            except Exception:
+                retry = None
+            return ApiRead(cause="rate_limited", retry_after=retry, status=code, detail=detail)
+        return ApiRead(cause="forbidden", status=code, detail=detail)
+    return ApiRead(cause="http_error", status=code, detail=detail)
+
+
+def _do_request(path: str, method: str = "GET", token: str | None = None,
+                data: dict | None = None) -> ApiRead:
+    """The shared HTTP core — returns a typed `ApiRead` (never prints). `request()` wraps this for
+    the value-or-None callers; `read_dir`/`read_file` use it directly to keep the failure cause."""
     headers = {"Accept": "application/vnd.github+json",
                "User-Agent": "StayAwakeBot/1.0"}
     body = None
@@ -42,24 +82,33 @@ def request(path: str, method: str = "GET", token: str | None = None,
     req = urllib.request.Request(_API + path, data=body, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=15, context=_SSL_CTX) as resp:
-            return json.loads(resp.read().decode())
+            return ApiRead(value=json.loads(resp.read().decode()))
     except urllib.error.HTTPError as he:
-        # Always drain + close the error response (even when quiet) so it doesn't linger as an
-        # unclosed socket → ResourceWarning; only PRINT the detail when not quiet.
+        # Always drain + close the error response so it doesn't linger as an unclosed socket.
         try:
             detail = he.read().decode()
         except Exception:
             detail = str(he)
         finally:
             he.close()
-        if not quiet:
-            # stderr, never stdout — stdout carries `saw scan --json` / piped report output.
-            print(f"GitHub API error: {he.code} {detail}", file=sys.stderr)
-        return None
-    except Exception as e:  # noqa: BLE001
-        if not quiet:
-            print(f"GitHub API request failed: {e}", file=sys.stderr)
-        return None
+        return _classify(he, detail)
+    except Exception as e:  # noqa: BLE001 — connection/DNS/TLS/timeout all mean "network"
+        return ApiRead(cause="network", detail=str(e))
+
+
+def request(path: str, method: str = "GET", token: str | None = None,
+            data: dict | None = None, quiet: bool = False) -> Any:
+    """Low-level call. `path` is the API path (leading slash). Returns the parsed JSON, or `None`
+    on any failure. `quiet` suppresses error logging (e.g. expected 404s while polling for an async
+    fork)."""
+    r = _do_request(path, method, token, data)
+    if r.cause is not None and not quiet:
+        # stderr, never stdout — stdout carries `saw scan --json` / piped report output.
+        if r.status is not None:
+            print(f"GitHub API error: {r.status} {r.detail}", file=sys.stderr)
+        else:
+            print(f"GitHub API request failed: {r.detail}", file=sys.stderr)
+    return r.value if r.cause is None else None
 
 
 def get_authenticated_user(token: str | None, quiet: bool = False) -> dict | None:
@@ -348,19 +397,41 @@ def ref_commit_sha(owner: str, repo: str, ref: str, token: str | None = None) ->
     return res["sha"] if isinstance(res, dict) and isinstance(res.get("sha"), str) else None
 
 
+def read_dir(owner: str, repo: str, path: str, token: str | None = None) -> ApiRead:
+    """Contents-API directory listing, TYPED (#1243): `value` is the `[{name, path, type, …}]` list
+    on success; otherwise `cause` says why (a 404 = the directory doesn't exist, distinct from a real
+    read failure). A file (not a dir) at `path` returns a dict → treated as `not_found`."""
+    r = _do_request(f"/repos/{owner}/{repo}/contents/{path}", token=token)
+    if r.cause is None and not isinstance(r.value, list):
+        return ApiRead(cause="not_found")
+    return r
+
+
+def read_file(owner: str, repo: str, path: str, token: str | None = None) -> ApiRead:
+    """A repo file's UTF-8 text via the contents API, TYPED (#1243): `value` is the decoded text on
+    success; otherwise `cause` says why."""
+    import base64
+    r = _do_request(f"/repos/{owner}/{repo}/contents/{path}", token=token)
+    if r.cause is not None:
+        return r
+    res = r.value
+    if isinstance(res, dict) and res.get("encoding") == "base64" and isinstance(res.get("content"), str):
+        try:
+            return ApiRead(value=base64.b64decode(res["content"]).decode("utf-8", "replace"))
+        except Exception:  # noqa: BLE001
+            return ApiRead(cause="http_error", detail="undecodable content")
+    return ApiRead(cause="not_found")
+
+
 def list_dir(owner: str, repo: str, path: str, token: str | None = None) -> list | None:
-    """Contents-API directory listing ([{name, path, type, …}]), or None. Quiet."""
-    res = request(f"/repos/{owner}/{repo}/contents/{path}", token=token, quiet=True)
-    return res if isinstance(res, list) else None
+    """Contents-API directory listing ([{name, path, type, …}]), or None. Value-or-None wrapper over
+    `read_dir` for callers that don't need the failure cause."""
+    r = read_dir(owner, repo, path, token)
+    return r.value if r.cause is None else None
 
 
 def get_file_text(owner: str, repo: str, path: str, token: str | None = None) -> str | None:
-    """UTF-8 text of a repo file via the contents API, or None. Quiet."""
-    import base64
-    res = request(f"/repos/{owner}/{repo}/contents/{path}", token=token, quiet=True)
-    if isinstance(res, dict) and res.get("encoding") == "base64" and isinstance(res.get("content"), str):
-        try:
-            return base64.b64decode(res["content"]).decode("utf-8", "replace")
-        except Exception:  # noqa: BLE001
-            return None
-    return None
+    """UTF-8 text of a repo file via the contents API, or None. Value-or-None wrapper over
+    `read_file`."""
+    r = read_file(owner, repo, path, token)
+    return r.value if r.cause is None else None

@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from stayawake.bots.security.guard import GateProbe  # noqa: E402
 from stayawake.bots.security import hygiene
 
 
@@ -815,7 +816,7 @@ class TestBranchProtection(unittest.TestCase):
     def test_worm_guard_not_required_warns(self):
         prot = {"required_status_checks": {"contexts": ["build", "lint"]}}
         with mock.patch("stayawake.lib.adapters.github_api.get_branch_protection", return_value=prot), \
-             mock.patch("stayawake.bots.security.guard.remote_gate", return_value=None):  # no strix wf
+             mock.patch("stayawake.bots.security.guard.probe_remote_gate", return_value=GateProbe()):  # no strix wf
             issues = hygiene.check_branch_protection("o/r", "tok")
         self.assertEqual([i.id for i in issues], ["worm-guard-not-required"])
 
@@ -823,28 +824,38 @@ class TestBranchProtection(unittest.TestCase):
         # No Strix workflow found → fall back to the fuzzy "worm" context match.
         prot = {"required_status_checks": {"contexts": ["Worm Guard — block infected merges"]}}
         with mock.patch("stayawake.lib.adapters.github_api.get_branch_protection", return_value=prot), \
-             mock.patch("stayawake.bots.security.guard.remote_gate", return_value=None):
+             mock.patch("stayawake.bots.security.guard.probe_remote_gate", return_value=GateProbe()):
             self.assertEqual(hygiene.check_branch_protection("o/r", "tok"), [])
 
     def test_derived_strix_context_required_is_clean(self):
         # #1230: a job named `strix` produces the context `strix` (no "worm"). When branch protection
         # requires THAT context the gate IS enforced — the old fuzzy match wrongly warned here.
-        from stayawake.bots.security.guard import StrixRef
+        from stayawake.bots.security.guard import StrixRef, GateProbe
         prot = {"required_status_checks": {"contexts": ["strix"]}}
         with mock.patch("stayawake.lib.adapters.github_api.get_branch_protection", return_value=prot), \
-             mock.patch("stayawake.bots.security.guard.remote_gate",
-                        return_value=StrixRef(".github/workflows/worm-scan.yml", "strix", "v0.1.4", "tag")):
+             mock.patch("stayawake.bots.security.guard.probe_remote_gate",
+                        return_value=GateProbe(ref=StrixRef(".github/workflows/worm-scan.yml", "strix", "v0.1.4", "tag"))):
             self.assertEqual(hygiene.check_branch_protection("o/r", "tok"), [])
 
     def test_derived_strix_context_not_required_names_the_actual_context(self):
-        from stayawake.bots.security.guard import StrixRef
+        from stayawake.bots.security.guard import StrixRef, GateProbe
         prot = {"required_status_checks": {"contexts": ["build"]}}
         with mock.patch("stayawake.lib.adapters.github_api.get_branch_protection", return_value=prot), \
-             mock.patch("stayawake.bots.security.guard.remote_gate",
-                        return_value=StrixRef(".github/workflows/w.yml", "strix", "v0.1.4", "tag")):
+             mock.patch("stayawake.bots.security.guard.probe_remote_gate",
+                        return_value=GateProbe(ref=StrixRef(".github/workflows/w.yml", "strix", "v0.1.4", "tag"))):
             issues = hygiene.check_branch_protection("o/r", "tok")
         self.assertEqual([i.id for i in issues], ["worm-guard-not-required"])
         self.assertIn("strix", issues[0].title)      # names the ACTUAL context, not "worm"
+
+    def test_read_failure_does_not_launder_into_a_false_not_required(self):
+        # #1243: if the workflows can't be READ (auth/scope/rate/network), we can't determine the
+        # gate — stay silent, never warn "not required" (the old remote_gate `or {}` did exactly that).
+        from stayawake.bots.security.guard import GateProbe
+        prot = {"required_status_checks": {"contexts": ["build"]}}
+        with mock.patch("stayawake.lib.adapters.github_api.get_branch_protection", return_value=prot), \
+             mock.patch("stayawake.bots.security.guard.probe_remote_gate",
+                        return_value=GateProbe(cause="forbidden")):
+            self.assertEqual(hygiene.check_branch_protection("o/r", "tok"), [])
 
 
 class TestAuditRender(unittest.TestCase):
