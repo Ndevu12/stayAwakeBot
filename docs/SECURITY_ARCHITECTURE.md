@@ -287,7 +287,11 @@ any repo (`worm-guard.yml`), portable git hooks (`prevent/hooks/`) block local c
 catch incoming infections, and `prevent/SECURITY_BASELINE.md` covers branch protection +
 token/Action hardening. The Action installs the published scanner (Strix from PyPI; the in-repo
 composite via `git+…@<ref>`) rather than cloning the source tree, so the gate runs the same code
-as the package.
+as the package. The gate is installed and verified from the CLI by
+[`saw guard`](CLI.md#saw-guard): `saw guard setup` writes (or surgically SHA-pin-bumps) the
+`worm-guard.yml` — locally to review, or as a rolling PR — and `saw guard check` reports, across a
+sweep of repos, whether each gate is present, **SHA-pinned**, current with the latest Strix release,
+and **required** by branch protection.
 
 Supply-chain hardening of the gate itself: pin `sentinel-ref` to a **commit SHA** (never `@main`,
 which is mutable) and SHA-pin every third-party action — a later compromise of an upstream tag
