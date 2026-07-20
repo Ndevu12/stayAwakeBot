@@ -147,6 +147,34 @@ saw scan -d /tmp/sab-reports                                         # opt-in, r
 stayawake-health-check  --reports-dir /tmp/sab-reports               # the health bot still writes reports
 ```
 
+### Enforcing the CI gate (guard)
+
+`saw` closes the loop: **scan** finds worms, **fix** cleans them, **audit** checks whether a repo is
+*protected*, and **`saw guard`** installs and verifies the **Strix worm-guard CI gate** so infected
+PRs are blocked before they ever merge. The gate is always found by its **action reference**
+(`uses: Ndevu12/strix@…`), never a filename or job name, so it recognises a gate whatever a repo
+calls it. Both subcommands sweep many repos — **local by default**, or `--remote`/`--user`/`--org`
+for GitHub — exactly like `saw scan`/`saw fix`.
+
+```bash
+saw guard check                       # is this repo's gate present, SHA-pinned, current, required?
+saw guard check --user Ndevu12 -f     # CI gate across a user's repos (exit 1 if any is unguarded)
+saw guard setup --dry-run             # preview the workflow that would be installed
+saw guard setup                       # write it into the working tree to review + commit + PR
+saw guard setup --pr                  # open a rolling install/bump PR instead (never pushes main)
+saw guard setup --org UB-TechDEV      # clone each org repo → open a gate PR
+```
+
+`saw guard setup` resolves the latest Strix release to a **commit SHA** and writes a report-only,
+least-privilege `worm-guard.yml` — or, when a gate already exists under *any* filename, **surgically
+bumps only its `uses:` pin** and leaves the rest byte-for-byte. It is **idempotent** (create / bump /
+no-op / already-guarded) and **fails closed** if it can't resolve the SHA (offline → pass
+`--ref <sha|tag>`). It **never pushes to a default branch**: `--pr`/`--remote` plan against
+`origin/<default>` (the PR base) and open a rolling `security/guard-setup` PR whose body carries the
+hardening a file can't do itself (mark the check required, add CODEOWNERS). Auto-remediation of an
+infected default branch needs scoped write and is deliberately **opt-in** — not part of the installer.
+See the [`saw` CLI guide](CLI.md#saw-guard) for every flag.
+
 ## Local defense-in-depth (hooks + audit)
 
 Harden a developer machine with layered, dependency-free git hooks:

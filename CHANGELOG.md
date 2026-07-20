@@ -179,6 +179,12 @@ All notable changes to this project are documented here. The format is based on
   `uses: Ndevu12/strix@…` action reference (reusing `saw guard`'s detection), derives the job's
   actual status-check context, and requires **that** — falling back to the fuzzy match only when no
   Strix workflow is found.
+- **Documented `saw guard` where the other verbs are documented.** The command had a full reference
+  section but was missing from the CLI **cheat sheet**, the command table of contents, the exit-code
+  table, and the alias list, and wasn't mentioned in the README or `docs/USAGE.md` at all — so the
+  gate installer/verifier was easy to miss. Added it to all of those, plus a note in the README's
+  "Gate any repo's CI" section and `SECURITY_ARCHITECTURE.md` that `saw guard setup`/`check` are how
+  you install and verify the `worm-guard.yml` gate from the CLI.
 
 ### Security
 - **Bumped the pinned self-scan engine to current main (`sentinel-ref` → merge of #1255), in both
