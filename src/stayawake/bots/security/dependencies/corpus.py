@@ -15,11 +15,20 @@ fully-populated corpus's memory modest even though the malware set is huge.
 """
 from __future__ import annotations
 
-from typing import Iterable
+from typing import Iterable, NamedTuple
 
-from stayawake.bots.security.dependencies.comparators import version_in_any_range
+from stayawake.bots.security.dependencies.comparators import fixed_version_for, version_in_any_range
 from stayawake.bots.security.dependencies.ecosystems import canonical_ecosystem as _eco
 from stayawake.bots.security.dependencies.osv import OsvAffected, OsvRecord
+
+
+class AdvisoryMatch(NamedTuple):
+    """A vulnerability advisory that affects a queried package, plus the remediation target: `fixed`
+    is the first patched version to upgrade to (#1252), or None when the advisory names no fix
+    (a whole-package hit, an explicit-version-only advisory, or an open-ended one)."""
+
+    record: OsvRecord
+    fixed: str | None
 
 
 def _covers_all_versions(aff: OsvAffected) -> bool:
@@ -74,16 +83,18 @@ class AdvisoryCorpus:
                 return rec
         return self._bounded_hit(key, eco, purl.version, want_malicious=True)
 
-    def vulnerability_matches(self, purl) -> list[OsvRecord]:
+    def vulnerability_matches(self, purl) -> list[AdvisoryMatch]:
         """All NON-malware advisories (ordinary CVEs) affecting `purl.version` — the opt-in advisory
-        tier, which never moves the worm verdict."""
+        tier, which never moves the worm verdict. Each match carries the first patched version to
+        upgrade to (`AdvisoryMatch.fixed`), or None when the advisory names no fix (#1252)."""
         eco = _eco(purl.type)
         key = (eco, purl.name)
-        out = [rec for rec in self._whole.get(key, ()) if not rec.malicious]
+        # Whole-package hits cover EVERY version → there is no "upgrade to" target (fixed=None).
+        out = [AdvisoryMatch(rec, None) for rec in self._whole.get(key, ()) if not rec.malicious]
         for aff, rec in self._bounded.get(key, ()):
             if not rec.malicious and (
                     purl.version in aff.versions or version_in_any_range(purl.version, aff.ranges, eco)):
-                out.append(rec)
+                out.append(AdvisoryMatch(rec, fixed_version_for(purl.version, aff.ranges, eco)))
         return out
 
     def is_empty(self) -> bool:

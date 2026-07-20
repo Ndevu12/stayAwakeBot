@@ -27,9 +27,20 @@ def mal_record(name: str, versions: list[str], *, rid: str = "MAL-2024-0001",
                           "versions": list(versions)}]}
 
 
-def vuln_record(name: str, versions: list[str], *, rid: str = "CVE-2024-0001",
-                ecosystem: str = "npm", aliases: list[str] | None = None) -> dict[str, Any]:
-    """A minimal ordinary-vulnerability OSV record (no malware signals) — the advisory tier."""
-    return {"id": rid, "aliases": list(aliases or []),
-            "affected": [{"package": {"ecosystem": ecosystem, "name": name},
-                          "versions": list(versions)}]}
+def vuln_record(name: str, versions: list[str] | None = None, *, rid: str = "CVE-2024-0001",
+                ecosystem: str = "npm", aliases: list[str] | None = None,
+                ranges: list[tuple[str, str | None]] | None = None,
+                range_type: str = "SEMVER") -> dict[str, Any]:
+    """A minimal ordinary-vulnerability OSV record (no malware signals) — the advisory tier.
+
+    `ranges` is `[(introduced, fixed_or_None), …]` → an OSV `ranges` entry, so a test can exercise the
+    remediation path (the `fixed` event that becomes the upgrade target, #1252)."""
+    affected: dict[str, Any] = {"package": {"ecosystem": ecosystem, "name": name}}
+    if versions:
+        affected["versions"] = list(versions)
+    if ranges:
+        affected["ranges"] = [
+            {"type": range_type,
+             "events": [{"introduced": intro}] + ([{"fixed": fix}] if fix else [])}
+            for intro, fix in ranges]
+    return {"id": rid, "aliases": list(aliases or []), "affected": [affected]}

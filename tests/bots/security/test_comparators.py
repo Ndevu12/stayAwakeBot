@@ -5,12 +5,59 @@ from __future__ import annotations
 import unittest
 
 from stayawake.bots.security.dependencies.comparators import (
-    gem_key, is_version_in_range, maven_key, pep440_key, semver_key, version_in_any_range)
+    fixed_version_for, gem_key, is_version_in_range, maven_key, pep440_key, semver_key,
+    version_in_any_range)
 from stayawake.bots.security.dependencies.osv import OsvRange
 
 
 def _range(rtype, *events):
     return OsvRange(rtype, tuple(events))
+
+
+class TestFixedVersionFor(unittest.TestCase):
+    """The remediation target: the first patched version to upgrade to (#1252)."""
+
+    def test_affected_version_gets_the_range_fix(self):
+        r = _range("SEMVER", ("introduced", "1.0.0"), ("fixed", "1.3.0"))
+        self.assertEqual(fixed_version_for("1.2.0", (r,), "npm"), "1.3.0")
+
+    def test_unaffected_version_has_no_fix(self):
+        r = _range("SEMVER", ("introduced", "1.0.0"), ("fixed", "1.3.0"))
+        self.assertIsNone(fixed_version_for("1.5.0", (r,), "npm"))     # already past the fix
+
+    def test_smallest_fix_across_overlapping_ranges(self):
+        # Two affecting ranges → recommend the LOWEST fix that resolves it.
+        r1 = _range("SEMVER", ("introduced", "1.0.0"), ("fixed", "1.9.0"))
+        r2 = _range("SEMVER", ("introduced", "1.0.0"), ("fixed", "1.4.0"))
+        self.assertEqual(fixed_version_for("1.2.0", (r1, r2), "npm"), "1.4.0")
+
+    def test_open_ended_range_has_no_fix(self):
+        r = _range("SEMVER", ("introduced", "1.0.0"), ("last_affected", "2.0.0"))
+        self.assertIsNone(fixed_version_for("1.5.0", (r,), "npm"))     # no `fixed` event published
+
+    def test_multi_interval_range_never_recommends_a_downgrade(self):
+        # Backported fixes: fixed in 1.5.0 on the 1.x branch, and 2.5.0 on the 2.x branch. A 2.2.0
+        # install must be told to go to 2.5.0 — NEVER "upgrade" to the lower 1.5.0.
+        r = _range("SEMVER", ("introduced", "1.0.0"), ("fixed", "1.5.0"),
+                   ("introduced", "2.0.0"), ("fixed", "2.5.0"))
+        self.assertEqual(fixed_version_for("2.2.0", (r,), "npm"), "2.5.0")
+        self.assertEqual(fixed_version_for("1.2.0", (r,), "npm"), "1.5.0")   # 1.x install → 1.x fix
+
+    def test_open_branch_with_only_a_lower_fix_has_no_fix(self):
+        # 2.x branch is affected with no fix published; the 1.5.0 fix does not resolve a 2.x install.
+        r = _range("SEMVER", ("introduced", "1.0.0"), ("fixed", "1.5.0"), ("introduced", "2.0.0"))
+        self.assertIsNone(fixed_version_for("2.2.0", (r,), "npm"))
+
+    def test_mixed_range_key_types_do_not_crash(self):
+        # A pathological advisory mixing a SEMVER and an ECOSYSTEM range (different comparator keys)
+        # must not raise — it returns a qualifying fix, never a TypeError.
+        semver_r = _range("SEMVER", ("introduced", "1.0.0"), ("fixed", "1.5.0"))
+        eco_r = _range("ECOSYSTEM", ("introduced", "0"), ("fixed", "1.4.0"))
+        self.assertIsNotNone(fixed_version_for("1.2.0", (semver_r, eco_r), "pypi"))
+
+    def test_pep440_ecosystem_ordering(self):
+        r = _range("ECOSYSTEM", ("introduced", "0"), ("fixed", "2.31.0"))
+        self.assertEqual(fixed_version_for("2.30.0", (r,), "pypi"), "2.31.0")
 
 
 class TestSemverKey(unittest.TestCase):

@@ -25,6 +25,8 @@ from stayawake.bots.security.models import Finding, Severity
 from stayawake.bots.security.matchers.base import Matcher
 from stayawake.bots.security.dependencies import RESOLVERS, Advisory, AdvisoryStore
 from stayawake.bots.security.dependencies.purl import ResolvedDependency
+from stayawake.bots.security.dependencies.remediation import (
+    advisory_reference, malware_fix, vulnerability_fix)
 
 
 class DependencyAuditMatcher(Matcher):
@@ -76,7 +78,9 @@ def _emit(advisory: Advisory, dep: ResolvedDependency) -> Finding:
         severity=Severity.parse(sig["severity"]), path=dep.source_path,
         description=sig["description"], remediation=sig.get("remediation", "manual"),
         evidence=f"{dep.purl.coordinate} — known-malicious upstream package{cite} ({dep.source_name})",
-        vector=sig["category"])
+        vector=sig["category"],
+        fix_advice=malware_fix(dep.purl.name),                    # remove, don't upgrade
+        reference=advisory_reference(advisory.osv_id, advisory.aliases))
 
 
 def _emit_advisory(advisory: Advisory, dep: ResolvedDependency) -> Finding:
@@ -88,7 +92,10 @@ def _emit_advisory(advisory: Advisory, dep: ResolvedDependency) -> Finding:
         severity=Severity.parse(sig["severity"]), path=dep.source_path,
         description=sig["description"], remediation=sig.get("remediation", "manual"),
         evidence=f"{dep.purl.coordinate} — known security advisory{cite} ({dep.source_name})",
-        vector=sig["category"], advisory_only=True)
+        vector=sig["category"], advisory_only=True,
+        fix_advice=vulnerability_fix(dep.purl.type, dep.purl.name, advisory.fixed_version),
+        fixed_version=advisory.fixed_version,
+        reference=advisory_reference(advisory.osv_id, advisory.aliases))
 
 
 def _external_findings(target, signatures, seen: set[tuple[str, str]]) -> list[Finding]:
@@ -111,4 +118,9 @@ def _emit_external(sig: dict, finding) -> Finding:
         description=sig["description"], remediation=sig.get("remediation", "manual"),
         evidence=(f"{finding.package}@{finding.version} — {finding.advisory_id} "
                   f"(via {finding.source_tool})"),
-        vector=sig["category"], advisory_only=True)
+        vector=sig["category"], advisory_only=True,
+        # The external tool doesn't hand us a structured fixed version, so point at the advisory and
+        # its own fix flow rather than inventing an upgrade target.
+        fix_advice=(f"Upgrade {finding.package} to a release that resolves {finding.advisory_id} "
+                    f"(see the advisory), then re-run {finding.source_tool}."),
+        reference=advisory_reference(finding.advisory_id))

@@ -248,3 +248,36 @@ def is_version_in_range(version: str, osv_range: OsvRange, ecosystem: str) -> bo
 
 def version_in_any_range(version: str, ranges, ecosystem: str) -> bool:
     return any(is_version_in_range(version, r, ecosystem) for r in ranges)
+
+
+def fixed_version_for(version: str, ranges, ecosystem: str) -> str | None:
+    """The smallest patched version STRICTLY ABOVE `version` among the ranges that currently affect it
+    — the correct upgrade target (#1252).
+
+    Only a `fixed` bound that orders ABOVE the installed version actually resolves the vulnerability, so
+    a multi-interval range (backported fixes, e.g. `fixed 1.5.0 … introduced 2.0.0, fixed 2.5.0`) never
+    yields a downgrade to 1.5.0 for a 2.x install, and a still-open branch whose only published fix sits
+    below the install yields None (no fix for that branch). Conservative: an unparseable version/bound,
+    an explicit-version-only advisory, or no qualifying fix → None."""
+    candidates: list[tuple[object, str]] = []          # (comparable key, raw) for fixes above `version`
+    for r in ranges:
+        if not is_version_in_range(version, r, ecosystem):
+            continue
+        keyfn = _key_fn(r.type, ecosystem)
+        if keyfn is None:
+            continue
+        vkey = keyfn(version)
+        if vkey is None:
+            continue
+        for kind, value in r.events:
+            if kind != "fixed":
+                continue
+            fkey = keyfn(value)
+            if fkey is not None and fkey > vkey:       # a fix ABOVE the installed version resolves it
+                candidates.append((fkey, value))
+    if not candidates:
+        return None
+    try:
+        return min(candidates)[1]                      # the smallest qualifying fix
+    except TypeError:                                  # mixed comparator key types across ranges (rare)
+        return min(candidates, key=lambda c: c[1])[1]

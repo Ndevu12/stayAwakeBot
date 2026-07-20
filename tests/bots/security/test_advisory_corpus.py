@@ -52,7 +52,7 @@ class TestAdvisoryCorpus(unittest.TestCase):
         # malware only surfaces via malicious_match; a CVE only via vulnerability_matches.
         self.assertIsNotNone(corpus.malicious_match(Purl("npm", "bad", "1.0.0")))
         self.assertIsNone(corpus.malicious_match(Purl("npm", "vuln", "2.0.0")))
-        self.assertEqual([r.id for r in corpus.vulnerability_matches(Purl("npm", "vuln", "2.0.0"))],
+        self.assertEqual([m.record.id for m in corpus.vulnerability_matches(Purl("npm", "vuln", "2.0.0"))],
                          ["CVE-2024-9"])
         self.assertEqual(corpus.vulnerability_matches(Purl("npm", "bad", "1.0.0")), [])
 

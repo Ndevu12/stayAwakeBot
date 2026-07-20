@@ -72,7 +72,8 @@ class Finding:
     severity: Severity
     path: str                      # repo-relative path (or git ref for history findings)
     description: str
-    remediation: str = "manual"
+    remediation: str = "manual"    # the machine STRATEGY keyword that drives `saw fix`
+                                   # (recover/quarantine-*/manual…) — NOT user-facing prose
     line: int | None = None
     evidence: str | None = None
     vector: str | None = None      # e.g. "vscode-autorun", "evil-merge"
@@ -80,6 +81,12 @@ class Finding:
     advisory_only: bool = False    # informational (e.g. a dependency CVE) — the scanner routes these
                                    # OUT of the worm verdict into ScanResult.advisories; a repo with
                                    # only advisory_only findings stays CLEAN (reported, never gated).
+    # Actionable remediation for the reader (#1252) — populated for dependency findings; the render
+    # prints a "→ fix" / "→ details" line when present. `fix_advice` is the human sentence (incl. an
+    # upgrade command), `fixed_version` the structured upgrade target, `reference` the advisory URL.
+    fix_advice: str | None = None
+    fixed_version: str | None = None
+    reference: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
