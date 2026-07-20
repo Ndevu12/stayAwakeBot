@@ -140,5 +140,12 @@ def render(issues: list[HygieneIssue], *, color: bool = False, width: int = 80) 
             lines += block(i.detail, indent=5, width=width)
             lines += block(i.remediation, indent=5, width=width, marker="→ fix  ",
                            code=SEVERITY["info"], color=color)
+            if i.command:
+                # The copy-pasteable command renders VERBATIM on its own line(s), never reflowed — a
+                # wrapped command is unsafe to paste, and keeping it out of the prose makes it cleanly
+                # selectable (#1237). Rationale stays in `remediation`; the deep "why" is the details link.
+                lines += [f"       {cmd_line}" for cmd_line in i.command.split("\n")]
+            if i.reference:
+                lines.append("     " + paint("→ details: ", SEVERITY["info"], on=color) + i.reference)
             lines.append("")
     return "\n".join(lines).rstrip()
