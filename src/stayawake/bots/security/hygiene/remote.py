@@ -32,9 +32,14 @@ def check_branch_protection(slug: str | None, token: str | None,
     # Prefer the PRECISE check (#1230): find the repo's Strix gate by its action reference and require
     # its ACTUAL job context — a job named `strix` (or anything) produces a context the fuzzy "worm"
     # match below would miss, wrongly flagging a correctly-protected repo. Fall back to the heuristic
-    # only when no Strix workflow is found (or its workflows can't be read).
+    # only when no Strix workflow is found.
     from stayawake.bots.security import guard
-    ref = guard.remote_gate(slug, token)
+    probe = guard.probe_remote_gate(slug, token)
+    if probe.cause is not None:
+        # Couldn't READ the workflows (auth/scope/rate/network) → can't determine the gate; stay
+        # silent rather than laundering a read failure into a false "not required" warning (#1243).
+        return []
+    ref = probe.ref
     if ref is not None:
         if ref.job in contexts:
             return []                                   # the real gate context IS required — good
