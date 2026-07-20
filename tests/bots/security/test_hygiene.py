@@ -13,13 +13,87 @@ from stayawake.bots.security import hygiene
 
 
 class TestCredentials(unittest.TestCase):
-    def test_keychain_hit_is_a_warning(self):
-        with mock.patch.object(hygiene.credentials, "_macos_keychain_has_github", return_value=True), \
-             mock.patch.object(hygiene.credentials, "_git_credentials_file_with_github", return_value=None):
-            issues = hygiene.check_credentials()
-        ids = [i.id for i in issues]
-        self.assertIn("cached-github-keychain", ids)
-        self.assertTrue(all(i.severity == "warning" for i in issues))
+    def _keychain(self, *, served=False, ssh=True, gh=True, origins=None):
+        """check_credentials() with the keychain hit and the given machine shape (#1237). `served` is
+        the tri-state HTTPS-in-use probe: True (in use) | False (unused) | None (couldn't probe)."""
+        C = hygiene.credentials
+        origins = origins if origins is not None else [("file:/Users/u/.gitconfig", "osxkeychain")]
+        with mock.patch.object(C, "_macos_keychain_has_github", return_value=True), \
+             mock.patch.object(C, "_git_credentials_file_with_github", return_value=None), \
+             mock.patch.object(C, "_https_token_status", return_value=served), \
+             mock.patch.object(C, "_ssh_key_present", return_value=ssh), \
+             mock.patch.object(C, "_gh_configured", return_value=gh), \
+             mock.patch.object(C, "_credential_helper_origins", return_value=origins):
+            return next(i for i in hygiene.check_credentials() if i.id == "cached-github-keychain")
+
+    def test_keychain_hit_is_info_not_warning(self):
+        # #1237: a token in the ENCRYPTED keychain is normal — a review item, not a warning to act on.
+        f = self._keychain()
+        self.assertEqual(f.severity, "info")
+        self.assertEqual(f.reference, hygiene.credentials.CREDENTIAL_HYGIENE_DOC)
+
+    def test_keychain_finding_is_property_framed_and_names_the_store(self):
+        f = self._keychain()
+        self.assertIn("lifetime", f.detail.lower())
+        self.assertIn("scope", f.detail.lower())
+        # names the store + scopes the claim: gh / SSH are separate and untouched
+        self.assertIn("SEPARATE stores", f.detail)
+        self.assertRegex(f.detail.lower(), r"gh.*ssh|ssh.*gh")
+
+    def test_keychain_never_in_the_exposure_banner(self):
+        # A lone cached keychain token must NOT trigger the credential-exposure banner (it's not an
+        # incident) — only a real misconfiguration (plaintext on disk) does.
+        self.assertNotIn("cached-github-keychain", hygiene.CREDENTIAL_EXPOSURE_IDS)
+        out = hygiene.render([self._keychain()])
+        self.assertNotIn("Credential exposure", out)
+        self.assertNotIn("no active host persistence", out.lower())
+
+    def test_unused_token_offers_a_lockout_safe_verified_command(self):
+        # served=False → removal candidate. The command must LEAD with an `ssh -T` alternate-path check
+        # (so a wrong guess can't silently lock you out), then resolve source + delete + re-probe.
+        f = self._keychain(served=False, ssh=True, gh=True)
+        self.assertIn("removal candidate", f.detail)
+        cmd_lines = f.command.splitlines()
+        self.assertIn("ssh -T git@github.com", cmd_lines[0])     # STEP 1 is the alternate-path check
+        self.assertIn("STOP if it doesn't", cmd_lines[0])
+        self.assertIn("git config --show-origin", f.command)     # resolves the REAL source
+        self.assertIn("git credential fill", f.command)          # re-probes to VERIFY caching stopped
+
+    def test_served_token_is_never_offered_a_delete(self):
+        # HTTPS is IN USE here → deleting logs you out regardless of any 'alternate' → NEVER offer a
+        # delete (this is the lockout guard, and it no longer depends on ssh/gh being accurate).
+        for ssh, gh in [(False, False), (True, False), (False, True), (True, True)]:
+            f = self._keychain(served=True, ssh=ssh, gh=gh)
+            self.assertIsNone(f.command, f"delete offered with ssh={ssh} gh={gh} while HTTPS in use")
+            self.assertIn("IN USE", f.detail)
+            self.assertIn("don't delete this token", f.remediation)
+
+    def test_unknown_probe_stays_cautious_but_verified(self):
+        # served=None (couldn't probe) → don't assert 'unused'; still offer the ssh-T-guarded sequence.
+        f = self._keychain(served=None, ssh=False, gh=False)
+        self.assertIn("Couldn't determine", f.detail)
+        self.assertIn("ssh -T git@github.com", f.command.splitlines()[0])
+
+    def test_system_default_origin_uses_add_reset_not_unset(self):
+        # AC4: an inherited read-only system default (Apple CommandLineTools) can't be --unset; the
+        # command must reset it with `--add credential.helper ""`.
+        clt = [("file:/Library/Developer/CommandLineTools/usr/share/git-core/gitconfig", "osxkeychain")]
+        f = self._keychain(served=False, ssh=True, origins=clt)
+        self.assertIn('--add credential.helper ""', f.command)
+        self.assertIn("CommandLineTools", f.command)
+
+    def test_user_config_origin_does_not_force_add_reset(self):
+        f = self._keychain(served=False, ssh=True,
+                           origins=[("file:/Users/u/.gitconfig", "osxkeychain")])
+        self.assertNotIn('--add credential.helper ""', f.command)
+
+    def test_user_library_path_not_misread_as_system_default(self):
+        # Regression: `~/Library/...` (a USER path) must NOT be classified a read-only system default
+        # just because it contains "/Library/". Anchored prefixes, not loose substrings.
+        f = self._keychain(served=False, ssh=True,
+                           origins=[("file:/Users/u/Library/Application Support/Fork/gitconfig",
+                                     "osxkeychain")])
+        self.assertNotIn('--add credential.helper ""', f.command)
 
     def test_clean_machine_has_no_credential_issues(self):
         with mock.patch.object(hygiene.credentials, "_macos_keychain_has_github", return_value=False), \
@@ -408,6 +482,79 @@ class TestVSCode(unittest.TestCase):
         # No path given → auto-detect; when VS Code isn't installed it returns None.
         with mock.patch.object(hygiene.editor, "_vscode_user_settings", return_value=None):
             self.assertEqual(hygiene.check_vscode(), [])
+
+    def test_untrusted_files_open_is_warning(self):
+        p = self._settings('{ "task.allowAutomaticTasks": "off", '
+                           '"security.workspace.trust.untrustedFiles": "open" }')
+        issue = next(i for i in hygiene.check_vscode(p) if i.id == "vscode-untrusted-files-open")
+        self.assertEqual(issue.severity, "warning")
+
+    def test_risky_autoapprove_entries_flagged(self):
+        p = self._settings('{ "task.allowAutomaticTasks": "off", '
+                           '"chat.tools.terminal.autoApprove": { "npx": true, "ssh": true, '
+                           '"echo": true } }')
+        issue = next(i for i in hygiene.check_vscode(p) if i.id == "vscode-autoapprove-risky")
+        self.assertEqual(issue.severity, "warning")
+        self.assertIn("npx", issue.detail)
+        self.assertIn("ssh", issue.detail)
+        self.assertNotIn("echo", issue.detail)                  # benign command isn't flagged
+
+    def test_autoapprove_denied_entry_not_flagged(self):
+        # A risky command explicitly set to false (a deny) must NOT trip the warning.
+        p = self._settings('{ "task.allowAutomaticTasks": "off", '
+                           '"chat.tools.terminal.autoApprove": { "npx": false } }')
+        self.assertNotIn("vscode-autoapprove-risky", [i.id for i in hygiene.check_vscode(p)])
+
+    def test_autoapprove_blanket_true_is_flagged(self):
+        # The single most dangerous form — approve EVERYTHING — must be caught (a naive object-only
+        # probe misses it entirely).
+        p = self._settings('{ "task.allowAutomaticTasks": "off", '
+                           '"chat.tools.terminal.autoApprove": true }')
+        self.assertIn("vscode-autoapprove-all", [i.id for i in hygiene.check_vscode(p)])
+
+    def test_autoapprove_nested_object_sibling_does_not_hide_risky_booleans(self):
+        # Regression: a non-greedy regex truncates at the first `}`; an object-valued sibling must NOT
+        # hide `"rm": true` / `"curl": true` that follow it (balanced-brace extraction).
+        p = self._settings('{ "task.allowAutomaticTasks": "off", '
+                           '"chat.tools.terminal.autoApprove": { '
+                           '"/^git (status|log)/": { "approve": true }, '
+                           '"rm": true, "curl": true } }')
+        issue = next(i for i in hygiene.check_vscode(p) if i.id == "vscode-autoapprove-risky")
+        self.assertIn("rm", issue.detail)
+        self.assertIn("curl", issue.detail)
+
+    def test_autoapprove_object_form_approve_true_is_flagged(self):
+        p = self._settings('{ "task.allowAutomaticTasks": "off", '
+                           '"chat.tools.terminal.autoApprove": { "npx": { "approve": true } } }')
+        issue = next(i for i in hygiene.check_vscode(p) if i.id == "vscode-autoapprove-risky")
+        self.assertIn("npx", issue.detail)
+
+    def test_autoapprove_catchall_regex_key_is_approve_all(self):
+        # A catch-all regex key approves EVERYTHING — must escalate to the approve-all finding, not slip
+        # through because the key text contains no literal risky command name.
+        for key in ('"/.*/"', '"/^/"', '"//"'):
+            p = self._settings('{ "task.allowAutomaticTasks": "off", '
+                               '"chat.tools.terminal.autoApprove": { ' + key + ': true } }')
+            self.assertIn("vscode-autoapprove-all", [i.id for i in hygiene.check_vscode(p)],
+                          f"catch-all key {key} not treated as approve-all")
+
+    def test_autoapprove_scoped_regex_is_not_approve_all(self):
+        # A SCOPED regex (only git commands) must NOT be mistaken for approve-everything.
+        p = self._settings('{ "task.allowAutomaticTasks": "off", '
+                           '"chat.tools.terminal.autoApprove": { "/^git /": true } }')
+        self.assertNotIn("vscode-autoapprove-all", [i.id for i in hygiene.check_vscode(p)])
+
+    def test_autoapprove_brace_inside_key_does_not_hide_entries(self):
+        # Regression: an unmatched brace inside a quoted key must not unbalance the extractor and hide
+        # a real risky approval (string-aware brace matching).
+        p = self._settings('{ "task.allowAutomaticTasks": "off", '
+                           '"chat.tools.terminal.autoApprove": { "rm {": true, "curl": true } }')
+        issue = next(i for i in hygiene.check_vscode(p) if i.id == "vscode-autoapprove-risky")
+        self.assertIn("curl", issue.detail)
+
+    def test_no_autoapprove_block_is_clean(self):
+        p = self._settings('{ "task.allowAutomaticTasks": "off" }')
+        self.assertNotIn("vscode-autoapprove-risky", [i.id for i in hygiene.check_vscode(p)])
 
 
 class TestSSHAuthorizedKeys(unittest.TestCase):
@@ -869,6 +1016,35 @@ class TestAuditRender(unittest.TestCase):
         self.assertIn("Detail", out)
         self.assertIn("→ fix", out)
         self.assertIn("Fix", out)
+
+    def test_command_renders_verbatim_on_its_own_line(self):
+        # AC8: the copy-pasteable command is on its own line, NOT reflowed into the rationale prose —
+        # even a command long enough to exceed the wrap width stays intact on a single line.
+        long_cmd = "security delete-internet-password -s github.com   # a comment long enough to wrap"
+        issue = hygiene.HygieneIssue("x", "info", "T", "D", "rationale", command=long_cmd)
+        out = hygiene.render([issue], width=60)
+        self.assertIn(long_cmd, [ln.strip() for ln in out.splitlines()])   # present verbatim, unwrapped
+
+    def test_multiline_command_each_on_its_own_line(self):
+        issue = hygiene.HygieneIssue("x", "info", "T", "D", "r", command="cmd-one\ncmd-two")
+        rendered = hygiene.render([issue])
+        body_lines = [ln.strip() for ln in rendered.splitlines()]
+        self.assertIn("cmd-one", body_lines)
+        self.assertIn("cmd-two", body_lines)
+
+    def test_reference_renders_details_line(self):
+        issue = hygiene.HygieneIssue("x", "info", "T", "D", "r", reference="https://example/doc")
+        out = hygiene.render([issue])
+        self.assertIn("→ details:", out)
+        self.assertIn("https://example/doc", out)
+
+    def test_header_count_matches_rendered_finding_blocks(self):
+        # AC8: the "N findings" header must equal the number of rendered finding titles.
+        issues = [hygiene.HygieneIssue("a", "warning", "TitleA", "D", "F"),
+                  hygiene.HygieneIssue("b", "info", "TitleB", "D", "F")]
+        out = hygiene.render(issues)
+        self.assertIn("2 findings", out)
+        self.assertEqual(sum(ln.count("TitleA") + ln.count("TitleB") for ln in out.splitlines()), 2)
 
     def test_credential_exposure_only_is_calm_not_full_runbook(self):
         # Proportionality: a lone credential EXPOSURE (no active persistence) gets a calm note, NOT the

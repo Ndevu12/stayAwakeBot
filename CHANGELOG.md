@@ -6,6 +6,33 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- **`saw audit` flags two more VS Code auto-execution surfaces** (#1237): `security.workspace.trust.
+  untrustedFiles: "open"` (files in an untrusted folder open — and their language servers / auto-tasks
+  run — without the trust prompt), and risky commands auto-approved for chat/agent tools via
+  `chat.tools.terminal.autoApprove` (a blanket `true`, a catch-all regex like `/.*/`, or specific risky
+  commands such as `npx`/`ssh`/`sed`/`awk` set to `true`). Both were present-but-unreported on real
+  machines; both are unattended-execution vectors the worm can use.
+
+### Changed
+- **`saw audit`'s cached-credential finding is reframed around the threat model** (#1237). A GitHub
+  token in the *encrypted* login Keychain is now an **`info` review item, not a `warning`** — the
+  Keychain is the recommended store, so a cached token there is normal, not a misconfiguration (a
+  plaintext `~/.git-credentials`, which is a real one, stays a `warning`). The finding now: frames risk
+  by **property** (lifetime / scope / that a bearer token can be *copied* in-session), not location;
+  is **multi-path-aware** — it detects your other working auth (SSH key, `gh`) and probes read-only
+  whether a helper is actively *serving* the token, so it distinguishes an in-use path from an unused
+  leftover and **never tells you to collapse to one method or delete a path you rely on** (when HTTPS
+  is in use it offers no delete at all; the removal command it does show leads with an `ssh -T`
+  alternate-path check so a wrong guess can't lock you out); and makes its removal command
+  **config-source-aware** — it resolves the real `credential.helper` origin, so an inherited read-only
+  system default (macOS Command Line Tools) gets `--add credential.helper ""` rather than a
+  silently-no-op `--unset`, then re-probes with `git credential fill` to verify caching stopped.
+  Findings now carry a **`→ details:`** link to the new `docs/CREDENTIAL_HYGIENE.md`, and the
+  copy-pasteable command renders **verbatim on its own selectable line(s)**, separate from the
+  rationale. The lone-Keychain token no longer triggers the credential-exposure banner or fails
+  `saw audit --fail`.
+
 ## [0.1.14] - 2026-07-20
 
 ### Added
