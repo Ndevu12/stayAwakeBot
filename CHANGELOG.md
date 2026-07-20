@@ -85,6 +85,18 @@ All notable changes to this project are documented here. The format is based on
   pre-existing directory-escape scan-evasion heuristic is unchanged.
 
 ### Changed
+- **Package layout is now a strict layered foundation** (#1236): `utils/` → `lib/` → `core/` →
+  `bots/` → `cli/`, where a module may import only from strictly-lower layers (enforced by
+  `tests/core/test_layering.py`, which walks the full AST). The old catch-all `stayawake.core`
+  bucket was split — **pure helpers** (`render`, `textsafe`, `config`, `env`, `io`, `streaming`,
+  `terminal`, `pager`, `timeutil`) moved to **`stayawake.utils`**; **external-system adapters**
+  (`adapters/{github_api,http_client,slack}`, `git/`, `auth`, `github_app`) moved to
+  **`stayawake.lib`**; and `stayawake.core` now holds only the cross-bot **domain** layer
+  (`issue_state`). This also fixed a real dependency inversion (the merge corroborator imported the
+  security package; it now injects the check). **Import-path change** for anyone importing these
+  internals directly: `stayawake.core.render` → `stayawake.utils.render`,
+  `stayawake.core.adapters.github_api` → `stayawake.lib.adapters.github_api`, etc. Behaviour is
+  otherwise unchanged. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - **`saw guard check` now discovers and sweeps repositories like `saw scan`/`saw fix`.** It takes
   positional `TARGETS` (local repo/dir paths, or `owner/repo` slugs under `--remote`), `-p/--path`,
   `-c/--config`, `-r/--remote`, and `--user`/`--org` — so `saw guard check .` (or a whole tree, or a
