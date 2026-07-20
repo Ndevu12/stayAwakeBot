@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.1.14] - 2026-07-20
+
 ### Added
 - **`saw guard check` verifies the Strix CI gate on a repo** (#1229). It finds the gate by its
   **action reference** — a `uses: Ndevu12/strix@…` step — not by the workflow filename or job name
@@ -1039,7 +1041,8 @@ release-publish hardening._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel
 (supply-chain worm detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.13...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.14...HEAD
+[0.1.14]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.13...v0.1.14
 [0.1.13]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.12...v0.1.13
 [0.1.12]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.11...v0.1.12
 [0.1.11]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.10...v0.1.11
