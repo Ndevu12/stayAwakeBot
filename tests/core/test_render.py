@@ -7,7 +7,7 @@ from __future__ import annotations
 import unittest
 from unittest import mock
 
-from stayawake.core import render
+from stayawake.utils import render
 
 
 class TestPaint(unittest.TestCase):

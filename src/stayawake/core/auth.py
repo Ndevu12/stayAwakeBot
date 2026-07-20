@@ -17,7 +17,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 
-from stayawake.core import env
+from stayawake.utils import env
 
 ENV_VARS = (env.GH_SECURITY_TOKEN, env.GITHUB_TOKEN)
 _GH_TIMEOUT = 10  # gh auth token is a local keyring read; should be near-instant.

@@ -26,11 +26,11 @@ import yaml
 from stayawake.core.adapters import github_api
 from stayawake.core import auth
 from stayawake.core import git as gitutil
-from stayawake.core import textsafe
-from stayawake.core.config import load_yaml
-from stayawake.core.render import SEVERITY, paint
-from stayawake.core.streaming import Streamer, stream_enabled, status as spin_status
-from stayawake.core.terminal import supports_color
+from stayawake.utils import textsafe
+from stayawake.utils.config import load_yaml
+from stayawake.utils.render import SEVERITY, paint
+from stayawake.utils.streaming import Streamer, stream_enabled, status as spin_status
+from stayawake.utils.terminal import supports_color
 from stayawake.bots.security import proposal
 from stayawake.bots.security import resolution
 from stayawake.bots.security.targets import ScanOptions

@@ -17,7 +17,7 @@ isolation.
 """
 from __future__ import annotations
 
-from stayawake.core.terminal import ColorLevel
+from stayawake.utils.terminal import ColorLevel
 
 # ── the endorsed "SAW" wordmark, composed from fixed-width letter grids (columns always align) ──
 _S = [" █████", "██    ", " ████ ", "    ██", "█████ "]

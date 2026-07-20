@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from stayawake.bots.security import redaction
-from stayawake.core.io import write_json
+from stayawake.utils.io import write_json
 
 try:                                       # version is derived from the git tag at build time
     __version__ = _pkg_version("stayawakebot")

@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from stayawake.core.io import resolve_writable_dir, resolve_reports_dir, write_json
+from stayawake.utils.io import resolve_writable_dir, resolve_reports_dir, write_json
 
 
 class TestResolveWritableDir(unittest.TestCase):

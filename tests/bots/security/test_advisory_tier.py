@@ -15,7 +15,7 @@ from stayawake.bots.security.models import CLEAN, INFECTED, Finding, ScanReport,
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.sinks.render import render_markdown, render_terminal
 from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions
-from stayawake.core.timeutil import now_iso
+from stayawake.utils.timeutil import now_iso
 from tests.bots.security._osv_fixtures import mal_record, osv_zip, vuln_record
 
 MAL_SIG = {"id": "malicious-dependency", "category": "supply-chain-dep", "severity": "critical",

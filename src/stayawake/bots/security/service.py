@@ -13,10 +13,10 @@ import sys
 import tempfile
 from pathlib import Path
 
-from stayawake.core.config import load_yaml
-from stayawake.core.io import resolve_reports_dir
-from stayawake.core.streaming import Streamer, status, stream_enabled
-from stayawake.core.timeutil import now_iso
+from stayawake.utils.config import load_yaml
+from stayawake.utils.io import resolve_reports_dir
+from stayawake.utils.streaming import Streamer, status, stream_enabled
+from stayawake.utils.timeutil import now_iso
 # github_api/auth are consumed transitively through the resolution seam; kept imported so the
 # targeting tests can patch them at the service boundary (`service.github_api`/`service.auth`) —
 # they are the same module objects resolution.py uses, so the patches reach it.

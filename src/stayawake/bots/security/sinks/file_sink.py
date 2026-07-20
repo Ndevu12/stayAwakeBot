@@ -14,7 +14,7 @@ from stayawake.bots.security.models import ScanReport
 from stayawake.bots.security.redaction import redact_payload
 from stayawake.bots.security.sinks.base import Sink
 from stayawake.bots.security.sinks.render import render_markdown
-from stayawake.core.io import write_json
+from stayawake.utils.io import write_json
 
 
 class FileSink(Sink):

@@ -11,10 +11,10 @@ from __future__ import annotations
 
 import urllib.parse
 
-from stayawake.core import env
+from stayawake.utils import env
 from stayawake.core.adapters.slack import send_slack
 from stayawake.core.adapters import github_api
-from stayawake.core.timeutil import utc_stamp
+from stayawake.utils.timeutil import utc_stamp
 
 LABEL = "stayawakebot-security"
 

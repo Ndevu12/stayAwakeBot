@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from stayawake.core import env
+from stayawake.utils import env
 
 
 def resolve_writable_dir(preferred: str | Path, *, label: str = "reports") -> Path:

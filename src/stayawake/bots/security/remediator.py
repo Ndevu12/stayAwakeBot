@@ -18,13 +18,13 @@ import os
 import sys
 from pathlib import Path
 
-from stayawake.core.config import load_yaml
+from stayawake.utils.config import load_yaml
 from stayawake.core import auth
-from stayawake.core import env
+from stayawake.utils import env
 from stayawake.core import git as gitutil
 from stayawake.core.adapters import github_api
-from stayawake.core.streaming import Streamer, stream_enabled, status
-from stayawake.core.timeutil import now_iso
+from stayawake.utils.streaming import Streamer, stream_enabled, status
+from stayawake.utils.timeutil import now_iso
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security import resolution
 from stayawake.bots.security.resolution import (

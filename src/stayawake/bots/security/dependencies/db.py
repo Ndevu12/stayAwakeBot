@@ -28,12 +28,12 @@ import zipfile
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
-from stayawake.core import env
+from stayawake.utils import env
 from stayawake.bots.security.dependencies.corpus import AdvisoryCorpus
 from stayawake.bots.security.dependencies.ecosystems import PURL_TO_OSV
 from stayawake.bots.security.dependencies.osv import (
     OsvAffected, OsvRange, OsvRecord, parse_osv_record)
-from stayawake.core.timeutil import now_iso
+from stayawake.utils.timeutil import now_iso
 
 _SCHEMA = 2   # bumped for the #1126 manifest (snapshot + generated_at); older caches lack these
 _OSV_EXPORT_BASE = "https://osv-vulnerabilities.storage.googleapis.com"

@@ -10,7 +10,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from stayawake.core.streaming import Streamer, status, stream_enabled
+from stayawake.utils.streaming import Streamer, status, stream_enabled
 
 
 def register(sub) -> None:
