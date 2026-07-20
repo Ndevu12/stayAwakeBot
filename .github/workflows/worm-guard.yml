@@ -30,14 +30,14 @@ jobs:
         with:
           # Pin the scanner to a known-good SHA, never @main (SECURITY_BASELINE doctrine):
           # a later compromise of main cannot silently change what the gate runs. This points at
-          # current main (merge of #1251). Since the last pin (#1206) it catches up host-persistence
+          # current main (merge of #1255). Since the last pin (#1206) it catches up host-persistence
           # & write-redirect-symlink detection (#1215/#1216) plus new signatures, the `saw guard`
-          # gate verifier/installer (#1229–#1251), the hygiene/ package split (#1217), and the
+          # gate verifier/installer (#1229–#1255), the hygiene/ package split (#1217), and the
           # layered utils/lib/core refactor (#1236). requires-python >=3.11 satisfies the 3.13
           # runner. Bump this deliberately after reviewed engine changes — the in-band pin-freshness
           # gate (#1172) fails an engine PR that doesn't bump this, both pin copies must AGREE
           # (check_pins_synced.sh, #1210), and scanner-pin-drift opens an issue if it falls behind.
-          sentinel-ref: f35304ee953667d79feeb080b8eec4c6478994a1   # merge of #1251 — catches up detection (#1215/#1216), the saw guard gate (#1229–#1251), hygiene split (#1217), layered refactor (#1236)
+          sentinel-ref: 29b1c3790936ab23dd87e3c1d52bafc8b6cd69ea   # merge of #1255 — catches up detection (#1215/#1216), the saw guard gate (#1229–#1255), hygiene split (#1217), layered refactor (#1236)
           fail-on-findings: 'true'
           # This gate never uploads SARIF — the job conclusion is the scan's exit code, nothing
           # else. Code-scanning delivery is owned solely by security-sentinel.yml.

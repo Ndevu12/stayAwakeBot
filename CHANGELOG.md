@@ -179,11 +179,11 @@ All notable changes to this project are documented here. The format is based on
   Strix workflow is found.
 
 ### Security
-- **Bumped the pinned self-scan engine to current main (`sentinel-ref` → merge of #1251), in both
+- **Bumped the pinned self-scan engine to current main (`sentinel-ref` → merge of #1255), in both
   the worm-guard gate and the release self-scan.** Catches the gate up to the `pin-bump-deferred`
   engine work that landed since the last pin (#1206): host-persistence and write-redirect-symlink
   detection (#1215/#1216) plus new signatures, the `saw guard` gate verifier/installer
-  (#1229–#1251), the `hygiene/` package split (#1217), and the layered `utils`/`lib`/`core` refactor
+  (#1229–#1255), the `hygiene/` package split (#1217), and the layered `utils`/`lib`/`core` refactor
   (#1236) — so the gate scans with the current reviewed engine rather than a stale one. Both pin
   copies are bumped together, as the sync gate added in #1210 (`check_pins_synced.sh`) now requires.
 
