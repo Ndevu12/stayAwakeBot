@@ -7,6 +7,14 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **`saw audit` detects a cached GitHub credential on Linux and Windows, not just macOS** (#1260). The
+  reframed keychain finding (#1237) was macOS-only (`security find-internet-password`); it now also
+  probes **Linux libsecret / gnome-keyring** (`secret-tool`) and the **Windows Credential Manager**
+  (`cmdkey`), naming the platform's store and emitting the platform-correct removal command
+  (`secret-tool clear` / `cmdkey /delete`). Every probe is read-only, never reads the secret value, and
+  degrades to nothing when the store's CLI is absent. All the #1237 safety behavior is shared across
+  platforms — `info` severity, the lockout-safe gating (no delete offered while the token is in use;
+  the removal command leads with an `ssh -T` alternate-path check), and the `→ details:` link.
 - **`saw audit` flags two more VS Code auto-execution surfaces** (#1237): `security.workspace.trust.
   untrustedFiles: "open"` (files in an untrusted folder open — and their language servers / auto-tasks
   run — without the trust prompt), and risky commands auto-approved for chat/agent tools via

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Credential-exposure hygiene: a cached GitHub token (macOS Keychain / ~/.git-credentials).
+"""Credential-exposure hygiene: a cached GitHub token in the OS keychain (macOS Keychain / Linux
+libsecret-gnome-keyring / Windows Credential Manager) or a plaintext `~/.git-credentials`.
 
 Threat-model note (#1237): a token *cached in the encrypted login Keychain is normal* — the Keychain
 is the recommended store, and a credential must live somewhere to be usable. What actually determines
@@ -23,6 +24,8 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from .models import HygieneIssue, _WIPER_NOTE
@@ -30,6 +33,29 @@ from .models import HygieneIssue, _WIPER_NOTE
 # Where the finding's `→ details:` link points — the full, non-destructive walkthrough.
 CREDENTIAL_HYGIENE_DOC = ("https://github.com/Ndevu12/stayAwakeBot/blob/main/"
                           "docs/CREDENTIAL_HYGIENE.md")
+
+
+@dataclass(frozen=True)
+class KeychainStore:
+    """The OS credential store that holds a cached github.com credential on a given platform — its
+    human name (for the finding's prose) and the platform-correct removal command (#1260). The store is
+    encrypted and recommended on every platform; only the name and the delete verb differ."""
+    name: str
+    delete_command: str
+
+
+# One store per platform. macOS Keychain / Linux libsecret (gnome-keyring) / Windows Credential Manager
+# are all encrypted, recommended stores — a cached token is normal on each; the finding messaging is
+# shared and only these two fields vary.
+_MACOS_STORE = KeychainStore(
+    "the macOS login Keychain",
+    "security delete-internet-password -s github.com        # remove the cached entry")
+_LINUX_STORE = KeychainStore(
+    "the system secret store (libsecret / gnome-keyring)",
+    "secret-tool clear server github.com                    # remove it from libsecret/gnome-keyring")
+_WINDOWS_STORE = KeychainStore(
+    "Windows Credential Manager",
+    "cmdkey /delete:git:https://github.com                  # remove it from Windows Credential Manager")
 
 # git config paths that are READ-ONLY system defaults — a helper inherited from one of these can't be
 # `--unset` (that silently no-ops); it must be reset with `--add credential.helper ""` at global scope.
@@ -41,12 +67,20 @@ _SYSTEM_CONFIG_PREFIXES = ("/library/developer/commandlinetools/",
 _SYSTEM_CONFIG_EXACT = ("/etc/gitconfig", "/usr/local/etc/gitconfig", "/opt/homebrew/etc/gitconfig")
 
 
-def _run(cmd: list[str], *, input_text: str | None = None,
-         timeout: int = 10) -> subprocess.CompletedProcess | None:
+def _run(cmd: list[str], *, input_text: str | None = None, timeout: int = 10,
+         capture: bool = True) -> subprocess.CompletedProcess | None:
     """Read-only subprocess helper. Returns None (never raises) when the tool is missing / errors /
-    times out, so every probe degrades gracefully on a machine that lacks git, `security`, or gh."""
+    times out, so every probe degrades gracefully on a machine that lacks git, `security`, or gh.
+
+    `capture=False` DISCARDS the child's stdout/stderr to /dev/null and exposes only the exit code —
+    used for a probe whose tool would print a live SECRET (libsecret's `secret-tool`), so the token is
+    written to the child's null sink and never enters saw's memory (#1260). saw reads presence, never
+    the secret, on every platform."""
     try:
         env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}   # never block on an interactive prompt
+        if not capture:
+            return subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                  text=True, timeout=timeout, input=input_text, env=env)
         return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
                               input=input_text, env=env)
     except (FileNotFoundError, OSError, subprocess.SubprocessError):
@@ -57,6 +91,42 @@ def _macos_keychain_has_github() -> bool:
     """True if a github.com internet password is cached in the macOS Keychain."""
     r = _run(["security", "find-internet-password", "-s", "github.com"])
     return r is not None and r.returncode == 0
+
+
+def _linux_secret_has_github() -> bool:
+    """True if libsecret / gnome-keyring holds a github.com credential (via `secret-tool`).
+
+    Both of libsecret's query verbs LOAD the secret (there is no metadata-only CLI like macOS's
+    `find-internet-password`), so we run `secret-tool lookup` with its output **discarded to the child's
+    /dev/null** (`capture=False`) and read presence from the EXIT CODE alone (0 = found). The token is
+    materialized only inside the secret-tool child and never enters saw's memory — keeping the
+    'saw never reads a live secret' invariant on Linux too. No-op (False) when secret-tool is absent."""
+    r = _run(["secret-tool", "lookup", "server", "github.com"], capture=False)
+    return r is not None and r.returncode == 0
+
+
+def _windows_credential_has_github() -> bool:
+    """True if Windows Credential Manager holds a github.com git credential, via `cmdkey /list`. Reads
+    only the target label (never the secret); False when the target is absent (`* NONE *`) (#1260)."""
+    r = _run(["cmdkey", "/list:git:https://github.com"])
+    if r is None or r.returncode != 0:
+        return False
+    out = (r.stdout or "").lower()
+    return "github.com" in out and "none" not in out
+
+
+def _detect_cached_credential() -> KeychainStore | None:
+    """The OS credential store holding a cached github.com credential on THIS platform, or None —
+    macOS Keychain / Linux libsecret / Windows Credential Manager (#1260). Each probe is read-only,
+    never reads the secret value, and degrades to None when the platform's tool is absent (so an audit
+    on a host without the store's CLI simply reports nothing, rather than erroring)."""
+    if sys.platform == "darwin":
+        return _MACOS_STORE if _macos_keychain_has_github() else None
+    if sys.platform.startswith("linux"):
+        return _LINUX_STORE if _linux_secret_has_github() else None
+    if sys.platform in ("win32", "cygwin"):
+        return _WINDOWS_STORE if _windows_credential_has_github() else None
+    return None
 
 
 def _git_credentials_file_with_github() -> Path | None:
@@ -148,9 +218,11 @@ def _gh_configured() -> bool:
     return r is not None and r.returncode == 0
 
 
-def _keychain_finding() -> HygieneIssue:
-    """Build the (info-level) cached-Keychain-token finding — property-framed, multi-path-aware, and
-    config-source-aware, informing rather than prescribing a delete (see module docstring / #1237)."""
+def _keychain_finding(store: KeychainStore) -> HygieneIssue:
+    """Build the (info-level) cached-credential finding for `store` (the platform's OS keychain) —
+    property-framed, multi-path-aware, and config-source-aware, informing rather than prescribing a
+    delete (see module docstring / #1237). Only the store name + removal command vary by platform;
+    all the messaging and the lockout-safe gating are shared (#1260)."""
     origins = _credential_helper_origins()
     served = _https_token_status()                      # True (in use) | False (unused) | None (unknown)
     ssh, gh = _ssh_key_present(), _gh_configured()
@@ -164,7 +236,7 @@ def _keychain_finding() -> HygieneIssue:
     alt_phrase = " and ".join(alts) if alts else None
 
     detail = [
-        "A github.com token is cached in the login Keychain — the recommended, encrypted store. That "
+        f"A github.com token is cached in {store.name} — the recommended, encrypted store. That "
         "on its own is NORMAL, not a misconfiguration: a credential has to live somewhere to be usable.",
         "What actually determines risk is the token's lifetime, scope, and that a bearer token can be "
         "COPIED by a process running as you — not where it's stored. If this is a non-expiring, "
@@ -187,8 +259,8 @@ def _keychain_finding() -> HygieneIssue:
     else:  # None — probe couldn't run
         detail.append("Couldn't determine whether HTTPS auth is in use here (git or the keychain wasn't "
                       "reachable) — verify before changing anything.")
-    detail.append("This is the git-HTTPS Keychain entry only. Your gh CLI token and your SSH keys are "
-                  "SEPARATE stores — removing this leaves them untouched.")
+    detail.append(f"This is the git-HTTPS entry in {store.name} only. Your gh CLI token and your SSH "
+                  "keys are SEPARATE stores — removing this leaves them untouched.")
 
     if served is True:
         # HTTPS is IN USE here — deleting logs you out, full stop. Never offer a delete command; the
@@ -212,7 +284,7 @@ def _keychain_finding() -> HygieneIssue:
             "ssh -T git@github.com   # STEP 1: confirm an ALTERNATE path authenticates — STOP if it doesn't\n"
             "git config --show-origin --get-all credential.helper   # find the REAL source\n"
             + reset +
-            "security delete-internet-password -s github.com        # macOS: remove the cached entry\n"
+            store.delete_command + "\n"
             "printf 'protocol=https\\nhost=github.com\\n\\n' | GIT_TERMINAL_PROMPT=0 git credential fill"
             "   # VERIFY: an error on 'could not read Username' means nothing caches it anymore"
         )
@@ -225,7 +297,7 @@ def _keychain_finding() -> HygieneIssue:
     return HygieneIssue(
         id="cached-github-keychain",
         severity="info",
-        title="GitHub token cached in the macOS Keychain — review its lifetime/scope",
+        title=f"GitHub token cached in {store.name} — review its lifetime/scope",
         detail=" ".join(detail),
         remediation=remediation,
         command=command,
@@ -235,8 +307,9 @@ def _keychain_finding() -> HygieneIssue:
 
 def check_credentials() -> list[HygieneIssue]:
     issues: list[HygieneIssue] = []
-    if _macos_keychain_has_github():
-        issues.append(_keychain_finding())
+    store = _detect_cached_credential()
+    if store is not None:
+        issues.append(_keychain_finding(store))
     cred_file = _git_credentials_file_with_github()
     if cred_file is not None:
         issues.append(HygieneIssue(
