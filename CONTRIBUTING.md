@@ -20,25 +20,31 @@ bump it there, not in workflow files. (The `worm-scan` action stays pinned expli
 remains self-contained for repos that adopt the gate.) The user-facing version requirement
 lives in [`docs/PREREQUISITES.md`](docs/PREREQUISITES.md).
 
-## Layout (one responsibility per folder)
+## Layout — layered, imports point DOWN
+Five packages, low → high; a module may import only from layers to its LEFT
+(`utils → lib → core → bots → cli`). The rule is enforced by `tests/core/test_layering.py`; an
+upward import fails the build. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 ```
 src/stayawake/
-  core/            shared utilities (io, timeutil, config, git) + adapters/
-  bots/health/     uptime sentinel  (checker · reporter · alerter · service · cli/)
-  bots/security/   security sentinel (scanner · matchers/ · targets/ · remediator · pr · data/ · cli/)
-tests/             mirrors src (tests/bots/health, tests/bots/security)
+  utils/           pure helpers (render · textsafe · config · env · io · streaming · timeutil …)
+  lib/             external-system adapters (adapters/{github_api,http_client,slack} · git/ · auth · github_app)
+  core/            domain layer — cross-bot abstractions (issue_state)
+  bots/health/     uptime sentinel  (checker · alerter · cli/)
+  bots/security/   security sentinel (scanner · matchers/ · targets/ · remediator · pr · guard · data/ · cli/)
+tests/             mirrors src (tests/core/test_layering.py · tests/bots/health · tests/bots/security)
 config/            deployment config (urls.yml, security.yml)
 ```
 
 ## Principles we hold to
+- **Layering** — imports point down (`utils → lib → core → bots → cli`); the guard test rejects any upward import. If a lower layer needs higher-layer behavior, **inject** it as a callable (don't import up).
 - **SRP** — one job per module/folder; new detection techniques are one file in `security/matchers/`.
-- **DRY** — reuse `stayawake.core` (+ `core.adapters`); don't duplicate git/github/slack/io.
+- **DRY** — reuse `utils/` + `lib/`; don't duplicate git/github/slack/io.
 - **Data over code** — new worm indicators go in `src/stayawake/bots/security/data/signatures.yml`, not Python.
 - **Tests mirror source** and must pass; add a test with every change.
 
 ## Adding a bot
 1. Create `src/stayawake/bots/<bot>/` with `models`/`service` + a thin `cli/`.
-2. Reuse `stayawake.core`; add console scripts in `pyproject.toml` (`stayawake-<bot>-<action>`).
+2. Reuse the lower layers (`utils/`, `lib/`, `core/`); add console scripts in `pyproject.toml` (`stayawake-<bot>-<action>`).
 3. Mirror tests under `tests/bots/<bot>/`. Existing bots stay untouched.
 
 ## Adding a worm signature (security bot)
