@@ -488,6 +488,29 @@ class TestSetupPr(unittest.TestCase):
         self.assertFalse(res.signed)
         self.assertIn("UNSIGNED", guard.render_setup(res))
 
+    def test_pr_plans_against_origin_not_a_dirty_working_tree(self):
+        # The bug: `saw guard setup --pr` planned from the WORKING TREE. A worm-guard.yml written by a
+        # prior local `setup` (untracked, never on origin) made `--pr` see the gate as already-there and
+        # no-op — so it "reported" success while opening no PR. `--pr` must plan against origin's tree.
+        from stayawake.bots.security.proposal import SubmitResult
+        repo = _tmp_repo()
+        wf = Path(repo) / guard.WORM_GUARD_FILE                 # an UNTRACKED gate in the working tree…
+        wf.parent.mkdir(parents=True, exist_ok=True)
+        wf.write_text("name: Worm Guard\non: pull_request\njobs: {}\n", encoding="utf-8")
+        with mock.patch.object(guard, "resolve_pin", return_value=guard.Pin(SHA, "v0.1.4")), \
+             mock.patch.object(guard.gitutil, "default_branch", return_value="main"), \
+             mock.patch.object(guard.gitutil, "origin_slug", return_value="up/repo"), \
+             mock.patch.object(guard.gitutil, "ref_exists", return_value=True), \
+             mock.patch.object(guard.gitutil, "fetch", return_value=True), \
+             mock.patch.object(guard.gitutil, "list_tree", return_value=[]), \
+             mock.patch.object(guard, "_setup_pr",
+                               return_value=guard.SetupResult(
+                                   plan=guard.SetupPlan("create", guard.WORM_GUARD_FILE, new_ref=SHA),
+                                   submit=SubmitResult("pr", action="opened", number=9, url="u"))) as sp:
+            res = guard.setup(repo, token="tok", pr=True)
+        sp.assert_called_once()                                 # origin has no gate → PR opened, not no-op
+        self.assertEqual(res.plan.action, "create")
+
 
 class TestRenderSetup(unittest.TestCase):
     def test_error(self):
@@ -592,7 +615,8 @@ class TestSetupSweep(unittest.TestCase):
         return guard.SetupResult(plan=guard.SetupPlan("create", "wf", new_ref=SHA), wrote=Path("/x"))
 
     def test_local_sweep_sets_up_each_discovered_repo(self):
-        with mock.patch.object(guard.resolution, "discover_local_repos",
+        with mock.patch.object(guard, "resolve_pin", return_value=guard.Pin(SHA, "v0.1.4")), \
+             mock.patch.object(guard.resolution, "discover_local_repos",
                                return_value=[Path("/a"), Path("/b")]), \
              mock.patch.object(guard.auth, "resolve_token", return_value=(None, None)), \
              mock.patch.object(guard, "setup", side_effect=lambda *a, **k: self._ok()) as s:
@@ -601,7 +625,8 @@ class TestSetupSweep(unittest.TestCase):
         self.assertEqual(s.call_count, 2)
 
     def test_one_repo_error_isolated_but_exits_one(self):
-        with mock.patch.object(guard.resolution, "discover_local_repos",
+        with mock.patch.object(guard, "resolve_pin", return_value=guard.Pin(SHA, "v0.1.4")), \
+             mock.patch.object(guard.resolution, "discover_local_repos",
                                return_value=[Path("/a"), Path("/b")]), \
              mock.patch.object(guard.auth, "resolve_token", return_value=(None, None)), \
              mock.patch.object(guard, "setup", side_effect=[RuntimeError("boom"), self._ok()]) as s:
@@ -610,7 +635,8 @@ class TestSetupSweep(unittest.TestCase):
         self.assertEqual(rc, 1)                              # an errored repo → exit 1
 
     def test_remote_clones_and_sets_up_with_pr_implied(self):
-        with mock.patch.object(guard.resolution, "resolve_remote",
+        with mock.patch.object(guard, "resolve_pin", return_value=guard.Pin(SHA, "v0.1.4")), \
+             mock.patch.object(guard.resolution, "resolve_remote",
                                return_value=(["o/a", "o/b"], "t", "env")), \
              mock.patch.object(guard.resolution, "cloned_repo",
                                side_effect=lambda *a, **k: _fake_clone(Path("/clone"))), \
@@ -625,13 +651,29 @@ class TestSetupSweep(unittest.TestCase):
             self.assertEqual(guard.setup_targets(remote=True, no_stream=True), 2)
 
     def test_remote_clone_failure_is_an_error(self):
-        with mock.patch.object(guard.resolution, "resolve_remote", return_value=(["o/a"], "t", "env")), \
+        with mock.patch.object(guard, "resolve_pin", return_value=guard.Pin(SHA, "v0.1.4")), \
+             mock.patch.object(guard.resolution, "resolve_remote", return_value=(["o/a"], "t", "env")), \
              mock.patch.object(guard.resolution, "cloned_repo",
                                side_effect=lambda *a, **k: _fake_clone(None)), \
              mock.patch.object(guard, "setup") as s:
             rc = guard.setup_targets(remote=True, no_stream=True)
         self.assertEqual(rc, 1)                              # clone failed → error → exit 1
         s.assert_not_called()                                # never setup on a failed clone
+
+    def test_pushed_but_unopened_pr_is_not_counted_as_success(self):
+        # The ladder returns a SubmitResult even when the branch pushed but the PR API call failed
+        # (or the fork wasn't ready, or there was no write access). That is NOT an opened PR — it must
+        # not be tallied as "opened/updated", and the sweep must exit non-zero, not phantom-succeed.
+        from stayawake.bots.security.proposal import SubmitResult
+        failed = guard.SetupResult(plan=guard.SetupPlan("create", "wf", new_ref=SHA),
+                                   submit=SubmitResult("pr-create-failed"))
+        with mock.patch.object(guard, "resolve_pin", return_value=guard.Pin(SHA, "v0.1.4")), \
+             mock.patch.object(guard.resolution, "resolve_remote", return_value=(["o/a"], "t", "env")), \
+             mock.patch.object(guard.resolution, "cloned_repo",
+                               side_effect=lambda *a, **k: _fake_clone(Path("/clone"))), \
+             mock.patch.object(guard, "setup", side_effect=lambda *a, **k: failed):
+            rc = guard.setup_targets(remote=True, no_stream=True)
+        self.assertEqual(rc, 1)                              # pushed-but-unopened → failure, not success
 
     def test_invalid_slug_exits_two(self):
         self.assertEqual(guard.setup_targets(remote=True, slugs=["not-a-slug"], no_stream=True), 2)
