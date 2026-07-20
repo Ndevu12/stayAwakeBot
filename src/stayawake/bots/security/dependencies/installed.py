@@ -21,6 +21,7 @@ import csv
 import hashlib
 import json
 import os
+import stat as _stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
@@ -75,7 +76,20 @@ class InstalledTree:
         yield
 
 
+def _is_regular(path: str) -> bool:
+    """True only for a REGULAR file (following a symlink to its target). False for a FIFO/socket/device
+    — a blocking `open()` on one would HANG the scan forever with no writer (#1226) — or when the path
+    can't be stat'd. The installed-tree audit walks node_modules/site-packages itself (not through the
+    engine's guarded read path), so its own file opens must guard the same way."""
+    try:
+        return _stat.S_ISREG(os.stat(path).st_mode)
+    except OSError:
+        return False
+
+
 def _read_manifest(path: str) -> dict | None:
+    if not _is_regular(path):                          # never a blocking open() on a FIFO/device (#1226)
+        return None
     try:
         with open(path, encoding="utf-8", errors="replace") as fh:
             data = json.load(fh)
@@ -238,6 +252,8 @@ class PythonInstalledTree(InstalledTree):
         """Parse the `Name:`/`Version:` headers of a METADATA/PKG-INFO block (RFC822-style; headers end
         at the first blank line)."""
         name = version = None
+        if not _is_regular(meta_path):                 # FIFO/device METADATA → skip, don't hang (#1226)
+            return None
         try:
             with open(meta_path, encoding="utf-8", errors="replace") as fh:
                 for line in fh:
@@ -290,8 +306,8 @@ class PythonInstalledTree(InstalledTree):
                         size = os.path.getsize(fp)
                     except OSError:
                         continue                          # listed-but-absent file → not a tamper signal
-                    if os.path.islink(fp) or size > self._MAX_HASH_BYTES:
-                        continue                          # skip symlinks + huge data files (bounded)
+                    if os.path.islink(fp) or not _is_regular(fp) or size > self._MAX_HASH_BYTES:
+                        continue                          # skip symlinks, FIFO/device (#1226), huge files
                     if size > budget:
                         return                            # total hashing budget spent (DoS backstop)
                     budget -= size
@@ -305,6 +321,8 @@ class PythonInstalledTree(InstalledTree):
 def _record_hashes(record_path: str) -> Iterator[tuple[str, str]]:
     """`(relpath, "sha256=<b64>")` for each RECORD row that carries a sha256 (CSV — a path may be
     quoted). Rows with no hash (`.pyc`, RECORD itself) are skipped."""
+    if not _is_regular(record_path):                   # FIFO/device RECORD → skip, don't hang (#1226)
+        return
     try:
         with open(record_path, encoding="utf-8", errors="replace", newline="") as fh:
             for row in csv.reader(fh):
@@ -316,6 +334,8 @@ def _record_hashes(record_path: str) -> Iterator[tuple[str, str]]:
 
 def _sha256_record(path: str) -> str | None:
     """`sha256=<urlsafe-b64-no-pad>` of a file's bytes — the exact form RECORD stores."""
+    if not _is_regular(path):                          # FIFO/device → skip, never a blocking open (#1226)
+        return None
     try:
         with open(path, "rb") as fh:
             digest = hashlib.sha256(fh.read()).digest()

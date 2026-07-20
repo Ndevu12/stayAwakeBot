@@ -13,7 +13,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from stayawake.bots.security.models import INFECTED, SUSPICIOUS
+from stayawake.bots.security.models import CLEAN, INFECTED, SUSPICIOUS
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions
@@ -129,6 +129,42 @@ class TestSymlinkEscape(unittest.TestCase):
         (self.d / "loop_b").symlink_to(self.d / "loop_a")
         r = self._scan_dir()                                   # must simply complete
         self.assertIsNone(r.error)
+
+
+@unittest.skipUnless(hasattr(os, "mkfifo"), "FIFOs need POSIX mkfifo")
+class TestNonRegularFiles(unittest.TestCase):
+    """#1226: a FIFO/socket/device with a scannable name must NOT hang the scanner's blocking open(),
+    and is a BENIGN skip (a pipe has no static content) — never a recorded gap that fails the scan."""
+
+    def setUp(self):
+        self.d = Path(tempfile.mkdtemp())
+
+    def _alarm(self, seconds=30):
+        # Hard guard: if the read-path regresses to a blocking open() on the FIFO, fail fast instead of
+        # hanging CI forever. (SIGALRM is POSIX — same availability as mkfifo, so this class is gated.)
+        import signal
+        signal.signal(signal.SIGALRM, lambda *_: (_ for _ in ()).throw(AssertionError("scan hung on a FIFO")))
+        signal.alarm(seconds)
+        self.addCleanup(signal.alarm, 0)
+
+    def test_fifo_is_skipped_not_read_and_not_a_gap(self):
+        self._alarm()
+        os.mkfifo(self.d / "evil.js")                          # a FIFO with a scannable extension
+        (self.d / "real.js").write_text("const x = 1;\n")
+        t = LocalRepoTarget(self.d, "t", ScanOptions())
+        self.assertIsNone(t.read_text("evil.js"))             # returns at once, nothing to scan
+        self.assertIsNone(t.read_bytes("evil.js"))
+        self.assertEqual(list(t.read_source_windows("evil.js")), [])
+        self.assertEqual(t.read_errors, [])                   # BENIGN skip — not a gap (no fail-closed)
+        self.assertEqual(t.read_text("real.js"), "const x = 1;\n")   # real files still read
+
+    def test_scan_over_a_repo_with_a_fifo_completes_cleanly(self):
+        self._alarm()
+        os.mkfifo(self.d / "pipe.js")
+        (self.d / "ok.js").write_text("const y = 2;\n")
+        r = scan_target(LocalRepoTarget(self.d, "t", ScanOptions()), SIGS, [])
+        self.assertIsNone(r.error)                            # the FIFO didn't hang or fail the scan
+        self.assertEqual(r.verdict, CLEAN)
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ is decoupled from the source (DIP).
 from __future__ import annotations
 
 import os
+import stat as _stat
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterator
@@ -122,10 +123,15 @@ class Target:
     def read_bytes(self, rel: str, limit: int | None = None) -> bytes | None:
         p = self.root / rel
         try:
-            if limit is None and p.stat().st_size > self.opts.max_file_bytes:
-                return None                       # policy skip (too large) — a benign skip
+            st = p.stat()                         # follows a symlink to its target
         except OSError:
             return None                           # can't stat (vanished / race) — treat as absent
+        if not _stat.S_ISREG(st.st_mode):
+            return None                           # FIFO/socket/device → benign skip: a blocking open()
+            #                                       would HANG the scan forever, and there's no static
+            #                                       content behind a pipe/device to scan anyway (#1226).
+        if limit is None and st.st_size > self.opts.max_file_bytes:
+            return None                           # policy skip (too large) — a benign skip
         try:
             with p.open("rb") as fh:
                 return fh.read(limit) if limit else fh.read()
@@ -168,12 +174,16 @@ class Target:
         p = self.root / rel
         ext = _ext(rel)
         try:
-            size = p.stat().st_size
+            st = p.stat()
         except FileNotFoundError:
             return None                           # vanished (race) — benign skip
         except OSError as exc:
             self._note_unreadable(rel, p, exc)    # present but unstattable — a gap (unless a symlink)
             return None
+        if not _stat.S_ISREG(st.st_mode):
+            return None                           # FIFO/socket/device → benign skip, never a blocking
+            #                                       open() that hangs the scan (#1226)
+        size = st.st_size
         if size > self.opts.max_file_bytes:
             if ext not in SOURCE_EXTS:
                 return None                       # genuinely large binary — skip
@@ -212,12 +222,15 @@ class Target:
         p = self.root / rel
         ext = _ext(rel)
         try:
-            size = p.stat().st_size
+            st = p.stat()
         except FileNotFoundError:
             return                                # vanished (race) — benign skip
         except OSError as exc:
             self._note_unreadable(rel, p, exc)    # unstattable — a gap (unless a symlink loop/escape)
             return
+        if not _stat.S_ISREG(st.st_mode):
+            return                                # FIFO/socket/device → benign skip (no blocking open, #1226)
+        size = st.st_size
         if ext not in SOURCE_EXTS:
             # NON-source file: the confirmed content tier (this reader's ONLY consumer) scans a bounded,
             # NUL-stripped head+tail so a payload hidden under a benign extension — an oversized `.bin`,
