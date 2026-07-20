@@ -12,7 +12,7 @@ import sys
 
 from stayawake.cli._banner import render_intro
 from stayawake.cli._meta import __version__
-from stayawake.core.terminal import color_level
+from stayawake.utils.terminal import color_level
 
 
 def register(sub) -> None:

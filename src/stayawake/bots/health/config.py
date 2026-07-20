@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from stayawake.core.config import load_yaml
+from stayawake.utils.config import load_yaml
 from stayawake.bots.health.models import UrlCheckConfig
 
 

@@ -16,8 +16,8 @@ from pathlib import Path
 
 from stayawake.core.adapters import github_api
 from stayawake.core import git as gitutil
-from stayawake.core import textsafe
-from stayawake.core.streaming import status
+from stayawake.utils import textsafe
+from stayawake.utils.streaming import status
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.targets import LocalRepoTarget
 from stayawake.bots.security.models import QUARANTINE_DIR, CONFIRMED

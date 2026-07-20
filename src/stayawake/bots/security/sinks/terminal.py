@@ -12,9 +12,9 @@ import sys
 from stayawake.bots.security.models import ScanReport
 from stayawake.bots.security.sinks.base import Sink
 from stayawake.bots.security.sinks.render import render_terminal
-from stayawake.core.pager import page
-from stayawake.core.streaming import Streamer
-from stayawake.core.terminal import supports_color
+from stayawake.utils.pager import page
+from stayawake.utils.streaming import Streamer
+from stayawake.utils.terminal import supports_color
 
 # Fleets bigger than this collapse their CLEAN rows to a count in the terminal table (the
 # full inventory still ships in the --json / -d artifact). Keeps a 200-repo sweep readable.

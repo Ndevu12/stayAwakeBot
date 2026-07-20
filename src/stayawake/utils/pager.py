@@ -15,7 +15,7 @@ import subprocess
 import sys
 from typing import TextIO
 
-from stayawake.core import env
+from stayawake.utils import env
 
 # `-R` keeps colour escapes; we deliberately DON'T pass `-F`/`-X`. `-F` ("quit if it fits one
 # screen") is redundant — we already write short reports straight through, below — and the

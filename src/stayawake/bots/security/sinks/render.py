@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import Any
 
 from stayawake.bots.security.redaction import render_redacted
-from stayawake.core.render import SEVERITY, STATUS, paint, rule
+from stayawake.utils.render import SEVERITY, STATUS, paint, rule
 
 # Colour is emitted only when the terminal sink says stdout is a TTY (and NO_COLOR isn't set) —
 # the palette and `paint()` live in core.render so this surface and the audit report never drift

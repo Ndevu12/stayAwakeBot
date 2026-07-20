@@ -12,7 +12,7 @@ import sys
 from stayawake.cli import commands
 from stayawake.cli._banner import render_welcome
 from stayawake.cli._meta import __version__
-from stayawake.core.terminal import color_level
+from stayawake.utils.terminal import color_level
 
 
 def build_parser() -> argparse.ArgumentParser:
