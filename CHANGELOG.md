@@ -139,6 +139,15 @@ All notable changes to this project are documented here. The format is based on
   (the scan output is byte-for-byte identical).
 
 ### Fixed
+- **`saw guard --remote` no longer blames your token when a repo simply has no CI** (#1243). Every
+  unreadable repo used to render the same `could not read … (missing/private/no token?)` — so a sweep
+  where most repos just have **no `.github/workflows/`** (a 404, the normal state) looked like an auth
+  outage. The GitHub read now surfaces a **typed cause** (`github_api.read_dir`/`read_file` →
+  `not_found`/`unauthorized`/`forbidden`/`rate_limited`/`network`), and `guard check` attributes it: a
+  404 is a **calm "no CI, nothing to gate"** (not an error); 401 → "run `gh auth login`"; a real
+  rate-limit → "retry in Ns"; private/scope and network get their own messages. The sweep summary now
+  counts "no CI" separately from "unreadable". `saw audit`'s remote check no longer launders a read
+  failure into a false "gate not required" (via a new `probe_remote_gate` that carries the cause).
 - **`saw guard` now recognises a worm gate installed by *any* mechanism**, not just the packaged
   `Ndevu12/strix` action. A repo that gates via a **local composite action** (`uses: ./…` whose
   `action.yml` runs the scanner) or a **direct `saw scan`/`saw audit` step** used to be reported as
