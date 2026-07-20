@@ -126,13 +126,20 @@ frozen (Open/Closed), so a new ecosystem is just another resolver. The blocklist
   - A `package.json` **version range** (`^4.2.11`) is ambiguous — it may or may not resolve to the
     bad version — so ranges are **not** matched; the lockfile's resolved version is the source of
     truth. A range-only project with no lockfile is a documented residual.
-  - **Behaviorally scanning `node_modules` content stays off by DEFAULT** — it is expensive and
-    noisy, and the lockfile audit already names exactly what is installed. The behavioral engine
-    covers a payload that reaches the *repo tree*; installed dependency *content* is out of a normal
-    scan's scope. The one **opt-in** exception is `saw audit --verify`, which content-scans a *single
-    suspect directory* a host-artifact probe flagged (e.g. a `~/.node_modules` in `$HOME`) — excludes
-    off, bounded, CONFIRMED-only — to corroborate that lone weak indicator, without changing how
-    `saw scan` handles repositories.
+  - **Behaviorally scanning `node_modules` content stays off by DEFAULT** — it is expensive
+    (~10–60s on a big tree) and the density heuristic false-positives on minified code, so a normal
+    scan checks only each installed package's **entry points** (`main`/`bin`) plus its identity /
+    ghost / lifecycle-hook signals. A loader payload in a **non-entry** file of an on-lockfile package
+    is therefore out of a normal scan's scope — and, so a `clean` verdict is not silently hollow, a
+    scan of a repo with `node_modules` prints an honest **coverage note** saying exactly that (#1222).
+    Two **opt-ins** look deeper, both **CONFIRMED-only** (never the FP-prone density heuristic):
+    - **`saw scan --deep`** (#1222) content-scans *every* source file of a repo's installed npm
+      packages with the confirmed loader fingerprints (0 false positives measured over 531 MB of real
+      vendored code) — catching that non-entry payload. Bounded (per-package file cap + a shared byte
+      budget whose exhaustion is reported as a partial-coverage note); npm-only.
+    - **`saw audit --verify`** content-scans a *single suspect directory* a host-artifact probe flagged
+      (e.g. a `~/.node_modules` in `$HOME`), excludes off, to corroborate that lone weak indicator —
+      without changing how `saw scan` discovers or scans repositories.
   - Lockfiles are read **whole** (up to 32 MB, bypassing the scan's head/tail truncation so a large
     `package-lock.json` still parses); a pathological lockfile beyond that cap, and an aliased
     dependency in a *yarn/pnpm* lockfile (npm aliases are resolved via the lockfile's `name` field),

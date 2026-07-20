@@ -156,7 +156,20 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False,
                         out.append(f"        → details: {textsafe.plain(a['reference'])}")
     if s.get("suspicious"):
         out += ["", "suspicious = heuristic match(es) to review; not asserted as malware."]
+    notes = _coverage_notes(payload)               # honest coverage caveats (#1222) — never gating
+    if notes:
+        out += ["", "Coverage notes (not gating):"] + [f"  • {n}" for n in notes]
     return "\n".join(out) + "\n"
+
+
+def _coverage_notes(payload: dict[str, Any]) -> list[str]:
+    """Unique, order-preserving coverage notes across all results (e.g. 'node_modules not deep-scanned',
+    #1222) — the same note repeats per repo, so dedup to one line."""
+    seen: dict[str, None] = {}
+    for r in payload.get("results", []):
+        for n in r.get("notes", []):
+            seen.setdefault(n, None)
+    return list(seen)
 
 
 def render_markdown(payload: dict[str, Any]) -> str:
@@ -219,4 +232,8 @@ def render_markdown(payload: dict[str, Any]) -> str:
                 if a.get("reference"):
                     out.append(f"  - details: {textsafe.sanitize(a['reference'])}")
             out.append("")
+    notes = _coverage_notes(payload)
+    if notes:
+        out += ["## Coverage notes", "", "_Not gating — what this scan did not look at._", ""]
+        out += [f"- {n}" for n in notes] + [""]
     return "\n".join(out) + "\n"

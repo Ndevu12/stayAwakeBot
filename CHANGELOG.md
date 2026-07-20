@@ -7,6 +7,18 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **`saw scan --deep` content-scans installed dependency CODE for loader payloads** (#1222). A normal
+  scan excludes `node_modules` (minified vendored code makes the density heuristic all false positives)
+  and only checks each installed package's **entry points** — so a confirmed loader fingerprint buried
+  in a **non-entry** file of an on-lockfile package read **clean**. `--deep` extends the **FP-safe
+  confirmed loader tier** (the same fingerprints the entry check uses — **0 hits measured over 531 MB
+  of real vendored code**) to *all* of a package's source files, catching that payload. It is opt-in
+  because a full vendored sweep adds ~10–60s on a big `node_modules`; it is **bounded** (per-package
+  file cap + a shared byte budget as a DoS backstop) and never runs the density/obfuscation heuristics
+  that would false-positive on minified code. To keep a default `clean` from being silently hollow, a
+  normal scan of a repo with `node_modules` now prints an honest **coverage note** ("node_modules was
+  not content-scanned — run `saw scan --deep`"), surfaced in the terminal report, the Markdown report,
+  and the JSON (`result.notes`); it never affects the verdict or exit code.
 - **`saw scan` now tells you how to FIX a flagged dependency, not just that it's flagged** (#1252).
   A vulnerable dependency finding now carries actionable remediation: the **first patched version** to
   upgrade to (read from the OSV advisory's `fixed` range event, which the corpus already stored) plus
