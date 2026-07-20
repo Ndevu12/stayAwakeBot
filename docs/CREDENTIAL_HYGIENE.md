@@ -129,15 +129,18 @@ git config --get-all credential.helper   # shows: osxkeychain <newline> (blank) 
 **c. Inspect before deleting** (avoid nuking the wrong entry if you have several):
 
 ```bash
-security find-internet-password -s github.com -g       # macOS: view first match
-# scope by account if needed: -a <account>
+security find-internet-password -s github.com          # macOS: presence (add -g to view the secret)
+secret-tool lookup server github.com >/dev/null; echo $?   # Linux (libsecret): 0 = present (secret discarded)
+cmdkey /list:git:https://github.com                    # Windows: show the Credential Manager entry
 ```
 
-**d. Delete the cached token:**
+**d. Delete the cached token** — use your platform's store (`saw audit` prints the one for your OS):
 
 ```bash
-security delete-internet-password -s github.com        # macOS
-# Linux (libsecret): git credential-libsecret erase <<< $'protocol=https\nhost=github.com\n'
+security delete-internet-password -s github.com        # macOS Keychain
+secret-tool clear server github.com                    # Linux libsecret/gnome-keyring
+#   (equivalently: git credential-libsecret erase <<< $'protocol=https\nhost=github.com\n')
+cmdkey /delete:git:https://github.com                  # Windows Credential Manager
 ```
 
 **e. VERIFY it actually stopped caching** — the step everyone skips:
@@ -152,12 +155,13 @@ ssh -T git@github.com                                  # confirm you are STILL a
 
 ## 6. Scope of the fix — what deletion does NOT touch
 
-There are (at least) three separate github.com credential stores on a typical Mac. Removing one leaves
-the others:
+There are (at least) three separate github.com credential stores on a typical dev machine. Removing one
+leaves the others (the table names the macOS stores; Linux libsecret / Windows Credential Manager have
+the same git-HTTPS-vs-gh-vs-SSH split):
 
 | Store | Used by | Removed by §5? |
 | --- | --- | --- |
-| git-HTTPS token (keychain *internet-password*) | git over HTTPS | ✅ yes |
+| git-HTTPS token (macOS keychain *internet-password* / Linux libsecret / Windows Credential Manager) | git over HTTPS | ✅ yes |
 | `gh` token (keychain *generic-password*, `gh:github.com`) | the `gh` CLI | ❌ no — `gh auth logout` to remove |
 | SSH keys (`~/.ssh/id_*`) | git over SSH | ❌ no — removing breaks your pushes |
 

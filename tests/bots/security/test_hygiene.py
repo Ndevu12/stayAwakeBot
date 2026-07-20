@@ -13,12 +13,14 @@ from stayawake.bots.security import hygiene
 
 
 class TestCredentials(unittest.TestCase):
-    def _keychain(self, *, served=False, ssh=True, gh=True, origins=None):
-        """check_credentials() with the keychain hit and the given machine shape (#1237). `served` is
-        the tri-state HTTPS-in-use probe: True (in use) | False (unused) | None (couldn't probe)."""
+    def _keychain(self, *, served=False, ssh=True, gh=True, origins=None, store=None):
+        """check_credentials() with the keychain hit and the given machine shape (#1237/#1260). `served`
+        is the tri-state HTTPS-in-use probe: True (in use) | False (unused) | None (couldn't probe).
+        `store` selects the platform's OS keychain (default: macOS) — mocked at `_detect_cached_credential`
+        so the test is independent of the host it runs on."""
         C = hygiene.credentials
         origins = origins if origins is not None else [("file:/Users/u/.gitconfig", "osxkeychain")]
-        with mock.patch.object(C, "_macos_keychain_has_github", return_value=True), \
+        with mock.patch.object(C, "_detect_cached_credential", return_value=store or C._MACOS_STORE), \
              mock.patch.object(C, "_git_credentials_file_with_github", return_value=None), \
              mock.patch.object(C, "_https_token_status", return_value=served), \
              mock.patch.object(C, "_ssh_key_present", return_value=ssh), \
@@ -96,7 +98,7 @@ class TestCredentials(unittest.TestCase):
         self.assertNotIn('--add credential.helper ""', f.command)
 
     def test_clean_machine_has_no_credential_issues(self):
-        with mock.patch.object(hygiene.credentials, "_macos_keychain_has_github", return_value=False), \
+        with mock.patch.object(hygiene.credentials, "_detect_cached_credential", return_value=None), \
              mock.patch.object(hygiene.credentials, "_git_credentials_file_with_github", return_value=None):
             self.assertEqual(hygiene.check_credentials(), [])
 
@@ -110,7 +112,7 @@ class TestCredentials(unittest.TestCase):
     def test_plaintext_remediation_is_wiper_safe(self):
         # The rotation advice must sequence rotation LAST and name the wiper tripwire —
         # never the old unconditional "rotate the exposed token on GitHub" (#1088).
-        with mock.patch.object(hygiene.credentials, "_macos_keychain_has_github", return_value=False), \
+        with mock.patch.object(hygiene.credentials, "_detect_cached_credential", return_value=None), \
              mock.patch.object(hygiene.credentials, "_git_credentials_file_with_github",
                                return_value=Path("/home/u/.git-credentials")):
             issues = hygiene.check_credentials()
@@ -118,6 +120,62 @@ class TestCredentials(unittest.TestCase):
         self.assertIn("gh-token-monitor.service", rem)          # names the wiper tripwire
         self.assertIn("Rotate the exposed token LAST", rem)     # rotation is sequenced last
         self.assertNotIn("rotate the exposed token on GitHub", rem)  # old unsafe wording gone
+
+    # --- cross-platform detection (#1260) ---------------------------------------------------------
+    def _detect(self, platform, *, mac=False, lin=False, win=False):
+        C = hygiene.credentials
+        with mock.patch.object(C.sys, "platform", platform), \
+             mock.patch.object(C, "_macos_keychain_has_github", return_value=mac), \
+             mock.patch.object(C, "_linux_secret_has_github", return_value=lin), \
+             mock.patch.object(C, "_windows_credential_has_github", return_value=win):
+            return C._detect_cached_credential()
+
+    def test_detect_dispatches_to_the_right_store_per_platform(self):
+        C = hygiene.credentials
+        self.assertIs(self._detect("darwin", mac=True), C._MACOS_STORE)
+        self.assertIs(self._detect("linux", lin=True), C._LINUX_STORE)
+        self.assertIs(self._detect("win32", win=True), C._WINDOWS_STORE)
+
+    def test_detect_returns_none_when_the_store_is_empty(self):
+        self.assertIsNone(self._detect("darwin", mac=False))
+        self.assertIsNone(self._detect("linux", lin=False))
+        self.assertIsNone(self._detect("win32", win=False))
+
+    def test_detect_unknown_platform_is_none(self):
+        # An unsupported platform (or one whose store CLI is absent) reports nothing, never errors.
+        self.assertIsNone(self._detect("freebsd", mac=True, lin=True, win=True))
+
+    def test_linux_probe_never_captures_the_secret(self):
+        # SAFETY (#1260): libsecret's query verbs load the secret, so the Linux probe must run with
+        # output DISCARDED (capture=False) and read presence from the exit code — saw never holds the
+        # token. Lock both the discard and the rc-only detection.
+        C = hygiene.credentials
+        with mock.patch.object(C, "_run", return_value=mock.Mock(returncode=0)) as run:
+            self.assertTrue(C._linux_secret_has_github())
+        self.assertEqual(run.call_args.kwargs.get("capture"), False)   # secret discarded, not captured
+        self.assertIn("lookup", run.call_args.args[0])                 # rc-based lookup, not printing search
+        with mock.patch.object(C, "_run", return_value=mock.Mock(returncode=1)):
+            self.assertFalse(C._linux_secret_has_github())             # rc!=0 → absent
+
+    def test_linux_finding_names_store_and_uses_libsecret_removal(self):
+        f = self._keychain(served=False, ssh=True, store=hygiene.credentials._LINUX_STORE,
+                           origins=[("file:/home/u/.gitconfig", "libsecret")])
+        self.assertIn("libsecret", f.title)
+        self.assertIn("secret-tool clear server github.com", f.command)
+        self.assertNotIn("security delete-internet-password", f.command)   # not the macOS command
+
+    def test_windows_finding_names_store_and_uses_cmdkey_removal(self):
+        f = self._keychain(served=False, ssh=True, store=hygiene.credentials._WINDOWS_STORE,
+                           origins=[("file:C:/Users/u/.gitconfig", "manager")])
+        self.assertIn("Windows Credential Manager", f.title)
+        self.assertIn("cmdkey /delete:git:https://github.com", f.command)
+
+    def test_served_token_never_offers_delete_on_any_platform(self):
+        # The lockout guard is platform-independent: HTTPS in use → no delete, whatever the store.
+        for store in (hygiene.credentials._MACOS_STORE, hygiene.credentials._LINUX_STORE,
+                      hygiene.credentials._WINDOWS_STORE):
+            f = self._keychain(served=True, ssh=False, gh=False, store=store)
+            self.assertIsNone(f.command)
 
 
 class TestRunnerPersistence(unittest.TestCase):
