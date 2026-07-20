@@ -19,8 +19,9 @@ run on your own machine to detect, report, and auto-remediate self-propagating m
 - [Synopsis & global options](#synopsis--global-options)
 - [Commands](#commands)
   - [`saw scan`](#saw-scan) · [`saw fix`](#saw-fix) · [`saw discard`](#saw-discard) ·
-    [`saw audit`](#saw-audit) · [`saw db`](#saw-db) · [`saw search`](#saw-search) ·
-    [`saw intro`](#saw-intro) · [`saw doctor`](#saw-doctor) · [`saw completion`](#saw-completion)
+    [`saw audit`](#saw-audit) · [`saw guard`](#saw-guard) · [`saw db`](#saw-db) ·
+    [`saw search`](#saw-search) · [`saw intro`](#saw-intro) · [`saw doctor`](#saw-doctor) ·
+    [`saw completion`](#saw-completion)
 - [Remote targeting (`--remote`)](#remote-targeting---remote)
 - [How reports are stored (evidence & redaction)](#how-reports-are-stored-evidence--redaction)
 - [Exit codes](#exit-codes)
@@ -41,6 +42,7 @@ saw <command> [options] [TARGETS...]      # no command → welcome banner;  -h/-
 | [`saw fix`](#saw-fix) | Clean findings onto a `security/auto-clean` branch | Branch only (never your working tree); no push unless `--pr` |
 | [`saw discard`](#saw-discard) | Undo `saw fix`: delete the branch and/or close its PR | git / GitHub API |
 | [`saw audit`](#saw-audit) | Local hygiene: credentials, editor, host artifacts, branch protection (`--verify` content-scans a suspect dir) | Read-only |
+| [`saw guard`](#saw-guard) | Install & verify the **Strix worm-guard CI gate** across repos — `check` grades it (present / SHA-pinned / current / required); `setup` installs or surgically pin-bumps it | `check`: **read-only**; `setup`: working tree, or PR with `--pr`/`--remote` (never pushes a default branch) |
 | [`saw db`](#saw-db) | Manage the offline advisory DB (malicious-package + CVE corpus) a scan consults | Cache only (`~/.cache/saw/advisories`) |
 | [`saw search`](#saw-search) | Fuzzy "what's the command for…?" lookup | — |
 | [`saw intro`](#saw-intro) | Branded tour (also the bare-`saw` welcome) | — |
@@ -56,12 +58,16 @@ saw fix .                         # prepare a clean branch for this repo; review
 saw fix --pr                      # also push + open/update one rolling PR per repo
 saw discard --branch              # delete the auto-clean branch (local + remote)
 saw audit                         # local credential + editor hygiene
+saw guard check                   # is this repo's Strix CI gate present + SHA-pinned + current?
+saw guard setup --pr              # install/bump the gate → one rolling PR (never pushes main)
 
 # Remote (GitHub) sweeps — see "Remote targeting"
 saw scan --remote                 # your own GitHub repos (or configured targets)
 saw scan --org UB-TechDEV         # a whole org (implies --remote)
 saw scan --remote Ndevu12/strix   # one specific repo (owner/repo)
 saw fix --remote                  # clone → fix → one rolling PR per repo
+saw guard check --org UB-TechDEV -f   # fail CI if any repo lacks a required gate
+saw guard setup --user Ndevu12    # clone each of a user's repos → open a gate PR
 ```
 
 ## Overview
@@ -493,9 +499,9 @@ code is the verdict, unconditionally** — a CI gate just checks it, no flag req
 
 | Code | Meaning |
 | --- | --- |
-| `0` | Clean. For `saw scan`, no scanned target is infected. For `saw audit`, no warning-level issue (or issues found without `-f`). |
-| `1` | For `saw scan`, at least one target is **infected** — returned unconditionally (there is no `--fail`). For `saw audit`, a warning-level issue was found **and** `-f/--fail` was set. |
-| `2` | Usage error (unknown command, bad option, or a missing explicit `--config` path), **or** a scan that could not complete — a malformed config (e.g. an `allowlist` that isn't a list of mappings) or a target that errored during scanning. `saw scan` fails **closed** here: a target it could not scan is never reported as clean. |
+| `0` | Clean. For `saw scan`, no scanned target is infected. For `saw audit`, no warning-level issue (or issues found without `-f`). For `saw guard check`, every gate is present, pinned, current, and required (or issues found without `-f`); for `saw guard setup`, every repo succeeded or was already up to date. |
+| `1` | For `saw scan`, at least one target is **infected** — returned unconditionally (there is no `--fail`). For `saw audit`, a warning-level issue was found **and** `-f/--fail` was set. For `saw guard check`, a gate is absent, unpinned, stale, or not required **and** `-f` was set; for `saw guard setup`, a repo errored or a PR could not be opened. |
+| `2` | Usage error (unknown command, bad option, or a missing explicit `--config` path), **or** a scan that could not complete — a malformed config (e.g. an `allowlist` that isn't a list of mappings) or a target that errored during scanning. `saw scan` fails **closed** here: a target it could not scan is never reported as clean. `saw guard setup` also exits `2` when it can't resolve the Strix release SHA (offline → pass `--ref`). |
 
 ## Command aliases & shell completion
 
@@ -507,7 +513,9 @@ Two independent shortcuts help you type less.
 | --- | --- |
 | `scan` | `s`, `sc` |
 | `audit` | `au` |
+| `guard` | `gd` |
 | `search` | `se` |
+| `intro` | `welcome` |
 | `doctor` | `d`, `doc` |
 | `completion` | `comp` |
 | `fix`, `discard` | *(none — always spelled out)* |

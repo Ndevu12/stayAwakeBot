@@ -66,6 +66,18 @@ jobs:
 published `stayawakebot` scanner from PyPI. Pin `@<sha>` rather than `@v1` for tamper-evident
 runs. See [Security baseline](prevent/SECURITY_BASELINE.md).
 
+**Don't hand-maintain that workflow — let `saw` manage it.** [`saw guard setup`](docs/CLI.md#saw-guard)
+writes (or *surgically pin-bumps*) exactly this gate for you — locally to review + commit, or
+`--pr` to open a rolling PR — and [`saw guard check`](docs/CLI.md#saw-guard) verifies a repo's gate is
+present, **SHA-pinned**, current, and **required** by branch protection. Both sweep many repos at once
+(local by default, or `--remote`/`--user`/`--org`), just like `saw scan`/`saw fix`:
+
+```bash
+saw guard check                       # is this repo's gate present + SHA-pinned + current?
+saw guard setup --pr                  # install/bump the gate → one rolling PR (never pushes main)
+saw guard check --org UB-TechDEV -f   # CI gate: fail if any repo lacks a required gate
+```
+
 ## Run via Docker (no local Python needed)
 
 Prefer not to install a Python toolchain at all? Pull the image and scan a mounted repo:
@@ -94,7 +106,7 @@ built from the same wheel published to PyPI, and ships SLSA provenance + SBOM at
 
 ## Documentation
 
-- [CLI command guide](docs/CLI.md) — the `saw` security commands (scan, run, fix, audit, …)
+- [CLI command guide](docs/CLI.md) — the `saw` security commands (scan, fix, audit, guard, …)
 - [Usage](docs/USAGE.md) — install, run both bots, secrets, GitHub Actions, deploy your own
 - [Configuration & Reports](docs/CONFIGURATION.md) — config file fields and report formats
 - [Architecture](docs/ARCHITECTURE.md) — package layout and design principles
