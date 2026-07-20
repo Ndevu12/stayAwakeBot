@@ -179,6 +179,30 @@ def _remote_action_reader(owner: str, name: str, token: str | None):
     return read
 
 
+def _ref_workflows(repo: Path, ref: str) -> dict[str, str]:
+    """Workflow files as they exist ON a git ref (e.g. `origin/main`) — so `--pr` plans against the
+    PR TARGET (the default branch), not a possibly-untracked working-tree file (#1243 follow-up)."""
+    out: dict[str, str] = {}
+    for path in gitutil.list_tree(repo, ref, WORKFLOW_DIR):
+        if path.endswith((".yml", ".yaml")):
+            text = gitutil.file_at(repo, ref, path)
+            if text:
+                out[path] = text
+    return out
+
+
+def _ref_action_reader(repo: Path, ref: str):
+    """Resolve a `uses: ./path` local composite action to its action.yml AS IT EXISTS ON `ref`."""
+    def read(uses: str) -> str | None:
+        rel = uses[2:].strip("/")
+        for fn in ("action.yml", "action.yaml"):
+            text = gitutil.file_at(repo, ref, f"{rel}/{fn}")
+            if text:
+                return text
+        return None
+    return read
+
+
 @dataclass
 class Freshness:
     state: str                 # "fresh" | "behind" | "floating" | "unknown"
@@ -640,19 +664,31 @@ def _setup_pr(repo: Path, plan: SetupPlan, base: str, token: str | None, spin: b
 
 def setup(repo: str | Path | None = None, *, token: str | None = None, ref: str | None = None,
           dry_run: bool = False, pr: bool = False, branch: str | None = None,
-          spin: bool = False) -> SetupResult:
+          spin: bool = False, pin: "Pin | None" = None) -> SetupResult:
     """Install or update the Strix gate on a LOCAL repo. Default: write the change into the working
     tree for the operator to review + commit + PR. `--pr`: open a rolling PR via the ladder. Either
-    way the default branch is only ever proposed to, never pushed. Fails closed if the pin can't be
-    resolved (offline → pass `ref`)."""
+    way the default branch is only ever proposed to, never pushed. A sweep passes a precomputed `pin`
+    (resolved once); otherwise it resolves the latest release here (fails closed offline → pass `ref`)."""
     repo = Path(repo or ".")
-    pin = resolve_pin(token, ref)
+    if pin is None:
+        pin = resolve_pin(token, ref)
     if pin is None:
         return SetupResult(error="couldn't resolve the latest Strix release "
                                  "(offline? pass --ref <sha|tag> to pin explicitly)")
     default_branch = branch or gitutil.default_branch(repo)
-    plan = plan_setup(_local_workflows(repo), default_branch, pin,
-                      read_action=_local_action_reader(repo))
+    if pr:
+        # `--pr` targets origin's default branch, so plan against WHAT ORIGIN HAS — never a dirty or
+        # UNTRACKED working tree. A worm-guard.yml written by a prior local `setup` (uncommitted) must
+        # not mask that origin lacks the gate, or `--pr` would wrongly no-op and never open the PR.
+        gitutil.fetch(repo, "origin", default_branch)
+        baseref = (f"origin/{default_branch}" if gitutil.ref_exists(repo, f"origin/{default_branch}")
+                   else default_branch)
+        workflows = _ref_workflows(repo, baseref)
+        reader = _ref_action_reader(repo, baseref)
+    else:
+        workflows = _local_workflows(repo)
+        reader = _local_action_reader(repo)
+    plan = plan_setup(workflows, default_branch, pin, read_action=reader)
     if plan.action == "present":
         # Already guarded by another mechanism — nothing to install; render explains.
         return SetupResult(plan=plan)
@@ -891,6 +927,10 @@ def setup_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
         if not resolved:
             prog.line(resolution.REMOTE_EMPTY_HINT)
             return 0
+        pin = resolve_pin(token, ref)                    # resolve the latest Strix release ONCE
+        if pin is None:
+            prog.line("couldn't resolve the latest Strix release (offline? pass --ref <sha|tag>)")
+            return 2
         prog.line(f"Setting up {len(resolved)} GitHub repositor{'y' if len(resolved) == 1 else 'ies'}…")
         for i, slug in enumerate(resolved, 1):
             prog.line(f"  [{i}/{len(resolved)}] {slug}")
@@ -899,12 +939,16 @@ def setup_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
                 if clone is None:
                     res = SetupResult(error=f"{slug}: clone failed (check token access)")
                 else:                                    # a remote repo has no working tree → always PR
-                    res = _safe_setup(clone, token=token, ref=ref, dry_run=dry_run, pr=True,
+                    res = _safe_setup(clone, token=token, pin=pin, dry_run=dry_run, pr=True,
                                       branch=branch, spin=prog.enabled)
             prog.line(_indent(render_setup(res, color=color)))
             results.append(res)
     else:
         token, _ = auth.resolve_token() if (pr or not ref) else (None, None)
+        pin = resolve_pin(token, ref)                    # resolve the latest Strix release ONCE
+        if pin is None:
+            prog.line("couldn't resolve the latest Strix release (offline? pass --ref <sha|tag>)")
+            return 2
         repos = resolution.discover_local_repos(_local_patterns(cfg, paths), ScanOptions())
         if not repos:
             prog.line("No local git repositories found.")
@@ -912,13 +956,38 @@ def setup_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
         prog.line(f"Setting up {len(repos)} local repositor{'y' if len(repos) == 1 else 'ies'}…")
         for i, repo in enumerate(repos, 1):
             prog.line(f"  [{i}/{len(repos)}] {_disp(repo)}")
-            res = _safe_setup(repo, token=token, ref=ref, dry_run=dry_run, pr=pr,
+            res = _safe_setup(repo, token=token, pin=pin, dry_run=dry_run, pr=pr,
                               branch=branch, spin=prog.enabled)
             prog.line(_indent(render_setup(res, color=color)))
             results.append(res)
 
-    errored = [r for r in results if r.error]
+    # Honest tally — DON'T say "Set up N" when nothing changed (the user saw "Set up 31" while every
+    # repo was a no-op → looked like 31 PRs that never appeared). Count what ACTUALLY happened, and —
+    # critically — only count a PR that truly opened. `submit is not None` is NOT success: the ladder
+    # returns a SubmitResult for push-succeeded-but-PR-failed / fork-not-ready / no-write-floor too, and
+    # counting those as "opened" would re-introduce the very phantom-PR dishonesty this fixes.
     n = len(results)
-    prog.line(f"\nSet up {n} repositor{'y' if n == 1 else 'ies'}"
-              + (f"; {len(errored)} errored." if errored else "."))
-    return 1 if errored else 0
+    opened = [r for r in results if not r.error and not r.dry_run
+              and (r.wrote is not None
+                   or (r.submit is not None and r.submit.kind in ("pr", "fork-pr")))]
+    incomplete = [r for r in results if not r.error and not r.dry_run
+                  and r.submit is not None and r.submit.kind not in ("pr", "fork-pr")]
+    previewed = sum(1 for r in results if r.dry_run)
+    noop = sum(1 for r in results if r.plan and r.plan.action == "noop" and not r.error and not r.dry_run)
+    present = sum(1 for r in results if r.plan and r.plan.action == "present")
+    errored = sum(1 for r in results if r.error)
+    parts = []
+    if opened:
+        parts.append(f"{len(opened)} {'PR opened/updated' if (pr or remote) else 'written to the working tree'}")
+    if previewed:
+        parts.append(f"{previewed} previewed")
+    if noop:
+        parts.append(f"{noop} already up to date")
+    if present:
+        parts.append(f"{present} already guarded by another mechanism")
+    if incomplete:
+        parts.append(f"{len(incomplete)} PR could NOT be opened (see above)")
+    if errored:
+        parts.append(f"{errored} errored")
+    prog.line(f"\n{n} repositor{'y' if n == 1 else 'ies'}: " + (", ".join(parts) or "nothing to do") + ".")
+    return 1 if (errored or incomplete) else 0        # a pushed-but-unopened PR is a failure, not success

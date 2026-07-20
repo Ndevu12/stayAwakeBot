@@ -148,6 +148,15 @@ All notable changes to this project are documented here. The format is based on
   rate-limit → "retry in Ns"; private/scope and network get their own messages. The sweep summary now
   counts "no CI" separately from "unreadable". `saw audit`'s remote check no longer launders a read
   failure into a false "gate not required" (via a new `probe_remote_gate` that carries the cause).
+- **`saw guard setup --pr` now actually opens PRs instead of silently no-op'ing** (#1253). A sweep
+  reported "Set up N repositories … already up to date" while **no PRs appeared**: `--pr`/`--remote`
+  planned the change from the **local working tree**, so an **untracked** `worm-guard.yml` left by a
+  prior default (working-tree) `setup` masked the fact that **origin had no gate** — the planner saw
+  the file and chose `noop`. `--pr`/`--remote` now plan against **`origin/<default>`** (the branch the
+  PR targets, read via `git ls-tree`/`git show`), matching how `saw fix` proposes against the PR base —
+  so a repo whose origin lacks the gate gets a PR. The Strix pin is resolved **once per sweep**, and
+  the sweep prints an **honest per-outcome summary** (opened/updated · already up to date · already
+  guarded by another mechanism · errored) instead of a flat "Set up N".
 - **`saw guard` now recognises a worm gate installed by *any* mechanism**, not just the packaged
   `Ndevu12/strix` action. A repo that gates via a **local composite action** (`uses: ./…` whose
   `action.yml` runs the scanner) or a **direct `saw scan`/`saw audit` step** used to be reported as

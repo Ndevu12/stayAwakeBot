@@ -24,6 +24,7 @@ from stayawake.lib.git.query import (
     changed_paths,
     path_exists_at,
     file_at,
+    list_tree,
     tracked,
     tracked_under,
     file_commits,
@@ -50,7 +51,7 @@ from stayawake.lib.git.write import (
 __all__ = [
     "run", "run_ok", "stdout", "github_https_auth",
     "is_git_repo", "slug_from_url", "origin_slug", "default_branch", "ref_exists",
-    "parents", "changed_paths", "path_exists_at", "file_at", "tracked", "tracked_under",
+    "parents", "changed_paths", "path_exists_at", "file_at", "list_tree", "tracked", "tracked_under",
     "file_commits", "introduced_added_text", "commit_meta", "remote_has_branch",
     "merge_commits", "evil_merge_paths",
     "add_worktree", "remove_worktree", "stage_all", "unstage_cached",
