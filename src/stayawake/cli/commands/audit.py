@@ -7,9 +7,9 @@ import sys
 
 from stayawake.bots.security import hygiene
 from stayawake.core import auth
-from stayawake.core.render import term_width
-from stayawake.core.streaming import Streamer, status, stream_enabled
-from stayawake.core.terminal import supports_color
+from stayawake.utils.render import term_width
+from stayawake.utils.streaming import Streamer, status, stream_enabled
+from stayawake.utils.terminal import supports_color
 
 
 def register(sub) -> None:

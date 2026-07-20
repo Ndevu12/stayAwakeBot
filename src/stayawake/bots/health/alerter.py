@@ -9,10 +9,10 @@ alert channel. Best-effort — a missing token / unreachable GitHub never affect
 """
 from __future__ import annotations
 
-from stayawake.core import env
+from stayawake.utils import env
 from stayawake.core import issue_state
 from stayawake.core.adapters.slack import send_slack
-from stayawake.core.timeutil import now_iso, utc_stamp
+from stayawake.utils.timeutil import now_iso, utc_stamp
 
 LABEL = "availability-status"
 MARKER = "<!-- stayawakebot-sentinel:status -->"

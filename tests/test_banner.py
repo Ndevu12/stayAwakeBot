@@ -9,7 +9,7 @@ from __future__ import annotations
 import unittest
 
 from stayawake.cli._banner import SAW_LOGO, render_intro, render_welcome
-from stayawake.core.terminal import ColorLevel
+from stayawake.utils.terminal import ColorLevel
 
 ESC = "\033"
 

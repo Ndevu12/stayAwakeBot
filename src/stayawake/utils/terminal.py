@@ -25,7 +25,7 @@ import sys
 from enum import IntEnum
 from typing import TextIO
 
-from stayawake.core import env
+from stayawake.utils import env
 
 
 class ColorLevel(IntEnum):

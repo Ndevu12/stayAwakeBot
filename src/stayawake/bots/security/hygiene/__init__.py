@@ -34,7 +34,7 @@ from .host_artifacts import check_host_artifacts
 from .editor import check_vscode
 from .mechanism import check_ssh_authorized_keys, check_shell_profile, check_git_config_execution
 from .remote import check_branch_protection
-from stayawake.core.render import SEVERITY, block, marked_list, paint
+from stayawake.utils.render import SEVERITY, block, marked_list, paint
 
 __all__ = [
     "HygieneIssue", "INCIDENT_TRIGGER_IDS", "incident_response_sequence",

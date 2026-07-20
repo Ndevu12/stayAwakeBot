@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import unittest
 
-from stayawake.core import textsafe
+from stayawake.utils import textsafe
 
 
 class TestSanitize(unittest.TestCase):

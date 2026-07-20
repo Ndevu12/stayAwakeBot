@@ -9,7 +9,7 @@ from __future__ import annotations
 import unittest
 from unittest import mock
 
-from stayawake.core import env
+from stayawake.utils import env
 
 
 def _environ(**kv):

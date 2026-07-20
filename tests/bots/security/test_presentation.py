@@ -12,7 +12,7 @@ from pathlib import Path
 from unittest import mock
 from contextlib import redirect_stderr, redirect_stdout
 
-from stayawake.core import pager
+from stayawake.utils import pager
 from stayawake.bots.security import service
 from stayawake.bots.security.models import Finding, ScanReport, ScanResult, Severity
 from stayawake.bots.security.sinks.render import render_terminal

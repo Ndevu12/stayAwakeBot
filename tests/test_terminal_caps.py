@@ -10,7 +10,7 @@ import os
 import unittest
 from unittest import mock
 
-from stayawake.core.terminal import ColorLevel, color_level, supports_color
+from stayawake.utils.terminal import ColorLevel, color_level, supports_color
 
 
 class _Stream:

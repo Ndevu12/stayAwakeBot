@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 import aiohttp
 
 from stayawake.core.adapters.http_client import resolve_dns, inspect_cert
-from stayawake.core.timeutil import now_iso
+from stayawake.utils.timeutil import now_iso
 from stayawake.bots.health.models import UrlCheckConfig
 
 

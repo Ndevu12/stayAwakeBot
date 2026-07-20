@@ -9,8 +9,8 @@ import os
 import unittest
 from unittest import mock
 
-from stayawake.core import streaming
-from stayawake.core.streaming import Streamer, status, stream_enabled
+from stayawake.utils import streaming
+from stayawake.utils.streaming import Streamer, status, stream_enabled
 
 
 class TestStreamerDisabled(unittest.TestCase):

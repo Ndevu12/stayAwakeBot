@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""Layering guard: nothing under `core/` may import UP into a bot (#1236).
+"""Layering guard: a package may import only from STRICTLY-LOWER layers, never sideways-up (#1236).
 
-`core/` is the shared lower layer (utilities + adapters); `bots/` is the application layer above it.
-A `core` module that imports `stayawake.bots.*` is a dependency inversion — it drags domain policy
-down into the shared layer and couples every `core` consumer to that bot. This test walks the WHOLE
-AST (so it catches lazy imports inside functions too, not just module-level ones) and would have
-caught the `core/git/merge/corroborate.py` → `bots.security.obfuscation` inversion this fixed.
+The shared foundation is layered bottom-to-top:
+
+    utils/  →  core/  →  bots/  →  cli/
+
+(`lib/` slots in between `utils` and `core` once the integration modules move there.) A module in a
+layer must not import from any HIGHER layer — that would be a dependency inversion (e.g. the old
+`core/git/merge/corroborate.py` importing `bots.security.obfuscation`, fixed in #1245). This walks
+the FULL AST of every module, so lazy imports inside functions count too.
 """
 from __future__ import annotations
 
@@ -13,34 +16,47 @@ import ast
 import pathlib
 import unittest
 
-_REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
-_CORE = _REPO_ROOT / "src" / "stayawake" / "core"
+_SRC = pathlib.Path(__file__).resolve().parents[2] / "src" / "stayawake"
+
+# Low → high. A package may import only from packages to its LEFT.
+_LAYERS = ["utils", "core", "bots", "cli"]
 
 
-def _bots_imports(pyfile: pathlib.Path) -> list[str]:
+def _imported_top_packages(pyfile: pathlib.Path) -> set[str]:
+    """The `stayawake.<pkg>` top-level packages this file imports (module-level AND lazy)."""
     tree = ast.parse(pyfile.read_text(encoding="utf-8"), filename=str(pyfile))
-    hits: list[str] = []
+    pkgs: set[str] = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("stayawake.bots"):
-            hits.append(node.module)
+        names = []
+        if isinstance(node, ast.ImportFrom) and node.module:
+            names.append(node.module)
         elif isinstance(node, ast.Import):
-            hits += [a.name for a in node.names if a.name.startswith("stayawake.bots")]
-    return hits
+            names += [a.name for a in node.names]
+        for n in names:
+            parts = n.split(".")
+            if len(parts) >= 2 and parts[0] == "stayawake":
+                pkgs.add(parts[1])
+    return pkgs
 
 
-class TestCoreDoesNotImportBots(unittest.TestCase):
-    def test_no_core_module_imports_up_into_a_bot(self):
+class TestLayering(unittest.TestCase):
+    def test_no_module_imports_a_higher_layer(self):
         offenders = {}
-        for py in _CORE.rglob("*.py"):
-            if "__pycache__" in py.parts:
+        for i, layer in enumerate(_LAYERS):
+            higher = set(_LAYERS[i + 1:])
+            root = _SRC / layer
+            if not root.exists():
                 continue
-            hits = _bots_imports(py)
-            if hits:
-                offenders[str(py.relative_to(_REPO_ROOT))] = hits
+            for py in root.rglob("*.py"):
+                if "__pycache__" in py.parts:
+                    continue
+                bad = _imported_top_packages(py) & higher
+                if bad:
+                    offenders[str(py.relative_to(_SRC.parent.parent))] = sorted(bad)
         self.assertEqual(
             offenders, {},
-            "core/ must not import stayawake.bots.* — a lower layer depending up on the security "
-            f"domain is a dependency inversion (#1236). Offenders: {offenders}")
+            "a layer may import only strictly-lower layers (low→high: "
+            f"{' → '.join(_LAYERS)}); upward imports are a dependency inversion (#1236): {offenders}")
 
 
 if __name__ == "__main__":
