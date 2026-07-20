@@ -75,6 +75,21 @@ All notable changes to this project are documented here. The format is based on
   `package.json`/`METADATA`/`RECORD` no longer hangs it — found in adversarial review). Regular files,
   including those reached through a symlink, are unaffected.
 
+### Security
+- **Hardened all of `saw`'s own file-write/delete paths against SymJacking write-through** (#1218,
+  completing the #1161 hardening whose detection half shipped in #1215/#1216). `saw` writes and deletes
+  inside repositories it remediates or proposes changes to — trees an attacker may control — so a
+  planted **symlink** at a write target (or a symlinked ancestor directory) could redirect the write
+  THROUGH the link into a sink outside the tree (`~/.bashrc`, `.git/hooks/…`, `/etc/…`). An adversarial
+  audit of every write path found the guard `saw fix`'s clean-text rewrite got in #1204 was **missing**
+  on `saw fix`'s **strip-settings / strip-gitignore** apply write (the primary gap — a committed
+  symlink named `settings.json` would be rewritten through, with the backup/verify net dead), and
+  absent as defense-in-depth on `saw guard setup`'s gate write and the read-only patch floor. The
+  #1204 guard is now factored into a shared `pathsafe.is_safe_write_target(path, root)` — refuses a
+  symlinked leaf and any path that resolves outside its intended root, fails closed on a symlink loop —
+  and applied at every attacker-influenced write/delete. Also fixed an `apply()` quarantine delete that
+  called `rmtree` on a symlinked directory (a crash) instead of unlinking the planted link.
+
 ## [0.1.14] - 2026-07-20
 
 ### Added

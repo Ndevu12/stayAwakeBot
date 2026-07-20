@@ -33,6 +33,7 @@ from stayawake.utils.streaming import Streamer, stream_enabled, status as spin_s
 from stayawake.utils.terminal import supports_color
 from stayawake.bots.security import proposal
 from stayawake.bots.security import resolution
+from stayawake.utils.pathsafe import is_safe_write_target
 from stayawake.bots.security.targets import ScanOptions
 
 # The canonical Strix action. Detection is scoped to it (a fork/mirror is out of scope for v1).
@@ -642,6 +643,9 @@ def _setup_pr(repo: Path, plan: SetupPlan, base: str, token: str | None, spin: b
         return SetupResult(plan=plan, slug=slug, error="could not create a worktree for the PR")
     try:
         dest = wt / plan.path
+        if not is_safe_write_target(dest, wt):        # never write the gate through a planted symlink (#1218)
+            return SetupResult(plan=plan, slug=slug,
+                               error=f"refusing to write {plan.path} — it is a symlink or escapes the worktree")
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(plan.content, encoding="utf-8")
         if not gitutil.stage_all(wt):
@@ -709,6 +713,9 @@ def setup(repo: str | Path | None = None, *, token: str | None = None, ref: str 
         return _setup_pr(repo, plan, default_branch, token, spin)
     # LOCAL: write into the working tree for the operator to review, commit on a branch, and PR.
     dest = repo / plan.path
+    if not is_safe_write_target(dest, repo):          # never write the gate through a planted symlink (#1218)
+        return SetupResult(plan=plan,
+                           error=f"refusing to write {plan.path} — it is a symlink or escapes the repo")
     try:
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(plan.content, encoding="utf-8")

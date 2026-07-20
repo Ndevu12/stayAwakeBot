@@ -380,6 +380,19 @@ class TestSetupLocal(unittest.TestCase):
         self.assertTrue((repo / guard.WORM_GUARD_FILE).is_file())
         self.assertEqual(res.wrote, repo / guard.WORM_GUARD_FILE)
 
+    def test_refuses_gate_write_through_a_symlinked_ancestor_dir(self):
+        # #1218: if `.github/workflows` is a planted symlink escaping the repo, `setup` must NOT write
+        # the gate THROUGH it — it refuses, and nothing lands outside the repo.
+        import tempfile
+        repo = _tmp_repo()
+        outside = Path(tempfile.mkdtemp())
+        (repo / ".github").mkdir(parents=True, exist_ok=True)
+        (repo / ".github" / "workflows").symlink_to(outside, target_is_directory=True)
+        with self._resolve(), mock.patch.object(guard.gitutil, "default_branch", return_value="main"):
+            res = guard.setup(repo)
+        self.assertIn("refusing to write", res.error or "")
+        self.assertFalse((outside / "worm-guard.yml").exists())   # never written through the link
+
     def test_never_clobbers_an_unrecognized_file_at_the_path(self):
         # Regression (#1239 data-loss): a file at the conventional worm-guard.yml path that ISN'T a
         # recognizable worm gate (here a local action whose action.yml we can't resolve to prove it
