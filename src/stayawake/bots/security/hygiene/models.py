@@ -16,6 +16,9 @@ class HygieneIssue:
     title: str
     detail: str
     remediation: str
+    command: str | None = None    # copy-pasteable command(s), rendered VERBATIM on their own selectable
+                                  # line(s) — kept out of `remediation` prose so the fix is selectable (#1237)
+    reference: str | None = None  # optional docs URL, rendered as a "→ details: <url>" line (#1237)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -45,11 +48,17 @@ ACTIVE_PERSISTENCE_IDS = {"self-hosted-runner-persistence", "os-service-persiste
                           "ssh-authorized-keys-forced-command", "shell-profile-fetch-exec",
                           "git-fsmonitor-command", "git-hookspath-unsafe", "git-config-fetch-exec"}
 
-# CREDENTIAL EXPOSURE — a cached/plaintext token is worth acting on, but is NOT proof of a compromised
-# host. When it is the WORST thing found (no active persistence alongside it), the response is a calm
-# credential note, NOT "isolate and rebuild" — while keeping the one caveat that matters: a hidden
-# rotation-wiper can't be fully excluded, so don't make bulk rotation the first move.
-CREDENTIAL_EXPOSURE_IDS = {"cached-github-keychain", "git-credentials-plaintext"}
+# CREDENTIAL EXPOSURE — a credential in a location that is genuinely a misconfiguration (plaintext on
+# disk) is worth acting on, but is NOT proof of a compromised host. When it is the WORST thing found (no
+# active persistence alongside it), the response is a calm credential note, NOT "isolate and rebuild" —
+# while keeping the one caveat that matters: a hidden rotation-wiper can't be fully excluded, so don't
+# make bulk rotation the first move.
+#
+# NOTE (#1237): a token cached in the *encrypted* login Keychain is deliberately NOT here. The Keychain
+# is the recommended store — a cached token there is normal, not an exposure incident, so it renders as
+# a calm `info` review item (see credentials.py) and never triggers this banner on its own. Only a
+# genuinely misconfigured store — a PLAINTEXT `~/.git-credentials` — counts as exposure.
+CREDENTIAL_EXPOSURE_IDS = {"git-credentials-plaintext"}
 
 # Union kept for back-compat (any finding that carries an incident context, of either tier).
 INCIDENT_TRIGGER_IDS = ACTIVE_PERSISTENCE_IDS | CREDENTIAL_EXPOSURE_IDS
