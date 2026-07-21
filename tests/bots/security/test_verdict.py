@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Confidence-graded verdict: INFECTED only for a `confirmed` finding; heuristic-only
-matches surface as SUSPICIOUS (informed, never asserted as malware). This is what keeps
-the scanner from labelling a base64 asset / crypto test vector "infected"."""
+matches surface as SUSPICIOUS (informed, never asserted as malware). A lone CONTIGUOUS
+base64 blob (a mock JWT / API token / inlined asset / crypto test vector) is ordinary
+data and produces NO finding at all — CLEAN, not merely not-infected (#1212)."""
 from __future__ import annotations
 
 import random
@@ -88,15 +89,29 @@ class TestVerdict(unittest.TestCase):
         self.assertEqual(d["findings"][0]["confidence"], HEURISTIC)
 
     # ── End-to-end through the scanner (confidence stamped from the signature) ──
-    def test_scanner_stamps_confidence_and_grades_assets_suspicious(self):
-        # A base64 asset embedded in source trips only the heuristic obfuscated-source-file.
-        random.seed(2)
-        al = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-        blob = "".join(random.choice(al) for _ in range(400))
-        r = _scan({"avatar.ts": f'export const A = "{blob}";\n'})
+    def test_scanner_stamps_confidence_and_grades_obfuscation_suspicious(self):
+        # A charcode/byte array fed to String.fromCharCode.apply (the canonical string
+        # shuffler) trips only the heuristic obfuscated-source-file → SUSPICIOUS, and the
+        # scanner stamps that confidence from the signature.
+        arr = ",".join("0x68" for _ in range(40))
+        r = _scan({"packed.ts": f"const d = String.fromCharCode.apply(0, [{arr}]);\n"})
         self.assertEqual(r.verdict, SUSPICIOUS)
         obf = [f for f in r.findings if f.signature_id == "obfuscated-source-file"]
         self.assertTrue(obf and all(f.confidence == HEURISTIC for f in obf))
+
+    def test_scanner_grades_contiguous_base64_asset_clean(self):
+        # #1212: a raw CONTIGUOUS base64 literal (a mock token / inlined asset / test vector)
+        # embedded in ordinary source is data — no exec sink, no concat-splitting — so it
+        # produces NO finding and the verdict is CLEAN. Flagging it (even as SUSPICIOUS) was
+        # near-zero-precision noise (a mock JWT in a real test file surfaced as a payload).
+        random.seed(3)
+        al = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+        blob = "".join(random.choice(al) for _ in range(300))
+        r = _scan({"avatar.ts": ("import { api } from './client';\n"
+                                 f"const TOKEN = '{blob}';\n"
+                                 "export default () => api.use(TOKEN);\n")})
+        self.assertEqual(r.verdict, CLEAN)
+        self.assertFalse(any(f.signature_id == "obfuscated-source-file" for f in r.findings))
 
     def test_scanner_grades_real_loader_infected(self):
         r = _scan({"x.mjs": "var _$_1e42 = sfL(0); String.fromCharCode(127);\n"})

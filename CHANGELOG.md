@@ -65,6 +65,23 @@ All notable changes to this project are documented here. The format is based on
   `saw audit --fail`.
 
 ### Fixed
+- **A base64 token, key array, or inlined asset no longer gets flagged as a "packed payload"** (#1212).
+  The whole-file obfuscation heuristic treated a ≥120-char base64 run — contiguous *or* reassembled
+  from concat/array chunks — as an encoded payload and surfaced it as SUSPICIOUS. So a mock JWT in a
+  test fixture (`eyJhbGci…`), an API token, an SRI hash, a cert-pin / JWKS **key array**, a crypto
+  test-vector table, or a base64 asset stored without a `data:` prefix all read as obfuscated; a
+  real-world scan flagged three clean `*.test.tsx` files this way. base64 is **ubiquitous benign data**,
+  and an array's `,`/`+` element seams are indistinguishable from a split-payload reassembly without
+  runtime data-flow analysis — so a base64 blob is **no longer a signal at all**, at any confidence.
+  No loss of real detection: a self-contained loader is caught by its **exec step** (the exec-sink,
+  charcode-array, or dense-escape-run arms) or a **confirmed** loader fingerprint — the actual payload
+  in the report that surfaced this was still caught by its `String.fromCharCode` exec sink. The
+  evil-merge corroborator (`analyze_delta`) gets the same treatment. As adversarial verification of the
+  change surfaced, the base64 arm had been *incidentally* masking a gap in the exec-sink list, so this
+  also **adds `vm.runInNewContext` / `vm.runInContext`** (vm-qualified, to avoid lodash's
+  `_.runInContext`) as dynamic-code-exec sinks, catching a `vm`-based decode-then-run dropper directly.
+  A base64 payload decoded and run via a sink no arm covers (e.g. `child_process` on a decoded string)
+  is the documented data-at-rest residual, tracked in #1266 for a proper decode-then-exec data-flow check.
 - **A FIFO/socket/device in a scanned repo can no longer hang `saw scan`** (#1226). The engine's read
   path did a blocking `open()` on whatever `os.walk` yielded, so a named pipe with a scannable name
   (e.g. `evil.js`) blocked forever with no writer — hanging the whole scan (a DoS on any scan surface,
