@@ -30,12 +30,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout (full history + tags for hatch-vcs versioning)
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0   # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
         with:
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1   # v6.3.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97   # v7.0.0
         with:
           python-version-file: .python-version
           check-latest: true
@@ -99,7 +99,7 @@ jobs:
       contents: read   # pure exit-code publish gate; no SARIF upload here (owned by security-sentinel)
     steps:
       - name: Checkout (full history for evil-merge detection)
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0   # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
         with:
           fetch-depth: 0
       - name: Worm scan
@@ -133,7 +133,7 @@ jobs:
           name: dist
           path: dist/
       - name: Publish to TestPyPI
-        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b   # v1.14.0
+        uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247   # v1.14.1
         with:
           repository-url: https://test.pypi.org/legacy/
           attestations: true
@@ -156,7 +156,7 @@ jobs:
           name: dist
           path: dist/
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b   # v1.14.0
+        uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247   # v1.14.1
         with:
           attestations: true   # PEP 740 signed provenance, displayed on the PyPI page
           # A re-run of a tag whose files already published should no-op, not hard-fail.
@@ -172,7 +172,7 @@ jobs:
       contents: write          # create the release + upload assets
     steps:
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0   # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
         with:
           fetch-depth: 0
       - name: Download distribution artifacts
@@ -215,16 +215,16 @@ jobs:
       packages: write          # push to GHCR via the built-in GITHUB_TOKEN — no extra secret
     steps:
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0   # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
 
       - name: Derive version from tag (v0.1.0 -> 0.1.0)
         run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
 
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5   # v4.1.0
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c   # v4.2.0
 
       - name: Log in to GHCR
-        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee   # v4.2.0
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0   # v4.4.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -232,7 +232,7 @@ jobs:
 
       - name: Image tags + OCI labels
         id: meta
-        uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9   # v6.1.0
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302   # v6.2.0
         with:
           images: ghcr.io/ndevu12/stayawakebot      # GHCR requires a lowercase path
           tags: |
@@ -245,7 +245,7 @@ jobs:
       # so a fixable critical/high never reaches GHCR (no "published-but-failed"). The push
       # step below reuses this build from the buildx cache.
       - name: Build image for scanning (load locally, no push yet)
-        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf   # v7.2.0
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a   # v7.3.0
         with:
           context: .
           build-args: VERSION=${{ env.VERSION }}
@@ -271,7 +271,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Build & push (with SLSA provenance + SBOM attestations)
-        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf   # v7.2.0
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a   # v7.3.0
         with:
           context: .
           build-args: VERSION=${{ env.VERSION }}
