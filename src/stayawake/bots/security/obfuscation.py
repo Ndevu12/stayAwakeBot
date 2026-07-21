@@ -19,10 +19,15 @@ we require either a *self-evidently executable* obfuscation construct OR a
     feeding String.fromCharCode / apply: the canonical Shai-Hulud string shuffler
     and the generic "build a string from numbers so no literal is greppable" trick.
   * dynamic-exec sinks            — eval(, new Function(, atob(, fromCharCode, the
-    require-hijack global['!'], and reflective `x['constructor'](…)` Function-
-    constructor smuggling (name-agnostic catch for a renamed decoder, #1053; the
-    `new …` clone idiom is carved out): code that turns decoded bytes back into
-    execution.
+    require-hijack global['!'], vm.runInNewContext/runInContext, and reflective
+    `x['constructor'](…)` Function-constructor smuggling (name-agnostic catch for a
+    renamed decoder, #1053; the `new …` clone idiom is carved out): code that turns
+    decoded bytes back into execution.
+  * decode→exec dropper (#1266)   — a base64/hex DECODE (`Buffer.from(` / `atob(`) as the
+    LEADING argument to a command / dynamic-module sink the exec-sink arm doesn't cover:
+    `child_process` runners (execSync/execFile/spawn/fork), a dynamic `import(`, or
+    `new Worker(`. The FLOW is the tell, not the encoded bytes (#1212) — neither half is a
+    signal alone. Purely static: the recipe is matched in the text, never decoded or run.
   * base64 blob                    — NOT a signal (#1212). A >=120-char base64 run,
     contiguous OR reassembled from concat/array chunks, is ubiquitous benign DATA:
     JWTs, API tokens, SRI hashes, cert-pin / JWKS key arrays, crypto KAT vectors,
@@ -141,6 +146,36 @@ def _has_exec_sink(s: str, strict: bool = False) -> bool:
         strict or not _NEW_CLONE_PREFIX.search(s[max(0, m.start() - 48):m.start()])
         for m in _CONSTRUCTOR_EXEC.finditer(s)
     )
+
+
+# ── Decode-then-exec dropper (#1266) ──────────────────────────────────────────────
+# The decode→exec DATA FLOW that #1212 stopped inferring from a bare base64 blob. base64
+# alone is benign data; a DECODE call whose result is fed straight into a command / dynamic-
+# module sink is the dropper. We match the FLOW textually — a decode call as the LEADING
+# argument to the sink — so neither half is a signal on its own:
+#   • decode  = `atob(` (also an _EXEC_SINK on its own) OR `Buffer.from(` (the Node decoder —
+#     benign alone: decoding a JWT, an image, a hash; only running its result is the tell).
+#     Matched by the call START, not the `'base64'` encoding arg, because the payload blob sits
+#     BETWEEN `Buffer.from(` and its encoding arg and can be arbitrarily long (a bounded window
+#     to the arg would be evaded by a big blob). Running a CONSTRUCTED buffer as a command /
+#     module / worker is anomalous whatever the encoding (base64, hex, or a raw byte array that
+#     spells a command) — so the call start is the right, robust anchor.
+#   • sink    = the child_process-SPECIFIC command runners (execSync/execFile[Sync]/spawn[Sync]/
+#     fork — a regex `.exec`/event `.spawn` has none of these names, so no collision), a dynamic
+#     `import(`, or `new Worker(`. Bare `exec(` is deliberately NOT a sink: `regex.exec(buf)` is
+#     an ordinary decode-then-match, not a command.
+# Requiring the decode to be the sink's argument keeps this near-zero-FP: no legitimate code runs
+# a Buffer/atob result as a shell command / module specifier / worker source. PURELY STATIC text
+# match — nothing is ever decoded or executed. `\s*` between sink `(` and the decode is bounded
+# (ReDoS-safe). RESIDUAL (still #1266): a decode assigned to a VARIABLE then passed to the sink
+# (indirection), and a `data:` base64 URI dynamic import (`import('data:…;base64,'+p)`).
+_DECODE = r"(?:atob\s*\(|Buffer\s*\.\s*from\s*\()"
+_DECODE_INTO_EXEC = re.compile(
+    r"\b(?:execSync|execFileSync|execFile|spawnSync|spawn|fork)\s*\(\s*" + _DECODE
+    + r"|\bimport\s*\(\s*" + _DECODE
+    + r"|\bnew\s+Worker\s*\(\s*" + _DECODE,
+    re.IGNORECASE,
+)
 # A self-describing inline asset (image/font/media data-URI). Stripped before the density
 # and escape-run analysis so a legitimate `data:<mime>;base64,` blob does not inflate a
 # line's length/entropy. (base64 blobs are no longer a standalone signal — see #1212.)
@@ -376,17 +411,21 @@ def analyze_file(text: str, ext: str = "", constructs_only: bool = False) -> Obf
     # across line breaks (`sfL['constructor']\n(decoded)`) is still seen.
     if _has_exec_sink(body) or _has_exec_sink(flat):
         return ObfuscationVerdict(True, "dynamic-exec sink (eval/Function/atob/fromCharCode/constructor)")
+    # Decode→exec dropper (#1266): a base64/hex decode fed straight into a command/module sink
+    # (child_process / import() / Worker) — the FLOW, not the encoded bytes. Static match only.
+    if _DECODE_INTO_EXEC.search(body) or _DECODE_INTO_EXEC.search(flat):
+        return ObfuscationVerdict(True, "base64/hex decoded and run via a command/module sink (child_process/import/Worker)")
     # A base64 blob — whether CONTIGUOUS or reassembled from concat/array chunks — is NOT a
     # verdict on its own (#1212). base64 is ubiquitous benign DATA: JWTs, API tokens, SRI
     # hashes, cert-pin / JWKS key arrays, crypto KAT vectors, inlined assets. It has near-
     # zero precision as an obfuscation signal (a real scan flagged three clean *.test.tsx
     # files that merely held a mock JWT), and the `,`/`+` seams of an ordinary base64 ARRAY
     # are indistinguishable from a split-payload reassembly without runtime data flow. A real
-    # packed loader is still caught by its EXEC step — the exec-sink / charcode-array /
-    # escape-run arms below, or the CONFIRMED loader-fingerprint tier that scans this file
+    # packed loader is still caught by its EXEC step — the exec-sink / decode→exec / charcode-
+    # array / escape-run arms, or the CONFIRMED loader-fingerprint tier that scans this file
     # independently — not by the mere presence of encoded bytes at rest. A base64 payload
-    # whose decode→exec uses a sink none of those arms cover is the documented data-at-rest
-    # residual (tracked in #1266 for a proper decode-then-exec data-flow check).
+    # decoded through a VARIABLE (indirection) before an uncovered sink is the residual #1266
+    # still tracks (the direct decode→exec flow above is now caught).
     #
     # The dense escape-encoded byte run stays: unlike base64, a 48+ `\xNN`/`\uNNNN` run gated
     # on byte-range + entropy has no benign-data analogue (nobody writes a token/asset that
@@ -460,10 +499,12 @@ def analyze_delta(introduced: str, baseline: str = "") -> ObfuscationVerdict:
         return ObfuscationVerdict(True, "charcode/byte numeric-array literal (string shuffler)")
     if _has_exec_sink(text):
         return ObfuscationVerdict(True, "dynamic-exec sink (eval/Function/atob/fromCharCode/constructor)")
+    if _DECODE_INTO_EXEC.search(text):
+        return ObfuscationVerdict(True, "base64/hex decoded and run via a command/module sink (child_process/import/Worker)")
     # A base64 blob is NOT a delta verdict on its own (#1212): a merge/feature commit that
     # introduces a base64 token, a cert-pin / JWKS key array, or a KAT-vector table is data,
     # not an evil-merge tell. A genuinely merge-introduced payload is caught by its exec sink
-    # (above), its charcode array, or the loader-fingerprint corroboration in the caller.
+    # (above), the decode→exec flow, its charcode array, or the loader-fingerprint corroboration.
 
     # 2) Corroborated density anomaly: a previously-formatted file that suddenly
     #    gains a very long single line that ALSO reads as high-entropy packed text.

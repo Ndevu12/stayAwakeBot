@@ -63,6 +63,45 @@ class TestWholeFileObfuscation(unittest.TestCase):
         self.assertNotIn(OBF, _scan(
             {"util.js": "const _ = require('lodash');\nexport const ld = _.runInContext();\n"}))
 
+    def test_decode_then_exec_dropper_caught(self):
+        # #1266: a base64/hex DECODE fed straight into a command / dynamic-module sink is a
+        # dropper — the decode->exec FLOW, not the encoded bytes (#1212 dropped the bytes-alone
+        # signal). Statically matched (nothing is decoded or executed). Covers the sinks the
+        # exec-sink arm does not: child_process runners, dynamic import(), new Worker.
+        random.seed(3)
+        alph = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+        blob = "".join(random.choice(alph) for _ in range(300))
+        for name, src in {
+            "cp.mjs": "import {execSync} from 'child_process';\n"
+                      f"execSync(Buffer.from('{blob}', 'base64').toString());\n",
+            "spawn.js": f"spawn(Buffer.from('{blob}', 'base64').toString(), []);\n",
+            "worker.js": f"new Worker(Buffer.from('{blob}', 'base64').toString());\n",
+            "dynimport.mjs": f"import(atob('{blob}')).then(m => m.run());\n",
+            "hexfile.js": f"execFile(Buffer.from('{blob}', 'hex').toString());\n",
+            "bytearr.js": "execSync(Buffer.from([0x6c, 0x73]).toString());\n",  # byte-array command
+        }.items():
+            self.assertIn(OBF, _scan({name: src}), name)
+
+    def test_decode_then_exec_false_positive_boundaries_clean(self):
+        # #1266 FP guards: neither half alone, nor a non-command `.exec`, is a signal.
+        random.seed(4)
+        alph = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+        blob = "".join(random.choice(alph) for _ in range(300))
+        for name, src in {
+            # a JWT util: base64-decode THEN regex-match — `.exec` is a regexp method, not a command.
+            "jwt.ts": "const p = Buffer.from(tok.split('.')[1], 'base64').toString();\n"
+                      "const claims = /\"exp\":(\\d+)/.exec(p);\n",
+            # a build script that spawns a process AND (unrelatedly) holds a base64 asset.
+            "build.js": f"const LOGO = '{blob}';\n"
+                        "import {execSync} from 'child_process';\nexecSync('npm run build');\n",
+            # ordinary dynamic import / worker of a real module path.
+            "router.mjs": "const m = await import('./routes/' + name + '.js');\n",
+            "spawnw.js": "const w = new Worker(new URL('./w.js', import.meta.url));\n",
+            # Buffer.from base64 decode with NO exec sink (decoding a token) — data, not a dropper.
+            "token.ts": "const payload = JSON.parse(Buffer.from(tok, 'base64').toString());\n",
+        }.items():
+            self.assertNotIn(OBF, _scan({name: src}), name)
+
     def test_eval_atob_in_svelte(self):
         body = "<script>\n" + "const y=" + ("q" * 450) + ";\n" * 6 + "eval(atob(y));\n</script>"
         self.assertIn(OBF, _scan({"P.svelte": body}))
