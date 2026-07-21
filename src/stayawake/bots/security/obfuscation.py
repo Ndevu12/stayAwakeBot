@@ -23,14 +23,21 @@ we require either a *self-evidently executable* obfuscation construct OR a
     constructor smuggling (name-agnostic catch for a renamed decoder, #1053; the
     `new …` clone idiom is carved out): code that turns decoded bytes back into
     execution.
-  * long base64 blob              — a single >=120-char [A-Za-z0-9+/=] run that is
-    not already plain text (most real code has spaces/punctuation breaking it up).
-  * concat/escape-encoded blob    — the SAME payload split into quoted chunks
-    (`"a"+"b"+…` or `["a","b"].join("")`) or written as a dense byte-range, high-
-    entropy `\\xNN`/`\\uNNNN` escape run; caught by normalizing the reassembly seams
-    away and re-testing the reassembled content (#1053). Residual boundaries:
-    template-literal `${a}${b}` reassembly (chunks live in variables) and `.concat`
-    via non-quote args are not statically reassembled.
+  * base64 blob                    — NOT a signal (#1212). A >=120-char base64 run,
+    contiguous OR reassembled from concat/array chunks, is ubiquitous benign DATA:
+    JWTs, API tokens, SRI hashes, cert-pin / JWKS key arrays, crypto KAT vectors,
+    inlined assets. Its precision as an obfuscation tell is near zero, and an array's
+    `,`/`+` element seams are indistinguishable from a split-payload reassembly without
+    runtime data flow, so it is deliberately never flagged — a real packed loader is
+    caught by its EXEC step or a confirmed loader fingerprint, not by encoded bytes at
+    rest. A payload whose decode→exec uses a sink no arm covers is the documented
+    data-at-rest residual (tracked in #1266 for a proper decode-then-exec data-flow check).
+  * dense escape-encoded byte run  — a payload written as a contiguous >=48 run of
+    `\\xNN`/`\\uNNNN` escapes decoding to high-entropy BYTES; caught after normalizing
+    concat/array reassembly seams away (#1053). Unlike base64 this HAS no benign-data
+    analogue (nobody writes a token/asset as an escape run), so the byte-range + entropy
+    gate keeps it FP-safe. Residual boundaries: template-literal `${a}${b}` reassembly
+    (chunks live in variables) and `.concat` via non-quote args are not reassembled.
   * minification spike            — the introduced text is one (or few) very long
     lines AND the file's baseline was normally-formatted (short lines): a
     previously hand-formatted file does not legitimately gain a 2 KB single line
@@ -39,10 +46,12 @@ we require either a *self-evidently executable* obfuscation construct OR a
     text is both high in absolute terms AND markedly above the file baseline:
     packed/encoded payload looks random; prose and code do not.
 
-The verdict requires a dynamic-exec sink, OR a charcode/hex array, OR a base64
-blob, OR (minification spike AND entropy spike together). A lone high-entropy or
-lone long-line signal is NOT enough — that is exactly the benign "long config
-value" / "generated data line" shape, and is left to corroborate elsewhere.
+The verdict requires a dynamic-exec sink, OR a charcode/hex array, OR a dense
+escape-encoded byte run, OR (minification spike AND entropy spike together). A
+base64 blob (contiguous or arrayed), a lone high-entropy signal, and a lone long
+line are NOT enough on their own — those are exactly the benign "embedded token /
+key array / asset", "long config value", and "generated data line" shapes, left to
+corroborate elsewhere (#1212).
 
 Build-artifact blind spot (deliberate; see docs/SECURITY_ARCHITECTURE.md → "Provenance is
 not trust"). This heuristic is suppressed on generated/build/minified paths
@@ -54,7 +63,7 @@ corroboration — the point before a payload is baked into a post-build artifact
 compiled output. This is a content decision, not a provenance one: `saw` never treats a
 target's SLSA / PEP-740 attestation as trust; provenance attests the build, not the source. An
 opt-in `scan_build_outputs` mode (analyze_file `constructs_only=True`) runs ONLY the self-evident
-obfuscation-construct checks (charcode array / exec sink / base64 / escape run) on build outputs at
+obfuscation-construct checks (charcode array / exec sink / escape run) on build outputs at
 `heuristic` confidence as an inspection aid — it does not close the residual (a construct-free
 minified payload still evades it).
 """
@@ -69,13 +78,15 @@ _NUM_ARRAY = re.compile(r"\[\s*(?:0x[0-9a-fA-F]+|\d{1,3})\s*(?:,\s*(?:0x[0-9a-fA
 # Dynamic-execution sinks that turn decoded bytes back into running code. IGNORECASE-safe forms
 # only (constructs with no common case-variant collision); the case-SENSITIVE reflective forms live
 # in _REFLECTIVE_EXEC below. Beyond the classic eval/Function/atob/fromCharCode: vm's
-# run-in-THIS-context (running code in the current global — a strong signal, and NOT a lodash
-# method, unlike bare `runInContext`), and a Reflect apply/construct whose target is the eval or
-# Function global. Surfaced as a HEURISTIC obfuscation verdict (SUSPICIOUS).
+# dynamic-code runners — `runInThisContext` and `runInNewContext` (run code in the current /
+# a fresh global; neither is a lodash method, so both are safe bare) and the vm-QUALIFIED
+# `vm.runInContext` (bare `runInContext` IS a lodash method — `_.runInContext()` — so it must
+# carry the `vm.` receiver to avoid that false positive); and a Reflect apply/construct whose
+# target is the eval or Function global. Surfaced as a HEURISTIC obfuscation verdict (SUSPICIOUS).
 _EXEC_SINK = re.compile(
     r"\beval\s*\(|new\s+Function\s*\(|\bFunction\s*\(\s*[\"']|\batob\s*\(|"
     r"String\s*[.\[]\s*[\"']?fromCharCode|global\s*\[\s*['\"]!['\"]\s*\]\s*=|"
-    r"\brunInThisContext\s*\(|"
+    r"\brunInThisContext\s*\(|\brunInNewContext\s*\(|\bvm\s*\.\s*runInContext\s*\(|"
     r"\bReflect\s*\.\s*(?:apply|construct)\s*\(\s*(?:eval|Function)\b",
     re.IGNORECASE,
 )
@@ -130,36 +141,26 @@ def _has_exec_sink(s: str, strict: bool = False) -> bool:
         strict or not _NEW_CLONE_PREFIX.search(s[max(0, m.start() - 48):m.start()])
         for m in _CONSTRUCTOR_EXEC.finditer(s)
     )
-# A long unbroken base64-ish run not already broken up by code/prose punctuation.
-_B64_BLOB = re.compile(r"[A-Za-z0-9+/]{120,}={0,2}")
-# A self-describing inline asset (image/font/media data-URI). A base64 blob that is the
-# payload of a `data:<mime>;base64,` URI is a legitimate inlined asset, not obfuscated
-# code — so we exclude those runs before the base64-blob trigger to avoid that FP.
+# A self-describing inline asset (image/font/media data-URI). Stripped before the density
+# and escape-run analysis so a legitimate `data:<mime>;base64,` blob does not inflate a
+# line's length/entropy. (base64 blobs are no longer a standalone signal — see #1212.)
 _DATA_URI = re.compile(r"data:[\w.+-]+/[\w.+-]+;base64,[A-Za-z0-9+/]+={0,2}", re.IGNORECASE)
-# Minimum Shannon entropy a matched base64-blob run must itself carry to count as an
-# encoded payload. A real base64 blob is ~5.5-6.0 bits/char (uniform over 64 symbols);
-# a long *low-entropy* run that happens to be all [A-Za-z0-9+/] — e.g. a repeated-char
-# placeholder/path segment (`token=xxxxxxxx…`) or a single-token long URL — is NOT an
-# encoded payload and must not trip the blob trigger. This gate closes the long-URL FP
-# (G5) without weakening detection of genuine base64 (which clears it by a wide margin).
-_B64_BLOB_MIN_ENTROPY = 4.5
 
-# ── Wrap/concat-resistant payload-at-rest detection (#1053 Tier-2 hardening) ──────
-# The blob/array detectors above key on a long UNBROKEN run, which an attacker defeats
-# two ways without changing the payload: (A) splitting it into short quoted chunks joined
-# by `+` (`"aaa" + "bbb"`), whose quote/plus/space seams break the run; and (B) encoding it
-# as a dense run of \xNN/\uNNNN escapes decoded at runtime (Buffer.from / fromCodePoint),
-# which carries no [A-Za-z0-9+/] run at all. Both are reversible by NORMALIZING the seams
-# away, then re-testing the reassembled content — what these two helpers add. Escape runs
-# are tested on the de-chunked form too, so a chunked escape payload is reassembled first.
+# ── Wrap/concat-resistant escape-payload-at-rest detection (#1053 Tier-2 hardening) ──
+# A payload encoded as a dense run of \xNN/\uNNNN escapes decoded at runtime (Buffer.from /
+# fromCodePoint) can dodge the escape-run detector by splitting into short quoted chunks
+# joined by `+`/`,` (`"\\x41\\x42" + "\\x43…"`), whose quote/sep/space seams break the run.
+# _dechunk normalizes those seams away so the escape-run test sees the reassembled content.
+# (base64 reassembly is no longer tested — a base64 blob is benign data regardless of
+# splitting, #1212 — so _dechunk now serves ONLY the escape-run arm.)
 
-# A JS string-reassembly seam: a closing quote, a `+` (concat) OR `,` (array element /
-# .concat arg) separator, an opening quote — any whitespace/newlines between. Collapsing it
-# rejoins `"aaa" + "bbb"` AND `["aaa","bbb"].join("")` (the canonical obfuscator string-
-# array primitive) into one run. Only quote-SEP-quote seams match, so base64 `+` inside a
-# chunk, arithmetic `a + b`, a `["x", host]` array with a variable, and a list separator
-# in prose are all untouched. The downstream >=120-char + 4.5-bit blob gate is what keeps
-# this false-positive-safe: reassembling a legit short/low-entropy array trips nothing.
+# A JS string-reassembly seam: a closing quote, a `+` (concat) OR `,` (array element)
+# separator, an opening quote — any whitespace/newlines between. Collapsing it rejoins
+# `"\\x41" + "\\x42"` AND `["\\x41","\\x42"].join("")` into one run. Only quote-SEP-quote
+# seams match, so a `+` inside a chunk, arithmetic `a + b`, a `["x", host]` array with a
+# variable, and a list separator in prose are all untouched. The downstream escape-run gate
+# (48+ run AND decoded byte-range AND entropy) is what keeps this FP-safe: reassembling a
+# legit string array that carries no dense escape run trips nothing.
 _CONCAT_SEAM = re.compile(r"['\"]\s*[,+]\s*['\"]")
 
 # A contiguous run of >= _MIN_ESCAPE_RUN numeric escapes (hex byte, BMP unicode, unicode
@@ -322,17 +323,6 @@ _MAX_PROSE_SPACE_FRAC = 0.07   # packed code is <7% whitespace; prose is far abo
 _MIN_UNBROKEN_RUN = 200        # a >=200-char run with no whitespace is not human text
 
 
-def _has_b64_payload(text: str) -> bool:
-    """True if `text` contains a long unbroken base64-ish run that is ALSO high-entropy —
-    i.e. a genuinely encoded blob, not a long low-entropy [A-Za-z0-9+/] run such as a
-    repeated-char placeholder or a single-token URL. Callers must strip data-URIs first
-    (legit inlined assets) before calling this."""
-    for m in _B64_BLOB.finditer(text):
-        if _shannon(m.group(0)) >= _B64_BLOB_MIN_ENTROPY:
-            return True
-    return False
-
-
 def _longest_nonspace_run(s: str) -> int:
     best = run = 0
     for ch in s:
@@ -353,8 +343,9 @@ def analyze_file(text: str, ext: str = "", constructs_only: bool = False) -> Obf
 
     Two tiers, mirroring analyze_delta:
       1) self-evidently executable obfuscation (charcode/byte array, dynamic-exec sink,
-         long base64 blob — including one reassembled from concat-chunked chunks or a
-         dense escape-encoded run) — sufficient on its own, line-independent.
+         or a dense escape-encoded byte run) — sufficient on its own, line-independent. A
+         base64 blob (contiguous OR arrayed) is NOT here: it is ordinary data (JWT / API
+         token / key array / asset), see #1212.
       2) a corroborated whole-file minification+entropy anomaly: the file carries an
          outlier-long line AND a dense packed region that dominates it AND the whole
          file reads as high-entropy. This is the in-file analogue of analyze_delta's
@@ -365,11 +356,11 @@ def analyze_file(text: str, ext: str = "", constructs_only: bool = False) -> Obf
     for restricting to authored extensions; this function judges content only.
 
     `constructs_only=True` runs ONLY the self-evident construct checks (the charcode/byte array,
-    dynamic-exec sink, and base64/escape-blob detectors above) and skips the whole-file
+    dynamic-exec sink, and dense escape-run detectors above) and skips the whole-file
     density/entropy heuristic below. This is the opt-in build-output mode (`scan_build_outputs`):
     on a generated/minified path density IS expected and would be all false positives, but a
-    self-evident construct (a charcode array, an exec sink, a base64/escape blob) is still worth
-    surfacing as a heuristic signal. Never used on hand-authored source, where the whole-file
+    self-evident construct (a charcode array, an exec sink, an escape-encoded byte run) is still
+    worth surfacing as a heuristic signal. Never used on hand-authored source, where the whole-file
     density heuristic is the durable lever.
     """
     body = text or ""
@@ -385,16 +376,23 @@ def analyze_file(text: str, ext: str = "", constructs_only: bool = False) -> Obf
     # across line breaks (`sfL['constructor']\n(decoded)`) is still seen.
     if _has_exec_sink(body) or _has_exec_sink(flat):
         return ObfuscationVerdict(True, "dynamic-exec sink (eval/Function/atob/fromCharCode/constructor)")
+    # A base64 blob — whether CONTIGUOUS or reassembled from concat/array chunks — is NOT a
+    # verdict on its own (#1212). base64 is ubiquitous benign DATA: JWTs, API tokens, SRI
+    # hashes, cert-pin / JWKS key arrays, crypto KAT vectors, inlined assets. It has near-
+    # zero precision as an obfuscation signal (a real scan flagged three clean *.test.tsx
+    # files that merely held a mock JWT), and the `,`/`+` seams of an ordinary base64 ARRAY
+    # are indistinguishable from a split-payload reassembly without runtime data flow. A real
+    # packed loader is still caught by its EXEC step — the exec-sink / charcode-array /
+    # escape-run arms below, or the CONFIRMED loader-fingerprint tier that scans this file
+    # independently — not by the mere presence of encoded bytes at rest. A base64 payload
+    # whose decode→exec uses a sink none of those arms cover is the documented data-at-rest
+    # residual (tracked in #1266 for a proper decode-then-exec data-flow check).
+    #
+    # The dense escape-encoded byte run stays: unlike base64, a 48+ `\xNN`/`\uNNNN` run gated
+    # on byte-range + entropy has no benign-data analogue (nobody writes a token/asset that
+    # way), so it is FP-safe. _dechunk first so a chunked escape payload is reassembled.
     deassetted = _DATA_URI.sub("", flat)
-    if _has_b64_payload(deassetted):
-        return ObfuscationVerdict(True, "long unbroken base64 blob")
-    # A+B (#1053): reassemble concat-chunked payloads, then re-test for a base64 blob or a
-    # dense escape-encoded byte run — both survive the attacker splitting/encoding the
-    # payload to dodge the unbroken-run detectors above (the merged-PR Tier-2 hardening).
-    dechunked = _dechunk(deassetted)
-    if _has_b64_payload(dechunked):
-        return ObfuscationVerdict(True, "reassembled chunked base64 blob (string-concat splitting)")
-    if _escape_run(dechunked):
+    if _escape_run(_dechunk(deassetted)):
         return ObfuscationVerdict(True, "dense escape-encoded byte payload (\\xNN/\\uNNNN run)")
 
     if constructs_only:
@@ -462,11 +460,10 @@ def analyze_delta(introduced: str, baseline: str = "") -> ObfuscationVerdict:
         return ObfuscationVerdict(True, "charcode/byte numeric-array literal (string shuffler)")
     if _has_exec_sink(text):
         return ObfuscationVerdict(True, "dynamic-exec sink (eval/Function/atob/fromCharCode/constructor)")
-    # Strip self-describing inline assets (image/font data-URIs) before the base64 test:
-    # a `data:...;base64,...` payload is a legitimate inlined asset, not packed code.
-    deassetted = _DATA_URI.sub("", text)
-    if _has_b64_payload(deassetted):
-        return ObfuscationVerdict(True, "long unbroken base64 blob")
+    # A base64 blob is NOT a delta verdict on its own (#1212): a merge/feature commit that
+    # introduces a base64 token, a cert-pin / JWKS key array, or a KAT-vector table is data,
+    # not an evil-merge tell. A genuinely merge-introduced payload is caught by its exec sink
+    # (above), its charcode array, or the loader-fingerprint corroboration in the caller.
 
     # 2) Corroborated density anomaly: a previously-formatted file that suddenly
     #    gains a very long single line that ALSO reads as high-entropy packed text.

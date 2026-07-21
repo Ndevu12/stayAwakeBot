@@ -47,12 +47,21 @@ class TestWholeFileObfuscation(unittest.TestCase):
         body = "import React from 'react'\nvar _$_1e42='seed';\n" + packed
         self.assertIn(OBF, _scan({"C.jsx": body}))
 
-    def test_split_base64_blob_in_vue_without_fingerprint(self):
+    def test_vm_runinnewcontext_dropper_caught(self):
+        # #1212 follow-through: a base64 blob decoded and run via `vm.runInNewContext` is a
+        # dropper. The blob alone is data, but runInNewContext is dynamic CODE execution — the
+        # exec-sink arm now covers vm's runInThisContext/runInNewContext and vm-qualified
+        # runInContext, so the loader is caught by its exec step regardless of base64 contiguity.
         random.seed(1)
         alph = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-        blob = "".join(random.choice(alph) for _ in range(8000))
-        chunks = "\n".join(blob[i:i + 150] for i in range(0, len(blob), 150))
-        self.assertIn(OBF, _scan({"App.vue": "<script>\nconst x=`\n" + chunks + "\n`\n</script>"}))
+        blob = "".join(random.choice(alph) for _ in range(300))
+        src = ("const vm = require('vm');\n"
+               "const p = '" + blob + "';\n"
+               "vm.runInNewContext(Buffer.from(p, 'base64').toString());\n")
+        self.assertIn(OBF, _scan({"loader.js": src}))
+        # FP guard: lodash's `_.runInContext()` is NOT vm code-exec — the bare form must not fire.
+        self.assertNotIn(OBF, _scan(
+            {"util.js": "const _ = require('lodash');\nexport const ld = _.runInContext();\n"}))
 
     def test_eval_atob_in_svelte(self):
         body = "<script>\n" + "const y=" + ("q" * 450) + ";\n" * 6 + "eval(atob(y));\n</script>"
@@ -87,17 +96,20 @@ class TestWholeFileObfuscation(unittest.TestCase):
         self.assertTrue(
             analyze_file("var q=function(){};\nq['constructor']\n('return 3')();\n", ".js"))
 
-    def test_chunked_base64_blob_reassembled(self):
-        # #1053 Tier-2 (signal A): a base64 payload split into short quoted chunks joined
-        # by `+` and WRAPPED to <400-char lines dodges the long-line + unbroken-run blob
-        # detectors. De-chunking the concat seams reassembles the blob and catches it.
+    def test_split_base64_payload_caught_via_its_decoder(self):
+        # #1212 posture: a base64 blob split into `+`-joined chunks is NOT flagged on the
+        # encoded bytes alone (that shape is indistinguishable from a benign wrapped token /
+        # key array). A REAL split-base64 loader is caught by its DECODE→EXEC step — here the
+        # reassembled blob is fed to `eval(atob(...))`, so the exec-sink arm fires.
         random.seed(11)
         alph = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
         blob = "".join(random.choice(alph) for _ in range(900))
         chunks = " +\n  ".join('"%s"' % blob[i:i + 60] for i in range(0, len(blob), 60))
-        src = "const cfg = {};\nexport default cfg;\nconst b =\n  " + chunks + ";\n"
-        self.assertLess(max(len(l) for l in src.splitlines()), 400)  # evades old Tier-2
-        self.assertIn(OBF, _scan({"postcss.config.mjs": src}))
+        bare = "const cfg = {};\nexport default cfg;\nconst b =\n  " + chunks + ";\n"
+        self.assertLess(max(len(l) for l in bare.splitlines()), 400)
+        self.assertNotIn(OBF, _scan({"postcss.config.mjs": bare}))          # bytes alone: clean
+        loader = bare + "eval(atob(b));\n"
+        self.assertIn(OBF, _scan({"loader.mjs": loader}))                   # decode→exec: caught
 
     def test_escape_encoded_payload_flagged(self):
         # #1053 Tier-2 (signal B): a payload written as a dense run of \xNN escapes carries
@@ -117,17 +129,21 @@ class TestWholeFileObfuscation(unittest.TestCase):
         src = 'const s = "' + a + '" +\n  "' + b + '";\nexport default s;\n'
         self.assertIn(OBF, _scan({"x.mjs": src}))
 
-    def test_join_array_reassembly_caught(self):
-        # Signal A, the canonical obfuscator primitive: a base64 payload stored as a string
-        # ARRAY rejoined with .join("") — comma-quote seams, not `+`. _dechunk must collapse
-        # those too, else the most common off-the-shelf obfuscator output walks straight past.
+    def test_base64_string_array_is_clean_data(self):
+        # #1212: a base64 string ARRAY — whether `.join("")`-reassembled or used element-wise —
+        # is NOT flagged on the bytes alone. Comma-quote seams of an ordinary base64 array (a
+        # JWKS `n`-value table, a cert-pin allowlist, a KAT-vector corpus) are indistinguishable
+        # from a `.join("")` reassembly without runtime data flow, so both stay CLEAN. Kept on
+        # <400-char lines so the density arm does not fire either.
         random.seed(13)
         alph = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
         blob = "".join(random.choice(alph) for _ in range(900))
         arr = ",\n  ".join('"%s"' % blob[i:i + 50] for i in range(0, len(blob), 50))
-        src = "const p = [\n  " + arr + "\n].join('');\nexport default p;\n"
-        self.assertLess(max(len(l) for l in src.splitlines()), 400)
-        self.assertIn(OBF, _scan({"x.mjs": src}))
+        joined = "const p = [\n  " + arr + "\n].join('');\nexport default p;\n"
+        used = "const KEYS = [\n  " + arr + "\n];\nexport const has = (k) => KEYS.includes(k);\n"
+        self.assertLess(max(len(l) for l in joined.splitlines()), 400)
+        self.assertNotIn(OBF, _scan({"reassembled.mjs": joined}))
+        self.assertNotIn(OBF, _scan({"keys.mjs": used}))
 
     # ── False positives: legit dense source / vendored context stays clean ──────
     def test_normal_big_component_clean(self):
@@ -197,6 +213,39 @@ class TestWholeFileObfuscation(unittest.TestCase):
         sri = "export const H = [" + ",".join("'sha384-%s'" % ("AbC9+/" * 14) for _ in range(8)) + "];\n"
         self.assertNotIn(OBF, _scan({"data.ts": words}))
         self.assertNotIn(OBF, _scan({"sri.ts": sri}))
+
+    def test_mock_jwt_in_test_file_clean(self):
+        # #1212 regression: a hardcoded mock JWT (`header.payload.signature`) in a test
+        # fixture is a >120-char high-entropy base64url run — but it is DATA, not packed
+        # code, and carries no exec sink / charcode array / concat-splitting. It must NOT
+        # be flagged, not even at heuristic confidence (the real-world false positive that
+        # surfaced a clean test file as a "packed payload").
+        jwt = ("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+               "eyJpZCI6ImMzZDg5ZTJkLTNiZDQtNDEyYi1hYzEzLWYzNTM4Y2Q2YjZlNSIsImZpcnN0TmFtZSI6"
+               "IkpvaG4iLCJsYXN0TmFtZSI6IkRvZSIsImVtYWlsIjoidmVuZG9yQGdtYWlsLmNvbSIsInJvbGUi"
+               "OiJWRU5ET1IiLCJpYXQiOjE3MTk3NjIwNjAsImV4cCI6MTcxOTg0ODQ2MH0."
+               "NSCYBuYzhhMgNbbMn2s7sc0r333YZaQHHnlhMcYRyCc")
+        code = ("import { describe, it } from 'vitest';\n"
+                "describe('auth', () => {\n"
+                "  const mockedToken = JSON.stringify({ token: '" + jwt + "' });\n"
+                "  it('renders', () => {});\n});\n")
+        self.assertNotIn(OBF, _scan({"src/__test__/Navbar.test.tsx": code}))
+        self.assertFalse(analyze_file(code, ".tsx"))
+
+    def test_contiguous_base64_blob_without_tell_clean(self):
+        # #1212: a raw CONTIGUOUS base64 literal (an API token, an inlined asset stored
+        # without a data-URI prefix, a crypto test vector) embedded in ordinary source is
+        # DATA, not packed code. Only a blob emerging from reassembled SPLIT chunks — or one
+        # with an exec sink — is the obfuscation tell. The token sits on a <400-char line in
+        # a normal multi-line module, so neither the base64 arm nor the density arm fires.
+        random.seed(7)
+        alph = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+        blob = "".join(random.choice(alph) for _ in range(300))
+        src = ("import { api } from './client';\n"
+               "const API_KEY = '" + blob + "';\n"
+               "export function auth() { return api.withKey(API_KEY); }\n")
+        self.assertNotIn(OBF, _scan({"asset.ts": src}))
+        self.assertFalse(analyze_file(src, ".ts"))
 
     def test_constructor_member_access_without_call_is_clean(self):
         # Plain ['constructor'] access (no call) is ordinary reflection — the exec-sink
