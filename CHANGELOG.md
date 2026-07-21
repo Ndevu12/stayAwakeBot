@@ -77,11 +77,17 @@ All notable changes to this project are documented here. The format is based on
   charcode-array, or dense-escape-run arms) or a **confirmed** loader fingerprint — the actual payload
   in the report that surfaced this was still caught by its `String.fromCharCode` exec sink. The
   evil-merge corroborator (`analyze_delta`) gets the same treatment. As adversarial verification of the
-  change surfaced, the base64 arm had been *incidentally* masking a gap in the exec-sink list, so this
-  also **adds `vm.runInNewContext` / `vm.runInContext`** (vm-qualified, to avoid lodash's
-  `_.runInContext`) as dynamic-code-exec sinks, catching a `vm`-based decode-then-run dropper directly.
-  A base64 payload decoded and run via a sink no arm covers (e.g. `child_process` on a decoded string)
-  is the documented data-at-rest residual, tracked in #1266 for a proper decode-then-exec data-flow check.
+  change surfaced, the base64 arm had been *incidentally* masking a gap in the sink list — so detection
+  was **reframed from encoded-bytes-at-rest to the decode→exec DATA FLOW** (#1266): a base64/hex decode
+  (`Buffer.from(…)` / `atob(`) fed straight into a command / dynamic-module sink the exec-sink arm did
+  not cover — `child_process` runners (`execSync`/`execFile`/`spawn`/`fork`), a dynamic `import()`, or
+  `new Worker()` — is now flagged, along with `vm.runInNewContext` / `vm.runInContext` (vm-qualified, to
+  avoid lodash's `_.runInContext`). This catches the real dropper (`execSync(Buffer.from(x,'base64'))`,
+  `import(atob(x))`) **without** the false positives, and is **purely static — nothing is ever decoded or
+  executed** (it matches the *recipe* in the source text, not the payload). Neither half is a signal
+  alone: `Buffer.from(tok,'base64')` decoding a JWT, or `execSync('npm run build')`, stays clean; only
+  the decode-as-the-sink's-argument flow fires. Residual (still #1266): a decode routed through a
+  **variable** before the sink, and a `data:` base64 URI dynamic import.
 - **A FIFO/socket/device in a scanned repo can no longer hang `saw scan`** (#1226). The engine's read
   path did a blocking `open()` on whatever `os.walk` yielded, so a named pipe with a scannable name
   (e.g. `evil.js`) blocked forever with no writer — hanging the whole scan (a DoS on any scan surface,
