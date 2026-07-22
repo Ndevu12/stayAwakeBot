@@ -46,6 +46,25 @@ All notable changes to this project are documented here. The format is based on
   machines; both are unattended-execution vectors the worm can use.
 
 ### Changed
+- **A concealment-seam config payload with no clean git ancestor is now stripped into a review-required
+  PR commit, not left as a hand-hunt checklist** (#1209). `saw fix` excises a concealment-hidden loader
+  as a *trusted* auto-fix only when the strip byte-for-byte matches a clean committed ancestor — that
+  match is what proves nothing ELSE was injected into the kept code. The cases with no such ancestor —
+  **no VCS, an untracked file, a born-infected first commit, or a legit edit made since infection** —
+  used to defer to a "go find the payload yourself" note. They now get a **`Suggested` disposition**:
+  `saw` runs the same five self-contained excision gates (an unambiguous ≥16-char concealment boundary,
+  a payload-free result, a result that isn't itself packed, **no detectable exec sink in the kept
+  code**, and only-removal) and, if they hold, **applies the strip on the `security/auto-clean` branch
+  as a SEPARATE, clearly-labeled commit** — surfaced in a **"Computed strip applied — review before
+  merging"** PR section and the CLI stream, kept distinct from the git-corroborated commit. It is
+  **never auto-merged and never presented as a trusted-clean fix**: the one thing the whole-file git
+  match adds over those five gates is catching a *scanner-invisible* injection in the kept code, and
+  closing that residual is the operator's PR review (the original is quarantined, the diff is in the
+  commit for one-glance review, and the run stays **needs-review / gate red** until a human merges).
+  Cases with no clean seam — or a detectable exec sink surviving in the kept code — still defer to a
+  full manual investigation, correctly. Auto-*merging* a file with no trusted baseline would mean
+  declaring a "clean" nothing corroborates; `saw` never does that — it does all the mechanical work up
+  to the human's one trust decision, in a single rolling PR (trusted + review-required, two commits).
 - **`saw audit`'s cached-credential finding is reframed around the threat model** (#1237). A GitHub
   token in the *encrypted* login Keychain is now an **`info` review item, not a `warning`** — the
   Keychain is the recommended store, so a cached token there is normal, not a misconfiguration (a
