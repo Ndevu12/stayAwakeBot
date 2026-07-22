@@ -112,6 +112,15 @@ All notable changes to this project are documented here. The format is based on
   symlinked leaf and any path that resolves outside its intended root, fails closed on a symlink loop —
   and applied at every attacker-influenced write/delete. Also fixed an `apply()` quarantine delete that
   called `rmtree` on a symlinked directory (a crash) instead of unlinking the planted link.
+- **Bumped the pinned self-scan engine to current main (`sentinel-ref` → merge of #1268), in both
+  the worm-guard gate and the release self-scan.** Catches the gate up to the `pin-bump-deferred`
+  engine work that landed since the last pin (#1255): cross-platform cached-credential detection
+  (#1259/#1261), dependency fix-advice (#1262), non-regular-file scan hardening (#1263), `saw scan
+  --deep` installed-dependency content-scanning (#1222/#1264), the SymJacking write-through hardening
+  above (#1218/#1265), and base64 decode-then-exec dropper detection with its false-positive fix
+  (#1212/#1266/#1267/#1268) — so the gate scans with the current reviewed engine rather than a stale
+  one. Both pin copies are bumped together, as the sync gate (#1210, `check_pins_synced.sh`) requires.
+  Resolves the `scanner-pin-drift` alarm (#1250).
 
 ## [0.1.14] - 2026-07-20
 
