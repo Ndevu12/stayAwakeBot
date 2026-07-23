@@ -152,6 +152,12 @@ All notable changes to this project are documented here. The format is based on
   (#1212/#1266/#1267/#1268) — so the gate scans with the current reviewed engine rather than a stale
   one. Both pin copies are bumped together, as the sync gate (#1210, `check_pins_synced.sh`) requires.
   Resolves the `scanner-pin-drift` alarm (#1250).
+- **Bumped the pinned self-scan engine to current main (`sentinel-ref` → merge of #1272), in both
+  the worm-guard gate and the release self-scan.** Catches the gate up to the `pin-bump-deferred`
+  engine work that landed since the last pin (#1268): the computed-strip review-required fix path for
+  config payloads with no git ancestor (#1209/#1271), and the lengthy-report spill / clickable-path
+  dashboard (#1203/#1272) — so the gate scans with the current reviewed engine rather than a stale
+  one. Both pin copies are bumped together, as the sync gate (#1210, `check_pins_synced.sh`) requires.
 
 ## [0.1.14] - 2026-07-20
 
