@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import shutil
 import textwrap
+from pathlib import Path
 from typing import TextIO
 
 RESET = "\033[0m"
@@ -47,12 +48,35 @@ STATUS: dict[str, str] = {
     "clean": "\033[32m",        # green
 }
 
+# Clickable path convention — bold cyan reads as a link in most terminals.
+LINK = "\033[1;36m"
+
 
 def paint(text: str, code: str | None, *, on: bool) -> str:
     """Wrap `text` in ANSI `code` (reset after) iff `on` and a code is given — otherwise return
     `text` unchanged. The single place a colour escape is emitted, so gating is uniform and a
     caller that computed `on=False` (piped / NO_COLOR / CI) always gets clean text."""
     return f"{code}{text}{RESET}" if on and code else text
+
+
+def path_link(path: Path | str, *, on: bool) -> str:
+    """Render a filesystem path as coloured, clickable text when `on`.
+
+    Uses OSC 8 `file://` hyperlinks (iTerm2, VS Code terminal, Windows Terminal, Ghostty, …) so a
+    click / Cmd-click opens the file or folder in the OS without typing a command — the UX ask for
+    operators who aren't comfortable with shell navigation (#1203). When `on` is False (piped /
+    NO_COLOR / CI) return the plain path string — scripts and logs never see escape sequences.
+    The visible text is still the full path, so copy-paste works even where hyperlinks don't."""
+    p = Path(path)
+    text = str(p)
+    if not on:
+        return text
+    try:
+        uri = p.resolve().as_uri()
+    except OSError:
+        return paint(text, LINK, on=True)                 # colour only if the URI can't be built
+    # OSC 8: ESC ] 8 ; ; URI ST   coloured-text   ESC ] 8 ; ; ST
+    return f"\033]8;;{uri}\033\\{paint(text, LINK, on=True)}\033]8;;\033\\"
 
 
 def term_width(default: int = 80, *, stream: TextIO | None = None) -> int:

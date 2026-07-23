@@ -7,7 +7,6 @@ sink remains the place to see full evidence.
 """
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 from stayawake.bots.security.models import ScanReport
@@ -26,4 +25,6 @@ class FileSink(Sink):
         payload = redact_payload(report.to_payload())
         write_json(self.dir / "latest.json", payload)
         (self.dir / "latest.md").write_text(render_markdown(payload), encoding="utf-8")
-        print(f"Reports written to {self.dir}", file=sys.stderr)
+        # The report PATH is surfaced by the orchestrator (service.scan), which alone knows the full
+        # context — a spilled sweep vs. a plain -d copy vs. a remote run — so the message is uniform
+        # and highlighted in one place (#1203). This sink just writes the bundle.

@@ -186,13 +186,16 @@ saw scan -d /tmp/sab-reports              # opt-in redacted latest.json + latest
 > in CI, with `--no-stream`, or `STAYAWAKE_NO_STREAM=1` — so `--json` and any persisted artifact
 > stay byte-for-byte unchanged. Progress → `stderr`; report → `stdout`.
 >
-> **Large fleets — nothing lost to scrollback.** Scanning many repos produces a report bigger
-> than the terminal. Three things keep it readable and complete, **with no pager by default**
-> (you're never dropped into `less`): (1) a big sweep keeps the terminal a bounded **dashboard**
-> — the table only — and moves **per-finding evidence to the written report** (full Markdown +
-> JSON in your `-d` dir or a temp dir, path printed as `Full report: …`), so the complete result
-> is always recoverable off-terminal; (2) **clean rows collapse to a count** once the fleet is
-> large; (3) `--pager` opts into scrolling the report in place through `$PAGER`.
+> **Large sweeps — nothing lost to scrollback.** A many-repo (or lengthy) scan produces a report
+> bigger than the terminal. Several things keep it readable and complete, **with no pager by
+> default** (you're never dropped into `less`): (1) a big sweep keeps the terminal a bounded
+> **dashboard** — the table only — and moves **per-finding evidence to the written report** (full
+> Markdown + JSON in your `-d` dir or a temp dir), so the complete result is always recoverable
+> off-terminal; this triggers on the **repo count** and on the **aggregate size of the result**
+> (findings + advisories), for **local and remote** alike, so a wall of findings no longer floods
+> the terminal (#1203); (2) **clean rows collapse to a count** once the fleet is large; (3) the
+> **report path is highlighted** on `stderr` in every case a report is written (local `-d` or any
+> spill); (4) `--pager` opts into scrolling the report in place through `$PAGER`.
 
 ### `saw fix`
 
