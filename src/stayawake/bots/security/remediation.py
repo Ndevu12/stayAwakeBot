@@ -251,6 +251,32 @@ class Manual:
     line: int | None = None
 
 
+@dataclass(frozen=True)
+class Suggested:
+    """A COMPUTED concealment-seam excision that `_seam_strip` proved structurally safe — five
+    self-contained gates hold (an unambiguous ≥16-char concealment boundary, a payload-free result,
+    a result that isn't itself packed, NO detectable exec sink in the KEPT code, and only-removal /
+    no fabricated byte) — but there is no clean committed ancestor to corroborate it against a
+    scanner-INVISIBLE injection in the kept code (the file has no VCS / is untracked / is born
+    infected / was legitimately edited since infection, so no whole-file trusted version exists).
+
+    That missing corroboration is the ONE thing the git-match adds over the five gates, and it is
+    exactly what a human reviewer + the quarantine backup close (see `_seam_strip`'s own note). So a
+    Suggested is NOT trusted like a `Recovery`: it is still applied — `apply_suggested` writes the
+    strip — but ONLY into the review branch as a SEPARATE, clearly-labeled commit that the operator
+    must eyeball before merging (never auto-merged, and the run stays needs-review until they do).
+    The PR review is the trust anchor; the tool never declares the host clean on its own. `diff` is
+    the redaction-aware preview (payload shown only as a digest); `excised_text` the strip that gets
+    written; `reason` the code for why it isn't git-corroborated; `action` the operator guidance."""
+    path: str
+    signature_id: str
+    reason: str
+    action: str
+    diff: str
+    excised_text: str
+    line: int | None = None
+
+
 def codeloader_content_sig(all_signatures):
     """Compile the code-loader CONTENT fingerprints into check(text) -> id|None — the
     yardstick for deciding whether a (possibly historical) version of a file is clean."""
@@ -561,6 +587,35 @@ def _seam_strip(work: str, ext: str, content_sig) -> str | None:
     return stripped
 
 
+def _try_suggest(work, ext, content_sig, fallback: "Manual"):
+    """Escalate a DEFERRED finding to a computed `Suggested` fix when `_seam_strip` proves a safe
+    concealment-seam excision. `_seam_strip`'s five gates are self-contained (they need no git
+    ancestor), so this works for the cases that have no whole-file trusted version — no-VCS /
+    untracked / born-infected / edited-since. Else return the given `Manual` unchanged (no clean
+    seam, or a detectable exec sink survives in the kept code → genuinely inseparable).
+
+    This never weakens auto-apply: a `Suggested` is NEVER written automatically — only a git-
+    corroborated `Recovery` is (`apply_recovery`). The human reviewing the computed strip is the
+    trust anchor for the ONE residual the git-match would otherwise cover (a scanner-invisible
+    injection in the kept code)."""
+    excised = _seam_strip(work, ext, content_sig)
+    if excised is None:
+        return fallback
+    return _build_suggested(work, excised, content_sig,
+                            fallback.path, fallback.signature_id, fallback.reason, fallback.line)
+
+
+def _build_suggested(work, excised, content_sig, path, sig, reason, line) -> "Suggested":
+    """Wrap an already-computed `_seam_strip` result as a `Suggested` fix (one home for the operator
+    guidance + redacted diff)."""
+    action = ("saw applied a computed payload-only strip to the review branch: it cuts the "
+              "concealment-seam payload and keeps every other byte, and the kept code carries no "
+              "payload or detectable exec sink. It is NOT git-corroborated (no clean committed "
+              "version to compare against), so review that the kept code is untampered before "
+              "merging — the original is quarantined and this change is not auto-merged.")
+    return Suggested(path, sig, reason, action, _recovery_diff(work, excised, content_sig), excised, line)
+
+
 def classify_recovery(repo, finding, content_sig):
     """Decide how to remediate ONE (confirmed) code-loader finding — always to a CLEAN COMMITTED
     version, so the result is trusted history rather than anything we synthesized. Two proofs that
@@ -590,13 +645,15 @@ def classify_recovery(repo, finding, content_sig):
     work = target.read_text(encoding="utf-8", errors="replace") if target.exists() else ""
 
     if not gitutil.is_git_repo(repo):
-        return Manual(path, sig, NO_VCS,
-                      "Not a git repository — no clean version to recover. Review and remove "
-                      "the payload manually, or delete the file.", line)
+        return _try_suggest(work, ext, content_sig, Manual(
+            path, sig, NO_VCS,
+            "Not a git repository — no clean version to recover. Review and remove "
+            "the payload manually, or delete the file.", line))
     if not gitutil.tracked(repo, path):
-        return Manual(path, sig, UNTRACKED,
-                      "Not tracked in git — no committed clean version to recover. Review and "
-                      "remove the payload, or delete the file.", line)
+        return _try_suggest(work, ext, content_sig, Manual(
+            path, sig, UNTRACKED,
+            "Not tracked in git — no committed clean version to recover. Review and "
+            "remove the payload, or delete the file.", line))
 
     # The history walk touches git for every commit that changed the file. Any failure here
     # (a corrupt object, an unreadable blob, an OS error) must NOT crash the caller — that
@@ -616,9 +673,10 @@ def classify_recovery(repo, finding, content_sig):
 
         if clean is None:
             if analyze_file(work, ext):       # packed/obfuscated → looks born-infected
-                return Manual(path, sig, BORN_INFECTED,
-                              "No clean version in git history and the content is packed/obfuscated "
-                              "— likely born infected. Review and, if confirmed, remove/quarantine it.", line)
+                return _try_suggest(work, ext, content_sig, Manual(
+                    path, sig, BORN_INFECTED,
+                    "No clean version in git history and the content is packed/obfuscated "
+                    "— likely born infected. Review and, if confirmed, remove/quarantine it.", line))
             return Manual(path, sig, INTRINSIC_MATCH,
                           "No clean version in history, but it is a plain literal — likely intentional "
                           f"(test/research data). If so, allowlist `{sig}` for `{path}`.", line)
@@ -628,22 +686,73 @@ def classify_recovery(repo, finding, content_sig):
         label = f'{sha[:7]} ("{_short(meta.get("subject", ""), 40)}", {meta.get("date", "")[:10]})'
         if _safe_to_recover(work, clean_text, content_sig):
             return Recovery(path, sha, label, _recovery_diff(work, clean_text, content_sig), clean_text)
-        # Excision, corroborated by the clean ancestor: only when the payload-stripped working file
-        # equals `clean_text` EXACTLY. (`_seam_strip` returns None when there is no safe seam, and
-        # None never equals a real clean_text, so a no-seam file falls through to Manual.)
-        if _seam_strip(work, ext, content_sig) == clean_text:
+        # Excision, corroborated by the clean ancestor: auto-apply ONLY when the payload-stripped
+        # working file equals `clean_text` EXACTLY (matches trusted history → safe against even a
+        # scanner-invisible injection). When `_seam_strip` yields a valid excision that DOESN'T match
+        # the ancestor — a legit edit was made since infection — auto-apply is unsafe (the edit isn't
+        # in trusted history), but the strip is still structurally proven, so offer it as a computed
+        # Suggested fix for the operator to review rather than a bare hand-hunt checklist (#1209).
+        excised = _seam_strip(work, ext, content_sig)
+        if excised == clean_text:
             return Recovery(path, sha, label, _recovery_diff(work, clean_text, content_sig),
                             clean_text, excised=True)
+        if excised is not None:
+            return _build_suggested(work, excised, content_sig, path, sig, LEGIT_CHANGES, line)
+        # No computable seam at all → genuinely inseparable; defer to a manual investigation.
         return Manual(path, sig, LEGIT_CHANGES,
                       f"Payload shares a line with real code and the payload-stripped file doesn't "
-                      f"match a clean commit — can't auto-separate it safely. Delete just the payload "
-                      f"run from that line, keeping the rest. Note `git checkout {sha[:7]} -- {path}` "
-                      f"reverts the ENTIRE file to {sha[:7]} (diff it first so you don't lose other "
-                      f"edits made since then).", line)
+                      f"match a clean commit, and no safe concealment seam was found — can't auto-"
+                      f"separate it. Delete just the payload run from that line, keeping the rest. Note "
+                      f"`git checkout {sha[:7]} -- {path}` reverts the ENTIRE file to {sha[:7]} (diff it "
+                      f"first so you don't lose other edits made since then).", line)
     except Exception:  # noqa: BLE001 — never let one file's history quirk abort the sweep
         return Manual(path, sig, INSPECT_FAILED,
                       "Could not read this file's git history to find a clean version. Inspect it "
                       f"manually and recover from a known-good commit: `git log -- {path}`.", line)
+
+
+def _backup_write_verify(root: Path, rel: str, new_text: str, quarantine: Path, content_sig) -> bool:
+    """The shared write TAIL of every remediation (git RESTORE, git-corroborated EXCISION, and the
+    computed #1209 strip): back up the current file to `quarantine`, write `new_text`, then
+    verify-or-revert — the written file must read back byte-identical AND carry neither a loader
+    literal nor an exec sink (`_carries_payload`), else the original is restored. One home for the
+    backup + verify + revert net so it is identical for every write path (never downgraded)."""
+    target = root / rel
+    _backup(root, rel, quarantine)
+    target.write_text(new_text, encoding="utf-8")
+    restored = target.read_text(encoding="utf-8", errors="replace")
+    if restored != new_text or _carries_payload(restored, content_sig):
+        backup = quarantine / rel         # verify failed → revert to the original
+        if backup.exists():
+            shutil.copy2(backup, target)
+        return False
+    return True
+
+
+def _apply_seam_excision(root: Path, rel: str, expected: str, quarantine: Path, content_sig) -> bool:
+    """Write a concealment-seam excision, re-proving `expected` against the bytes on disk NOW:
+    non-empty, a safe write target (NEVER through a symlink or outside the worktree — the shared
+    #1218 guard, since `write_text` follows a link and `_backup` skips symlinks, which would leave
+    the quarantine + verify net dead), the file exists, the result carries no payload, and — the
+    load-bearing check — re-running the deterministic `_seam_strip` on the CURRENT file reproduces
+    `expected` EXACTLY. That single equality re-checks every gate (each seam still validates, the
+    shim is still dead, the result carries no payload and is not packed, subsequence) against the
+    live bytes; if the file changed since classify, the strip differs and we refuse. Then the
+    shared backup → write → verify-or-revert tail.
+
+    Shared by a GIT-CORROBORATED `Recovery(excised=True)` and a COMPUTED `Suggested` (#1209): the
+    WRITE safety is byte-for-byte identical; they differ ONLY in provenance (whether a clean ancestor
+    corroborated `expected`), which the caller reflects in a separate commit / PR section, never in
+    the bytes or the proof."""
+    target = root / rel
+    if not expected or not is_safe_write_target(target, root):
+        return False
+    if not target.exists() or _carries_payload(expected, content_sig):
+        return False
+    current = target.read_text(encoding="utf-8", errors="replace")
+    if _seam_strip(current, _ext(rel), content_sig) != expected:
+        return False                      # the canonical strip no longer reproduces it → refuse
+    return _backup_write_verify(root, rel, expected, quarantine, content_sig)
 
 
 def apply_recovery(repo, rec: Recovery, quarantine: Path, content_sig) -> bool:
@@ -651,18 +760,17 @@ def apply_recovery(repo, rec: Recovery, quarantine: Path, content_sig) -> bool:
     bytes on disk NOW — proven independently of the planner, so a stale/mismatched `clean_text`
     can never slip through — and reverting if the write doesn't verify.
 
-    BEFORE writing, the pre-proof depends on how `clean_text` was derived:
+    The pre-proof depends on how `clean_text` was derived:
+      * a surgical EXCISION (`rec.excised`): delegated to `_apply_seam_excision` — re-run the
+        deterministic `_seam_strip` on the CURRENT file; it must reproduce `clean_text` exactly.
       * a git RESTORE (`rec.excised` is False): the delta must be provably payload-only
         (`_safe_to_recover`) AND `clean_text` a subsequence of the file (`_is_subsequence`, no
         fabricated byte).
-      * a surgical EXCISION (`rec.excised`): re-run the deterministic `_seam_strip` on the CURRENT
-        file — it must reproduce `clean_text` exactly. That single equality re-checks every gate
-        (each seam still validates, the shim is still dead, the result carries no payload and is
-        not packed, subsequence) against the live bytes; if the file changed since classify, the
-        strip differs and we refuse.
-    AFTER writing, the restored file must match `clean_text` byte-for-byte and carry neither a
-    loader literal nor an exec sink (`_carries_payload`), else the original is put back."""
+    AFTER writing (shared tail), the restored file must match byte-for-byte and carry neither a
+    loader literal nor an exec sink, else the original is put back."""
     root = Path(repo)
+    if rec.excised:
+        return _apply_seam_excision(root, rec.path, rec.clean_text, quarantine, content_sig)
     target = root / rec.path
     if not rec.clean_text or not is_safe_write_target(target, root):
         # Refuse an empty result, and NEVER write through a symlink or outside the worktree (#1204,
@@ -673,23 +781,21 @@ def apply_recovery(repo, rec: Recovery, quarantine: Path, content_sig) -> bool:
     if not target.exists() or _carries_payload(rec.clean_text, content_sig):
         return False                      # never write a version that still carries the payload
     current = target.read_text(encoding="utf-8", errors="replace")
-    if rec.excised:
-        if _seam_strip(current, _ext(rec.path), content_sig) != rec.clean_text:
-            return False                  # the canonical strip no longer reproduces it → refuse
-    else:
-        # No legit byte dropped (delta provably payload-only) and no fabricated byte. Either
-        # failing means clean_text is not 'current minus payload' → refuse rather than risk
-        # reverting legitimate work.
-        if not _safe_to_recover(current, rec.clean_text, content_sig):
-            return False
-        if not _is_subsequence(rec.clean_text, current):
-            return False
-    _backup(root, rec.path, quarantine)
-    target.write_text(rec.clean_text, encoding="utf-8")
-    restored = target.read_text(encoding="utf-8", errors="replace")
-    if restored != rec.clean_text or _carries_payload(restored, content_sig):
-        backup = quarantine / rec.path    # verify failed → revert to the original
-        if backup.exists():
-            shutil.copy2(backup, target)
+    # No legit byte dropped (delta provably payload-only) and no fabricated byte. Either failing
+    # means clean_text is not 'current minus payload' → refuse rather than risk reverting legit work.
+    if not _safe_to_recover(current, rec.clean_text, content_sig):
         return False
-    return True
+    if not _is_subsequence(rec.clean_text, current):
+        return False
+    return _backup_write_verify(root, rec.path, rec.clean_text, quarantine, content_sig)
+
+
+def apply_suggested(repo, sug: "Suggested", quarantine: Path, content_sig) -> bool:
+    """Apply a COMPUTED (non-git-corroborated) concealment-seam strip — the #1209 Tier-2 write.
+    Byte-for-byte the SAME safety as an excised `Recovery` (re-prove `_seam_strip` on the live file,
+    then backup → write → verify-or-revert, all via the shared `_apply_seam_excision`). The ONLY
+    difference is that no clean ancestor corroborated it, so the CALLER lands it as a separate,
+    review-required commit and keeps the run needs-review — the operator's PR review is the trust
+    anchor for the one residual the git-match would otherwise close (a scanner-invisible injection
+    in the kept code). Never auto-merged; never presented as a corroborated fix."""
+    return _apply_seam_excision(Path(repo), sug.path, sug.excised_text, quarantine, content_sig)

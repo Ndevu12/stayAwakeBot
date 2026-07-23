@@ -210,6 +210,43 @@ class TestPartialFix(unittest.TestCase):
         r.add_labels.assert_called_once()
         self.assertIn("updated existing PR #7", r.outcome)
 
+    def test_computed_strip_ships_partial_review_required(self):
+        # #1209 (Option B): a code-loader with no git ancestor → a computed Suggested strip that IS
+        # applied (a separate commit) but is NOT git-corroborated. The PR is OPENED (computed is
+        # shippable, not aborted), marked PARTIAL, carries the review-required section, and the
+        # outcome carries PARTIAL so the run counts as needs-review until a human reviews & merges.
+        infected = ScanResult("owner/repo", "local", [self._LOADER])
+        clean = ScanResult("owner/repo", "local", [])
+        # scans: initial (loader found) → trusted-tier quarantine rescan (clean, nothing auto-fixable)
+        # → final residual rescan AFTER the computed strip is applied (clean).
+        scans = [infected, clean, clean]
+        sug = pr.remediation.Suggested("postcss.config.mjs", "loader", pr.remediation.NO_VCS,
+                                       "review the kept code before merging", "diff", "clean\n", 1)
+        with _patch_git(), \
+             mock.patch.object(pr, "scan_target",
+                               side_effect=lambda *a, **k: scans.pop(0) if scans else clean), \
+             mock.patch.object(pr.remediation, "plan", return_value=[]), \
+             mock.patch.object(pr.remediation, "apply", return_value=[]), \
+             mock.patch.object(pr.remediation, "quarantine_residual", return_value=[]), \
+             mock.patch.object(pr.remediation, "classify_recovery", return_value=sug), \
+             mock.patch.object(pr.remediation, "apply_suggested", return_value=True) as applyer, \
+             mock.patch.object(pr.github_api, "list_open_pulls", return_value=[]), \
+             mock.patch.object(pr.github_api, "add_labels") as add_labels, \
+             mock.patch.object(pr.github_api, "remove_label"), \
+             mock.patch.object(pr.github_api, "list_open_issues", return_value=[]), \
+             mock.patch.object(pr.github_api, "create_issue", return_value={"number": 9, "html_url": "iu"}), \
+             mock.patch.object(pr.github_api, "create_pull",
+                               return_value={"number": 55, "html_url": "u"}) as create:
+            outcome = pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t")
+        applyer.assert_called_once()                            # the computed strip WAS applied
+        create.assert_called_once()                             # a PR IS opened (computed is shippable)
+        kw = create.call_args.kwargs
+        self.assertIn("PARTIAL", kw["title"])                  # not a trusted-clean fix
+        self.assertIn("Computed strip applied", kw["body"])    # the review-required section
+        self.assertIn("postcss.config.mjs", kw["body"])
+        add_labels.assert_called_once()                        # partial label applied
+        self.assertIn("PARTIAL", outcome)                      # → remediator counts needs-review
+
     def test_pr_body_neutralizes_injection(self):
         # A malicious path/reason/action cannot inject active Markdown/HTML: every attacker field
         # is _code-wrapped, so dangerous sequences appear ONLY inside code spans, never bare.
@@ -226,6 +263,34 @@ class TestPartialFix(unittest.TestCase):
         for bad in ("](", "<img", "onerror", "evil.example", "PWNED", "‮"):
             self.assertNotIn(bad, outside, f"{bad!r} injected OUTSIDE a code span")
         self.assertIn("PARTIAL", body)
+
+    def test_pr_body_renders_computed_strip_applied(self):
+        # #1209 (Option B): a computed strip that WAS applied on the branch (a separate commit)
+        # renders in its own "Computed strip applied — REVIEW before merging" section, distinct from
+        # the manual checklist, with location + reason + the review guidance. The tree stays PARTIAL
+        # (not git-corroborated) so a human must review before merge.
+        sug = pr.remediation.Suggested(
+            "next.config.mjs", "loader-fromcharcode-127", pr.remediation.NO_VCS,
+            "saw applied a computed payload-only strip to the review branch…",
+            "diff-preview", "export default config;\n", 1)
+        body = pr._pr_body("owner/repo", [Change("strip-gitignore", ".gitignore")], computed=[sug])
+        self.assertIn("Computed strip applied", body)
+        self.assertIn("concealment seam", body)                        # tells the operator where/how
+        self.assertIn("next.config.mjs:1", body)
+        self.assertIn("PARTIAL", body)                                 # not git-corroborated → review
+
+    def test_pr_body_computed_strip_is_injection_safe(self):
+        # A computed strip from a crafted path/reason/action cannot inject active Markdown/HTML —
+        # same code-span discipline as the manual list: every attacker field is `textsafe.code`-
+        # wrapped, and no raw diff is embedded in the body (it lives in the commit).
+        sug = pr.remediation.Suggested(
+            "src/[X](http://evil.example)`.js", "s`ig", pr.remediation.LEGIT_CHANGES,
+            "run `x` <img src=x onerror=1> ‮evil [CLICK](http://evil.example)", "d", "x", 2)
+        body = pr._pr_body("owner/repo", [Change("recover", "a.mjs")], computed=[sug])
+        self.assertEqual(body.count("`") % 2, 0, "unbalanced code spans → a span was left open")
+        outside = "".join(body.split("`")[0::2])
+        for bad in ("](", "<img", "onerror", "evil.example", "‮"):
+            self.assertNotIn(bad, outside, f"{bad!r} injected OUTSIDE a code span")
 
     def test_issue_body_neutralizes_injection(self):
         # The read-only issue fallback (#1183 invariant #5 covers "PR/issue body") must escape
