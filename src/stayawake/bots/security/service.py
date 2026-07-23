@@ -27,6 +27,8 @@ from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.models import ScanResult, ScanReport
 from stayawake.bots.security.sinks import (
     Sink, TerminalSink, JsonSink, SarifSink, FileSink, IssueSink, SlackSink)
+from stayawake.utils.render import path_link, rule
+from stayawake.utils.terminal import supports_color
 from stayawake.bots.security.targets import ScanOptions, LocalRepoTarget, RemoteRepoTarget
 # Target resolution lives in one shared module (resolution.py); re-imported here under the names
 # service.scan's body and the targeting tests already use (the `_`-prefixed ones stay for compat).
@@ -39,6 +41,12 @@ REPORTS_DIR = Path("reports/security")
 # Above this many targets, a terminal can't hold the whole report — if the user didn't
 # already persist it (-d/--json), we drop the full Markdown+JSON in a temp dir and point there.
 LARGE_FLEET = 25
+# #1203: independent of repo count, a report whose aggregate findings+advisories exceed this would
+# overflow a terminal and be trimmed from scrollback (the user can't read the whole result). Above
+# it — for ANY scan, local or remote — the terminal shows the dashboard only and the full per-finding
+# detail moves to the written report. Catches the case the repo-count gate misses: FEW repos (even
+# one), but a wall of findings. A cheap count off data the report already carries — no extra render.
+MANY_FINDINGS = 200
 
 
 def _read_config(config_path: str | None) -> dict:
@@ -129,6 +137,29 @@ def _status_tag(r: ScanResult) -> str:
     tag = ("INFECTED" if r.infected else "SUSPECT" if r.suspicious
            else "ERROR" if r.error else "clean")
     return f"[{tag:8}]"
+
+
+def _print_report_pointer(report_path: Path, *, spilled: bool, reason: str = "") -> None:
+    """Point the user at the written report, PROMINENTLY (#1203) — in EVERY case a report is written
+    (local `-d`, or any spill — large fleet or many findings, local or remote). A ruled block on
+    stderr (kept off stdout so it never mixes into the report body or a pipe). Paths are coloured
+    and OSC-8 `file://` hyperlinks when stderr is a colour TTY, so a click opens the file/folder
+    without typing a command; when piped / NO_COLOR they stay plain text. `spilled` picks the
+    wording: a spilled sweep shows only the dashboard on-screen (the detail is in the file);
+    otherwise the file is a full copy for the record (e.g. `-d`)."""
+    on = supports_color(sys.stderr)
+    head = (f"Full report with per-finding detail saved ({reason}) — the terminal shows a summary only:"
+            if spilled else "Report written — a full copy saved for the record:")
+    tip = "  (click a coloured path to open it)" if on else ""
+    bar = rule(72)
+    print("\n".join([
+        bar,
+        head + tip,
+        f"  \u2192 {path_link(report_path, on=on)}",
+        f"    machine-readable: {path_link(report_path.with_name('latest.json'), on=on)}",
+        f"    folder: {path_link(report_path.parent, on=on)}",
+        bar,
+    ]), file=sys.stderr)
 
 
 def scan(config_path: str | None = None, *, remote: bool = False,
@@ -235,11 +266,13 @@ def scan(config_path: str | None = None, *, remote: bool = False,
 
     report = ScanReport(generated_at=now_iso(), results=results)
 
-    # A large sweep can't fit a terminal's scrollback, and its per-finding evidence (hundreds
-    # of lines) would bury the table. So for a big fleet the terminal shows the dashboard only
-    # (table + collapsed clean) and the full per-finding detail moves to the written report.
-    # Only meaningful for the human surface — `--json` carries everything to its consumer.
-    large_fleet = not json_out and len(results) > LARGE_FLEET
+    # A sweep too big for a terminal shows the SAME dashboard the large-fleet path already uses
+    # (table + collapsed clean; per-finding detail OFF) and moves the full detail to the written
+    # report. "Too big" is EITHER many repos (LARGE_FLEET) OR a large AGGREGATE of
+    # findings+advisories (MANY_FINDINGS, #1203) — both apply to EVERY scan (local, org, account).
+    # Cheap counts off data the report already carries; no extra render. `--json` carries everything.
+    detail_units = sum(len(r.findings) + len(r.advisories) for r in results)
+    spill = not json_out and (len(results) > LARGE_FLEET or detail_units > MANY_FINDINGS)
 
     # --- compose the output sinks from the flags. Default is terminal-first and persists
     #     nothing; --json swaps the human report for machine JSON on stdout; --sarif / -d add
@@ -248,7 +281,7 @@ def scan(config_path: str | None = None, *, remote: bool = False,
     sinks: list[Sink] = [
         JsonSink() if json_out
         else TerminalSink(enabled=report_on, pager=report_on and pager,
-                          detail=not large_fleet)]
+                          detail=not spill)]          # spill → same board as large fleet
     if sarif_path:
         sinks.append(SarifSink(sarif_path))
     if reports_dir:
@@ -261,16 +294,17 @@ def scan(config_path: str | None = None, *, remote: bool = False,
     for sink in sinks:
         sink.emit(report)
 
-    # Large sweep: guarantee the FULL report (with per-finding evidence) exists off-terminal
-    # and point at it — the complete result is always recoverable. If the user already
-    # persisted with -d we reuse that; otherwise drop the redacted Markdown+JSON in a temp dir.
-    if large_fleet:
-        if report_path is None:
-            tmp = Path(tempfile.mkdtemp(prefix="sab-report-"))
-            FileSink(tmp).emit(report)
-            report_path = tmp / "latest.md"
-        print(f"Full report ({len(results)} repos, with per-finding detail): {report_path}"
-              "  (+ latest.json)", file=sys.stderr)
+    # Spilled sweep: guarantee the FULL report exists off-terminal (same path large fleet already
+    # used). Reuse -d when given; otherwise a temp dir. Highlight the path whenever a report was
+    # written — local -d OR any spill — so it's never lost (#1203 UX).
+    if spill and report_path is None:
+        tmp = Path(tempfile.mkdtemp(prefix="sab-report-"))
+        FileSink(tmp).emit(report)
+        report_path = tmp / "latest.md"
+    if report_path is not None:
+        reason = (f"{len(results)} repositories scanned" if len(results) > LARGE_FLEET
+                  else "the report is larger than a terminal can show")
+        _print_report_pointer(report_path, spilled=spill, reason=reason)
 
     # Verdict as exit code. INFECTED (confirmed findings) → 1. A target that ERRORED (could not be
     # scanned at all — an unreadable/malformed config, a read failure, a failed clone) carries no

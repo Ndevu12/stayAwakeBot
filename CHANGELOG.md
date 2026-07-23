@@ -46,6 +46,18 @@ All notable changes to this project are documented here. The format is based on
   machines; both are unattended-execution vectors the worm can use.
 
 ### Changed
+- **`saw scan` no longer floods the terminal when the result is lengthy — local or org/account —
+  and highlights the report path whenever one is written** (#1203). A scan whose findings/advisories
+  ran long used to dump the whole report to the terminal and get trimmed by scrollback, so the full
+  result was unreadable. The existing large-fleet behavior already shows a **dashboard** (table only)
+  on-screen and moves per-finding detail to a written file when there are many repos; that **same
+  board** now also fires when the **aggregate findings+advisories** exceed `MANY_FINDINGS` — a cheap
+  count off data the report already carries (no extra render), for **every** scan (local, org, or
+  account), even at few repos. When it spills, the terminal keeps the readable dashboard, the full
+  detail lands in a written report (a temp dir when `-d` wasn't given), and the **report path is
+  highlighted** in a ruled stderr block — **coloured and clickable** (`file://` hyperlinks that open
+  the `.md` / `.json` / folder in a supporting terminal) — in **all** cases a report is written
+  (local `-d` or any spill). `--json` and piped consumers are unaffected.
 - **A concealment-seam config payload with no clean git ancestor is now stripped into a review-required
   PR commit, not left as a hand-hunt checklist** (#1209). `saw fix` excises a concealment-hidden loader
   as a *trusted* auto-fix only when the strip byte-for-byte matches a clean committed ancestor — that
