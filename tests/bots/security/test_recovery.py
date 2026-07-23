@@ -390,15 +390,32 @@ class TestSeamExcision(unittest.TestCase):
         self.assertEqual(result, clean_with_shim)                  # byte-exact: shim + require kept
         self.assertNotIn("sfL", result)                            # payload gone
 
-    def test_excision_requires_a_clean_ancestor(self):
-        # The excision is a safe git RESTORE (the payload-stripped result must EQUAL a clean commit),
-        # not a blind textual strip — with no git history to corroborate against, it defers.
+    def test_no_ancestor_seam_offers_a_suggested_strip(self):
+        # #1209: with no git history to corroborate against, the seam excision can't AUTO-apply
+        # (no trusted version to prove nothing ELSE was injected into the kept code) — but the strip
+        # is structurally proven by `_seam_strip`'s five self-contained gates, so saw offers it as a
+        # computed Suggested fix for the operator to review, instead of a bare hand-hunt checklist.
+        # The file is NOT modified — only a git-corroborated Recovery is ever auto-written.
         d = Path(tempfile.mkdtemp())                               # no git init
         (d / "next.config.mjs").write_text(_infected_line(), encoding="utf-8")
         disp = remediation.classify_recovery(d, _finding("next.config.mjs"), SIG)
-        self.assertIsInstance(disp, remediation.Manual)
+        self.assertIsInstance(disp, remediation.Suggested)
         self.assertEqual(disp.reason, remediation.NO_VCS)
-        self.assertIn("sfL", (d / "next.config.mjs").read_text())  # untouched
+        self.assertEqual(disp.excised_text, CLEAN)                 # the computed strip is byte-exact clean
+        self.assertNotIn("sfL", disp.diff)                         # payload redacted in the preview
+        self.assertIn("sfL", (d / "next.config.mjs").read_text())  # file UNTOUCHED (not auto-applied)
+
+    def test_no_ancestor_seam_with_visible_exec_sink_in_kept_stays_manual(self):
+        # #1209 safety: even without an ancestor, if the KEPT code carries a DETECTABLE exec sink,
+        # `_seam_strip` gate 4 refuses → no Suggested, defer to a full Manual investigation. A
+        # computed strip is only ever offered when the kept code is free of detectable payload/exec
+        # sinks — the same gate that protects the git-corroborated path protects this one.
+        d = Path(tempfile.mkdtemp())                               # no git
+        rce = "globalThis.x = require('vm').runInThisContext('a');\n" + _infected_line()
+        (d / "next.config.mjs").write_text(rce, encoding="utf-8")
+        disp = remediation.classify_recovery(d, _finding("next.config.mjs"), SIG)
+        self.assertIsInstance(disp, remediation.Manual)            # NOT offered as a clean strip
+        self.assertIn("runInThisContext", (d / "next.config.mjs").read_text())
 
     def test_hidden_rce_in_kept_code_defers_via_corroboration(self):
         # THE edge-case fix: an RCE the scanner CAN'T see (`require('vm').runInThisContext`) injected
@@ -415,9 +432,12 @@ class TestSeamExcision(unittest.TestCase):
         self.assertEqual(disp.reason, remediation.LEGIT_CHANGES)
         self.assertIn("runInThisContext", (d / "postcss.config.mjs").read_text())   # file untouched
 
-    def test_legit_edit_since_infection_defers(self):
-        # A legit edit made after infection means the payload-stripped file no longer equals the
-        # pre-infection clean commit → corroboration defers rather than silently drop the edit.
+    def test_legit_edit_since_infection_offers_a_suggested_strip(self):
+        # #1209: a legit edit made after infection means the payload-stripped file no longer equals
+        # any pre-infection clean commit, so the excision can't AUTO-apply (the edit isn't in trusted
+        # history). But `_seam_strip` PRESERVES that edit (every non-seam byte kept) and is
+        # structurally proven, so it is offered as a computed Suggested fix to review — not a bare
+        # defer. The legit edit survives in the computed strip; the file itself is untouched.
         d = _repo()
         _commit(d, "postcss.config.mjs", CLEAN, "add config")
         edited = CLEAN.replace("export default config;",
@@ -425,8 +445,11 @@ class TestSeamExcision(unittest.TestCase):
         (d / "postcss.config.mjs").write_text(edited.rstrip("\n") + " " * 470 + PAYLOAD + "\n",
                                               encoding="utf-8")
         disp = remediation.classify_recovery(d, _finding("postcss.config.mjs"), SIG)
-        self.assertIsInstance(disp, remediation.Manual)
-        self.assertIn("VERSION", (d / "postcss.config.mjs").read_text())   # legit edit preserved
+        self.assertIsInstance(disp, remediation.Suggested)
+        self.assertEqual(disp.reason, remediation.LEGIT_CHANGES)
+        self.assertIn("VERSION", disp.excised_text)                        # legit edit preserved in strip
+        self.assertNotIn("sfL", disp.excised_text)                         # payload gone from the strip
+        self.assertIn("VERSION", (d / "postcss.config.mjs").read_text())   # file untouched (not applied)
 
     def test_apply_refuses_a_tampered_excision(self):
         # apply re-proves by RE-RUNNING the canonical strip on the file NOW; a clean_text that is
@@ -438,6 +461,42 @@ class TestSeamExcision(unittest.TestCase):
                                         "export default config;\n", excised=True)  # dropped the config
         self.assertFalse(remediation.apply_recovery(d, tampered, remediation.quarantine_path(d), SIG))
         self.assertIn("sfL", (d / "c.mjs").read_text())            # untouched, payload intact
+
+    # ── #1209 (Option B): apply_suggested WRITES the computed strip (into the review branch) ──
+    def test_apply_suggested_applies_the_computed_strip(self):
+        # A Suggested (no git ancestor) is applied by the SAME write machinery as an excised Recovery:
+        # re-prove _seam_strip on the live bytes, quarantine the original, write the strip, verify.
+        # Payload gone, every other byte kept — the ONLY difference from Recovery is provenance.
+        d = Path(tempfile.mkdtemp())                               # no git → NO_VCS Suggested
+        (d / "next.config.mjs").write_text(_infected_line(), encoding="utf-8")
+        disp = remediation.classify_recovery(d, _finding("next.config.mjs"), SIG)
+        self.assertIsInstance(disp, remediation.Suggested)
+        q = remediation.quarantine_path(d)
+        self.assertTrue(remediation.apply_suggested(d, disp, q, SIG))
+        self.assertEqual((d / "next.config.mjs").read_text(), CLEAN)   # clean prefix kept byte-exact
+        self.assertNotIn("sfL", (d / "next.config.mjs").read_text())   # payload stripped
+        self.assertIn("sfL", (q / "next.config.mjs").read_text())      # original quarantined
+
+    def test_apply_suggested_refuses_when_live_bytes_diverge(self):
+        # Re-proof against the file NOW: if it changed since classify so the canonical strip no longer
+        # reproduces excised_text, refuse before any write (the strip can't be applied to stale bytes).
+        d = Path(tempfile.mkdtemp())
+        (d / "next.config.mjs").write_text(_infected_line(), encoding="utf-8")
+        disp = remediation.classify_recovery(d, _finding("next.config.mjs"), SIG)
+        self.assertIsInstance(disp, remediation.Suggested)
+        (d / "next.config.mjs").write_text("export default other;\n", encoding="utf-8")  # changed, no seam
+        self.assertFalse(remediation.apply_suggested(d, disp, remediation.quarantine_path(d), SIG))
+        self.assertEqual((d / "next.config.mjs").read_text(), "export default other;\n")  # untouched
+
+    def test_apply_suggested_refuses_a_symlinked_target(self):
+        # Same #1218 guard as apply_recovery: never write through a symlink (would clobber outside the
+        # worktree with no backup). The computed strip shares the write path, so it inherits the guard.
+        d = Path(tempfile.mkdtemp())
+        (d / "real.mjs").write_text(_infected_line(), encoding="utf-8")
+        os.symlink(d / "real.mjs", d / "link.mjs")
+        sug = remediation.Suggested("link.mjs", "sig", remediation.NO_VCS, "x", "d", CLEAN, 1)
+        self.assertFalse(remediation.apply_suggested(d, sug, remediation.quarantine_path(d), SIG))
+        self.assertIn("sfL", (d / "real.mjs").read_text())         # real target untouched through link
 
     # ── adversarial negatives: the excision must NOT fire on legit near-misses ──
     def test_no_seam_direct_append_not_excised(self):

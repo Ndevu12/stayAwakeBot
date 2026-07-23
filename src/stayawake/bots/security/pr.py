@@ -38,26 +38,39 @@ def _mark_partial(outcome: str, partial: bool) -> str:
     return outcome if (not partial or "PARTIAL" in outcome) else f"{outcome}  [PARTIAL — manual review required]"
 
 
-def manual_review_lines(manual, limit: int = 20) -> str:
-    """Per-finding manual-review guidance for `saw fix`'s CLI stream (#1184): each residual as
-    location + reason-code + the recommended (inspect-before-running) command classify_recovery
-    already computed. Empty when there is no residual. Every field is `_plain`-sanitized (a crafted
-    path can't inject terminal/Actions control sequences), the list is bounded (`…and N more`), and
-    only locations / reasons / commands are shown — the payload bytes are NEVER echoed (#1184
-    invariants 2–4). Recovery commands keep their 'review the diff before running' framing;
-    validating a recovery sha's ancestry is #1185's source-trust rule."""
-    if not manual:
+def _review_lines(items, header: str, limit: int = 20) -> str:
+    """Shared CLI-stream renderer for a bounded list of review items (location · reason-code ·
+    action). Every field is `_plain`-sanitized (a crafted path can't inject terminal/Actions control
+    sequences), the list is bounded (`…and N more`), and only locations / reasons / guidance are
+    shown — the payload bytes are NEVER echoed (#1184 invariants 2–4). Empty when there are none."""
+    if not items:
         return ""
-    lines = ["", "    Manual review needed (inspect before running any command):"]
-    for m in manual[:limit]:
+    lines = ["", f"    {header}"]
+    for m in items[:limit]:
         loc = m.path + (f":{m.line}" if getattr(m, "line", None) else "")
         lines.append(f"      • {textsafe.plain(loc)}  ({textsafe.plain(getattr(m, 'reason', ''), 40)})")
         action = textsafe.plain(getattr(m, "action", ""), 300)
         if action:
             lines.append(f"        {action}")
-    if len(manual) > limit:
-        lines.append(f"      …and {len(manual) - limit} more")
+    if len(items) > limit:
+        lines.append(f"      …and {len(items) - limit} more")
     return "\n".join(lines)
+
+
+def manual_review_lines(manual, limit: int = 20) -> str:
+    """Per-finding manual-review guidance for `saw fix`'s CLI stream (#1184): each residual as
+    location + reason-code + the recommended (inspect-before-running) command classify_recovery
+    already computed. Recovery commands keep their 'review the diff before running' framing;
+    validating a recovery sha's ancestry is #1185's source-trust rule. See `_review_lines` for the
+    injection-safety contract."""
+    return _review_lines(manual, "Manual review needed (inspect before running any command):", limit)
+
+
+def computed_review_lines(computed, limit: int = 20) -> str:
+    """CLI-stream guidance for the #1209 computed strips that WERE applied to the review branch but
+    are NOT git-corroborated: each as location + reason-code + the review-before-merge guidance (the
+    operator's review is the trust anchor for the one residual the git-match would otherwise close)."""
+    return _review_lines(computed, "Computed strips applied — REVIEW the kept code before merging:", limit)
 
 
 def _untrack_quarantine(repo: Path) -> bool:
@@ -134,11 +147,13 @@ def _render_submit(res: proposal.SubmitResult, *, slug: str, base: str, partial:
             "signed commits?) — " + "; ".join(bits) + ".")
 
 
-def _pr_body(slug: str, changes, suspicious=(), manual=()) -> str:
-    """Render the PR body. `manual` (residual CONFIRMED findings that couldn't be auto-fixed)
-    makes this a PARTIAL fix (#1183): the body says so loudly and lists each residual as a
-    checklist. All untrusted text (paths, reasons) goes through `_code`/`_sanitize` (invariant #5)."""
-    partial = bool(manual)
+def _pr_body(slug: str, changes, computed=(), suspicious=(), manual=()) -> str:
+    """Render the PR body. A PARTIAL fix (#1183/#1209) is any tree that is NOT fully git-corroborated
+    clean — either residual CONFIRMED findings with no safe fix (`manual`), OR computed strips that
+    ARE applied (a separate commit) but are NOT git-corroborated and MUST be reviewed before merge
+    (`computed`). The body says so loudly and lists each. All untrusted text (paths, reasons) goes
+    through `_code`/`_sanitize` (invariant #5)."""
+    partial = bool(manual) or bool(computed)
     lines = [
         (f"**⚠ PARTIAL remediation for {textsafe.code(slug)}** by StayAwakeBot Security Sentinel — this "
          "branch applies what is provably safe but is **NOT a clean tree** (see below)."
@@ -149,10 +164,31 @@ def _pr_body(slug: str, changes, suspicious=(), manual=()) -> str:
     if len(changes) > 200:                    # bound the body — a hostile tree can't bloat it
         change_lines.append(f"- …and {len(changes) - 200} more")
     lines += change_lines or ["- (none)"]
+    if computed:
+        # #1209 REVIEW-REQUIRED tier: these strips ARE applied on this branch (as a SEPARATE commit
+        # from the git-corroborated changes above), but they are NOT git-corroborated — the payload
+        # was cut along a structurally-proven concealment seam, and the ONE residual the whole-file
+        # git match would otherwise close (a scanner-invisible injection in the kept code) is closed
+        # by THIS human review. So the reviewer MUST read the kept code before merging.
+        lines += ["", "## 🔧 Computed strip applied — REVIEW the kept code before merging",
+                  "", f"**{len(computed)} finding(s) were fixed by a saw-computed payload-only strip** "
+                  "(a SEPARATE commit on this branch). saw cut the payload after the concealment seam "
+                  "and kept every other byte; the kept code carries no payload or detectable exec "
+                  "sink. But saw could NOT git-corroborate the result (no clean committed version to "
+                  "compare against), so this is **not a trusted auto-fix** — read the diff for each and "
+                  "confirm the kept code is untampered before merging. The gate stays red until you do:",
+                  ""]
+        # One code-wrapped line per finding (same injection-safe shape as the manual list — every
+        # attacker-influenced field via `textsafe.code`, no raw diff embedded in the Markdown body,
+        # so a crafted path/kept-line can't inject a link/image/HTML; the diff lives in the commit).
+        for m in computed[:50]:
+            loc = m.path + (f":{m.line}" if getattr(m, "line", None) else "")
+            lines.append(f"- [ ] {textsafe.code(loc)} — {textsafe.code(getattr(m, 'signature_id', ''))} "
+                         f"({textsafe.code(getattr(m, 'reason', ''), 40)}): "
+                         f"{textsafe.code(getattr(m, 'action', ''))}")
     if manual:
-        # The honest heart of a partial fix: confirmed indicators that we did NOT touch (a
-        # code-loader with no safe git recovery), each with its reason + recommended action. The
-        # tree is never presented as clean — the gate stays red and this list says why.
+        # The honest heart of a partial fix: confirmed indicators with no safe fix at all, each with
+        # its reason + recommended action. The tree is never presented as clean.
         lines += ["", "## 🚨 Still infected — confirmed indicators NOT auto-fixed (manual action required)",
                   "", f"**{len(manual)} confirmed finding(s) could not be safely auto-remediated and "
                   "remain in this tree.** Do NOT merge this as a completed fix — the security gate stays "
@@ -185,22 +221,27 @@ def _pr_body(slug: str, changes, suspicious=(), manual=()) -> str:
 
 @dataclass(frozen=True)
 class _Fix:
-    """The result of building a fix: the base branch it sits on, and the changes/findings
-    used to commit it to FIX_BRANCH and to write the PR body. `manual` holds the residual
-    CONFIRMED findings that could NOT be auto-fixed — non-empty means a PARTIAL fix (#1183):
-    the safe changes still ship, but the tree is not clean and the PR/gate must say so.
-    `signed` is False when the fix commit had to be landed with signing forced OFF (the repo
-    wanted signed commits but signing couldn't complete in the worktree)."""
+    """The result of building a fix: the base branch it sits on, and the changes/findings used to
+    commit it to FIX_BRANCH and write the PR body. `applied` are the TRUSTED (structure-safe +
+    git-corroborated) changes; `computed` are the #1209 review-required strips — applied on a SEPARATE
+    commit but NOT git-corroborated, so they keep the run needs-review until a human reviews them.
+    `manual` holds residual CONFIRMED findings that could NOT be auto-fixed. Any of `computed`/`manual`
+    non-empty means a PARTIAL fix (#1183/#1209): the safe changes still ship, but the tree is not a
+    trusted-clean one and the PR/gate must say so. `signed` is False when either fix commit had to be
+    landed with signing forced OFF (the repo wanted signed commits but signing couldn't complete)."""
     base: str
     applied: list
-    suspicious: list
-    findings: list
+    computed: tuple = ()
+    suspicious: list = ()
+    findings: list = ()
     manual: tuple = ()
     signed: bool = True
 
     @property
     def partial(self) -> bool:
-        return bool(self.manual)
+        # A computed strip is applied but NOT git-corroborated — it MUST be reviewed before merge, so
+        # a run carrying one is needs-review (gate red / exit 1) exactly like a residual manual item.
+        return bool(self.manual) or bool(self.computed)
 
 
 def _signing_note(fix: "_Fix | None") -> str:
@@ -256,14 +297,18 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *,
     with status(f"scanning {label}…", enabled=spin):       # phase 1: detection (the slow part)
         findings = _scan()
 
-    # phase 2: apply structure-safe fixes, recover code-loaders from git, verify, commit.
+    # phase 2: apply the TRUSTED tier (structure-safe fixes + git-corroborated recoveries) and commit
+    # it, then apply the COMPUTED #1209 strips (structurally proven but NOT git-corroborated) as a
+    # SEPARATE, review-required commit — two trust levels, two commits, in one rolling PR.
     with status(f"fixing {label}…", enabled=spin):
         applied = remediation.apply(wt, remediation.plan(findings), quarantine)
-        # CONFIRMED code-loader findings are RECOVERED from git history, never surgically edited
-        # — so the fix can never carry corrupted code. When there is no PROVABLY-safe recovery the
-        # finding is deferred to MANUAL review (captured here with its reason), never touched.
+        # CONFIRMED code-loader findings are RECOVERED from git history, never surgically edited. A
+        # git-corroborated recovery is applied now (trusted tier). One with no clean ancestor but a
+        # structurally-proven strip is a Suggested → applied as the separate computed tier below
+        # (#1209). No safe fix at all → deferred to MANUAL, never touched.
         seen_cl: set = set()
-        manual_reviews: dict = {}          # path -> remediation.Manual (couldn't safely auto-fix)
+        manual_reviews: dict = {}          # path -> Manual (no safe recovery at all)
+        suggested: list = []               # Suggested dispositions to apply as the computed tier
         for f in findings:
             if (f.category != "code-loader" or getattr(f, "confidence", "confirmed") != "confirmed"
                     or f.path in seen_cl):
@@ -273,22 +318,64 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *,
             if isinstance(disp, remediation.Recovery) and \
                     remediation.apply_recovery(wt, disp, quarantine, content_sig):
                 applied.append(remediation.Change("recover", disp.path, disp.label))
+            elif isinstance(disp, remediation.Suggested):
+                suggested.append(disp)     # computed strip → applied + committed separately below
             elif isinstance(disp, remediation.Manual):
-                manual_reviews[disp.path] = disp   # no safe recovery → carry reason + action
+                manual_reviews[disp.path] = disp
 
-        # Post-apply verification — never leave a fix presented as clean while infected. BLOCKING =
-        # still auto-fixable OR any CONFIRMED code-loader we couldn't recover; quarantine the
-        # auto-fixable residue (fail-safe), then re-scan for the ground-truth residual.
-        fs = _scan()
-        auto = [f for f in _blocking(fs) if remediation.is_auto_fixable(f)]
+        # Quarantine any AUTO-FIXABLE residue of the trusted tier (fail-safe). The computed-tier
+        # payloads are code-loaders (NOT auto-fixable), so they survive here untouched — to be
+        # applied as the separate review-required commit, never swept into the trusted commit.
+        auto = [f for f in _blocking(_scan()) if remediation.is_auto_fixable(f)]
         if auto:
             applied += remediation.quarantine_residual(wt, auto, quarantine)
-            fs = _scan()
+
+        # Commit the TRUSTED tier FIRST — before any computed strip touches disk — so the two trust
+        # levels land as cleanly separated commits (`stage_all` after each write group captures only
+        # that group's changes, since the previous group is already committed).
+        if not _untrack_quarantine(wt):
+            return None, f"ABORTED — could not untrack {QUARANTINE_DIR}/ (would commit backups)", wt
+        signed = True
+        if applied:
+            if not gitutil.stage_all(wt):
+                return None, "ABORTED — could not stage the fix (git add failed)", wt
+            # commit_fix checks the result and retries UNSIGNED if signing fails — so the branch
+            # always advances (no phantom "prepared N" on an empty branch) and we learn whether the
+            # commit is unsigned (surfaced to the operator via `_signing_note`).
+            commit = gitutil.commit_fix(wt, "security: auto-remediate worm indicators\n\n"
+                                        + "\n".join(f"- {c.action}: {c.path}" for c in applied))
+            if not commit.committed:
+                return None, "ABORTED — could not commit the fix (git commit failed)", wt
+            signed = commit.signed
+
+        # COMPUTED tier (#1209): apply each structurally-proven strip (re-proved against the live
+        # bytes inside apply_suggested) and commit it SEPARATELY, clearly labeled review-required. A
+        # strip that no longer re-proves falls back to manual (still infected, never silently lost).
+        computed: list = []
+        for disp in suggested:
+            if remediation.apply_suggested(wt, disp, quarantine, content_sig):
+                computed.append(disp)
+            else:
+                manual_reviews[disp.path] = remediation.Manual(
+                    disp.path, disp.signature_id, disp.reason,
+                    "A computed payload strip could not be re-proved against the file on disk — "
+                    "review and remove the payload manually.", disp.line)
+        if computed:
+            if not gitutil.stage_all(wt):
+                return None, "ABORTED — could not stage the computed strip (git add failed)", wt
+            commit = gitutil.commit_fix(
+                wt, "security: computed payload strip — REVIEW REQUIRED (not git-corroborated)\n\n"
+                + "\n".join(f"- strip-computed: {d.path}" for d in computed))
+            if not commit.committed:
+                return None, "ABORTED — could not commit the computed strip (git commit failed)", wt
+            signed = signed and commit.signed
+
+        # GROUND-TRUTH residual AFTER both tiers are applied — the honest "still infected" set. The
+        # computed-tier paths are stripped, so they never appear here; only genuinely-manual do. The
+        # tree is never called clean while `manual` (or `computed`) is non-empty.
+        fs = _scan()
         residual = _blocking(fs)
         suspicious = [f for f in fs if not _is_blocking(f)]   # heuristic-only residue
-        # Every residual (confirmed finding still present) becomes a manual-review item, built from
-        # the GROUND-TRUTH re-scan — a captured recovery reason where we have one, else a generic
-        # note. The tree is never called clean while `manual` is non-empty.
         manual: list = []
         for path in sorted({f.path for f in residual}):
             m = manual_reviews.get(path)
@@ -300,31 +387,15 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *,
                     "remove/recover manually.", getattr(f0, "line", None))
             manual.append(m)
 
-        if not applied:
+        if not applied and not computed:
             # Nothing was provably safe to ship. If confirmed findings remain, return a NOTIFY-ONLY
-            # fix (no changes committed, `applied` empty) so the caller files a de-duplicated
-            # manual-review issue and keeps the gate red — better than a silent dead-end (#1183).
-            # Otherwise the tree was already clean.
+            # fix (no changes committed) so the caller files a de-duplicated manual-review issue and
+            # keeps the gate red — better than a silent dead-end (#1183). Else the tree was clean.
             if residual:
-                return _Fix(base, [], suspicious, findings, tuple(manual)), "", wt
+                return _Fix(base, [], (), suspicious, findings, tuple(manual)), "", wt
             return None, f"'{base}' already clean — nothing to fix", wt
-
-        # applied ≥ 1. If confirmed findings remain, this is a PARTIAL fix (#1183): ship the safe
-        # changes and list every residual as manual-review work. The tree is never called clean.
-        if not _untrack_quarantine(wt):
-            return None, f"ABORTED — could not untrack {QUARANTINE_DIR}/ (would commit backups)", wt
-        if not gitutil.stage_all(wt):
-            return None, "ABORTED — could not stage the fix (git add failed)", wt
-        subject = ("security: partial auto-remediation (manual review required)" if manual
-                   else "security: auto-remediate worm indicators")
-        msg = subject + "\n\n" + "\n".join(f"- {c.action}: {c.path}" for c in applied)
-        # commit_fix checks the result and retries UNSIGNED if signing fails — so the branch
-        # always advances (no phantom "prepared N" on an empty branch) and we learn whether the
-        # commit is unsigned (surfaced to the operator via `_signing_note`).
-        commit = gitutil.commit_fix(wt, msg)
-        if not commit.committed:
-            return None, "ABORTED — could not commit the fix (git commit failed)", wt
-    return _Fix(base, applied, suspicious, findings, tuple(manual), signed=commit.signed), "", wt
+    return _Fix(base, applied, tuple(computed), suspicious, findings, tuple(manual),
+                signed=signed), "", wt
 
 
 def prepare_fix(repo: Path, opts, signatures, allowlist, *, spin: bool = False) -> str:
@@ -336,16 +407,18 @@ def prepare_fix(repo: Path, opts, signatures, allowlist, *, spin: bool = False) 
     try:
         if fix is None:
             return f"{slug}: {outcome}"
-        if not fix.applied:
+        if not fix.applied and not fix.computed:
             # Nothing safely fixable, confirmed findings remain (#1183). `saw fix` (no --pr) does no
             # network, so it just reports the abort; `saw fix --pr` additionally files an issue.
             return (f"{slug}: ABORTED — nothing auto-fixable; {len(fix.manual)} confirmed finding(s) "
                     "need manual review") + manual_review_lines(fix.manual)
         if fix.partial:
-            return (f"{slug}: PARTIAL — prepared {len(fix.applied)} safe change(s) on '{FIX_BRANCH}', "
-                    f"but {len(fix.manual)} confirmed finding(s) still need manual review "
-                    f"(`git -C {repo} diff {fix.base}...{FIX_BRANCH}`)"
-                    ) + _signing_note(fix) + manual_review_lines(fix.manual)
+            prepared = len(fix.applied) + len(fix.computed)
+            need = ([f"{len(fix.computed)} computed strip(s) need review before merge"] if fix.computed else []) \
+                + ([f"{len(fix.manual)} confirmed finding(s) still need manual review"] if fix.manual else [])
+            return (f"{slug}: PARTIAL — prepared {prepared} change(s) on '{FIX_BRANCH}', "
+                    f"but {' and '.join(need)} (`git -C {repo} diff {fix.base}...{FIX_BRANCH}`)"
+                    ) + _signing_note(fix) + computed_review_lines(fix.computed) + manual_review_lines(fix.manual)
         return (f"{slug}: prepared {len(fix.applied)} change(s) on '{FIX_BRANCH}' — review "
                 f"`git -C {repo} diff {fix.base}...{FIX_BRANCH}`, then `saw fix --pr` to open a PR"
                 ) + _signing_note(fix)
@@ -367,13 +440,13 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
         try:
             if fix is None:
                 return outcome
-            if not fix.applied:
+            if not fix.applied and not fix.computed:
                 return (f"ABORTED — nothing auto-fixable; {len(fix.manual)} confirmed finding(s) "
                         "need manual review (no GitHub origin — cannot file an issue)"
                         ) + manual_review_lines(fix.manual)
             return _mark_partial(
                 f"no GitHub origin — prepared on '{FIX_BRANCH}'; add a remote and push to open a PR",
-                fix.partial) + _signing_note(fix) + manual_review_lines(fix.manual)
+                fix.partial) + _signing_note(fix) + computed_review_lines(fix.computed) + manual_review_lines(fix.manual)
         finally:
             if wt:
                 gitutil.remove_worktree(repo, wt)
@@ -384,7 +457,7 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
     try:
         if fix is None:
             return f"{slug}: {outcome}"
-        if not fix.applied:
+        if not fix.applied and not fix.computed:
             # Nothing safely fixable but confirmed indicators remain (#1183): there is no branch/PR
             # to push, so file a de-duplicated manual-review issue (the read-only floor's mechanism)
             # and abort with the count. The gate stays red (outcome carries ABORTED). Degrades
@@ -404,7 +477,8 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
             partial = fix.partial
             title = ("security: PARTIAL auto-remediation — manual review required" if partial
                      else "security: auto-remediate worm indicators")
-            body = _pr_body(slug, fix.applied, fix.suspicious, fix.manual)
+            body = _pr_body(slug, fix.applied, computed=fix.computed,
+                            suspicious=fix.suspicious, manual=fix.manual)
             # The shared ladder does push → fork → patch → dedup-issue and returns structured facts;
             # fix owns the outcome wording (`_render_submit`) and the PARTIAL label reconcile.
             res = proposal.submit_change_pr(wt, slug, base, branch=FIX_BRANCH, title=title,
@@ -419,7 +493,7 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
         # marked needs-review here (#1183 invariant #1) — no fallback path can silently pass clean —
         # and the per-finding manual-review guidance + any unsigned-commit warning are appended.
         return (_mark_partial(_publish(), fix.partial)
-                + _signing_note(fix) + manual_review_lines(fix.manual))
+                + _signing_note(fix) + computed_review_lines(fix.computed) + manual_review_lines(fix.manual))
     finally:
         if wt:
             gitutil.remove_worktree(repo, wt)

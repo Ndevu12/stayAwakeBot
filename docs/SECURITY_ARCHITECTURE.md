@@ -275,9 +275,41 @@ open PR from that branch and **updates it instead of creating a duplicate**. Wor
 a git worktree; it never commits to or force-pushes the default branch. After applying, it
 **re-scans and aborts (no PR) if a confirmed infection is still detected**, discloses any
 remaining heuristic/suspicious findings in the PR body, and the commit message / PR body
-describe only what was *actually* changed. An injected payload is recovered from git (the
-file's last clean committed version), or deferred to manual review with the exact command —
-never reconstructed.
+describe only what was *actually* changed. An injected payload is never *reconstructed* — it is
+only ever removed, and only along a graded set of trust tiers:
+
+**Payload-recovery trust tiers (#1204, #1209).** `saw` only ever writes bytes a trusted source
+endorses, and the tier is set by *how strong* that endorsement is:
+
+1. **Auto-apply — git-corroborated.** The payload-stripped file byte-for-byte equals the file's
+   last clean committed first-parent ancestor (a whole-file restore, or a concealment-seam
+   excision that reproduces that ancestor exactly). That match is the whole safety proof: anything
+   the attacker injected *anywhere* in the kept code — even a scanner-invisible RCE — makes the
+   result diverge from trusted history and is refused. No human scrutiny of the strip is required.
+2. **Computed strip — structurally proven, human-corroborated (`Suggested`).** When there is **no
+   clean committed ancestor** to compare against — the repo has no VCS, the file is untracked, it was
+   *born infected* (the first commit already carried the payload), or a *legitimate edit was made
+   since infection* — `saw` cannot land a trusted auto-fix, but it can still *compute* the exact
+   strip: a concealment-seam excision passes five self-contained gates (an unambiguous ≥16-char
+   concealment boundary; a payload-free result; a result that isn't itself packed; **no detectable
+   exec sink in the kept code**; only-removal / no fabricated byte). The one thing the git match adds
+   over those five gates is catching a *scanner-invisible* injection in the kept code. So `saw`
+   **applies the strip on the `security/auto-clean` branch as a SEPARATE, clearly-labeled commit**
+   (distinct from the git-corroborated tier-1 commit) and surfaces it in a **"Computed strip applied
+   — review before merging"** PR section, original quarantined. It is **never auto-merged**: the PR
+   review is the trust anchor for that one residual, the run stays needs-review (gate red) until a
+   human merges, and the host/default branch is never touched by the tool. The reviewer reads a
+   ready diff instead of hand-hunting the payload; the human supplies the trust git couldn't.
+3. **Manual investigation.** No clean seam exists, or a *detectable* exec sink survives in the kept
+   code — genuinely inseparable. Deferred with guidance.
+
+Why tier-2 is applied to a PR rather than auto-merged, and tier-3 is deferred: the `security/auto-clean`
+PR is inherently a **proposal awaiting human review** — even a tier-1 corroborated recovery lands in a
+PR a human merges; the tool never touches the default branch. Committing a tier-2 strip to that branch
+is proposing a reviewable change, not declaring the host clean. Auto-*merging* a file with no trusted
+baseline, by contrast, would mean asserting a "clean" nothing corroborates — a confident false verdict
+(the "fixing an infected host = lying" rule), which `saw` never does. So the two trust levels ride one
+rolling PR as two commits; the operator's merge is the single trust decision `saw` reduces the job to.
 
 `saw audit [--repo owner/name]` checks local posture (cached GitHub credential,
 VS Code auto-run / Workspace Trust, host persistence / drop-artifacts) and, with a token +
