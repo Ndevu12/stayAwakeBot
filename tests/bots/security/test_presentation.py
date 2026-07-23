@@ -7,6 +7,7 @@ from __future__ import annotations
 import io
 import os
 import signal
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -25,6 +26,15 @@ def _clean(name: str) -> ScanResult:
 def _infected(name: str) -> ScanResult:
     r = ScanResult(target=name, source="local")
     r.findings.append(Finding("loader-seed-var", "code-loader", Severity.CRITICAL, "x.js", "loader"))
+    return r
+
+
+def _infected_many(name: str, n: int) -> ScanResult:
+    """One repo with `n` findings — few repos, but a report far too tall for a terminal (#1203)."""
+    r = ScanResult(target=name, source="local")
+    for i in range(n):
+        r.findings.append(Finding(f"sig-{i}", "code-loader", Severity.CRITICAL,
+                                  f"f{i}.js", "loader", evidence="snippet"))
     return r
 
 
@@ -136,6 +146,74 @@ class TestLargeFleetPointer(unittest.TestCase):
              redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err:
             service.scan(None, no_stream=True)
         self.assertNotIn("Full report", err.getvalue())
+
+
+def _remote_scan(results, **kw):
+    """Drive service.scan down the REMOTE path with `results` as the per-repo scan outcomes,
+    stubbing resolution + clone + scan so no network/FS is touched. Returns (rc, stdout, stderr)."""
+    slugs = [r.target for r in results]
+    it = iter(results)
+    with mock.patch.object(service, "_resolve_remote", return_value=(slugs, None, "test")), \
+         mock.patch.object(service, "RemoteRepoTarget") as RT, \
+         mock.patch.object(service, "scan_target", side_effect=lambda *a, **k: next(it)), \
+         redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()) as err:
+        RT.return_value.clone.return_value = True
+        rc = service.scan(None, remote=True, slugs=slugs, no_stream=True, **kw)
+    return rc, out.getvalue(), err.getvalue()
+
+
+def _local_scan(result, **kw):
+    """Drive service.scan down the LOCAL path with one mocked repo. Returns (rc, stdout, stderr)."""
+    with mock.patch.object(service, "discover_local_repos", return_value=[Path("/x/r0")]), \
+         mock.patch.object(service, "LocalRepoTarget"), \
+         mock.patch.object(service, "scan_target", return_value=result), \
+         redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()) as err:
+        rc = service.scan(None, no_stream=True, **kw)
+    return rc, out.getvalue(), err.getvalue()
+
+
+class TestManyFindingsSpills(unittest.TestCase):
+    """#1203: a wall of findings (local OR remote) uses the SAME board the large-fleet path uses —
+    dashboard on-screen, full detail in a highlighted file — even at few repos."""
+
+    def test_local_wall_of_findings_shows_board_and_spills(self):
+        rc, out, err = _local_scan(_infected_many("o/huge", service.MANY_FINDINGS + 10))
+        self.assertEqual(rc, 1)
+        self.assertIn("o/huge", out)                            # board still names the target
+        self.assertNotIn("sig-0", out)                          # per-finding detail OFF the terminal
+        self.assertIn("full report", out.lower())               # dashboard points at the file
+        self.assertIn("Full report", err)                       # highlighted path on stderr
+        self.assertIn("larger than a terminal", err)
+        self.assertIn("latest.md", err)
+        self.assertIn("folder:", err)                           # folder line for easy navigation
+
+    def test_remote_wall_of_findings_shows_board_and_spills(self):
+        rc, out, err = _remote_scan([_infected_many("o/huge", service.MANY_FINDINGS + 10)])
+        self.assertEqual(rc, 1)
+        self.assertIn("o/huge", out)                            # same board as local
+        self.assertNotIn("sig-0", out)
+        self.assertIn("Full report", err)
+        self.assertIn("latest.md", err)
+
+    def test_small_local_keeps_detail_inline_no_pointer(self):
+        rc, out, err = _local_scan(_infected("o/bad"))
+        self.assertIn("loader-seed-var", out)                   # detail stays inline
+        self.assertNotIn("Full report", err)
+        self.assertNotIn("Report written", err)
+
+    def test_small_remote_keeps_detail_inline_no_pointer(self):
+        # Small remote is still terminal-first — no auto-persist unless spilled or -d.
+        rc, out, err = _remote_scan([_infected("o/bad")])
+        self.assertIn("loader-seed-var", out)
+        self.assertNotIn("Full report", err)
+        self.assertNotIn("Report written", err)
+
+    def test_local_with_reports_dir_highlights_path(self):
+        d = tempfile.mkdtemp()
+        rc, out, err = _local_scan(_infected("o/bad"), reports_dir=d)
+        self.assertIn("loader-seed-var", out)                   # small → detail still inline
+        self.assertIn("Report written", err)                    # -d → highlighted path
+        self.assertIn(os.path.basename(d), err)
 
 
 if __name__ == "__main__":

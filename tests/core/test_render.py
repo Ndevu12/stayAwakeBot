@@ -25,6 +25,24 @@ class TestPaint(unittest.TestCase):
         self.assertNotIn("\033", render.paint("x", "\033[31m", on=False))
 
 
+class TestPathLink(unittest.TestCase):
+    def test_off_is_plain_path(self):
+        from pathlib import Path
+        p = Path("/tmp/report/latest.md")
+        self.assertEqual(render.path_link(p, on=False), str(p))
+        self.assertNotIn("\033", render.path_link(p, on=False))
+
+    def test_on_is_coloured_and_hyperlinked(self):
+        from pathlib import Path
+        p = Path("/tmp/report/latest.md")
+        out = render.path_link(p, on=True)
+        self.assertIn(str(p), out)                          # visible text is still the path
+        self.assertIn("\033]8;;file://", out)               # OSC 8 hyperlink
+        self.assertIn(render.LINK, out)                     # bold-cyan colour
+        self.assertIn(render.RESET, out)
+        self.assertTrue(out.endswith("\033]8;;\033\\"))     # link closer
+
+
 class TestRule(unittest.TestCase):
     def test_width(self):
         self.assertEqual(render.rule(5), "─────")
