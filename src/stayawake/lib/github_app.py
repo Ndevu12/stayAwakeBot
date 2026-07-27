@@ -25,9 +25,11 @@ from __future__ import annotations
 import json
 import os
 import stat
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from importlib.metadata import PackageNotFoundError, distribution
 
 from stayawake.lib.adapters import github_api
 
@@ -170,6 +172,68 @@ def jwt_available() -> bool:
 
 
 APP_EXTRA_HINT = 'pip install "stayawakebot[app]"'
+_PIPX_APP_CRYPTO = 'pipx inject stayawakebot "pyjwt[crypto]>=2.0"'
+
+
+def _package_project_root() -> Path | None:
+    """Directory containing pyproject.toml for this tree, if discoverable."""
+    import stayawake
+
+    here = Path(stayawake.__file__).resolve().parent
+    for parent in (here, *here.parents):
+        pj = parent / "pyproject.toml"
+        if pj.is_file():
+            return parent
+    return None
+
+
+def _distribution_is_editable(dist) -> bool:
+    try:
+        raw = dist.read_text("direct_url.json")
+    except (OSError, FileNotFoundError, KeyError):
+        return False
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return False
+    dir_info = data.get("dir_info") if isinstance(data, dict) else None
+    return isinstance(dir_info, dict) and bool(dir_info.get("editable"))
+
+
+def _running_under_pipx() -> bool:
+    exe = Path(sys.executable).resolve()
+    parts = exe.parts
+    if "pipx" in parts and "venvs" in parts:
+        return True
+    pipx_home = os.environ.get("PIPX_HOME")
+    if pipx_home:
+        try:
+            exe.relative_to(Path(pipx_home).resolve())
+            return True
+        except ValueError:
+            pass
+    local = Path.home() / ".local" / "pipx" / "venvs"
+    try:
+        exe.relative_to(local.resolve())
+        return True
+    except (ValueError, OSError):
+        return False
+
+
+def app_crypto_install_hint() -> str:
+    """Context-aware one-liner to install the optional App crypto extra (PyJWT)."""
+    try:
+        dist = distribution("stayawakebot")
+    except PackageNotFoundError:
+        if _package_project_root() is not None:
+            return 'pip install -e ".[app]"'
+        return APP_EXTRA_HINT
+
+    if _distribution_is_editable(dist) or _package_project_root() is not None:
+        return 'pip install -e ".[app]"'
+    if _running_under_pipx():
+        return _PIPX_APP_CRYPTO
+    return APP_EXTRA_HINT
 
 
 def installation_actor_label() -> str | None:

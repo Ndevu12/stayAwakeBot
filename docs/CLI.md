@@ -63,7 +63,7 @@ saw audit                         # local credential + editor hygiene
 saw guard check                   # is this repo's Strix CI gate present + SHA-pinned + current?
 saw guard setup --pr              # install/bump the gate → one rolling PR (never pushes main)
 saw auth status                   # credential + capability gate (fix vs guard/workflow)
-saw auth app register             # StayAwakeBot App with Workflows write (create + install)
+saw auth app register             # StayAwakeBot App (needs [app]; --force for browser-only test)
 
 # Remote (GitHub) sweeps — see "Remote targeting"
 saw scan --remote                 # your own GitHub repos (or configured targets)
@@ -91,10 +91,22 @@ saw guard setup --user Ndevu12    # clone each of a user's repos → open a gate
 ## Install
 
 ```bash
-pip install stayawakebot          # from PyPI
+pip install stayawakebot          # from PyPI — scan/fix with `gh` or a PAT
 # or the latest from source:
 pip install "stayawakebot @ git+https://github.com/Ndevu12/stayAwakeBot@main"
 ```
+
+**App-ready** (GitHub App registration + installation-token minting — optional PyJWT extra,
+never auto-installed by Saw):
+
+```bash
+pip install "stayawakebot[app]"                          # PyPI / git URL
+pip install -e ".[app]"                                  # editable clone
+pipx inject stayawakebot "pyjwt[crypto]>=2.0"            # pipx install
+```
+
+`saw auth app register` exits with install hints until `[app]` is present; pass `--force`
+to exercise the browser manifest without PyJWT (minting still blocked until you install it).
 
 Installing provides two equivalent binaries:
 
