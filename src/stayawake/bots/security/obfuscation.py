@@ -31,6 +31,13 @@ we require either a *self-evidently executable* obfuscation construct OR a
     Decode→exec (`import(atob`, `execSync(Buffer.from`) is #1266 — not re-implemented here.
     `(?<![.\\w$])` + comment/'/-string scrub keep `System.import` / docs mentions out.
     Heuristic → SUSPICIOUS.
+  * obfuscated exec sinks (#1207) — what #1206 deliberately left open (split-token /
+    indirect / light alias). Bounded same-quote string-concat fold (`'ev'+'al'` → `'eval'`)
+    before the existing sink regexes; plus `(0, eval)(` / `(0, Function)(`, a
+    `const e = eval; e(` binding-then-call, and `const k = 'eval'; g[k](` after fold.
+    Heuristic → SUSPICIOUS. Hard residual: cross-statement dataflow beyond the light
+    window, mixed-quote / template splits, and a renamed binding whose RHS is itself
+    computed.
   * decode→exec dropper (#1266)   — a base64/hex DECODE (`Buffer.from(` / `atob(`) as the
     LEADING argument to a command / dynamic-module sink the exec-sink arm doesn't cover:
     `child_process` runners (execSync/execFile/spawn/fork), a dynamic `import(`, or
@@ -121,8 +128,8 @@ _CTOR_ACCESS = r"(?:\.\s*constructor\b|\[\s*[\"']constructor[\"']\s*\])"
 #   • a GLOBAL timer given a STRING/template body — `set(Timeout|Interval)('code', …)` — the
 #     deprecated eval-form. The `(?<![.\w$])` keeps it to the global, so a member
 #     `client.setTimeout('30s')` / `job.setInterval(cron)` duration setter is NOT flagged.
-# Still not a full closure: a split-token/runtime-built key evades any token check; the durable
-# lever is the Tier-2 density anomaly.
+# Still not a full closure: a renamed/aliased sink beyond the light #1207 window, or a
+# mixed-quote / template split, still evades; the durable lever is the Tier-2 density anomaly.
 _REFLECTIVE_EXEC = re.compile(
     r"\[\s*[\"'](?:eval|Function)[\"']\s*\]\s*\("
     r"|" + _CTOR_ACCESS + r"\s*" + _CTOR_ACCESS + r"\s*\("
@@ -140,25 +147,103 @@ _CONSTRUCTOR_EXEC = re.compile(r"\[\s*[\"']constructor[\"']\s*\]\s*\(")
 # comma/whitespace splice like `new Date(), x['constructor'](p)` still flags.
 _NEW_CLONE_PREFIX = re.compile(r"\bnew\s+[\w$.)\]]*\s*$")
 
+# ── #1207 obfuscated exec sinks (after #1206; orthogonal to #1208/#1266) ───────────
+# Timeline: #1207 was filed ~5 min after #1206 as the deliberate residual tracker for
+# forms no token check can see without a light de-obfuscation pass. #1266/#1208 later
+# closed OTHER residuals (decode→exec, non-literal import, constructed child_process);
+# they do NOT cover these. This block closes the COMMON obfuscator output only:
+#
+# 1) Bounded same-quote string-concat FOLD (`'ev'+'al'` → `'eval'`, `'con'+'structor'` →
+#    `'constructor'`) so the existing reflective/literal sink regexes fire on the
+#    reassembled token. Distinct from `_dechunk` (which STRIPS quotes for escape-run
+#    reassembly). Mixed quotes / templates / `.concat(` are NOT folded — arms race.
+#
+# 2) Indirect call via the comma operator: `(0, eval)(x)` / `(0, Function)('…')` (and the
+#    common `void 0` / `null` / `!0` left-hand variants). Babel's `(0, _mod.default)(x)`
+#    stays clean — the RHS must be the bare `eval`/`Function` global.
+#
+# 3) Light alias: `const e = eval; e(x)` / `let F = Function; F('…')` — a binding whose RHS
+#    is the bare global, then that binding CALLED within a short window.
+#
+# 4) Light runtime-built key (after fold): `const k = 'ev'+'al'; g[k](x)` → folded to
+#    `const k = 'eval'; g[k](x)`. The `new …[k](` polymorphic-clone shape is carved out
+#    (same gate as `_CONSTRUCTOR_EXEC`).
+#
+# Heuristic → SUSPICIOUS. Hard residual: dataflow past the window, mixed-quote splits,
+# `const e = g['ev'+'al']; e(x)` (RHS not a bare global), Tier-2 density remains the
+# durable lever.
+_STR_CONCAT_FOLD = re.compile(
+    r"(['\"])([^'\"\\\n]{0,64})\1\s*\+\s*\1([^'\"\\\n]{0,64})\1"
+)
+_INDIRECT_EVAL = re.compile(
+    r"\(\s*(?:0|1|void\s+0|null|undefined|!0|!1)\s*,\s*(?:eval|Function)\s*\)\s*\("
+)
+_BIND_EVAL_FN = re.compile(
+    r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:eval|Function)\b"
+)
+_BIND_DANGEROUS_KEY = re.compile(
+    r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*[\"'](?:eval|Function|constructor)[\"']"
+)
+_ALIAS_CALL_WINDOW = 240
+
+
+def _fold_string_concats(s: str, max_passes: int = 24) -> str:
+    """Collapse adjacent same-quote string concatenations (`'ev'+'al'` → `'eval'`) so the
+    existing sink regexes see the reassembled token (#1207). Bounded chunk length (64) and
+    pass count (24) keep this ReDoS/DoS-safe; a no-op on text with no quote-concat seams."""
+    for _ in range(max_passes):
+        ns = _STR_CONCAT_FOLD.sub(
+            lambda m: f"{m.group(1)}{m.group(2)}{m.group(3)}{m.group(1)}", s)
+        if ns == s:
+            return s
+        s = ns
+    return s
+
+
+def _has_obfuscated_exec_forms(s: str) -> bool:
+    """True if `s` (already fold-normalized) has an indirect / light-alias / runtime-key
+    exec form from #1207. Call-required and `new`-clone-carved; Babel `(0, _mod.x)(` stays
+    clean."""
+    if _INDIRECT_EVAL.search(s):
+        return True
+    for m in _BIND_EVAL_FN.finditer(s):
+        name = re.escape(m.group(1))
+        window = s[m.end():m.end() + _ALIAS_CALL_WINDOW]
+        if re.search(rf"(?<![\w$]){name}\s*\(", window):
+            return True
+    for m in _BIND_DANGEROUS_KEY.finditer(s):
+        name = re.escape(m.group(1))
+        window = s[m.end():m.end() + _ALIAS_CALL_WINDOW]
+        for cm in re.finditer(rf"\[\s*{name}\s*\]\s*\(", window):
+            prefix = window[max(0, cm.start() - 48):cm.start()]
+            if _NEW_CLONE_PREFIX.search(prefix):
+                continue
+            return True
+    return False
+
 
 def _has_exec_sink(s: str, strict: bool = False) -> bool:
     """True if `s` contains a dynamic-execution sink: any literal `_EXEC_SINK` construct, a
     case-sensitive `_REFLECTIVE_EXEC` form (computed-key access to a dangerous global, or a
     double-constructor Function reach), a #1208 residual form (non-literal import or
-    constructed child_process command — the gap still open after #1266), or a SINGLE reflective
-    bracket-constructor call that is NOT a `new`-prefixed polymorphic clone (the benign idiom
-    the worm never uses). Every single-constructor occurrence is checked, so a `new`-clone
-    earlier can't mask a real sink later.
+    constructed child_process command — the gap still open after #1266), a #1207 obfuscated
+    form (split-token via concat-fold, indirect comma-call, light alias / runtime-key), or a
+    SINGLE reflective bracket-constructor call that is NOT a `new`-prefixed polymorphic clone
+    (the benign idiom the worm never uses). Every single-constructor occurrence is checked, so
+    a `new`-clone earlier can't mask a real sink later.
 
     `strict=True` DROPS the `new`-clone carve-out — every single bracket-constructor call counts.
     This is for gates that must not KEEP a possibly-hostile reflective constructor (e.g. deciding a
     surgically-excised file is benign enough to auto-clean): there, deferring on the benign idiom is
     a safe false-positive, whereas trusting it could pass an RCE hidden in kept code."""
-    if _EXEC_SINK.search(s) or _REFLECTIVE_EXEC.search(s) or _has_corroborated_dynamic_exec(s):
+    # Fold first so `'ev'+'al'` becomes `'eval'` before every arm (including #1208 scrub).
+    view = _fold_string_concats(s)
+    if (_EXEC_SINK.search(view) or _REFLECTIVE_EXEC.search(view)
+            or _has_corroborated_dynamic_exec(view) or _has_obfuscated_exec_forms(view)):
         return True
     return any(
-        strict or not _NEW_CLONE_PREFIX.search(s[max(0, m.start() - 48):m.start()])
-        for m in _CONSTRUCTOR_EXEC.finditer(s)
+        strict or not _NEW_CLONE_PREFIX.search(view[max(0, m.start() - 48):m.start()])
+        for m in _CONSTRUCTOR_EXEC.finditer(view)
     )
 
 

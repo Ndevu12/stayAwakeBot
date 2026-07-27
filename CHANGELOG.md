@@ -7,6 +7,14 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **`saw` closes the #1207 residual that #1206 deliberately left open** — split-token /
+  indirect / light-alias exec sinks. Filed ~5 min after #1206; later #1266/#1208 closed
+  *other* residuals (decode→exec, non-literal import) and do **not** cover these. Bounded
+  same-quote concat fold (`'ev'+'al'` → `'eval'`) so existing sink regexes fire; plus
+  `(0, eval)(` / `(0, Function)(`, `const e = eval; e(`, and `const k = 'eval'; g[k](`
+  (after fold). Heuristic → SUSPICIOUS. Babel `(0, _mod.default)(`, polymorphic
+  `new obj[k](`, bare registry lookups, and non-dangerous key aliases stay clean. Hard
+  residual: mixed-quote/template splits, dataflow past the light window.
 - **`saw` closes the #1208 residual that #1206 left open and #1266 did not later cover** —
   filed ~5 min after #1206; five days later #1266 already caught decode→exec
   (`import(atob`, `execSync(Buffer.from`). What was still missing: non-literal dynamic
