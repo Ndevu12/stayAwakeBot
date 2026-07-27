@@ -22,12 +22,14 @@ _APP_ENV = {"GH_APP_ID": "123", "GH_APP_PRIVATE_KEY": "-----PEM-----",
 
 class TestConfig(unittest.TestCase):
     def test_not_configured_returns_none(self):
-        with mock.patch.dict(os.environ, {}, clear=True):
+        with mock.patch.dict(os.environ, {}, clear=True), \
+             mock.patch.object(github_app, "load_config", return_value=None):
             self.assertIsNone(github_app.installation_token())
             self.assertFalse(github_app.is_configured())
 
     def test_is_configured_with_app_env(self):
-        with mock.patch.dict(os.environ, _APP_ENV, clear=True):
+        with mock.patch.dict(os.environ, _APP_ENV, clear=True), \
+             mock.patch.object(github_app, "load_config", return_value=None):
             self.assertTrue(github_app.is_configured())
 
     def test_private_key_from_path(self):
@@ -36,7 +38,8 @@ class TestConfig(unittest.TestCase):
             path = f.name
         try:
             with mock.patch.dict(os.environ, {"GH_APP_ID": "1", "GH_APP_PRIVATE_KEY_PATH": path},
-                                 clear=True):
+                                 clear=True), \
+                 mock.patch.object(github_app, "load_config", return_value=None):
                 self.assertEqual(github_app._private_key(), "-----FROM FILE-----")
                 self.assertTrue(github_app.is_configured())
         finally:
@@ -46,6 +49,12 @@ class TestConfig(unittest.TestCase):
 class TestMinting(unittest.TestCase):
     def setUp(self):
         github_app._cache.clear()
+        github_app._token_perms.clear()
+        self._cfg = mock.patch.object(github_app, "load_config", return_value=None)
+        self._cfg.start()
+
+    def tearDown(self):
+        self._cfg.stop()
 
     def test_mints_token_with_explicit_installation(self):
         with mock.patch.dict(os.environ, _APP_ENV, clear=True), \

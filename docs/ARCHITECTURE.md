@@ -21,7 +21,10 @@ utils/  →  lib/  →  core/  →  bots/  →  cli/
   `adapters/` (`github_api` · `http_client` · `slack`) · `git/` (the git-CLI package) · `auth` ·
   `github_app`. **Depends on `utils/`.**
 - **`core/`** — the application's **domain layer**: cross-bot abstractions & shared patterns, e.g.
-  `issue_state` (a GitHub issue used as a durable, file-less state store). **Depends on `lib/` + `utils/`.**
+  `issue_state` (a GitHub issue used as a durable, file-less state store) and **`identity/`**
+  (AuthN session + AuthZ capability gate: `require(Intent)` before privileged side effects).
+  Credential *adapters* stay in `lib/` (`auth`, `github_app`); policy lives here.
+  **Depends on `lib/` + `utils/`.**
 - **`bots/`** — the features/policies. **Depends on `core/` + `lib/` + `utils/`.**
 - **`cli/`** — the unified `saw` command; one module per verb. **Depends on `bots/`.**
 
@@ -37,7 +40,7 @@ src/stayawake/                     ← single import root (installable; no name 
   lib/         auth · github_app
     adapters/  http_client · github_api · slack     # external I/O, one per file (SRP)
     git/       run · auth · query · merge/ · write/  # the git CLI, split per concern
-  core/        issue_state                          # domain layer (cross-bot patterns)
+  core/        issue_state · identity/   # domain layer (cross-bot patterns + AuthZ gate)
   bots/
     health/    models · config · checker · alerter · cli/            # uptime sentinel
     security/  models · signatures · scanner · service · remediator · resolution · pr · proposal · guard
@@ -46,7 +49,7 @@ src/stayawake/                     ← single import root (installable; no name 
       sinks/     terminal · json · sarif · alert · file_sink   # terminal-first output (Strategy); evidence redacted when persisted
       hygiene/   host-persistence audit (saw audit)
       data/      signatures.yml      # default IoC DB shipped INSIDE the package
-  cli/         dispatch · _meta · commands/{scan,fix,audit,guard,search,db,…}   # unified `saw` CLI
+  cli/         dispatch · _meta · commands/{scan,fix,audit,guard,auth,search,db,…}   # unified `saw` CLI
 pyproject.toml   packaging: metadata · console scripts · package-data
 config/   urls.yml · security.yml        # deployment config (targets/allowlist; signatures are packaged)
 tests/    core/test_layering.py · bots/health · bots/security    # mirrors src; the layering guard lives in tests/core

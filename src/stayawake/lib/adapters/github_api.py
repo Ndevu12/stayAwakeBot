@@ -82,7 +82,9 @@ def _do_request(path: str, method: str = "GET", token: str | None = None,
     req = urllib.request.Request(_API + path, data=body, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=15, context=_SSL_CTX) as resp:
-            return ApiRead(value=json.loads(resp.read().decode()))
+            raw = resp.read()
+            value = json.loads(raw.decode()) if raw else None
+            return ApiRead(value=value)
     except urllib.error.HTTPError as he:
         # Always drain + close the error response so it doesn't linger as an unclosed socket.
         try:
@@ -109,6 +111,56 @@ def request(path: str, method: str = "GET", token: str | None = None,
         else:
             print(f"GitHub API request failed: {r.detail}", file=sys.stderr)
     return r.value if r.cause is None else None
+
+
+def oauth_scopes(token: str | None) -> frozenset[str] | None:
+    """Classic OAuth scopes from `X-OAuth-Scopes`, or None when the header is absent.
+
+    Classic PATs / `gh` tokens expose the header. Fine-grained PATs and GitHub App
+    installation tokens typically omit it → None (capabilities unknown; gate allows after
+    liveness and delivery classifies). An empty header yields an empty frozenset.
+    """
+    if not token:
+        return None
+    headers = {"Accept": "application/vnd.github+json",
+               "User-Agent": "StayAwakeBot/1.0",
+               "Authorization": f"Bearer {token}"}
+    # GET /rate_limit is cheap and always allowed for a live token.
+    req = urllib.request.Request(_API + "/rate_limit", headers=headers, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=15, context=_SSL_CTX) as resp:
+            raw = resp.headers.get("X-OAuth-Scopes")
+            if raw is None:
+                raw = resp.headers.get("x-oauth-scopes")
+            if raw is None:
+                return None
+            return frozenset(s.strip() for s in raw.split(",") if s.strip())
+    except urllib.error.HTTPError as he:
+        try:
+            he.read()
+        except Exception:
+            pass
+        finally:
+            he.close()
+        return None
+    except Exception:  # noqa: BLE001 — probe must never raise into the gate
+        return None
+
+
+def installation_permissions(token: str | None) -> dict[str, str] | None:
+    """Permissions map for an App installation token, if known from the mint cache.
+
+    Installation tokens don't expose a reliable permissions introspection endpoint the way
+    classic OAuth exposes `X-OAuth-Scopes`. We record permissions when minting (see
+    `github_app.installation_token`) and read them back here.
+    """
+    if not token:
+        return None
+    try:
+        from stayawake.lib import github_app
+        return github_app.cached_permissions_for_token(token)
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def get_authenticated_user(token: str | None, quiet: bool = False) -> dict | None:

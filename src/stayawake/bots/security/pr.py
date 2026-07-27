@@ -142,9 +142,17 @@ def _render_submit(res: proposal.SubmitResult, *, slug: str, base: str, partial:
     if res.issue_note:
         bits.append(res.issue_note)
     if not bits:
+        from stayawake.core.identity import push_failure_message
+        from stayawake.core.identity.classify import PushFailure
+        if res.push_reason:
+            return f"{slug}: {dash}{push_failure_message(PushFailure(res.push_reason, res.push_detail))}"
         return f"{slug}: branch push failed (check token write scope)"
-    return (f"{slug}: {dash}push rejected (no write access, or the branch requires "
-            "signed commits?) — " + "; ".join(bits) + ".")
+    from stayawake.core.identity import push_failure_message
+    from stayawake.core.identity.classify import PushFailure
+    head = (push_failure_message(PushFailure(res.push_reason, res.push_detail))
+            if res.push_reason else
+            "push rejected (no write access, or the branch requires signed commits?)")
+    return (f"{slug}: {dash}{head} — " + "; ".join(bits) + ".")
 
 
 def _pr_body(slug: str, changes, computed=(), suspicious=(), manual=()) -> str:
