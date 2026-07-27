@@ -19,10 +19,18 @@ we require either a *self-evidently executable* obfuscation construct OR a
     feeding String.fromCharCode / apply: the canonical Shai-Hulud string shuffler
     and the generic "build a string from numbers so no literal is greppable" trick.
   * dynamic-exec sinks            — eval(, new Function(, atob(, fromCharCode, the
-    require-hijack global['!'], vm.runInNewContext/runInContext, and reflective
-    `x['constructor'](…)` Function-constructor smuggling (name-agnostic catch for a
-    renamed decoder, #1053; the `new …` clone idiom is carved out): code that turns
-    decoded bytes back into execution.
+    require-hijack global['!'], vm.runInNewContext/runInContext (incl. the
+    `require('vm').runInContext` form, #1208), and reflective `x['constructor'](…)`
+    Function-constructor smuggling (name-agnostic catch for a renamed decoder, #1053;
+    the `new …` clone idiom is carved out): code that turns decoded bytes back into
+    execution.
+  * corroborated dynamic-exec (#1208 residual) — what #1206 left open and #1266 did NOT
+    later close: a dynamic `import(` of a non-literal specifier (bare ident / non-relative
+    `` `${…}` `` template; string-prefixed routes stay clean), a `child_process` runner
+    with a constructed command (concat / `${…}`), and `require('vm').runInContext`.
+    Decode→exec (`import(atob`, `execSync(Buffer.from`) is #1266 — not re-implemented here.
+    `(?<![.\\w$])` + comment/'/-string scrub keep `System.import` / docs mentions out.
+    Heuristic → SUSPICIOUS.
   * decode→exec dropper (#1266)   — a base64/hex DECODE (`Buffer.from(` / `atob(`) as the
     LEADING argument to a command / dynamic-module sink the exec-sink arm doesn't cover:
     `child_process` runners (execSync/execFile/spawn/fork), a dynamic `import(`, or
@@ -85,13 +93,17 @@ _NUM_ARRAY = re.compile(r"\[\s*(?:0x[0-9a-fA-F]+|\d{1,3})\s*(?:,\s*(?:0x[0-9a-fA
 # in _REFLECTIVE_EXEC below. Beyond the classic eval/Function/atob/fromCharCode: vm's
 # dynamic-code runners — `runInThisContext` and `runInNewContext` (run code in the current /
 # a fresh global; neither is a lodash method, so both are safe bare) and the vm-QUALIFIED
-# `vm.runInContext` (bare `runInContext` IS a lodash method — `_.runInContext()` — so it must
-# carry the `vm.` receiver to avoid that false positive); and a Reflect apply/construct whose
-# target is the eval or Function global. Surfaced as a HEURISTIC obfuscation verdict (SUSPICIOUS).
+# receivers for `runInContext` (bare `runInContext` IS a lodash method — `_.runInContext()` —
+# so it must carry a `vm.` OR `require('vm').` receiver to avoid that false positive; the
+# `require('vm').runInContext` form is the #1208 gap the dotted `vm.` arm alone missed); and a
+# Reflect apply/construct whose target is the eval or Function global. Surfaced as a HEURISTIC
+# obfuscation verdict (SUSPICIOUS).
 _EXEC_SINK = re.compile(
     r"\beval\s*\(|new\s+Function\s*\(|\bFunction\s*\(\s*[\"']|\batob\s*\(|"
     r"String\s*[.\[]\s*[\"']?fromCharCode|global\s*\[\s*['\"]!['\"]\s*\]\s*=|"
-    r"\brunInThisContext\s*\(|\brunInNewContext\s*\(|\bvm\s*\.\s*runInContext\s*\(|"
+    r"\brunInThisContext\s*\(|\brunInNewContext\s*\(|"
+    r"\bvm\s*\.\s*runInContext\s*\(|"
+    r"\brequire\s*\(\s*(?:/\*[\s\S]{0,200}?\*/\s*)*[\"']vm[\"']\s*\)\s*(?:\?\s*)?\.\s*runInContext\s*\(|"
     r"\bReflect\s*\.\s*(?:apply|construct)\s*\(\s*(?:eval|Function)\b",
     re.IGNORECASE,
 )
@@ -132,15 +144,17 @@ _NEW_CLONE_PREFIX = re.compile(r"\bnew\s+[\w$.)\]]*\s*$")
 def _has_exec_sink(s: str, strict: bool = False) -> bool:
     """True if `s` contains a dynamic-execution sink: any literal `_EXEC_SINK` construct, a
     case-sensitive `_REFLECTIVE_EXEC` form (computed-key access to a dangerous global, or a
-    double-constructor Function reach), or a SINGLE reflective bracket-constructor call that is
-    NOT a `new`-prefixed polymorphic clone (the benign idiom the worm never uses). Every
-    single-constructor occurrence is checked, so a `new`-clone earlier can't mask a real sink later.
+    double-constructor Function reach), a #1208 residual form (non-literal import or
+    constructed child_process command — the gap still open after #1266), or a SINGLE reflective
+    bracket-constructor call that is NOT a `new`-prefixed polymorphic clone (the benign idiom
+    the worm never uses). Every single-constructor occurrence is checked, so a `new`-clone
+    earlier can't mask a real sink later.
 
     `strict=True` DROPS the `new`-clone carve-out — every single bracket-constructor call counts.
     This is for gates that must not KEEP a possibly-hostile reflective constructor (e.g. deciding a
     surgically-excised file is benign enough to auto-clean): there, deferring on the benign idiom is
     a safe false-positive, whereas trusting it could pass an RCE hidden in kept code."""
-    if _EXEC_SINK.search(s) or _REFLECTIVE_EXEC.search(s):
+    if _EXEC_SINK.search(s) or _REFLECTIVE_EXEC.search(s) or _has_corroborated_dynamic_exec(s):
         return True
     return any(
         strict or not _NEW_CLONE_PREFIX.search(s[max(0, m.start() - 48):m.start()])
@@ -176,6 +190,150 @@ _DECODE_INTO_EXEC = re.compile(
     + r"|\bnew\s+Worker\s*\(\s*" + _DECODE,
     re.IGNORECASE,
 )
+
+# ── #1208 residual (after #1206 + #1266) ──────────────────────────────────────────
+# Timeline: #1208 was filed ~5 min after #1206 as the deliberate residual tracker.
+# Five days later #1266 closed the DECODE→exec half (`import(atob`, `execSync(Buffer.from`,
+# …). This block does NOT re-implement #1266 — it only closes what is STILL missing:
+#
+# 1) `require('vm').runInContext` — in `_EXEC_SINK` above (the dotted `vm.` arm from #1206
+#    missed the `require('vm').` form). Lodash `_.runInContext()` stays clean.
+#
+# 2) Dynamic `import(` of a NON-LITERAL specifier — stage-2 load without needing a decode.
+#    After optional block comments, the next non-ws token is NOT a string/template opener
+#    (`import(url)`, `import(atob(x))`) OR it is a template with `${…}` that does NOT start
+#    as a relative path (`` import(`${url}`) `` fires; `` import(`./x/${y}`) `` stays clean —
+#    the Vite/Webpack route shape). String-prefixed `import('./routes/'+name)` stays clean
+#    because the arg STARTS with a quote. `(?<![.\w$])` keeps `System.import` / `loader.import`
+#    out (same global-only gate as the #1206 timer arm).
+#
+# 3) `child_process` runners with a CONSTRUCTED first arg (concat / `${…}`) — the #1208 ask
+#    that #1266 does not cover (no decode). Bare `execSync(cmd)` / `execSync('npm …')` stay
+#    clean. Also `require('child_process').exec(Sync)?(` with a constructed or decode arg
+#    (bare `exec(` stays out of the name set — regex.exec; the require receiver is the gate).
+#
+# Heuristic → SUSPICIOUS (informs; never CI-fails; never auto-remediates). Patterns run over
+# a comment/'/'-string-scrubbed view so docs/string mentions don't fire. Template bodies are
+# kept so the relative-path carve-out can see `./`. Hard residual: fully indirect
+# `const i = import; i(url)`, destructured bare `runInContext` (lodash).
+_CONSTRUCTED_ARG = (
+    r"(?:"
+    + r"[\"'][^\"'\n]{0,200}[\"']\s*\+"          # 'cmd' + …
+    + r"|[A-Za-z_$][\w$]*\s*\+"                  # cmd + …
+    + r"""|`[^`\n]{0,200}`\s*\+"""               # `cmd` + …
+    + r"""|`[^`\n]{0,200}\$\{"""                 # `…${…}`
+    + r")"
+)
+_DYNAMIC_IMPORT = re.compile(
+    r"(?<![.\w$])import\s*\(\s*(?:/\*[\s\S]{0,200}?\*/\s*)*(?:"
+    # non-relative template with interpolation
+    + r"""`(?!\./|\.\./)[^`\n]{0,200}\$\{"""
+    # or any non-string / non-template / non-comment start (bare ident, call, …)
+    # `(?=[^\s])` stops `\s*` backtracking onto a space before a string (webpack FP).
+    + r"|(?=[^\s])(?![\"'`]|/\*)"
+    + r")",
+    re.IGNORECASE,
+)
+_CP_RUNNERS = r"(?:execSync|execFileSync|execFile|spawnSync|spawn|fork)"
+_CONSTRUCTED_CP = re.compile(
+    # Runner names are child_process-specific (no regex.exec collision). The
+    # require('…').exec form uses a quoted-module wildcard so it still matches after
+    # the comment/'/-string scrub blanks the module-name characters (quotes remain).
+    r"(?<![.\w$])" + _CP_RUNNERS + r"\s*\(\s*" + _CONSTRUCTED_ARG
+    + r"|\brequire\s*\(\s*(?:/\*[\s\S]{0,200}?\*/\s*)*[\"'][^\"'\n]{1,64}[\"']\s*\)\s*"
+    + r"(?:\?\s*)?\.\s*exec(?:Sync)?\s*\(\s*(?:" + _CONSTRUCTED_ARG + r"|" + _DECODE + r")",
+    re.IGNORECASE,
+)
+
+
+def _scrub_comments_and_strings(s: str) -> str:
+    """Scrub // and /* */ comments and ' / \" string *contents* (same length, spaces) so a
+    #1208 pattern can't fire on documentation or a string that merely mentions `import(url)`.
+    Template literal BODIES are kept intact (the relative-path carve-out must see `./`);
+    only `${…}` expression interiors are scrubbed. Best-effort — not a full JS lexer."""
+    out: list[str] = []
+    i, n = 0, len(s)
+    while i < n:
+        c = s[i]
+        if c == "/" and i + 1 < n and s[i + 1] == "/":
+            out.append("  ")
+            i += 2
+            while i < n and s[i] not in "\n\r":
+                out.append(" ")
+                i += 1
+            continue
+        if c == "/" and i + 1 < n and s[i + 1] == "*":
+            out.append("  ")
+            i += 2
+            while i + 1 < n and not (s[i] == "*" and s[i + 1] == "/"):
+                out.append("\n" if s[i] == "\n" else " ")
+                i += 1
+            if i + 1 < n:
+                out.append("  ")
+                i += 2
+            continue
+        if c == "`":
+            out.append("`")
+            i += 1
+            while i < n:
+                ch = s[i]
+                if ch == "\\" and i + 1 < n:
+                    out.append(s[i:i + 2])
+                    i += 2
+                    continue
+                if ch == "`":
+                    out.append("`")
+                    i += 1
+                    break
+                if ch == "$" and i + 1 < n and s[i + 1] == "{":
+                    out.append("${")
+                    i += 2
+                    depth = 1
+                    while i < n and depth:
+                        if s[i] == "{":
+                            depth += 1
+                            out.append(" ")
+                            i += 1
+                        elif s[i] == "}":
+                            depth -= 1
+                            out.append("}" if depth == 0 else " ")
+                            i += 1
+                        else:
+                            out.append(" " if s[i] != "\n" else "\n")
+                            i += 1
+                    continue
+                out.append(ch)
+                i += 1
+            continue
+        if c in "'\"":
+            quote = c
+            out.append(c)
+            i += 1
+            while i < n:
+                ch = s[i]
+                if ch == "\\" and i + 1 < n:
+                    out.append("  ")
+                    i += 2
+                    continue
+                if ch == quote:
+                    out.append(ch)
+                    i += 1
+                    break
+                out.append("\n" if ch == "\n" else " ")
+                i += 1
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def _has_corroborated_dynamic_exec(s: str) -> bool:
+    """True if `s` has a #1208 residual form still missing after #1266. Scrubbed view;
+    folded into `_has_exec_sink` so remediation shares the yardstick (FP → defer, safe)."""
+    scrubbed = _scrub_comments_and_strings(s)
+    return bool(_DYNAMIC_IMPORT.search(scrubbed) or _CONSTRUCTED_CP.search(scrubbed))
+
+
 # A self-describing inline asset (image/font/media data-URI). Stripped before the density
 # and escape-run analysis so a legitimate `data:<mime>;base64,` blob does not inflate a
 # line's length/entropy. (base64 blobs are no longer a standalone signal — see #1212.)
