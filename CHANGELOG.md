@@ -16,9 +16,10 @@ All notable changes to this project are documented here. The format is based on
   matrix. Operator-managed App via `saw auth app register` (you own App ID + PEM).
 - **`saw auth app register` — operator-managed StayAwakeBot GitHub App** — GitHub App-manifest
   flow on a loopback server (create → install via `setup_url`); credentials at
-  `~/.config/stayawake/github-app.json` (0600). Default App name **StayAwakeBot**; ships a
-  packaged icon for App settings Display information. Manifest grants Contents + Pull
-  requests + **Workflows** + Issues write. Hint package is `stayawakebot[app]` (PyJWT).
+  `~/.config/saw/github-app.json` (0600; matches `~/.cache/saw/`). Default App name
+  **StayAwakeBot**; ships a packaged icon for App settings Display information. Manifest
+  grants Contents + Pull requests + **Workflows** + Issues write. Hint package is
+  `stayawakebot[app]` (PyJWT). Legacy `~/.config/stayawake/github-app.json` is migrated once.
 - **`saw auth` UX polish** — status distinguishes App config present / PyJWT missing /
   not installed / ready; register auto-opens install and persists `installation_id`.
 - **`saw` closes the #1207 residual that #1206 deliberately left open** — split-token /

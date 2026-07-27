@@ -7,6 +7,7 @@ mocked, and the missing-extra path is exercised by forcing the `import jwt` to f
 from __future__ import annotations
 
 import builtins
+import json
 import os
 import unittest
 from pathlib import Path
@@ -104,6 +105,31 @@ class TestMinting(unittest.TestCase):
              mock.patch.object(github_app.github_api, "request", return_value=None):  # API failed
             with self.assertRaises(github_app.GithubAppError):
                 github_app.installation_token()
+
+
+class TestConfigPath(unittest.TestCase):
+    def test_config_path_is_under_saw(self):
+        with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": "/tmp/xdg-saw-test"}, clear=False):
+            self.assertEqual(github_app.config_path(),
+                             Path("/tmp/xdg-saw-test/saw/github-app.json"))
+            self.assertEqual(github_app.legacy_config_path(),
+                             Path("/tmp/xdg-saw-test/stayawake/github-app.json"))
+
+    def test_migrates_legacy_stayawake_config(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            xdg = Path(td)
+            legacy = xdg / "stayawake" / "github-app.json"
+            legacy.parent.mkdir(parents=True)
+            legacy.write_text(json.dumps({
+                "app_id": "1", "private_key_pem": "PEM", "installation_id": "9",
+                "slug": "stayawakebot", "name": "StayAwakeBot",
+            }), encoding="utf-8")
+            with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": td}, clear=False):
+                cfg = github_app.load_config()
+            self.assertEqual(cfg["app_id"], "1")
+            self.assertTrue((xdg / "saw" / "github-app.json").is_file())
+            self.assertFalse(legacy.is_file())
 
 
 class TestMissingExtra(unittest.TestCase):
