@@ -76,7 +76,7 @@ def upgrades_for_missing(missing: frozenset[Capability], *, source: str | None) 
             ))
         paths.append(UpgradePath(
             kind="register_app",
-            detail="or register a self-owned Saw GitHub App with Workflows: write (recommended for fleet)",
+            detail="or register a StayAwakeBot GitHub App with Workflows: write (recommended for fleet)",
             command="saw auth app register",
         ))
         if source != "gh":
@@ -100,13 +100,13 @@ def upgrades_for_missing(missing: frozenset[Capability], *, source: str | None) 
         ))
         paths.append(UpgradePath(
             kind="register_app",
-            detail="or use a Saw GitHub App installation with those permissions",
+            detail="or use a StayAwakeBot GitHub App installation with those permissions",
             command="saw auth app register",
         ))
     if not paths:
         paths.append(UpgradePath(
             kind="register_app",
-            detail="register a Saw GitHub App with the required permissions",
+            detail="register a StayAwakeBot GitHub App with the required permissions",
             command="saw auth app register",
         ))
     return tuple(paths)

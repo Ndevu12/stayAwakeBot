@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """GitHub App authentication — mint short-lived installation tokens.
 
-Optional feature: needs `pip install "stayawake[app]"` (PyJWT[crypto]). A GitHub App is
+Optional feature: needs `pip install "stayawakebot[app]"` (PyJWT[crypto]). A GitHub App is
 the production way to scan/remediate/guard org-wide: an admin installs it once on selected
 repos and it mints **1-hour, auto-rotating installation tokens** scoped to exactly the
 granted permissions — no human PAT to leak, fully revocable, and the install itself
@@ -9,7 +9,7 @@ defines scope.
 
 Security: JWT signing is delegated to the audited PyJWT/cryptography stack. Tokens/keys are
 returned to callers but never logged here. Credentials may come from env OR from the local
-config written by `saw auth app register` (`~/.config/stayawake/github-app.json`).
+config written by `saw auth app register` (`~/.config/saw/github-app.json`).
 
 Configuration (env wins over the config file):
   GH_APP_ID                 numeric App ID (not secret)
@@ -18,8 +18,7 @@ Configuration (env wins over the config file):
   GH_APP_INSTALLATION_ID    optional; if omitted and the App has exactly one
                             installation, that one is used
 
-Phase 2 (official public Saw App) is deferred — see GitHub issue #1277. Phase 1 uses a
-per-operator App registered from our manifest (`saw auth app register`).
+Phase 1 registers an operator-managed App via `saw auth app register` (you own App ID + PEM).
 """
 from __future__ import annotations
 
@@ -50,16 +49,22 @@ class GithubAppError(RuntimeError):
     resolvable installation, API failure)."""
 
 
-def config_path() -> Path:
-    """XDG-style path for the self-registered App credentials (`saw auth app register`)."""
+def _xdg_config_home() -> Path:
     xdg = os.environ.get("XDG_CONFIG_HOME")
-    base = Path(xdg) if xdg else Path.home() / ".config"
-    return base / "stayawake" / "github-app.json"
+    return Path(xdg) if xdg else Path.home() / ".config"
 
 
-def load_config() -> dict | None:
-    """Local App credentials from `saw auth app register`, or None."""
-    path = config_path()
+def config_path() -> Path:
+    """XDG path for App credentials — under `saw/` to match `~/.cache/saw/`."""
+    return _xdg_config_home() / "saw" / "github-app.json"
+
+
+def legacy_config_path() -> Path:
+    """Pre-rename path (`~/.config/stayawake/…`); migrated on read when present."""
+    return _xdg_config_home() / "stayawake" / "github-app.json"
+
+
+def _read_config_file(path: Path) -> dict | None:
     if not path.is_file():
         return None
     try:
@@ -69,6 +74,36 @@ def load_config() -> dict | None:
     if not isinstance(data, dict) or not data.get("app_id") or not data.get("private_key_pem"):
         return None
     return data
+
+
+def _migrate_legacy_config() -> Path | None:
+    """Move `~/.config/stayawake/github-app.json` → `~/.config/saw/` once, if needed."""
+    dest = config_path()
+    if dest.is_file():
+        return None
+    src = legacy_config_path()
+    if not src.is_file():
+        return None
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(src.read_bytes())
+        try:
+            dest.chmod(stat.S_IRUSR | stat.S_IWUSR)
+        except OSError:
+            pass
+        try:
+            src.unlink()
+        except OSError:
+            pass
+        return dest
+    except OSError:
+        return None
+
+
+def load_config() -> dict | None:
+    """Local App credentials from `saw auth app register`, or None."""
+    _migrate_legacy_config()
+    return _read_config_file(config_path())
 
 
 def save_config(app_id: str, private_key_pem: str, *, installation_id: str | None = None,
@@ -88,6 +123,13 @@ def save_config(app_id: str, private_key_pem: str, *, installation_id: str | Non
         path.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 0600
     except OSError:
         pass
+    # Drop a leftover legacy file so the two never diverge.
+    legacy = legacy_config_path()
+    if legacy.is_file() and legacy.resolve() != path.resolve():
+        try:
+            legacy.unlink()
+        except OSError:
+            pass
     _cache.clear()
     _token_perms.clear()
     return path
@@ -118,6 +160,18 @@ def is_configured() -> bool:
     return bool(_app_id() and _private_key())
 
 
+def jwt_available() -> bool:
+    """True when the optional PyJWT[crypto] extra can be imported."""
+    try:
+        import jwt  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+APP_EXTRA_HINT = 'pip install "stayawakebot[app]"'
+
+
 def installation_actor_label() -> str | None:
     """Short label for Session.actor when using an App credential."""
     cfg = load_config() or {}
@@ -142,7 +196,7 @@ def _build_jwt(app_id: str, private_key: str) -> str:
         import jwt  # PyJWT — only needed for App auth (optional [app] extra)
     except ImportError as e:
         raise GithubAppError(
-            'GitHub App auth needs PyJWT — install the extra: pip install "stayawake[app]".'
+            f"GitHub App auth needs PyJWT — install the extra: {APP_EXTRA_HINT}."
         ) from e
     now = int(time.time())
     payload = {"iat": now - _SKEW, "exp": now + _JWT_TTL, "iss": app_id}
