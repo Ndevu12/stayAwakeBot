@@ -34,17 +34,7 @@ def require(intent: Intent, *, session: Session | None = None,
         )
 
     if not sess.live:
-        return Decision(
-            allowed=False, intent=intent, missing=needed,
-            reason=("GitHub API unreachable or the token was rejected — nothing started. "
-                    "Check connectivity/TLS and that the token can reach the repository."),
-            upgrades=(UpgradePath(
-                kind="login",
-                detail="re-authenticate or fix the token",
-                command="gh auth status   # or check GH_SECURITY_TOKEN / GH_APP_*",
-            ),),
-            session_source=sess.source, session_actor=sess.actor,
-        )
+        return _not_live_decision(intent, sess, needed, repo_slug)
 
     if sess.capabilities is None:
         # Unknown powers (fine-grained PAT, Actions token without introspectable perms).
@@ -68,6 +58,100 @@ def require(intent: Intent, *, session: Session | None = None,
         upgrades=upgrades_for_missing(missing, source=sess.source),
         session_source=sess.source, session_actor=sess.actor,
     )
+
+
+def _not_live_decision(intent: Intent, sess: Session, needed: frozenset[Capability],
+                       repo_slug: str | None) -> Decision:
+    """Distinguish a dead/unreachable credential from 'token OK but this repo is out of reach'.
+
+    When `resolve_session(repo_slug=…)` fails liveness, the old path listed every intent
+    capability as `missing:` — which looked like a scope problem. If the same token is live
+    *without* a repo context, the App/token works; this repo simply isn't reachable (not in
+    the App installation, private without access, wrong remote, …).
+    """
+    who = sess.actor or sess.source or "this credential"
+    if repo_slug and "/" in repo_slug and _credential_live_globally(sess.token):
+        return Decision(
+            allowed=False, intent=intent, missing=frozenset(),
+            reason=_repo_unreachable_reason(who, repo_slug, sess),
+            upgrades=_repo_unreachable_upgrades(sess, repo_slug),
+            session_source=sess.source, session_actor=sess.actor,
+        )
+    return Decision(
+        allowed=False, intent=intent, missing=needed,
+        reason=("GitHub API unreachable or the token was rejected — nothing started. "
+                "Check connectivity/TLS and that the token can reach the repository."),
+        upgrades=(UpgradePath(
+            kind="login",
+            detail="re-authenticate or fix the token",
+            command="gh auth status   # or check GH_SECURITY_TOKEN / GH_APP_*",
+        ),),
+        session_source=sess.source, session_actor=sess.actor,
+    )
+
+
+def _credential_live_globally(token: str | None) -> bool:
+    """True when the token is accepted by GitHub with no repo context (rate_limit /user)."""
+    if not token:
+        return False
+    try:
+        from stayawake.lib.adapters import github_api
+        return bool(github_api.token_is_valid(token, repo_slug=None))
+    except Exception:  # noqa: BLE001 — probe must not raise into the gate
+        return False
+
+
+def _repo_unreachable_reason(who: str, repo_slug: str, sess: Session) -> str:
+    if sess.source == "github-app" or sess.kind == "app_installation":
+        return (
+            f"{who} cannot access {repo_slug} — this repository is not reachable with the "
+            f"current StayAwakeBot App installation (not selected for the install, wrong "
+            f"account/org, or the remote slug does not exist). This is NOT missing write scopes."
+        )
+    return (
+        f"{who} cannot access {repo_slug} — the credential is live but GitHub rejected "
+        f"access to that repository (private without permission, SSO, or a bad remote). "
+        f"This is NOT missing write scopes."
+    )
+
+
+def _repo_unreachable_upgrades(sess: Session, repo_slug: str) -> tuple[UpgradePath, ...]:
+    if sess.source == "github-app" or sess.kind == "app_installation":
+        paths: list[UpgradePath] = [
+            UpgradePath(
+                kind="register_app",
+                detail=f"add {repo_slug} under the App's Repository access (or grant all repos)",
+                command=_app_installation_settings_command(),
+            ),
+            UpgradePath(
+                kind="pat_scopes",
+                detail="confirm `git remote -v` points at the intended owner/repo",
+            ),
+        ]
+        return tuple(paths)
+    return (
+        UpgradePath(
+            kind="login",
+            detail=f"grant this credential access to {repo_slug} (or fix the remote)",
+            command="gh auth status   # or check GH_SECURITY_TOKEN",
+        ),
+    )
+
+
+def _app_installation_settings_command() -> str:
+    """Best-effort Configure URL for the local App installation."""
+    try:
+        from stayawake.lib import github_app
+        cfg = github_app.load_config() or {}
+        iid = cfg.get("installation_id")
+        if iid:
+            return f"open https://github.com/settings/installations/{iid}"
+        slug = cfg.get("slug")
+        if slug:
+            return f"open https://github.com/apps/{slug}/installations"
+    except Exception:  # noqa: BLE001
+        pass
+    return "open https://github.com/settings/installations"
 
 
 def _deny_reason(intent: Intent, missing: frozenset[Capability], sess: Session) -> str:

@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+- **AuthZ repo-access Deny no longer looks like missing write scopes** — when the credential
+  is live globally but cannot reach a specific `owner/repo` (e.g. StayAwakeBot App install
+  does not include that repository), `require()` explains installation/remote access and
+  points at App Configure — it does not list `contents_write` / `workflows_write` as missing.
+
 ### Added
 - **`core/identity` — AuthN/AuthZ capability gate (Phase 0)** — privileged verbs
   (`saw fix --pr`, `saw guard setup --pr` / remote) call `require(Intent)` *before*

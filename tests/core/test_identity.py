@@ -43,6 +43,37 @@ class TestGate(unittest.TestCase):
         sess = Session(token="t", source="gh", kind="user", live=False)
         d = require(Intent.OPEN_FIX_PR, session=sess)
         self.assertFalse(d.allowed)
+        self.assertIn("unreachable", d.message.lower())
+        self.assertIn(Capability.CONTENTS_WRITE, d.missing)
+
+    def test_app_live_but_repo_unreachable_does_not_fake_missing_scopes(self):
+        # Token works globally; get_repo for this slug fails → old UX listed every write cap.
+        sess = Session(
+            token="ghs_x", source="github-app", kind="app_installation",
+            actor="installation:1 (stayawakebot)", live=False,
+            capabilities=frozenset({
+                Capability.CONTENTS_WRITE, Capability.PULL_REQUESTS_WRITE,
+                Capability.WORKFLOWS_WRITE, Capability.REPO_READ,
+            }),
+        )
+        with mock.patch("stayawake.lib.adapters.github_api.token_is_valid", return_value=True), \
+             mock.patch("stayawake.lib.github_app.load_config",
+                        return_value={"installation_id": "149", "slug": "stayawakebot"}):
+            d = require(Intent.OPEN_GUARD_PR, session=sess, repo_slug="Ndevu12/justdeploy")
+        self.assertFalse(d.allowed)
+        self.assertEqual(d.missing, frozenset())
+        self.assertNotIn("missing:", d.message)
+        self.assertIn("justdeploy", d.message)
+        self.assertIn("NOT missing write scopes", d.message)
+        self.assertTrue(any("installations/149" in (u.command or "") for u in d.upgrades))
+
+    def test_globally_dead_still_reports_capability_gap_shape(self):
+        sess = Session(token="dead", source="github-app", kind="app_installation", live=False)
+        with mock.patch("stayawake.lib.adapters.github_api.token_is_valid", return_value=False):
+            d = require(Intent.OPEN_GUARD_PR, session=sess, repo_slug="o/r")
+        self.assertFalse(d.allowed)
+        self.assertIn(Capability.WORKFLOWS_WRITE, d.missing)
+        self.assertIn("unreachable", d.message.lower())
 
     def test_repo_without_workflow_allows_fix_denies_guard(self):
         caps = capabilities_from_oauth_scopes({"repo"})
