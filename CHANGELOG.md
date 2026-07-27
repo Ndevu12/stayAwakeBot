@@ -22,6 +22,10 @@ All notable changes to this project are documented here. The format is based on
   `stayawakebot[app]` (PyJWT). Legacy `~/.config/stayawake/github-app.json` is migrated once.
 - **`saw auth` UX polish** — status distinguishes App config present / PyJWT missing /
   not installed / ready; register auto-opens install and persists `installation_id`.
+- **`saw auth app register` App-crypto gate** — registration requires the optional
+  `stayawakebot[app]` extra (context-aware install hints; exit 2 without it). `--force`
+  skips the gate for browser-only testing; Saw never auto-installs PyJWT. Status/show say
+  “App saved but not usable yet” when credentials exist without crypto.
 - **`saw` closes the #1207 residual that #1206 deliberately left open** — split-token /
   indirect / light-alias exec sinks. Filed ~5 min after #1206; later #1266/#1208 closed
   *other* residuals (decode→exec, non-literal import) and do **not** cover these. Bounded
