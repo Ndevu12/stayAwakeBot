@@ -467,7 +467,9 @@ class TestSetupLocal(unittest.TestCase):
 class TestSetupPr(unittest.TestCase):
     """`--pr`: build in a worktree off default and open a rolling PR via the shared proposal ladder."""
     def _run(self, submit, *, signed=True, origin="up/repo"):
+        from stayawake.core.identity import Decision, Intent
         from stayawake.lib.git.write.commit import CommitResult
+        allow = Decision(allowed=True, intent=Intent.OPEN_GUARD_PR)
         with mock.patch.object(guard, "resolve_pin", return_value=guard.Pin(SHA, "v0.1.4")), \
              mock.patch.object(guard.gitutil, "default_branch", return_value="main"), \
              mock.patch.object(guard.gitutil, "origin_slug", return_value=origin), \
@@ -478,6 +480,7 @@ class TestSetupPr(unittest.TestCase):
              mock.patch.object(guard.gitutil, "stage_all", return_value=True), \
              mock.patch.object(guard.gitutil, "commit_fix",
                                return_value=CommitResult(committed=True, signed=signed)), \
+             mock.patch("stayawake.core.identity.require", return_value=allow), \
              mock.patch.object(guard.proposal, "submit_change_pr", return_value=submit) as sub:
             res = guard.setup(_tmp_repo(), token="tok", pr=True)
         return res, sub
@@ -627,6 +630,11 @@ class TestSetupSweep(unittest.TestCase):
     def _ok(self):
         return guard.SetupResult(plan=guard.SetupPlan("create", "wf", new_ref=SHA), wrote=Path("/x"))
 
+    def _allow_guard(self):
+        from stayawake.core.identity import Decision, Intent
+        return mock.patch("stayawake.core.identity.require",
+                          return_value=Decision(allowed=True, intent=Intent.OPEN_GUARD_PR))
+
     def test_local_sweep_sets_up_each_discovered_repo(self):
         with mock.patch.object(guard, "resolve_pin", return_value=guard.Pin(SHA, "v0.1.4")), \
              mock.patch.object(guard.resolution, "discover_local_repos",
@@ -653,6 +661,7 @@ class TestSetupSweep(unittest.TestCase):
                                return_value=(["o/a", "o/b"], "t", "env")), \
              mock.patch.object(guard.resolution, "cloned_repo",
                                side_effect=lambda *a, **k: _fake_clone(Path("/clone"))), \
+             self._allow_guard(), \
              mock.patch.object(guard, "setup", side_effect=lambda *a, **k: self._ok()) as s:
             rc = guard.setup_targets(remote=True, no_stream=True)
         self.assertEqual(rc, 0)
@@ -668,6 +677,7 @@ class TestSetupSweep(unittest.TestCase):
              mock.patch.object(guard.resolution, "resolve_remote", return_value=(["o/a"], "t", "env")), \
              mock.patch.object(guard.resolution, "cloned_repo",
                                side_effect=lambda *a, **k: _fake_clone(None)), \
+             self._allow_guard(), \
              mock.patch.object(guard, "setup") as s:
             rc = guard.setup_targets(remote=True, no_stream=True)
         self.assertEqual(rc, 1)                              # clone failed → error → exit 1
@@ -684,6 +694,7 @@ class TestSetupSweep(unittest.TestCase):
              mock.patch.object(guard.resolution, "resolve_remote", return_value=(["o/a"], "t", "env")), \
              mock.patch.object(guard.resolution, "cloned_repo",
                                side_effect=lambda *a, **k: _fake_clone(Path("/clone"))), \
+             self._allow_guard(), \
              mock.patch.object(guard, "setup", side_effect=lambda *a, **k: failed):
             rc = guard.setup_targets(remote=True, no_stream=True)
         self.assertEqual(rc, 1)                              # pushed-but-unopened → failure, not success

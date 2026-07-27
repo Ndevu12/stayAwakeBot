@@ -71,6 +71,9 @@ class TestRemoteFix(unittest.TestCase):
         # API unreachable / bad token → pre-flight aborts BEFORE any clone or push.
         with mock.patch.object(service.auth, "resolve_token", return_value=("t", "env")), \
              mock.patch.object(remediator.github_api, "token_is_valid", return_value=False), \
+             mock.patch.object(remediator.github_api, "oauth_scopes", return_value=None), \
+             mock.patch.object(remediator.github_api, "installation_permissions", return_value=None), \
+             mock.patch.object(remediator.github_api, "get_authenticated_user", return_value=None), \
              mock.patch.object(service.github_api, "list_repos", return_value=["o/a"]), \
              mock.patch.object(remediator.pr_submit, "submit_fix_pr") as m_pr:
             self.assertEqual(remediator.fix(_cfg(["o"]), remote=True, no_stream=True), 0)

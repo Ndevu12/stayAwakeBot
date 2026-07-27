@@ -19,6 +19,7 @@ from stayawake.bots.security import proposal                        # noqa: E402
 from stayawake.bots.security.models import Finding, Severity, ScanResult  # noqa: E402
 from stayawake.bots.security.remediation import Change             # noqa: E402
 from stayawake.lib.git.write.commit import CommitResult          # noqa: E402
+from stayawake.lib.git.write.push import PushResult              # noqa: E402
 
 
 # Default behaviour for every typed git helper `_build_fix`/`submit_fix_pr` touch: the happy
@@ -42,8 +43,19 @@ def _git_defaults() -> dict:
 
 @contextlib.contextmanager
 def _patch_git(**overrides):
-    """Patch pr.gitutil's typed helpers with the happy-path defaults, plus any overrides."""
+    """Patch pr.gitutil's typed helpers with the happy-path defaults, plus any overrides.
+
+    `push_branch` overrides are auto-wrapped into `push_branch_result` (PushResult) so AuthZ
+    classification tests keep the old bool seam.
+    """
     cfg = {**_git_defaults(), **overrides}
+    push_fn = cfg.get("push_branch")
+
+    def _as_result(repo, slug, branch, token, **kw):
+        ok = bool(push_fn(repo, slug, branch, token, **kw)) if push_fn else True
+        return PushResult(ok, "" if ok else "mocked push failure")
+
+    cfg.setdefault("push_branch_result", _as_result)
     with contextlib.ExitStack() as stack:
         for name, fn in cfg.items():
             stack.enter_context(mock.patch.object(pr.gitutil, name, fn))

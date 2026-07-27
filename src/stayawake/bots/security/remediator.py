@@ -66,22 +66,31 @@ def _safe(fn, display: str) -> str:
         return f"{display}: error — {exc}"
 
 
-def _preflight(token: str | None) -> str | None:
-    """Verify the GitHub API is reachable AND the token is valid BEFORE any push/close, so a
-    broken env (e.g. SSL) or bad token fails fast instead of force-pushing branches to every
-    repo. Accepts BOTH a PAT and the Actions installation `GITHUB_TOKEN` — the latter can't
-    call `/user`, so it's validated against `$GITHUB_REPOSITORY` (see github_api.token_is_valid).
-    Returns an error message, or None when good to go."""
+def _preflight(token: str | None, intent=None) -> str | None:
+    """Authorize BEFORE any push/close via core.identity — never start privileged work on a
+    dead/under-scoped credential. Returns an error message, or None when good to go."""
+    from stayawake.core.identity import Intent, require
+    from stayawake.core.identity.capabilities import (
+        capabilities_from_app_permissions, capabilities_from_oauth_scopes,
+    )
+    from stayawake.core.identity.session import Session
+
+    intent = intent or Intent.OPEN_FIX_PR
     if not token:
-        return (auth.no_credential_hint("opening pull requests")
-                + " A token with repo + pull-request write scope is required.")
-    if not github_api.token_is_valid(token, env.github_repository()):
-        return ("GitHub API unreachable or the token was rejected — nothing pushed. Check "
-                "connectivity/TLS (on macOS a missing CA bundle causes this — the `certifi` "
-                "dependency fixes it) and that the token can reach the repository (in GitHub "
-                "Actions the default `GITHUB_TOKEN` works with `contents: write` + "
-                "`pull-requests: write`).")
-    return None
+        sess = Session(token=None, source=None, kind="none", live=False)
+    else:
+        # Use this module's `github_api` / `env` so tests can patch remediator.github_api.*.
+        live = github_api.token_is_valid(token, env.github_repository())
+        scopes = github_api.oauth_scopes(token)
+        caps = capabilities_from_oauth_scopes(scopes) if scopes is not None else None
+        perms = github_api.installation_permissions(token)
+        if perms is not None:
+            caps = capabilities_from_app_permissions(perms)
+        user = github_api.get_authenticated_user(token, quiet=True) or {}
+        sess = Session(token=token, source="preflight", kind="user",
+                       actor=user.get("login"), capabilities=caps, scopes=scopes, live=live)
+    decision = require(intent, session=sess)
+    return None if decision.allowed else decision.message
 
 
 def _local_repos(cfg: dict, opts: ScanOptions, paths) -> list[Path]:

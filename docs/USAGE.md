@@ -267,10 +267,16 @@ scope is in parentheses):
 | `saw scan <path>` / public remotes | no | — |
 | `saw scan --remote` (private) | read | Contents + Metadata: Read (`repo`) |
 | `saw fix` / `saw fix --remote` | write | Contents + Pull requests: R/W (`repo`) |
+| `saw guard setup --pr` / `--user` / `--org` | write + **workflows** | Contents + Pull requests + **Workflows** R/W (`repo` + **`workflow`**) — or `saw auth app register` |
 | ↳ fork fallback (cross-fork PR when you can't push upstream) | fork + PR | Pull requests: R/W on your fork (`public_repo` / `repo`) |
 | ↳ patch/issue fallback (no write at all) | none / issues | Issues: R/W for the notify issue (`repo` / `public_repo`); patch needs nothing |
 | `saw scan --alert` (GitHub issue) | write | Issues: R/W (`repo` / `public_repo`) |
 | `saw audit --repo` | read | Administration: Read (`repo`) |
+| `saw auth status` / `saw doctor` | read (probe) | same as the credential under test |
+
+Missing `workflow` / Workflows permission is **not** “no write access” — GitHub rejects
+pushes that create/update `.github/workflows/*` without it. Fix with
+`gh auth refresh -h github.com -s repo,workflow` or `saw auth app register`.
 
 ### GitHub App (organization **or** personal account)
 
@@ -305,7 +311,10 @@ If the App env is set without the extra installed, StayAwakeBot prints a clear
 
 **Minimal App permissions** (Repository permissions): **Metadata: Read** (always) +
 **Contents: Read** to scan; add **Contents: Read & write** and **Pull requests: Read &
-write** to open remediation PRs.
+write** to open remediation PRs; add **Workflows: Read & write** for `saw guard setup`
+(required to push `.github/workflows/*`). Prefer `saw auth app register` to create a
+self-owned App with that set pre-filled. An official public Saw App is deferred
+([#1277](https://github.com/Ndevu12/stayAwakeBot/issues/1277)).
 
 Other secrets:
 

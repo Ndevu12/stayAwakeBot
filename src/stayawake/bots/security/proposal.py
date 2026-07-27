@@ -50,7 +50,9 @@ class SubmitResult:
       "fork-pr"              — opened/updated a cross-fork PR (see `action`, `fork_slug`)
       "fork-not-ready"       — forked, but the fork wasn't queryable in time (`fork_slug`)
       "fork-pr-create-failed"— pushed to the fork, but the PR API call failed (`fork_slug`)
-      "floor"                — no push access: `patch_path` and/or `issue_note` record the fallback
+      "floor"                — push refused: `patch_path` and/or `issue_note` record the fallback
+    `push_reason` (floor): workflow_scope | signed_commits | forbidden | network | unknown —
+    from core.identity.classify (never invent a blanket 'no write access').
     """
     kind: str
     action: str | None = None          # "opened" | "updated" for a pr/fork-pr
@@ -59,6 +61,8 @@ class SubmitResult:
     fork_slug: str | None = None
     patch_path: Path | None = None
     issue_note: str | None = None      # generic issue outcome fragment, ready to embed
+    push_reason: str | None = None
+    push_detail: str = ""
 
 
 def _wait_for_fork(slug: str, token: str) -> bool:
@@ -134,9 +138,12 @@ def _fork_and_pr(wt: Path, owner: str, name: str, base: str, branch: str,
         return None  # forking not permitted → fall back
     if not _wait_for_fork(fork_slug, token):
         return SubmitResult("fork-not-ready", fork_slug=fork_slug)
-    # Push the branch to the fork (token via GIT_ASKPASS, never in URL/argv).
-    if not gitutil.push_branch(wt, fork_slug, branch, token):
-        return None  # couldn't push to the fork either → fall back to patch/issue
+    from stayawake.core.identity import classify_push_stderr
+    pushed = gitutil.push_branch_result(wt, fork_slug, branch, token)
+    if not pushed.ok:
+        failure = classify_push_stderr(pushed.stderr)
+        return SubmitResult("floor", fork_slug=fork_slug,
+                            push_reason=failure.reason, push_detail=failure.detail)
     fork_owner = fork_slug.split("/", 1)[0]
     result = github_api.open_or_update_pr(owner, name, head_branch=branch, base=base,
                                           title=title, body=body, token=token, head_owner=fork_owner)
@@ -155,20 +162,25 @@ def submit_change_pr(wt: Path, slug: str, base: str, *, branch: str, title: str,
 
     `wt` must hold the committed change; `title`/`body` are used for both the upstream and (on
     fallback) the fork PR; `issue`, if given, is filed only when there is no push access."""
+    from stayawake.core.identity import classify_push_stderr
+
     owner, name = slug.split("/", 1)
-    # Token via GIT_ASKPASS (env), never in the URL/argv. Push the change branch.
-    if not gitutil.push_branch(wt, slug, branch, token):
-        # Push rejected — usually no write access, but a branch that REQUIRES SIGNED COMMITS also
-        # rejects a possibly-unsigned commit here. Either way, fall back: fork→PR, else patch +
-        # de-duplicated issue so the work is never lost.
-        forked = _fork_and_pr(wt, owner, name, base, branch, title, body, token)
-        if forked is not None:
-            return forked
+    pushed = gitutil.push_branch_result(wt, slug, branch, token)
+    if not pushed.ok:
+        failure = classify_push_stderr(pushed.stderr)
+        # Workflow-scope / signed-commits: forking cannot fix these — skip straight to floor.
+        if failure.reason not in ("workflow_scope", "signed_commits"):
+            forked = _fork_and_pr(wt, owner, name, base, branch, title, body, token)
+            if forked is not None and forked.kind != "floor":
+                return forked
+            if forked is not None and forked.push_reason:
+                from stayawake.core.identity.classify import PushFailure
+                failure = PushFailure(forked.push_reason, forked.push_detail)
         patch = _save_patch(wt, slug, Path(patches_dir) if patches_dir else PATCHES_DIR)
         note = file_dedup_issue(owner, name, issue, token) if issue else None
-        return SubmitResult("floor", patch_path=patch, issue_note=note)
+        return SubmitResult("floor", patch_path=patch, issue_note=note,
+                            push_reason=failure.reason, push_detail=failure.detail)
 
-    # Open the rolling PR or refresh the existing one (idempotent dedup lives in open_or_update_pr).
     result = github_api.open_or_update_pr(owner, name, head_branch=branch, base=base,
                                           title=title, body=body, token=token)
     if not result:
