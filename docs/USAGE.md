@@ -14,6 +14,18 @@ pip install "stayawakebot @ git+https://github.com/Ndevu12/stayAwakeBot@main"   
 pip install -e .
 ```
 
+**Default install** covers local scanning and `gh`-based credentials. **App-ready install**
+(adds PyJWT for GitHub App JWT signing — never installed automatically by Saw):
+
+```bash
+pip install "stayawakebot[app]"       # PyPI / git URL install
+pip install -e ".[app]"               # from a clone (editable)
+pipx inject stayawakebot "pyjwt[crypto]>=2.0"   # if you installed via pipx
+```
+
+`saw auth app register` **requires** the App extra (exit 2 with an install hint if it is
+missing). Use `--force` only for browser-only manifest testing; minting still needs `[app]`.
+
 The PyPI distribution is named **`stayawakebot`** because `stayawake` is already taken on
 PyPI by an unrelated project. The import package (`stayawake`) and the `stayawake-*` console
 scripts are unchanged.
@@ -293,7 +305,8 @@ For a personal account with a handful of repos, `gh auth login` or a fine-graine
 simpler. Reach for an App when you want that same rotating, narrowly-scoped, revocable
 token model on your own repos — or when you manage many.
 
-It's an **opt-in extra** so the base install stays stdlib-only:
+It's an **opt-in extra** so the base install stays stdlib-only (install before
+`saw auth app register` — Saw does not pip-install it for you):
 
 ```bash
 pip install "stayawakebot[app]"       # adds PyJWT[crypto] — only needed for App auth
