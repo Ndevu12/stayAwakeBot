@@ -369,6 +369,58 @@ class TestWholeFileObfuscation(unittest.TestCase):
         ):
             self.assertFalse(analyze_file(code, ".ts"), code)
 
+    # ── #1208 residual (after #1206 + #1266): non-literal import, constructed
+    #    child_process command, require('vm').runInContext — heuristic SUSPICIOUS. ──
+    def test_dynamic_import_non_literal_flagged(self):
+        self.assertTrue(analyze_file("const m = await import(attackerUrl);\n", ".mjs"))
+        self.assertTrue(analyze_file("import(decodedModule).then(m => m.run());\n", ".js"))
+        self.assertTrue(analyze_file("import(`${attackerUrl}`);\n", ".js"))
+        self.assertTrue(analyze_file("import(`https://${host}/p.js`);\n", ".js"))
+        # decode form is also #1266; still must fire
+        self.assertTrue(analyze_file("import(atob(payload));\n", ".js"))
+
+    def test_constructed_child_process_command_flagged(self):
+        self.assertTrue(analyze_file("execSync(cmd + ' --force');\n", ".js"))
+        self.assertTrue(analyze_file("spawnSync(`sh -c ${payload}`);\n", ".js"))
+        self.assertTrue(analyze_file("fork(bin + ext);\n", ".js"))
+        self.assertTrue(analyze_file(
+            "require('child_process').exec(cmd + flags);\n", ".js"))
+        self.assertTrue(analyze_file(
+            "require('child_process').execSync(`run ${x}`);\n", ".js"))
+        # decode form via .exec — #1266 covers bare execSync(decode); this covers .exec
+        self.assertTrue(analyze_file(
+            "require('child_process').exec(atob(cmd));\n", ".js"))
+
+    def test_require_vm_runInContext_flagged(self):
+        self.assertTrue(analyze_file("require('vm').runInContext(code, ctx);\n", ".js"))
+        self.assertTrue(analyze_file('require("vm").runInContext(decoded);\n', ".js"))
+        self.assertTrue(analyze_file("require('vm')?.runInContext(code);\n", ".js"))
+        self.assertTrue(analyze_file("require(/*c*/'vm').runInContext(code);\n", ".js"))
+
+    def test_dynamic_exec_false_positive_boundaries_clean(self):
+        for code in (
+            "const _ = require('lodash').runInContext();\n",
+            "const m = await import('lodash');\n",
+            "const m = await import(\"./routes/\" + name + '.js');\n",
+            "import(/* webpackChunkName: \"x\" */ './mod.js');\n",
+            "import(`./locales/${locale}.js`);\n",
+            "System.import(env + '.js');\n",
+            "loader.import(`./widgets/${id}`);\n",
+            "const x = require('fs');\n",
+            "const p = require(path.join(__dirname, 'x'));\n",
+            "const messages = require('./locales/' + locale + '.json');\n",
+            "execSync('npm run build');\n",
+            "execSync(cmd);\n",                                    # bare ident — Ops default
+            "spawn(process.execPath, args);\n",
+            "const {execSync} = require('child_process');\n",
+            "const vm = require('vm');\n",
+            "/\"exp\":(\\d+)/.exec(buf);\n",
+            "// Example: load via import(pluginUrl) at runtime\nexport const ok = 1;\n",
+            "'import(url)';\n",
+            "\"execSync(cmd + x)\";\n",
+        ):
+            self.assertFalse(analyze_file(code, ".ts"), code)
+
     def test_vendored_and_generated_paths_suppressed(self):
         arr = "var a=[" + ",".join(["0x68"] * 40) + "];String.fromCharCode(127)"
         for path in ("lib/app.min.js", ".pnp.cjs", ".yarn/releases/yarn.cjs",

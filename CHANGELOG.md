@@ -7,6 +7,16 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **`saw` closes the #1208 residual that #1206 left open and #1266 did not later cover** —
+  filed ~5 min after #1206; five days later #1266 already caught decode→exec
+  (`import(atob`, `execSync(Buffer.from`). What was still missing: non-literal dynamic
+  `import(` (`` import(url) `` / `` import(`${url}`) ``; string-prefixed routes and
+  `` import(`./x/${y}`) `` stay clean), constructed `child_process` commands
+  (`execSync(cmd+' x')`, `` spawn(`sh ${p}`) ``, `require('child_process').exec(…)`), and
+  `require('vm').runInContext` (incl. `?.`). Heuristic → SUSPICIOUS. Reuses `#1266` /
+  `_has_exec_sink` — does not re-implement decode→exec. FP gates kept from the hunt:
+  comment/'/-string scrub, `(?<![.\w$])` (kills `System.import`), relative-template carve-out,
+  bare `execSync(cmd)` / literal execs / lodash `_.runInContext()` stay clean.
 - **`saw scan --deep` content-scans installed dependency CODE for loader payloads** (#1222). A normal
   scan excludes `node_modules` (minified vendored code makes the density heuristic all false positives)
   and only checks each installed package's **entry points** — so a confirmed loader fingerprint buried
