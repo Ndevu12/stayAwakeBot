@@ -26,6 +26,9 @@ All notable changes to this project are documented here. The format is based on
   `stayawakebot[app]` extra (context-aware install hints; exit 2 without it). `--force`
   skips the gate for browser-only testing; Saw never auto-installs PyJWT. Status/show say
   “App saved but not usable yet” when credentials exist without crypto.
+- **`saw doctor` App crypto readiness** — when App config exists but PyJWT is missing, doctor
+  no longer prints a bare “config present” ✓; it mirrors `saw auth status` (“not usable yet” +
+  install hint). `--json` adds `app_jwt_available`.
 - **`saw` closes the #1207 residual that #1206 deliberately left open** — split-token /
   indirect / light-alias exec sinks. Filed ~5 min after #1206; later #1266/#1208 closed
   *other* residuals (decode→exec, non-literal import) and do **not** cover these. Bounded

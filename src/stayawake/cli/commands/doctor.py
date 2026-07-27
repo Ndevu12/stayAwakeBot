@@ -35,6 +35,7 @@ def run(a: argparse.Namespace) -> int:
             "capabilities": (sorted(c.value for c in sess.capabilities)
                              if sess.capabilities is not None else None),
             "app_configured": github_app.is_configured(),
+            "app_jwt_available": github_app.jwt_available(),
             "open_fix_pr": fix.allowed,
             "open_guard_pr": guard.allowed,
             "health_scripts_installed": bool(health),
@@ -64,7 +65,17 @@ def run(a: argparse.Namespace) -> int:
                 if u.command:
                     lines.append(f"  → {u.command}")
         if github_app.is_configured():
-            lines.append(f"✓ Saw App config present ({github_app.config_path()})")
+            if github_app.jwt_available():
+                lines.append(f"✓ Saw App config present ({github_app.config_path()})")
+            else:
+                cfg = github_app.load_config() or {}
+                head = (
+                    "✗ App saved but not usable yet"
+                    if cfg
+                    else "✗ App configured but not usable yet"
+                )
+                lines.append(head)
+                lines.append(f"  → {github_app.app_crypto_install_hint()}")
     lines += [
         f"{mark(bool(health))} health entry points installed (remote-only, not saw "
         f"subcommands): {'yes' if health else 'no'}",

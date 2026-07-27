@@ -260,7 +260,7 @@ def _build_jwt(app_id: str, private_key: str) -> str:
         import jwt  # PyJWT — only needed for App auth (optional [app] extra)
     except ImportError as e:
         raise GithubAppError(
-            f"GitHub App auth needs PyJWT — install the extra: {APP_EXTRA_HINT}."
+            f"GitHub App auth needs PyJWT — install the extra: {app_crypto_install_hint()}."
         ) from e
     now = int(time.time())
     payload = {"iat": now - _SKEW, "exp": now + _JWT_TTL, "iss": app_id}
