@@ -43,7 +43,7 @@ saw <command> [options] [TARGETS...]      # no command → welcome banner;  -h/-
 | [`saw discard`](#saw-discard) | Undo `saw fix`: delete the branch and/or close its PR | git / GitHub API |
 | [`saw audit`](#saw-audit) | Local hygiene: credentials, editor, host artifacts, branch protection (`--verify` content-scans a suspect dir) | Read-only |
 | [`saw guard`](#saw-guard) | Install & verify the **Strix worm-guard CI gate** across repos — `check` grades it (present / SHA-pinned / current / required); `setup` installs or surgically pin-bumps it | `check`: **read-only**; `setup`: working tree, or PR with `--pr`/`--remote` (never pushes a default branch; needs **`workflow` scope** or a Saw App) |
-| [`saw auth`](#saw-auth) | Credential + capability status; register a self-owned Saw GitHub App (Phase 1) | Local config / browser manifest flow |
+| [`saw auth`](#saw-auth) | Credential + capability status; register an operator-managed StayAwakeBot GitHub App | Local config / browser manifest + install flow |
 | [`saw db`](#saw-db) | Manage the offline advisory DB (malicious-package + CVE corpus) a scan consults | Cache only (`~/.cache/saw/advisories`) |
 | [`saw search`](#saw-search) | Fuzzy "what's the command for…?" lookup | — |
 | [`saw intro`](#saw-intro) | Branded tour (also the bare-`saw` welcome) | — |
@@ -63,7 +63,7 @@ saw audit                         # local credential + editor hygiene
 saw guard check                   # is this repo's Strix CI gate present + SHA-pinned + current?
 saw guard setup --pr              # install/bump the gate → one rolling PR (never pushes main)
 saw auth status                   # credential + capability gate (fix vs guard/workflow)
-saw auth app register             # self-owned Saw App with Workflows write (Phase 1)
+saw auth app register             # StayAwakeBot App with Workflows write (create + install)
 
 # Remote (GitHub) sweeps — see "Remote targeting"
 saw scan --remote                 # your own GitHub repos (or configured targets)

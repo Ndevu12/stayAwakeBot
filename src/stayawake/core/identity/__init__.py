@@ -4,7 +4,8 @@
     utils/ → lib/ (credential adapters) → core/identity (this package) → bots/ → cli/
 
 Bots call `require(Intent.…)` and stop on Deny — never clone/push first and guess why.
-Phase 2 (official public Saw App) is deferred: see GitHub issue #1277.
+Phase 1 (`saw auth app register`) is the supported operator-managed App path; a
+marketplace App remains optional backlog (#1277).
 """
 from __future__ import annotations
 

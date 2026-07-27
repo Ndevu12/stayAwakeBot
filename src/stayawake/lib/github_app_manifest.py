@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""StayAwake Saw GitHub App manifest + local register flow (Phase 1).
+"""StayAwakeBot GitHub App manifest + local register/install flow (Phase 1).
 
-Registers a *self-owned* App from a pre-filled manifest (GitHub's App-manifest handshake).
-The operator owns App ID + PEM — we never ship a shared private key. Official public App
-(Phase 2) is deferred: GitHub issue #1277.
+Registers an *operator-managed* App from a pre-filled manifest (GitHub's App-manifest
+handshake), then continues through installation via `setup_url` so the loopback captures
+`installation_id` without a manual URL copy step. The operator owns App ID + PEM — we
+never ship a shared private key.
 """
 from __future__ import annotations
 
@@ -14,6 +15,7 @@ import urllib.parse
 import urllib.request
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 from typing import Any
 
 from stayawake.lib import github_app
@@ -27,17 +29,31 @@ DEFAULT_PERMISSIONS = {
     "issues": "write",
 }
 
-_MANIFEST_NAME = "StayAwake Saw"
+_MANIFEST_NAME = "StayAwakeBot"
 _MANIFEST_URL = "https://github.com/Ndevu12/stayAwakeBot"
+_MANIFEST_DESCRIPTION = (
+    "Operator-managed GitHub App for the StayAwakeBot (`saw`) CLI — "
+    "detect, report, and remediate supply-chain worms on the repos you choose. "
+    "Credentials stay on your machine; you own the App registration."
+)
 
 
-def build_manifest(*, redirect_url: str, name: str = _MANIFEST_NAME) -> dict[str, Any]:
+def app_icon_path() -> Path | None:
+    """Packaged StayAwakeBot App icon (PNG), or None if the asset is missing."""
+    path = Path(__file__).resolve().parent / "data" / "stayawakebot-app-icon.png"
+    return path if path.is_file() else None
+
+
+def build_manifest(*, redirect_url: str, setup_url: str,
+                    name: str = _MANIFEST_NAME) -> dict[str, Any]:
     """Manifest body for POST to GitHub's new-app form. No webhook/events (API-only App)."""
     return {
         "name": name,
         "url": _MANIFEST_URL,
+        "description": _MANIFEST_DESCRIPTION,
         "redirect_url": redirect_url,
         "callback_urls": [redirect_url],
+        "setup_url": setup_url,
         "public": False,
         "default_permissions": dict(DEFAULT_PERMISSIONS),
         "default_events": [],
@@ -63,14 +79,24 @@ def exchange_manifest_code(code: str) -> dict:
 
 
 def register_via_browser(*, name: str = _MANIFEST_NAME, open_browser: bool = True,
-                         timeout_s: float = 300.0) -> dict:
-    """Drive the GitHub App-manifest flow on a loopback HTTP server.
+                         timeout_s: float = 300.0,
+                         install_timeout_s: float = 600.0) -> dict:
+    """Drive App create + install on one loopback HTTP server.
 
-    Returns the conversion payload (includes id, pem, slug). Saves credentials via
-    `github_app.save_config`. Raises GithubAppError on failure / timeout.
+    1. POST pre-filled manifest to GitHub (create App).
+    2. Exchange conversion code → save PEM/app_id locally.
+    3. Open the install page; GitHub redirects to `setup_url` with `installation_id`.
+    4. Persist `installation_id` and return the conversion payload (+ installation_id).
+
+    If install is skipped/timed out, credentials are still saved and the install URL is
+    included on the returned dict as `_install_url` for the CLI to print.
     """
-    result: dict[str, Any] = {"code": None, "error": None}
-    ready = threading.Event()
+    state: dict[str, Any] = {
+        "code": None, "error": None,
+        "installation_id": None, "setup_error": None,
+    }
+    registered = threading.Event()
+    installed = threading.Event()
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):  # noqa: ARG002 — keep loopback quiet
@@ -78,36 +104,65 @@ def register_via_browser(*, name: str = _MANIFEST_NAME, open_browser: bool = Tru
 
         def do_GET(self):  # noqa: N802
             parsed = urllib.parse.urlparse(self.path)
+            port = self.server.server_port
             if parsed.path in ("/", "/start"):
-                manifest = build_manifest(redirect_url=f"http://127.0.0.1:{self.server.server_port}/callback",
-                                          name=name)
+                manifest = build_manifest(
+                    redirect_url=f"http://127.0.0.1:{port}/callback",
+                    setup_url=f"http://127.0.0.1:{port}/setup",
+                    name=name,
+                )
                 body = _start_page(manifest).encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
+                self._ok(body)
                 return
             if parsed.path == "/callback":
                 qs = urllib.parse.parse_qs(parsed.query)
                 if qs.get("code"):
-                    result["code"] = qs["code"][0]
-                    msg = b"<html><body><h2>StayAwake Saw App registered.</h2>" \
-                          b"<p>You can close this tab and return to the terminal.</p></body></html>"
-                    self.send_response(200)
+                    state["code"] = qs["code"][0]
+                    msg = _html(
+                        "StayAwakeBot App registered",
+                        "Next: GitHub will open the <strong>install</strong> page. "
+                        "Pick the account/repos, then you will return here automatically.",
+                    )
+                    self._ok(msg)
                 else:
-                    result["error"] = qs.get("error_description", qs.get("error", ["unknown"]))[0]
-                    msg = b"<html><body><h2>Registration failed.</h2>" \
-                          b"<p>Return to the terminal for details.</p></body></html>"
-                    self.send_response(400)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.send_header("Content-Length", str(len(msg)))
-                self.end_headers()
-                self.wfile.write(msg)
-                ready.set()
+                    state["error"] = qs.get("error_description", qs.get("error", ["unknown"]))[0]
+                    self._fail(_html("Registration failed",
+                                     "Return to the terminal for details."))
+                registered.set()
+                return
+            if parsed.path == "/setup":
+                qs = urllib.parse.parse_qs(parsed.query)
+                iid = (qs.get("installation_id") or [None])[0]
+                if iid:
+                    state["installation_id"] = str(iid)
+                    msg = _html(
+                        "StayAwakeBot App installed",
+                        "You can close this tab and return to the terminal.",
+                    )
+                    self._ok(msg)
+                else:
+                    state["setup_error"] = qs.get("error_description",
+                                                 qs.get("error", ["missing installation_id"]))[0]
+                    self._fail(_html("Install callback incomplete",
+                                     "Return to the terminal for details."))
+                installed.set()
                 return
             self.send_response(404)
             self.end_headers()
+
+        def _ok(self, body: bytes) -> None:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _fail(self, body: bytes) -> None:
+            self.send_response(400)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
 
     server = HTTPServer(("127.0.0.1", 0), Handler)
     port = server.server_port
@@ -117,38 +172,64 @@ def register_via_browser(*, name: str = _MANIFEST_NAME, open_browser: bool = Tru
     try:
         if open_browser:
             webbrowser.open(start_url)
-        if not ready.wait(timeout_s):
+        if not registered.wait(timeout_s):
             raise github_app.GithubAppError(
                 f"timed out waiting for GitHub redirect (open {start_url} manually and retry)")
-        if result["error"]:
-            raise github_app.GithubAppError(f"GitHub returned an error: {result['error']}")
-        if not result["code"]:
+        if state["error"]:
+            raise github_app.GithubAppError(f"GitHub returned an error: {state['error']}")
+        if not state["code"]:
             raise github_app.GithubAppError("no conversion code received from GitHub")
-        payload = exchange_manifest_code(result["code"])
+
+        payload = exchange_manifest_code(state["code"])
         pem = payload.get("pem")
         app_id = payload.get("id")
         if not pem or not app_id:
             raise github_app.GithubAppError("conversion response missing id/pem")
-        github_app.save_config(
-            str(app_id), pem,
-            slug=payload.get("slug"),
-            name=payload.get("name") or name,
-        )
+        slug = payload.get("slug")
+        display = payload.get("name") or name
+        github_app.save_config(str(app_id), pem, slug=slug, name=display)
+
+        install = install_url(slug)
+        payload["_install_url"] = install
+        payload["_settings_url"] = settings_url(slug, app_id=app_id)
+        payload["_icon_path"] = str(app_icon_path()) if app_icon_path() else None
+
+        if open_browser:
+            webbrowser.open(install)
+        if installed.wait(timeout=install_timeout_s):
+            if state["setup_error"]:
+                raise github_app.GithubAppError(
+                    f"install callback error: {state['setup_error']}")
+            iid = state["installation_id"]
+            if iid:
+                github_app.save_config(str(app_id), pem, installation_id=iid,
+                                      slug=slug, name=display)
+                payload["installation_id"] = iid
+                payload["_installed"] = True
+            else:
+                payload["_installed"] = False
+        else:
+            payload["_installed"] = False
         return payload
     finally:
         server.shutdown()
 
 
+def _html(title: str, body: str) -> bytes:
+    return (f"<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
+            f"<title>{title}</title></head><body>"
+            f"<h2>{title}</h2><p>{body}</p></body></html>").encode("utf-8")
+
+
 def _start_page(manifest: dict) -> str:
     """Auto-submitting HTML form that posts the manifest to GitHub's new-app endpoint."""
     manifest_json = json.dumps(manifest)
-    # Escape for HTML attribute context
     escaped = (manifest_json.replace("&", "&amp;").replace('"', "&quot;")
                .replace("<", "&lt;").replace(">", "&gt;"))
     return f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Register StayAwake Saw</title></head>
+<html><head><meta charset="utf-8"><title>Register StayAwakeBot</title></head>
 <body>
-  <p>Continuing to GitHub to create your StayAwake Saw App…</p>
+  <p>Continuing to GitHub to create your StayAwakeBot App…</p>
   <form id="f" action="https://github.com/settings/apps/new" method="post">
     <input type="hidden" name="manifest" value="{escaped}">
     <button type="submit">Create GitHub App</button>
@@ -162,4 +243,13 @@ def install_url(slug: str | None) -> str:
     """Where the operator installs the newly registered App on an account/org."""
     if slug:
         return f"https://github.com/apps/{slug}/installations/new"
+    return "https://github.com/settings/apps"
+
+
+def settings_url(slug: str | None, *, app_id: int | str | None = None) -> str:
+    """GitHub App settings (Display information — upload the StayAwakeBot icon here)."""
+    if slug:
+        return f"https://github.com/settings/apps/{slug}"
+    if app_id:
+        return f"https://github.com/settings/apps/{app_id}"
     return "https://github.com/settings/apps"

@@ -312,9 +312,9 @@ If the App env is set without the extra installed, StayAwakeBot prints a clear
 **Minimal App permissions** (Repository permissions): **Metadata: Read** (always) +
 **Contents: Read** to scan; add **Contents: Read & write** and **Pull requests: Read &
 write** to open remediation PRs; add **Workflows: Read & write** for `saw guard setup`
-(required to push `.github/workflows/*`). Prefer `saw auth app register` to create a
-self-owned App with that set pre-filled. An official public Saw App is deferred
-([#1277](https://github.com/Ndevu12/stayAwakeBot/issues/1277)).
+(required to push `.github/workflows/*`). Prefer `saw auth app register` to create an
+operator-managed StayAwakeBot App with that set pre-filled (you own the App ID and
+private key on your machine).
 
 Other secrets:
 
