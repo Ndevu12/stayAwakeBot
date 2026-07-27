@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """GitHub App authentication — mint short-lived installation tokens.
 
-Optional feature: needs `pip install "stayawake[app]"` (PyJWT[crypto]). A GitHub App is
+Optional feature: needs `pip install "stayawakebot[app]"` (PyJWT[crypto]). A GitHub App is
 the production way to scan/remediate/guard org-wide: an admin installs it once on selected
 repos and it mints **1-hour, auto-rotating installation tokens** scoped to exactly the
 granted permissions — no human PAT to leak, fully revocable, and the install itself
@@ -18,8 +18,7 @@ Configuration (env wins over the config file):
   GH_APP_INSTALLATION_ID    optional; if omitted and the App has exactly one
                             installation, that one is used
 
-Phase 2 (official public Saw App) is deferred — see GitHub issue #1277. Phase 1 uses a
-per-operator App registered from our manifest (`saw auth app register`).
+Phase 1 registers an operator-managed App via `saw auth app register` (you own App ID + PEM).
 """
 from __future__ import annotations
 
@@ -118,6 +117,18 @@ def is_configured() -> bool:
     return bool(_app_id() and _private_key())
 
 
+def jwt_available() -> bool:
+    """True when the optional PyJWT[crypto] extra can be imported."""
+    try:
+        import jwt  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+APP_EXTRA_HINT = 'pip install "stayawakebot[app]"'
+
+
 def installation_actor_label() -> str | None:
     """Short label for Session.actor when using an App credential."""
     cfg = load_config() or {}
@@ -142,7 +153,7 @@ def _build_jwt(app_id: str, private_key: str) -> str:
         import jwt  # PyJWT — only needed for App auth (optional [app] extra)
     except ImportError as e:
         raise GithubAppError(
-            'GitHub App auth needs PyJWT — install the extra: pip install "stayawake[app]".'
+            f"GitHub App auth needs PyJWT — install the extra: {APP_EXTRA_HINT}."
         ) from e
     now = int(time.time())
     payload = {"iat": now - _SKEW, "exp": now + _JWT_TTL, "iss": app_id}
