@@ -452,7 +452,9 @@ recording). The full command list is always at `saw -h`.
 
 Self-check: confirm that `saw` resolves to this installation, report whether a usable GitHub /
 Slack credential is present, and note that the health entry points (`stayawake-health-*`) are
-installed even though they are not `saw` subcommands.
+installed even though they are not `saw` subcommands. When a StayAwakeBot App is configured,
+`saw doctor` also reports whether PyJWT is installed (`app_jwt_available` in `--json`) — same
+readiness signals as `saw auth status`.
 
 ```text
 saw doctor [--json] [-q]
