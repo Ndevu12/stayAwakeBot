@@ -421,6 +421,61 @@ class TestWholeFileObfuscation(unittest.TestCase):
         ):
             self.assertFalse(analyze_file(code, ".ts"), code)
 
+    # ── #1207 residual (after #1206; orthogonal to #1208/#1266): split-token via
+    #    concat-fold, indirect comma-call, light alias / runtime-key — heuristic. ──
+    def test_split_token_exec_flagged(self):
+        self.assertTrue(analyze_file("['ev'+'al'](payload);\n", ".js"))
+        self.assertTrue(analyze_file("global['ev'+'al'](code);\n", ".js"))
+        self.assertTrue(analyze_file('window["ev"+"al"](x);\n', ".js"))
+        self.assertTrue(analyze_file("['Fun'+'ction']('return 1')();\n", ".js"))
+        self.assertTrue(analyze_file("obj['con'+'structor']('return 1')();\n", ".js"))
+        self.assertTrue(analyze_file(
+            "x['con'+'structor']['con'+'structor']('return 1')();\n", ".js"))
+        # multi-chunk fold
+        self.assertTrue(analyze_file("global['e'+'v'+'a'+'l'](x);\n", ".js"))
+
+    def test_indirect_comma_eval_flagged(self):
+        self.assertTrue(analyze_file("(0, eval)(payload);\n", ".js"))
+        self.assertTrue(analyze_file("(0,eval)(x);\n", ".js"))
+        self.assertTrue(analyze_file("(void 0, Function)('return 1')();\n", ".js"))
+        self.assertTrue(analyze_file("(null, eval)(code);\n", ".js"))
+        self.assertTrue(analyze_file("(!0, Function)(body)();\n", ".js"))
+
+    def test_aliased_eval_flagged(self):
+        self.assertTrue(analyze_file("const e = eval; e(payload);\n", ".js"))
+        self.assertTrue(analyze_file("let F = Function; F('return 1')();\n", ".js"))
+        self.assertTrue(analyze_file("var run = eval;\nrun(code);\n", ".js"))
+
+    def test_runtime_built_key_flagged(self):
+        self.assertTrue(analyze_file("const k = 'ev' + 'al'; g[k](x);\n", ".js"))
+        self.assertTrue(analyze_file("let k = 'eval'; global[k](payload);\n", ".js"))
+        self.assertTrue(analyze_file(
+            "const k = 'con' + 'structor'; obj[k](decoded);\n", ".js"))
+
+    def test_obfuscated_exec_false_positive_boundaries_clean(self):
+        for code in (
+            # Babel / tslib interop — must NOT fire on non-eval RHS
+            "var x = (0, _mod.default)(arg);\n",
+            "(0, Object.assign)(a, b);\n",
+            "(0, require('tslib').__exportStar)(m, exports);\n",
+            "(0, fn)(x);\n",
+            # benign concat / non-dangerous keys
+            "const msg = 'hello' + 'world';\nexport const x = msg;\n",
+            "['hel'+'lo'](x);\n",
+            "const k = 'push'; arr[k](x);\n",
+            "const k = 'eval';\nconsole.log(k);\n",           # binding, no call via [k](
+            "const e = evaluate; e(x);\n",                    # not the eval global
+            "const F = Functional; F(x);\n",
+            "handlers['eval'];\n",                           # lookup, no call
+            "registry['Function'];\n",
+            # polymorphic clone via runtime key — same carve-out as literal form
+            "const k = 'constructor';\nreturn new obj[k](props);\n",
+            # alias without a call
+            "const e = eval;\nmodule.exports = e;\n",
+            "const F = Function;\nif (!(x instanceof F)) throw 0;\n",
+        ):
+            self.assertFalse(analyze_file(code, ".ts"), code)
+
     def test_vendored_and_generated_paths_suppressed(self):
         arr = "var a=[" + ",".join(["0x68"] * 40) + "];String.fromCharCode(127)"
         for path in ("lib/app.min.js", ".pnp.cjs", ".yarn/releases/yarn.cjs",

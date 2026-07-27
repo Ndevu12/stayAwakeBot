@@ -574,11 +574,12 @@ def _seam_strip(work: str, ext: str, content_sig) -> str | None:
         # benign clone — could be a separate RCE the excision would auto-"clean" past manual review.
         # Refuse: only auto-clean when what remains has no *detectable* exec sink (adversarial catch).
         # NOTE: this is NOT a general RCE guard — it shares the whole scanner's token detection
-        # (`_has_exec_sink`), which now catches the common reflective forms (a double-constructor
-        # call, a computed-key call, vm run-in-this-context, a Reflect-of-eval) but STILL can't see a
-        # split-token or aliased sink, a bare dangerous require whose exec is built at runtime, or a
-        # dynamic import. That residual is the pre-existing scanner blind spot, not new here; the PR
-        # this fix lands in is human-reviewed, and the original is quarantined.
+        # (`_has_exec_sink`), which now catches the common reflective forms AND the #1207
+        # obfuscated forms (split-token via concat-fold, `(0, eval)(`, light alias /
+        # runtime-key). It STILL can't see a renamed binding whose RHS is itself computed,
+        # a bare dangerous require whose exec is built at runtime past that window, or every
+        # dynamic-import shape. That residual is the pre-existing scanner blind spot, not new
+        # here; the PR this fix lands in is human-reviewed, and the original is quarantined.
         return None
     if analyze_file(stripped, ext):        # result still looks packed → not a clean hand-authored file
         return None
