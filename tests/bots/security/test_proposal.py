@@ -14,13 +14,24 @@ from pathlib import Path
 from unittest import mock
 
 from stayawake.bots.security import proposal
+from stayawake.lib.git.write.push import PushResult
 
 
 def _git(**over):
-    """Patch proposal.gitutil.* — default: upstream push succeeds, patch capture yields a body."""
+    """Patch proposal.gitutil.* — default: upstream push succeeds, patch capture yields a body.
+
+    `push_branch` overrides are auto-wrapped into `push_branch_result` (PushResult) so the
+    AuthZ classification path keeps the old bool seam used by these tests.
+    """
     base = {"push_branch": lambda repo, slug, branch, token, **k: True,
             "format_patch": lambda repo, ref="HEAD": "From abc\nSubject: x\n\nbody\n"}
     base.update(over)
+    push_fn = base.get("push_branch")
+    if "push_branch_result" not in base and push_fn is not None:
+        def _as_result(repo, slug, branch, token, **k):
+            ok = bool(push_fn(repo, slug, branch, token, **k))
+            return PushResult(ok, "" if ok else "mocked push failure")
+        base["push_branch_result"] = _as_result
     return [mock.patch.object(proposal.gitutil, n, f) for n, f in base.items()]
 
 

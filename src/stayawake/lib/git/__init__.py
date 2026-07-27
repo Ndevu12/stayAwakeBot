@@ -42,6 +42,8 @@ from stayawake.lib.git.write import (
     CommitResult,
     BOT_AUTHOR,
     push_branch,
+    push_branch_result,
+    PushResult,
     delete_remote_branch,
     format_patch,
     fetch,
@@ -55,6 +57,7 @@ __all__ = [
     "file_commits", "introduced_added_text", "commit_meta", "remote_has_branch",
     "merge_commits", "evil_merge_paths",
     "add_worktree", "remove_worktree", "stage_all", "unstage_cached",
-    "commit_fix", "CommitResult", "BOT_AUTHOR", "push_branch", "delete_remote_branch",
+    "commit_fix", "CommitResult", "BOT_AUTHOR", "push_branch", "push_branch_result", "PushResult",
+    "delete_remote_branch",
     "format_patch", "fetch", "delete_branch",
 ]

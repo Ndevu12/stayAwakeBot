@@ -7,6 +7,17 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **`core/identity` — AuthN/AuthZ capability gate (Phase 0)** — privileged verbs
+  (`saw fix --pr`, `saw guard setup --pr` / remote) call `require(Intent)` *before*
+  clone/worktree/push. Classic OAuth scopes (`X-OAuth-Scopes`) and App installation
+  permissions map to capabilities; missing `workflow` / Workflows write is a typed Deny
+  (not “no write access”). Push failures are classified (`workflow_scope`,
+  `signed_commits`, `forbidden`, …). `saw auth status` / upgraded `saw doctor` show the
+  matrix. Official public Saw App remains deferred ([#1277](https://github.com/Ndevu12/stayAwakeBot/issues/1277)).
+- **`saw auth app register` — Phase 1 self-owned Saw GitHub App** — GitHub App-manifest
+  flow on a loopback server; credentials stored at `~/.config/stayawake/github-app.json`
+  (0600). Manifest grants Contents + Pull requests + **Workflows** + Issues write. Prefer
+  this (or `gh auth refresh -s repo,workflow`) for guard/workflow PRs.
 - **`saw` closes the #1207 residual that #1206 deliberately left open** — split-token /
   indirect / light-alias exec sinks. Filed ~5 min after #1206; later #1266/#1208 closed
   *other* residuals (decode→exec, non-literal import) and do **not** cover these. Bounded

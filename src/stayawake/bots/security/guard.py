@@ -631,10 +631,23 @@ def _setup_pr_body(plan: SetupPlan, base: str) -> str:
 def _setup_pr(repo: Path, plan: SetupPlan, base: str, token: str | None, spin: bool) -> SetupResult:
     """Build the change in a throwaway worktree off the default branch and open/update one rolling
     PR via the shared `proposal` ladder — never a push to the default branch."""
+    from stayawake.core.identity import Intent, require
+
     slug = gitutil.origin_slug(repo)
     if not slug:
         return SetupResult(plan=plan, error="no GitHub origin — cannot open a PR (drop --pr to write "
                                             "the file locally, or add a remote)")
+    # AuthZ BEFORE worktree/commit — missing `workflow` must not look like 'no write access' after
+    # expensive work. Uses resolve_session() so App / gh / env all go through one gate.
+    decision = require(Intent.OPEN_GUARD_PR, repo_slug=slug)
+    if not decision.allowed:
+        return SetupResult(plan=plan, slug=slug, error=decision.message)
+    if not token:
+        from stayawake.core.identity import resolve_session
+        token = resolve_session(repo_slug=slug).token
+    if not token:
+        return SetupResult(plan=plan, slug=slug, error=decision.message)
+
     baseref = f"origin/{base}" if gitutil.ref_exists(repo, f"origin/{base}") else base
     gitutil.fetch(repo, "origin", base)
     wt = Path(tempfile.mkdtemp(prefix="sab-guard-"))
@@ -789,9 +802,12 @@ def _render_setup_submit(result: SetupResult, *, color: bool) -> str:
     if res.kind == "fork-not-ready":
         return paint(f"⚠️  {slug}: forked to {res.fork_slug} but it wasn't ready in time — retry later",
                      warn, on=color)
-    # floor: no push access — the change is saved as a patch (issue floor not used for setup)
+    # floor: classified push failure + optional patch
+    from stayawake.core.identity import push_failure_message
+    from stayawake.core.identity.classify import PushFailure
+    why = push_failure_message(PushFailure(res.push_reason or "unknown", res.push_detail or ""))
     where = f" (saved a patch at {res.patch_path})" if res.patch_path else ""
-    return paint(f"⚠️  {slug}: no write access — could not open the guard PR{where}", warn, on=color) + sign
+    return paint(f"⚠️  {slug}: {why}{where}", warn, on=color) + sign
 
 
 # ── sweep: resolve targets (local repos / remote slugs) and check each — like saw scan/fix ────────
@@ -930,6 +946,11 @@ def setup_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
                                                           users=users, orgs=orgs, slugs=slugs)
         if not token:
             prog.line(auth.no_credential_hint("cloning and opening guard PRs") + "\n")
+            return 2
+        from stayawake.core.identity import Intent, require
+        decision = require(Intent.OPEN_GUARD_PR)
+        if not decision.allowed:
+            prog.line(decision.message)
             return 2
         if not resolved:
             prog.line(resolution.REMOTE_EMPTY_HINT)

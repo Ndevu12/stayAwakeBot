@@ -79,6 +79,9 @@ class TestFixLocal(unittest.TestCase):
     def test_pr_publishes_via_submit_fix_pr(self):
         d = _git_repo(INFECTED_FILES)
         with mock.patch.object(remediator.auth, "resolve_token", return_value=("t", "env")), \
+             mock.patch.object(remediator.github_api, "token_is_valid", return_value=True), \
+             mock.patch.object(remediator.github_api, "oauth_scopes", return_value=frozenset({"repo"})), \
+             mock.patch.object(remediator.github_api, "installation_permissions", return_value=None), \
              mock.patch.object(remediator.github_api, "get_authenticated_user", return_value={"login": "me"}), \
              mock.patch.object(remediator.pr_submit, "submit_fix_pr",
                                return_value="repo: opened PR #1 (url)") as m_pub, \
@@ -92,6 +95,9 @@ class TestFixLocal(unittest.TestCase):
         d = _git_repo(INFECTED_FILES)
         with mock.patch.object(remediator.auth, "resolve_token", return_value=("t", "env")), \
              mock.patch.object(remediator.github_api, "token_is_valid", return_value=False), \
+             mock.patch.object(remediator.github_api, "oauth_scopes", return_value=None), \
+             mock.patch.object(remediator.github_api, "installation_permissions", return_value=None), \
+             mock.patch.object(remediator.github_api, "get_authenticated_user", return_value=None), \
              mock.patch.object(remediator.pr_submit, "submit_fix_pr") as m_pub:
             rc = remediator.fix(None, pr=True, paths=[str(d)], no_stream=True)
         self.assertEqual(rc, 0)
@@ -218,6 +224,9 @@ class TestDiscard(unittest.TestCase):
         d = _git_repo(INFECTED_FILES)
         with mock.patch.object(remediator.auth, "resolve_token", return_value=("t", "env")), \
              mock.patch.object(remediator.github_api, "token_is_valid", return_value=False), \
+             mock.patch.object(remediator.github_api, "oauth_scopes", return_value=None), \
+             mock.patch.object(remediator.github_api, "installation_permissions", return_value=None), \
+             mock.patch.object(remediator.github_api, "get_authenticated_user", return_value=None), \
              mock.patch.object(remediator.pr_submit, "discard_pr") as m:
             rc = remediator.discard(None, pr=True, paths=[str(d)], no_stream=True)
         self.assertEqual(rc, 0)
