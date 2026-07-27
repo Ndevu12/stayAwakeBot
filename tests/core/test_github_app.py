@@ -144,7 +144,7 @@ class TestMissingExtra(unittest.TestCase):
         with mock.patch.object(builtins, "__import__", side_effect=no_jwt):
             with self.assertRaises(github_app.GithubAppError) as ctx:
                 github_app._build_jwt("123", "KEY")
-        self.assertIn("stayawakebot[app]", str(ctx.exception))
+        self.assertIn(github_app.app_crypto_install_hint(), str(ctx.exception))
 
 
 class TestResolveTokenIntegration(unittest.TestCase):
