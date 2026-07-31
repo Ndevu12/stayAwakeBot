@@ -6,11 +6,7 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
-### Fixed
-- **AuthZ repo-access Deny no longer looks like missing write scopes** — when the credential
-  is live globally but cannot reach a specific `owner/repo` (e.g. StayAwakeBot App install
-  does not include that repository), `require()` explains installation/remote access and
-  points at App Configure — it does not list `contents_write` / `workflows_write` as missing.
+## [0.1.17] - 2026-07-31
 
 ### Added
 - **`core/identity` — AuthN/AuthZ capability gate (Phase 0)** — privileged verbs
@@ -53,6 +49,76 @@ All notable changes to this project are documented here. The format is based on
   `_has_exec_sink` — does not re-implement decode→exec. FP gates kept from the hunt:
   comment/'/-string scrub, `(?<![.\w$])` (kills `System.import`), relative-template carve-out,
   bare `execSync(cmd)` / literal execs / lodash `_.runInContext()` stay clean.
+
+### Fixed
+- **AuthZ repo-access Deny no longer looks like missing write scopes** — when the credential
+  is live globally but cannot reach a specific `owner/repo` (e.g. StayAwakeBot App install
+  does not include that repository), `require()` explains installation/remote access and
+  points at App Configure — it does not list `contents_write` / `workflows_write` as missing.
+
+### Security
+- **Bumped the pinned self-scan engine to current main (`sentinel-ref` → merge of #1282), in both
+  the worm-guard gate and the release self-scan.** Catches the gate up to the reviewed engine work
+  since the last pin (#1272): the obfuscation detection residual-closers left after #1206/#1266
+  (#1274/#1275), plus the rest of current main (the AuthZ capability gate and self-owned Saw App,
+  #1278–#1282). Both pin copies are bumped together, as the sync gate (`check_pins_synced.sh`, #1210)
+  requires.
+
+## [0.1.16] - 2026-07-23
+
+### Changed
+- **`saw scan` no longer floods the terminal when the result is lengthy — local or org/account —
+  and highlights the report path whenever one is written** (#1203). A scan whose findings/advisories
+  ran long used to dump the whole report to the terminal and get trimmed by scrollback, so the full
+  result was unreadable. The existing large-fleet behavior already shows a **dashboard** (table only)
+  on-screen and moves per-finding detail to a written file when there are many repos; that **same
+  board** now also fires when the **aggregate findings+advisories** exceed `MANY_FINDINGS` — a cheap
+  count off data the report already carries (no extra render), for **every** scan (local, org, or
+  account), even at few repos. When it spills, the terminal keeps the readable dashboard, the full
+  detail lands in a written report (a temp dir when `-d` wasn't given), and the **report path is
+  highlighted** in a ruled stderr block — **coloured and clickable** (`file://` hyperlinks that open
+  the `.md` / `.json` / folder in a supporting terminal) — in **all** cases a report is written
+  (local `-d` or any spill). `--json` and piped consumers are unaffected.
+- **A concealment-seam config payload with no clean git ancestor is now stripped into a review-required
+  PR commit, not left as a hand-hunt checklist** (#1209). `saw fix` excises a concealment-hidden loader
+  as a *trusted* auto-fix only when the strip byte-for-byte matches a clean committed ancestor — that
+  match is what proves nothing ELSE was injected into the kept code. The cases with no such ancestor —
+  **no VCS, an untracked file, a born-infected first commit, or a legit edit made since infection** —
+  used to defer to a "go find the payload yourself" note. They now get a **`Suggested` disposition**:
+  `saw` runs the same five self-contained excision gates (an unambiguous ≥16-char concealment boundary,
+  a payload-free result, a result that isn't itself packed, **no detectable exec sink in the kept
+  code**, and only-removal) and, if they hold, **applies the strip on the `security/auto-clean` branch
+  as a SEPARATE, clearly-labeled commit** — surfaced in a **"Computed strip applied — review before
+  merging"** PR section and the CLI stream, kept distinct from the git-corroborated commit. It is
+  **never auto-merged and never presented as a trusted-clean fix**: the one thing the whole-file git
+  match adds over those five gates is catching a *scanner-invisible* injection in the kept code, and
+  closing that residual is the operator's PR review (the original is quarantined, the diff is in the
+  commit for one-glance review, and the run stays **needs-review / gate red** until a human merges).
+  Cases with no clean seam — or a detectable exec sink surviving in the kept code — still defer to a
+  full manual investigation, correctly. Auto-*merging* a file with no trusted baseline would mean
+  declaring a "clean" nothing corroborates; `saw` never does that — it does all the mechanical work up
+  to the human's one trust decision, in a single rolling PR (trusted + review-required, two commits).
+
+### Security
+- **Bumped the pinned self-scan engine to current main (`sentinel-ref` → merge of #1268), in both
+  the worm-guard gate and the release self-scan.** Catches the gate up to the `pin-bump-deferred`
+  engine work that landed since the last pin (#1255): cross-platform cached-credential detection
+  (#1259/#1261), dependency fix-advice (#1262), non-regular-file scan hardening (#1263), `saw scan
+  --deep` installed-dependency content-scanning (#1222/#1264), the SymJacking write-through hardening
+  above (#1218/#1265), and base64 decode-then-exec dropper detection with its false-positive fix
+  (#1212/#1266/#1267/#1268) — so the gate scans with the current reviewed engine rather than a stale
+  one. Both pin copies are bumped together, as the sync gate (#1210, `check_pins_synced.sh`) requires.
+  Resolves the `scanner-pin-drift` alarm (#1250).
+- **Bumped the pinned self-scan engine to current main (`sentinel-ref` → merge of #1272), in both
+  the worm-guard gate and the release self-scan.** Catches the gate up to the `pin-bump-deferred`
+  engine work that landed since the last pin (#1268): the computed-strip review-required fix path for
+  config payloads with no git ancestor (#1209/#1271), and the lengthy-report spill / clickable-path
+  dashboard (#1203/#1272) — so the gate scans with the current reviewed engine rather than a stale
+  one. Both pin copies are bumped together, as the sync gate (#1210, `check_pins_synced.sh`) requires.
+
+## [0.1.15] - 2026-07-21
+
+### Added
 - **`saw scan --deep` content-scans installed dependency CODE for loader payloads** (#1222). A normal
   scan excludes `node_modules` (minified vendored code makes the density heuristic all false positives)
   and only checks each installed package's **entry points** — so a confirmed loader fingerprint buried
@@ -92,37 +158,6 @@ All notable changes to this project are documented here. The format is based on
   machines; both are unattended-execution vectors the worm can use.
 
 ### Changed
-- **`saw scan` no longer floods the terminal when the result is lengthy — local or org/account —
-  and highlights the report path whenever one is written** (#1203). A scan whose findings/advisories
-  ran long used to dump the whole report to the terminal and get trimmed by scrollback, so the full
-  result was unreadable. The existing large-fleet behavior already shows a **dashboard** (table only)
-  on-screen and moves per-finding detail to a written file when there are many repos; that **same
-  board** now also fires when the **aggregate findings+advisories** exceed `MANY_FINDINGS` — a cheap
-  count off data the report already carries (no extra render), for **every** scan (local, org, or
-  account), even at few repos. When it spills, the terminal keeps the readable dashboard, the full
-  detail lands in a written report (a temp dir when `-d` wasn't given), and the **report path is
-  highlighted** in a ruled stderr block — **coloured and clickable** (`file://` hyperlinks that open
-  the `.md` / `.json` / folder in a supporting terminal) — in **all** cases a report is written
-  (local `-d` or any spill). `--json` and piped consumers are unaffected.
-- **A concealment-seam config payload with no clean git ancestor is now stripped into a review-required
-  PR commit, not left as a hand-hunt checklist** (#1209). `saw fix` excises a concealment-hidden loader
-  as a *trusted* auto-fix only when the strip byte-for-byte matches a clean committed ancestor — that
-  match is what proves nothing ELSE was injected into the kept code. The cases with no such ancestor —
-  **no VCS, an untracked file, a born-infected first commit, or a legit edit made since infection** —
-  used to defer to a "go find the payload yourself" note. They now get a **`Suggested` disposition**:
-  `saw` runs the same five self-contained excision gates (an unambiguous ≥16-char concealment boundary,
-  a payload-free result, a result that isn't itself packed, **no detectable exec sink in the kept
-  code**, and only-removal) and, if they hold, **applies the strip on the `security/auto-clean` branch
-  as a SEPARATE, clearly-labeled commit** — surfaced in a **"Computed strip applied — review before
-  merging"** PR section and the CLI stream, kept distinct from the git-corroborated commit. It is
-  **never auto-merged and never presented as a trusted-clean fix**: the one thing the whole-file git
-  match adds over those five gates is catching a *scanner-invisible* injection in the kept code, and
-  closing that residual is the operator's PR review (the original is quarantined, the diff is in the
-  commit for one-glance review, and the run stays **needs-review / gate red** until a human merges).
-  Cases with no clean seam — or a detectable exec sink surviving in the kept code — still defer to a
-  full manual investigation, correctly. Auto-*merging* a file with no trusted baseline would mean
-  declaring a "clean" nothing corroborates; `saw` never does that — it does all the mechanical work up
-  to the human's one trust decision, in a single rolling PR (trusted + review-required, two commits).
 - **`saw audit`'s cached-credential finding is reframed around the threat model** (#1237). A GitHub
   token in the *encrypted* login Keychain is now an **`info` review item, not a `warning`** — the
   Keychain is the recommended store, so a cached token there is normal, not a misconfiguration (a
@@ -189,21 +224,6 @@ All notable changes to this project are documented here. The format is based on
   symlinked leaf and any path that resolves outside its intended root, fails closed on a symlink loop —
   and applied at every attacker-influenced write/delete. Also fixed an `apply()` quarantine delete that
   called `rmtree` on a symlinked directory (a crash) instead of unlinking the planted link.
-- **Bumped the pinned self-scan engine to current main (`sentinel-ref` → merge of #1268), in both
-  the worm-guard gate and the release self-scan.** Catches the gate up to the `pin-bump-deferred`
-  engine work that landed since the last pin (#1255): cross-platform cached-credential detection
-  (#1259/#1261), dependency fix-advice (#1262), non-regular-file scan hardening (#1263), `saw scan
-  --deep` installed-dependency content-scanning (#1222/#1264), the SymJacking write-through hardening
-  above (#1218/#1265), and base64 decode-then-exec dropper detection with its false-positive fix
-  (#1212/#1266/#1267/#1268) — so the gate scans with the current reviewed engine rather than a stale
-  one. Both pin copies are bumped together, as the sync gate (#1210, `check_pins_synced.sh`) requires.
-  Resolves the `scanner-pin-drift` alarm (#1250).
-- **Bumped the pinned self-scan engine to current main (`sentinel-ref` → merge of #1272), in both
-  the worm-guard gate and the release self-scan.** Catches the gate up to the `pin-bump-deferred`
-  engine work that landed since the last pin (#1268): the computed-strip review-required fix path for
-  config payloads with no git ancestor (#1209/#1271), and the lengthy-report spill / clickable-path
-  dashboard (#1203/#1272) — so the gate scans with the current reviewed engine rather than a stale
-  one. Both pin copies are bumped together, as the sync gate (#1210, `check_pins_synced.sh`) requires.
 
 ## [0.1.14] - 2026-07-20
 
@@ -1240,7 +1260,10 @@ release-publish hardening._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel
 (supply-chain worm detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.14...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.17...HEAD
+[0.1.17]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.16...v0.1.17
+[0.1.16]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.15...v0.1.16
+[0.1.15]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.14...v0.1.15
 [0.1.14]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.13...v0.1.14
 [0.1.13]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.12...v0.1.13
 [0.1.12]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.11...v0.1.12
