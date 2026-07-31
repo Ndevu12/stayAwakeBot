@@ -225,3 +225,6 @@ src/*.egg-info/
 
 # Runtime output — the sentinel keeps status in ONE GitHub issue, never files (#1149).
 reports/
+
+# Local design / working plans (not project docs — keep private to the working tree)
+docs/plan/
