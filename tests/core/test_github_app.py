@@ -167,6 +167,70 @@ class TestResolveTokenIntegration(unittest.TestCase):
              mock.patch.object(auth, "gh_token", return_value=None):
             self.assertEqual(auth.resolve_token(), (None, None))
 
+    def test_non_apperror_from_app_never_crashes_resolution(self):
+        # #1287: installation_token raising a NON-GithubAppError (e.g. the json.loads(None) TypeError
+        # that shipped in 0.1.17) must NOT crash resolve_token — it degrades and falls through.
+        with mock.patch.dict(os.environ, {}, clear=True), \
+             mock.patch.object(github_app, "installation_token",
+                               side_effect=TypeError("json.loads(None) style crash")), \
+             mock.patch.object(auth, "gh_token", return_value="ghtok"):
+            self.assertEqual(auth.resolve_token(), ("ghtok", "gh"))
+
+
+class TestAppCryptoRobustness(unittest.TestCase):
+    """#1287: the App-crypto-absent path must NEVER crash the CLI, and readiness must be honest."""
+
+    def test_editable_probe_survives_none_read(self):
+        # THE crash root: importlib.metadata `read_text` returns None (a normal, non-editable install
+        # has no direct_url.json); `json.loads(None)` used to raise an uncaught TypeError that crashed
+        # `saw auth` for every default-install user (no PyJWT).
+        class _NoDirectUrl:
+            def read_text(self, name):
+                return None
+        self.assertFalse(github_app._distribution_is_editable(_NoDirectUrl()))
+
+    def test_install_hint_never_raises(self):
+        # The hint runs inside error/status paths — any probe failure must degrade, never crash.
+        with mock.patch.object(github_app, "distribution", side_effect=RuntimeError("boom")):
+            self.assertEqual(github_app.app_crypto_install_hint(), github_app.APP_EXTRA_HINT)
+
+    def test_build_jwt_without_crypto_backend_points_at_extra(self):
+        # PyJWT installed WITHOUT `cryptography` → jwt.encode(RS256) raises NotImplementedError; must
+        # surface the friendly "install the extra" GithubAppError, not an uncaught crash at mint.
+        import types
+        real_import = builtins.__import__
+        fake_jwt = types.SimpleNamespace(
+            encode=lambda *a, **k: (_ for _ in ()).throw(NotImplementedError("Algorithm not supported")))
+
+        def imp(name, *a, **k):
+            return fake_jwt if name == "jwt" else real_import(name, *a, **k)
+
+        with mock.patch.object(builtins, "__import__", side_effect=imp):
+            with self.assertRaises(github_app.GithubAppError) as ctx:
+                github_app._build_jwt("123", "KEY")
+        self.assertIn("crypto", str(ctx.exception).lower())
+
+    def test_jwt_available_false_when_pyjwt_absent(self):
+        real_import = builtins.__import__
+
+        def no_jwt(name, *a, **k):
+            if name == "jwt" or name.startswith("jwt."):
+                raise ImportError("no jwt")
+            return real_import(name, *a, **k)
+
+        with mock.patch.object(builtins, "__import__", side_effect=no_jwt):
+            self.assertFalse(github_app.jwt_available())
+
+    def test_jwt_available_tracks_has_crypto(self):
+        try:
+            import jwt.algorithms as _alg
+        except ImportError:
+            self.skipTest("PyJWT not installed")
+        with mock.patch.object(_alg, "has_crypto", False):
+            self.assertFalse(github_app.jwt_available())   # bare pyjwt, no RS256 → not ready
+        with mock.patch.object(_alg, "has_crypto", True):
+            self.assertTrue(github_app.jwt_available())
+
 
 class TestInstallationRepos(unittest.TestCase):
     def test_list_installation_repos_paginates_and_skips_archived(self):

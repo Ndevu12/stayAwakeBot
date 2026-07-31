@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 
 from stayawake.utils import env
 
@@ -62,14 +63,19 @@ def gh_token(hostname: str = "github.com") -> str | None:
 
 
 def _app_token() -> str | None:
-    """A GitHub App installation token, or None if no App is configured. Never raises:
-    a configured-but-broken App is reported and treated as 'no token' so resolution can
-    fall through (the caller's hint then guides)."""
-    from stayawake.lib import github_app  # lazy: keeps PyJWT fully optional
+    """A GitHub App installation token, or None if no App is configured. NEVER raises:
+    a configured-but-broken App (missing PyJWT[crypto] extra, bad key, unreachable API, or any
+    other failure) is reported to stderr and treated as 'no token' so resolution falls through to
+    the gh session — exactly like `gh_token`. Diagnostics go to STDERR so they never pollute a
+    command's stdout (e.g. a piped scan report). (#1287)"""
+    from stayawake.lib import github_app  # lazy: keeps PyJWT fully optional (never a core dep)
     try:
         return github_app.installation_token()
     except github_app.GithubAppError as e:
-        print(f"GitHub App auth configured but unavailable: {e}")
+        print(f"GitHub App auth configured but unavailable: {e}", file=sys.stderr)
+        return None
+    except Exception as e:  # noqa: BLE001 — a broken App must NEVER crash credential resolution
+        print(f"GitHub App auth error (ignored, falling back): {e}", file=sys.stderr)
         return None
 
 

@@ -57,6 +57,17 @@ All notable changes to this project are documented here. The format is based on
   bare `execSync(cmd)` / literal execs / lodash `_.runInContext()` stay clean.
 
 ### Fixed
+- **`saw auth` no longer crashes on a default install without the optional App extra.** With a
+  GitHub App configured but PyJWT absent (the default — `[app]` is an optional extra), `saw auth`
+  and `saw auth status` crashed with an uncaught `TypeError`: an install-hint lookup did
+  `json.loads(None)` when `direct_url.json` was absent, and neither `_build_jwt` nor `_app_token`
+  caught it. Now the whole App-crypto-absent path degrades gracefully — a configured-but-unusable
+  App is reported to **stderr** and treated as "no App token" so resolution falls through to the
+  `gh` session (exactly like every other credential probe), never crashing the CLI. Readiness is
+  also honest: `jwt_available()` gates on PyJWT's actual crypto backend (`has_crypto`), so
+  `saw auth status` / `saw doctor` no longer claim "ready to mint" when RS256 can't run, and
+  `_build_jwt` surfaces a friendly "install the extra" message on a missing backend instead of an
+  uncaught `NotImplementedError`. PyJWT/cryptography stays an **optional** dependency, never core.
 - **AuthZ repo-access Deny no longer looks like missing write scopes** — when the credential
   is live globally but cannot reach a specific `owner/repo` (e.g. StayAwakeBot App install
   does not include that repository), `require()` explains installation/remote access and
