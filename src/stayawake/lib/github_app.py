@@ -163,12 +163,17 @@ def is_configured() -> bool:
 
 
 def jwt_available() -> bool:
-    """True when the optional PyJWT[crypto] extra can be imported."""
+    """True only when App JWT signing (RS256) can ACTUALLY run — PyJWT *and* its crypto backend.
+
+    PyJWT can be installed without `cryptography` (a bare `pip install pyjwt`, not the `[crypto]`
+    extra), and there `jwt.encode(..., algorithm="RS256")` raises `NotImplementedError`. Gating on
+    `has_crypto` keeps readiness HONEST — `saw auth status` / `saw doctor` never claim "ready to mint"
+    and then crash at signing time. Import failures (PyJWT absent entirely) also return False."""
     try:
-        import jwt  # noqa: F401
-        return True
+        import jwt.algorithms as _alg
     except ImportError:
         return False
+    return bool(getattr(_alg, "has_crypto", False))
 
 
 APP_EXTRA_HINT = 'pip install "stayawakebot[app]"'
@@ -192,9 +197,14 @@ def _distribution_is_editable(dist) -> bool:
         raw = dist.read_text("direct_url.json")
     except (OSError, FileNotFoundError, KeyError):
         return False
+    if not raw:
+        # `importlib.metadata` backends return None (not raise) when the file is absent — a normal
+        # (non-editable) install has no direct_url.json. `json.loads(None)` would then raise an
+        # UNCAUGHT TypeError and crash the whole CLI from a mere install-hint lookup (#1287).
+        return False
     try:
         data = json.loads(raw)
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, TypeError, ValueError):
         return False
     dir_info = data.get("dir_info") if isinstance(data, dict) else None
     return isinstance(dir_info, dict) and bool(dir_info.get("editable"))
@@ -221,19 +231,25 @@ def _running_under_pipx() -> bool:
 
 
 def app_crypto_install_hint() -> str:
-    """Context-aware one-liner to install the optional App crypto extra (PyJWT)."""
-    try:
-        dist = distribution("stayawakebot")
-    except PackageNotFoundError:
-        if _package_project_root() is not None:
-            return 'pip install -e ".[app]"'
-        return APP_EXTRA_HINT
+    """Context-aware one-liner to install the optional App crypto extra (PyJWT).
 
-    if _distribution_is_editable(dist) or _package_project_root() is not None:
-        return 'pip install -e ".[app]"'
-    if _running_under_pipx():
-        return _PIPX_APP_CRYPTO
-    return APP_EXTRA_HINT
+    Runs inside error/status paths, so it must NEVER raise — any probe failure degrades to the
+    generic `pip install "stayawakebot[app]"` rather than crashing the caller (#1287)."""
+    try:
+        try:
+            dist = distribution("stayawakebot")
+        except PackageNotFoundError:
+            if _package_project_root() is not None:
+                return 'pip install -e ".[app]"'
+            return APP_EXTRA_HINT
+
+        if _distribution_is_editable(dist) or _package_project_root() is not None:
+            return 'pip install -e ".[app]"'
+        if _running_under_pipx():
+            return _PIPX_APP_CRYPTO
+        return APP_EXTRA_HINT
+    except Exception:  # noqa: BLE001 — a best-effort UX hint must never crash the path that needs it
+        return APP_EXTRA_HINT
 
 
 def installation_actor_label() -> str | None:
@@ -255,7 +271,10 @@ def cached_permissions_for_token(token: str) -> dict[str, str] | None:
 
 
 def _build_jwt(app_id: str, private_key: str) -> str:
-    """Sign the App JWT (RS256). Requires the optional PyJWT[crypto] extra."""
+    """Sign the App JWT (RS256). Requires the optional PyJWT[crypto] extra.
+
+    Raises a friendly `GithubAppError` (never a raw crash) when the extra is missing OR present
+    without its crypto backend — both are the same "install the extra" story to the operator (#1287)."""
     try:
         import jwt  # PyJWT — only needed for App auth (optional [app] extra)
     except ImportError as e:
@@ -264,7 +283,14 @@ def _build_jwt(app_id: str, private_key: str) -> str:
         ) from e
     now = int(time.time())
     payload = {"iat": now - _SKEW, "exp": now + _JWT_TTL, "iss": app_id}
-    return jwt.encode(payload, private_key, algorithm="RS256")
+    try:
+        return jwt.encode(payload, private_key, algorithm="RS256")
+    except NotImplementedError as e:
+        # PyJWT installed WITHOUT `cryptography` → RS256 unavailable. Same operator remedy.
+        raise GithubAppError(
+            f"GitHub App auth needs PyJWT's crypto backend — install the extra: "
+            f"{app_crypto_install_hint()}."
+        ) from e
 
 
 def _expiry_epoch(expires_at: str | None) -> float:
