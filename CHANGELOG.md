@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+- **The CI scanner-pin tooling is now Python.** The four bash scripts (`_pin_lib.sh`,
+  `check_pin_freshness.sh`, `check_pins_synced.sh`, `check_pin_drift.sh`) are consolidated into one
+  `.github/scripts/pin_tools.py` with `freshness` / `synced` / `drift` subcommands — same gates,
+  same behavior, with the decision logic importable and unit-tested directly (#1284).
+
 ## [0.1.17] - 2026-07-31
 
 ### Added
