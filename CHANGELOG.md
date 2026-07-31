@@ -64,7 +64,7 @@ All notable changes to this project are documented here. The format is based on
   #1278–#1282). Both pin copies are bumped together, as the sync gate (`check_pins_synced.sh`, #1210)
   requires.
 - **The release now fails if the CHANGELOG wasn't cut for the tagged version.** A new
-  `check_changelog_release.sh` gate in `release.yml` blocks the build (before any publish) when
+  `check_changelog_release.py` gate in `release.yml` blocks the build (before any publish) when
   `## [X.Y.Z]` is missing for the `vX.Y.Z` tag — the guardrail that stops the `[Unreleased]` drift
   which shipped v0.1.15/v0.1.16 unlisted. Unit-tested in `tests/test_changelog_release.py`.
 

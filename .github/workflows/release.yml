@@ -39,7 +39,7 @@ jobs:
       # pushes only — a workflow_dispatch dry-run has no version tag to check.
       - name: Verify CHANGELOG was cut for this release
         if: startsWith(github.ref, 'refs/tags/v')
-        run: bash .github/scripts/check_changelog_release.sh "${GITHUB_REF_NAME}"
+        run: python3 .github/scripts/check_changelog_release.py "${GITHUB_REF_NAME}"
 
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1   # v6.3.0
