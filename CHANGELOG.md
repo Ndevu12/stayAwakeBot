@@ -74,6 +74,13 @@ All notable changes to this project are documented here. The format is based on
   points at App Configure — it does not list `contents_write` / `workflows_write` as missing.
 
 ### Security
+- **The GitHub App private key is never written world-readable.** `saw auth app register` (and the
+  one-time legacy-config migration) wrote the App config — which contains the App **private key** —
+  with `write_text(...)` then `chmod(0600)`, leaving the secret group/world-readable under the
+  process umask (typically 0644) for the window between the write and the chmod, in a 0755 dir. It is
+  now written with **no readable window**: to a same-directory temp file that is `0600` from birth,
+  then atomically `os.replace`d into place, under a `0700` config dir. This also makes the write
+  symlink-safe (a pre-planted symlink at the config path is replaced, never written through).
 - **Bumped the pinned self-scan engine to current main (`sentinel-ref` → merge of #1282), in both
   the worm-guard gate and the release self-scan.** Catches the gate up to the reviewed engine work
   since the last pin (#1272): the obfuscation detection residual-closers left after #1206/#1266

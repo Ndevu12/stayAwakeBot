@@ -9,6 +9,7 @@ from __future__ import annotations
 import builtins
 import json
 import os
+import stat
 import unittest
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -128,8 +129,32 @@ class TestConfigPath(unittest.TestCase):
             with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": td}, clear=False):
                 cfg = github_app.load_config()
             self.assertEqual(cfg["app_id"], "1")
-            self.assertTrue((xdg / "saw" / "github-app.json").is_file())
+            dest = xdg / "saw" / "github-app.json"
+            self.assertTrue(dest.is_file())
             self.assertFalse(legacy.is_file())
+            # #1288: the migrated PRIVATE-KEY file must be 0600 (no group/world bits).
+            self.assertEqual(stat.S_IMODE(dest.stat().st_mode) & (stat.S_IRWXG | stat.S_IRWXO), 0)
+
+    def test_save_config_writes_0600_in_0700_dir_no_readable_window(self):
+        # #1288: the file holds the App PRIVATE KEY; it must be written 0600 with NO group/world
+        # bits (write-then-chmod left a world-readable window) under a 0700 dir. Verified across a
+        # fresh write AND overwriting an existing (possibly looser-mode) file.
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            xdg = Path(td)
+            with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": td}, clear=False):
+                p = github_app.save_config("1", "-----BEGIN KEY-----\nSECRET\n-----END KEY-----",
+                                           installation_id="9", slug="saw")
+                self.assertEqual(stat.S_IMODE(p.stat().st_mode) & (stat.S_IRWXG | stat.S_IRWXO), 0,
+                                 "private-key file must have no group/world bits")
+                self.assertEqual(stat.S_IMODE(p.parent.stat().st_mode) & (stat.S_IRWXG | stat.S_IRWXO),
+                                 0, "config dir must not be world-traversable")
+                # Loosen it, then re-save: the overwrite must restore 0600 (atomic replace).
+                os.chmod(p, 0o644)
+                github_app.save_config("2", "-----BEGIN KEY-----\nS2\n-----END KEY-----")
+                self.assertEqual(stat.S_IMODE(p.stat().st_mode) & (stat.S_IRWXG | stat.S_IRWXO), 0)
+                # No leftover temp files in the config dir.
+                self.assertFalse([f for f in p.parent.iterdir() if f.name.startswith(".github-app-")])
 
 
 class TestMissingExtra(unittest.TestCase):
