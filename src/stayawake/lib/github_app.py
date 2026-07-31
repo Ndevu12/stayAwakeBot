@@ -26,6 +26,7 @@ import json
 import os
 import stat
 import sys
+import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
@@ -78,6 +79,32 @@ def _read_config_file(path: Path) -> dict | None:
     return data
 
 
+def _write_private_config(path: Path, data: bytes) -> None:
+    """Write App credentials — which include the App PRIVATE KEY — with NO world-readable window
+    (#1288). `write_text(...)` then `chmod(0600)` creates the file under the process umask (often
+    0644) and leaves the secret group/world-readable until the chmod lands. Instead: ensure the
+    parent dir is 0700, write to a same-dir temp that is 0600 FROM BIRTH (`mkstemp`), then atomically
+    `os.replace` it into place — no window, torn write, or leftover, and an existing 0644 file is
+    replaced by the 0600 temp inode. Same-dir temp keeps the rename atomic (one filesystem)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        path.parent.chmod(stat.S_IRWXU)                     # 0700 — dir must not be world-traversable
+    except OSError:
+        pass
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".github-app-", suffix=".tmp")
+    try:
+        os.chmod(tmp, stat.S_IRUSR | stat.S_IWUSR)          # 0600 (mkstemp already restricts; explicit)
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+        os.replace(tmp, path)                               # atomic; dest inherits the 0600 temp
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def _migrate_legacy_config() -> Path | None:
     """Move `~/.config/stayawake/github-app.json` → `~/.config/saw/` once, if needed."""
     dest = config_path()
@@ -87,12 +114,7 @@ def _migrate_legacy_config() -> Path | None:
     if not src.is_file():
         return None
     try:
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(src.read_bytes())
-        try:
-            dest.chmod(stat.S_IRUSR | stat.S_IWUSR)
-        except OSError:
-            pass
+        _write_private_config(dest, src.read_bytes())       # 0600 from birth — no readable window
         try:
             src.unlink()
         except OSError:
@@ -110,9 +132,9 @@ def load_config() -> dict | None:
 
 def save_config(app_id: str, private_key_pem: str, *, installation_id: str | None = None,
                 slug: str | None = None, name: str | None = None) -> Path:
-    """Persist App credentials from the manifest flow. Mode 0600 on the file."""
+    """Persist App credentials from the manifest flow. The file holds the App PRIVATE KEY, so it is
+    written 0600 with no world-readable window and under a 0700 dir (`_write_private_config`, #1288)."""
     path = config_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "app_id": str(app_id),
         "private_key_pem": private_key_pem,
@@ -120,11 +142,7 @@ def save_config(app_id: str, private_key_pem: str, *, installation_id: str | Non
         "slug": slug,
         "name": name,
     }
-    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    try:
-        path.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 0600
-    except OSError:
-        pass
+    _write_private_config(path, (json.dumps(payload, indent=2) + "\n").encode("utf-8"))
     # Drop a leftover legacy file so the two never diverge.
     legacy = legacy_config_path()
     if legacy.is_file() and legacy.resolve() != path.resolve():
