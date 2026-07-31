@@ -5,7 +5,7 @@ name: Scanner pin freshness
 # worm-guard gate's pinned scanner (sentinel-ref in worm-guard.yml), fail — so pin drift is caught
 # at PR time, on the exact event that breaks the invariant, instead of surfacing up to a week later
 # as a human-closeable issue. Deliberate deferral (e.g. one bump at the end of an epic) is allowed
-# via the 'pin-bump-deferred' label. The decision lives in .github/scripts/check_pin_freshness.sh
+# via the 'pin-bump-deferred' label. The decision lives in .github/scripts/pin_tools.py (freshness)
 # (unit-tested by tests/test_pin_tooling.py); this workflow only feeds it the PR diff. (#1172)
 
 on:
@@ -35,10 +35,10 @@ jobs:
           full="$RUNNER_TEMP/pin.diff"
           gh pr diff "$PR" --name-only > "$changed"
           gh pr diff "$PR"             > "$full"
-          bash .github/scripts/check_pin_freshness.sh "$changed" "$full"
+          python3 .github/scripts/pin_tools.py freshness "$changed" "$full"
       # Freshness only requires *a* bump on engine changes — it does NOT check that the two pin
       # copies (worm-guard gate + release self-scan) AGREE. This closes that gap: both must pin the
       # same SHA, so a bump can't land in one file and leave the other stranded (as #1138 vs #1193
       # did). Repo-state check on the checked-out head — no PR diff needed.
       - name: Enforce both scanner pins stay in sync
-        run: bash .github/scripts/check_pins_synced.sh
+        run: python3 .github/scripts/pin_tools.py synced

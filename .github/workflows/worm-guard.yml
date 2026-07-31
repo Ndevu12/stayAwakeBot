@@ -35,7 +35,7 @@ jobs:
           # main (the AuthZ capability gate + self-owned Saw App, #1278–#1282). requires-python >=3.11
           # satisfies the 3.13 runner. Bump this deliberately after reviewed engine changes — the
           # in-band pin-freshness gate (#1172) fails an engine PR that doesn't bump this, both pin
-          # copies must AGREE (check_pins_synced.sh, #1210), and scanner-pin-drift opens an issue if
+          # copies must AGREE (pin_tools.py synced, #1210), and scanner-pin-drift opens an issue if
           # it falls behind.
           sentinel-ref: 8314b7153d7a588e0bcb25ba6d915894808acdde   # merge of #1282 — catches up obfuscation residual-closers (#1274/#1275) + AuthZ gate / Saw App (#1278–#1282)
           fail-on-findings: 'true'
