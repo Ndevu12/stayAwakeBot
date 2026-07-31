@@ -10,8 +10,8 @@ name: Scanner pin drift
 #
 # It compares ONLY the engine subtree (src/stayawake/bots/security/**), so the constant
 # chore(sentinel) report commits never raise a false alarm — drift fires only when the
-# scanner itself has actually moved. The logic lives in .github/scripts/check_pin_drift.sh,
-# which shares its engine-subtree + pin definitions with the freshness check via _pin_lib.sh.
+# scanner itself has actually moved. The logic lives in .github/scripts/pin_tools.py (drift),
+# which shares its engine-subtree + pin definitions with the freshness/synced checks in that module.
 
 on:
   schedule:
@@ -34,4 +34,4 @@ jobs:
       - name: Detect engine drift from the worm-guard pin
         env:
           GH_TOKEN: ${{ github.token }}
-        run: bash .github/scripts/check_pin_drift.sh
+        run: python3 .github/scripts/pin_tools.py drift
