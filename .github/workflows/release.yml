@@ -34,6 +34,13 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Fail the release BEFORE building/publishing if the tagged version was never cut into the
+      # CHANGELOG. Stops the [Unreleased] drift that shipped v0.1.15/v0.1.16 unlisted (#1283). Tag
+      # pushes only — a workflow_dispatch dry-run has no version tag to check.
+      - name: Verify CHANGELOG was cut for this release
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: python3 .github/scripts/check_changelog_release.py "${GITHUB_REF_NAME}"
+
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1   # v6.3.0
         with:
@@ -108,7 +115,7 @@ jobs:
           # Pin the scanner to a known-good SHA, NEVER the commit under test: a compromised
           # release commit must not be able to certify itself. Bump after an intentional
           # scanner/signature update (kept in sync with worm-guard.yml).
-          sentinel-ref: 8d6dd3c5e2bb2cb954267939ce69c749c35a7240   # merge of #1272 — kept identical to worm-guard.yml (enforced by check_pins_synced.sh, #1210)
+          sentinel-ref: 8314b7153d7a588e0bcb25ba6d915894808acdde   # merge of #1282 — kept identical to worm-guard.yml (enforced by check_pins_synced.sh, #1210)
           fail-on-findings: 'true'
           # Pure exit-code gate: the job conclusion is the scan verdict, nothing else. This
           # commit is also scanned (and, when enabled, uploaded) by worm-guard + security-sentinel,
