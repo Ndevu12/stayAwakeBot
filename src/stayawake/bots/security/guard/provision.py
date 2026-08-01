@@ -88,36 +88,78 @@ def resolve_pin(token: str | None = None, ref: str | None = None) -> Pin | None:
 
 
 def render_workflow(pin: Pin, default_branch: str = "main") -> str:
-    """The report-only, least-privilege worm-guard workflow, SHA-pinned. Remediation (which needs
-    scoped write) is deliberately NOT enabled here — it's an opt-in follow-up. The gate is found by
-    its `uses: Ndevu12/strix@<sha>` reference (not this filename), so re-running setup bumps the pin."""
+    """The worm-guard workflow `saw guard setup` installs, SHA-pinned. TWO jobs, each least-privilege:
+
+      • `worm-guard` (on PR/push) — scans, and on an infected verdict runs `saw fix --pr` to open ONE
+        rolling `security/auto-clean` PR. The gate still goes RED until that PR is merged: remediation
+        opens the fix, it does not make the check pass. Needs `contents: write` + `pull-requests: write`.
+      • `pin-drift` (weekly + manual) — files ONE self-closing issue when the pinned Strix release
+        falls behind (`saw guard drift`). Needs only `issues: write`.
+
+    The gate is found by its `uses: Ndevu12/strix@<sha>` reference (not this filename), so re-running
+    `saw guard setup` surgically bumps just the pin and leaves the rest of the file untouched."""
     comment = f"  # {pin.tag}" if pin.tag else ""
     return (
         "# Strix worm-guard — installed/updated by `saw guard setup`.\n"
-        "# Blocks a merge when Strix finds self-propagating worm indicators. Found by its\n"
-        "# `uses: Ndevu12/strix@<sha>` reference (not this filename); re-run `saw guard setup` to bump\n"
-        "# the SHA. Report-only least privilege (contents: read). Auto-remediation needs scoped write\n"
-        "# — see the Strix README's Auto-remediation section; it is deliberately opt-in.\n"
+        "# Blocks a merge when Strix finds self-propagating worm indicators, and opens a fix PR for\n"
+        "# an infected verdict. Found by its `uses: Ndevu12/strix@<sha>` reference (not this filename);\n"
+        "# re-run `saw guard setup` to bump the SHA.\n"
+        "#\n"
+        "# Auto-remediation needs write access (the scan itself only reads):\n"
+        "#   contents: write        -> push the security/auto-clean fix branch\n"
+        "#   pull-requests: write   -> open/update the rolling cleanup PR\n"
+        "# To let the token OPEN that PR, enable: Settings -> Actions -> General ->\n"
+        "#   'Allow GitHub Actions to create and approve pull requests'.\n"
+        "# A PR opened with the built-in GITHUB_TOKEN will NOT itself re-trigger this gate; to have the\n"
+        "# fix PR scanned too, set a repo secret GH_SECURITY_TOKEN (a PAT with repo + PR scope) — the\n"
+        "# `token:` below prefers it and falls back to GITHUB_TOKEN when it is absent.\n"
         "name: Worm guard — block infected merges\n"
         "\n"
         "on:\n"
         "  pull_request:\n"
         "  push:\n"
         f"    branches: [{default_branch}]\n"
+        "  schedule:\n"
+        "    - cron: '0 7 * * 1'        # Mondays 07:00 UTC — pin-drift check\n"
+        "  workflow_dispatch:\n"
         "\n"
-        "permissions:\n"
-        "  contents: read       # pure exit-code gate: green = clean, red = infected\n"
+        "permissions: {}                # least privilege: granted PER JOB below\n"
         "\n"
         "jobs:\n"
         "  worm-guard:\n"
+        "    if: github.event_name != 'schedule'   # gate on code changes, not the drift schedule\n"
         "    runs-on: ubuntu-latest\n"
+        "    permissions:\n"
+        "      contents: write        # push the security/auto-clean fix branch\n"
+        "      pull-requests: write   # open/update the rolling cleanup PR\n"
         "    steps:\n"
         "      - name: Checkout (full history so evil-merge detection sees the whole graph)\n"
         "        uses: actions/checkout@v4\n"
         "        with:\n"
         "          fetch-depth: 0\n"
-        "      - name: Strix worm scan\n"
+        "      - name: Strix worm scan (+ open a fix PR on an infected verdict)\n"
         f"        uses: Ndevu12/strix@{pin.sha}{comment}\n"
+        "        with:\n"
+        "          remediate: pr\n"
+        "          token: ${{ secrets.GH_SECURITY_TOKEN || github.token }}\n"
+        "\n"
+        "  pin-drift:\n"
+        "    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'\n"
+        "    runs-on: ubuntu-latest\n"
+        "    permissions:\n"
+        "      contents: read         # read the pinned ref from this workflow file\n"
+        "      issues: write          # open/close the one drift tracking issue\n"
+        "    steps:\n"
+        "      - uses: actions/checkout@v4\n"
+        "      - uses: actions/setup-python@v5\n"
+        "        with:\n"
+        "          python-version: '3.x'\n"
+        "      - name: Report if the pinned Strix release is behind\n"
+        "        env:\n"
+        "          GITHUB_TOKEN: ${{ github.token }}\n"
+        "        run: |\n"
+        "          pip install --quiet stayawakebot\n"
+        "          saw guard drift\n"
     )
 
 
@@ -165,11 +207,20 @@ def _setup_pr_body(plan: SetupPlan, base: str) -> str:
         "",
         f"- **File:** {textsafe.code(plan.path)}",   # repo-controlled filename → injection-safe
         f"- **Pin:** `Ndevu12/strix@{plan.new_ref[:12]}…`{tag}",
-        "- **Posture:** report-only least privilege (`contents: read`). Auto-remediation is opt-in.",
+        "- **Gate job** (`worm-guard`): scans PRs/pushes and, on an infected verdict, opens ONE rolling "
+        "`security/auto-clean` fix PR (needs `contents: write` + `pull-requests: write`, granted at the "
+        "job level). The gate stays **red until that fix PR is merged** — remediation opens the fix, it "
+        "does not make the check pass.",
+        "- **Pin-drift job** (`pin-drift`): weekly (+ manual) it files ONE self-closing issue if the "
+        "pinned Strix release falls behind (`issues: write` only).",
         "",
         "### Please finish the hardening (a PR can't set these):",
         "- [ ] Mark the **worm-guard** check **required** in branch protection.",
         "- [ ] Add **CODEOWNERS** on `.github/**` (and `config/security.yml`, if used).",
+        "- [ ] Enable **Settings → Actions → General → “Allow GitHub Actions to create and approve pull "
+        "requests”** so the gate can open the fix PR.",
+        "- [ ] *(optional)* add a **`GH_SECURITY_TOKEN`** secret (a PAT with repo + PR scope) so the fix "
+        "PR itself gets scanned — a PR opened with the built-in token does not re-trigger this gate.",
         "",
         "_A PR opened by a bot token may not trigger the new workflow on this PR — push an empty "
         "commit to run the gate on itself. This is a single rolling PR; re-runs update it._",
