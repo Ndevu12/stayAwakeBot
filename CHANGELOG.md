@@ -21,6 +21,12 @@ All notable changes to this project are documented here. The format is based on
   variable, or a cross-scope name collision stays clean). Heuristic → SUSPICIOUS; purely static.
 
 ### Changed
+- **Maintainability: `bots/security/pr.py` (567 lines) is now a `pr/` package** split per concern —
+  `constants` / `render` (PR & issue bodies + review-line summaries, pure text) / `fix` (build & submit
+  the fix PR, proposed-only) / `discard` (the inverse). Pure refactor: every function/class/constant is
+  byte-identical to the original (verified per-definition), `__init__` re-exports only the public API
+  (internal body helpers `_pr_body`/`_issue_body` reached at `pr.render.*`), zero unused imports, and
+  the full suite passes with only mock/private-access paths repointed to the owning submodule.
 - **Maintainability: `bots/security/remediation.py` (802 lines) is now a `remediation/` package** split
   into `changes` (structure-safe transforms: quarantine, exact-line / JSON-key removal) and the
   code-loader recovery pipeline — `gates` (pure payload analysis + the surgical seam-strip), `classify`
