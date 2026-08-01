@@ -458,19 +458,38 @@ class TestGuardDrift(unittest.TestCase):
         self.assertEqual(o.state, "unknown")
         self.assertEqual((calls["created"], calls["updated"], calls["commented"]), ([], [], []))
 
-    def test_non_strix_gate_is_recognized_not_called_no_gate(self):
-        # THE #1315-review bug: a repo guarded by a LOCAL action (not Ndevu12/strix) must be reported
-        # as present-but-not-trackable — NOT "no gate" — and must touch no issue.
+    def test_non_strix_gate_is_protected_no_issue(self):
+        # A repo guarded by a LOCAL action (not Ndevu12/strix) is PROTECTED — recognized (not "no
+        # gate"), opens NO issue; its release pin just isn't freshness-trackable.
         st = GuardStatus(present=True, ref=None, mechanism="local-action",
                          gate_file=".github/workflows/worm-guard.yml")
         o, calls = self._run(st)
         self.assertEqual(o.state, "not-strix")
-        self.assertIn("local-action", o.detail)
         self.assertEqual((calls["created"], calls["updated"]), ([], []))
 
-    def test_no_gate_touches_no_issue(self):
+    def test_non_strix_gate_closes_a_stale_protection_issue(self):
+        # If a repo was flagged unprotected and later gains a (non-Strix) gate, close the issue.
+        st = GuardStatus(present=True, ref=None, mechanism="local-action", gate_file="w.yml")
+        o, calls = self._run(st, existing=42)
+        self.assertEqual(o.action, "closed")
+        self.assertEqual(calls["updated"][0][1].get("state"), "closed")
+
+    def test_no_gate_opens_a_protection_issue(self):
+        # THE point of "ensure the repo is gated": an UNPROTECTED repo (no gate) files an issue.
         o, calls = self._run(GuardStatus(present=False))
-        self.assertEqual(o.state, "no-gate")
+        self.assertEqual((o.state, o.action), ("no-gate", "opened"))
+        self.assertEqual(len(calls["created"]), 1)
+        self.assertEqual(calls["created"][0][1].get("labels"), [guard.pindrift.DRIFT_LABEL])
+        self.assertIn("unprotected", " ".join(str(a) for a in calls["created"][0][0]).lower())
+
+    def test_no_ci_opens_a_protection_issue(self):
+        o, calls = self._run(GuardStatus(present=False, no_ci=True))
+        self.assertEqual((o.state, o.action), ("no-ci", "opened"))
+        self.assertEqual(len(calls["created"]), 1)
+
+    def test_remote_read_error_never_churns(self):
+        o, calls = self._run(GuardStatus(present=False, error="rate limited"), existing=42)
+        self.assertEqual(o.state, "error")
         self.assertEqual((calls["created"], calls["updated"]), ([], []))
 
 

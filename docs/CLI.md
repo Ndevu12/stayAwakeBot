@@ -380,15 +380,16 @@ the check never passes on the strength of an unreviewed auto-change.
 
 #### `saw guard drift`
 
-The **out-of-band pin-drift backstop** — **across repos**, same target model as
-[`saw guard check`](#saw-guard-check). For each repo it reads the pinned `Ndevu12/strix@<sha>`,
-compares it to the latest Strix release, and opens ONE de-duplicated tracking **issue** when it has
-fallen behind — **closing it automatically** once the pin catches up. It recognizes a gate by **any**
-mechanism (like `check`): a non-Strix gate (a local action / a `saw` step) is reported
-present-but-not-trackable — *not* "no gate" — and touches no issue. Reports drift as an issue, **never
-a build failure** (exit 0), so it's safe on a schedule. The `pin-drift` job that
-[`saw guard setup`](#saw-guard-setup) installs runs it weekly on that repo; an operator can sweep a
-whole fleet with `--remote`.
+The **out-of-band protection backstop** — **across repos**, same target model as
+[`saw guard check`](#saw-guard-check). It keeps each repo *gated and current* by maintaining ONE
+de-duplicated, self-closing tracking **issue**: it **opens** the issue when a repo is **unprotected**
+(no worm gate) or its pinned `Ndevu12/strix@<sha>` has fallen **behind** the latest release, and
+**closes it automatically** once the repo is protected and current. It recognizes a gate by **any**
+mechanism (like `check`): a non-Strix gate (a local action / a `saw` step) counts as **protected** —
+it opens no issue (its release pin just isn't freshness-trackable). Reports as an issue, **never a
+build failure** (exit 0), so it's safe on a schedule. The `pin-drift` job that
+[`saw guard setup`](#saw-guard-setup) installs runs it weekly on that repo (catching a gate that was
+removed, or a stale pin); an operator can sweep a whole fleet with `--remote`.
 
 ```text
 saw guard drift [TARGETS...] [-p PATH] [-c FILE] [-r] [--user U] [--org O] [--repo OWNER/NAME]

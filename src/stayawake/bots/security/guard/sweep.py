@@ -182,17 +182,20 @@ def drift_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
             prog.line(_indent(render_drift(o, color=color)))
             outcomes.append(o)
 
+    unprotected = sum(1 for o in outcomes if o.state in ("no-gate", "no-ci"))
     behind = sum(1 for o in outcomes if o.state == "behind")
     opened = sum(1 for o in outcomes if o.action == "opened")
     closed = sum(1 for o in outcomes if o.action == "closed")
     errored = sum(1 for o in outcomes if o.state == "error")
     n = len(outcomes)
     tail = "".join([
+        f", {behind} with a stale pin" if behind else "",
         f", {opened} issue(s) opened" if opened else "",
         f", {closed} closed" if closed else "",
         f", {errored} errored" if errored else "",
     ])
-    prog.line(f"\nChecked {n} repositor{'y' if n == 1 else 'ies'}: {behind} behind{tail}.")
+    prog.line(f"\nChecked {n} repositor{'y' if n == 1 else 'ies'}: "
+              f"{unprotected} UNPROTECTED{tail}.")
     return 0
 
 
