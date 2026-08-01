@@ -25,9 +25,11 @@ All notable changes to this project are documented here. The format is based on
   git-push `authentication failed` / `invalid username` (the credential itself is rejected) is now
   classified `auth` → *"authentication failed — check the token"*, separately from a bare `403`
   (authenticated but no write access) → *"no Contents write access"*. Previously both mapped to
-  `forbidden`, leaving the `auth` message branch dead code. The fork→patch→issue fallback ladder is
-  unchanged (it gates only on `workflow_scope`/`signed_commits`) — this changes the message, not the
-  path.
+  `forbidden`, leaving the `auth` message branch dead code. The fallback ladder now also **skips the
+  fork attempt for an `auth` failure** — a rejected credential can't push to a fork either, so the run
+  goes straight to the patch/notify-issue floor instead of a wasted fork round-trip (it degraded
+  gracefully before; now it's honest and cheaper). `forbidden` (a valid token lacking write) still
+  attempts the fork, as before.
 - **Architecture: the domain-neutral `proposal` seam moved from `bots/security` down to `core`.** The
   "propose a change as a reviewed PR, with a fork → patch → notify-issue degradation ladder" machinery
   knows nothing about security (its own docstring calls it "deliberately domain-neutral") and is shared
