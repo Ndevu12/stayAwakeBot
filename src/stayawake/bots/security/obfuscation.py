@@ -895,28 +895,17 @@ def analyze_file(text: str, ext: str = "", constructs_only: bool = False) -> Obf
     # across line breaks (`sfL['constructor']\n(decoded)`) is still seen.
     if _has_exec_sink(body) or _has_exec_sink(flat):
         return ObfuscationVerdict(True, "dynamic-exec sink (eval/Function/atob/fromCharCode/constructor)")
-    # Decode→exec dropper (#1266): a base64/hex decode fed straight into a command/module sink
-    # (child_process / import() / Worker) — the FLOW, not the encoded bytes. Static match only.
-    if _DECODE_INTO_EXEC.search(body) or _DECODE_INTO_EXEC.search(flat):
-        return ObfuscationVerdict(True, "base64/hex decoded and run via a command/module sink (child_process/import/Worker)")
-    # A base64 blob — whether CONTIGUOUS or reassembled from concat/array chunks — is NOT a
-    # verdict on its own (#1212). base64 is ubiquitous benign DATA: JWTs, API tokens, SRI
-    # hashes, cert-pin / JWKS key arrays, crypto KAT vectors, inlined assets. It has near-
-    # zero precision as an obfuscation signal (a real scan flagged three clean *.test.tsx
-    # files that merely held a mock JWT), and the `,`/`+` seams of an ordinary base64 ARRAY
-    # are indistinguishable from a split-payload reassembly without runtime data flow. A real
-    # packed loader is still caught by its EXEC step — the exec-sink / decode→exec / charcode-
-    # array / escape-run arms, or the CONFIRMED loader-fingerprint tier that scans this file
-    # independently — not by the mere presence of encoded bytes at rest.
-    #
-    # BUT a hardcoded blob decoded through a VARIABLE and then RUN is the dropper the nested
-    # #1266 check misses (`const d = Buffer.from(p,'base64'); execSync(d)`). Flag ONLY that
-    # conjunction — an encoded blob present AND a decode→variable→command/module/worker flow —
-    # so a lone blob (the #1212 FP class) stays clean while the in-file dropper is caught.
-    # _dechunk first so a split/concat-reassembled blob still corroborates.
+    # Decode→exec dropper — the ONE decode→exec-flow detector (see taint/): a baked encoded payload
+    # DECODED and then RUN, via a command/module/worker sink (the #1266 nested form and the
+    # variable-indirected form, leading arg) OR through a shell `-c` argument (`spawn('sh',['-c',d])`
+    # / `execSync('sh -c '+d)`). A LONE blob (#1212 — JWT / token / key / asset) stays clean; only
+    # the decode→exec FLOW is the dropper. Run on both the raw and newline-flattened views so a
+    # decode wrapped across line breaks is still seen. Lazy import breaks the taint↔obfuscation cycle.
+    from stayawake.bots.security.taint.analyzer import detect_dropper
+    dropper = detect_dropper(body) or detect_dropper(flat)
+    if dropper:
+        return ObfuscationVerdict(True, dropper)
     deassetted = _DATA_URI.sub("", flat)
-    if _has_encoded_payload(_dechunk(deassetted)) and _decode_var_into_exec(body):
-        return ObfuscationVerdict(True, "base64 payload decoded via a variable and run (command/module/worker sink)")
     # The dense escape-encoded byte run stays: unlike base64, a 48+ `\xNN`/`\uNNNN` run gated
     # on byte-range + entropy has no benign-data analogue (nobody writes a token/asset that
     # way), so it is FP-safe. _dechunk first so a chunked escape payload is reassembled.
@@ -988,18 +977,14 @@ def analyze_delta(introduced: str, baseline: str = "") -> ObfuscationVerdict:
         return ObfuscationVerdict(True, "charcode/byte numeric-array literal (string shuffler)")
     if _has_exec_sink(text):
         return ObfuscationVerdict(True, "dynamic-exec sink (eval/Function/atob/fromCharCode/constructor)")
-    if _DECODE_INTO_EXEC.search(text):
-        return ObfuscationVerdict(True, "base64/hex decoded and run via a command/module sink (child_process/import/Worker)")
-    # A base64 blob is NOT a delta verdict on its own (#1212): a merge/feature commit that
-    # introduces a base64 token, a cert-pin / JWKS key array, or a KAT-vector table is data,
-    # not an evil-merge tell. But a blob decoded through a VARIABLE and then RUN inside the hunk
-    # (`const p='<blob>'; const d=Buffer.from(p,'base64'); execSync(d)`) is the evil-merge dropper
-    # #1266's nested check misses — flag only that conjunction (blob present AND decode→var→sink).
-    de_intro = _DATA_URI.sub("", text)
-    if _has_encoded_payload(_dechunk(de_intro)) and _decode_var_into_exec(text):
-        return ObfuscationVerdict(True, "base64 payload decoded via a variable and run (command/module/worker sink)")
-    # A genuinely merge-introduced payload is otherwise caught by its exec sink (above), the
-    # nested decode→exec flow, its charcode array, or the loader-fingerprint corroboration.
+    # Decode→exec dropper introduced by the hunk — same ONE detector as analyze_file (leading-arg
+    # #1266/var forms AND the shell `-c` form). A lone base64 blob a merge introduces (a token, a
+    # cert-pin/JWKS key array, a KAT table) is DATA, not an evil-merge tell (#1212); only the
+    # decode→exec FLOW is. See taint/.
+    from stayawake.bots.security.taint.analyzer import detect_dropper
+    dropper = detect_dropper(text)
+    if dropper:
+        return ObfuscationVerdict(True, dropper)
 
     # 2) Corroborated density anomaly: a previously-formatted file that suddenly
     #    gains a very long single line that ALSO reads as high-entropy packed text.
