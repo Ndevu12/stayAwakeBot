@@ -21,6 +21,13 @@ All notable changes to this project are documented here. The format is based on
   variable, or a cross-scope name collision stays clean). Heuristic → SUSPICIOUS; purely static.
 
 ### Changed
+- **Push-failure guidance now distinguishes a bad credential from a missing permission (#1291).** A
+  git-push `authentication failed` / `invalid username` (the credential itself is rejected) is now
+  classified `auth` → *"authentication failed — check the token"*, separately from a bare `403`
+  (authenticated but no write access) → *"no Contents write access"*. Previously both mapped to
+  `forbidden`, leaving the `auth` message branch dead code. The fork→patch→issue fallback ladder is
+  unchanged (it gates only on `workflow_scope`/`signed_commits`) — this changes the message, not the
+  path.
 - **Architecture: the domain-neutral `proposal` seam moved from `bots/security` down to `core`.** The
   "propose a change as a reviewed PR, with a fork → patch → notify-issue degradation ladder" machinery
   knows nothing about security (its own docstring calls it "deliberately domain-neutral") and is shared
