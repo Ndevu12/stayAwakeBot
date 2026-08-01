@@ -13,7 +13,8 @@ from unittest import mock
 
 from stayawake.bots.security import guard
 from stayawake.bots.security.guard import (Freshness, GuardStatus, StrixRef, classify_pin,
-                             _context_required, find_strix)
+                             find_strix)
+from stayawake.bots.security.guard.detect import _context_required  # private: reached at its home
 
 BLOG_WF = """name: Worm scan
 on: { push: { branches: [main] }, pull_request: {} }
