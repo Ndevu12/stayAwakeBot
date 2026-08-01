@@ -21,6 +21,15 @@ All notable changes to this project are documented here. The format is based on
   variable, or a cross-scope name collision stays clean). Heuristic → SUSPICIOUS; purely static.
 
 ### Changed
+- **Maintainability: `bots/security/service.py` (320 lines) is now a `service/` package** split per
+  concern — `config` (YAML + CLI flags → `ScanOptions`, plus the advisory-DB gate) / `report` (the
+  per-target verdict tag + the written-report pointer) / `run` (the `scan` orchestration and its
+  fleet/finding spill thresholds; the module is named `run`, not `scan`, to avoid shadowing the
+  `scan` function). Pure refactor: every function/constant is byte-identical to the original (verified
+  per-definition), `__init__` re-exports only the public entrypoint (`scan`) plus the `github_api`/
+  `auth` module singletons the targeting tests patch — internal helpers are reached at
+  `service.config.*` / `service.run.*` — zero unused imports, and the full suite passes with only
+  mock/private-access paths repointed to the owning submodule (no behavior change).
 - **Maintainability: `bots/security/pr.py` (567 lines) is now a `pr/` package** split per concern —
   `constants` / `render` (PR & issue bodies + review-line summaries, pure text) / `fix` (build & submit
   the fix PR, proposed-only) / `discard` (the inverse). Pure refactor: every function/class/constant is

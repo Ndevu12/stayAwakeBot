@@ -122,7 +122,7 @@ class TestSarifWiredIntoScan(unittest.TestCase):
 
         def snap(d):
             return {str(p) for p in d.rglob("*")} if d.exists() else set()
-        before = snap(sec_service.REPORTS_DIR)
+        before = snap(sec_service.run.REPORTS_DIR)
         with redirect_stdout(io.StringIO()):     # swallow the terminal-sink report
             sec_service.scan(str(cfg), sarif_path=str(sarif_out))
 
@@ -130,7 +130,7 @@ class TestSarifWiredIntoScan(unittest.TestCase):
         log = json.loads(sarif_out.read_text(encoding="utf-8"))
         self.assertEqual(log["version"], "2.1.0")
         self.assertIn("runs", log)
-        self.assertEqual(before, snap(sec_service.REPORTS_DIR),
+        self.assertEqual(before, snap(sec_service.run.REPORTS_DIR),
                          "scan must not touch the default reports/security dir")
 
 

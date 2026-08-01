@@ -23,14 +23,14 @@ class TestRemoteResolution(unittest.TestCase):
         with mock.patch.object(service.auth, "resolve_token", return_value=("t", "env")), \
              mock.patch.object(service.github_api, "list_repos",
                                side_effect=lambda acct, kind, *a, **k: [f"{acct}/r"]) as m:
-            slugs, _t, _s = service._resolve_remote(cfg, OPTS, users=["adhoc"], orgs=None, slugs=None)
+            slugs, _t, _s = service.run._resolve_remote(cfg, OPTS, users=["adhoc"], orgs=None, slugs=None)
         self.assertEqual(slugs, ["adhoc/r"])              # the CONFIG user is NOT enumerated
         m.assert_called_once_with("adhoc", "users", "t", False, False)
 
     def test_slugs_passthrough_no_enumeration(self):
         with mock.patch.object(service.auth, "resolve_token", return_value=("t", "env")), \
              mock.patch.object(service.github_api, "list_repos") as m:
-            slugs, _t, _s = service._resolve_remote({}, OPTS, users=None, orgs=None,
+            slugs, _t, _s = service.run._resolve_remote({}, OPTS, users=None, orgs=None,
                                                     slugs=["o/b", "o/a"])
         self.assertEqual(slugs, ["o/a", "o/b"])          # used as-is (sorted), no API enumeration
         m.assert_not_called()
@@ -38,7 +38,7 @@ class TestRemoteResolution(unittest.TestCase):
     def test_infer_my_repos_when_nothing_named(self):
         with mock.patch.object(service.auth, "resolve_token", return_value=("t", "env")), \
              mock.patch.object(service.github_api, "list_my_repos", return_value=["me/a", "me/b"]) as m:
-            slugs, _t, _s = service._resolve_remote({}, OPTS, users=None, orgs=None, slugs=None)
+            slugs, _t, _s = service.run._resolve_remote({}, OPTS, users=None, orgs=None, slugs=None)
         self.assertEqual(slugs, ["me/a", "me/b"])
         m.assert_called_once()                            # /user/repos, owner-only
 
@@ -46,20 +46,20 @@ class TestRemoteResolution(unittest.TestCase):
         with mock.patch.object(service.auth, "resolve_token", return_value=("t", "github-app")), \
              mock.patch.object(service.github_api, "list_installation_repos", return_value=["org/a"]), \
              mock.patch.object(service.github_api, "list_my_repos") as my:
-            slugs, _t, source = service._resolve_remote({}, OPTS, users=None, orgs=None, slugs=None)
+            slugs, _t, source = service.run._resolve_remote({}, OPTS, users=None, orgs=None, slugs=None)
         self.assertEqual(slugs, ["org/a"])
         self.assertEqual(source, "github-app")
         my.assert_not_called()                           # App → installation repos, not /user/repos
 
     def test_no_token_no_config_is_empty(self):
         with mock.patch.object(service.auth, "resolve_token", return_value=(None, None)):
-            slugs, _t, _s = service._resolve_remote({}, OPTS, users=None, orgs=None, slugs=None)
+            slugs, _t, _s = service.run._resolve_remote({}, OPTS, users=None, orgs=None, slugs=None)
         self.assertEqual(slugs, [])
 
     def test_invalid_slugs_detected(self):
-        self.assertEqual(service.invalid_slugs(["a/b", "bad", "x/y/z", "a/b c"]),
+        self.assertEqual(service.run.invalid_slugs(["a/b", "bad", "x/y/z", "a/b c"]),
                          ["bad", "x/y/z", "a/b c"])
-        self.assertEqual(service.invalid_slugs(["owner/name"]), [])
+        self.assertEqual(service.run.invalid_slugs(["owner/name"]), [])
 
 
 class TestListMyRepos(unittest.TestCase):

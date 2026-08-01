@@ -118,10 +118,10 @@ class TestAdvisoryTier(unittest.TestCase):
 class TestAdvisoryWiring(unittest.TestCase):
     def test_advisories_default_on_and_opt_out(self):
         from stayawake.bots.security import service
-        self.assertTrue(service._options({}).dependency_advisories)                         # default ON
-        self.assertFalse(service._options({}, no_advisories=True).dependency_advisories)    # --no-advisories
-        self.assertFalse(service._options({"dependency_advisories": False}).dependency_advisories)  # config off
-        self.assertFalse(service._options({}).external_audit)                               # external opt-in
+        self.assertTrue(service.config._options({}).dependency_advisories)                         # default ON
+        self.assertFalse(service.config._options({}, no_advisories=True).dependency_advisories)    # --no-advisories
+        self.assertFalse(service.config._options({"dependency_advisories": False}).dependency_advisories)  # config off
+        self.assertFalse(service.config._options({}).external_audit)                               # external opt-in
 
     def test_scan_cli_flags(self):
         from stayawake.cli.dispatch import build_parser
@@ -136,10 +136,10 @@ class TestAdvisoryWiring(unittest.TestCase):
         # sandbox (`bool("false")` is True; the strict coercion prevents that).
         from stayawake.bots.security import service
         for falsy in ("false", "no", "off", "0", ""):
-            self.assertFalse(service._options({"external_audit": falsy}).external_audit, falsy)
-        self.assertFalse(service._options({"dependency_advisories": "false"}).dependency_advisories)
-        self.assertTrue(service._options({"external_audit": True}).external_audit)      # real bool works
-        self.assertTrue(service._options({"external_audit": "yes"}).external_audit)     # explicit truthy
+            self.assertFalse(service.config._options({"external_audit": falsy}).external_audit, falsy)
+        self.assertFalse(service.config._options({"dependency_advisories": "false"}).dependency_advisories)
+        self.assertTrue(service.config._options({"external_audit": True}).external_audit)      # real bool works
+        self.assertTrue(service.config._options({"external_audit": "yes"}).external_audit)     # explicit truthy
 
 
 if __name__ == "__main__":

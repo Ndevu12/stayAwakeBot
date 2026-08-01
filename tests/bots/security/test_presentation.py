@@ -118,20 +118,20 @@ class TestDetailSuppression(unittest.TestCase):
 
 class TestLargeFleetPointer(unittest.TestCase):
     def test_writes_temp_report_and_points_at_it(self):
-        repos = [Path(f"/x/r{i}") for i in range(service.LARGE_FLEET + 5)]
-        with mock.patch.object(service, "discover_local_repos", return_value=repos), \
-             mock.patch.object(service, "LocalRepoTarget"), \
-             mock.patch.object(service, "scan_target", return_value=ScanResult("r", "local")), \
+        repos = [Path(f"/x/r{i}") for i in range(service.run.LARGE_FLEET + 5)]
+        with mock.patch.object(service.run, "discover_local_repos", return_value=repos), \
+             mock.patch.object(service.run, "LocalRepoTarget"), \
+             mock.patch.object(service.run, "scan_target", return_value=ScanResult("r", "local")), \
              redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err:
             rc = service.scan(None, no_stream=True)          # local, no -d / --json
         self.assertEqual(rc, 0)
         self.assertIn("Full report", err.getvalue())         # pointer printed for a big sweep
 
     def test_large_fleet_moves_detail_off_terminal(self):
-        repos = [Path(f"/x/r{i}") for i in range(service.LARGE_FLEET + 5)]
-        with mock.patch.object(service, "discover_local_repos", return_value=repos), \
-             mock.patch.object(service, "LocalRepoTarget"), \
-             mock.patch.object(service, "scan_target", return_value=_infected("o/bad")), \
+        repos = [Path(f"/x/r{i}") for i in range(service.run.LARGE_FLEET + 5)]
+        with mock.patch.object(service.run, "discover_local_repos", return_value=repos), \
+             mock.patch.object(service.run, "LocalRepoTarget"), \
+             mock.patch.object(service.run, "scan_target", return_value=_infected("o/bad")), \
              redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()) as err:
             rc = service.scan(None, no_stream=True)
         self.assertEqual(rc, 1)                                       # infected → exit 1
@@ -140,9 +140,9 @@ class TestLargeFleetPointer(unittest.TestCase):
 
     def test_small_fleet_writes_no_pointer(self):
         repos = [Path("/x/r0")]
-        with mock.patch.object(service, "discover_local_repos", return_value=repos), \
-             mock.patch.object(service, "LocalRepoTarget"), \
-             mock.patch.object(service, "scan_target", return_value=ScanResult("r", "local")), \
+        with mock.patch.object(service.run, "discover_local_repos", return_value=repos), \
+             mock.patch.object(service.run, "LocalRepoTarget"), \
+             mock.patch.object(service.run, "scan_target", return_value=ScanResult("r", "local")), \
              redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err:
             service.scan(None, no_stream=True)
         self.assertNotIn("Full report", err.getvalue())
@@ -153,9 +153,9 @@ def _remote_scan(results, **kw):
     stubbing resolution + clone + scan so no network/FS is touched. Returns (rc, stdout, stderr)."""
     slugs = [r.target for r in results]
     it = iter(results)
-    with mock.patch.object(service, "_resolve_remote", return_value=(slugs, None, "test")), \
-         mock.patch.object(service, "RemoteRepoTarget") as RT, \
-         mock.patch.object(service, "scan_target", side_effect=lambda *a, **k: next(it)), \
+    with mock.patch.object(service.run, "_resolve_remote", return_value=(slugs, None, "test")), \
+         mock.patch.object(service.run, "RemoteRepoTarget") as RT, \
+         mock.patch.object(service.run, "scan_target", side_effect=lambda *a, **k: next(it)), \
          redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()) as err:
         RT.return_value.clone.return_value = True
         rc = service.scan(None, remote=True, slugs=slugs, no_stream=True, **kw)
@@ -164,9 +164,9 @@ def _remote_scan(results, **kw):
 
 def _local_scan(result, **kw):
     """Drive service.scan down the LOCAL path with one mocked repo. Returns (rc, stdout, stderr)."""
-    with mock.patch.object(service, "discover_local_repos", return_value=[Path("/x/r0")]), \
-         mock.patch.object(service, "LocalRepoTarget"), \
-         mock.patch.object(service, "scan_target", return_value=result), \
+    with mock.patch.object(service.run, "discover_local_repos", return_value=[Path("/x/r0")]), \
+         mock.patch.object(service.run, "LocalRepoTarget"), \
+         mock.patch.object(service.run, "scan_target", return_value=result), \
          redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()) as err:
         rc = service.scan(None, no_stream=True, **kw)
     return rc, out.getvalue(), err.getvalue()
@@ -177,7 +177,7 @@ class TestManyFindingsSpills(unittest.TestCase):
     dashboard on-screen, full detail in a highlighted file — even at few repos."""
 
     def test_local_wall_of_findings_shows_board_and_spills(self):
-        rc, out, err = _local_scan(_infected_many("o/huge", service.MANY_FINDINGS + 10))
+        rc, out, err = _local_scan(_infected_many("o/huge", service.run.MANY_FINDINGS + 10))
         self.assertEqual(rc, 1)
         self.assertIn("o/huge", out)                            # board still names the target
         self.assertNotIn("sig-0", out)                          # per-finding detail OFF the terminal
@@ -188,7 +188,7 @@ class TestManyFindingsSpills(unittest.TestCase):
         self.assertIn("folder:", err)                           # folder line for easy navigation
 
     def test_remote_wall_of_findings_shows_board_and_spills(self):
-        rc, out, err = _remote_scan([_infected_many("o/huge", service.MANY_FINDINGS + 10)])
+        rc, out, err = _remote_scan([_infected_many("o/huge", service.run.MANY_FINDINGS + 10)])
         self.assertEqual(rc, 1)
         self.assertIn("o/huge", out)                            # same board as local
         self.assertNotIn("sig-0", out)
