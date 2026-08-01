@@ -7,6 +7,11 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Changed
+- **Maintainability: `bots/security/guard.py` (1021 lines) is now a `guard/` package** split per
+  concern — `constants` / `detect` (find & grade the gate, READ-ONLY) / `provision` (install/update,
+  proposed-only) / `sweep` (resolve & run over many targets). Pure refactor: the package re-exports
+  the flat public API so every caller imports unchanged, and the test suite passes with only mock
+  target paths repointed to the submodules (no behavior change).
 - **Obfuscation detector: tightened decode→exec arms (restores the #1212 base64 capability, fixes
   the #1289 FPs) — no coverage lost.** Three changes, all on hand-authored source only:
   - Restores catching a hardcoded base64/hex payload **decoded through a variable and then run**
