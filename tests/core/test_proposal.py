@@ -102,6 +102,35 @@ class TestForkRung(unittest.TestCase):
         self.assertTrue((out / "up-repo.patch").is_file())     # patch floor
         self.assertIn("#9", res.issue_note)                    # dedup issue filed
 
+    def test_auth_failure_skips_fork_straight_to_floor(self):
+        # #1291: a rejected CREDENTIAL can't push to a fork either (same token), so we must NOT
+        # attempt the fork — go straight to the patch/issue floor. Assert create_fork is never called
+        # and the reason carried to the floor is `auth`, not a fork-derived one.
+        out = Path(tempfile.mkdtemp())
+        fork_mock = mock.MagicMock(return_value={"full_name": "me/repo"})
+        authed_mock = mock.MagicMock(return_value={"login": "me"})
+
+        def push_result(repo, slug, branch, token, **k):
+            return PushResult(False, "fatal: Authentication failed for 'https://github.com/up/repo.git/'")
+
+        with tempfile.TemporaryDirectory() as wt:
+            with mock.patch.object(proposal.time, "sleep", return_value=None):
+                for p in (_git(push_branch_result=push_result)
+                          + _api(get_authenticated_user=authed_mock, create_fork=fork_mock,
+                                 list_open_issues=[], create_issue={"number": 9, "html_url": "iu"})):
+                    p.start()
+                try:
+                    res = proposal.submit_change_pr(
+                        Path(wt), "up/repo", "main", branch="security/x", title="t", body="b",
+                        token="tok", issue=proposal.IssueSpec("t", "b", "lbl"), patches_dir=out)
+                finally:
+                    mock.patch.stopall()
+        self.assertEqual(res.kind, "floor")
+        self.assertEqual(res.push_reason, "auth")
+        self.assertFalse(fork_mock.called)      # fork NOT attempted with a dead credential
+        self.assertFalse(authed_mock.called)    # ...not even the identity probe that precedes it
+        self.assertTrue((out / "up-repo.patch").is_file())
+
 
 class TestFloor(unittest.TestCase):
     def test_patch_and_issue(self):
