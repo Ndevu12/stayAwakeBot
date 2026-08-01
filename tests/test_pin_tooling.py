@@ -14,6 +14,8 @@ from __future__ import annotations
 import importlib.util
 import unittest
 from pathlib import Path
+from subprocess import CompletedProcess
+from unittest import mock
 
 REPO = Path(__file__).resolve().parents[1]
 SCRIPT = REPO / ".github" / "scripts" / "pin_tools.py"
@@ -99,6 +101,70 @@ class TestSynced(unittest.TestCase):
 
     def test_single_carrier_is_trivially_synced(self):
         self.assertEqual(pt.pins_synced({"a.yml": SHA_A})[0], 0)
+
+
+class TestDrift(unittest.TestCase):
+    """The out-of-band drift backstop's git/gh glue (#1293) — the pure functions are covered above,
+    but `drift()` itself was untested, and a silent regression there fails OPEN (drift sails through).
+    `_run` and the pin/issue lookups are mocked so no real git/gh runs."""
+
+    @staticmethod
+    def _cp(rc=0, out="", err=""):
+        return CompletedProcess(args=[], returncode=rc, stdout=out, stderr=err)
+
+    def _drift(self, *, pin=SHA_A, existing=None, diff_rc=1, names_out="a.py\nb.py\n"):
+        calls = []
+
+        def fake_run(cmd):
+            calls.append(cmd)
+            if cmd[:3] == ["git", "diff", "--quiet"]:
+                return self._cp(rc=diff_rc, err="fatal: bad object" if diff_rc not in (0, 1) else "")
+            if cmd[:3] == ["git", "diff", "--name-only"]:
+                return self._cp(out=names_out)
+            if cmd[:2] == ["git", "rev-parse"]:
+                return self._cp(out="abc1234\n")
+            return self._cp(out="")            # gh issue create/comment/close
+        with mock.patch.object(pt, "extract_pin_file", return_value=pin), \
+             mock.patch.object(pt, "_find_drift_issue", return_value=existing), \
+             mock.patch.object(pt, "_run", side_effect=fake_run):
+            rc = pt.drift()
+        return rc, calls
+
+    def test_unreadable_pin_fails_closed(self):
+        rc, _ = self._drift(pin=None)
+        self.assertEqual(rc, 1)
+
+    def test_git_diff_error_fails_closed(self):
+        # returncode NOT in (0, 1) is a real git error — it must return 1 (fail closed), never be
+        # mistaken for "returncode 0 = no drift" (which would fail OPEN). This is the branch #1293
+        # flagged as untested; the backstop silently passing on a git error is the exact hazard.
+        rc, calls = self._drift(diff_rc=128)
+        self.assertEqual(rc, 1)
+        self.assertFalse(any("create" in c for c in calls))    # no issue churn on a hard error
+
+    def test_no_drift_returns_zero(self):
+        rc, _ = self._drift(diff_rc=0)
+        self.assertEqual(rc, 0)
+
+    def test_no_drift_closes_existing_issue(self):
+        rc, calls = self._drift(diff_rc=0, existing="42")
+        self.assertEqual(rc, 0)
+        self.assertTrue(any(c[:3] == ["gh", "issue", "close"] for c in calls))
+
+    def test_drift_comments_on_existing_issue(self):
+        rc, calls = self._drift(diff_rc=1, existing="7")
+        self.assertEqual(rc, 0)
+        self.assertTrue(any(c[:3] == ["gh", "issue", "comment"] for c in calls))
+
+    def test_drift_creates_issue_with_per_line_bullets(self):
+        # A changed path CONTAINING A SPACE must be ONE bullet — the splitlines()-vs-split() fix
+        # (#1293). With the old split() it would break into "dir/a" + "file.py" (two bullets).
+        rc, calls = self._drift(diff_rc=1, existing=None, names_out="dir/a file.py\nb.py\n")
+        self.assertEqual(rc, 0)
+        create = next(c for c in calls if c[:3] == ["gh", "issue", "create"])
+        body = create[create.index("--body") + 1]
+        self.assertIn("- dir/a file.py", body)                 # one bullet, space preserved
+        self.assertIn("- b.py", body)
 
 
 if __name__ == "__main__":
