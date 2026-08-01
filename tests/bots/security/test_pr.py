@@ -81,7 +81,7 @@ class TestNoDuplicatePr(unittest.TestCase):
         # First scan finds the payload; the post-apply re-scan(s) come back clean.
         scans = [infected, clean, clean]
         with _patch_git(), \
-             mock.patch.object(pr, "scan_target",
+             mock.patch.object(pr.fix, "scan_target",
                                side_effect=lambda *a, **k: scans.pop(0) if scans else clean), \
              mock.patch.object(pr.remediation, "plan",
                                return_value=[Change("strip-payload", "postcss.config.mjs")]), \
@@ -113,7 +113,7 @@ class TestNoDuplicatePr(unittest.TestCase):
                           "loader", remediation="strip-appended-payload")
         infected = ScanResult("owner/repo", "local", [finding])
         with _patch_git(), \
-             mock.patch.object(pr, "scan_target", return_value=infected), \
+             mock.patch.object(pr.fix, "scan_target", return_value=infected), \
              mock.patch.object(pr.remediation, "plan",
                                return_value=[Change("strip-payload", "evil.cjs")]), \
              mock.patch.object(pr.remediation, "apply", return_value=[]), \
@@ -145,7 +145,7 @@ class TestPartialFix(unittest.TestCase):
         # `applied` is what apply() safely applied; `residual` stays infected across every re-scan.
         infected = ScanResult("owner/repo", "local", list(residual))
         with _patch_git(), \
-             mock.patch.object(pr, "scan_target", return_value=infected), \
+             mock.patch.object(pr.fix, "scan_target", return_value=infected), \
              mock.patch.object(pr.remediation, "plan", return_value=list(applied)), \
              mock.patch.object(pr.remediation, "apply", return_value=list(applied)), \
              mock.patch.object(pr.remediation, "quarantine_residual", return_value=[]), \
@@ -195,7 +195,7 @@ class TestPartialFix(unittest.TestCase):
     def test_nothing_fixable_dedups_issue(self):
         # A re-run with an existing open issue must not open a duplicate (idempotent notify).
         with _patch_git(), \
-             mock.patch.object(pr, "scan_target",
+             mock.patch.object(pr.fix, "scan_target",
                                return_value=ScanResult("owner/repo", "local", [self._EXFIL])), \
              mock.patch.object(pr.remediation, "plan", return_value=[]), \
              mock.patch.object(pr.remediation, "apply", return_value=[]), \
@@ -235,7 +235,7 @@ class TestPartialFix(unittest.TestCase):
         sug = pr.remediation.Suggested("postcss.config.mjs", "loader", pr.remediation.NO_VCS,
                                        "review the kept code before merging", "diff", "clean\n", 1)
         with _patch_git(), \
-             mock.patch.object(pr, "scan_target",
+             mock.patch.object(pr.fix, "scan_target",
                                side_effect=lambda *a, **k: scans.pop(0) if scans else clean), \
              mock.patch.object(pr.remediation, "plan", return_value=[]), \
              mock.patch.object(pr.remediation, "apply", return_value=[]), \
@@ -267,7 +267,7 @@ class TestPartialFix(unittest.TestCase):
             evil, "s`ig", "residual",
             "run `git checkout abc -- src/[CLICK](https://evil.example)`.js` <img src=x onerror=1> ‮evil",
             1)
-        body = pr._pr_body("owner/repo", [Change("strip-gitignore", ".gitignore")], manual=[m])
+        body = pr.render._pr_body("owner/repo", [Change("strip-gitignore", ".gitignore")], manual=[m])
         # _sanitize turns interior backticks into a look-alike, so spans stay balanced; a
         # single-backtick split alternates OUTSIDE(even)/INSIDE(odd) code spans.
         self.assertEqual(body.count("`") % 2, 0, "unbalanced code spans → a span was left open")
@@ -285,7 +285,7 @@ class TestPartialFix(unittest.TestCase):
             "next.config.mjs", "loader-fromcharcode-127", pr.remediation.NO_VCS,
             "saw applied a computed payload-only strip to the review branch…",
             "diff-preview", "export default config;\n", 1)
-        body = pr._pr_body("owner/repo", [Change("strip-gitignore", ".gitignore")], computed=[sug])
+        body = pr.render._pr_body("owner/repo", [Change("strip-gitignore", ".gitignore")], computed=[sug])
         self.assertIn("Computed strip applied", body)
         self.assertIn("concealment seam", body)                        # tells the operator where/how
         self.assertIn("next.config.mjs:1", body)
@@ -298,7 +298,7 @@ class TestPartialFix(unittest.TestCase):
         sug = pr.remediation.Suggested(
             "src/[X](http://evil.example)`.js", "s`ig", pr.remediation.LEGIT_CHANGES,
             "run `x` <img src=x onerror=1> ‮evil [CLICK](http://evil.example)", "d", "x", 2)
-        body = pr._pr_body("owner/repo", [Change("recover", "a.mjs")], computed=[sug])
+        body = pr.render._pr_body("owner/repo", [Change("recover", "a.mjs")], computed=[sug])
         self.assertEqual(body.count("`") % 2, 0, "unbalanced code spans → a span was left open")
         outside = "".join(body.split("`")[0::2])
         for bad in ("](", "<img", "onerror", "evil.example", "‮"):
@@ -309,7 +309,7 @@ class TestPartialFix(unittest.TestCase):
         # attacker paths/signatures the same way — a backtick is a legal filename char.
         f = Finding("s`ig", "code-loader", Severity.CRITICAL,
                     "app`[CLICK](http://evil.example)`x.js", "d", remediation="strip-appended-payload")
-        body = pr._issue_body("owner/repo", [f])
+        body = pr.render._issue_body("owner/repo", [f])
         self.assertEqual(body.count("`") % 2, 0, "unbalanced code spans in the issue body")
         outside = "".join(body.split("`")[0::2])
         for bad in ("](", "evil.example", "<img"):
@@ -333,7 +333,7 @@ class TestSigningWarning(unittest.TestCase):
         clean = ScanResult("owner/repo", "local", [])
         scans = [ScanResult("owner/repo", "local", []), clean, clean]
         with _patch_git(commit_fix=lambda repo, msg: commit_result), \
-             mock.patch.object(pr, "scan_target",
+             mock.patch.object(pr.fix, "scan_target",
                                side_effect=lambda *a, **k: scans.pop(0) if scans else clean), \
              mock.patch.object(pr.remediation, "plan", return_value=[self._SAFE]), \
              mock.patch.object(pr.remediation, "apply", return_value=[self._SAFE]), \
@@ -365,7 +365,7 @@ class TestSigningWarning(unittest.TestCase):
         clean = ScanResult("owner/repo", "local", [])
         scans = [ScanResult("owner/repo", "local", []), clean, clean]
         with _patch_git(commit_fix=lambda repo, msg: CommitResult(committed=True, signed=False)), \
-             mock.patch.object(pr, "scan_target",
+             mock.patch.object(pr.fix, "scan_target",
                                side_effect=lambda *a, **k: scans.pop(0) if scans else clean), \
              mock.patch.object(pr.remediation, "plan", return_value=[self._SAFE]), \
              mock.patch.object(pr.remediation, "apply", return_value=[self._SAFE]):
@@ -428,7 +428,7 @@ class TestReadOnlyFallback(unittest.TestCase):
                  ScanResult("owner/repo", "local", [])]
         with _patch_git(push_branch=lambda repo, slug, branch, token, **kw: False,   # read-only
                         format_patch=lambda repo, ref="HEAD": "From abc\nSubject: fix\n\npatch-body\n"), \
-             mock.patch.object(pr, "scan_target",
+             mock.patch.object(pr.fix, "scan_target",
                                side_effect=lambda *a, **k: scans.pop(0) if scans else scans), \
              mock.patch.object(pr.remediation, "plan",
                                return_value=[Change("strip-payload", "postcss.config.mjs")]), \
@@ -483,7 +483,7 @@ class TestForkPr(unittest.TestCase):
         with _patch_git(origin_slug=lambda repo: "up/repo", push_branch=fake_push,
                         format_patch=lambda repo, ref="HEAD": "patch-body\n"), \
              mock.patch.object(proposal.time, "sleep", return_value=None), \
-             mock.patch.object(pr, "scan_target",
+             mock.patch.object(pr.fix, "scan_target",
                                side_effect=lambda *a, **k: scans.pop(0) if scans else scans), \
              mock.patch.object(pr.remediation, "plan",
                                return_value=[Change("strip-payload", "postcss.config.mjs")]), \
