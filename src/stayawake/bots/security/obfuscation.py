@@ -24,12 +24,14 @@ we require either a *self-evidently executable* obfuscation construct OR a
     Function-constructor smuggling (name-agnostic catch for a renamed decoder, #1053;
     the `new …` clone idiom is carved out): code that turns decoded bytes back into
     execution.
-  * corroborated dynamic-exec (#1208 residual) — what #1206 left open and #1266 did NOT
-    later close: a dynamic `import(` of a non-literal specifier (bare ident / non-relative
-    `` `${…}` `` template; string-prefixed routes stay clean), a `child_process` runner
-    with a constructed command (concat / `${…}`), and `require('vm').runInContext`.
-    Decode→exec (`import(atob`, `execSync(Buffer.from`) is #1266 — not re-implemented here.
-    `(?<![.\\w$])` + comment/'/-string scrub keep `System.import` / docs mentions out.
+  * corroborated dynamic-exec (#1208 residual, TIGHTENED #1289) — the SCAN flags only the two
+    precise shapes with no benign analogue: a `data:` JS-MIME AND base64-encoded `import(` (a
+    concealed inline module; plaintext `data:…,code` stays clean), and a require-receiver command
+    runner (`child_process`/`shelljs`) fed a decode. The BROAD arms — any non-literal `import(` or
+    constructed `child_process` command — FP'd on every lazy-import / build script, so they no
+    longer raise a finding; they are RETAINED only as the conservative remediation gate
+    (`_has_exec_sink(strict=True)`), where over-refusal is safe. `require('vm').runInContext` and the
+    nested decode→exec (`import(atob`, `execSync(Buffer.from`) are #1266 / _EXEC_SINK, not here.
     Heuristic → SUSPICIOUS.
   * obfuscated exec sinks (#1207) — what #1206 deliberately left open (split-token /
     indirect / light alias). Bounded same-quote string-concat fold (`'ev'+'al'` → `'eval'`)
@@ -43,15 +45,16 @@ we require either a *self-evidently executable* obfuscation construct OR a
     `child_process` runners (execSync/execFile/spawn/fork), a dynamic `import(`, or
     `new Worker(`. The FLOW is the tell, not the encoded bytes (#1212) — neither half is a
     signal alone. Purely static: the recipe is matched in the text, never decoded or run.
-  * base64 blob                    — NOT a signal (#1212). A >=120-char base64 run,
-    contiguous OR reassembled from concat/array chunks, is ubiquitous benign DATA:
-    JWTs, API tokens, SRI hashes, cert-pin / JWKS key arrays, crypto KAT vectors,
-    inlined assets. Its precision as an obfuscation tell is near zero, and an array's
-    `,`/`+` element seams are indistinguishable from a split-payload reassembly without
-    runtime data flow, so it is deliberately never flagged — a real packed loader is
-    caught by its EXEC step or a confirmed loader fingerprint, not by encoded bytes at
-    rest. A payload whose decode→exec uses a sink no arm covers is the documented
-    data-at-rest residual (tracked in #1266 for a proper decode-then-exec data-flow check).
+  * encoded blob (base64/hex)      — NOT a signal ON ITS OWN (#1212). A >=120-char base64 run
+    (or >=200-char hex run), contiguous OR reassembled from concat/array chunks, is ubiquitous
+    benign DATA: JWTs, API tokens, SRI hashes, cert-pin / JWKS key arrays, crypto KAT vectors,
+    hex keys, inlined assets. A lone blob is therefore never flagged. But a blob DECODED THROUGH A
+    VARIABLE and then RUN — `const d = Buffer.from(p,'base64'); execSync(d)` — is the in-file
+    dropper #1266's nested check misses and #1212's removal opened; it is flagged when a blob is
+    present AND a decode result flows (in scope, one hop) into a command/`import(`/`Worker` sink
+    (`_has_encoded_payload` + `_decode_var_into_exec`). The corroboration keeps a lone JWT / key /
+    asset clean. Residual: a loader whose exec is in ANOTHER file, or reached by multi-hop
+    reassignment (indistinguishable from a lone blob without cross-file/whole-program dataflow).
   * dense escape-encoded byte run  — a payload written as a contiguous >=48 run of
     `\\xNN`/`\\uNNNN` escapes decoding to high-entropy BYTES; caught after normalizing
     concat/array reassembly seams away (#1053). Unlike base64 this HAS no benign-data
@@ -67,11 +70,11 @@ we require either a *self-evidently executable* obfuscation construct OR a
     packed/encoded payload looks random; prose and code do not.
 
 The verdict requires a dynamic-exec sink, OR a charcode/hex array, OR a dense
-escape-encoded byte run, OR (minification spike AND entropy spike together). A
-base64 blob (contiguous or arrayed), a lone high-entropy signal, and a lone long
-line are NOT enough on their own — those are exactly the benign "embedded token /
-key array / asset", "long config value", and "generated data line" shapes, left to
-corroborate elsewhere (#1212).
+escape-encoded byte run, OR an encoded blob whose decode flows into a sink, OR
+(minification spike AND entropy spike together). A LONE encoded blob (base64/hex,
+contiguous or arrayed), a lone high-entropy signal, and a lone long line are NOT
+enough on their own — those are exactly the benign "embedded token / key array /
+asset", "long config value", and "generated data line" shapes (#1212).
 
 Build-artifact blind spot (deliberate; see docs/SECURITY_ARCHITECTURE.md → "Provenance is
 not trust"). This heuristic is suppressed on generated/build/minified paths
@@ -225,21 +228,22 @@ def _has_obfuscated_exec_forms(s: str) -> bool:
 def _has_exec_sink(s: str, strict: bool = False) -> bool:
     """True if `s` contains a dynamic-execution sink: any literal `_EXEC_SINK` construct, a
     case-sensitive `_REFLECTIVE_EXEC` form (computed-key access to a dangerous global, or a
-    double-constructor Function reach), a #1208 residual form (non-literal import or
-    constructed child_process command — the gap still open after #1266), a #1207 obfuscated
-    form (split-token via concat-fold, indirect comma-call, light alias / runtime-key), or a
-    SINGLE reflective bracket-constructor call that is NOT a `new`-prefixed polymorphic clone
-    (the benign idiom the worm never uses). Every single-constructor occurrence is checked, so
-    a `new`-clone earlier can't mask a real sink later.
+    double-constructor Function reach), a #1208 residual form (see `_has_corroborated_dynamic_exec`),
+    a #1207 obfuscated form (split-token via concat-fold, indirect comma-call, light alias /
+    runtime-key), or a SINGLE reflective bracket-constructor call that is NOT a `new`-prefixed
+    polymorphic clone (the benign idiom the worm never uses). Every single-constructor occurrence is
+    checked, so a `new`-clone earlier can't mask a real sink later.
 
-    `strict=True` DROPS the `new`-clone carve-out — every single bracket-constructor call counts.
-    This is for gates that must not KEEP a possibly-hostile reflective constructor (e.g. deciding a
-    surgically-excised file is benign enough to auto-clean): there, deferring on the benign idiom is
-    a safe false-positive, whereas trusting it could pass an RCE hidden in kept code."""
+    `strict=True` is the REMEDIATION gate mode (deciding a surgically-excised file is benign enough
+    to auto-clean), and makes the whole check MORE conservative in two ways: (1) it DROPS the
+    `new`-clone carve-out — every single bracket-constructor call counts; and (2) it enables the
+    BROAD #1208 arms (any non-literal import / constructed child_process command) that are too
+    FP-prone for a scan finding (#1289) but safe as a gate. In both, deferring on a benign shape is a
+    safe false-positive, whereas trusting it could pass an RCE hidden in kept code."""
     # Fold first so `'ev'+'al'` becomes `'eval'` before every arm (including #1208 scrub).
     view = _fold_string_concats(s)
     if (_EXEC_SINK.search(view) or _REFLECTIVE_EXEC.search(view)
-            or _has_corroborated_dynamic_exec(view) or _has_obfuscated_exec_forms(view)):
+            or _has_corroborated_dynamic_exec(view, strict=strict) or _has_obfuscated_exec_forms(view)):
         return True
     return any(
         strict or not _NEW_CLONE_PREFIX.search(view[max(0, m.start() - 48):m.start()])
@@ -276,31 +280,34 @@ _DECODE_INTO_EXEC = re.compile(
     re.IGNORECASE,
 )
 
-# ── #1208 residual (after #1206 + #1266) ──────────────────────────────────────────
-# Timeline: #1208 was filed ~5 min after #1206 as the deliberate residual tracker.
-# Five days later #1266 closed the DECODE→exec half (`import(atob`, `execSync(Buffer.from`,
-# …). This block does NOT re-implement #1266 — it only closes what is STILL missing:
+# ── #1208 residual (after #1206 + #1266), TIGHTENED per #1289 ──────────────────────
+# Timeline: #1208 was filed ~5 min after #1206 as the deliberate residual tracker; #1266 then
+# closed the DECODE→exec half (`import(atob`, `execSync(Buffer.from`). v0.1.17 closed the rest with
+# two BROAD arms — any non-literal `import(x)`, any constructed `execSync(cmd + …)` — which #1289
+# found FP-prone at near-zero precision: every React.lazy / `@/`-alias / i18n dynamic import and
+# every build script (`execSync(`npm run ${task}`)`) fires. A bare dynamic import or a runtime-built
+# command is NOT, on its own, separable from ordinary code (same wall as #1185) — so those broad
+# arms must not raise a SCAN finding.
 #
-# 1) `require('vm').runInContext` — in `_EXEC_SINK` above (the dotted `vm.` arm from #1206
-#    missed the `require('vm').` form). Lodash `_.runInContext()` stays clean.
+# The fix is a SENSITIVITY SPLIT keyed on `_has_exec_sink`'s existing `strict` flag, because the two
+# callers want opposite things:
+#   • the SCAN verdict (strict=False) wants PRECISION — only shapes with no benign analogue, so a
+#     lazy-import / build script never becomes a SUSPICIOUS finding. TIGHT arms only:
+#       2a) a `data:` EXECUTABLE-module dynamic import — an inline (java|ecma)script / base64 module
+#           passed to `import(`. No benign analogue; the signal lives INSIDE the specifier string so
+#           this arm runs on a COMMENT-scrubbed view (strings KEPT — a full string scrub blanks it).
+#       2b) a require-RECEIVER child_process runner fed a DECODE — `require('cp').exec(atob(x))` — the
+#           form #1266's bare-name set misses. Full comment+string scrub (module name blanked).
+#       (`require('vm').runInContext` is in `_EXEC_SINK`; `import(atob(x))` is #1266's `_DECODE_INTO_EXEC`.)
+#   • the REMEDIATION gate (strict=True) wants CONSERVATISM — "the kept code MIGHT dynamically exec,
+#     so REFUSE to auto-clean." There an over-broad match is SAFE (defer to manual); a miss is not. So
+#     the broad arms (bare non-literal import, any constructed child_process command) are KEPT, but
+#     used ONLY under strict. Nothing is downgraded — the broad coverage moves to exactly the caller
+#     where a false positive is the safe direction.
 #
-# 2) Dynamic `import(` of a NON-LITERAL specifier — stage-2 load without needing a decode.
-#    After optional block comments, the next non-ws token is NOT a string/template opener
-#    (`import(url)`, `import(atob(x))`) OR it is a template with `${…}` that does NOT start
-#    as a relative path (`` import(`${url}`) `` fires; `` import(`./x/${y}`) `` stays clean —
-#    the Vite/Webpack route shape). String-prefixed `import('./routes/'+name)` stays clean
-#    because the arg STARTS with a quote. `(?<![.\w$])` keeps `System.import` / `loader.import`
-#    out (same global-only gate as the #1206 timer arm).
-#
-# 3) `child_process` runners with a CONSTRUCTED first arg (concat / `${…}`) — the #1208 ask
-#    that #1266 does not cover (no decode). Bare `execSync(cmd)` / `execSync('npm …')` stay
-#    clean. Also `require('child_process').exec(Sync)?(` with a constructed or decode arg
-#    (bare `exec(` stays out of the name set — regex.exec; the require receiver is the gate).
-#
-# Heuristic → SUSPICIOUS (informs; never CI-fails; never auto-remediates). Patterns run over
-# a comment/'/'-string-scrubbed view so docs/string mentions don't fire. Template bodies are
-# kept so the relative-path carve-out can see `./`. Hard residual: fully indirect
-# `const i = import; i(url)`, destructured bare `runInContext` (lodash).
+# Heuristic → SUSPICIOUS (informs; never CI-fails; never auto-remediates). Hard residual: a bare
+# dynamic import / runtime-built command with no decode or data:-URI tell (deliberately NOT a scan
+# finding — indistinguishable from legit lazy-load / build tooling), fully-indirect `const i=import`.
 _CONSTRUCTED_ARG = (
     r"(?:"
     + r"[\"'][^\"'\n]{0,200}[\"']\s*\+"          # 'cmd' + …
@@ -329,13 +336,228 @@ _CONSTRUCTED_CP = re.compile(
     + r"(?:\?\s*)?\.\s*exec(?:Sync)?\s*\(\s*(?:" + _CONSTRUCTED_ARG + r"|" + _DECODE + r")",
     re.IGNORECASE,
 )
+# TIGHT arms (always on — precise enough for a SCAN finding, #1289).
+# 2a) A `data:` URI that is a JS-MIME module AND base64-ENCODED, passed to `import(` — the inline
+#     encoded stage-2 loader. BOTH gates matter (accuracy, FP-hunt):
+#       • MIME must be (java|ecma)script — ESM only RUNS a JS-MIME data: import; a
+#         `data:application/json;base64,…` module is inert DATA.
+#       • it must be `;base64,`-ENCODED — a PLAINTEXT `data:text/javascript,export const x=1` import
+#         is a documented, standards-blessed inline-module idiom (module-loader tests, REPL/playground
+#         tools, Deno) whose code is READABLE, i.e. not obfuscation. Only the base64-encoded form is a
+#         concealed payload. Requiring both keeps the readable inline-module case CLEAN.
+#     Runs on a COMMENT-only scrubbed view (see `_has_corroborated_dynamic_exec`): the tell is INSIDE
+#     the specifier string, which a full string-scrub would blank. Bounded lookaheads keep it linear.
+_DATA_URI_IMPORT = re.compile(
+    r"(?<![.\w$])import\s*\(\s*(?:/\*[\s\S]{0,200}?\*/\s*)*['\"\x60]\s*data:"
+    r"[^'\"\x60\n]{0,80}?(?:java|ecma)script[^'\"\x60\n]{0,40}?;base64,",
+    re.IGNORECASE,
+)
+# 2b) A require-RECEIVER command runner fed a DECODE — `require('child_process').exec(atob(x))`,
+#     `require('shelljs').execSync(Buffer.from(x))`. The bare-name #1266 set (`execSync(decode)`)
+#     misses the `.exec` on a required module. The module is CONSTRAINED to real command runners
+#     (child_process / shelljs) — a wildcard module FP'd on `require('./re').exec(Buffer.from(x))`
+#     (RegExp.exec) and `require('./db').exec(<decoded SQL>)` (sqlite .exec). Runs on a
+#     strings-KEPT (comment-only) scrub so the module name is visible; the decode arg is the tell.
+_CP_METHOD = r"(?:exec|execSync|execFile|execFileSync|spawn|spawnSync|fork)"
+_REQUIRE_CP_DECODE = re.compile(
+    r"\brequire\s*\(\s*(?:/\*[\s\S]{0,200}?\*/\s*)*['\"](?:node:)?(?:child_process|shelljs)['\"]\s*\)\s*"
+    r"(?:\?\s*)?\.\s*" + _CP_METHOD + r"\s*\(\s*" + _DECODE,
+    re.IGNORECASE,
+)
 
 
-def _scrub_comments_and_strings(s: str) -> str:
+# ── Variable-indirected decode→exec dropper (#1266 residual; restores the #1212 base64 arm,
+#    TIGHTENED so it can never FP on a lone blob) ─────────────────────────────────────────────
+# #1266's `_DECODE_INTO_EXEC` catches only a decode NESTED in the sink (`execSync(Buffer.from(…))`).
+# It (and #1212's removal of the standalone base64 arm) leaves a real blind spot the user hit: a
+# hardcoded base64 payload decoded through a VARIABLE and then run —
+#     const p = '<blob>'; const d = Buffer.from(p, 'base64'); execSync(d);
+# Neither half is a signal alone: the blob at rest is ubiquitous benign DATA (JWT / API token /
+# SRI hash / cert-pin·JWKS key array / crypto KAT / inlined asset) — flagging it standalone is the
+# exact #1212 FP that stays removed — and a bare decode is a normal JWT/asset read. The TELL is the
+# two together: an encoded blob is present AND a decode result flows into a command/module/worker
+# sink. So we RESTORE the encoded-blob check (deleted by #1212) but ONLY as a CORROBORATOR to the flow,
+# never a standalone verdict. This also stays inside saw's baked-payload threat model: requiring a
+# hardcoded blob means a `Buffer.from(networkInput); execSync(…)` runtime-RCE (no baked blob) is left
+# to other tooling rather than false-alarming here.
+
+# The encoded blob a decode→exec flow is corroborated against — RESTORED from #1212 as a
+# corroborator only (see above); callers strip data-URIs first so an inline asset never corroborates.
+# Two alphabets, because a payload can be baked as either:
+#   • base64 — a >=120-char high-entropy [A-Za-z0-9+/] run (NOT a low-entropy placeholder / URL).
+#   • hex    — a >=200-char run of hex digits. Hex maxes at ~4.0 bits/char (16 symbols), BELOW the
+#     base64 4.5 gate, so it needs its own check or a `Buffer.from(p,'hex')` dropper is missed
+#     (FN-hunt). The length floor (200 = 100 bytes) sits above a SHA-512 (128) / 3×SHA-256 (192)
+#     hash so an embedded digest does not corroborate; a modest 3.5 entropy gate drops repeated-char
+#     hex padding. Both are corroborators ONLY — never a standalone verdict (a lone key/hash is data).
+_B64_BLOB = re.compile(r"[A-Za-z0-9+/]{120,}={0,2}")
+_B64_BLOB_MIN_ENTROPY = 4.5
+_HEX_BLOB = re.compile(r"(?<![0-9a-fA-Fx])[0-9a-fA-F]{200,}(?![0-9a-fA-F])")
+_HEX_BLOB_MIN_ENTROPY = 3.5
+
+
+def _has_encoded_payload(text: str) -> bool:
+    """True if `text` carries a baked base64 OR hex encoded blob (see `_B64_BLOB`/`_HEX_BLOB`). NOT a
+    verdict on its own — the #1212 FP class (a mock JWT / a hex key is exactly this shape) — used
+    ONLY to corroborate `_decode_var_into_exec`."""
+    for m in _B64_BLOB.finditer(text):
+        if _shannon(m.group(0)) >= _B64_BLOB_MIN_ENTROPY:
+            return True
+    for m in _HEX_BLOB.finditer(text):
+        if _shannon(m.group(0)) >= _HEX_BLOB_MIN_ENTROPY:
+            return True
+    return False
+
+
+# A base64/hex decode (`atob(` / `Buffer.from(`) ASSIGNED to a variable, whose name is captured so
+# we can look for that variable flowing into a sink. Optional declaration keyword (const/let/var or a
+# bare reassignment); `(?<![.\w$])` keeps a property write `obj.d =` and mid-identifier matches out;
+# `(?!=)` rejects `==`/`===`/`=>` (comparison / arrow, not an assignment of the decode).
+_DECODE_TO_VAR = re.compile(
+    r"(?:(?:const|let|var)\s+)?(?<![.\w$])([A-Za-z_$][\w$]*)\s*=(?!=)\s*" + _DECODE
+)
+_INDIRECT_SINK_WINDOW = 300   # chars after the decode-assignment in which the sink must appear
+_MAX_DECODE_VARS = 50         # cap the assignments scanned so a hostile file can't blow up the walk
+
+
+# The decoded value reaches a sink as its LEADING arg used DIRECTLY — bare, or through a chain of
+# METHOD CALLS (`d.toString('utf8').trim()`, a real decode idiom) — NEVER as a bare PROPERTY of it:
+# `spawn(cfg.cmd, cfg.args)` / `import(mod.entry)` mean the variable is a structured config OBJECT,
+# not raw decoded bytes, so a name collision there was a FP (FP-hunt). Tail = zero or more
+# `.method(...)` calls then a `,` or `)`. A property access (`.cmd` with no `()`) breaks the chain.
+_DECODED_ARG_TAIL = r"\s*(?:\.\s*[\w$]+\s*\([^)]*\))*\s*[,)]"
+# A parameter list that BINDS names — `(params)` followed by `{` (function / method / class-method /
+# `catch` body) or `=>` (arrow) — so we can tell a re-bound same-name (a collision) from the decoded
+# var. A leading control-flow keyword (`if (cond) {` …) is excluded: it does NOT bind a name. The
+# `{0,120}` bound keeps this linear on a hostile `(`-run (an unbounded `[^)]*` is O(n^2) per
+# test_redos_safety); a param list longer than 120 chars simply isn't checked for re-binding.
+_PARAMS_THEN_BODY = re.compile(r"\(([^)\n]{0,120})\)\s*(?:=>|\{)")
+_CONTROL_HEADS = {"if", "for", "while", "switch", "with"}
+
+
+def _trailing_ident(s: str) -> str:
+    """The identifier at the end of `s` (after trailing whitespace), by a linear backward scan. A
+    `$`-anchored regex (`[\\w$]*\\s*$`) backtracks quadratically on a hostile all-word run, so this is
+    plain string work instead (test_redos_safety enforces boundedness on every module-level regex)."""
+    j = len(s)
+    while j > 0 and s[j - 1].isspace():
+        j -= 1
+    i = j
+    while i > 0 and (s[i - 1].isalnum() or s[i - 1] in "_$"):
+        i -= 1
+    return s[i:j]
+
+
+def _sink_takes_var(name: str) -> "re.Pattern[str]":
+    """A sink (child_process runner / dynamic `import(` / `new Worker(`) whose LEADING argument is the
+    variable `name` (already re.escape'd) used directly — see `_DECODED_ARG_TAIL`."""
+    return re.compile(
+        _CP_RUNNERS + r"\s*\(\s*" + name + _DECODED_ARG_TAIL
+        + r"|(?<![.\w$])import\s*\(\s*" + name + _DECODED_ARG_TAIL
+        + r"|\bnew\s+Worker\s*\(\s*" + name + _DECODED_ARG_TAIL)
+
+
+def _name_rebound(gap: str, name: str) -> bool:
+    """True if `name` (re.escape'd) is re-declared or re-introduced as a PARAMETER inside `gap` —
+    meaning the sink's variable is a DIFFERENT binding than the decode's (a name collision, not a
+    data flow). This catches a MODULE-LEVEL decode var colliding with a same-named param in a later
+    function/method, which the brace-depth check alone cannot see (a module binding has no enclosing
+    `}` to close). Recognizes EVERY param-binding form — `function f(x)`, ES6 method-shorthand /
+    class method `m(x){}`, `catch(x){}`, and arrows `(x)=>` / `x=>` — by matching any `(params)`
+    that is followed by `{` or `=>`, minus a leading control-flow head (`if`/`for`/… bind nothing)."""
+    if re.search(r"(?:const|let|var)\s+" + name + r"\b", gap):
+        return True
+    name_re = re.compile(r"(?<![.\w$])" + name + r"\b")
+    for m in _PARAMS_THEN_BODY.finditer(gap):
+        if _trailing_ident(gap[max(0, m.start() - 40):m.start()]) in _CONTROL_HEADS:
+            continue                       # `if (cond) {` etc. — a condition, binds nothing
+        if name_re.search(m.group(1)):
+            return True
+    # single-ident arrow with no parens — `name => …` (not covered by _PARAMS_THEN_BODY)
+    return re.search(r"(?<![.\w$])" + name + r"\s*=>", gap) is not None
+
+
+def _decode_var_into_exec(s: str) -> bool:
+    """True if a base64/hex decode assigned to a variable then flows, within a short window AND
+    WITHOUT leaving the variable's scope, into a command / dynamic-module / worker sink:
+    `const d = Buffer.from(p, 'base64'); execSync(d)`. This is the #1266 residual the nested
+    `_DECODE_INTO_EXEC` misses (decode via a VARIABLE) and the #1212 blind spot. The sink set is
+    #1266's (child_process runners / `import(` / `new Worker(`) — `eval`/`Function`/`atob` are already
+    standalone `_EXEC_SINK`s so a decoded value reaching THEM is caught without this.
+
+    THREE accuracy guards keep a short, ubiquitous var name (`p`, `data`, `config`) from FP'ing on a
+    coincidental collision (FP-hunt):
+      • the sink must take the decoded var DIRECTLY (bare or `.toString()`'d), never a PROPERTY of it
+        (`spawn(cfg.cmd,…)` / `import(mod.entry)` mean it's a config object, not decoded bytes);
+      • the name must not be RE-BOUND (re-declared / a function-or-arrow param) between decode and
+        sink — that is a different binding (`_name_rebound`; catches a module-level decode colliding
+        with a later same-named param);
+      • the sink must sit at a brace depth the decode's block has not already closed (`_name_rebound`
+        can't see a re-use with no re-declaration in a sibling block; the depth check does).
+    We scrub strings/comments FIRST so their braces (and any `import(`-in-a-string) never skew the
+    depth or match. Bounded window + assignment cap keep it linear. Purely static — matched in text,
+    never decoded or run.
+
+    Residuals (all the same #1185 infeasibility family — closing them needs whole-program dataflow,
+    and each is covered by the CONFIRMED loader-fingerprint tier + Tier-2 density independently):
+      • multi-hop reassignment — `d=Buffer.from(); c=d.toString(); exec(c)`;
+      • a HOISTED binding assigned inside a nested block, run after the block closes —
+        `let d; if(c){ d=Buffer.from(p,'base64'); } execSync(d);` — the block's `}` drives the depth
+        negative so the scope check treats it as out-of-scope. Deliberate cost of the scope check,
+        which fixes the far more realistic cross-function name-collision FP; the natural dropper keeps
+        decode+exec together inside the block (caught), so this shape is contrived;
+      • `sh -c <decoded>` as a NON-leading arg — `spawn('sh',['-c',d])` / `execSync('sh -c '+d)`. The
+        LEADING-arg anchor is shared with #1266 and is the FP-safe choice (a decoded value in an
+        args[] array is often benign); catching the shell-invocation form needs an `sh`/`-c`-aware
+        arg scan — a worthwhile follow-up, not this arm's regression;
+      • a deliberately-planted same-name arrow decoy between decode and exec — `const d=Buffer.from(p);
+        arr.map(d=>d.id); execSync(d)` — the re-bind guard skips it; requires an exact-name shadow, so
+        it is an evasion-only shape, not a natural dropper."""
+    view = _scrub_comments_and_strings(s)   # code braces kept, string/comment braces removed
+    for i, m in enumerate(_DECODE_TO_VAR.finditer(view)):
+        if i >= _MAX_DECODE_VARS:
+            break
+        name = re.escape(m.group(1))
+        window = view[m.end():m.end() + _INDIRECT_SINK_WINDOW]
+        for sm in _sink_takes_var(name).finditer(window):
+            gap = window[:sm.start()]
+            # (1) Re-binding guard: if the name is re-declared or re-introduced as a function/arrow
+            #     PARAMETER before the sink, the sink's variable is a different binding — a name
+            #     collision, not a flow (FP-hunt: a MODULE-LEVEL `const data=Buffer.from(…)` and a
+            #     later `function run(data){ spawn(data,…) }`; a module binding has no `}` to close so
+            #     the brace check below can't see it).
+            if _name_rebound(gap, name):
+                continue
+            # (2) Scope-exit guard: the decode's binding is in scope at the sink only if its block has
+            #     NOT closed between them — the running brace depth never drops below 0 (an unmatched
+            #     `}` that exits the binding's scope). A later `{` re-opening a sibling scope must NOT
+            #     mask that exit, so we test for depth going negative at any point, not the final depth
+            #     (`const p=…}` in one function then `import(p)` in the NEXT is a collision, not a flow).
+            depth = 0
+            closed = False
+            for ch in gap:
+                if ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth < 0:
+                        closed = True
+                        break
+            if not closed:
+                return True
+    return False
+
+
+def _scrub_comments_and_strings(s: str, scrub_strings: bool = True) -> str:
     """Scrub // and /* */ comments and ' / \" string *contents* (same length, spaces) so a
     #1208 pattern can't fire on documentation or a string that merely mentions `import(url)`.
     Template literal BODIES are kept intact (the relative-path carve-out must see `./`);
-    only `${…}` expression interiors are scrubbed. Best-effort — not a full JS lexer."""
+    only `${…}` expression interiors are scrubbed. Best-effort — not a full JS lexer.
+
+    `scrub_strings=False` scrubs comments ONLY, keeping '/\" string contents verbatim. The
+    data:-URI-import arm needs this: its tell (`data:…;base64,`) lives INSIDE the specifier
+    string, so a full string scrub would blank the very thing it matches — but a mention in a
+    // or /* */ comment must still be silenced."""
     out: list[str] = []
     i, n = 0, len(s)
     while i < n:
@@ -397,14 +619,14 @@ def _scrub_comments_and_strings(s: str) -> str:
             while i < n:
                 ch = s[i]
                 if ch == "\\" and i + 1 < n:
-                    out.append("  ")
+                    out.append(s[i:i + 2] if not scrub_strings else "  ")
                     i += 2
                     continue
                 if ch == quote:
                     out.append(ch)
                     i += 1
                     break
-                out.append("\n" if ch == "\n" else " ")
+                out.append(ch if not scrub_strings else ("\n" if ch == "\n" else " "))
                 i += 1
             continue
         out.append(c)
@@ -412,11 +634,30 @@ def _scrub_comments_and_strings(s: str) -> str:
     return "".join(out)
 
 
-def _has_corroborated_dynamic_exec(s: str) -> bool:
-    """True if `s` has a #1208 residual form still missing after #1266. Scrubbed view;
-    folded into `_has_exec_sink` so remediation shares the yardstick (FP → defer, safe)."""
-    scrubbed = _scrub_comments_and_strings(s)
-    return bool(_DYNAMIC_IMPORT.search(scrubbed) or _CONSTRUCTED_CP.search(scrubbed))
+def _has_corroborated_dynamic_exec(s: str, strict: bool = False) -> bool:
+    """True if `s` has a #1208 residual form still missing after #1266. Folded into
+    `_has_exec_sink`, whose `strict` flag splits the two callers' opposite needs (#1289):
+
+      * ALWAYS (both callers) — the TIGHT, no-benign-analogue arms suitable for a SCAN finding: a
+        `data:` executable-module `import(` (its tell lives in the specifier string, so a
+        COMMENT-only scrub) and a require-receiver command runner fed a decode.
+      * strict=True ONLY (the remediation "is the kept code safe to auto-clean?" gate) — the BROAD
+        arms (any non-literal `import(`, any constructed child_process command). Too FP-prone to
+        raise a finding, but as a conservative gate a false positive is the SAFE direction (defer to
+        manual). Keeping them here — not deleting them — is why the tighten downgrades nothing."""
+    # Both TIGHT arms need string CONTENTS: 2a's tell (`data:…;base64,`) and 2b's module name
+    # (`'child_process'`) live inside strings, so a full string-scrub would blank them. Use a
+    # comment-only scrub (strings kept) — a mention in a // or /* */ comment is still silenced.
+    kept = _scrub_comments_and_strings(s, scrub_strings=False)
+    if _DATA_URI_IMPORT.search(kept) or _REQUIRE_CP_DECODE.search(kept):
+        return True
+    # The BROAD arms (strict/remediation-gate only) match code shapes, so a full string scrub is
+    # right there — a docs string mentioning `import(url)` / `execSync(cmd+x)` must not trip the gate.
+    if strict:
+        scrubbed = _scrub_comments_and_strings(s)
+        if _DYNAMIC_IMPORT.search(scrubbed) or _CONSTRUCTED_CP.search(scrubbed):
+            return True
+    return False
 
 
 # A self-describing inline asset (image/font/media data-URI). Stripped before the density
@@ -666,14 +907,19 @@ def analyze_file(text: str, ext: str = "", constructs_only: bool = False) -> Obf
     # are indistinguishable from a split-payload reassembly without runtime data flow. A real
     # packed loader is still caught by its EXEC step — the exec-sink / decode→exec / charcode-
     # array / escape-run arms, or the CONFIRMED loader-fingerprint tier that scans this file
-    # independently — not by the mere presence of encoded bytes at rest. A base64 payload
-    # decoded through a VARIABLE (indirection) before an uncovered sink is the residual #1266
-    # still tracks (the direct decode→exec flow above is now caught).
+    # independently — not by the mere presence of encoded bytes at rest.
     #
+    # BUT a hardcoded blob decoded through a VARIABLE and then RUN is the dropper the nested
+    # #1266 check misses (`const d = Buffer.from(p,'base64'); execSync(d)`). Flag ONLY that
+    # conjunction — an encoded blob present AND a decode→variable→command/module/worker flow —
+    # so a lone blob (the #1212 FP class) stays clean while the in-file dropper is caught.
+    # _dechunk first so a split/concat-reassembled blob still corroborates.
+    deassetted = _DATA_URI.sub("", flat)
+    if _has_encoded_payload(_dechunk(deassetted)) and _decode_var_into_exec(body):
+        return ObfuscationVerdict(True, "base64 payload decoded via a variable and run (command/module/worker sink)")
     # The dense escape-encoded byte run stays: unlike base64, a 48+ `\xNN`/`\uNNNN` run gated
     # on byte-range + entropy has no benign-data analogue (nobody writes a token/asset that
     # way), so it is FP-safe. _dechunk first so a chunked escape payload is reassembled.
-    deassetted = _DATA_URI.sub("", flat)
     if _escape_run(_dechunk(deassetted)):
         return ObfuscationVerdict(True, "dense escape-encoded byte payload (\\xNN/\\uNNNN run)")
 
@@ -746,8 +992,14 @@ def analyze_delta(introduced: str, baseline: str = "") -> ObfuscationVerdict:
         return ObfuscationVerdict(True, "base64/hex decoded and run via a command/module sink (child_process/import/Worker)")
     # A base64 blob is NOT a delta verdict on its own (#1212): a merge/feature commit that
     # introduces a base64 token, a cert-pin / JWKS key array, or a KAT-vector table is data,
-    # not an evil-merge tell. A genuinely merge-introduced payload is caught by its exec sink
-    # (above), the decode→exec flow, its charcode array, or the loader-fingerprint corroboration.
+    # not an evil-merge tell. But a blob decoded through a VARIABLE and then RUN inside the hunk
+    # (`const p='<blob>'; const d=Buffer.from(p,'base64'); execSync(d)`) is the evil-merge dropper
+    # #1266's nested check misses — flag only that conjunction (blob present AND decode→var→sink).
+    de_intro = _DATA_URI.sub("", text)
+    if _has_encoded_payload(_dechunk(de_intro)) and _decode_var_into_exec(text):
+        return ObfuscationVerdict(True, "base64 payload decoded via a variable and run (command/module/worker sink)")
+    # A genuinely merge-introduced payload is otherwise caught by its exec sink (above), the
+    # nested decode→exec flow, its charcode array, or the loader-fingerprint corroboration.
 
     # 2) Corroborated density anomaly: a previously-formatted file that suddenly
     #    gains a very long single line that ALSO reads as high-entropy packed text.
