@@ -19,9 +19,8 @@ import sys
 from stayawake.bots.security.models import Finding, Severity
 from stayawake.bots.security.matchers.base import (
     Matcher, globs_ok, FONT_MAGIC, BINARY_MAGIC, build_content_sig)
-from stayawake.bots.security.obfuscation import (
-    analyze_file, is_generated_context, _AUTHORED_OBFUSCATABLE_EXTS,
-)
+from stayawake.bots.security.obfuscation import analyze_file, is_generated_context
+from stayawake.bots.security.obfuscation.heuristics import _AUTHORED_OBFUSCATABLE_EXTS
 from stayawake.bots.security.matchers.obfuscation import _ext
 
 # Whitespace concealment (T1027/T1564): a payload pushed off-screen behind a long run of
