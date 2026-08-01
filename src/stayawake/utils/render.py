@@ -25,6 +25,8 @@ import textwrap
 from pathlib import Path
 from typing import TextIO
 
+from stayawake.utils import textsafe
+
 RESET = "\033[0m"
 
 # The ONE colour vocabulary the whole CLI shares. Callers reference a level by name; the ANSI
@@ -66,9 +68,16 @@ def path_link(path: Path | str, *, on: bool) -> str:
     click / Cmd-click opens the file or folder in the OS without typing a command — the UX ask for
     operators who aren't comfortable with shell navigation (#1203). When `on` is False (piped /
     NO_COLOR / CI) return the plain path string — scripts and logs never see escape sequences.
-    The visible text is still the full path, so copy-paste works even where hyperlinks don't."""
+    The visible text is still the full path, so copy-paste works even where hyperlinks don't.
+
+    Safe for an UNTRUSTED path (#1294): the visible text is run through `textsafe.plain`, so a path
+    that embeds control/escape (a nested OSC/CSI, a BEL) or bidi-override characters can't hijack the
+    terminal or inject a workflow-command into a CI log — those become spaces. The OSC 8 target URI is
+    built from the resolved path via `Path.as_uri()` (percent-encoded), so the click destination stays
+    exact even after the visible text is sanitized. Today's callers pass a trusted report destination;
+    this keeps the shared util safe by default for any future caller that doesn't."""
     p = Path(path)
-    text = str(p)
+    text = textsafe.plain(str(p), limit=4096)   # neutralize terminal/log control·escape·bidi; PATH_MAX-generous
     if not on:
         return text
     try:

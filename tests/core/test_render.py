@@ -42,6 +42,20 @@ class TestPathLink(unittest.TestCase):
         self.assertIn(render.RESET, out)
         self.assertTrue(out.endswith("\033]8;;\033\\"))     # link closer
 
+    def test_untrusted_path_cannot_inject_terminal_escapes(self):
+        # #1294: a path embedding a nested OSC-8 escape + a bidi override must not hijack the terminal
+        # or a CI log. The visible text is sanitized; the click target is still built from the raw path.
+        from pathlib import Path
+        evil = Path("/tmp/\033]8;;http://evil\033\\click‮dm.md")
+        off = render.path_link(evil, on=False)
+        self.assertNotIn("\033", off)                       # every control/escape char neutralized
+        self.assertNotIn("‮", off)                     # bidi override neutralized
+        on = render.path_link(evil, on=True)
+        self.assertNotIn("\033]8;;http://evil", on)         # the injected OSC-8 opener did NOT survive
+        self.assertNotIn("‮", on)
+        self.assertIn("\033]8;;file://", on)                # our own hyperlink wrapper is intact
+        self.assertTrue(on.endswith("\033]8;;\033\\"))
+
 
 class TestRule(unittest.TestCase):
     def test_width(self):
