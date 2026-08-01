@@ -157,7 +157,9 @@ def drift() -> int:
         return 0
 
     print(f"::warning::engine has drifted from the pinned scanner ({pin})")
-    names = _run(["git", "diff", "--name-only", pin, "HEAD", "--", ENGINE_SUBTREE]).stdout.split()
+    # splitlines() (per-line), NOT split() (any whitespace) — a path containing a space is ONE file,
+    # one bullet, matching the old `sed 's/^/- /'` behaviour of check_pin_drift.sh (#1293).
+    names = _run(["git", "diff", "--name-only", pin, "HEAD", "--", ENGINE_SUBTREE]).stdout.splitlines()
     changed = "\n".join(f"- {n}" for n in names)
     short = _run(["git", "rev-parse", "--short", "HEAD"]).stdout.strip()
     if existing:
