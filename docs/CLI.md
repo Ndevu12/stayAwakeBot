@@ -333,11 +333,23 @@ saw guard check --user Ndevu12 -f    # gate CI on all of a user's repos
 
 Install the gate, or **surgically bump an existing pin**, **across the resolved repos** — same target
 model as [`saw guard check`](#saw-guard-check) and `scan`/`fix`. Resolves the **latest Strix release
-to a commit SHA** and writes a report-only, least-privilege workflow (or rewrites *only* the `uses:`
-ref of an existing gate — the rest of the file is untouched). **Idempotent** (create / bump / no-op /
-already-guarded) and **fails closed** if the SHA can't be resolved. It **never pushes to a default
-branch**: **local** by default (writes into each working tree for you to review + commit + PR),
-`--pr` opens one PR per repo, and `--remote` clones each GitHub repo and opens a PR.
+to a commit SHA** and writes a workflow with **two least-privilege jobs** (or rewrites *only* the
+`uses:` ref of an existing gate — the rest of the file is untouched):
+
+- **`worm-guard`** (on PR/push) — scans and, on an infected verdict, opens ONE rolling
+  `security/auto-clean` **fix PR** via the Strix action's `remediate: pr`. Granted `contents: write` +
+  `pull-requests: write` **at the job level**; the gate still goes **red until that PR is merged**. Its
+  `token:` prefers a **`GH_SECURITY_TOKEN`** secret (so the fix PR itself gets scanned) and falls back
+  to the built-in `github.token`.
+- **`pin-drift`** (weekly + manual, `issues: write` only) — runs [`saw guard drift`](#saw-guard-drift)
+  to file one self-closing issue if the pinned Strix release falls behind.
+
+**Idempotent** (create / bump / no-op / already-guarded) and **fails closed** if the SHA can't be
+resolved. It **never pushes to a default branch**: **local** by default (writes into each working tree
+for you to review + commit + PR), `--pr` opens one PR per repo, and `--remote` clones each GitHub repo
+and opens a PR. The install PR body lists the two follow-ups a PR can't do itself: enable
+**Settings → Actions → General → “Allow GitHub Actions to create and approve pull requests”**, and
+(optionally) add the **`GH_SECURITY_TOKEN`** secret.
 
 ```text
 saw guard setup [TARGETS...] [-p PATH] [-c FILE] [--pr] [-r] [--user U] [--org O]
@@ -361,9 +373,36 @@ saw guard setup --pr                            # open a rolling install/bump PR
 saw guard setup --user Ndevu12                  # clone each of a user's repos and open a gate PR
 ```
 
-Auto-remediation (a cleanup PR on an infected default branch) needs scoped write permissions and is
-deliberately **opt-in** — it is *not* enabled by `saw guard setup`; see the Strix README's
-Auto-remediation section.
+Auto-remediation (a cleanup PR on an infected default branch) is **enabled by default** in the
+installed gate via the Strix action's `remediate: pr`. It is safe by design: it opens a **reviewed
+PR** and never commits to the default branch, and the gate stays **red until you merge the fix** — so
+the check never passes on the strength of an unreviewed auto-change.
+
+#### `saw guard drift`
+
+The **out-of-band protection backstop** — **across repos**, same target model as
+[`saw guard check`](#saw-guard-check). It keeps each repo *gated and current* by maintaining ONE
+de-duplicated, self-closing tracking **issue**: it **opens** the issue when a repo is **unprotected**
+(no worm gate) or its pinned `Ndevu12/strix@<sha>` has fallen **behind** the latest release, and
+**closes it automatically** once the repo is protected and current. It recognizes a gate by **any**
+mechanism (like `check`): a non-Strix gate (a local action / a `saw` step) counts as **protected** —
+it opens no issue (its release pin just isn't freshness-trackable). Reports as an issue, **never a
+build failure** (exit 0), so it's safe on a schedule. The `pin-drift` job that
+[`saw guard setup`](#saw-guard-setup) installs runs it weekly on that repo (catching a gate that was
+removed, or a stale pin); an operator can sweep a whole fleet with `--remote`.
+
+```text
+saw guard drift [TARGETS...] [-p PATH] [-c FILE] [-r] [--user U] [--org O] [--repo OWNER/NAME]
+```
+
+| Option | Description |
+| --- | --- |
+| `TARGETS...` / `-p` / `-c` / `-r` / `--user` / `--org` / `--repo` | Target selection, identical to [`saw guard check`](#saw-guard-check): local paths by default (omit for the current repo), or `owner/repo` slugs under `--remote`. |
+
+```bash
+saw guard drift                                 # this repo (or configured local targets): file/close the issue
+saw guard drift --remote --org UB-TechDEV       # sweep an org: open a drift issue in each behind repo
+```
 
 ### `saw db`
 

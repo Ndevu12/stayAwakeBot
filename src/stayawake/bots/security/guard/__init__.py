@@ -13,7 +13,8 @@ from stayawake.bots.security.guard.detect import (
     check, render)
 from stayawake.bots.security.guard.provision import (
     Pin, SetupPlan, SetupResult, resolve_pin, render_workflow, plan_setup, setup, render_setup)
-from stayawake.bots.security.guard.sweep import check_targets, setup_targets
+from stayawake.bots.security.guard.sweep import check_targets, setup_targets, drift_targets
+from stayawake.bots.security.guard.pindrift import drift_one, render_drift, DriftOutcome
 # Re-export the module singletons the submodules use so existing tests keep working with
 # `mock.patch.object(guard.<module>, …)` — a module is one object, so patching it here reaches every
 # submodule that imported it. (Function-level helpers are patched on their OWN submodule, where their
@@ -29,5 +30,6 @@ __all__ = [
     "LatestStrix", "latest_strix", "freshness", "GuardStatus", "RemoteRead", "GateProbe",
     "probe_remote_gate", "remote_gate", "check", "render",
     "Pin", "SetupPlan", "SetupResult", "resolve_pin", "render_workflow", "plan_setup", "setup",
-    "render_setup", "check_targets", "setup_targets", "github_api", "gitutil",
+    "render_setup", "check_targets", "setup_targets", "drift_targets", "drift_one", "render_drift",
+    "DriftOutcome", "github_api", "gitutil",
 ]

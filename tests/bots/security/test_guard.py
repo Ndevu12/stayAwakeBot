@@ -362,6 +362,159 @@ class TestPlanSetup(unittest.TestCase):
         self.assertNotIn('"Ndevu12/strix@v0"', p.content)
 
 
+class TestRenderWorkflow(unittest.TestCase):
+    """The installed worm-guard workflow: two least-privilege jobs — a gate that opens a fix PR, and a
+    scheduled pin-drift reporter."""
+
+    def setUp(self):
+        import yaml
+        self.wf = guard.render_workflow(guard.Pin(SHA, "v0.1.4"), "main")
+        self.doc = yaml.safe_load(self.wf)          # must be valid YAML
+
+    def test_gate_job_has_scoped_write_and_opens_a_fix_pr(self):
+        gate = self.doc["jobs"]["worm-guard"]
+        self.assertEqual(gate["permissions"], {"contents": "write", "pull-requests": "write"})
+        strix = gate["steps"][-1]
+        self.assertEqual(strix["uses"], f"Ndevu12/strix@{SHA}")
+        self.assertEqual(strix["with"]["remediate"], "pr")
+
+    def test_token_prefers_the_secret_and_falls_back(self):
+        strix = self.doc["jobs"]["worm-guard"]["steps"][-1]
+        self.assertEqual(strix["with"]["token"], "${{ secrets.GH_SECURITY_TOKEN || github.token }}")
+
+    def test_pin_drift_job_is_scheduled_and_only_needs_issues_write(self):
+        drift = self.doc["jobs"]["pin-drift"]
+        self.assertEqual(drift["permissions"], {"contents": "read", "issues": "write"})
+        self.assertIn("saw guard drift", " ".join(s.get("run", "") for s in drift["steps"]))
+        self.assertIn("schedule", self.doc[True])   # PyYAML parses `on:` as the bool key True
+
+    def test_jobs_are_event_gated_so_they_do_not_overlap(self):
+        self.assertEqual(self.doc["jobs"]["worm-guard"]["if"], "github.event_name != 'schedule'")
+        self.assertIn("schedule", self.doc["jobs"]["pin-drift"]["if"])
+
+    def test_repin_preserves_the_two_job_structure(self):
+        # A surgical repin must touch ONLY the strix @ref, leaving the remediate/token/drift intact.
+        newpin = guard.Pin("b" * 40, "v0.1.5")
+        p = guard.plan_setup({guard.WORM_GUARD_FILE: self.wf}, "main", newpin)
+        self.assertEqual(p.action, "repin")
+        self.assertIn(f"Ndevu12/strix@{'b' * 40}", p.content)
+        self.assertIn("remediate: pr", p.content)
+        self.assertIn("secrets.GH_SECURITY_TOKEN", p.content)
+        self.assertIn("saw guard drift", p.content)
+
+
+class TestGuardDrift(unittest.TestCase):
+    """`drift_one`: grade one repo (via `detect.check`) → ONE self-closing tracking issue. Recognizes
+    a gate by ANY mechanism, and only files issues for the gradeable Strix-action pin."""
+
+    REF = StrixRef(workflow=".github/workflows/worm-guard.yml", job="worm-guard", ref=SHA, pin="sha")
+
+    def _strix(self, state, latest="v0.1.5"):
+        return GuardStatus(present=True, ref=self.REF,
+                           fresh=guard.Freshness(state, latest, f"latest {latest}"))
+
+    def _run(self, status, *, existing=None):
+        calls = {"created": [], "updated": [], "commented": []}
+        open_issues = ([{"number": existing, "title": guard.pindrift.DRIFT_TITLE}] if existing else [])
+        with mock.patch.object(guard.pindrift.detect, "check", return_value=status), \
+             mock.patch.object(guard.pindrift, "_resolve_slug", return_value=("o", "r")), \
+             mock.patch.object(guard.pindrift.github_api, "list_open_issues", return_value=open_issues), \
+             mock.patch.object(guard.pindrift.github_api, "create_issue",
+                               side_effect=lambda *a, **k: calls["created"].append((a, k)) or {"number": 7}), \
+             mock.patch.object(guard.pindrift.github_api, "update_issue",
+                               side_effect=lambda *a, **k: calls["updated"].append((a, k)) or {}), \
+             mock.patch.object(guard.pindrift.github_api, "add_issue_comment",
+                               side_effect=lambda *a, **k: calls["commented"].append((a, k)) or {}):
+            outcome = guard.drift_one(repo=".", token="t")
+        return outcome, calls
+
+    def test_behind_opens_a_new_issue(self):
+        o, calls = self._run(self._strix("behind"), existing=None)
+        self.assertEqual((o.state, o.action), ("behind", "opened"))
+        self.assertEqual(len(calls["created"]), 1)
+        self.assertEqual(calls["created"][0][1].get("labels"), [guard.pindrift.DRIFT_LABEL])
+
+    def test_behind_with_existing_issue_refreshes_not_duplicates(self):
+        o, calls = self._run(self._strix("behind"), existing=42)
+        self.assertEqual(o.action, "refreshed")
+        self.assertEqual(calls["created"], [])              # no duplicate
+        self.assertEqual(len(calls["updated"]), 1)          # silent body refresh
+        self.assertNotIn("state", calls["updated"][0][1])   # refresh, not a close
+
+    def test_fresh_closes_an_open_issue(self):
+        o, calls = self._run(self._strix("fresh"), existing=42)
+        self.assertEqual(o.action, "closed")
+        self.assertEqual(calls["updated"][0][1].get("state"), "closed")
+        self.assertEqual(len(calls["commented"]), 1)        # notifies on the close
+
+    def test_fresh_with_no_issue_does_nothing(self):
+        o, calls = self._run(self._strix("fresh"), existing=None)
+        self.assertEqual((o.state, o.action), ("fresh", "none"))
+        self.assertEqual((calls["created"], calls["updated"]), ([], []))
+
+    def test_unknown_never_churns_the_issue(self):
+        # a transient releases-API failure must not open OR close anything
+        o, calls = self._run(self._strix("unknown"), existing=42)
+        self.assertEqual(o.state, "unknown")
+        self.assertEqual((calls["created"], calls["updated"], calls["commented"]), ([], [], []))
+
+    def test_non_strix_gate_is_protected_no_issue(self):
+        # A repo guarded by a LOCAL action (not Ndevu12/strix) is PROTECTED — recognized (not "no
+        # gate"), opens NO issue; its release pin just isn't freshness-trackable.
+        st = GuardStatus(present=True, ref=None, mechanism="local-action",
+                         gate_file=".github/workflows/worm-guard.yml")
+        o, calls = self._run(st)
+        self.assertEqual(o.state, "not-strix")
+        self.assertEqual((calls["created"], calls["updated"]), ([], []))
+
+    def test_non_strix_gate_closes_a_stale_protection_issue(self):
+        # If a repo was flagged unprotected and later gains a (non-Strix) gate, close the issue.
+        st = GuardStatus(present=True, ref=None, mechanism="local-action", gate_file="w.yml")
+        o, calls = self._run(st, existing=42)
+        self.assertEqual(o.action, "closed")
+        self.assertEqual(calls["updated"][0][1].get("state"), "closed")
+
+    def test_no_gate_opens_a_protection_issue(self):
+        # THE point of "ensure the repo is gated": an UNPROTECTED repo (no gate) files an issue.
+        o, calls = self._run(GuardStatus(present=False))
+        self.assertEqual((o.state, o.action), ("no-gate", "opened"))
+        self.assertEqual(len(calls["created"]), 1)
+        self.assertEqual(calls["created"][0][1].get("labels"), [guard.pindrift.DRIFT_LABEL])
+        self.assertIn("unprotected", " ".join(str(a) for a in calls["created"][0][0]).lower())
+
+    def test_no_ci_opens_a_protection_issue(self):
+        o, calls = self._run(GuardStatus(present=False, no_ci=True))
+        self.assertEqual((o.state, o.action), ("no-ci", "opened"))
+        self.assertEqual(len(calls["created"]), 1)
+
+    def test_remote_read_error_never_churns(self):
+        o, calls = self._run(GuardStatus(present=False, error="rate limited"), existing=42)
+        self.assertEqual(o.state, "error")
+        self.assertEqual((calls["created"], calls["updated"]), ([], []))
+
+
+class TestDriftSweep(unittest.TestCase):
+    """`drift_targets` — the sweep wiring (like `check_targets`)."""
+
+    def test_no_local_repos_is_calm_zero(self):
+        with mock.patch.object(guard.sweep, "_guard_config", return_value={}), \
+             mock.patch.object(guard.sweep.resolution, "discover_local_repos", return_value=[]):
+            self.assertEqual(guard.drift_targets(no_stream=True), 0)
+
+    def test_remote_sweep_drifts_each_slug(self):
+        seen = []
+        with mock.patch.object(guard.sweep, "_guard_config", return_value={}), \
+             mock.patch.object(guard.sweep.resolution, "resolve_remote",
+                               return_value=(["o/a", "o/b"], "tok", "env")), \
+             mock.patch.object(guard.sweep, "latest_strix", return_value=guard.LatestStrix("v1")), \
+             mock.patch.object(guard.sweep, "drift_one",
+                               side_effect=lambda **k: seen.append(k["slug"]) or
+                               guard.DriftOutcome(k["slug"], "fresh")):
+            rc = guard.drift_targets(remote=True, slugs=["o/a", "o/b"], no_stream=True)
+        self.assertEqual(rc, 0)
+        self.assertEqual(seen, ["o/a", "o/b"])
+
+
 def _tmp_repo():
     import subprocess
     d = Path(tempfile.mkdtemp())
