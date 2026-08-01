@@ -2,6 +2,8 @@
 """Git-history matcher — the evil-merge detector."""
 from __future__ import annotations
 
+import sys
+
 from stayawake.lib import git as gitutil
 from stayawake.bots.security.models import Finding, Severity
 from stayawake.bots.security.matchers.base import Matcher, build_content_sig
@@ -16,7 +18,12 @@ def _obfuscation_reason(path: str, delta: str, baseline: str) -> str | None:
     single shared `analyze_delta` — one source of truth with the whole-file obfuscation matcher."""
     if is_generated_context(path):
         return None
-    verdict = analyze_delta(delta, baseline)
+    try:
+        verdict = analyze_delta(delta, baseline)
+    except Exception as exc:  # fail-SAFE: a detector fault on one hunk must not abort the sweep
+        print(f"saw: obfuscation delta-analysis skipped for {path}: {type(exc).__name__}: {exc}",
+              file=sys.stderr)
+        return None
     return verdict.reason if verdict else None
 
 

@@ -7,6 +7,22 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Changed
+- **Obfuscation detector: tightened decode→exec arms (restores the #1212 base64 capability, fixes
+  the #1289 FPs) — no coverage lost.** Three changes, all on hand-authored source only:
+  - Restores catching a hardcoded base64/hex payload **decoded through a variable and then run**
+    (`const p='…'; const d=Buffer.from(p,'base64'); execSync(d)`) — the in-file dropper the #1212
+    removal opened and the nested #1266 check misses. An encoded blob is a signal **only** when its
+    decode result flows (same scope, one hop) into a command / `import()` / `Worker` sink; a lone
+    JWT / token / asset / key-array / hex key stays clean (the #1212 false-positive class stays
+    fixed), and a decode/sink name collision across two functions no longer trips it. Also adds a
+    `data:` base64-encoded JS-module import (a plaintext `data:` module stays clean) and a
+    `require('child_process'|'shelljs').exec(atob(…))` form (a RegExp/DB `.exec` stays clean).
+  - The broad #1208 arms (any non-literal `import(x)`, any constructed `execSync(cmd+…)`) no longer
+    raise a **scan** finding — they false-positived on every `React.lazy` / alias import and build
+    script (#1289). They are **retained** as the conservative remediation "safe to auto-clean?" gate
+    (`strict=True`), where an over-refusal is the safe direction — so nothing is downgraded.
+  - `analyze_file` / `analyze_delta` calls in the scanner now fail **safe** (skip one file, never
+    abort a whole-repo sweep) while the remediation gate keeps failing **closed**.
 - **The CI scanner-pin tooling is now Python.** The four bash scripts (`_pin_lib.sh`,
   `check_pin_freshness.sh`, `check_pins_synced.sh`, `check_pin_drift.sh`) are consolidated into one
   `.github/scripts/pin_tools.py` with `freshness` / `synced` / `drift` subcommands — same gates,

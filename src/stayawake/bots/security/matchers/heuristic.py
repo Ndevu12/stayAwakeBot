@@ -14,6 +14,7 @@ generated paths are suppressed there, so dense bundles never reach this rule.
 from __future__ import annotations
 
 import re
+import sys
 
 from stayawake.bots.security.models import Finding, Severity
 from stayawake.bots.security.matchers.base import (
@@ -103,7 +104,12 @@ class HeuristicMatcher(Matcher):
         #     globs already restrict to config/source extensions, but guard explicitly so
         #     a future glob widening can't leak a non-authored ext into analyze_file).
         if _ext(rel) in _AUTHORED_OBFUSCATABLE_EXTS:
-            verdict = analyze_file(text, _ext(rel))
+            try:
+                verdict = analyze_file(text, _ext(rel))
+            except Exception as exc:  # fail-SAFE: skip this one file, never abort the repo sweep
+                print(f"saw: obfuscation analysis skipped for {rel}: {type(exc).__name__}: {exc}",
+                      file=sys.stderr)
+                verdict = None
             if verdict:
                 return self._emit(sig, rel, f"line {i}: {n} chars; {verdict.reason}", i)
         return None
