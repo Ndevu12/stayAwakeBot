@@ -10,7 +10,7 @@ from stayawake.bots.security.guard.constants import (
 from stayawake.bots.security.guard.detect import (
     StrixRef, classify_pin, find_strix, WormGate, find_worm_gate, Freshness, LatestStrix,
     latest_strix, freshness, GuardStatus, RemoteRead, GateProbe, probe_remote_gate, remote_gate,
-    check, render, _context_required)   # _context_required: imported by test_guard directly
+    check, render)
 from stayawake.bots.security.guard.provision import (
     Pin, SetupPlan, SetupResult, resolve_pin, render_workflow, plan_setup, setup, render_setup)
 from stayawake.bots.security.guard.sweep import check_targets, setup_targets
