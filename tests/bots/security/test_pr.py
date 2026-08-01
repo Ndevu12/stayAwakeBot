@@ -548,5 +548,31 @@ class TestForkPr(unittest.TestCase):
         self.assertTrue((out / "up-repo.patch").is_file())
 
 
+class TestFixPartialInvariant(unittest.TestCase):
+    """Pin the load-bearing `_Fix.partial` tripwire (#1209/#1290) directly at the property, where a
+    future simplifier edits — a small unit guard beside the end-to-end
+    `test_computed_strip_ships_partial_review_required`. `partial` MUST stay
+    `bool(manual) OR bool(computed)`: after a computed strip the post-strip rescan can report the tree
+    CLEAN (empty `manual`), so a reduction to `bool(manual)` would let a not-git-corroborated tree go
+    green (exit 0). These cases fail if the `computed` arm is ever dropped."""
+
+    def _fix(self, *, computed=(), manual=()):
+        return pr.fix._Fix(base="main", applied=[], computed=computed, manual=manual)
+
+    def test_computed_only_is_partial_even_when_manual_empty(self):
+        # THE tripwire: rescan-clean (manual empty) + a computed strip present → still needs-review.
+        self.assertTrue(self._fix(computed=("strip",), manual=()).partial)
+
+    def test_manual_only_is_partial(self):
+        self.assertTrue(self._fix(computed=(), manual=("residual",)).partial)
+
+    def test_both_is_partial(self):
+        self.assertTrue(self._fix(computed=("strip",), manual=("residual",)).partial)
+
+    def test_neither_is_not_partial(self):
+        # A fully trusted-clean fix (no computed strip, no residual manual) is NOT partial.
+        self.assertFalse(self._fix(computed=(), manual=()).partial)
+
+
 if __name__ == "__main__":
     unittest.main()
