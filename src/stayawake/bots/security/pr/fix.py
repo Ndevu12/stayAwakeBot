@@ -12,7 +12,8 @@ from stayawake.utils.streaming import status
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.targets import LocalRepoTarget
 from stayawake.bots.security.models import QUARANTINE_DIR, CONFIRMED
-from stayawake.bots.security import remediation, proposal
+from stayawake.bots.security import remediation
+from stayawake.core import proposal
 from stayawake.bots.security.pr.constants import FIX_BRANCH, PARTIAL_LABEL
 from stayawake.bots.security.pr.render import (
     manual_review_lines, computed_review_lines, _issue_spec, _mark_partial, _pr_body, _render_submit)

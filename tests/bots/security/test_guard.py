@@ -487,7 +487,7 @@ class TestSetupPr(unittest.TestCase):
         return res, sub
 
     def test_opens_pr_via_ladder(self):
-        from stayawake.bots.security.proposal import SubmitResult
+        from stayawake.core.proposal import SubmitResult
         res, sub = self._run(SubmitResult("pr", action="opened", number=42, url="u"))
         sub.assert_called_once()
         self.assertEqual(sub.call_args.kwargs["branch"], guard.SETUP_BRANCH)
@@ -500,7 +500,7 @@ class TestSetupPr(unittest.TestCase):
         self.assertIn("no GitHub origin", res.error)
 
     def test_unsigned_commit_is_surfaced(self):
-        from stayawake.bots.security.proposal import SubmitResult
+        from stayawake.core.proposal import SubmitResult
         res, _ = self._run(SubmitResult("pr", action="opened", number=7, url="u"), signed=False)
         self.assertFalse(res.signed)
         self.assertIn("UNSIGNED", guard.render_setup(res))
@@ -509,7 +509,7 @@ class TestSetupPr(unittest.TestCase):
         # The bug: `saw guard setup --pr` planned from the WORKING TREE. A worm-guard.yml written by a
         # prior local `setup` (untracked, never on origin) made `--pr` see the gate as already-there and
         # no-op — so it "reported" success while opening no PR. `--pr` must plan against origin's tree.
-        from stayawake.bots.security.proposal import SubmitResult
+        from stayawake.core.proposal import SubmitResult
         repo = _tmp_repo()
         wf = Path(repo) / guard.WORM_GUARD_FILE                 # an UNTRACKED gate in the working tree…
         wf.parent.mkdir(parents=True, exist_ok=True)
@@ -688,7 +688,7 @@ class TestSetupSweep(unittest.TestCase):
         # The ladder returns a SubmitResult even when the branch pushed but the PR API call failed
         # (or the fork wasn't ready, or there was no write access). That is NOT an opened PR — it must
         # not be tallied as "opened/updated", and the sweep must exit non-zero, not phantom-succeed.
-        from stayawake.bots.security.proposal import SubmitResult
+        from stayawake.core.proposal import SubmitResult
         failed = guard.SetupResult(plan=guard.SetupPlan("create", "wf", new_ref=SHA),
                                    submit=SubmitResult("pr-create-failed"))
         with mock.patch.object(guard.sweep, "resolve_pin", return_value=guard.Pin(SHA, "v0.1.4")), \

@@ -20,7 +20,8 @@ from stayawake.bots.security.guard.sweep import check_targets, setup_targets
 # caller resolves them: e.g. guard.detect.freshness, guard.sweep.check, guard.provision.resolve_pin.)
 from stayawake.lib.adapters import github_api
 from stayawake.lib import auth, git as gitutil
-from stayawake.bots.security import proposal, resolution
+from stayawake.core import proposal
+from stayawake.bots.security import resolution
 
 __all__ = [
     "STRIX_OWNER", "STRIX_REPO", "WORKFLOW_DIR", "WORM_GUARD_FILE", "SETUP_BRANCH",
