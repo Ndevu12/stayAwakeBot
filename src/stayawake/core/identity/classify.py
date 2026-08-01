@@ -29,6 +29,15 @@ def classify_push_stderr(stderr: str | None) -> PushFailure:
     if "authentication failed" in low or "invalid username" in low or "403" in low:
         if "workflow" in low:
             return PushFailure("workflow_scope", text)
+        # Distinguish a bad/expired CREDENTIAL from a valid token that lacks write PERMISSION:
+        # `authentication failed` / `invalid username` is git rejecting the credential itself
+        # (retrying the same token — incl. a fork push — won't help; the fix is a new token), whereas
+        # a bare `403` is an authenticated-but-forbidden push (the token is fine, it lacks Contents
+        # write). They want different operator guidance, so they get different reasons. Both still
+        # walk the same fork→patch→issue ladder (proposal.submit_change_pr gates that on
+        # workflow_scope/signed_commits only), so this changes the MESSAGE, not the fallback path.
+        if "authentication failed" in low or "invalid username" in low:
+            return PushFailure("auth", text)
         return PushFailure("forbidden", text)
     if "could not resolve host" in low or "timed out" in low or "ssl" in low:
         return PushFailure("network", text)

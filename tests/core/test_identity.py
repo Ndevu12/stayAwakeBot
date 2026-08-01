@@ -108,6 +108,26 @@ class TestClassify(unittest.TestCase):
         f = classify_push_stderr("remote rejected: Commit must be signed")
         self.assertEqual(f.reason, "signed_commits")
 
+    def test_authentication_failed_is_auth_not_forbidden(self):
+        # A bad/expired CREDENTIAL — distinct from a permission 403 (#1291). The `auth` message
+        # tells the operator to fix the TOKEN, not that they lack write access.
+        for stderr in ("fatal: Authentication failed for 'https://github.com/o/r.git/'",
+                       "remote: Invalid username or password."):
+            f = classify_push_stderr(stderr)
+            self.assertEqual(f.reason, "auth", stderr)
+            self.assertIn("token", push_failure_message(f).lower())
+
+    def test_bare_403_is_forbidden_not_auth(self):
+        f = classify_push_stderr("remote: Permission denied (403).")
+        self.assertEqual(f.reason, "forbidden")
+        self.assertIn("write access", push_failure_message(f).lower())
+
+    def test_auth_failure_with_workflow_still_workflow_scope(self):
+        # workflow-scope detection takes precedence over the auth/forbidden split.
+        f = classify_push_stderr("Authentication failed: token cannot create or update workflow "
+                                 "`.github/workflows/x.yml` without `workflow` scope")
+        self.assertEqual(f.reason, "workflow_scope")
+
 
 if __name__ == "__main__":
     unittest.main()
