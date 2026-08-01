@@ -4,7 +4,6 @@ up each, streaming per repo; one repo's failure never aborts the run."""
 from __future__ import annotations
 
 import os
-import re
 import sys
 from pathlib import Path
 
@@ -15,7 +14,8 @@ from stayawake.utils.terminal import supports_color
 from stayawake.bots.security import resolution
 from stayawake.bots.security.targets import ScanOptions
 from stayawake.bots.security.guard.detect import check, render, GuardStatus, latest_strix
-from stayawake.bots.security.guard.provision import setup, render_setup, resolve_pin, SetupResult, Pin
+from stayawake.bots.security.guard.provision import setup, render_setup, resolve_pin, SetupResult
+from stayawake.bots.security.guard.pindrift import drift_one, render_drift, DriftOutcome
 
 # ── sweep: resolve targets (local repos / remote slugs) and check each — like saw scan/fix ────────
 # `saw guard check` takes positional TARGETS (local paths, or owner/repo slugs under --remote),
@@ -118,6 +118,85 @@ def check_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
     ])
     prog.line(f"\nChecked {n} repositor{'y' if n == 1 else 'ies'}: {guarded} with a worm gate{tail}.")
     return 1 if (fail and unhealthy) else 0
+
+
+def _safe_drift(**kw) -> DriftOutcome:
+    """One repo's error must never abort the drift sweep — a failure becomes an error outcome."""
+    try:
+        return drift_one(**kw)
+    except Exception as exc:  # noqa: BLE001 — isolate one repo, keep the sweep going
+        tgt = kw.get("slug") or str(kw.get("repo") or ".")
+        return DriftOutcome(tgt, "error", detail=f"drift check failed — {exc}")
+
+
+def drift_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool = False,
+                  config_path: str | None = None, no_stream: bool = False) -> int:
+    """`saw guard drift` across many repos — same target model as `saw guard check`. LOCAL by default
+    (discover git repos under the given paths / configured `targets.local` / the enclosing repo);
+    `remote=True` (or naming users/orgs) resolves GitHub repos via the #1075 ladder. For each repo it
+    grades the pinned Strix gate and files/refreshes/closes ONE de-duplicated drift issue. The latest
+    Strix release is resolved ONCE and reused. Streams per repo; one repo's error never aborts the run.
+    Returns 2 on a missing --config / a remote sweep with no credential, else 0 (drift is reported as
+    an issue, never a build failure)."""
+    cfg = _guard_config(config_path)
+    if cfg is None:
+        return 2
+    remote = remote or bool(users) or bool(orgs)
+    prog = Streamer(enabled=stream_enabled(sys.stdout, force_off=no_stream))
+    color = supports_color(sys.stdout)
+    outcomes: list[DriftOutcome] = []
+
+    if remote:
+        bad = resolution.invalid_slugs(slugs)
+        if bad:
+            prog.line(f"error: --remote targets must be owner/repo slugs; got {bad}")
+            return 2
+        resolved, token, _src = resolution.resolve_remote(cfg, ScanOptions(),
+                                                          users=users, orgs=orgs, slugs=slugs)
+        if not resolved:
+            prog.line(resolution.REMOTE_EMPTY_HINT)
+            return 0
+        if not token:
+            prog.line(auth.no_credential_hint("filing pin-drift issues") + "\n")
+            return 2
+        latest = latest_strix(token)
+        prog.line(f"Checking pin drift on {len(resolved)} GitHub "
+                  f"repositor{'y' if len(resolved) == 1 else 'ies'}…")
+        for i, slug in enumerate(resolved, 1):
+            prog.line(f"  [{i}/{len(resolved)}] {slug}")
+            o = _safe_drift(slug=slug, token=token, latest=latest)
+            prog.line(_indent(render_drift(o, color=color)))
+            outcomes.append(o)
+    else:
+        repos = resolution.discover_local_repos(_local_patterns(cfg, paths), ScanOptions())
+        if not repos:
+            prog.line("No local git repositories found.")
+            return 0
+        token, _ = auth.resolve_token()      # needed to file issues (and eases freshness rate limits)
+        latest = latest_strix(token)
+        prog.line(f"Checking pin drift on {len(repos)} local "
+                  f"repositor{'y' if len(repos) == 1 else 'ies'}…")
+        for i, repo in enumerate(repos, 1):
+            prog.line(f"  [{i}/{len(repos)}] {_disp(repo)}")
+            o = _safe_drift(repo=repo, token=token, latest=latest)
+            prog.line(_indent(render_drift(o, color=color)))
+            outcomes.append(o)
+
+    unprotected = sum(1 for o in outcomes if o.state in ("no-gate", "no-ci"))
+    behind = sum(1 for o in outcomes if o.state == "behind")
+    opened = sum(1 for o in outcomes if o.action == "opened")
+    closed = sum(1 for o in outcomes if o.action == "closed")
+    errored = sum(1 for o in outcomes if o.state == "error")
+    n = len(outcomes)
+    tail = "".join([
+        f", {behind} with a stale pin" if behind else "",
+        f", {opened} issue(s) opened" if opened else "",
+        f", {closed} closed" if closed else "",
+        f", {errored} errored" if errored else "",
+    ])
+    prog.line(f"\nChecked {n} repositor{'y' if n == 1 else 'ies'}: "
+              f"{unprotected} UNPROTECTED{tail}.")
+    return 0
 
 
 def _safe_setup(repo, **kw) -> SetupResult:

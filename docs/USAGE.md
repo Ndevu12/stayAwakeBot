@@ -190,11 +190,15 @@ saw guard setup --dry-run             # preview the workflow that would be insta
 saw guard setup                       # write it into the working tree to review + commit + PR
 saw guard setup --pr                  # open a rolling install/bump PR instead (never pushes main)
 saw guard setup --org UB-TechDEV      # clone each org repo → open a gate PR
+saw guard drift                       # is this repo's pinned gate behind? file/close the drift issue
 ```
 
-`saw guard setup` resolves the latest Strix release to a **commit SHA** and writes a report-only,
-least-privilege `worm-guard.yml` — or, when a gate already exists under *any* filename, **surgically
-bumps only its `uses:` pin** and leaves the rest byte-for-byte. It is **idempotent** (create / bump /
+`saw guard setup` resolves the latest Strix release to a **commit SHA** and writes a `worm-guard.yml`
+with two least-privilege jobs — a **gate** that blocks infected merges *and opens a fix PR*
+(`remediate: pr`; gate stays red until it's merged), and a weekly **`pin-drift`** job that runs
+`saw guard drift` to file a self-closing issue when the pin falls behind — or, when a gate already
+exists under *any* filename, **surgically bumps only its `uses:` pin** and leaves the rest
+byte-for-byte. It is **idempotent** (create / bump /
 no-op / already-guarded) and **fails closed** if it can't resolve the SHA (offline → pass
 `--ref <sha|tag>`). It **never pushes to a default branch**: `--pr`/`--remote` plan against
 `origin/<default>` (the PR base) and open a rolling `security/guard-setup` PR whose body carries the
