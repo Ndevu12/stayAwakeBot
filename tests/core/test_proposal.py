@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unit tests for bots.security.proposal — the shared "propose a change as a reviewed PR" ladder.
+"""Unit tests for core.proposal — the shared "propose a change as a reviewed PR" ladder.
 
 The ladder was extracted from pr.py so both `saw fix` and `saw guard setup` reuse ONE hardened
 implementation (push → fork → patch → dedup-issue). test_pr.py still exercises it through `saw fix`
@@ -13,7 +13,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from stayawake.bots.security import proposal
+from stayawake.core import proposal
 from stayawake.lib.git.write.push import PushResult
 
 

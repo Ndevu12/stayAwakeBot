@@ -13,7 +13,7 @@ from stayawake.lib import git as gitutil
 from stayawake.utils import textsafe
 from stayawake.utils.render import SEVERITY, paint
 from stayawake.utils.streaming import status as spin_status
-from stayawake.bots.security import proposal
+from stayawake.core import proposal
 from stayawake.utils.pathsafe import is_safe_write_target
 from stayawake.bots.security.guard.constants import (
     STRIX_OWNER, STRIX_REPO, WORKFLOW_DIR, WORM_GUARD_FILE, SETUP_BRANCH)
