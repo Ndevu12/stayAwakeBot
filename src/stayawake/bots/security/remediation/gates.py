@@ -1,0 +1,325 @@
+#!/usr/bin/env python3
+"""Code-loader payload ANALYSIS + the surgical seam-strip — pure functions, no I/O, no git. The
+safety gates that decide whether a line/statement is payload, whether a concealment seam is present,
+and whether a strip is provably safe (`_seam_strip`). Used by `classify` (to decide) and `writeback`
+(to re-prove at apply time)."""
+from __future__ import annotations
+
+import difflib
+import hashlib
+import re
+import unicodedata
+
+from stayawake.bots.security.matchers.base import build_content_sig
+from stayawake.bots.security.obfuscation import (
+    analyze_file, _has_exec_sink, _shannon, _ENTROPY_ABS, _MAX_PROSE_SPACE_FRAC)
+
+def codeloader_content_sig(all_signatures):
+    """Compile the code-loader CONTENT fingerprints into check(text) -> id|None — the
+    yardstick for deciding whether a (possibly historical) version of a file is clean."""
+    return build_content_sig(all_signatures)
+
+
+def _ext(path: str) -> str:
+    i = path.rfind(".")
+    return path[i:].lower() if i != -1 else ""
+
+
+def _carries_payload(text: str, content_sig) -> bool:
+    """True if `text` still carries the worm — a known LOADER literal OR a dynamic-exec sink
+    (eval / Function / atob / fromCharCode / constructor / the require-hijack global assignment).
+    This is the yardstick for
+    choosing a clean recovery target and for the post-restore verify.
+
+    Why literal-OR-exec-sink, not just the literal: a confirmed finding's history can hold an
+    EARLIER obfuscation stage where the literal isn't present yet but an `eval(atob(...))`
+    loader already is (#1053). Keying on the literal alone would mark that stage 'clean' and
+    restore a live payload. Why NOT the full analyze_file() packed/base64 verdict: that
+    false-positives on legitimately inlined base64 assets / minified lines, and a FP here
+    (marking a clean version 'infected') would push recovery onto an older revision — so we
+    stop at the exec sink, which every executing payload must reach but a static asset never
+    does. A base64-at-rest payload with no sink is caught by the scanner as a (heuristic)
+    obfuscation finding and routed to manual review, never to recovery."""
+    return bool(text) and (bool(content_sig(text)) or _has_exec_sink(text))
+
+
+# A payload-blob line is long, dense (almost no whitespace) and high-entropy — the shape of
+# a packed loader. A *legit* statement that merely contains a loader token — a real DEL-char
+# fromCharCode call, a function carrying the worm's shuffler name, or a line that splices the
+# require-hijack global assignment in front of real code — is short and readable and fails this
+# gate. That distinction is the whole point: content_sig() is a SUBSTRING match, so it can't tell
+# a packed payload from legit code that shares a byte sequence with one. Size+density+entropy can.
+_MIN_PAYLOAD_LINE = 120
+
+
+def _is_packed_line(line: str) -> bool:
+    s = line.strip()
+    if len(s) < _MIN_PAYLOAD_LINE:
+        return False
+    space_frac = sum(1 for ch in s if ch == " " or ch == "\t") / len(s)
+    return _shannon(s) >= _ENTROPY_ABS and space_frac <= _MAX_PROSE_SPACE_FRAC
+
+
+def _is_concealment(ch: str) -> bool:
+    """True for a character used only to pad/hide a seam: ASCII whitespace plus every Unicode
+    control/format (C*), line/paragraph separator (Zl/Zp) and space separator (Zs)."""
+    if ch == " " or ch == "\t":
+        return True
+    cat = unicodedata.category(ch)
+    return cat[0] == "C" or cat in ("Zl", "Zp", "Zs")
+
+
+def _strip_concealment(s: str) -> str:
+    """Drop leading and trailing concealment runs, keeping the core intact."""
+    i, j = 0, len(s)
+    while i < j and _is_concealment(s[i]):
+        i += 1
+    while j > i and _is_concealment(s[j - 1]):
+        j -= 1
+    return s[i:j]
+
+
+# A base64/hex-ish run — the shape of a packed payload's encoded data. Used to bound a blob's
+# EXTENT so trailing legit code abutting it isn't absorbed. Bounded char class → linear scan.
+_BLOB_RUN = re.compile(r"[A-Za-z0-9+/=]{40,}")
+
+
+def _stmt_is_payload(stmt: str, content_sig) -> bool:
+    """True when one `;`-delimited statement of a packed line is provably payload — nothing a
+    developer would keep: concealment-only, a whole loader statement carrying a fingerprint
+    (`content_sig` on the FULL statement), or a pure encoded blob (nothing readable remains after
+    removing concealment + maximal base64/hex runs). A readable, non-fingerprinted statement like
+    `module.exports=runServer` is legit code → NOT payload."""
+    s = _strip_concealment(stmt)
+    if not s:
+        return True
+    if content_sig(s):
+        return True
+    return _strip_concealment(_BLOB_RUN.sub("", s)) == ""
+
+
+def _line_is_pure_payload(ln: str, content_sig) -> bool:
+    """True ONLY when an added line is provably payload END-TO-END, safe to drop on recovery. It
+    must be a dense packed blob (`_is_packed_line`) carrying a loader fingerprint (`content_sig`),
+    AND every `;`-statement of it must itself be provably payload (`_stmt_is_payload`).
+
+    The per-statement gate is what closes the mixed-line hole (#1190): span-aggregate density is
+    NOT enough — a legit statement concatenated with an appended blob (`module.exports=runServer;
+    <blob>`) rides on the blob's average density + a substring fingerprint match and would be
+    dropped whole. Requiring each statement to be individually payload defers that instead.
+
+    KNOWN RESIDUAL (same irreducible class as #1189, mitigated by the quarantine backup): this
+    still can't separate a legit statement that *mimics* a loader token (a real DEL-char char-code
+    handler, a function carrying the worm's decoder name) or minified legit code that reads as a
+    base64 run, from the worm's own connective code — no byte rule can, on a shared line. It
+    strictly REDUCES the exposure (it only ever DEFERS more, never drops more than the prior
+    density-only check); it does not eliminate the class. See #1190."""
+    if not (_is_packed_line(ln) and content_sig(ln)):
+        return False
+    return all(_stmt_is_payload(stmt, content_sig) for stmt in ln.split(";"))
+
+
+# A concealment SEAM: a run of this many consecutive concealment chars mid-line. Hand-authored
+# code never puts real code, 16+ hiding chars, then MORE code — so a seam is a provable boundary
+# between legit code and an appended payload, which is exactly what the general same-line case
+# (#1185) lacks. The worm uses hundreds; 16 is far above any legit indentation/alignment and far
+# below the worm's runs, so the exact value is not load-bearing (the multi-condition gate below is).
+_MIN_CONCEALMENT_SEAM = 16
+
+
+def _concealment_seam(line: str, content_sig) -> str | None:
+    """If `line` hides a payload behind a whitespace-concealment seam —
+    `<clean prefix><concealment run ≥ _MIN_CONCEALMENT_SEAM><packed confirmed-payload suffix>` —
+    return the CLEAN PREFIX to keep (payload excised). Else None.
+
+    This is the ONE same-line subclass that is provably separable, and every clause is a guard:
+      * a substantial CONCEALMENT run is the separator the general same-line case lacks — the split
+        point is unambiguous, not a byte-boundary guess;
+      * the PREFIX must be non-blank and carry no payload (`_carries_payload`) — we keep it verbatim,
+        so it must already be clean;
+      * the SUFFIX must be a dense packed blob (`_is_packed_line`) that carries a CONFIRMED loader
+        LITERAL (`content_sig`, NOT the broader `_carries_payload`) — requiring the specific worm
+        fingerprint, not a generic dynamic-exec sink, is what stops a legit dense line that merely
+        USES `atob`/`eval`/`Function` (e.g. a hand-aligned inlined-asset decoder) from being excised
+        as if it were payload (adversarial catch — the exec-sink gate dropped real code).
+    The residual (same irreducible class as #1189/#1190): a genuinely packed suffix that carries an
+    actual worm literal yet is legit minified code would be excised — bounded by the caller's
+    `analyze_file` 'result is normal, not packed' gate, the re-scan-to-confirm, and the quarantine."""
+    n, i = len(line), 0
+    while i < n:
+        if not _is_concealment(line[i]):
+            i += 1
+            continue
+        j = i
+        while j < n and _is_concealment(line[j]):
+            j += 1
+        if j - i >= _MIN_CONCEALMENT_SEAM:      # the first real seam is the boundary
+            prefix, suffix = line[:i], line[j:]
+            if (prefix.strip() and not _carries_payload(prefix, content_sig)
+                    and _is_packed_line(suffix) and content_sig(suffix)):
+                return prefix
+            return None                          # the seam didn't validate → no safe split
+        i = j
+    return None
+
+
+# The worm's require-SHIM: an ESM file has no CommonJS `require`, so before a `require`-based
+# payload it prepends `import { createRequire } from 'module'; const require = createRequire(
+# import.meta.url);`. Matched ONLY at the very start of the file (the worm prepends it). Kept
+# tolerant of quote/`node:module`/spacing variants but anchored on the two exact statements.
+_WORM_SHIM = re.compile(
+    r"^\s*import\s*\{\s*createRequire\s*\}\s*from\s*['\"](?:node:)?module['\"]\s*;?[ \t]*\r?\n"
+    r"(?:[ \t]*\r?\n)*"
+    r"[ \t]*const\s+require\s*=\s*createRequire\s*\(\s*import\.meta\.url\s*\)\s*;?[ \t]*\r?\n"
+    r"(?:[ \t]*\r?\n)*"
+)
+
+
+def _worm_shim_block(text: str) -> str | None:
+    """The leading require-shim block the worm prepends (see `_WORM_SHIM`), or None. Returns the
+    exact leading text (including its trailing blank lines) so it can be removed verbatim."""
+    m = _WORM_SHIM.match(text)
+    return m.group(0) if m else None
+
+
+def _shim_is_dead(rest: str) -> bool:
+    """True when the require-shim is UNUSED by `rest` (the file minus the shim, payload already
+    excised) — no reference to `require`/`createRequire` remains. Removing an unused binding is a
+    semantic no-op, so this is the only condition under which excising the shim is provably safe;
+    a config that legitimately calls `require(...)` keeps its shim. Conservative (a substring match
+    in a comment/string counts as 'used' → keep the shim) — we only ever remove a provably-dead one."""
+    return "require" not in rest and "createRequire" not in rest
+
+
+def _safe_to_recover(work: str, clean: str, content_sig) -> bool:
+    """True ONLY when restoring `clean` (a whole clean COMMITTED version) provably loses no
+    legitimate code. This is the git-RESTORE proof; the surgical-excision path re-proves itself by
+    re-running `_seam_strip`, so this stays deliberately narrow. Every requirement is a guard the
+    adversarial passes proved necessary:
+
+      * the SOLE diff is ADDED lines — no clean line modified or deleted (a modified line
+        could carry interleaved legit edits we can't separate), AND
+      * EVERY added non-blank line is BOTH a dense packed-payload line (`_is_packed_line`)
+        AND carries a loader literal (`content_sig`).
+
+    An added line is only dropped when it is provably payload END-TO-END (`_line_is_pure_payload`:
+    dense + fingerprinted AND every `;`-statement individually payload). Requiring `content_sig`
+    alone dropped legit lines byte-identical to a fingerprint (a real DEL-char fromCharCode call)
+    and lines that spliced a loader token in front of real code (substring match); `_is_packed_line`
+    alone would drop a legitimately-inlined base64 asset; and density-of-the-whole-line alone let a
+    legit statement concatenated with an appended blob (`module.exports=runServer;<blob>`) ride
+    along and be dropped (#1190). The per-statement gate closes that. Conservative by design: a
+    payload split across short bootstrap lines, or any line with a readable non-payload statement,
+    defers to manual (the concealment-seam same-line case is handled by the excision path instead)."""
+    w, c = work.splitlines(), clean.splitlines()
+    saw_payload = False
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(a=c, b=w, autojunk=False).get_opcodes():
+        if tag == "equal":
+            continue
+        if tag != "insert":              # a clean line was modified/deleted → not provably safe
+            return False
+        for ln in w[j1:j2]:
+            if not ln.strip():
+                continue
+            if not _line_is_pure_payload(ln, content_sig):
+                return False             # not provably payload end-to-end → could be legit → unsafe
+            saw_payload = True
+    return saw_payload                    # ≥1 packed payload line, and every add is payload/blank
+
+
+def _is_subsequence(sub: str, whole: str) -> bool:
+    """True if every character of `sub` appears in `whole` in order (a greedy O(len(whole))
+    scan). The independent 'no fabricated byte' check: recovery only ever REMOVES payload lines,
+    so the clean text it writes must be a subsequence of the working file — a clean_text
+    carrying any byte not present in-order in the infected file would be fabricated content."""
+    it = iter(whole)
+    return all(ch in it for ch in sub)
+
+
+def _short(s: str, n: int = 100) -> str:
+    s = s.rstrip("\n")
+    return s if len(s) <= n else s[:n] + "…"
+
+
+def _redact(body: str) -> str:
+    """Redact a payload line to a digest — never print raw malware to a terminal/report."""
+    h = hashlib.sha256(body.encode("utf-8", "replace")).hexdigest()[:8]
+    return f"[obfuscated payload · {len(body)} chars · sha256 {h}…]"
+
+
+def _recovery_diff(work: str, clean: str, content_sig, context: int = 1) -> str:
+    """Compact, redaction-aware preview of what recovery removes. Recovery only ever drops
+    whole packed payload lines that carry a loader literal (see _safe_to_recover), so each
+    removed line matches content_sig and is redacted to a digest, while the surrounding clean
+    lines are shown verbatim — the payload is never printed raw to a terminal or report."""
+    out: list[str] = []
+    for ln in difflib.unified_diff(work.splitlines(), clean.splitlines(), lineterm="", n=context):
+        if ln[:3] in ("---", "+++") or ln.startswith("@@"):
+            continue
+        if ln.startswith("-"):
+            body = ln[1:]
+            out.append("    - " + (_redact(body) if content_sig(body) else _short(body)))
+        elif ln.startswith("+"):
+            out.append("    + " + _short(ln[1:]))
+        else:
+            out.append("      " + _short(ln[1:]))
+    return "\n".join(out)
+
+
+def _seam_strip(work: str, ext: str, content_sig) -> str | None:
+    """Build the payload-EXCISED version of `work`: every line hiding a payload behind a
+    concealment seam (`_concealment_seam`) is cut back to its clean prefix; EVERY OTHER BYTE is
+    preserved — so, unlike a git restore of an older revision, this can never drop a legit edit
+    made since infection. Returns the stripped text, or None when there is nothing to cut or the
+    result isn't provably safe. Gates (each independently necessary):
+      * ≥1 seam was excised, AND
+      * the result carries NO payload (`_carries_payload` — the loader is gone), AND
+      * the result does NOT itself read as packed/obfuscated (`analyze_file`) — this rejects a
+        genuinely minified/packed file (where the excised suffix could be legit dense content) and
+        confines the mechanism to hand-authored source/config the worm appended to, AND
+      * the result is a SUBSEQUENCE of the working file — we only ever removed bytes, never
+        fabricated any.
+    When a payload seam is excised, a now-DEAD require-shim the worm prepended is removed too
+    (`_worm_shim_block` + `_shim_is_dead`) — a semantic no-op that restores the original byte-for-
+    byte; a shim a config actually uses is kept. Deterministic, so apply_recovery re-proves the
+    excision by simply re-running this on the on-disk file and requiring the same result; the
+    original is quarantined first, so a mis-cut is recoverable."""
+    changed = False
+    out: list[str] = []
+    for raw in work.splitlines(keepends=True):
+        body = raw.rstrip("\r\n")
+        eol = raw[len(body):]
+        prefix = _concealment_seam(body, content_sig)
+        if prefix is not None:
+            out.append(prefix + eol)      # keep the clean prefix + original line ending
+            changed = True
+        else:
+            out.append(raw)
+    if not changed:
+        return None                        # no concealment-seam payload here → not our pattern
+    stripped = "".join(out)
+    # With the payload gone, drop the worm's require-shim IFF nothing left uses `require` — an
+    # unused binding, so removing it can't change behaviour (a config that calls require keeps it).
+    shim = _worm_shim_block(stripped)
+    if shim is not None and _shim_is_dead(stripped[len(shim):]):
+        stripped = stripped[len(shim):]
+    if _carries_payload(stripped, content_sig):
+        return None                        # excision didn't fully remove the loader → not safe
+    if _has_exec_sink(stripped, strict=True):
+        # We KEEP the prefix and every other line verbatim; a dynamic-exec sink surviving in that
+        # kept code — including a reflective `['constructor'](` the normal detector carves out as a
+        # benign clone — could be a separate RCE the excision would auto-"clean" past manual review.
+        # Refuse: only auto-clean when what remains has no *detectable* exec sink (adversarial catch).
+        # NOTE: this is NOT a general RCE guard — it shares the whole scanner's token detection
+        # (`_has_exec_sink`), which now catches the common reflective forms AND the #1207
+        # obfuscated forms (split-token via concat-fold, `(0, eval)(`, light alias /
+        # runtime-key). It STILL can't see a renamed binding whose RHS is itself computed,
+        # a bare dangerous require whose exec is built at runtime past that window, or every
+        # dynamic-import shape. That residual is the pre-existing scanner blind spot, not new
+        # here; the PR this fix lands in is human-reviewed, and the original is quarantined.
+        return None
+    if analyze_file(stripped, ext):        # result still looks packed → not a clean hand-authored file
+        return None
+    if not _is_subsequence(stripped, work):
+        return None                        # fabricated a byte → refuse (defensive; can't happen here)
+    return stripped
