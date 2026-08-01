@@ -275,29 +275,29 @@ class TestRecovery(unittest.TestCase):
 
     # ── white-box guards for the two key predicates ──────────────────────────────────
     def test_carries_payload_flags_exec_sink_without_literal(self):
-        self.assertTrue(remediation._carries_payload("eval(atob('QUFB'))", SIG))   # sink, no literal
-        self.assertTrue(remediation._carries_payload("var _$_=sfL(0)", SIG))       # loader literal
-        self.assertFalse(remediation._carries_payload("export const x = 1;", SIG)) # clean code
+        self.assertTrue(remediation.gates._carries_payload("eval(atob('QUFB'))", SIG))   # sink, no literal
+        self.assertTrue(remediation.gates._carries_payload("var _$_=sfL(0)", SIG))       # loader literal
+        self.assertFalse(remediation.gates._carries_payload("export const x = 1;", SIG)) # clean code
 
     def test_line_is_pure_payload_accepts_pure_refuses_mixed(self):
         # #1190 per-statement gate: a pure packed loader line is payload; the SAME blob with a
         # legit statement concatenated in front is NOT (that statement is readable, not payload).
-        self.assertTrue(remediation._line_is_pure_payload(PACKED_PAYLOAD, SIG))
-        self.assertFalse(remediation._line_is_pure_payload("module.exports=runServer;" + PACKED_PAYLOAD, SIG))
-        self.assertFalse(remediation._line_is_pure_payload(PACKED_PAYLOAD + "doLegit();", SIG))  # trailing legit
+        self.assertTrue(remediation.gates._line_is_pure_payload(PACKED_PAYLOAD, SIG))
+        self.assertFalse(remediation.gates._line_is_pure_payload("module.exports=runServer;" + PACKED_PAYLOAD, SIG))
+        self.assertFalse(remediation.gates._line_is_pure_payload(PACKED_PAYLOAD + "doLegit();", SIG))  # trailing legit
         # a legit inlined base64 ASSET (no loader fingerprint) is refused, never dropped.
-        self.assertFalse(remediation._line_is_pure_payload('const IMG="' + _HIENT + '";', SIG))
+        self.assertFalse(remediation.gates._line_is_pure_payload('const IMG="' + _HIENT + '";', SIG))
 
     def test_stmt_is_payload_classifies_statements(self):
-        self.assertTrue(remediation._stmt_is_payload("var _$_1e42=sfL(0)", SIG))   # fingerprinted loader
-        self.assertTrue(remediation._stmt_is_payload(_HIENT, SIG))                 # pure encoded blob
-        self.assertTrue(remediation._stmt_is_payload("   ", SIG))                  # concealment-only
-        self.assertFalse(remediation._stmt_is_payload("module.exports=runServer", SIG))  # legit statement
+        self.assertTrue(remediation.gates._stmt_is_payload("var _$_1e42=sfL(0)", SIG))   # fingerprinted loader
+        self.assertTrue(remediation.gates._stmt_is_payload(_HIENT, SIG))                 # pure encoded blob
+        self.assertTrue(remediation.gates._stmt_is_payload("   ", SIG))                  # concealment-only
+        self.assertFalse(remediation.gates._stmt_is_payload("module.exports=runServer", SIG))  # legit statement
 
     def test_is_packed_line_rejects_short_readable_lines(self):
-        self.assertFalse(remediation._is_packed_line("export const DEL = String.fromCharCode(127);"))
-        self.assertFalse(remediation._is_packed_line("global['!']=boot(); export const PORT = 3000;"))
-        self.assertTrue(remediation._is_packed_line(PACKED_PAYLOAD))
+        self.assertFalse(remediation.gates._is_packed_line("export const DEL = String.fromCharCode(127);"))
+        self.assertFalse(remediation.gates._is_packed_line("global['!']=boot(); export const PORT = 3000;"))
+        self.assertTrue(remediation.gates._is_packed_line(PACKED_PAYLOAD))
 
 
 class TestRecoveryHardening(unittest.TestCase):
@@ -501,34 +501,34 @@ class TestSeamExcision(unittest.TestCase):
     # ── adversarial negatives: the excision must NOT fire on legit near-misses ──
     def test_no_seam_direct_append_not_excised(self):
         # Payload appended with NO concealment seam (directly adjacent) → no provable boundary → defer.
-        self.assertIsNone(remediation._seam_strip(CLEAN.rstrip("\n") + PACKED_PAYLOAD + "\n", ".mjs", SIG))
+        self.assertIsNone(remediation.gates._seam_strip(CLEAN.rstrip("\n") + PACKED_PAYLOAD + "\n", ".mjs", SIG))
 
     def test_short_suffix_after_spaces_not_excised(self):
         # A SHORT legit statement after a big whitespace run is not a packed payload → left alone.
         line = CLEAN.rstrip("\n") + " " * 470 + "export const DEL = String.fromCharCode(127);\n"
-        self.assertIsNone(remediation._seam_strip(line, ".mjs", SIG))
+        self.assertIsNone(remediation.gates._seam_strip(line, ".mjs", SIG))
 
     def test_still_packed_result_not_excised(self):
         # If cutting the seam leaves a STILL-packed prefix (a genuinely minified/packed file, where
         # the excised part could be legit dense content), refuse — confine to hand-authored source.
         packed_prefix = _HIENT * 3                                 # a long base64 blob, no loader
-        self.assertIsNone(remediation._seam_strip(packed_prefix + " " * 470 + PACKED_PAYLOAD + "\n", ".mjs", SIG))
+        self.assertIsNone(remediation.gates._seam_strip(packed_prefix + " " * 470 + PACKED_PAYLOAD + "\n", ".mjs", SIG))
 
     def test_legit_exec_sink_line_is_not_excised(self):
         # Adversarial data-loss catch: a legit hand-aligned line that USES a dynamic-exec sink
         # (atob/eval/Function) but carries NO worm loader literal must NOT be excised — the suffix
         # gate requires a confirmed loader fingerprint, not a generic sink.
         icon = "const ICON =" + " " * 30 + "atob('" + _HIENT + "').split('').map(c => c.charCodeAt(0));"
-        self.assertIsNone(remediation._concealment_seam(icon, SIG))         # the atob line is not a seam
+        self.assertIsNone(remediation.gates._concealment_seam(icon, SIG))         # the atob line is not a seam
         f = CLEAN.rstrip("\n") + " " * 470 + PAYLOAD + "\n" + icon + "\n"    # legit line co-resident w/ payload
-        self.assertIsNone(remediation._seam_strip(f, ".mjs", SIG))          # → defer, don't drop the decoder
+        self.assertIsNone(remediation.gates._seam_strip(f, ".mjs", SIG))          # → defer, don't drop the decoder
 
     def test_reflective_constructor_result_is_not_auto_cleaned(self):
         # Adversarial false-all-clear catch: a stealth reflective `['constructor'](` RCE in the KEPT
         # prefix (which the normal sink detector carves out as a benign clone) must BLOCK the
         # auto-clean — else the excision would present an RCE-bearing file as clean, past review.
         f = "boot=new mod['constructor']('return 1')();" + " " * 30 + PACKED_PAYLOAD + "\n"
-        self.assertIsNone(remediation._seam_strip(f, ".mjs", SIG))
+        self.assertIsNone(remediation.gates._seam_strip(f, ".mjs", SIG))
 
     def test_symlinked_target_is_refused(self):
         # apply_recovery must NEVER write through a symlink: `write_text` follows the link (could
@@ -555,17 +555,17 @@ class TestSeamExcision(unittest.TestCase):
     # ── white-box guards for the new predicates ──
     def test_concealment_seam_predicate(self):
         seam = "export default config;" + " " * 470 + PACKED_PAYLOAD
-        self.assertEqual(remediation._concealment_seam(seam, SIG), "export default config;")
-        self.assertIsNone(remediation._concealment_seam("const x = 1;", SIG))            # no seam
-        self.assertIsNone(remediation._concealment_seam(" " * 470 + PACKED_PAYLOAD, SIG))  # no clean prefix
-        self.assertIsNone(remediation._concealment_seam("a;" + " " * 470 + "short();", SIG))  # suffix not packed
+        self.assertEqual(remediation.gates._concealment_seam(seam, SIG), "export default config;")
+        self.assertIsNone(remediation.gates._concealment_seam("const x = 1;", SIG))            # no seam
+        self.assertIsNone(remediation.gates._concealment_seam(" " * 470 + PACKED_PAYLOAD, SIG))  # no clean prefix
+        self.assertIsNone(remediation.gates._concealment_seam("a;" + " " * 470 + "short();", SIG))  # suffix not packed
 
     def test_worm_shim_detect_and_dead(self):
-        self.assertIsNotNone(remediation._worm_shim_block(_SHIM + "const config={};\n"))
-        self.assertIsNone(remediation._worm_shim_block("const x=1;\n"))                  # no shim
-        self.assertIsNone(remediation._worm_shim_block("x;\n" + _SHIM))                  # not at file start
-        self.assertTrue(remediation._shim_is_dead("const config = {};\n"))              # no require ref
-        self.assertFalse(remediation._shim_is_dead("const t = require('x');\n"))        # require used
+        self.assertIsNotNone(remediation.gates._worm_shim_block(_SHIM + "const config={};\n"))
+        self.assertIsNone(remediation.gates._worm_shim_block("const x=1;\n"))                  # no shim
+        self.assertIsNone(remediation.gates._worm_shim_block("x;\n" + _SHIM))                  # not at file start
+        self.assertTrue(remediation.gates._shim_is_dead("const config = {};\n"))              # no require ref
+        self.assertFalse(remediation.gates._shim_is_dead("const t = require('x');\n"))        # require used
 
 
 if __name__ == "__main__":

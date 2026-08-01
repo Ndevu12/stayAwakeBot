@@ -110,7 +110,7 @@ class TestStripAndResidual(unittest.TestCase):
         link = repo / "link.txt"
         link.symlink_to(secret)
         q = Path(tempfile.mkdtemp())
-        remediation._backup(repo, "link.txt", q)
+        remediation.changes._backup(repo, "link.txt", q)
         # the symlink target's contents must not be copied into quarantine
         self.assertFalse((q / "link.txt").exists())
 
