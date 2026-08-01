@@ -28,7 +28,7 @@ from __future__ import annotations
 
 # ── 1. DECODE SOURCES ────────────────────────────────────────────────────────────────────────────
 # A call that turns a baked encoded blob into runnable bytes/text. The blob itself (base64/hex/
-# charcode/escape) is matched by obfuscation._has_encoded_payload / _NUM_ARRAY / _escape_run — this
+# charcode/escape) is matched by flow._has_encoded_payload / obfuscation _NUM_ARRAY / _escape_run — this
 # names the DECODE step. `Buffer.from` only counts as a decode when its encoding arg is base64/hex
 # (a `Buffer.from(str)` / `Buffer.from(arr)` without an encoding is a plain buffer, still a decode of
 # a byte array when fed a numeric array — handled by the charcode source below).

@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Decode→exec dropper detection: `model` (what a dropper is) + `analyzer` (tracing the flow).
+"""Decode→exec dropper detection: the ONE place the decode→exec capability lives.
 
-Kept import-light on purpose — `analyzer` imports `obfuscation` for its hardened primitives, so
-callers reach it via `from stayawake.bots.security.taint.analyzer import detect_dropper` (a lazy,
-function-level import in `obfuscation`) to avoid an import cycle. Nothing is imported here at
-package-init time.
+Three concerns: `model` (what a dropper IS — the threat as data), `flow` (the hardened decode→exec
+primitives: decode/sink regexes, blob corroborators, the scope-aware variable walk, the scrubber),
+and `analyzer` (traces the flow end-to-end via `detect_dropper`). `obfuscation` depends on THIS
+package — `execsink` reuses `flow._has_corroborated_dynamic_exec`, and `entry` calls
+`analyzer.detect_dropper` (a lazy, function-level import) — so the dependency flows one way,
+`obfuscation → taint`. Nothing is imported here at package-init time to keep that load order clean.
 """

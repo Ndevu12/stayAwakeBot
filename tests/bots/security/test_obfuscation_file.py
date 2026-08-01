@@ -17,9 +17,9 @@ from pathlib import Path
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions
-from stayawake.bots.security.obfuscation import (
-    analyze_file, analyze_delta, is_generated_context, _GENERATED_PATH, _has_exec_sink,
-)
+from stayawake.bots.security.obfuscation import analyze_file, analyze_delta, is_generated_context
+from stayawake.bots.security.obfuscation.heuristics import _GENERATED_PATH
+from stayawake.bots.security.obfuscation.execsink import _has_exec_sink
 
 SIGS = load_signatures()
 OBF = "obfuscated-source-file"

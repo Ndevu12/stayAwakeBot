@@ -21,6 +21,21 @@ All notable changes to this project are documented here. The format is based on
   variable, or a cross-scope name collision stays clean). Heuristic → SUSPICIOUS; purely static.
 
 ### Changed
+- **Maintainability: `bots/security/obfuscation.py` (1012 lines) is now an `obfuscation/` package, and
+  the decode→exec dropper primitives moved into `taint/` (the dependency now flows one way).** The
+  monolith split per concern — `execsink` (self-evident dynamic-exec sink constructs) / `heuristics`
+  (whole-file density / entropy / escape-run / minification + the `is_generated_context` suppression
+  predicate) / `entry` (the `analyze_file` / `analyze_delta` verdicts). The decode→exec FLOW
+  primitives (`_DECODE`, the blob corroborators, the scope-aware variable walk, the scrubber, …) —
+  which `taint/analyzer` used to reach UP into `obfuscation` for — now live in `taint/flow`, so the
+  detector's decode→exec capability is in ONE place and the dependency is `obfuscation → taint`, never
+  the reverse. Shared low-level text utilities (Shannon entropy, the inline-asset data-URI matcher,
+  the string de-chunker) were extracted to a new leaf module `bots/security/sourcescan`, imported by
+  both. The move is byte-identical (verified per-definition: 67/67 unchanged), and `taint/model` is
+  now the single source of truth for the decode/runner taxonomy — `flow`'s `_DECODE` / `_CP_RUNNERS` /
+  `_CP_METHOD` regexes are DERIVED from its frozensets (proven behavior-equivalent to the old
+  hand-written literals by a differential test over 550 samples + a new derivation-contract test).
+  No coverage change; the full decode→exec MUST-CATCH/MUST-CLEAR matrix and ReDoS-safety suite pass.
 - **Maintainability: `bots/security/service.py` (320 lines) is now a `service/` package** split per
   concern — `config` (YAML + CLI flags → `ScanOptions`, plus the advisory-DB gate) / `report` (the
   per-target verdict tag + the written-report pointer) / `run` (the `scan` orchestration and its
