@@ -30,14 +30,15 @@ jobs:
         with:
           # Pin the scanner to a known-good SHA, never @main (SECURITY_BASELINE doctrine):
           # a later compromise of main cannot silently change what the gate runs. This points at
-          # current main (merge of #1313). Since the last pin (#1282) it catches up the model-driven
+          # current main (merge of #1315). Since the last pin (#1282) it catches up the model-driven
           # taint-analysis decode→exec detector (#1298/#1299/#1304), the guard/remediation/pr/service
-          # package splits (#1300–#1306), and auth/identity hardening (#1287–#1313). requires-python >=3.11
+          # package splits (#1300–#1306), auth/identity hardening (#1287–#1313), and the guard
+          # remediating-gate + self-closing pin-drift (#1315). requires-python >=3.11
           # satisfies the 3.13 runner. Bump this deliberately after reviewed engine changes — the
           # in-band pin-freshness gate (#1172) fails an engine PR that doesn't bump this, both pin
           # copies must AGREE (pin_tools.py synced, #1210), and scanner-pin-drift opens an issue if
           # it falls behind.
-          sentinel-ref: 8b47ec579863362253ddbe5cd928faa39cbb45f4   # merge of #1313 — catches up the taint decode→exec detector (#1298/#1299/#1304), the security package splits (#1300–#1306), auth hardening (#1287–#1313)
+          sentinel-ref: f3e014cdacce5077a7ae7099b6627e8e6cbaf18f   # merge of #1315 — catches up the taint decode→exec detector (#1298/#1299/#1304), security package splits (#1300–#1306), auth hardening (#1287–#1313), guard remediating-gate/pin-drift (#1315)
           fail-on-findings: 'true'
           # This gate never uploads SARIF — the job conclusion is the scan's exit code, nothing
           # else. Code-scanning delivery is owned solely by security-sentinel.yml.

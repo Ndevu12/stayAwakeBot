@@ -134,11 +134,12 @@ All notable changes to this project are documented here. The format is based on
   same behavior, with the decision logic importable and unit-tested directly (#1284).
 
 ### Security
-- **Bumped the pinned self-scan engine to current main (`sentinel-ref` → merge of #1313), in both
+- **Bumped the pinned self-scan engine to current main (`sentinel-ref` → merge of #1315), in both
   the worm-guard gate and the release self-scan.** Catches the gate up to the reviewed engine work
   since the last pin (#1282): the model-driven taint-analysis decode→exec detector and shell-command
-  coverage (#1298/#1299/#1304), the guard/remediation/pr/service package splits (#1300–#1306), and
-  the auth/identity hardening (#1287–#1313) — so the gate scans with the current reviewed engine.
+  coverage (#1298/#1299/#1304), the guard/remediation/pr/service package splits (#1300–#1306), the
+  auth/identity hardening (#1287–#1313), and the guard remediating-gate + self-closing pin-drift
+  (#1315) — so the gate scans with the current reviewed engine.
   Both pin copies are bumped together, as the sync gate (`pin_tools.py synced`, #1210) requires.
 
 ## [0.1.17] - 2026-07-31
