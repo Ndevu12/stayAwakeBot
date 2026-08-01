@@ -57,6 +57,11 @@ class _Fix:
     def partial(self) -> bool:
         # A computed strip is applied but NOT git-corroborated — it MUST be reviewed before merge, so
         # a run carrying one is needs-review (gate red / exit 1) exactly like a residual manual item.
+        # The `computed` arm is LOAD-BEARING, not redundant: after a computed strip the post-strip
+        # rescan can report the tree CLEAN (empty `manual`), so `bool(self.computed)` is the only thing
+        # that keeps a not-git-corroborated tree from going green. See the invariant at the `fs =
+        # _scan()` rescan site in `_build_fix` (#1209/#1290) before touching this. Do NOT reduce to
+        # `bool(self.manual)`.
         return bool(self.manual) or bool(self.computed)
 
 
@@ -187,8 +192,17 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *,
             signed = signed and commit.signed
 
         # GROUND-TRUTH residual AFTER both tiers are applied — the honest "still infected" set. The
-        # computed-tier paths are stripped, so they never appear here; only genuinely-manual do. The
-        # tree is never called clean while `manual` (or `computed`) is non-empty.
+        # computed-tier paths are stripped, so they never appear here; only genuinely-manual do.
+        #
+        # LOAD-BEARING INVARIANT (#1209/#1290 — do NOT simplify `_Fix.partial` without reading this):
+        # a COMPUTED strip removes the VISIBLE payload, so this rescan can legitimately report the tree
+        # CLEAN — `residual`, `suspicious`, AND `manual` can ALL be empty even though we just applied a
+        # NOT-git-corroborated (possibly scanner-invisible-RCE) change. When that happens, the ONLY
+        # thing keeping the run needs-review (gate red / exit 1) is `bool(self.computed)` in
+        # `_Fix.partial`. So `partial` MUST stay `bool(self.manual) OR bool(self.computed)`: dropping
+        # the `computed` arm back to the pre-#1209 `bool(self.manual)` would silently turn such a tree
+        # GREEN (exit 0) on the strength of a rescan that only proves the payload is no longer GREPPABLE.
+        # This is pinned by `test_computed_strip_ships_partial_review_required`; keep both in lockstep.
         fs = _scan()
         residual = _blocking(fs)
         suspicious = [f for f in fs if not _is_blocking(f)]   # heuristic-only residue
