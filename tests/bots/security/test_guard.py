@@ -362,6 +362,112 @@ class TestPlanSetup(unittest.TestCase):
         self.assertNotIn('"Ndevu12/strix@v0"', p.content)
 
 
+class TestRenderWorkflow(unittest.TestCase):
+    """The installed worm-guard workflow: two least-privilege jobs — a gate that opens a fix PR, and a
+    scheduled pin-drift reporter."""
+
+    def setUp(self):
+        import yaml
+        self.wf = guard.render_workflow(guard.Pin(SHA, "v0.1.4"), "main")
+        self.doc = yaml.safe_load(self.wf)          # must be valid YAML
+
+    def test_gate_job_has_scoped_write_and_opens_a_fix_pr(self):
+        gate = self.doc["jobs"]["worm-guard"]
+        self.assertEqual(gate["permissions"], {"contents": "write", "pull-requests": "write"})
+        strix = gate["steps"][-1]
+        self.assertEqual(strix["uses"], f"Ndevu12/strix@{SHA}")
+        self.assertEqual(strix["with"]["remediate"], "pr")
+
+    def test_token_prefers_the_secret_and_falls_back(self):
+        strix = self.doc["jobs"]["worm-guard"]["steps"][-1]
+        self.assertEqual(strix["with"]["token"], "${{ secrets.GH_SECURITY_TOKEN || github.token }}")
+
+    def test_pin_drift_job_is_scheduled_and_only_needs_issues_write(self):
+        drift = self.doc["jobs"]["pin-drift"]
+        self.assertEqual(drift["permissions"], {"contents": "read", "issues": "write"})
+        self.assertIn("saw guard drift", " ".join(s.get("run", "") for s in drift["steps"]))
+        self.assertIn("schedule", self.doc[True])   # PyYAML parses `on:` as the bool key True
+
+    def test_jobs_are_event_gated_so_they_do_not_overlap(self):
+        self.assertEqual(self.doc["jobs"]["worm-guard"]["if"], "github.event_name != 'schedule'")
+        self.assertIn("schedule", self.doc["jobs"]["pin-drift"]["if"])
+
+    def test_repin_preserves_the_two_job_structure(self):
+        # A surgical repin must touch ONLY the strix @ref, leaving the remediate/token/drift intact.
+        newpin = guard.Pin("b" * 40, "v0.1.5")
+        p = guard.plan_setup({guard.WORM_GUARD_FILE: self.wf}, "main", newpin)
+        self.assertEqual(p.action, "repin")
+        self.assertIn(f"Ndevu12/strix@{'b' * 40}", p.content)
+        self.assertIn("remediate: pr", p.content)
+        self.assertIn("secrets.GH_SECURITY_TOKEN", p.content)
+        self.assertIn("saw guard drift", p.content)
+
+
+class TestGuardDrift(unittest.TestCase):
+    """`saw guard drift`: freshness → ONE self-closing tracking issue."""
+
+    REF = StrixRef(workflow=".github/workflows/worm-guard.yml", job="worm-guard", ref=SHA, pin="sha")
+
+    def _run(self, *, state, existing=None, latest="v0.1.5", detail="pinned …, latest is v0.1.5"):
+        calls = {"created": [], "updated": [], "commented": []}
+        open_issues = ([{"number": existing, "title": guard.pindrift.DRIFT_TITLE}] if existing else [])
+        with mock.patch.object(guard.pindrift, "_resolve_slug", return_value=("o", "r")), \
+             mock.patch.object(guard.pindrift.detect, "_local_workflows", return_value={"x": "y"}), \
+             mock.patch.object(guard.pindrift.detect, "find_strix", return_value=self.REF), \
+             mock.patch.object(guard.pindrift.detect, "freshness",
+                               return_value=guard.Freshness(state, latest, detail)), \
+             mock.patch.object(guard.pindrift.github_api, "list_open_issues", return_value=open_issues), \
+             mock.patch.object(guard.pindrift.github_api, "create_issue",
+                               side_effect=lambda *a, **k: calls["created"].append((a, k)) or {"number": 7}), \
+             mock.patch.object(guard.pindrift.github_api, "update_issue",
+                               side_effect=lambda *a, **k: calls["updated"].append((a, k)) or {}), \
+             mock.patch.object(guard.pindrift.github_api, "add_issue_comment",
+                               side_effect=lambda *a, **k: calls["commented"].append((a, k)) or {}):
+            rc = guard.drift(".", token="t")
+        return rc, calls
+
+    def test_behind_opens_a_new_issue(self):
+        rc, calls = self._run(state="behind", existing=None)
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(calls["created"]), 1)
+        # created with the drift label
+        self.assertEqual(calls["created"][0][1].get("labels"), [guard.pindrift.DRIFT_LABEL])
+
+    def test_behind_with_existing_issue_refreshes_not_duplicates(self):
+        rc, calls = self._run(state="behind", existing=42)
+        self.assertEqual(rc, 0)
+        self.assertEqual(calls["created"], [])             # no duplicate
+        self.assertEqual(len(calls["updated"]), 1)          # silent body refresh
+        self.assertNotIn("state", calls["updated"][0][1])   # refresh, not a close
+
+    def test_fresh_closes_an_open_issue(self):
+        rc, calls = self._run(state="fresh", existing=42)
+        self.assertEqual(rc, 0)
+        self.assertEqual(calls["updated"][0][1].get("state"), "closed")
+        self.assertEqual(len(calls["commented"]), 1)        # notifies on the close
+
+    def test_fresh_with_no_issue_does_nothing(self):
+        rc, calls = self._run(state="fresh", existing=None)
+        self.assertEqual(rc, 0)
+        self.assertEqual((calls["created"], calls["updated"]), ([], []))
+
+    def test_unknown_never_churns_the_issue(self):
+        # a transient releases-API failure must not open OR close anything
+        rc, calls = self._run(state="unknown", existing=42)
+        self.assertEqual(rc, 0)
+        self.assertEqual((calls["created"], calls["updated"], calls["commented"]), ([], [], []))
+
+    def test_no_gate_is_a_calm_zero(self):
+        with mock.patch.object(guard.pindrift, "_resolve_slug", return_value=("o", "r")), \
+             mock.patch.object(guard.pindrift.detect, "_local_workflows", return_value={}), \
+             mock.patch.object(guard.pindrift.detect, "find_strix", return_value=None):
+            self.assertEqual(guard.drift("."), 0)
+
+    def test_unresolvable_repo_fails_closed(self):
+        with mock.patch.object(guard.pindrift, "_resolve_slug", return_value=None):
+            self.assertEqual(guard.drift("."), 1)
+
+
 def _tmp_repo():
     import subprocess
     d = Path(tempfile.mkdtemp())

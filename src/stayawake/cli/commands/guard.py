@@ -80,6 +80,17 @@ def register(sub) -> None:
                     help="disable the typewriter output (plain, instant)")
     st.set_defaults(func=run_setup)
 
+    dr = gsub.add_parser(
+        "drift", help="report if this repo's pinned Strix gate is behind the latest release (files an issue)",
+        description="Out-of-band pin-drift backstop for the worm-guard gate INSTALLED IN THIS REPO: "
+                    "read the pinned `Ndevu12/strix@<sha>`, compare it to the latest Strix release, and "
+                    "open ONE de-duplicated tracking issue when it has fallen behind — closing it again "
+                    "automatically once the pin catches up. Meant to run on a schedule in the workflow "
+                    "`saw guard setup` installs; reports drift as an issue, never a build failure.")
+    dr.add_argument("repo", nargs="?", default=".", metavar="REPO",
+                    help="local repo path to check (default: current directory)")
+    dr.set_defaults(func=run_drift)
+
 
 def run_check(a: argparse.Namespace) -> int:
     from stayawake.bots.security import guard   # lazy: pull yaml/API in only when the command runs
@@ -93,6 +104,12 @@ def run_check(a: argparse.Namespace) -> int:
         paths=None if remote else (positionals or None),
         slugs=slugs, users=a.user or None, orgs=a.org or None, remote=remote,
         config_path=a.config, branch=a.branch, fail=a.fail, no_stream=a.no_stream)
+
+
+def run_drift(a: argparse.Namespace) -> int:
+    from stayawake.bots.security import guard   # lazy: pull yaml/API in only when the command runs
+
+    return guard.drift(a.repo)
 
 
 def run_setup(a: argparse.Namespace) -> int:
