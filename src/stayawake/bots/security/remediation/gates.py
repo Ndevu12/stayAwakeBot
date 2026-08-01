@@ -11,8 +11,10 @@ import re
 import unicodedata
 
 from stayawake.bots.security.matchers.base import build_content_sig
-from stayawake.bots.security.obfuscation import (
-    analyze_file, _has_exec_sink, _shannon, _ENTROPY_ABS, _MAX_PROSE_SPACE_FRAC)
+from stayawake.bots.security.obfuscation import analyze_file
+from stayawake.bots.security.obfuscation.execsink import _has_exec_sink
+from stayawake.bots.security.obfuscation.heuristics import _ENTROPY_ABS, _MAX_PROSE_SPACE_FRAC
+from stayawake.bots.security.sourcescan import _shannon
 
 def codeloader_content_sig(all_signatures):
     """Compile the code-loader CONTENT fingerprints into check(text) -> id|None — the

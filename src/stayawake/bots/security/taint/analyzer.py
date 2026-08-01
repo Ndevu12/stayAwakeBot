@@ -18,8 +18,8 @@ from __future__ import annotations
 
 import re
 
-from stayawake.bots.security import obfuscation as _obf
-from stayawake.bots.security.taint import model
+from stayawake.bots.security import sourcescan
+from stayawake.bots.security.taint import flow, model
 
 # Reason strings (redaction-safe evidence).
 _R_DIRECT = "base64/hex decoded and run via a command/module sink (child_process/import/Worker)"
@@ -57,10 +57,10 @@ _INLINE_HEAD = (
 
 # NESTED decode directly in the shell payload position — self-evident, no blob corroborator needed
 # (running a freshly-decoded value as a shell command is the dropper regardless of blob length).
-_SHELL_ARGV_NESTED = re.compile(_ARGV_HEAD + _obf._DECODE, re.IGNORECASE)
-_SHELL_INARRAY_NESTED = re.compile(_INARRAY_HEAD + _obf._DECODE, re.IGNORECASE)
+_SHELL_ARGV_NESTED = re.compile(_ARGV_HEAD + flow._DECODE, re.IGNORECASE)
+_SHELL_INARRAY_NESTED = re.compile(_INARRAY_HEAD + flow._DECODE, re.IGNORECASE)
 _SHELL_INLINE_NESTED = re.compile(
-    _INLINE_HEAD + r"[^'\"\x60\n]{0,80}['\"]?\s*(?:\+|\$\{)\s*" + _obf._DECODE, re.IGNORECASE)
+    _INLINE_HEAD + r"[^'\"\x60\n]{0,80}['\"]?\s*(?:\+|\$\{)\s*" + flow._DECODE, re.IGNORECASE)
 _SHELL_NESTED = (_SHELL_ARGV_NESTED, _SHELL_INARRAY_NESTED, _SHELL_INLINE_NESTED)
 
 # VARIABLE at the shell payload position — capture the identifier so we can confirm it is a decode
@@ -80,8 +80,8 @@ def _decode_var_names(view: str) -> set[str]:
     """The set of variables assigned a base64/hex decode (`const d = Buffer.from(p,'base64')`),
     bounded, over the (fully-scrubbed) view — the taint seeds for the variable forms."""
     names: set[str] = set()
-    for i, m in enumerate(_obf._DECODE_TO_VAR.finditer(view)):
-        if i >= _obf._MAX_DECODE_VARS:
+    for i, m in enumerate(flow._DECODE_TO_VAR.finditer(view)):
+        if i >= flow._MAX_DECODE_VARS:
             break
         names.add(m.group(1))
     return names
@@ -93,8 +93,8 @@ def _var_reaches_shell(text: str) -> bool:
     (the `'sh'`/`'-c'` literals must survive) but run the SCOPE/re-bind checks on the strings-BLANKED
     view at the same offsets (so a `}` or `(param)` inside a string can't skew scope) — mirroring the
     discipline of `_decode_var_into_exec`."""
-    kept = _obf._scrub_comments_and_strings(text, scrub_strings=False)
-    full = _obf._scrub_comments_and_strings(text)          # strings blanked; same length/offsets
+    kept = flow._scrub_comments_and_strings(text, scrub_strings=False)
+    full = flow._scrub_comments_and_strings(text)          # strings blanked; same length/offsets
     decode_vars = _decode_var_names(full)
     if not decode_vars:
         return False
@@ -107,7 +107,7 @@ def _var_reaches_shell(text: str) -> bool:
             if assign is None:
                 continue
             gap = full[assign:m.start()]
-            if _obf._name_rebound(gap, re.escape(name)) or _scope_closed(gap):
+            if flow._name_rebound(gap, re.escape(name)) or _scope_closed(gap):
                 continue
             return True
     return False
@@ -117,7 +117,7 @@ def _last_decode_assign_before(view: str, name: str, pos: int) -> int | None:
     """End offset of the nearest `<name> = <decode>` assignment before `pos`, else None."""
     best = None
     pat = re.compile(
-        r"(?:(?:const|let|var)\s+)?(?<![.\w$])" + re.escape(name) + r"\s*=(?!=)\s*" + _obf._DECODE)
+        r"(?:(?:const|let|var)\s+)?(?<![.\w$])" + re.escape(name) + r"\s*=(?!=)\s*" + flow._DECODE)
     for m in pat.finditer(view, 0, pos):
         best = m.end()
     return best
@@ -146,17 +146,17 @@ def detect_dropper(text: str) -> str | None:
     # 1) Leading-argument forms — REUSE the shipped, 4-round-hardened detection (zero regression):
     #    a nested decode in a command/module/worker sink (self-evident), or a decode-through-variable
     #    reaching such a sink corroborated by a baked blob.
-    if _obf._DECODE_INTO_EXEC.search(text):
+    if flow._DECODE_INTO_EXEC.search(text):
         return _R_DIRECT
-    deassetted = _obf._DATA_URI.sub("", text)
-    baked = _obf._has_encoded_payload(_obf._dechunk(deassetted))
-    if baked and _obf._decode_var_into_exec(text):
+    deassetted = sourcescan._DATA_URI.sub("", text)
+    baked = flow._has_encoded_payload(sourcescan._dechunk(deassetted))
+    if baked and flow._decode_var_into_exec(text):
         return _R_VAR
 
     # 2) Shell code-argument forms — the gap the leading-arg anchor misses. A decoded value in a
     #    shell `-c` slot has no benign analogue. Nested decode is self-evident; the variable form is
     #    blob-corroborated + scope-guarded (a decoded value must reach the shell code slot, in scope).
-    kept = _obf._scrub_comments_and_strings(text, scrub_strings=False)  # keep the 'sh'/'-c' literals
+    kept = flow._scrub_comments_and_strings(text, scrub_strings=False)  # keep the 'sh'/'-c' literals
     if any(rx.search(kept) for rx in _SHELL_NESTED):
         return _R_SHELL
     if baked and _var_reaches_shell(text):
