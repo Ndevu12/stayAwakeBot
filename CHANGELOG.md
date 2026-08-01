@@ -30,6 +30,12 @@ All notable changes to this project are documented here. The format is based on
   goes straight to the patch/notify-issue floor instead of a wasted fork round-trip (it degraded
   gracefully before; now it's honest and cheaper). `forbidden` (a valid token lacking write) still
   attempts the fork, as before.
+- **`render.path_link` sanitizes its visible text — safe for untrusted paths (#1294).** The clickable
+  path text now runs through `textsafe.plain`, so a path embedding control/escape (a nested OSC/CSI, a
+  BEL) or bidi-override characters can't hijack the terminal or inject a workflow-command into a CI
+  log. The OSC 8 target URI is still built from the resolved path (`Path.as_uri()`, percent-encoded),
+  so the click destination stays exact. Normal paths render identically; this hardens the shared util
+  by default for any future caller that passes attacker-influenced input.
 - **Architecture: the domain-neutral `proposal` seam moved from `bots/security` down to `core`.** The
   "propose a change as a reviewed PR, with a fork → patch → notify-issue degradation ladder" machinery
   knows nothing about security (its own docstring calls it "deliberately domain-neutral") and is shared
