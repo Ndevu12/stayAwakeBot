@@ -168,8 +168,12 @@ def submit_change_pr(wt: Path, slug: str, base: str, *, branch: str, title: str,
     pushed = gitutil.push_branch_result(wt, slug, branch, token)
     if not pushed.ok:
         failure = classify_push_stderr(pushed.stderr)
-        # Workflow-scope / signed-commits: forking cannot fix these — skip straight to floor.
-        if failure.reason not in ("workflow_scope", "signed_commits"):
+        # Some refusals can't be fixed by forking, so skip straight to the patch/issue floor:
+        #  • workflow_scope / signed_commits — the fork PR would hit the same wall.
+        #  • auth — the CREDENTIAL itself is rejected (#1291), so a fork push (same token) fails too;
+        #    attempting it is wasted API calls. (It degraded gracefully before — the fork's
+        #    get_authenticated_user returned None — but skipping is honest and cheaper.)
+        if failure.reason not in ("workflow_scope", "signed_commits", "auth"):
             forked = _fork_and_pr(wt, owner, name, base, branch, title, body, token)
             if forked is not None and forked.kind != "floor":
                 return forked
