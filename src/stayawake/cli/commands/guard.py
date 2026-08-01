@@ -81,14 +81,32 @@ def register(sub) -> None:
     st.set_defaults(func=run_setup)
 
     dr = gsub.add_parser(
-        "drift", help="report if this repo's pinned Strix gate is behind the latest release (files an issue)",
-        description="Out-of-band pin-drift backstop for the worm-guard gate INSTALLED IN THIS REPO: "
-                    "read the pinned `Ndevu12/strix@<sha>`, compare it to the latest Strix release, and "
-                    "open ONE de-duplicated tracking issue when it has fallen behind — closing it again "
-                    "automatically once the pin catches up. Meant to run on a schedule in the workflow "
-                    "`saw guard setup` installs; reports drift as an issue, never a build failure.")
-    dr.add_argument("repo", nargs="?", default=".", metavar="REPO",
-                    help="local repo path to check (default: current directory)")
+        "drift", help="report worm-guard pin drift across repos (files/closes a tracking issue each)",
+        description="Out-of-band pin-drift backstop for the worm-guard gate: read each repo's pinned "
+                    "`Ndevu12/strix@<sha>`, compare it to the latest Strix release, and open ONE "
+                    "de-duplicated tracking issue when it has fallen behind — closing it again "
+                    "automatically once the pin catches up. Same target model as `saw guard check`: "
+                    "LOCAL by default (discovers git repos; omit targets for the current repo), "
+                    "--remote (or --user/--org) sweeps GitHub repos. Reports drift as an issue, never "
+                    "a build failure. `saw guard setup`'s scheduled pin-drift job runs this.")
+    dr.add_argument("targets", nargs="*", metavar="TARGETS",
+                    help="local repo/dir paths — or, with --remote, owner/repo slugs. "
+                         "Omit to check configured targets or the current repo.")
+    dr.add_argument("-p", "--path", action="append", default=[], dest="extra_paths",
+                    metavar="PATH", help="additional target (repeatable)")
+    dr.add_argument("-c", "--config", default=None,
+                    help="config file (default: config/security.yml when present)")
+    dr.add_argument("-r", "--remote", action="store_true",
+                    help="check GitHub repos instead of local: ad-hoc --user/--org/owner-repo, "
+                         "else configured targets, else your own repos")
+    dr.add_argument("--user", action="append", default=[], metavar="USER",
+                    help="check this GitHub user's repos (repeatable; implies --remote)")
+    dr.add_argument("--org", action="append", default=[], metavar="ORG",
+                    help="check this GitHub org's repos (repeatable; implies --remote)")
+    dr.add_argument("--repo", metavar="OWNER/NAME", default=None,
+                    help="shorthand for a single remote repo (same as `--remote owner/name`)")
+    dr.add_argument("--no-stream", action="store_true", dest="no_stream",
+                    help="disable the typewriter output (plain, instant)")
     dr.set_defaults(func=run_drift)
 
 
@@ -109,7 +127,15 @@ def run_check(a: argparse.Namespace) -> int:
 def run_drift(a: argparse.Namespace) -> int:
     from stayawake.bots.security import guard   # lazy: pull yaml/API in only when the command runs
 
-    return guard.drift(a.repo)
+    positionals = [*a.targets, *a.extra_paths]
+    remote = a.remote or bool(a.user) or bool(a.org) or bool(a.repo)   # any GitHub selector → remote
+    slugs = list(positionals) if remote else None
+    if a.repo:                                    # --repo owner/name is sugar for a single remote target
+        slugs = (slugs or []) + [a.repo]
+    return guard.drift_targets(
+        paths=None if remote else (positionals or None),
+        slugs=slugs, users=a.user or None, orgs=a.org or None, remote=remote,
+        config_path=a.config, no_stream=a.no_stream)
 
 
 def run_setup(a: argparse.Namespace) -> int:

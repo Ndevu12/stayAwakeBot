@@ -380,22 +380,27 @@ the check never passes on the strength of an unreviewed auto-change.
 
 #### `saw guard drift`
 
-The **out-of-band pin-drift backstop** for the gate installed **in this repo**: read the pinned
-`Ndevu12/strix@<sha>`, compare it to the latest Strix release, and open ONE de-duplicated tracking
-**issue** when it has fallen behind — **closing it automatically** once the pin catches up. It reports
-drift as an issue, **never a build failure** (exit 0), so it's safe on a schedule. The `pin-drift` job
-that [`saw guard setup`](#saw-guard-setup) installs runs it weekly; run it manually to check now.
+The **out-of-band pin-drift backstop** — **across repos**, same target model as
+[`saw guard check`](#saw-guard-check). For each repo it reads the pinned `Ndevu12/strix@<sha>`,
+compares it to the latest Strix release, and opens ONE de-duplicated tracking **issue** when it has
+fallen behind — **closing it automatically** once the pin catches up. It recognizes a gate by **any**
+mechanism (like `check`): a non-Strix gate (a local action / a `saw` step) is reported
+present-but-not-trackable — *not* "no gate" — and touches no issue. Reports drift as an issue, **never
+a build failure** (exit 0), so it's safe on a schedule. The `pin-drift` job that
+[`saw guard setup`](#saw-guard-setup) installs runs it weekly on that repo; an operator can sweep a
+whole fleet with `--remote`.
 
 ```text
-saw guard drift [REPO]
+saw guard drift [TARGETS...] [-p PATH] [-c FILE] [-r] [--user U] [--org O] [--repo OWNER/NAME]
 ```
 
 | Option | Description |
 | --- | --- |
-| `REPO` | Local repo path to check (default: the current directory). Resolves the repo slug from `GITHUB_REPOSITORY` (in CI) or the git origin. |
+| `TARGETS...` / `-p` / `-c` / `-r` / `--user` / `--org` / `--repo` | Target selection, identical to [`saw guard check`](#saw-guard-check): local paths by default (omit for the current repo), or `owner/repo` slugs under `--remote`. |
 
 ```bash
-saw guard drift                                 # is this repo's pinned gate behind? file/close the issue
+saw guard drift                                 # this repo (or configured local targets): file/close the issue
+saw guard drift --remote --org UB-TechDEV       # sweep an org: open a drift issue in each behind repo
 ```
 
 ### `saw db`

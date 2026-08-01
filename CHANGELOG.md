@@ -16,9 +16,12 @@ All notable changes to this project are documented here. The format is based on
   to the built-in token. The **pin-drift** job (`pin-drift`, weekly + manual, `issues: write` only)
   runs the new **`saw guard drift`**, which files ONE de-duplicated tracking issue when the pinned
   `Ndevu12/strix@<sha>` falls behind the latest release and closes it automatically once the pin
-  catches up. Re-running `saw guard setup` still surgically bumps only the pin, preserving the rest
-  of the file. The install PR body lists the two follow-ups a PR can't do itself (enable Actions
-  create-PR; optional `GH_SECURITY_TOKEN`).
+  catches up. `saw guard drift` **sweeps repos** with the same target model as `saw guard check`
+  (local by default; `--remote`/`--user`/`--org` for a fleet), and recognizes a gate by **any**
+  mechanism: a non-Strix gate (a local action / a `saw` step) is reported present-but-not-trackable —
+  *not* "no gate" — and touches no issue. Re-running `saw guard setup` still surgically bumps only the
+  pin, preserving the rest of the file. The install PR body lists the two follow-ups a PR can't do
+  itself (enable Actions create-PR; optional `GH_SECURITY_TOKEN`).
 - **Decode→exec dropper detection is now one model-driven analyzer (`bots/security/taint/`), and it
   closes the shell-command gap.** A single `model` (what a dropper is: an encoded blob → a decode →
   an exec sink, with each sink's *code argument position* named) drives one `analyzer.detect_dropper`

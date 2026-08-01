@@ -404,18 +404,20 @@ class TestRenderWorkflow(unittest.TestCase):
 
 
 class TestGuardDrift(unittest.TestCase):
-    """`saw guard drift`: freshness → ONE self-closing tracking issue."""
+    """`drift_one`: grade one repo (via `detect.check`) → ONE self-closing tracking issue. Recognizes
+    a gate by ANY mechanism, and only files issues for the gradeable Strix-action pin."""
 
     REF = StrixRef(workflow=".github/workflows/worm-guard.yml", job="worm-guard", ref=SHA, pin="sha")
 
-    def _run(self, *, state, existing=None, latest="v0.1.5", detail="pinned …, latest is v0.1.5"):
+    def _strix(self, state, latest="v0.1.5"):
+        return GuardStatus(present=True, ref=self.REF,
+                           fresh=guard.Freshness(state, latest, f"latest {latest}"))
+
+    def _run(self, status, *, existing=None):
         calls = {"created": [], "updated": [], "commented": []}
         open_issues = ([{"number": existing, "title": guard.pindrift.DRIFT_TITLE}] if existing else [])
-        with mock.patch.object(guard.pindrift, "_resolve_slug", return_value=("o", "r")), \
-             mock.patch.object(guard.pindrift.detect, "_local_workflows", return_value={"x": "y"}), \
-             mock.patch.object(guard.pindrift.detect, "find_strix", return_value=self.REF), \
-             mock.patch.object(guard.pindrift.detect, "freshness",
-                               return_value=guard.Freshness(state, latest, detail)), \
+        with mock.patch.object(guard.pindrift.detect, "check", return_value=status), \
+             mock.patch.object(guard.pindrift, "_resolve_slug", return_value=("o", "r")), \
              mock.patch.object(guard.pindrift.github_api, "list_open_issues", return_value=open_issues), \
              mock.patch.object(guard.pindrift.github_api, "create_issue",
                                side_effect=lambda *a, **k: calls["created"].append((a, k)) or {"number": 7}), \
@@ -423,49 +425,75 @@ class TestGuardDrift(unittest.TestCase):
                                side_effect=lambda *a, **k: calls["updated"].append((a, k)) or {}), \
              mock.patch.object(guard.pindrift.github_api, "add_issue_comment",
                                side_effect=lambda *a, **k: calls["commented"].append((a, k)) or {}):
-            rc = guard.drift(".", token="t")
-        return rc, calls
+            outcome = guard.drift_one(repo=".", token="t")
+        return outcome, calls
 
     def test_behind_opens_a_new_issue(self):
-        rc, calls = self._run(state="behind", existing=None)
-        self.assertEqual(rc, 0)
+        o, calls = self._run(self._strix("behind"), existing=None)
+        self.assertEqual((o.state, o.action), ("behind", "opened"))
         self.assertEqual(len(calls["created"]), 1)
-        # created with the drift label
         self.assertEqual(calls["created"][0][1].get("labels"), [guard.pindrift.DRIFT_LABEL])
 
     def test_behind_with_existing_issue_refreshes_not_duplicates(self):
-        rc, calls = self._run(state="behind", existing=42)
-        self.assertEqual(rc, 0)
-        self.assertEqual(calls["created"], [])             # no duplicate
+        o, calls = self._run(self._strix("behind"), existing=42)
+        self.assertEqual(o.action, "refreshed")
+        self.assertEqual(calls["created"], [])              # no duplicate
         self.assertEqual(len(calls["updated"]), 1)          # silent body refresh
         self.assertNotIn("state", calls["updated"][0][1])   # refresh, not a close
 
     def test_fresh_closes_an_open_issue(self):
-        rc, calls = self._run(state="fresh", existing=42)
-        self.assertEqual(rc, 0)
+        o, calls = self._run(self._strix("fresh"), existing=42)
+        self.assertEqual(o.action, "closed")
         self.assertEqual(calls["updated"][0][1].get("state"), "closed")
         self.assertEqual(len(calls["commented"]), 1)        # notifies on the close
 
     def test_fresh_with_no_issue_does_nothing(self):
-        rc, calls = self._run(state="fresh", existing=None)
-        self.assertEqual(rc, 0)
+        o, calls = self._run(self._strix("fresh"), existing=None)
+        self.assertEqual((o.state, o.action), ("fresh", "none"))
         self.assertEqual((calls["created"], calls["updated"]), ([], []))
 
     def test_unknown_never_churns_the_issue(self):
         # a transient releases-API failure must not open OR close anything
-        rc, calls = self._run(state="unknown", existing=42)
-        self.assertEqual(rc, 0)
+        o, calls = self._run(self._strix("unknown"), existing=42)
+        self.assertEqual(o.state, "unknown")
         self.assertEqual((calls["created"], calls["updated"], calls["commented"]), ([], [], []))
 
-    def test_no_gate_is_a_calm_zero(self):
-        with mock.patch.object(guard.pindrift, "_resolve_slug", return_value=("o", "r")), \
-             mock.patch.object(guard.pindrift.detect, "_local_workflows", return_value={}), \
-             mock.patch.object(guard.pindrift.detect, "find_strix", return_value=None):
-            self.assertEqual(guard.drift("."), 0)
+    def test_non_strix_gate_is_recognized_not_called_no_gate(self):
+        # THE #1315-review bug: a repo guarded by a LOCAL action (not Ndevu12/strix) must be reported
+        # as present-but-not-trackable — NOT "no gate" — and must touch no issue.
+        st = GuardStatus(present=True, ref=None, mechanism="local-action",
+                         gate_file=".github/workflows/worm-guard.yml")
+        o, calls = self._run(st)
+        self.assertEqual(o.state, "not-strix")
+        self.assertIn("local-action", o.detail)
+        self.assertEqual((calls["created"], calls["updated"]), ([], []))
 
-    def test_unresolvable_repo_fails_closed(self):
-        with mock.patch.object(guard.pindrift, "_resolve_slug", return_value=None):
-            self.assertEqual(guard.drift("."), 1)
+    def test_no_gate_touches_no_issue(self):
+        o, calls = self._run(GuardStatus(present=False))
+        self.assertEqual(o.state, "no-gate")
+        self.assertEqual((calls["created"], calls["updated"]), ([], []))
+
+
+class TestDriftSweep(unittest.TestCase):
+    """`drift_targets` — the sweep wiring (like `check_targets`)."""
+
+    def test_no_local_repos_is_calm_zero(self):
+        with mock.patch.object(guard.sweep, "_guard_config", return_value={}), \
+             mock.patch.object(guard.sweep.resolution, "discover_local_repos", return_value=[]):
+            self.assertEqual(guard.drift_targets(no_stream=True), 0)
+
+    def test_remote_sweep_drifts_each_slug(self):
+        seen = []
+        with mock.patch.object(guard.sweep, "_guard_config", return_value={}), \
+             mock.patch.object(guard.sweep.resolution, "resolve_remote",
+                               return_value=(["o/a", "o/b"], "tok", "env")), \
+             mock.patch.object(guard.sweep, "latest_strix", return_value=guard.LatestStrix("v1")), \
+             mock.patch.object(guard.sweep, "drift_one",
+                               side_effect=lambda **k: seen.append(k["slug"]) or
+                               guard.DriftOutcome(k["slug"], "fresh")):
+            rc = guard.drift_targets(remote=True, slugs=["o/a", "o/b"], no_stream=True)
+        self.assertEqual(rc, 0)
+        self.assertEqual(seen, ["o/a", "o/b"])
 
 
 def _tmp_repo():
