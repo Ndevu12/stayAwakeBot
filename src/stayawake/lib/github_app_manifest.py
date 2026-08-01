@@ -9,6 +9,7 @@ never ship a shared private key.
 from __future__ import annotations
 
 import json
+import secrets
 import threading
 import urllib.error
 import urllib.parse
@@ -42,6 +43,12 @@ def app_icon_path() -> Path | None:
     """Packaged StayAwakeBot App icon (PNG), or None if the asset is missing."""
     path = Path(__file__).resolve().parent / "data" / "stayawakebot-app-icon.png"
     return path if path.is_file() else None
+
+
+def _state_matches(got: str | None, nonce: str) -> bool:
+    """True iff `got` (a request's `state` query value) equals the run's `nonce` (#1292). Fails CLOSED
+    on a missing/empty value, and uses a constant-time compare so a near-miss leaks no timing signal."""
+    return bool(got) and secrets.compare_digest(got, nonce)
 
 
 def build_manifest(*, redirect_url: str, setup_url: str,
@@ -95,6 +102,11 @@ def register_via_browser(*, name: str = _MANIFEST_NAME, open_browser: bool = Tru
         "code": None, "error": None,
         "installation_id": None, "setup_error": None,
     }
+    # Anti-CSRF nonce bound to THIS run (#1292). It rides GitHub's own `state` param: baked into the
+    # new-app form action (echoed back to /callback) and into setup_url (returned to /setup). A forged
+    # local request to the ephemeral loopback port can't know it, so /callback and /setup reject any
+    # request whose `state` doesn't match. Constant-time compared to avoid a timing oracle.
+    nonce = secrets.token_urlsafe(32)
     registered = threading.Event()
     installed = threading.Event()
 
@@ -106,16 +118,26 @@ def register_via_browser(*, name: str = _MANIFEST_NAME, open_browser: bool = Tru
             parsed = urllib.parse.urlparse(self.path)
             port = self.server.server_port
             if parsed.path in ("/", "/start"):
+                nonce_q = urllib.parse.quote(nonce)
                 manifest = build_manifest(
                     redirect_url=f"http://127.0.0.1:{port}/callback",
-                    setup_url=f"http://127.0.0.1:{port}/setup",
+                    # state on setup_url so the install redirect (/setup) is CSRF-checked too.
+                    setup_url=f"http://127.0.0.1:{port}/setup?state={nonce_q}",
                     name=name,
                 )
-                body = _start_page(manifest).encode("utf-8")
+                # state on the new-app form action → GitHub echoes it to /callback with the code.
+                new_app_url = f"https://github.com/settings/apps/new?state={nonce_q}"
+                body = _start_page(manifest, new_app_url=new_app_url).encode("utf-8")
                 self._ok(body)
                 return
             if parsed.path == "/callback":
                 qs = urllib.parse.parse_qs(parsed.query)
+                if not self._state_ok(qs):
+                    state["error"] = "state mismatch — possible CSRF; the callback was ignored"
+                    self._fail(_html("Registration rejected",
+                                     "Anti-CSRF state check failed — return to the terminal."))
+                    registered.set()
+                    return
                 if qs.get("code"):
                     state["code"] = qs["code"][0]
                     msg = _html(
@@ -132,6 +154,12 @@ def register_via_browser(*, name: str = _MANIFEST_NAME, open_browser: bool = Tru
                 return
             if parsed.path == "/setup":
                 qs = urllib.parse.parse_qs(parsed.query)
+                if not self._state_ok(qs):
+                    state["setup_error"] = "state mismatch — possible CSRF; the install callback was ignored"
+                    self._fail(_html("Install rejected",
+                                     "Anti-CSRF state check failed — return to the terminal."))
+                    installed.set()
+                    return
                 iid = (qs.get("installation_id") or [None])[0]
                 if iid:
                     state["installation_id"] = str(iid)
@@ -149,6 +177,10 @@ def register_via_browser(*, name: str = _MANIFEST_NAME, open_browser: bool = Tru
                 return
             self.send_response(404)
             self.end_headers()
+
+        def _state_ok(self, qs: dict) -> bool:
+            """True iff the request carries the run's anti-CSRF `state` nonce (#1292)."""
+            return _state_matches((qs.get("state") or [None])[0], nonce)
 
         def _ok(self, body: bytes) -> None:
             self.send_response(200)
@@ -213,6 +245,7 @@ def register_via_browser(*, name: str = _MANIFEST_NAME, open_browser: bool = Tru
         return payload
     finally:
         server.shutdown()
+        server.server_close()      # release the listening socket (not just stop serve_forever)
 
 
 def _html(title: str, body: str) -> bytes:
@@ -221,16 +254,22 @@ def _html(title: str, body: str) -> bytes:
             f"<h2>{title}</h2><p>{body}</p></body></html>").encode("utf-8")
 
 
-def _start_page(manifest: dict) -> str:
-    """Auto-submitting HTML form that posts the manifest to GitHub's new-app endpoint."""
+def _start_page(manifest: dict, *,
+                new_app_url: str = "https://github.com/settings/apps/new") -> str:
+    """Auto-submitting HTML form that posts the manifest to GitHub's new-app endpoint. `new_app_url`
+    carries the per-run `?state=` nonce (#1292) so GitHub echoes it back to /callback for CSRF
+    verification; it is HTML-escaped into the form action like the manifest body."""
     manifest_json = json.dumps(manifest)
-    escaped = (manifest_json.replace("&", "&amp;").replace('"', "&quot;")
-               .replace("<", "&lt;").replace(">", "&gt;"))
+    def _esc(s: str) -> str:
+        return (s.replace("&", "&amp;").replace('"', "&quot;")
+                 .replace("<", "&lt;").replace(">", "&gt;"))
+    escaped = _esc(manifest_json)
+    action = _esc(new_app_url)
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Register StayAwakeBot</title></head>
 <body>
   <p>Continuing to GitHub to create your StayAwakeBot App…</p>
-  <form id="f" action="https://github.com/settings/apps/new" method="post">
+  <form id="f" action="{action}" method="post">
     <input type="hidden" name="manifest" value="{escaped}">
     <button type="submit">Create GitHub App</button>
   </form>

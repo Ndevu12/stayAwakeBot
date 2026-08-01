@@ -21,6 +21,14 @@ All notable changes to this project are documented here. The format is based on
   variable, or a cross-scope name collision stays clean). Heuristic → SUSPICIOUS; purely static.
 
 ### Changed
+- **App-manifest loopback OAuth now binds an anti-CSRF `state` nonce (#1292).** `saw auth app register`'s
+  local `/callback` and `/setup` handlers previously accepted `code` / `installation_id` with no
+  binding to the run. A per-run `secrets.token_urlsafe` nonce now rides GitHub's own `state` param —
+  baked into the new-app form action (echoed back to `/callback`) and into `setup_url` (returned to
+  `/setup`) — and both handlers reject (HTTP 400) any request whose `state` doesn't match, using a
+  constant-time compare that fails closed on a missing value. A forged request to the ephemeral
+  loopback port can no longer inject a code/installation. (Also: the loopback server now closes its
+  listening socket on exit.)
 - **Push-failure guidance now distinguishes a bad credential from a missing permission (#1291).** A
   git-push `authentication failed` / `invalid username` (the credential itself is rejected) is now
   classified `auth` → *"authentication failed — check the token"*, separately from a bare `403`
