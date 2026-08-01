@@ -21,6 +21,15 @@ All notable changes to this project are documented here. The format is based on
   variable, or a cross-scope name collision stays clean). Heuristic → SUSPICIOUS; purely static.
 
 ### Changed
+- **Architecture: the domain-neutral `proposal` seam moved from `bots/security` down to `core`.** The
+  "propose a change as a reviewed PR, with a fork → patch → notify-issue degradation ladder" machinery
+  knows nothing about security (its own docstring calls it "deliberately domain-neutral") and is shared
+  by two different features — `saw guard`'s CI-gate install and `saw fix`'s remediation — so it belonged
+  in the shared `core` layer, not inside the security bot. It composes `lib` adapters + `core.identity`
+  push-failure classification, which is exactly a `core` (domain) concern, not a `lib` (adapter) one —
+  so `core`, not `lib`, is its correct home. Pure relocation (byte-identical; importers repointed to
+  `stayawake.core.proposal`); no behavior change. (`resolution` was audited too and deliberately stays
+  in `bots/security`: it depends on the security-domain `ScanOptions` and is used only by security verbs.)
 - **Maintainability: `bots/security/obfuscation.py` (1012 lines) is now an `obfuscation/` package, and
   the decode→exec dropper primitives moved into `taint/` (the dependency now flows one way).** The
   monolith split per concern — `execsink` (self-evident dynamic-exec sink constructs) / `heuristics`

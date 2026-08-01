@@ -5,7 +5,8 @@ from __future__ import annotations
 
 from stayawake.utils import textsafe
 from stayawake.bots.security.models import CONFIRMED
-from stayawake.bots.security import remediation, proposal
+from stayawake.bots.security import remediation
+from stayawake.core import proposal
 from stayawake.bots.security.pr.constants import ISSUE_LABEL
 
 def _mark_partial(outcome: str, partial: bool) -> str:
