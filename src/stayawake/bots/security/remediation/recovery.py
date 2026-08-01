@@ -1,16 +1,12 @@
 #!/usr/bin/env python3
-"""Remediation engine — turn findings into safe, reversible changes.
-
-Each finding carries a `remediation` id (from the signature DB); this module maps
-ids to concrete `Change`s and applies them. Every applied change first backs the
-original up to a quarantine directory (reversible). Pure planning is separate from
-side-effecting apply so dry-run is trivial.
-"""
+"""Code-loader remediation — restore the last clean committed version from git, or the ONE narrowly
+gated surgical case (excise a payload hidden behind a concealment SEAM via `_seam_strip`), else defer
+to manual review. NEVER an unbounded textual transform (that corrupted valid files). See
+`classify_recovery`. Every write backs the original up to quarantine and re-proves its gate at apply."""
 from __future__ import annotations
 
 import difflib
 import hashlib
-import json
 import re
 import shutil
 import unicodedata
@@ -19,201 +15,12 @@ from pathlib import Path
 
 from stayawake.lib import git as gitutil
 from stayawake.utils.pathsafe import is_safe_write_target
-from stayawake.bots.security.matchers.base import load_jsonc, build_content_sig
+from stayawake.bots.security.matchers.base import build_content_sig
 from stayawake.bots.security.models import (
-    HEURISTIC, QUARANTINE_DIR,
-    BORN_INFECTED, INTRINSIC_MATCH, LEGIT_CHANGES, UNTRACKED, NO_VCS, INSPECT_FAILED,
-)
+    BORN_INFECTED, INTRINSIC_MATCH, LEGIT_CHANGES, UNTRACKED, NO_VCS, INSPECT_FAILED)
 from stayawake.bots.security.obfuscation import (
-    analyze_file, _has_exec_sink, _shannon, _ENTROPY_ABS, _MAX_PROSE_SPACE_FRAC,
-)
-
-# remediation id → internal action. NOTE: the code-loader family (`strip-appended-payload`)
-# is deliberately ABSENT here — those findings are NEVER fixed by an UNBOUNDED textual transform
-# (that is what corrupted valid files: a substring/regex edit can't reliably excise a polymorphic
-# payload). They go through git RECOVERY (restore the last clean committed version), else the ONE
-# narrowly-gated surgical case — excising a payload hidden behind a concealment SEAM on a line of
-# real code (`_seam_strip`: a provable separator, a packed+confirmed suffix, a non-packed result,
-# re-proven at apply time, original quarantined) — else manual review. See classify_recovery().
-# The actions below are the reliable, structure-safe ones: whole-file quarantine, line/JSON-key removal.
-_ACTIONS = {
-    "quarantine-file": "quarantine",
-    "quarantine-dir": "quarantine",
-    "remove-foreign-vscode": "vscode",
-    "strip-gitignore-markers": "strip-gitignore",
-}
-_GITIGNORE_MARKERS = {"branch_structure.json", "temp_auto_push.bat", "temp_interactive_push.bat"}
-
-# Quarantine / remediation backups must stay local and never be committed.
-# `ensure_ignored` guarantees a target repo's .gitignore carries this before we
-# `git add` a fix, so backups never leak into a commit or PR.
-_QUARANTINE_COMMENT = "# Malware quarantine / remediation artifacts (kept local, never committed)"
-_QUARANTINE_PATTERNS = (QUARANTINE_DIR + "/",)
-
-
-def is_auto_fixable(finding) -> bool:
-    """True if a finding has a known automatic remediation AND we are confident enough to
-    auto-edit. A HEURISTIC finding (a packed-blob / oversized-line shape a base64 asset or
-    crypto vector also produces) is surfaced but NEVER auto-stripped — auto-editing a file
-    we are not sure is malicious is exactly how a false positive becomes a corrupted file.
-    Such findings fall through to the manual list instead."""
-    if getattr(finding, "confidence", "confirmed") == HEURISTIC:
-        return False
-    return getattr(finding, "remediation", "manual") in _ACTIONS
-
-
-def quarantine_path(root: Path) -> Path:
-    return root / QUARANTINE_DIR
-
-
-@dataclass(frozen=True)
-class Change:
-    action: str        # strip-payload | quarantine | strip-gitignore | strip-settings
-    path: str          # repo-relative path the action targets
-    detail: str = ""
-
-
-def _fonts_dir(rel: str) -> str:
-    """Map a path inside a camouflage fonts dir to that directory."""
-    parts = rel.split("/")
-    if "fonts" in parts:
-        i = len(parts) - 1 - parts[::-1].index("fonts")
-        return "/".join(parts[: i + 1])
-    return str(Path(rel).parent)
-
-
-def plan(findings) -> list[Change]:
-    """Map findings to a deduped list of changes (pure — no filesystem access)."""
-    changes: dict[tuple[str, str], Change] = {}
-    for f in findings:
-        if not is_auto_fixable(f):
-            continue                      # manual (e.g. evil-merge) or heuristic — not auto-fixed
-        action = _ACTIONS[getattr(f, "remediation", "manual")]
-        path = f.path
-        if f.remediation == "quarantine-dir":
-            path = _fonts_dir(f.path)
-        if action == "vscode":
-            if f.path.endswith("tasks.json"):
-                c = Change("quarantine", f.path, "VS Code auto-run task harness")
-            elif f.path.endswith("settings.json"):
-                c = Change("strip-settings", f.path, "remove allowAutomaticTasks/tasks")
-            else:
-                continue
-        else:
-            c = Change(action, path, f.description[:60])
-        changes[(c.action, c.path)] = c
-    return list(changes.values())
-
-
-# ── individual transforms (structure-safe: exact-line / JSON-key removal only) ──
-
-def strip_gitignore_text(text: str) -> str:
-    return "\n".join(l for l in text.splitlines()
-                     if l.strip() not in _GITIGNORE_MARKERS).rstrip("\n") + "\n"
-
-
-def strip_settings_autorun(text: str) -> str:
-    data = load_jsonc(text)
-    if not isinstance(data, dict):
-        return text
-    data.pop("task.allowAutomaticTasks", None)
-    data.pop("tasks", None)
-    return json.dumps(data, indent=2) + "\n"
-
-
-def ensure_ignored(root: Path) -> bool:
-    """Guarantee `root/.gitignore` ignores quarantine/remediation artifacts.
-
-    Appends any missing patterns (and the explanatory comment) idempotently.
-    Returns True if the file was changed. Called before `git add` so backups
-    never land in a commit or PR.
-    """
-    gi = root / ".gitignore"
-    if gi.is_symlink():
-        return False                      # refuse to follow a symlinked .gitignore (write-through guard)
-    text = gi.read_text(encoding="utf-8", errors="replace") if gi.exists() else ""
-    present = {l.strip() for l in text.splitlines()}
-    missing = [p for p in _QUARANTINE_PATTERNS if p not in present]
-    if not missing:
-        return False
-    block: list[str] = []
-    if _QUARANTINE_COMMENT not in present:
-        block.append(_QUARANTINE_COMMENT)
-    block += missing
-    head = (text.rstrip("\n") + "\n\n") if text.strip() else ""
-    gi.write_text(head + "\n".join(block) + "\n", encoding="utf-8")
-    return True
-
-
-def _backup(root: Path, rel: str, quarantine: Path) -> None:
-    src = root / rel
-    if not src.exists():
-        return
-    if src.is_symlink():
-        return                            # never dereference a symlinked target into quarantine
-    dest = quarantine / rel
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    if src.is_dir():
-        # symlinks=True recreates inner symlinks as links instead of copying their
-        # (possibly out-of-tree) targets' contents into the quarantine.
-        shutil.copytree(src, dest, dirs_exist_ok=True, symlinks=True)
-    else:
-        shutil.copy2(src, dest, follow_symlinks=False)
-
-
-def quarantine_residual(root: Path, findings, quarantine: Path) -> list["Change"]:
-    """Quarantine (back up + remove) every distinct file still flagged after a
-    strip/apply pass — the fail-safe so a partially-cleaned file is never left behind.
-    Returns the Changes performed."""
-    done: list[Change] = []
-    for rel in sorted({f.path for f in findings}):
-        target = root / rel
-        if not target.exists():
-            continue
-        _backup(root, rel, quarantine)
-        if target.is_dir() and not target.is_symlink():
-            shutil.rmtree(target)
-        else:
-            target.unlink()
-        done.append(Change("quarantine", rel, "residual after remediation"))
-    return done
-
-
-def apply(root: Path, changes: list[Change], quarantine: Path) -> list[Change]:
-    """Apply changes in-place under `root`, backing up originals to `quarantine`.
-
-    Idempotent: a change whose target is already gone/clean is skipped.
-    """
-    applied: list[Change] = []
-    for c in changes:
-        target = root / c.path
-        if c.action == "quarantine":
-            if target.exists():
-                _backup(root, c.path, quarantine)
-                if target.is_dir() and not target.is_symlink():
-                    shutil.rmtree(target)          # a symlinked dir → unlink the link, don't rmtree it
-                else:
-                    target.unlink()
-                applied.append(c)
-        elif c.action in ("strip-gitignore", "strip-settings"):
-            if not target.exists():
-                continue
-            if not is_safe_write_target(target, root):
-                # NEVER read/strip/rewrite THROUGH a planted symlink or outside the worktree (#1218):
-                # `write_text` would follow the link into a sink and `_backup` skips symlinks, so the
-                # backup/verify net is dead. A symlinked/escaping finding defers to manual.
-                continue
-            original = target.read_text(encoding="utf-8", errors="replace")
-            if c.action == "strip-gitignore":
-                new = strip_gitignore_text(original)
-            else:
-                new = strip_settings_autorun(original)
-            if new != original:
-                _backup(root, c.path, quarantine)
-                target.write_text(new, encoding="utf-8")
-                applied.append(c)
-    return applied
-
+    analyze_file, _has_exec_sink, _shannon, _ENTROPY_ABS, _MAX_PROSE_SPACE_FRAC)
+from stayawake.bots.security.remediation.changes import _backup
 
 # ── code-loader remediation: git recovery, or deferred manual review ─────────────
 # A code-loader payload is polymorphic and embedded in arbitrary code, so it cannot be
