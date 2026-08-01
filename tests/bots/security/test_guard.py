@@ -201,26 +201,26 @@ class TestCheck(unittest.TestCase):
         self.assertNotIn("No worm gate", out)
 
     def test_remote_required_uses_derived_context(self):
-        with mock.patch.object(guard, "_remote_workflows", return_value=guard.RemoteRead({"w.yml": BLOG_WF})), \
+        with mock.patch.object(guard.detect, "_remote_workflows", return_value=guard.RemoteRead({"w.yml": BLOG_WF})), \
              mock.patch.object(guard.github_api, "get_branch_protection",
                                return_value={"required_status_checks": {"contexts": ["strix"]}}), \
-             mock.patch.object(guard, "freshness", return_value=Freshness("fresh", "v0.1.4")):
+             mock.patch.object(guard.detect, "freshness", return_value=Freshness("fresh", "v0.1.4")):
             s = guard.check(slug="o/r", token="t")
         self.assertTrue(s.present)
         self.assertTrue(s.required)
 
     def test_remote_fuzzy_worm_does_not_satisfy_strix_context(self):
         # The #1230 point: require the ACTUAL job context (strix), not a name containing "worm".
-        with mock.patch.object(guard, "_remote_workflows", return_value=guard.RemoteRead({"w.yml": BLOG_WF})), \
+        with mock.patch.object(guard.detect, "_remote_workflows", return_value=guard.RemoteRead({"w.yml": BLOG_WF})), \
              mock.patch.object(guard.github_api, "get_branch_protection",
                                return_value={"required_status_checks": {"contexts": ["Worm Guard"]}}), \
-             mock.patch.object(guard, "freshness", return_value=Freshness("fresh", "v0.1.4")):
+             mock.patch.object(guard.detect, "freshness", return_value=Freshness("fresh", "v0.1.4")):
             s = guard.check(slug="o/r", token="t")
         self.assertFalse(s.required)
 
     def test_remote_no_ci_is_calm_not_an_error(self):
         # #1243: a 404 on .github/workflows = the repo has no CI — the NORMAL state, NOT a token error.
-        with mock.patch.object(guard, "_remote_workflows",
+        with mock.patch.object(guard.detect, "_remote_workflows",
                                return_value=guard.RemoteRead({}, cause="not_found")):
             s = guard.check(slug="o/r", token="t")
         self.assertFalse(s.present)
@@ -236,7 +236,7 @@ class TestCheck(unittest.TestCase):
             "network": "network error",
         }
         for cause, needle in cases.items():
-            with mock.patch.object(guard, "_remote_workflows",
+            with mock.patch.object(guard.detect, "_remote_workflows",
                                    return_value=guard.RemoteRead({}, cause=cause)):
                 s = guard.check(slug="o/r", token="t")
             self.assertFalse(s.present)
@@ -244,7 +244,7 @@ class TestCheck(unittest.TestCase):
             self.assertIn(needle, s.error, cause)
 
     def test_remote_rate_limited_names_the_retry(self):
-        with mock.patch.object(guard, "_remote_workflows",
+        with mock.patch.object(guard.detect, "_remote_workflows",
                                return_value=guard.RemoteRead({}, cause="rate_limited", retry_after=42)):
             s = guard.check(slug="o/r", token="t")
         self.assertIn("rate limit", s.error)
@@ -370,7 +370,7 @@ def _tmp_repo():
 
 class TestSetupLocal(unittest.TestCase):
     def _resolve(self):
-        return mock.patch.object(guard, "resolve_pin", return_value=guard.Pin(SHA, "v0.1.4"))
+        return mock.patch.object(guard.provision, "resolve_pin", return_value=guard.Pin(SHA, "v0.1.4"))
 
     def test_writes_file_into_working_tree(self):
         repo = _tmp_repo()
@@ -445,7 +445,7 @@ class TestSetupLocal(unittest.TestCase):
         self.assertIsNone(res.wrote)
 
     def test_fails_closed_when_pin_unresolved(self):
-        with mock.patch.object(guard, "resolve_pin", return_value=None):
+        with mock.patch.object(guard.provision, "resolve_pin", return_value=None):
             res = guard.setup(_tmp_repo())
         self.assertIsNotNone(res.error)
         self.assertIn("--ref", res.error)
@@ -470,7 +470,7 @@ class TestSetupPr(unittest.TestCase):
         from stayawake.core.identity import Decision, Intent
         from stayawake.lib.git.write.commit import CommitResult
         allow = Decision(allowed=True, intent=Intent.OPEN_GUARD_PR)
-        with mock.patch.object(guard, "resolve_pin", return_value=guard.Pin(SHA, "v0.1.4")), \
+        with mock.patch.object(guard.provision, "resolve_pin", return_value=guard.Pin(SHA, "v0.1.4")), \
              mock.patch.object(guard.gitutil, "default_branch", return_value="main"), \
              mock.patch.object(guard.gitutil, "origin_slug", return_value=origin), \
              mock.patch.object(guard.gitutil, "ref_exists", return_value=False), \
@@ -513,13 +513,13 @@ class TestSetupPr(unittest.TestCase):
         wf = Path(repo) / guard.WORM_GUARD_FILE                 # an UNTRACKED gate in the working tree…
         wf.parent.mkdir(parents=True, exist_ok=True)
         wf.write_text("name: Worm Guard\non: pull_request\njobs: {}\n", encoding="utf-8")
-        with mock.patch.object(guard, "resolve_pin", return_value=guard.Pin(SHA, "v0.1.4")), \
+        with mock.patch.object(guard.provision, "resolve_pin", return_value=guard.Pin(SHA, "v0.1.4")), \
              mock.patch.object(guard.gitutil, "default_branch", return_value="main"), \
              mock.patch.object(guard.gitutil, "origin_slug", return_value="up/repo"), \
              mock.patch.object(guard.gitutil, "ref_exists", return_value=True), \
              mock.patch.object(guard.gitutil, "fetch", return_value=True), \
              mock.patch.object(guard.gitutil, "list_tree", return_value=[]), \
-             mock.patch.object(guard, "_setup_pr",
+             mock.patch.object(guard.provision, "_setup_pr",
                                return_value=guard.SetupResult(
                                    plan=guard.SetupPlan("create", guard.WORM_GUARD_FILE, new_ref=SHA),
                                    submit=SubmitResult("pr", action="opened", number=9, url="u"))) as sp:
@@ -560,15 +560,15 @@ class TestCheckSweep(unittest.TestCase):
 
     def _mocks(self, *, discover=None, resolve=None, check_side=None, check_return=None,
                token=("t", "env")):
-        cms = [mock.patch.object(guard, "latest_strix", return_value=guard.LatestStrix("v1", SHA)),
+        cms = [mock.patch.object(guard.sweep, "latest_strix", return_value=guard.LatestStrix("v1", SHA)),
                mock.patch.object(guard.auth, "resolve_token", return_value=token)]
         if discover is not None:
             cms.append(mock.patch.object(guard.resolution, "discover_local_repos", return_value=discover))
         if resolve is not None:
             cms.append(mock.patch.object(guard.resolution, "resolve_remote", return_value=resolve))
-        chk = mock.patch.object(guard, "check",
+        chk = mock.patch.object(guard.sweep, "check",
                                 side_effect=check_side) if check_side else \
-            mock.patch.object(guard, "check", return_value=check_return)
+            mock.patch.object(guard.sweep, "check", return_value=check_return)
         cms.append(chk)
         return cms
 
@@ -636,33 +636,33 @@ class TestSetupSweep(unittest.TestCase):
                           return_value=Decision(allowed=True, intent=Intent.OPEN_GUARD_PR))
 
     def test_local_sweep_sets_up_each_discovered_repo(self):
-        with mock.patch.object(guard, "resolve_pin", return_value=guard.Pin(SHA, "v0.1.4")), \
+        with mock.patch.object(guard.sweep, "resolve_pin", return_value=guard.Pin(SHA, "v0.1.4")), \
              mock.patch.object(guard.resolution, "discover_local_repos",
                                return_value=[Path("/a"), Path("/b")]), \
              mock.patch.object(guard.auth, "resolve_token", return_value=(None, None)), \
-             mock.patch.object(guard, "setup", side_effect=lambda *a, **k: self._ok()) as s:
+             mock.patch.object(guard.sweep, "setup", side_effect=lambda *a, **k: self._ok()) as s:
             rc = guard.setup_targets(paths=["."], no_stream=True)
         self.assertEqual(rc, 0)
         self.assertEqual(s.call_count, 2)
 
     def test_one_repo_error_isolated_but_exits_one(self):
-        with mock.patch.object(guard, "resolve_pin", return_value=guard.Pin(SHA, "v0.1.4")), \
+        with mock.patch.object(guard.sweep, "resolve_pin", return_value=guard.Pin(SHA, "v0.1.4")), \
              mock.patch.object(guard.resolution, "discover_local_repos",
                                return_value=[Path("/a"), Path("/b")]), \
              mock.patch.object(guard.auth, "resolve_token", return_value=(None, None)), \
-             mock.patch.object(guard, "setup", side_effect=[RuntimeError("boom"), self._ok()]) as s:
+             mock.patch.object(guard.sweep, "setup", side_effect=[RuntimeError("boom"), self._ok()]) as s:
             rc = guard.setup_targets(paths=["."], no_stream=True)
         self.assertEqual(s.call_count, 2)                    # second repo still attempted
         self.assertEqual(rc, 1)                              # an errored repo → exit 1
 
     def test_remote_clones_and_sets_up_with_pr_implied(self):
-        with mock.patch.object(guard, "resolve_pin", return_value=guard.Pin(SHA, "v0.1.4")), \
+        with mock.patch.object(guard.sweep, "resolve_pin", return_value=guard.Pin(SHA, "v0.1.4")), \
              mock.patch.object(guard.resolution, "resolve_remote",
                                return_value=(["o/a", "o/b"], "t", "env")), \
              mock.patch.object(guard.resolution, "cloned_repo",
                                side_effect=lambda *a, **k: _fake_clone(Path("/clone"))), \
              self._allow_guard(), \
-             mock.patch.object(guard, "setup", side_effect=lambda *a, **k: self._ok()) as s:
+             mock.patch.object(guard.sweep, "setup", side_effect=lambda *a, **k: self._ok()) as s:
             rc = guard.setup_targets(remote=True, no_stream=True)
         self.assertEqual(rc, 0)
         self.assertEqual(s.call_count, 2)
@@ -673,12 +673,12 @@ class TestSetupSweep(unittest.TestCase):
             self.assertEqual(guard.setup_targets(remote=True, no_stream=True), 2)
 
     def test_remote_clone_failure_is_an_error(self):
-        with mock.patch.object(guard, "resolve_pin", return_value=guard.Pin(SHA, "v0.1.4")), \
+        with mock.patch.object(guard.sweep, "resolve_pin", return_value=guard.Pin(SHA, "v0.1.4")), \
              mock.patch.object(guard.resolution, "resolve_remote", return_value=(["o/a"], "t", "env")), \
              mock.patch.object(guard.resolution, "cloned_repo",
                                side_effect=lambda *a, **k: _fake_clone(None)), \
              self._allow_guard(), \
-             mock.patch.object(guard, "setup") as s:
+             mock.patch.object(guard.sweep, "setup") as s:
             rc = guard.setup_targets(remote=True, no_stream=True)
         self.assertEqual(rc, 1)                              # clone failed → error → exit 1
         s.assert_not_called()                                # never setup on a failed clone
@@ -690,12 +690,12 @@ class TestSetupSweep(unittest.TestCase):
         from stayawake.bots.security.proposal import SubmitResult
         failed = guard.SetupResult(plan=guard.SetupPlan("create", "wf", new_ref=SHA),
                                    submit=SubmitResult("pr-create-failed"))
-        with mock.patch.object(guard, "resolve_pin", return_value=guard.Pin(SHA, "v0.1.4")), \
+        with mock.patch.object(guard.sweep, "resolve_pin", return_value=guard.Pin(SHA, "v0.1.4")), \
              mock.patch.object(guard.resolution, "resolve_remote", return_value=(["o/a"], "t", "env")), \
              mock.patch.object(guard.resolution, "cloned_repo",
                                side_effect=lambda *a, **k: _fake_clone(Path("/clone"))), \
              self._allow_guard(), \
-             mock.patch.object(guard, "setup", side_effect=lambda *a, **k: failed):
+             mock.patch.object(guard.sweep, "setup", side_effect=lambda *a, **k: failed):
             rc = guard.setup_targets(remote=True, no_stream=True)
         self.assertEqual(rc, 1)                              # pushed-but-unopened → failure, not success
 
