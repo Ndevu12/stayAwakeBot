@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Security orchestration: resolve targets → scan → deliver via sinks.
-
-Single responsibility: wire the security stages together and hand the in-memory
-`ScanReport` to a caller-selected list of output sinks. Detection lives in the matchers;
-delivery lives in the sinks; this module performs NO output I/O of its own. Never executes
-scanned code; remote repos are cloned read-only into sandboxes and removed after.
+"""Scan orchestration: resolve targets → scan → deliver via sinks, and return the verdict
+exit code. Wires the stages together and hands the in-memory `ScanReport` to a caller-selected
+list of output sinks. Detection lives in the matchers; delivery lives in the sinks; config
+decisions live in `config`; presentation cues live in `report`. This module performs NO output
+I/O of its own. Never executes scanned code; remote repos are cloned read-only and removed after.
 """
 from __future__ import annotations
 
@@ -13,29 +12,25 @@ import sys
 import tempfile
 from pathlib import Path
 
-from stayawake.utils.config import load_yaml
 from stayawake.utils.io import resolve_reports_dir
 from stayawake.utils.streaming import Streamer, status, stream_enabled
 from stayawake.utils.timeutil import now_iso
-# github_api/auth are consumed transitively through the resolution seam; kept imported so the
-# targeting tests can patch them at the service boundary (`service.github_api`/`service.auth`) —
-# they are the same module objects resolution.py uses, so the patches reach it.
-from stayawake.lib.adapters import github_api  # noqa: F401
-from stayawake.lib import auth  # noqa: F401
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.models import ScanResult, ScanReport
 from stayawake.bots.security.sinks import (
     Sink, TerminalSink, JsonSink, SarifSink, FileSink, IssueSink, SlackSink)
-from stayawake.utils.render import path_link, rule
-from stayawake.utils.terminal import supports_color
-from stayawake.bots.security.targets import ScanOptions, LocalRepoTarget, RemoteRepoTarget
-# Target resolution lives in one shared module (resolution.py); re-imported here under the names
-# service.scan's body and the targeting tests already use (the `_`-prefixed ones stay for compat).
+from stayawake.bots.security.targets import LocalRepoTarget, RemoteRepoTarget
+# Target resolution lives in one shared module (resolution.py); imported under the names scan's
+# body already uses (the `_`-prefixed ones stay for compat).
 from stayawake.bots.security.resolution import (
-    DEFAULT_CONFIG, REMOTE_EMPTY_HINT, discover_local_repos, invalid_slugs,
+    REMOTE_EMPTY_HINT, discover_local_repos, invalid_slugs,
     enclosing_repo_root as _enclosing_repo_root, remote_scope as _remote_scope,
     resolve_remote as _resolve_remote)
+from stayawake.bots.security.service.config import (
+    _read_config, _options, _as_bool, _require_db_or_error)
+from stayawake.bots.security.service.report import _status_tag, _print_report_pointer
+
 
 REPORTS_DIR = Path("reports/security")
 # Above this many targets, a terminal can't hold the whole report — if the user didn't
@@ -47,119 +42,6 @@ LARGE_FLEET = 25
 # detail moves to the written report. Catches the case the repo-count gate misses: FEW repos (even
 # one), but a wall of findings. A cheap count off data the report already carries — no extra render.
 MANY_FINDINGS = 200
-
-
-def _read_config(config_path: str | None) -> dict:
-    """Load the scan config. When `config_path` is None we use the default file if it
-    exists, else an empty config — so a bare `saw scan` in any repo works without a
-    config. An explicitly-given path that is missing is an error."""
-    if config_path is None:
-        p = Path(DEFAULT_CONFIG)
-        return load_yaml(p) if p.exists() else {}
-    return load_yaml(config_path)
-
-
-# Project build-output dirs (not third-party node_modules) that the opt-in build-scan un-prunes.
-_BUILD_OUTPUT_DIRS = {"dist", "build", "out", ".next"}
-
-
-def _as_bool(value, default: bool) -> bool:
-    """Coerce a config value to bool WITHOUT the string footgun — `bool("false")` is True, so a
-    quoted YAML `external_audit: "false"` (or `"no"`/`"off"`/`"0"`) would otherwise read as True and
-    silently ENABLE a security-sensitive option (external audit leaves the offline sandbox). A value
-    that isn't a recognizable boolean falls back to `default`."""
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return default
-    if isinstance(value, (int, float)):
-        return bool(value)
-    if isinstance(value, str):
-        s = value.strip().lower()
-        if s in ("true", "1", "yes", "on"):
-            return True
-        if s in ("false", "0", "no", "off", ""):
-            return False
-    return default
-
-
-def _options(settings: dict, *, no_advisories: bool = False,
-             external_audit: bool = False, deep: bool = False) -> ScanOptions:
-    base = ScanOptions()
-    exclude = set(settings.get("exclude_dirs", base.exclude_dirs))
-    scan_build_outputs = _as_bool(settings.get("scan_build_outputs"), base.scan_build_outputs)
-    if scan_build_outputs:
-        exclude -= _BUILD_OUTPUT_DIRS          # let build outputs be traversed (matcher gates the rest)
-    return ScanOptions(
-        exclude_dirs=exclude,
-        max_file_bytes=int(settings.get("max_file_bytes", base.max_file_bytes)),
-        remote_clone_depth=int(settings.get("remote_clone_depth", base.remote_clone_depth)),
-        scan_build_outputs=scan_build_outputs,
-        # `--deep` (or config `deep: true`): content-scan installed dependency CODE with the confirmed
-        # loader tier (#1222). Strict bool coercion so a quoted `"false"` can't silently enable it.
-        deep=deep or _as_bool(settings.get("deep"), base.deep),
-        # The offline CVE-advisory tier is ON by default; `--no-advisories` or config
-        # `dependency_advisories: false` turns the section off.
-        dependency_advisories=(not no_advisories) and _as_bool(
-            settings.get("dependency_advisories"), base.dependency_advisories),
-        # External auditors are the one opt-in that leaves the offline sandbox (subprocess + a tool's
-        # own network) — CLI flag OR config, off by default. Strict bool coercion so a quoted
-        # `"false"` can't silently enable it.
-        external_audit=external_audit or _as_bool(
-            settings.get("external_audit"), base.external_audit),
-    )
-
-
-def _require_db_or_error() -> int | None:
-    """`--require-db` gate: a non-zero exit (with a stderr reason) if the advisory DB is absent or
-    fails its content-hash integrity check; None if it's present and valid."""
-    from stayawake.bots.security.dependencies import db
-    st = db.cache_status()
-    if not st.get("present"):
-        print("saw scan --require-db: advisory DB not found — run `saw db update`.", file=sys.stderr)
-        return 2
-    if not st.get("schema_compatible", True):
-        # Unusable (older format → scan falls back to the inline seed), but not tampering. Fail
-        # closed for CI, with the honest reason so it's not mistaken for a security incident (#1137).
-        print(f"saw scan --require-db: advisory DB is an older format (schema {st.get('schema')}) "
-              "— run `saw db update`.", file=sys.stderr)
-        return 2
-    if not st.get("integrity_ok"):
-        print("saw scan --require-db: advisory DB integrity check FAILED "
-              f"({', '.join(st.get('mismatches', []))}) — run `saw db update`.", file=sys.stderr)
-        return 2
-    return None
-
-
-
-def _status_tag(r: ScanResult) -> str:
-    """Bracketed, padded verdict tag for a per-target line (INFECTED / SUSPECT / clean)."""
-    tag = ("INFECTED" if r.infected else "SUSPECT" if r.suspicious
-           else "ERROR" if r.error else "clean")
-    return f"[{tag:8}]"
-
-
-def _print_report_pointer(report_path: Path, *, spilled: bool, reason: str = "") -> None:
-    """Point the user at the written report, PROMINENTLY (#1203) — in EVERY case a report is written
-    (local `-d`, or any spill — large fleet or many findings, local or remote). A ruled block on
-    stderr (kept off stdout so it never mixes into the report body or a pipe). Paths are coloured
-    and OSC-8 `file://` hyperlinks when stderr is a colour TTY, so a click opens the file/folder
-    without typing a command; when piped / NO_COLOR they stay plain text. `spilled` picks the
-    wording: a spilled sweep shows only the dashboard on-screen (the detail is in the file);
-    otherwise the file is a full copy for the record (e.g. `-d`)."""
-    on = supports_color(sys.stderr)
-    head = (f"Full report with per-finding detail saved ({reason}) — the terminal shows a summary only:"
-            if spilled else "Report written — a full copy saved for the record:")
-    tip = "  (click a coloured path to open it)" if on else ""
-    bar = rule(72)
-    print("\n".join([
-        bar,
-        head + tip,
-        f"  \u2192 {path_link(report_path, on=on)}",
-        f"    machine-readable: {path_link(report_path.with_name('latest.json'), on=on)}",
-        f"    folder: {path_link(report_path.parent, on=on)}",
-        bar,
-    ]), file=sys.stderr)
 
 
 def scan(config_path: str | None = None, *, remote: bool = False,
