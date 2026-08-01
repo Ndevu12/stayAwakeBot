@@ -6,6 +6,20 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- **Decode→exec dropper detection is now one model-driven analyzer (`bots/security/taint/`), and it
+  closes the shell-command gap.** A single `model` (what a dropper is: an encoded blob → a decode →
+  an exec sink, with each sink's *code argument position* named) drives one `analyzer.detect_dropper`
+  that `obfuscation.analyze_file`/`analyze_delta` call — consolidating the scattered decode→exec arms
+  in one place. It reuses the hardened leading-argument detection verbatim (no regression) and adds
+  the form the leading-argument anchor missed: a decoded payload run as a **shell command** —
+  `spawn('sh',['-c',<decoded>])`, `execSync('sh -c '+<decoded>)`, `['bash','-c',<decoded>].join(' ')`,
+  the `env <interp> -c` wrapper, and script interpreters (`python -c`, `ruby -e`, `perl -e`, `php -r`,
+  `node -e`, `powershell -Command`, `cmd /k`), matched by interpreter **basename** so absolute paths
+  (`/opt/homebrew/bin/bash`) are covered. A nested decode is self-evident; the variable form is
+  blob-corroborated and scope-guarded (a decoded value in a *non-code* args slot, a non-decoded
+  variable, or a cross-scope name collision stays clean). Heuristic → SUSPICIOUS; purely static.
+
 ### Changed
 - **Obfuscation detector: tightened decode→exec arms (restores the #1212 base64 capability, fixes
   the #1289 FPs) — no coverage lost.** Three changes, all on hand-authored source only:
