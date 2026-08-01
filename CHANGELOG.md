@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.1.18] - 2026-08-02
+
 ### Added
 - **`saw guard setup` now installs a complete worm-guard CI: a gate that opens fix PRs, plus a
   self-closing pin-drift issue.** The generated workflow has two least-privilege jobs. The
@@ -1418,7 +1420,8 @@ release-publish hardening._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel
 (supply-chain worm detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.17...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.18...HEAD
+[0.1.18]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.17...v0.1.18
 [0.1.17]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.16...v0.1.17
 [0.1.16]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.15...v0.1.16
 [0.1.15]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.14...v0.1.15
