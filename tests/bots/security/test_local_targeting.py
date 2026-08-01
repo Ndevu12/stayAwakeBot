@@ -30,8 +30,8 @@ class TestTargetResolution(unittest.TestCase):
             cap["remote_kw"] = kw   # users/orgs/slugs selectors (the #1075 ladder inputs)
             return [], None, None   # mirror _resolve_remote's (slugs, token, source) 3-tuple
 
-        with mock.patch.object(svc, "discover_local_repos", side_effect=fake_discover), \
-             mock.patch.object(svc, "_resolve_remote", side_effect=fake_remote):
+        with mock.patch.object(svc.run, "discover_local_repos", side_effect=fake_discover), \
+             mock.patch.object(svc.run, "_resolve_remote", side_effect=fake_remote):
             out = Path(tempfile.mkdtemp())
             svc.scan(reports_dir=str(out), **scan_kwargs)
         return cap
@@ -53,7 +53,7 @@ class TestTargetResolution(unittest.TestCase):
 
     def test_cwd_default_when_nothing_configured(self):
         cap = self._capture(config_path=self._cfg("settings: {}\ntargets: { local: [] }\n"))
-        self.assertEqual(cap["patterns"], [str(svc._enclosing_repo_root())])
+        self.assertEqual(cap["patterns"], [str(svc.run._enclosing_repo_root())])
 
     def test_default_scope_is_local_even_with_github_configured(self):
         # #1069: scope is LOCAL by default — a configured GitHub target is NOT scanned
@@ -61,7 +61,7 @@ class TestTargetResolution(unittest.TestCase):
         cfg = self._cfg("settings: {}\ntargets:\n  local: []\n  github: { users: [octocat] }\n")
         cap = self._capture(config_path=cfg)                      # no remote=True
         self.assertNotIn("remote_called", cap)                   # GitHub NOT enumerated
-        self.assertEqual(cap["patterns"], [str(svc._enclosing_repo_root())])  # cwd fallback
+        self.assertEqual(cap["patterns"], [str(svc.run._enclosing_repo_root())])  # cwd fallback
 
     def test_remote_scope_scans_github_not_local(self):
         cfg = self._cfg("settings: {}\ntargets:\n  github: { users: [octocat] }\n")
@@ -76,22 +76,22 @@ class TestHelpers(unittest.TestCase):
         (repo / ".git").mkdir()
         sub = repo / "src" / "deep"
         sub.mkdir(parents=True)
-        self.assertEqual(svc._enclosing_repo_root(sub), repo.resolve())
+        self.assertEqual(svc.run._enclosing_repo_root(sub), repo.resolve())
 
     def test_enclosing_repo_root_falls_back_to_start(self):
         plain = Path(tempfile.mkdtemp())  # no .git anywhere under tmp
-        self.assertEqual(svc._enclosing_repo_root(plain), plain.resolve())
+        self.assertEqual(svc.run._enclosing_repo_root(plain), plain.resolve())
 
     def test_read_config_default_missing_is_empty_but_explicit_missing_raises(self):
         # explicit but missing path → hard error (don't silently scan nothing)
         with self.assertRaises(FileNotFoundError):
-            svc._read_config("/no/such/security.yml")
+            svc.config._read_config("/no/such/security.yml")
         # default (None) with no config file present → empty config, no error
         cwd = os.getcwd()
         tmp = tempfile.mkdtemp()
         try:
             os.chdir(tmp)
-            self.assertEqual(svc._read_config(None), {})
+            self.assertEqual(svc.config._read_config(None), {})
         finally:
             os.chdir(cwd)
 

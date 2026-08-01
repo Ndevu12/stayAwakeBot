@@ -23,11 +23,11 @@ class TestReportsIsolation(unittest.TestCase):
         cfg = work / "security.yml"
         cfg.write_text("settings: {}\ntargets: { local: [] }\n", encoding="utf-8")
         out = work / "out"
-        before = _snapshot(sec_service.REPORTS_DIR)        # the real default dir
+        before = _snapshot(sec_service.run.REPORTS_DIR)        # the real default dir
         sec_service.scan(str(cfg), reports_dir=str(out))
         self.assertTrue((out / "latest.json").is_file())
         self.assertTrue((out / "latest.md").is_file())
-        self.assertEqual(before, _snapshot(sec_service.REPORTS_DIR),
+        self.assertEqual(before, _snapshot(sec_service.run.REPORTS_DIR),
                          "scan must not touch the default reports/security dir")
 
 

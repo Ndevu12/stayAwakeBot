@@ -142,7 +142,7 @@ class TestSchemaSkew(unittest.TestCase):
         try:
             err = io.StringIO()
             with redirect_stderr(err):
-                rc = service._require_db_or_error()
+                rc = service.config._require_db_or_error()
             self.assertEqual(rc, 2)                     # fail closed
             self.assertIn("older format", err.getvalue())
             self.assertNotIn("integrity check FAILED", err.getvalue())
@@ -223,7 +223,7 @@ class TestCorruptManifest(unittest.TestCase):
         db._CORPUS_MEMO.clear()
         try:
             with redirect_stderr(io.StringIO()):
-                self.assertEqual(service._require_db_or_error(), 2)   # --require-db: fail closed
+                self.assertEqual(service.config._require_db_or_error(), 2)   # --require-db: fail closed
         finally:
             os.environ.pop("SAW_ADVISORY_CACHE_DIR", None)
             db._CORPUS_MEMO.clear()
@@ -282,14 +282,14 @@ class TestRequireDbGate(unittest.TestCase):
     def test_gate_fails_closed_when_absent(self):
         from stayawake.bots.security import service
         self._with_cache_env(Path(tempfile.mkdtemp()))          # empty → no manifest
-        self.assertEqual(service._require_db_or_error(), 2)
+        self.assertEqual(service.config._require_db_or_error(), 2)
 
     def test_gate_passes_when_valid(self):
         from stayawake.bots.security import service
         cache = Path(tempfile.mkdtemp())
         _build(cache, {"MAL.json": mal_record("evil", ["1.0.0"])})
         self._with_cache_env(cache)
-        self.assertIsNone(service._require_db_or_error())
+        self.assertIsNone(service.config._require_db_or_error())
 
     def test_scan_cli_exposes_require_db(self):
         from stayawake.cli.dispatch import build_parser

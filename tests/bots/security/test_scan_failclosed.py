@@ -50,7 +50,7 @@ class TestScanFailClosed(unittest.TestCase):
             cfg = os.path.join(d, "c.yml")
             Path(cfg).write_text("allowlist: []\n")
             errored = ScanResult(target=d, source="local", error="Boom: unreadable target")
-            with mock.patch.object(service, "scan_target", return_value=errored), \
+            with mock.patch.object(service.run, "scan_target", return_value=errored), \
                  redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
                 rc = service.scan(cfg, paths=[d], no_stream=True)
             self.assertEqual(rc, 2)

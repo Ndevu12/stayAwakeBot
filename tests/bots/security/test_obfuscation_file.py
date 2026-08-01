@@ -773,7 +773,7 @@ class TestOptInBuildScan(unittest.TestCase):
         self.assertNotIn("obfuscated-build-artifact", ids)
 
     def test_options_unprunes_build_dirs_only_when_enabled(self):
-        from stayawake.bots.security.service import _options
+        from stayawake.bots.security.service.config import _options
         on = _options({"scan_build_outputs": True})
         self.assertTrue(on.scan_build_outputs)
         self.assertNotIn("dist", on.exclude_dirs)
