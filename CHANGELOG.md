@@ -21,6 +21,13 @@ All notable changes to this project are documented here. The format is based on
   variable, or a cross-scope name collision stays clean). Heuristic → SUSPICIOUS; purely static.
 
 ### Changed
+- **Maintainability: `bots/security/remediation.py` (802 lines) is now a `remediation/` package** split
+  into `changes` (structure-safe transforms: quarantine, exact-line / JSON-key removal) and the
+  code-loader recovery pipeline — `gates` (pure payload analysis + the surgical seam-strip), `classify`
+  (decide recover / suggest / defer), `writeback` (the side-effecting apply). Pure refactor: the moved
+  code is byte-identical to the original (each section diffs clean), the package re-exports the flat
+  public API (including the safety-gate helpers and defer-reason constants callers use), and the full
+  suite passes **with zero test edits** (no behavior change).
 - **Maintainability: `bots/security/guard.py` (1021 lines) is now a `guard/` package** split per
   concern — `constants` / `detect` (find & grade the gate, READ-ONLY) / `provision` (install/update,
   proposed-only) / `sweep` (resolve & run over many targets). Pure refactor: the package re-exports
