@@ -29,6 +29,11 @@ repoints). A perf optimization must be **provably byte-identical in detection** 
 `main` on clean AND planted-payload corpora). Clean code is part of accuracy (no unused imports, no
 private internals leaked through a facade). **Right-size to the threat, not the maximal engine.**
 
+**Optimizing a detector IS a detection change.** A prefilter/skip-gate can be byte-identical today yet
+silently downgrade a future arm. Ship one only under the full contract — proven-necessary condition,
+derived from the taxonomy, matched with the detector's own engine (not `str.lower()`), and guarded by a
+PERMANENT differential/fuzz test so a future arm can't slip the gate. See `scanner-performance`.
+
 ## Adversarial verification — gate the push
 
 For any change to default network behavior, a trust mechanism, a security default, detection, or
