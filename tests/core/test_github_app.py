@@ -304,5 +304,68 @@ class TestInstallationRepos(unittest.TestCase):
         self.assertEqual(len(repos), 101)
 
 
+class TestAppExists(unittest.TestCase):
+    """`app_exists()` distinguishes 'App still on GitHub' from 'deleted' from 'can't tell' so
+    register can avoid duplicating a live App yet recover when the old one is genuinely gone."""
+
+    def test_true_when_app_authenticates(self):
+        with mock.patch.dict(os.environ, {"GH_APP_ID": "1", "GH_APP_PRIVATE_KEY": "PEM"}, clear=True), \
+             mock.patch.object(github_app, "load_config", return_value=None), \
+             mock.patch.object(github_app, "_build_jwt", return_value="JWT"), \
+             mock.patch.object(github_app.github_api, "app_authenticated", return_value=True):
+            self.assertTrue(github_app.app_exists())
+
+    def test_false_when_app_gone(self):
+        with mock.patch.dict(os.environ, {"GH_APP_ID": "1", "GH_APP_PRIVATE_KEY": "PEM"}, clear=True), \
+             mock.patch.object(github_app, "load_config", return_value=None), \
+             mock.patch.object(github_app, "_build_jwt", return_value="JWT"), \
+             mock.patch.object(github_app.github_api, "app_authenticated", return_value=False):
+            self.assertFalse(github_app.app_exists())
+
+    def test_none_when_not_configured(self):
+        with mock.patch.dict(os.environ, {}, clear=True), \
+             mock.patch.object(github_app, "load_config", return_value=None):
+            self.assertIsNone(github_app.app_exists())
+
+
+class TestAppAuthenticated(unittest.TestCase):
+    def test_true_on_app_object(self):
+        from stayawake.lib.adapters import github_api
+        from stayawake.lib.adapters.github_api import ApiRead
+        with mock.patch.object(github_api, "_do_request", return_value=ApiRead(value={"id": 42})):
+            self.assertTrue(github_api.app_authenticated("JWT"))
+
+    def test_false_only_on_404_gone(self):
+        from stayawake.lib.adapters import github_api
+        from stayawake.lib.adapters.github_api import ApiRead
+        with mock.patch.object(github_api, "_do_request", return_value=ApiRead(cause="not_found")):
+            self.assertFalse(github_api.app_authenticated("JWT"))
+
+    def test_none_on_401_not_false(self):
+        # A 401 (bad/expired key, or clock skew) must NOT be read as "App deleted" — that would let a
+        # transient error trigger a duplicate App. Stay cautious → None.
+        from stayawake.lib.adapters import github_api
+        from stayawake.lib.adapters.github_api import ApiRead
+        with mock.patch.object(github_api, "_do_request", return_value=ApiRead(cause="unauthorized")):
+            self.assertIsNone(github_api.app_authenticated("JWT"))
+
+    def test_none_on_403_secondary_ratelimit(self):
+        # A secondary rate-limit is a 403 (classified 'forbidden'); it is NOT proof the App is gone.
+        from stayawake.lib.adapters import github_api
+        from stayawake.lib.adapters.github_api import ApiRead
+        with mock.patch.object(github_api, "_do_request", return_value=ApiRead(cause="forbidden")):
+            self.assertIsNone(github_api.app_authenticated("JWT"))
+
+    def test_none_on_network(self):
+        from stayawake.lib.adapters import github_api
+        from stayawake.lib.adapters.github_api import ApiRead
+        with mock.patch.object(github_api, "_do_request", return_value=ApiRead(cause="network")):
+            self.assertIsNone(github_api.app_authenticated("JWT"))
+
+    def test_none_without_jwt(self):
+        from stayawake.lib.adapters import github_api
+        self.assertIsNone(github_api.app_authenticated(None))
+
+
 if __name__ == "__main__":
     unittest.main()

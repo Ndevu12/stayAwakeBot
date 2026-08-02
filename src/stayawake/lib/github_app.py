@@ -191,6 +191,23 @@ def jwt_available() -> bool:
     return True
 
 
+def app_exists() -> bool | None:
+    """Whether the locally-configured App still EXISTS on GitHub (an operator may have deleted it,
+    leaving a stale local config). True (exists) / False (deleted, or id+key no longer authenticate an
+    App) / None (can't tell: no App configured, an unbuildable JWT, or the API was unreachable).
+    Never raises. Lets `saw auth app register` avoid creating a duplicate when one is already live, yet
+    recover when the old one is genuinely gone."""
+    app_id = _app_id()
+    key = _private_key()
+    if not (app_id and key):
+        return None
+    try:
+        app_jwt = _build_jwt(str(app_id), key)
+    except GithubAppError:
+        return None
+    return github_api.app_authenticated(app_jwt)
+
+
 def installation_actor_label() -> str | None:
     """Short label for Session.actor when using an App credential."""
     cfg = load_config() or {}

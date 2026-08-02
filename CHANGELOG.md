@@ -20,8 +20,26 @@ All notable changes to this project are documented here. The format is based on
   installing it on that account/org (`https://github.com/apps/<slug>/installations/new`) — instead of
   the personal installation's settings. Applies to `saw scan`/`fix`/`guard` (check, setup, drift) and
   the AuthZ gate's messaging.
+- **`saw auth app register` no longer creates a duplicate GitHub App every run, and new Apps can be
+  installed on organizations.** Two root causes: (1) register ran GitHub's *create-app* manifest flow
+  unconditionally, and since App names are globally unique GitHub minted a new suffixed App each time
+  ("StayAwakeBot Saw cli", "…Saw idea", …). Register is now **idempotent** — when an App is already
+  configured locally it first **verifies the App still exists on GitHub** (`GET /app`), then, instead
+  of duplicating, points you at installing the *same* App on more accounts/orgs; it only registers
+  anew when nothing is configured, the previous App is confirmed **gone** from GitHub, or you pass
+  `--replace`. (2) The App manifest set `public: false` ("Only on this account"), so the install page
+  offered **no account picker** and the App could land only on the personal account — org repos were
+  unreachable. New registrations now use `public: true` ("Any account"), so the picker lists the
+  personal account **plus every org you administer**. (An App registered before this change stays
+  private; `saw auth app show`/`register` now explain how to switch it to "Any account" in App
+  settings.) Together with the per-owner installation resolution, one App now services all the
+  accounts/orgs it's installed on.
 
 ### Changed
+- **`saw auth` commands now stream output** (spinners over the GitHub round-trips in `status`/`app
+  register`, typewriter result lines), matching the rest of the CLI; `--no-stream` disables it, and
+  `--json` stays byte-exact. Progress labels are deliberately neutral (e.g. "checking GitHub access…")
+  so a security tool never implies it is transmitting your credential.
 - **GitHub App JWT signing is now built in — the optional `pyjwt[crypto]` extra is gone.** App auth
   needs exactly one thing: an RS256-signed JWT (RSASSA-PKCS1-v1.5 + SHA-256) over the operator's RSA
   private key. `saw` now produces it with a small, dependency-free stdlib signer
