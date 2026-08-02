@@ -36,10 +36,14 @@ All notable changes to this project are documented here. The format is based on
   accounts/orgs it's installed on.
 
 ### Changed
-- **`saw auth` commands now stream output** (spinners over the GitHub round-trips in `status`/`app
-  register`, typewriter result lines), matching the rest of the CLI; `--no-stream` disables it, and
-  `--json` stays byte-exact. Progress labels are deliberately neutral (e.g. "checking GitHub access…")
-  so a security tool never implies it is transmitting your credential.
+- **`saw auth` output is now rendered like `saw audit`** — the shared `utils.render` toolkit for real
+  spacing (blank-line-separated sections), colour (green ✓ / dim section headers / bold-cyan links),
+  and width-aware wrapping with hanging indents. Every command/URL suggestion is printed **verbatim on
+  its own line** (never reflowed into prose), so it's clearly visible and safe to copy-paste. Commands
+  also stream (spinners over the GitHub round-trips in `status`/`app register`, typewriter result
+  lines); `--no-stream` disables it and `--json` stays byte-exact. Progress labels are deliberately
+  neutral (e.g. "checking GitHub access…") so a security tool never implies it is transmitting your
+  credential.
 - **GitHub App JWT signing is now built in — the optional `pyjwt[crypto]` extra is gone.** App auth
   needs exactly one thing: an RS256-signed JWT (RSASSA-PKCS1-v1.5 + SHA-256) over the operator's RSA
   private key. `saw` now produces it with a small, dependency-free stdlib signer
