@@ -6,6 +6,21 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+- **A GitHub App now works across all the accounts/orgs it's installed on — not just the personal
+  account.** A GitHub App installation is per-account, but `saw` resolved a single installation id and
+  minted from it for every repo, so a sweep over repos in other orgs failed with "not reachable" even
+  though the App was installed there. Now, for each target repo, `saw` resolves the installation that
+  **owns** that repo (`GET /repos/{owner}/{repo}/installation`, memoized per owner) and mints **that
+  installation's** token — honoring whatever repo selection the operator chose there (all repos, or
+  only-select). The base credential is still resolved once per sweep (no extra `gh` calls); only the
+  App path upgrades per repo, and a token is cached per installation, so a sweep across N accounts
+  mints N tokens, not one-per-repo. env-PAT / `gh` sessions are unchanged (repo-agnostic). When the
+  App genuinely isn't installed on a repo's owner, the guidance now points at the real unblock —
+  installing it on that account/org (`https://github.com/apps/<slug>/installations/new`) — instead of
+  the personal installation's settings. Applies to `saw scan`/`fix`/`guard` (check, setup, drift) and
+  the AuthZ gate's messaging.
+
 ### Changed
 - **GitHub App JWT signing is now built in — the optional `pyjwt[crypto]` extra is gone.** App auth
   needs exactly one thing: an RS256-signed JWT (RSASSA-PKCS1-v1.5 + SHA-256) over the operator's RSA

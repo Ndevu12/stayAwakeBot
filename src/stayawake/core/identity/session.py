@@ -31,8 +31,11 @@ class Session:
 
 
 def resolve_session(*, repo_slug: str | None = None, hostname: str = "github.com") -> Session:
-    """Resolve the active credential into a Session (AuthN + best-effort capability probe)."""
-    token, source = auth.resolve_token(hostname)
+    """Resolve the active credential into a Session (AuthN + best-effort capability probe).
+
+    `repo_slug` targets a specific repo: for a GitHub App it selects the installation that owns that
+    repo (multi-account), and it sharpens the liveness probe to that repo."""
+    token, source = auth.resolve_token(hostname, repo_slug=repo_slug)
     if not token:
         return Session(token=None, source=None, kind="none", live=False,
                        detail="no GitHub credential")

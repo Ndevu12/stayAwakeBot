@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from stayawake.lib import auth
+from stayawake.lib import git as gitutil
 from stayawake.utils.config import load_yaml
 from stayawake.utils.streaming import Streamer, stream_enabled, status as spin_status
 from stayawake.utils.terminal import supports_color
@@ -44,6 +45,15 @@ def _disp(repo: Path) -> str:
     return str(repo).replace(os.path.expanduser("~"), "~")
 
 
+def _act(base_token, source, *, repo: Path | None = None, slug: str | None = None):
+    """(token, err) to act on ONE repo in a sweep. A GitHub App upgrades to the token of the
+    installation that OWNS the repo (multi-account) so each account/org is acted on with its own
+    credentials; env / gh stay repo-agnostic. `err` (install/expand guidance) is set when an App is
+    configured but can't reach the repo — the caller records it as that repo's outcome and continues."""
+    s = slug if slug else (gitutil.origin_slug(repo) if repo is not None else None)
+    return auth.act_token(base_token, source, s)
+
+
 def _indent(text: str) -> str:
     return "\n".join("    " + ln for ln in text.splitlines())
 
@@ -77,8 +87,8 @@ def check_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
         if bad:
             prog.line(f"error: --remote targets must be owner/repo slugs; got {bad}")
             return 2
-        resolved, token, _src = resolution.resolve_remote(cfg, ScanOptions(),
-                                                          users=users, orgs=orgs, slugs=slugs)
+        resolved, token, source = resolution.resolve_remote(cfg, ScanOptions(),
+                                                            users=users, orgs=orgs, slugs=slugs)
         if not resolved:
             prog.line(resolution.REMOTE_EMPTY_HINT)
             return 0
@@ -86,7 +96,9 @@ def check_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
         prog.line(f"Checking {len(resolved)} GitHub repositor{'y' if len(resolved) == 1 else 'ies'}…")
         for i, slug in enumerate(resolved, 1):
             prog.line(f"  [{i}/{len(resolved)}] {slug}")
-            st = _safe_check(slug=slug, branch=branch, token=token, latest=latest)
+            tok, aerr = _act(token, source, slug=slug)
+            st = GuardStatus(present=False, error=aerr) if aerr \
+                else _safe_check(slug=slug, branch=branch, token=tok, latest=latest)
             prog.line(_indent(render(st, color=color)))
             statuses.append(st)
     else:
@@ -99,6 +111,8 @@ def check_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
         prog.line(f"Checking {len(repos)} local repositor{'y' if len(repos) == 1 else 'ies'}…")
         for i, repo in enumerate(repos, 1):
             prog.line(f"  [{i}/{len(repos)}] {_disp(repo)}")
+            # A local check reads the working tree; only freshness touches the network (public Strix
+            # release), so the base token is enough — no per-owner installation token needed here.
             st = _safe_check(repo=repo, token=token, latest=latest)
             prog.line(_indent(render(st, color=color)))
             statuses.append(st)
@@ -151,8 +165,8 @@ def drift_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
         if bad:
             prog.line(f"error: --remote targets must be owner/repo slugs; got {bad}")
             return 2
-        resolved, token, _src = resolution.resolve_remote(cfg, ScanOptions(),
-                                                          users=users, orgs=orgs, slugs=slugs)
+        resolved, token, source = resolution.resolve_remote(cfg, ScanOptions(),
+                                                            users=users, orgs=orgs, slugs=slugs)
         if not resolved:
             prog.line(resolution.REMOTE_EMPTY_HINT)
             return 0
@@ -164,7 +178,9 @@ def drift_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
                   f"repositor{'y' if len(resolved) == 1 else 'ies'}…")
         for i, slug in enumerate(resolved, 1):
             prog.line(f"  [{i}/{len(resolved)}] {slug}")
-            o = _safe_drift(slug=slug, token=token, latest=latest)
+            tok, aerr = _act(token, source, slug=slug)
+            o = DriftOutcome(slug, "error", detail=aerr) if aerr \
+                else _safe_drift(slug=slug, token=tok, latest=latest)
             prog.line(_indent(render_drift(o, color=color)))
             outcomes.append(o)
     else:
@@ -172,13 +188,15 @@ def drift_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
         if not repos:
             prog.line("No local git repositories found.")
             return 0
-        token, _ = auth.resolve_token()      # needed to file issues (and eases freshness rate limits)
+        token, source = auth.resolve_token()  # needed to file issues (and eases freshness rate limits)
         latest = latest_strix(token)
         prog.line(f"Checking pin drift on {len(repos)} local "
                   f"repositor{'y' if len(repos) == 1 else 'ies'}…")
         for i, repo in enumerate(repos, 1):
             prog.line(f"  [{i}/{len(repos)}] {_disp(repo)}")
-            o = _safe_drift(repo=repo, token=token, latest=latest)
+            tok, aerr = _act(token, source, repo=repo)
+            o = DriftOutcome(_disp(repo), "error", detail=aerr) if aerr \
+                else _safe_drift(repo=repo, token=tok, latest=latest)
             prog.line(_indent(render_drift(o, color=color)))
             outcomes.append(o)
 
@@ -228,8 +246,8 @@ def setup_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
         if bad:
             prog.line(f"error: --remote targets must be owner/repo slugs; got {bad}")
             return 2
-        resolved, token, _src = resolution.resolve_remote(cfg, ScanOptions(),
-                                                          users=users, orgs=orgs, slugs=slugs)
+        resolved, token, source = resolution.resolve_remote(cfg, ScanOptions(),
+                                                            users=users, orgs=orgs, slugs=slugs)
         if not token:
             prog.line(auth.no_credential_hint("cloning and opening guard PRs") + "\n")
             return 2
@@ -248,17 +266,21 @@ def setup_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
         prog.line(f"Setting up {len(resolved)} GitHub repositor{'y' if len(resolved) == 1 else 'ies'}…")
         for i, slug in enumerate(resolved, 1):
             prog.line(f"  [{i}/{len(resolved)}] {slug}")
-            with spin_status(f"cloning {slug}…", enabled=prog.enabled), \
-                    resolution.cloned_repo(slug, token) as clone:
-                if clone is None:
-                    res = SetupResult(error=f"{slug}: clone failed (check token access)")
-                else:                                    # a remote repo has no working tree → always PR
-                    res = _safe_setup(clone, token=token, pin=pin, dry_run=dry_run, pr=True,
-                                      branch=branch, spin=prog.enabled)
+            tok, aerr = _act(token, source, slug=slug)
+            if aerr:
+                res = SetupResult(error=f"{slug}: {aerr}")
+            else:
+                with spin_status(f"cloning {slug}…", enabled=prog.enabled), \
+                        resolution.cloned_repo(slug, tok) as clone:
+                    if clone is None:
+                        res = SetupResult(error=f"{slug}: clone failed (check token access)")
+                    else:                                # a remote repo has no working tree → always PR
+                        res = _safe_setup(clone, token=tok, pin=pin, dry_run=dry_run, pr=True,
+                                          branch=branch, spin=prog.enabled)
             prog.line(_indent(render_setup(res, color=color)))
             results.append(res)
     else:
-        token, _ = auth.resolve_token() if (pr or not ref) else (None, None)
+        token, source = auth.resolve_token() if (pr or not ref) else (None, None)
         pin = resolve_pin(token, ref)                    # resolve the latest Strix release ONCE
         if pin is None:
             prog.line("couldn't resolve the latest Strix release (offline? pass --ref <sha|tag>)")
@@ -270,8 +292,15 @@ def setup_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
         prog.line(f"Setting up {len(repos)} local repositor{'y' if len(repos) == 1 else 'ies'}…")
         for i, repo in enumerate(repos, 1):
             prog.line(f"  [{i}/{len(repos)}] {_disp(repo)}")
-            res = _safe_setup(repo, token=token, pin=pin, dry_run=dry_run, pr=pr,
-                              branch=branch, spin=prog.enabled)
+            # Only a PUSH (`--pr`) needs the repo's own installation token (multi-account); a plain
+            # working-tree write touches no remote, so it must not mint one (nor fail if the App isn't
+            # installed on that owner).
+            tok, aerr = _act(token, source, repo=repo) if pr else (token, None)
+            if aerr:
+                res = SetupResult(error=f"{_disp(repo)}: {aerr}")
+            else:
+                res = _safe_setup(repo, token=tok, pin=pin, dry_run=dry_run, pr=pr,
+                                  branch=branch, spin=prog.enabled)
             prog.line(_indent(render_setup(res, color=color)))
             results.append(res)
 

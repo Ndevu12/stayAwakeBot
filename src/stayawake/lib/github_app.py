@@ -39,10 +39,15 @@ INSTALLATION_ID_ENV = "GH_APP_INSTALLATION_ID"
 
 _SKEW = 60          # refresh this many seconds before the API-stated expiry
 _JWT_TTL = 540      # App JWT lifetime (≤ 10 min per GitHub)
-# cache_key -> (token, expires_epoch, permissions_dict)
+# cache_key ((app_id, installation_id)) -> (token, expires_epoch, permissions_dict).
+# Keyed by INSTALLATION (not repo), so a sweep across many repos of the same account/org reuses one
+# token — the installation's own repo selection (all repos / only-select) is the authorization
+# boundary the operator chose, so we mint the whole installation token and honor it.
 _cache: dict[tuple[str, str], tuple[str, float, dict]] = {}
 # token -> permissions (so AuthZ can introspect the live installation token)
 _token_perms: dict[str, dict[str, str]] = {}
+# owner (account/org login) -> installation_id — memo so per-owner installation lookup happens once.
+_owner_installation: dict[str, str] = {}
 
 
 class GithubAppError(RuntimeError):
@@ -150,6 +155,7 @@ def save_config(app_id: str, private_key_pem: str, *, installation_id: str | Non
             pass
     _cache.clear()
     _token_perms.clear()
+    _owner_installation.clear()
     return path
 
 
@@ -226,7 +232,8 @@ def _expiry_epoch(expires_at: str | None) -> float:
 
 
 def _resolve_installation_id(app_jwt: str) -> str | None:
-    """Env / config installation id, else the sole installation if there's exactly one."""
+    """Env / config installation id, else the sole installation if there's exactly one. Used only
+    for repo-agnostic operations (e.g. `saw auth status`); per-repo work resolves by owner instead."""
     explicit = os.environ.get(INSTALLATION_ID_ENV) or (load_config() or {}).get("installation_id")
     if explicit:
         return str(explicit)
@@ -236,24 +243,74 @@ def _resolve_installation_id(app_jwt: str) -> str | None:
     return None
 
 
-def installation_token() -> str | None:
+def _install_guidance(owner: str) -> str:
+    """Where to install/expand the App so `owner`'s repos become reachable — the concrete unblock
+    for the multi-account case (the App is per-account; each org/user needs its own installation)."""
+    cfg = load_config() or {}
+    slug = cfg.get("slug")
+    if slug:
+        return (f"install the StayAwakeBot App on '{owner}' "
+                f"(https://github.com/apps/{slug}/installations/new), or if it is installed with "
+                f"'Only select repositories', add the repo under its Repository access")
+    return (f"install the StayAwakeBot App on '{owner}' "
+            "(https://github.com/settings/installations), or add the repo to its selected repositories")
+
+
+def _installation_for_repo(app_jwt: str, repo_slug: str) -> str:
+    """The installation id that OWNS `owner/repo`, via `GET /repos/{owner}/{repo}/installation`
+    (memoized per owner). Honors multi-account: one App installed on several accounts/orgs resolves
+    the right installation per repo. Raises `GithubAppError` with the concrete install/expand step
+    when the App can't reach that repo (not installed on the owner, or a select-repos install that
+    doesn't include it)."""
+    owner = repo_slug.split("/", 1)[0]
+    memo = _owner_installation.get(owner)
+    if memo:
+        return memo
+    res = github_api.request(f"/repos/{repo_slug}/installation", token=app_jwt, quiet=True)
+    iid = res.get("id") if isinstance(res, dict) else None
+    if not iid:
+        raise GithubAppError(
+            f"the StayAwakeBot App cannot reach {repo_slug}: {_install_guidance(owner)}.")
+    _owner_installation[owner] = str(iid)
+    return str(iid)
+
+
+def installation_token(repo_slug: str | None = None) -> str | None:
     """Mint (or return a cached) installation access token.
 
+    With `repo_slug` ("owner/repo"), resolve the installation that OWNS that repo and mint ITS token
+    — so one App installed on several accounts/orgs services them all, each honoring its own repo
+    selection (all repos / only-select). Without a repo, fall back to the configured/sole installation
+    for repo-agnostic operations (e.g. `saw auth status`).
+
     Returns None when no App is configured (callers fall back to other credentials).
-    Raises GithubAppError when an App *is* configured but unusable."""
+    Raises GithubAppError when an App *is* configured but the target is unreachable/unusable."""
     app_id = _app_id()
     key = _private_key()
     if not (app_id and key):
         return None
 
-    inst_env = os.environ.get(INSTALLATION_ID_ENV) or (load_config() or {}).get("installation_id") or ""
-    cache_key = (str(app_id), str(inst_env))
-    cached = _cache.get(cache_key)
+    repo = repo_slug if (repo_slug and "/" in repo_slug) else None
+    app_jwt: str | None = None
+    if repo:
+        # A warm owner memo → no JWT build; a warm token cache below → no network at all.
+        installation_id = _owner_installation.get(repo.split("/", 1)[0])
+        if not installation_id:
+            app_jwt = _build_jwt(str(app_id), key)
+            installation_id = _installation_for_repo(app_jwt, repo)
+    else:
+        installation_id = (os.environ.get(INSTALLATION_ID_ENV)
+                           or (load_config() or {}).get("installation_id") or "")
+
+    cache_key = (str(app_id), str(installation_id))
+    cached = _cache.get(cache_key) if installation_id else None
     if cached and cached[1] - _SKEW > time.time():
         return cached[0]
 
-    app_jwt = _build_jwt(str(app_id), key)
-    installation_id = _resolve_installation_id(app_jwt)
+    if app_jwt is None:
+        app_jwt = _build_jwt(str(app_id), key)
+    if not installation_id:
+        installation_id = _resolve_installation_id(app_jwt)
     if not installation_id:
         raise GithubAppError(
             f"set {INSTALLATION_ID_ENV} (or re-run `saw auth app register` after installing the App "
@@ -266,7 +323,7 @@ def installation_token() -> str | None:
             "could not mint an installation token (check the App ID, private key, and installation).")
     token = res["token"]
     perms = res.get("permissions") if isinstance(res.get("permissions"), dict) else {}
-    _cache[cache_key] = (token, _expiry_epoch(res.get("expires_at")), perms)
+    _cache[(str(app_id), str(installation_id))] = (token, _expiry_epoch(res.get("expires_at")), perms)
     if perms:
         _token_perms[token] = {str(k): str(v) for k, v in perms.items()}
     return token
