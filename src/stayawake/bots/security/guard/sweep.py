@@ -60,23 +60,26 @@ def _indent(text: str) -> str:
     return "\n".join("    " + ln for ln in text.splitlines())
 
 
-def _guard_sweep(items, labels, make_result, render_one, describe, dead, prog: Streamer, *,
+def _guard_sweep(items, labels, make_result, render_one, tag_of, dead, prog: Streamer, *,
                  jobs, verb: str, no_stream: bool):
-    """Run one guard operation over each item, render each result to STDOUT in SUBMISSION order, and
-    return the results list for the caller's tally. NO downgrade to either mode:
+    """Run one guard operation over each item and return the results list for the caller's tally.
+    Each repo's OWN rendered result is shown AT the point it completes — never in a separate,
+    untrackable pass. NO downgrade to either mode:
 
       * ONE worker (a single repo, or `-j 1`) → run inline, single-writer: the `[i/N]` header, the
         live phase spinners (`make_result(item, spin=prog.enabled)`), and the streamed render —
-        exactly as before. Nothing is lost when there's only one thing happening.
+        exactly as before.
       * MANY workers → run on the shared concurrency seam (`utils.sweep`, THREAD backend: git + API
-        is I/O-bound, GIL released, no token crosses a process boundary) with the live board on
-        STDERR; results still render to STDOUT in target order. Per-repo spinners MUST be off here
-        (`spin=False`) — N concurrent workers can't each drive the one terminal — so the board is
-        the reporter instead. One repo isolated; a dead worker becomes `dead(label, err)` so the
-        tally still fails closed.
+        is I/O-bound, GIL released, no token crosses a process boundary). The board shows the live
+        `done · running · elapsed` header + in-flight repos, and as each repo finishes it scrolls up
+        carrying its FULL rendered block right under its `[i/N] tag label` header — so the result is
+        rendered in place, labelled, at completion. The board draws on STDOUT (guard's report
+        stream, so it stays redirectable). Per-repo spinners are off (`spin=False`) — N concurrent
+        workers can't each drive the terminal; the board is the reporter. One repo isolated; a dead
+        worker becomes `dead(label, err)` so the tally still fails closed.
 
-    `make_result(item, spin=…)` does one repo's work and never raises (it wraps in `_safe_*`);
-    `render_one(result)` returns its human block; `describe` renders a board tag/detail."""
+    `make_result(item, spin=…)` does one repo's work and never raises (wraps in `_safe_*`);
+    `render_one(result)` is its human block; `tag_of(outcome)` gives the board verdict tag."""
     workers = parallel.resolve_jobs(jobs, len(items))
     results = []
     if workers == 1:
@@ -86,13 +89,18 @@ def _guard_sweep(items, labels, make_result, render_one, describe, dead, prog: S
             prog.line(_indent(render_one(res)))
             results.append(res)
         return results
+
+    # The board renders each repo's own block as it completes (`describe` → (tag, "", block)); the
+    # bare "" detail keeps the header clean since the block below carries the full result.
+    def describe(o):
+        tag, _ = tag_of(o)
+        return tag, "", _indent(render_one(o.value))
+
     swept = run_sweep(lambda it: make_result(it, spin=False), items, jobs=workers,
-                      backend=parallel.THREAD, labels=labels, describe=describe, out=sys.stderr,
-                      verb=verb, progress_on=stream_enabled(sys.stderr, force_off=no_stream))
+                      backend=parallel.THREAD, labels=labels, describe=describe, out=sys.stdout,
+                      verb=verb, progress_on=stream_enabled(sys.stdout, force_off=no_stream))
     for o in swept:
-        res = o.value if not o.error else dead(labels[o.index], o.error)
-        prog.line(_indent(render_one(res)))
-        results.append(res)
+        results.append(o.value if not o.error else dead(labels[o.index], o.error))
     return results
 
 

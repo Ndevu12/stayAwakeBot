@@ -32,8 +32,12 @@ def run_sweep(work_fn: Callable[[Any], Any], items: Iterable[Any], *, jobs: int,
     `Outcome`s in SUBMISSION order (so a caller renders identically at any worker count).
 
     - `labels[i]` names item i on the board.
-    - `describe(outcome) -> (tag, detail)` renders ONE finished (non-error) item, e.g.
-      `("[clean   ]", "12 findings")`. Called on the calling thread only, so it needs no locking.
+    - `describe(outcome)` renders ONE finished (non-error) item for the board. It returns either
+      `(tag, detail)` — a compact completion line, e.g. `("[clean   ]", "12 findings")` — or
+      `(tag, detail, block)`, where `block` is the caller's OWN fully-rendered multi-line result
+      (a guard status block, …) printed under the header as the item scrolls up. So a command
+      renders its result AT completion, in place and labelled — never in a separate untrackable
+      pass. Called on the calling thread only, so it needs no locking.
     - `progress_on` picks a live board (a real TTY) vs one plain line per item (pipe / CI /
       `--no-stream`). The board draws on `out` (default stderr — progress, never the report).
     - `verb` is the board header's action word ("Fixing"/"Checking"…), cosmetic only.
@@ -53,8 +57,10 @@ def run_sweep(work_fn: Callable[[Any], Any], items: Iterable[Any], *, jobs: int,
         if outcome.error:
             progress.item_done(labels[outcome.index], "[ERROR   ]", outcome.error)
         else:
-            tag, detail = describe(outcome)
-            progress.item_done(labels[outcome.index], tag, detail)
+            rendered = describe(outcome)          # (tag, detail) or (tag, detail, block)
+            tag, detail = rendered[0], rendered[1]
+            block = rendered[2] if len(rendered) > 2 else None
+            progress.item_done(labels[outcome.index], tag, detail, block=block)
 
     try:
         return parallel.run_ordered(work_fn, work, jobs=jobs, backend=backend,

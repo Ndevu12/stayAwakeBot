@@ -140,19 +140,16 @@ def _run_fix_sweep(items, labels, make_outcome, prog: Streamer, *, jobs, verb: s
             prog.line(f"      → {text}")
             outcomes.append(text)
         return outcomes
+    # Each repo scrolls up carrying its full outcome (`→ …`) right under its `[i/N] tag label`
+    # header, at completion — labelled, in place, no separate reprint pass.
     swept = run_sweep(
         lambda item: make_outcome(item, spin=False), items, jobs=workers,
         backend=parallel.THREAD, labels=labels,
-        describe=lambda o: (("[review  ]" if _needs_review(o.value) else "[fixed   ]"),
-                            _board_detail(labels[o.index], o.value)),
+        describe=lambda o: (("[review  ]" if _needs_review(o.value) else "[fixed   ]"), "",
+                            f"      → {_board_detail(labels[o.index], o.value)}"),
         progress_on=prog.enabled, verb=verb)
-    outcomes = [o.value if not o.error else f"{labels[o.index]}: error — {o.error}"
-                for o in swept]
-    # The board only shows a COMPACT per-repo line, so echo each full outcome (PR URL / manual-review
-    # guidance) in submission order after it closes — no less detail than the sequential path.
-    for text in outcomes:
-        prog.line(f"      → {text}")
-    return outcomes
+    return [o.value if not o.error else f"{labels[o.index]}: error — {o.error}"
+            for o in swept]
 
 
 # ── saw fix ──────────────────────────────────────────────────────────────────────

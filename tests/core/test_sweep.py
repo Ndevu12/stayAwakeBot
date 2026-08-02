@@ -92,6 +92,22 @@ class TestRunSweep(unittest.TestCase):
     def test_empty_items(self):
         self.assertEqual(self._run(lambda x: x, [], jobs=4), [])
 
+    def test_describe_block_renders_under_the_header(self):
+        # A command can render its OWN full result (a multi-line block) as the completion output —
+        # printed under the `[i/N] tag label` header, at completion, not in a separate pass.
+        out = io.StringIO()
+        run_sweep(lambda x: x, ["alpha", "beta"], jobs=2, backend=parallel.THREAD,
+                  labels=["repo-a", "repo-b"], progress_on=False, out=out,
+                  describe=lambda o: ("[ok      ]", "", f"    detail for {o.value}"))
+        text = out.getvalue()
+        # Each repo's block appears, and follows a header line naming that repo.
+        for repo, val in (("repo-a", "alpha"), ("repo-b", "beta")):
+            self.assertIn(f"detail for {val}", text)
+            hdr = text.index(repo)
+            self.assertLess(hdr, text.index(f"detail for {val}"), "block must follow its header")
+        # Bare "" detail → no empty "()" on the header.
+        self.assertNotIn("()", text)
+
 
 if __name__ == "__main__":
     unittest.main()
