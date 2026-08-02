@@ -104,6 +104,27 @@ class TestCallbacksAndDefaults(unittest.TestCase):
         self.assertEqual(sorted(dones), list(range(6)))
         self.assertTrue(all(t == caller for t in seen_threads))   # single-writer guarantee
 
+    def test_on_start_fires_once_and_before_on_done_for_every_item(self):
+        # Regression: a fast item can complete before its start-signal (a separate channel) is
+        # drained. The contract is on_start(i) EXACTLY ONCE and BEFORE on_done(i) — else a progress
+        # board shows a finished item as still in-flight (it lingers forever). Many fast tasks +
+        # several workers make the race likely; the guarantee must hold regardless.
+        events = []   # (kind, index), in call order — both callbacks fire on the calling thread
+        parallel.run_ordered(_square, list(range(40)), jobs=4, backend=parallel.PROCESS,
+                             on_start=lambda i, _it: events.append(("start", i)),
+                             on_done=lambda o: events.append(("done", o.index)))
+        starts = [i for k, i in events if k == "start"]
+        self.assertEqual(sorted(starts), list(range(40)))     # every index started...
+        self.assertEqual(len(starts), len(set(starts)))       # ...exactly once (no stale duplicate)
+        first_start = {}
+        for pos, (kind, i) in enumerate(events):
+            if kind == "start":
+                first_start.setdefault(i, pos)
+        for pos, (kind, i) in enumerate(events):
+            if kind == "done":
+                self.assertIn(i, first_start, f"index {i} completed but never started")
+                self.assertLess(first_start[i], pos, f"index {i} done before start")
+
     def test_empty_input(self):
         self.assertEqual(parallel.run_ordered(_square, [], jobs=4), [])
 

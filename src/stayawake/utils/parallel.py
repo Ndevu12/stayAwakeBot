@@ -113,9 +113,10 @@ def _resolve(future, index, item) -> Outcome:
         return Outcome(index=index, item=item, error=f"{type(exc).__name__}: {exc}")
 
 
-def _drain_starts(start_q, work, on_start) -> None:
-    """Emit any pending start-signals (main thread only). Best-effort: a broken queue after a
-    worker crash must not wedge the loop — completions still resolve via the futures."""
+def _drain_starts(start_q, work, on_start, started: set) -> None:
+    """Emit pending start-signals (main thread only), each index AT MOST ONCE (`started` dedups).
+    Best-effort: a broken queue after a worker crash must not wedge the loop — completions still
+    resolve via the futures."""
     if start_q is None or on_start is None:
         return
     while True:
@@ -125,27 +126,38 @@ def _drain_starts(start_q, work, on_start) -> None:
             return
         except (OSError, ValueError, EOFError):
             return  # queue closed/broken (worker crash) — starts are cosmetic; keep going
-        if 0 <= index < len(work):
+        if 0 <= index < len(work) and index not in started:
+            started.add(index)
             on_start(index, work[index])
 
 
 def _pump(submit, start_q, work, on_start, on_done) -> list[Outcome]:
-    """Shared completion loop for both pool backends: submit everything, then interleave
-    draining start-signals with resolving completed futures — all on the calling thread."""
+    """Shared completion loop for both pool backends: submit everything, then interleave draining
+    start-signals with resolving completed futures — all on the calling thread.
+
+    Contract: `on_start(i)` fires EXACTLY ONCE and always BEFORE `on_done(i)`. A fast item can
+    complete before its start-signal (a separate channel — the mp.Queue) has been drained; without
+    the guarantee below, `on_start` would arrive AFTER `on_done` and a progress reporter would show a
+    finished item as still in-flight. So a completion forces the start first if it hasn't landed yet,
+    and `started` suppresses the now-stale queued signal."""
     outcomes: list[Outcome | None] = [None] * len(work)
+    started: set[int] = set()
     fut_index = {submit(i, item): i for i, item in enumerate(work)}
     pending = set(fut_index)
     while pending:
-        _drain_starts(start_q, work, on_start)
+        _drain_starts(start_q, work, on_start, started)
         done, pending = cf.wait(pending, timeout=_POLL_SECONDS,
                                 return_when=cf.FIRST_COMPLETED)
         for fut in done:
             i = fut_index[fut]
+            if on_start is not None and i not in started:
+                started.add(i)
+                on_start(i, work[i])
             outcome = _resolve(fut, i, work[i])
             outcomes[i] = outcome
             if on_done:
                 on_done(outcome)
-    _drain_starts(start_q, work, on_start)  # flush any final starts
+    _drain_starts(start_q, work, on_start, started)  # flush any final starts
     return [o for o in outcomes if o is not None]
 
 
