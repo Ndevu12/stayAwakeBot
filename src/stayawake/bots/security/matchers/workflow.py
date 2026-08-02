@@ -84,6 +84,7 @@ DEPENDABOT = re.compile(r"dependabot", re.IGNORECASE)
 
 class WorkflowYamlMatcher(Matcher):
     handles = "workflow-yaml"
+    partitionable = True    # per-file YAML parse; verified #1325
 
     def scan(self, target, signatures):
         by_kind = {s["kind"]: s for s in signatures if s.get("kind")}

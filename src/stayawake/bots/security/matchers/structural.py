@@ -30,6 +30,7 @@ _FONT_EXEC = re.compile(r"\.(?:woff2?|ttf|otf)\b", re.IGNORECASE)
 
 class StructuralJsonMatcher(Matcher):
     handles = "structural-json"
+    partitionable = True    # per-file JSONC parse; verified #1325
 
     def scan(self, target, signatures, all_signatures=None):
         by_kind = {s["kind"]: s for s in signatures if s.get("kind")}
