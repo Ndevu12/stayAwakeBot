@@ -75,6 +75,21 @@ class TestLiveProgress(unittest.TestCase):
         # colour off → the only ANSI is cursor control, never a colour SGR like the LINK code
         self.assertNotIn("\033[1;36m", self._run(color=False))
 
+    def test_header_shows_running_count_not_a_stuck_zero(self):
+        # Regression: early in a sweep the header must show in-flight activity, not a bare "0/38"
+        # that reads as stuck / as if it were counting completions.
+        buf = io.StringIO()
+        lp = LiveProgress(buf, color=False, interval=0.02)
+        lp.start(38)
+        for i in range(5):
+            lp.item_started(f"owner/repo-{i}")
+        time.sleep(0.06)                      # let the render thread draw a frame
+        mid = buf.getvalue()
+        lp.finish()
+        self.assertIn("0 done", mid)          # nothing finished yet...
+        self.assertIn("5 running", mid)       # ...but 5 are visibly in flight
+        self.assertIn("38 repos", mid)
+
     def test_make_progress_picks_live_when_enabled(self):
         self.assertIsInstance(make_progress(enabled=True, out=io.StringIO(), color=False),
                               LiveProgress)

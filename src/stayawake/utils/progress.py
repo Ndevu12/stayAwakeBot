@@ -146,7 +146,11 @@ class LiveProgress(ProgressReporter):
         elapsed = int(time.monotonic() - self._start_ts)
         spin = _FRAMES[self._spin % len(_FRAMES)]
         self._spin += 1
-        header = self._fit(f"{spin} Scanning {self._done}/{self._total} · {elapsed}s")
+        # Show DONE and RUNNING distinctly: a bare "0/38" early in a sweep reads as stuck / as if it
+        # were counting the wrong thing, when in fact several repos are already in flight.
+        running = len(self._active)
+        header = self._fit(f"{spin} Scanning {self._total} repos — "
+                           f"{self._done} done · {running} running · {elapsed}s")
         lines = [paint(header, LINK, on=self._color)]
         shown = list(self._active)[:_MAX_INFLIGHT_LINES]
         for label in shown:
