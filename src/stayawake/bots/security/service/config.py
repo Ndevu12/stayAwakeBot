@@ -73,6 +73,22 @@ def _options(settings: dict, *, no_advisories: bool = False,
     )
 
 
+def jobs_setting(settings: dict) -> int | None:
+    """Config `settings.jobs` as a worker count, or None for AUTO. Accepts an int, a numeric
+    string, or "auto"/"" (→ None). A junk value falls back to AUTO rather than crashing the scan;
+    a value below 1 is clamped to 1 (force sequential). CLI `-j/--jobs` takes precedence over this."""
+    value = settings.get("jobs")
+    if value is None:
+        return None
+    if isinstance(value, str) and value.strip().lower() in ("auto", ""):
+        return None
+    try:
+        count = int(value)
+    except (TypeError, ValueError):
+        return None
+    return max(count, 1)
+
+
 def _require_db_or_error() -> int | None:
     """`--require-db` gate: a non-zero exit (with a stderr reason) if the advisory DB is absent or
     fails its content-hash integrity check; None if it's present and valid."""

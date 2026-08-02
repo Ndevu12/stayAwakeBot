@@ -157,7 +157,7 @@ Durable output beyond the terminal is opt-in via "sinks": `--json`, `--sarif`, `
 (see [How reports are stored](#how-reports-are-stored-evidence--redaction)).
 
 ```text
-saw scan [TARGETS...] [-r] [--user U] [--org O] [-c FILE] [-p PATH]
+saw scan [TARGETS...] [-r] [--user U] [--org O] [-c FILE] [-p PATH] [-j N]
          [--json] [--sarif FILE] [--alert] [-d DIR] [--no-stream] [--pager]
          [--no-advisories] [-x | --external] [--deep] [--require-db]
 ```
@@ -174,7 +174,8 @@ saw scan [TARGETS...] [-r] [--user U] [--org O] [-c FILE] [-p PATH]
 | `--sarif FILE` | Write a SARIF 2.1.0 report to `FILE` for GitHub code-scanning upload. Evidence is **redacted** (fingerprint only). |
 | `--alert` | Push the durable record **in this pass**: open/close a GitHub issue per infected repo and post a Slack summary. Reads `GITHUB_TOKEN`, `GITHUB_REPOSITORY`, `SLACK_WEBHOOK_URL` from the environment; bodies are **evidence-free**. |
 | `-d`, `--reports-dir DIR` | **Opt-in:** also write `latest.json` + `latest.md` into `DIR`. Evidence is **redacted** (fingerprint only). |
-| `--no-stream` | Disable the live progress/typewriter output. (Auto-off already when piped, in CI, or with `STAYAWAKE_NO_STREAM=1`.) |
+| `-j`, `--jobs N` | Scan up to **N targets concurrently** — a much faster multi-repo sweep. **Default AUTO:** one target runs sequentially (no overhead), several use one worker per CPU core. Pass a number to cap it, `-j 1` to force **sequential** (reproducible / low-load runs), or `auto`. Config `settings.jobs` sets the default. Workers are **processes** (local scanning is CPU-bound; Python's GIL means threads wouldn't help). Results are returned in submission order, so a persisted report (`-d`/`--json`/`--sarif`) is **byte-identical** to a sequential run; a worker that dies is reported as an ERROR and still fails **closed** (exit 2). |
+| `--no-stream` | Disable the live progress/typewriter output. (Auto-off already when piped, in CI, or with `STAYAWAKE_NO_STREAM=1`.) With a parallel sweep, the live board becomes one plain line per completed repo. |
 | `--pager` | Page the report through `$PAGER` (default `less -R`). **Off by default** — the report prints straight through. |
 | `--no-advisories` | Suppress the dependency **CVE-advisory** section. A scan reports malware **and** known CVEs (from the offline [advisory DB](#saw-db)) by default; advisories never change the verdict/exit code, so this only quiets the output. |
 | `-x`, `--external` | **Opt-in — leaves the offline sandbox.** Also run *installed* external auditors (`osv-scanner`, …) and fold their vulns into the advisory tier. Spawns subprocesses and a tool may send your dependency list to its own servers; absent tools are skipped, and it never changes the verdict/exit code. |
@@ -186,6 +187,8 @@ saw scan                                  # scan local targets; full report to t
 saw scan ./service-a ./service-b          # scan specific local paths
 saw scan --remote                         # scan your own GitHub repos (or configured targets)
 saw scan --org UB-TechDEV                 # an org (implies --remote)
+saw scan --org UB-TechDEV -j 8            # …scanning up to 8 repos at once (faster sweep)
+saw scan ~ -j auto                        # sweep everything under $HOME, one worker per CPU core
 saw scan --remote Ndevu12/strix           # one specific GitHub repo
 saw scan; echo $?                         # gate: exit code is the verdict (0 clean / 1 infected)
 saw scan --deep                           # also content-scan installed dependency code (node_modules)
