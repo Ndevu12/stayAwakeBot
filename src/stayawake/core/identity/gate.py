@@ -103,10 +103,12 @@ def _credential_live_globally(token: str | None) -> bool:
 
 def _repo_unreachable_reason(who: str, repo_slug: str, sess: Session) -> str:
     if sess.source == "github-app" or sess.kind == "app_installation":
+        owner = repo_slug.split("/", 1)[0]
         return (
-            f"{who} cannot access {repo_slug} — this repository is not reachable with the "
-            f"current StayAwakeBot App installation (not selected for the install, wrong "
-            f"account/org, or the remote slug does not exist). This is NOT missing write scopes."
+            f"{who} cannot access {repo_slug} — the StayAwakeBot App is not installed on '{owner}' "
+            f"(or is installed there with 'Only select repositories' that excludes this repo). A "
+            f"GitHub App is per-account, so each account/org needs its own installation. This is NOT "
+            f"missing write scopes."
         )
     return (
         f"{who} cannot access {repo_slug} — the credential is live but GitHub rejected "
@@ -117,11 +119,13 @@ def _repo_unreachable_reason(who: str, repo_slug: str, sess: Session) -> str:
 
 def _repo_unreachable_upgrades(sess: Session, repo_slug: str) -> tuple[UpgradePath, ...]:
     if sess.source == "github-app" or sess.kind == "app_installation":
+        owner = repo_slug.split("/", 1)[0]
         paths: list[UpgradePath] = [
             UpgradePath(
                 kind="register_app",
-                detail=f"add {repo_slug} under the App's Repository access (or grant all repos)",
-                command=_app_installation_settings_command(),
+                detail=f"install the StayAwakeBot App on '{owner}' (or add {repo_slug} to its "
+                       f"selected repositories)",
+                command=_app_install_command(owner),
             ),
             UpgradePath(
                 kind="pat_scopes",
@@ -138,17 +142,14 @@ def _repo_unreachable_upgrades(sess: Session, repo_slug: str) -> tuple[UpgradePa
     )
 
 
-def _app_installation_settings_command() -> str:
-    """Best-effort Configure URL for the local App installation."""
+def _app_install_command(owner: str) -> str:
+    """Best-effort URL to install the App on `owner` (the concrete multi-account unblock) — a GitHub
+    App is per-account, so an org repo needs the App installed on that org, not on the personal one."""
     try:
         from stayawake.lib import github_app
-        cfg = github_app.load_config() or {}
-        iid = cfg.get("installation_id")
-        if iid:
-            return f"open https://github.com/settings/installations/{iid}"
-        slug = cfg.get("slug")
+        slug = (github_app.load_config() or {}).get("slug")
         if slug:
-            return f"open https://github.com/apps/{slug}/installations"
+            return f"open https://github.com/apps/{slug}/installations/new"
     except Exception:  # noqa: BLE001
         pass
     return "open https://github.com/settings/installations"

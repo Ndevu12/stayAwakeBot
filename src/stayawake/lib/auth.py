@@ -62,15 +62,18 @@ def gh_token(hostname: str = "github.com") -> str | None:
     return None
 
 
-def _app_token() -> str | None:
+def _app_token(repo_slug: str | None = None) -> str | None:
     """A GitHub App installation token, or None if no App is configured. NEVER raises:
     a configured-but-broken App (bad/encrypted key, unreachable API, or any other failure) is
     reported to stderr and treated as 'no token' so resolution falls through to the gh session —
     exactly like `gh_token`. Diagnostics go to STDERR so they never pollute a command's stdout
-    (e.g. a piped scan report). (#1287)"""
+    (e.g. a piped scan report). (#1287)
+
+    When `repo_slug` is given, the token is minted from the installation that OWNS that repo
+    (multi-account) — see `github_app.installation_token`."""
     from stayawake.lib import github_app  # lazy import: keeps App auth off the hot path
     try:
-        return github_app.installation_token()
+        return github_app.installation_token(repo_slug)
     except github_app.GithubAppError as e:
         print(f"GitHub App auth configured but unavailable: {e}", file=sys.stderr)
         return None
@@ -79,22 +82,47 @@ def _app_token() -> str | None:
         return None
 
 
-def resolve_token(hostname: str = "github.com") -> tuple[str | None, str | None]:
+def resolve_token(hostname: str = "github.com",
+                  *, repo_slug: str | None = None) -> tuple[str | None, str | None]:
     """Return (token, source). `source` is the env var name, 'github-app', 'gh', or None.
 
     Precedence: an explicit env PAT wins (human override) → a GitHub App installation
     token (automation default) → the gh CLI session → none. Callers decide whether a
-    missing token is fatal (writes) or fine (public read)."""
+    missing token is fatal (writes) or fine (public read).
+
+    `repo_slug` ("owner/repo") makes the App path mint the token from the installation that OWNS
+    that repo (multi-account). It does NOT affect the env-PAT / gh paths, which are repo-agnostic."""
     token, source = _env_token()
     if token:
         return token, source
-    app = _app_token()
+    app = _app_token(repo_slug)
     if app:
         return app, "github-app"
     token = gh_token(hostname)
     if token:
         return token, "gh"
     return None, None
+
+
+def act_token(base_token: str | None, source: str | None,
+              repo_slug: str | None) -> tuple[str | None, str | None]:
+    """The token to ACT on one specific `repo_slug` during a multi-repo sweep, plus an optional
+    per-repo error string. Resolve the base credential ONCE (so a sweep does not re-spawn `gh` per
+    repo); then upgrade PER REPO only for a GitHub App — minting the token of the installation that
+    owns that repo (multi-account) so each repo is acted on with the right account's credentials.
+    env-PAT / gh sessions are repo-agnostic and returned unchanged.
+
+    Never raises: an App that is configured but cannot reach the repo yields `(None, guidance)` so the
+    caller records it as that repo's outcome and keeps the sweep going."""
+    if source == "github-app" and repo_slug and "/" in repo_slug:
+        from stayawake.lib import github_app
+        try:
+            return github_app.installation_token(repo_slug), None
+        except github_app.GithubAppError as e:
+            return None, str(e)
+        except Exception as e:  # noqa: BLE001 — one repo's auth hiccup must not abort the sweep
+            return None, str(e)
+    return base_token, None
 
 
 def no_credential_hint(action: str = "this operation") -> str:
