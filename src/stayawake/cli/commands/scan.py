@@ -15,6 +15,21 @@ import argparse
 from stayawake.bots.security import service
 
 
+def _jobs(value: str) -> int | None:
+    """Parse `-j/--jobs`: a positive int (worker cap), or `auto`/`` → None (auto-pick). Rejects
+    zero/negative/junk with a clear argparse error rather than silently disabling concurrency."""
+    s = value.strip().lower()
+    if s in ("auto", ""):
+        return None
+    try:
+        count = int(s)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"--jobs must be a positive integer or 'auto', got {value!r}")
+    if count < 1:
+        raise argparse.ArgumentTypeError("--jobs must be >= 1 (use 1 for sequential)")
+    return count
+
+
 def register(sub) -> None:
     p = sub.add_parser("scan", aliases=["s", "sc"], help="hunt supply-chain worms (read-only)")
     p.add_argument("paths", nargs="*", metavar="TARGETS",
@@ -51,6 +66,10 @@ def register(sub) -> None:
                    help="fail (exit 2) if the advisory DB is absent or fails its integrity check, "
                         "instead of falling back to the inline malware seed — for CI gates that must "
                         "not silently lose coverage. Default is fail-open (degrade to the seed).")
+    p.add_argument("-j", "--jobs", type=_jobs, default=None, dest="jobs", metavar="N",
+                   help="scan up to N targets concurrently (a multi-repo sweep). Default AUTO: one "
+                        "target runs sequentially, several use one worker per CPU core. Pass a number "
+                        "to cap it, `-j 1` to force sequential (reproducible / low-load), or `auto`.")
     p.add_argument("--no-stream", action="store_true", dest="no_stream",
                    help="disable live progress/typewriter output (plain, instant lines)")
     p.add_argument("--pager", action="store_true", dest="pager",
@@ -78,4 +97,4 @@ def run(a: argparse.Namespace) -> int:
                         json_out=a.json, sarif_path=a.sarif, reports_dir=a.reports_dir,
                         alert=a.alert, no_stream=a.no_stream, pager=a.pager,
                         no_advisories=a.no_advisories, external_audit=a.external_audit,
-                        deep=a.deep, require_db=a.require_db)
+                        deep=a.deep, require_db=a.require_db, jobs=a.jobs)
