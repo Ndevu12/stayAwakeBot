@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+- **GitHub App JWT signing is now built in — the optional `pyjwt[crypto]` extra is gone.** App auth
+  needs exactly one thing: an RS256-signed JWT (RSASSA-PKCS1-v1.5 + SHA-256) over the operator's RSA
+  private key. `saw` now produces it with a small, dependency-free stdlib signer
+  (`stayawake.lib.jwtsign`, using `hashlib`/`base64`/`pow()` over a minimal DER parse), proven
+  byte-for-byte equal to `openssl dgst -sha256 -sign` and PyJWT across PKCS#1/PKCS#8 and
+  2048/4096-bit keys. This removes the per-package-manager install step (the pip/pip3/pipx/uv/poetry
+  install-hint dance — the `stayawakebot[app]` extra and its `saw auth`/`saw doctor` "not usable yet"
+  hints are gone) and drops a CVE-prone dependency: App auth now just works on every install method
+  with the base package. The signer folds in RSA blinding (OpenSSL's timing-side-channel defense) and
+  fails loud on an encrypted/non-RSA/malformed key. `saw auth app register` no longer gates on a
+  crypto backend (the `--force` flag is removed). Closes #1317.
+
 ## [0.1.18] - 2026-08-02
 
 ### Added

@@ -64,11 +64,11 @@ def gh_token(hostname: str = "github.com") -> str | None:
 
 def _app_token() -> str | None:
     """A GitHub App installation token, or None if no App is configured. NEVER raises:
-    a configured-but-broken App (missing PyJWT[crypto] extra, bad key, unreachable API, or any
-    other failure) is reported to stderr and treated as 'no token' so resolution falls through to
-    the gh session — exactly like `gh_token`. Diagnostics go to STDERR so they never pollute a
-    command's stdout (e.g. a piped scan report). (#1287)"""
-    from stayawake.lib import github_app  # lazy: keeps PyJWT fully optional (never a core dep)
+    a configured-but-broken App (bad/encrypted key, unreachable API, or any other failure) is
+    reported to stderr and treated as 'no token' so resolution falls through to the gh session —
+    exactly like `gh_token`. Diagnostics go to STDERR so they never pollute a command's stdout
+    (e.g. a piped scan report). (#1287)"""
+    from stayawake.lib import github_app  # lazy import: keeps App auth off the hot path
     try:
         return github_app.installation_token()
     except github_app.GithubAppError as e:

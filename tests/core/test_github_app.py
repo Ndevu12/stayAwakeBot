@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """GitHub App auth: installation-token minting, caching, graceful degradation.
 
-These tests don't require the optional PyJWT[crypto] extra — the JWT signing seam is
-mocked, and the missing-extra path is exercised by forcing the `import jwt` to fail.
+JWT signing is BUILT IN (stdlib RS256 signer, `lib/jwtsign`) — no optional crypto extra — so these
+tests mock the signing seam for minting/caching, and exercise the real signer's fail-loud path with a
+malformed key.
 """
 from __future__ import annotations
 
-import builtins
 import json
 import os
 import stat
@@ -157,19 +157,36 @@ class TestConfigPath(unittest.TestCase):
                 self.assertFalse([f for f in p.parent.iterdir() if f.name.startswith(".github-app-")])
 
 
-class TestMissingExtra(unittest.TestCase):
-    def test_build_jwt_without_pyjwt_points_at_extra(self):
-        real_import = builtins.__import__
+class TestBuiltInSigning(unittest.TestCase):
+    def test_jwt_always_available(self):
+        # Signing is built in (no optional extra) → the capability is always present.
+        self.assertTrue(github_app.jwt_available())
 
-        def no_jwt(name, *a, **k):
-            if name == "jwt":
-                raise ImportError("no module named jwt")
-            return real_import(name, *a, **k)
+    def test_build_jwt_with_malformed_key_raises_apperror(self):
+        # A genuinely unusable key (not a PEM) must surface as a friendly GithubAppError, not a raw
+        # crash — the built-in signer's JwtSignError is wrapped at the mint boundary.
+        with self.assertRaises(github_app.GithubAppError):
+            github_app._build_jwt("123", "not a private key")
 
-        with mock.patch.object(builtins, "__import__", side_effect=no_jwt):
-            with self.assertRaises(github_app.GithubAppError) as ctx:
-                github_app._build_jwt("123", "KEY")
-        self.assertIn(github_app.app_crypto_install_hint(), str(ctx.exception))
+    def test_build_jwt_signs_a_real_key(self):
+        # End-to-end through the real built-in signer: a valid RSA PEM yields a 3-segment JWT whose
+        # payload carries the App id as `iss`.
+        import base64
+        import json as _json
+        import shutil
+        import subprocess
+        import tempfile
+        if not shutil.which("openssl"):
+            self.skipTest("needs openssl to generate a key")
+        with tempfile.TemporaryDirectory() as td:
+            key = Path(td) / "k.pem"
+            subprocess.run(["openssl", "genrsa", "-out", str(key), "2048"],
+                           check=True, capture_output=True)
+            jwt = github_app._build_jwt("123", key.read_text())
+        parts = jwt.split(".")
+        self.assertEqual(len(parts), 3)
+        payload = _json.loads(base64.urlsafe_b64decode(parts[1] + "=="))
+        self.assertEqual(payload["iss"], "123")
 
 
 class TestResolveTokenIntegration(unittest.TestCase):
@@ -200,61 +217,6 @@ class TestResolveTokenIntegration(unittest.TestCase):
                                side_effect=TypeError("json.loads(None) style crash")), \
              mock.patch.object(auth, "gh_token", return_value="ghtok"):
             self.assertEqual(auth.resolve_token(), ("ghtok", "gh"))
-
-
-class TestAppCryptoRobustness(unittest.TestCase):
-    """#1287: the App-crypto-absent path must NEVER crash the CLI, and readiness must be honest."""
-
-    def test_editable_probe_survives_none_read(self):
-        # THE crash root: importlib.metadata `read_text` returns None (a normal, non-editable install
-        # has no direct_url.json); `json.loads(None)` used to raise an uncaught TypeError that crashed
-        # `saw auth` for every default-install user (no PyJWT).
-        class _NoDirectUrl:
-            def read_text(self, name):
-                return None
-        self.assertFalse(github_app._distribution_is_editable(_NoDirectUrl()))
-
-    def test_install_hint_never_raises(self):
-        # The hint runs inside error/status paths — any probe failure must degrade, never crash.
-        with mock.patch.object(github_app, "distribution", side_effect=RuntimeError("boom")):
-            self.assertEqual(github_app.app_crypto_install_hint(), github_app.APP_EXTRA_HINT)
-
-    def test_build_jwt_without_crypto_backend_points_at_extra(self):
-        # PyJWT installed WITHOUT `cryptography` → jwt.encode(RS256) raises NotImplementedError; must
-        # surface the friendly "install the extra" GithubAppError, not an uncaught crash at mint.
-        import types
-        real_import = builtins.__import__
-        fake_jwt = types.SimpleNamespace(
-            encode=lambda *a, **k: (_ for _ in ()).throw(NotImplementedError("Algorithm not supported")))
-
-        def imp(name, *a, **k):
-            return fake_jwt if name == "jwt" else real_import(name, *a, **k)
-
-        with mock.patch.object(builtins, "__import__", side_effect=imp):
-            with self.assertRaises(github_app.GithubAppError) as ctx:
-                github_app._build_jwt("123", "KEY")
-        self.assertIn("crypto", str(ctx.exception).lower())
-
-    def test_jwt_available_false_when_pyjwt_absent(self):
-        real_import = builtins.__import__
-
-        def no_jwt(name, *a, **k):
-            if name == "jwt" or name.startswith("jwt."):
-                raise ImportError("no jwt")
-            return real_import(name, *a, **k)
-
-        with mock.patch.object(builtins, "__import__", side_effect=no_jwt):
-            self.assertFalse(github_app.jwt_available())
-
-    def test_jwt_available_tracks_has_crypto(self):
-        try:
-            import jwt.algorithms as _alg
-        except ImportError:
-            self.skipTest("PyJWT not installed")
-        with mock.patch.object(_alg, "has_crypto", False):
-            self.assertFalse(github_app.jwt_available())   # bare pyjwt, no RS256 → not ready
-        with mock.patch.object(_alg, "has_crypto", True):
-            self.assertTrue(github_app.jwt_available())
 
 
 class TestInstallationRepos(unittest.TestCase):
