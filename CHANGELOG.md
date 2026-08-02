@@ -7,6 +7,11 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **Repo-committed Claude Code skills (`.claude/skills/`)** — portable, distilled contributor
+  guidance so anyone working on the codebase (on any machine) shares the same conventions and
+  discipline: `saw-overview`, `saw-architecture`, `engineering-standard`, `working-with-this-codebase`,
+  `shipping-changes`, `security-change-discipline`, `scanner-performance`, `security-hardening-patterns`
+  (see `.claude/skills/README.md`). Documentation only — no runtime change.
 - **`saw scan -j/--jobs N` runs concurrently, for a much faster scan** (#1205, #1325). A **multi-repo
   sweep** (e.g. `saw scan ~` or an org) scans up to *N* repos at once instead of one at a time
   (#1205); a scan of a **single big repo/monorepo/vendored tree** now splits that repo's files across
