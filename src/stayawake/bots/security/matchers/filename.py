@@ -10,6 +10,7 @@ from stayawake.bots.security.matchers.base import Matcher
 
 class FilenameMatcher(Matcher):
     handles = "filename"
+    partitionable = True    # pure per-file glob; verified #1325
 
     def scan(self, target, signatures):
         findings: list[Finding] = []

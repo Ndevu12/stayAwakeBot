@@ -10,6 +10,7 @@ from stayawake.bots.security.matchers.base import Matcher, evidence, globs_ok
 
 class ContentMatcher(Matcher):
     handles = "content"
+    partitionable = True    # per-file (fired-set is per-file); verified #1325
 
     def scan(self, target, signatures):
         # IGNORECASE so trivial case-flips (let/LET, SFL vs sfL, 0X7F) don't evade.

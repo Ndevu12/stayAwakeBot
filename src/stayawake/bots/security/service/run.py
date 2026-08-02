@@ -12,14 +12,19 @@ import sys
 import tempfile
 from pathlib import Path
 
+import heapq
+
 from stayawake.utils import parallel
 from stayawake.utils.io import resolve_reports_dir
 from stayawake.utils.progress import make_progress
 from stayawake.utils.streaming import Streamer, status, stream_enabled
 from stayawake.utils.terminal import supports_color
 from stayawake.utils.timeutil import now_iso
+from stayawake.bots.security import scanner
+from stayawake.bots.security.matchers import REGISTRY
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.models import ScanResult, ScanReport
+from stayawake.bots.security.targets import LocalRepoTarget
 from stayawake.bots.security.sinks import (
     Sink, TerminalSink, JsonSink, SarifSink, FileSink, IssueSink, SlackSink)
 # Target resolution lives in one shared module (resolution.py); imported under the names scan's
@@ -101,6 +106,116 @@ def _scan_targets(jobs_batch: list, labels: list[str], sources: list[str], worke
     for text in diagnostics:          # replay captured worker output AFTER the board is gone
         sys.stderr.write(text)
     return results
+
+
+# Within-target file parallelism (#1325) tuning. Below the file-count floor a single target scans
+# sequentially — the pool's startup + per-chunk pickling isn't worth it for a small repo (measured:
+# ~4ms/file, so the floor is ~1s of work). Config `settings.parallel_min_files` overrides the floor.
+WITHIN_TARGET_MIN_FILES = 256
+_CHUNKS_PER_WORKER = 4        # more chunks than workers → the pool load-balances uneven file sizes
+_MIN_CHUNK_FILES = 16        # …but don't shatter a small set into trivially tiny chunks
+
+
+def _file_workers(jobs_pref: int | None) -> int:
+    """Worker count for parallelizing ONE target's files: AUTO (`None`) → all cores; an explicit
+    `-j N` caps it; `-j 1` → 1 (sequential, no pool)."""
+    if jobs_pref is None:
+        return os.cpu_count() or 1
+    return max(1, jobs_pref)
+
+
+def _balanced_chunks(root, files: list[str], nchunks: int) -> list[list[str]]:
+    """Partition `files` into ~`nchunks` size-balanced groups (largest-file-first onto the lightest
+    chunk — LPT), because per-file scan cost tracks file size (obfuscation is 68% of it). A few huge
+    files can't pile onto one worker. Order within a chunk doesn't matter — matchers are per-file and
+    the final sort is total."""
+    sized = []
+    for rel in files:
+        try:
+            size = (Path(root) / rel).stat().st_size
+        except OSError:
+            size = 0
+        sized.append((size, rel))
+    sized.sort(reverse=True)                      # LPT: place the biggest first
+    # Key is (bytes, file_count, index): balance by size, but tie-break by the LIGHTEST file count so
+    # equal- or zero-size files still spread across chunks — otherwise many 0-byte/uniform files would
+    # all pile onto chunk 0 (load never advances) and there'd be no parallelism.
+    heap = [(0, 0, i) for i in range(nchunks)]
+    heapq.heapify(heap)
+    buckets: list[list[str]] = [[] for _ in range(nchunks)]
+    for size, rel in sized:
+        load, count, idx = heapq.heappop(heap)
+        buckets[idx].append(rel)
+        heapq.heappush(heap, (load + size, count + 1, idx))
+    return [b for b in buckets if b]              # drop any empty bucket
+
+
+def _scan_one_target(repo, display: str, opts, sigs, allowlist, workers: int,
+                     progress_on: bool, settings: dict) -> ScanResult:
+    """Scan ONE local target. Above the file-count floor and with >1 worker, split its files into
+    size-balanced chunks scanned in parallel (partitionable matchers) alongside the whole-target
+    matchers (each once), then MERGE raw findings through `scanner.finalize` — byte-identical to a
+    sequential scan. Below the floor / 1 worker, scan sequentially (no pool overhead)."""
+    try:
+        return _scan_one_target_inner(repo, display, opts, sigs, allowlist, workers,
+                                      progress_on, settings)
+    except Exception as exc:  # never let one target crash the CLI — fail CLOSED (mirrors scan_target)
+        return ScanResult(target=display, source="local",
+                          error=f"scan worker failed: {type(exc).__name__}: {exc}")
+
+
+def _scan_one_target_inner(repo, display: str, opts, sigs, allowlist, workers: int,
+                           progress_on: bool, settings: dict) -> ScanResult:
+    files = list(LocalRepoTarget(repo, display, opts).iter_files())
+    min_files = int(settings.get("parallel_min_files", WITHIN_TARGET_MIN_FILES) or 0)
+    if workers <= 1 or len(files) < min_files:
+        # Sequential fast-path — a full scan of the whole target. Reuse the same worker seam as the
+        # multi-repo path (so its behaviour and the tests' mock point stay consistent); capture +
+        # replay any stray output, as elsewhere.
+        worker_scan = scan_workers.scan_local(
+            scan_workers.LocalScanJob(str(repo), display, opts, sigs, allowlist))
+        if worker_scan.diagnostics:
+            sys.stderr.write(worker_scan.diagnostics)
+        return worker_scan.result
+
+    all_sigs = [s for group in sigs.values() for s in group]
+    order = list(sigs.keys())
+    part_names = tuple(n for n in order if n in REGISTRY and REGISTRY[n].partitionable)
+    whole_names = [n for n in order if n in REGISTRY and not REGISTRY[n].partitionable]
+    nchunks = max(1, min(workers * _CHUNKS_PER_WORKER, -(-len(files) // _MIN_CHUNK_FILES)))
+    chunks = _balanced_chunks(repo, files, nchunks)
+    jobs = [scan_workers.MatcherJob(str(repo), display, opts, part_names, tuple(chunk), sigs, all_sigs)
+            for chunk in chunks]
+    jobs += [scan_workers.MatcherJob(str(repo), display, opts, (name,), None, sigs, all_sigs)
+             for name in whole_names]
+
+    with status(f"Scanning {display} — {len(files)} files across {workers} workers…",
+                enabled=progress_on):
+        outcomes = parallel.run_ordered(scan_workers.collect_partial, jobs,
+                                        jobs=workers, backend=parallel.PROCESS)
+
+    merged: dict[str, list] = {}
+    read_errors: list[str] = []
+    coverage_notes: list[str] = []
+    diagnostics: list[str] = []
+    worker_error: str | None = None
+    for outcome in outcomes:
+        if outcome.error:                        # a chunk/matcher worker died → the target is only
+            worker_error = outcome.error         # partially scanned; fail CLOSED (below), never clean
+            continue
+        partial = outcome.value
+        for name, found in partial.by_matcher.items():
+            merged.setdefault(name, []).extend(found)
+        read_errors.extend(partial.read_errors)
+        coverage_notes.extend(partial.coverage_notes)
+        if partial.diagnostics:
+            diagnostics.append(partial.diagnostics)
+    for text in diagnostics:                     # replay captured worker output after the spinner
+        sys.stderr.write(text)
+    if worker_error is not None:
+        return ScanResult(target=display, source="local", error=f"scan worker failed: {worker_error}")
+    return scanner.finalize(display, "local", merged, order, read_errors, coverage_notes,
+                            opts, repo, allowlist, all_sigs)
 
 
 def scan(config_path: str | None = None, *, remote: bool = False,
@@ -196,7 +311,15 @@ def scan(config_path: str | None = None, *, remote: bool = False,
             return 2
         if progress_on and repos:
             prog.line(f"Found {len(repos)} repositor{'y' if len(repos) == 1 else 'ies'} to scan.")
-        if repos:
+        if len(repos) == 1:
+            # ONE local target → parallelize ACROSS ITS FILES (#1325), so a single big repo/monorepo
+            # uses every core. (A multi-repo sweep instead parallelizes across repos, below — the two
+            # grains stay mutually exclusive so we never oversubscribe / nest pools.)
+            home = os.path.expanduser("~")
+            display = str(repos[0]).replace(home, "~")
+            results = [_scan_one_target(repos[0], display, opts, sigs, allowlist,
+                                        _file_workers(jobs_pref), progress_on, settings)]
+        elif repos:
             home = os.path.expanduser("~")
             labels = [str(repo).replace(home, "~") for repo in repos]
             jobs_batch = [scan_workers.LocalScanJob(str(repo), labels[i], opts, sigs, allowlist)

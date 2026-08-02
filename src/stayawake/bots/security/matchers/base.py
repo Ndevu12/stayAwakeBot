@@ -80,6 +80,13 @@ def build_content_sig(signatures: list[dict[str, Any]]):
 
 class Matcher:
     handles: str = ""
+    # True iff this matcher processes each file INDEPENDENTLY (iterates `target.iter_files()` with no
+    # cross-file state), so it can safely run over a SUBSET of files and have its findings merged —
+    # the basis for within-target file parallelism (#1325). Whole-target matchers (git history,
+    # lockfile audits, the symlink walk) keep the safe default False and always run once over the
+    # full target. Verified per-matcher before enabling; defaulting False means a new matcher is
+    # never silently chunked (which could split cross-file state) until it's reviewed.
+    partitionable: bool = False
 
     def scan(self, target, signatures: list[dict[str, Any]]):
         raise NotImplementedError

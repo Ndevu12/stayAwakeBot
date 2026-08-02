@@ -23,8 +23,8 @@ import io
 from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass, field
 
-from stayawake.bots.security.models import ScanResult
-from stayawake.bots.security.scanner import scan_target
+from stayawake.bots.security.models import Finding, ScanResult
+from stayawake.bots.security.scanner import run_matchers, scan_target
 from stayawake.bots.security.targets import LocalRepoTarget, RemoteRepoTarget
 
 
@@ -74,3 +74,49 @@ def scan_remote(job: RemoteScanJob) -> WorkerScan:
         finally:
             target.cleanup()
     return WorkerScan(result, buf.getvalue())
+
+
+# --- Within-target file parallelism (#1325) -------------------------------------------------------
+#
+# A single big LOCAL target is decomposed into MatcherJobs run in parallel and merged back into one
+# ScanResult via scanner.finalize. Two shapes of job, ONE worker (`collect_partial`):
+#   * a FILE-CHUNK job — `include` set → the partitionable (per-file) matchers over just those files;
+#   * a WHOLE-MATCHER job — `include` None → one whole-target matcher (git history / lockfile audit /
+#     symlink walk) over the FULL target, run exactly once.
+# Each returns RAW per-matcher findings + the chunk's read_errors/coverage_notes; the orchestrator
+# concatenates them and calls scanner.finalize ONCE — so a parallel scan is byte-identical to a
+# sequential one. Stray worker stdout/stderr is captured and replayed after the board, as in #1205.
+
+
+@dataclass
+class RawPartial:
+    """One job's contribution to a target's scan: raw findings keyed by matcher (no allowlist/
+    confidence/sort applied — that's finalize's job), plus the read_errors / coverage_notes the job's
+    Target accumulated, plus any captured stray output to replay."""
+    by_matcher: dict[str, list[Finding]]
+    read_errors: list[str] = field(default_factory=list)
+    coverage_notes: list[str] = field(default_factory=list)
+    diagnostics: str = ""
+
+
+@dataclass
+class MatcherJob:
+    """A unit of within-target work: run `matcher_names` over the target. `include` None = the FULL
+    target (whole-target matchers); a tuple of relpaths = just that file-chunk (partitionable
+    matchers). Picklable (spawn)."""
+    root: str
+    display: str
+    opts: object
+    matcher_names: tuple[str, ...]
+    include: tuple[str, ...] | None
+    signatures: dict
+    all_sigs: list
+
+
+def collect_partial(job: MatcherJob) -> RawPartial:
+    buf = io.StringIO()
+    with redirect_stdout(buf), redirect_stderr(buf):
+        target = LocalRepoTarget(job.root, job.display, job.opts, include_only=job.include)
+        by_matcher = run_matchers(target, list(job.matcher_names), job.signatures, job.all_sigs)
+    return RawPartial(by_matcher, list(target.read_errors), list(target.coverage_notes),
+                      buf.getvalue())
