@@ -46,8 +46,12 @@ _JWT_TTL = 540      # App JWT lifetime (≤ 10 min per GitHub)
 _cache: dict[tuple[str, str], tuple[str, float, dict]] = {}
 # token -> permissions (so AuthZ can introspect the live installation token)
 _token_perms: dict[str, dict[str, str]] = {}
-# owner (account/org login) -> installation_id — memo so per-owner installation lookup happens once.
-_owner_installation: dict[str, str] = {}
+# owner (account/org login) -> (installation_id, repository_selection). Memo so per-owner resolution
+# happens once. `repository_selection` ("all" | "selected") decides whether the memo can be REUSED
+# without re-checking: for an "all repositories" install every repo of that owner is reachable, so we
+# skip the per-repo lookup; for a "select repositories" install reachability differs repo-by-repo, so
+# each repo is still checked (the memo is not used to short-circuit).
+_owner_installation: dict[str, tuple[str, str]] = {}
 
 
 class GithubAppError(RuntimeError):
@@ -274,21 +278,26 @@ def _install_guidance(owner: str) -> str:
 
 
 def _installation_for_repo(app_jwt: str, repo_slug: str) -> str:
-    """The installation id that OWNS `owner/repo`, via `GET /repos/{owner}/{repo}/installation`
-    (memoized per owner). Honors multi-account: one App installed on several accounts/orgs resolves
-    the right installation per repo. Raises `GithubAppError` with the concrete install/expand step
-    when the App can't reach that repo (not installed on the owner, or a select-repos install that
-    doesn't include it)."""
+    """The installation id that OWNS `owner/repo`, via `GET /repos/{owner}/{repo}/installation`.
+
+    Multi-account aware, and honors the operator's repo-selection WITHOUT losing perf:
+      * "all repositories" install → every repo of that owner is reachable, so the (id, "all") is
+        memoized per owner and REUSED with no further lookup (the fast common path).
+      * "select repositories" install → reachability differs per repo, so each repo IS checked; the
+        memo is stored but never used to short-circuit, so an EXCLUDED repo is correctly rejected.
+    Raises `GithubAppError` with the concrete install/expand step when the App can't reach the repo
+    (not installed on the owner, or a select-repos install that excludes it)."""
     owner = repo_slug.split("/", 1)[0]
     memo = _owner_installation.get(owner)
-    if memo:
-        return memo
+    if memo and memo[1] == "all":                    # all-repos install → reachable; skip the lookup
+        return memo[0]
     res = github_api.request(f"/repos/{repo_slug}/installation", token=app_jwt, quiet=True)
     iid = res.get("id") if isinstance(res, dict) else None
     if not iid:
         raise GithubAppError(
             f"the StayAwakeBot App cannot reach {repo_slug}: {_install_guidance(owner)}.")
-    _owner_installation[owner] = str(iid)
+    selection = str(res.get("repository_selection") or "selected")
+    _owner_installation[owner] = (str(iid), selection)
     return str(iid)
 
 
@@ -298,7 +307,8 @@ def installation_token(repo_slug: str | None = None) -> str | None:
     With `repo_slug` ("owner/repo"), resolve the installation that OWNS that repo and mint ITS token
     — so one App installed on several accounts/orgs services them all, each honoring its own repo
     selection (all repos / only-select). Without a repo, fall back to the configured/sole installation
-    for repo-agnostic operations (e.g. `saw auth status`).
+    for repo-agnostic operations (e.g. `saw auth status`). The token is cached PER INSTALLATION, so a
+    sweep across many repos of the same install mints once.
 
     Returns None when no App is configured (callers fall back to other credentials).
     Raises GithubAppError when an App *is* configured but the target is unreachable/unusable."""
@@ -307,32 +317,37 @@ def installation_token(repo_slug: str | None = None) -> str | None:
     if not (app_id and key):
         return None
 
+    # Resolve the installation id FIRST (so the cache read/write key always matches — the per-repo
+    # reachability check also lives here). Build the App JWT lazily, only when a network step needs it.
     repo = repo_slug if (repo_slug and "/" in repo_slug) else None
     app_jwt: str | None = None
     if repo:
-        # A warm owner memo → no JWT build; a warm token cache below → no network at all.
-        installation_id = _owner_installation.get(repo.split("/", 1)[0])
-        if not installation_id:
+        # An "all repos" owner is already memoized as reachable → no JWT build, no lookup; a warm token
+        # cache below then means no network at all. Otherwise resolve (and per-repo-check) via the JWT.
+        memo = _owner_installation.get(repo.split("/", 1)[0])
+        if memo and memo[1] == "all":
+            installation_id = memo[0]
+        else:
             app_jwt = _build_jwt(str(app_id), key)
-            installation_id = _installation_for_repo(app_jwt, repo)
+            installation_id = _installation_for_repo(app_jwt, repo)   # per-repo reachability (may raise)
     else:
         installation_id = (os.environ.get(INSTALLATION_ID_ENV)
                            or (load_config() or {}).get("installation_id") or "")
-
-    cache_key = (str(app_id), str(installation_id))
-    cached = _cache.get(cache_key) if installation_id else None
-    if cached and cached[1] - _SKEW > time.time():
-        return cached[0]
-
-    if app_jwt is None:
-        app_jwt = _build_jwt(str(app_id), key)
-    if not installation_id:
-        installation_id = _resolve_installation_id(app_jwt)
+        if not installation_id:
+            app_jwt = _build_jwt(str(app_id), key)
+            installation_id = _resolve_installation_id(app_jwt) or ""
     if not installation_id:
         raise GithubAppError(
             f"set {INSTALLATION_ID_ENV} (or re-run `saw auth app register` after installing the App "
             "on an account/org — zero or multiple installations found).")
 
+    cache_key = (str(app_id), str(installation_id))
+    cached = _cache.get(cache_key)
+    if cached and cached[1] - _SKEW > time.time():
+        return cached[0]
+
+    if app_jwt is None:
+        app_jwt = _build_jwt(str(app_id), key)
     res = github_api.request(
         f"/app/installations/{installation_id}/access_tokens", method="POST", token=app_jwt)
     if not isinstance(res, dict) or not res.get("token"):

@@ -130,7 +130,9 @@ def _fix_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *, publish: bo
         if publish:
             # A GitHub App mints the token of the installation that owns THIS repo (multi-account).
             tok, aerr = auth.act_token(token, source, gitutil.origin_slug(repo))
-            outcome = f"{display}: {aerr}" if aerr else _safe(
+            # ": error" marks it needs-review so `fix()` exits non-zero (a repo no credential can
+            # reach was NOT fixed — never report it as success).
+            outcome = f"{display}: error — {aerr}" if aerr else _safe(
                 lambda r=repo, t=tok: pr_submit.submit_fix_pr(r, opts, sigs, allowlist, t,
                                                               spin=prog.enabled), display)
         else:
