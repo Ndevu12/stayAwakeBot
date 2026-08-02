@@ -38,6 +38,16 @@ and opens files itself (e.g. an installed-package audit walking `node_modules`) 
 Never claim "clean" over content you did not fully READ (a `--verify` that hit an unreadable/oversized/
 non-regular entry reports the gap, CONFIRMED-tier only).
 
+## Case-folding: `str.lower()` ≠ `re.IGNORECASE`
+
+When a fast-path check must agree with a case-insensitive regex — e.g. a prefilter that decides
+whether to run a `re.IGNORECASE` detector — **match with the regex engine (`re.IGNORECASE`), not
+`str.lower()`.** They fold some Unicode differently: `re.IGNORECASE` folds `ſ`(U+017F)→`s`,
+`İ`(U+0130)→`i`, but `'ſ'.lower() == 'ſ'`. A `.lower()` substring gate therefore diverges from the
+regex on adversarial homoglyphs. Using a compiled anchor regex with the same flag makes the gate open
+exactly when the detector could match — no asymmetry (see the prefilter contract in
+`scanner-performance`). `str.casefold()` is closer but still not guaranteed identical to `re`'s folding.
+
 ## Committing programmatically
 
 A programmatic commit inherits `commit.gpgsign=true` and **fails in a worktree** — and a
