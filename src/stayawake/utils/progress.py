@@ -71,10 +71,12 @@ class LiveProgress(ProgressReporter):
     """A multi-line live board on a TTY. All terminal writes happen on ONE render thread; the
     sweep only mutates state under a lock, so concurrent `item_*` calls never corrupt output."""
 
-    def __init__(self, out: TextIO, *, color: bool, interval: float = 0.1) -> None:
+    def __init__(self, out: TextIO, *, color: bool, interval: float = 0.1,
+                 verb: str = "Scanning") -> None:
         self._out = out
         self._color = color
         self._interval = interval
+        self._verb = verb
         self._lock = threading.Lock()
         self._total = 0
         self._done = 0
@@ -149,7 +151,7 @@ class LiveProgress(ProgressReporter):
         # Show DONE and RUNNING distinctly: a bare "0/38" early in a sweep reads as stuck / as if it
         # were counting the wrong thing, when in fact several repos are already in flight.
         running = len(self._active)
-        header = self._fit(f"{spin} Scanning {self._total} repos — "
+        header = self._fit(f"{spin} {self._verb} {self._total} repos — "
                            f"{self._done} done · {running} running · {elapsed}s")
         lines = [paint(header, LINK, on=self._color)]
         shown = list(self._active)[:_MAX_INFLIGHT_LINES]
@@ -177,9 +179,11 @@ class LiveProgress(ProgressReporter):
         return line[:budget - 1] + "…"
 
 
-def make_progress(*, enabled: bool, out: TextIO, color: bool) -> ProgressReporter:
+def make_progress(*, enabled: bool, out: TextIO, color: bool,
+                  verb: str = "Scanning") -> ProgressReporter:
     """Pick the reporter for the run: a `LiveProgress` board when animation is `enabled`
-    (a real TTY, not --no-stream / CI / piped), else a `PlainProgress` line-per-target."""
+    (a real TTY, not --no-stream / CI / piped), else a `PlainProgress` line-per-target. `verb`
+    is the board header's action word ("Scanning"/"Fixing"/"Checking"…) — cosmetic only."""
     if enabled:
-        return LiveProgress(out, color=color)
+        return LiveProgress(out, color=color, verb=verb)
     return PlainProgress(out)

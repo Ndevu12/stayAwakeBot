@@ -9,8 +9,10 @@ from pathlib import Path
 
 from stayawake.lib import auth
 from stayawake.lib import git as gitutil
+from stayawake.utils import parallel
 from stayawake.utils.config import load_yaml
 from stayawake.utils.streaming import Streamer, stream_enabled, status as spin_status
+from stayawake.utils.sweep import run_sweep
 from stayawake.utils.terminal import supports_color
 from stayawake.bots.security import resolution
 from stayawake.bots.security.targets import ScanOptions
@@ -58,6 +60,79 @@ def _indent(text: str) -> str:
     return "\n".join("    " + ln for ln in text.splitlines())
 
 
+def _guard_sweep(items, labels, make_result, render_one, describe, dead, prog: Streamer, *,
+                 jobs, verb: str, no_stream: bool):
+    """Run one guard operation over each item, render each result to STDOUT in SUBMISSION order, and
+    return the results list for the caller's tally. NO downgrade to either mode:
+
+      * ONE worker (a single repo, or `-j 1`) → run inline, single-writer: the `[i/N]` header, the
+        live phase spinners (`make_result(item, spin=prog.enabled)`), and the streamed render —
+        exactly as before. Nothing is lost when there's only one thing happening.
+      * MANY workers → run on the shared concurrency seam (`utils.sweep`, THREAD backend: git + API
+        is I/O-bound, GIL released, no token crosses a process boundary) with the live board on
+        STDERR; results still render to STDOUT in target order. Per-repo spinners MUST be off here
+        (`spin=False`) — N concurrent workers can't each drive the one terminal — so the board is
+        the reporter instead. One repo isolated; a dead worker becomes `dead(label, err)` so the
+        tally still fails closed.
+
+    `make_result(item, spin=…)` does one repo's work and never raises (it wraps in `_safe_*`);
+    `render_one(result)` returns its human block; `describe` renders a board tag/detail."""
+    workers = parallel.resolve_jobs(jobs, len(items))
+    results = []
+    if workers == 1:
+        for i, item in enumerate(items):
+            prog.line(f"  [{i + 1}/{len(items)}] {labels[i]}")
+            res = make_result(item, spin=prog.enabled)
+            prog.line(_indent(render_one(res)))
+            results.append(res)
+        return results
+    swept = run_sweep(lambda it: make_result(it, spin=False), items, jobs=workers,
+                      backend=parallel.THREAD, labels=labels, describe=describe, out=sys.stderr,
+                      verb=verb, progress_on=stream_enabled(sys.stderr, force_off=no_stream))
+    for o in swept:
+        res = o.value if not o.error else dead(labels[o.index], o.error)
+        prog.line(_indent(render_one(res)))
+        results.append(res)
+    return results
+
+
+def _check_board(o) -> tuple[str, str]:
+    """Compact board tag/detail for a `GuardStatus` (progress only — never the exit code, which the
+    final tally owns)."""
+    st = o.value
+    if st.error:
+        return "[error   ]", "unreadable"
+    if st.no_ci:
+        return "[no ci   ]", "no CI"
+    if not st.present:
+        return "[absent  ]", "no worm gate"
+    if st.healthy:
+        return "[guarded ]", "pinned & fresh"
+    return "[stale   ]", "needs attention"
+
+
+def _drift_board(o) -> tuple[str, str]:
+    d = o.value
+    if d.state == "error":
+        return "[error   ]", "check failed"
+    tag = {"behind": "[stale   ]", "no-gate": "[no gate ]",
+           "no-ci": "[no ci   ]"}.get(d.state, "[ok      ]")
+    return tag, (d.action if d.action != "none" else d.state)
+
+
+def _setup_board(o) -> tuple[str, str]:
+    r = o.value
+    if r.error:
+        return "[error   ]", "failed"
+    if r.dry_run:
+        return "[preview ]", "dry run"
+    if r.wrote is not None or (r.submit is not None and r.submit.kind in ("pr", "fork-pr")):
+        return "[done    ]", "opened/written"
+    if r.submit is not None:                       # pushed but the PR itself didn't open (#see tally)
+        return "[review  ]", "PR not opened"
+    return "[ok      ]", "up to date"
+
+
 def _safe_check(**kw) -> GuardStatus:
     """One repo's error must never abort the sweep — a failed check becomes an error status."""
     try:
@@ -68,19 +143,20 @@ def _safe_check(**kw) -> GuardStatus:
 
 def check_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool = False,
                   config_path: str | None = None, branch: str = "main",
-                  fail: bool = False, no_stream: bool = False) -> int:
+                  fail: bool = False, no_stream: bool = False, jobs: int | None = None) -> int:
     """`saw guard check` across many repos. LOCAL by default (discover git repos under the given
     paths / configured `targets.local` / the enclosing repo); `remote=True` (or naming users/orgs)
     resolves GitHub repos via the #1075 ladder and checks each over the API. The latest Strix release
-    is resolved ONCE and reused for every repo's freshness. Streams per repo. Returns 2 on a missing
-    --config, 1 when `fail` and any gate isn't a healthy pinned Strix gate, else 0."""
+    is resolved ONCE and reused for every repo's freshness. A multi-repo sweep checks up to `jobs`
+    repos at once (AUTO by default; `-j 1` forces sequential); results render in target order.
+    Returns 2 on a missing --config, 1 when `fail` and any gate isn't a healthy pinned Strix gate,
+    else 0."""
     cfg = _guard_config(config_path)
     if cfg is None:
         return 2
     remote = remote or bool(users) or bool(orgs)
     prog = Streamer(enabled=stream_enabled(sys.stdout, force_off=no_stream))
     color = supports_color(sys.stdout)
-    statuses: list[GuardStatus] = []
 
     if remote:
         bad = resolution.invalid_slugs(slugs)
@@ -94,13 +170,12 @@ def check_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
             return 0
         latest = latest_strix(token)
         prog.line(f"Checking {len(resolved)} GitHub repositor{'y' if len(resolved) == 1 else 'ies'}…")
-        for i, slug in enumerate(resolved, 1):
-            prog.line(f"  [{i}/{len(resolved)}] {slug}")
+        items, labels = resolved, list(resolved)
+
+        def make_result(slug, *, spin):        # check has no per-phase spinner; `spin` unused
             tok, aerr = _act(token, source, slug=slug)
-            st = GuardStatus(present=False, error=aerr) if aerr \
+            return GuardStatus(present=False, error=aerr) if aerr \
                 else _safe_check(slug=slug, branch=branch, token=tok, latest=latest)
-            prog.line(_indent(render(st, color=color)))
-            statuses.append(st)
     else:
         repos = resolution.discover_local_repos(_local_patterns(cfg, paths), ScanOptions())
         if not repos:
@@ -109,13 +184,17 @@ def check_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
         token, _ = auth.resolve_token()      # optional — eases freshness rate limits (public repo works without)
         latest = latest_strix(token)
         prog.line(f"Checking {len(repos)} local repositor{'y' if len(repos) == 1 else 'ies'}…")
-        for i, repo in enumerate(repos, 1):
-            prog.line(f"  [{i}/{len(repos)}] {_disp(repo)}")
+        items, labels = repos, [_disp(r) for r in repos]
+
+        def make_result(repo, *, spin):
             # A local check reads the working tree; only freshness touches the network (public Strix
             # release), so the base token is enough — no per-owner installation token needed here.
-            st = _safe_check(repo=repo, token=token, latest=latest)
-            prog.line(_indent(render(st, color=color)))
-            statuses.append(st)
+            return _safe_check(repo=repo, token=token, latest=latest)
+
+    statuses = _guard_sweep(
+        items, labels, make_result, lambda st: render(st, color=color), _check_board,
+        lambda label, err: GuardStatus(present=False, error=f"check failed — {err}"),
+        prog, jobs=jobs, verb="Checking", no_stream=no_stream)
 
     guarded = sum(1 for s in statuses if s.present)
     verified = sum(1 for s in statuses if s.healthy)
@@ -144,21 +223,22 @@ def _safe_drift(**kw) -> DriftOutcome:
 
 
 def drift_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool = False,
-                  config_path: str | None = None, no_stream: bool = False) -> int:
+                  config_path: str | None = None, no_stream: bool = False,
+                  jobs: int | None = None) -> int:
     """`saw guard drift` across many repos — same target model as `saw guard check`. LOCAL by default
     (discover git repos under the given paths / configured `targets.local` / the enclosing repo);
     `remote=True` (or naming users/orgs) resolves GitHub repos via the #1075 ladder. For each repo it
     grades the pinned Strix gate and files/refreshes/closes ONE de-duplicated drift issue. The latest
-    Strix release is resolved ONCE and reused. Streams per repo; one repo's error never aborts the run.
-    Returns 2 on a missing --config / a remote sweep with no credential, else 0 (drift is reported as
-    an issue, never a build failure)."""
+    Strix release is resolved ONCE and reused. A multi-repo sweep runs up to `jobs` repos at once
+    (AUTO by default; `-j 1` forces sequential); each repo files only its OWN issue. Returns 2 on a
+    missing --config / a remote sweep with no credential, else 0 (drift is reported as an issue, never
+    a build failure)."""
     cfg = _guard_config(config_path)
     if cfg is None:
         return 2
     remote = remote or bool(users) or bool(orgs)
     prog = Streamer(enabled=stream_enabled(sys.stdout, force_off=no_stream))
     color = supports_color(sys.stdout)
-    outcomes: list[DriftOutcome] = []
 
     if remote:
         bad = resolution.invalid_slugs(slugs)
@@ -176,13 +256,12 @@ def drift_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
         latest = latest_strix(token)
         prog.line(f"Checking pin drift on {len(resolved)} GitHub "
                   f"repositor{'y' if len(resolved) == 1 else 'ies'}…")
-        for i, slug in enumerate(resolved, 1):
-            prog.line(f"  [{i}/{len(resolved)}] {slug}")
+        items, labels = resolved, list(resolved)
+
+        def make_result(slug, *, spin):        # drift has no per-phase spinner; `spin` unused
             tok, aerr = _act(token, source, slug=slug)
-            o = DriftOutcome(slug, "error", detail=aerr) if aerr \
+            return DriftOutcome(slug, "error", detail=aerr) if aerr \
                 else _safe_drift(slug=slug, token=tok, latest=latest)
-            prog.line(_indent(render_drift(o, color=color)))
-            outcomes.append(o)
     else:
         repos = resolution.discover_local_repos(_local_patterns(cfg, paths), ScanOptions())
         if not repos:
@@ -192,13 +271,17 @@ def drift_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
         latest = latest_strix(token)
         prog.line(f"Checking pin drift on {len(repos)} local "
                   f"repositor{'y' if len(repos) == 1 else 'ies'}…")
-        for i, repo in enumerate(repos, 1):
-            prog.line(f"  [{i}/{len(repos)}] {_disp(repo)}")
+        items, labels = repos, [_disp(r) for r in repos]
+
+        def make_result(repo, *, spin):
             tok, aerr = _act(token, source, repo=repo)
-            o = DriftOutcome(_disp(repo), "error", detail=aerr) if aerr \
+            return DriftOutcome(_disp(repo), "error", detail=aerr) if aerr \
                 else _safe_drift(repo=repo, token=tok, latest=latest)
-            prog.line(_indent(render_drift(o, color=color)))
-            outcomes.append(o)
+
+    outcomes = _guard_sweep(
+        items, labels, make_result, lambda o: render_drift(o, color=color), _drift_board,
+        lambda label, err: DriftOutcome(label, "error", detail=f"drift check failed — {err}"),
+        prog, jobs=jobs, verb="Drift on", no_stream=no_stream)
 
     unprotected = sum(1 for o in outcomes if o.state in ("no-gate", "no-ci"))
     behind = sum(1 for o in outcomes if o.state == "behind")
@@ -227,19 +310,21 @@ def _safe_setup(repo, **kw) -> SetupResult:
 
 def setup_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool = False,
                   config_path: str | None = None, ref: str | None = None, dry_run: bool = False,
-                  pr: bool = False, branch: str | None = None, no_stream: bool = False) -> int:
+                  pr: bool = False, branch: str | None = None, no_stream: bool = False,
+                  jobs: int | None = None) -> int:
     """`saw guard setup` across many repos, like `saw fix`. LOCAL by default (discover git repos;
     write/prepare the gate into each working tree, or `--pr` to open a PR each); `remote=True`
     resolves GitHub repos via the #1075 ladder, clones each, and opens a PR (a remote repo has no
-    working tree, so `--pr` is implied). Never pushes to a default branch. Streams per repo; one
-    repo's error never aborts the run. Returns 2 on a missing --config, 1 if any repo errored, else 0."""
+    working tree, so `--pr` is implied). Never pushes to a default branch. A multi-repo sweep runs up
+    to `jobs` repos at once (AUTO by default; `-j 1` forces sequential) — each repo works in its own
+    clone/worktree so concurrency never crosses repos. Returns 2 on a missing --config, 1 if any repo
+    errored or a PR couldn't be opened, else 0."""
     cfg = _guard_config(config_path)
     if cfg is None:
         return 2
     remote = remote or bool(users) or bool(orgs)
     prog = Streamer(enabled=stream_enabled(sys.stdout, force_off=no_stream))
     color = supports_color(sys.stdout)
-    results: list[SetupResult] = []
 
     if remote:
         bad = resolution.invalid_slugs(slugs)
@@ -264,21 +349,21 @@ def setup_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
             prog.line("couldn't resolve the latest Strix release (offline? pass --ref <sha|tag>)")
             return 2
         prog.line(f"Setting up {len(resolved)} GitHub repositor{'y' if len(resolved) == 1 else 'ies'}…")
-        for i, slug in enumerate(resolved, 1):
-            prog.line(f"  [{i}/{len(resolved)}] {slug}")
+        items, labels = resolved, list(resolved)
+
+        def make_result(slug, *, spin):
             tok, aerr = _act(token, source, slug=slug)
             if aerr:
-                res = SetupResult(error=f"{slug}: {aerr}")
-            else:
-                with spin_status(f"cloning {slug}…", enabled=prog.enabled), \
-                        resolution.cloned_repo(slug, tok) as clone:
-                    if clone is None:
-                        res = SetupResult(error=f"{slug}: clone failed (check token access)")
-                    else:                                # a remote repo has no working tree → always PR
-                        res = _safe_setup(clone, token=tok, pin=pin, dry_run=dry_run, pr=True,
-                                          branch=branch, spin=prog.enabled)
-            prog.line(_indent(render_setup(res, color=color)))
-            results.append(res)
+                return SetupResult(error=f"{slug}: {aerr}")
+            # `status` shows a live "cloning…" spinner in the sequential path; off under concurrency
+            # (the board reports in-flight state instead — see fix). a remote repo has no working
+            # tree → always PR; _safe_setup then drives its own phase spinners.
+            with spin_status(f"cloning {slug}…", enabled=spin), \
+                    resolution.cloned_repo(slug, tok) as clone:
+                if clone is None:
+                    return SetupResult(error=f"{slug}: clone failed (check token access)")
+                return _safe_setup(clone, token=tok, pin=pin, dry_run=dry_run, pr=True,
+                                   branch=branch, spin=spin)
     else:
         token, source = auth.resolve_token() if (pr or not ref) else (None, None)
         pin = resolve_pin(token, ref)                    # resolve the latest Strix release ONCE
@@ -290,19 +375,22 @@ def setup_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
             prog.line("No local git repositories found.")
             return 0
         prog.line(f"Setting up {len(repos)} local repositor{'y' if len(repos) == 1 else 'ies'}…")
-        for i, repo in enumerate(repos, 1):
-            prog.line(f"  [{i}/{len(repos)}] {_disp(repo)}")
+        items, labels = repos, [_disp(r) for r in repos]
+
+        def make_result(repo, *, spin):
             # Only a PUSH (`--pr`) needs the repo's own installation token (multi-account); a plain
             # working-tree write touches no remote, so it must not mint one (nor fail if the App isn't
             # installed on that owner).
             tok, aerr = _act(token, source, repo=repo) if pr else (token, None)
             if aerr:
-                res = SetupResult(error=f"{_disp(repo)}: {aerr}")
-            else:
-                res = _safe_setup(repo, token=tok, pin=pin, dry_run=dry_run, pr=pr,
-                                  branch=branch, spin=prog.enabled)
-            prog.line(_indent(render_setup(res, color=color)))
-            results.append(res)
+                return SetupResult(error=f"{_disp(repo)}: {aerr}")
+            return _safe_setup(repo, token=tok, pin=pin, dry_run=dry_run, pr=pr,
+                               branch=branch, spin=spin)
+
+    results = _guard_sweep(
+        items, labels, make_result, lambda r: render_setup(r, color=color), _setup_board,
+        lambda label, err: SetupResult(error=f"{label}: setup failed — {err}"),
+        prog, jobs=jobs, verb="Setting up", no_stream=no_stream)
 
     # Honest tally — DON'T say "Set up N" when nothing changed (the user saw "Set up 31" while every
     # repo was a no-op → looked like 31 PRs that never appeared). Count what ACTUALLY happened, and —
