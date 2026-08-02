@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-03
+
 ### Changed
 - **Scans are substantially faster with identical results** (#1326). Profiling showed ~85% of scan
   time was the obfuscation/decode→exec analysis running on every file. That analysis now short-circuits
@@ -58,6 +60,14 @@ All notable changes to this project are documented here. The format is based on
   replaced by a multi-line live board that shows every in-flight repo, with a single dedicated
   writer so concurrent completions never interleave. Piped / CI / `--no-stream` output is unchanged
   (one plain line per completed repo).
+
+### Security
+- **Bumped the pinned self-scan engine to current main (`sentinel-ref` → merge of #1348), in both
+  the worm-guard gate and the release self-scan.** Catches the gate up to the reviewed engine work
+  since the last pin (#1322): parallel multi-repo / within-repo scanning and parallel fix/guard
+  sweeps (#1205/#1325/#1327/#1328/#1329/#1348), plus the prefilter-gated decode→exec analysis
+  (#1326). Both pin copies are bumped together, as the sync gate (`pin_tools.py synced`, #1210)
+  requires.
 
 ## [0.1.19] - 2026-08-02
 
@@ -1532,7 +1542,8 @@ release-publish hardening._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel
 (supply-chain worm detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.19...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.19...v0.2.0
 [0.1.19]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.18...v0.1.19
 [0.1.18]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.17...v0.1.18
 [0.1.17]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.16...v0.1.17
