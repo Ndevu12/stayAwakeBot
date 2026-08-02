@@ -6,6 +6,27 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- **`saw scan -j/--jobs N` scans multiple targets concurrently, for a much faster multi-repo
+  sweep** (#1205). A sweep over many repos (e.g. `saw scan ~` or an org) previously scanned one
+  repo at a time; it now runs up to *N* at once. The default is **auto** — a single target still
+  runs sequentially (no overhead, behaviour unchanged), while several targets use one worker per CPU
+  core. Pass a number to cap it, `-j 1` to force sequential (reproducible / low-load runs), or
+  `-j auto`; a config `settings.jobs` sets the default. Local scanning is CPU-bound, so workers are
+  **processes** (Python's GIL means threads wouldn't help). Results are returned in submission order,
+  so a persisted report (`-d`/`--json`/SARIF) is **byte-identical** whether run with one worker or
+  many; a worker that dies is recorded as an ERROR and still fails the scan **closed** (exit 2),
+  never a silent "clean". `Ctrl-C` is responsive — it terminates in-flight workers immediately
+  instead of freezing until the slowest scan finishes, and leaves no orphaned processes. Progress
+  is a concurrency-aware live board (one worker per line) that degrades to plain per-repo lines when
+  piped / in CI / `--no-stream`.
+
+### Changed
+- Scan progress output was reworked for concurrency (`utils.progress`): the single-line spinner is
+  replaced by a multi-line live board that shows every in-flight repo, with a single dedicated
+  writer so concurrent completions never interleave. Piped / CI / `--no-stream` output is unchanged
+  (one plain line per completed repo).
+
 ## [0.1.19] - 2026-08-02
 
 ### Fixed

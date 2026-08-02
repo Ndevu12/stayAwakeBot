@@ -21,6 +21,8 @@ from pathlib import Path
 from unittest import mock
 
 from stayawake.bots.security import service
+from stayawake.bots.security.service import workers as scan_workers
+from stayawake.bots.security.service.workers import WorkerScan
 from stayawake.bots.security.models import ScanReport, ScanResult
 
 
@@ -50,7 +52,8 @@ class TestScanFailClosed(unittest.TestCase):
             cfg = os.path.join(d, "c.yml")
             Path(cfg).write_text("allowlist: []\n")
             errored = ScanResult(target=d, source="local", error="Boom: unreadable target")
-            with mock.patch.object(service.run, "scan_target", return_value=errored), \
+            # One target → the inline (in-process) worker path, so patching the worker seam applies.
+            with mock.patch.object(scan_workers, "scan_local", return_value=WorkerScan(errored)), \
                  redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
                 rc = service.scan(cfg, paths=[d], no_stream=True)
             self.assertEqual(rc, 2)

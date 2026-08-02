@@ -12,23 +12,25 @@ import sys
 import tempfile
 from pathlib import Path
 
+from stayawake.utils import parallel
 from stayawake.utils.io import resolve_reports_dir
+from stayawake.utils.progress import make_progress
 from stayawake.utils.streaming import Streamer, status, stream_enabled
+from stayawake.utils.terminal import supports_color
 from stayawake.utils.timeutil import now_iso
 from stayawake.bots.security.signatures import load_signatures
-from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.models import ScanResult, ScanReport
 from stayawake.bots.security.sinks import (
     Sink, TerminalSink, JsonSink, SarifSink, FileSink, IssueSink, SlackSink)
-from stayawake.bots.security.targets import LocalRepoTarget, RemoteRepoTarget
 # Target resolution lives in one shared module (resolution.py); imported under the names scan's
 # body already uses (the `_`-prefixed ones stay for compat).
 from stayawake.bots.security.resolution import (
     REMOTE_EMPTY_HINT, discover_local_repos, invalid_slugs,
     enclosing_repo_root as _enclosing_repo_root, remote_scope as _remote_scope,
     resolve_remote as _resolve_remote)
+from stayawake.bots.security.service import workers as scan_workers
 from stayawake.bots.security.service.config import (
-    _read_config, _options, _as_bool, _require_db_or_error)
+    _read_config, _options, _as_bool, _require_db_or_error, jobs_setting as _jobs_setting)
 from stayawake.bots.security.service.report import _status_tag, _print_report_pointer
 
 
@@ -44,6 +46,63 @@ LARGE_FLEET = 25
 MANY_FINDINGS = 200
 
 
+def _resolve_workers(jobs: int | None, target_count: int) -> int:
+    """Concurrency for THIS scope: at most one worker per target (extra workers would idle), and
+    always 1 for a single target (the inline fast-path — no pool, no cost, behaviour unchanged).
+    `jobs=None` = AUTO → min(cpu_count, targets). An explicit `jobs<=1` forces sequential."""
+    if target_count <= 1:
+        return 1
+    if jobs is None:
+        return min(os.cpu_count() or 1, target_count)
+    if jobs <= 1:
+        return 1
+    return min(jobs, target_count)
+
+
+def _scan_targets(jobs_batch: list, labels: list[str], sources: list[str], worker_fn, *,
+                  workers: int, progress_on: bool) -> list[ScanResult]:
+    """Scan a batch of targets, up to `workers` at a time, returning results in SUBMISSION order
+    (so the persisted report is byte-identical whether run with one worker or many). A worker that
+    crashes outright becomes an ERROR result (fail-closed → exit 2), never a silent drop. Any
+    stdout/stderr a worker emitted is captured and REPLAYED here, after the live board closes, so a
+    pool worker can never corrupt the board and no diagnostic is lost."""
+    progress = make_progress(enabled=progress_on, out=sys.stderr,
+                             color=supports_color(sys.stderr))
+    progress.start(len(jobs_batch))
+
+    def on_start(index: int, _item) -> None:
+        progress.item_started(labels[index])
+
+    def on_done(outcome: parallel.Outcome) -> None:
+        if outcome.error:
+            progress.item_done(labels[outcome.index], "[ERROR   ]", outcome.error)
+        else:
+            res = outcome.value.result
+            progress.item_done(labels[outcome.index], _status_tag(res),
+                               f"{len(res.findings)} findings")
+
+    try:
+        outcomes = parallel.run_ordered(worker_fn, jobs_batch, jobs=workers,
+                                        backend=parallel.PROCESS,
+                                        on_start=on_start, on_done=on_done)
+    finally:
+        progress.finish()
+
+    results: list[ScanResult] = []
+    diagnostics: list[str] = []
+    for outcome in outcomes:
+        if outcome.error:
+            results.append(ScanResult(target=labels[outcome.index], source=sources[outcome.index],
+                                      error=f"scan worker failed: {outcome.error}"))
+        else:
+            results.append(outcome.value.result)
+            if outcome.value.diagnostics:
+                diagnostics.append(outcome.value.diagnostics)
+    for text in diagnostics:          # replay captured worker output AFTER the board is gone
+        sys.stderr.write(text)
+    return results
+
+
 def scan(config_path: str | None = None, *, remote: bool = False,
          paths: list[str] | None = None, users: list[str] | None = None,
          orgs: list[str] | None = None, slugs: list[str] | None = None,
@@ -51,7 +110,7 @@ def scan(config_path: str | None = None, *, remote: bool = False,
          reports_dir: str | Path | None = None, alert: bool = False,
          no_stream: bool = False, pager: bool = False,
          no_advisories: bool = False, external_audit: bool = False,
-         deep: bool = False, require_db: bool = False) -> int:
+         deep: bool = False, require_db: bool = False, jobs: int | None = None) -> int:
     """Scan targets (READ-ONLY) and deliver the result through sinks. Scope is LOCAL by
     default — explicit `paths`, the configured local globs, or the current repo. With
     remote=True (`saw scan --remote`) it scans GitHub repos resolved by the #1075 ladder:
@@ -88,6 +147,10 @@ def scan(config_path: str | None = None, *, remote: bool = False,
         if rc is not None:
             return rc
 
+    # How many targets to scan CONCURRENTLY. CLI `-j/--jobs` wins; else config `settings.jobs`;
+    # else auto (resolved per-scope below against the target count). See `_resolve_workers`.
+    jobs_pref = jobs if jobs is not None else _jobs_setting(settings)
+
     # --- WHAT to scan. LOCAL by default (explicit paths / configured globs / current repo);
     #     `--remote` switches scope to the configured GitHub targets. One scope per run.
     results: list[ScanResult] = []
@@ -103,17 +166,13 @@ def scan(config_path: str | None = None, *, remote: bool = False,
             print(f"Scanning {len(resolved)} GitHub repositor{'y' if len(resolved) == 1 else 'ies'} "
                   f"({_remote_scope(cfg, users, orgs, slugs)}, via {source or 'anonymous'}).",
                   file=sys.stderr)
-        m = len(resolved)
-        for j, slug in enumerate(resolved, 1):
-            rt = RemoteRepoTarget(slug, opts, token)
-            try:
-                with status(f"[{j}/{m}] cloning + scanning {slug}…", enabled=progress_on):
-                    res = (scan_target(rt, sigs, allowlist) if rt.clone()
-                           else ScanResult(target=slug, source="remote", error="clone failed"))
-            finally:
-                rt.cleanup()
-            results.append(res)
-            prog.line(f"  [{j}/{m}] {_status_tag(res)}  {res.target}  ({len(res.findings)} findings)")
+        if resolved:
+            jobs_batch = [scan_workers.RemoteScanJob(slug, opts, token, sigs, allowlist)
+                          for slug in resolved]
+            results = _scan_targets(jobs_batch, list(resolved), ["remote"] * len(resolved),
+                                    scan_workers.scan_remote,
+                                    workers=_resolve_workers(jobs_pref, len(resolved)),
+                                    progress_on=progress_on)
     else:
         cfg_local = (cfg.get("targets", {}) or {}).get("local", []) or []
         if paths:                                  # explicit ad-hoc paths
@@ -137,14 +196,15 @@ def scan(config_path: str | None = None, *, remote: bool = False,
             return 2
         if progress_on and repos:
             prog.line(f"Found {len(repos)} repositor{'y' if len(repos) == 1 else 'ies'} to scan.")
-        n = len(repos)
-        for i, repo in enumerate(repos, 1):
-            display = str(repo).replace(os.path.expanduser("~"), "~")
-            with status(f"[{i}/{n}] scanning {display}…", enabled=progress_on):  # spinner over real work
-                with LocalRepoTarget(repo, display, opts) as t:
-                    res = scan_target(t, sigs, allowlist)
-            results.append(res)
-            prog.line(f"  [{i}/{n}] {_status_tag(res)}  {res.target}  ({len(res.findings)} findings)")
+        if repos:
+            home = os.path.expanduser("~")
+            labels = [str(repo).replace(home, "~") for repo in repos]
+            jobs_batch = [scan_workers.LocalScanJob(str(repo), labels[i], opts, sigs, allowlist)
+                          for i, repo in enumerate(repos)]
+            results = _scan_targets(jobs_batch, labels, ["local"] * len(repos),
+                                    scan_workers.scan_local,
+                                    workers=_resolve_workers(jobs_pref, len(repos)),
+                                    progress_on=progress_on)
 
     report = ScanReport(generated_at=now_iso(), results=results)
 
