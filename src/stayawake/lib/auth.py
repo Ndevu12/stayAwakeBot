@@ -104,25 +104,53 @@ def resolve_token(hostname: str = "github.com",
     return None, None
 
 
+_GH_UNSET = object()
+_gh_fallback_cache: object | str | None = _GH_UNSET
+
+
+def _gh_fallback(hostname: str = "github.com") -> str | None:
+    """The operator's gh-session token, resolved AT MOST ONCE per process (a sweep must not re-spawn
+    `gh auth token` per repo). Used as the per-repo fallback when a GitHub App can't reach a repo."""
+    global _gh_fallback_cache
+    if _gh_fallback_cache is _GH_UNSET:
+        _gh_fallback_cache = gh_token(hostname)
+    return _gh_fallback_cache  # type: ignore[return-value]
+
+
 def act_token(base_token: str | None, source: str | None,
-              repo_slug: str | None) -> tuple[str | None, str | None]:
+              repo_slug: str | None, *, hostname: str = "github.com") -> tuple[str | None, str | None]:
     """The token to ACT on one specific `repo_slug` during a multi-repo sweep, plus an optional
     per-repo error string. Resolve the base credential ONCE (so a sweep does not re-spawn `gh` per
-    repo); then upgrade PER REPO only for a GitHub App — minting the token of the installation that
-    owns that repo (multi-account) so each repo is acted on with the right account's credentials.
-    env-PAT / gh sessions are repo-agnostic and returned unchanged.
+    repo); then, PER REPO, pick the best credential that can actually reach it:
 
-    Never raises: an App that is configured but cannot reach the repo yields `(None, guidance)` so the
-    caller records it as that repo's outcome and keeps the sweep going."""
-    if source == "github-app" and repo_slug and "/" in repo_slug:
-        from stayawake.lib import github_app
-        try:
-            return github_app.installation_token(repo_slug), None
-        except github_app.GithubAppError as e:
-            return None, str(e)
-        except Exception as e:  # noqa: BLE001 — one repo's auth hiccup must not abort the sweep
-            return None, str(e)
-    return base_token, None
+      * A GitHub App is per-account. Upgrade to the installation that OWNS this repo (multi-account),
+        so it's acted on with the right account's scoped, revocable token.
+      * If the App can't reach the repo (not installed on that owner, or a select-repos install that
+        excludes it), FALL BACK to the operator's gh/PAT session — which already reaches their org
+        repos. So a partially-installed App is ADDITIVE (upgrades coverage where installed) and never
+        REMOVES access the human credential already had.
+      * env-PAT / gh sources are repo-agnostic and returned unchanged.
+
+    Only when NO credential can reach the repo is `(None, guidance)` returned, so the caller records
+    that repo's outcome and keeps the sweep going. Never raises."""
+    if source != "github-app" or not (repo_slug and "/" in repo_slug):
+        return base_token, None
+    from stayawake.lib import github_app
+    guidance: str | None = None
+    try:
+        tok = github_app.installation_token(repo_slug)
+        if tok:
+            return tok, None
+    except github_app.GithubAppError as e:
+        guidance = str(e)
+    except Exception as e:  # noqa: BLE001 — one repo's auth hiccup must not abort the sweep
+        guidance = str(e)
+    # The App can't reach this repo — fall back to the operator's gh session, which may (it covers the
+    # accounts/orgs the human can access, including ones the App isn't installed on).
+    fallback = _gh_fallback(hostname)
+    if fallback:
+        return fallback, None
+    return None, guidance or f"no configured credential can reach {repo_slug}"
 
 
 def no_credential_hint(action: str = "this operation") -> str:
