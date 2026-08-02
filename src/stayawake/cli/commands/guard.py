@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import argparse
 
+from stayawake.cli.argtypes import add_jobs_arg
+
 
 def register(sub) -> None:
     p = sub.add_parser("guard", aliases=["gd"],
@@ -42,6 +44,9 @@ def register(sub) -> None:
                     help="branch whose protection must require the gate (default: main)")
     ck.add_argument("-f", "--fail", action="store_true", dest="fail",
                     help="exit non-zero when ANY gate is absent, unpinned, stale, or not required")
+    add_jobs_arg(ck, help="check up to N repositories concurrently (a multi-repo sweep). Default "
+                          "AUTO: one repo runs sequentially, several use one worker per CPU core. "
+                          "Pass a number to cap it, `-j 1` to force sequential, or `auto`.")
     ck.add_argument("--no-stream", action="store_true", dest="no_stream",
                     help="disable the typewriter output (plain, instant)")
     ck.set_defaults(func=run_check)
@@ -76,6 +81,10 @@ def register(sub) -> None:
                     help="default branch to target (default: auto-detect)")
     st.add_argument("--dry-run", action="store_true", dest="dry_run",
                     help="preview the change without writing anything")
+    add_jobs_arg(st, help="set up up to N repositories concurrently (a multi-repo sweep). Default "
+                          "AUTO: one repo runs sequentially, several use one worker per CPU core. "
+                          "Each repo works in its own clone/worktree. Pass a number to cap it, "
+                          "`-j 1` to force sequential, or `auto`.")
     st.add_argument("--no-stream", action="store_true", dest="no_stream",
                     help="disable the typewriter output (plain, instant)")
     st.set_defaults(func=run_setup)
@@ -105,6 +114,9 @@ def register(sub) -> None:
                     help="check this GitHub org's repos (repeatable; implies --remote)")
     dr.add_argument("--repo", metavar="OWNER/NAME", default=None,
                     help="shorthand for a single remote repo (same as `--remote owner/name`)")
+    add_jobs_arg(dr, help="check up to N repositories concurrently (a multi-repo sweep). Default "
+                          "AUTO: one repo runs sequentially, several use one worker per CPU core. "
+                          "Pass a number to cap it, `-j 1` to force sequential, or `auto`.")
     dr.add_argument("--no-stream", action="store_true", dest="no_stream",
                     help="disable the typewriter output (plain, instant)")
     dr.set_defaults(func=run_drift)
@@ -121,7 +133,7 @@ def run_check(a: argparse.Namespace) -> int:
     return guard.check_targets(
         paths=None if remote else (positionals or None),
         slugs=slugs, users=a.user or None, orgs=a.org or None, remote=remote,
-        config_path=a.config, branch=a.branch, fail=a.fail, no_stream=a.no_stream)
+        config_path=a.config, branch=a.branch, fail=a.fail, no_stream=a.no_stream, jobs=a.jobs)
 
 
 def run_drift(a: argparse.Namespace) -> int:
@@ -135,7 +147,7 @@ def run_drift(a: argparse.Namespace) -> int:
     return guard.drift_targets(
         paths=None if remote else (positionals or None),
         slugs=slugs, users=a.user or None, orgs=a.org or None, remote=remote,
-        config_path=a.config, no_stream=a.no_stream)
+        config_path=a.config, no_stream=a.no_stream, jobs=a.jobs)
 
 
 def run_setup(a: argparse.Namespace) -> int:
@@ -148,4 +160,4 @@ def run_setup(a: argparse.Namespace) -> int:
         slugs=list(positionals) if remote else None,
         users=a.user or None, orgs=a.org or None, remote=remote,
         config_path=a.config, ref=a.ref, dry_run=a.dry_run, pr=a.pr,
-        branch=a.branch, no_stream=a.no_stream)
+        branch=a.branch, no_stream=a.no_stream, jobs=a.jobs)

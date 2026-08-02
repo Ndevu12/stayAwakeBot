@@ -36,6 +36,22 @@ All notable changes to this project are documented here. The format is based on
   (exit 2), never a silent "clean". `Ctrl-C` terminates in-flight workers immediately (no freeze, no
   orphans). Progress is a concurrency-aware live board that degrades to plain per-repo lines when
   piped / in CI / `--no-stream`.
+- **`saw fix` and `saw guard` accept `-j/--jobs N` for a much faster multi-repo sweep** (#1327).
+  Remediation (`saw fix`) and the CI-gate commands (`saw guard check`/`setup`/`drift`) now process up
+  to *N* repositories at once instead of one at a time — the same `-j` UX as `saw scan` (default
+  **auto**: a single repo stays sequential, several use one worker per CPU core; `-j 1` forces
+  sequential). Their per-repo cost is git + GitHub-API I/O, so workers are **threads** (the GIL is
+  released; no token crosses a process boundary). All three commands adopt one shared concurrency
+  seam (`utils.sweep.run_sweep`) — the same ordered, fail-closed, Ctrl-C-safe machinery `saw scan`
+  uses — so they inherit its guarantees: results are collected in **submission order** (a run is
+  deterministic at any `-j`), one repo's failure is isolated and still flagged (fix's needs-review /
+  guard's errored/incomplete exit codes unchanged), and each repo acts with **its own** installation
+  token (no cross-repo bleed). Every existing safety invariant is preserved — fix's PARTIAL
+  accounting and per-repo worktree/token isolation, guard's "never clobber an existing gate" and
+  plan-against-`origin/<default>`. A single repo (or `-j 1`) keeps the full per-phase streaming
+  spinners exactly as before; a concurrent sweep shows the concurrency-aware live board instead.
+  `saw audit` is intentionally excluded — it inspects the local host plus at most one remote repo, so
+  it has no multi-repo sweep to parallelize.
 
 ### Changed
 - Scan progress output was reworked for concurrency (`utils.progress`): the single-line spinner is

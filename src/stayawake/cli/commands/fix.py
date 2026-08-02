@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 
 from stayawake.bots.security import remediator
+from stayawake.cli.argtypes import add_jobs_arg
 
 
 def register(sub) -> None:
@@ -32,6 +33,10 @@ def register(sub) -> None:
                    help="fix this GitHub user's repos (repeatable; implies --remote)")
     p.add_argument("--org", action="append", default=[], metavar="ORG",
                    help="fix this GitHub org's repos (repeatable; implies --remote)")
+    add_jobs_arg(p, help="fix up to N repositories concurrently (a multi-repo sweep). Default AUTO: "
+                         "one repo runs sequentially, several use one worker per CPU core. Pass a "
+                         "number to cap it, `-j 1` to force sequential, or `auto`. Each repo keeps "
+                         "its own branch/worktree/token, so concurrency never crosses repos.")
     p.add_argument("--no-stream", action="store_true", dest="no_stream",
                    help="disable live progress output (plain, instant lines)")
     p.set_defaults(func=run)
@@ -43,4 +48,5 @@ def run(a: argparse.Namespace) -> int:
     return remediator.fix(a.config, pr=a.pr, remote=remote,
                           paths=None if remote else (positionals or None),
                           slugs=(positionals or None) if remote else None,
-                          users=a.user or None, orgs=a.org or None, no_stream=a.no_stream)
+                          users=a.user or None, orgs=a.org or None, no_stream=a.no_stream,
+                          jobs=a.jobs)
