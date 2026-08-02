@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.1.19] - 2026-08-02
+
 ### Fixed
 - **A GitHub App now works across all the accounts/orgs it's installed on — not just the personal
   account.** A GitHub App installation is per-account, but `saw` resolved a single installation id and
@@ -55,6 +57,13 @@ All notable changes to this project are documented here. The format is based on
   with the base package. The signer folds in RSA blinding (OpenSSL's timing-side-channel defense) and
   fails loud on an encrypted/non-RSA/malformed key. `saw auth app register` no longer gates on a
   crypto backend (the `--force` flag is removed). Closes #1317.
+
+### Security
+- **Bumped the pinned self-scan engine to current main (`sentinel-ref` → merge of #1322), in both
+  the worm-guard gate and the release self-scan.** Catches the gate up to the reviewed engine work
+  since the last pin (#1315): the built-in stdlib RS256 JWT signer and multi-account App
+  install / reachability / render (#1318–#1322), plus the guard-sweep / remediator refinements.
+  Both pin copies are bumped together, as the sync gate (`pin_tools.py synced`, #1210) requires.
 
 ## [0.1.18] - 2026-08-02
 
@@ -1470,7 +1479,8 @@ release-publish hardening._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel
 (supply-chain worm detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.18...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.19...HEAD
+[0.1.19]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.18...v0.1.19
 [0.1.18]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.17...v0.1.18
 [0.1.17]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.16...v0.1.17
 [0.1.16]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.15...v0.1.16
