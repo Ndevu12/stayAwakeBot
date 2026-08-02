@@ -108,6 +108,77 @@ class TestMinting(unittest.TestCase):
                 github_app.installation_token()
 
 
+class TestMultiAccountMinting(unittest.TestCase):
+    """A GitHub App is per-account: `installation_token(repo_slug)` resolves the installation that
+    OWNS the repo and mints ITS token, so one App installed on several accounts/orgs services them all."""
+
+    def setUp(self):
+        github_app._cache.clear()
+        github_app._token_perms.clear()
+        github_app._owner_installation.clear()
+        self._cfg = mock.patch.object(github_app, "load_config",
+                                      return_value={"slug": "stayawakebot"})
+        self._cfg.start()
+
+    def tearDown(self):
+        self._cfg.stop()
+
+    def test_resolves_owner_installation_and_mints(self):
+        calls: list[str] = []
+
+        def fake_request(path, method="GET", token=None, data=None, quiet=False):
+            calls.append(path)
+            if path == "/repos/UB-TechDEV/backend/installation":
+                return {"id": 555}
+            if path == "/app/installations/555/access_tokens":
+                return {"token": "ghs_org", "expires_at": _FUTURE}
+            raise AssertionError(f"unexpected {path}")
+
+        with mock.patch.dict(os.environ, {"GH_APP_ID": "123", "GH_APP_PRIVATE_KEY": "-----PEM-----"},
+                             clear=True), \
+             mock.patch.object(github_app, "_build_jwt", return_value="JWT"), \
+             mock.patch.object(github_app.github_api, "request", side_effect=fake_request):
+            self.assertEqual(github_app.installation_token("UB-TechDEV/backend"), "ghs_org")
+        self.assertIn("/repos/UB-TechDEV/backend/installation", calls)
+
+    def test_same_owner_reuses_installation_without_relookup(self):
+        n = {"install_lookups": 0, "mints": 0}
+
+        def fake_request(path, method="GET", token=None, data=None, quiet=False):
+            if path.endswith("/installation"):
+                n["install_lookups"] += 1
+                return {"id": 555}
+            if "access_tokens" in path:
+                n["mints"] += 1
+                return {"token": "ghs_org", "expires_at": _FUTURE}
+            raise AssertionError(path)
+
+        with mock.patch.dict(os.environ, {"GH_APP_ID": "123", "GH_APP_PRIVATE_KEY": "-----PEM-----"},
+                             clear=True), \
+             mock.patch.object(github_app, "_build_jwt", return_value="JWT"), \
+             mock.patch.object(github_app.github_api, "request", side_effect=fake_request):
+            github_app.installation_token("org/one")
+            github_app.installation_token("org/two")       # same owner → memo + token cache
+        self.assertEqual(n["install_lookups"], 1)           # resolved the owner's installation once
+        self.assertEqual(n["mints"], 1)                     # and reused the cached installation token
+
+    def test_app_not_installed_on_owner_raises_with_install_guidance(self):
+        def fake_request(path, method="GET", token=None, data=None, quiet=False):
+            if path.endswith("/installation"):
+                return None                                 # 404 — App not installed on that owner
+            raise AssertionError(path)
+
+        with mock.patch.dict(os.environ, {"GH_APP_ID": "123", "GH_APP_PRIVATE_KEY": "-----PEM-----"},
+                             clear=True), \
+             mock.patch.object(github_app, "_build_jwt", return_value="JWT"), \
+             mock.patch.object(github_app.github_api, "request", side_effect=fake_request):
+            with self.assertRaises(github_app.GithubAppError) as ctx:
+                github_app.installation_token("SomeOrg/repo")
+        msg = str(ctx.exception)
+        self.assertIn("SomeOrg", msg)
+        self.assertIn("apps/stayawakebot/installations/new", msg)
+
+
 class TestConfigPath(unittest.TestCase):
     def test_config_path_is_under_saw(self):
         with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": "/tmp/xdg-saw-test"}, clear=False):

@@ -65,7 +65,11 @@ class TestGate(unittest.TestCase):
         self.assertNotIn("missing:", d.message)
         self.assertIn("justdeploy", d.message)
         self.assertIn("NOT missing write scopes", d.message)
-        self.assertTrue(any("installations/149" in (u.command or "") for u in d.upgrades))
+        # Multi-account: a GitHub App is per-account, so the unblock is installing it on the repo's
+        # OWNER (not tweaking the personal installation's settings).
+        self.assertIn("Ndevu12", d.message)                       # names the owner that lacks the App
+        self.assertTrue(any("apps/stayawakebot/installations/new" in (u.command or "")
+                            for u in d.upgrades))
 
     def test_globally_dead_still_reports_capability_gap_shape(self):
         sess = Session(token="dead", source="github-app", kind="app_installation", live=False)

@@ -120,6 +120,32 @@ class TestGhToken(unittest.TestCase):
             self.assertIsNone(auth.gh_token())
 
 
+class TestActToken(unittest.TestCase):
+    """Per-repo token for a multi-repo sweep: env/gh are repo-agnostic; a GitHub App upgrades to the
+    installation that owns each repo, and an unreachable repo yields guidance (never raises)."""
+
+    def test_env_and_gh_are_repo_agnostic(self):
+        self.assertEqual(auth.act_token("envtok", "GH_SECURITY_TOKEN", "o/r"), ("envtok", None))
+        self.assertEqual(auth.act_token("ghtok", "gh", "o/r"), ("ghtok", None))
+
+    def test_app_upgrades_per_repo(self):
+        with mock.patch("stayawake.lib.github_app.installation_token",
+                        return_value="ghs_repo") as mint:
+            self.assertEqual(auth.act_token("base", "github-app", "org/repo"), ("ghs_repo", None))
+        mint.assert_called_once_with("org/repo")
+
+    def test_app_unreachable_returns_guidance_not_raise(self):
+        from stayawake.lib import github_app
+        with mock.patch("stayawake.lib.github_app.installation_token",
+                        side_effect=github_app.GithubAppError("install it on 'org'")):
+            tok, err = auth.act_token("base", "github-app", "org/repo")
+        self.assertIsNone(tok)
+        self.assertIn("install it on 'org'", err)
+
+    def test_no_slug_returns_base(self):
+        self.assertEqual(auth.act_token("base", "github-app", None), ("base", None))
+
+
 class TestHint(unittest.TestCase):
     def test_hint_when_gh_missing_says_install(self):
         with mock.patch.object(auth, "gh_installed", return_value=False):

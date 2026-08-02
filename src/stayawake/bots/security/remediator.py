@@ -108,9 +108,9 @@ def _disp(repo: Path) -> str:
 def _fix_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *, publish: bool) -> list[str]:
     """Fix LOCAL repositories. Default: PREPARE a `security/auto-clean` branch per repo (no
     push, no network). `publish` (`--pr`): also push + open/update a PR (pre-flighted)."""
-    token = None
+    token = source = None
     if publish:
-        token, _ = auth.resolve_token()
+        token, source = auth.resolve_token()
         err = _preflight(token)
         if err:
             prog.line(err)
@@ -127,10 +127,16 @@ def _fix_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *, publish: bo
         # No wrapping spinner here — pr.{prepare_fix,submit_fix_pr} drive their OWN
         # phase-accurate spinners (scanning → fixing → opening PR), so the label always
         # reflects what's actually happening.
-        outcome = _safe(
-            (lambda r=repo: pr_submit.submit_fix_pr(r, opts, sigs, allowlist, token, spin=prog.enabled))
-            if publish else
-            (lambda r=repo: pr_submit.prepare_fix(r, opts, sigs, allowlist, spin=prog.enabled)), display)
+        if publish:
+            # A GitHub App mints the token of the installation that owns THIS repo (multi-account).
+            tok, aerr = auth.act_token(token, source, gitutil.origin_slug(repo))
+            outcome = f"{display}: {aerr}" if aerr else _safe(
+                lambda r=repo, t=tok: pr_submit.submit_fix_pr(r, opts, sigs, allowlist, t,
+                                                              spin=prog.enabled), display)
+        else:
+            outcome = _safe(
+                lambda r=repo: pr_submit.prepare_fix(r, opts, sigs, allowlist, spin=prog.enabled),
+                display)
         prog.line(f"      → {outcome}")
         outcomes.append(outcome)
     return outcomes
@@ -145,7 +151,7 @@ def _fix_remote(cfg, opts, sigs, allowlist, prog: Streamer, *,
     if bad:
         prog.line(f"error: --remote targets must be owner/repo slugs; got {bad}")
         return []
-    resolved, token, _source = _resolve_remote(cfg, opts, users=users, orgs=orgs, slugs=slugs)
+    resolved, token, source = _resolve_remote(cfg, opts, users=users, orgs=orgs, slugs=slugs)
     err = _preflight(token)
     if err:
         prog.line(err)
@@ -158,12 +164,17 @@ def _fix_remote(cfg, opts, sigs, allowlist, prog: Streamer, *,
     outcomes: list[str] = []
     for i, slug in enumerate(resolved, 1):
         prog.line(f"  [{i}/{len(resolved)}] {slug}")
-        with status(f"cloning {slug}…", enabled=prog.enabled), \
-                resolution.cloned_repo(slug, token) as clone:      # phase 0: clone (shared helper)
-            # submit_fix_pr then drives its own scanning → fixing → opening-PR spinners.
-            outcome = (f"{slug}: clone failed (check token access)" if clone is None
-                       else _safe(lambda c=clone: pr_submit.submit_fix_pr(c, opts, sigs, allowlist,
-                                                                          token, spin=prog.enabled), slug))
+        # A GitHub App mints the token of the installation that owns THIS repo (multi-account).
+        tok, aerr = auth.act_token(token, source, slug)
+        if aerr:
+            outcome = f"{slug}: {aerr}"
+        else:
+            with status(f"cloning {slug}…", enabled=prog.enabled), \
+                    resolution.cloned_repo(slug, tok) as clone:    # phase 0: clone (shared helper)
+                # submit_fix_pr then drives its own scanning → fixing → opening-PR spinners.
+                outcome = (f"{slug}: clone failed (check token access)" if clone is None
+                           else _safe(lambda c=clone, t=tok: pr_submit.submit_fix_pr(
+                               c, opts, sigs, allowlist, t, spin=prog.enabled), slug))
         prog.line(f"      → {outcome}")
         outcomes.append(outcome)
     return outcomes
@@ -208,9 +219,9 @@ def fix(config_path: str | None = None, *, pr: bool = False, remote: bool = Fals
 # ── saw discard ──────────────────────────────────────────────────────────────────
 
 def _discard_local(cfg, opts, branch: bool, pr: bool, paths, prog: Streamer) -> list[str]:
-    token = None
+    token = source = None
     if pr:
-        token, _ = auth.resolve_token()
+        token, source = auth.resolve_token()
         err = _preflight(token)
         if err:
             prog.line(err)
@@ -226,11 +237,14 @@ def _discard_local(cfg, opts, branch: bool, pr: bool, paths, prog: Streamer) -> 
         display = _disp(repo)
         prog.line(f"  [{i}/{len(repos)}] {display}")
         parts: list[str] = []
+        # Closing a PR hits the API → a GitHub App needs THIS repo's installation token (multi-account).
+        tok, aerr = auth.act_token(token, source, gitutil.origin_slug(repo)) if pr else (None, None)
         with status(f"discarding in {display}…", enabled=prog.enabled):
             if branch:
                 parts.append(_safe(lambda r=repo: pr_submit.discard_branch(r), display))
             if pr:
-                parts.append(_safe(lambda r=repo: pr_submit.discard_pr(r, token), display))
+                parts.append(f"PR: {aerr}" if aerr
+                             else _safe(lambda r=repo, t=tok: pr_submit.discard_pr(r, t), display))
         outcome = "  ·  ".join(parts)
         prog.line(f"      → {outcome}")
         outcomes.append(outcome)
@@ -243,7 +257,7 @@ def _discard_remote(cfg, opts, branch: bool, pr: bool, prog: Streamer, *,
     if bad:
         prog.line(f"error: --remote targets must be owner/repo slugs; got {bad}")
         return []
-    resolved, token, _source = _resolve_remote(cfg, opts, users=users, orgs=orgs, slugs=slugs)
+    resolved, token, source = _resolve_remote(cfg, opts, users=users, orgs=orgs, slugs=slugs)
     err = _preflight(token)
     if err:
         prog.line(err)
@@ -257,11 +271,16 @@ def _discard_remote(cfg, opts, branch: bool, pr: bool, prog: Streamer, *,
     for i, slug in enumerate(resolved, 1):
         prog.line(f"  [{i}/{len(resolved)}] {slug}")
         parts: list[str] = []
+        # A GitHub App mints the token of the installation that owns THIS repo (multi-account).
+        tok, aerr = auth.act_token(token, source, slug)
         with status(f"discarding {slug}…", enabled=prog.enabled):
-            if branch:
-                parts.append(_safe(lambda s=slug: pr_submit.discard_remote_branch(s, token), slug))
-            if pr:
-                parts.append(_safe(lambda s=slug: pr_submit.discard_remote_pr(s, token), slug))
+            if aerr:
+                parts.append(aerr)
+            else:
+                if branch:
+                    parts.append(_safe(lambda s=slug, t=tok: pr_submit.discard_remote_branch(s, t), slug))
+                if pr:
+                    parts.append(_safe(lambda s=slug, t=tok: pr_submit.discard_remote_pr(s, t), slug))
         outcome = "  ·  ".join(parts)
         prog.line(f"      → {outcome}")
         outcomes.append(outcome)
