@@ -141,13 +141,15 @@ class TestMultiAccountMinting(unittest.TestCase):
             self.assertEqual(github_app.installation_token("UB-TechDEV/backend"), "ghs_org")
         self.assertIn("/repos/UB-TechDEV/backend/installation", calls)
 
-    def test_same_owner_reuses_installation_without_relookup(self):
+    def test_all_repos_install_reuses_without_relookup(self):
+        # An "all repositories" install → every repo of the owner is reachable, so the per-owner memo
+        # is reused: two repos → ONE reachability lookup and ONE mint (no wasted per-repo calls).
         n = {"install_lookups": 0, "mints": 0}
 
         def fake_request(path, method="GET", token=None, data=None, quiet=False):
             if path.endswith("/installation"):
                 n["install_lookups"] += 1
-                return {"id": 555}
+                return {"id": 555, "repository_selection": "all"}
             if "access_tokens" in path:
                 n["mints"] += 1
                 return {"token": "ghs_org", "expires_at": _FUTURE}
@@ -158,9 +160,35 @@ class TestMultiAccountMinting(unittest.TestCase):
              mock.patch.object(github_app, "_build_jwt", return_value="JWT"), \
              mock.patch.object(github_app.github_api, "request", side_effect=fake_request):
             github_app.installation_token("org/one")
-            github_app.installation_token("org/two")       # same owner → memo + token cache
-        self.assertEqual(n["install_lookups"], 1)           # resolved the owner's installation once
-        self.assertEqual(n["mints"], 1)                     # and reused the cached installation token
+            github_app.installation_token("org/two")       # same all-repos install → memo reused
+        self.assertEqual(n["install_lookups"], 1)           # all-repos → resolved once, reused
+        self.assertEqual(n["mints"], 1)                     # installation token cached across repos
+
+    def test_select_repos_checks_each_repo_and_rejects_excluded(self):
+        # A "select repositories" install → reachability differs per repo, so the memo must NOT
+        # short-circuit: repo A (selected) resolves; repo B (same owner, NOT selected) must still
+        # 404 → GithubAppError, never silently reuse A's installation.
+        n = {"install_lookups": 0}
+
+        def fake_request(path, method="GET", token=None, data=None, quiet=False):
+            if path == "/repos/org/selected/installation":
+                n["install_lookups"] += 1
+                return {"id": 555, "repository_selection": "selected"}
+            if path == "/repos/org/excluded/installation":
+                n["install_lookups"] += 1
+                return None                                 # 404 — not in the select-repos install
+            if "access_tokens" in path:
+                return {"token": "ghs_org", "expires_at": _FUTURE}
+            raise AssertionError(path)
+
+        with mock.patch.dict(os.environ, {"GH_APP_ID": "123", "GH_APP_PRIVATE_KEY": "-----PEM-----"},
+                             clear=True), \
+             mock.patch.object(github_app, "_build_jwt", return_value="JWT"), \
+             mock.patch.object(github_app.github_api, "request", side_effect=fake_request):
+            self.assertEqual(github_app.installation_token("org/selected"), "ghs_org")
+            with self.assertRaises(github_app.GithubAppError):
+                github_app.installation_token("org/excluded")
+        self.assertEqual(n["install_lookups"], 2)           # select-repos → each repo checked, no skip
 
     def test_app_not_installed_on_owner_raises_with_install_guidance(self):
         def fake_request(path, method="GET", token=None, data=None, quiet=False):

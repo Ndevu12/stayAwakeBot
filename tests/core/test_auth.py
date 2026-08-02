@@ -122,7 +122,8 @@ class TestGhToken(unittest.TestCase):
 
 class TestActToken(unittest.TestCase):
     """Per-repo token for a multi-repo sweep: env/gh are repo-agnostic; a GitHub App upgrades to the
-    installation that owns each repo, and an unreachable repo yields guidance (never raises)."""
+    installation that owns each repo, and — where the App can't reach a repo — falls back to the gh
+    session so a partially-installed App never REMOVES access the human credential already had."""
 
     def test_env_and_gh_are_repo_agnostic(self):
         self.assertEqual(auth.act_token("envtok", "GH_SECURITY_TOKEN", "o/r"), ("envtok", None))
@@ -134,10 +135,20 @@ class TestActToken(unittest.TestCase):
             self.assertEqual(auth.act_token("base", "github-app", "org/repo"), ("ghs_repo", None))
         mint.assert_called_once_with("org/repo")
 
-    def test_app_unreachable_returns_guidance_not_raise(self):
+    def test_app_unreachable_falls_back_to_gh(self):
+        # The App isn't installed on 'org', but the operator's gh session reaches it → use gh, no error.
         from stayawake.lib import github_app
         with mock.patch("stayawake.lib.github_app.installation_token",
-                        side_effect=github_app.GithubAppError("install it on 'org'")):
+                        side_effect=github_app.GithubAppError("install it on 'org'")), \
+             mock.patch.object(auth, "_gh_fallback", return_value="ghtok"):
+            self.assertEqual(auth.act_token("base", "github-app", "org/repo"), ("ghtok", None))
+
+    def test_app_unreachable_and_no_gh_returns_guidance(self):
+        # No gh fallback (e.g. CI) → surface the install guidance, never raise.
+        from stayawake.lib import github_app
+        with mock.patch("stayawake.lib.github_app.installation_token",
+                        side_effect=github_app.GithubAppError("install it on 'org'")), \
+             mock.patch.object(auth, "_gh_fallback", return_value=None):
             tok, err = auth.act_token("base", "github-app", "org/repo")
         self.assertIsNone(tok)
         self.assertIn("install it on 'org'", err)
