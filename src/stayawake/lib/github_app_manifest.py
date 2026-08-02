@@ -61,7 +61,17 @@ def build_manifest(*, redirect_url: str, setup_url: str,
         "redirect_url": redirect_url,
         "callback_urls": [redirect_url],
         "setup_url": setup_url,
-        "public": False,
+        # "Any account" — REQUIRED so the operator can install the App on their organizations, not
+        # just their personal account. GitHub's manifest `public` is binary: false = "Only on this
+        # account" (installable ONLY on the owner's personal account, so the install page skips the
+        # account picker and orgs are unreachable); true = "Any account" (the picker lists the personal
+        # account + every org the operator administers). Trade-off (accepted): a public App has a public
+        # install page (github.com/apps/<slug>) and CAN be installed by anyone who finds the slug — and
+        # since the operator holds the key and the App requests contents/PR/workflows write, a stranger
+        # who installs it grants the KEY-HOLDER token-mintable write to THEIR repos (their choice, not a
+        # leak of the operator's key or repos). The slug is unlisted (not Marketplace); this is the
+        # unblock for multi-account scanning and the operator owns their App + key.
+        "public": True,
         "default_permissions": dict(DEFAULT_PERMISSIONS),
         "default_events": [],
     }

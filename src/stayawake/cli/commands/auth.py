@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 
 from stayawake.core.identity import Intent, require, resolve_session
 from stayawake.lib import github_app
 from stayawake.utils import env
+from stayawake.utils.streaming import Streamer, status, stream_enabled
 
 
 def register(sub) -> None:
@@ -19,6 +21,7 @@ def register(sub) -> None:
 
     st = asub.add_parser("status", help="show active credential + capability gate for key intents")
     st.add_argument("--json", action="store_true", help="machine-readable output")
+    st.add_argument("--no-stream", action="store_true", help="disable animated output")
     st.set_defaults(func=_status)
 
     ap = asub.add_parser(
@@ -35,12 +38,23 @@ def register(sub) -> None:
                      help="App display name (default: StayAwakeBot)")
     reg.add_argument("--no-browser", action="store_true",
                      help="print the local URL instead of opening a browser")
+    reg.add_argument("--replace", action="store_true",
+                     help="register a brand-new App even if one is already configured locally "
+                          "(otherwise register is a no-op that points you at installing the existing "
+                          "App on more accounts/orgs)")
+    reg.add_argument("--no-stream", action="store_true", help="disable animated output")
     reg.set_defaults(func=_app_register)
 
     show = apsub.add_parser("show", help="show whether a local StayAwakeBot App config is present")
+    show.add_argument("--no-stream", action="store_true", help="disable animated output")
     show.set_defaults(func=_app_show)
 
     p.set_defaults(func=_auth_root)
+
+
+def _streamer(a: argparse.Namespace) -> Streamer:
+    """A stdout Streamer honoring `--no-stream` (and auto-off when piped / CI / non-TTY)."""
+    return Streamer(enabled=stream_enabled(sys.stdout, force_off=getattr(a, "no_stream", False)))
 
 
 def _auth_root(a: argparse.Namespace) -> int:
@@ -71,21 +85,26 @@ def _app_readiness_lines() -> list[str]:
 
 
 def _status(a: argparse.Namespace) -> int:
-    sess = resolve_session()
+    prog = _streamer(a)
     intents = (Intent.READ_REMOTE, Intent.OPEN_FIX_PR, Intent.OPEN_GUARD_PR)
     rows = []
-    for intent in intents:
-        d = require(intent, session=sess)
-        rows.append({
-            "intent": intent.value,
-            "allowed": d.allowed,
-            "missing": sorted(c.value for c in d.missing),
-            "reason": d.reason if not d.allowed else "",
-            "upgrades": [
-                {"kind": u.kind, "detail": u.detail, "command": u.command}
-                for u in d.upgrades
-            ],
-        })
+    # The gate probes GitHub for liveness/capabilities — cover the silent wait with a spinner
+    # (stderr; never pollutes the --json stdout). Keep the label neutral: a security tool must not
+    # imply it is transmitting or "resolving" the user's secret — it's only checking access.
+    with status("checking GitHub access…", enabled=prog.enabled):
+        sess = resolve_session()
+        for intent in intents:
+            d = require(intent, session=sess)
+            rows.append({
+                "intent": intent.value,
+                "allowed": d.allowed,
+                "missing": sorted(c.value for c in d.missing),
+                "reason": d.reason if not d.allowed else "",
+                "upgrades": [
+                    {"kind": u.kind, "detail": u.detail, "command": u.command}
+                    for u in d.upgrades
+                ],
+            })
     payload = {
         "source": sess.source,
         "kind": sess.kind,
@@ -102,90 +121,139 @@ def _status(a: argparse.Namespace) -> int:
         return 0 if sess.live or sess.token is None else 1
 
     if not sess.token:
-        print("• no GitHub credential (public scans still work)")
-        print("  → `gh auth login`  or  `saw auth app register`")
+        prog.line("• no GitHub credential (public scans still work)")
+        prog.line("  → `gh auth login`  or  `saw auth app register`")
         for line in _app_readiness_lines():
-            print(line)
+            prog.line(line)
         return 0
     who = sess.actor or sess.source or "?"
-    print(f"{'✓' if sess.live else '✗'} credential: {sess.source} as {who}"
-          + ("" if sess.live else f" — {sess.detail or 'not live'}"))
+    prog.line(f"{'✓' if sess.live else '✗'} credential: {sess.source} as {who}"
+              + ("" if sess.live else f" — {sess.detail or 'not live'}"))
     if sess.scopes is not None:
-        print(f"  classic scopes: {', '.join(sorted(sess.scopes)) or '(none)'}")
+        prog.line(f"  classic scopes: {', '.join(sorted(sess.scopes)) or '(none)'}")
     elif sess.capabilities is not None:
-        print(f"  capabilities: {', '.join(sorted(c.value for c in sess.capabilities))}")
+        prog.line(f"  capabilities: {', '.join(sorted(c.value for c in sess.capabilities))}")
     else:
-        print("  capabilities: unknown (fine-grained PAT?) — delivery will classify push failures")
+        prog.line("  capabilities: unknown (fine-grained PAT?) — delivery will classify push failures")
     for line in _app_readiness_lines():
-        print(line)
-    print("  intent gate:")
+        prog.line(line)
+    prog.line("  intent gate:")
     for row in rows:
         mark = "✓" if row["allowed"] else "✗"
-        print(f"    {mark} {row['intent']}")
+        prog.line(f"    {mark} {row['intent']}")
         if not row["allowed"]:
             if row["missing"]:
-                print(f"        missing: {', '.join(row['missing'])}")
+                prog.line(f"        missing: {', '.join(row['missing'])}")
             for u in row["upgrades"]:
                 if u["command"]:
-                    print(f"        → {u['command']}")
+                    prog.line(f"        → {u['command']}")
                 elif u["detail"]:
-                    print(f"        → {u['detail']}")
+                    prog.line(f"        → {u['detail']}")
     # Exit 1 when guard PR would be denied (the critical fleet path).
     guard = next(r for r in rows if r["intent"] == Intent.OPEN_GUARD_PR.value)
     return 0 if guard["allowed"] or not sess.live else 1
 
 
-def _app_show(_a: argparse.Namespace) -> int:
+def _app_show(a: argparse.Namespace) -> int:
+    prog = _streamer(a)
     cfg = github_app.load_config()
     if not cfg and not github_app.is_configured():
-        print("• no StayAwakeBot GitHub App configured")
-        print("  → `saw auth app register`")
+        prog.line("• no StayAwakeBot GitHub App configured")
+        prog.line("  → `saw auth app register`")
         return 1
     if cfg:
-        print(f"✓ local App config: {github_app.config_path()}")
-        print(f"  app_id: {cfg.get('app_id')}")
-        print(f"  name:   {cfg.get('name') or '(unknown)'}")
-        print(f"  slug:   {cfg.get('slug') or '(unknown — install from GitHub App settings)'}")
+        from stayawake.lib.github_app_manifest import install_url, settings_url
+        slug = cfg.get("slug")
+        prog.line(f"✓ local App config: {github_app.config_path()}")
+        prog.line(f"  app_id: {cfg.get('app_id')}")
+        prog.line(f"  name:   {cfg.get('name') or '(unknown)'}")
+        prog.line(f"  slug:   {slug or '(unknown — install from GitHub App settings)'}")
         if cfg.get("installation_id"):
-            print(f"  installation_id: {cfg['installation_id']}")
-        else:
-            from stayawake.lib.github_app_manifest import install_url
-            print(f"  → install on an account/org: {install_url(cfg.get('slug'))}")
+            prog.line(f"  installation_id: {cfg['installation_id']}")
+        prog.line("  install on more accounts/orgs (a GitHub App is per-account):")
+        prog.line(f"    → {install_url(slug)}")
+        prog.line("  if the install page offers no account picker, the App is set to 'Only on this")
+        prog.line("  account' — switch it to 'Any account' in App settings, then install:")
+        prog.line(f"    → {settings_url(slug, app_id=cfg.get('app_id'))}")
     else:
-        print("✓ App configured via environment (GH_APP_*)")
+        prog.line("✓ App configured via environment (GH_APP_*)")
+    return 0
+
+
+def _already_registered(prog: Streamer, a: argparse.Namespace) -> int | None:
+    """If a StayAwakeBot App is ALREADY configured locally, don't create a duplicate — GitHub App
+    names are globally unique, so a fresh manifest run mints a NEW App with a suffixed name every
+    time (the reported duplication). Confirm the App still exists on GitHub, then point the operator
+    at the real next step — INSTALLING the same App on more accounts/orgs — and return 0. Returns None
+    (→ proceed to register) only when nothing is configured, `--replace` is set, or the previously
+    registered App is confirmed GONE from GitHub."""
+    if getattr(a, "replace", False) or not github_app.is_configured():
+        return None
+    from stayawake.lib.github_app_manifest import install_url, settings_url
+    cfg = github_app.load_config() or {}
+    slug = cfg.get("slug")
+    with status("checking your existing StayAwakeBot App on GitHub…", enabled=prog.enabled):
+        exists = github_app.app_exists()
+    if exists is False:
+        prog.line("⚠ the previously registered StayAwakeBot App no longer exists on GitHub — "
+                  "registering a new one.")
+        return None
+    label = cfg.get("name") or slug or f"app_id={cfg.get('app_id')}"
+    suffix = f" ({slug})" if slug and cfg.get("name") else ""
+    prog.line(f"✓ a StayAwakeBot App is already registered on GitHub: {label}{suffix}")
+    if exists is None:
+        prog.line("  (couldn't confirm it still exists on GitHub — offline, rate-limited, or a "
+                  "key/clock issue — so not creating a duplicate; use --replace to force a new App)")
+    prog.line(f"  local config: {github_app.config_path()}")
+    prog.line("  Note: this is the App REGISTRATION — it stays even after you UNINSTALL the App "
+              "(uninstalling only removes an installation, not the registration).")
+    prog.line("  What you probably want:")
+    prog.line("  • run it on another account/org — install this SAME App there (a GitHub App is")
+    prog.line(f"    per-account, so each org needs its own installation): {install_url(slug)}")
+    prog.line("    (no account picker there? the App is 'Only on this account' — set it to "
+              f"'Any account' first: {settings_url(slug, app_id=cfg.get('app_id'))})")
+    prog.line("  • start completely over — DELETE the registration, then register again:")
+    prog.line(f"    {settings_url(slug, app_id=cfg.get('app_id'))} → Advanced → Delete GitHub App")
+    prog.line("  • replace it now with a brand-new App:  saw auth app register --replace")
     return 0
 
 
 def _app_register(a: argparse.Namespace) -> int:
     from stayawake.lib import github_app_manifest as manifest
+    prog = _streamer(a)
+    # Idempotency guard: never mint a duplicate App when one is already configured (the reported bug).
+    early = _already_registered(prog, a)
+    if early is not None:
+        return early
     try:
-        print("Starting StayAwakeBot GitHub App registration…")
-        print("  browser will: create App → install on your account/org → return here")
-        payload = manifest.register_via_browser(
-            name=getattr(a, "name", "StayAwakeBot") or "StayAwakeBot",
-            open_browser=not getattr(a, "no_browser", False),
-        )
+        prog.line("Starting StayAwakeBot GitHub App registration…")
+        prog.line("  a browser will open: create App → install on your account/org → return here")
+        with status("waiting for GitHub (complete the flow in your browser)…", enabled=prog.enabled):
+            payload = manifest.register_via_browser(
+                name=getattr(a, "name", "StayAwakeBot") or "StayAwakeBot",
+                open_browser=not getattr(a, "no_browser", False),
+            )
     except github_app.GithubAppError as e:
-        print(f"✗ {e}")
+        prog.line(f"✗ {e}")
         return 2
     except Exception as e:  # noqa: BLE001
-        print(f"✗ registration failed: {e}")
+        prog.line(f"✗ registration failed: {e}")
         return 2
     slug = payload.get("slug")
-    print(f"✓ registered App id={payload.get('id')} slug={slug}")
-    print(f"  credentials saved to {github_app.config_path()} (mode 0600)")
+    prog.line(f"✓ registered App id={payload.get('id')} slug={slug}")
+    prog.line(f"  credentials saved to {github_app.config_path()} (mode 0600)")
     if payload.get("_installed") and payload.get("installation_id"):
-        print(f"✓ installed (installation_id={payload['installation_id']})")
+        prog.line(f"✓ installed (installation_id={payload['installation_id']})")
     else:
-        print("⚠ App registered but install was not completed in this session")
-        print(f"  → finish install: {payload.get('_install_url') or manifest.install_url(slug)}")
-        print("  → then: saw auth status")
+        prog.line("⚠ App registered but install was not completed in this session")
+        prog.line(f"  → finish install: {payload.get('_install_url') or manifest.install_url(slug)}")
+        prog.line("  → then: saw auth status")
     icon = payload.get("_icon_path")
     settings = payload.get("_settings_url")
     if icon and settings:
-        print("  branding: upload the StayAwakeBot icon in App settings → Display information")
-        print(f"    icon: {icon}")
-        print(f"    settings: {settings}")
-    print("  next: saw auth status   # confirm open_guard_pr is allowed")
-    print("  note: this App is operator-managed — you own the registration and credentials.")
+        prog.line("  branding: upload the StayAwakeBot icon in App settings → Display information")
+        prog.line(f"    icon: {icon}")
+        prog.line(f"    settings: {settings}")
+    prog.line("  next: saw auth status   # confirm open_guard_pr is allowed")
+    prog.line("  note: this App is operator-managed — you own the registration and credentials.")
     return 0 if payload.get("_installed") else 1
