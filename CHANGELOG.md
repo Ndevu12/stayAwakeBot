@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+- **Scans are substantially faster with identical results** (#1326). Profiling showed ~85% of scan
+  time was the obfuscation/decode→exec analysis running on every file. That analysis now short-circuits
+  when a file lacks the *necessary* anchors it provably requires — the decode-call names
+  (`atob`/`Buffer.from`, derived from the threat taxonomy so they can't drift) for the dropper flow,
+  and `data:`/`child_process`/`shelljs` for the tight dynamic-exec arms — the same prefilter technique
+  the content matcher already uses. The directory tree is also walked once and memoized instead of
+  once per matcher. Measured **~1.9× faster** on a 2,000-file tree; **detection is byte-identical**
+  (proven on clean and planted-payload corpora), and it compounds with `-j` parallelism. No new flags.
+
 ### Added
 - **Repo-committed Claude Code skills (`.claude/skills/`)** — portable, distilled contributor
   guidance so anyone working on the codebase (on any machine) shares the same conventions and

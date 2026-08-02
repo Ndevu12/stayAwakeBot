@@ -151,6 +151,15 @@ _REQUIRE_CP_DECODE = re.compile(
     r"(?:\?\s*)?\.\s*" + _CP_METHOD + r"\s*\(\s*" + _DECODE,
     re.IGNORECASE,
 )
+# Necessary anchors for the two ALWAYS-ON tight arms above — 2a requires a `data:` URI, 2b a
+# `child_process`/`shelljs` require. If none is present, neither tight arm can match, so
+# `_has_corroborated_dynamic_exec`'s non-strict work is skippable. Matched with the SAME re.IGNORECASE
+# folding the arms use (not str.lower()) so there is NO case-fold asymmetry — the gate opens exactly
+# when a tight arm could match, making the skip byte-identical for any Unicode input. Kept in lockstep
+# with the literals in `_DATA_URI_IMPORT` / `_REQUIRE_CP_DECODE` (a positive-case + drift test pins it).
+_TIGHT_DYNEXEC_ANCHORS = ("data:", "child_process", "shelljs")
+_TIGHT_DYNEXEC_ANCHOR_RE = re.compile("|".join(re.escape(a) for a in _TIGHT_DYNEXEC_ANCHORS),
+                                      re.IGNORECASE)
 
 
 # ── Variable-indirected decode→exec dropper (#1266 residual; restores the #1212 base64 arm,
@@ -432,12 +441,17 @@ def _has_corroborated_dynamic_exec(s: str, strict: bool = False) -> bool:
         arms (any non-literal `import(`, any constructed child_process command). Too FP-prone to
         raise a finding, but as a conservative gate a false positive is the SAFE direction (defer to
         manual). Keeping them here — not deleting them — is why the tighten downgrades nothing."""
-    # Both TIGHT arms need string CONTENTS: 2a's tell (`data:…;base64,`) and 2b's module name
-    # (`'child_process'`) live inside strings, so a full string-scrub would blank them. Use a
-    # comment-only scrub (strings kept) — a mention in a // or /* */ comment is still silenced.
-    kept = _scrub_comments_and_strings(s, scrub_strings=False)
-    if _DATA_URI_IMPORT.search(kept) or _REQUIRE_CP_DECODE.search(kept):
-        return True
+    # Prefilter (byte-identical): both TIGHT arms carry a necessary literal — 2a a `data:` URI, 2b a
+    # `child_process`/`shelljs` require — so if none of those anchors is present, neither tight arm can
+    # match and we skip the comment-scrub + searches. Same re.IGNORECASE folding as the arms → no
+    # case-fold asymmetry. (`_TIGHT_DYNEXEC_ANCHOR_RE` mirrors the literals in those two regexes.)
+    if _TIGHT_DYNEXEC_ANCHOR_RE.search(s):
+        # Both TIGHT arms need string CONTENTS: 2a's tell (`data:…;base64,`) and 2b's module name
+        # (`'child_process'`) live inside strings, so a full string-scrub would blank them. Use a
+        # comment-only scrub (strings kept) — a mention in a // or /* */ comment is still silenced.
+        kept = _scrub_comments_and_strings(s, scrub_strings=False)
+        if _DATA_URI_IMPORT.search(kept) or _REQUIRE_CP_DECODE.search(kept):
+            return True
     # The BROAD arms (strict/remediation-gate only) match code shapes, so a full string scrub is
     # right there — a docs string mentioning `import(url)` / `execSync(cmd+x)` must not trip the gate.
     if strict:
