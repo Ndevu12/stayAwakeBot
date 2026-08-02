@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 
 from stayawake.core.identity import Intent, require, resolve_session
 from stayawake.lib import github_app
+from stayawake.utils import env
 
 
 def register(sub) -> None:
@@ -35,11 +35,6 @@ def register(sub) -> None:
                      help="App display name (default: StayAwakeBot)")
     reg.add_argument("--no-browser", action="store_true",
                      help="print the local URL instead of opening a browser")
-    reg.add_argument(
-        "--force",
-        action="store_true",
-        help="continue without PyJWT (browser manifest only; minting still needs the App extra)",
-    )
     reg.set_defaults(func=_app_register)
 
     show = apsub.add_parser("show", help="show whether a local StayAwakeBot App config is present")
@@ -55,18 +50,9 @@ def _auth_root(a: argparse.Namespace) -> int:
     return 2
 
 
-def _app_crypto_missing_lines(*, local_saved: bool) -> list[str]:
-    hint = github_app.app_crypto_install_hint()
-    head = (
-        "    ✗ App saved but not usable yet"
-        if local_saved
-        else "    ✗ App configured but not usable yet"
-    )
-    return [head, f"      → {hint}"]
-
-
 def _app_readiness_lines() -> list[str]:
-    """Explain App config vs mint readiness (PyJWT + installation)."""
+    """Explain App config vs mint readiness. Signing is BUILT IN (no crypto extra), so once the App is
+    configured the only remaining step is completing the installation."""
     lines: list[str] = []
     if not github_app.is_configured():
         return lines
@@ -75,9 +61,7 @@ def _app_readiness_lines() -> list[str]:
     if cfg.get("slug") or cfg.get("name"):
         label = cfg.get("name") or cfg.get("slug")
         lines.append(f"    app: {label}" + (f" ({cfg['slug']})" if cfg.get("slug") and cfg.get("name") else ""))
-    if not github_app.jwt_available():
-        lines.extend(_app_crypto_missing_lines(local_saved=bool(cfg)))
-    elif not (cfg.get("installation_id") or os.environ.get("GH_APP_INSTALLATION_ID")):
+    if not (cfg.get("installation_id") or env.get(github_app.INSTALLATION_ID_ENV)):
         from stayawake.lib.github_app_manifest import install_url
         lines.append("    ⚠ registered but not installed (or installation_id unknown)")
         lines.append(f"      → {install_url(cfg.get('slug'))}")
@@ -111,7 +95,6 @@ def _status(a: argparse.Namespace) -> int:
         "capabilities": (sorted(c.value for c in sess.capabilities)
                          if sess.capabilities is not None else None),
         "app_configured": github_app.is_configured(),
-        "app_jwt_available": github_app.jwt_available(),
         "intents": rows,
     }
     if getattr(a, "json", False):
@@ -135,10 +118,6 @@ def _status(a: argparse.Namespace) -> int:
         print("  capabilities: unknown (fine-grained PAT?) — delivery will classify push failures")
     for line in _app_readiness_lines():
         print(line)
-    # If App is configured but we fell through to gh, make the reason obvious.
-    if github_app.is_configured() and sess.source == "gh" and not github_app.jwt_available():
-        print("  note: App saved but not usable yet")
-        print(f"      → {github_app.app_crypto_install_hint()}")
     print("  intent gate:")
     for row in rows:
         mark = "✓" if row["allowed"] else "✗"
@@ -167,9 +146,6 @@ def _app_show(_a: argparse.Namespace) -> int:
         print(f"  app_id: {cfg.get('app_id')}")
         print(f"  name:   {cfg.get('name') or '(unknown)'}")
         print(f"  slug:   {cfg.get('slug') or '(unknown — install from GitHub App settings)'}")
-        if not github_app.jwt_available():
-            print("  App saved but not usable yet")
-            print(f"  → {github_app.app_crypto_install_hint()}")
         if cfg.get("installation_id"):
             print(f"  installation_id: {cfg['installation_id']}")
         else:
@@ -177,23 +153,11 @@ def _app_show(_a: argparse.Namespace) -> int:
             print(f"  → install on an account/org: {install_url(cfg.get('slug'))}")
     else:
         print("✓ App configured via environment (GH_APP_*)")
-        if not github_app.jwt_available():
-            print("  App configured but not usable yet")
-            print(f"  → {github_app.app_crypto_install_hint()}")
     return 0
 
 
 def _app_register(a: argparse.Namespace) -> int:
     from stayawake.lib import github_app_manifest as manifest
-    force = getattr(a, "force", False)
-    if not github_app.jwt_available() and not force:
-        print("✗ Install the App crypto extra before registering a StayAwakeBot GitHub App.")
-        print(f"  → {github_app.app_crypto_install_hint()}")
-        print("  → Or: saw auth app register --force  (browser-only test; minting still needs the extra)")
-        return 2
-    if force and not github_app.jwt_available():
-        print("⚠ continuing without PyJWT — registration may succeed but minting stays blocked until:")
-        print(f"  → {github_app.app_crypto_install_hint()}")
     try:
         print("Starting StayAwakeBot GitHub App registration…")
         print("  browser will: create App → install on your account/org → return here")
@@ -222,10 +186,6 @@ def _app_register(a: argparse.Namespace) -> int:
         print("  branding: upload the StayAwakeBot icon in App settings → Display information")
         print(f"    icon: {icon}")
         print(f"    settings: {settings}")
-    if not github_app.jwt_available():
-        print(f"  next: {github_app.app_crypto_install_hint()}")
-        print("       then: saw auth status   # confirm open_guard_pr is allowed")
-    else:
-        print("  next: saw auth status   # confirm open_guard_pr is allowed")
+    print("  next: saw auth status   # confirm open_guard_pr is allowed")
     print("  note: this App is operator-managed — you own the registration and credentials.")
     return 0 if payload.get("_installed") else 1

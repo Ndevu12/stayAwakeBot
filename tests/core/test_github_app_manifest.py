@@ -40,13 +40,6 @@ class TestManifestBranding(unittest.TestCase):
                          "https://github.com/settings/apps/stayawakebot")
 
 
-class TestAppExtraHint(unittest.TestCase):
-    def test_hint_uses_distribution_name(self):
-        from stayawake.lib import github_app
-        self.assertIn("stayawakebot[app]", github_app.APP_EXTRA_HINT)
-        self.assertNotIn("stayawake[app]", github_app.APP_EXTRA_HINT)
-
-
 class TestStateNonce(unittest.TestCase):
     """The anti-CSRF `state` primitive (#1292): constant-time, fail-closed."""
 
