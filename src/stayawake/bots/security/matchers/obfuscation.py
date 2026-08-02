@@ -29,6 +29,7 @@ def _ext(rel: str) -> str:
 
 class ObfuscationMatcher(Matcher):
     handles = "obfuscation"
+    partitionable = True    # per-file analyze_file (68% of scan time); verified #1325
 
     def scan(self, target, signatures, all_signatures=None):
         source_sig = next((s for s in signatures if s.get("kind") == "obfuscated-file"), None)

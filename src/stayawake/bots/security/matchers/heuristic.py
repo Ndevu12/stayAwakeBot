@@ -53,6 +53,7 @@ _CONCEALMENT_CHARS = re.compile(
 
 class HeuristicMatcher(Matcher):
     handles = "heuristic"
+    partitionable = True    # per-file density/masquerade checks; verified #1325
 
     def scan(self, target, signatures, all_signatures=None):
         findings: list[Finding] = []

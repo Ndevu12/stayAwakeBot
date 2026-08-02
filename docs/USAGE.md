@@ -113,15 +113,19 @@ for git repos. Scanning is **local by default** (nothing is sent to GitHub unles
 `--remote`). With no paths and nothing configured, it scans the current repository (found by
 walking up to the nearest `.git`), so a bare `saw scan` "just works" after `pip install`.
 
-**Faster multi-repo sweeps (`-j`/`--jobs`).** When you point `saw` at many repos (`saw scan ~`,
-an org, or a folder of checkouts), it scans several at once. The default is **auto** — a single
-target still runs sequentially, while several use one worker per CPU core — so you usually get the
-speedup for free. Cap it with a number, force sequential with `-j 1` (reproducible / low-load
-runs), or set `settings.jobs` in config. A parallel run is **byte-identical** to a sequential one
-in any persisted report (`-d`/`--json`/`--sarif`) and still fails **closed** if a worker dies.
+**Faster scans (`-j`/`--jobs`).** `saw` scans concurrently on two fronts: a **multi-repo sweep**
+(`saw scan ~`, an org, a folder of checkouts) scans several repos at once, and a **single big
+repo/monorepo/vendored tree** is split across workers by file — so one large target uses every core
+too. The default is **auto** — a small scan stays sequential (no overhead), a big one uses one
+worker per CPU core, so you usually get the speedup for free. Cap it with a number, force sequential
+with `-j 1` (reproducible / low-load runs), or set `settings.jobs` in config (and
+`settings.parallel_min_files` for the single-target size floor). Detection is unchanged: a parallel
+run is **byte-identical** to a sequential one in any persisted report (`-d`/`--json`/`--sarif`) and
+still fails **closed** if a worker dies.
 
 ```bash
 saw scan ~ -j auto            # sweep every repo under $HOME, one worker per CPU core
+saw scan /big/monorepo -j 8   # split ONE big repo's files across 8 workers
 saw scan --org UB-TechDEV -j 8   # up to 8 org repos at once
 saw scan -j 1                 # force sequential (e.g. a low-memory box or byte-stable timing)
 ```

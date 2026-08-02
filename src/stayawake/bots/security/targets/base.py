@@ -97,10 +97,16 @@ class ScanOptions:
 class Target:
     source = "local"
 
-    def __init__(self, root: str | Path, display: str, opts: ScanOptions):
+    def __init__(self, root: str | Path, display: str, opts: ScanOptions,
+                 include_only: tuple[str, ...] | None = None):
         self.root = Path(root)
         self.display = display
         self.opts = opts
+        # When set (within-target file parallelism, #1325), `iter_files` yields EXACTLY these
+        # already-discovered relpaths — in this order — and does NOT re-walk. A worker scanning one
+        # file-chunk gets a Target restricted to its chunk; the file-based matchers run over just
+        # those files, and their findings merge. `None` = normal full walk (unchanged).
+        self.include_only = include_only
         # Files that EXIST (os.walk yielded them) but could not be READ — a permission error, a
         # restrictive ACL, etc. These are scan GAPS, not benign skips: scan_target promotes them to
         # result.error so the run fails CLOSED. A payload behind an unreadable file must never be
@@ -115,6 +121,9 @@ class Target:
         return self.root
 
     def iter_files(self) -> Iterator[str]:
+        if self.include_only is not None:       # #1325: a pre-discovered file-chunk — no re-walk
+            yield from self.include_only
+            return
         for dirpath, dirnames, filenames in os.walk(self.root):
             dirnames[:] = [d for d in dirnames if d not in self.opts.exclude_dirs]
             for fn in filenames:

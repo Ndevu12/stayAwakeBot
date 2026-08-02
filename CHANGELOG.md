@@ -7,18 +7,19 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
-- **`saw scan -j/--jobs N` scans multiple targets concurrently, for a much faster multi-repo
-  sweep** (#1205). A sweep over many repos (e.g. `saw scan ~` or an org) previously scanned one
-  repo at a time; it now runs up to *N* at once. The default is **auto** — a single target still
-  runs sequentially (no overhead, behaviour unchanged), while several targets use one worker per CPU
-  core. Pass a number to cap it, `-j 1` to force sequential (reproducible / low-load runs), or
-  `-j auto`; a config `settings.jobs` sets the default. Local scanning is CPU-bound, so workers are
-  **processes** (Python's GIL means threads wouldn't help). Results are returned in submission order,
-  so a persisted report (`-d`/`--json`/SARIF) is **byte-identical** whether run with one worker or
-  many; a worker that dies is recorded as an ERROR and still fails the scan **closed** (exit 2),
-  never a silent "clean". `Ctrl-C` is responsive — it terminates in-flight workers immediately
-  instead of freezing until the slowest scan finishes, and leaves no orphaned processes. Progress
-  is a concurrency-aware live board (one worker per line) that degrades to plain per-repo lines when
+- **`saw scan -j/--jobs N` runs concurrently, for a much faster scan** (#1205, #1325). A **multi-repo
+  sweep** (e.g. `saw scan ~` or an org) scans up to *N* repos at once instead of one at a time
+  (#1205); a scan of a **single big repo/monorepo/vendored tree** now splits that repo's files across
+  workers (#1325), so one large target uses every core too. The default is **auto** — a small scan
+  stays sequential (no overhead), a big one uses one worker per CPU core. Pass a number to cap it,
+  `-j 1` to force sequential (reproducible / low-load runs), or `-j auto`; config `settings.jobs`
+  sets the default and `settings.parallel_min_files` the size floor below which a single target stays
+  sequential. Local scanning is CPU-bound, so workers are **processes** (Python's GIL means threads
+  wouldn't help). Detection is unchanged and a persisted report (`-d`/`--json`/SARIF) is
+  **byte-identical** whether run with one worker or many (findings merged in matcher order, then the
+  usual sort); a worker that dies is recorded as an ERROR and still fails the scan **closed**
+  (exit 2), never a silent "clean". `Ctrl-C` terminates in-flight workers immediately (no freeze, no
+  orphans). Progress is a concurrency-aware live board that degrades to plain per-repo lines when
   piped / in CI / `--no-stream`.
 
 ### Changed
