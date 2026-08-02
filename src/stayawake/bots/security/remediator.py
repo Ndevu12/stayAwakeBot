@@ -20,10 +20,11 @@ from pathlib import Path
 
 from stayawake.utils.config import load_yaml
 from stayawake.lib import auth
-from stayawake.utils import env
+from stayawake.utils import env, parallel
 from stayawake.lib import git as gitutil
 from stayawake.lib.adapters import github_api
 from stayawake.utils.streaming import Streamer, stream_enabled, status
+from stayawake.utils.sweep import run_sweep
 from stayawake.utils.timeutil import now_iso
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security import resolution
@@ -103,9 +104,58 @@ def _disp(repo: Path) -> str:
     return str(repo).replace(os.path.expanduser("~"), "~")
 
 
+def _needs_review(text: str) -> bool:
+    """A repo needs manual review when its outcome is an error, an abort, or a PARTIAL fix (#1183) —
+    the tree isn't provably clean, so `fix` must exit non-zero for it (invariant #1). This is the ONE
+    predicate the board tag and the final `fix()` tally both use, so they can never disagree."""
+    return "ABORTED" in text or ": error" in text or "PARTIAL" in text
+
+
+def _board_detail(label: str, text: str) -> str:
+    """The outcome string starts with the repo label (`f"{slug}: …"`); drop that prefix so the
+    board's per-repo line doesn't print the label twice."""
+    return text[len(label):].lstrip(": ").strip() or text if text.startswith(label) else text
+
+
+def _run_fix_sweep(items, labels, make_outcome, prog: Streamer, *, jobs, verb: str) -> list[str]:
+    """Run one repo's operation over each item, returning outcome STRINGS in SUBMISSION order (so
+    `fix()`'s needs-review tally is deterministic at any `-j`). `make_outcome(item, spin=…)` does the
+    repo's work and never raises (it wraps its work in `_safe`).
+
+    Two presentation modes, NO downgrade to either:
+      * ONE worker (a single repo, or `-j 1`) → run inline with the FULL per-repo streaming — the
+        live phase spinners (`spin=prog.enabled`) and the `[i/N] … → outcome` lines, exactly as
+        before. There's a single writer, so nothing is lost.
+      * MANY workers → run on the shared concurrency seam (`utils.sweep`, THREAD backend: git + API
+        is I/O-bound, GIL released, no token crosses a process boundary) with the live board. Here
+        per-repo spinners MUST be off (`spin=False`) — N concurrent workers can't each drive the one
+        terminal — so the board is the reporter instead. One repo's failure stays isolated; a dead
+        worker maps to a needs-review error string so the run still fails closed."""
+    workers = parallel.resolve_jobs(jobs, len(items))
+    if workers == 1:
+        outcomes: list[str] = []
+        for i, item in enumerate(items):
+            prog.line(f"  [{i + 1}/{len(items)}] {labels[i]}")
+            text = make_outcome(item, spin=prog.enabled)
+            prog.line(f"      → {text}")
+            outcomes.append(text)
+        return outcomes
+    # Each repo scrolls up carrying its full outcome (`→ …`) right under its `[i/N] tag label`
+    # header, at completion — labelled, in place, no separate reprint pass.
+    swept = run_sweep(
+        lambda item: make_outcome(item, spin=False), items, jobs=workers,
+        backend=parallel.THREAD, labels=labels,
+        describe=lambda o: (("[review  ]" if _needs_review(o.value) else "[fixed   ]"), "",
+                            f"      → {_board_detail(labels[o.index], o.value)}"),
+        progress_on=prog.enabled, verb=verb)
+    return [o.value if not o.error else f"{labels[o.index]}: error — {o.error}"
+            for o in swept]
+
+
 # ── saw fix ──────────────────────────────────────────────────────────────────────
 
-def _fix_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *, publish: bool) -> list[str]:
+def _fix_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *, publish: bool,
+               jobs=None) -> list[str]:
     """Fix LOCAL repositories. Default: PREPARE a `security/auto-clean` branch per repo (no
     push, no network). `publish` (`--pr`): also push + open/update a PR (pre-flighted)."""
     token = source = None
@@ -120,32 +170,30 @@ def _fix_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *, publish: bo
         return []
     verb = "Opening PRs for" if publish else "Preparing fixes for"
     prog.line(f"{verb} {len(repos)} local repositor{'y' if len(repos) == 1 else 'ies'}…")
-    outcomes: list[str] = []
-    for i, repo in enumerate(repos, 1):
+
+    # `spin` is on only in the sequential single-writer path; the concurrent path passes spin=False
+    # and shows in-flight state on the board instead (see `_run_fix_sweep`). pr.{prepare_fix,
+    # submit_fix_pr} drive their OWN phase-accurate spinners (scanning → fixing → opening PR).
+    def make_outcome(repo, *, spin):
         display = _disp(repo)
-        prog.line(f"  [{i}/{len(repos)}] {display}")
-        # No wrapping spinner here — pr.{prepare_fix,submit_fix_pr} drive their OWN
-        # phase-accurate spinners (scanning → fixing → opening PR), so the label always
-        # reflects what's actually happening.
         if publish:
             # A GitHub App mints the token of the installation that owns THIS repo (multi-account).
             tok, aerr = auth.act_token(token, source, gitutil.origin_slug(repo))
             # ": error" marks it needs-review so `fix()` exits non-zero (a repo no credential can
             # reach was NOT fixed — never report it as success).
-            outcome = f"{display}: error — {aerr}" if aerr else _safe(
-                lambda r=repo, t=tok: pr_submit.submit_fix_pr(r, opts, sigs, allowlist, t,
-                                                              spin=prog.enabled), display)
-        else:
-            outcome = _safe(
-                lambda r=repo: pr_submit.prepare_fix(r, opts, sigs, allowlist, spin=prog.enabled),
-                display)
-        prog.line(f"      → {outcome}")
-        outcomes.append(outcome)
-    return outcomes
+            if aerr:
+                return f"{display}: error — {aerr}"
+            return _safe(lambda: pr_submit.submit_fix_pr(repo, opts, sigs, allowlist, tok,
+                                                         spin=spin), display)
+        return _safe(lambda: pr_submit.prepare_fix(repo, opts, sigs, allowlist, spin=spin),
+                     display)
+
+    return _run_fix_sweep(repos, [_disp(r) for r in repos], make_outcome, prog, jobs=jobs,
+                          verb="Fixing")
 
 
 def _fix_remote(cfg, opts, sigs, allowlist, prog: Streamer, *,
-                users=None, orgs=None, slugs=None) -> list[str]:
+                users=None, orgs=None, slugs=None, jobs=None) -> list[str]:
     """Fix REMOTE repositories: resolve targets via the #1075 ladder (ad-hoc `--user`/`--org`
     /`owner/repo` selectors → config → your own repos), clone each, and open/update its PR
     (no local copy exists, so a PR is the only output)."""
@@ -163,34 +211,34 @@ def _fix_remote(cfg, opts, sigs, allowlist, prog: Streamer, *,
         return []
     prog.line(f"Sweeping {len(resolved)} GitHub repositor{'y' if len(resolved) == 1 else 'ies'} "
               f"({_remote_scope(cfg, users, orgs, slugs)})…")
-    outcomes: list[str] = []
-    for i, slug in enumerate(resolved, 1):
-        prog.line(f"  [{i}/{len(resolved)}] {slug}")
+
+    def make_outcome(slug, *, spin):
         # A GitHub App mints the token of the installation that owns THIS repo (multi-account).
         tok, aerr = auth.act_token(token, source, slug)
         if aerr:
-            outcome = f"{slug}: {aerr}"
-        else:
-            with status(f"cloning {slug}…", enabled=prog.enabled), \
-                    resolution.cloned_repo(slug, tok) as clone:    # phase 0: clone (shared helper)
-                # submit_fix_pr then drives its own scanning → fixing → opening-PR spinners.
-                outcome = (f"{slug}: clone failed (check token access)" if clone is None
-                           else _safe(lambda c=clone, t=tok: pr_submit.submit_fix_pr(
-                               c, opts, sigs, allowlist, t, spin=prog.enabled), slug))
-        prog.line(f"      → {outcome}")
-        outcomes.append(outcome)
-    return outcomes
+            return f"{slug}: {aerr}"
+        # `status` shows a live "cloning…" spinner in the sequential path; off under concurrency
+        # (the board reports in-flight state). submit_fix_pr then drives its own phase spinners.
+        with status(f"cloning {slug}…", enabled=spin), \
+                resolution.cloned_repo(slug, tok) as clone:        # phase 0: clone (shared helper)
+            if clone is None:
+                return f"{slug}: clone failed (check token access)"
+            return _safe(lambda: pr_submit.submit_fix_pr(clone, opts, sigs, allowlist, tok,
+                                                         spin=spin), slug)
+
+    return _run_fix_sweep(resolved, list(resolved), make_outcome, prog, jobs=jobs, verb="Fixing")
 
 
 def fix(config_path: str | None = None, *, pr: bool = False, remote: bool = False,
         paths: list[str] | None = None, users: list[str] | None = None,
         orgs: list[str] | None = None, slugs: list[str] | None = None,
-        no_stream: bool = False) -> int:
+        no_stream: bool = False, jobs: int | None = None) -> int:
     """`saw fix`: prepare a `security/auto-clean` branch per infected repo (no push). With
     `pr=True` (`--pr`) also push + open/update one rolling PR each; with `remote=True`
     (`--remote`) sweep GitHub targets resolved by the #1075 ladder (ad-hoc `users`/`orgs`/
-    `slugs` → config → your own repos). Streams each repo's outcome. Returns 2 if an explicit
-    --config is missing, 1 if any repo needs manual review, else 0."""
+    `slugs` → config → your own repos). A multi-repo sweep runs up to `jobs` repos at once
+    (AUTO by default; `-j 1` forces sequential). Streams each repo's outcome. Returns 2 if an
+    explicit --config is missing, 1 if any repo needs manual review, else 0."""
     cfg = _resolve_config(config_path)
     if cfg is None:
         return 2
@@ -202,9 +250,10 @@ def fix(config_path: str | None = None, *, pr: bool = False, remote: bool = Fals
     prog.line(f"Security fix — {now_iso()}")
     prog.line("")
 
-    outcomes = (_fix_remote(cfg, opts, sigs, allowlist, prog, users=users, orgs=orgs, slugs=slugs)
+    outcomes = (_fix_remote(cfg, opts, sigs, allowlist, prog, users=users, orgs=orgs, slugs=slugs,
+                            jobs=jobs)
                 if remote
-                else _fix_local(cfg, opts, sigs, allowlist, paths, prog, publish=pr))
+                else _fix_local(cfg, opts, sigs, allowlist, paths, prog, publish=pr, jobs=jobs))
     if not outcomes:
         prog.line("No repositories to fix.")
         return 0

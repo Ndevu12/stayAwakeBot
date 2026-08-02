@@ -44,13 +44,23 @@ class ProgressReporter:
 
     def start(self, total: int) -> None: ...
     def item_started(self, label: str) -> None: ...
-    def item_done(self, label: str, tag: str, detail: str) -> None: ...
+    def item_done(self, label: str, tag: str, detail: str, block: str | None = None) -> None: ...
     def finish(self) -> None: ...
 
 
+def _header_line(done: int, total: int, tag: str, label: str, detail: str) -> str:
+    """The one-line completion header shared by both reporters: `[done/total] tag label (detail)`.
+    `(detail)` is omitted when empty, so a command that renders a full `block` below can pass a bare
+    verdict header without a trailing `()`."""
+    tail = f"  ({detail})" if detail else ""
+    return f"  [{done}/{total}] {tag}  {label}{tail}"
+
+
 class PlainProgress(ProgressReporter):
-    """One completion line per target — for pipes / CI / --no-stream. No cursor control, so it
-    is safe to interleave with nothing (the sweep is the only writer via the main thread)."""
+    """One completion entry per target — for pipes / CI / --no-stream. No cursor control, so it
+    is safe to interleave with nothing (the sweep is the only writer via the main thread). When the
+    caller supplies a `block` (its own fully-rendered per-repo result), it is printed right under the
+    header — so a command renders its result AT completion, never in a separate untrackable pass."""
 
     def __init__(self, out: TextIO) -> None:
         self._out = out
@@ -60,10 +70,13 @@ class PlainProgress(ProgressReporter):
     def start(self, total: int) -> None:
         self._total = total
 
-    def item_done(self, label: str, tag: str, detail: str) -> None:
+    def item_done(self, label: str, tag: str, detail: str, block: str | None = None) -> None:
         self._done += 1
         safe = textsafe.plain(label, limit=200)
-        self._out.write(f"  [{self._done}/{self._total}] {tag}  {safe}  ({detail})\n")
+        text = _header_line(self._done, self._total, tag, safe, detail)
+        if block:
+            text += "\n" + block.rstrip("\n")
+        self._out.write(text + "\n")
         self._out.flush()
 
 
@@ -71,10 +84,12 @@ class LiveProgress(ProgressReporter):
     """A multi-line live board on a TTY. All terminal writes happen on ONE render thread; the
     sweep only mutates state under a lock, so concurrent `item_*` calls never corrupt output."""
 
-    def __init__(self, out: TextIO, *, color: bool, interval: float = 0.1) -> None:
+    def __init__(self, out: TextIO, *, color: bool, interval: float = 0.1,
+                 verb: str = "Scanning") -> None:
         self._out = out
         self._color = color
         self._interval = interval
+        self._verb = verb
         self._lock = threading.Lock()
         self._total = 0
         self._done = 0
@@ -98,11 +113,11 @@ class LiveProgress(ProgressReporter):
         with self._lock:
             self._active[label] = None
 
-    def item_done(self, label: str, tag: str, detail: str) -> None:
+    def item_done(self, label: str, tag: str, detail: str, block: str | None = None) -> None:
         with self._lock:
             self._active.pop(label, None)
             self._done += 1
-            self._pending.append(self._completion_line(label, tag, detail))
+            self._pending.append(self._completion_line(label, tag, detail, block))
 
     def finish(self) -> None:
         self._running = False
@@ -149,7 +164,7 @@ class LiveProgress(ProgressReporter):
         # Show DONE and RUNNING distinctly: a bare "0/38" early in a sweep reads as stuck / as if it
         # were counting the wrong thing, when in fact several repos are already in flight.
         running = len(self._active)
-        header = self._fit(f"{spin} Scanning {self._total} repos — "
+        header = self._fit(f"{spin} {self._verb} {self._total} repos — "
                            f"{self._done} done · {running} running · {elapsed}s")
         lines = [paint(header, LINK, on=self._color)]
         shown = list(self._active)[:_MAX_INFLIGHT_LINES]
@@ -160,13 +175,17 @@ class LiveProgress(ProgressReporter):
             lines.append(f"  … +{hidden} more")
         return lines
 
-    def _completion_line(self, label: str, tag: str, detail: str) -> str:
+    def _completion_line(self, label: str, tag: str, detail: str, block: str | None = None) -> str:
         safe = textsafe.plain(label, limit=200)
-        # Fit the PLAIN line to width first, then colour the tag — so truncation never cuts an
+        # Fit the PLAIN header to width first, then colour the tag — so truncation never cuts an
         # ANSI reset (colour bleed) and the width maths counts visible characters, not bytes.
-        line = self._fit(f"  [{self._done}/{self._total}] {tag}  {safe}  ({detail})")
+        line = self._fit(_header_line(self._done, self._total, tag, safe, detail))
         painted = paint(tag, _tag_color(tag), on=self._color)
-        return line.replace(tag, painted, 1) if self._color else line
+        header = line.replace(tag, painted, 1) if self._color else line
+        # A caller's own rendered result (guard's status block, …) scrolls up UNDER its header, as a
+        # permanent region — not fitted (it's above the live region, so wrapping can't break the
+        # cursor maths, and truncating a multi-line result would lose detail).
+        return header + "\n" + block.rstrip("\n") if block else header
 
     def _fit(self, line: str) -> str:
         """Truncate a PLAIN line to the terminal width so the region never wraps (a wrapped
@@ -177,9 +196,11 @@ class LiveProgress(ProgressReporter):
         return line[:budget - 1] + "…"
 
 
-def make_progress(*, enabled: bool, out: TextIO, color: bool) -> ProgressReporter:
+def make_progress(*, enabled: bool, out: TextIO, color: bool,
+                  verb: str = "Scanning") -> ProgressReporter:
     """Pick the reporter for the run: a `LiveProgress` board when animation is `enabled`
-    (a real TTY, not --no-stream / CI / piped), else a `PlainProgress` line-per-target."""
+    (a real TTY, not --no-stream / CI / piped), else a `PlainProgress` line-per-target. `verb`
+    is the board header's action word ("Scanning"/"Fixing"/"Checking"…) — cosmetic only."""
     if enabled:
-        return LiveProgress(out, color=color)
+        return LiveProgress(out, color=color, verb=verb)
     return PlainProgress(out)

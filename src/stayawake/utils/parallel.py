@@ -27,12 +27,28 @@ from __future__ import annotations
 
 import concurrent.futures as cf
 import multiprocessing as mp
+import os
 import queue
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable
 
 PROCESS = "process"
 THREAD = "thread"
+
+
+def resolve_jobs(requested: int | None, count: int) -> int:
+    """Worker count for a sweep of `count` items — the single policy every command shares.
+
+    At most one worker per item (extra workers would idle), and ALWAYS 1 for a single item
+    (the inline fast-path — no pool, no cost, behaviour unchanged). `requested=None` = AUTO →
+    `min(cpu_count, count)`. An explicit `requested<=1` forces sequential."""
+    if count <= 1:
+        return 1
+    if requested is None:
+        return min(os.cpu_count() or 1, count)
+    if requested <= 1:
+        return 1
+    return min(requested, count)
 
 # How often the main loop wakes to drain start-signals while waiting on completions. Small
 # enough that a live progress board feels responsive, large enough to add no real overhead.

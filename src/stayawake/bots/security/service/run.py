@@ -16,9 +16,8 @@ import heapq
 
 from stayawake.utils import parallel
 from stayawake.utils.io import resolve_reports_dir
-from stayawake.utils.progress import make_progress
 from stayawake.utils.streaming import Streamer, status, stream_enabled
-from stayawake.utils.terminal import supports_color
+from stayawake.utils.sweep import run_sweep
 from stayawake.utils.timeutil import now_iso
 from stayawake.bots.security import scanner
 from stayawake.bots.security.matchers import REGISTRY
@@ -52,16 +51,10 @@ MANY_FINDINGS = 200
 
 
 def _resolve_workers(jobs: int | None, target_count: int) -> int:
-    """Concurrency for THIS scope: at most one worker per target (extra workers would idle), and
-    always 1 for a single target (the inline fast-path — no pool, no cost, behaviour unchanged).
-    `jobs=None` = AUTO → min(cpu_count, targets). An explicit `jobs<=1` forces sequential."""
-    if target_count <= 1:
-        return 1
-    if jobs is None:
-        return min(os.cpu_count() or 1, target_count)
-    if jobs <= 1:
-        return 1
-    return min(jobs, target_count)
+    """Concurrency for a multi-TARGET scope — the shared `parallel.resolve_jobs` policy (at most
+    one worker per target, always 1 for a single target). Kept as a named alias so the call sites
+    below read in scanner terms."""
+    return parallel.resolve_jobs(jobs, target_count)
 
 
 def _scan_targets(jobs_batch: list, labels: list[str], sources: list[str], worker_fn, *,
@@ -71,27 +64,10 @@ def _scan_targets(jobs_batch: list, labels: list[str], sources: list[str], worke
     crashes outright becomes an ERROR result (fail-closed → exit 2), never a silent drop. Any
     stdout/stderr a worker emitted is captured and REPLAYED here, after the live board closes, so a
     pool worker can never corrupt the board and no diagnostic is lost."""
-    progress = make_progress(enabled=progress_on, out=sys.stderr,
-                             color=supports_color(sys.stderr))
-    progress.start(len(jobs_batch))
-
-    def on_start(index: int, _item) -> None:
-        progress.item_started(labels[index])
-
-    def on_done(outcome: parallel.Outcome) -> None:
-        if outcome.error:
-            progress.item_done(labels[outcome.index], "[ERROR   ]", outcome.error)
-        else:
-            res = outcome.value.result
-            progress.item_done(labels[outcome.index], _status_tag(res),
-                               f"{len(res.findings)} findings")
-
-    try:
-        outcomes = parallel.run_ordered(worker_fn, jobs_batch, jobs=workers,
-                                        backend=parallel.PROCESS,
-                                        on_start=on_start, on_done=on_done)
-    finally:
-        progress.finish()
+    outcomes = run_sweep(
+        worker_fn, jobs_batch, jobs=workers, backend=parallel.PROCESS, labels=labels,
+        describe=lambda o: (_status_tag(o.value.result), f"{len(o.value.result.findings)} findings"),
+        progress_on=progress_on, out=sys.stderr)
 
     results: list[ScanResult] = []
     diagnostics: list[str] = []
