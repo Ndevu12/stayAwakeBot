@@ -21,13 +21,24 @@ import re
 from stayawake.bots.security import sourcescan
 from stayawake.bots.security.taint import flow, model
 
-# Necessary-substring PREFILTER anchors, DERIVED from the threat taxonomy (model.DECODE_CALLS) exactly
-# as flow._DECODE's regex is — so they can never drift (pinned by test_taint_model_derivation). Every
-# detect_dropper arm requires a decode call (flow._DECODE), whose call name's FIRST identifier segment
-# (`Buffer` of `Buffer.from`, `atob`) must appear contiguously in the text. So if none of these
-# lowercased anchors is present, NO arm can match and detect_dropper can early-return — skipping the
-# expensive regex/blob/scrub pipeline on the ~all files that carry no decode. Byte-identical.
+# Necessary PREFILTER anchors, DERIVED from the threat taxonomy (model.DECODE_CALLS) exactly as
+# flow._DECODE's regex is — so they can never drift (pinned by tests). EVERY detect_dropper arm
+# requires a decode call (flow._DECODE), whose call name's FIRST identifier segment (`Buffer` of
+# `Buffer.from`, `atob`) must appear contiguously in the source. If no anchor can appear, NO arm can
+# match, so detect_dropper early-returns — skipping the expensive regex/blob/scrub pipeline on the
+# ~all files that carry no decode.
+#
+# ⚠ CONTRACT: this gate is byte-identical ONLY while every arm in `_run_dropper_arms` requires a
+# `model.DECODE_CALLS` decode. If you add an arm keyed on a DIFFERENT decode class — e.g.
+# `model.CHARCODE_DECODES` (fromCharCode) — you MUST extend the anchors, or the gate will SILENTLY
+# skip it. `test_scanner_prefilter` enforces this: it fuzzes inputs from all `model` taxonomies and
+# fails if gated `detect_dropper` ever diverges from the un-gated `_run_dropper_arms`.
 _DECODE_ANCHORS = frozenset(name.split(".", 1)[0].lower() for name in model.DECODE_CALLS)
+# Match with the SAME re.IGNORECASE folding flow._DECODE uses — not str.lower() — so the gate has NO
+# case-fold asymmetry (str.lower() and re.IGNORECASE fold some Unicode differently, e.g. ſ/İ): the
+# anchor search matches exactly when a decode token could, making the skip a provably necessary
+# condition for any Unicode input.
+_DECODE_ANCHOR_RE = re.compile("|".join(re.escape(a) for a in sorted(_DECODE_ANCHORS)), re.IGNORECASE)
 
 # Reason strings (redaction-safe evidence).
 _R_DIRECT = "base64/hex decoded and run via a command/module sink (child_process/import/Worker)"
@@ -147,17 +158,24 @@ def _scope_closed(gap: str) -> bool:
 def detect_dropper(text: str) -> str | None:
     """Return a redaction-safe reason if `text` contains a baked encoded-payload → decode → exec
     dropper flow, else None. Consolidates the leading-argument forms (reused verbatim from the
-    hardened obfuscation arms) and the shell code-argument forms (this module). Static-only."""
+    hardened obfuscation arms) and the shell code-argument forms (this module). Static-only.
+
+    A necessary-decode-anchor PREFILTER short-circuits the (expensive) arms — the dominant scan-time
+    cost — on the ~all files with no decode. It is byte-identical to running the arms directly (see
+    `_run_dropper_arms` + the differential test); every arm requires a `model.DECODE_CALLS` decode."""
     if not text:
         return None
-
-    # Prefilter (byte-identical): every arm below requires a decode call (flow._DECODE). If the text
-    # carries none of the decode-name anchors, no arm can fire — skip the whole pipeline. This is the
-    # dominant scan-time cost (the pipeline runs on every authored file; ~0% of clean files decode).
-    low = text.lower()
-    if not any(anchor in low for anchor in _DECODE_ANCHORS):
+    # Prefilter: same re.IGNORECASE folding as flow._DECODE → a provably necessary condition (no
+    # case-fold asymmetry). If no decode anchor can appear, no arm can fire.
+    if not _DECODE_ANCHOR_RE.search(text):
         return None
+    return _run_dropper_arms(text)
 
+
+def _run_dropper_arms(text: str) -> str | None:
+    """The dropper arms WITHOUT the prefilter — the un-gated reference `detect_dropper` must equal.
+    Kept separate so a differential/fuzz test can pin the invariant that every arm requires a decode
+    anchor (so the gate can never silently drop a future arm). Do not call directly on the hot path."""
     # 1) Leading-argument forms — REUSE the shipped, 4-round-hardened detection (zero regression):
     #    a nested decode in a command/module/worker sink (self-evident), or a decode-through-variable
     #    reaching such a sink corroborated by a baked blob.
