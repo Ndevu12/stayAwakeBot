@@ -163,6 +163,27 @@ def installation_permissions(token: str | None) -> dict[str, str] | None:
         return None
 
 
+def app_authenticated(app_jwt: str | None) -> bool | None:
+    """Whether an App JWT still authenticates a live GitHub App (`GET /app`). Returns True (the App
+    exists), False ONLY when the App is DEFINITIVELY gone (404 — the app id does not exist), or None
+    when we cannot tell. Never raises.
+
+    The False verdict gates re-registration, so it must be conservative: a 401 (bad/expired key, or
+    clock skew making `iat` look future-dated) and a 403 (a *secondary* rate-limit returns 403 without
+    the primary-quota header) are NOT proof the App was deleted — mapping them to False would let a
+    transient error trigger a duplicate App (the very bug this guards). So only a 404 is "gone";
+    everything else non-200 (unauthorized / forbidden / rate-limited / network) → None, and the caller
+    stays cautious (offers `--replace` rather than auto-recreating)."""
+    if not app_jwt:
+        return None
+    r = _do_request("/app", token=app_jwt)
+    if r.cause is None:
+        return bool(isinstance(r.value, dict) and r.value.get("id"))
+    if r.cause == "not_found":
+        return False
+    return None
+
+
 def get_authenticated_user(token: str | None, quiet: bool = False) -> dict | None:
     """The account the token belongs to (its 'login' is the fork owner). None on failure.
 
