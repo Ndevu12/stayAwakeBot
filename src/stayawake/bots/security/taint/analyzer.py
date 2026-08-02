@@ -21,6 +21,14 @@ import re
 from stayawake.bots.security import sourcescan
 from stayawake.bots.security.taint import flow, model
 
+# Necessary-substring PREFILTER anchors, DERIVED from the threat taxonomy (model.DECODE_CALLS) exactly
+# as flow._DECODE's regex is — so they can never drift (pinned by test_taint_model_derivation). Every
+# detect_dropper arm requires a decode call (flow._DECODE), whose call name's FIRST identifier segment
+# (`Buffer` of `Buffer.from`, `atob`) must appear contiguously in the text. So if none of these
+# lowercased anchors is present, NO arm can match and detect_dropper can early-return — skipping the
+# expensive regex/blob/scrub pipeline on the ~all files that carry no decode. Byte-identical.
+_DECODE_ANCHORS = frozenset(name.split(".", 1)[0].lower() for name in model.DECODE_CALLS)
+
 # Reason strings (redaction-safe evidence).
 _R_DIRECT = "base64/hex decoded and run via a command/module sink (child_process/import/Worker)"
 _R_VAR = "base64 payload decoded via a variable and run (command/module/worker sink)"
@@ -141,6 +149,13 @@ def detect_dropper(text: str) -> str | None:
     dropper flow, else None. Consolidates the leading-argument forms (reused verbatim from the
     hardened obfuscation arms) and the shell code-argument forms (this module). Static-only."""
     if not text:
+        return None
+
+    # Prefilter (byte-identical): every arm below requires a decode call (flow._DECODE). If the text
+    # carries none of the decode-name anchors, no arm can fire — skip the whole pipeline. This is the
+    # dominant scan-time cost (the pipeline runs on every authored file; ~0% of clean files decode).
+    low = text.lower()
+    if not any(anchor in low for anchor in _DECODE_ANCHORS):
         return None
 
     # 1) Leading-argument forms — REUSE the shipped, 4-round-hardened detection (zero regression):

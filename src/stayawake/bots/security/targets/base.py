@@ -107,6 +107,10 @@ class Target:
         # file-chunk gets a Target restricted to its chunk; the file-based matchers run over just
         # those files, and their findings merge. `None` = normal full walk (unchanged).
         self.include_only = include_only
+        # Memoized full-walk file list: today each matcher calls `iter_files` → an independent
+        # `os.walk`; a scan runs ~15 of them. The walk is deterministic within a (read-only) scan, so
+        # caching the FIRST walk's list and replaying it is byte-identical and collapses N walks to 1.
+        self._walk_cache: list[str] | None = None
         # Files that EXIST (os.walk yielded them) but could not be READ — a permission error, a
         # restrictive ACL, etc. These are scan GAPS, not benign skips: scan_target promotes them to
         # result.error so the run fails CLOSED. A payload behind an unreadable file must never be
@@ -124,10 +128,14 @@ class Target:
         if self.include_only is not None:       # #1325: a pre-discovered file-chunk — no re-walk
             yield from self.include_only
             return
-        for dirpath, dirnames, filenames in os.walk(self.root):
-            dirnames[:] = [d for d in dirnames if d not in self.opts.exclude_dirs]
-            for fn in filenames:
-                yield str((Path(dirpath) / fn).relative_to(self.root))
+        if self._walk_cache is None:            # walk once, memoize (byte-identical replay after)
+            cache: list[str] = []
+            for dirpath, dirnames, filenames in os.walk(self.root):
+                dirnames[:] = [d for d in dirnames if d not in self.opts.exclude_dirs]
+                for fn in filenames:
+                    cache.append(str((Path(dirpath) / fn).relative_to(self.root)))
+            self._walk_cache = cache
+        yield from self._walk_cache
 
     def _note_unreadable(self, name: str, p: Path, exc: OSError) -> None:
         """A file present but unreadable is a scan GAP → recorded so the run fails CLOSED — EXCEPT a
