@@ -19,9 +19,9 @@ run on your own machine to detect, report, and auto-remediate self-propagating m
 - [Synopsis & global options](#synopsis--global-options)
 - [Commands](#commands)
   - [`saw scan`](#saw-scan) · [`saw fix`](#saw-fix) · [`saw discard`](#saw-discard) ·
-    [`saw audit`](#saw-audit) · [`saw guard`](#saw-guard) · [`saw db`](#saw-db) ·
-    [`saw search`](#saw-search) · [`saw intro`](#saw-intro) · [`saw doctor`](#saw-doctor) ·
-    [`saw completion`](#saw-completion)
+    [`saw audit`](#saw-audit) · [`saw guard`](#saw-guard) · [`saw hook`](#saw-hook) ·
+    [`saw db`](#saw-db) · [`saw search`](#saw-search) · [`saw intro`](#saw-intro) ·
+    [`saw doctor`](#saw-doctor) · [`saw completion`](#saw-completion)
 - [Remote targeting (`--remote`)](#remote-targeting---remote)
 - [How reports are stored (evidence & redaction)](#how-reports-are-stored-evidence--redaction)
 - [Exit codes](#exit-codes)
@@ -43,6 +43,7 @@ saw <command> [options] [TARGETS...]      # no command → welcome banner;  -h/-
 | [`saw discard`](#saw-discard) | Undo `saw fix`: delete the branch and/or close its PR | git / GitHub API |
 | [`saw audit`](#saw-audit) | Local hygiene: credentials, editor, host artifacts, branch protection (`--verify` content-scans a suspect dir) | Read-only |
 | [`saw guard`](#saw-guard) | Install & verify the **Strix worm-guard CI gate** across repos — `check` grades it (present / SHA-pinned / current / required); `setup` installs or surgically pin-bumps it | `check`: **read-only**; `setup`: working tree, or PR with `--pr`/`--remote` (never pushes a default branch; needs **`workflow` scope** or a Saw App) |
+| [`saw hook`](#saw-hook) | **Scan-on-clone:** install global git hooks so a `git clone`/`pull`/`rebase` auto-scans what just landed and warns *before* you run it | `install`/`uninstall`: your global git config + `~/.config/saw/git-template`; the scan itself is **read-only** |
 | [`saw auth`](#saw-auth) | Credential + capability status; register an operator-managed StayAwakeBot GitHub App | Local config / browser manifest + install flow |
 | [`saw db`](#saw-db) | Manage the offline advisory DB (malicious-package + CVE corpus) a scan consults | Cache only (`~/.cache/saw/advisories`) |
 | [`saw search`](#saw-search) | Fuzzy "what's the command for…?" lookup | — |
@@ -406,6 +407,56 @@ saw guard drift [TARGETS...] [-p PATH] [-c FILE] [-r] [--user U] [--org O] [--re
 saw guard drift                                 # this repo (or configured local targets): file/close the issue
 saw guard drift --remote --org UB-TechDEV       # sweep an org: open a drift issue in each behind repo
 ```
+
+### `saw hook`
+
+**Scan-on-clone** — install global git hooks so a fresh **clone**, a **pull**, a **branch switch**,
+or a **rebase** (including `git pull --rebase`) automatically scans the code that just landed and
+**warns before you run it** — `npm install`, a build, or an editor auto-run task, where a
+supply-chain worm fires. GitHub has no clone webhook, so this is deliberately **local**; the CI-gate
+equivalent is [`saw guard`](#saw-guard).
+
+It uses git's `init.templateDir` (not a global `core.hooksPath`), so it is **forward-looking**
+(existing repos are untouched), coexists with a repo's own hooks, and hijacks nothing. The scan is
+**read-only, offline, and trust-safe**: it uses the packaged signatures + *your* allowlist
+(optionally baked in with `--config`), **never** a cloned repo's own `config/security.yml` — a worm
+can't ship an allowlist to whitelist itself. The hook **warns and guides** ([`saw fix`](#saw-fix)),
+never auto-modifies, and can never break a git command.
+
+| Subcommand | What it does |
+| --- | --- |
+| `saw hook install` | Point git's global `init.templateDir` at saw's template, so future clones/inits get the scan hooks. |
+| `saw hook uninstall` | Reverse it (restoring any hook it had to preserve). |
+| `saw hook status` | Show whether it's active, the template dir, and the scan cache. |
+
+```text
+saw hook install [-c FILE]
+saw hook uninstall
+saw hook status
+```
+
+| Option | Description |
+| --- | --- |
+| `-c`, `--config FILE` | Operator config whose **allowlist** clones are scanned against — baked into the hook. The hook never reads a cloned repo's own config. |
+
+```bash
+saw hook install                       # future clones/pulls are scanned automatically
+saw hook install -c ~/security.yml     # scan clones against your allowlist
+saw hook status                        # is it active? where is its state?
+saw hook uninstall                     # stop scanning future clones
+SAW_HOOK_DISABLED=1 git clone <url>    # one-off bypass (e.g. bulk cloning) — no uninstall needed
+```
+
+**How it scopes the scan.** A fresh **clone** is scanned in full; a **pull** / **branch switch** /
+**rebase** scans only the changed files (`ORIG_HEAD..HEAD` / `old..new`), so it is near-instant, and
+a repeated full scan of the same revision is skipped via a SHA cache. Every scan runs under a
+wall-clock budget (`SAW_HOOK_TIMEOUT`, default 60s) so a giant clone can never hang git; on timeout
+the tree is reported **unverified** (never "clean").
+
+**Notes & limits.** Applies only to repos cloned/created *after* install (that is how
+`init.templateDir` works). A global `core.hooksPath` overrides per-repo hooks — `install`/`status`
+warn when one is set, since it would silently disable the scan hooks. `git reset --hard` fires no git
+hook, so code introduced that way is not auto-scanned — scan it with [`saw scan`](#saw-scan).
 
 ### `saw db`
 
