@@ -20,8 +20,8 @@ run on your own machine to detect, report, and auto-remediate self-propagating m
 - [Commands](#commands)
   - [`saw scan`](#saw-scan) · [`saw fix`](#saw-fix) · [`saw discard`](#saw-discard) ·
     [`saw audit`](#saw-audit) · [`saw guard`](#saw-guard) · [`saw hook`](#saw-hook) ·
-    [`saw db`](#saw-db) · [`saw search`](#saw-search) · [`saw intro`](#saw-intro) ·
-    [`saw doctor`](#saw-doctor) · [`saw completion`](#saw-completion)
+    [`saw auth`](#saw-auth) · [`saw db`](#saw-db) · [`saw search`](#saw-search) ·
+    [`saw intro`](#saw-intro) · [`saw doctor`](#saw-doctor) · [`saw completion`](#saw-completion)
 - [Remote targeting (`--remote`)](#remote-targeting---remote)
 - [How reports are stored (evidence & redaction)](#how-reports-are-stored-evidence--redaction)
 - [Exit codes](#exit-codes)
@@ -457,6 +457,61 @@ the tree is reported **unverified** (never "clean").
 `init.templateDir` works). A global `core.hooksPath` overrides per-repo hooks — `install`/`status`
 warn when one is set, since it would silently disable the scan hooks. `git reset --hard` fires no git
 hook, so code introduced that way is not auto-scanned — scan it with [`saw scan`](#saw-scan).
+
+### `saw auth`
+
+Show your GitHub **credential + capability status**, and register an **operator-managed StayAwakeBot
+GitHub App**. Most of saw works offline; `auth` is only about the credential used for the network
+paths — `--remote` scanning, `saw fix --pr`, and `saw guard setup --pr`. Running bare `saw auth` is
+the same as `saw auth status`.
+
+#### `saw auth status`
+
+Report the active credential (source, actor, whether it is **live**), its **scopes / capabilities**,
+whether a StayAwakeBot App is configured, and an **intent gate**: for each key action (read a remote,
+open a fix PR, open a guard PR) whether the current credential is allowed — and if not, exactly what
+is missing and the command to fix it. Exits non-zero when a live credential can't open a guard PR
+(the critical fleet path), so it drops straight into CI.
+
+```text
+saw auth status [--json] [--no-stream]
+```
+
+| Option | Description |
+| --- | --- |
+| `--json` | Machine-readable status: `source`, `kind`, `actor`, `live`, `scopes`, `capabilities`, `app_configured`, and the per-intent gate. |
+| `--no-stream` | Disable the animated output. |
+
+#### `saw auth app`
+
+Manage the operator-managed **StayAwakeBot GitHub App** — the recommended credential for acting
+across many repos/accounts (scoped, revocable, per-account installation tokens). Token signing is
+**built in** (no crypto extra to install).
+
+- **`saw auth app register`** — register + install a new App through GitHub's browser **manifest
+  flow**, storing the credentials locally (mode `0600`). **Idempotent:** if an App is already
+  configured it won't mint a duplicate (GitHub App names are globally unique) — it points you at
+  installing the *same* App on more accounts/orgs; `--replace` forces a brand-new one.
+- **`saw auth app show`** — show whether a local App config is present (id / name / slug /
+  installation) with the install + settings URLs.
+
+```text
+saw auth app register [--name NAME] [--no-browser] [--replace] [--no-stream]
+saw auth app show [--no-stream]
+```
+
+| Option | Description |
+| --- | --- |
+| `--name NAME` | App display name (default: `StayAwakeBot`). |
+| `--no-browser` | Print the local manifest URL instead of opening a browser. |
+| `--replace` | Register a brand-new App even if one is already configured (otherwise `register` is a no-op that points you at installing the existing App elsewhere). |
+
+```bash
+saw auth                                # credential + capability status (same as `saw auth status`)
+saw auth status --json                  # machine-readable; non-zero if a guard PR would be denied
+saw auth app register                   # register + install the StayAwakeBot App (browser flow)
+saw auth app show                       # is a local App configured? where, and how to install elsewhere
+```
 
 ### `saw db`
 
