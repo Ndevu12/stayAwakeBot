@@ -6,6 +6,26 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- **`saw hook` — scan-on-clone: catch a worm the moment code lands, before you run it** (#1195).
+  `saw hook install` seeds git's global `init.templateDir` so every FUTURE `git clone` / `git pull`
+  automatically scans what just arrived and warns **before** `npm install`, a build, or an editor
+  auto-run task can fire the payload — closing the window between "code lands" and "code runs". It's
+  **local by design** (GitHub has no clone webhook, so there's nothing to react to server-side).
+  - A fresh **clone** gets a full-tree scan; a **pull**, a **branch switch**, and a **rebase**
+    (including `git pull --rebase`, via `post-checkout` / `post-merge` / `post-rewrite`) scan only
+    the changed files (`ORIG_HEAD..HEAD` / `old..new`), so they're near-instant — and a repeated
+    full scan of the same rev is skipped via a SHA cache. The scan runs under a wall-clock budget
+    (`SAW_HOOK_TIMEOUT`, default 60s) so a giant clone can never hang git; on timeout it reports the
+    tree as **unverified** (never "clean").
+  - **Trust-safe:** the scan uses the packaged signatures + *your* allowlist (optionally baked in
+    with `saw hook install --config <file>`), **never** a cloned repo's own `config/security.yml` — a
+    worm can't ship an allowlist to whitelist itself. Read-only and offline; it **warns and guides**
+    (`saw fix`), never auto-modifies, and can never break a git command.
+  - Uses git's `init.templateDir` (not a global `core.hooksPath`), so it's forward-looking, coexists
+    with a repo's own hooks, and never hijacks existing repos. `saw hook uninstall` reverses it;
+    `saw hook status` shows state; `SAW_HOOK_DISABLED=1` is a per-shell kill-switch.
+
 ## [0.2.0] - 2026-08-03
 
 ### Changed

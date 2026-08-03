@@ -25,6 +25,9 @@ SLACK_WEBHOOK_URL = "SLACK_WEBHOOK_URL"
 STAYAWAKE_REPORTS_DIR = "STAYAWAKE_REPORTS_DIR"
 SAW_ADVISORY_CACHE_DIR = "SAW_ADVISORY_CACHE_DIR"
 XDG_CACHE_HOME = "XDG_CACHE_HOME"
+XDG_CONFIG_HOME = "XDG_CONFIG_HOME"     # base for saw's git-template dir (scan-on-clone hooks)
+SAW_HOOK_DISABLED = "SAW_HOOK_DISABLED"  # kill-switch: skip the scan-on-clone hook without uninstalling
+SAW_HOOK_TIMEOUT = "SAW_HOOK_TIMEOUT"   # wall-clock budget (s) for a scan-on-clone scan; 0 = no cap
 NO_COLOR = "NO_COLOR"
 CLICOLOR_FORCE = "CLICOLOR_FORCE"   # force colour on even when stdout is not a TTY (e.g. recording)
 CI = "CI"                           # set by CI runners → suppress colour so captured logs stay plain
@@ -98,3 +101,32 @@ def is_ci() -> bool:
 def stream_disabled() -> bool:
     """Live streaming is off when any NO_STREAM variable is set."""
     return any_set(NO_STREAM)
+
+
+def hook_disabled() -> bool:
+    """The scan-on-clone git hook is a no-op when SAW_HOOK_DISABLED is set to a truthy value —
+    a per-shell kill-switch (e.g. bulk-cloning) that doesn't require `saw hook uninstall`."""
+    return _truthy(get(SAW_HOOK_DISABLED))
+
+
+def hook_timeout() -> float:
+    """Wall-clock budget (seconds) for one scan-on-clone scan, so a giant clone can never hang git.
+    `SAW_HOOK_TIMEOUT` overrides the 60s default; `0`/negative/invalid means no cap."""
+    raw = get(SAW_HOOK_TIMEOUT)
+    if raw is None:
+        return 60.0
+    try:
+        val = float(raw)
+    except ValueError:
+        return 60.0
+    return val if val > 0 else 0.0
+
+
+def xdg_config_home() -> str:
+    """`$XDG_CONFIG_HOME`, else `~/.config` (the XDG default) — base for saw's git-template dir."""
+    return get(XDG_CONFIG_HOME) or os.path.join(os.path.expanduser("~"), ".config")
+
+
+def xdg_cache_home() -> str:
+    """`$XDG_CACHE_HOME`, else `~/.cache` (the XDG default) — base for saw's hook scan cache."""
+    return get(XDG_CACHE_HOME) or os.path.join(os.path.expanduser("~"), ".cache")
