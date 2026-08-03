@@ -6,6 +6,24 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-03
+
+### Fixed
+- **`saw hook` scan-on-clone UX refinements** (#1355). The runtime hook messages are rebranded from
+  `stayawake:` to StayAwakeBot / `saw`; the untrusted-clone warning now spells out exactly what to
+  AVOID so a worm can't execute — don't install its deps (npm/pip/yarn/pnpm), open it in an
+  editor/IDE (auto-run tasks/extensions fire on open), or build/run it — via one shared phrase for
+  both the infected and suspicious cases; a live spinner shows during the scan so a `git clone` never
+  looks stuck (transient, clears before the verdict, no-op when piped/CI); and the `saw scan` /
+  `saw fix` remediation commands render in the shared link colour. Follow-up to the #1195/#1352
+  feature.
+
+### Security
+- **Bumped the pinned self-scan engine to current main (`sentinel-ref` → merge of #1355), in both
+  the worm-guard gate and the release self-scan.** Catches the gate up to the `saw hook` UX
+  refinement (#1355). Both pin copies are bumped together, as the sync gate (`pin_tools.py synced`,
+  #1210) requires.
+
 ## [0.3.0] - 2026-08-03
 
 ### Added
@@ -1570,7 +1588,8 @@ release-publish hardening._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel
 (supply-chain worm detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.19...v0.2.0
 [0.1.19]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.18...v0.1.19
