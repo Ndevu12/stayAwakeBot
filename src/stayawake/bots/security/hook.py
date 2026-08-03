@@ -34,7 +34,8 @@ from pathlib import Path
 from stayawake.utils import env
 from stayawake.utils.config import load_yaml
 from stayawake.utils.pathsafe import is_safe_write_target
-from stayawake.utils.render import SEVERITY, paint
+from stayawake.utils.render import LINK, SEVERITY, paint
+from stayawake.utils.streaming import status as spin_status, stream_enabled
 from stayawake.utils.terminal import supports_color
 from stayawake.lib import git as gitutil
 from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions
@@ -47,6 +48,11 @@ _MARKER = "stayawake-scan-on-clone"        # identifies OUR hook script (idempot
 # `git pull --rebase`) and `commit --amend`. Together these cover the ways OTHERS' code lands.
 _HOOKS = ("post-checkout", "post-merge", "post-rewrite")
 _NULL_REV = "0" * 40                        # git's "no previous rev" — a clone's post-checkout old-rev
+_BRAND = "StayAwakeBot"                      # the product name (the CLI is `saw`)
+# The concrete actions that would let a just-landed worm EXECUTE — spelled out, not just "run it",
+# so the warning is actionable. Shared by the infected + suspicious messages.
+_AVOID = ("install its dependencies (`npm install` / `pip install` / `yarn` / `pnpm`), open it in "
+          "your editor/IDE (auto-run tasks & extensions fire on open), or build or run it")
 
 
 class HookError(Exception):
@@ -61,6 +67,12 @@ def _paint(text: str, level: str, stream) -> str:
     """Colour `text` at a shared level (ok/warn/dim) iff the stream supports it — so a piped/CI/
     NO_COLOR run degrades to clean text, exactly like the rest of the CLI."""
     return paint(text, _LEVELS.get(level), on=supports_color(stream))
+
+
+def _cmd(text: str, stream) -> str:
+    """A runnable command, rendered in the shared LINK colour (bold cyan) so remediation commands
+    stand out distinctly from the prose — the same treatment `saw audit`/`saw auth` give commands."""
+    return paint(text, LINK, on=supports_color(stream))
 
 
 # ── paths (XDG, mirroring dependencies.db / lib.github_app) ─────────────────────────────
@@ -359,7 +371,7 @@ def _scan_within_budget(root: Path, include, config_path: str | None, display: s
 
 def _warn_infected(display: str, result) -> None:
     err = sys.stderr
-    print("\n" + _paint(f"⚠  stayawake: WORM DETECTED in freshly-landed code — {display}",
+    print("\n" + _paint(f"⚠  {_BRAND}: WORM DETECTED in freshly-landed code — {display}",
                         "warn", err), file=err)
     for f in result.findings[:5]:
         loc = f"{f.path}:{f.line}" if f.line else f.path
@@ -367,10 +379,10 @@ def _warn_infected(display: str, result) -> None:
     extra = len(result.findings) - 5
     if extra > 0:
         print(_paint(f"     • …and {extra} more", "dim", err), file=err)
-    print(_paint("   DO NOT run `npm install`, build it, or open it in an editor yet.", "warn", err),
-          file=err)
-    print(_paint(f"   Inspect: saw scan {display}   ·   Remediate: saw fix --path {display}\n",
-                 "dim", err), file=err)
+    print(_paint(f"   Until it is cleaned, do NOT {_AVOID}.", "warn", err), file=err)
+    print("   " + _paint("Inspect:", "dim", err) + " " + _cmd(f"saw scan {display}", err)
+          + _paint("   ·   Remediate:", "dim", err) + " " + _cmd(f"saw fix --path {display}", err)
+          + "\n", file=err)
 
 
 def run_event(event: str, argv: list[str], config_path: str | None = None) -> int:
@@ -380,7 +392,7 @@ def run_event(event: str, argv: list[str], config_path: str | None = None) -> in
     try:
         return _run_event(event, argv, config_path)
     except BaseException as exc:            # noqa: BLE001 — last-resort: never break/confuse git
-        print(_paint(f"stayawake: scan-on-clone error — {exc}", "warn", sys.stderr), file=sys.stderr)
+        print(_paint(f"{_BRAND}: scan-on-clone error — {exc}", "warn", sys.stderr), file=sys.stderr)
         return 2
 
 
@@ -400,27 +412,34 @@ def _run_event(event: str, argv: list[str], config_path: str | None) -> int:
         return 0                            # already scanned this exact full tree
 
     err = sys.stderr
-    scanned = _scan_within_budget(root, include, config_path, display)
+    # A live spinner on stderr while we scan, so a `git clone` never LOOKS stuck (the scan can take a
+    # moment on a big tree). Transient — it clears before the verdict; a no-op when piped / CI.
+    with spin_status(f"{_BRAND}: scanning {display} for supply-chain worms…",
+                     enabled=stream_enabled(err)):
+        scanned = _scan_within_budget(root, include, config_path, display)
     if scanned is _TIMED_OUT:
         budget = env.hook_timeout()
-        print(_paint(f"⚠  stayawake: scan of {display} aborted after {budget:.0f}s (large tree) — "
-                     f"NOT verified. Run `saw scan {display}` before using it.", "warn", err), file=err)
+        print(_paint(f"⚠  {_BRAND}: scan of {display} aborted after {budget:.0f}s (large tree) — "
+                     "NOT verified.", "warn", err), file=err)
+        print("   " + _paint("Scan it yourself:", "dim", err) + " " + _cmd(f"saw scan {display}", err),
+              file=err)
         return 2
     result = scanned
 
     if head and include is None:            # only a full-tree scan is safe to cache by HEAD
         _remember(root, head)
     if result.error:
-        print(_paint(f"stayawake: scan-on-clone hit an error scanning {display} — {result.error}",
+        print(_paint(f"{_BRAND}: scan-on-clone hit an error scanning {display} — {result.error}",
                      "warn", err), file=err)
         return 2
     if result.infected:
         _warn_infected(display, result)
         return 1
     if result.suspicious:
-        print(_paint(f"⚠  stayawake: {display} — {len(result.findings)} suspicious signal(s); "
-                     f"review with `saw scan {display}` before running it.", "warn", err), file=err)
+        print(_paint(f"⚠  {_BRAND}: {display} — {len(result.findings)} suspicious signal(s). "
+                     f"Until you've reviewed it, do NOT {_AVOID}.", "warn", err), file=err)
+        print("   " + _paint("Review:", "dim", err) + " " + _cmd(f"saw scan {display}", err), file=err)
         return 0
     if label == "clone":                    # a fresh clone: confirm it's clean (a pull stays quiet)
-        print(_paint(f"✓ stayawake: {display} scanned clean.", "ok", err), file=err)
+        print(_paint(f"✓ {_BRAND}: {display} scanned clean.", "ok", err), file=err)
     return 0

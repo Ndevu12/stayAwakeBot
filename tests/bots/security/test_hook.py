@@ -9,6 +9,7 @@ import contextlib
 import io
 import os
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -231,6 +232,39 @@ class TestRunEventScope(_Isolated):
             self.assertEqual(hook.run_event("post-rewrite", ["amend"]), 0)
             m.assert_not_called()
 
+    def test_infected_warning_is_branded_and_actionable(self):
+        repo = _repo({".gitignore": _INFECTED})
+        self._in_repo(repo)
+        head = hook.gitutil.stdout(repo, ["rev-parse", "HEAD"]).strip()
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            rc = hook.run_event("post-checkout", [hook._NULL_REV, head, "1"])
+        out = buf.getvalue()
+        self.assertEqual(rc, 1)
+        self.assertIn("StayAwakeBot", out)                   # correct product branding…
+        self.assertNotIn("stayawake:", out)                  # …not the old lowercase prefix
+        # spells out what to AVOID, not just "before running it"
+        self.assertIn("npm install", out)
+        self.assertIn("editor", out)
+        # the remediation commands are present (rendered distinctly via LINK)
+        self.assertIn("saw scan ", out)
+        self.assertIn("saw fix ", out)
+
+    def test_suspicious_warning_spells_out_what_to_avoid(self):
+        # a base64 decode→exec repo is heuristic/suspicious, not confirmed-infected
+        repo = _repo({"index.js": "const r = require('child_process').execSync("
+                                  "Buffer.from('ZWNobyBoaQ==','base64').toString());\n"})
+        self._in_repo(repo)
+        head = hook.gitutil.stdout(repo, ["rev-parse", "HEAD"]).strip()
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            rc = hook.run_event("post-checkout", [hook._NULL_REV, head, "1"])
+        out = buf.getvalue()
+        self.assertEqual(rc, 0)                              # suspicious does not fail
+        self.assertIn("StayAwakeBot", out)
+        self.assertIn("npm install", out)                    # avoid-list, not just "before running it"
+        self.assertIn("saw scan ", out)
+
     def test_kill_switch_skips_everything(self):
         repo = _repo({".gitignore": _INFECTED})
         self._in_repo(repo)
@@ -263,6 +297,15 @@ class TestHookScript(unittest.TestCase):
     def test_hook_script_has_no_config_flag_when_none(self):
         s = hook._hook_script("post-merge", "/usr/local/bin/saw", None)
         self.assertNotIn("--config", s)
+
+    def test_remediation_commands_use_a_distinct_colour(self):
+        from stayawake.utils.render import LINK, SEVERITY
+        with mock.patch.object(hook, "supports_color", return_value=True):
+            cmd = hook._cmd("saw scan /x", sys.stdout)          # a remediation command
+            label = hook._paint("Inspect:", "dim", sys.stdout)  # surrounding prose
+        self.assertIn(LINK, cmd)                                # command in the LINK colour…
+        self.assertNotIn(LINK, label)                           # …distinct from the dim prose
+        self.assertIn(SEVERITY["info"], label)
 
 
 class TestTrustModel(_Isolated):
