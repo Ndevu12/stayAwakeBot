@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-03
+
 ### Added
 - **`saw hook` — scan-on-clone: catch a worm the moment code lands, before you run it** (#1195).
   `saw hook install` seeds git's global `init.templateDir` so every FUTURE `git clone` / `git pull`
@@ -25,6 +27,12 @@ All notable changes to this project are documented here. The format is based on
   - Uses git's `init.templateDir` (not a global `core.hooksPath`), so it's forward-looking, coexists
     with a repo's own hooks, and never hijacks existing repos. `saw hook uninstall` reverses it;
     `saw hook status` shows state; `SAW_HOOK_DISABLED=1` is a per-shell kill-switch.
+
+### Security
+- **Bumped the pinned self-scan engine to current main (`sentinel-ref` → merge of #1353), in both
+  the worm-guard gate and the release self-scan.** Catches the gate up to the reviewed engine work
+  since the last pin (#1348): the `saw hook` scan-on-clone command (#1195/#1352). Both pin copies
+  are bumped together, as the sync gate (`pin_tools.py synced`, #1210) requires.
 
 ## [0.2.0] - 2026-08-03
 
@@ -1562,7 +1570,8 @@ release-publish hardening._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel
 (supply-chain worm detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.19...v0.2.0
 [0.1.19]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.18...v0.1.19
 [0.1.18]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.17...v0.1.18

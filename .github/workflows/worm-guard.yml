@@ -30,14 +30,13 @@ jobs:
         with:
           # Pin the scanner to a known-good SHA, never @main (SECURITY_BASELINE doctrine):
           # a later compromise of main cannot silently change what the gate runs. This points at
-          # current main (merge of #1348). Since the last pin (#1322) it catches up parallel
-          # multi-repo / within-repo scanning + parallel fix/guard sweeps (#1205/#1325/#1327/#1328/
-          # #1329/#1348) and the prefilter-gated decode→exec analysis (#1326). requires-python >=3.11
+          # current main (merge of #1353). Since the last pin (#1348) it catches up the `saw hook`
+          # scan-on-clone command (#1195/#1352) and its docs. requires-python >=3.11
           # satisfies the 3.13 runner. Bump this deliberately after reviewed engine changes — the
           # in-band pin-freshness gate (#1172) fails an engine PR that doesn't bump this, both pin
           # copies must AGREE (pin_tools.py synced, #1210), and scanner-pin-drift opens an issue if
           # it falls behind.
-          sentinel-ref: efd0a21f37123c719a78ab5d3ce60e57c602abb4   # merge of #1348 — catches up parallel scanning + parallel fix/guard sweeps (#1205/#1325/#1327/#1328/#1329/#1348) and the prefilter-gated decode→exec analysis (#1326)
+          sentinel-ref: e80c38f8527327fc55c793bc562eaa8b4954c4d4   # merge of #1353 — catches up the `saw hook` scan-on-clone command (#1195/#1352)
           fail-on-findings: 'true'
           # This gate never uploads SARIF — the job conclusion is the scan's exit code, nothing
           # else. Code-scanning delivery is owned solely by security-sentinel.yml.
