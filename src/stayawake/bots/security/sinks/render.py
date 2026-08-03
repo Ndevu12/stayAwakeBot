@@ -159,6 +159,14 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False,
     notes = _coverage_notes(payload)               # honest coverage caveats (#1222) — never gating
     if notes:
         out += ["", "Coverage notes (not gating):"] + [f"  • {n}" for n in notes]
+    # Host-scope note (#1332): a repo-content scan says nothing about host PERSISTENCE. Surfaced when
+    # nothing is infected — the exact moment a user might read "clean" and rotate a token, which can
+    # arm a rotation-wiper daemon. Terminal-only, never gates; the authoritative host verdict is
+    # `saw audit` (which now withholds its all-clear until the persistence surface is verified).
+    if not s.get("infected"):
+        out += ["", "Host note: a clean repo scan is NOT a host all-clear — it does not check host "
+                    "persistence. Before rotating any credential, run `saw audit` (rotating while a "
+                    "persistence daemon is live can arm a home-directory wiper)."]
     return "\n".join(out) + "\n"
 
 

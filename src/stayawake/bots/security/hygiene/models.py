@@ -63,6 +63,34 @@ CREDENTIAL_EXPOSURE_IDS = {"git-credentials-plaintext"}
 # Union kept for back-compat (any finding that carries an incident context, of either tier).
 INCIDENT_TRIGGER_IDS = ACTIVE_PERSISTENCE_IDS | CREDENTIAL_EXPOSURE_IDS
 
+# UNVERIFIED persistence surface (#1332) — a user-owned persistence location EXISTS but could not be
+# read (permissions / an unreadable path), so this host cannot be certified free of a rotation-wiper.
+# This is the "never claim clean over content you did not read" principle applied to the persistence
+# surface, where the cost of a wrong all-clear is a wiped home directory rather than a missed finding.
+# It is NOT a finding (we found nothing) and NOT clean (we could not look) — it is UNKNOWN.
+UNVERIFIED_PERSISTENCE_IDS = {"persistence-surface-unverified"}
+
+# The run may NOT assert that credential rotation is safe when EITHER active persistence was found OR
+# the persistence surface could not be fully enumerated. Both withhold the all-clear (safety dominates:
+# the catastrophic axis, encoded orthogonally to the confidence-graded finding verdict).
+ROTATION_UNSAFE_IDS = ACTIVE_PERSISTENCE_IDS | UNVERIFIED_PERSISTENCE_IDS
+
+# Rotation-safety verdict states (the run-level property #1332 adds). A property of the WHOLE run,
+# reachable even when no individual finding is present.
+ROTATION_SAFE = "safe"                 # surface enumerated AND clean → rotating credentials is safe
+ROTATION_UNSAFE_PERSISTENCE = "unsafe-persistence"   # active persistence found → rotate LAST
+ROTATION_UNSAFE_UNKNOWN = "unsafe-unknown"           # surface could not be verified → treat as unsafe
+
+
+def rotation_safety(issue_ids: set[str]) -> str:
+    """The run-level rotation-safety verdict from the set of finding ids. Active persistence dominates
+    (a live wiper), then an unverified surface (couldn't look), else safe. See ROTATION_* above."""
+    if issue_ids & ACTIVE_PERSISTENCE_IDS:
+        return ROTATION_UNSAFE_PERSISTENCE
+    if issue_ids & UNVERIFIED_PERSISTENCE_IDS:
+        return ROTATION_UNSAFE_UNKNOWN
+    return ROTATION_SAFE
+
 
 def incident_response_sequence() -> list[str]:
     """The canonical order for responding to a suspected worm compromise. Rotation is
