@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- **`saw audit` now certifies the persistence surface, and states whether credential rotation is
+  safe** (#1332). A clean audit no longer silently implies a persistence check it didn't perform: a
+  new coverage probe enumerates the user-owned persistence locations (launch agents / user services,
+  `~/.ssh/authorized_keys`, shell startup files) and, when one **exists but cannot be read**, the run
+  reports **UNKNOWN** rather than clean — the "never claim clean over content you didn't read"
+  principle applied where a wrong all-clear costs a wiped home directory. (A non-regular file planted
+  at a persistence path — e.g. a FIFO that would block a naive read forever — is flagged *unverified*,
+  never opened, closing the #1226 hazard class here too.) Every run now prints a
+  **run-level rotation-safety verdict** (reachable even with zero findings): *safe* (surface
+  enumerated and clean), or *UNSAFE* (active persistence found, or the surface could not be verified)
+  — because rotating a token while a `gh-token-monitor` daemon is live arms the wiper.
+  - **Exit codes:** the catastrophic axis gates **unconditionally** — active host persistence or an
+    unverified surface exits **`3`** ("rotation unsafe / not verified"), regardless of `-f`; the
+    weaker hygiene warnings keep their opt-in `-f → 1` gate. `3` is additive (every `rc==0`/`rc!=0`
+    consumer fails safe; distinct from infected `1` / error `2`). Detection is unchanged.
+  - **`saw scan`** clean output now carries a one-line **host note**: a repo-content scan is not a
+    host all-clear — run `saw audit` before rotating credentials. (Terminal-only; never gates.)
+
 ## [0.3.1] - 2026-08-03
 
 ### Fixed

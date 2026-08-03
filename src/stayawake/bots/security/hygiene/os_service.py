@@ -33,6 +33,16 @@ def _launchd_dirs() -> tuple[Path, ...]:
             Path("/Library/LaunchDaemons"))
 
 
+def user_persistence_dirs() -> tuple[Path, ...]:
+    """The USER-OWNED launch-agent / service dirs a user-level worm can plant into WITHOUT root —
+    the home-relative subset of the dirs scanned above. Exposed as the single source of truth for
+    the persistence-coverage probe (#1332): a dir we read to DETECT a plant is one we must be able
+    to read to certify the host clean. System dirs (/etc, /Library/…) are best-effort, so their
+    unreadability is N/A, not unknown — a system-level plant needs root, outside the npm-worm model."""
+    return (_systemd_unit_dirs()[0],    # ~/.config/systemd/user   (Linux; absent elsewhere = N/A)
+            _launchd_dirs()[0])         # ~/Library/LaunchAgents    (macOS; absent elsewhere = N/A)
+
+
 def _scan_service_dirs(dirs, suffixes) -> list[tuple[Path, bool]]:
     """(path, is_named) for unit/agent files whose NAME matches the wiper or a lookalike.
     Read-only directory listing; a missing/unreadable dir is skipped (graceful degradation)."""

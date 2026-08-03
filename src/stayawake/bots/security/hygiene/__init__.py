@@ -26,10 +26,13 @@ from pathlib import Path   # noqa: F401  re-exported so tests can patch hygiene.
 from typing import Callable
 
 from .models import (HygieneIssue, INCIDENT_TRIGGER_IDS, ACTIVE_PERSISTENCE_IDS,
-                     CREDENTIAL_EXPOSURE_IDS, incident_response_sequence, credential_exposure_note)
+                     CREDENTIAL_EXPOSURE_IDS, UNVERIFIED_PERSISTENCE_IDS, ROTATION_UNSAFE_IDS,
+                     ROTATION_SAFE, ROTATION_UNSAFE_PERSISTENCE, ROTATION_UNSAFE_UNKNOWN,
+                     rotation_safety, incident_response_sequence, credential_exposure_note)
 from .credentials import check_credentials
 from .runner import check_runner_persistence
 from .os_service import check_persistence
+from .coverage import check_persistence_coverage
 from .host_artifacts import check_host_artifacts
 from .editor import check_vscode
 from .mechanism import check_ssh_authorized_keys, check_shell_profile, check_git_config_execution
@@ -37,8 +40,10 @@ from .remote import check_branch_protection
 from stayawake.utils.render import SEVERITY, block, marked_list, paint
 
 __all__ = [
-    "HygieneIssue", "INCIDENT_TRIGGER_IDS", "incident_response_sequence",
-    "check_credentials", "check_runner_persistence", "check_persistence", "check_host_artifacts",
+    "HygieneIssue", "INCIDENT_TRIGGER_IDS", "ROTATION_UNSAFE_IDS", "rotation_safety",
+    "incident_response_sequence",
+    "check_credentials", "check_runner_persistence", "check_persistence",
+    "check_persistence_coverage", "check_host_artifacts",
     "check_vscode", "check_ssh_authorized_keys", "check_shell_profile", "check_git_config_execution",
     "check_branch_protection", "audit", "audit_checks", "render",
 ]
@@ -69,6 +74,7 @@ def audit_checks(slug: str | None = None, token: str | None = None, branch: str 
         ("VS Code settings", check_vscode),
         ("self-hosted runner", check_runner_persistence),
         ("OS-service persistence", check_persistence),
+        ("persistence surface readable", check_persistence_coverage),   # #1332 enumeration honesty
         ("host drop-files", lambda: check_host_artifacts(verify=verify_artifacts)),
         ("SSH authorized_keys", check_ssh_authorized_keys),
         ("shell startup files", check_shell_profile),
@@ -100,24 +106,59 @@ def _banner(issue_ids: set[str], *, color: bool, width: int) -> list[str]:
             marked_list(steps, ordered=ordered, indent=5, width=width))
 
 
+def _rotation_verdict(issues: list[HygieneIssue], *, color: bool, width: int) -> list[str]:
+    """The run-level ROTATION-SAFETY verdict (#1332) — ALWAYS stated, reachable even with zero
+    findings. Says explicitly whether credential rotation is safe, because rotating while a
+    `gh-token-monitor` daemon is live arms a home-directory wiper. Three states (see models):
+    SAFE (surface enumerated + clean), UNSAFE-persistence (a live foothold → the isolate/rotate-LAST
+    runbook follows in _banner), UNSAFE-unknown (surface could not be read → treat as unsafe)."""
+    verdict = rotation_safety({i.id for i in issues})
+    if verdict == ROTATION_SAFE:
+        return [paint("✓ Rotation safety: persistence surface enumerated and clean — rotating "
+                      "credentials is safe.", SEVERITY["ok"], on=color)]
+    if verdict == ROTATION_UNSAFE_PERSISTENCE:
+        return [paint("⚠️  Rotation safety: UNSAFE — active host persistence detected; do NOT rotate "
+                      "any credential yet (runbook below).", SEVERITY["warning"], on=color)]
+    # UNSAFE-unknown: name exactly what could not be read, so the gap is actionable, not vague.
+    lines = [paint("⚠️  Rotation safety: UNKNOWN — the persistence surface could not be fully "
+                   "verified, so treat credential rotation as UNSAFE until it is.",
+                   SEVERITY["warning"], on=color)]
+    for i in issues:
+        if i.severity == "unknown":
+            lines += block(i.detail, indent=5, width=width)
+    return lines
+
+
 def render(issues: list[HygieneIssue], *, color: bool = False, width: int = 80) -> str:
     """Human-facing audit report. `color` (ANSI, gated by the caller via
     core.terminal.supports_color) and `width` (terminal columns, from core.render.term_width)
     default to plain/80 so a piped or test invocation is deterministic. Findings are grouped
     worst-first (warnings to act on, then weaker items to review); long detail/fix/runbook lines
-    wrap to `width` with a hanging indent."""
-    if not issues:
-        return paint("✓ Local security hygiene: no issues found.", SEVERITY["ok"], on=color)
+    wrap to `width` with a hanging indent. The run-level rotation-safety verdict (#1332) always
+    leads — reachable even when no individual finding is present."""
+    rotation = _rotation_verdict(issues, color=color, width=width)
 
+    # `unknown` items (unverified persistence surface) are surfaced in the rotation verdict above, not
+    # as findings — they are the ABSENCE of a look, not something found. Split them out of the groups.
     warnings = [i for i in issues if i.severity == "warning"]
-    reviews = [i for i in issues if i.severity != "warning"]
+    reviews = [i for i in issues if i.severity == "info"]
+
+    if not (warnings or reviews):
+        # No findings. The verdict still stands: "clean" if the surface was verified, "unknown" if not.
+        head = ("✓ Local security hygiene: no issues found."
+                if all(i.severity != "unknown" for i in issues)
+                else "Local security hygiene: no findings, but the persistence surface is UNVERIFIED.")
+        code = SEVERITY["ok"] if "no issues" in head else SEVERITY["warning"]
+        return "\n".join([paint(head, code, on=color), ""] + rotation).rstrip()
+
     counts = []
     if warnings:
         counts.append(f"{len(warnings)} warning{'' if len(warnings) == 1 else 's'}")
     if reviews:
         counts.append(f"{len(reviews)} to review")
-    n = len(issues)
+    n = len(warnings) + len(reviews)
     lines = [f"Local security hygiene — {n} finding{'' if n == 1 else 's'}: " + ", ".join(counts), ""]
+    lines += rotation + [""]
 
     banner = _banner({i.id for i in issues}, color=color, width=width)
     if banner:
