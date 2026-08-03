@@ -284,6 +284,14 @@ saw discard --branch --remote # delete the branch across the configured GitHub t
 Run a local security hygiene audit: credential exposure, editor (VS Code) settings, host
 persistence / drop-artifacts, and — optionally — a repository's default-branch protection.
 
+**Rotation safety (#1332).** Every audit ends with a **run-level rotation-safety verdict** — reachable
+even with zero findings — because rotating a credential while a `gh-token-monitor` daemon is live arms
+a home-directory wiper. The audit **enumerates the user-owned persistence surface** (launch agents /
+user services, `~/.ssh/authorized_keys`, shell startup files); if a location **exists but cannot be
+read**, the run is **UNKNOWN, not clean** (`saw` never claims clean over content it did not read).
+The verdict is one of: *safe* (surface enumerated and clean → rotation is safe), or **UNSAFE** —
+active persistence found, or the surface could not be verified.
+
 ```text
 saw audit [--repo OWNER/NAME] [-b BRANCH] [-f] [--verify]
 ```
@@ -292,14 +300,21 @@ saw audit [--repo OWNER/NAME] [-b BRANCH] [-f] [--verify]
 | --- | --- |
 | `--repo OWNER/NAME` | Also audit this repository's branch protection (needs a token). |
 | `-b`, `--branch NAME` | Branch to check protection for (default: `main`). |
-| `-f`, `--fail` | Exit `1` if any warning-level issue is found. (Also accepts `--fail-on-issues`.) |
+| `-f`, `--fail` | Exit `1` if a **weaker** warning-level hygiene issue is found. (Also accepts `--fail-on-issues`.) The **rotation-unsafe** axis below gates *unconditionally*, independent of this flag. |
 | `--verify` | When the audit flags a lone **weak** host artifact (e.g. a `~/.node_modules` in `$HOME`), content-scan it to corroborate — it looks *inside* the directory (the everyday `node_modules`/`dist`/`build` excludes are turned off, so the tree is actually examined) and turns the weak indicator into a real verdict: CONFIRMED worm markers → a `warning`; fully scanned clean → a reassuring note; too large / unreadable → the same honest "verify it yourself." **Opt-in** (slower) and **bounded**; graded on CONFIRMED signatures only (a tree of minified libraries is not mistaken for malware). It calls the scan engine directly on that one directory and **never touches `saw scan`** — no repository discovery, no change to how `saw scan` finds or scans repos. |
 
 ```bash
-saw audit                                       # local credential + editor + host hygiene
+saw audit                                       # local hygiene + persistence surface + rotation verdict
 saw audit --repo Ndevu12/strix -f               # also gate on branch-protection issues
 saw audit --verify                              # also content-scan a weak ~/.node_modules
+saw audit; echo $?                              # 3 = rotation UNSAFE (persistence found / unverified)
 ```
+
+**Exit codes:** `0` = clean and rotation-safe; **`3`** = **rotation unsafe** — active host persistence
+was found, **or** the persistence surface could not be verified; `1` = a weaker hygiene warning under
+`-f`. `3` gates *unconditionally* (a live wiper is data-loss, not an opt-in concern) and is additive —
+existing `rc == 0` / `rc != 0` consumers fail safe, and it is distinct from `saw scan`'s infected `1` /
+error `2`. A migration note for consumers is in [Exit codes](#exit-codes).
 
 ### `saw guard`
 
@@ -670,9 +685,10 @@ code is the verdict, unconditionally** — a CI gate just checks it, no flag req
 
 | Code | Meaning |
 | --- | --- |
-| `0` | Clean. For `saw scan`, no scanned target is infected. For `saw audit`, no warning-level issue (or issues found without `-f`). For `saw guard check`, every gate is present, pinned, current, and required (or issues found without `-f`); for `saw guard setup`, every repo succeeded or was already up to date. |
-| `1` | For `saw scan`, at least one target is **infected** — returned unconditionally (there is no `--fail`). For `saw audit`, a warning-level issue was found **and** `-f/--fail` was set. For `saw guard check`, a gate is absent, unpinned, stale, or not required **and** `-f` was set; for `saw guard setup`, a repo errored or a PR could not be opened. |
+| `0` | Clean. For `saw scan`, no scanned target is infected. For `saw audit`, the persistence surface is enumerated and clean and no weaker warning gated (**rotation-safe**). For `saw guard check`, every gate is present, pinned, current, and required (or issues found without `-f`); for `saw guard setup`, every repo succeeded or was already up to date. |
+| `1` | For `saw scan`, at least one target is **infected** — returned unconditionally (there is no `--fail`). For `saw audit`, a **weaker** warning-level hygiene issue was found **and** `-f/--fail` was set. For `saw guard check`, a gate is absent, unpinned, stale, or not required **and** `-f` was set; for `saw guard setup`, a repo errored or a PR could not be opened. |
 | `2` | Usage error (unknown command, bad option, or a missing explicit `--config` path), **or** a scan that could not complete — a malformed config (e.g. an `allowlist` that isn't a list of mappings) or a target that errored during scanning. `saw scan` fails **closed** here: a target it could not scan is never reported as clean. `saw guard setup` also exits `2` when it can't resolve the Strix release SHA (offline → pass `--ref`). |
+| `3` | **`saw audit` only — rotation UNSAFE** (#1332): active host persistence was found, **or** the persistence surface could not be verified (a user-owned location existed but couldn't be read). Gated **unconditionally** (independent of `-f`), because rotating a credential while a persistence daemon is live can arm a home-directory wiper. **Migration:** `3` is additive — code that treats "`0` = ok, non-zero = attention" is already correct and fails safe. Only code that specifically distinguished `saw audit`'s `1` from `2` needs to also handle `3`. `saw scan` / `saw guard` never return `3`. |
 
 ## Command aliases & shell completion
 

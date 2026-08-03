@@ -28,6 +28,16 @@ _RUNNER_DIR_CANDIDATES = (
 )
 
 
+def user_runner_dirs() -> tuple[Path, ...]:
+    """The HOME-relative self-hosted-runner install dirs — the user-owned subset of the candidates
+    scanned above. Single source of truth for the persistence-coverage probe (#1332): a dir we read
+    to detect a runner foothold is one we must be able to read to certify the host clean. The
+    system paths (/opt, /) are best-effort, so their unreadability is N/A (a system install needs
+    root, outside the npm-worm model)."""
+    home = Path.home()
+    return tuple(d for d in _RUNNER_DIR_CANDIDATES if d == home or home in d.parents)
+
+
 def _installed_runner_dir() -> Path | None:
     for d in _RUNNER_DIR_CANDIDATES:
         try:
