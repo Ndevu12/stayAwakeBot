@@ -247,6 +247,15 @@ signatures:
     remediation: strip-gitignore-markers
 
   # ── Evil merge (git history) ─────────────────────────────────────────────────
+  # Graded by CORROBORATION STRENGTH (the matcher routes each merge to one of these two ids):
+  #   evil-merge         — structural (new-file-unseen-by-parents) or context-aware obfuscation of the
+  #                        introduced hunk. Review-evading, but no known-malware fingerprint → HEURISTIC.
+  #   evil-merge-loader  — the merge-introduced hunk MATCHES A WORM LOADER SIGNATURE. A known-malware
+  #                        payload smuggled through an unreviewable merge is decisive on its own →
+  #                        CONFIRMED / critical (same grade the loader earns when found directly).
+  # Detection (which merges/paths are flagged) is identical across the two; only the confidence/severity
+  # partition differs. Both defer to MANUAL: the finding is keyed to a merge COMMIT, not a working-tree
+  # file, so `saw fix` gives history-provenance guidance and NEVER rewrites history (a maintainer call).
   - id: evil-merge
     category: evil-merge
     severity: high
@@ -254,6 +263,14 @@ signatures:
     confidence: heuristic
     kind: evil-merge
     description: "Merge commit introducing content beyond a clean 3-way merge of its parents (review-evading)"
+    remediation: manual
+  - id: evil-merge-loader
+    category: evil-merge
+    severity: critical
+    matcher: git-history
+    confidence: confirmed
+    kind: evil-merge
+    description: "Merge commit smuggling a worm loader payload past review (introduced hunk matches a loader signature)"
     remediation: manual
 
   # ── Shai-Hulud exfiltration / persistence branding (content) ─────────────────

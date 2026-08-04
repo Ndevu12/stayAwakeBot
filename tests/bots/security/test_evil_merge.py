@@ -12,12 +12,20 @@ from pathlib import Path
 
 from stayawake.bots.security.matchers.git_history import GitHistoryMatcher          # noqa: E402
 from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions  # noqa: E402
+from stayawake.bots.security.models import Severity                       # noqa: E402
 
-EVIL_SIG = [{
-    "id": "evil-merge", "category": "evil-merge", "severity": "high",
-    "matcher": "git-history", "kind": "evil-merge",
-    "description": "evil merge", "remediation": "manual",
-}]
+# The two graded evil-merge signatures + a loader content signature to corroborate arm (b).
+EVIL_SIG = [
+    {"id": "evil-merge", "category": "evil-merge", "severity": "high",
+     "matcher": "git-history", "kind": "evil-merge", "confidence": "heuristic",
+     "description": "evil merge", "remediation": "manual"},
+    {"id": "evil-merge-loader", "category": "evil-merge", "severity": "critical",
+     "matcher": "git-history", "kind": "evil-merge", "confidence": "confirmed",
+     "description": "evil merge smuggling a loader", "remediation": "manual"},
+    {"id": "loader-fromcharcode", "category": "code-loader", "severity": "critical",
+     "matcher": "content", "pattern": r"String\.fromCharCode\s*\(",
+     "description": "fromCharCode loader", "remediation": "recover"},
+]
 
 
 def _git(d, *args):
@@ -275,6 +283,66 @@ class TestEvilMerge(unittest.TestCase):
         cands = gitutil.merge_commits(self.d)
         self.assertEqual(cands.count(head), 1,
                          "a merge on both a local and a remote ref must appear once, not twice")
+
+
+class TestEvilMergeGrading(TestEvilMerge):
+    """Two-signature grading (#1360): a merge whose introduced hunk matches a worm loader signature is
+    CONFIRMED (`evil-merge-loader`, critical); structural (new-file-unseen) / obfuscation-only
+    corroboration stays HEURISTIC (`evil-merge`, high). Detection — WHICH merges are flagged — is
+    identical across the split; only the id / confidence / severity partition changes."""
+
+    def _loader_merge(self):
+        # x.js EXISTS in a parent, so arm (a) "new file absent from every parent" does NOT fire; the
+        # MERGE smuggles a fromCharCode loader hunk into it that neither parent's diff shows → the
+        # merge-introduced hunk matches the loader signature = arm (b) corroboration → CONFIRMED.
+        (self.d / "x.js").write_text("var ok = 1;\n")
+        _git(self.d, "add", "x.js"); _git(self.d, "commit", "-qm", "add x.js")
+        _git(self.d, "merge", "--no-ff", "--no-commit", "feature")
+        (self.d / "x.js").write_text("var ok = 1;\neval(String.fromCharCode(1, 2, 3));\n")
+        _git(self.d, "add", "x.js"); _git(self.d, "commit", "-qm", "merge (smuggled loader)")
+
+    def test_loader_corroborated_merge_is_confirmed_critical(self):
+        self._loader_merge()
+        fs = self._findings()
+        self.assertEqual(len(fs), 1)
+        f = fs[0]
+        self.assertEqual(f.signature_id, "evil-merge-loader")     # routed to the confirmed arm
+        self.assertEqual(f.severity, Severity.CRITICAL)
+        self.assertIn("x.js", f.related_paths)                    # structured, for remediation/PR2
+        self.assertIn("matches signature", f.evidence)
+
+    def test_structural_merge_stays_heuristic_high(self):
+        # A NEW benign file injected only in the merge — review-evading but no malware fingerprint.
+        _git(self.d, "merge", "--no-ff", "--no-commit", "feature")
+        (self.d / "evil.txt").write_text("injected only in the merge\n")
+        _git(self.d, "add", "evil.txt"); _git(self.d, "commit", "-qm", "merge with new file")
+        fs = self._findings()
+        self.assertEqual(len(fs), 1)
+        self.assertEqual(fs[0].signature_id, "evil-merge")        # stays on the heuristic arm
+        self.assertEqual(fs[0].severity, Severity.HIGH)
+        self.assertIn("evil.txt", fs[0].related_paths)
+
+    def test_loader_reason_prefix_in_lockstep_with_corroborator(self):
+        # The matcher routes to the CONFIRMED arm by string-matching corroborate.py's arm-(b) reason.
+        # If that reason string ever changes, routing would silently fall back to heuristic (a downgrade
+        # with no test failure) — so pin the coupling here.
+        import inspect
+        from stayawake.bots.security.matchers.git_history import _LOADER_REASON_PREFIX
+        from stayawake.lib.git.merge import corroborate
+        self.assertIn(_LOADER_REASON_PREFIX, inspect.getsource(corroborate.corroborated),
+                      "the loader-reason prefix drifted from corroborate.py arm (b)")
+
+    def test_grading_does_not_change_which_merges_are_flagged(self):
+        # Byte-identical DETECTION: the loader merge is caught whether or not the confirmed arm is
+        # present in the signature set — dropping `evil-merge-loader` only re-routes it to the
+        # heuristic id, it never un-flags the merge (a zero-downgrade guard on the split).
+        self._loader_merge()
+        full = {f.path for f in self._findings()}
+        heuristic_only = [s for s in EVIL_SIG if s["id"] != "evil-merge-loader"]
+        t = LocalRepoTarget(self.d, "tmp", ScanOptions())
+        trimmed = {f.path for f in GitHistoryMatcher().scan(t, heuristic_only)}
+        self.assertEqual(full, trimmed, "the split must not change WHICH merges are flagged")
+        self.assertTrue(full, "the loader merge must be flagged under either grading")
 
 
 if __name__ == "__main__":

@@ -78,6 +78,28 @@ def _signing_note(fix: "_Fix | None") -> str:
             "worktree); if this repo enforces signed commits, re-sign it before pushing/merging.")
 
 
+def _manual_for(f0, path: str) -> "remediation.Manual":
+    """Build the manual-review entry for a confirmed residual finding. Most are working-tree files
+    ("remove/recover manually"), but an EVIL-MERGE finding is keyed to a merge COMMIT (`path` is the
+    SHA, `related_paths` the files it introduced), so a generic "remove this from the file" is
+    nonsensical. It gets history-provenance guidance instead: `saw fix` never rewrites history — that
+    breaks every clone/fork/tag and is the maintainer's decision — so the honest action is to verify
+    the payload's reach and decide on a rewrite by hand."""
+    if getattr(f0, "vector", None) == "evil-merge":
+        files = ", ".join(getattr(f0, "related_paths", ()) or []) or "see evidence"
+        return remediation.Manual(
+            path, f0.signature_id, "evil-merge",
+            "Worm payload smuggled via this merge COMMIT (a history finding, not a file edit; "
+            f"files: {files}). `saw fix` never rewrites history — it breaks clones/forks/tags. If the "
+            "payload is gone from your working tree the tree is clean but the commit persists; verify "
+            "no fork/tag still ships it, then decide on a history rewrite (git filter-repo) yourself.",
+            getattr(f0, "line", None))
+    return remediation.Manual(
+        path, f0.signature_id, "residual",
+        "Confirmed indicator still present after remediation — review and remove/recover manually.",
+        getattr(f0, "line", None))
+
+
 def _suspicious_only_outcome(label: str, fix: "_Fix") -> str:
     """The `saw fix` outcome for a repo whose ONLY findings are heuristic/suspicious — nothing
     confirmed, nothing auto-fixable. It DISCLOSES the set and defers to review, deliberately WITHOUT
@@ -224,10 +246,7 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *,
             m = manual_reviews.get(path)
             if m is None:
                 f0 = next(f for f in residual if f.path == path)
-                m = remediation.Manual(
-                    path, f0.signature_id, "residual",
-                    "Confirmed indicator still present after remediation — review and "
-                    "remove/recover manually.", getattr(f0, "line", None))
+                m = _manual_for(f0, path)
             manual.append(m)
 
         if not applied and not computed:
