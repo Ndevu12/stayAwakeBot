@@ -16,7 +16,8 @@ from stayawake.bots.security import remediation
 from stayawake.core import proposal
 from stayawake.bots.security.pr.constants import FIX_BRANCH, PARTIAL_LABEL
 from stayawake.bots.security.pr.render import (
-    manual_review_lines, computed_review_lines, _issue_spec, _mark_partial, _pr_body, _render_submit)
+    manual_review_lines, computed_review_lines, suspicious_review_lines,
+    _issue_spec, _mark_partial, _pr_body, _render_submit)
 
 def _untrack_quarantine(repo: Path) -> bool:
     """git only ignores UNTRACKED paths, so untrack any pre-existing tracked
@@ -75,6 +76,18 @@ def _signing_note(fix: "_Fix | None") -> str:
         return ""
     return (f"\n    ⚠ the fix commit on '{FIX_BRANCH}' is UNSIGNED (commit signing failed in the "
             "worktree); if this repo enforces signed commits, re-sign it before pushing/merging.")
+
+
+def _suspicious_only_outcome(label: str, fix: "_Fix") -> str:
+    """The `saw fix` outcome for a repo whose ONLY findings are heuristic/suspicious — nothing
+    confirmed, nothing auto-fixable. It DISCLOSES the set and defers to review, deliberately WITHOUT
+    an `ABORTED`/`PARTIAL`/`error` marker so the run stays exit 0, consistent with a suspicious `saw
+    scan` (which exits 0). This is the #1360 fix: `saw fix` must never call such a repo 'already
+    clean' while `saw scan`/`saw hook` flag it — a self-contradiction that erodes trust."""
+    n = len(fix.suspicious)
+    plural = "" if n == 1 else "s"
+    return (f"{label}: {n} suspicious (heuristic) finding{plural} — not auto-remediable; "
+            "review with `saw scan` (not asserted as malware)") + suspicious_review_lines(fix.suspicious)
 
 
 def _build_fix(repo: Path, opts, signatures, allowlist, *,
@@ -220,9 +233,17 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *,
         if not applied and not computed:
             # Nothing was provably safe to ship. If confirmed findings remain, return a NOTIFY-ONLY
             # fix (no changes committed) so the caller files a de-duplicated manual-review issue and
-            # keeps the gate red — better than a silent dead-end (#1183). Else the tree was clean.
+            # keeps the gate red — better than a silent dead-end (#1183).
             if residual:
                 return _Fix(base, [], (), suspicious, findings, tuple(manual)), "", wt
+            # No CONFIRMED indicator and nothing auto-fixable, but HEURISTIC (suspicious) findings
+            # remain. This is NOT "already clean" — saying so contradicts `saw scan`/`saw hook`, which
+            # flag the very same repo (the trust-eroding disagreement in #1360). Return a disclose-only
+            # fix (no changes, no confirmed manual set) so the caller reports the suspicious findings
+            # and defers to review. Heuristics are never auto-fixed (trust model), so — like a
+            # suspicious `saw scan` — this stays exit 0; only the truly-empty tree is "already clean".
+            if suspicious:
+                return _Fix(base, [], (), suspicious, findings, ()), "", wt
             return None, f"'{base}' already clean — nothing to fix", wt
     return _Fix(base, applied, tuple(computed), suspicious, findings, tuple(manual),
                 signed=signed), "", wt
@@ -238,10 +259,13 @@ def prepare_fix(repo: Path, opts, signatures, allowlist, *, spin: bool = False) 
         if fix is None:
             return f"{slug}: {outcome}"
         if not fix.applied and not fix.computed:
-            # Nothing safely fixable, confirmed findings remain (#1183). `saw fix` (no --pr) does no
-            # network, so it just reports the abort; `saw fix --pr` additionally files an issue.
+            # Nothing auto-fixable. Suspicious-only (heuristics, nothing confirmed) → disclose + defer,
+            # exit 0 (#1360). Otherwise confirmed findings remain (#1183): report the abort (no --pr =
+            # no network, so no issue is filed here) and stay needs-review.
+            if not fix.manual:
+                return _suspicious_only_outcome(slug, fix)
             return (f"{slug}: ABORTED — nothing auto-fixable; {len(fix.manual)} confirmed finding(s) "
-                    "need manual review") + manual_review_lines(fix.manual)
+                    "need manual review") + manual_review_lines(fix.manual) + suspicious_review_lines(fix.suspicious)
         if fix.partial:
             prepared = len(fix.applied) + len(fix.computed)
             need = ([f"{len(fix.computed)} computed strip(s) need review before merge"] if fix.computed else []) \
@@ -271,9 +295,12 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
             if fix is None:
                 return outcome
             if not fix.applied and not fix.computed:
+                if not fix.manual:   # suspicious-only → disclose + defer, exit 0 (#1360)
+                    return _suspicious_only_outcome(
+                        str(repo).replace(str(Path.home()), "~"), fix)
                 return (f"ABORTED — nothing auto-fixable; {len(fix.manual)} confirmed finding(s) "
                         "need manual review (no GitHub origin — cannot file an issue)"
-                        ) + manual_review_lines(fix.manual)
+                        ) + manual_review_lines(fix.manual) + suspicious_review_lines(fix.suspicious)
             return _mark_partial(
                 f"no GitHub origin — prepared on '{FIX_BRANCH}'; add a remote and push to open a PR",
                 fix.partial) + _signing_note(fix) + computed_review_lines(fix.computed) + manual_review_lines(fix.manual)
@@ -288,6 +315,11 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
         if fix is None:
             return f"{slug}: {outcome}"
         if not fix.applied and not fix.computed:
+            # Suspicious-only (#1360): heuristic findings, nothing confirmed. Do NOT file a manual-
+            # review issue (a heuristic isn't asserted malware — filing would over-alarm and spam the
+            # repo); just disclose and defer. Exit 0, consistent with a suspicious `saw scan`.
+            if not fix.manual:
+                return _suspicious_only_outcome(slug, fix)
             # Nothing safely fixable but confirmed indicators remain (#1183): there is no branch/PR
             # to push, so file a de-duplicated manual-review issue (the read-only floor's mechanism)
             # and abort with the count. The gate stays red (outcome carries ABORTED). Degrades
@@ -297,7 +329,7 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
                                                   _issue_spec(owner, name, fix.findings), token)
             note = f"; {issue}" if issue else ""
             return (f"{slug}: ABORTED — nothing auto-fixable; {len(fix.manual)} confirmed finding(s) "
-                    f"need manual review{note}") + manual_review_lines(fix.manual)
+                    f"need manual review{note}") + manual_review_lines(fix.manual) + suspicious_review_lines(fix.suspicious)
         base = fix.base
 
         def _publish() -> str:
