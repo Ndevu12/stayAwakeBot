@@ -18,6 +18,20 @@ All notable changes to this project are documented here. The format is based on
   (the delta is provably payload-only, no fabricated byte, result payload-free, quarantine-backed). It is
   offered *only* when the working file reduces to that clean version by a proven-safe removal; a poisoned
   merge blob or a legit edit sitting on the payload defers to manual, never clobbering work.
+- **`saw audit` catches a dead-man daemon that polls a *legitimate* endpoint — by behaviour, not
+  destination** (#1335). The Mini Shai-Hulud wiper polls `api.github.com` every 60s and deletes `$HOME`
+  when the token is revoked; `api.github.com` is among the most expected destinations on a dev machine,
+  so no destination blocklist can catch it. The discriminating features are behavioural and — for a
+  script-based daemon — **static**: the poll cadence is a literal in the persistence artifact
+  (`StartInterval` / `OnUnitActiveSec`), and a LaunchAgent / systemd *user* service is non-interactive
+  (no TTY, launchd/systemd-spawned) by construction. These now fuse into the autorun monitor: the
+  dead-man `$HOME`-wipe (#1334) is a **decisive** shape, a short poll interval is a **corroborating**
+  reason — never a destination check. Because a trusted interpreter does not vouch for the script it
+  runs, an autorun that launders through one (`node /path/daemon.js`) now has **that script**
+  content-scanned, closing an interpreter-provenance evasion. Periodicity + non-interactive alone are
+  never treated as malicious (benign timer software shares them); the near-zero-benign corroborator is
+  the destructive payload. The feature-set decision, the empirical unprivileged-obtainability table, and
+  the false-positive analysis are documented in `docs/SECURITY_ARCHITECTURE.md`.
 - **Evil-merge is now graded by corroboration strength, and confirmed loader-smuggling merges are
   remediated honestly** (#1360). The evil-merge detector previously graded *every* review-evading merge
   the same (`heuristic`), so a merge that smuggles a **known worm loader** past review scored the same

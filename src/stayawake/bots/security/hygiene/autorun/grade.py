@@ -16,6 +16,7 @@ entry regardless of the baseline, so a tampered or first-run baseline can never 
 from __future__ import annotations
 
 import os
+import re
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -24,18 +25,60 @@ from stayawake.utils import pathsafe
 from ..models import HygieneIssue, _WIPER_NOTE
 from .. import mechanism
 from ...taint import analyzer
+from ...taint.destructive import detect_destructive
 from .baseline import NEW, CHANGED
 
 _MAX_REFERENCED = 256 * 1024        # cap the referenced-script read — a real dropper is tiny
 
 
+# Script interpreters: when one of these is argv[0], the real payload is the SCRIPT ARGUMENT, not the
+# interpreter binary. A LaunchAgent/unit that runs `node /path/daemon.js` launders provenance through
+# the trusted interpreter — the daemon's code is what determines behaviour, so that is what we read.
+_INTERPRETERS = frozenset({
+    "node", "nodejs", "deno", "bun", "python", "python2", "python3", "ruby", "perl", "php",
+    "sh", "bash", "zsh", "dash", "ksh", "osascript", "tsx", "ts-node"})
+
+
+# Inline-eval flags: the code is IN argv (already seen via `shape_text()`), not in a script file — so
+# `node -e '<code>'` / `python -c '<code>'` must NOT mistake the code argument for a path to read.
+_INLINE_EVAL_FLAGS = frozenset({"-e", "--eval", "-c", "-p", "--print", "-"})
+
+
+def _payload_path(entry) -> str | None:
+    """The path of the code the entry actually RUNS. Normally argv[0]; but when argv[0] is a script
+    INTERPRETER (`node`, `python`, `sh`, …), it is the first non-flag script ARGUMENT — the payload the
+    interpreter executes. So a `node /path/daemon.js` autorun is read at daemon.js, not at the trusted
+    `node` binary (which would launder the payload past the content-shape engines). An inline-eval
+    invocation (`node -e '<code>'`) has no script file — the code is already in argv (seen via
+    `shape_text()`), so fall back to argv[0] rather than treat the code as a phantom path."""
+    if not entry.argv:
+        return None
+    if os.path.basename(entry.argv[0]).split(".")[0] in _INTERPRETERS:
+        args = entry.argv[1:]
+        if any(a in _INLINE_EVAL_FLAGS for a in args):
+            return entry.argv[0]
+        for arg in args:
+            if not arg.startswith("-"):        # the first non-flag argument is the script
+                return arg
+    return entry.argv[0]
+
+
+def launched_via_interpreter(entry) -> bool:
+    """True when argv[0] is a script interpreter running a distinct script argument — so the payload
+    script must be read for content-shape EVEN IF the interpreter is an attributed/trusted binary
+    (its trust does not vouch for the arbitrary script it runs)."""
+    return bool(entry.argv) and _payload_path(entry) not in (None, entry.argv[0])
+
+
 def _referenced_text(entry) -> str:
-    """The content of the entry's referenced executable, capped, or '' — so the content-shape engines
-    see the payload where it usually LIVES (a script the unit runs), not just the unit file. FIFO-safe
-    via pathsafe; a compiled binary simply won't match the (JS/shell-shaped) detectors."""
-    if not entry.exec_path:
+    """The content of the entry's referenced PAYLOAD (interpreter-aware, see `_payload_path`), capped,
+    or '' — so the content-shape engines see the payload where it usually LIVES (a script the unit
+    runs), not just the unit file or a trusted interpreter binary. FIFO-safe via pathsafe; a compiled
+    binary simply won't match the (JS/shell-shaped) detectors."""
+    payload = _payload_path(entry)
+    if not payload:
         return ""
-    data = pathsafe.read_regular_bytes(Path(os.path.expanduser(entry.exec_path)))
+    data = pathsafe.read_regular_bytes(Path(os.path.expanduser(payload)))
     if data is None:
         return ""
     return data[:_MAX_REFERENCED].decode("utf-8", "replace")
@@ -51,10 +94,23 @@ class ContentSignal:
 
 
 def content_signal(entry, *, read_referenced: bool = False) -> ContentSignal:
-    """Run the existing content-shape engines on the entry's command + body — and, when
-    `read_referenced` (used for UNATTRIBUTED entries, where the referenced script is worth reading),
-    on the referenced script's content too. `hit` is a decisive fetch/decode-execute shape; a short
-    poll interval (the Mini wiper's 60s GitHub poll) is a corroborating reason, not decisive alone."""
+    """Run the content-shape engines on the entry's command + body — and, when `read_referenced`
+    (used for UNATTRIBUTED entries, where the referenced script is worth reading), on the referenced
+    script's content too. `hit` is a decisive shape (act-now regardless of owner).
+
+    #1335 — a malicious daemon that polls a legitimate endpoint (e.g. `api.github.com` every 60s) can't
+    be caught by WHERE it connects; the discriminating features are BEHAVIOURAL, and for a script-based
+    daemon they are STATIC: the poll interval is a literal in the code / the persistence artifact, and a
+    persistence entry is non-interactive (no TTY, launchd/systemd-spawned) BY CONSTRUCTION. So we fuse,
+    never blocklist a destination:
+      * decisive `hit` — a fetch/decode-to-shell command, a decode→execute dropper, OR the dead-man
+        self-destruct shape (#1334's corroborated `$HOME`-wipe) in the daemon's own code. The Mini
+        Shai-Hulud wiper is plain code (poll → on token-revoke, delete `$HOME`), NOT a decode→exec
+        dropper, so fusing `detect_destructive` here is what actually catches it.
+      * corroborating reason — a short poll interval (the timer the dead-man loop runs on). Never
+        decisive alone: benign software polls on a timer too (the FP guard is that escalation needs a
+        decisive shape, and `detect_destructive` is itself corroborated home-root ∧ recursive ∧ delete,
+        so firing it adds no new false positive)."""
     text = entry.shape_text()
     if read_referenced:
         text += "\n" + _referenced_text(entry)
@@ -66,15 +122,41 @@ def content_signal(entry, *, read_referenced: bool = False) -> ContentSignal:
     if analyzer.detect_dropper(text):
         reasons.append("decode→execute dropper")
         hit = True
-    for pflag in entry.persistence:
+    if detect_destructive(text) is not None:
+        reasons.append("dead-man self-destruct ($HOME wipe on an auth/token condition)")
+        hit = True
+    secs = _poll_seconds(entry.persistence)
+    if secs is not None and 0 < secs <= 300:
+        reasons.append(f"short poll interval ({secs}s)")
+    return ContentSignal(hit=hit, reasons=reasons)
+
+
+def _poll_seconds(persistence) -> int | None:
+    """The daemon's poll/timer period in seconds, read STATICALLY from the persistence artifact —
+    macOS `StartInterval` (`poll-interval=Ns`) or a systemd `OnUnitActiveSec` timer (`60`, `30s`,
+    `1min`). This is the static analog of "interval regularity": a poll loop's cadence is a literal in
+    the artifact, no live observation needed. None when no periodic timer is declared."""
+    for pflag in persistence:
         if pflag.startswith("poll-interval="):
             try:
-                secs = int(pflag.split("=", 1)[1].rstrip("s") or "0")
+                return int(pflag.split("=", 1)[1].rstrip("s") or "0")
             except ValueError:
-                secs = 0
-            if 0 < secs <= 300:
-                reasons.append(f"short poll interval ({secs}s)")
-    return ContentSignal(hit=hit, reasons=reasons)
+                return None
+        if pflag.startswith("timer:OnUnitActiveSec="):
+            return _systemd_seconds(pflag.split("=", 1)[1])
+    return None
+
+
+def _systemd_seconds(dur: str) -> int | None:
+    """Parse a simple systemd time span (`60`, `30s`, `5min`, `1h`) to seconds — enough for the
+    short-interval corroboration; an unrecognised/compound span returns None (no corroboration, never
+    a crash)."""
+    m = re.fullmatch(r"\s*(\d+)\s*(s|sec|secs|seconds|min|minutes|m|h|hours?)?\s*", dur)
+    if not m:
+        return None
+    n, unit = int(m.group(1)), (m.group(2) or "s")
+    mult = 60 if unit.startswith("m") and unit != "s" else 3600 if unit.startswith("h") else 1
+    return n * mult
 
 
 def correlate(entries, attributed: dict[str, bool]) -> set[str]:

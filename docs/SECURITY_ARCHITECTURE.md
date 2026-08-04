@@ -203,6 +203,52 @@ ordered runbook, and its rotation remediation is phrased as the **last** step wi
 warning — never "rotate now". (This is distinct from the GitHub **App** installation-token
 auto-rotation in `docs/USAGE.md`, which is a routine hardening feature, not incident response.)
 
+## Behavioural detection: a daemon polling a legitimate endpoint (#1335)
+
+The Mini Shai-Hulud dead-man daemon polls `api.github.com` every 60s and wipes `$HOME` when it sees
+the token revoked. `api.github.com` is one of the **most expected** destinations on a developer
+machine, so **destination filtering cannot catch this** — a blocklist that flagged it would be
+useless, one that permits it lets the daemon through. The malicious property is not *where* the
+traffic goes; it is the **behaviour** of an unattended process running on a timer that destroys data.
+
+**Feature-set decision — capture behaviour, not destinations.** The discriminating features are
+interval regularity, TTY absence, parent lineage, and non-interactive origin. For a **script-based**
+daemon (which is what this worm is) *all four have static analogs*, read from the persistence artifact
++ the script it runs — so `saw`'s point-in-time **scanning** model captures them without a privileged
+agent or a live packet capture:
+
+- **interval regularity** → the poll cadence is a literal in the artifact (`StartInterval` /
+  `OnUnitActiveSec`) and in the code (`setInterval(fn, 60000)`) — read statically, no observation
+  window needed.
+- **TTY absence / parent lineage / non-interactive origin** → a LaunchAgent / systemd *user* service
+  is launchd/systemd-spawned with no controlling terminal **by construction**; being a persistence
+  entry *is* the non-interactive signal.
+
+These fuse into the existing autorun monitor (`hygiene/autorun/`, #1333): the dead-man
+self-destruct (`taint/destructive`, #1334) is a **decisive** content shape, and a short poll interval
+is a **corroborating** reason. Because a trusted interpreter does not vouch for the script it runs, an
+autorun that launders through one (`node /path/daemon.js`) has **that script** content-scanned, not the
+`node` binary. The one feature that genuinely needs a live observation window — *measured* egress
+timing for a **compiled** daemon whose interval isn't in readable source — is a monitoring capability,
+out of scope for the scanner.
+
+**Empirical: what is obtainable unprivileged?** Measured on macOS (uid 501, no root) — the daemon runs
+as the *user* (LaunchAgent / systemd user service), so userspace tools see its context and egress:
+
+| Feature | Unprivileged? | Source |
+| --- | --- | --- |
+| Parent lineage (PPID), TTY absence | ✅ | `ps -o ppid,tty` — sees launchd-spawned procs, `??` = no TTY |
+| Non-interactive origin | ✅ | the persistence artifact itself + PPID/TTY |
+| Poll cadence | ✅ | `StartInterval` / `OnUnitActiveSec` literal in the artifact |
+| *Measured* egress interval regularity | ⚠️ needs a window | `nettop`/`lsof` run unprivileged, but establishing periodicity needs minutes — monitoring, not scanning |
+
+**False-positive analysis.** Non-interactive + timer + polls-`api.github.com` are each *individually
+benign* — update-notifiers, Dropbox, `backupd` all qualify. Periodicity alone is never malicious. The
+near-zero-benign corroborator is the **dead-man `$HOME`-wipe** (itself corroborated home-root ∧
+recursive ∧ delete, #1334) — never a single feature. A benign daemon sharing every behavioural feature
+*except* the destructive payload produces no decisive hit (pinned by
+`test_benign_timer_daemon_is_not_decisive`).
+
 ## Config
 - `config/security.yml` — targets (local globs + GitHub users/orgs), exclude dirs, remediation mode,
   allowlist, alert routing. `exclude_dirs` defaults already skip `.git`, `node_modules`, build

