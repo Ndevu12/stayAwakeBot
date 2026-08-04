@@ -26,6 +26,8 @@ STAYAWAKE_REPORTS_DIR = "STAYAWAKE_REPORTS_DIR"
 SAW_ADVISORY_CACHE_DIR = "SAW_ADVISORY_CACHE_DIR"
 XDG_CACHE_HOME = "XDG_CACHE_HOME"
 XDG_CONFIG_HOME = "XDG_CONFIG_HOME"     # base for saw's git-template dir (scan-on-clone hooks)
+XDG_STATE_HOME = "XDG_STATE_HOME"       # base for saw's cross-run state (autorun baseline, #1333)
+SAW_AUTORUN_BASELINE = "SAW_AUTORUN_BASELINE"   # override the autorun baseline path (tests / operators)
 SAW_HOOK_DISABLED = "SAW_HOOK_DISABLED"  # kill-switch: skip the scan-on-clone hook without uninstalling
 SAW_HOOK_TIMEOUT = "SAW_HOOK_TIMEOUT"   # wall-clock budget (s) for a scan-on-clone scan; 0 = no cap
 NO_COLOR = "NO_COLOR"
@@ -130,3 +132,16 @@ def xdg_config_home() -> str:
 def xdg_cache_home() -> str:
     """`$XDG_CACHE_HOME`, else `~/.cache` (the XDG default) — base for saw's hook scan cache."""
     return get(XDG_CACHE_HOME) or os.path.join(os.path.expanduser("~"), ".cache")
+
+
+def xdg_state_home() -> str:
+    """`$XDG_STATE_HOME`, else `~/.local/state` (the XDG default) — base for saw's cross-run state
+    (the #1333 autorun baseline). State, not cache: losing it degrades gracefully but it is meant
+    to persist longitudinally on a workstation."""
+    return get(XDG_STATE_HOME) or os.path.join(os.path.expanduser("~"), ".local", "state")
+
+
+def autorun_baseline_path() -> str | None:
+    """Explicit override for the autorun baseline file (`SAW_AUTORUN_BASELINE`), else None → the
+    caller composes the default under `xdg_state_home()`."""
+    return get(SAW_AUTORUN_BASELINE)
