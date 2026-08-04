@@ -85,11 +85,25 @@ _DEADMAN = re.compile(
     re.IGNORECASE)
 _NAMED_IOC = re.compile(r"\b(?:setup_bun|bun_environment)\b", re.IGNORECASE)
 
+# #1336 — the destructive capability shipped behind a DISABLED feature flag (the SANDWORM_MODE staging
+# shape: the routine is present + functional, one attacker toggle from running). We deliberately do NOT
+# try to resolve the flag's runtime VALUE — that is unreliable, attacker-controlled, and the polymorphic
+# engine is itself one of the flagged components. We detect a destruct-intent-NAMED flag DECLARED to a
+# disabled value. This is ENRICHMENT ONLY: it changes the finding's WORDING, never the verdict — so an
+# undetected gate simply reads as "armed" (the safer default) and the finding stands either way. Bounded
+# (no nested quantifier) → ReDoS-safe.
+_DESTRUCT_FLAG = r"(?:destroy|destruct|self_?destruct|wipe|nuke|purge|detonat|sandworm|dead_?man|kill_?switch)"
+_DISABLED_FLAG = re.compile(
+    r"\b\w*" + _DESTRUCT_FLAG + r"\w*\b\s*[:=]\s*(?:false|0|['\"]?(?:off|no|disabled?)['\"]?)\b",
+    re.IGNORECASE)
+
 
 @dataclass
 class DestructiveVerdict:
     variant: str            # PLAIN (recoverable) | SECURE (overwrite-then-delete, unrecoverable)
     reason: str             # short, redaction-safe evidence string
+    gated: bool = False     # #1336: the capability is PRESENT but guarded behind a DISABLED feature
+                            # flag (still a confirmed finding — never a downgrade; the flag is context)
 
 
 def _amplifiers(text: str) -> list[str]:
@@ -127,11 +141,22 @@ def detect_destructive(text: str) -> DestructiveVerdict | None:
     overwrite = bool(_OVERWRITE.search(text))
     variant = SECURE if overwrite else PLAIN
     where = "the filesystem root (/)" if (root_wipe and not home) else "the user's home directory"
-    head = (f"recursively walks {where} and OVERWRITES-then-deletes files "
-            "(secure wipe — data is unrecoverable)" if variant == SECURE
-            else f"recursively walks {where} and DELETES files (recoverable — image the disk before use)")
+    destroys = ("OVERWRITES-then-deletes files (secure wipe — data is unrecoverable)" if variant == SECURE
+                else "DELETES files (recoverable — image the disk before use)")
+    # #1336 — capability-first: the finding is on the routine's PRESENCE, never its reachability. When
+    # the routine is gated behind a DISABLED feature flag it is still CONFIRMED (never downgraded) — the
+    # flag is attacker-controlled context, so the wording shifts to "contains a … CAPABILITY, gated"
+    # rather than the present-tense "wipes …", which is both accurate and more alarming than either half.
+    gated = bool(_DISABLED_FLAG.search(text))
+    if gated:
+        head = (f"contains a routine that recursively walks {where} and {destroys} — a self-destruct "
+                "CAPABILITY currently GATED behind a disabled feature flag; an attacker can flip it in "
+                "the next publish with no other change (capability is durable, configuration is not — "
+                "present but not currently armed; do not dismiss as inactive)")
+    else:
+        head = f"recursively walks {where} and {destroys}"
     reason = "destructive intent: " + head
     extra = _amplifiers(text)
     if extra:
         reason += "; " + "; ".join(extra)
-    return DestructiveVerdict(variant=variant, reason=reason)
+    return DestructiveVerdict(variant=variant, reason=reason, gated=gated)
