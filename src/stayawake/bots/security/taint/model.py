@@ -126,3 +126,38 @@ def is_shell_interpreter(program: str) -> bool:
         return True
     tail = p.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
     return tail in SHELL_INTERPRETERS
+
+
+# ── 4. DESTRUCTIVE-WIPE CAPABILITY (#1334) ──────────────────────────────────────────────────────
+# The worm's self-destruct / evidence-removal routine: a recursive filesystem walk ROOTED AT THE USER'S
+# HOME (or the filesystem root) co-occurring with DELETION — and, reported distinctly, with OVERWRITE-
+# then-delete (a SECURE wipe that makes the data unrecoverable). Detection is a CORROBORATED co-occurrence
+# (home-root ∧ recursive ∧ delete): each half alone is common and inert (a scoped `rm -rf ./dist`, a lone
+# `unlink(tmp)`, a `readdir` for config); only the COMBINATION is near-zero benign, which is exactly what
+# earns the confirmed grade. This is vocabulary only — `destructive.py` compiles the recognisers and a
+# differential test pins them to these sets, so the two can never drift.
+
+# The traversal ROOT that turns a recursive delete catastrophic — the user's home, or `/`.
+HOME_ROOT_TOKENS = frozenset({
+    "os.homedir", "homedir", "expanduser", "Path.home",
+    "process.env.HOME", "process.env.USERPROFILE", "process.env.HOMEPATH",
+    "$HOME", "${HOME}", "%USERPROFILE%", "~/",
+})
+# RECURSIVE traversal / recursive-delete markers. A recursive-delete API (rimraf, `rm -rf`, rmSync with
+# `recursive:true`) is BOTH the walk and the delete in one call.
+RECURSIVE_TOKENS = frozenset({
+    "recursive:true", "rimraf", "rm -rf", "rm -fr", "readdir", "readdirSync", "walk", "glob", "**",
+    "find ",
+})
+# DELETION sinks.
+DELETE_TOKENS = frozenset({"unlink", "unlinkSync", "rmSync", "rmdirSync", "rmdir", "rimraf", "rm "})
+# OVERWRITE-then-delete = the SECURE, unrecoverable variant (bytes overwritten before unlink).
+OVERWRITE_TOKENS = frozenset({
+    "writeFileSync", "writeFile", "randomBytes", "randomFillSync", "createWriteStream", "shred",
+    "dd if=/dev/urandom", "dd if=/dev/zero",
+})
+# DEAD-MAN'S-SWITCH amplifier: the wipe is armed on an auth/token condition (Shai-Hulud wipes when it
+# CANNOT authenticate to GitHub / on token revocation). Co-presence RAISES confidence, never gates.
+DEADMAN_TOKENS = frozenset({
+    "GITHUB_TOKEN", "NPM_TOKEN", "revoke", "unauthorized", "authenticat", "getUser", "createRepo",
+})

@@ -166,6 +166,29 @@ signatures:
     description: "Build/minified artifact carries a self-evident obfuscation construct (opt-in scan_build_outputs; review the source it was built from)"
     remediation: manual
 
+  # ── Destructive intent — self-destruct / evidence removal (#1334) ────────────
+  # A recursive filesystem walk ROOTED AT THE USER'S HOME (or /) co-occurring with DELETION — the
+  # Shai-Hulud wipe. CONFIRMED (no `confidence: heuristic`) because the CORROBORATION carries it: the
+  # detector requires home-root ∧ recursive ∧ delete together (see taint/destructive.py) — each half
+  # alone (a scoped `rm -rf ./dist`, a lone `unlink(tmp)`, a `readdir`) is inert, so a package shipping
+  # an ordinary cleanup/build script does NOT trigger this. Reported in TWO variants because
+  # recoverable-or-not is the first question after a wipe (#1344). remediation: manual — a wipe payload
+  # is neutralised by isolating/quarantining the package, not by a code-recovery edit.
+  - id: destructive-home-wipe
+    category: destructive
+    severity: critical
+    matcher: destructive
+    kind: destructive-home-wipe
+    description: "Code recursively walks the user's home directory and DELETES files (home-dir wipe; recoverable — image the disk before further use)"
+    remediation: manual
+  - id: secure-home-wipe
+    category: destructive
+    severity: critical
+    matcher: destructive
+    kind: secure-home-wipe
+    description: "Code recursively walks the user's home directory and OVERWRITES-then-deletes files (secure wipe — the data is UNRECOVERABLE)"
+    remediation: manual
+
   # ── VS Code auto-run harness (structured JSON) ───────────────────────────────
   - id: vscode-task-folderopen-exec
     category: vscode-autorun
