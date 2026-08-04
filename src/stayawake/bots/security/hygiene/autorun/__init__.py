@@ -48,9 +48,12 @@ def check_autorun(jobs: int | None = None) -> list[HygieneIssue]:
 
     issues: list[HygieneIssue] = []
     for entry, attrib in zip(entries, attribs):
-        # For an UNATTRIBUTED entry, also read the referenced script (the payload usually lives there,
-        # not in the unit file) — skipped for attributed entries to avoid reading trusted binaries.
-        shape = grade.content_signal(entry, read_referenced=not attrib.attributed)
+        # Read the referenced script (the payload usually lives there, not in the unit file) for an
+        # UNATTRIBUTED entry — and ALSO when the entry launders through a trusted interpreter (#1335):
+        # `node /path/daemon.js` is "attributed" to node, but node's trust does not vouch for the
+        # arbitrary script it runs, so that script must still be content-scanned.
+        read_ref = not attrib.attributed or grade.launched_via_interpreter(entry)
+        shape = grade.content_signal(entry, read_referenced=read_ref)
         issue = grade.grade(entry, attrib, novel.get(entry.key(), baseline.KNOWN),
                             shape, entry.key() in correlated)
         if issue is not None:
