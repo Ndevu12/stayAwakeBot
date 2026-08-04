@@ -7,6 +7,19 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **Evil-merge is now graded by corroboration strength, and confirmed loader-smuggling merges are
+  remediated honestly** (#1360). The evil-merge detector previously graded *every* review-evading merge
+  the same (`heuristic`), so a merge that smuggles a **known worm loader** past review scored the same
+  as one that merely introduced a new file — and `saw scan` reported it only `suspicious`. It now routes
+  each merge by the strongest corroboration it found: a merge whose **introduced hunk matches a worm
+  loader signature** is **confirmed / critical** (`evil-merge-loader`) — decisive on its own, so the
+  repo is **INFECTED**; structural (new-file-unseen-by-parents) or obfuscation-only corroboration stays
+  **heuristic / high** (`evil-merge`). Detection is unchanged — the *same* merges and paths are flagged;
+  only the confidence/severity partition moved (a tighten, never a downgrade). An evil-merge finding is
+  keyed to a merge **commit** (not a working-tree file), so `saw fix` no longer offers the nonsensical
+  "remove this from the file": it gives **history-provenance guidance** — names the commit and the files
+  it introduced, and states that `saw fix` **never rewrites history** (that breaks every clone/fork/tag —
+  a maintainer's decision), so verify the payload's reach and decide on a rewrite by hand.
 - **Destructive-intent detection — `saw` now sees that a lifecycle script *deletes the user's home
   directory*, not just that it runs code** (#1334). A new model-driven flow detector (`taint/`) flags
   the Shai-Hulud self-destruct routine by its static shape: a recursive filesystem walk **rooted at the
