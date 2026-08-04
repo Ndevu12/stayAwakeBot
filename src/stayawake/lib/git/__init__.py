@@ -32,7 +32,7 @@ from stayawake.lib.git.query import (
     commit_meta,
     remote_has_branch,
 )
-from stayawake.lib.git.merge import merge_commits, evil_merge_paths
+from stayawake.lib.git.merge import merge_commits, evil_merge_paths, clean_merge_blob
 from stayawake.lib.git.write import (
     add_worktree,
     remove_worktree,
@@ -55,7 +55,7 @@ __all__ = [
     "is_git_repo", "slug_from_url", "origin_slug", "default_branch", "ref_exists",
     "parents", "changed_paths", "path_exists_at", "file_at", "list_tree", "tracked", "tracked_under",
     "file_commits", "introduced_added_text", "commit_meta", "remote_has_branch",
-    "merge_commits", "evil_merge_paths",
+    "merge_commits", "evil_merge_paths", "clean_merge_blob",
     "add_worktree", "remove_worktree", "stage_all", "unstage_cached",
     "commit_fix", "CommitResult", "BOT_AUTHOR", "push_branch", "push_branch_result", "PushResult",
     "delete_remote_branch",

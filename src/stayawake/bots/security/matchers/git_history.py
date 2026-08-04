@@ -80,5 +80,5 @@ class GitHistoryMatcher(Matcher):
                 evidence=f"{len(evil)} corroborated path(s) introduced beyond a clean "
                          f"3-way merge; e.g. {paths[:3]} ({why}); "
                          f"by {meta.get('author_email','?')}",
-                vector="evil-merge", related_paths=tuple(paths)))
+                vector="evil-merge", related_paths=tuple(paths), commit_sha=sha))
         return findings

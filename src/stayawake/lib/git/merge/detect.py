@@ -5,9 +5,30 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from stayawake.lib.git.query import parents, changed_paths
+from stayawake.lib.git.query import parents, changed_paths, path_exists_at, file_at
 from stayawake.lib.git.merge.tree import auto_merge_tree
 from stayawake.lib.git.merge.corroborate import corroborated
+
+
+def clean_merge_blob(repo: str | Path, merge_sha: str, path: str) -> str | None:
+    """The content of `path` in the CLEAN 3-way auto-merge of `merge_sha`'s two parents — the
+    payload-free version a proper, review-visible merge WOULD have produced, before the recorded
+    merge smuggled anything beyond it. This is the recovery source for a file BORN via an evil merge:
+    the payload was introduced at the merge itself, so the first-parent history chain holds no clean
+    version, yet the auto-merge tree does.
+
+    Returns None for an octopus merge (>2 parents), a git too old for `merge-tree --write-tree`, or a
+    path absent from the clean tree. The blob is SECOND-PARENT-DERIVED (it can come from the merge's
+    side branch), so a caller must treat it as REVIEW-REQUIRED, never auto-apply it — the first-parent
+    recovery walk deliberately avoids trusting the second parent, and this must not launder that."""
+    ps = parents(repo, merge_sha)
+    if len(ps) != 2:
+        return None
+    base_tree = auto_merge_tree(repo, ps[0], ps[1])
+    if base_tree is None or not path_exists_at(repo, base_tree, path):
+        return None
+    text = file_at(repo, base_tree, path)
+    return text or None
 
 
 def evil_merge_paths(repo: str | Path, merge_sha: str, content_sig=None,

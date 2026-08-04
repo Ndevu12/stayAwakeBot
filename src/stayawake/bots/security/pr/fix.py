@@ -165,12 +165,26 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *,
         seen_cl: set = set()
         manual_reviews: dict = {}          # path -> Manual (no safe recovery at all)
         suggested: list = []               # Suggested dispositions to apply as the computed tier
+        # #1363 PR2: a file BORN via an evil merge has no first-parent clean ancestor, so its code-loader
+        # recovery would defer to manual. The evil-merge finding names the merge (commit_sha) and the
+        # files it introduced (related_paths); the merge's clean 3-way auto-merge blob is a recovery
+        # source for exactly those files. Offered to classify_recovery as a REVIEW-required Suggested
+        # (second-parent-derived → never auto-applied). Map is path -> clean-merge blob.
+        merge_clean: dict = {}
+        for f in findings:
+            if getattr(f, "vector", None) != "evil-merge" or not getattr(f, "commit_sha", None):
+                continue
+            for rp in getattr(f, "related_paths", ()):
+                if rp not in merge_clean:
+                    blob = gitutil.clean_merge_blob(wt, f.commit_sha, rp)
+                    if blob is not None:
+                        merge_clean[rp] = blob
         for f in findings:
             if (f.category != "code-loader" or getattr(f, "confidence", "confirmed") != "confirmed"
                     or f.path in seen_cl):
                 continue
             seen_cl.add(f.path)
-            disp = remediation.classify_recovery(wt, f, content_sig)
+            disp = remediation.classify_recovery(wt, f, content_sig, merge_clean=merge_clean.get(f.path))
             if isinstance(disp, remediation.Recovery) and \
                     remediation.apply_recovery(wt, disp, quarantine, content_sig):
                 applied.append(remediation.Change("recover", disp.path, disp.label))
