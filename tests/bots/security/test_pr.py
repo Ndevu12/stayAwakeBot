@@ -574,5 +574,88 @@ class TestFixPartialInvariant(unittest.TestCase):
         self.assertFalse(self._fix(computed=(), manual=()).partial)
 
 
+class TestSuspiciousOnlyDisclosed(unittest.TestCase):
+    """#1360: a repo whose ONLY findings are HEURISTIC (suspicious) — nothing confirmed, nothing
+    auto-fixable — must be DISCLOSED and deferred to review, NEVER reported 'already clean'. `saw
+    scan`/`saw hook` flag such a repo; `saw fix` calling it clean is a self-contradiction that erodes
+    trust. It must also stay exit 0 (no ABORTED/PARTIAL/error marker), consistent with a suspicious
+    `saw scan`, and must NOT file a manual-review issue (a heuristic is not asserted malware)."""
+
+    # An evil-merge (history, heuristic) + an obfuscated-source-file (heuristic) — the exact GEOFINDA
+    # shape from the issue. `confidence="heuristic"` is what keeps them out of the blocking set.
+    _EVIL_MERGE = Finding("evil-merge", "git-history", Severity.HIGH, "96dcbd397c",
+                          "merge-introduced loader hunk", confidence="heuristic", vector="evil-merge")
+    _OBFUSCATED = Finding("obfuscated-source-file", "obfuscation", Severity.MEDIUM,
+                          ".claude/skills/run/driver.mjs", "dynamic-exec sink", confidence="heuristic")
+
+    def _no_op_remediation(self):
+        # Heuristics are never planned/applied/recovered — every remediation seam is a no-op, so the
+        # build falls through to the suspicious-only return.
+        return [
+            mock.patch.object(pr.remediation, "plan", return_value=[]),
+            mock.patch.object(pr.remediation, "apply", return_value=[]),
+            mock.patch.object(pr.remediation, "quarantine_residual", return_value=[]),
+        ]
+
+    def _submit(self, findings):
+        scan = ScanResult("owner/repo", "local", list(findings))
+        with _patch_git(), \
+             mock.patch.object(pr.fix, "scan_target", return_value=scan), \
+             mock.patch.object(pr.github_api, "list_open_pulls", return_value=[]), \
+             mock.patch.object(pr.github_api, "list_open_issues", return_value=[]), \
+             mock.patch.object(pr.github_api, "create_issue",
+                               return_value={"number": 9, "html_url": "iu"}) as create_issue, \
+             mock.patch.object(pr.github_api, "create_pull") as create_pull, \
+             contextlib.ExitStack() as stack:
+            for p in self._no_op_remediation():
+                stack.enter_context(p)
+            outcome = pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t")
+        return SimpleNamespace(outcome=outcome, create_pull=create_pull, create_issue=create_issue)
+
+    def _prepare(self, findings):
+        scan = ScanResult("owner/repo", "local", list(findings))
+        with _patch_git(), \
+             mock.patch.object(pr.fix, "scan_target", return_value=scan), \
+             contextlib.ExitStack() as stack:
+            for p in self._no_op_remediation():
+                stack.enter_context(p)
+            return pr.prepare_fix(Path("/repo"), object(), {}, [])
+
+    def test_submit_discloses_not_clean(self):
+        r = self._submit([self._EVIL_MERGE, self._OBFUSCATED])
+        self.assertNotIn("already clean", r.outcome)         # the #1360 lie is gone
+        self.assertIn("suspicious", r.outcome.lower())       # discloses the heuristic findings
+        self.assertIn("2 suspicious", r.outcome)             # both counted
+        self.assertIn("saw scan", r.outcome)                 # points at review
+        self.assertIn("evil-merge", r.outcome)               # the signature is listed
+
+    def test_submit_stays_exit_zero(self):
+        # remediator.fix keys needs-review (exit 1) off these substrings — none may appear.
+        r = self._submit([self._EVIL_MERGE, self._OBFUSCATED])
+        for marker in ("ABORTED", "PARTIAL", ": error"):
+            self.assertNotIn(marker, r.outcome)
+
+    def test_submit_does_not_file_issue_or_pr(self):
+        # A heuristic is not asserted malware: no PR (nothing to fix) and no over-alarming issue.
+        r = self._submit([self._EVIL_MERGE])
+        r.create_pull.assert_not_called()
+        r.create_issue.assert_not_called()
+
+    def test_prepare_discloses_not_clean(self):
+        outcome = self._prepare([self._EVIL_MERGE, self._OBFUSCATED])
+        self.assertNotIn("already clean", outcome)
+        self.assertIn("suspicious", outcome.lower())
+        self.assertNotIn("ABORTED", outcome)
+
+    def test_singular_plural(self):
+        self.assertIn("1 suspicious (heuristic) finding —", self._submit([self._EVIL_MERGE]).outcome)
+
+    def test_truly_clean_still_reports_already_clean(self):
+        # The genuinely-empty tree keeps the old wording — only suspicious-bearing repos change.
+        r = self._submit([])
+        self.assertIn("already clean", r.outcome)
+        self.assertNotIn("suspicious", r.outcome.lower())
+
+
 if __name__ == "__main__":
     unittest.main()

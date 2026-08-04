@@ -57,6 +57,18 @@ All notable changes to this project are documented here. The format is based on
   - **`saw scan`** clean output now carries a one-line **host note**: a repo-content scan is not a
     host all-clear — run `saw audit` before rotating credentials. (Terminal-only; never gates.)
 
+### Fixed
+
+- **`saw fix` no longer reports a heuristic-flagged repo "already clean"** (#1360). When a repo's
+  **only** findings were `suspicious` (heuristic) — nothing confirmed, nothing safe to auto-fix —
+  `saw fix` printed `'…' already clean — nothing to fix`, flatly contradicting `saw scan` and `saw
+  hook`, which flag the very same repo. A security tool disagreeing with itself erodes trust and can
+  lead a user to install a flagged repo. `saw fix` now **discloses** the suspicious findings (each
+  location + signature id) and defers to review (`saw scan` to inspect), across every surface
+  (`saw fix`, `--pr`, `--remote`, no-origin). Consistent with a suspicious scan it stays **exit 0**
+  and files **no** manual-review issue (a heuristic is not asserted malware); only a genuinely empty
+  tree is still "already clean". Heuristics remain **never auto-fixed** — detection is unchanged.
+
 ## [0.3.1] - 2026-08-03
 
 ### Fixed

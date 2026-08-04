@@ -53,6 +53,26 @@ def computed_review_lines(computed, limit: int = 20) -> str:
     return _review_lines(computed, "Computed strips applied — REVIEW the kept code before merging:", limit)
 
 
+def suspicious_review_lines(suspicious, limit: int = 20) -> str:
+    """CLI-stream disclosure of HEURISTIC (suspicious) findings that `saw fix` deliberately does NOT
+    auto-remediate — a heuristic is not asserted malware, and a surgical edit on a possible FP would
+    damage legitimate code (trust model). `saw fix` must still DISCLOSE them (never report "already
+    clean" while `saw scan`/`saw hook` flag the same repo — the #1360 disagreement), so this lists
+    each as location + signature id and points at `saw scan` to inspect. Every field is `_plain`-
+    sanitized (a crafted path can't inject terminal/Actions control sequences) and the list is bounded;
+    payload bytes are never echoed. Empty when there are none."""
+    if not suspicious:
+        return ""
+    lines = ["", "    Suspicious (heuristic) — review, not auto-remediable "
+                 "(not asserted as malware; `saw scan` to inspect):"]
+    for f in suspicious[:limit]:
+        loc = f.path + (f":{f.line}" if getattr(f, "line", None) else "")
+        lines.append(f"      • {textsafe.plain(loc)}  ({textsafe.plain(getattr(f, 'signature_id', ''), 40)})")
+    if len(suspicious) > limit:
+        lines.append(f"      …and {len(suspicious) - limit} more")
+    return "\n".join(lines)
+
+
 def _issue_body(slug: str, findings) -> str:
     # Same injection-safety contract as _pr_body (#1183 invariant #5): the slug, signature ids and
     # attacker-controlled paths all go through _code so a path like `x`](evil) can't inject markup.

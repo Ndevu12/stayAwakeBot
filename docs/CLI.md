@@ -255,6 +255,11 @@ saw fix --remote              # sweep the configured GitHub targets, one rolling
 > scanner **never surgically edits a source file**, so a fix can never corrupt valid code; and
 > heuristic-only (`suspicious`) matches — e.g. an inlined base64 asset — are disclosed in the PR
 > for review, never auto-touched. The fix lives on a branch; nothing lands until you merge.
+>
+> When a repo has **only** heuristic (`suspicious`) findings — nothing confirmed, nothing safe to
+> auto-fix — `saw fix` **discloses them and defers to review** (`saw scan` to inspect); it never
+> reports such a repo "already clean" while [`saw scan`](#saw-scan)/[`saw hook`](#saw-hook) flag it.
+> Consistent with a suspicious scan, this stays **exit 0** — only a genuinely empty tree is "clean".
 
 ### `saw discard`
 
