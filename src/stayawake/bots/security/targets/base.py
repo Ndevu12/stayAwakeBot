@@ -17,10 +17,22 @@ from typing import Iterator
 # Source/text extensions we always attempt to scan even when a file looks "binary"
 # (NUL bytes) or exceeds the size cap — the worm hides in exactly these, so one NUL
 # byte or 2 MB of padding must not buy it invisibility.
-SOURCE_EXTS = {
+# The EXECUTABLE-CODE extensions — files whose content IS code: JS/TS, POSIX shells, Python/Ruby/PHP/
+# Go/Rust, WINDOWS batch + PowerShell (a common worm dropper form, e.g. `temp_auto_push.bat`), and JSON
+# for a manifest's inline lifecycle scripts. This is the AUTHORITATIVE list; `SOURCE_EXTS` derives from
+# it. Use CODE_EXTS (not SOURCE_EXTS) where a detector reasons about what CODE DOES — e.g. the
+# destructive-intent detector (#1334) — so prose/markup that merely QUOTES an attack can't false-positive.
+CODE_EXTS = {
     ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".mts", ".cts",
-    ".json", ".vue", ".svelte", ".md", ".yml", ".yaml", ".sh", ".bash",
-    ".py", ".rb", ".php", ".go", ".rs", ".html", ".htm", ".css", ".map",
+    ".sh", ".bash", ".zsh", ".py", ".rb", ".php", ".go", ".rs",
+    ".bat", ".cmd", ".ps1", ".psm1", ".json",
+}
+
+# The broad scanner SOURCE set = executable code PLUS the prose/markup/config the content + obfuscation
+# heuristics also inspect. Derived from CODE_EXTS so the two can never drift and a new code extension is
+# added in exactly one place.
+SOURCE_EXTS = CODE_EXTS | {
+    ".vue", ".svelte", ".md", ".yml", ".yaml", ".html", ".htm", ".css", ".map",
 }
 
 
