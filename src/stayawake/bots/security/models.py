@@ -78,6 +78,9 @@ class Finding:
     evidence: str | None = None
     vector: str | None = None      # e.g. "vscode-autorun", "evil-merge"
     confidence: str = CONFIRMED    # confirmed | heuristic — stamped by the scanner from the signature
+    related_paths: tuple[str, ...] = ()  # working-tree paths a COMMIT-keyed finding concerns (e.g. the
+                                   # files an evil-merge introduced) — `path` there is a merge SHA, so
+                                   # remediation reads the affected files from here, not `path`
     advisory_only: bool = False    # informational (e.g. a dependency CVE) — the scanner routes these
                                    # OUT of the worm verdict into ScanResult.advisories; a repo with
                                    # only advisory_only findings stays CLEAN (reported, never gated).

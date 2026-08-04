@@ -138,6 +138,11 @@ class TestPartialFix(unittest.TestCase):
                       "loader", remediation="strip-appended-payload")
     _EXFIL = Finding("x", "exfil", Severity.CRITICAL, "telemetry.js",
                      "shai-hulud", remediation="manual")
+    # A confirmed evil-merge (#1360 PR2): keyed to a merge SHA (path), with the introduced files in
+    # `related_paths` — its remediation is history-provenance guidance, not a working-tree edit.
+    _EVIL_MERGE = Finding("evil-merge-loader", "evil-merge", Severity.CRITICAL, "96dcbd397c",
+                          "smuggled loader", remediation="manual", vector="evil-merge",
+                          related_paths=("tailwind.config.js",))
     _SAFE = Change("strip-gitignore", ".gitignore")
 
     def _run(self, *, residual, applied=(_SAFE,), existing_pulls=(),
@@ -191,6 +196,17 @@ class TestPartialFix(unittest.TestCase):
         self.assertIn("ABORTED", r.outcome)
         self.assertIn("#9", r.outcome)                      # the filed issue is reported
         self.assertNotIn("already clean", r.outcome)
+
+    def test_evil_merge_gets_history_provenance_guidance(self):
+        # A confirmed evil-merge is keyed to a merge COMMIT, not a file — the generic "remove/recover
+        # manually" is nonsensical. It must get history-provenance guidance: name the SHA + files and
+        # state that `saw fix` never rewrites history (a maintainer decision).
+        r = self._run(residual=[self._EVIL_MERGE], applied=())
+        self.assertIn("ABORTED", r.outcome)                     # confirmed → needs-review, exit 1
+        self.assertIn("96dcbd397c", r.outcome)                  # location is the merge SHA
+        self.assertIn("tailwind.config.js", r.outcome)          # the introduced file is named
+        self.assertIn("never rewrites history", r.outcome)      # the load-bearing safety guidance
+        self.assertNotIn("remove/recover manually", r.outcome)  # NOT the generic file action
 
     def test_nothing_fixable_dedups_issue(self):
         # A re-run with an existing open issue must not open a duplicate (idempotent notify).
