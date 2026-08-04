@@ -33,6 +33,15 @@ SAW_HOOK_TIMEOUT = "SAW_HOOK_TIMEOUT"   # wall-clock budget (s) for a scan-on-cl
 NO_COLOR = "NO_COLOR"
 CLICOLOR_FORCE = "CLICOLOR_FORCE"   # force colour on even when stdout is not a TTY (e.g. recording)
 CI = "CI"                           # set by CI runners → suppress colour so captured logs stay plain
+# Ephemeral-runner markers (#1337) — runner-SPECIFIC signals set by the CI system (bare `CI=` is not
+# enough; a dev may export it). READ-ONLY: consulted only to add impact CONTEXT to a finding, never to
+# change severity/verdict/exit (see `is_ephemeral_runner`). Not operator-configured.
+GITHUB_ACTIONS = "GITHUB_ACTIONS"   # GitHub Actions
+GITLAB_CI = "GITLAB_CI"             # GitLab CI
+CIRCLECI = "CIRCLECI"               # CircleCI
+BUILDKITE = "BUILDKITE"             # Buildkite
+RUNNER_OS = "RUNNER_OS"             # GitHub Actions runner OS marker
+_RUNNER_MARKERS = (GITHUB_ACTIONS, GITLAB_CI, CIRCLECI, BUILDKITE, RUNNER_OS)
 TERM = "TERM"                       # terminal type ('xterm-256color', 'dumb', …); read by core.terminal
 COLORTERM = "COLORTERM"             # 'truecolor' / '24bit' when 24-bit colour is available
 PAGER = "PAGER"
@@ -53,6 +62,28 @@ def get(name: str, default: str | None = None) -> str | None:
 def any_set(names) -> bool:
     """True when any of `names` holds a non-empty value (e.g. the NO_STREAM group)."""
     return any(get(n) for n in names)
+
+
+def is_ephemeral_runner() -> bool:
+    """True only when the host is clearly an EPHEMERAL CI runner. FAILS TOWARD WORKSTATION (False) when
+    ambiguous or absent (#1337): the CI signal is attacker-forgeable, so it may only ever ADD runner
+    context to an impact finding — never soften its severity/verdict/exit. Requires a runner-specific
+    marker AND the absence of a persistent home, so container-on-a-workstation (real `$HOME`/SSH mounted
+    through) stays 'workstation'."""
+    return any_set(_RUNNER_MARKERS) and not _has_persistent_home()
+
+
+def _has_persistent_home() -> bool:
+    """A real workstation home carries private SSH keys an ephemeral runner image does not — the safe
+    direction: a runner can't fake real keys, and if it somehow did the only effect is dropping a note.
+    Lists names only, never reads key bytes."""
+    from pathlib import Path
+    home = get("HOME") or os.path.expanduser("~")
+    try:
+        return any(p.name.startswith("id_") and not p.name.endswith(".pub")
+                   for p in (Path(home) / ".ssh").iterdir())
+    except OSError:
+        return False
 
 
 # ── GitHub / Slack context (reused across the alerters + the remediator) ───────────────
