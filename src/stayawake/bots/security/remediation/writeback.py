@@ -57,6 +57,26 @@ def _apply_seam_excision(root: Path, rel: str, expected: str, quarantine: Path, 
     return _backup_write_verify(root, rel, expected, quarantine, content_sig)
 
 
+def _apply_whole_file_restore(root: Path, rel: str, expected: str, quarantine: Path, content_sig) -> bool:
+    """Write a WHOLE-FILE restore (a clean 3-way-merge version, #1363), re-proving `expected` against
+    the bytes on disk NOW with the SAME gates a non-excised `Recovery` uses — NOT `_seam_strip`, which
+    is specific to concealment-seam excisions. `expected` must be a safe write target, carry no
+    payload, be `current` minus a provably payload-only delta (`_safe_to_recover`) with no fabricated
+    byte (`_is_subsequence`), then the shared backup → write → verify-or-revert tail. Identical WRITE
+    safety to `apply_recovery`'s restore arm; the ONLY difference is provenance (a synthesized merge
+    tree, not committed first-parent history), which is why the caller lands it as a review-required
+    computed-tier commit and never auto-trusts it."""
+    target = root / rel
+    if not expected or not is_safe_write_target(target, root):
+        return False
+    if not target.exists() or _carries_payload(expected, content_sig):
+        return False
+    current = target.read_text(encoding="utf-8", errors="replace")
+    if not _safe_to_recover(current, expected, content_sig) or not _is_subsequence(expected, current):
+        return False                      # not 'current minus payload' → refuse (never revert legit work)
+    return _backup_write_verify(root, rel, expected, quarantine, content_sig)
+
+
 def apply_recovery(repo, rec: Recovery, quarantine: Path, content_sig) -> bool:
     """Write `rec.clean_text` (after backing up the infected file), re-proving safety against the
     bytes on disk NOW — proven independently of the planner, so a stale/mismatched `clean_text`
@@ -99,5 +119,11 @@ def apply_suggested(repo, sug: "Suggested", quarantine: Path, content_sig) -> bo
     difference is that no clean ancestor corroborated it, so the CALLER lands it as a separate,
     review-required commit and keeps the run needs-review — the operator's PR review is the trust
     anchor for the one residual the git-match would otherwise close (a scanner-invisible injection
-    in the kept code). Never auto-merged; never presented as a corroborated fix."""
+    in the kept code). Never auto-merged; never presented as a corroborated fix.
+
+    A "restore"-mode Suggested (#1363: a clean 3-way-merge version for a file born via an evil merge)
+    re-proves through the whole-file restore gates instead of `_seam_strip` — same write safety, still
+    review-required."""
+    if getattr(sug, "apply_mode", "seam") == "restore":
+        return _apply_whole_file_restore(Path(repo), sug.path, sug.excised_text, quarantine, content_sig)
     return _apply_seam_excision(Path(repo), sug.path, sug.excised_text, quarantine, content_sig)

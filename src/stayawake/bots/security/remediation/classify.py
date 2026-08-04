@@ -10,7 +10,8 @@ from pathlib import Path
 
 from stayawake.lib import git as gitutil
 from stayawake.bots.security.models import (
-    BORN_INFECTED, INTRINSIC_MATCH, LEGIT_CHANGES, UNTRACKED, NO_VCS, INSPECT_FAILED)
+    BORN_INFECTED, INTRINSIC_MATCH, LEGIT_CHANGES, UNTRACKED, NO_VCS, INSPECT_FAILED,
+    MERGE_CLEAN_RECOVERED)
 from stayawake.bots.security.obfuscation import analyze_file
 from stayawake.bots.security.remediation.gates import (
     _seam_strip, _recovery_diff, _carries_payload, _ext, _safe_to_recover, _short)
@@ -65,6 +66,37 @@ class Suggested:
     diff: str
     excised_text: str
     line: int | None = None
+    apply_mode: str = "seam"   # "seam" → re-prove via _seam_strip (the #1209 computed strip); "restore"
+                               # → whole-file restore re-proved like a non-excised Recovery
+                               # (_safe_to_recover + subsequence). Both stay REVIEW-required (never
+                               # auto-merged); "restore" carries a clean 3-way-merge version (#1363 PR2).
+
+
+def _merge_recovery(work, content_sig, merge_clean, path, sig, line):
+    """A REVIEW-required `Suggested` that restores a file BORN via an evil merge to the clean version
+    a proper 3-way merge would have produced (`merge_clean`). Offered ONLY when that blob is available,
+    carries no payload, and the working file is `merge_clean` plus a PROVABLY payload-only APPEND
+    (`_safe_to_recover`) — the exact shape `_apply_whole_file_restore` can re-prove at write time, so
+    it never emits a Suggested the apply step would silently reject. (A same-line concealment SEAM is
+    NOT handled here — `_apply_whole_file_restore` can't re-prove a seam; that case falls through to the
+    existing `_try_suggest`, which excises the seam directly.)
+
+    `merge_clean` is second-parent-derived (the first-parent walk deliberately distrusts the other
+    parent), so it is NEVER auto-applied: it lands on the review branch as a computed-tier commit the
+    operator must eyeball — that review is the trust anchor against a scanner-invisible backdoor an
+    attacker could have committed to the side branch. Returns None (→ caller falls through) otherwise."""
+    if not merge_clean or _carries_payload(merge_clean, content_sig):
+        return None
+    if not _safe_to_recover(work, merge_clean, content_sig):
+        return None
+    action = ("saw recovered this file to the clean version a proper 3-way merge would have produced — "
+              "the evil merge introduced the payload beyond it. It derives from the merge's OTHER parent, "
+              "not the first-parent history chain, so it is offered for REVIEW, not auto-applied: verify "
+              "the restored content before merging; the original is quarantined.")
+    return Suggested(path, sig, MERGE_CLEAN_RECOVERED, action,
+                     _recovery_diff(work, merge_clean, content_sig), merge_clean, line, apply_mode="restore")
+
+
 def _try_suggest(work, ext, content_sig, fallback: "Manual"):
     """Escalate a DEFERRED finding to a computed `Suggested` fix when `_seam_strip` proves a safe
     concealment-seam excision. `_seam_strip`'s five gates are self-contained (they need no git
@@ -94,7 +126,7 @@ def _build_suggested(work, excised, content_sig, path, sig, reason, line) -> "Su
     return Suggested(path, sig, reason, action, _recovery_diff(work, excised, content_sig), excised, line)
 
 
-def classify_recovery(repo, finding, content_sig):
+def classify_recovery(repo, finding, content_sig, merge_clean: str | None = None):
     """Decide how to remediate ONE (confirmed) code-loader finding — always to a CLEAN COMMITTED
     version, so the result is trusted history rather than anything we synthesized. Two proofs that
     restoring the last clean first-parent version is safe:
@@ -150,6 +182,12 @@ def classify_recovery(repo, finding, content_sig):
                 break
 
         if clean is None:
+            # Born via an evil merge? The first-parent chain holds no clean version, but the merge's
+            # clean 3-way auto-merge does. Offer it as a REVIEW-required Suggested (never auto-applied —
+            # it derives from the merge's other parent, which the first-parent walk distrusts). #1363.
+            merged = _merge_recovery(work, content_sig, merge_clean, path, sig, line)
+            if merged is not None:
+                return merged
             if analyze_file(work, ext):       # packed/obfuscated → looks born-infected
                 return _try_suggest(work, ext, content_sig, Manual(
                     path, sig, BORN_INFECTED,
