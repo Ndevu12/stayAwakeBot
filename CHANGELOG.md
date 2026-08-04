@@ -7,6 +7,22 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **`saw audit` catches a NOVEL autorun foothold in a known location — no signature required** (#1333).
+  Signature matching misses a new payload by construction, and with the worm's source public, variants
+  are the expected case. The new autorun monitor treats the re-execution surface (macOS LaunchAgents /
+  Linux systemd user units) as monitored state and **fuses four statically-observable signals** per
+  entry: **provenance** (is the referenced executable owned by a package/app, code-signed, on a trusted
+  path — or unowned, unsigned, run from a scratch/cache path?), **content-shape** (does it fetch/decode-
+  execute or poll on a short interval — read from the referenced *script*, where the payload usually
+  lives), **novelty** (new/changed since a baseline), and **correlation** (one unattributed payload
+  wired into several re-run points). An **unattributed** entry that runs a scratch-path payload, or
+  whose content fetch-execs, is reported as a **foothold** (a rotation-UNSAFE finding → exit `3`) even
+  with zero signature hits; a merely-new unattributed entry is an `info` review item. Provenance
+  resolution (dpkg/rpm/codesign) runs on the shared **parallel** THREAD seam — deterministic at any
+  worker count, fail-closed to *unattributed* on a subprocess error/timeout. The cross-run **baseline**
+  (XDG state) adds only the novelty signal and is **never trusted for safety** — provenance, content,
+  and correlation grade every entry regardless, so a tampered or first-run baseline can't launder a
+  foothold; a lazily-tampered baseline is detected and ignored. Disabled on ephemeral/CI hosts.
 - **`saw audit` now certifies the persistence surface, and states whether credential rotation is
   safe** (#1332). A clean audit no longer silently implies a persistence check it didn't perform: a
   new coverage probe enumerates the user-owned persistence locations (launch agents / user services,

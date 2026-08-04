@@ -46,7 +46,9 @@ ACTIVE_PERSISTENCE_IDS = {"self-hosted-runner-persistence", "os-service-persiste
                           "host-artifact-content-infected",
                           # active mechanism-based persistence (a live backdoor, not just hardening)
                           "ssh-authorized-keys-forced-command", "shell-profile-fetch-exec",
-                          "git-fsmonitor-command", "git-hookspath-unsafe", "git-config-fetch-exec"}
+                          "git-fsmonitor-command", "git-hookspath-unsafe", "git-config-fetch-exec",
+                          # a novel, unattributed autorun foothold caught by state+provenance, #1333
+                          "autorun-unattributed-foothold"}
 
 # CREDENTIAL EXPOSURE — a credential in a location that is genuinely a misconfiguration (plaintext on
 # disk) is worth acting on, but is NOT proof of a compromised host. When it is the WORST thing found (no
