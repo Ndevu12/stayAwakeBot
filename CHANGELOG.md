@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-04
+
 ### Added
 - **`saw fix` can now recover a file *born* via an evil merge, safely and review-gated** (#1363). A file
   the merge introduced onto mainline through its *second parent* has no clean version on the first-parent
@@ -106,6 +108,14 @@ All notable changes to this project are documented here. The format is based on
   (`saw fix`, `--pr`, `--remote`, no-origin). Consistent with a suspicious scan it stays **exit 0**
   and files **no** manual-review issue (a heuristic is not asserted malware); only a genuinely empty
   tree is still "already clean". Heuristics remain **never auto-fixed** — detection is unchanged.
+
+### Security
+- **Bumped the pinned self-scan engine to current main (`sentinel-ref` → merge of #1366), in both
+  the worm-guard gate and the release self-scan.** Catches the gate up to the reviewed engine work
+  since the last pin (#1355): the dead-man-daemon (#1335), destructive-intent (#1334), novel-autorun
+  (#1333) and persistence-surface (#1332) audit capabilities, plus evil-merge grading and recovery
+  (#1363/#1364/#1365). Both pin copies are bumped together, as the sync gate (`pin_tools.py synced`,
+  #1210) requires.
 
 ## [0.3.1] - 2026-08-03
 
@@ -1689,7 +1699,8 @@ release-publish hardening._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel
 (supply-chain worm detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.1.19...v0.2.0
