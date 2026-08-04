@@ -165,5 +165,70 @@ class TestEndToEnd(unittest.TestCase):
         self.assertNotIn("secure-home-wipe", {f.signature_id for f in r.findings})
 
 
+class TestGatedCapability(unittest.TestCase):
+    """#1336 — a destructive routine shipped behind a DISABLED feature flag (the SANDWORM_MODE staging
+    shape) is NOT benign. Detection is capability-first: it fires on the routine's PRESENCE, never its
+    reachability, so a gated wipe is still a CONFIRMED finding — the flag is mitigating CONTEXT, never a
+    downgrade. The output distinguishes present-but-gated from armed rather than collapsing them."""
+
+    _GATED = ("const os=require('os'),fs=require('fs');\n"
+              "const FLAGS={destroyOnRevoke:false};\n"       # off by default (staging)
+              "if(FLAGS.destroyOnRevoke){ fs.rmSync(os.homedir(),{recursive:true,force:true}); }\n")
+    _ARMED = "const os=require('os'),fs=require('fs'); fs.rmSync(os.homedir(),{recursive:true});"
+
+    def test_gated_wipe_is_still_detected(self):
+        # criterion ①: present-behind-a-disabled-flag produces a finding, NOT a clean result.
+        self.assertIsNotNone(detect_destructive(self._GATED))
+
+    def test_gated_flag_is_set_and_worded_distinctly(self):
+        # criterion ②: gated vs armed are distinguished in the verdict + the evidence wording.
+        gated = detect_destructive(self._GATED)
+        armed = detect_destructive(self._ARMED)
+        self.assertTrue(gated.gated)
+        self.assertFalse(armed.gated)
+        self.assertIn("gated", gated.reason.lower())
+        self.assertIn("capability", gated.reason.lower())
+        self.assertIn("do not dismiss", gated.reason.lower())      # remediation framing, not "inactive"
+        self.assertNotIn("gated", armed.reason.lower())            # armed wording is unchanged
+
+    def test_gating_never_downgrades_the_grade(self):
+        # criterion ③: same signature + CONFIRMED/critical whether gated or armed — the flag is context.
+        d = Path(tempfile.mkdtemp(prefix="gated-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
+        (d / "armed.js").write_text(self._ARMED)
+        (d / "gated.js").write_text(self._GATED)
+        with LocalRepoTarget(str(d), "t", ScanOptions()) as tg:
+            r = scan_target(tg, load_signatures(), [])
+        wipes = [f for f in r.findings if f.signature_id == "destructive-home-wipe"]
+        self.assertEqual({f.path for f in wipes}, {"armed.js", "gated.js"})   # BOTH flagged
+        for f in wipes:
+            self.assertEqual(f.confidence, "confirmed")
+            self.assertEqual(f.severity.label(), "critical")               # gated is NOT downgraded
+        self.assertTrue(any("gated" in (f.evidence or "").lower()
+                            for f in wipes if f.path == "gated.js"))        # distinction reaches output
+
+    def test_disabled_flag_alone_is_not_a_finding(self):
+        # FP guard: the gate signal is ONLY consulted once the destructive FLOW fires. A disabled
+        # feature flag on its own (no home-rooted recursive delete) is nothing.
+        self.assertIsNone(detect_destructive("const cfg={enableSelfDestruct:false}; doWork();"))
+
+    def test_boundary_is_home_rooting_not_reachability(self):
+        # criterion ④ boundary: we do NOT do dead-code elimination — but a SCOPED delete behind a flag
+        # is still clean because it isn't HOME-ROOTED, not because it's unreachable. (A flagged
+        # `rm -rf ./tmp` / `rimraf('./build')` in vendored or test code must not false-positive.)
+        self.assertIsNone(detect_destructive(
+            "const F={wipe:false}; if(F.wipe){ require('rimraf')('./build'); }"))
+        self.assertIsNone(detect_destructive(
+            "const F={destroyCache:false}; if(F.destroyCache){ fs.rmSync('./node_modules',{recursive:true}); }"))
+
+    def test_secure_variant_carries_the_gate(self):
+        secure_gated = ("let SANDWORM_MODE=false;\n"
+                        "if(SANDWORM_MODE){ for(const f of walk(os.homedir())){"
+                        "fs.writeFileSync(f,crypto.randomBytes(4096)); fs.unlinkSync(f);} }")
+        v = detect_destructive(secure_gated)
+        self.assertEqual(v.variant, SECURE)
+        self.assertTrue(v.gated)
+
+
 if __name__ == "__main__":
     unittest.main()
