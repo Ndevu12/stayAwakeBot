@@ -7,6 +7,17 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **`saw fix` can now recover a file *born* via an evil merge, safely and review-gated** (#1363). A file
+  the merge introduced onto mainline through its *second parent* has no clean version on the first-parent
+  history chain, so its code-loader recovery previously deferred to manual (`born-infected`). `saw fix`
+  now uses the merge's **clean 3-way auto-merge version** — the payload-free file a proper, review-visible
+  merge would have produced — as a recovery source. Because that version is *second-parent-derived* (the
+  first-parent recovery walk deliberately distrusts the other parent, where an attacker could have
+  committed a scanner-invisible backdoor), it is **never auto-applied**: it lands as a **review-required**
+  computed-tier commit the operator must eyeball, re-proved with the same write gates as a git restore
+  (the delta is provably payload-only, no fabricated byte, result payload-free, quarantine-backed). It is
+  offered *only* when the working file reduces to that clean version by a proven-safe removal; a poisoned
+  merge blob or a legit edit sitting on the payload defers to manual, never clobbering work.
 - **Evil-merge is now graded by corroboration strength, and confirmed loader-smuggling merges are
   remediated honestly** (#1360). The evil-merge detector previously graded *every* review-evading merge
   the same (`heuristic`), so a merge that smuggles a **known worm loader** past review scored the same

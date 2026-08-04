@@ -21,6 +21,7 @@ import unittest
 from pathlib import Path
 
 from stayawake.bots.security import remediation
+from stayawake.lib import git as gitutil
 from stayawake.bots.security.models import Finding, Severity
 from stayawake.bots.security.signatures import load_signatures
 
@@ -566,6 +567,67 @@ class TestSeamExcision(unittest.TestCase):
         self.assertIsNone(remediation.gates._worm_shim_block("x;\n" + _SHIM))                  # not at file start
         self.assertTrue(remediation.gates._shim_is_dead("const config = {};\n"))              # no require ref
         self.assertFalse(remediation.gates._shim_is_dead("const t = require('x');\n"))        # require used
+
+
+class TestMergeBornRecovery(unittest.TestCase):
+    """#1363 PR2: a file BORN via an evil merge (payload introduced at the merge itself, arriving on
+    mainline through the merge's second parent) has NO clean version on the first-parent history chain,
+    so it defers `born-infected` today. The merge's clean 3-way auto-merge blob IS a payload-free
+    version — offered as a REVIEW-required Suggested (restore mode), never an auto-applied Recovery,
+    because it is second-parent-derived and the first-parent walk deliberately distrusts that parent."""
+
+    def _born_via_merge(self):
+        d = _repo()
+        _commit(d, "base.txt", "base\n", "init")
+        main = _git_out(d, "rev-parse", "--abbrev-ref", "HEAD")
+        _git(d, "checkout", "-qb", "feat")
+        _commit(d, "y.mjs", CLEAN, "clean y.mjs on the feature branch")
+        _git(d, "checkout", "-q", main)
+        _git(d, "merge", "--no-ff", "--no-commit", "feat")
+        (d / "y.mjs").write_text(CLEAN + PACKED_PAYLOAD + "\n", encoding="utf-8")   # smuggle at the merge
+        _git(d, "add", "y.mjs"); _git(d, "commit", "-q", "-m", "evil merge (born via 2nd parent)")
+        merge = _git_out(d, "rev-parse", "HEAD")
+        return d, merge
+
+    def test_no_first_parent_clean_defers_without_merge_source(self):
+        d, _ = self._born_via_merge()
+        disp = remediation.classify_recovery(str(d), _finding("y.mjs"), SIG)
+        self.assertIsInstance(disp, remediation.Manual)            # today: no clean → manual
+        self.assertEqual(disp.reason, "born-infected")
+
+    def test_merge_blob_recovers_as_review_required_suggested(self):
+        d, merge = self._born_via_merge()
+        blob = gitutil.clean_merge_blob(str(d), merge, "y.mjs")
+        self.assertEqual(blob, CLEAN)                              # the clean 3-way-merge version
+        disp = remediation.classify_recovery(str(d), _finding("y.mjs"), SIG, merge_clean=blob)
+        self.assertIsInstance(disp, remediation.Suggested)        # REVIEW-required, not auto-Recovery
+        self.assertNotIsInstance(disp, remediation.Recovery)
+        self.assertEqual(disp.reason, "merge-clean-recovered")
+        self.assertEqual(disp.apply_mode, "restore")
+        # applies through the computed tier and restores the clean version exactly
+        quar = Path(tempfile.mkdtemp())
+        self.assertTrue(remediation.apply_suggested(str(d), disp, quar, SIG))
+        self.assertEqual((d / "y.mjs").read_text(), CLEAN)
+        self.assertNotIn("fromCharCode", (d / "y.mjs").read_text())
+
+    def test_never_recovers_from_a_poisoned_merge_blob(self):
+        # If the base_tree version ITSELF carries a payload (the side branch was already backdoored
+        # with a KNOWN loader), refuse — never launder a poisoned source as clean.
+        d, merge = self._born_via_merge()
+        poisoned = CLEAN + PACKED_PAYLOAD + "\n"
+        disp = remediation.classify_recovery(str(d), _finding("y.mjs"), SIG, merge_clean=poisoned)
+        self.assertIsInstance(disp, remediation.Manual)
+        self.assertEqual(disp.reason, "born-infected")
+
+    def test_legit_edit_over_payload_is_not_restored(self):
+        # If the working file isn't `merge_clean` + a provably-payload-only delta (a legit edit sits
+        # on top), the restore is unsafe → defer, never clobber the edit.
+        d, merge = self._born_via_merge()
+        (d / "y.mjs").write_text(CLEAN + "export const extra = 9;\n" + PACKED_PAYLOAD + "\n",
+                                 encoding="utf-8")
+        blob = gitutil.clean_merge_blob(str(d), merge, "y.mjs")
+        disp = remediation.classify_recovery(str(d), _finding("y.mjs"), SIG, merge_clean=blob)
+        self.assertIsInstance(disp, remediation.Manual)           # can't prove safe → defers
 
 
 if __name__ == "__main__":

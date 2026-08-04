@@ -42,6 +42,9 @@ UNTRACKED = "untracked"                     # file not tracked in git → no cle
 NO_VCS = "no-vcs"                           # not a git repository
 SUSPECT_HEURISTIC = "suspicious-heuristic"  # heuristic-only match (asset/minified shape) → review, never auto-recover
 INSPECT_FAILED = "inspect-failed"           # git history could not be read (e.g. corrupt repo) → defer, never guess
+MERGE_CLEAN_RECOVERED = "merge-clean-recovered"  # born via an evil merge; the clean 3-way auto-merge
+                                            # version is available → offered as a REVIEW-required
+                                            # Suggested (second-parent-derived, never auto-applied)
 
 
 class Severity(IntEnum):
@@ -81,6 +84,9 @@ class Finding:
     related_paths: tuple[str, ...] = ()  # working-tree paths a COMMIT-keyed finding concerns (e.g. the
                                    # files an evil-merge introduced) — `path` there is a merge SHA, so
                                    # remediation reads the affected files from here, not `path`
+    commit_sha: str | None = None  # FULL SHA of the commit a commit-keyed finding concerns (e.g. the
+                                   # evil merge) — `path` may be a truncated display SHA, so git ops
+                                   # (clean-merge-blob recovery) use this
     advisory_only: bool = False    # informational (e.g. a dependency CVE) — the scanner routes these
                                    # OUT of the worm verdict into ScanResult.advisories; a repo with
                                    # only advisory_only findings stays CLEAN (reported, never gated).
