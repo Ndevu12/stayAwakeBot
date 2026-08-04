@@ -30,13 +30,14 @@ jobs:
         with:
           # Pin the scanner to a known-good SHA, never @main (SECURITY_BASELINE doctrine):
           # a later compromise of main cannot silently change what the gate runs. This points at
-          # current main (merge of #1355). Since the last pin (#1353) it catches up the `saw hook`
-          # scan-on-clone UX refinement — branding, avoid-list, spinner, colours (#1355). requires-python >=3.11
+          # current main (merge of #1366). Since the last pin (#1355) it catches up new audit/detect
+          # capabilities — dead-man daemon, destructive-intent, novel autorun, persistence-surface
+          # certification, evil-merge grading/recovery (#1332/#1333/#1334/#1335/#1363/#1364/#1365). requires-python >=3.11
           # satisfies the 3.13 runner. Bump this deliberately after reviewed engine changes — the
           # in-band pin-freshness gate (#1172) fails an engine PR that doesn't bump this, both pin
           # copies must AGREE (pin_tools.py synced, #1210), and scanner-pin-drift opens an issue if
           # it falls behind.
-          sentinel-ref: 9edd39f4241d522cfe76eb1301e77ec44a3c01a1   # merge of #1355 — catches up the `saw hook` scan-on-clone UX refinement (#1355)
+          sentinel-ref: d1e9e1902b14ec23261b5e9abcadbe00c9aa8a60   # merge of #1366 — catches up dead-man daemon (#1335), destructive-intent (#1334), novel autorun (#1333), persistence-surface certification (#1332), evil-merge grading/recovery (#1363/#1364/#1365)
           fail-on-findings: 'true'
           # This gate never uploads SARIF — the job conclusion is the scan's exit code, nothing
           # else. Code-scanning delivery is owned solely by security-sentinel.yml.
