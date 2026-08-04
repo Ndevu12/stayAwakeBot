@@ -228,19 +228,27 @@ These fuse into the existing autorun monitor (`hygiene/autorun/`, #1333): the de
 self-destruct (`taint/destructive`, #1334) is a **decisive** content shape, and a short poll interval
 is a **corroborating** reason. Because a trusted interpreter does not vouch for the script it runs, an
 autorun that launders through one (`node /path/daemon.js`) has **that script** content-scanned, not the
-`node` binary. The one feature that genuinely needs a live observation window — *measured* egress
-timing for a **compiled** daemon whose interval isn't in readable source — is a monitoring capability,
-out of scope for the scanner.
+`node` binary.
 
-**Empirical: what is obtainable unprivileged?** Measured on macOS (uid 501, no root) — the daemon runs
-as the *user* (LaunchAgent / systemd user service), so userspace tools see its context and egress:
+**Empirical: what is obtainable, and in a single look?** Two axes are easy to conflate — keep them
+apart. *Privilege* is not the divider: measured on macOS (uid 501, no root), every feature below is
+obtainable unprivileged, because the daemon runs as the *user* (LaunchAgent / systemd user service), so
+`ps` / `lsof` / `nettop` all see its context and egress. The real divider is **whether the feature
+exists in one snapshot (a scan) or only as a pattern across events over time (monitoring)**:
 
-| Feature | Unprivileged? | Source |
-| --- | --- | --- |
-| Parent lineage (PPID), TTY absence | ✅ | `ps -o ppid,tty` — sees launchd-spawned procs, `??` = no TTY |
-| Non-interactive origin | ✅ | the persistence artifact itself + PPID/TTY |
-| Poll cadence | ✅ | `StartInterval` / `OnUnitActiveSec` literal in the artifact |
-| *Measured* egress interval regularity | ⚠️ needs a window | `nettop`/`lsof` run unprivileged, but establishing periodicity needs minutes — monitoring, not scanning |
+| Feature | Unprivileged? | In one look (scan)? | How |
+| --- | --- | --- | --- |
+| Parent lineage (PPID), TTY absence | ✅ | ✅ | `ps -o ppid,tty` — launchd-spawned, `??` = no TTY |
+| Non-interactive origin | ✅ | ✅ | the persistence artifact itself + PPID/TTY |
+| Poll cadence — **read** from source | ✅ | ✅ | `StartInterval` / `OnUnitActiveSec`, or `setInterval(fn, 60000)` in the script — a literal you *read*, not a rhythm you *time* |
+| Egress interval regularity — **measured** | ✅ | ❌ needs a window | one `nettop`/`lsof` shows *a* connection now; the 60s *rhythm* is a property of a sequence of events, so confirming it needs minutes of observation = **monitoring** |
+
+For a **script-based** daemon (which is what Shai-Hulud is) the cadence is a readable literal, so the
+last row is never needed — reading `60000` is the same fact as measuring a 60s rhythm, obtained in one
+look. The measured row is the *last resort* only for a **compiled** daemon whose interval is baked into
+machine code with no readable source; establishing it requires an observation window, which is a
+monitoring capability, out of scope for the scanner. That case is tracked as an open question in
+**#1368**.
 
 **False-positive analysis.** Non-interactive + timer + polls-`api.github.com` are each *individually
 benign* — update-notifiers, Dropbox, `backupd` all qualify. Periodicity alone is never malicious. The
