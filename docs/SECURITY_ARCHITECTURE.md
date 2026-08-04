@@ -257,6 +257,42 @@ recursive ∧ delete, #1334) — never a single feature. A benign daemon sharing
 *except* the destructive payload produces no decisive hit (pinned by
 `test_benign_timer_daemon_is_not_decisive`).
 
+## Capability, not configuration: a wipe behind a disabled flag (#1336)
+
+**SANDWORM_MODE** (Feb 2026) ships its destructive routine and polymorphic engine **behind feature
+flags that are off by default** — the staging shape, where the capability is present and functional but
+one attacker-controlled toggle from running. A scanner that reported on *armed state* would return clean
+during exactly the window a package is being seeded into dependency trees, then fire only after the
+attacker detonates. **Capability is durable; configuration is not.**
+
+**Decision — the destructive detector is capability-first.** `taint/destructive` (#1334) matches the
+routine's **static shape** (home-root ∧ recursive ∧ delete, co-located) and **never checks
+reachability**, so a wipe gated behind `if (FLAGS.destroyOnRevoke)` fires on the same footing as an
+armed one. That is deliberate, not incidental: reachability/dead-code analysis is precisely what would
+re-introduce the evaporating-during-staging miss.
+
+- **Grade — gating never downgrades.** A gated wipe is still **confirmed / critical**. The flag is
+  attacker-controlled *context*, so it shifts the finding's **wording** — "contains a `$HOME`-wipe
+  *capability*, currently gated behind a disabled feature flag; an attacker can flip it in the next
+  publish" — not its **confidence**. Present-but-gated and present-and-armed are distinguished (a
+  `DestructiveVerdict.gated` flag + the reason text), never collapsed in either direction. Remediation
+  leads with "present and attacker-flippable; do not dismiss as inactive," never with the true-but-
+  dangerous "not currently running."
+- **Flag state is not resolved, on purpose.** We do not try to determine the flag's runtime *value*
+  (unreliable, attacker-controlled, and the polymorphic engine is itself a flagged component). We detect
+  a destruct-intent-**named** flag *declared* to a disabled value, and it is **enrichment only** — it
+  changes wording, never the verdict, so an undetermined gate simply reads as the more-alarming "armed"
+  and the finding stands regardless.
+- **Boundary against benign dead code.** The line is **home-rooting, not reachability.** A flagged
+  `rimraf('./build')` or `rm -rf ./tmp` stays clean because it is scoped, not because it is unreachable
+  — so we get the gated-wipe catch without opening the door to flagging every dangerous-looking dead
+  routine. **FP analysis (vendored / test code):** the corroborated home-root ∧ recursive ∧ delete flow
+  is essentially unheard of in benign code (a real uninstaller deletes *its own* dirs, not `$HOME`); a
+  vendored or test file that genuinely carries a home-wipe routine *is* a real capability and is flagged
+  correctly; `saw`'s own detector fixtures are covered by the `src/**` + `tests/**` self-reference
+  allowlist. The gate signal is consulted **only after** the destructive flow already fired, so a
+  stray disabled flag on its own is never a finding.
+
 ## Config
 - `config/security.yml` — targets (local globs + GitHub users/orgs), exclude dirs, remediation mode,
   allowlist, alert routing. `exclude_dirs` defaults already skip `.git`, `node_modules`, build

@@ -6,6 +6,24 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- **A destructive routine shipped behind a *disabled* feature flag is now reported as a capability, not
+  dismissed as inactive** (#1336). SANDWORM_MODE ships its `$HOME`-wipe behind an off-by-default flag —
+  the staging shape, where the capability is present and functional but one attacker toggle from running;
+  reporting only on *armed* state would return clean during exactly the window a package is being seeded.
+  The destructive detector (#1334) is **capability-first**: it matches the routine's static shape
+  (home-root ∧ recursive ∧ delete) and never checks reachability, so a gated wipe fires on the same
+  footing as an armed one. **Gating never downgrades** — a gated wipe stays **confirmed / critical**; the
+  flag is attacker-controlled *context* that shifts the finding's wording ("contains a `$HOME`-wipe
+  *capability*, currently gated behind a disabled feature flag — an attacker can flip it in the next
+  publish; do not dismiss as inactive") without touching its confidence, so present-but-gated and
+  present-and-armed are distinguished rather than collapsed. The flag's runtime *value* is deliberately
+  not resolved (unreliable, attacker-controlled, and the polymorphic engine is itself flagged) — the gate
+  signal is enrichment only, so an undetermined gate reads as the more-alarming "armed". The boundary
+  against benign dead code is **home-rooting, not reachability**: a flagged `rimraf('./build')` stays
+  clean because it is scoped. Capability-vs-configuration rationale + false-positive analysis (vendored /
+  test code) documented in `docs/SECURITY_ARCHITECTURE.md`.
+
 ## [0.4.0] - 2026-08-04
 
 ### Added
