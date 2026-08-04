@@ -23,6 +23,16 @@ All notable changes to this project are documented here. The format is based on
   against benign dead code is **home-rooting, not reachability**: a flagged `rimraf('./build')` stays
   clean because it is scoped. Capability-vs-configuration rationale + false-positive analysis (vendored /
   test code) documented in `docs/SECURITY_ARCHITECTURE.md`.
+- **A destruction finding on an ephemeral CI runner now carries impact context — without ever softening
+  severity** (#1337). The same `$HOME`-wipe is catastrophic on a workstation and near a no-op on a
+  disposable runner, but the CI signal is attacker-forgeable, so **environment does not modulate
+  severity, verdict, or exit code** (a rule that downgraded on a detected runner is one a workstation
+  payload could trigger to suppress its own alarm). Instead, on a runner the finding gets a one-line note
+  reframing the risk toward what matters there — credential theft + lateral movement — since the same
+  payload is still critical, just for a different reason. `env.is_ephemeral_runner()` **fails toward
+  workstation** (a runner-specific marker *and* no persistent home; container-on-a-workstation with a
+  real `$HOME`/SSH mounted through stays "workstation"). No build that previously failed can start
+  passing. Rationale documented in `docs/SECURITY_ARCHITECTURE.md`.
 
 ## [0.4.0] - 2026-08-04
 

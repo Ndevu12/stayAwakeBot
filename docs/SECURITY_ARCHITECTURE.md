@@ -293,6 +293,27 @@ re-introduce the evaporating-during-staging miss.
   allowlist. The gate signal is consulted **only after** the destructive flow already fired, so a
   stray disabled flag on its own is never a finding.
 
+## Environment context, not severity modulation (#1337)
+
+A home-wipe is catastrophic on a workstation and close to a no-op on an ephemeral CI runner (the home
+is discarded when the job ends) — but the payload is identical, so it produces an identical finding.
+
+**Decision: environment does NOT modulate severity. It adds impact *context* only.** The CI signal is
+**attacker-forgeable** (a payload can set `CI=true`), and the costs are asymmetric: under-scoring a
+workstation loses data irreversibly, over-scoring a runner is reversible alarm fatigue. Any rule that
+*downgrades* on a detected runner is one a workstation payload can trigger to suppress its own alarm
+where it is catastrophic — so severity, verdict, and exit code are **environment-invariant**. Instead,
+on a runner a destruction finding gets a one-line note reframing the risk toward what actually matters
+there (credential theft + lateral movement), because the same payload is still critical on a runner —
+just for a different reason. Reframing beats downscaling: it fixes alarm fatigue without ever quieting
+the alarm, and a forged `CI=true` can only *add* a note, never lower the gate.
+
+- **Fails toward workstation** (`env.is_ephemeral_runner()`): true only on a runner-specific marker
+  (`GITHUB_ACTIONS`/`GITLAB_CI`/…, not bare `CI=`) **and** no persistent home — so container-on-a-
+  workstation (real `$HOME`/SSH mounted through) stays "workstation". Ambiguous/absent → workstation.
+- **Exit codes / CI gating are untouched**: severity does not move, so no build that previously failed
+  can silently start passing (pinned by `test_verdict_and_severity_are_environment_invariant`).
+
 ## Config
 - `config/security.yml` — targets (local globs + GitHub users/orgs), exclude dirs, remediation mode,
   allowlist, alert routing. `exclude_dirs` defaults already skip `.git`, `node_modules`, build
