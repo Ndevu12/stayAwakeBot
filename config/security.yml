@@ -74,6 +74,14 @@ allowlist:
   # Heuristic shapes of the same packed fixture (postcss.config.mjs)
   - {signature: obfuscated-source-file, path_glob: "tests/**"}
   - {signature: oversized-config-line, path_glob: "tests/**"}
+  # destructive-intent detector — the detector's OWN source (taint/destructive.py) and its test
+  # fixtures legitimately contain the wipe patterns it matches (regexes, taxonomy, comments), exactly
+  # like exfil-shai-hulud-token@src/** above. Self-scoped; a user scanning their repo uses their own
+  # config, so their code is still scanned. #1334
+  - {signature: destructive-home-wipe, path_glob: "src/**"}
+  - {signature: destructive-home-wipe, path_glob: "tests/**"}
+  - {signature: secure-home-wipe, path_glob: "src/**"}
+  - {signature: secure-home-wipe, path_glob: "tests/**"}
   # Exfil-branding signatures — this repo is a scanner, so its signature DB names the worm's own
   # IoC phrases and its threat-intel prose legitimately references them. Suppress ONLY this repo's
   # own mentions (self-scoped). The runner signature is file_globs-scoped, so it needs no rule.

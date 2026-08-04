@@ -7,6 +7,22 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **Destructive-intent detection — `saw` now sees that a lifecycle script *deletes the user's home
+  directory*, not just that it runs code** (#1334). A new model-driven flow detector (`taint/`) flags
+  the Shai-Hulud self-destruct routine by its static shape: a recursive filesystem walk **rooted at the
+  user's home** (or `/`) co-occurring with **deletion**. It is **corroborated, not a lone signal** — the
+  home root must be co-located with the delete/walk (home is the *target*), so a scoped `rm -rf ./dist`,
+  a lone `unlink(tmp)`, or an `os.homedir()` used for a config path never triggers it; each half alone
+  is inert, and only the combination (near-zero benign use) earns the **confirmed / critical** grade. On
+  top of that core it **fuses amplifiers** — the dead-man's-switch trigger (armed on a GitHub-auth /
+  token-revocation condition), a co-present decode→execute dropper, and the named IoC droppers
+  (`setup_bun.js` / `bun_environment.js`). The two variants are reported **distinctly**, because
+  recoverable-or-not is the first question after a wipe: **`destructive-home-wipe`** (plain delete →
+  recoverable, image the disk before use) vs **`secure-home-wipe`** (overwrite-then-delete → the data is
+  unrecoverable). Cross-platform: POSIX (`rm -rf`/`rimraf`/`find … -delete`), **Windows** batch +
+  PowerShell (`rmdir /s`, `del /f /s /q`, `Remove-Item -Recurse` over `%USERPROFILE%` / `$env:USERPROFILE`;
+  `.bat`/`.cmd`/`.ps1` are scanned), and bracket-access home forms. A fully computed/obfuscated root and
+  cross-file reach are documented residuals.
 - **`saw audit` catches a NOVEL autorun foothold in a known location — no signature required** (#1333).
   Signature matching misses a new payload by construction, and with the worm's source public, variants
   are the expected case. The new autorun monitor treats the re-execution surface (macOS LaunchAgents /
