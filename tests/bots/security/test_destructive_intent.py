@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from stayawake.bots.security.taint import model
@@ -228,6 +229,55 @@ class TestGatedCapability(unittest.TestCase):
         v = detect_destructive(secure_gated)
         self.assertEqual(v.variant, SECURE)
         self.assertTrue(v.gated)
+
+
+class TestRunnerImpactContext(unittest.TestCase):
+    """#1337 — the same wipe payload has orders-of-magnitude different impact on an ephemeral CI runner
+    vs a workstation. Environment modulates only the finding's impact CONTEXT (evidence prose), NEVER its
+    severity / verdict / exit code — the CI signal is attacker-forgeable, so it may only add context,
+    never soften an alarm. The probe fails toward 'workstation' when ambiguous."""
+
+    def _probe(self, environ):
+        from stayawake.utils import env
+        with mock.patch.dict(__import__("os").environ, environ, clear=True):
+            return env.is_ephemeral_runner()
+
+    def test_probe_fails_toward_workstation(self):
+        self.assertFalse(self._probe({}))                                  # nothing set → workstation
+        self.assertFalse(self._probe({"CI": "true"}))                      # bare CI= is not enough
+
+    def test_probe_true_only_on_a_runner_marker_without_persistent_home(self):
+        self.assertTrue(self._probe({"GITHUB_ACTIONS": "true", "HOME": "/no/such/home"}))
+
+    def test_container_on_workstation_stays_workstation(self):
+        # runner marker set, but a real $HOME with an SSH private key is mounted through → workstation.
+        home = Path(tempfile.mkdtemp(prefix="ws-home-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(home, ignore_errors=True))
+        (home / ".ssh").mkdir()
+        (home / ".ssh" / "id_ed25519").write_text("KEY")
+        self.assertFalse(self._probe({"GITHUB_ACTIONS": "true", "HOME": str(home)}))
+
+    def _scan_wipe(self, environ):
+        d = Path(tempfile.mkdtemp(prefix="impact-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
+        (d / "w.js").write_text("const os=require('os'),fs=require('fs'); fs.rmSync(os.homedir(),{recursive:true});")
+        with mock.patch.dict(__import__("os").environ, environ, clear=True), \
+             LocalRepoTarget(str(d), "t", ScanOptions()) as tg:
+            return [f for f in scan_target(tg, load_signatures(), []).findings if f.vector == "destructive-wipe"][0]
+
+    def test_verdict_and_severity_are_environment_invariant(self):
+        ws = self._scan_wipe({})
+        ci = self._scan_wipe({"GITHUB_ACTIONS": "true", "HOME": "/no/such/home"})
+        # detection + verdict + severity identical; ONLY the evidence prose differs.
+        self.assertEqual(ws.signature_id, ci.signature_id)
+        self.assertEqual(ws.severity, ci.severity)
+        self.assertEqual(ws.confidence, ci.confidence)
+        self.assertEqual(ws.severity.label(), "critical")                  # not softened on the runner
+
+    def test_runner_note_only_on_a_runner(self):
+        self.assertNotIn("ephemeral CI", self._scan_wipe({}).evidence)
+        self.assertIn("ephemeral CI", self._scan_wipe(
+            {"GITHUB_ACTIONS": "true", "HOME": "/no/such/home"}).evidence)
 
 
 if __name__ == "__main__":
