@@ -14,7 +14,43 @@ ancestor or a `..` escape into a location outside the root, which the containmen
 """
 from __future__ import annotations
 
+import stat
 from pathlib import Path
+
+
+def is_regular_file(path: Path) -> bool:
+    """True iff `path` is a REGULAR file (follows symlinks; not a dir/FIFO/socket/device). Swallows
+    OSError → False. The gate every "read an arbitrary file" path shares: opening a FIFO named like a
+    real file read-BLOCKS forever, so callers must confirm regular-ness BEFORE `open()` (#1226)."""
+    try:
+        return stat.S_ISREG(path.stat().st_mode)
+    except OSError:
+        return False
+
+
+def read_regular_bytes(path: Path) -> bytes | None:
+    """The bytes of a regular file, or None if it is absent / non-regular / unreadable. NEVER opens a
+    non-regular file (a FIFO would block forever — #1226). One shared implementation for every probe
+    that reads a possibly-adversarial path on disk."""
+    if not is_regular_file(path):
+        return None
+    try:
+        return path.read_bytes()
+    except OSError:
+        return None
+
+
+def read_regular_text(path: Path, *, errors: str = "replace") -> str | None:
+    """The UTF-8 text of a regular file, or None (absent / non-regular / unreadable). Decodes
+    tolerantly (`errors="replace"` by default) so a non-UTF-8 byte can't crash a read of an
+    attacker-influenced file — the same evasion-safe decoding the scanner uses. Never opens a
+    non-regular file (#1226)."""
+    if not is_regular_file(path):
+        return None
+    try:
+        return path.read_text(encoding="utf-8", errors=errors)
+    except OSError:
+        return None
 
 
 def is_safe_write_target(path: Path, root: Path) -> bool:

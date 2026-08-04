@@ -33,6 +33,7 @@ from .credentials import check_credentials
 from .runner import check_runner_persistence
 from .os_service import check_persistence
 from .coverage import check_persistence_coverage
+from .autorun import check_autorun
 from .host_artifacts import check_host_artifacts
 from .editor import check_vscode
 from .mechanism import check_ssh_authorized_keys, check_shell_profile, check_git_config_execution
@@ -43,7 +44,7 @@ __all__ = [
     "HygieneIssue", "INCIDENT_TRIGGER_IDS", "ROTATION_UNSAFE_IDS", "rotation_safety",
     "incident_response_sequence",
     "check_credentials", "check_runner_persistence", "check_persistence",
-    "check_persistence_coverage", "check_host_artifacts",
+    "check_persistence_coverage", "check_autorun", "check_host_artifacts",
     "check_vscode", "check_ssh_authorized_keys", "check_shell_profile", "check_git_config_execution",
     "check_branch_protection", "audit", "audit_checks", "render",
 ]
@@ -79,6 +80,7 @@ def audit_checks(slug: str | None = None, token: str | None = None, branch: str 
         ("SSH authorized_keys", check_ssh_authorized_keys),
         ("shell startup files", check_shell_profile),
         ("git exec config", check_git_config_execution),
+        ("autorun surface", check_autorun),                             # #1333 novel-foothold monitor
         ("branch protection", lambda: check_branch_protection(slug, token, branch)),
     ]
 

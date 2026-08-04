@@ -292,6 +292,18 @@ read**, the run is **UNKNOWN, not clean** (`saw` never claims clean over content
 The verdict is one of: *safe* (surface enumerated and clean → rotation is safe), or **UNSAFE** —
 active persistence found, or the surface could not be verified.
 
+**Novel-foothold monitor (#1333).** Beyond matching known-bad patterns, the audit treats the autorun
+surface (launch agents / systemd user units) as **monitored state** and fuses four static signals per
+entry — **provenance** (is the referenced executable package/app-owned, code-signed, on a trusted path,
+versus unowned and run from a scratch/cache dir?), **content-shape** (does it fetch/decode-execute or
+poll on a short interval — read from the referenced script), **novelty** (new/changed since a
+longitudinal baseline in `~/.local/state/saw/`), and **correlation** (one unattributed payload wired
+into several re-run points). An **unattributed** entry that runs a scratch payload or fetch-execs is a
+**foothold** (a rotation-UNSAFE finding → exit `3`) *without a signature match*; a merely-new one is an
+`info` review item. The baseline only adds novelty and is **never trusted for safety** — provenance,
+content, and correlation grade every entry regardless, so a tampered or first-run baseline can't hide a
+foothold. Skipped on ephemeral/CI hosts (every run there is a first run).
+
 ```text
 saw audit [--repo OWNER/NAME] [-b BRANCH] [-f] [--verify]
 ```
