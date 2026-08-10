@@ -52,7 +52,7 @@ Targets (local globs + GitHub users/orgs), `exclude_dirs`, `max_file_bytes`,
 `remote_clone_depth`, `reports_dir` (output location; default `reports/security`),
 allowlist, and alert routing. The signature database ships **inside the package**; point
 at a custom DB with `settings.signatures_path`. Full field reference and the layered
-design live in [SECURITY_ARCHITECTURE.md](SECURITY_ARCHITECTURE.md).
+design are maintained privately.
 
 `targets.local` is **optional**: for ad-hoc local scans you can pass paths on the command
 line (`saw scan <path>…` / `--path`), and a bare `saw scan` with nothing configured scans

@@ -174,7 +174,7 @@ keyring token is a *recommended* end state, not a problem.
 This page is steady-state hygiene. If you have real evidence of the worm (see the persistence findings
 in `saw audit`), follow the incident-response order instead — **isolate → neutralize persistence →
 rebuild → rotate credentials LAST** — because rotating while persistence is live can trigger a reported
-home-directory wiper. See [SECURITY_ARCHITECTURE.md](SECURITY_ARCHITECTURE.md).
+home-directory wiper.
 
 ## 8. Checklist
 
