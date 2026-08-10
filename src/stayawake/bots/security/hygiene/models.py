@@ -63,7 +63,35 @@ ACTIVE_PERSISTENCE_IDS = {"self-hosted-runner-persistence", "os-service-persiste
 CREDENTIAL_EXPOSURE_IDS = {"git-credentials-plaintext"}
 
 # Union kept for back-compat (any finding that carries an incident context, of either tier).
+# DO NOT grade proportionality on this: it FLATTENS the two tiers below, which the report grades apart
+# — that is how a plaintext-credential finding once ended a green, no-incident report with "scope your
+# response". Ask incident_tier() instead; it is the single authority.
 INCIDENT_TRIGGER_IDS = ACTIVE_PERSISTENCE_IDS | CREDENTIAL_EXPOSURE_IDS
+
+# Incident tiers, most severe first. TABLE-DRIVEN so adding a tier is one entry here and every
+# consumer follows — no consumer re-derives the tier, and no test can silently miss the new one.
+TIER_ACTIVE_PERSISTENCE = "active-persistence"     # a live foothold on THIS host
+TIER_CREDENTIAL_EXPOSURE = "credential-exposure"   # a secret is exposed; the host is not implicated
+TIER_IDS: tuple[tuple[str, set[str]], ...] = (
+    (TIER_ACTIVE_PERSISTENCE, ACTIVE_PERSISTENCE_IDS),
+    (TIER_CREDENTIAL_EXPOSURE, CREDENTIAL_EXPOSURE_IDS),
+)
+
+
+def incident_tier(issue_ids: set[str]) -> str | None:
+    """The ONE place a run's incident tier is decided, for every consumer that must be proportionate to
+    it (the banner, the scope note). None when no incident is indicated.
+
+    This exists because deciding the tier twice is how five consecutive review rounds each found the
+    report contradicting itself: a consumer re-derived "what kind of run is this?" from something that
+    only CORRELATED with the answer — the rotation verdict (a priority function where persistence
+    dominates), then `severity == "warning"` (nine warning ids are not incident-tier), then
+    INCIDENT_TRIGGER_IDS (the union above, which flattens these tiers). Every proxy was right about the
+    cases in front of it and wrong one case deeper. Ask here instead."""
+    for tier, ids in TIER_IDS:
+        if issue_ids & ids:
+            return tier
+    return None
 
 # UNVERIFIED persistence surface (#1332) — a user-owned persistence location EXISTS but could not be
 # read (permissions / an unreadable path), so this host cannot be certified free of a rotation-wiper.
