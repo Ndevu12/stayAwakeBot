@@ -314,6 +314,73 @@ the alarm, and a forged `CI=true` can only *add* a note, never lower the gate.
 - **Exit codes / CI gating are untouched**: severity does not move, so no build that previously failed
   can silently start passing (pinned by `test_verdict_and_severity_are_environment_invariant`).
 
+## Scan scope — what is covered, and every gap revealed (#1341)
+
+Supply-chain malware stages files and leaves remnants outside both the home directory and the
+repository, and a home-directory wipe (Shai-Hulud 2.0) leaves everything outside `$HOME` intact. This
+is an honest, current audit of where `saw` looks — and, for a **security tool**, nothing here is
+declared "out of scope": an uncovered malware-staging location is a **gap to close**, revealed and
+tracked, not accepted.
+
+| Location | `saw scan` (repo-only) | `saw audit` (host) | Status |
+| --- | --- | --- | --- |
+| A scanned git repository | ✅ walks it (`exclude_dirs` prunes `node_modules`/`dist`/`build`) | — | Covered |
+| Host persistence surface (LaunchAgents, systemd-user, runner artifacts, SSH, shell rc) | — | ✅ enumerated, with a #1332 UNKNOWN-not-clean verdict | Covered |
+| `/tmp` + the system temp dir (`tempfile.gettempdir()`) | — | ✅ targeted drop-path IoCs (`/…/.npm`, `get-pip.py`, staged archive/scanner) | Covered (targeted, not a full walk) |
+| **`/var/tmp`-class survivor temp dirs** | ❌ | ❌ | **Gap → #1378** |
+| **Global npm prefix** (`npm root -g`) | ❌ (repo-only) | ❌ | **Gap → #1376** |
+| **Docker images / volumes** | ❌ | ❌ (no daemon/privilege) | **Gap → #1377** |
+| **Other mounted filesystems** (network share, external drive) | ❌ | ❌ | **Gap → #1378** |
+| **Account / organization state** (self-hosted runner registrations) | ❌ | ❌ | **Gap → #1373** |
+
+**The honesty rule.** Every `saw audit` **reveals its scope boundary** (`_scope_note`): it states what it
+read (the persistence surface + known drop-paths) and what it did **not** scan — `/var/tmp`-class
+survivors, the global npm prefix, Docker images/volumes, other mounts, and account/organization-level
+state — so "no issues found / rotating credentials is safe" can never be read as a host all-clear over
+those locations. The note is presentation only; it never changes the verdict or exit code. This applies
+the #1332 discipline ("never claim clean over content not read") to the staging axis, not only the
+persistence surface.
+
+Two properties of the note are load-bearing, and both are pinned by tests:
+
+* **The gap list must be complete on every axis.** An omission from an explicit list reads as *coverage*
+  of the omitted thing. The account axis is the sharp case: `saw audit` probes for a self-hosted runner
+  on DISK, so a reader who sees runner-persistence checked and no account caveat will reasonably infer
+  the org-registered runner was examined too — it was not, and it survives a full host rebuild (#1340,
+  deferred to #1373). Naming it costs nothing and closes the inference.
+* **The wording tracks the run state.** One fixed sentence cannot describe all three states honestly:
+  after a finding, "a clean result does not exclude those" is inapplicable and the responder needs the
+  compromise scoped *wider* than the list; when the persistence surface could not be fully read, a flat
+  claim to have read it would restate — as the report's last word — the very over-claim the #1332 UNKNOWN
+  verdict withdrew four lines above.
+
+The probed drop-paths are named from what the code actually probes — home, `/tmp`, and
+`tempfile.gettempdir()` (which is `/var/folders/…` on macOS, *not* `/tmp`). Naming a path the probe does
+not read, or omitting one it does, is the same defect the note exists to remove.
+
+**Why these are gaps, not exclusions.** The global npm prefix is host-specific (`npm root -g` resolves
+to a system path, Homebrew, or *inside `$HOME`* under nvm/volta) and is a full dependency tree, so it
+belongs to the installed-package audit (#1163) once the prefix is resolved (#1376). Docker artifacts are
+not a filesystem walk — reaching them needs the daemon/privilege `saw` will not silently take, so the
+closure is a bounded, opt-in, delegation-based probe (#1377). Arbitrary mounts are unbounded, so their
+closure is an opt-in, budgeted scan (#1378). Each is filed and cross-linked, on a path to closure.
+
+`/var/tmp` is the one that looks cheapest and is not. Adding it to the probed set is a one-line change,
+but the corroboration rule grades `strong or len(found) >= 2` on description STRINGS rather than on
+distinct indicator kinds or distinct real directories — so a second temp root lets the *same* indicator
+corroborate *itself*, and `host-drop-artifacts` is in `ACTIVE_PERSISTENCE_IDS`, which means an
+unconditional exit 3 and the full isolate-and-rebuild runbook. Adversarial verification of that one-line
+change found the same defect already reachable on `main` through path aliases (with `TMPDIR=/private/tmp`,
+`/tmp/.npm` alone is counted twice and grades warning/exit 3 over a single file). Closing this gap
+therefore means fixing the grading boundary first — canonicalising probe directories by real identity and
+counting distinct kinds and distinct real locations — which is tracked in #1378 rather than smuggled in
+behind a path addition.
+
+**Routine vs post-incident (decision).** Routine scanning stays **bounded** — repos + targeted host
+IoCs + the persistence surface — so a default run never surprise-walks a NAS or a global dependency
+tree. Forensic breadth (installed-auditing the resolved global prefix, a fuller mount sweep) is
+**opt-in**, hung off the existing `saw audit --verify` / `saw scan --deep` seams, never the default.
+
 ## Config
 - `config/security.yml` — targets (local globs + GitHub users/orgs), exclude dirs, remediation mode,
   allowlist, alert routing. `exclude_dirs` defaults already skip `.git`, `node_modules`, build

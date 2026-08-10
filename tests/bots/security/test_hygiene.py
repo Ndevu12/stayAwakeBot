@@ -1134,5 +1134,209 @@ class TestAuditRender(unittest.TestCase):
         self.assertIn("gh-token-monitor.service", joined)
 
 
+class TestScanScopeHonesty(unittest.TestCase):
+    """#1341 — a clean audit must REVEAL what it did not scan, so "no issues / rotating is safe" is
+    never read as a host all-clear over the locations supply-chain malware stages in."""
+
+    def test_scope_note_reveals_gaps_on_a_clean_audit(self):
+        out = hygiene.render([])
+        self.assertIn("no issues found", out)                 # still reports clean
+        self.assertIn("Scope of this audit", out)             # but bounds the claim
+        for gap in ("global npm prefix", "Docker", "mounted filesystem"):
+            self.assertIn(gap, out)                           # names the gaps explicitly
+
+    def test_scope_note_present_when_findings_exist(self):
+        out = hygiene.render([hygiene.HygieneIssue("x", "warning", "T", "D", "F")])
+        self.assertIn("Scope of this audit", out)
+        self.assertIn("global npm prefix", out)
+
+    def test_scope_note_names_the_account_axis_as_a_gap(self):
+        # A gap list that omits an axis reads as COVERAGE of it. `saw audit` is a DISK scanner, so an
+        # account-level foothold (an org-registered runner) is invisible here and MUST be named —
+        # otherwise the note implies the very coverage #1340/#1373 established it does not have.
+        for issues in ([], [hygiene.HygieneIssue("x", "warning", "T", "D", "F")]):
+            out = self._flowed(issues)
+            self.assertIn("account/organization-level state", out)
+            self.assertIn("runner registrations", out)
+
+    def test_scope_note_names_only_paths_the_probe_actually_reads(self):
+        # The note must not claim a path the probe does not read (/var/tmp is deferred to #1378) nor
+        # omit one it does (the system temp dir is `tempfile.gettempdir()`, not /tmp, on macOS).
+        scope = self._flowed([]).split("Scope of this audit:")[1]
+        self.assertIn("system temp dir", scope)
+        self.assertIn("other survivor temp dirs", scope)   # revealed as a GAP, not as covered
+
+        # The claim is tied to the probe's real behaviour by
+        # test_the_temp_dir_claim_holds_whatever_TMPDIR_points_at, which parametrizes $TMPDIR rather
+        # than mocking it to the single value that would make a specific-path claim true.
+
+    @staticmethod
+    def _flowed(issues) -> str:
+        """The report with wrapping undone. `block()` reflows to the terminal width, so a phrase
+        assertion against the raw string breaks on where the line happens to fold — the same
+        wording-coupling these tests exist to avoid."""
+        return " ".join(hygiene.render(issues).split())
+
+    def test_scope_note_wording_tracks_the_run_state(self):
+        # One fixed sentence misdescribes two of the three states: "a clean result does not exclude
+        # those" is inapplicable once something was FOUND, and claiming to have read the persistence
+        # surface restates the over-claim the #1332 UNKNOWN verdict just withdrew.
+        clean = self._flowed([])
+        self.assertIn("A clean result does not exclude those", clean)
+        self.assertIn("reads the host persistence surface and a targeted set of known drop-paths", clean)
+
+        found = self._flowed([hygiene.HygieneIssue("os-service-persistence", "warning", "T", "D", "F")])
+        self.assertIn("may not be the full extent", found)
+        self.assertNotIn("A clean result does not exclude those", found)
+
+        unknown = self._flowed([hygiene.HygieneIssue("persistence-surface-unverified", "unknown",
+                                                     "T", "D", "F")])
+        self.assertIn("the part of the host persistence surface it could read", unknown)
+        self.assertNotIn("A clean result does not exclude those", unknown)
+
+    def test_unreadable_surface_is_disclosed_even_during_an_active_incident(self):
+        # REGRESSION: `rotation_safety` is a PRIORITY function — active persistence DOMINATES, so
+        # deriving "was the surface fully read?" from it silently returns the flat full-coverage
+        # wording whenever a live foothold and an unreadable location coexist. That is the highest
+        # stakes state there is, and the claim contradicts the coverage probe four lines above it.
+        both = self._flowed([
+            hygiene.HygieneIssue("os-service-persistence", "warning", "T", "D", "F"),
+            hygiene.HygieneIssue("persistence-surface-unverified", "unknown", "T", "D", "F")])
+        self.assertIn("the part of the host persistence surface it could read", both)
+        self.assertNotIn("reads the host persistence surface and a targeted set", both)
+        self.assertIn("may not be the full extent", both)      # still the incident-scoping wording
+
+    def test_non_incident_warnings_do_not_get_incident_wording(self):
+        # DISCRIMINATING fixture. Severity is only a PROXY for "is this an incident?" — `_banner`, the
+        # run's proportionality authority, grades on INCIDENT_TRIGGER_IDS, and several `warning` ids
+        # sit outside it. `branch-unprotected` describes a REMOTE repo's settings and says nothing
+        # about this host; telling that operator to "scope your response" under a green host all-clear
+        # is false urgency that dilutes the incident channel. A fixture whose severity and incident
+        # tier co-vary (e.g. os-service-persistence) cannot catch a severity-based gate — this can.
+        for non_incident_id in ("branch-unprotected", "vscode-workspace-trust-off"):
+            with self.subTest(id=non_incident_id):
+                out = self._flowed([hygiene.HygieneIssue(non_incident_id, "warning", "T", "D", "F")])
+                self.assertIn("These locations were not examined", out)
+                self.assertNotIn("scope your response", out.lower())
+
+    def test_active_persistence_ids_get_incident_wording(self):
+        # The other side of the boundary — the gate must not narrow so far it goes quiet on a real
+        # incident. EVERY id in ACTIVE_PERSISTENCE_IDS must reach the incident wording; iterate the
+        # set itself rather than a hand-picked pair, so adding an id to the tier cannot silently
+        # bypass this (a hardcoded fixture list is the same "correlates today" trap as the gate was).
+        for incident_id in sorted(hygiene.ACTIVE_PERSISTENCE_IDS):
+            with self.subTest(id=incident_id):
+                out = self._flowed([hygiene.HygieneIssue(incident_id, "warning", "T", "D", "F")])
+                self.assertIn("may not be the full extent", out)
+                self.assertNotIn("These locations were not examined", out)
+
+    def test_credential_exposure_is_not_scoped_as_an_incident(self):
+        # The tier `_banner` grades APART from active persistence. A plaintext credential renders a
+        # GREEN rotation verdict and _banner's explicit "not a confirmed compromise, so host
+        # isolation isn't warranted" — so ending that same page with "scope your response" is the
+        # report contradicting itself. Gating on INCIDENT_TRIGGER_IDS (a union of both tiers) did
+        # exactly that, and passed the whole suite; this fixture is what makes the two gates
+        # distinguishable.
+        from stayawake.bots.security.hygiene import models
+
+        for cred_id in sorted(models.CREDENTIAL_EXPOSURE_IDS):
+            with self.subTest(id=cred_id):
+                out = self._flowed([hygiene.HygieneIssue(cred_id, "warning", "T", "D", "F")])
+                self.assertIn("These locations were not examined", out)
+                self.assertNotIn("scope your response", out.lower())
+
+    def test_unreadable_locations_are_named_even_when_persistence_outranks_them(self):
+        # `rotation_safety` is a PRIORITY function: active persistence dominates, so keying the
+        # unreadable-location disclosure off its verdict hid the list in the ONE state that needs it
+        # most. `unknown` items are split out of the finding groups, so the verdict is their only
+        # home — printing nothing meant a responder neutralised what was found, rotated, and was never
+        # told a persistence location had gone unexamined. That is the #1332 wiper hazard.
+        detail = "~/.ssh/authorized_keys is not readable (EPERM); 2 of 9 locations unverified."
+        both = hygiene.render([
+            hygiene.HygieneIssue("os-service-persistence", "warning", "T", "D", "F"),
+            hygiene.HygieneIssue("persistence-surface-unverified", "unknown", "T", detail, "F")])
+        self.assertIn("authorized_keys", both)
+        self.assertIn("do NOT rotate", both)                  # the persistence verdict still leads
+        # …and the scope note's admission of a partial read now has a referent in the report.
+        self.assertIn("the part of the host persistence surface it could read", " ".join(both.split()))
+
+    def test_unverified_surface_sentence_is_pinned(self):
+        # Without this, deleting the whole `surface_unverified` arm passed all 1352 tests.
+        out = self._flowed([hygiene.HygieneIssue("persistence-surface-unverified", "unknown",
+                                                 "T", "D", "F")])
+        self.assertIn("not a clean bill of health for those either", out)
+
+    def test_incident_tier_is_the_single_authority_for_both_consumers(self):
+        # The STRUCTURAL pin. Five review rounds each found the scope note contradicting the banner
+        # because each re-derived the tier from something that merely correlated with it — and round
+        # five showed this very test could be fooled too, because it NAMED the tiers. It now derives
+        # its corpus from models.TIER_IDS, so adding a third tier automatically enters the fixture
+        # set: a tier the banner honours and the note ignores fails here instead of shipping.
+        from stayawake.bots.security.hygiene import models
+
+        tiered = {i for _tier, ids in models.TIER_IDS for i in ids}
+        for issue_id in sorted(tiered | {"branch-unprotected"}):
+            with self.subTest(id=issue_id):
+                out = self._flowed([hygiene.HygieneIssue(issue_id, "warning", "T", "D", "F")])
+                banner_is_incident = "respond in THIS order" in out
+                note_scopes_response = "scope your response" in out.lower()
+                self.assertEqual(banner_is_incident, note_scopes_response,
+                                 f"banner and scope note disagree about {issue_id}")
+
+    def test_the_temp_dir_claim_holds_whatever_TMPDIR_points_at(self):
+        # `tempfile.gettempdir()` honours $TMPDIR, so a note naming a specific survivor dir (e.g.
+        # "does NOT scan /var/tmp") is FALSE on a host that points $TMPDIR there — and a test that
+        # mocks gettempdir to the one value making the claim true would never notice. Parametrize
+        # over both, and pin the invariant the wording actually rests on: the probe reads only /tmp
+        # and the system temp dir, so "other survivor temp dirs" is true in every case.
+        from stayawake.bots.security.hygiene import host_artifacts
+
+        def fake_exists(self):
+            return str(self).endswith("/.npm")
+        for tmpdir in ("/tmp", "/var/tmp"):
+            with self.subTest(tmpdir=tmpdir):
+                with mock.patch.object(host_artifacts.Path, "exists", fake_exists), \
+                     mock.patch.object(host_artifacts.tempfile, "gettempdir", lambda: tmpdir), \
+                     mock.patch.object(host_artifacts.Path, "home", staticmethod(lambda: Path("/h"))):
+                    _strong, weak = host_artifacts._host_artifacts()
+                read = {d.rsplit("/", 1)[0] for d, _ in weak if d.startswith("/")}
+                self.assertTrue(read <= {"/tmp", tmpdir}, f"probe read outside /tmp+$TMPDIR: {read}")
+        self.assertIn("other survivor temp dirs", self._flowed([]))
+
+    def test_info_only_run_does_not_get_incident_wording(self):
+        # "Scope your response" presupposes an incident. A token cached in the encrypted login
+        # Keychain is INFO and documented as normal — that operator is under a green all-clear, and
+        # the note must not contradict it (the same proportionality `_banner` already implements).
+        info_only = self._flowed([hygiene.HygieneIssue("cached-github-keychain", "info", "T", "D", "F")])
+        self.assertIn("These locations were not examined", info_only)
+        self.assertNotIn("scope your response", info_only.lower())
+
+    def test_scope_note_never_changes_the_verdict_or_exit_code(self):
+        # The CONTRACT, driven through the REAL CLI. Re-deriving the exit rule in the test would only
+        # pin the contents of ROTATION_UNSAFE_IDS and would still pass if the gate in
+        # cli/commands/audit.py were rewritten — so call audit for real and read its return code.
+        import io
+        from contextlib import redirect_stdout
+        from stayawake import cli
+
+        for issues, expected_rc in (
+                ([], 0),
+                ([hygiene.HygieneIssue("cached-github-keychain", "info", "T", "D", "F")], 0),
+                ([hygiene.HygieneIssue("os-service-persistence", "warning", "T", "D", "F")], 3),
+                ([hygiene.HygieneIssue("persistence-surface-unverified", "unknown", "T", "D", "F")], 3)):
+            with self.subTest(ids=[i.id for i in issues]):
+                buf = io.StringIO()
+                with mock.patch("stayawake.bots.security.hygiene.audit_checks",
+                                return_value=[("probe", lambda: list(issues))]), \
+                     mock.patch("stayawake.lib.auth.resolve_token", return_value=(None, None)), \
+                     redirect_stdout(buf):
+                    rc = cli.main(["audit", "--no-stream"])
+                out = buf.getvalue()
+                self.assertIn("Scope of this audit", out)     # the note reached the real report…
+                self.assertEqual(rc, expected_rc)             # …and the real exit gate is untouched
+                if not issues:
+                    self.assertIn("no issues found", out.split("Scope of this audit:")[0])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -28,6 +28,7 @@ from typing import Callable
 from .models import (HygieneIssue, INCIDENT_TRIGGER_IDS, ACTIVE_PERSISTENCE_IDS,
                      CREDENTIAL_EXPOSURE_IDS, UNVERIFIED_PERSISTENCE_IDS, ROTATION_UNSAFE_IDS,
                      ROTATION_SAFE, ROTATION_UNSAFE_PERSISTENCE, ROTATION_UNSAFE_UNKNOWN,
+                     TIER_ACTIVE_PERSISTENCE, TIER_CREDENTIAL_EXPOSURE, incident_tier,
                      rotation_safety, incident_response_sequence, credential_exposure_note)
 from .credentials import check_credentials
 from .runner import check_runner_persistence
@@ -96,10 +97,11 @@ def _banner(issue_ids: set[str], *, color: bool, width: int) -> list[str]:
 
     The runbook is a genuine ORDERED procedure (rotate LAST) → a NUMBERED list; the note is a set
     of points/caveats, not a sequence → a BULLETED list. Both go through core.render.marked_list."""
-    if issue_ids & ACTIVE_PERSISTENCE_IDS:
+    tier = incident_tier(issue_ids)
+    if tier == TIER_ACTIVE_PERSISTENCE:
         head = "⚠️  Active host persistence detected — respond in THIS order (rotate LAST):"
         steps, ordered = incident_response_sequence(), True
-    elif issue_ids & CREDENTIAL_EXPOSURE_IDS:
+    elif tier == TIER_CREDENTIAL_EXPOSURE:
         head = "⚠️  Credential exposure — no active host persistence detected:"
         steps, ordered = credential_exposure_note(), False
     else:
@@ -119,16 +121,87 @@ def _rotation_verdict(issues: list[HygieneIssue], *, color: bool, width: int) ->
         return [paint("✓ Rotation safety: persistence surface enumerated and clean — rotating "
                       "credentials is safe.", SEVERITY["ok"], on=color)]
     if verdict == ROTATION_UNSAFE_PERSISTENCE:
-        return [paint("⚠️  Rotation safety: UNSAFE — active host persistence detected; do NOT rotate "
-                      "any credential yet (runbook below).", SEVERITY["warning"], on=color)]
-    # UNSAFE-unknown: name exactly what could not be read, so the gap is actionable, not vague.
-    lines = [paint("⚠️  Rotation safety: UNKNOWN — the persistence surface could not be fully "
-                   "verified, so treat credential rotation as UNSAFE until it is.",
-                   SEVERITY["warning"], on=color)]
-    for i in issues:
-        if i.severity == "unknown":
-            lines += block(i.detail, indent=5, width=width)
+        lines = [paint("⚠️  Rotation safety: UNSAFE — active host persistence detected; do NOT rotate "
+                       "any credential yet (runbook below).", SEVERITY["warning"], on=color)]
+    else:
+        # UNSAFE-unknown: name exactly what could not be read, so the gap is actionable, not vague.
+        lines = [paint("⚠️  Rotation safety: UNKNOWN — the persistence surface could not be fully "
+                       "verified, so treat credential rotation as UNSAFE until it is.",
+                       SEVERITY["warning"], on=color)]
+    # The unreadable locations are named on BOTH unsafe paths. `rotation_safety` is a PRIORITY
+    # function — active persistence dominates — so keying this disclosure off its verdict hid the
+    # list in the one state that needs it most: a live foothold PLUS a location nobody could read.
+    # `unknown` items are split out of the finding groups (see render), so the verdict is their only
+    # home; printing nothing meant a responder neutralised what was found, rotated, and was never told
+    # a persistence location had gone unexamined — the wiper hazard #1332 exists to close.
+    lines += _unverified_locations(issues, width=width)
     return lines
+
+
+def _unverified_locations(issues: list[HygieneIssue], *, width: int) -> list[str]:
+    """The detail of every location that EXISTS but could not be read, keyed off the id (never off the
+    verdict, and never off `severity`), so the disclosure survives whichever verdict outranks it."""
+    return [line
+            for i in issues if i.id in UNVERIFIED_PERSISTENCE_IDS
+            for line in block(i.detail, indent=5, width=width)]
+
+
+def _scope_note(issues: list[HygieneIssue], *, color: bool, width: int) -> list[str]:
+    """REVEAL what this audit does not scan (#1341), so no result is read as a host all-clear over the
+    locations supply-chain malware stages in. These are tracked GAPS on a path to closure (#1376 global
+    npm prefix, #1377 Docker images/volumes, #1378 `/var/tmp`-class survivors and other mounts, #1373
+    account-level state), never accepted out-of-scope. Always shown; presentation only — never a
+    finding, never affects the verdict or exit code.
+
+    The probed drop-paths are named from what the code ACTUALLY probes — home, `/tmp`, and the system
+    temp dir (`tempfile.gettempdir()`, which is `/var/folders/…` on macOS, not `/tmp`). Naming a path
+    the probe does not read, or omitting one it does, is the same defect this note exists to remove.
+
+    Both halves track the run state, because one fixed sentence misdescribes two of the three:
+
+    * WHAT WAS READ — when the persistence surface could not be fully enumerated (#1332 UNKNOWN), a flat
+      "reads the host persistence surface" would restate, as the report's last word, the very over-claim
+      the verdict four lines above just withdrew.
+    * WHAT IT MEANS — "a clean result does not exclude those" is inapplicable once something WAS found;
+      a responder needs the compromise scoped WIDER than this list, not a clean-run caveat.
+    """
+    # Test for the unverified surface DIRECTLY, never via rotation_safety(): that is a PRIORITY
+    # function (models.rotation_safety) where active persistence DOMINATES, so an incident that also
+    # has an unreadable location returns UNSAFE_PERSISTENCE and would silently take the flat
+    # full-coverage wording — restating the over-claim the verdict just withdrew, in the highest-stakes
+    # state of all. Presence of the id is the honest question here, not which verdict outranks which.
+    surface_unverified = bool({i.id for i in issues} & UNVERIFIED_PERSISTENCE_IDS)
+    surface_read = ("reads the part of the host persistence surface it could read, plus a targeted set "
+                    "of known drop-paths" if surface_unverified else
+                    "reads the host persistence surface and a targeted set of known drop-paths")
+    # "Scope your response past what is listed here" presupposes an active compromise whose extent may
+    # exceed the list — so it is gated on that EXACT tier, asked of `incident_tier()`, the same
+    # authority `_banner` consults. Credential exposure is deliberately NOT that: the run says the
+    # host is not implicated, so it takes the neutral wording below rather than contradicting the
+    # green rotation verdict printed above it.
+    if incident_tier({i.id for i in issues}) == TIER_ACTIVE_PERSISTENCE:
+        means = "This may not be the full extent — scope your response past what is listed here."
+    elif surface_unverified:
+        means = ("The surface above could not be fully read, so this is not a clean bill of health for "
+                 "those either.")
+    elif issues:
+        means = "These locations were not examined."
+    else:
+        means = "A clean result does not exclude those."
+    # A gap list that omits an axis reads as COVERAGE of it, which is the failure this note exists to
+    # prevent. `saw audit` is a DISK scanner: an account-level foothold (a self-hosted runner registered
+    # against the org) survives a full host rebuild and is invisible here — so it is named, not implied
+    # (#1340, deferred to #1373). The audit's own runner probe is disk-only and reads as broader than it is.
+    return [paint("Scope of this audit:", SEVERITY["info"], on=color)] + block(
+        # "OTHER survivor temp dirs" is relative to the system temp dir named just above, and is
+        # therefore true in every state: `tempfile.gettempdir()` honours $TMPDIR, so naming a specific
+        # path here (e.g. /var/tmp) would be a false claim on any host that points $TMPDIR at it.
+        # docs/SECURITY_ARCHITECTURE.md carries the concrete list and the tracking issues.
+        f"{surface_read} (home, /tmp, the system temp dir, the working directory). It does NOT scan "
+        "other survivor temp dirs, the global npm prefix, Docker images/volumes, other mounted "
+        "filesystems, or account/organization-level state such as self-hosted runner registrations. "
+        f"{means} See docs/SECURITY_ARCHITECTURE.md for the full scope statement.",
+        indent=2, width=width)
 
 
 def render(issues: list[HygieneIssue], *, color: bool = False, width: int = 80) -> str:
@@ -147,11 +220,16 @@ def render(issues: list[HygieneIssue], *, color: bool = False, width: int = 80) 
 
     if not (warnings or reviews):
         # No findings. The verdict still stands: "clean" if the surface was verified, "unknown" if not.
+        # Ask the ids, not `severity == "unknown"`: severity only correlates with "was the surface
+        # unverified?" because ONE probe emits that pairing today. The rotation verdict, the exit gate
+        # and the scope note all key off UNVERIFIED_PERSISTENCE_IDS, so a second unknown-severity id
+        # would otherwise split this heading three ways from the verdict printed under it.
         head = ("✓ Local security hygiene: no issues found."
-                if all(i.severity != "unknown" for i in issues)
+                if not ({i.id for i in issues} & UNVERIFIED_PERSISTENCE_IDS)
                 else "Local security hygiene: no findings, but the persistence surface is UNVERIFIED.")
         code = SEVERITY["ok"] if "no issues" in head else SEVERITY["warning"]
-        return "\n".join([paint(head, code, on=color), ""] + rotation).rstrip()
+        return "\n".join([paint(head, code, on=color), ""] + rotation
+                         + [""] + _scope_note(issues, color=color, width=width)).rstrip()
 
     counts = []
     if warnings:
@@ -191,4 +269,5 @@ def render(issues: list[HygieneIssue], *, color: bool = False, width: int = 80) 
             if i.reference:
                 lines.append("     " + paint("→ details: ", SEVERITY["info"], on=color) + i.reference)
             lines.append("")
+    lines += _scope_note(issues, color=color, width=width)
     return "\n".join(lines).rstrip()

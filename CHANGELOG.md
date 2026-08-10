@@ -7,6 +7,22 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **`saw audit` now reveals its scan-scope boundary instead of implying a host all-clear** (#1341). A
+  supply-chain wipe leaves everything outside `$HOME` intact, and malware stages files where `saw` did
+  not look — so a clean audit stating "rotating credentials is safe" over unexamined locations was a
+  false assurance. Every audit now names what it did **not** scan — `/var/tmp`-class survivor temp dirs,
+  the global npm prefix, Docker images/volumes, other mounted filesystems, and account/organization-level
+  state such as self-hosted runner registrations — extending the #1332 "never claim clean over content
+  not read" discipline from the persistence surface to the staging axis. The note is **presentation
+  only**: it never creates a finding and never changes the verdict or the exit code, which is pinned by
+  a test asserting the exit gate for every verdict state. Its wording tracks the run rather than being
+  fixed, because one sentence cannot describe all three states honestly — after a finding it scopes the
+  response *wider* than the list instead of offering a clean-run caveat, and when the persistence surface
+  could not be fully read it says so rather than restating the coverage the verdict just withdrew. For a
+  security tool nothing is declared out-of-scope: every uncovered location is a tracked gap on a path to
+  closure — `/var/tmp`-class survivors and other mounts (#1378), the global npm prefix (#1376), Docker
+  images/volumes (#1377), account-level state (#1373) — with the full scope statement and the
+  routine-vs-post-incident decision in `docs/SECURITY_ARCHITECTURE.md`.
 - **A destructive routine shipped behind a *disabled* feature flag is now reported as a capability, not
   dismissed as inactive** (#1336). SANDWORM_MODE ships its `$HOME`-wipe behind an off-by-default flag —
   the staging shape, where the capability is present and functional but one attacker toggle from running;
