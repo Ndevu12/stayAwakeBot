@@ -19,9 +19,22 @@ description: The contribution workflow — feature-branch PRs (never push main),
 
 ## Every user-facing change
 
-- **Update `CHANGELOG.md` `[Unreleased]` in the SAME PR** — don't let it drift. Match the existing
-  keep-a-changelog style (heading then list; the markdown-lint warnings are pre-existing).
+- **Update `CHANGELOG.md` `[Unreleased]` in the SAME PR** — don't let it drift.
 - Update the relevant `docs/` (CLI.md / USAGE.md / etc.).
+
+**What an entry may say.** An entry describes what someone *using* the release observes: new or
+changed behaviour, flags, compatibility, and fixes they would notice. It does **not** describe
+internal implementation — module layout, refactors, detector or rule internals, thresholds, the
+inputs an analysis keys on, coverage gaps, or release-pipeline mechanics. **A change with no
+user-visible effect gets no entry at all**, which is the common case for a refactor or a pin bump.
+
+For a **security** entry, state that the fix shipped and what it means for the reader — never the
+mechanism, and never the weakness it closed. A changelog is read by everyone, including someone
+looking for a way past the scanner, and it is permanent and shipped inside the sdist.
+
+This is the same obligations-not-mechanisms rule the skills follow (see
+`.claude/skills/README.md`). The changelog is the highest-volume public surface in the repo — it
+grows with every PR — so it is where the rule matters most and slips most easily.
 
 ## Changes under the security subtree
 
