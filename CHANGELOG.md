@@ -14,28 +14,28 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Fixed
-- **The availability sentinel ran but never checked anything.** `stayawake-health-check` aborted on
-  startup with a `TypeError` on every invocation, so scheduled runs had been failing — and endpoints
-  going unmonitored — since 2026-07-08. It now runs normally.
+- **`stayawake-health-check` failed on startup instead of running its checks.** If you run it on a
+  schedule, its results were not being recorded — re-check your monitoring coverage. It now runs
+  normally.
 
 ### Removed
 - The `--reports-dir` flag on `stayawake-health-check`. The sentinel has written no report files
-  since 0.1.8; the flag did nothing and was the cause of the crash above.
+  since 0.1.8, so the flag had no effect.
 
 ### Changed
-- **The availability status issue is now filed only where you tell it to.** Set
-  `settings.alert_repo: "owner/name"` in the health config. Previously the issue was written to
-  whichever repository happened to be running the check, which publishes the monitored endpoints and
-  their outage history wherever that repository is visible. With `alert_repo` unset no issue is
-  written; the check still runs, still prints results, and still sets its exit code.
-
-### Changed
+- **The availability status issue is now filed only where you configure it.** Set
+  `settings.alert_repo: "owner/name"` in the health config; there is no default. With it unset no
+  issue is written, while the check still runs, still prints results, and still sets its exit code.
 - Documentation reorganised: the public repository carries product documentation. Install, usage,
   configuration, the CLI reference and licensing are unaffected.
 - `saw audit` states the boundary of what it examined, so a clean result is not mistaken for a
   whole-host all-clear.
-- This changelog was rewritten to the Keep a Changelog standard: entries now describe user-visible
-  change only. Released versions, dates and compare links are unchanged.
+- This changelog now follows the Keep a Changelog standard. Released versions, dates and compare
+  links are unchanged.
+
+### Security
+- Bumped the pinned self-scan engine used by the CI gate and the release self-scan to current `main`,
+  so both validate against the same scanner that ships.
 
 ## [0.4.0] - 2026-08-04
 
