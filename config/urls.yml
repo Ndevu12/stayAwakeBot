@@ -8,9 +8,11 @@ settings:
   # Recovery debounce: require this many consecutive healthy checks before declaring
   # recovery (closes the issue). Defaults to consecutive_failures_before_alert.
   consecutive_healthy_before_recovery: 2
-  # Optional: where reports are written (default: reports). Override per run with
-  # --reports-dir; set a scratch path here to keep committed reports untouched.
-  # reports_dir: reports
+  # Where the status issue is filed, as "owner/name". There is no default: an uptime alert
+  # names the endpoints it monitors and carries their outage history, so it is never filed
+  # into whatever repository happens to be running the check. Leave this unset and no issue
+  # is written (the check itself still runs and still sets the exit code).
+  # alert_repo: "owner/name"
 
 urls:
   - name: "Ndevu Store Application"
