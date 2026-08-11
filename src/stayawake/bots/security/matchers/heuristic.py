@@ -18,7 +18,7 @@ import sys
 
 from stayawake.bots.security.models import Finding, Severity
 from stayawake.bots.security.matchers.base import (
-    Matcher, globs_ok, FONT_MAGIC, BINARY_MAGIC, build_content_sig)
+    Matcher, globs_ok, FONT_MAGIC, BINARY_MAGIC, build_confirmed_loader_check)
 from stayawake.bots.security.obfuscation import analyze_file, is_generated_context
 from stayawake.bots.security.obfuscation.heuristics import _AUTHORED_OBFUSCATABLE_EXTS
 from stayawake.bots.security.matchers.obfuscation import _ext
@@ -60,7 +60,7 @@ class HeuristicMatcher(Matcher):
         long_line = next((s for s in signatures if s.get("kind") == "long-line"), None)
         masquerade = [s for s in signatures if s.get("kind") == "magic-byte-masquerade"]
         concealment = next((s for s in signatures if s.get("kind") == "whitespace-concealment"), None)
-        content_sig = build_content_sig(all_signatures or signatures)
+        content_sig = build_confirmed_loader_check(all_signatures or signatures)
         for rel in target.iter_files():
             if long_line and globs_ok(rel, long_line):
                 f = self._oversized_line(target, rel, long_line, content_sig)

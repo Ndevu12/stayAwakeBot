@@ -21,7 +21,7 @@ from __future__ import annotations
 import re
 
 from stayawake.bots.security.models import Finding, Severity
-from stayawake.bots.security.matchers.base import Matcher, build_content_sig
+from stayawake.bots.security.matchers.base import Matcher, build_confirmed_loader_check
 from stayawake.bots.security.dependencies import RESOLVERS, AdvisoryStore
 from stayawake.bots.security.dependencies.installed import INSTALLED_TREES
 from stayawake.bots.security.dependencies.purl import Purl
@@ -48,10 +48,10 @@ class InstalledPackageAuditMatcher(Matcher):
         # npm-manifest matcher can't reach (node_modules is pruned). The heuristic exec pattern is
         # excluded: it FPs on legit curl/bun/deno across hundreds of third-party packages.
         hook_patterns = _confirmed_lifecycle_patterns(all_signatures) if hook_sig is not None else []
-        # The confirmed code-loader fingerprints (build_content_sig, one callable) run on each installed
+        # The confirmed code-loader fingerprints (build_confirmed_loader_check, one callable) run on each installed
         # package's ENTRY file(s) — the FP-safe tier, targeted to main/bin so it isn't the brute-force
         # node_modules scan PR3 rejected. A novel malicious package's runtime loader is otherwise pruned.
-        entry_check = build_content_sig(all_signatures) if (entry_sig is not None and all_signatures) else None
+        entry_check = build_confirmed_loader_check(all_signatures) if (entry_sig is not None and all_signatures) else None
         # `--deep` (#1222): extend the SAME confirmed loader check from entry files to ALL of a package's
         # source files, so a payload in a NON-entry file isn't invisible. Off by default (perf — a full
         # vendored sweep is 10–60s); a shared byte BUDGET bounds a hostile/huge tree. FP-safe (confirmed

@@ -6,7 +6,7 @@ import sys
 
 from stayawake.lib import git as gitutil
 from stayawake.bots.security.models import Finding, Severity
-from stayawake.bots.security.matchers.base import Matcher, build_content_sig
+from stayawake.bots.security.matchers.base import Matcher, build_confirmed_loader_check
 from stayawake.bots.security.obfuscation import is_generated_context, analyze_delta
 
 
@@ -59,7 +59,7 @@ class GitHistoryMatcher(Matcher):
         # content signatures live in their own matcher group; the scanner passes the full
         # signature set as `all_signatures` so we can reach them. Fall back to the
         # git-history group (loaders absent) when not provided.
-        content_sig = build_content_sig(all_signatures or signatures)
+        content_sig = build_confirmed_loader_check(all_signatures or signatures)
         findings: list[Finding] = []
         for sha in gitutil.merge_commits(target.repo_root)[:_MAX_CANDIDATES]:
             evil = gitutil.evil_merge_paths(target.repo_root, sha, content_sig=content_sig,

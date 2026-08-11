@@ -20,6 +20,16 @@ reader, not the mechanism or the weakness it closed.
   run that deliberately declined to certify could be read at a glance as a clean one. It is now
   visually distinct from both a nudge and an act-now warning. Audit rows also align consistently,
   which they previously did not across the two markers.
+- **`saw scan` no longer reports INFECTED on published, benign packages.** A loader fingerprint
+  collided with ordinary minified code, so vendoring a large published bundle — or running
+  `--deep` on a project that depends on one — could fail your scan with an infected verdict and a
+  non-zero exit. If a scan failed on a dependency you had no other reason to doubt, re-run it. The
+  detection that catches this worm family is unchanged, and remediation is unaffected: a partially
+  cleaned file that still carries loader code is still refused as "fixed".
+
+### Added
+- **A new confirmed indicator for the same worm family**, covering a marker the earlier fingerprints
+  missed.
 
 ## [0.4.1] - 2026-08-11
 

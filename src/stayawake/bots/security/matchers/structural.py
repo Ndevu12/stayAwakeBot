@@ -12,7 +12,7 @@ import re
 
 from stayawake.bots.security.models import Finding, Severity
 from stayawake.bots.security.matchers.base import (
-    Matcher, load_jsonc, build_content_sig, REMOTE_FETCH_INTO_INTERPRETER)
+    Matcher, load_jsonc, build_confirmed_loader_check, REMOTE_FETCH_INTO_INTERPRETER)
 
 # Claude Code lifecycle events that fire WITHOUT the user invoking a specific tool — the agent
 # analogue of runOn:folderOpen. (PreToolUse/PostToolUse/UserPromptSubmit fire only during active
@@ -36,7 +36,7 @@ class StructuralJsonMatcher(Matcher):
         by_kind = {s["kind"]: s for s in signatures if s.get("kind")}
         # Corroborate a hook command against the shared code-loader fingerprints (one source of
         # truth, so the two never drift). Needs the cross-signature view; falls back gracefully.
-        loader_check = build_content_sig(all_signatures or signatures)
+        loader_check = build_confirmed_loader_check(all_signatures or signatures)
         findings: list[Finding] = []
         for rel in target.iter_files():
             base = rel.rsplit("/", 1)[-1]
