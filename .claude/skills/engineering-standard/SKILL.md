@@ -23,6 +23,9 @@ Write for a new/collaborating developer. New work is expected to honor these; be
 - **Self-documenting names** — name by meaning, not internal jargon (`tier1_only` →
   `constructs_only`). A reader should understand a call site without hunting. Don't propagate
   pre-existing jargon into new identifiers; describe behavior in comments.
+- **Comment density — hold what the code can't say.** A comment earns its place with a
+  measurement, a rejected alternative, or a trap that would otherwise be re-introduced — not by
+  narrating the code. Aim two lines, not nine; long rationale belongs in the commit message.
 - **Altitude — fix at the right depth, no bandaids.** A special case layered on shared infra is a
   smell; prefer generalizing the underlying mechanism. But don't over-engineer the maximal engine.
 
