@@ -13,6 +13,14 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Fixed
+- **An audit check that could not be completed no longer looks like an ordinary review note.**
+  When `saw audit` cannot fully read the persistence surface it withholds its all-clear and says so
+  — but that "could not establish this" state was rendered identically to a low-priority nudge, so a
+  run that deliberately declined to certify could be read at a glance as a clean one. It is now
+  visually distinct from both a nudge and an act-now warning. Audit rows also align consistently,
+  which they previously did not across the two markers.
+
 ## [0.4.1] - 2026-08-11
 
 ### Fixed

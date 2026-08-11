@@ -39,7 +39,7 @@ from .host_artifacts import check_host_artifacts
 from .editor import check_vscode
 from .mechanism import check_ssh_authorized_keys, check_shell_profile, check_git_config_execution
 from .remote import check_branch_protection
-from stayawake.utils.render import SEVERITY, block, marked_list, paint
+from stayawake.utils.render import MARKER, SEVERITY, block, marked_list, paint
 
 __all__ = [
     "HygieneIssue", "INCIDENT_TRIGGER_IDS", "ROTATION_UNSAFE_IDS", "rotation_safety",
@@ -86,7 +86,17 @@ def audit_checks(slug: str | None = None, token: str | None = None, branch: str 
     ]
 
 
-_ICON = {"warning": "⚠️", "info": "•"}
+# Per-issue markers come from the shared vocabulary (`utils.render.MARKER`) rather than a local
+# map, so this surface and the scan report cannot drift on what a glyph means — the same reason
+# SEVERITY lives there. Two things this fixes over the local map it replaces:
+#   * `unknown` now HAS a marker. It used to fall through to the `info` bullet and render
+#     unpainted (no SEVERITY entry either), so "the surface could not be verified" (#1332) was
+#     pixel-identical to a review-worthy nudge — the exact distinction #1332 exists to draw.
+#   * the warning marker is the text glyph `⚠`, not the emoji `⚠️`. The emoji is double-width,
+#     so warning rows sat one column right of info rows in the same list. The banner heads below
+#     keep the emoji deliberately: they are standalone attention lines, not aligned columns.
+def _icon(severity: str) -> str:
+    return MARKER.get(severity, MARKER["info"])
 
 
 def _banner(issue_ids: set[str], *, color: bool, width: int) -> list[str]:
@@ -256,7 +266,7 @@ def render(issues: list[HygieneIssue], *, color: bool = False, width: int = 80) 
                          paint(f"  · {gsub}", SEVERITY["info"], on=color))
         for i in items:
             code = SEVERITY.get(i.severity)
-            icon = _ICON.get(i.severity, "•")
+            icon = _icon(i.severity)
             lines.append(f"  {paint(icon, code, on=color)} {paint(i.title, code, on=color)}")
             lines += block(i.detail, indent=5, width=width)
             lines += block(i.remediation, indent=5, width=width, marker="→ fix  ",
