@@ -39,7 +39,32 @@ SEVERITY: dict[str, str] = {
     "low": "\033[33m",          # yellow
     "warning": "\033[1;31m",    # bold red — an audit warning is act-now
     "info": "\033[2m",          # dim — a review-worthy nudge
+    "unknown": "\033[1;33m",    # bold yellow — the check could NOT be completed (#1332)
     "ok": "\033[32m",           # green — no issue
+}
+
+# The ONE glyph vocabulary, beside the colour one above. It lives here for the same reason
+# SEVERITY does: the scan report, the audit report and the CLI status lines were each choosing
+# their own markers, so "what does a tick mean?" could drift the way "what colour is critical?"
+# no longer can. Callers reference a marker by name; the character lives here once.
+#
+# TEXT GLYPHS ONLY, never emoji. An emoji carries a variation selector and renders DOUBLE-WIDTH,
+# which silently breaks the hanging-indent maths in `block()`/`marked_list()` (those align
+# continuations under the text by `len(marker)`, a count of code points, not display columns).
+# Emoji is fine where width is irrelevant and rendering is richer — a Slack payload, a JSON field.
+#
+# The severity-named keys mirror SEVERITY, so a caller can pair `MARKER[sev]` with
+# `SEVERITY[sev]`; the rest name a ROLE the marker plays rather than a level.
+MARKER: dict[str, str] = {
+    # by severity — what the check actually established
+    "ok": "✓",          # an established POSITIVE: installed, already guarded, scanned clean
+    "warning": "⚠",     # act now
+    "info": "•",        # a scoped negative ("none found HERE") or a nudge — never an all-clear
+    "unknown": "?",     # the check could not be run or completed — not "fine", not "act now"
+    # by role
+    "fail": "✗",        # an operation failed, or a required thing is absent
+    "detail": "→",      # a labelled follow-on line: "→ fix  ", "→ details: "
+    "meta": "·",        # separator / dim metadata
 }
 
 # Scan's per-target status tokens (distinct from severity: a verdict, not a level).

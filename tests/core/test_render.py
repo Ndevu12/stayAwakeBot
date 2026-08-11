@@ -4,7 +4,9 @@ width-aware wrapping, rules, and terminal-width fallback. These are the MECHANIS
 sink and the audit report compose, so they are pinned here once."""
 from __future__ import annotations
 
+import re
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from stayawake.utils import render
@@ -177,3 +179,101 @@ class TestPalette(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestMarkerVocabulary(unittest.TestCase):
+    """The glyph vocabulary (`render.MARKER`) is the counterpart to the colour one, and it lives
+    beside it for the same reason: the audit report, the scan report and the CLI status lines each
+    used to choose their own markers, so "what does a tick mean?" could drift the way "what colour
+    is critical?" no longer can."""
+
+    def _severities_emitted_by_hygiene(self) -> set[str]:
+        """Derive the inventory FROM THE SOURCE, never a hardcoded list — a new severity added to a
+        probe must fail this suite rather than silently render as an unpainted info bullet."""
+        pkg = Path(render.__file__).resolve().parents[1] / "bots" / "security" / "hygiene"
+        found: set[str] = set()
+        for py in pkg.rglob("*.py"):
+            found |= set(re.findall(r'severity=["\']([a-z]+)["\']', py.read_text()))
+        self.assertTrue(found, "found no severities — the scrape broke, so this test proves nothing")
+        return found
+
+    def test_every_emitted_severity_has_both_a_colour_and_a_marker(self):
+        # The defect this pins: `unknown` (#1332's "surface could not be verified") existed in
+        # NEITHER map, so it fell through to the info bullet AND rendered unpainted — the one state
+        # meaning "we could not establish this" was pixel-identical to a review-worthy nudge.
+        for sev in sorted(self._severities_emitted_by_hygiene()):
+            self.assertIn(sev, render.SEVERITY, f"severity {sev!r} has no colour")
+            self.assertIn(sev, render.MARKER, f"severity {sev!r} has no marker")
+
+    def test_unknown_is_distinguishable_from_info(self):
+        # Not-established must not read as a nudge, in EITHER channel — glyph or colour.
+        self.assertNotEqual(render.MARKER["unknown"], render.MARKER["info"])
+        self.assertNotEqual(render.SEVERITY["unknown"], render.SEVERITY["info"])
+
+    def test_ok_is_reserved_for_an_established_positive(self):
+        # `ok`/✓ asserts a check ESTABLISHED a positive. A scoped negative ("none found here") is
+        # `info`, and a check that could not run is `unknown` — neither may share the tick.
+        self.assertNotEqual(render.MARKER["ok"], render.MARKER["info"])
+        self.assertNotEqual(render.MARKER["ok"], render.MARKER["unknown"])
+
+    def test_no_marker_is_a_double_width_emoji(self):
+        # `block()`/`marked_list()` hang continuations by len(marker) — a COUNT OF CODE POINTS, not
+        # display columns. An emoji (variation selector U+FE0F) renders double-width, so it silently
+        # shifts every continuation line and misaligns rows against their single-width neighbours.
+        for name, glyph in render.MARKER.items():
+            self.assertNotIn("️", glyph, f"MARKER[{name!r}] is an emoji presentation")
+            self.assertEqual(len(glyph), 1, f"MARKER[{name!r}] must be one code point")
+
+    def test_block_hanging_indent_holds_for_every_marker(self):
+        # The mechanical consequence of the rule above, asserted rather than assumed.
+        for name, glyph in render.MARKER.items():
+            marker = f"{glyph} "
+            lines = render.block("word " * 40, indent=2, width=40, marker=marker)
+            self.assertGreater(len(lines), 1, f"{name}: needed a wrapped sample")
+            hang = 2 + len(marker)
+            for cont in lines[1:]:
+                self.assertTrue(cont.startswith(" " * hang),
+                                f"MARKER[{name!r}] broke the hanging indent")
+                self.assertNotEqual(cont[hang], " ", f"MARKER[{name!r}] over-indented")
+
+
+class TestVocabularyIsActuallyAdopted(unittest.TestCase):
+    """Defining the vocabulary is not the point — ADOPTING it is. A `MARKER` map that no caller
+    reads leaves the glyphs exactly as scattered as before, which is the drift it exists to stop.
+
+    So: no report surface may hardcode a marker glyph in a string literal. Parsed with `ast` so
+    comments and docstrings (which legitimately discuss the glyphs) are not mistaken for output.
+    """
+
+    EMOJI_VS = "️"   # variation selector — the emoji presentation form
+
+    def _surfaces(self) -> list[Path]:
+        sec = Path(render.__file__).resolve().parents[1] / "bots" / "security"
+        files = sorted((sec / "hygiene").rglob("*.py")) + sorted((sec / "sinks").rglob("*.py"))
+        self.assertTrue(files, "found no render surfaces — the scan broke, so this proves nothing")
+        return files
+
+    def test_no_surface_hardcodes_a_glyph_in_MARKER_POSITION(self):
+        # Scoped to marker POSITION — a literal that begins a rendered line — rather than to the
+        # glyph anywhere. `→` and `·` are also ordinary punctuation ("isolate → rebuild", "a · b"),
+        # and flagging those would make this test noise that gets deleted rather than a rule that
+        # holds. What must not drift is the glyph that LEADS a line, because that is the one the
+        # reader decodes as severity.
+        import ast
+        offenders: list[str] = []
+        for path in self._surfaces():
+            for node in ast.walk(ast.parse(path.read_text())):
+                if not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
+                    continue
+                lead = node.value.lstrip()
+                for name, glyph in render.MARKER.items():
+                    if not lead.startswith(glyph):
+                        continue
+                    # Documented exception: a standalone incident BANNER may use the emoji
+                    # presentation. It never sits in an aligned list, so the width rule that bars
+                    # emoji from the vocabulary does not apply there.
+                    if lead.startswith(glyph + self.EMOJI_VS):
+                        continue
+                    offenders.append(f"{path.name}:{node.lineno} leads with MARKER[{name!r}]")
+        self.assertEqual(offenders, [], "use MARKER[...] instead of a literal glyph:\n  " +
+                         "\n  ".join(offenders))

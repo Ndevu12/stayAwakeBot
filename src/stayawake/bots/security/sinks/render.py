@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import Any
 
 from stayawake.bots.security.redaction import render_redacted
-from stayawake.utils.render import SEVERITY, STATUS, paint, rule
+from stayawake.utils.render import MARKER, SEVERITY, STATUS, paint, rule
 from stayawake.utils import textsafe
 
 # Colour is emitted only when the terminal sink says stdout is a TTY (and NO_COLOR isn't set) —
@@ -59,7 +59,7 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False,
               f"{s.get('suspicious', 0)} suspicious · "
               f"{s['findings']} findings ({s['critical']} critical, {s['high']} high)")
     if s.get("advisories"):
-        header += f" · {s['advisories']} advisories"
+        header += f" {MARKER['meta']} {s['advisories']} advisories"
     out = [f"Security scan — {payload['generated_at']}", "", header, ""]
 
     results = payload["results"]
@@ -114,25 +114,25 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False,
             # Project header, then a rule under it so the project is clearly separated from
             # its findings. The rule length is computed from the PLAIN header (colour codes
             # have no display width), so it always matches the visible text.
-            head_plain = f"{r['target']} — {label} · {total} finding(s)"
+            head_plain = f"{r['target']} — {label} {MARKER['meta']} {total} finding(s)"
             out += ["",
                     f"  {paint(r['target'], _label_color(label), on=color)} — {label} "
-                    f"· {total} finding(s)",
+                    f"{MARKER['meta']} {total} finding(s)",
                     "  " + rule(len(head_plain))]
-            tags = [f"[{f['severity']} · {f.get('confidence', 'confirmed')}]"
+            tags = [f"[{f['severity']} {MARKER['meta']} {f.get('confidence', 'confirmed')}]"
                     for f in r["findings"]]
             tw = max(len(t) for t in tags)
             for f, tag in zip(r["findings"], tags):
                 loc = f["path"] + (f":{f['line']}" if f.get("line") else "")
                 colored = paint(tag.ljust(tw), _SEV_COLOR.get(f["severity"]), on=color)
                 # A visible bullet per finding; evidence sits under it, deeper-indented.
-                out.append(f"    • {colored}  {f['signature_id']}  —  {loc}")
+                out.append(f"    {MARKER['info']} {colored}  {f['signature_id']}  —  {loc}")
                 if f.get("evidence"):
                     out.append(f"        evidence: {_fmt_evidence(f['evidence'])}")
                 if f.get("fix_advice"):                          # actionable remediation (#1252)
-                    out.append(f"        → fix: {textsafe.plain(f['fix_advice'])}")
+                    out.append(f"        {MARKER['detail']} fix: {textsafe.plain(f['fix_advice'])}")
                 if f.get("reference"):
-                    out.append(f"        → details: {textsafe.plain(f['reference'])}")
+                    out.append(f"        {MARKER['detail']} details: {textsafe.plain(f['reference'])}")
     # Dependency advisories — a SEPARATE, opt-in tier (ordinary CVEs). Listed for any target that
     # has them, including clean ones, and explicitly labelled as not affecting the verdict.
     advised = [r for r in ordered if r.get("advisories")]
@@ -147,18 +147,18 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False,
                             f"{'y' if len(r['advisories']) == 1 else 'ies'}"]
                 for a in r["advisories"]:
                     loc = a["path"] + (f":{a['line']}" if a.get("line") else "")
-                    out.append(f"    • [{a['severity']}]  {a['signature_id']}  —  {loc}")
+                    out.append(f"    {MARKER['info']} [{a['severity']}]  {a['signature_id']}  —  {loc}")
                     if a.get("evidence"):
                         out.append(f"        {_fmt_evidence(a['evidence'])}")
                     if a.get("fix_advice"):                      # how to actually fix it (#1252)
-                        out.append(f"        → fix: {textsafe.plain(a['fix_advice'])}")
+                        out.append(f"        {MARKER['detail']} fix: {textsafe.plain(a['fix_advice'])}")
                     if a.get("reference"):
-                        out.append(f"        → details: {textsafe.plain(a['reference'])}")
+                        out.append(f"        {MARKER['detail']} details: {textsafe.plain(a['reference'])}")
     if s.get("suspicious"):
         out += ["", "suspicious = heuristic match(es) to review; not asserted as malware."]
     notes = _coverage_notes(payload)               # honest coverage caveats (#1222) — never gating
     if notes:
-        out += ["", "Coverage notes (not gating):"] + [f"  • {n}" for n in notes]
+        out += ["", "Coverage notes (not gating):"] + [f"  {MARKER['info']} {n}" for n in notes]
     # Host-scope note (#1332): a repo-content scan says nothing about host PERSISTENCE. Surfaced when
     # nothing is infected — the exact moment a user might read "clean" and rotate a token, which can
     # arm a rotation-wiper daemon. Terminal-only, never gates; the authoritative host verdict is
@@ -206,7 +206,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
         out.append(f"### {r['target']}")
         for f in r["findings"]:
             loc = f["path"] + (f":{f['line']}" if f.get("line") else "")
-            out.append(f"- **[{f['severity']} · {f.get('confidence', 'confirmed')}]** "
+            out.append(f"- **[{f['severity']} {MARKER['meta']} {f.get('confidence', 'confirmed')}]** "
                        f"`{f['signature_id']}` — {loc}")
             out.append(f"  - {f['description']}")
             if f.get("evidence"):
