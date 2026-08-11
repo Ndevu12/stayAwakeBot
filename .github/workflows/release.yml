@@ -140,7 +140,7 @@ jobs:
           name: dist
           path: dist/
       - name: Publish to TestPyPI
-        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b   # v1.14.0
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33   # v1.14.2
         with:
           repository-url: https://test.pypi.org/legacy/
           attestations: true
@@ -163,7 +163,7 @@ jobs:
           name: dist
           path: dist/
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b   # v1.14.0
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33   # v1.14.2
         with:
           attestations: true   # PEP 740 signed provenance, displayed on the PyPI page
           # A re-run of a tag whose files already published should no-op, not hard-fail.
