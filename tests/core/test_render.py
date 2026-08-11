@@ -235,3 +235,45 @@ class TestMarkerVocabulary(unittest.TestCase):
                 self.assertTrue(cont.startswith(" " * hang),
                                 f"MARKER[{name!r}] broke the hanging indent")
                 self.assertNotEqual(cont[hang], " ", f"MARKER[{name!r}] over-indented")
+
+
+class TestVocabularyIsActuallyAdopted(unittest.TestCase):
+    """Defining the vocabulary is not the point — ADOPTING it is. A `MARKER` map that no caller
+    reads leaves the glyphs exactly as scattered as before, which is the drift it exists to stop.
+
+    So: no report surface may hardcode a marker glyph in a string literal. Parsed with `ast` so
+    comments and docstrings (which legitimately discuss the glyphs) are not mistaken for output.
+    """
+
+    EMOJI_VS = "️"   # variation selector — the emoji presentation form
+
+    def _surfaces(self) -> list[Path]:
+        sec = Path(render.__file__).resolve().parents[1] / "bots" / "security"
+        files = sorted((sec / "hygiene").rglob("*.py")) + sorted((sec / "sinks").rglob("*.py"))
+        self.assertTrue(files, "found no render surfaces — the scan broke, so this proves nothing")
+        return files
+
+    def test_no_surface_hardcodes_a_glyph_in_MARKER_POSITION(self):
+        # Scoped to marker POSITION — a literal that begins a rendered line — rather than to the
+        # glyph anywhere. `→` and `·` are also ordinary punctuation ("isolate → rebuild", "a · b"),
+        # and flagging those would make this test noise that gets deleted rather than a rule that
+        # holds. What must not drift is the glyph that LEADS a line, because that is the one the
+        # reader decodes as severity.
+        import ast
+        offenders: list[str] = []
+        for path in self._surfaces():
+            for node in ast.walk(ast.parse(path.read_text())):
+                if not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
+                    continue
+                lead = node.value.lstrip()
+                for name, glyph in render.MARKER.items():
+                    if not lead.startswith(glyph):
+                        continue
+                    # Documented exception: a standalone incident BANNER may use the emoji
+                    # presentation. It never sits in an aligned list, so the width rule that bars
+                    # emoji from the vocabulary does not apply there.
+                    if lead.startswith(glyph + self.EMOJI_VS):
+                        continue
+                    offenders.append(f"{path.name}:{node.lineno} leads with MARKER[{name!r}]")
+        self.assertEqual(offenders, [], "use MARKER[...] instead of a literal glyph:\n  " +
+                         "\n  ".join(offenders))

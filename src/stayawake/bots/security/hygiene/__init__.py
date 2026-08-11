@@ -107,6 +107,10 @@ def _banner(issue_ids: set[str], *, color: bool, width: int) -> list[str]:
 
     The runbook is a genuine ORDERED procedure (rotate LAST) → a NUMBERED list; the note is a set
     of points/caveats, not a sequence → a BULLETED list. Both go through core.render.marked_list."""
+    # The two banner heads are the deliberate emoji exception. Everything else on this surface takes
+    # its glyph from MARKER, but a banner is a STANDALONE attention line that renders only when an
+    # incident is live — never inside an aligned list — so the width cost that bars emoji from the
+    # marker vocabulary does not apply, and the extra weight is the point.
     tier = incident_tier(issue_ids)
     if tier == TIER_ACTIVE_PERSISTENCE:
         head = "⚠️  Active host persistence detected — respond in THIS order (rotate LAST):"
@@ -128,16 +132,22 @@ def _rotation_verdict(issues: list[HygieneIssue], *, color: bool, width: int) ->
     runbook follows in _banner), UNSAFE-unknown (surface could not be read → treat as unsafe)."""
     verdict = rotation_safety({i.id for i in issues})
     if verdict == ROTATION_SAFE:
-        return [paint("✓ Rotation safety: persistence surface enumerated and clean — rotating "
-                      "credentials is safe.", SEVERITY["ok"], on=color)]
+        return [paint(f"{MARKER['ok']} Rotation safety: persistence surface enumerated and clean "
+                      "— rotating credentials is safe.", SEVERITY["ok"], on=color)]
     if verdict == ROTATION_UNSAFE_PERSISTENCE:
-        lines = [paint("⚠️  Rotation safety: UNSAFE — active host persistence detected; do NOT rotate "
-                       "any credential yet (runbook below).", SEVERITY["warning"], on=color)]
+        lines = [paint(f"{MARKER['warning']}  Rotation safety: UNSAFE — active host persistence "
+                       "detected; do NOT rotate any credential yet (runbook below).",
+                       SEVERITY["warning"], on=color)]
     else:
         # UNSAFE-unknown: name exactly what could not be read, so the gap is actionable, not vague.
-        lines = [paint("⚠️  Rotation safety: UNKNOWN — the persistence surface could not be fully "
-                       "verified, so treat credential rotation as UNSAFE until it is.",
-                       SEVERITY["warning"], on=color)]
+        # Marker and colour say different things here, on purpose: `?` states the EPISTEMIC fact
+        # (we could not establish this), `warning` states the REQUIRED ACTION (do not rotate — this
+        # path drives the unconditional exit 3). Painting it `unknown` too would soften an act-now
+        # instruction; marking it `warning` would claim we looked and found something. Neither is
+        # true alone, which is what having two channels is for.
+        lines = [paint(f"{MARKER['unknown']}  Rotation safety: UNKNOWN — the persistence surface "
+                       "could not be fully verified, so treat credential rotation as UNSAFE "
+                       "until it is.", SEVERITY["warning"], on=color)]
     # The unreadable locations are named on BOTH unsafe paths. `rotation_safety` is a PRIORITY
     # function — active persistence dominates — so keying this disclosure off its verdict hid the
     # list in the one state that needs it most: a live foothold PLUS a location nobody could read.
@@ -234,7 +244,7 @@ def render(issues: list[HygieneIssue], *, color: bool = False, width: int = 80) 
         # unverified?" because ONE probe emits that pairing today. The rotation verdict, the exit gate
         # and the scope note all key off UNVERIFIED_PERSISTENCE_IDS, so a second unknown-severity id
         # would otherwise split this heading three ways from the verdict printed under it.
-        head = ("✓ Local security hygiene: no issues found."
+        head = (f"{MARKER['ok']} Local security hygiene: no issues found."
                 if not ({i.id for i in issues} & UNVERIFIED_PERSISTENCE_IDS)
                 else "Local security hygiene: no findings, but the persistence surface is UNVERIFIED.")
         code = SEVERITY["ok"] if "no issues" in head else SEVERITY["warning"]
@@ -263,13 +273,13 @@ def render(issues: list[HygieneIssue], *, color: bool = False, width: int = 80) 
             continue
         if show_headers:
             lines.append(paint(gtitle, SEVERITY[gsev], on=color) +
-                         paint(f"  · {gsub}", SEVERITY["info"], on=color))
+                         paint(f"  {MARKER['meta']} {gsub}", SEVERITY["info"], on=color))
         for i in items:
             code = SEVERITY.get(i.severity)
             icon = _icon(i.severity)
             lines.append(f"  {paint(icon, code, on=color)} {paint(i.title, code, on=color)}")
             lines += block(i.detail, indent=5, width=width)
-            lines += block(i.remediation, indent=5, width=width, marker="→ fix  ",
+            lines += block(i.remediation, indent=5, width=width, marker=f"{MARKER['detail']} fix  ",
                            code=SEVERITY["info"], color=color)
             if i.command:
                 # The copy-pasteable command renders VERBATIM on its own line(s), never reflowed — a
@@ -277,7 +287,7 @@ def render(issues: list[HygieneIssue], *, color: bool = False, width: int = 80) 
                 # selectable (#1237). Rationale stays in `remediation`; the deep "why" is the details link.
                 lines += [f"       {cmd_line}" for cmd_line in i.command.split("\n")]
             if i.reference:
-                lines.append("     " + paint("→ details: ", SEVERITY["info"], on=color) + i.reference)
+                lines.append("     " + paint(f"{MARKER['detail']} details: ", SEVERITY["info"], on=color) + i.reference)
             lines.append("")
     lines += _scope_note(issues, color=color, width=width)
     return "\n".join(lines).rstrip()
