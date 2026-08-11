@@ -77,7 +77,7 @@ jobs:
         run: |
           pip install pip-audit
           # Fails the release on any advisory in the resolved deps. To ship past a vuln with
-          # no fix yet, add a scoped `--ignore-vuln GHSA-xxxx` here (see docs/RELEASING.md).
+          # no fix yet, add a scoped `--ignore-vuln GHSA-xxxx` here.
           pip-audit --strict --requirement /tmp/app-requirements.txt
 
       - name: Generate CycloneDX SBOM

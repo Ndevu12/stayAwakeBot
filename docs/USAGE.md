@@ -126,20 +126,15 @@ still fails **closed** if a worker dies.
 ```bash
 saw scan ~ -j auto            # sweep every repo under $HOME, one worker per CPU core
 saw scan /big/monorepo -j 8   # split ONE big repo's files across 8 workers
-saw scan --org UB-TechDEV -j 8   # up to 8 org repos at once
+saw scan --org your-org -j 8     # up to 8 org repos at once
 saw scan -j 1                 # force sequential (e.g. a low-memory box or byte-stable timing)
 ```
 
-**Scanning vendored dependency code (`--deep`).** A normal scan excludes `node_modules` (minified
-vendored code makes the density heuristic all false positives) and checks only each installed
-package's **entry points** — so a loader payload buried in a *non-entry* file of an on-lockfile
-package reads clean. To keep that from being a silent gap, a scan of a repo with `node_modules`
-prints an honest **coverage note** telling you it wasn't content-scanned. When you want that coverage,
-`saw scan --deep` runs the **FP-safe confirmed loader tier** (0 hits over 531 MB of real vendored
-code) over *every* source file of the installed npm packages — catching the non-entry payload. It is
-opt-in because reading every dependency file adds ~10–60s on a large `node_modules`; it is bounded and
-never runs the FP-prone heuristics. (For a *non-repo* suspect dir like a bare `~/.node_modules`, use
-`saw audit --verify` instead — see the [CLI guide](CLI.md#saw-scan).)
+**Scanning vendored dependency code (`--deep`).** A normal scan checks each installed package's
+entry points; `saw scan --deep` content-scans *every* source file of the installed npm packages.
+It is opt-in because reading every dependency file adds ~10–60s on a large `node_modules`.
+(For a *non-repo* suspect dir like a bare `~/.node_modules`, use `saw audit --verify` instead —
+see the [CLI guide](CLI.md#saw-scan).)
 
 ```bash
 saw scan --deep               # content-scan node_modules for loader payloads (opt-in, ~10–60s)
@@ -177,8 +172,7 @@ some combination — even without write access to the target.
 
 Pass `--remote` to scan the GitHub users/orgs listed in `config/security.yml` instead of local
 paths (scope is local **or** remote — one per run). `saw scan`'s exit code **is** the verdict
-(`0`/`1`), so a CI gate just checks it — there is no `--fail` flag. See
-[SECURITY_ARCHITECTURE.md](SECURITY_ARCHITECTURE.md) for how detection / remediation work, and the
+(`0`/`1`), so a CI gate just checks it — there is no `--fail` flag. See the
 [`saw` CLI guide](CLI.md) for every command and flag.
 
 **Security reports are no longer committed into the repo.** `saw scan` persists nothing by

@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+- **The public repository now carries product documentation only.** The engineering
+  documentation — architecture, security architecture, the maintainer release runbook, the
+  contributor layering guide and the committed agent configuration — has moved to a private
+  repository. `README.md`, `docs/CLI.md`, `docs/USAGE.md`, `CONTRIBUTING.md`,
+  `prevent/SECURITY_BASELINE.md` and `.github/CODEOWNERS` stay public with their internal
+  passages removed; install, usage, configuration, CLI reference and licensing are unaffected.
+
 ### Added
 - **`saw audit` now reveals its scan-scope boundary instead of implying a host all-clear** (#1341). A
   supply-chain wipe leaves everything outside `$HOME` intact, and malware stages files where `saw` did
