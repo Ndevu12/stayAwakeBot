@@ -37,7 +37,7 @@ jobs:
           # in-band pin-freshness gate (#1172) fails an engine PR that doesn't bump this, both pin
           # copies must AGREE (pin_tools.py synced, #1210), and scanner-pin-drift opens an issue if
           # it falls behind.
-          sentinel-ref: d1e9e1902b14ec23261b5e9abcadbe00c9aa8a60   # merge of #1366 — catches up dead-man daemon (#1335), destructive-intent (#1334), novel autorun (#1333), persistence-surface certification (#1332), evil-merge grading/recovery (#1363/#1364/#1365)
+          sentinel-ref: a7ce58f1f7409916bb6ab0c3b9857207f9703be1   # merge of #1366 — catches up dead-man daemon (#1335), destructive-intent (#1334), novel autorun (#1333), persistence-surface certification (#1332), evil-merge grading/recovery (#1363/#1364/#1365)
           fail-on-findings: 'true'
           # This gate never uploads SARIF — the job conclusion is the scan's exit code, nothing
           # else. Code-scanning delivery is owned solely by security-sentinel.yml.
