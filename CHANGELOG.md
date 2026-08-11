@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- **A public contributor skill set is back, scoped to obligations rather than mechanisms.** `CLAUDE.md`
+  and four `.claude/skills/` — `saw-overview`, `engineering-standard`, `working-with-this-codebase`
+  and `shipping-changes` — return so a contributor's agent picks up the project's discipline
+  automatically. They state what a change must satisfy; they deliberately do not state how detection
+  decides, what it keys on, or where its coverage ends. `.claude/skills/README.md` records that rule
+  so it can be applied to future edits.
+
 ### Changed
 - **The public repository now carries product documentation only.** The engineering
   documentation — architecture, security architecture, the maintainer release runbook, the
