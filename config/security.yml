@@ -68,6 +68,7 @@ allowlist:
   # Code-loader IoC literals in the infected fixture + detector test files
   - {signature: loader-seed-var, path_glob: "tests/**"}
   - {signature: loader-decoder-fn, path_glob: "tests/**"}
+  - {signature: loader-global-v-marker, path_glob: "tests/**"}
   - {signature: loader-fromcharcode-127, path_glob: "tests/**"}
   - {signature: loader-global-bang, path_glob: "tests/**"}
   - {signature: loader-require-hijack, path_glob: "tests/**"}

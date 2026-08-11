@@ -14,6 +14,7 @@ from typing import Any
 # npm_manifest, remediation) keep `from ...matchers.base import load_jsonc`, while the
 # `dependencies/` package imports it directly and avoids a matchers↔dependencies cycle.
 from stayawake.bots.security.jsonc import load_jsonc  # noqa: F401  (re-export)
+from stayawake.bots.security.models import HEURISTIC
 
 # Font-format magic bytes; a "font" lacking these but carrying text is a payload.
 FONT_MAGIC = {
@@ -56,17 +57,15 @@ def globs_ok(relpath: str, sig: dict[str, Any]) -> bool:
     return any(fnmatch(relpath, g) or fnmatch(base, g) for g in globs)
 
 
-def build_content_sig(signatures: list[dict[str, Any]]):
-    """Compile the worm CONTENT-loader fingerprints (the `content` matcher's code-loader
-    regex signatures) into one callable `check(text) -> signature_id | None`.
+def _loader_check(signatures: list[dict[str, Any]], *, confirmed_only: bool):
+    """Compile the CONTENT-loader fingerprints into `check(text) -> signature_id | None`.
 
-    Matches against the text AND its newline-flattened form, so a payload wrapped across
-    lines still hits. Used wherever a matcher corroborates a structural signal (a long
-    line, a merge-introduced hunk) against "is this actually a known loader" without
-    re-running a full file scan. Patterns come from the live signature DB so the two never
-    drift. Shared by the evil-merge, heuristic and obfuscation matchers (one source)."""
+    Matches against the text AND its newline-flattened form, so a payload wrapped across lines
+    still hits. Patterns come from the live signature DB so no consumer can drift from it."""
     pats = [(s["id"], re.compile(s["pattern"], re.IGNORECASE))
-            for s in signatures if s.get("pattern") and s.get("category") == "code-loader"]
+            for s in signatures
+            if s.get("pattern") and s.get("category") == "code-loader"
+            and not (confirmed_only and s.get("confidence") == HEURISTIC)]
 
     def check(text: str):
         flat = text.replace("\n", "").replace("\r", "")
@@ -76,6 +75,19 @@ def build_content_sig(signatures: list[dict[str, Any]]):
         return None
 
     return check
+
+
+def build_confirmed_loader_check(signatures: list[dict[str, Any]]):
+    """CONFIRMED fingerprints only — for matchers whose finding drives a verdict. A heuristic
+    shape is one benign code can share, so it must not be laundered into an accusation."""
+    return _loader_check(signatures, confirmed_only=True)
+
+
+def build_any_loader_check(signatures: list[dict[str, Any]]):
+    """Every tier — for the remediation gate, which asks whether anything loader-shaped SURVIVED
+    an excision. A heuristic match must still block a "fixed" claim. Tier grades how confidently
+    we accuse, not how carefully we clean."""
+    return _loader_check(signatures, confirmed_only=False)
 
 
 class Matcher:

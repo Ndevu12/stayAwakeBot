@@ -47,7 +47,34 @@ signatures:
     matcher: content
     pattern: '\bsfL\s*\('
     prefilter: "sfl"   # cheap required-literal reject before the regex
+    # A mangled identifier, and this family regenerates them every build: 0 matches across 35
+    # decrypted revisions and 0 on the captured argv (which names its decoder `lfL`), against
+    # confirmed-tier FPs on published bundles. Mechanism signatures carry the real detection.
+    confidence: heuristic
     description: "Obfuscated loader decoder call — the sfL decoder function"
+    remediation: recover
+
+  - id: loader-global-v-marker
+    category: code-loader
+    severity: critical
+    matcher: content
+    pattern: "global\\[\\s*['\"]_V['\"]\\s*\\]\\s*="
+    prefilter: "global['_v'"   # cheap required-literal reject before the regex
+    # Structure rather than a mangled name: 34/35 decrypted revisions (97%) plus the captured
+    # argv. Keys on the assignment, not the value it is given (that value is N=1). FP 0 / 16,315.
+    description: "Loader bootstrap assigning the global['_V'] marker"
+    remediation: recover
+
+  - id: loader-clientcode-error
+    category: code-loader
+    severity: high
+    matcher: content
+    pattern: 'failed to run clientCode'
+    prefilter: "failed to run clientcode"   # cheap required-literal reject before the regex
+    # FP 0 / 16,315 real JS/TS, but N=1 for stability (one sample, no revision) — enough to
+    # surface, not enough to accuse.
+    confidence: heuristic
+    description: "Obfuscated loader status string reported to its operator channel"
     remediation: recover
 
   - id: loader-global-bang
@@ -459,7 +486,7 @@ signatures:
     severity: critical
     matcher: installed-package-audit
     # No `confidence` → confirmed/INFECTED. The matcher runs ONLY the confirmed code-loader fingerprints
-    # (the FP-safe tier, reused via build_content_sig) on an installed package's ENTRY files (main/bin).
+    # (the FP-safe tier, reused via build_confirmed_loader_check) on an installed package's ENTRY files (main/bin).
     # node_modules is content-pruned, so a novel malicious package's runtime loader in its main entry is
     # otherwise invisible. TARGETED (entry files only, not brute-force all of node_modules): measured 0
     # FP over 800 real entry files, ~0.5s.
