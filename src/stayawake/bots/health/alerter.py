@@ -119,13 +119,36 @@ def _render(state: dict, results: list[dict]) -> tuple[str, str]:
     return title, "\n".join(lines)
 
 
+def _alert_target(settings: dict) -> tuple[str, str] | None:
+    """Resolve where the status issue lives, from `settings.alert_repo` ("owner/name").
+
+    Deliberately NOT defaulted to the repository running the check. An uptime alert names the
+    endpoints it monitors and carries their outage history, so filing it into whatever repository
+    happens to host the workflow publishes that wherever that repository happens to be. The
+    destination is an explicit operator choice or there is none.
+    """
+    target = settings.get("alert_repo")
+    if not target:
+        print("alerter: settings.alert_repo is not set — not filing a status issue. Uptime alerts "
+              "name the endpoints they monitor, so they are never filed into a repository that was "
+              'not chosen for them. Set `alert_repo: "owner/name"` in the health config to enable.',
+              flush=True)
+        return None
+    owner, _, repo_name = str(target).partition("/")
+    if not (owner and repo_name):
+        print(f"alerter: settings.alert_repo {target!r} is not 'owner/name' — not filing a status "
+              "issue.", flush=True)
+        return None
+    return owner, repo_name
+
+
 def publish(results: list[dict], settings: dict | None = None) -> None:
     """Refresh the one dashboard issue from `results` and Slack any DOWN/RECOVERY transition."""
     settings = settings or {}
     token = env.github_token()
-    slug = env.github_slug()
+    slug = _alert_target(settings)
     if not (token and slug):
-        print("alerter: GITHUB_TOKEN/GITHUB_REPOSITORY unset — skipping issue update", flush=True)
+        print("alerter: no usable alert target — skipping issue update", flush=True)
         return
     owner, repo_name = slug
     fail_threshold = int(settings.get("consecutive_failures_before_alert", 2) or 1)

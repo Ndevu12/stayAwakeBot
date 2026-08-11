@@ -54,7 +54,10 @@ class PublishTest(unittest.TestCase):
              mock.patch.object(alerter, "send_slack") as slack, \
              mock.patch.dict("os.environ", self.ENV, clear=False):
             alerter.publish(results, {"consecutive_failures_before_alert": 2,
-                                      "consecutive_healthy_before_recovery": 2})
+                                      "consecutive_healthy_before_recovery": 2,
+                                      # The destination is an explicit setting; the ambient
+                                      # GITHUB_REPOSITORY in ENV is deliberately not used.
+                                      "alert_repo": "o/r"})
         return sv, slack
 
     def test_refreshes_one_issue_and_slacks_on_down(self):
