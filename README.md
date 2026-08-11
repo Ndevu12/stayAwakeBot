@@ -6,15 +6,10 @@ toolkit. Under one `stayawake` namespace it ships two bots over a shared `core`:
 - **Health sentinel** — a URL/uptime availability monitor (HTTP status, latency, TLS,
   keyword checks) that writes JSON/markdown reports.
 - **Security sentinel** — a supply-chain worm hunter that detects, alerts on, and
-  auto-fixes self-propagating malware (obfuscated loaders, fake fonts, VS Code auto-run
-  tasks, and stealth "evil merges"), opening remediation PRs and gating CI.
+  auto-fixes self-propagating malware, opening remediation PRs and gating CI.
 
 Run either bot as a **console script** locally, or as **GitHub Actions** workflows that
 commit reports back to the repository — the same packaged code in both places.
-
-## Architecture
-
-Coming soon
 
 ## Quick start
 
@@ -56,7 +51,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }   # full history so evil merges are detectable
+        with: { fetch-depth: 0 }   # full history required
       - uses: Ndevu12/strix@v1             # pin to a SHA in production
         with:
           fail-on-findings: 'true'
@@ -75,7 +70,7 @@ present, **SHA-pinned**, current, and **required** by branch protection. Both sw
 ```bash
 saw guard check                       # is this repo's gate present + SHA-pinned + current?
 saw guard setup --pr                  # install/bump the gate → one rolling PR (never pushes main)
-saw guard check --org UB-TechDEV -f   # CI gate: fail if any repo lacks a required gate
+saw guard check --org your-org -f     # CI gate: fail if any repo lacks a required gate
 ```
 
 ## Run via Docker (no local Python needed)
@@ -99,20 +94,13 @@ docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/repo" \
 Tags: `:latest`, `:X.Y.Z`, `:X.Y`, and `:sha-<commit>`. The image runs as a non-root user, is
 built from the same wheel published to PyPI, and ships SLSA provenance + SBOM attestations.
 
-> Note: that provenance attests **`saw`'s own** build. When `saw` *scans* a target it is purely
-> behavioral — it never treats a scanned package's SLSA / PEP-740 / sigstore attestation as a trust
-> signal (Shai-Hulud 2.0 shipped valid provenance). See
-> [SECURITY_ARCHITECTURE.md → Provenance is not trust](docs/SECURITY_ARCHITECTURE.md#provenance-is-not-trust-and-the-build-artifact-blind-spot).
-
 ## Documentation
 
 - [CLI command guide](docs/CLI.md) — the `saw` security commands (scan, fix, audit, guard, …)
 - [Usage](docs/USAGE.md) — install, run both bots, secrets, GitHub Actions, deploy your own
 - [Configuration & Reports](docs/CONFIGURATION.md) — config file fields and report formats
-- [Architecture](docs/ARCHITECTURE.md) — package layout and design principles
-- [Security architecture](docs/SECURITY_ARCHITECTURE.md) — detection, remediation, prevention
+- [Prerequisites](docs/PREREQUISITES.md) — supported Python versions and install troubleshooting
 - [Security baseline](prevent/SECURITY_BASELINE.md) — hardening checklist for any repo
-- [Releasing](docs/RELEASING.md) — maintainer runbook: tags, PyPI Trusted Publishing, verification
 - [Contributing](CONTRIBUTING.md) — development setup and guidelines
 
 ## License
