@@ -35,6 +35,9 @@ class AutorunEntry:
     # Every command line this entry executes — argv is only the first. The parser owns the config
     # grammar, so it publishes these rather than each consumer re-deriving them.
     shell_lines: list[str] = field(default_factory=list)
+    # Whether `argv` came from a structured source (a plist array) or a naive `.split()` that loses
+    # quoting. Only the parser knows, and a consumer that guessed got it wrong both ways.
+    argv_is_exact: bool = True
     persistence: list[str] = field(default_factory=list)
 
     @property
@@ -155,7 +158,8 @@ def _parse_systemd_unit(path: Path) -> AutorunEntry | None:
     if re.search(r"^\s*WantedBy\s*=", text, re.MULTILINE):
         persistence.append("enabled")
     return AutorunEntry(location="systemd-user", path=path, argv=argv, body=text,
-                        shell_lines=_systemd_shell_lines(text), persistence=persistence)
+                        shell_lines=_systemd_shell_lines(text), persistence=persistence,
+                        argv_is_exact=False)
 
 
 def enumerate_entries() -> list[AutorunEntry]:

@@ -12,6 +12,7 @@ instead — is the payload PATH under scratch — which is what it meant all alo
 """
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -214,6 +215,11 @@ class TestEveryExecDirectiveIsShellContext(unittest.TestCase):
             "[Service]\nExecCondition=/bin/sh -c 'z; /tmp/.stage'\nExecStart=/usr/bin/myd\n",
         "backslash continuation":
             "[Service]\nExecStart=/bin/sh -c 'sleep 1 \\\n  ; /tmp/.stage'\n",
+        # The payload as the WHOLE code argument, with no `;`/`&&` in front of it. Every case above
+        # also matches on the raw directive via the operator arm, so all six stayed green through a
+        # regression that resolved only `argv` — this one needs the code argument to be extracted.
+        "bare code argument":
+            "[Service]\nExecStart=/usr/bin/true\nExecStartPost=/bin/sh -c '/tmp/.stage'\n",
     }
 
     BENIGN = {
@@ -302,3 +308,224 @@ class TestInlineCodeIsItsOwnShellLine(unittest.TestCase):
                      ["/bin/sh", "-c", "myapp --cache-dir /tmp/cache"],
                      ["/bin/sh", "-c", "echo hi >| /tmp/lock"]):
             self.assertFalse(self._hit(argv), f"false positive: {argv!r}")
+
+
+class TestInvocationResolver(unittest.TestCase):
+    """One walk answers what an entry executes. Four consumers used to answer it separately — from
+    argv[0], or from a regex over the joined argv — and disagreed. Flattening argv made a flag and a
+    value indistinguishable, which is how `tar -c /tmp/staging` became a foothold on a signed binary
+    while a multi-line `sh -c` script went silent."""
+
+    def _inv(self, argv):
+        return grade.resolve_invocation(argv)
+
+    def test_wrappers_resolve_to_the_real_interpreter(self):
+        inv = self._inv(["/usr/bin/env", "A=1", "bash", "-c", "/tmp/.x/agent"])
+        self.assertTrue(inv.is_posix_shell)
+        self.assertEqual(inv.code_args, ("/tmp/.x/agent",))
+
+    def test_a_non_shell_owning_the_flag_yields_no_shell_code(self):
+        for argv in (["/usr/bin/tar", "-c", "/tmp/staging"],
+                     ["/usr/local/bin/redis-server", "-c", "/tmp/redis.conf"],
+                     ["/usr/bin/sort", "-c", "/tmp/q.txt"]):
+            self.assertFalse(self._inv(argv).is_posix_shell, argv)
+            self.assertFalse(grade.content_signal(_entry(argv)).hit, argv)
+
+    def test_code_is_code_even_for_a_non_shell_interpreter(self):
+        # `node -e` IS code, but not SHELL code — so it must never reach the shell-grammar matcher.
+        inv = self._inv(["/usr/bin/node", "-e", "x = 1"])
+        self.assertEqual(inv.code_args, ("x = 1",))
+        self.assertFalse(inv.is_posix_shell)
+
+    def test_what_follows_the_code_is_an_argument_to_it_never_a_path(self):
+        # `sh -c <script> <$0> <$1…>` — the tokens after the script are its arguments. Reading one as
+        # a path both misstates what runs and makes saw OPEN it: a report named on a `python3 -m
+        # json.tool` line was read, and a quoted command inside it graded the entry a foothold.
+        for argv in (["/usr/bin/python3", "-m", "json.tool", "/tmp/report.json"],
+                     ["/usr/bin/python3", "-c", "import json", "/tmp/report.json"],
+                     ["/bin/sh", "-c", "exec \"$0\"", "/tmp/wrapper.sh"]):
+            self.assertNotEqual(self._inv(argv).payload_path, argv[-1], argv)
+            self.assertFalse(grade.content_signal(_entry(argv), read_referenced=True).hit, argv)
+
+    def test_any_command_prefix_is_transparent_to_the_shell_behind_it(self):
+        # The prefix families are open-ended — 49 measured, from `sudo`/`env` through `chrt`,
+        # `systemd-run`, `strace`, `caffeinate`, `launchctl asuser` to `direnv exec` and `poetry
+        # run`. Enumerating them is an unbounded false-negative surface, and enumerating them WRONG
+        # is worse: a name list resolved `su nobody -c` to `nobody` as the program. Anchoring on the
+        # shell needs none of them named, and covers paths no allowlist would hold (NixOS, linuxbrew).
+        for argv in (["/usr/bin/sudo", "-u", "nobody", "/bin/sh", "-c", "/tmp/.x/agent"],
+                     ["/run/wrappers/bin/sudo", "-u", "nobody", "/bin/sh", "-c", "/tmp/.x/agent"],
+                     ["/nix/store/abc-coreutils-9.5/bin/env", "bash", "-c", "/tmp/.x/agent"],
+                     ["/home/linuxbrew/.linuxbrew/bin/env", "sh", "-c", "/tmp/.x/agent"],
+                     ["/usr/local/sbin/nohup", "/bin/sh", "-c", "/tmp/.x/agent"],
+                     ["/usr/bin/chrt", "-b", "0", "/bin/sh", "-c", "/tmp/.x/agent"],
+                     ["/usr/bin/systemd-run", "--user", "/bin/sh", "-c", "/tmp/.x/agent"],
+                     ["/usr/bin/caffeinate", "-i", "/bin/sh", "-c", "/tmp/.x/agent"],
+                     ["/bin/launchctl", "asuser", "501", "/bin/sh", "-c", "/tmp/.x/agent"],
+                     ["/usr/bin/poetry", "run", "/bin/sh", "-c", "/tmp/.x/agent"],
+                     ["/usr/bin/timeout", "30", "/bin/sh", "-c", "/tmp/.x/agent"],
+                     ["/usr/bin/xargs", "-I{}", "/bin/sh", "-c", "/tmp/.x/agent"],
+                     ["/usr/bin/env", "-S", "bash -c '/tmp/.x/agent --daemon'"],
+                     ["/bin/su", "nobody", "-c", "/tmp/.x/agent"],
+                     ["/usr/bin/flock", "-n", "/run/lock/x", "-c", "/tmp/.x/agent"],
+                     ["/usr/bin/ionice", "-c", "3", "/bin/sh", "-c", "/tmp/.x/agent"],
+                     ["/bin/bash", "-lc", "/tmp/.x/agent"]):
+            self.assertTrue(grade.content_signal(_entry(argv)).hit, argv)
+
+    def test_a_prefix_that_crosses_a_boundary_is_not_a_foothold_here(self):
+        # `autorun-unattributed-foothold` asserts a live foothold on THIS host. A `/tmp` path inside
+        # a container image or another root is not one. This is a denylist on purpose: it is ~10
+        # deliberate names, where the host-level prefixes it complements are open-ended.
+        for argv in (["/usr/bin/docker", "run", "--rm", "alpine", "sh", "-c", "/tmp/.x/a"],
+                     ["/usr/bin/podman", "run", "alpine", "sh", "-c", "/tmp/.x/a"],
+                     ["/usr/bin/kubectl", "exec", "pod", "--", "sh", "-c", "/tmp/.x/a"],
+                     ["/usr/sbin/chroot", "/newroot", "/bin/sh", "-c", "/tmp/.x/a"],
+                     ["/usr/bin/ssh", "host", "/bin/sh", "-c", "/tmp/.x/a"]):
+            self.assertFalse(grade.content_signal(_entry(argv)).hit, argv)
+
+    def test_a_boundary_name_cannot_be_used_as_cover(self):
+        # Suppression is the one thing here an attacker WANTS to trigger. Matching a boundary name
+        # anywhere in argv meant one decoy argument switched the detector off; matching it at any
+        # path meant a payload called `/tmp/.x/docker` did the same. Only the program position, and
+        # only where a real one lives — an entry has to run, so cover costs the worm its execution.
+        for argv in (["/bin/sh", "-c", "/tmp/.x/agent", "docker"],
+                     ["/bin/sh", "-c", "/tmp/.x/agent", "ssh"],
+                     ["/bin/sh", "-c", "/tmp/.x/agent", "/tmp/.x/kubectl"],
+                     ["/tmp/.x/docker", "/bin/sh", "-c", "/tmp/.x/agent"],
+                     ["/tmp/.x/docker", "run", "alpine", "sh", "-c", "/tmp/.x/a"]):
+            self.assertFalse(grade._crosses_a_boundary(argv), argv)
+            self.assertTrue(grade.content_signal(_entry(argv)).hit, argv)
+        # …while the genuine article still is one, wherever a real one is installed.
+        for argv in (["/usr/bin/docker", "run", "alpine", "sh", "-c", "/tmp/.x/a"],
+                     ["docker", "run", "alpine", "sh", "-c", "/tmp/.x/a"],
+                     ["/usr/bin/sudo", "/usr/bin/docker", "run", "i", "sh", "-c", "/tmp/.x/a"]):
+            self.assertTrue(grade._crosses_a_boundary(argv), argv)
+
+    def test_a_shell_option_between_the_shell_and_c_is_still_a_shell(self):
+        # Reading only the token before `-c` meant ONE option turned the check off. `bash -lc` worked
+        # and `bash -l -c` did not — and a login environment is the ordinary reason to write it.
+        for argv in (["/bin/bash", "-l", "-c", "/tmp/.x/agent"],
+                     ["/bin/bash", "--login", "-c", "/tmp/.x/agent"],
+                     ["/bin/bash", "-o", "pipefail", "-c", "/tmp/.x/agent"],
+                     ["/bin/bash", "--rcfile", "/etc/x", "-c", "/tmp/.x/agent"],
+                     ["/bin/zsh", "-f", "-c", "/tmp/.x/agent"]):
+            self.assertTrue(grade.content_signal(_entry(argv)).hit, argv)
+
+    def test_a_shell_is_not_only_the_five_names_of_the_grammar(self):
+        # `ash` IS /bin/sh on Alpine, `mksh` on Android and Debian, and `$SHELL` is how an agent asks
+        # for the login shell without naming it. Anchoring on a five-name literal lost all of them.
+        for argv in (["/bin/ash", "-c", "/tmp/.x/agent"], ["/bin/mksh", "-c", "/tmp/.x/agent"],
+                     ["/bin/rbash", "-c", "/tmp/.x/agent"], ["$SHELL", "-c", "/tmp/.x/agent"],
+                     ["/bin/busybox", "sh", "-c", "/tmp/.x/agent"]):
+            self.assertTrue(grade.content_signal(_entry(argv)).hit, argv)
+
+    def test_a_keyword_introduces_a_command_position(self):
+        # `while true; do <payload>; sleep 60; done` is the canonical poll-beacon (#1335) — the shape
+        # this module exists for — and neither main nor the first two designs saw it.
+        for script in ("while true; do /tmp/.x/agent; sleep 60; done",
+                       "until false; do /tmp/.x/agent; sleep 60; done",
+                       "if [ -f /etc/x ]; then /tmp/.x/agent; fi",
+                       "for i in 1 2 3; do /tmp/.x/agent; done",
+                       "{ /tmp/.x/agent; } &", "eval /tmp/.x/agent"):
+            self.assertTrue(grade.content_signal(_entry(["/bin/sh", "-c", script])).hit, script)
+
+    def test_a_systemd_exec_line_is_parsed_by_the_shell_s_rule(self):
+        # systemd's ExecStart argv is a naive `.split()`, so `sh -c 'exec /tmp/x'` truncates at the
+        # space — and rejoins to the identical string, so no text comparison could notice.
+        with tempfile.TemporaryDirectory(dir=Path.home()) as d:
+            for text in ("[Service]\nExecStart=/bin/sh -c 'exec /tmp/.x/agent'\n",
+                         "[Service]\nExecStart=/bin/sh -c 'exec /tmp/.x/agent --daemon'\n",
+                         "[Service]\nExecStart=/bin/sh -c 'nohup /tmp/.x/agent &'\n"):
+                unit = Path(d) / "u.service"
+                unit.write_text(text)
+                self.assertTrue(grade.content_signal(surface._parse_systemd_unit(unit)).hit, text)
+
+    def test_hostile_shell_cannot_crash_or_stall_the_lexer(self):
+        # A crash is a fail-open an attacker can ASK FOR: `content_signal` runs per autorun entry, so
+        # nesting `$(` in their own payload made `saw audit` die instead of reporting them.
+        for name, script in (("nested $(", "$(" * 2000 + "id" + ")" * 2000),
+                             ("unterminated $(", "$(" * 20000),
+                             ("nested backticks", "`" * 4000),
+                             ("deep parens", "(" * 30000 + "id" + ")" * 30000),
+                             ("unclosed quote", '"' + "a" * 65000),
+                             ("heredoc never closed", "cat <<EOF\n" + "x\n" * 32000)):
+            with self.subTest(name):
+                self.assertIsInstance(grade.shell_command_lines(script), list)
+        # …and a genuinely nested substitution still resolves to its payload
+        self.assertIn("/tmp/.x/agent", grade.shell_command_lines("OUT=$(echo $(/tmp/.x/agent))"))
+
+    def test_only_a_command_position_is_a_command(self):
+        # `splitlines()` fabricates command positions. A backslash continuation, a heredoc body and a
+        # `case` label each begin a physical line without beginning a command — and each carried an
+        # ordinary agent to `autorun-unattributed-foothold` (exit 3) while signed and attributed.
+        P = "/tmp/.cache-agent/beacon.sh"
+        for script in (
+            "set -e\nrm -rf \\\n  /tmp/restic-cache \\\n  /tmp/restic.lock\nexec /opt/restic run",
+            "cat <<EOF > /var/log/x\n/tmp/data-one\n/tmp/data-two\nEOF\nexec /opt/app/run",
+            "case \"$1\" in\n  /tmp/*) echo scratch ;;\n  *) echo other ;;\nesac\nexec /opt/app/run",
+            # a `case` label's `|` joins PATTERNS — a backup agent skipping scratch dirs
+            'case "$d" in\n  /tmp/*|/var/tmp/*) continue ;;\n  *) echo ok ;;\nesac\nexec /opt/app/run',
+            f"cat <<\\EOF > /var/log/x\n{P} is the control socket\nEOF\nexec /opt/app/run",
+            f"cat <<'EOF'\n{P}\nEOF\nexec /opt/app/run",
+            f"cat <<EOF\nnot EOF here\n{P}\nEOF\nexec /opt/app/run",   # delimiter inside its own body
+            f'FILES=$(find /var \\\n  -name "*.log")\necho "{P}"\nexec /opt/app/run',
+            f'EXCLUDES=(\n  {P}\n  /var/cache\n)\nexec /opt/app/run',   # an array NAMES, never runs
+            f'X="\r\n{P}\r\n"\r\nexec /opt/app/run\r\n',                # CRLF inside a quoted string
+            f'rsync -a --exclude="\n/tmp/spool\ncache\n" /src /dst',
+            "print hi >| /tmp/x",                                       # zsh clobber, not a pipe
+        ):
+            self.assertFalse(grade.content_signal(_entry(["/bin/sh", "-c", script])).hit, script)
+        # and the multi-line payload this must NOT silence
+        self.assertTrue(grade.content_signal(
+            _entry(["/bin/sh", "-c", "export PATH=/usr/bin\numask 077\nexec /tmp/.x/agent &"])).hit)
+
+    def test_a_payload_named_like_a_wrapper_is_still_the_payload(self):
+        # Matching a wrapper on `basename.split('.')[0]`, anywhere on disk, skipped past a payload
+        # called `env.sh` — and `command` under a scratch path is the suspicious case, not a wrapper.
+        # Each carries a following argument, so a skip lands somewhere and cannot pass by fallback.
+        for argv in (["/tmp/.x/env.sh", "/opt/app.conf"], ["/tmp/.x/time.py", "/opt/app.conf"],
+                     ["/tmp/.x/command", "run"], ["/tmp/a=b/agent", "--serve"]):
+            self.assertEqual(self._inv(argv).payload_path, argv[0], argv)
+
+    def test_only_a_real_assignment_is_skipped_inside_a_wrapper(self):
+        # `"=" in arg.partition("=")[1]` is true of ANY token containing `=`, so a scratch payload
+        # whose directory has one was skipped as if it were `VAR=value` and never checked.
+        self.assertEqual(self._inv(["/usr/bin/env", "/tmp/a=b/agent"]).payload_path, "/tmp/a=b/agent")
+        self.assertEqual(self._inv(["/usr/bin/env", "A=1", "/tmp/.x/agent"]).payload_path,
+                         "/tmp/.x/agent")
+
+    def test_a_multi_line_shell_script_is_seen_line_by_line(self):
+        argv = ["/bin/sh", "-c", "export PATH=/usr/bin\numask 077\nexec /tmp/.x/agent &"]
+        self.assertTrue(grade.content_signal(_entry(argv)).hit)
+        # and the ';'-separated form it used to differ from by one character
+        self.assertTrue(grade.content_signal(
+            _entry(["/bin/sh", "-c", "export PATH=/usr/bin; umask 077; exec /tmp/.x/agent &"])).hit)
+
+    def test_an_entry_covers_every_command_line_not_only_argv(self):
+        # `argv` is the first ExecStart alone. Answering from the entry rather than from each of its
+        # command lines is the same derived-proxy shape one layer in: the authority is `shell_lines`.
+        entry = AutorunEntry(location="systemd-user", path="/x/u.service", argv=["/usr/bin/true"],
+                             body="", persistence={}, argv_is_exact=False,   # as the parser sets it
+                             shell_lines=["/usr/bin/true", "/bin/sh -c '/tmp/.stage'"])
+        self.assertEqual([grade.shell_code_args(a) for a in grade._command_argvs(entry)],
+                         [(), ("/tmp/.stage",)])
+
+    def test_a_shell_accepts_its_options_clustered(self):
+        # `bash -lc CMD` is one flag group, not an unknown option. Unrecognised, the code string
+        # became `payload_path` — shell code read as a path to open, the guess this design refuses.
+        self.assertEqual(grade.shell_code_args(["/bin/bash", "-lc", "/tmp/.x/agent"]),
+                         ("/tmp/.x/agent",))
+        self.assertIsNone(self._inv(["/bin/bash", "-lc", "echo hi"]).payload_path)
+
+    def test_no_script_argument_means_no_payload_to_read(self):
+        # Inline code runs no file. Naming the interpreter sent the reader 133 KB of `/bin/sh` to
+        # content-scan; naming a bare `bash` opened it against saw's OWN working directory. A walk
+        # that loses the line says so rather than guessing — `su -c '<code>' user` once resolved the
+        # command STRING as a path, matching the scratch check by luck.
+        for argv in (["/usr/bin/env", "A=1", "bash", "-c", "id"],
+                     ["/bin/sh", "-c", "id"],
+                     ["/usr/bin/python3", "-m", "json.tool", "/tmp/report.json"],
+                     ["/usr/bin/env", "-i"],                    # the walk runs off the end
+                     ["/usr/bin/sudo", "-u", "nobody", "-H"]):  # …and ends on a flag
+            self.assertIsNone(self._inv(argv).payload_path, argv)
+            self.assertEqual(grade._referenced_text(_entry(argv)), "", argv)

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -39,28 +40,408 @@ _INTERPRETERS = frozenset({
     "sh", "bash", "zsh", "dash", "ksh", "osascript", "tsx", "ts-node"})
 
 
-# Inline-eval flags: the code is IN argv (already seen via `shape_text()`), not in a script file — so
-# `node -e '<code>'` / `python -c '<code>'` must NOT mistake the code argument for a path to read.
-_INLINE_EVAL_FLAGS = frozenset({"-e", "--eval", "-c", "-p", "--print", "-"})
+# Inline-code flags PER INTERPRETER, because they conflict: `-m` names a module for python but is job
+# control for a shell, and `-c` is an archive for tar and a config file for redis. The code is IN argv
+# (already seen via `shape_text()`), so its argument must never be mistaken for a path to read.
+_CODE_FLAGS = {
+    **{shell: frozenset({"-c"}) for shell in POSIX_SHELLS},
+    "python": frozenset({"-c"}), "python2": frozenset({"-c"}), "python3": frozenset({"-c"}),
+    "node": frozenset({"-e", "--eval", "-p", "--print"}),
+    "nodejs": frozenset({"-e", "--eval", "-p", "--print"}),
+    "deno": frozenset({"-e", "--eval"}), "bun": frozenset({"-e", "--eval"}),
+    "ruby": frozenset({"-e"}), "perl": frozenset({"-e", "-E"}), "php": frozenset({"-r"}),
+    "osascript": frozenset({"-e"}),
+}
+_MODULE_FLAGS = {"python": frozenset({"-m"}), "python2": frozenset({"-m"}),
+                 "python3": frozenset({"-m"})}
+
+# A shell's `-c` flag, including the clustered short forms a shell accepts (`bash -lc`, `sh -ic`).
+# `-c` must end the cluster, since it consumes the next argument.
+_SHELL_C_FLAG = re.compile(r"-[A-Za-z]{0,4}c")
+# Shell options that consume the next token, so `bash --rcfile /etc/x -c …` still resolves.
+_SHELL_VALUE_OPTS = frozenset({"-o", "+o", "--rcfile", "--init-file"})
+
+# Programs whose `-c` argument is a shell command. Wider than POSIX_SHELLS, which names the grammar:
+# `ash` IS /bin/sh on Alpine and BusyBox, `mksh` ships as /bin/sh on Android and in Debian, and
+# `tcsh`/`fish` are not POSIX but their `-c` is still a command. `$SHELL` is how a LaunchAgent asks
+# for the login shell without naming it. All nine were caught by merged main and lost by anchoring on
+# a five-name literal.
+_C_FLAG_SHELLS = frozenset(POSIX_SHELLS) | {
+    "ash", "busybox", "mksh", "pdksh", "yash", "rbash", "bash5", "sh5", "tcsh", "csh", "fish",
+    "$SHELL", "${SHELL}"}
+
+# Programs whose OWN `-c` carries a shell command string — they exec a shell themselves, so their
+# operand sits between the program and the flag and the owner test cannot see it.
+_SHELL_COMMAND_CARRIERS = frozenset({"su", "runuser", "script", "flock"})
+
+# Programs that execute the command in ANOTHER root, container or host. A `/tmp` path there is not a
+# foothold on THIS machine, and `autorun-unattributed-foothold` means a live foothold on this one.
+# A DENYLIST is the right polarity: the host-level prefix families are open-ended (49 measured —
+# su/runuser/chrt/taskset/systemd-run/strace/caffeinate/direnv/poetry/…, and more exist), so an
+# allowlist of them carries an unbounded false-negative surface. This list is ~10 deliberate names.
+_BOUNDARY_PROGRAMS = frozenset({"docker", "podman", "nerdctl", "kubectl", "lxc", "machinectl",
+                                "distrobox-enter", "chroot", "flatpak", "ssh"})
+
+# Exec wrappers stand BEFORE the real program (`env A=1 bash -c …`, `sudo -u x node app.js`). Used
+# ONLY to find which file an entry runs — never to decide whether a code argument is shell.
+_EXEC_WRAPPERS = frozenset({"env", "sudo", "nohup", "nice", "setsid", "exec", "command", "stdbuf",
+                            "time", "doas"})
+# Wrapper options that consume the NEXT token. Per wrapper because they conflict: `stdbuf -i` takes a
+# value, `env -i` does not.
+_WRAPPER_VALUE_OPTS = {
+    "sudo":   frozenset({"-u", "--user", "-g", "--group", "-p", "--prompt", "-C", "--close-from",
+                         "-h", "--host", "-r", "--role", "-t", "--type", "-U", "--other-user"}),
+    "doas":   frozenset({"-u", "-C"}),
+    "env":    frozenset({"-u", "--unset", "-C", "--chdir", "-S", "--split-string"}),
+    "nice":   frozenset({"-n", "--adjustment"}),
+    "stdbuf": frozenset({"-i", "--input", "-o", "--output", "-e", "--error"}),
+    "time":   frozenset({"-f", "--format", "-o", "--output"}),
+}
+_SYSTEM_BIN_DIRS = frozenset({"/bin", "/usr/bin", "/usr/local/bin", "/sbin", "/usr/sbin",
+                              "/opt/homebrew/bin", "/opt/local/bin"})
+_ASSIGNMENT = re.compile(r"[A-Za-z_]\w{0,255}=")
+
+
+@dataclass(frozen=True)
+class Invocation:
+    """What one command line actually executes, resolved ONCE.
+
+    Four consumers used to answer this separately — which file to read, whether referenced content is
+    shell, which arguments are code, which lines take shell grammar — from argv[0] or from a regex over
+    the joined argv. Four partial answers to one question is how they disagreed (#1393)."""
+    interpreter: str | None = None       # the real program, wrappers stripped
+    is_posix_shell: bool = False
+    payload_path: str | None = None      # the file it executes, if any
+    code_args: tuple[str, ...] = ()      # arguments that ARE code, not paths
+
+
+def shell_code_args(argv) -> tuple[str, ...]:
+    """The arguments of a command line that are SHELL code.
+
+    Decided AT THE FLAG — the token that owns `-c` — never by resolving the program. `tar -c
+    /tmp/staging` and `sudo -u nobody /bin/sh -c /tmp/x` differ only in that token, and every attempt
+    to answer it by walking the prefix went silent on some real path: NixOS `/run/wrappers/bin/sudo`,
+    linuxbrew, `/usr/local/sbin`, and 49 measured prefix families (`su`, `chrt`, `systemd-run`,
+    `caffeinate`, `direnv`, `poetry run`, …). Anchoring on the shell needs none of them enumerated."""
+    argv = list(argv or [])
+    if _crosses_a_boundary(argv):
+        return ()
+    code: list[str] = []
+    for n, arg in enumerate(argv[:-1]):
+        if n == 0 or not _SHELL_C_FLAG.fullmatch(arg):
+            continue
+        if _shell_owns_the_flag(argv, n) or any(
+                _interpreter_base(a) in _SHELL_COMMAND_CARRIERS for a in argv[:n]):
+            code.append(argv[n + 1])
+    # `env -S "bash -c '<payload>'"` packs a whole command line into one argument.
+    for n, arg in enumerate(argv[:-1]):
+        if arg in ("-S", "--split-string") and _interpreter_base(argv[n - 1]) == "env":
+            code.extend(shell_code_args(_split_command(argv[n + 1])))
+    return tuple(code)
+
+
+def _shell_owns_the_flag(argv: list[str], flag: int) -> bool:
+    """Whether the program owning the `-c` at `flag` is a shell, looking back past the shell's OWN
+    options. Reading only the token before the flag meant one option token turned the check off:
+    `bash -lc` resolved but `bash -l -c` did not, and `bash -l -c` is the ordinary way a LaunchAgent
+    asks for a login environment."""
+    i = flag - 1
+    while i >= 0:
+        if _interpreter_base(argv[i]) in _C_FLAG_SHELLS or argv[i] in _C_FLAG_SHELLS:
+            return True
+        if argv[i].startswith("-") or argv[i].startswith("+"):
+            i -= 1
+        elif i > 0 and argv[i - 1] in _SHELL_VALUE_OPTS:
+            i -= 2
+        else:
+            return False
+    return False
+
+
+def _crosses_a_boundary(argv: list[str]) -> bool:
+    """Whether this command line executes somewhere other than this host.
+
+    Only the PROGRAM counts, and only where a real one lives. Matching any token let one decoy
+    argument switch the detector off — `sh -c <payload> docker` went silent — and matching any path
+    let a payload named `/tmp/.x/docker` do the same. An entry has to run, so a worm cannot put a
+    boundary program in the program position without actually launching it."""
+    if not argv:
+        return False
+    program = argv[min(_program_index(argv), len(argv) - 1)]
+    if os.path.basename(program) not in _BOUNDARY_PROGRAMS:
+        return False
+    parent = os.path.dirname(program)
+    return parent == "" or parent in _SYSTEM_BIN_DIRS
+
+
+def resolve_invocation(argv) -> Invocation:
+    """Resolve ONE command line — which file it runs. Per command line, never per entry: `entry.argv`
+    is only the first of them, and `_invocations` covers the rest.
+
+    Every field is a POSITIVE identification or absent. A walk that loses the line returns no payload
+    rather than a guess: guessing resolved `su -c '<payload>' user` to the command STRING as a path,
+    which matched the scratch check by luck and handed an invented path to the file reader."""
+    argv = list(argv or [])
+    if not argv:
+        return Invocation()
+    i = _program_index(argv)
+    if i >= len(argv) or argv[i].startswith("-"):
+        return Invocation()                    # the walk lost the line — say so, do not invent
+    interp, rest = argv[i], argv[i + 1:]
+    base = _interpreter_base(interp)
+    if base not in _INTERPRETERS:
+        return Invocation(interpreter=interp, payload_path=interp)
+    code_flags = _CODE_FLAGS.get(base, frozenset())
+    module_flags = _MODULE_FLAGS.get(base, frozenset())
+    code, path = [], None
+    for n, arg in enumerate(rest):
+        if arg in code_flags or (base in POSIX_SHELLS and _SHELL_C_FLAG.fullmatch(arg)):
+            if n + 1 < len(rest):
+                code.append(rest[n + 1])
+            break              # what follows the code is an argument TO it ($0, $@) — never a path
+        if arg in module_flags:
+            break              # a module NAME, and what follows is the module's own argv
+        if not arg.startswith("-"):
+            path = arg
+            break
+    # No script argument means there is no file this runs: the code is inline, or it names a module.
+    # Reporting the interpreter would send the reader 133 KB of `/bin/sh` to content-scan.
+    return Invocation(interpreter=interp, is_posix_shell=base in POSIX_SHELLS,
+                      payload_path=path, code_args=tuple(code))
+
+
+def _program_index(argv: list[str]) -> int:
+    """Index of the real program — the first token that is not a wrapper, a wrapper's option, or a
+    `VAR=value` assignment."""
+    i = 0
+    while i < len(argv):
+        wrapper = _wrapper_name(argv[i])
+        if wrapper is None:
+            break
+        value_opts = _WRAPPER_VALUE_OPTS.get(wrapper, frozenset())
+        i += 1
+        while i < len(argv):
+            arg = argv[i]
+            if arg in value_opts:
+                i += 2
+            elif (arg.startswith("-") and arg != "-") or _ASSIGNMENT.match(arg):
+                i += 1
+            else:
+                break
+    return i
+
+
+def _wrapper_name(arg: str) -> str | None:
+    """The wrapper this token names, or None. The basename must match EXACTLY and sit unqualified or
+    in a system bin dir — otherwise a payload at `/tmp/.x/env.sh` or `/tmp/.x/command` is skipped as a
+    wrapper and the scratch path it names is never checked."""
+    name = os.path.basename(arg)
+    if name not in _EXEC_WRAPPERS:
+        return None
+    parent = os.path.dirname(arg)
+    return name if parent == "" or parent in _SYSTEM_BIN_DIRS else None
+
+
+def _interpreter_base(arg: str) -> str:
+    """`python3.11` → `python3`, `/usr/bin/node` → `node`. Version suffixes only: wrapper matching
+    uses the exact basename, since `env.sh` is a payload and `env` is a wrapper."""
+    return os.path.basename(arg).split(".")[0]
+
+
+def _command_argvs(entry) -> list[list[str]]:
+    """Every command line the entry executes, as argv. `entry.argv` is only the FIRST — a unit's
+    second `ExecStart=`, its `ExecStartPre/Post=`, `ExecReload=` or `ExecCondition=` each run their
+    own, and a payload hides in one just as well (five such forms went silent when only argv was
+    read). A parser with no command line to give falls back to the raw body; splitting that is 66ms
+    per entry for nothing, and the body is already matched as a part in its own right."""
+    argv = list(entry.argv or [])
+    # Re-split a line ONLY when the parser says its argv is inexact. systemd's ExecStart argv is a
+    # naive `.split()`, so `sh -c 'exec /tmp/x'` truncates at the space and rejoins to the identical
+    # string — a text comparison could never spot it. A plist's argv is a real array, and re-splitting
+    # its own join instead destroyed the quoting of a multi-line argument.
+    lines = [] if entry.argv_is_exact else [_split_command(ln) for ln in entry.shell_lines
+                                            if ln != entry.body]
+    seen, out = set(), []
+    for candidate in ([argv] + lines if argv else lines or [_split_command(entry.body)]):
+        key = tuple(candidate)
+        if candidate and key not in seen:
+            seen.add(key)
+            out.append(candidate)
+    return out
+
+
+_HEREDOC_START = re.compile(r"<<-?\s{0,8}(\\?)([\"']?)([A-Za-z_]\w{0,63})\2")
+# Keywords that introduce a command: `while true; do PAYLOAD` is a command position, and it is the
+# canonical poll-beacon shape (#1335). `eval` is here because its argument is a command too.
+_OPENS_A_COMMAND = frozenset({"do", "then", "else", "elif", "eval", "{", "(", "!", "time"})
+_CASE_OPENS = re.compile(r"(?:^|\s)case\s[^;&|]{0,256}\sin$")
+_MAX_SCRIPT = 64 * 1024
+_MAX_SUBSTITUTION_DEPTH = 8
+
+
+def shell_command_lines(script: str, _depth: int = 0) -> list[str]:
+    """The COMMAND POSITIONS of a shell script — the text following each separator that actually
+    separates commands, which is the only text where a leading path means execution.
+
+    This has to track quoting, because the difference between a command and a datum is entirely
+    quote state. Splitting on newlines and special-casing continuations, heredocs and `case` labels
+    was measured wrong seven ways: a multi-line quoted string, `<<\\EOF`, a `$(…)` spanning lines, a
+    bash array, a delimiter recurring inside its own body, two heredocs opened on one line, and CRLF
+    each turned a data line into a fabricated command position — reaching exit 3 on signed agents.
+    A `case` label is skipped for the same reason, and `while true; do <payload>` is NOT skipped."""
+    out: list[str] = []
+    text, i, n = script[:_MAX_SCRIPT], 0, len(script[:_MAX_SCRIPT])
+    start, depth, quote, pending_heredocs = 0, 0, "", []
+    in_case = in_pattern = False
+    while i < n:
+        ch = text[i]
+        if quote:
+            if ch == "\\" and quote == '"':
+                i += 2
+                continue
+            if ch == quote:
+                quote = ""
+            i += 1
+            continue
+        if ch == "\\":
+            i += 2
+            continue
+        if ch in "'\"":
+            quote, i = ch, i + 1
+            continue
+        if ch == "#" and (i == 0 or text[i - 1] in " \t\n;&|"):
+            i = text.find("\n", i)
+            if i < 0:
+                break
+            continue
+        found = _HEREDOC_START.match(text, i)
+        if found:
+            pending_heredocs.append(found.group(3))
+            i = found.end()
+            continue
+        if ch == "\n" and pending_heredocs:
+            i = _skip_heredoc_bodies(text, i + 1, pending_heredocs)
+            start = i
+            continue
+        if ch in "([":
+            depth += 1
+        elif ch in ")]":
+            if depth:
+                depth -= 1
+            elif ch == ")":                       # a `case` label at depth 0 — a pattern, not a command
+                start, in_pattern = i + 1, False
+        # Inside a `case` label the `|` joins PATTERNS, so `/tmp/*|/var/tmp/*)` is one datum: a backup
+        # agent skipping scratch dirs reached "isolate and rebuild" when it was read as a pipe.
+        separator = "\n;&" if in_pattern else "\n;&|"
+        if ch == "|" and text[:i].rstrip()[-1:] == ">":
+            separator = "\n;&"                    # `>| file` is a zsh clobber redirect, not a pipe
+        if depth == 0 and (ch in separator or (ch == "{" and text[i:i + 2] != "{{")):
+            chunk = text[start:i]
+            _emit(out, chunk, _depth)
+            if _CASE_OPENS.search(chunk):
+                in_case = True
+            elif in_case and chunk.strip() == "esac":
+                in_case = False
+            if in_case and (_CASE_OPENS.search(chunk) or text[i:i + 2] == ";;"):
+                in_pattern = True
+            start = i + 1
+        i += 1
+    _emit(out, text[start:], _depth)
+    return out
+
+
+def _emit(out: list[str], chunk: str, depth: int = 0) -> None:
+    """Record a command position, past any assignment prefix and any keyword that merely introduces
+    one. `FOO=bar /tmp/payload` runs the payload; `FOO=( /tmp/x )` and `FOO="…/tmp/x…"` only NAME it,
+    and reading their value as a command is what flagged an rsync exclude list and a bash array."""
+    chunk = chunk.strip().lstrip("&|;")
+    # `OUT=`/tmp/x`` assigns, but the substitution still RUNS — so its body is a command position of
+    # its own, and dropping it with the assignment lost a real foothold.
+    # Bounded: `$(` nested 2,000 deep hit Python's recursion limit and CRASHED the audit, which an
+    # attacker can put in their own payload to be scanned silently instead of reported. Real shell
+    # does not nest substitutions past two or three.
+    for body in _substitutions(chunk) if depth < _MAX_SUBSTITUTION_DEPTH else ():
+        if body.strip() and body != chunk:
+            out.extend(shell_command_lines(body, depth + 1))
+    piece = _strip_assignments(chunk)
+    while piece:
+        out.append(piece)
+        head, _, rest = piece.partition(" ")
+        if head not in _OPENS_A_COMMAND or not rest.strip():
+            return
+        piece = _strip_assignments(rest.strip())
+
+
+def _substitutions(text: str) -> list[str]:
+    """The bodies of `$(…)` and backtick command substitutions in `text` — each one executes."""
+    bodies, i = [], 0
+    while i < len(text):
+        if text.startswith("$(", i):
+            depth, j = 1, i + 2
+            while j < len(text) and depth:
+                depth += (text[j] == "(") - (text[j] == ")")
+                j += 1
+            bodies.append(text[i + 2:j - 1])
+            i = j
+        elif text[i] == "`":
+            j = text.find("`", i + 1)
+            if j < 0:
+                break
+            bodies.append(text[i + 1:j])
+            i = j + 1
+        else:
+            i += 1
+    return bodies
+
+
+def _strip_assignments(piece: str) -> str:
+    """`piece` with any leading `NAME=value` assignments removed — '' when that is all it was."""
+    while (found := _ASSIGNMENT.match(piece)):
+        i, depth, quote = found.end(), 0, ""
+        while i < len(piece):                      # the value ends at unquoted, unnested whitespace
+            ch = piece[i]
+            if quote:
+                quote = "" if ch == quote else quote
+            elif ch in "'\"":
+                quote = ch
+            elif ch in "([":
+                depth += 1
+            elif ch in ")]":
+                depth -= 1
+            elif ch.isspace() and depth <= 0:
+                break
+            i += 1
+        piece = piece[i:].strip()
+    return piece
+
+
+def _skip_heredoc_bodies(text: str, i: int, delimiters: list[str]) -> int:
+    """Past the bodies of every heredoc opened on the line just ended. Their content is DATA — a
+    line of it beginning with a scratch path is not a command."""
+    while delimiters:
+        end = text.find("\n", i)
+        line = text[i:] if end < 0 else text[i:end]
+        if line.strip() == delimiters[0]:
+            delimiters.pop(0)
+        if end < 0:
+            return len(text)
+        i = end + 1
+    return i
+
+
+def _split_command(line: str) -> list[str]:
+    """A command line as argv, by the shell's own quoting rule — it is what strips the quotes around
+    `sh -c '<payload>'`. An unbalanced quote falls back to whitespace rather than losing the line."""
+    try:
+        return shlex.split(line)
+    except ValueError:
+        return line.split()
 
 
 def _payload_path(entry) -> str | None:
-    """The path of the code the entry actually RUNS. Normally argv[0]; but when argv[0] is a script
-    INTERPRETER (`node`, `python`, `sh`, …), it is the first non-flag script ARGUMENT — the payload the
-    interpreter executes. So a `node /path/daemon.js` autorun is read at daemon.js, not at the trusted
-    `node` binary (which would launder the payload past the content-shape engines). An inline-eval
-    invocation (`node -e '<code>'`) has no script file — the code is already in argv (seen via
-    `shape_text()`), so fall back to argv[0] rather than treat the code as a phantom path."""
-    if not entry.argv:
-        return None
-    if os.path.basename(entry.argv[0]).split(".")[0] in _INTERPRETERS:
-        args = entry.argv[1:]
-        if any(a in _INLINE_EVAL_FLAGS for a in args):
-            return entry.argv[0]
-        for arg in args:
-            if not arg.startswith("-"):        # the first non-flag argument is the script
-                return arg
-    return entry.argv[0]
+    """The path of the code the entry RUNS — the script argument when an interpreter is argv[0], so a
+    `node /path/daemon.js` autorun is read at daemon.js, not at the trusted `node`."""
+    return resolve_invocation(entry.argv).payload_path
 
 
 def launched_via_interpreter(entry) -> bool:
@@ -74,18 +455,13 @@ def launched_via_interpreter(entry) -> bool:
 # how the set drifts. `.dash` is not a real suffix, so suffixes stay explicit.
 _SHELL_SUFFIXES = (".sh", ".bash", ".zsh", ".ksh")
 _SHEBANG_SHELL = re.compile(rf"^#!.*\b(?:{'|'.join(POSIX_SHELLS)})\b")
-# the argument after a shell's inline-code flag, unquoted
-_INLINE_CODE = re.compile(r"""\s-(?:c|e)\s+['\"]?(.+?)['\"]?\s*$""")
 _LEADING_NOISE = "﻿ \t\r\n"      # BOM is not whitespace, so lstrip() alone leaves it
 
 
 def _runs_as_shell(entry, referenced: str) -> bool:
-    """Whether the referenced payload is EXECUTED as a shell script.
-
-    `argv[0]` being a POSIX shell is authoritative — the payload cannot rename that away. Shebang and
-    suffix are secondary, since the payload author chooses both."""
-    argv = entry.argv or []
-    if argv and os.path.basename(argv[0]).split(".")[0] in POSIX_SHELLS:
+    """Whether the referenced payload is EXECUTED as a shell script. The resolver is authoritative —
+    the payload cannot rename that away. Shebang and suffix are secondary, being author-chosen."""
+    if resolve_invocation(entry.argv).is_posix_shell:
         return True
     payload = _payload_path(entry)
     if payload and payload.lower().endswith(_SHELL_SUFFIXES):
@@ -93,17 +469,26 @@ def _runs_as_shell(entry, referenced: str) -> bool:
     return bool(_SHEBANG_SHELL.match(referenced.lstrip(_LEADING_NOISE)))
 
 
-def _shell_context_text(entry, referenced: str) -> str:
+def _shell_context_text(entry, referenced: str) -> list[str]:
     """The shell command lines of an entry, each matched on its own so a path starting one is at a
     command position — joining them would anchor only the first.
 
     `shell_lines` is the parser's answer — every Exec* directive, continuations joined. The unit BODY
     is excluded: that is where a JS template literal or a comment lives (#1393)."""
-    parts = list(entry.shell_lines) or [" ".join(entry.argv or [])]
-    # `sh -c '<line>'` makes <line> a shell line in its own right, so its FIRST token is a command
-    # position. Without splitting it out, `sh -c '/tmp/.stage &'` has no operator before the path and
-    # the operator-anchored arm never fires — a scratch foothold with no punctuation in front of it.
-    parts += [m.group(1) for part in list(parts) for m in _INLINE_CODE.finditer(part)]
+    # A shell's code argument is a script in its own right, so each of its command lines is a command
+    # position. It is EXCISED from the joined line rather than left in both: flattened, the script has
+    # no command positions at all, so `case $d in /tmp/*|/var/tmp/*)` read its pattern alternation as
+    # a pipe and called an ordinary backup agent a foothold.
+    parts, seen_code = [], []
+    for line_argv in _command_argvs(entry):
+        code_args = shell_code_args(line_argv)
+        seen_code += code_args
+        for code in code_args:
+            parts += shell_command_lines(code)
+    for line in entry.shell_lines or [" ".join(entry.argv or [])]:
+        for code in seen_code:
+            line = line.replace(code, " ")
+        parts.append(line)
     if referenced and _runs_as_shell(entry, referenced):
         parts.append(referenced)
     return parts
@@ -114,10 +499,10 @@ def _referenced_text(entry) -> str:
     or '' — so the content-shape engines see the payload where it usually LIVES (a script the unit
     runs), not just the unit file or a trusted interpreter binary. FIFO-safe via pathsafe; a compiled
     binary simply won't match the (JS/shell-shaped) detectors."""
-    payload = _payload_path(entry)
-    if not payload:
-        return ""
-    data = pathsafe.read_regular_bytes(Path(os.path.expanduser(payload)))
+    payload = os.path.expanduser(_payload_path(entry) or "")
+    if not os.path.isabs(payload):
+        return ""                    # a bare name would resolve against saw's own working directory
+    data = pathsafe.read_regular_bytes(Path(payload))
     if data is None:
         return ""
     return data[:_MAX_REFERENCED].decode("utf-8", "replace")
