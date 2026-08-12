@@ -31,10 +31,15 @@ from .models import HygieneIssue, _WIPER_NOTE
 # and `curl|python` (and `curl|python -`, stdin-as-script) fire; the FP pass proved `curl|python -m
 # json.tool` (API pretty-print), `base64 -d|python3 -m json.tool` (JWT decode) and `diff <(curl a)
 # <(curl b)` (proc-sub into a data consumer) are DATA, not exec — the bare-guard keeps them clean.
+# One authority per concept; every form below is DERIVED, so a shell or a scratch root added here
+# reaches the regexes, the membership tests and the path checks together instead of three of four.
+POSIX_SHELLS = ("sh", "bash", "zsh", "dash", "ksh")
+SCRATCH_ROOTS = ("/tmp", "/var/tmp", "/private/tmp", "/dev/shm")
+
 _FETCH = r"(?:curl|wget)"
-_POSIX_SHELL = r"(?:sh|bash|zsh|dash|ksh)"
+_POSIX_SHELL = rf"(?:{'|'.join(POSIX_SHELLS)})"
 _SCRIPT_INTERP = r"(?:python[23]?|perl|ruby|node|php)"
-_SCRATCH = r"(?:/tmp/|/var/tmp/|/dev/shm/|/private/tmp/)"
+_SCRATCH = rf"(?:{'|'.join(root + '/' for root in SCRATCH_ROOTS)})"
 # stdin-as-code sink: POSIX shell (always), or a scripting interpreter with no program arg. A lone `-`
 # (read the script from stdin) is still exec; `-m`/`-c`/`-e`/a script path make stdin DATA — the
 # `(?!\s*(?:[\w/.]|-\S))` guard clears the latter while keeping bare `python` and `python -` flagged.
@@ -88,7 +93,7 @@ _SSH_AUTHKEYS = ("authorized_keys", "authorized_keys2")
 # World-writable scratch roots. A path is treated as "under scratch" only at a real path boundary
 # (equals a root or is a descendant) — NOT an unanchored substring, so a private `/opt/acme/tmp/hooks`
 # or a `command="rrsync … /var/tmp/repo"` DATA path is not mistaken for the system scratch dir.
-_SCRATCH_ROOTS = (Path("/tmp"), Path("/var/tmp"), Path("/private/tmp"), Path("/dev/shm"))
+_SCRATCH_PATHS = tuple(Path(root) for root in SCRATCH_ROOTS)
 
 
 def _other_writable(p: Path) -> bool:
@@ -110,7 +115,7 @@ def _under_scratch(p: Path) -> bool:
         norm = Path(os.path.normpath(os.path.expanduser(str(p))))
     except (OSError, ValueError):
         return False
-    return any(norm == root or root in norm.parents for root in _SCRATCH_ROOTS)
+    return any(norm == root or root in norm.parents for root in _SCRATCH_PATHS)
 
 
 def check_ssh_authorized_keys() -> list[HygieneIssue]:

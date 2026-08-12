@@ -32,9 +32,8 @@ class AutorunEntry:
     path: Path                          # the .plist / .service / .timer file
     argv: list[str] = field(default_factory=list)
     body: str = ""
-    # Every command line this entry EXECUTES. `argv` is only the first one, so a consumer that
-    # re-derives "what shell does this run" from argv misses a unit's other Exec* directives — the
-    # parser owns the config grammar, so it publishes this rather than each consumer guessing.
+    # Every command line this entry executes — argv is only the first. The parser owns the config
+    # grammar, so it publishes these rather than each consumer re-deriving them.
     shell_lines: list[str] = field(default_factory=list)
     persistence: list[str] = field(default_factory=list)
 
@@ -110,9 +109,8 @@ def _parse_launch_agent(path: Path) -> AutorunEntry | None:
 # ── Linux systemd user units (ini-ish) ──────────────────────────────────────────────────
 
 _EXECSTART = re.compile(r"^\s*ExecStart\s*=\s*(.*)$", re.MULTILINE)
-# EVERY executed directive, not just the first ExecStart: a `Type=oneshot` unit may carry several
-# ExecStart=, and ExecStartPre/Post, ExecReload, ExecCondition and ExecStopPost each run a command
-# line of their own. argv holds only the first, so anything reading argv alone sees none of them.
+# EVERY executed directive: a oneshot unit may carry several ExecStart=, and ExecStartPre/Post,
+# ExecReload, ExecCondition and ExecStopPost each run a command line argv never sees.
 _EXEC_DIRECTIVE = re.compile(r"^\s*Exec[A-Za-z]*\s*=\s*(.*)$", re.MULTILINE)
 _CONTINUATION = re.compile(r"\\\s*\n\s*")
 _TIMER_KEY = re.compile(r"^\s*(OnUnitActiveSec|OnCalendar|OnBootSec|OnUnitInactiveSec)\s*=\s*(.*)$",

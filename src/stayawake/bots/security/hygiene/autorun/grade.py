@@ -70,24 +70,20 @@ def launched_via_interpreter(entry) -> bool:
     return bool(entry.argv) and _payload_path(entry) not in (None, entry.argv[0])
 
 
-_POSIX_SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh"})
+# Derived from mechanism.POSIX_SHELLS, never restated — the same five names in a third spelling is
+# how the set drifts. `.dash` is not a real suffix, so suffixes stay explicit.
 _SHELL_SUFFIXES = (".sh", ".bash", ".zsh", ".ksh")
-# `lstrip` the BOM explicitly: it is not whitespace, so a UTF-8 BOM ahead of `#!` would otherwise
-# defeat the anchor — and the payload author chooses the encoding.
-_SHEBANG_SHELL = re.compile(r"^#!.*\b(?:sh|bash|zsh|dash|ksh)\b")
-_LEADING_NOISE = "﻿ \t\r\n"
+_SHEBANG_SHELL = re.compile(rf"^#!.*\b(?:{'|'.join(mechanism.POSIX_SHELLS)})\b")
+_LEADING_NOISE = "﻿ \t\r\n"      # BOM is not whitespace, so lstrip() alone leaves it
 
 
 def _runs_as_shell(entry, referenced: str) -> bool:
     """Whether the referenced payload is EXECUTED as a shell script.
 
-    Decided first from how the entry runs it: `argv[0]` being a POSIX shell is authoritative, and is
-    the one signal the payload cannot rename away — dropping the shebang and calling itself `.dat`
-    changes nothing about `["/bin/bash", "payload.dat"]`. Shebang and suffix are additional signals
-    for the case where the invoking binary is something else; both are attacker-controlled, so
-    neither is relied on alone."""
+    `argv[0]` being a POSIX shell is authoritative — the payload cannot rename that away. Shebang and
+    suffix are secondary, since the payload author chooses both."""
     argv = entry.argv or []
-    if argv and os.path.basename(argv[0]).split(".")[0] in _POSIX_SHELLS:
+    if argv and os.path.basename(argv[0]).split(".")[0] in mechanism.POSIX_SHELLS:
         return True
     payload = _payload_path(entry)
     if payload and payload.lower().endswith(_SHELL_SUFFIXES):
@@ -96,14 +92,10 @@ def _runs_as_shell(entry, referenced: str) -> bool:
 
 
 def _shell_context_text(entry, referenced: str) -> str:
-    """The parts of an entry that genuinely ARE a shell command line, for the shell-grammar matcher.
+    """The parts of an entry that genuinely ARE a shell command line.
 
-    The argv line always is one; a referenced payload is one when `_runs_as_shell`. The unit BODY is
-    deliberately excluded — that is where a JS template literal or a comment lives, and reading
-    shell operators there is what produced the false positives this split exists to fix."""
-    # `entry.shell_lines` is the parser's answer to "what command lines does this run" — every
-    # Exec* directive, continuations joined. Deriving it from argv here instead would miss all but
-    # the first, which is the defect this consumes the authority to avoid.
+    `shell_lines` is the parser's answer — every Exec* directive, continuations joined. The unit BODY
+    is excluded: that is where a JS template literal or a comment lives (#1393)."""
     parts = list(entry.shell_lines) or [" ".join(entry.argv or [])]
     if referenced and _runs_as_shell(entry, referenced):
         parts.append(referenced)
@@ -160,15 +152,12 @@ def content_signal(entry, *, read_referenced: bool = False) -> ContentSignal:
     if mechanism._FETCH_PIPE_EXEC.search(text):
         reasons.append("fetch/decode-to-shell command")
         hit = True
-    # Scratch execution is asked TWO ways, because the entry carries two kinds of evidence.
-    # By PATH — what the entry runs, immune to how the surrounding code is written:
+    # Asked two ways: by PATH (immune to how the surrounding code reads) and, failing that, by
+    # shell grammar over the lines that genuinely are a command line.
     payload = _payload_path(entry)
     if payload and mechanism._under_scratch(Path(payload)):
         reasons.append("runs code from a world-writable scratch directory")
         hit = True
-    # By shell GRAMMAR — but only over the parts that genuinely are a shell command line. Asking it
-    # of arbitrary payload text is what #1393 fixed; asking it of nothing loses `sh -c '…; /tmp/x'`,
-    # where the path check resolves to the shell binary and the scratch payload is invisible.
     elif mechanism._SCRATCH_EXEC.search(_shell_context_text(entry, referenced)):
         reasons.append("runs code from a world-writable scratch directory")
         hit = True

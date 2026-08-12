@@ -16,6 +16,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from stayawake.bots.security.hygiene import mechanism
 from stayawake.bots.security.hygiene.mechanism import _FETCH_PIPE_EXEC, _SCRATCH_EXEC
 from stayawake.bots.security.hygiene.autorun import grade, surface
 from stayawake.bots.security.hygiene.autorun.surface import AutorunEntry
@@ -252,6 +253,29 @@ class TestEveryExecDirectiveIsShellContext(unittest.TestCase):
             lines = surface._parse_systemd_unit(unit).shell_lines
         self.assertEqual(len(lines), 2, lines)
         self.assertTrue(any("/tmp/.stage" in ln for ln in lines), lines)
+
+
+class TestOneAuthorityPerConcept(unittest.TestCase):
+    """The five shell names lived in three spellings — a regex alternation, a frozenset and a literal
+    inside the shebang pattern — and the scratch roots in two. Every form is now derived, so a name
+    added to the authority reaches all of them rather than three of four."""
+
+    def test_every_shell_form_derives_from_one_list(self):
+        for shell in mechanism.POSIX_SHELLS:
+            self.assertIn(shell, mechanism._POSIX_SHELL)
+            self.assertIn(shell, grade._SHEBANG_SHELL.pattern)
+
+    def test_every_scratch_form_derives_from_one_list(self):
+        for root in mechanism.SCRATCH_ROOTS:
+            self.assertIn(root + "/", mechanism._SCRATCH)
+            self.assertIn(Path(root), mechanism._SCRATCH_PATHS)
+
+    def test_adding_to_the_authority_reaches_every_form(self):
+        # The property, not the current contents: a name added to the list must appear in each
+        # derived form. Asserting membership of today's five would pass against hardcoded copies.
+        self.assertEqual(len(mechanism._SCRATCH_PATHS), len(mechanism.SCRATCH_ROOTS))
+        self.assertEqual(mechanism._POSIX_SHELL.count("|"), len(mechanism.POSIX_SHELLS) - 1)
+        self.assertEqual(mechanism._SCRATCH.count("|"), len(mechanism.SCRATCH_ROOTS) - 1)
 
 
 if __name__ == "__main__":
