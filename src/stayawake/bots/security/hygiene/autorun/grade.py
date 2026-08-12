@@ -270,10 +270,15 @@ def _command_argvs(entry) -> list[list[str]]:
     return out
 
 
-_HEREDOC_START = re.compile(r"<<-?\s{0,8}(\\?)([\"']?)([A-Za-z_]\w{0,63})\2")
+# A quoted heredoc delimiter may hold ANY characters, so `<<'E-O-F'` and `<<END-OF-TEXT` are valid.
+# Capturing only the leading word made both never match: one left its body unskipped (data read as
+# commands), the other swallowed the script to EOF.
+_HEREDOC_START = re.compile(
+    r"""<<-?[ \t]{0,8}(?:'([^'\n]{1,64})'|"([^"\n]{1,64})"|\\?([A-Za-z_][\w.-]{0,63}))""")
+_ARITHMETIC = re.compile(r"\$?\(\(")
 # Keywords that introduce a command: `while true; do PAYLOAD` is a command position, and it is the
 # canonical poll-beacon shape (#1335). `eval` is here because its argument is a command too.
-_OPENS_A_COMMAND = frozenset({"do", "then", "else", "elif", "eval", "{", "(", "!", "time"})
+_OPENS_A_COMMAND = frozenset({"do", "then", "else", "elif", "eval", "{", "(", "!", "time", "trap"})
 _CASE_OPENS = re.compile(r"(?:^|\s)case\s[^;&|]{0,256}\sin$")
 _MAX_SCRIPT = 64 * 1024
 _MAX_SUBSTITUTION_DEPTH = 8
@@ -314,15 +319,24 @@ def shell_command_lines(script: str, _depth: int = 0) -> list[str]:
             if i < 0:
                 break
             continue
+        arith = _ARITHMETIC.match(text, i)
+        if arith:
+            # `$((1<<SHIFT))` is a left shift, not a heredoc. Reading it as one registered `SHIFT` as
+            # a delimiter that never appears and swallowed the whole script — an attacker-selectable
+            # off-switch for every check below, in twelve bytes.
+            i = _skip_arithmetic(text, arith.end())
+            continue
         found = _HEREDOC_START.match(text, i)
         if found:
-            pending_heredocs.append(found.group(3))
+            pending_heredocs.append(found.group(1) or found.group(2) or found.group(3))
             i = found.end()
             continue
         if ch == "\n" and pending_heredocs:
-            i = _skip_heredoc_bodies(text, i + 1, pending_heredocs)
-            start = i
-            continue
+            past = _skip_heredoc_bodies(text, i + 1, pending_heredocs)
+            if past is not None:
+                i = start = past
+                continue
+            pending_heredocs.clear()      # unterminated: read the rest as commands, never swallow it
         if ch in "([":
             depth += 1
         elif ch in ")]":
@@ -335,7 +349,8 @@ def shell_command_lines(script: str, _depth: int = 0) -> list[str]:
         separator = "\n;&" if in_pattern else "\n;&|"
         if ch == "|" and text[:i].rstrip()[-1:] == ">":
             separator = "\n;&"                    # `>| file` is a zsh clobber redirect, not a pipe
-        if depth == 0 and (ch in separator or (ch == "{" and text[i:i + 2] != "{{")):
+        brace = ch == "{" and text[i:i + 2] != "{{" and text[i - 1:i] != "$"
+        if depth == 0 and (ch in separator or brace):
             chunk = text[start:i]
             _emit(out, chunk, _depth)
             if _CASE_OPENS.search(chunk):
@@ -360,10 +375,23 @@ def _emit(out: list[str], chunk: str, depth: int = 0) -> None:
     # Bounded: `$(` nested 2,000 deep hit Python's recursion limit and CRASHED the audit, which an
     # attacker can put in their own payload to be scanned silently instead of reported. Real shell
     # does not nest substitutions past two or three.
-    for body in _substitutions(chunk) if depth < _MAX_SUBSTITUTION_DEPTH else ():
-        if body.strip() and body != chunk:
+    for body in _substitutions(chunk):
+        if not body.strip() or body == chunk:
+            continue
+        if depth < _MAX_SUBSTITUTION_DEPTH:
             out.extend(shell_command_lines(body, depth + 1))
-    piece = _strip_assignments(chunk)
+        else:
+            # Past the bound, keep the text rather than dropping it — discarding silently turned
+            # crash protection into an evasion, `$(` nested eight deep hiding a payload in 83 bytes.
+            # Stepping only, never recursing: re-entering here is what put the crash back.
+            _step_past_keywords(out, body)
+    _step_past_keywords(out, chunk)
+
+
+def _step_past_keywords(out: list[str], chunk: str) -> None:
+    """Append `chunk` as a command position, and again past each keyword or assignment that merely
+    introduces one — so `eval /tmp/x` yields the payload as well as the whole line."""
+    piece = _strip_assignments(chunk.strip())
     while piece:
         out.append(piece)
         head, _, rest = piece.partition(" ")
@@ -376,7 +404,7 @@ def _substitutions(text: str) -> list[str]:
     """The bodies of `$(…)` and backtick command substitutions in `text` — each one executes."""
     bodies, i = [], 0
     while i < len(text):
-        if text.startswith("$(", i):
+        if text.startswith("$(", i) or text[i:i + 2] in ("<(", ">("):
             depth, j = 1, i + 2
             while j < len(text) and depth:
                 depth += (text[j] == "(") - (text[j] == ")")
@@ -402,7 +430,7 @@ def _strip_assignments(piece: str) -> str:
             ch = piece[i]
             if quote:
                 quote = "" if ch == quote else quote
-            elif ch in "'\"":
+            elif ch in "'\"`":
                 quote = ch
             elif ch in "([":
                 depth += 1
@@ -415,17 +443,33 @@ def _strip_assignments(piece: str) -> str:
     return piece
 
 
+def _skip_arithmetic(text: str, i: int) -> int:
+    """Past a `$((…))` / `((…))` expansion. Its `<<` is a shift operator, and everything in it is a
+    value rather than a command."""
+    depth = 2
+    while i < len(text) and depth:
+        depth += (text[i] == "(") - (text[i] == ")")
+        i += 1
+    return i
+
+
 def _skip_heredoc_bodies(text: str, i: int, delimiters: list[str]) -> int:
     """Past the bodies of every heredoc opened on the line just ended. Their content is DATA — a
-    line of it beginning with a scratch path is not a command."""
-    while delimiters:
+    line of it beginning with a scratch path is not a command.
+
+    FAILS CLOSED: a delimiter that never appears skips NOTHING — None says so, and the caller then
+    reads the text as ordinary commands. Consuming to end-of-file on a delimiter we failed to
+    recognise is how one mis-read `<<` silenced an entire script."""
+    pending = list(delimiters)
+    while pending:
         end = text.find("\n", i)
         line = text[i:] if end < 0 else text[i:end]
-        if line.strip() == delimiters[0]:
-            delimiters.pop(0)
+        if line.strip() == pending[0]:
+            pending.pop(0)
         if end < 0:
-            return len(text)
+            return None                      # unterminated — never swallow to end-of-file
         i = end + 1
+    delimiters.clear()
     return i
 
 

@@ -454,6 +454,41 @@ class TestInvocationResolver(unittest.TestCase):
         # …and a genuinely nested substitution still resolves to its payload
         self.assertIn("/tmp/.x/agent", grade.shell_command_lines("OUT=$(echo $(/tmp/.x/agent))"))
 
+    def test_no_construct_can_switch_the_lexer_off(self):
+        # `$((1<<SHIFT))` is a left shift. Read as a heredoc, `SHIFT` became a delimiter that never
+        # appears and the rest of the script was swallowed — a twelve-byte off-switch for every check
+        # below it, chosen by the worm author, who controls argv completely.
+        for prefix in ("n=$((1<<SHIFT))", "n=$(( 1 << MAX ))", "((n = 1<<BITS))",
+                       "for ((i=0;i<<n;i++)) ; do :; done", "cat <<END-OF-TEXT"):
+            for body in ("exec /tmp/.x/p", "{ /tmp/.x/p; }",
+                         "while true; do /tmp/.x/p; sleep 60; done", "/tmp/.x/p &"):
+                with self.subTest(prefix=prefix, body=body):
+                    self.assertTrue(grade.content_signal(
+                        _entry(["/bin/sh", "-c", f"{prefix}\n{body}\n"])).hit)
+
+    def test_arithmetic_is_not_a_heredoc_and_an_expansion_is_not_a_brace(self):
+        # Asserted on the lexer directly: failing closed already masks the swallow when the delimiter
+        # never reappears, so only a script where it DOES reappear separates the two fixes.
+        self.assertIn("exec /tmp/.x/p",
+                      grade.shell_command_lines("n=$((1<<EOF))\nexec /tmp/.x/p\nEOF\n"))
+        # `${…}` is one word; splitting there fabricated a position in half of all real shell.
+        self.assertEqual(grade.shell_command_lines("echo ${TMPDIR:-/tmp}/x"),
+                         ["echo ${TMPDIR:-/tmp}/x"])
+
+    def test_a_bound_and_an_unknown_delimiter_both_fail_closed(self):
+        # Every limit here is attacker-reachable, so none may lose the payload. Nesting past the
+        # substitution bound hid one in 83 bytes; an unrecognised heredoc delimiter swallowed a
+        # whole script. Both now keep the text instead of dropping it.
+        self.assertTrue(grade.content_signal(_entry(
+            ["/bin/sh", "-c", "X=" + "$(echo " * 8 + "$(eval /tmp/.x/p)" + ")" * 8])).hit)
+        self.assertTrue(grade.content_signal(_entry(
+            ["/bin/sh", "-c", "cat <<END-OF-TEXT\nexec /tmp/.x/p\n"])).hit)
+
+    def test_execution_through_a_substitution_or_a_trap_is_execution(self):
+        for script in ("cat <(/tmp/.x/p)", "echo x > >(/tmp/.x/p)", "trap /tmp/.x/p EXIT",
+                       "OUT=`/tmp/.x/p`"):
+            self.assertTrue(grade.content_signal(_entry(["/bin/sh", "-c", script])).hit, script)
+
     def test_only_a_command_position_is_a_command(self):
         # `splitlines()` fabricates command positions. A backslash continuation, a heredoc body and a
         # `case` label each begin a physical line without beginning a command — and each carried an
@@ -473,6 +508,13 @@ class TestInvocationResolver(unittest.TestCase):
             f'X="\r\n{P}\r\n"\r\nexec /opt/app/run\r\n',                # CRLF inside a quoted string
             f'rsync -a --exclude="\n/tmp/spool\ncache\n" /src /dst',
             "print hi >| /tmp/x",                                       # zsh clobber, not a pipe
+            # stock /usr/bin/znew and gzexe — a backtick delimits a value exactly as a quote does
+            "tmp=`mktemp /tmp/znewXXXXXXXXXX` || exit 1\nrsync -a $HOME/d \"$tmp\"/\nrm -rf \"$tmp\"",
+            "x=`readlink -f /var/tmp/x`\nexec /opt/app/run",
+            # a quoted delimiter may hold any characters; unrecognised, the body read as commands
+            "cat <<'E-O-F' >/dev/null\n/tmp/spool/item\nE-O-F\nexec /opt/app/run",
+            "cat <<END-OF-TEXT >/dev/null\n/tmp/spool/item\nEND-OF-TEXT\nexec /opt/app/run",
+            "echo ${TMPDIR:-/tmp}/x\nexec /opt/app/run",   # `${` is expansion, not a brace group
         ):
             self.assertFalse(grade.content_signal(_entry(["/bin/sh", "-c", script])).hit, script)
         # and the multi-line payload this must NOT silence

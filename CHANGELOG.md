@@ -14,6 +14,7 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Fixed
+- **`saw audit` no longer stops reading a start-up script partway through, and no longer reports an agent that creates a temporary file as active persistence.** A start-up entry could contain shell that caused the rest of it to go unexamined, so anything after that point was never reported. Separately, an entry that made a temporary file in the ordinary way — the idiom stock system scripts use — could be reported as active host persistence, withholding the rotation all-clear and exiting `3`. Both are fixed, and `saw audit` now also reports payloads run through a shell trap or a process substitution.
 - **`saw audit` no longer reports ordinary system agents as host footholds, and no longer misses a multi-line start-up script.** An agent running `tar`, `sort`, `du` or a config-file service with a `-c` option could be reported as active host persistence — withholding the rotation all-clear and exiting `3` — while a start-up entry whose shell script spans several lines was reported nothing at all. Both are fixed, and entries launched through `env`/`sudo` wrappers are now read correctly rather than skipped.
 - **`saw audit` now catches a start-up entry that runs a scratch-directory payload with no punctuation in front of it**, such as a systemd `ExecStopPost=/bin/sh -c '/tmp/x &'`. It was reported only when a shell operator preceded the path.
 - **`saw audit` no longer reports a start-up entry as an unattributable foothold on ordinary code.**
