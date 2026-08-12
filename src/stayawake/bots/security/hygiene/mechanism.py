@@ -21,8 +21,9 @@ from .models import HygieneIssue, _WIPER_NOTE
 # → info) rather than assert-malware. All read-only; absent paths/tools degrade to nothing.
 
 # The shape a persistence line almost never has for a legitimate reason: a network fetch piped or
-# eval'd into an interpreter, a decode-then-execute, or a script run out of a world-writable scratch
-# dir. Reused across the shell-rc, SSH forced-command, and git-exec-config probes below. Benign tool
+# eval'd into an interpreter, or a decode-then-execute. Reused across the shell-rc, SSH
+# forced-command, and git-exec-config probes below. A script run out of a world-writable scratch dir
+# recognised from shell OPERATORS is `_SCRATCH_EXEC`, split out below because it needs shell context. Benign tool
 # init (`eval "$(rbenv init -)"`, `eval "$(brew shellenv)"`) contains no fetch, so it stays clean.
 #
 # A `… | X` SINK executes stdin as CODE only for a POSIX shell (always) or a scripting interpreter that
@@ -30,10 +31,15 @@ from .models import HygieneIssue, _WIPER_NOTE
 # and `curl|python` (and `curl|python -`, stdin-as-script) fire; the FP pass proved `curl|python -m
 # json.tool` (API pretty-print), `base64 -d|python3 -m json.tool` (JWT decode) and `diff <(curl a)
 # <(curl b)` (proc-sub into a data consumer) are DATA, not exec — the bare-guard keeps them clean.
+# One authority per concept; every form below is DERIVED, so a shell or a scratch root added here
+# reaches the regexes, the membership tests and the path checks together instead of three of four.
+POSIX_SHELLS = ("sh", "bash", "zsh", "dash", "ksh")
+SCRATCH_ROOTS = ("/tmp", "/var/tmp", "/private/tmp", "/dev/shm")
+
 _FETCH = r"(?:curl|wget)"
-_POSIX_SHELL = r"(?:sh|bash|zsh|dash|ksh)"
+_POSIX_SHELL = rf"(?:{'|'.join(POSIX_SHELLS)})"
 _SCRIPT_INTERP = r"(?:python[23]?|perl|ruby|node|php)"
-_SCRATCH = r"(?:/tmp/|/var/tmp/|/dev/shm/|/private/tmp/)"
+_SCRATCH = rf"(?:{'|'.join(root + '/' for root in SCRATCH_ROOTS)})"
 # stdin-as-code sink: POSIX shell (always), or a scripting interpreter with no program arg. A lone `-`
 # (read the script from stdin) is still exec; `-m`/`-c`/`-e`/a script path make stdin DATA — the
 # `(?!\s*(?:[\w/.]|-\S))` guard clears the latter while keeping bare `python` and `python -` flagged.
@@ -57,9 +63,21 @@ _FETCH_PIPE_EXEC = re.compile(
     rf"|(?:^|[;&|]|\s){_EXEC_CMD}\b\s+<\(\s*{_FETCH}\b"                            # bash <(curl …)
     rf"|(?:^|[;&|])\s*\.\s+<\(\s*{_FETCH}\b"                                       # . <(curl …)   (stmt boundary)
     rf"|\bbase64\s+(?:-d|-D|--decode)\b[^\n|]{{0,512}}+\|\s*{_PIPE_SINK}"           # … | base64 -d | sh
-    rf"|(?:^|[;&|]|\s){_EXEC_CMD}\b\s+[\"']?{_SCRATCH}"                            # bash /tmp/x ; source /tmp/x
-    rf"|(?:^|[;&|])\s*\.\s+[\"']?{_SCRATCH}"                                       # . /tmp/x      (stmt boundary)
-    rf"|(?:^|[;&|`]|&&|\|\||\$\()\s*(?:{_EXEC_WRAP}\s+){{0,4}}(?:\w+=\S*\s+){{0,6}}[\"']?{_SCRATCH}",  # ; /tmp/x ; env X=1 /tmp/x
+    rf"|(?:^|[;&|]|\s){_EXEC_CMD}\b\s+[\"']?{_SCRATCH}",                           # bash /tmp/x ; source /tmp/x
+    re.IGNORECASE)
+
+# A scratch path in an EXECUTION POSITION, recognised from shell operators alone — no command is
+# named, so this only means "execute" if the text IS a shell command line. Split out of
+# _FETCH_PIPE_EXEC (#1393): applied to arbitrary payload text those same operators are ordinary
+# syntax in other languages, and every measured false positive came through here — a JS template
+# literal (`` `/tmp/${pid}.sock` ``), a logical-or default (`|| '/tmp/app.sock'`), a pipe inside a
+# comment, and a bare quoted path on its own line. Callers that hold a shell line use it; callers
+# holding arbitrary text ask the structural question (is the payload PATH under scratch?) instead.
+_SCRATCH_EXEC = re.compile(
+    rf"(?:^|[;&|])\s*\.\s+[\"']?{_SCRATCH}"                                        # . /tmp/x      (stmt boundary)
+    # `(?<!>)` on the pipe: zsh's clobber redirect `>|` is a WRITE, not a pipe, so `pwd >| /tmp/f`
+    # is not execution. Without it every shell that emits one flags itself.
+    rf"|(?:^|[;&`]|(?<!>)\||&&|\|\||\$\()\s*(?:{_EXEC_WRAP}\s+){{0,4}}(?:\w+=\S*\s+){{0,6}}[\"']?{_SCRATCH}",
     re.IGNORECASE)
 
 # Forced-command on an authorized_keys line: `command="…" ssh-ed25519 …`. Scanned across the WHOLE line
@@ -75,7 +93,7 @@ _SSH_AUTHKEYS = ("authorized_keys", "authorized_keys2")
 # World-writable scratch roots. A path is treated as "under scratch" only at a real path boundary
 # (equals a root or is a descendant) — NOT an unanchored substring, so a private `/opt/acme/tmp/hooks`
 # or a `command="rrsync … /var/tmp/repo"` DATA path is not mistaken for the system scratch dir.
-_SCRATCH_ROOTS = (Path("/tmp"), Path("/var/tmp"), Path("/private/tmp"), Path("/dev/shm"))
+_SCRATCH_PATHS = tuple(Path(root) for root in SCRATCH_ROOTS)
 
 
 def _other_writable(p: Path) -> bool:
@@ -97,7 +115,7 @@ def _under_scratch(p: Path) -> bool:
         norm = Path(os.path.normpath(os.path.expanduser(str(p))))
     except (OSError, ValueError):
         return False
-    return any(norm == root or root in norm.parents for root in _SCRATCH_ROOTS)
+    return any(norm == root or root in norm.parents for root in _SCRATCH_PATHS)
 
 
 def check_ssh_authorized_keys() -> list[HygieneIssue]:
@@ -150,7 +168,8 @@ def check_ssh_authorized_keys() -> list[HygieneIssue]:
             # backdoor = a fetch/decode/scratch-EXEC shape (incl. via a wrapper or after a `;`/`&&`), or
             # the forced executable itself in a scratch dir. A scratch path used only as a data argument
             # (`rrsync … /var/tmp/repo`) is NOT — _FETCH_PIPE_EXEC and the argv[0] check distinguish them.
-            if _FETCH_PIPE_EXEC.search(cmd) or (argv and _under_scratch(Path(argv[0]))):
+            if (_FETCH_PIPE_EXEC.search(cmd) or _SCRATCH_EXEC.search(cmd)
+                    or (argv and _under_scratch(Path(argv[0])))):
                 malicious.append(cmd[:120])
             else:
                 restricted += 1
@@ -212,7 +231,7 @@ def check_shell_profile() -> list[HygieneIssue]:
             line = raw.strip()
             if not line or line.startswith("#"):
                 continue
-            if _FETCH_PIPE_EXEC.search(line):
+            if _FETCH_PIPE_EXEC.search(line) or _SCRATCH_EXEC.search(line):
                 hits.append(f"line {lineno}: {line[:120]}")
         if hits:
             issues.append(HygieneIssue(
@@ -282,7 +301,8 @@ def check_git_config_execution() -> list[HygieneIssue]:
             if val.lower() in _GIT_BOOL:
                 continue                       # builtin FSMonitor toggle — benign
             argv = val.split()
-            if _FETCH_PIPE_EXEC.search(val) or (argv and _under_scratch(Path(os.path.expanduser(argv[0])))):
+            if (_FETCH_PIPE_EXEC.search(val) or _SCRATCH_EXEC.search(val)
+                    or (argv and _under_scratch(Path(os.path.expanduser(argv[0]))))):
                 issues.append(HygieneIssue(
                     id="git-fsmonitor-command",
                     severity="warning",
@@ -328,7 +348,7 @@ def check_git_config_execution() -> list[HygieneIssue]:
             # scratch-exec arms (which anchor on a statement boundary, not `!`) — a git quirk kept out
             # of the shared SSH/shell-rc regex. Non-`!` keys (pager/editor/filter) match val directly.
             probe = re.sub(r"^\s*!\s*", "", val) if _GIT_BANG_KEY.match(key) else val
-            if _FETCH_PIPE_EXEC.search(probe):
+            if _FETCH_PIPE_EXEC.search(probe) or _SCRATCH_EXEC.search(probe):
                 issues.append(HygieneIssue(
                     id="git-config-fetch-exec",
                     severity="warning",

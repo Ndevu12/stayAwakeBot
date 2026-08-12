@@ -70,6 +70,38 @@ def launched_via_interpreter(entry) -> bool:
     return bool(entry.argv) and _payload_path(entry) not in (None, entry.argv[0])
 
 
+# Derived from mechanism.POSIX_SHELLS, never restated — the same five names in a third spelling is
+# how the set drifts. `.dash` is not a real suffix, so suffixes stay explicit.
+_SHELL_SUFFIXES = (".sh", ".bash", ".zsh", ".ksh")
+_SHEBANG_SHELL = re.compile(rf"^#!.*\b(?:{'|'.join(mechanism.POSIX_SHELLS)})\b")
+_LEADING_NOISE = "﻿ \t\r\n"      # BOM is not whitespace, so lstrip() alone leaves it
+
+
+def _runs_as_shell(entry, referenced: str) -> bool:
+    """Whether the referenced payload is EXECUTED as a shell script.
+
+    `argv[0]` being a POSIX shell is authoritative — the payload cannot rename that away. Shebang and
+    suffix are secondary, since the payload author chooses both."""
+    argv = entry.argv or []
+    if argv and os.path.basename(argv[0]).split(".")[0] in mechanism.POSIX_SHELLS:
+        return True
+    payload = _payload_path(entry)
+    if payload and payload.lower().endswith(_SHELL_SUFFIXES):
+        return True
+    return bool(_SHEBANG_SHELL.match(referenced.lstrip(_LEADING_NOISE)))
+
+
+def _shell_context_text(entry, referenced: str) -> str:
+    """The parts of an entry that genuinely ARE a shell command line.
+
+    `shell_lines` is the parser's answer — every Exec* directive, continuations joined. The unit BODY
+    is excluded: that is where a JS template literal or a comment lives (#1393)."""
+    parts = list(entry.shell_lines) or [" ".join(entry.argv or [])]
+    if referenced and _runs_as_shell(entry, referenced):
+        parts.append(referenced)
+    return "\n".join(parts)
+
+
 def _referenced_text(entry) -> str:
     """The content of the entry's referenced PAYLOAD (interpreter-aware, see `_payload_path`), capped,
     or '' — so the content-shape engines see the payload where it usually LIVES (a script the unit
@@ -112,12 +144,22 @@ def content_signal(entry, *, read_referenced: bool = False) -> ContentSignal:
         decisive shape, and `detect_destructive` is itself corroborated home-root ∧ recursive ∧ delete,
         so firing it adds no new false positive)."""
     text = entry.shape_text()
-    if read_referenced:
-        text += "\n" + _referenced_text(entry)
+    referenced = _referenced_text(entry) if read_referenced else ""
+    if referenced:
+        text += "\n" + referenced
     reasons: list[str] = []
     hit = False
     if mechanism._FETCH_PIPE_EXEC.search(text):
         reasons.append("fetch/decode-to-shell command")
+        hit = True
+    # Asked two ways: by PATH (immune to how the surrounding code reads) and, failing that, by
+    # shell grammar over the lines that genuinely are a command line.
+    payload = _payload_path(entry)
+    if payload and mechanism._under_scratch(Path(payload)):
+        reasons.append("runs code from a world-writable scratch directory")
+        hit = True
+    elif mechanism._SCRATCH_EXEC.search(_shell_context_text(entry, referenced)):
+        reasons.append("runs code from a world-writable scratch directory")
         hit = True
     if analyzer.detect_dropper(text):
         reasons.append("decode→execute dropper")
