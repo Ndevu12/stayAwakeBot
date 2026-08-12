@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -48,6 +49,21 @@ _INLINE_EVAL_FLAGS = frozenset({"-e", "--eval", "-c", "-p", "--print", "-"})
 # them is what lets one walk answer for every consumer instead of each guessing from argv[0].
 _EXEC_WRAPPERS = frozenset({"env", "sudo", "nohup", "nice", "setsid", "exec", "command", "stdbuf",
                             "time", "doas"})
+# Wrapper options that consume the NEXT token. Per wrapper because they conflict: `stdbuf -i` takes a
+# value, `env -i` does not. Without this the value reads as the program and `sudo -u nobody sh -c
+# <payload>` goes silent — measured on seven wrapper forms.
+_WRAPPER_VALUE_OPTS = {
+    "sudo":   frozenset({"-u", "--user", "-g", "--group", "-p", "--prompt", "-C", "--close-from",
+                         "-h", "--host", "-r", "--role", "-t", "--type", "-U", "--other-user"}),
+    "doas":   frozenset({"-u", "-C"}),
+    "env":    frozenset({"-u", "--unset", "-C", "--chdir", "-S", "--split-string"}),
+    "nice":   frozenset({"-n", "--adjustment"}),
+    "stdbuf": frozenset({"-i", "--input", "-o", "--output", "-e", "--error"}),
+    "time":   frozenset({"-f", "--format", "-o", "--output"}),
+}
+_SYSTEM_BIN_DIRS = frozenset({"/bin", "/usr/bin", "/usr/local/bin", "/sbin", "/usr/sbin",
+                              "/opt/homebrew/bin", "/opt/local/bin"})
+_ASSIGNMENT = re.compile(r"[A-Za-z_]\w{0,255}=")
 # Flags whose ARGUMENT is code rather than a path. `-m` is neither: it names a module.
 _CODE_FLAGS = frozenset({"-c", "-e", "--eval", "-p", "--print", "-Command", "-EncodedCommand"})
 _MODULE_FLAGS = frozenset({"-m", "--module"})
@@ -55,7 +71,7 @@ _MODULE_FLAGS = frozenset({"-m", "--module"})
 
 @dataclass(frozen=True)
 class Invocation:
-    """What an entry actually executes, resolved ONCE.
+    """What one command line actually executes, resolved ONCE.
 
     Four consumers used to answer this separately — which file to read, whether referenced content is
     shell, which arguments are code, which lines take shell grammar — from argv[0] or from a regex over
@@ -66,47 +82,100 @@ class Invocation:
     code_args: tuple[str, ...] = ()      # arguments that ARE code, not paths
 
 
-def resolve_invocation(entry) -> Invocation:
-    argv = list(entry.argv or [])
+def resolve_invocation(argv) -> Invocation:
+    """Resolve ONE command line. Per command line, never per entry: `entry.argv` is only the first of
+    them, and `_invocations` is what covers the rest."""
+    argv = list(argv or [])
     if not argv:
         return Invocation()
-    # Skip wrappers and the VAR=value assignments they carry, so `env A=1 bash -c` resolves to bash.
-    i = 0
-    while i < len(argv) and (_base(argv[i]) in _EXEC_WRAPPERS or "=" in argv[i].partition("=")[1]):
-        i += 1
-        while i < len(argv) and "=" in argv[i].partition("=")[1]:
-            i += 1
-    if i >= len(argv):
+    i = _program_index(argv)
+    # A program is never a bare flag: landing on one means the walk lost the line, so fall back to
+    # argv[0] — the un-resolved answer — rather than inventing a payload out of an option.
+    if i >= len(argv) or argv[i].startswith("-"):
         return Invocation(interpreter=argv[0], payload_path=argv[0])
     interp, rest = argv[i], argv[i + 1:]
-    base = _base(interp)
+    base = _interpreter_base(interp)
     if base not in _INTERPRETERS:
         return Invocation(interpreter=interp, payload_path=interp)
-    code, path, skip = [], None, False
+    code, path = [], None
     for n, arg in enumerate(rest):
-        if skip:
-            skip = False
-            continue
         if arg in _CODE_FLAGS:
             if n + 1 < len(rest):
                 code.append(rest[n + 1])
-            skip = True
-        elif arg in _MODULE_FLAGS:
-            skip = True                       # a module NAME, never a path to read
-        elif path is None and not arg.startswith("-"):
+            break              # what follows the code is an argument TO it ($0, $@) — never a path
+        if arg in _MODULE_FLAGS:
+            break              # a module NAME, and what follows is the module's own argv
+        if not arg.startswith("-"):
             path = arg
+            break
     return Invocation(interpreter=interp, is_posix_shell=base in POSIX_SHELLS,
                       payload_path=path or interp, code_args=tuple(code))
 
 
-def _base(arg: str) -> str:
+def _program_index(argv: list[str]) -> int:
+    """Index of the real program — the first token that is not a wrapper, a wrapper's option, or a
+    `VAR=value` assignment."""
+    i = 0
+    while i < len(argv):
+        wrapper = _wrapper_name(argv[i])
+        if wrapper is None:
+            break
+        value_opts = _WRAPPER_VALUE_OPTS.get(wrapper, frozenset())
+        i += 1
+        while i < len(argv):
+            arg = argv[i]
+            if arg in value_opts:
+                i += 2
+            elif (arg.startswith("-") and arg != "-") or _ASSIGNMENT.match(arg):
+                i += 1
+            else:
+                break
+    return i
+
+
+def _wrapper_name(arg: str) -> str | None:
+    """The wrapper this token names, or None. The basename must match EXACTLY and sit unqualified or
+    in a system bin dir — otherwise a payload at `/tmp/.x/env.sh` or `/tmp/.x/command` is skipped as a
+    wrapper and the scratch path it names is never checked."""
+    name = os.path.basename(arg)
+    if name not in _EXEC_WRAPPERS:
+        return None
+    parent = os.path.dirname(arg)
+    return name if parent == "" or parent in _SYSTEM_BIN_DIRS else None
+
+
+def _interpreter_base(arg: str) -> str:
+    """`python3.11` → `python3`, `/usr/bin/node` → `node`. Version suffixes only: wrapper matching
+    uses the exact basename, since `env.sh` is a payload and `env` is a wrapper."""
     return os.path.basename(arg).split(".")[0]
+
+
+def _invocations(entry) -> list[Invocation]:
+    """Every command line the entry executes, resolved. `argv` is only the FIRST — a unit's second
+    `ExecStart=`, its `ExecStartPre/Post=`, `ExecReload=` or `ExecCondition=` each run their own, and a
+    payload hides in one just as well (measured: five such forms went silent when only argv was read)."""
+    argv = list(entry.argv or [])
+    primary = " ".join(argv)
+    # A parser with no command line to give falls back to the raw body; splitting that is 66ms of
+    # meaningless work per entry, and the body is already matched as a part in its own right.
+    return [resolve_invocation(argv)] + [
+        resolve_invocation(_split_command(line))
+        for line in entry.shell_lines if line != primary and line != entry.body]
+
+
+def _split_command(line: str) -> list[str]:
+    """A command line as argv, by the shell's own quoting rule — it is what strips the quotes around
+    `sh -c '<payload>'`. An unbalanced quote falls back to whitespace rather than losing the line."""
+    try:
+        return shlex.split(line)
+    except ValueError:
+        return line.split()
 
 
 def _payload_path(entry) -> str | None:
     """The path of the code the entry RUNS — the script argument when an interpreter is argv[0], so a
     `node /path/daemon.js` autorun is read at daemon.js, not at the trusted `node`."""
-    return resolve_invocation(entry).payload_path
+    return resolve_invocation(entry.argv).payload_path
 
 
 def launched_via_interpreter(entry) -> bool:
@@ -126,7 +195,7 @@ _LEADING_NOISE = "﻿ \t\r\n"      # BOM is not whitespace, so lstrip() alone le
 def _runs_as_shell(entry, referenced: str) -> bool:
     """Whether the referenced payload is EXECUTED as a shell script. The resolver is authoritative —
     the payload cannot rename that away. Shebang and suffix are secondary, being author-chosen."""
-    if resolve_invocation(entry).is_posix_shell:
+    if resolve_invocation(entry.argv).is_posix_shell:
         return True
     payload = _payload_path(entry)
     if payload and payload.lower().endswith(_SHELL_SUFFIXES):
@@ -144,9 +213,9 @@ def _shell_context_text(entry, referenced: str) -> list[str]:
     # A shell's code argument is a script in its own right, so each of ITS lines is a command
     # position. Taken from the resolver, never re-parsed out of the joined argv: a flag and a value
     # are indistinguishable once flattened, which is how `tar -c /tmp/x` became a foothold.
-    inv = resolve_invocation(entry)
-    if inv.is_posix_shell:
-        parts += [line for arg in inv.code_args for line in arg.splitlines() if line.strip()]
+    for inv in _invocations(entry):
+        if inv.is_posix_shell:
+            parts += [line for arg in inv.code_args for line in arg.splitlines() if line.strip()]
     if referenced and _runs_as_shell(entry, referenced):
         parts.append(referenced)
     return parts
@@ -157,10 +226,10 @@ def _referenced_text(entry) -> str:
     or '' — so the content-shape engines see the payload where it usually LIVES (a script the unit
     runs), not just the unit file or a trusted interpreter binary. FIFO-safe via pathsafe; a compiled
     binary simply won't match the (JS/shell-shaped) detectors."""
-    payload = _payload_path(entry)
-    if not payload:
-        return ""
-    data = pathsafe.read_regular_bytes(Path(os.path.expanduser(payload)))
+    payload = os.path.expanduser(_payload_path(entry) or "")
+    if not os.path.isabs(payload):
+        return ""                    # a bare name would resolve against saw's own working directory
+    data = pathsafe.read_regular_bytes(Path(payload))
     if data is None:
         return ""
     return data[:_MAX_REFERENCED].decode("utf-8", "replace")

