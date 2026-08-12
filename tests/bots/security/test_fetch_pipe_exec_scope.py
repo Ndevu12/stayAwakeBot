@@ -401,14 +401,65 @@ class TestInvocationResolver(unittest.TestCase):
                      ["/usr/bin/sudo", "/usr/bin/docker", "run", "i", "sh", "-c", "/tmp/.x/a"]):
             self.assertTrue(grade._crosses_a_boundary(argv), argv)
 
+    def test_a_shell_option_between_the_shell_and_c_is_still_a_shell(self):
+        # Reading only the token before `-c` meant ONE option turned the check off. `bash -lc` worked
+        # and `bash -l -c` did not — and a login environment is the ordinary reason to write it.
+        for argv in (["/bin/bash", "-l", "-c", "/tmp/.x/agent"],
+                     ["/bin/bash", "--login", "-c", "/tmp/.x/agent"],
+                     ["/bin/bash", "-o", "pipefail", "-c", "/tmp/.x/agent"],
+                     ["/bin/bash", "--rcfile", "/etc/x", "-c", "/tmp/.x/agent"],
+                     ["/bin/zsh", "-f", "-c", "/tmp/.x/agent"]):
+            self.assertTrue(grade.content_signal(_entry(argv)).hit, argv)
+
+    def test_a_shell_is_not_only_the_five_names_of_the_grammar(self):
+        # `ash` IS /bin/sh on Alpine, `mksh` on Android and Debian, and `$SHELL` is how an agent asks
+        # for the login shell without naming it. Anchoring on a five-name literal lost all of them.
+        for argv in (["/bin/ash", "-c", "/tmp/.x/agent"], ["/bin/mksh", "-c", "/tmp/.x/agent"],
+                     ["/bin/rbash", "-c", "/tmp/.x/agent"], ["$SHELL", "-c", "/tmp/.x/agent"],
+                     ["/bin/busybox", "sh", "-c", "/tmp/.x/agent"]):
+            self.assertTrue(grade.content_signal(_entry(argv)).hit, argv)
+
+    def test_a_keyword_introduces_a_command_position(self):
+        # `while true; do <payload>; sleep 60; done` is the canonical poll-beacon (#1335) — the shape
+        # this module exists for — and neither main nor the first two designs saw it.
+        for script in ("while true; do /tmp/.x/agent; sleep 60; done",
+                       "until false; do /tmp/.x/agent; sleep 60; done",
+                       "if [ -f /etc/x ]; then /tmp/.x/agent; fi",
+                       "for i in 1 2 3; do /tmp/.x/agent; done",
+                       "{ /tmp/.x/agent; } &", "eval /tmp/.x/agent"):
+            self.assertTrue(grade.content_signal(_entry(["/bin/sh", "-c", script])).hit, script)
+
+    def test_a_systemd_exec_line_is_parsed_by_the_shell_s_rule(self):
+        # systemd's ExecStart argv is a naive `.split()`, so `sh -c 'exec /tmp/x'` truncates at the
+        # space — and rejoins to the identical string, so no text comparison could notice.
+        with tempfile.TemporaryDirectory(dir=Path.home()) as d:
+            for text in ("[Service]\nExecStart=/bin/sh -c 'exec /tmp/.x/agent'\n",
+                         "[Service]\nExecStart=/bin/sh -c 'exec /tmp/.x/agent --daemon'\n",
+                         "[Service]\nExecStart=/bin/sh -c 'nohup /tmp/.x/agent &'\n"):
+                unit = Path(d) / "u.service"
+                unit.write_text(text)
+                self.assertTrue(grade.content_signal(surface._parse_systemd_unit(unit)).hit, text)
+
     def test_only_a_command_position_is_a_command(self):
         # `splitlines()` fabricates command positions. A backslash continuation, a heredoc body and a
         # `case` label each begin a physical line without beginning a command — and each carried an
         # ordinary agent to `autorun-unattributed-foothold` (exit 3) while signed and attributed.
-        restic = "set -e\nrm -rf \\\n  /tmp/restic-cache \\\n  /tmp/restic.lock\nexec /opt/restic run"
-        heredoc = "cat <<EOF > /var/log/x\n/tmp/data-one\n/tmp/data-two\nEOF\nexec /opt/app/run"
-        case = "case \"$1\" in\n  /tmp/*) echo scratch ;;\n  *) echo other ;;\nesac\nexec /opt/app/run"
-        for script in (restic, heredoc, case):
+        P = "/tmp/.cache-agent/beacon.sh"
+        for script in (
+            "set -e\nrm -rf \\\n  /tmp/restic-cache \\\n  /tmp/restic.lock\nexec /opt/restic run",
+            "cat <<EOF > /var/log/x\n/tmp/data-one\n/tmp/data-two\nEOF\nexec /opt/app/run",
+            "case \"$1\" in\n  /tmp/*) echo scratch ;;\n  *) echo other ;;\nesac\nexec /opt/app/run",
+            # a `case` label's `|` joins PATTERNS — a backup agent skipping scratch dirs
+            'case "$d" in\n  /tmp/*|/var/tmp/*) continue ;;\n  *) echo ok ;;\nesac\nexec /opt/app/run',
+            f"cat <<\\EOF > /var/log/x\n{P} is the control socket\nEOF\nexec /opt/app/run",
+            f"cat <<'EOF'\n{P}\nEOF\nexec /opt/app/run",
+            f"cat <<EOF\nnot EOF here\n{P}\nEOF\nexec /opt/app/run",   # delimiter inside its own body
+            f'FILES=$(find /var \\\n  -name "*.log")\necho "{P}"\nexec /opt/app/run',
+            f'EXCLUDES=(\n  {P}\n  /var/cache\n)\nexec /opt/app/run',   # an array NAMES, never runs
+            f'X="\r\n{P}\r\n"\r\nexec /opt/app/run\r\n',                # CRLF inside a quoted string
+            f'rsync -a --exclude="\n/tmp/spool\ncache\n" /src /dst',
+            "print hi >| /tmp/x",                                       # zsh clobber, not a pipe
+        ):
             self.assertFalse(grade.content_signal(_entry(["/bin/sh", "-c", script])).hit, script)
         # and the multi-line payload this must NOT silence
         self.assertTrue(grade.content_signal(
@@ -440,7 +491,7 @@ class TestInvocationResolver(unittest.TestCase):
         # `argv` is the first ExecStart alone. Answering from the entry rather than from each of its
         # command lines is the same derived-proxy shape one layer in: the authority is `shell_lines`.
         entry = AutorunEntry(location="systemd-user", path="/x/u.service", argv=["/usr/bin/true"],
-                             body="", persistence={},
+                             body="", persistence={}, argv_is_exact=False,   # as the parser sets it
                              shell_lines=["/usr/bin/true", "/bin/sh -c '/tmp/.stage'"])
         self.assertEqual([grade.shell_code_args(a) for a in grade._command_argvs(entry)],
                          [(), ("/tmp/.stage",)])

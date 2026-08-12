@@ -58,6 +58,17 @@ _MODULE_FLAGS = {"python": frozenset({"-m"}), "python2": frozenset({"-m"}),
 # A shell's `-c` flag, including the clustered short forms a shell accepts (`bash -lc`, `sh -ic`).
 # `-c` must end the cluster, since it consumes the next argument.
 _SHELL_C_FLAG = re.compile(r"-[A-Za-z]{0,4}c")
+# Shell options that consume the next token, so `bash --rcfile /etc/x -c …` still resolves.
+_SHELL_VALUE_OPTS = frozenset({"-o", "+o", "--rcfile", "--init-file"})
+
+# Programs whose `-c` argument is a shell command. Wider than POSIX_SHELLS, which names the grammar:
+# `ash` IS /bin/sh on Alpine and BusyBox, `mksh` ships as /bin/sh on Android and in Debian, and
+# `tcsh`/`fish` are not POSIX but their `-c` is still a command. `$SHELL` is how a LaunchAgent asks
+# for the login shell without naming it. All nine were caught by merged main and lost by anchoring on
+# a five-name literal.
+_C_FLAG_SHELLS = frozenset(POSIX_SHELLS) | {
+    "ash", "busybox", "mksh", "pdksh", "yash", "rbash", "bash5", "sh5", "tcsh", "csh", "fish",
+    "$SHELL", "${SHELL}"}
 
 # Programs whose OWN `-c` carries a shell command string — they exec a shell themselves, so their
 # operand sits between the program and the flag and the owner test cannot see it.
@@ -119,7 +130,7 @@ def shell_code_args(argv) -> tuple[str, ...]:
     for n, arg in enumerate(argv[:-1]):
         if n == 0 or not _SHELL_C_FLAG.fullmatch(arg):
             continue
-        if _interpreter_base(argv[n - 1]) in POSIX_SHELLS or any(
+        if _shell_owns_the_flag(argv, n) or any(
                 _interpreter_base(a) in _SHELL_COMMAND_CARRIERS for a in argv[:n]):
             code.append(argv[n + 1])
     # `env -S "bash -c '<payload>'"` packs a whole command line into one argument.
@@ -127,6 +138,24 @@ def shell_code_args(argv) -> tuple[str, ...]:
         if arg in ("-S", "--split-string") and _interpreter_base(argv[n - 1]) == "env":
             code.extend(shell_code_args(_split_command(argv[n + 1])))
     return tuple(code)
+
+
+def _shell_owns_the_flag(argv: list[str], flag: int) -> bool:
+    """Whether the program owning the `-c` at `flag` is a shell, looking back past the shell's OWN
+    options. Reading only the token before the flag meant one option token turned the check off:
+    `bash -lc` resolved but `bash -l -c` did not, and `bash -l -c` is the ordinary way a LaunchAgent
+    asks for a login environment."""
+    i = flag - 1
+    while i >= 0:
+        if _interpreter_base(argv[i]) in _C_FLAG_SHELLS or argv[i] in _C_FLAG_SHELLS:
+            return True
+        if argv[i].startswith("-") or argv[i].startswith("+"):
+            i -= 1
+        elif i > 0 and argv[i - 1] in _SHELL_VALUE_OPTS:
+            i -= 2
+        else:
+            return False
+    return False
 
 
 def _crosses_a_boundary(argv: list[str]) -> bool:
@@ -226,44 +255,174 @@ def _command_argvs(entry) -> list[list[str]]:
     read). A parser with no command line to give falls back to the raw body; splitting that is 66ms
     per entry for nothing, and the body is already matched as a part in its own right."""
     argv = list(entry.argv or [])
-    primary = " ".join(argv)
-    return [argv] + [_split_command(line) for line in entry.shell_lines
-                     if line != primary and line != entry.body]
+    # Re-split a line ONLY when the parser says its argv is inexact. systemd's ExecStart argv is a
+    # naive `.split()`, so `sh -c 'exec /tmp/x'` truncates at the space and rejoins to the identical
+    # string — a text comparison could never spot it. A plist's argv is a real array, and re-splitting
+    # its own join instead destroyed the quoting of a multi-line argument.
+    lines = [] if entry.argv_is_exact else [_split_command(ln) for ln in entry.shell_lines
+                                            if ln != entry.body]
+    seen, out = set(), []
+    for candidate in ([argv] + lines if argv else lines or [_split_command(entry.body)]):
+        key = tuple(candidate)
+        if candidate and key not in seen:
+            seen.add(key)
+            out.append(candidate)
+    return out
 
 
-_HEREDOC = re.compile(r"<<-?\s{0,8}[\"']?([A-Za-z_]\w{0,63})")
-_CASE_LABEL = re.compile(r"[^;&|(]{0,256}\)")
+_HEREDOC_START = re.compile(r"<<-?\s{0,8}(\\?)([\"']?)([A-Za-z_]\w{0,63})\2")
+# Keywords that introduce a command: `while true; do PAYLOAD` is a command position, and it is the
+# canonical poll-beacon shape (#1335). `eval` is here because its argument is a command too.
+_OPENS_A_COMMAND = frozenset({"do", "then", "else", "elif", "eval", "{", "(", "!", "time"})
+_CASE_OPENS = re.compile(r"(?:^|\s)case\s[^;&|]{0,256}\sin$")
+_MAX_SCRIPT = 64 * 1024
 
 
 def shell_command_lines(script: str) -> list[str]:
-    """The lines of a shell script that are COMMAND POSITIONS.
+    """The COMMAND POSITIONS of a shell script — the text following each separator that actually
+    separates commands, which is the only text where a leading path means execution.
 
-    `splitlines()` is not that, and the difference is a false-positive class: a backslash
-    continuation, a heredoc body and a `case` label each begin a physical line without beginning a
-    command, so a scratch path sitting there was read as execution. Measured on ordinary software —
-    a restic agent's `rm -rf \\` cleanup list, a heredoc data list, and `/tmp/*) echo scratch ;;` —
-    each reached `autorun-unattributed-foothold` on a signed, attributed entry."""
-    lines: list[str] = []
-    pending, heredoc = "", None
-    for raw in script.splitlines():
-        if heredoc is not None:
-            if raw.strip() == heredoc:
-                heredoc = None
+    This has to track quoting, because the difference between a command and a datum is entirely
+    quote state. Splitting on newlines and special-casing continuations, heredocs and `case` labels
+    was measured wrong seven ways: a multi-line quoted string, `<<\\EOF`, a `$(…)` spanning lines, a
+    bash array, a delimiter recurring inside its own body, two heredocs opened on one line, and CRLF
+    each turned a data line into a fabricated command position — reaching exit 3 on signed agents.
+    A `case` label is skipped for the same reason, and `while true; do <payload>` is NOT skipped."""
+    out: list[str] = []
+    text, i, n = script[:_MAX_SCRIPT], 0, len(script[:_MAX_SCRIPT])
+    start, depth, quote, pending_heredocs = 0, 0, "", []
+    in_case = in_pattern = False
+    while i < n:
+        ch = text[i]
+        if quote:
+            if ch == "\\" and quote == '"':
+                i += 2
+                continue
+            if ch == quote:
+                quote = ""
+            i += 1
             continue
-        line = pending + raw
-        pending = ""
-        stripped = line.rstrip()
-        if (len(stripped) - len(stripped.rstrip("\\"))) % 2:      # an odd trailing run continues it
-            pending = stripped[:-1]
+        if ch == "\\":
+            i += 2
             continue
-        found = _HEREDOC.search(line)
+        if ch in "'\"":
+            quote, i = ch, i + 1
+            continue
+        if ch == "#" and (i == 0 or text[i - 1] in " \t\n;&|"):
+            i = text.find("\n", i)
+            if i < 0:
+                break
+            continue
+        found = _HEREDOC_START.match(text, i)
         if found:
-            heredoc = found.group(1)
-        if line.strip() and not _CASE_LABEL.fullmatch(line.strip().split(None, 1)[0]):
-            lines.append(line)
-    if pending.strip():
-        lines.append(pending)
-    return lines
+            pending_heredocs.append(found.group(3))
+            i = found.end()
+            continue
+        if ch == "\n" and pending_heredocs:
+            i = _skip_heredoc_bodies(text, i + 1, pending_heredocs)
+            start = i
+            continue
+        if ch in "([":
+            depth += 1
+        elif ch in ")]":
+            if depth:
+                depth -= 1
+            elif ch == ")":                       # a `case` label at depth 0 — a pattern, not a command
+                start, in_pattern = i + 1, False
+        # Inside a `case` label the `|` joins PATTERNS, so `/tmp/*|/var/tmp/*)` is one datum: a backup
+        # agent skipping scratch dirs reached "isolate and rebuild" when it was read as a pipe.
+        separator = "\n;&" if in_pattern else "\n;&|"
+        if ch == "|" and text[:i].rstrip()[-1:] == ">":
+            separator = "\n;&"                    # `>| file` is a zsh clobber redirect, not a pipe
+        if depth == 0 and (ch in separator or (ch == "{" and text[i:i + 2] != "{{")):
+            chunk = text[start:i]
+            _emit(out, chunk)
+            if _CASE_OPENS.search(chunk):
+                in_case = True
+            elif in_case and chunk.strip() == "esac":
+                in_case = False
+            if in_case and (_CASE_OPENS.search(chunk) or text[i:i + 2] == ";;"):
+                in_pattern = True
+            start = i + 1
+        i += 1
+    _emit(out, text[start:])
+    return out
+
+
+def _emit(out: list[str], chunk: str) -> None:
+    """Record a command position, past any assignment prefix and any keyword that merely introduces
+    one. `FOO=bar /tmp/payload` runs the payload; `FOO=( /tmp/x )` and `FOO="…/tmp/x…"` only NAME it,
+    and reading their value as a command is what flagged an rsync exclude list and a bash array."""
+    chunk = chunk.strip().lstrip("&|;")
+    # `OUT=`/tmp/x`` assigns, but the substitution still RUNS — so its body is a command position of
+    # its own, and dropping it with the assignment lost a real foothold.
+    for body in _substitutions(chunk):
+        if body.strip() and body != chunk:
+            out.extend(shell_command_lines(body))
+    piece = _strip_assignments(chunk)
+    while piece:
+        out.append(piece)
+        head, _, rest = piece.partition(" ")
+        if head not in _OPENS_A_COMMAND or not rest.strip():
+            return
+        piece = _strip_assignments(rest.strip())
+
+
+def _substitutions(text: str) -> list[str]:
+    """The bodies of `$(…)` and backtick command substitutions in `text` — each one executes."""
+    bodies, i = [], 0
+    while i < len(text):
+        if text.startswith("$(", i):
+            depth, j = 1, i + 2
+            while j < len(text) and depth:
+                depth += (text[j] == "(") - (text[j] == ")")
+                j += 1
+            bodies.append(text[i + 2:j - 1])
+            i = j
+        elif text[i] == "`":
+            j = text.find("`", i + 1)
+            if j < 0:
+                break
+            bodies.append(text[i + 1:j])
+            i = j + 1
+        else:
+            i += 1
+    return bodies
+
+
+def _strip_assignments(piece: str) -> str:
+    """`piece` with any leading `NAME=value` assignments removed — '' when that is all it was."""
+    while (found := _ASSIGNMENT.match(piece)):
+        i, depth, quote = found.end(), 0, ""
+        while i < len(piece):                      # the value ends at unquoted, unnested whitespace
+            ch = piece[i]
+            if quote:
+                quote = "" if ch == quote else quote
+            elif ch in "'\"":
+                quote = ch
+            elif ch in "([":
+                depth += 1
+            elif ch in ")]":
+                depth -= 1
+            elif ch.isspace() and depth <= 0:
+                break
+            i += 1
+        piece = piece[i:].strip()
+    return piece
+
+
+def _skip_heredoc_bodies(text: str, i: int, delimiters: list[str]) -> int:
+    """Past the bodies of every heredoc opened on the line just ended. Their content is DATA — a
+    line of it beginning with a scratch path is not a command."""
+    while delimiters:
+        end = text.find("\n", i)
+        line = text[i:] if end < 0 else text[i:end]
+        if line.strip() == delimiters[0]:
+            delimiters.pop(0)
+        if end < 0:
+            return len(text)
+        i = end + 1
+    return i
 
 
 def _split_command(line: str) -> list[str]:
@@ -312,13 +471,20 @@ def _shell_context_text(entry, referenced: str) -> list[str]:
 
     `shell_lines` is the parser's answer — every Exec* directive, continuations joined. The unit BODY
     is excluded: that is where a JS template literal or a comment lives (#1393)."""
-    parts = list(entry.shell_lines) or [" ".join(entry.argv or [])]
     # A shell's code argument is a script in its own right, so each of its command lines is a command
-    # position. Never re-parsed out of the joined argv: a flag and a value are indistinguishable once
-    # flattened, which is how `tar -c /tmp/x` became a foothold.
+    # position. It is EXCISED from the joined line rather than left in both: flattened, the script has
+    # no command positions at all, so `case $d in /tmp/*|/var/tmp/*)` read its pattern alternation as
+    # a pipe and called an ordinary backup agent a foothold.
+    parts, seen_code = [], []
     for line_argv in _command_argvs(entry):
-        for code in shell_code_args(line_argv):
+        code_args = shell_code_args(line_argv)
+        seen_code += code_args
+        for code in code_args:
             parts += shell_command_lines(code)
+    for line in entry.shell_lines or [" ".join(entry.argv or [])]:
+        for code in seen_code:
+            line = line.replace(code, " ")
+        parts.append(line)
     if referenced and _runs_as_shell(entry, referenced):
         parts.append(referenced)
     return parts
