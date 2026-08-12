@@ -276,9 +276,10 @@ _HEREDOC_START = re.compile(r"<<-?\s{0,8}(\\?)([\"']?)([A-Za-z_]\w{0,63})\2")
 _OPENS_A_COMMAND = frozenset({"do", "then", "else", "elif", "eval", "{", "(", "!", "time"})
 _CASE_OPENS = re.compile(r"(?:^|\s)case\s[^;&|]{0,256}\sin$")
 _MAX_SCRIPT = 64 * 1024
+_MAX_SUBSTITUTION_DEPTH = 8
 
 
-def shell_command_lines(script: str) -> list[str]:
+def shell_command_lines(script: str, _depth: int = 0) -> list[str]:
     """The COMMAND POSITIONS of a shell script — the text following each separator that actually
     separates commands, which is the only text where a leading path means execution.
 
@@ -336,7 +337,7 @@ def shell_command_lines(script: str) -> list[str]:
             separator = "\n;&"                    # `>| file` is a zsh clobber redirect, not a pipe
         if depth == 0 and (ch in separator or (ch == "{" and text[i:i + 2] != "{{")):
             chunk = text[start:i]
-            _emit(out, chunk)
+            _emit(out, chunk, _depth)
             if _CASE_OPENS.search(chunk):
                 in_case = True
             elif in_case and chunk.strip() == "esac":
@@ -345,20 +346,23 @@ def shell_command_lines(script: str) -> list[str]:
                 in_pattern = True
             start = i + 1
         i += 1
-    _emit(out, text[start:])
+    _emit(out, text[start:], _depth)
     return out
 
 
-def _emit(out: list[str], chunk: str) -> None:
+def _emit(out: list[str], chunk: str, depth: int = 0) -> None:
     """Record a command position, past any assignment prefix and any keyword that merely introduces
     one. `FOO=bar /tmp/payload` runs the payload; `FOO=( /tmp/x )` and `FOO="…/tmp/x…"` only NAME it,
     and reading their value as a command is what flagged an rsync exclude list and a bash array."""
     chunk = chunk.strip().lstrip("&|;")
     # `OUT=`/tmp/x`` assigns, but the substitution still RUNS — so its body is a command position of
     # its own, and dropping it with the assignment lost a real foothold.
-    for body in _substitutions(chunk):
+    # Bounded: `$(` nested 2,000 deep hit Python's recursion limit and CRASHED the audit, which an
+    # attacker can put in their own payload to be scanned silently instead of reported. Real shell
+    # does not nest substitutions past two or three.
+    for body in _substitutions(chunk) if depth < _MAX_SUBSTITUTION_DEPTH else ():
         if body.strip() and body != chunk:
-            out.extend(shell_command_lines(body))
+            out.extend(shell_command_lines(body, depth + 1))
     piece = _strip_assignments(chunk)
     while piece:
         out.append(piece)

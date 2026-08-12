@@ -440,6 +440,20 @@ class TestInvocationResolver(unittest.TestCase):
                 unit.write_text(text)
                 self.assertTrue(grade.content_signal(surface._parse_systemd_unit(unit)).hit, text)
 
+    def test_hostile_shell_cannot_crash_or_stall_the_lexer(self):
+        # A crash is a fail-open an attacker can ASK FOR: `content_signal` runs per autorun entry, so
+        # nesting `$(` in their own payload made `saw audit` die instead of reporting them.
+        for name, script in (("nested $(", "$(" * 2000 + "id" + ")" * 2000),
+                             ("unterminated $(", "$(" * 20000),
+                             ("nested backticks", "`" * 4000),
+                             ("deep parens", "(" * 30000 + "id" + ")" * 30000),
+                             ("unclosed quote", '"' + "a" * 65000),
+                             ("heredoc never closed", "cat <<EOF\n" + "x\n" * 32000)):
+            with self.subTest(name):
+                self.assertIsInstance(grade.shell_command_lines(script), list)
+        # …and a genuinely nested substitution still resolves to its payload
+        self.assertIn("/tmp/.x/agent", grade.shell_command_lines("OUT=$(echo $(/tmp/.x/agent))"))
+
     def test_only_a_command_position_is_a_command(self):
         # `splitlines()` fabricates command positions. A backslash continuation, a heredoc body and a
         # `case` label each begin a physical line without beginning a command — and each carried an
