@@ -74,6 +74,8 @@ def launched_via_interpreter(entry) -> bool:
 # how the set drifts. `.dash` is not a real suffix, so suffixes stay explicit.
 _SHELL_SUFFIXES = (".sh", ".bash", ".zsh", ".ksh")
 _SHEBANG_SHELL = re.compile(rf"^#!.*\b(?:{'|'.join(POSIX_SHELLS)})\b")
+# the argument after a shell's inline-code flag, unquoted
+_INLINE_CODE = re.compile(r"""\s-(?:c|e)\s+['\"]?(.+?)['\"]?\s*$""")
 _LEADING_NOISE = "﻿ \t\r\n"      # BOM is not whitespace, so lstrip() alone leaves it
 
 
@@ -92,14 +94,19 @@ def _runs_as_shell(entry, referenced: str) -> bool:
 
 
 def _shell_context_text(entry, referenced: str) -> str:
-    """The parts of an entry that genuinely ARE a shell command line.
+    """The shell command lines of an entry, each matched on its own so a path starting one is at a
+    command position — joining them would anchor only the first.
 
     `shell_lines` is the parser's answer — every Exec* directive, continuations joined. The unit BODY
     is excluded: that is where a JS template literal or a comment lives (#1393)."""
     parts = list(entry.shell_lines) or [" ".join(entry.argv or [])]
+    # `sh -c '<line>'` makes <line> a shell line in its own right, so its FIRST token is a command
+    # position. Without splitting it out, `sh -c '/tmp/.stage &'` has no operator before the path and
+    # the operator-anchored arm never fires — a scratch foothold with no punctuation in front of it.
+    parts += [m.group(1) for part in list(parts) for m in _INLINE_CODE.finditer(part)]
     if referenced and _runs_as_shell(entry, referenced):
         parts.append(referenced)
-    return "\n".join(parts)
+    return parts
 
 
 def _referenced_text(entry) -> str:
@@ -158,7 +165,8 @@ def content_signal(entry, *, read_referenced: bool = False) -> ContentSignal:
     if payload and mechanism._under_scratch(Path(payload)):
         reasons.append("runs code from a world-writable scratch directory")
         hit = True
-    elif mechanism._SCRATCH_EXEC.search(_shell_context_text(entry, referenced)):
+    elif any(mechanism._SCRATCH_EXEC.search(line)
+             for line in _shell_context_text(entry, referenced)):
         reasons.append("runs code from a world-writable scratch directory")
         hit = True
     if analyzer.detect_dropper(text):

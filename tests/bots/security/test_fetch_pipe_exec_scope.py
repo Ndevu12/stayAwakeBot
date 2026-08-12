@@ -280,3 +280,25 @@ class TestOneAuthorityPerConcept(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestInlineCodeIsItsOwnShellLine(unittest.TestCase):
+    """`sh -c '<line>'` makes <line> a shell line in its own right, so its first token is a command
+    position. Without that, a scratch payload with no punctuation in front of it —
+    `ExecStopPost=/bin/sh -c '/tmp/.stage &'` — has no operator for the arm to anchor on and goes
+    silent. Pre-existing; the operator-anchored arm never covered it."""
+
+    def _hit(self, argv):
+        return grade.content_signal(_entry(argv)).hit
+
+    def test_a_scratch_payload_needs_no_operator_in_front_of_it(self):
+        for argv in (["/bin/sh", "-c", "/tmp/.stage &"],
+                     ["/bin/sh", "-c", "/private/tmp/.s/beacon"],
+                     ["/bin/sh", "-c", "/dev/shm/.x/agent >/dev/null"]):
+            self.assertTrue(self._hit(argv), f"silent: {argv!r}")
+
+    def test_benign_inline_lines_stay_clean(self):
+        for argv in (["/bin/sh", "-c", "exec /opt/app/run"],
+                     ["/bin/sh", "-c", "myapp --cache-dir /tmp/cache"],
+                     ["/bin/sh", "-c", "echo hi >| /tmp/lock"]):
+            self.assertFalse(self._hit(argv), f"false positive: {argv!r}")
