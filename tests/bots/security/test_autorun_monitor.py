@@ -12,7 +12,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from stayawake.bots.security.hygiene import models
+from stayawake.bots.security.hygiene import mechanism, models
 from stayawake.bots.security.hygiene.autorun import surface, provenance, grade, baseline, check_autorun
 
 _ATTR = "stayawake.bots.security.hygiene.autorun.provenance"
@@ -24,10 +24,20 @@ def _agent(**plist) -> bytes:
 
 class _Surface(unittest.TestCase):
     def setUp(self):
-        self.d = Path(tempfile.mkdtemp(prefix="autorun-"))
-        self.addCleanup(lambda: __import__("shutil").rmtree(self.d, ignore_errors=True))
-        self.state = Path(tempfile.mkdtemp(prefix="autorun-state-"))
-        self.addCleanup(lambda: __import__("shutil").rmtree(self.state, ignore_errors=True))
+        # Under HOME, because that is where real persistence dirs live (`~/Library/LaunchAgents`,
+        # `~/.config/systemd/user`). The default tempdir is `/tmp` on Linux and `/var/folders/…` on
+        # macOS, so a fixture placed there is a world-writable scratch path on one platform and not
+        # the other — which silently made every payload-location assertion below mean two different
+        # things depending on where the suite ran. Asserted, not assumed, so it fails loudly rather
+        # than inverting again.
+        home = Path(tempfile.mkdtemp(prefix="autorun-", dir=Path.home()))
+        self.assertFalse(mechanism._under_scratch(home),
+                         "fixture must not sit in a scratch dir — see the note above")
+        self.d = home / "entries"
+        self.d.mkdir()
+        self.addCleanup(lambda: __import__("shutil").rmtree(home, ignore_errors=True))
+        self.state = home / "state"
+        self.state.mkdir()
         # isolate the baseline file + force a non-CI (workstation) env so novelty is exercised
         self.env = mock.patch.dict(os.environ, {
             "SAW_AUTORUN_BASELINE": str(self.state / "baseline.json"), "CI": ""})
@@ -188,6 +198,22 @@ class TestDeadmanDaemon(_Surface):
         self.assertFalse(any("self-destruct" in r for r in sig.reasons))    # no dead-man reason
         # a signed, attributed interpreter running this benign polling script is CLEAN end-to-end
         self.assertEqual(self._run(signed=True), [])
+
+    def test_the_same_benign_script_IS_decisive_from_a_scratch_dir(self):
+        # The paired positive, so the two properties cannot drift into each other. Behaviour alone
+        # (poll + non-interactive) is never decisive; LOCATION is, on its own — no legitimate daemon
+        # installs itself into a world-writable scratch dir. Same script as the test above, so the
+        # only variable is where it lives.
+        scratch = Path("/tmp/autorun-scratch-fixture")
+        scratch.mkdir(parents=True, exist_ok=True)
+        self.addCleanup(lambda: __import__("shutil").rmtree(scratch, ignore_errors=True))
+        (scratch / "updater.js").write_text(_BENIGN_TIMER)
+        self.write("u.plist", ProgramArguments=["/usr/bin/node", str(scratch / "updater.js")],
+                   StartInterval=60)
+        (entry,) = surface.enumerate_entries()
+        sig = grade.content_signal(entry, read_referenced=True)
+        self.assertTrue(sig.hit)
+        self.assertIn("scratch", " ".join(sig.reasons))
 
     def test_inline_eval_payload_is_scanned_not_chased_as_a_path(self):
         # `node -e '<code>'`: the payload is inline in argv (seen via shape_text), not a file. The
