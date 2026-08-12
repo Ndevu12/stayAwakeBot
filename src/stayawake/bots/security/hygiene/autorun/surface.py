@@ -32,6 +32,10 @@ class AutorunEntry:
     path: Path                          # the .plist / .service / .timer file
     argv: list[str] = field(default_factory=list)
     body: str = ""
+    # Every command line this entry EXECUTES. `argv` is only the first one, so a consumer that
+    # re-derives "what shell does this run" from argv misses a unit's other Exec* directives — the
+    # parser owns the config grammar, so it publishes this rather than each consumer guessing.
+    shell_lines: list[str] = field(default_factory=list)
     persistence: list[str] = field(default_factory=list)
 
     @property
@@ -95,25 +99,47 @@ def _parse_launch_agent(path: Path) -> AutorunEntry | None:
             persistence.append("scheduled")
         if data.get("WatchPaths") or data.get("QueueDirectories"):
             persistence.append("watch-triggered")
-    return AutorunEntry(location="launch-agent", path=path, argv=argv,
-                        body=raw.decode("utf-8", "replace"), persistence=persistence)
+    body = raw.decode("utf-8", "replace")
+    # A plist plistlib cannot parse yields no argv (the entry is still surfaced), so the body is the
+    # only place its command survives — keep it in shell context rather than losing it silently.
+    return AutorunEntry(location="launch-agent", path=path, argv=argv, body=body,
+                        shell_lines=[" ".join(argv)] if argv else [body],
+                        persistence=persistence)
 
 
 # ── Linux systemd user units (ini-ish) ──────────────────────────────────────────────────
 
 _EXECSTART = re.compile(r"^\s*ExecStart\s*=\s*(.*)$", re.MULTILINE)
+# EVERY executed directive, not just the first ExecStart: a `Type=oneshot` unit may carry several
+# ExecStart=, and ExecStartPre/Post, ExecReload, ExecCondition and ExecStopPost each run a command
+# line of their own. argv holds only the first, so anything reading argv alone sees none of them.
+_EXEC_DIRECTIVE = re.compile(r"^\s*Exec[A-Za-z]*\s*=\s*(.*)$", re.MULTILINE)
+_CONTINUATION = re.compile(r"\\\s*\n\s*")
 _TIMER_KEY = re.compile(r"^\s*(OnUnitActiveSec|OnCalendar|OnBootSec|OnUnitInactiveSec)\s*=\s*(.*)$",
                         re.MULTILINE)
+
+
+def _strip_modifiers(line: str) -> str:
+    """systemd allows leading modifier chars (`-@!+:`) before the binary — strip them so what
+    remains is the real command line."""
+    line = line.strip()
+    while line[:1] in ("-", "@", "!", "+", ":"):
+        line = line[1:].lstrip()
+    return line
+
+
+def _systemd_shell_lines(text: str) -> list[str]:
+    """Every command line the unit executes, with backslash continuations joined first so a
+    directive split across lines is not truncated at the first one."""
+    joined = _CONTINUATION.sub(" ", text)
+    return [ln for ln in (_strip_modifiers(m.group(1)) for m in _EXEC_DIRECTIVE.finditer(joined)) if ln]
 
 
 def _systemd_argv(execstart: str) -> list[str]:
     """The argv of an ExecStart line. systemd allows leading modifier chars (`-@!+:`) before the
     binary — strip them so argv[0] is the real executable. A naive split is fine for provenance
     (we only need argv[0]'s path + a shape scan of the whole line)."""
-    line = execstart.strip()
-    while line[:1] in ("-", "@", "!", "+", ":"):
-        line = line[1:].lstrip()
-    return line.split()
+    return _strip_modifiers(execstart).split()
 
 
 def _parse_systemd_unit(path: Path) -> AutorunEntry | None:
@@ -131,7 +157,7 @@ def _parse_systemd_unit(path: Path) -> AutorunEntry | None:
     if re.search(r"^\s*WantedBy\s*=", text, re.MULTILINE):
         persistence.append("enabled")
     return AutorunEntry(location="systemd-user", path=path, argv=argv, body=text,
-                        persistence=persistence)
+                        shell_lines=_systemd_shell_lines(text), persistence=persistence)
 
 
 def enumerate_entries() -> list[AutorunEntry]:

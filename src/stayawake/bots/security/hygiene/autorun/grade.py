@@ -101,7 +101,10 @@ def _shell_context_text(entry, referenced: str) -> str:
     The argv line always is one; a referenced payload is one when `_runs_as_shell`. The unit BODY is
     deliberately excluded — that is where a JS template literal or a comment lives, and reading
     shell operators there is what produced the false positives this split exists to fix."""
-    parts = [" ".join(entry.argv or [])]
+    # `entry.shell_lines` is the parser's answer to "what command lines does this run" — every
+    # Exec* directive, continuations joined. Deriving it from argv here instead would miss all but
+    # the first, which is the defect this consumes the authority to avoid.
+    parts = list(entry.shell_lines) or [" ".join(entry.argv or [])]
     if referenced and _runs_as_shell(entry, referenced):
         parts.append(referenced)
     return "\n".join(parts)

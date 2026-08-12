@@ -17,7 +17,7 @@ import unittest
 from pathlib import Path
 
 from stayawake.bots.security.hygiene.mechanism import _FETCH_PIPE_EXEC, _SCRATCH_EXEC
-from stayawake.bots.security.hygiene.autorun import grade
+from stayawake.bots.security.hygiene.autorun import grade, surface
 from stayawake.bots.security.hygiene.autorun.surface import AutorunEntry
 
 
@@ -187,6 +187,71 @@ class TestReferencedScriptIsJudgedByHowItIsRun(unittest.TestCase):
     def test_a_js_payload_is_still_not_shell(self):
         self.assertFalse(self._hit("i.js", "const s = `/tmp/${p}.sock`; // cat f |/tmp/q\n",
                                    ["/usr/bin/node", "{P}"]))
+
+
+class TestEveryExecDirectiveIsShellContext(unittest.TestCase):
+    """Third round on this change, third instance of one class: a consumer deciding for itself which
+    text is shell, from `argv`, which only correlates with it.
+
+    `_EXECSTART.search()` takes the FIRST `ExecStart=` and only its first physical line, so a second
+    `ExecStart=` on a `Type=oneshot` unit, an `ExecStartPre=`, an `ExecReload=` or a backslash
+    continuation reaches `argv` never — it lives in the body alone. The fix is not another guess:
+    the parser owns the config grammar, so it publishes `shell_lines` and the grader consumes it.
+    """
+
+    FOOTHOLD = {
+        "second ExecStart on oneshot":
+            "[Service]\nType=oneshot\nExecStart=/usr/bin/true\n"
+            "ExecStart=/bin/sh -c 'sleep 1; /tmp/.stage'\n",
+        "ExecStartPre":
+            "[Service]\nExecStartPre=/bin/sh -c 'id; /tmp/.stage'\nExecStart=/usr/bin/myd\n",
+        "ExecStartPost":
+            "[Service]\nExecStart=/usr/bin/myd\nExecStartPost=/bin/sh -c 'x || /tmp/.stage'\n",
+        "ExecReload":
+            "[Service]\nExecStart=/usr/bin/myd\nExecReload=/bin/sh -c 'y && /tmp/.stage'\n",
+        "ExecCondition":
+            "[Service]\nExecCondition=/bin/sh -c 'z; /tmp/.stage'\nExecStart=/usr/bin/myd\n",
+        "backslash continuation":
+            "[Service]\nExecStart=/bin/sh -c 'sleep 1 \\\n  ; /tmp/.stage'\n",
+    }
+
+    BENIGN = {
+        "removes its socket":  "[Service]\nExecStartPre=/bin/sh -c 'rm -f /tmp/app.sock'\n"
+                               "ExecStart=/usr/bin/myd\n",
+        "kills by pidfile":    "[Service]\nExecStart=/usr/bin/myd\n"
+                               "ExecStop=/bin/sh -c 'test -f /tmp/app.pid && kill $(cat /tmp/app.pid)'\n",
+        "clobber redirect":    "[Service]\nExecStart=/usr/bin/myd\n"
+                               "ExecStartPost=/bin/sh -c 'echo started >| /tmp/app.state'\n",
+        "cache-dir on a cont": "[Service]\nExecStart=/usr/bin/myapp \\\n  --cache-dir /tmp/myapp\n",
+        "podman bind mount":   "[Service]\nExecStart=/usr/bin/podman run -v /tmp/s:/tmp/s img\n",
+        "mkdir runtime dir":   "[Service]\nExecStartPre=/bin/mkdir -p /tmp/runtime\n"
+                               "ExecStart=/usr/bin/myd\n",
+    }
+
+    def _hit(self, unit_text):
+        with tempfile.TemporaryDirectory(dir=Path.home()) as d:
+            unit = Path(d) / "u.service"
+            unit.write_text(unit_text)
+            return grade.content_signal(surface._parse_systemd_unit(unit)).hit
+
+    def test_a_scratch_payload_in_any_exec_directive_is_decisive(self):
+        for name, unit in self.FOOTHOLD.items():
+            self.assertTrue(self._hit(unit), f"silent foothold in {name}")
+
+    def test_ordinary_units_touching_tmp_stay_clean(self):
+        for name, unit in self.BENIGN.items():
+            self.assertFalse(self._hit(unit), f"false positive on {name}")
+
+    def test_the_parser_not_the_grader_owns_which_lines_are_shell(self):
+        # The property, stated directly: every executed directive reaches shell_lines. Asserting on
+        # the parser output rather than only on the verdict means a future consumer that re-derives
+        # from argv fails here first.
+        with tempfile.TemporaryDirectory(dir=Path.home()) as d:
+            unit = Path(d) / "u.service"
+            unit.write_text(self.FOOTHOLD["ExecStartPre"])
+            lines = surface._parse_systemd_unit(unit).shell_lines
+        self.assertEqual(len(lines), 2, lines)
+        self.assertTrue(any("/tmp/.stage" in ln for ln in lines), lines)
 
 
 if __name__ == "__main__":
