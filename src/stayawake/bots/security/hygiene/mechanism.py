@@ -10,7 +10,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from .models import HygieneIssue, _WIPER_NOTE
+from .models import HygieneIssue, POSIX_SHELLS, SCRATCH_ROOTS, _WIPER_NOTE
 
 #
 # Where a worm — or a GhostApproval/SymJacking write-redirect that lands a payload in a
@@ -31,11 +31,7 @@ from .models import HygieneIssue, _WIPER_NOTE
 # and `curl|python` (and `curl|python -`, stdin-as-script) fire; the FP pass proved `curl|python -m
 # json.tool` (API pretty-print), `base64 -d|python3 -m json.tool` (JWT decode) and `diff <(curl a)
 # <(curl b)` (proc-sub into a data consumer) are DATA, not exec — the bare-guard keeps them clean.
-# One authority per concept; every form below is DERIVED, so a shell or a scratch root added here
-# reaches the regexes, the membership tests and the path checks together instead of three of four.
-POSIX_SHELLS = ("sh", "bash", "zsh", "dash", "ksh")
-SCRATCH_ROOTS = ("/tmp", "/var/tmp", "/private/tmp", "/dev/shm")
-
+# Patterns are DERIVED from the vocabulary in models, never restated.
 _FETCH = r"(?:curl|wget)"
 _POSIX_SHELL = rf"(?:{'|'.join(POSIX_SHELLS)})"
 _SCRIPT_INTERP = r"(?:python[23]?|perl|ruby|node|php)"

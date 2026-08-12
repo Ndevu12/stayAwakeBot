@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from stayawake.utils import pathsafe
-from ..models import HygieneIssue, _WIPER_NOTE
+from ..models import HygieneIssue, POSIX_SHELLS, _WIPER_NOTE
 from .. import mechanism
 from ...taint import analyzer
 from ...taint.destructive import detect_destructive
@@ -70,10 +70,12 @@ def launched_via_interpreter(entry) -> bool:
     return bool(entry.argv) and _payload_path(entry) not in (None, entry.argv[0])
 
 
-# Derived from mechanism.POSIX_SHELLS, never restated — the same five names in a third spelling is
+# Derived from POSIX_SHELLS, never restated — the same five names in a third spelling is
 # how the set drifts. `.dash` is not a real suffix, so suffixes stay explicit.
 _SHELL_SUFFIXES = (".sh", ".bash", ".zsh", ".ksh")
-_SHEBANG_SHELL = re.compile(rf"^#!.*\b(?:{'|'.join(mechanism.POSIX_SHELLS)})\b")
+_SHEBANG_SHELL = re.compile(rf"^#!.*\b(?:{'|'.join(POSIX_SHELLS)})\b")
+# the argument after a shell's inline-code flag, unquoted
+_INLINE_CODE = re.compile(r"""\s-(?:c|e)\s+['\"]?(.+?)['\"]?\s*$""")
 _LEADING_NOISE = "﻿ \t\r\n"      # BOM is not whitespace, so lstrip() alone leaves it
 
 
@@ -83,7 +85,7 @@ def _runs_as_shell(entry, referenced: str) -> bool:
     `argv[0]` being a POSIX shell is authoritative — the payload cannot rename that away. Shebang and
     suffix are secondary, since the payload author chooses both."""
     argv = entry.argv or []
-    if argv and os.path.basename(argv[0]).split(".")[0] in mechanism.POSIX_SHELLS:
+    if argv and os.path.basename(argv[0]).split(".")[0] in POSIX_SHELLS:
         return True
     payload = _payload_path(entry)
     if payload and payload.lower().endswith(_SHELL_SUFFIXES):
@@ -92,14 +94,19 @@ def _runs_as_shell(entry, referenced: str) -> bool:
 
 
 def _shell_context_text(entry, referenced: str) -> str:
-    """The parts of an entry that genuinely ARE a shell command line.
+    """The shell command lines of an entry, each matched on its own so a path starting one is at a
+    command position — joining them would anchor only the first.
 
     `shell_lines` is the parser's answer — every Exec* directive, continuations joined. The unit BODY
     is excluded: that is where a JS template literal or a comment lives (#1393)."""
     parts = list(entry.shell_lines) or [" ".join(entry.argv or [])]
+    # `sh -c '<line>'` makes <line> a shell line in its own right, so its FIRST token is a command
+    # position. Without splitting it out, `sh -c '/tmp/.stage &'` has no operator before the path and
+    # the operator-anchored arm never fires — a scratch foothold with no punctuation in front of it.
+    parts += [m.group(1) for part in list(parts) for m in _INLINE_CODE.finditer(part)]
     if referenced and _runs_as_shell(entry, referenced):
         parts.append(referenced)
-    return "\n".join(parts)
+    return parts
 
 
 def _referenced_text(entry) -> str:
@@ -158,7 +165,8 @@ def content_signal(entry, *, read_referenced: bool = False) -> ContentSignal:
     if payload and mechanism._under_scratch(Path(payload)):
         reasons.append("runs code from a world-writable scratch directory")
         hit = True
-    elif mechanism._SCRATCH_EXEC.search(_shell_context_text(entry, referenced)):
+    elif any(mechanism._SCRATCH_EXEC.search(line)
+             for line in _shell_context_text(entry, referenced)):
         reasons.append("runs code from a world-writable scratch directory")
         hit = True
     if analyzer.detect_dropper(text):

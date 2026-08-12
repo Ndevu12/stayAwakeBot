@@ -5,6 +5,12 @@ Leaf module (no dependency on the check submodules) so every check imports it wi
 """
 from __future__ import annotations
 
+
+# Host vocabulary — WHERE things live and WHAT they are called, shared by the probes. Detection
+# PATTERNS (what a threat looks like) stay with their detector; only the nouns live here.
+POSIX_SHELLS = ("sh", "bash", "zsh", "dash", "ksh")
+SCRATCH_ROOTS = ("/tmp", "/var/tmp", "/private/tmp", "/dev/shm")
+
 from dataclasses import dataclass, asdict
 from typing import Any
 

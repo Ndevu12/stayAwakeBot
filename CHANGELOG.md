@@ -14,6 +14,7 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Fixed
+- **`saw audit` now catches a start-up entry that runs a scratch-directory payload with no punctuation in front of it**, such as a systemd `ExecStopPost=/bin/sh -c '/tmp/x &'`. It was reported only when a shell operator preceded the path.
 - **`saw audit` no longer reports a start-up entry as an unattributable foothold on ordinary code.**
   A shell-shaped check was being applied to payload text written in other languages, where the same
   punctuation is routine — a JavaScript template literal, a default value, a comment. Signed,
