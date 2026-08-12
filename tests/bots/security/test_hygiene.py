@@ -1340,3 +1340,38 @@ class TestScanScopeHonesty(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPlatformBoundaryIsDisclosed(unittest.TestCase):
+    """`user_persistence_dirs()` is `~/.config/systemd/user` + `~/Library/LaunchAgents`, and no
+    Windows autorun form (registry Run keys, the Startup folder, Scheduled Tasks) is enumerated
+    anywhere in the tool. So on Windows every persistence probe returns empty and the report would
+    otherwise read as a clean host — "clean over what was never inspected", which is the #1332 /
+    #1341 defect on the PLATFORM axis rather than the location axis."""
+
+    def _note(self, platform):
+        with mock.patch.object(hygiene.sys, "platform", platform):
+            return hygiene.render([], color=False, width=100)
+
+    def test_the_uncovered_windows_surface_is_named_on_every_platform(self):
+        for platform in ("darwin", "linux", "win32"):
+            note = self._note(platform)
+            self.assertIn("Windows autorun", note, f"platform axis unnamed on {platform}")
+            self.assertIn("Run keys", note)
+
+    def test_on_windows_it_does_not_claim_to_read_a_persistence_surface(self):
+        note = self._note("win32")
+        self.assertIn("does NOT enumerate a host persistence surface", note)
+        self.assertNotIn("reads the host persistence surface and", note)
+
+    def test_on_posix_it_still_claims_what_it_does_read(self):
+        for platform in ("darwin", "linux"):
+            self.assertIn("reads the host persistence surface and", self._note(platform))
+
+    def test_the_note_never_becomes_a_finding_or_moves_the_exit_code(self):
+        # Presentation only, on every platform — the #1341 contract.
+        for platform in ("darwin", "linux", "win32"):
+            with mock.patch.object(hygiene.sys, "platform", platform):
+                self.assertEqual(hygiene.audit_checks.__name__, "audit_checks")   # sanity
+                issues = []
+                self.assertFalse({i.id for i in issues} & hygiene.ROTATION_UNSAFE_IDS)

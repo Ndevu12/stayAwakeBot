@@ -21,6 +21,7 @@ default audit never pulls it in (see host_artifacts.check_host_artifacts).
 """
 from __future__ import annotations
 
+import sys
 import subprocess          # noqa: F401  re-exported so tests can patch hygiene.subprocess.run globally
 from pathlib import Path   # noqa: F401  re-exported so tests can patch hygiene.Path.home globally
 from typing import Callable
@@ -170,7 +171,8 @@ def _scope_note(issues: list[HygieneIssue], *, color: bool, width: int) -> list[
     """REVEAL what this audit does not scan (#1341), so no result is read as a host all-clear over the
     locations supply-chain malware stages in. These are tracked GAPS on a path to closure (#1376 global
     npm prefix, #1377 Docker images/volumes, #1378 `/var/tmp`-class survivors and other mounts, #1373
-    account-level state), never accepted out-of-scope. Always shown; presentation only — never a
+    account-level state, and the Windows autorun surface — enumerated nowhere in the tool, so a
+    Windows host produces no persistence findings at all), never accepted out-of-scope. Always shown; presentation only — never a
     finding, never affects the verdict or exit code.
 
     The probed drop-paths are named from what the code ACTUALLY probes — home, `/tmp`, and the system
@@ -191,9 +193,18 @@ def _scope_note(issues: list[HygieneIssue], *, color: bool, width: int) -> list[
     # full-coverage wording — restating the over-claim the verdict just withdrew, in the highest-stakes
     # state of all. Presence of the id is the honest question here, not which verdict outranks which.
     surface_unverified = bool({i.id for i in issues} & UNVERIFIED_PERSISTENCE_IDS)
-    surface_read = ("reads the part of the host persistence surface it could read, plus a targeted set "
-                    "of known drop-paths" if surface_unverified else
-                    "reads the host persistence surface and a targeted set of known drop-paths")
+    if sys.platform.startswith("win"):
+        # `user_persistence_dirs()` is `~/.config/systemd/user` + `~/Library/LaunchAgents`, so on
+        # Windows it enumerates NOTHING and every autorun probe returns empty. Claiming to read a
+        # surface here would make "no findings" mean "clean" when it means "not examined" — the same
+        # over-claim #1332 removed on the readability axis, one axis over.
+        surface_read = ("does NOT enumerate a host persistence surface on this platform — it reads "
+                        "only a targeted set of known drop-paths")
+    elif surface_unverified:
+        surface_read = ("reads the part of the host persistence surface it could read, plus a "
+                        "targeted set of known drop-paths")
+    else:
+        surface_read = "reads the host persistence surface and a targeted set of known drop-paths"
     # "Scope your response past what is listed here" presupposes an active compromise whose extent may
     # exceed the list — so it is gated on that EXACT tier, asked of `incident_tier()`, the same
     # authority `_banner` consults. Credential exposure is deliberately NOT that: the run says the
@@ -219,7 +230,9 @@ def _scope_note(issues: list[HygieneIssue], *, color: bool, width: int) -> list[
         # docs/SECURITY_ARCHITECTURE.md carries the concrete list and the tracking issues.
         f"{surface_read} (home, /tmp, the system temp dir, the working directory). It does NOT scan "
         "other survivor temp dirs, the global npm prefix, Docker images/volumes, other mounted "
-        "filesystems, or account/organization-level state such as self-hosted runner registrations. "
+        "filesystems, account/organization-level state such as self-hosted runner registrations, "
+        "or Windows autorun locations (registry Run keys, the Startup folder, Scheduled Tasks) — "
+        "persistence enumeration is macOS and Linux user-scope only. "
         f"{means} See docs/SECURITY_ARCHITECTURE.md for the full scope statement.",
         indent=2, width=width)
 
