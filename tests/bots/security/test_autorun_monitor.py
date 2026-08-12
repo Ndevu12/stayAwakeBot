@@ -221,7 +221,7 @@ class TestDeadmanDaemon(_Surface):
         inline = "const os=require('os'),fs=require('fs');fs.rmSync(os.homedir(),{recursive:true});"
         entry = surface.AutorunEntry(location="launch-agent", path=Path("/x.plist"),
                                      argv=["/usr/bin/node", "-e", inline], body="")
-        self.assertEqual(grade._payload_path(entry), "/usr/bin/node")   # no phantom path from -e
+        self.assertIsNone(grade._payload_path(entry))   # no path at all: inline code runs no file
         self.assertFalse(grade.launched_via_interpreter(entry))
         self.assertTrue(grade.content_signal(entry).hit)               # still caught via shape_text
 

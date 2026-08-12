@@ -40,18 +40,43 @@ _INTERPRETERS = frozenset({
     "sh", "bash", "zsh", "dash", "ksh", "osascript", "tsx", "ts-node"})
 
 
-# Inline-eval flags: the code is IN argv (already seen via `shape_text()`), not in a script file — so
-# `node -e '<code>'` / `python -c '<code>'` must NOT mistake the code argument for a path to read.
-_INLINE_EVAL_FLAGS = frozenset({"-e", "--eval", "-c", "-p", "--print", "-"})
+# Inline-code flags PER INTERPRETER, because they conflict: `-m` names a module for python but is job
+# control for a shell, and `-c` is an archive for tar and a config file for redis. The code is IN argv
+# (already seen via `shape_text()`), so its argument must never be mistaken for a path to read.
+_CODE_FLAGS = {
+    **{shell: frozenset({"-c"}) for shell in POSIX_SHELLS},
+    "python": frozenset({"-c"}), "python2": frozenset({"-c"}), "python3": frozenset({"-c"}),
+    "node": frozenset({"-e", "--eval", "-p", "--print"}),
+    "nodejs": frozenset({"-e", "--eval", "-p", "--print"}),
+    "deno": frozenset({"-e", "--eval"}), "bun": frozenset({"-e", "--eval"}),
+    "ruby": frozenset({"-e"}), "perl": frozenset({"-e", "-E"}), "php": frozenset({"-r"}),
+    "osascript": frozenset({"-e"}),
+}
+_MODULE_FLAGS = {"python": frozenset({"-m"}), "python2": frozenset({"-m"}),
+                 "python3": frozenset({"-m"})}
 
+# A shell's `-c` flag, including the clustered short forms a shell accepts (`bash -lc`, `sh -ic`).
+# `-c` must end the cluster, since it consumes the next argument.
+_SHELL_C_FLAG = re.compile(r"-[A-Za-z]{0,4}c")
 
-# Exec wrappers stand BEFORE the real program (`env A=1 bash -c …`, `sudo -u x node app.js`). Resolving
-# them is what lets one walk answer for every consumer instead of each guessing from argv[0].
+# Programs whose OWN `-c` carries a shell command string — they exec a shell themselves, so their
+# operand sits between the program and the flag and the owner test cannot see it.
+_SHELL_COMMAND_CARRIERS = frozenset({"su", "runuser", "script", "flock"})
+
+# Programs that execute the command in ANOTHER root, container or host. A `/tmp` path there is not a
+# foothold on THIS machine, and `autorun-unattributed-foothold` means a live foothold on this one.
+# A DENYLIST is the right polarity: the host-level prefix families are open-ended (49 measured —
+# su/runuser/chrt/taskset/systemd-run/strace/caffeinate/direnv/poetry/…, and more exist), so an
+# allowlist of them carries an unbounded false-negative surface. This list is ~10 deliberate names.
+_BOUNDARY_PROGRAMS = frozenset({"docker", "podman", "nerdctl", "kubectl", "lxc", "machinectl",
+                                "distrobox-enter", "chroot", "flatpak", "ssh"})
+
+# Exec wrappers stand BEFORE the real program (`env A=1 bash -c …`, `sudo -u x node app.js`). Used
+# ONLY to find which file an entry runs — never to decide whether a code argument is shell.
 _EXEC_WRAPPERS = frozenset({"env", "sudo", "nohup", "nice", "setsid", "exec", "command", "stdbuf",
                             "time", "doas"})
 # Wrapper options that consume the NEXT token. Per wrapper because they conflict: `stdbuf -i` takes a
-# value, `env -i` does not. Without this the value reads as the program and `sudo -u nobody sh -c
-# <payload>` goes silent — measured on seven wrapper forms.
+# value, `env -i` does not.
 _WRAPPER_VALUE_OPTS = {
     "sudo":   frozenset({"-u", "--user", "-g", "--group", "-p", "--prompt", "-C", "--close-from",
                          "-h", "--host", "-r", "--role", "-t", "--type", "-U", "--other-user"}),
@@ -64,9 +89,6 @@ _WRAPPER_VALUE_OPTS = {
 _SYSTEM_BIN_DIRS = frozenset({"/bin", "/usr/bin", "/usr/local/bin", "/sbin", "/usr/sbin",
                               "/opt/homebrew/bin", "/opt/local/bin"})
 _ASSIGNMENT = re.compile(r"[A-Za-z_]\w{0,255}=")
-# Flags whose ARGUMENT is code rather than a path. `-m` is neither: it names a module.
-_CODE_FLAGS = frozenset({"-c", "-e", "--eval", "-p", "--print", "-Command", "-EncodedCommand"})
-_MODULE_FLAGS = frozenset({"-m", "--module"})
 
 
 @dataclass(frozen=True)
@@ -82,34 +104,65 @@ class Invocation:
     code_args: tuple[str, ...] = ()      # arguments that ARE code, not paths
 
 
+def shell_code_args(argv) -> tuple[str, ...]:
+    """The arguments of a command line that are SHELL code.
+
+    Decided AT THE FLAG — the token that owns `-c` — never by resolving the program. `tar -c
+    /tmp/staging` and `sudo -u nobody /bin/sh -c /tmp/x` differ only in that token, and every attempt
+    to answer it by walking the prefix went silent on some real path: NixOS `/run/wrappers/bin/sudo`,
+    linuxbrew, `/usr/local/sbin`, and 49 measured prefix families (`su`, `chrt`, `systemd-run`,
+    `caffeinate`, `direnv`, `poetry run`, …). Anchoring on the shell needs none of them enumerated."""
+    argv = list(argv or [])
+    if any(_interpreter_base(a) in _BOUNDARY_PROGRAMS for a in argv):
+        return ()
+    code: list[str] = []
+    for n, arg in enumerate(argv[:-1]):
+        if n == 0 or not _SHELL_C_FLAG.fullmatch(arg):
+            continue
+        if _interpreter_base(argv[n - 1]) in POSIX_SHELLS or any(
+                _interpreter_base(a) in _SHELL_COMMAND_CARRIERS for a in argv[:n]):
+            code.append(argv[n + 1])
+    # `env -S "bash -c '<payload>'"` packs a whole command line into one argument.
+    for n, arg in enumerate(argv[:-1]):
+        if arg in ("-S", "--split-string") and _interpreter_base(argv[n - 1]) == "env":
+            code.extend(shell_code_args(_split_command(argv[n + 1])))
+    return tuple(code)
+
+
 def resolve_invocation(argv) -> Invocation:
-    """Resolve ONE command line. Per command line, never per entry: `entry.argv` is only the first of
-    them, and `_invocations` is what covers the rest."""
+    """Resolve ONE command line — which file it runs. Per command line, never per entry: `entry.argv`
+    is only the first of them, and `_invocations` covers the rest.
+
+    Every field is a POSITIVE identification or absent. A walk that loses the line returns no payload
+    rather than a guess: guessing resolved `su -c '<payload>' user` to the command STRING as a path,
+    which matched the scratch check by luck and handed an invented path to the file reader."""
     argv = list(argv or [])
     if not argv:
         return Invocation()
     i = _program_index(argv)
-    # A program is never a bare flag: landing on one means the walk lost the line, so fall back to
-    # argv[0] — the un-resolved answer — rather than inventing a payload out of an option.
     if i >= len(argv) or argv[i].startswith("-"):
-        return Invocation(interpreter=argv[0], payload_path=argv[0])
+        return Invocation()                    # the walk lost the line — say so, do not invent
     interp, rest = argv[i], argv[i + 1:]
     base = _interpreter_base(interp)
     if base not in _INTERPRETERS:
         return Invocation(interpreter=interp, payload_path=interp)
+    code_flags = _CODE_FLAGS.get(base, frozenset())
+    module_flags = _MODULE_FLAGS.get(base, frozenset())
     code, path = [], None
     for n, arg in enumerate(rest):
-        if arg in _CODE_FLAGS:
+        if arg in code_flags or (base in POSIX_SHELLS and _SHELL_C_FLAG.fullmatch(arg)):
             if n + 1 < len(rest):
                 code.append(rest[n + 1])
             break              # what follows the code is an argument TO it ($0, $@) — never a path
-        if arg in _MODULE_FLAGS:
+        if arg in module_flags:
             break              # a module NAME, and what follows is the module's own argv
         if not arg.startswith("-"):
             path = arg
             break
+    # No script argument means there is no file this runs: the code is inline, or it names a module.
+    # Reporting the interpreter would send the reader 133 KB of `/bin/sh` to content-scan.
     return Invocation(interpreter=interp, is_posix_shell=base in POSIX_SHELLS,
-                      payload_path=path or interp, code_args=tuple(code))
+                      payload_path=path, code_args=tuple(code))
 
 
 def _program_index(argv: list[str]) -> int:
@@ -150,17 +203,51 @@ def _interpreter_base(arg: str) -> str:
     return os.path.basename(arg).split(".")[0]
 
 
-def _invocations(entry) -> list[Invocation]:
-    """Every command line the entry executes, resolved. `argv` is only the FIRST — a unit's second
-    `ExecStart=`, its `ExecStartPre/Post=`, `ExecReload=` or `ExecCondition=` each run their own, and a
-    payload hides in one just as well (measured: five such forms went silent when only argv was read)."""
+def _command_argvs(entry) -> list[list[str]]:
+    """Every command line the entry executes, as argv. `entry.argv` is only the FIRST — a unit's
+    second `ExecStart=`, its `ExecStartPre/Post=`, `ExecReload=` or `ExecCondition=` each run their
+    own, and a payload hides in one just as well (five such forms went silent when only argv was
+    read). A parser with no command line to give falls back to the raw body; splitting that is 66ms
+    per entry for nothing, and the body is already matched as a part in its own right."""
     argv = list(entry.argv or [])
     primary = " ".join(argv)
-    # A parser with no command line to give falls back to the raw body; splitting that is 66ms of
-    # meaningless work per entry, and the body is already matched as a part in its own right.
-    return [resolve_invocation(argv)] + [
-        resolve_invocation(_split_command(line))
-        for line in entry.shell_lines if line != primary and line != entry.body]
+    return [argv] + [_split_command(line) for line in entry.shell_lines
+                     if line != primary and line != entry.body]
+
+
+_HEREDOC = re.compile(r"<<-?\s{0,8}[\"']?([A-Za-z_]\w{0,63})")
+_CASE_LABEL = re.compile(r"[^;&|(]{0,256}\)")
+
+
+def shell_command_lines(script: str) -> list[str]:
+    """The lines of a shell script that are COMMAND POSITIONS.
+
+    `splitlines()` is not that, and the difference is a false-positive class: a backslash
+    continuation, a heredoc body and a `case` label each begin a physical line without beginning a
+    command, so a scratch path sitting there was read as execution. Measured on ordinary software —
+    a restic agent's `rm -rf \\` cleanup list, a heredoc data list, and `/tmp/*) echo scratch ;;` —
+    each reached `autorun-unattributed-foothold` on a signed, attributed entry."""
+    lines: list[str] = []
+    pending, heredoc = "", None
+    for raw in script.splitlines():
+        if heredoc is not None:
+            if raw.strip() == heredoc:
+                heredoc = None
+            continue
+        line = pending + raw
+        pending = ""
+        stripped = line.rstrip()
+        if (len(stripped) - len(stripped.rstrip("\\"))) % 2:      # an odd trailing run continues it
+            pending = stripped[:-1]
+            continue
+        found = _HEREDOC.search(line)
+        if found:
+            heredoc = found.group(1)
+        if line.strip() and not _CASE_LABEL.fullmatch(line.strip().split(None, 1)[0]):
+            lines.append(line)
+    if pending.strip():
+        lines.append(pending)
+    return lines
 
 
 def _split_command(line: str) -> list[str]:
@@ -210,12 +297,12 @@ def _shell_context_text(entry, referenced: str) -> list[str]:
     `shell_lines` is the parser's answer — every Exec* directive, continuations joined. The unit BODY
     is excluded: that is where a JS template literal or a comment lives (#1393)."""
     parts = list(entry.shell_lines) or [" ".join(entry.argv or [])]
-    # A shell's code argument is a script in its own right, so each of ITS lines is a command
-    # position. Taken from the resolver, never re-parsed out of the joined argv: a flag and a value
-    # are indistinguishable once flattened, which is how `tar -c /tmp/x` became a foothold.
-    for inv in _invocations(entry):
-        if inv.is_posix_shell:
-            parts += [line for arg in inv.code_args for line in arg.splitlines() if line.strip()]
+    # A shell's code argument is a script in its own right, so each of its command lines is a command
+    # position. Never re-parsed out of the joined argv: a flag and a value are indistinguishable once
+    # flattened, which is how `tar -c /tmp/x` became a foothold.
+    for line_argv in _command_argvs(entry):
+        for code in shell_code_args(line_argv):
+            parts += shell_command_lines(code)
     if referenced and _runs_as_shell(entry, referenced):
         parts.append(referenced)
     return parts
