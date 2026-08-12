@@ -14,6 +14,14 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Fixed
+- **`saw audit` no longer reports a start-up entry as an unattributable foothold on ordinary code.**
+  A shell-shaped check was being applied to payload text written in other languages, where the same
+  punctuation is routine — a JavaScript template literal, a default value, a comment. Signed,
+  package-installed software could be reported as active host persistence, which withholds the
+  rotation all-clear and exits `3`. Detection of the real shapes is unchanged, including start-up
+  entries that run code from a world-writable scratch directory.
+
+### Fixed
 - **An audit check that could not be completed no longer looks like an ordinary review note.**
   When `saw audit` cannot fully read the persistence surface it withholds its all-clear and says so
   — but that "could not establish this" state was rendered identically to a low-priority nudge, so a
