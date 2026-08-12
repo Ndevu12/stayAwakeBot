@@ -302,3 +302,46 @@ class TestInlineCodeIsItsOwnShellLine(unittest.TestCase):
                      ["/bin/sh", "-c", "myapp --cache-dir /tmp/cache"],
                      ["/bin/sh", "-c", "echo hi >| /tmp/lock"]):
             self.assertFalse(self._hit(argv), f"false positive: {argv!r}")
+
+
+class TestInvocationResolver(unittest.TestCase):
+    """One walk answers what an entry executes. Four consumers used to answer it separately — from
+    argv[0], or from a regex over the joined argv — and disagreed. Flattening argv made a flag and a
+    value indistinguishable, which is how `tar -c /tmp/staging` became a foothold on a signed binary
+    while a multi-line `sh -c` script went silent."""
+
+    def _inv(self, argv):
+        return grade.resolve_invocation(_entry(argv))
+
+    def test_wrappers_resolve_to_the_real_interpreter(self):
+        inv = self._inv(["/usr/bin/env", "A=1", "bash", "-c", "/tmp/.x/agent"])
+        self.assertTrue(inv.is_posix_shell)
+        self.assertEqual(inv.code_args, ("/tmp/.x/agent",))
+
+    def test_a_non_shell_owning_the_flag_yields_no_shell_code(self):
+        for argv in (["/usr/bin/tar", "-c", "/tmp/staging"],
+                     ["/usr/local/bin/redis-server", "-c", "/tmp/redis.conf"],
+                     ["/usr/bin/sort", "-c", "/tmp/q.txt"]):
+            self.assertFalse(self._inv(argv).is_posix_shell, argv)
+            self.assertFalse(grade.content_signal(_entry(argv)).hit, argv)
+
+    def test_code_is_code_even_for_a_non_shell_interpreter(self):
+        # `node -e` IS code, but not SHELL code — so it must never reach the shell-grammar matcher.
+        inv = self._inv(["/usr/bin/node", "-e", "x = 1"])
+        self.assertEqual(inv.code_args, ("x = 1",))
+        self.assertFalse(inv.is_posix_shell)
+
+    def test_every_code_flag_is_taken_not_just_the_first(self):
+        self.assertEqual(self._inv(["/bin/sh", "-c", "a", "-c", "/tmp/.x/agent"]).code_args,
+                         ("a", "/tmp/.x/agent"))
+
+    def test_a_module_name_is_not_a_path(self):
+        self.assertEqual(self._inv(["/usr/bin/python3", "-m", "pkg", "/tmp/x.py"]).payload_path,
+                         "/tmp/x.py")
+
+    def test_a_multi_line_shell_script_is_seen_line_by_line(self):
+        argv = ["/bin/sh", "-c", "export PATH=/usr/bin\numask 077\nexec /tmp/.x/agent &"]
+        self.assertTrue(grade.content_signal(_entry(argv)).hit)
+        # and the ';'-separated form it used to differ from by one character
+        self.assertTrue(grade.content_signal(
+            _entry(["/bin/sh", "-c", "export PATH=/usr/bin; umask 077; exec /tmp/.x/agent &"])).hit)

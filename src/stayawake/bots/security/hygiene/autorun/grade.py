@@ -44,23 +44,69 @@ _INTERPRETERS = frozenset({
 _INLINE_EVAL_FLAGS = frozenset({"-e", "--eval", "-c", "-p", "--print", "-"})
 
 
+# Exec wrappers stand BEFORE the real program (`env A=1 bash -c …`, `sudo -u x node app.js`). Resolving
+# them is what lets one walk answer for every consumer instead of each guessing from argv[0].
+_EXEC_WRAPPERS = frozenset({"env", "sudo", "nohup", "nice", "setsid", "exec", "command", "stdbuf",
+                            "time", "doas"})
+# Flags whose ARGUMENT is code rather than a path. `-m` is neither: it names a module.
+_CODE_FLAGS = frozenset({"-c", "-e", "--eval", "-p", "--print", "-Command", "-EncodedCommand"})
+_MODULE_FLAGS = frozenset({"-m", "--module"})
+
+
+@dataclass(frozen=True)
+class Invocation:
+    """What an entry actually executes, resolved ONCE.
+
+    Four consumers used to answer this separately — which file to read, whether referenced content is
+    shell, which arguments are code, which lines take shell grammar — from argv[0] or from a regex over
+    the joined argv. Four partial answers to one question is how they disagreed (#1393)."""
+    interpreter: str | None = None       # the real program, wrappers stripped
+    is_posix_shell: bool = False
+    payload_path: str | None = None      # the file it executes, if any
+    code_args: tuple[str, ...] = ()      # arguments that ARE code, not paths
+
+
+def resolve_invocation(entry) -> Invocation:
+    argv = list(entry.argv or [])
+    if not argv:
+        return Invocation()
+    # Skip wrappers and the VAR=value assignments they carry, so `env A=1 bash -c` resolves to bash.
+    i = 0
+    while i < len(argv) and (_base(argv[i]) in _EXEC_WRAPPERS or "=" in argv[i].partition("=")[1]):
+        i += 1
+        while i < len(argv) and "=" in argv[i].partition("=")[1]:
+            i += 1
+    if i >= len(argv):
+        return Invocation(interpreter=argv[0], payload_path=argv[0])
+    interp, rest = argv[i], argv[i + 1:]
+    base = _base(interp)
+    if base not in _INTERPRETERS:
+        return Invocation(interpreter=interp, payload_path=interp)
+    code, path, skip = [], None, False
+    for n, arg in enumerate(rest):
+        if skip:
+            skip = False
+            continue
+        if arg in _CODE_FLAGS:
+            if n + 1 < len(rest):
+                code.append(rest[n + 1])
+            skip = True
+        elif arg in _MODULE_FLAGS:
+            skip = True                       # a module NAME, never a path to read
+        elif path is None and not arg.startswith("-"):
+            path = arg
+    return Invocation(interpreter=interp, is_posix_shell=base in POSIX_SHELLS,
+                      payload_path=path or interp, code_args=tuple(code))
+
+
+def _base(arg: str) -> str:
+    return os.path.basename(arg).split(".")[0]
+
+
 def _payload_path(entry) -> str | None:
-    """The path of the code the entry actually RUNS. Normally argv[0]; but when argv[0] is a script
-    INTERPRETER (`node`, `python`, `sh`, …), it is the first non-flag script ARGUMENT — the payload the
-    interpreter executes. So a `node /path/daemon.js` autorun is read at daemon.js, not at the trusted
-    `node` binary (which would launder the payload past the content-shape engines). An inline-eval
-    invocation (`node -e '<code>'`) has no script file — the code is already in argv (seen via
-    `shape_text()`), so fall back to argv[0] rather than treat the code as a phantom path."""
-    if not entry.argv:
-        return None
-    if os.path.basename(entry.argv[0]).split(".")[0] in _INTERPRETERS:
-        args = entry.argv[1:]
-        if any(a in _INLINE_EVAL_FLAGS for a in args):
-            return entry.argv[0]
-        for arg in args:
-            if not arg.startswith("-"):        # the first non-flag argument is the script
-                return arg
-    return entry.argv[0]
+    """The path of the code the entry RUNS — the script argument when an interpreter is argv[0], so a
+    `node /path/daemon.js` autorun is read at daemon.js, not at the trusted `node`."""
+    return resolve_invocation(entry).payload_path
 
 
 def launched_via_interpreter(entry) -> bool:
@@ -74,18 +120,13 @@ def launched_via_interpreter(entry) -> bool:
 # how the set drifts. `.dash` is not a real suffix, so suffixes stay explicit.
 _SHELL_SUFFIXES = (".sh", ".bash", ".zsh", ".ksh")
 _SHEBANG_SHELL = re.compile(rf"^#!.*\b(?:{'|'.join(POSIX_SHELLS)})\b")
-# the argument after a shell's inline-code flag, unquoted
-_INLINE_CODE = re.compile(r"""\s-(?:c|e)\s+['\"]?(.+?)['\"]?\s*$""")
 _LEADING_NOISE = "﻿ \t\r\n"      # BOM is not whitespace, so lstrip() alone leaves it
 
 
 def _runs_as_shell(entry, referenced: str) -> bool:
-    """Whether the referenced payload is EXECUTED as a shell script.
-
-    `argv[0]` being a POSIX shell is authoritative — the payload cannot rename that away. Shebang and
-    suffix are secondary, since the payload author chooses both."""
-    argv = entry.argv or []
-    if argv and os.path.basename(argv[0]).split(".")[0] in POSIX_SHELLS:
+    """Whether the referenced payload is EXECUTED as a shell script. The resolver is authoritative —
+    the payload cannot rename that away. Shebang and suffix are secondary, being author-chosen."""
+    if resolve_invocation(entry).is_posix_shell:
         return True
     payload = _payload_path(entry)
     if payload and payload.lower().endswith(_SHELL_SUFFIXES):
@@ -93,17 +134,19 @@ def _runs_as_shell(entry, referenced: str) -> bool:
     return bool(_SHEBANG_SHELL.match(referenced.lstrip(_LEADING_NOISE)))
 
 
-def _shell_context_text(entry, referenced: str) -> str:
+def _shell_context_text(entry, referenced: str) -> list[str]:
     """The shell command lines of an entry, each matched on its own so a path starting one is at a
     command position — joining them would anchor only the first.
 
     `shell_lines` is the parser's answer — every Exec* directive, continuations joined. The unit BODY
     is excluded: that is where a JS template literal or a comment lives (#1393)."""
     parts = list(entry.shell_lines) or [" ".join(entry.argv or [])]
-    # `sh -c '<line>'` makes <line> a shell line in its own right, so its FIRST token is a command
-    # position. Without splitting it out, `sh -c '/tmp/.stage &'` has no operator before the path and
-    # the operator-anchored arm never fires — a scratch foothold with no punctuation in front of it.
-    parts += [m.group(1) for part in list(parts) for m in _INLINE_CODE.finditer(part)]
+    # A shell's code argument is a script in its own right, so each of ITS lines is a command
+    # position. Taken from the resolver, never re-parsed out of the joined argv: a flag and a value
+    # are indistinguishable once flattened, which is how `tar -c /tmp/x` became a foothold.
+    inv = resolve_invocation(entry)
+    if inv.is_posix_shell:
+        parts += [line for arg in inv.code_args for line in arg.splitlines() if line.strip()]
     if referenced and _runs_as_shell(entry, referenced):
         parts.append(referenced)
     return parts
