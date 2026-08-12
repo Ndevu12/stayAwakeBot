@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from stayawake.utils import pathsafe
-from ..models import HygieneIssue, _WIPER_NOTE
+from ..models import HygieneIssue, POSIX_SHELLS, _WIPER_NOTE
 from .. import mechanism
 from ...taint import analyzer
 from ...taint.destructive import detect_destructive
@@ -70,10 +70,10 @@ def launched_via_interpreter(entry) -> bool:
     return bool(entry.argv) and _payload_path(entry) not in (None, entry.argv[0])
 
 
-# Derived from mechanism.POSIX_SHELLS, never restated — the same five names in a third spelling is
+# Derived from POSIX_SHELLS, never restated — the same five names in a third spelling is
 # how the set drifts. `.dash` is not a real suffix, so suffixes stay explicit.
 _SHELL_SUFFIXES = (".sh", ".bash", ".zsh", ".ksh")
-_SHEBANG_SHELL = re.compile(rf"^#!.*\b(?:{'|'.join(mechanism.POSIX_SHELLS)})\b")
+_SHEBANG_SHELL = re.compile(rf"^#!.*\b(?:{'|'.join(POSIX_SHELLS)})\b")
 _LEADING_NOISE = "﻿ \t\r\n"      # BOM is not whitespace, so lstrip() alone leaves it
 
 
@@ -83,7 +83,7 @@ def _runs_as_shell(entry, referenced: str) -> bool:
     `argv[0]` being a POSIX shell is authoritative — the payload cannot rename that away. Shebang and
     suffix are secondary, since the payload author chooses both."""
     argv = entry.argv or []
-    if argv and os.path.basename(argv[0]).split(".")[0] in mechanism.POSIX_SHELLS:
+    if argv and os.path.basename(argv[0]).split(".")[0] in POSIX_SHELLS:
         return True
     payload = _payload_path(entry)
     if payload and payload.lower().endswith(_SHELL_SUFFIXES):
