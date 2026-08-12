@@ -383,6 +383,24 @@ class TestInvocationResolver(unittest.TestCase):
                      ["/usr/bin/ssh", "host", "/bin/sh", "-c", "/tmp/.x/a"]):
             self.assertFalse(grade.content_signal(_entry(argv)).hit, argv)
 
+    def test_a_boundary_name_cannot_be_used_as_cover(self):
+        # Suppression is the one thing here an attacker WANTS to trigger. Matching a boundary name
+        # anywhere in argv meant one decoy argument switched the detector off; matching it at any
+        # path meant a payload called `/tmp/.x/docker` did the same. Only the program position, and
+        # only where a real one lives — an entry has to run, so cover costs the worm its execution.
+        for argv in (["/bin/sh", "-c", "/tmp/.x/agent", "docker"],
+                     ["/bin/sh", "-c", "/tmp/.x/agent", "ssh"],
+                     ["/bin/sh", "-c", "/tmp/.x/agent", "/tmp/.x/kubectl"],
+                     ["/tmp/.x/docker", "/bin/sh", "-c", "/tmp/.x/agent"],
+                     ["/tmp/.x/docker", "run", "alpine", "sh", "-c", "/tmp/.x/a"]):
+            self.assertFalse(grade._crosses_a_boundary(argv), argv)
+            self.assertTrue(grade.content_signal(_entry(argv)).hit, argv)
+        # …while the genuine article still is one, wherever a real one is installed.
+        for argv in (["/usr/bin/docker", "run", "alpine", "sh", "-c", "/tmp/.x/a"],
+                     ["docker", "run", "alpine", "sh", "-c", "/tmp/.x/a"],
+                     ["/usr/bin/sudo", "/usr/bin/docker", "run", "i", "sh", "-c", "/tmp/.x/a"]):
+            self.assertTrue(grade._crosses_a_boundary(argv), argv)
+
     def test_only_a_command_position_is_a_command(self):
         # `splitlines()` fabricates command positions. A backslash continuation, a heredoc body and a
         # `case` label each begin a physical line without beginning a command — and each carried an

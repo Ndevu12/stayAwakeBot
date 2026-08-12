@@ -113,7 +113,7 @@ def shell_code_args(argv) -> tuple[str, ...]:
     linuxbrew, `/usr/local/sbin`, and 49 measured prefix families (`su`, `chrt`, `systemd-run`,
     `caffeinate`, `direnv`, `poetry run`, …). Anchoring on the shell needs none of them enumerated."""
     argv = list(argv or [])
-    if any(_interpreter_base(a) in _BOUNDARY_PROGRAMS for a in argv):
+    if _crosses_a_boundary(argv):
         return ()
     code: list[str] = []
     for n, arg in enumerate(argv[:-1]):
@@ -127,6 +127,22 @@ def shell_code_args(argv) -> tuple[str, ...]:
         if arg in ("-S", "--split-string") and _interpreter_base(argv[n - 1]) == "env":
             code.extend(shell_code_args(_split_command(argv[n + 1])))
     return tuple(code)
+
+
+def _crosses_a_boundary(argv: list[str]) -> bool:
+    """Whether this command line executes somewhere other than this host.
+
+    Only the PROGRAM counts, and only where a real one lives. Matching any token let one decoy
+    argument switch the detector off — `sh -c <payload> docker` went silent — and matching any path
+    let a payload named `/tmp/.x/docker` do the same. An entry has to run, so a worm cannot put a
+    boundary program in the program position without actually launching it."""
+    if not argv:
+        return False
+    program = argv[min(_program_index(argv), len(argv) - 1)]
+    if os.path.basename(program) not in _BOUNDARY_PROGRAMS:
+        return False
+    parent = os.path.dirname(program)
+    return parent == "" or parent in _SYSTEM_BIN_DIRS
 
 
 def resolve_invocation(argv) -> Invocation:
