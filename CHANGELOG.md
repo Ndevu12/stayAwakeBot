@@ -20,8 +20,13 @@ reader, not the mechanism or the weakness it closed.
   package-installed software could be reported as active host persistence, which withholds the
   rotation all-clear and exits `3`. Detection of the real shapes is unchanged, including start-up
   entries that run code from a world-writable scratch directory.
+- **`saw audit` now says that it does not look for Windows start-up entries.** Persistence
+  enumeration covers macOS and Linux user-scope locations only, so on Windows the audit finds no
+  start-up entries because it examines none — not because there are none. It previously reported that
+  silently, which reads as a clean host. The scope note names the gap on every platform, and on
+  Windows the report no longer claims to have read a persistence surface. Presentation only: no new
+  finding, and the verdict and exit code are unchanged.
 
-### Fixed
 - **An audit check that could not be completed no longer looks like an ordinary review note.**
   When `saw audit` cannot fully read the persistence surface it withholds its all-clear and says so
   — but that "could not establish this" state was rendered identically to a low-priority nudge, so a
