@@ -131,11 +131,11 @@ def shell_code_args(argv) -> tuple[str, ...]:
         if n == 0 or not _SHELL_C_FLAG.fullmatch(arg):
             continue
         if _shell_owns_the_flag(argv, n) or any(
-                _interpreter_base(a) in _SHELL_COMMAND_CARRIERS for a in argv[:n]):
+                _program_name(a) in _SHELL_COMMAND_CARRIERS for a in argv[:n]):
             code.append(argv[n + 1])
     # `env -S "bash -c '<payload>'"` packs a whole command line into one argument.
     for n, arg in enumerate(argv[:-1]):
-        if arg in ("-S", "--split-string") and _interpreter_base(argv[n - 1]) == "env":
+        if arg in ("-S", "--split-string") and _program_name(argv[n - 1]) == "env":
             code.extend(shell_code_args(_split_command(argv[n + 1])))
     return tuple(code)
 
@@ -147,7 +147,7 @@ def _shell_owns_the_flag(argv: list[str], flag: int) -> bool:
     asks for a login environment."""
     i = flag - 1
     while i >= 0:
-        if _interpreter_base(argv[i]) in _C_FLAG_SHELLS or argv[i] in _C_FLAG_SHELLS:
+        if _program_name(argv[i]) in _C_FLAG_SHELLS or argv[i] in _C_FLAG_SHELLS:
             return True
         if argv[i].startswith("-") or argv[i].startswith("+"):
             i -= 1
@@ -168,7 +168,7 @@ def _crosses_a_boundary(argv: list[str]) -> bool:
     if not argv:
         return False
     program = argv[min(_program_index(argv), len(argv) - 1)]
-    if os.path.basename(program) not in _BOUNDARY_PROGRAMS:
+    if _program_name(program) not in _BOUNDARY_PROGRAMS:
         return False
     parent = os.path.dirname(program)
     return parent == "" or parent in _SYSTEM_BIN_DIRS
@@ -188,7 +188,7 @@ def resolve_invocation(argv) -> Invocation:
     if i >= len(argv) or argv[i].startswith("-"):
         return Invocation()                    # the walk lost the line — say so, do not invent
     interp, rest = argv[i], argv[i + 1:]
-    base = _interpreter_base(interp)
+    base = _program_name(interp)
     if base not in _INTERPRETERS:
         return Invocation(interpreter=interp, payload_path=interp)
     code_flags = _CODE_FLAGS.get(base, frozenset())
@@ -235,17 +235,38 @@ def _wrapper_name(arg: str) -> str | None:
     """The wrapper this token names, or None. The basename must match EXACTLY and sit unqualified or
     in a system bin dir — otherwise a payload at `/tmp/.x/env.sh` or `/tmp/.x/command` is skipped as a
     wrapper and the scratch path it names is never checked."""
-    name = os.path.basename(arg)
+    name = _program_name(arg)
     if name not in _EXEC_WRAPPERS:
         return None
     parent = os.path.dirname(arg)
     return name if parent == "" or parent in _SYSTEM_BIN_DIRS else None
 
 
-def _interpreter_base(arg: str) -> str:
-    """`python3.11` → `python3`, `/usr/bin/node` → `node`. Version suffixes only: wrapper matching
-    uses the exact basename, since `env.sh` is a payload and `env` is a wrapper."""
-    return os.path.basename(arg).split(".")[0]
+_EXE_SUFFIXES = frozenset({"exe", "bat", "cmd", "com"})
+
+
+def _program_name(arg: str) -> str:
+    """The comparable name of a program path: `/usr/bin/Node` → `node`, `python3.12` → `python3`.
+
+    ONE authority — interpreters, shells, carriers, wrappers and boundaries all compare through it,
+    so a name added to any of those sets matches every spelling of it. Two defects came from having
+    three spellings of this question, and both were silent:
+
+    Case. `_INTERPRETERS` is lowercase, so framework Python — `…/Python.app/Contents/MacOS/Python`,
+    the standard python.org install and 170 of 524 live processes on the measured host — was not an
+    interpreter, and a scratch payload it ran went entirely unreported.
+
+    Suffix. Stripping everything after the first dot read `/tmp/.x/node.evil.js` as the *interpreter*
+    `node`, so the payload's own path was lost and its CONTENT was never read: naming a dropper after
+    an interpreter bought it less analysis than naming it anything else. Only a trailing version
+    component or an executable extension is a suffix; `.js`, `.sh` and `.backdoor` are part of the
+    name."""
+    name = os.path.basename(arg).casefold()
+    while True:
+        stem, dot, suffix = name.rpartition(".")
+        if not dot or not (suffix.isdigit() or suffix in _EXE_SUFFIXES):
+            return name
+        name = stem
 
 
 def _command_argvs(entry) -> list[list[str]]:
