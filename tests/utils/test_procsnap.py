@@ -67,8 +67,15 @@ class TestArgvIsTheKernelsVector(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform == "darwin" or sys.platform.startswith("linux"), "no argv source")
     def test_a_long_argument_is_not_truncated(self):
-        # A payload's whole code argument has to arrive intact: measured, 200,000 characters.
-        argv = ["/bin/sh", "-c", "sleep 20; : " + "A" * 200_000]
+        # A payload's whole code argument has to arrive intact — the incident's was 5,930 characters,
+        # and a collector that quietly clipped it would hand the fingerprints a partial payload.
+        #
+        # 64 KB, not more, because the ceiling here is the PLATFORM's and not the collector's: Linux
+        # caps a single argument at MAX_ARG_STRLEN (128 KiB), so a 200,000-character fixture cannot be
+        # spawned at all and fails with "Argument list too long" before anything is measured. macOS
+        # has no equivalent per-argument cap — 400,000 round-trips there — which is exactly why this
+        # was green locally and failed in CI.
+        argv = ["/bin/sh", "-c", "sleep 20; : " + "A" * 64_000]
         got = self._roundtrip(argv)
         self.assertEqual(list(got or ()), argv)
 

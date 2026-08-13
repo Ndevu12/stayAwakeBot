@@ -14,7 +14,9 @@ it fails toward "nothing here". So argv comes from the kernel: `KERN_PROCARGS2` 
 executed with.
 
 **Unprivileged and prompt-free by construction.** Measured on macOS 14: no `sudo`, no Full Disk Access,
-no TCC dialog, and argv is NOT truncated (400,000 characters survived a round trip). A process owned by
+no TCC dialog, and argv is NOT truncated (400,000 characters survived a round trip on macOS; Linux
+caps a SINGLE argument at 128 KiB in the kernel, so that is the platform's ceiling and not this
+collector's). A process owned by
 another user simply refuses to yield its arguments, and that refusal is REPORTED rather than rendered
 as an empty command line — a snapshot that silently drops what it cannot read would let a beacon
 running as another user look like an absence of beacons.
