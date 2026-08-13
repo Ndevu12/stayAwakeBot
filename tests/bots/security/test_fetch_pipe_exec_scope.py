@@ -489,6 +489,34 @@ class TestInvocationResolver(unittest.TestCase):
                        "OUT=`/tmp/.x/p`"):
             self.assertTrue(grade.content_signal(_entry(["/bin/sh", "-c", script])).hit, script)
 
+    def test_a_program_name_compares_case_folded(self):
+        # `_INTERPRETERS` is lowercase, so framework Python — the standard python.org install, and 170
+        # of 524 live processes on the measured host — was not an interpreter, and a scratch payload it
+        # ran went entirely unreported. Four adversarial rounds missed this because every fixture I
+        # wrote used a lowercase interpreter path.
+        FW = "/Library/Frameworks/Python.framework/Versions/3.12/Resources/Python.app/Contents/MacOS/Python"
+        for argv in ([FW, "/tmp/.x/agent.py"], ["/usr/local/bin/Node", "/tmp/.x/agent.js"],
+                     ["/usr/bin/BASH", "-c", "/tmp/.x/agent"]):
+            self.assertTrue(grade.content_signal(_entry(argv)).hit, argv)
+
+    def test_a_payload_named_after_an_interpreter_keeps_its_own_path(self):
+        # Stripping everything after the first dot read `/tmp/.x/node.evil.js` as the interpreter
+        # `node`, losing the payload's path — so its CONTENT was never read. Naming a dropper after an
+        # interpreter bought it LESS analysis than naming it anything else.
+        for argv in (["/tmp/.x/node.evil.js"], ["/tmp/.x/python.stage2.py"], ["/tmp/.x/sh.backdoor"]):
+            self.assertEqual(grade.resolve_invocation(argv).payload_path, argv[0], argv)
+        # …while a real version or executable suffix still strips
+        self.assertEqual(grade._program_name("/usr/bin/python3.12.1"), "python3")
+        self.assertEqual(grade._program_name("/opt/n/node.exe"), "node")
+        self.assertEqual(grade._program_name("/tmp/.x/env.sh"), "env.sh")
+
+    def test_a_boundary_matches_however_its_path_is_cased(self):
+        # macOS filesystems are case-insensitive by default, so `/usr/bin/Docker` IS docker; treating
+        # them differently reported a CONTAINER path as a host foothold. The installed-path guard, not
+        # case, is what stops a name being used as cover.
+        self.assertTrue(grade._crosses_a_boundary(["/usr/bin/Docker", "run", "i", "sh", "-c", "/tmp/x"]))
+        self.assertFalse(grade._crosses_a_boundary(["/tmp/.x/docker", "run", "i", "sh", "-c", "/tmp/x"]))
+
     def test_only_a_command_position_is_a_command(self):
         # `splitlines()` fabricates command positions. A backslash continuation, a heredoc body and a
         # `case` label each begin a physical line without beginning a command — and each carried an
