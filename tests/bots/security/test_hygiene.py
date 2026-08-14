@@ -735,6 +735,16 @@ class TestSSHAuthorizedKeys(unittest.TestCase):
 class TestShellProfile(unittest.TestCase):
     """Shell startup files — a fetch-to-shell line runs on every new shell (T1546.004)."""
 
+    def setUp(self):
+        # The probe RESOLVES shell startup locations ($ZDOTDIR, $XDG_CONFIG_HOME) rather than
+        # assuming $HOME, so a fixture that patches only `Path.home()` inherits the developer's own
+        # variables — and the suite then fails for exactly the people this resolution is for.
+        patch = mock.patch.dict(os.environ, {}, clear=False)
+        patch.start()
+        self.addCleanup(patch.stop)
+        for var in ("ZDOTDIR", "XDG_CONFIG_HOME"):
+            os.environ.pop(var, None)
+
     def _home_with_rc(self, name: str, body: str):
         d = Path(tempfile.mkdtemp())
         (d / name).write_text(body, encoding="utf-8")
