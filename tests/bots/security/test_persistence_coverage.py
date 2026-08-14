@@ -274,6 +274,13 @@ class TestWhollyAbsentSurfaceIsNotClean(unittest.TestCase):
         self.assertIn("image the disk", remediation.lower())
         self.assertIn("recoverable", remediation.lower())
 
+    def test_the_incident_reading_is_stated_before_the_reassuring_one(self):
+        # This block also renders directly under "UNSAFE — active host persistence detected", where
+        # an operator whose eye stops after one sentence must not have read "nothing to do".
+        remediation = self._issues(self.ABSENT)[0].remediation
+        self.assertLess(remediation.index("treat it as an incident"),
+                        remediation.index("nothing to do"))
+
 
 class TestTheDisclosureIsNeverAmputated(unittest.TestCase):
     """The encoder that defangs an attacker-chosen path also TRUNCATES, and its default bound is
@@ -339,6 +346,38 @@ class TestTheCertifiedSurfaceIsTheScannedSurface(unittest.TestCase):
         (home / ".config" / "fish" / "config.fish").write_text("fish_add_path /opt/homebrew/bin\n")
         with mock.patch.object(Path, "home", staticmethod(lambda: home)):
             self.assertEqual([i.id for i in coverage.check_persistence_coverage()], [])
+
+
+class TestTheReportDescribesTheRightUnknown(unittest.TestCase):
+    """The two UNKNOWN states have opposite causes — one location could not be READ, or every
+    location was read and none EXISTED. A report that describes the second as the first sends a
+    responder hunting for an unreadable location there is none of, which is the one thing this
+    disclosure exists to give them."""
+
+    def _report(self, id_):
+        return " ".join(hygiene.render([HygieneIssue(id=id_, severity="unknown", title="t",
+                                                     detail="d", remediation="r")],
+                                       color=False, width=100).split())
+
+    def test_the_verdict_line_is_true_of_both_states(self):
+        for id_ in ("persistence-surface-unverified", "persistence-surface-not-established"):
+            with self.subTest(id=id_):
+                report = self._report(id_)
+                self.assertIn("could not be established", report)
+                self.assertNotIn("could not be fully verified", report)
+
+    def test_the_scope_note_does_not_claim_a_read_failure_that_did_not_happen(self):
+        absent = self._report("persistence-surface-not-established")
+        self.assertNotIn("the part of the host persistence surface it could read", absent)
+        self.assertNotIn("could not be fully read", absent)
+        self.assertIn("found no host persistence surface present to read", absent)
+
+    def test_the_unreadable_state_keeps_its_own_wording(self):
+        unreadable = self._report("persistence-surface-unverified")
+        self.assertIn("the part of the host persistence surface it could read", unreadable)
+
+    def test_a_clean_run_still_claims_the_full_surface(self):
+        self.assertIn("reads the host persistence surface and", " ".join(hygiene.render([]).split()))
 
 
 class TestProbesStayUnconditional(unittest.TestCase):

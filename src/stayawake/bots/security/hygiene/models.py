@@ -120,8 +120,9 @@ def incident_tier(issue_ids: set[str]) -> str | None:
 #   * `-unverified`       a location EXISTS but could not be read (permissions / an unreadable parent)
 #   * `-not-established`  the ENTIRE certified surface is absent, so nothing was enumerated at all —
 #                         a destroyed home reads exactly like a clean one (#120; see coverage.py)
-UNVERIFIED_PERSISTENCE_IDS = {"persistence-surface-unverified",
-                              "persistence-surface-not-established"}
+SURFACE_UNREADABLE_ID = "persistence-surface-unverified"
+SURFACE_ABSENT_ID = "persistence-surface-not-established"
+UNVERIFIED_PERSISTENCE_IDS = {SURFACE_UNREADABLE_ID, SURFACE_ABSENT_ID}
 
 # The run may NOT assert that credential rotation is safe when EITHER active persistence was found OR
 # the persistence surface could not be fully enumerated. Both withhold the all-clear (safety dominates:

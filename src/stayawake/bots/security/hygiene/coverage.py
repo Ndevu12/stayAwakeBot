@@ -147,11 +147,14 @@ def check_persistence_coverage() -> list[HygieneIssue]:
                    "state is a new account, a container or a CI image — or one whose home directory "
                    "has been destroyed. From disk alone the two are indistinguishable, and a wipe "
                    "leaves this check looking exactly like a clean host.",
-            remediation="Confirm which it is. On a new account, a container or a CI image this is "
-                        "expected and there is nothing to do. If this host had files and they are "
-                        "gone, treat it as an incident: image the disk BEFORE using it further — a "
-                        "plain delete leaves the content recoverable in freed blocks and continued "
-                        "use overwrites it — and treat credential rotation as UNSAFE until the "
-                        f"surface is confirmed ({_WIPER_NOTE}).",
+            # The INCIDENT reading leads and the benign one follows, because this block also renders
+            # under an "UNSAFE — active host persistence detected" verdict, where an operator whose
+            # eye stops after one sentence must not have read "there is nothing to do".
+            remediation="Confirm which it is. If this host had files and they are gone, treat it as "
+                        "an incident: image the disk BEFORE using it further — a plain delete leaves "
+                        "the content recoverable in freed blocks and continued use overwrites it — "
+                        "and treat credential rotation as UNSAFE until the surface is confirmed "
+                        f"({_WIPER_NOTE}). On a new account, a container or a CI image this state is "
+                        "expected and there is nothing to do.",
         ))
     return issues

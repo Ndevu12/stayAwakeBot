@@ -26,6 +26,9 @@ reader, not the mechanism or the weakness it closed.
 - **`saw audit` now certifies the fish shell's startup file, which it already read.** A `fish`-only
   account was scanned for a planted start-up line and then described as having no shell startup file
   at all.
+- **`saw audit` no longer describes a surface it read as one it could not read.** The verdict and the
+  scope note said a location had been unreadable even when every location had been read and none
+  existed, sending a reader looking for something that was not there.
 
 ### Changed
 - **The incident runbook now offers to image the disk before the step that rebuilds the host**, and

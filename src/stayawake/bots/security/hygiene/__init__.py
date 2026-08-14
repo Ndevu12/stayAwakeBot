@@ -27,6 +27,7 @@ from typing import Callable
 
 from .models import (HygieneIssue, INCIDENT_TRIGGER_IDS, ACTIVE_PERSISTENCE_IDS,
                      CREDENTIAL_EXPOSURE_IDS, UNVERIFIED_PERSISTENCE_IDS, ROTATION_UNSAFE_IDS,
+                     SURFACE_UNREADABLE_ID, SURFACE_ABSENT_ID,
                      ROTATION_SAFE, ROTATION_UNSAFE_PERSISTENCE, ROTATION_UNSAFE_UNKNOWN,
                      TIER_ACTIVE_PERSISTENCE, TIER_CREDENTIAL_EXPOSURE, incident_tier,
                      persistence_surface_is_enumerable, rotation_safety,
@@ -162,8 +163,11 @@ def _rotation_verdict(issues: list[HygieneIssue], *, color: bool, width: int) ->
         # path drives the unconditional exit 3). Painting it `unknown` too would soften an act-now
         # instruction; marking it `warning` would claim we looked and found something. Neither is
         # true alone, which is what having two channels is for.
+        # "could not be ESTABLISHED", not "could not be fully verified": one line serves both UNKNOWN
+        # states, and "not fully verified" sends an operator hunting for a location nobody could read
+        # when the actual state may be that every location was read and none of them existed.
         lines = [paint(f"{MARKER['unknown']}  Rotation safety: UNKNOWN — the persistence surface "
-                       "could not be fully verified, so treat credential rotation as UNSAFE "
+                       "could not be established, so treat credential rotation as UNSAFE "
                        "until it is.", SEVERITY["warning"], on=color)]
     # The UNKNOWN surface is disclosed on BOTH unsafe paths. `rotation_safety` is a PRIORITY
     # function — active persistence dominates — so keying this disclosure off its verdict hid the
@@ -223,7 +227,13 @@ def _scope_note(issues: list[HygieneIssue], *, color: bool, width: int) -> list[
     # has an unreadable location returns UNSAFE_PERSISTENCE and would silently take the flat
     # full-coverage wording — restating the over-claim the verdict just withdrew, in the highest-stakes
     # state of all. Presence of the id is the honest question here, not which verdict outranks which.
-    surface_unverified = bool({i.id for i in issues} & UNVERIFIED_PERSISTENCE_IDS)
+    #
+    # And it asks for the UNREADABLE id specifically, not the UNKNOWN set: "the part it could read" is
+    # the honest description when a location was unreadable, and a false one when every location was
+    # read and none existed. Sending a responder to hunt for an unreadable location there wastes the
+    # one thing this note is for.
+    ids = {i.id for i in issues}
+    surface_unverified = SURFACE_UNREADABLE_ID in ids
     if not persistence_surface_is_enumerable():
         # `user_persistence_dirs()` is `~/.config/systemd/user` + `~/Library/LaunchAgents`, so on
         # Windows it enumerates NOTHING and every autorun probe returns empty. Claiming to read a
@@ -234,6 +244,12 @@ def _scope_note(issues: list[HygieneIssue], *, color: bool, width: int) -> list[
     elif surface_unverified:
         surface_read = ("reads the part of the host persistence surface it could read, plus a "
                         "targeted set of known drop-paths")
+    elif SURFACE_ABSENT_ID in ids:
+        # A third wording, for the same reason there is a second: the flat claim would restate, as
+        # the report's last word, the coverage the verdict four lines above just withdrew — and
+        # "the part it could read" is equally wrong, because reading was never the problem here.
+        surface_read = ("found no host persistence surface present to read, and reads a targeted "
+                        "set of known drop-paths")
     else:
         surface_read = "reads the host persistence surface and a targeted set of known drop-paths"
     # "Scope your response past what is listed here" presupposes an active compromise whose extent may
