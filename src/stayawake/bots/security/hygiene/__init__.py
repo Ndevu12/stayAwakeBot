@@ -102,18 +102,14 @@ def _icon(severity: str) -> str:
     return MARKER.get(severity, MARKER["info"])
 
 
-# `textsafe.plain` defangs AND truncates, and its 300-char default is sized for a single untrusted
-# VALUE (a discovered path). A hygiene field is composed PROSE with such a value inside it, so that
-# default cut our own message: measured, the #1332 disclosure printed 2 of 11 unreadable locations
-# and the rotation-wiper warning ended mid-sentence — a silent amputation of the one disclosure that
-# exists so a responder is never told the surface is clean when nobody could read it. The bound stays
-# (an attacker still cannot pin a megabyte to the terminal); it is raised past any message we compose.
+# `textsafe.plain` defangs AND truncates, and its 300-char default is sized for one untrusted VALUE,
+# not for prose carrying one: measured, it printed 2 of 11 unreadable locations and cut the
+# rotation-wiper warning mid-sentence. Bounded still, just past anything we compose.
 _REPORT_FIELD_LIMIT = 4000
 
 
 def _safe(text: str) -> str:
-    """Every untrusted field on this surface goes through here — one call, so a field added later
-    cannot pick a different bound or skip the defanging."""
+    """One call for every untrusted field here, so a field added later cannot skip the defanging."""
     return textsafe.plain(text, limit=_REPORT_FIELD_LIMIT)
 
 
@@ -163,9 +159,8 @@ def _rotation_verdict(issues: list[HygieneIssue], *, color: bool, width: int) ->
         # path drives the unconditional exit 3). Painting it `unknown` too would soften an act-now
         # instruction; marking it `warning` would claim we looked and found something. Neither is
         # true alone, which is what having two channels is for.
-        # "could not be ESTABLISHED", not "could not be fully verified": one line serves both UNKNOWN
-        # states, and "not fully verified" sends an operator hunting for a location nobody could read
-        # when the actual state may be that every location was read and none of them existed.
+        # "established", not "fully verified": one line for both states, and the latter sends an
+        # operator hunting for an unreadable location when there may be none.
         lines = [paint(f"{MARKER['unknown']}  Rotation safety: UNKNOWN — the persistence surface "
                        "could not be established, so treat credential rotation as UNSAFE "
                        "until it is.", SEVERITY["warning"], on=color)]
@@ -185,13 +180,9 @@ def _unknown_surface_disclosure(issues: list[HygieneIssue], *, color: bool, widt
     Keyed off the id (never off the verdict, and never off `severity`), so the disclosure survives
     whichever verdict outranks it.
 
-    The FIX renders here too, in the same shape the finding groups give it. `unknown` items are split
-    out of those groups, so this is their only home, and printing the problem without the instruction
-    told the operator that rotation is unsafe and never what would make it safe again.
-
-    BOTH fields go through `textsafe`, for the same reason the finding loop does: these details name
-    discovered PATHS, and encoding at the render site is what stops a new field arriving unencoded
-    because whoever added it did not know to encode."""
+    The FIX renders here too: `unknown` items are split out of the finding groups, so this is their
+    only home, and printing the problem without the instruction said rotation was unsafe and never
+    what would resolve it."""
     lines: list[str] = []
     for i in issues:
         if i.id not in UNVERIFIED_PERSISTENCE_IDS:
@@ -227,11 +218,8 @@ def _scope_note(issues: list[HygieneIssue], *, color: bool, width: int) -> list[
     # has an unreadable location returns UNSAFE_PERSISTENCE and would silently take the flat
     # full-coverage wording — restating the over-claim the verdict just withdrew, in the highest-stakes
     # state of all. Presence of the id is the honest question here, not which verdict outranks which.
-    #
-    # And it asks for the UNREADABLE id specifically, not the UNKNOWN set: "the part it could read" is
-    # the honest description when a location was unreadable, and a false one when every location was
-    # read and none existed. Sending a responder to hunt for an unreadable location there wastes the
-    # one thing this note is for.
+    # And for the UNREADABLE id specifically, not the UNKNOWN set: "the part it could read" is false
+    # when every location was read and none existed.
     ids = {i.id for i in issues}
     surface_unverified = SURFACE_UNREADABLE_ID in ids
     if not persistence_surface_is_enumerable():
@@ -245,9 +233,8 @@ def _scope_note(issues: list[HygieneIssue], *, color: bool, width: int) -> list[
         surface_read = ("reads the part of the host persistence surface it could read, plus a "
                         "targeted set of known drop-paths")
     elif SURFACE_ABSENT_ID in ids:
-        # A third wording, for the same reason there is a second: the flat claim would restate, as
-        # the report's last word, the coverage the verdict four lines above just withdrew — and
-        # "the part it could read" is equally wrong, because reading was never the problem here.
+        # A third wording: the flat claim would restate the coverage the verdict just withdrew, and
+        # "the part it could read" is equally wrong — reading was never the problem here.
         surface_read = ("found no host persistence surface present to read, and reads a targeted "
                         "set of known drop-paths")
     else:

@@ -19,13 +19,8 @@ from typing import Any
 def persistence_surface_is_enumerable() -> bool:
     """Does THIS platform have a user-scope persistence surface `saw` enumerates at all?
 
-    macOS and Linux only: the certified locations are `~/Library/LaunchAgents`,
-    `~/.config/systemd/user`, POSIX shell startup files and `~/.ssh/authorized_keys`. None of those is
-    where Windows autorun lives (registry Run keys, the Startup folder, Scheduled Tasks — enumerated
-    nowhere in the tool), so on Windows every certified location reads absent for a reason that says
-    nothing about the host. ONE authority: the scope note and the coverage probe both ask here, because
-    re-deriving "is this platform covered?" per consumer is how the report ends up contradicting the
-    note printed four lines below it."""
+    ONE authority — the scope note and the coverage probe both ask here, because on Windows every
+    certified location reads absent for a reason that says nothing about the host."""
     return not sys.platform.startswith("win")
 
 
@@ -113,13 +108,9 @@ def incident_tier(issue_ids: set[str]) -> str | None:
             return tier
     return None
 
-# UNVERIFIED persistence surface (#1332) — the run could not ESTABLISH the surface, so it may not claim
-# clean over it. NOT a finding (nothing was found) and NOT clean (nothing was established) — UNKNOWN.
-# This is "never claim clean over content you did not read", applied where the cost of a wrong
-# all-clear is a wiped home directory rather than a missed finding. Two ways it happens:
-#   * `-unverified`       a location EXISTS but could not be read (permissions / an unreadable parent)
-#   * `-not-established`  the ENTIRE certified surface is absent, so nothing was enumerated at all —
-#                         a destroyed home reads exactly like a clean one (#120; see coverage.py)
+# The run could not ESTABLISH the surface, so it may not claim clean over it — NOT a finding (nothing
+# was found) and NOT clean (nothing was established). Two causes: a location EXISTS but could not be
+# read (#1332), or the ENTIRE surface is absent so nothing was enumerated (#120, see coverage.py).
 SURFACE_UNREADABLE_ID = "persistence-surface-unverified"
 SURFACE_ABSENT_ID = "persistence-surface-not-established"
 UNVERIFIED_PERSISTENCE_IDS = {SURFACE_UNREADABLE_ID, SURFACE_ABSENT_ID}
@@ -154,11 +145,8 @@ def incident_response_sequence() -> list[str]:
     # so this stays pure data (and a non-terminal consumer can renumber/reformat it freely).
     return [
         "Isolate the host from the network before doing anything else.",
-        # Imaging comes BEFORE the rebuild step, which is the one that destroys the evidence: a plain
-        # delete leaves file content intact in freed blocks, and both a rebuild and ordinary continued
-        # use overwrite it. `saw scan` already computes the discriminator (plain vs overwrite-then-
-        # delete) on a wipe payload and says which; before this step it was never asked at the moment
-        # the operator decides whether to image.
+        # BEFORE the rebuild step, which is the one that destroys the evidence a plain delete left
+        # recoverable. `saw scan` already computes the discriminator; nothing asked it here.
         "If files are missing, image the disk BEFORE rebuilding or using the host further — a plain "
         "delete leaves the content recoverable in freed blocks, and both rebuilding and ordinary use "
         "overwrite it. A wipe payload reported by `saw scan` names the variant: DELETES is "

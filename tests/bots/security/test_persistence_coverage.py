@@ -157,11 +157,9 @@ class TestAuditExitCode(unittest.TestCase):
 
 
 class TestWhollyAbsentSurfaceIsNotClean(unittest.TestCase):
-    """#120 — a wipe does not SUPPRESS the persistence checks, it SATISFIES them. Every location
-    raises FileNotFoundError, every location grades `absent` ("nothing planted here"), no issue is
-    raised, and the run reaches its most reassuring line — "persistence surface enumerated and clean
-    — rotating credentials is safe" — on a host whose home directory was just destroyed. Nothing was
-    enumerated, so "enumerated" is the false word and the all-clear has to be withheld."""
+    """#120 — a wipe does not SUPPRESS these checks, it SATISFIES them: every location grades
+    `absent`, so the run reaches "enumerated and clean — rotating credentials is safe" on a host whose
+    home was just destroyed. Nothing was enumerated, so the all-clear has to be withheld."""
 
     ABSENT = [("launch-agent / service dir", Path("/no/such/agents")),
               ("SSH authorized_keys", Path("/no/such/.ssh/authorized_keys")),
@@ -283,12 +281,9 @@ class TestWhollyAbsentSurfaceIsNotClean(unittest.TestCase):
 
 
 class TestTheDisclosureIsNeverAmputated(unittest.TestCase):
-    """The encoder that defangs an attacker-chosen path also TRUNCATES, and its default bound is
-    sized for a single untrusted value, not for a composed sentence carrying one. Applied to a whole
-    hygiene field it silently cut our own message — measured, the surface disclosure printed 2 of 11
-    unreadable locations and the rotation-wiper warning stopped mid-sentence. A disclosure that exists
-    so nobody reads a clean bill of health over locations no one could read must not lose the
-    locations, and an instruction that ends mid-word is not an instruction."""
+    """The encoder that defangs an attacker-chosen path also TRUNCATES, at a bound sized for one
+    value rather than prose carrying one: measured, the disclosure printed 2 of 11 unreadable
+    locations and the rotation-wiper warning stopped mid-sentence."""
 
     def _rendered(self, issue):
         return hygiene.render([issue], color=False, width=100)
@@ -325,11 +320,9 @@ class TestTheDisclosureIsNeverAmputated(unittest.TestCase):
 
 
 class TestTheCertifiedSurfaceIsTheScannedSurface(unittest.TestCase):
-    """coverage.py's stated invariant: "a dir we read to DETECT a plant is one we must be able to read
-    to certify the host clean". A shell startup file that the detection probe scans but the coverage
-    probe does not certify makes the audit report that no shell startup file exists while it is at
-    that moment reading one — and on an account whose only shell config is that file, it is the
-    difference between a clean run and exit 3."""
+    """coverage.py's invariant: what we read to DETECT a plant is what we must read to certify the
+    host clean. A file the scan reads but the coverage probe does not certify makes the audit report
+    it absent while reading it — on a fish-only account, the difference between clean and exit 3."""
 
     def test_every_scanned_shell_startup_file_is_also_certified(self):
         scanned = set(coverage.mechanism._SHELL_RC_FILES)
@@ -381,12 +374,9 @@ class TestTheReportDescribesTheRightUnknown(unittest.TestCase):
 
 
 class TestProbesStayUnconditional(unittest.TestCase):
-    """#120 AC 1 — wipe evidence must never suppress, downgrade or skip a persistence probe.
-
-    That holds today for free: `audit_checks()` is a flat list literal, and `saw` has no host-side
-    wipe signal to gate it WITH. Both halves can change, so the property is PINNED rather than
-    assumed — this fails the moment a probe is registered behind a branch, on damage evidence or
-    anything else."""
+    """#120 AC 1 — wipe evidence must never suppress, downgrade or skip a persistence probe. That
+    holds today only because there is no signal that could gate one, so it is PINNED rather than
+    assumed: this fails the moment a probe is registered behind a branch."""
 
     def _tree(self):
         return ast.parse(textwrap.dedent(inspect.getsource(hygiene.audit_checks))).body[0]

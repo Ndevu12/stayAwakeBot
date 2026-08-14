@@ -14,16 +14,12 @@ issue naming any that exist but could not be read — so the run reads (and exit
 and the rotation-safety verdict withholds its all-clear. Locations are sourced from the detection
 modules themselves (single source of truth), so the surface we certify is exactly the surface we scan.
 
-**Absent is clean per location, but an ENTIRELY absent surface is not (#120).** A wipe does not suppress
-these checks — it SATISFIES them: every location raises FileNotFoundError, every location grades
-`absent` ("nothing planted here"), zero issues are raised, and the run reaches its most reassuring line,
-*"persistence surface enumerated and clean — rotating credentials is safe"*, on a host whose home was
-just destroyed. Nothing was enumerated, so "enumerated" is the false word, and the verdict lands on the
-one action a rotation-triggered wiper is armed for. `persistence-surface-not-established` is that third
-state: absent because there is nothing to find, versus absent because nothing could be established. It
-fails to UNKNOWN and never to a finding — a new account, a container and a CI image present identically
-(measured: macOS creates an account from a template carrying no shell startup file and no
-`~/Library/LaunchAgents`), and from disk alone the two are indistinguishable.
+**Absent is clean per location; an ENTIRELY absent surface is not (#120).** A wipe does not suppress
+these checks, it SATISFIES them — every location grades `absent`, so the run reaches "enumerated and
+clean, rotating credentials is safe" on a host whose home was just destroyed. Nothing was enumerated.
+`persistence-surface-not-established` is that third state, and it fails to UNKNOWN and never to a
+finding: measured, macOS builds a new account from a template carrying no shell startup file and no
+`~/Library/LaunchAgents`, so a fresh account and a destroyed one are indistinguishable from disk.
 """
 from __future__ import annotations
 
@@ -33,10 +29,8 @@ from pathlib import Path
 from .models import HygieneIssue, _WIPER_NOTE, persistence_surface_is_enumerable
 from . import os_service, runner, mechanism
 
-# The ANCHOR of the certified surface: the one location class an account in real USE acquires, and
-# therefore the one whose absence makes a wholly-absent surface worth saying out loud. Named once
-# because `_surface_is_absent` requires it to be present in the list — "everything is absent" over a
-# list that happens to contain no anchor is vacuously true, not evidence.
+# The ANCHOR: the location class an account in real USE acquires. `_surface_is_absent` requires it,
+# because "everything is absent" over a list carrying no anchor is vacuously true, not evidence.
 _ANCHOR_LABEL = "shell startup file"
 
 
@@ -91,22 +85,15 @@ def _coverage(p: Path) -> str:
 
 
 def _surface_is_absent(graded: list[tuple[str, Path, str]]) -> bool:
-    """True when EVERY certified location is absent — the run enumerated nothing, so it cannot call
-    the surface clean (#120).
-
-    Two guards keep the claim honest rather than vacuous. The ANCHOR must be in the list, because
-    "all absent" over a list with nothing an in-use account acquires proves nothing. And the platform
-    must be one whose surface `saw` enumerates at all — on Windows every certified location is absent
-    by construction, which would make this fire on every host and say nothing (models is the one
-    authority for that, shared with the scope note)."""
+    """True when EVERY certified location is absent — nothing was enumerated, so nothing can be called
+    clean (#120). Guarded on the anchor and on the platform: on Windows every certified location is
+    absent by construction, so firing there would say nothing about the host."""
     if not persistence_surface_is_enumerable():
         return False
     if not any(label == _ANCHOR_LABEL for label, _p, _state in graded):
         return False
-    # A DANGLING symlink is `absent` to `_coverage` — correctly, since nothing readable is planted
-    # there — but it is not absent to this question. A dotfile manager that has not run yet, or a
-    # dotfiles repo on an unmounted volume, leaves `~/.zshrc -> …` visible in `ls` on an obviously
-    # configured account; reporting "nothing is here" over a link the operator can see is wrong.
+    # A DANGLING symlink is `absent` to `_coverage` but not to this question: a dotfile manager that
+    # has not run yet leaves `~/.zshrc -> …` visible in `ls` on an obviously configured account.
     return all(state == "absent" and not p.is_symlink() for _label, p, state in graded)
 
 
@@ -134,9 +121,7 @@ def check_persistence_coverage() -> list[HygieneIssue]:
         ))
 
     if _surface_is_absent(graded):
-        # The location classes are NAMED FROM THE DATA, never a prose list: a hand-written one drifts
-        # the moment the certified surface gains or loses a class, and a scope claim that misdescribes
-        # what was looked at is the same defect this module exists to remove.
+        # Named from the DATA: a hand-written list drifts the moment the surface gains or loses a class.
         kinds = ", ".join(sorted({label for label, _p, _state in graded}))
         issues.append(HygieneIssue(
             id="persistence-surface-not-established",
@@ -147,9 +132,8 @@ def check_persistence_coverage() -> list[HygieneIssue]:
                    "state is a new account, a container or a CI image — or one whose home directory "
                    "has been destroyed. From disk alone the two are indistinguishable, and a wipe "
                    "leaves this check looking exactly like a clean host.",
-            # The INCIDENT reading leads and the benign one follows, because this block also renders
-            # under an "UNSAFE — active host persistence detected" verdict, where an operator whose
-            # eye stops after one sentence must not have read "there is nothing to do".
+            # Incident reading first: this also renders under an active-persistence verdict, where an
+            # operator whose eye stops after one sentence must not have read "nothing to do".
             remediation="Confirm which it is. If this host had files and they are gone, treat it as "
                         "an incident: image the disk BEFORE using it further — a plain delete leaves "
                         "the content recoverable in freed blocks and continued use overwrites it — "
