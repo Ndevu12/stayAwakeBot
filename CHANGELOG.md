@@ -13,12 +13,17 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-08-14
+
 ### Fixed
-- **`stayawake-health-check` checked nothing unless `--fail-on-unhealthy` was passed.** The flag was
-  evaluated in the same expression as the check itself, and `and` short-circuits — so without it the
-  command contacted no endpoint, printed nothing, and exited `0`. A run that looked successful had
-  done no work. The check now always runs; the flag decides only the exit code.
-- **`saw audit` now judges a start-up program by who signed it, not merely by whether its signature is intact.** A binary carrying only a placeholder signature — which anyone can add in one command, and which is applied automatically to Apple Silicon software at build time — was accepted as properly signed. Separately, genuinely signed third-party applications were being reported as unsigned because of harmless packaging leftovers, which could make ordinary software look unaccountable. Both are corrected.
+- **`stayawake-health-check` did not perform its checks unless `--fail-on-unhealthy` was passed.**
+  A run without the flag reported success without contacting anything, so scheduled monitoring
+  invoked that way recorded no results — re-check your coverage. The check now always runs, and the
+  flag decides only the exit code.
+- **`saw audit` now judges a start-up program by who signed it, not merely by whether its signature
+  is intact.** Some binaries were accepted as properly signed when they should not have been, and
+  separately, genuinely signed third-party applications could be reported as unsigned — making
+  ordinary software look unaccountable. Both are corrected.
 - **The README's quick-start scan command did not work.** It passed `--local`, a flag removed in
   0.1.6 — local is the default and `--remote` is the scope toggle — so following the README produced
   `unrecognized arguments: --local`. The README now leads with the security sentinel and shows
@@ -386,7 +391,8 @@ _No user-facing changes were recorded for this release._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel (supply-chain worm
 detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.3.1...v0.4.0
