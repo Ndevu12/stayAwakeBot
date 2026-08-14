@@ -100,14 +100,14 @@ jobs:
 ### Don't hand-maintain that workflow
 
 **`saw guard` writes it, keeps it pinned, and proves it is enforced** — for one repository or a
-whole organisation.
+whole organisation. Reach for whichever one you need; they are alternatives, not a sequence.
 
-```bash
-saw guard setup                       # write the gate here, for you to review and commit
-saw guard setup --pr                  # or open one rolling PR (never pushes main)
-saw guard check                       # present? SHA-pinned? current? required?
-saw guard check --org your-org -f     # fail if any repo in the org lacks a required gate
-```
+| Command | What it does |
+| --- | --- |
+| `saw guard setup` | Writes the gate here, for you to review and commit |
+| `saw guard setup --pr` | Opens it as one rolling pull request instead — never pushes `main` |
+| `saw guard check` | Is this repo's gate present, SHA-pinned, current, and **required**? |
+| `saw guard check --org your-org -f` | The same across an organisation, failing if any repo lacks a required gate |
 
 `saw guard setup` *surgically pin-bumps* a gate that already exists rather than replacing it, and
 never clobbers a workflow installed by some other means. `saw guard check` goes further than "is the
