@@ -13,6 +13,11 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Changed
+- The README now leads with what `saw` is for — hunting self-propagating supply-chain packages —
+  and what each command does. The uptime sentinel is documented further down, since it is
+  independent of `saw` and shares only the packaging.
+
 ## [0.5.1] - 2026-08-14
 
 ### Fixed
