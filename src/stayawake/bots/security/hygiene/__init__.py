@@ -227,13 +227,12 @@ def _scope_note(issues: list[HygieneIssue], *, color: bool, width: int) -> list[
         # "OTHER survivor temp dirs" is relative to the system temp dir named just above, and is
         # therefore true in every state: `tempfile.gettempdir()` honours $TMPDIR, so naming a specific
         # path here (e.g. /var/tmp) would be a false claim on any host that points $TMPDIR at it.
-        # docs/SECURITY_ARCHITECTURE.md carries the concrete list and the tracking issues.
         f"{surface_read} (home, /tmp, the system temp dir, the working directory). It does NOT scan "
         "other survivor temp dirs, the global npm prefix, Docker images/volumes, other mounted "
         "filesystems, account/organization-level state such as self-hosted runner registrations, "
         "or Windows autorun locations (registry Run keys, the Startup folder, Scheduled Tasks) — "
         "persistence enumeration is macOS and Linux user-scope only. "
-        f"{means} See docs/SECURITY_ARCHITECTURE.md for the full scope statement.",
+        f"{means}",
         indent=2, width=width)
 
 

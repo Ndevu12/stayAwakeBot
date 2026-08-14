@@ -16,7 +16,7 @@ What this is NOT (kept out on purpose, so the model stays true to the threat):
   * NOT a runtime command-injection / RCE detector — `execSync(userInput)` with no BAKED payload is a
     vulnerability, not a shipped worm. We require a decoded BAKED blob at the source of the flow.
   * NOT whole-program / cross-file dataflow — a loader whose exec lives in another file is the
-    CONFIRMED loader-fingerprint tier's job, not this heuristic's (see docs/SECURITY_ARCHITECTURE).
+    CONFIRMED loader-fingerprint tier's job, not this heuristic's.
   * NOT a verdict of INFECTED — everything here is HEURISTIC → SUSPICIOUS, a corroborator.
 
 The verdict rule both backends share: flag iff a DECODE SOURCE (of a baked blob) reaches a CODE

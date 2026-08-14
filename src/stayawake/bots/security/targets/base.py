@@ -59,8 +59,7 @@ def _ext(rel: str) -> str:
 
 @dataclass
 class ScanOptions:
-    # Two kinds of exclusion, both deliberate (see docs/SECURITY_ARCHITECTURE.md → "Provenance is
-    # not trust"):
+    # Two kinds of exclusion, both deliberate:
     #  * BUILD OUTPUTS — "node_modules", ".next", "dist", "build": compiled/vendored artifacts where
     #    minification IS obfuscation, so the density heuristic there would be all false positives.
     #    This is a build-artifact trust decision, NOT a provenance one — `saw` never trusts an
