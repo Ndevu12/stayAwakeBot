@@ -13,6 +13,10 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Changed
+- The README's CI-gate section now leads with `saw guard`, which writes and maintains that workflow
+  for you, instead of leaving it as a footnote after the configuration reference.
+
 ### Added
 - **A security policy** (`SECURITY.md`) with a private reporting address, so a vulnerability in the
   scanner can be reported without opening a public issue. **saw@ndevuspace.com** is also now the

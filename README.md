@@ -97,29 +97,39 @@ jobs:
           remediate: pr
 ```
 
+### Don't hand-maintain that workflow
+
+**`saw guard` writes it, keeps it pinned, and proves it is enforced** — for one repository or a
+whole organisation.
+
+```bash
+saw guard setup                       # write the gate here, for you to review and commit
+saw guard setup --pr                  # or open one rolling PR (never pushes main)
+saw guard check                       # present? SHA-pinned? current? required?
+saw guard check --org your-org -f     # fail if any repo in the org lacks a required gate
+```
+
+`saw guard setup` *surgically pin-bumps* a gate that already exists rather than replacing it, and
+never clobbers a workflow installed by some other means. `saw guard check` goes further than "is the
+file there" — it verifies branch protection actually **requires** the check, because a gate that is
+not required is decoration.
+
+Both sweep many repositories at once (`--remote` / `--user` / `--org`), like `saw scan` and
+`saw fix`. See the [CLI guide](docs/CLI.md#saw-guard).
+
+### About the pins
+
 `Ndevu12/strix` ("StayAwakeBot Strix") is the public Action — a thin wrapper that installs the
 published `stayawakebot` scanner from PyPI.
 
-**Pin every action by commit SHA, including this one.** A tag can be moved to point at different
-code after you have reviewed it; a SHA cannot. The trailing comment records which release the SHA
-corresponds to, so the pin stays readable.
+**Pin every action by commit SHA**, including this one: a tag can be moved to point at different code
+after you have reviewed it, a SHA cannot. The trailing comment records which release the SHA
+corresponds to, so the pin stays readable. In production pin `version:` as well — it selects the
+`stayawakebot` release from PyPI and otherwise tracks whatever is latest at run time.
 
-In production also pin what the Action installs — `version:` selects the `stayawakebot` release from
-PyPI and defaults to the latest. Other inputs: `config-file` to supply your own allowlist, `fail-on`
-to choose the verdict that fails the build (default `infected`), and `upload-sarif` to send findings
-to code scanning. See [Security baseline](prevent/SECURITY_BASELINE.md).
-
-**Don't hand-maintain that workflow — let `saw` manage it.** [`saw guard setup`](docs/CLI.md#saw-guard)
-writes (or *surgically pin-bumps*) exactly this gate for you — locally to review + commit, or
-`--pr` to open a rolling PR — and [`saw guard check`](docs/CLI.md#saw-guard) verifies a repo's gate is
-present, **SHA-pinned**, current, and **required** by branch protection. Both sweep many repos at once
-(local by default, or `--remote`/`--user`/`--org`), just like `saw scan`/`saw fix`:
-
-```bash
-saw guard check                       # is this repo's gate present + SHA-pinned + current?
-saw guard setup --pr                  # install/bump the gate → one rolling PR (never pushes main)
-saw guard check --org your-org -f     # CI gate: fail if any repo lacks a required gate
-```
+Other inputs: `config-file` to supply your own allowlist, `fail-on` to choose the verdict that fails
+the build (default `infected`), and `upload-sarif` to send findings to code scanning.
+See [Security baseline](prevent/SECURITY_BASELINE.md).
 
 ## Run via Docker (no local Python needed)
 
@@ -165,7 +175,7 @@ stayawake-health-check --config config/urls.yml
 
 ## License
 
-stayAwakeBot is **dual-licensed** (from v0.1.9 onward):
+stayAwakeBot is **dual-licensed**:
 
 - **[AGPL-3.0-or-later](LICENSE)** — free and open source. You must preserve attribution, and if you
   modify it and convey it or offer it over a network (e.g. as a hosted service), you must release
@@ -173,6 +183,4 @@ stayAwakeBot is **dual-licensed** (from v0.1.9 onward):
 - **[Commercial license](COMMERCIAL-LICENSE.md)** — a paid, proprietary-use option for closed-source
   or proprietary-SaaS use without the AGPL's source-disclosure obligations. For terms, contact
   **saw@ndevuspace.com**.
-
-Releases up to and including v0.1.8 were published under the MIT license and remain MIT for those versions.
 
