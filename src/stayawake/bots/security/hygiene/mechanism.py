@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 from .models import HygieneIssue, POSIX_SHELLS, SCRATCH_ROOTS, _WIPER_NOTE
@@ -195,20 +196,41 @@ def check_ssh_authorized_keys() -> list[HygieneIssue]:
 # Shell startup files sourced on every interactive/login shell — a fetch-to-shell line here runs
 # on each new terminal (T1546.004). Covers bash/zsh/sh + fish; a symlinked dotfile is followed
 # (read_text) since it's the user's own config.
-# ONE tuple: this probe SCANS these, the coverage probe CERTIFIES them. fish lived only in the scan
-# loop, so a fish account was scanned and simultaneously reported to have no shell startup file.
-_SHELL_RC_FILES = (".bashrc", ".bash_profile", ".bash_login", ".profile",
-                   ".zshrc", ".zprofile", ".zshenv", ".zlogin",
-                   ".config/fish/config.fish")
+_BASH_RC_FILES = (".bashrc", ".bash_profile", ".bash_login", ".profile")
+_ZSH_RC_FILES = (".zshrc", ".zprofile", ".zshenv", ".zlogin")
+
+
+def shell_rc_locations() -> list[Path]:
+    """Where shell startup files actually live — RESOLVED, not assumed to sit in `$HOME`.
+
+    ONE list: this module SCANS these for a planted line and the coverage probe CERTIFIES them, so
+    the surface we read can never drift from the surface we certify. Hard-coding `$HOME`-relative
+    names missed every layout that deliberately keeps `$HOME` clean — zsh under `$ZDOTDIR`, fish and
+    nushell under XDG — where a fetch-to-shell line runs on every new terminal unseen. `conf.d` is
+    returned as the DIRECTORY: it is sourced on every start and is the more attractive drop point."""
+    home = Path.home()
+    xdg = Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config")
+    # zsh reads $ZDOTDIR itself, so we ask the same question it does. It is usually exported from
+    # /etc/zshenv, which a non-zsh parent process will not have run — then this falls back to $HOME,
+    # the same place zsh would look, so the fallback is correct rather than merely safe.
+    zdotdir = Path(os.environ.get("ZDOTDIR") or home)
+    locations = [home / name for name in _BASH_RC_FILES]
+    locations += [zdotdir / name for name in _ZSH_RC_FILES]
+    locations += [xdg / "fish" / "config.fish", xdg / "fish" / "conf.d",
+                  xdg / "nushell" / "config.nu", xdg / "nushell" / "env.nu"]
+    if sys.platform == "darwin":                    # nushell's macOS default, outside XDG
+        support = home / "Library" / "Application Support" / "nushell"
+        locations += [support / "config.nu", support / "env.nu"]
+    return locations
 
 
 def _iter_shell_rc() -> list[Path]:
-    home = Path.home()
     found: list[Path] = []
-    for name in _SHELL_RC_FILES:
-        p = home / name
+    for p in shell_rc_locations():
         try:
-            if p.is_file():
+            if p.is_dir():                          # a conf.d drop-in dir — every file in it is sourced
+                found += sorted(q for q in p.iterdir() if q.is_file())
+            elif p.is_file():
                 found.append(p)
         except OSError:
             continue

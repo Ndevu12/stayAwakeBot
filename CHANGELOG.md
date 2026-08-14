@@ -14,6 +14,14 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Fixed
+- **`saw audit` now finds shell start-up files that are not kept in your home directory.** A
+  configuration under `$ZDOTDIR`, or a `fish`/`nushell` config in `~/.config`, was neither examined
+  for a planted start-up line nor counted when the audit decided whether it had a persistence surface
+  to certify — so on those setups a line that runs on every new terminal went unreported, and an
+  in-use account could be described as having nothing to examine. `fish`'s `conf.d` drop-in
+  directory, which is sourced on every start, is now read as well.
+
+### Fixed
 - **`saw audit` no longer reports a host whose persistence locations are all missing as "enumerated
   and clean".** When every location the audit certifies is absent, nothing was actually examined, so
   the run now ends **UNKNOWN** and withholds the rotation all-clear (exit `3`) instead of stating that

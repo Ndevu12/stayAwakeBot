@@ -45,7 +45,7 @@ def _must_verify_locations() -> list[tuple[str, Path]]:
     locs += [("self-hosted-runner dir", d) for d in runner.user_runner_dirs()]
     ssh = home / ".ssh"
     locs += [("SSH authorized_keys", ssh / name) for name in mechanism._SSH_AUTHKEYS]
-    locs += [(_ANCHOR_LABEL, home / name) for name in mechanism._SHELL_RC_FILES]
+    locs += [(_ANCHOR_LABEL, p) for p in mechanism.shell_rc_locations()]
     return locs
 
 
