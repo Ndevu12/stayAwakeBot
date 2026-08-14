@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""#1332 — the persistence-surface VERDICT contract. A clean `saw audit` must imply the persistence
-surface was ENUMERATED; a surface that could not be read is UNKNOWN, not clean; and the run states,
-as a run-level property, whether credential rotation is safe. Exit `3` encodes rotation-unsafe.
-Offline, stdlib-only."""
+"""#1332 / #120 — the persistence-surface VERDICT contract. A clean `saw audit` must imply the
+persistence surface was ENUMERATED; a surface that could not be read — or that is wholly ABSENT, and
+so was never enumerated at all — is UNKNOWN, not clean; and the run states, as a run-level property,
+whether credential rotation is safe. Exit `3` encodes rotation-unsafe. Offline, stdlib-only."""
 from __future__ import annotations
 
+import ast
+import inspect
 import os
 import tempfile
+import textwrap
 import threading
 import unittest
 from pathlib import Path
@@ -16,7 +19,8 @@ from unittest import mock
 from stayawake.bots.security import hygiene
 from stayawake.bots.security.hygiene import coverage
 from stayawake.bots.security.hygiene.models import (
-    HygieneIssue, rotation_safety, ROTATION_SAFE, ROTATION_UNSAFE_PERSISTENCE, ROTATION_UNSAFE_UNKNOWN)
+    HygieneIssue, incident_response_sequence, rotation_safety, ROTATION_SAFE,
+    ROTATION_UNSAFE_PERSISTENCE, ROTATION_UNSAFE_UNKNOWN)
 from stayawake.cli.commands import audit as audit_cmd
 from stayawake.bots.security.sinks import render as sink_render
 
@@ -82,7 +86,7 @@ class TestCoverageProbe(unittest.TestCase):
     def test_probe_is_in_the_single_composition_site(self):
         # audit_checks() is the ONE place probes are registered; the coverage probe must be there.
         labels = [lbl for lbl, _ in hygiene.audit_checks()]
-        self.assertIn("persistence surface readable", labels)
+        self.assertIn("persistence surface coverage", labels)
 
     def test_surface_covers_the_active_plant_locations(self):
         # The certified surface must include the deterministic user-owned PLANT locations (the wiper
@@ -140,6 +144,9 @@ class TestAuditExitCode(unittest.TestCase):
     def test_unverified_surface_exits_3(self):
         self.assertEqual(self._run([_issue("persistence-surface-unverified", "unknown")]), 3)
 
+    def test_unestablished_surface_exits_3(self):
+        self.assertEqual(self._run([_issue("persistence-surface-not-established", "unknown")]), 3)
+
     def test_clean_exits_0(self):
         self.assertEqual(self._run([]), 0)
 
@@ -147,6 +154,171 @@ class TestAuditExitCode(unittest.TestCase):
         # a non-persistence warning is the opt-in axis: 0 by default, 1 with -f — unchanged.
         self.assertEqual(self._run([_issue("git-credentials-plaintext")], fail=False), 0)
         self.assertEqual(self._run([_issue("git-credentials-plaintext")], fail=True), 1)
+
+
+class TestWhollyAbsentSurfaceIsNotClean(unittest.TestCase):
+    """#120 — a wipe does not SUPPRESS the persistence checks, it SATISFIES them. Every location
+    raises FileNotFoundError, every location grades `absent` ("nothing planted here"), no issue is
+    raised, and the run reaches its most reassuring line — "persistence surface enumerated and clean
+    — rotating credentials is safe" — on a host whose home directory was just destroyed. Nothing was
+    enumerated, so "enumerated" is the false word and the all-clear has to be withheld."""
+
+    ABSENT = [("launch-agent / service dir", Path("/no/such/agents")),
+              ("SSH authorized_keys", Path("/no/such/.ssh/authorized_keys")),
+              (coverage._ANCHOR_LABEL, Path("/no/such/.zshrc"))]
+
+    def _issues(self, locs):
+        with mock.patch.object(coverage, "_must_verify_locations", return_value=locs):
+            return coverage.check_persistence_coverage()
+
+    def test_a_wholly_absent_surface_reads_as_unknown_not_clean(self):
+        issues = self._issues(self.ABSENT)
+        self.assertEqual([i.id for i in issues], ["persistence-surface-not-established"])
+        self.assertEqual(issues[0].severity, "unknown")
+
+    def test_the_location_classes_are_named_from_the_data_not_from_prose(self):
+        # A hand-written list silently misdescribes the surface the moment a class is added or
+        # dropped — the same defect this module exists to remove, one level up.
+        detail = self._issues(self.ABSENT)[0].detail
+        for label in {lbl for lbl, _ in self.ABSENT}:
+            self.assertIn(label, detail)
+
+    def test_it_states_both_readings_and_picks_neither(self):
+        # A fresh account and a destroyed one are indistinguishable from disk, so it must not claim
+        # either. (Measured: macOS builds a new account from a template that carries no shell startup
+        # file and no ~/Library/LaunchAgents, so the benign reading is not hypothetical.)
+        issue = self._issues(self.ABSENT)[0]
+        for reading in ("new account", "container", "destroyed"):
+            self.assertIn(reading, issue.detail)
+
+    def test_one_present_anchor_keeps_the_surface_established(self):
+        d = Path(tempfile.mkdtemp(prefix="cov-anchor-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
+        (d / ".zshrc").write_text("export PATH=$PATH\n")
+        self.assertEqual(self._issues(self.ABSENT + [(coverage._ANCHOR_LABEL, d / ".zshrc")]), [])
+
+    def test_a_surface_carrying_no_anchor_never_fires(self):
+        # "everything is absent" over a list holding nothing an in-use account acquires is vacuously
+        # true, not evidence — so the anchor has to be present for the claim to mean anything.
+        self.assertEqual(self._issues([("launch-agent / service dir", Path("/no/such/agents"))]), [])
+
+    def test_it_stays_silent_where_the_platform_has_no_enumerable_surface(self):
+        # On Windows every certified location is absent by construction, so this would fire on every
+        # host and say nothing about it. That gap is disclosed by the scope note instead.
+        with mock.patch("sys.platform", "win32"):
+            self.assertEqual(self._issues(self.ABSENT), [])
+
+    @unittest.skipIf(os.getuid() == 0, "root bypasses permission bits")
+    def test_an_unreadable_location_is_the_other_state_not_this_one(self):
+        # The two UNKNOWN states are mutually exclusive by construction: an unreadable location is
+        # not an absent one, so a surface with one cannot also be wholly absent.
+        d = Path(tempfile.mkdtemp(prefix="cov-excl-"))
+        self.addCleanup(lambda: (os.chmod(d, 0o700), __import__("shutil").rmtree(d, ignore_errors=True)))
+        os.chmod(d, 0o000)
+        ids = [i.id for i in self._issues(self.ABSENT + [("launch-agent / service dir", d)])]
+        self.assertEqual(ids, ["persistence-surface-unverified"])
+
+    def test_it_withholds_the_rotation_all_clear(self):
+        self.assertEqual(rotation_safety({"persistence-surface-not-established"}),
+                         ROTATION_UNSAFE_UNKNOWN)
+
+    def test_the_report_never_says_rotating_is_safe(self):
+        report = hygiene.render([_issue("persistence-surface-not-established", "unknown")])
+        self.assertNotIn("rotating credentials is safe", report)
+        self.assertIn("UNKNOWN", report)
+        self.assertIn("UNSAFE", report)
+
+    def test_the_detail_and_the_fix_both_reach_the_report(self):
+        # The shared verdict line is generic; "new or destroyed" is stated in the ISSUE detail and
+        # what to do about it in the remediation. `unknown` items are split out of the finding
+        # groups, so the verdict block is their only home — printing the problem and swallowing the
+        # instruction told the operator rotation is unsafe and never what would make it safe again.
+        issue = HygieneIssue(id="persistence-surface-not-established", severity="unknown",
+                             title="t", detail="NOTHING WAS ENUMERATED HERE",
+                             remediation="IMAGE THE DISK FIRST")
+        report = hygiene.render([issue])
+        self.assertIn("NOTHING WAS ENUMERATED HERE", report)
+        self.assertIn("IMAGE THE DISK FIRST", report)
+
+    def test_the_unreadable_state_gets_its_fix_printed_too(self):
+        # Same hole, same fix — it was never specific to the new state.
+        report = hygiene.render([HygieneIssue(id="persistence-surface-unverified", severity="unknown",
+                                              title="t", detail="d", remediation="RE-RUN WITH ACCESS")])
+        self.assertIn("RE-RUN WITH ACCESS", report)
+
+    def test_both_disclosed_fields_are_encoded_like_every_other_untrusted_field(self):
+        # These details name discovered PATHS, and the fix line renders in the same block. A field
+        # added to this path without the encoder is how the audit report becomes a terminal- and
+        # CI-log-injection surface again — the encoder lives at the render site precisely so a new
+        # field cannot arrive unencoded because whoever added it did not know to encode.
+        hostile = "x\x1b]0;pwned\x07::error::FAKE-saw-says-clean\x1b[2J"
+        report = hygiene.render([HygieneIssue(
+            id="persistence-surface-not-established", severity="unknown", title="t",
+            detail="D:" + hostile, remediation="R:" + hostile)])
+        self.assertNotIn("\x1b", report)
+        self.assertNotIn("::error::", report)
+
+    def test_the_shipped_issue_tells_the_operator_to_image_before_using_the_host(self):
+        # Increment 2 of the #120 proposal, at the point the decision is actually made: a plain
+        # delete leaves content in freed blocks and continued use overwrites it.
+        remediation = self._issues(self.ABSENT)[0].remediation
+        self.assertIn("image the disk", remediation.lower())
+        self.assertIn("recoverable", remediation.lower())
+
+
+class TestProbesStayUnconditional(unittest.TestCase):
+    """#120 AC 1 — wipe evidence must never suppress, downgrade or skip a persistence probe.
+
+    That holds today for free: `audit_checks()` is a flat list literal, and `saw` has no host-side
+    wipe signal to gate it WITH. Both halves can change, so the property is PINNED rather than
+    assumed — this fails the moment a probe is registered behind a branch, on damage evidence or
+    anything else."""
+
+    def _tree(self):
+        return ast.parse(textwrap.dedent(inspect.getsource(hygiene.audit_checks))).body[0]
+
+    def test_the_body_is_a_single_return_of_a_flat_list(self):
+        fn = self._tree()
+        body = fn.body[1:] if ast.get_docstring(fn) else fn.body
+        self.assertEqual(len(body), 1, "audit_checks grew statements before its return")
+        self.assertIsInstance(body[0], ast.Return)
+        self.assertIsInstance(body[0].value, ast.List)
+
+    def test_no_probe_is_registered_behind_a_branch(self):
+        gated = sorted({type(n).__name__ for n in ast.walk(self._tree())
+                        if isinstance(n, (ast.If, ast.IfExp, ast.For, ast.While, ast.Try,
+                                          ast.ListComp, ast.GeneratorExp, ast.Match))})
+        self.assertEqual(gated, [], f"a probe is gated behind {gated}")
+
+    def test_every_probe_runs_for_every_argument_combination(self):
+        registered = {tuple(lbl for lbl, _ in hygiene.audit_checks(slug, token, "main",
+                                                                   verify_artifacts=verify))
+                      for slug in (None, "owner/repo")
+                      for token in (None, "t0ken")
+                      for verify in (False, True)}
+        self.assertEqual(len(registered), 1, f"the probe set varies with arguments: {registered}")
+
+
+class TestRunbookImagesBeforeItOverwrites(unittest.TestCase):
+    """#120 — `saw` already computes whether a wipe payload plain-deletes (content survives in freed
+    blocks) or overwrites-then-deletes (it does not), and the runbook's rebuild step is precisely the
+    one that destroys what a plain delete left behind. So imaging is offered BEFORE it."""
+
+    def test_imaging_precedes_the_step_that_overwrites_the_disk(self):
+        steps = incident_response_sequence()
+        image = [i for i, s in enumerate(steps) if "image the disk" in s.lower()]
+        rebuild = [i for i, s in enumerate(steps) if "rebuild affected hosts" in s.lower()]
+        self.assertTrue(image, "the runbook never offers to image the disk")
+        self.assertTrue(rebuild, "the rebuild step moved — re-anchor this ordering pin")
+        self.assertLess(image[0], rebuild[0], "imaging is offered after the disk is overwritten")
+
+    def test_it_names_the_discriminator_saw_already_computes(self):
+        joined = " ".join(incident_response_sequence()).lower()
+        self.assertIn("recoverable", joined)
+        self.assertIn("overwrite", joined)
+
+    def test_rotation_is_still_the_last_step(self):
+        self.assertIn("rotate", incident_response_sequence()[-1].lower())
 
 
 class TestScanHostNote(unittest.TestCase):

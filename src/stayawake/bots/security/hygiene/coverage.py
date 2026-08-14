@@ -13,14 +13,31 @@ persistence location is READABLE, and emits ONE `persistence-surface-unverified`
 issue naming any that exist but could not be read — so the run reads (and exits) as UNKNOWN, not clean,
 and the rotation-safety verdict withholds its all-clear. Locations are sourced from the detection
 modules themselves (single source of truth), so the surface we certify is exactly the surface we scan.
+
+**Absent is clean per location, but an ENTIRELY absent surface is not (#120).** A wipe does not suppress
+these checks — it SATISFIES them: every location raises FileNotFoundError, every location grades
+`absent` ("nothing planted here"), zero issues are raised, and the run reaches its most reassuring line,
+*"persistence surface enumerated and clean — rotating credentials is safe"*, on a host whose home was
+just destroyed. Nothing was enumerated, so "enumerated" is the false word, and the verdict lands on the
+one action a rotation-triggered wiper is armed for. `persistence-surface-not-established` is that third
+state: absent because there is nothing to find, versus absent because nothing could be established. It
+fails to UNKNOWN and never to a finding — a new account, a container and a CI image present identically
+(measured: macOS creates an account from a template carrying no shell startup file and no
+`~/Library/LaunchAgents`), and from disk alone the two are indistinguishable.
 """
 from __future__ import annotations
 
 import stat
 from pathlib import Path
 
-from .models import HygieneIssue, _WIPER_NOTE
+from .models import HygieneIssue, _WIPER_NOTE, persistence_surface_is_enumerable
 from . import os_service, runner, mechanism
+
+# The ANCHOR of the certified surface: the one location class an account in real USE acquires, and
+# therefore the one whose absence makes a wholly-absent surface worth saying out loud. Named once
+# because `_surface_is_absent` requires it to be present in the list — "everything is absent" over a
+# list that happens to contain no anchor is vacuously true, not evidence.
+_ANCHOR_LABEL = "shell startup file"
 
 
 def _must_verify_locations() -> list[tuple[str, Path]]:
@@ -34,7 +51,7 @@ def _must_verify_locations() -> list[tuple[str, Path]]:
     locs += [("self-hosted-runner dir", d) for d in runner.user_runner_dirs()]
     ssh = home / ".ssh"
     locs += [("SSH authorized_keys", ssh / name) for name in mechanism._SSH_AUTHKEYS]
-    locs += [("shell startup file", home / name) for name in mechanism._SHELL_RC_FILES]
+    locs += [(_ANCHOR_LABEL, home / name) for name in mechanism._SHELL_RC_FILES]
     return locs
 
 
@@ -73,20 +90,64 @@ def _coverage(p: Path) -> str:
     return "unverified"                         # FIFO/socket/device — anomalous AND unsafe to open
 
 
+def _surface_is_absent(graded: list[tuple[str, Path, str]]) -> bool:
+    """True when EVERY certified location is absent — the run enumerated nothing, so it cannot call
+    the surface clean (#120).
+
+    Two guards keep the claim honest rather than vacuous. The ANCHOR must be in the list, because
+    "all absent" over a list with nothing an in-use account acquires proves nothing. And the platform
+    must be one whose surface `saw` enumerates at all — on Windows every certified location is absent
+    by construction, which would make this fire on every host and say nothing (models is the one
+    authority for that, shared with the scope note)."""
+    if not persistence_surface_is_enumerable():
+        return False
+    if not any(label == _ANCHOR_LABEL for label, _p, _state in graded):
+        return False
+    return all(state == "absent" for _label, _p, state in graded)
+
+
 def check_persistence_coverage() -> list[HygieneIssue]:
-    """Emit a single `persistence-surface-unverified` (severity `unknown`) issue when any user-owned
-    persistence location exists but could not be read — so the run is UNKNOWN, never a false clean."""
-    unverified = [f"{label} ({p})" for label, p in _must_verify_locations()
-                  if _coverage(p) == "unverified"]
-    if not unverified:
-        return []
-    return [HygieneIssue(
-        id="persistence-surface-unverified",
-        severity="unknown",
-        title="Persistence surface could not be fully verified",
-        detail="These user-owned persistence locations exist but could not be read, so this host "
-               "cannot be certified free of a credential-rotation wiper: " + "; ".join(unverified)
-               + ". A run that could not enumerate the surface is UNKNOWN, not clean.",
-        remediation="Re-run with permission to read them (or inspect them by hand). Until the surface "
-                    f"is verified, treat credential rotation as UNSAFE — {_WIPER_NOTE}.",
-    )]
+    """Emit a single severity-`unknown` issue when the persistence surface could not be established —
+    either because a location exists but could not be READ, or because the whole surface is ABSENT and
+    so nothing was enumerated at all. Both make the run UNKNOWN rather than a false clean.
+
+    The two states are mutually exclusive by construction (an unreadable location is not an absent
+    one), so each condition is asked independently and neither has to know about the other."""
+    graded = [(label, p, _coverage(p)) for label, p in _must_verify_locations()]
+    issues: list[HygieneIssue] = []
+
+    unverified = [f"{label} ({p})" for label, p, state in graded if state == "unverified"]
+    if unverified:
+        issues.append(HygieneIssue(
+            id="persistence-surface-unverified",
+            severity="unknown",
+            title="Persistence surface could not be fully verified",
+            detail="These user-owned persistence locations exist but could not be read, so this host "
+                   "cannot be certified free of a credential-rotation wiper: " + "; ".join(unverified)
+                   + ". A run that could not enumerate the surface is UNKNOWN, not clean.",
+            remediation="Re-run with permission to read them (or inspect them by hand). Until the "
+                        f"surface is verified, treat credential rotation as UNSAFE — {_WIPER_NOTE}.",
+        ))
+
+    if _surface_is_absent(graded):
+        # The location classes are NAMED FROM THE DATA, never a prose list: a hand-written one drifts
+        # the moment the certified surface gains or loses a class, and a scope claim that misdescribes
+        # what was looked at is the same defect this module exists to remove.
+        kinds = ", ".join(sorted({label for label, _p, _state in graded}))
+        issues.append(HygieneIssue(
+            id="persistence-surface-not-established",
+            severity="unknown",
+            title="Persistence surface could not be established",
+            detail=f"Every user-owned persistence location this audit certifies is absent ({kinds}), "
+                   "so nothing was enumerated here and nothing can be certified clean. A host in this "
+                   "state is a new account, a container or a CI image — or one whose home directory "
+                   "has been destroyed. From disk alone the two are indistinguishable, and a wipe "
+                   "leaves this check looking exactly like a clean host.",
+            remediation="Confirm which it is. On a new account, a container or a CI image this is "
+                        "expected and there is nothing to do. If this host had files and they are "
+                        "gone, treat it as an incident: image the disk BEFORE using it further — a "
+                        "plain delete leaves the content recoverable in freed blocks and continued "
+                        "use overwrites it — and treat credential rotation as UNSAFE until the "
+                        f"surface is confirmed ({_WIPER_NOTE}).",
+        ))
+    return issues
