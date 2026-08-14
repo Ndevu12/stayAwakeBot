@@ -63,5 +63,39 @@ class AlertTargetIsExplicit(unittest.TestCase):
         save.assert_not_called()
 
 
+class CheckAlwaysRuns(unittest.TestCase):
+    """The check must happen regardless of the exit-code flag.
+
+    `run_check` once read `fail_on_unhealthy and asyncio.run(_check_async(...))`, and `and`
+    short-circuits: with the flag off the check was never invoked, so the process reported success
+    having contacted nothing. A monitor that is green without looking is worse than one that fails.
+    """
+
+    def _run(self, *, fail_on_unhealthy, unhealthy):
+        # A plain callable, not an AsyncMock: asyncio.run is stubbed too, so a real coroutine
+        # would be created and never awaited, emitting a warning that could mask a real one.
+        with mock.patch.object(service, "_check_async", new=lambda path: "coro"):
+            with mock.patch.object(service.asyncio, "run", side_effect=lambda c: unhealthy) as run:
+                code = service.run_check("cfg.yml", fail_on_unhealthy)
+        return code, run.call_count
+
+    def test_check_runs_when_the_flag_is_off(self):
+        code, calls = self._run(fail_on_unhealthy=False, unhealthy=True)
+        self.assertEqual(calls, 1, "the check must run even when it cannot change the exit code")
+        self.assertEqual(code, 0, "without the flag an unhealthy endpoint is reported, not failed")
+
+    def test_check_runs_when_the_flag_is_on(self):
+        code, calls = self._run(fail_on_unhealthy=True, unhealthy=True)
+        self.assertEqual(calls, 1)
+        self.assertEqual(code, 1, "with the flag an unhealthy endpoint sets a non-zero exit")
+
+    def test_healthy_is_zero_either_way(self):
+        for flag in (True, False):
+            with self.subTest(fail_on_unhealthy=flag):
+                code, calls = self._run(fail_on_unhealthy=flag, unhealthy=False)
+                self.assertEqual(calls, 1)
+                self.assertEqual(code, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

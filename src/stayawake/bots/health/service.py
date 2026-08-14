@@ -25,5 +25,11 @@ async def _check_async(config_path: str) -> bool:
 
 def run_check(config_path: str = "config/urls.yml", fail_on_unhealthy: bool = False) -> int:
     """Check every URL and refresh the one dashboard issue. Returns a process exit code
-    (non-fatal by default)."""
-    return 1 if (fail_on_unhealthy and asyncio.run(_check_async(config_path))) else 0
+    (non-fatal by default).
+
+    The check ALWAYS runs. `fail_on_unhealthy` decides only what the exit code says about the
+    result — it must never decide whether the work happens. Evaluating the two in one `and`
+    short-circuited the check away whenever the flag was off, so a monitor invoked without it
+    reported success having contacted nothing."""
+    any_unhealthy = asyncio.run(_check_async(config_path))
+    return 1 if (fail_on_unhealthy and any_unhealthy) else 0
