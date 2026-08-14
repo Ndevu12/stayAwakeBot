@@ -44,13 +44,30 @@ Or the latest from source:
 pip install "stayawakebot @ git+https://github.com/Ndevu12/stayAwakeBot@main"
 ```
 
-Then hunt:
+Then hunt. Each of these stands alone:
+
+**Scan the repository you are in:**
 
 ```bash
-saw scan                                     # the current repository
-saw scan ~/dev                               # every repository under a path
-saw scan --config config/security.yml        # with an operator-chosen allowlist
-saw audit                                    # this machine's hygiene posture
+saw scan
+```
+
+**Or sweep every repository under a path:**
+
+```bash
+saw scan ~/dev
+```
+
+**Scan with your own allowlist**, rather than the packaged defaults:
+
+```bash
+saw scan --config config/security.yml
+```
+
+**Check the machine itself**, not a repository — credential hygiene and start-up entries:
+
+```bash
+saw audit
 ```
 
 New here? `saw intro` is a 60-second tour, and `saw search "…"` finds the command you want.
@@ -60,7 +77,45 @@ New here? `saw intro` is a 60-second tour, and `saw search "…"` finds the comm
 
 ## Gate any repo's CI (GitHub Action)
 
-Add the gate to any repository — no install, no clone. This is a working setup, not a sketch:
+Every repository you own should refuse an infected merge. **Don't hand-maintain that workflow —
+`saw guard` writes it, keeps it pinned, and proves it is enforced**, for one repository or a
+whole organisation. Each command below stands alone; reach for the one you need.
+
+**Set it up with one command.** Writes the gate here, for you to review and commit:
+
+```bash
+saw guard setup
+```
+
+**Or raise it as a pull request** instead, which never pushes to `main`:
+
+```bash
+saw guard setup --pr
+```
+
+**Check that a repository is actually guarded** — present, SHA-pinned, current, and *required*:
+
+```bash
+saw guard check
+```
+
+**Check a whole organisation**, failing if any repository lacks a required gate:
+
+```bash
+saw guard check --org your-org -f
+```
+
+`saw guard setup` *surgically pin-bumps* a gate that already exists rather than replacing it, and
+never clobbers a workflow installed by some other means. `saw guard check` goes further than "is the
+file there" — it verifies branch protection actually **requires** the check, because a gate that is
+not required is decoration.
+
+Both sweep many repositories at once (`--remote` / `--user` / `--org`), like `saw scan` and
+`saw fix`. See the [CLI guide](docs/CLI.md#saw-guard).
+
+### The workflow it writes
+
+Installed for you by `saw guard setup`, and equally valid to drop in by hand:
 
 ```yaml
 # .github/workflows/worm-scan.yml
@@ -96,43 +151,6 @@ jobs:
           # the fix, it does not make the check pass. Omit for detection only.
           remediate: pr
 ```
-
-### Don't hand-maintain that workflow
-
-**`saw guard` writes it, keeps it pinned, and proves it is enforced** — for one repository or a
-whole organisation. Each of these stands alone; reach for the one you need.
-
-**Set it up with one command.** Writes the gate here, for you to review and commit:
-
-```bash
-saw guard setup
-```
-
-**Or raise it as a pull request** instead, which never pushes to `main`:
-
-```bash
-saw guard setup --pr
-```
-
-**Check that a repository is actually guarded** — present, SHA-pinned, current, and *required*:
-
-```bash
-saw guard check
-```
-
-**Check a whole organisation**, failing if any repository lacks a required gate:
-
-```bash
-saw guard check --org your-org -f
-```
-
-`saw guard setup` *surgically pin-bumps* a gate that already exists rather than replacing it, and
-never clobbers a workflow installed by some other means. `saw guard check` goes further than "is the
-file there" — it verifies branch protection actually **requires** the check, because a gate that is
-not required is decoration.
-
-Both sweep many repositories at once (`--remote` / `--user` / `--org`), like `saw scan` and
-`saw fix`. See the [CLI guide](docs/CLI.md#saw-guard).
 
 ### About the pins
 
