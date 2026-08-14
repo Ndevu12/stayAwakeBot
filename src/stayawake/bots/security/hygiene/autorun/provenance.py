@@ -101,15 +101,21 @@ def _homebrew_owner(entry_path: Path, exec_path: str) -> str | None:
 
 
 def _codesigned(exec_path: str) -> bool | None:
-    """macOS only: True if the executable has a valid code signature, False if verification FAILS,
-    None if not-applicable / could-not-check (non-macOS, missing binary, tool error). A False here is
-    a real signal (an unsigned binary behind an autorun entry); None never asserts anything."""
+    """macOS only: True if the executable is signed by an identity Apple vouched for, False if it is
+    unsigned OR signed only ad-hoc, None if not-applicable / could-not-check. A False is a real signal
+    (nobody accountable stands behind this binary); None never asserts anything."""
     if sys.platform != "darwin":
         return None
     p = _norm(exec_path)
     if not os.path.isfile(p):
         return None
-    r = _run(["codesign", "--verify", "--strict", p])
+    # `--verify` alone answers "is this signature intact", which an ad-hoc signature satisfies for
+    # free (`codesign -s -`, no certificate) — and on Apple Silicon the linker ad-hoc signs by
+    # DEFAULT (`ld(1)`), so a bare verify is near-inert there. `-R` adds the identity question.
+    # `--strict` is dropped: it fails legitimately signed Developer ID software on "resource fork,
+    # Finder information, or similar detritus" — measured on a shipping notarized browser, whose
+    # authority chain is valid. Both errors were live: ad-hoc read as signed, real vendors as unsigned.
+    r = _run(["codesign", "--verify", "-R=anchor apple generic", p])
     if r is None:
         return None
     return r.returncode == 0
