@@ -40,6 +40,7 @@ from .host_artifacts import check_host_artifacts
 from .editor import check_vscode
 from .mechanism import check_ssh_authorized_keys, check_shell_profile, check_git_config_execution
 from .remote import check_branch_protection
+from stayawake.utils import textsafe
 from stayawake.utils.render import MARKER, SEVERITY, block, marked_list, paint
 
 __all__ = [
@@ -164,7 +165,7 @@ def _unverified_locations(issues: list[HygieneIssue], *, width: int) -> list[str
     verdict, and never off `severity`), so the disclosure survives whichever verdict outranks it."""
     return [line
             for i in issues if i.id in UNVERIFIED_PERSISTENCE_IDS
-            for line in block(i.detail, indent=5, width=width)]
+            for line in block(textsafe.plain(i.detail), indent=5, width=width)]
 
 
 def _scope_note(issues: list[HygieneIssue], *, color: bool, width: int) -> list[str]:
@@ -289,9 +290,15 @@ def render(issues: list[HygieneIssue], *, color: bool = False, width: int = 80) 
         for i in items:
             code = SEVERITY.get(i.severity)
             icon = _icon(i.severity)
-            lines.append(f"  {paint(icon, code, on=color)} {paint(i.title, code, on=color)}")
-            lines += block(i.detail, indent=5, width=width)
-            lines += block(i.remediation, indent=5, width=width, marker=f"{MARKER['detail']} fix  ",
+            # Encoded here, not at construction: a filename from a world-writable directory is
+            # attacker-chosen, and an escape sequence has zero display width — it corrupts `block`'s
+            # wrap arithmetic AND executes on the terminal. `command` stays verbatim by design (#86);
+            # it is built from our own literals, confirmed no discovered path reaches it.
+            lines.append(f"  {paint(icon, code, on=color)} "
+                         f"{paint(textsafe.plain(i.title), code, on=color)}")
+            lines += block(textsafe.plain(i.detail), indent=5, width=width)
+            lines += block(textsafe.plain(i.remediation), indent=5, width=width,
+                           marker=f"{MARKER['detail']} fix  ",
                            code=SEVERITY["info"], color=color)
             if i.command:
                 # The copy-pasteable command renders VERBATIM on its own line(s), never reflowed — a
