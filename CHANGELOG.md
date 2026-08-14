@@ -30,6 +30,13 @@ reader, not the mechanism or the weakness it closed.
   scope note and the report's opening line said a location had been unreadable even when every
   location had been read and none existed, sending a reader looking for something that was not there.
 
+### Security
+- **`saw audit` no longer lets a discovered file path reach a copy-pasteable command unchanged.** One
+  removal command named the configuration file it had found, and that name is not always chosen by
+  you — so a crafted one could put terminal control sequences, or text a CI system reads as its own
+  instructions, into a block you are invited to paste. The name is now neutralised while still being
+  shown, and the command stays usable.
+
 ### Changed
 - **The incident runbook now offers to image the disk before the step that rebuilds the host**, and
   says when deleted content is still recoverable. Rebuilding, and ordinary continued use, overwrite
