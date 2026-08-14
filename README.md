@@ -84,12 +84,13 @@ jobs:
   strix:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0   # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
         with:
           fetch-depth: 0        # full history is required
 
       - uses: Ndevu12/strix@93fe465d7b0266c6010778999b73b591ae082f3e      # v0.1.4
         with:
+          version: '0.5.1'      # pin the scanner too; blank tracks latest
           # On an infected verdict, open ONE rolling `security/auto-clean` PR.
           # The gate still goes RED until that PR is merged — remediation opens
           # the fix, it does not make the check pass. Omit for detection only.
