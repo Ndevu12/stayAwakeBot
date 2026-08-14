@@ -13,6 +13,11 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Added
+- **A security policy** (`SECURITY.md`) with a private reporting address, so a vulnerability in the
+  scanner can be reported without opening a public issue. **saw@ndevuspace.com** is also now the
+  contact for commercial licensing and the package's author address.
+
 ### Fixed
 - **The README's CI gate example used an input the Action does not accept** (`fail-on-findings`),
   so the line was silently ignored by anyone who copied it. The example is now a working

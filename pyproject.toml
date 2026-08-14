@@ -20,7 +20,7 @@ requires-python = ">=3.11"
 # ships alongside LICENSE so it reaches everyone who installs the package.
 license = "AGPL-3.0-or-later"
 license-files = ["LICENSE", "COMMERCIAL-LICENSE.md"]
-authors = [{ name = "Jean Paul Elisa NIYOKWIZERWA" }]
+authors = [{ name = "Jean Paul Elisa NIYOKWIZERWA", email = "saw@ndevuspace.com" }]
 keywords = ["monitoring", "uptime", "security", "sentinel", "worm", "supply-chain", "github-actions"]
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -47,6 +47,7 @@ dev = []   # the test suite uses the stdlib `unittest`
 [project.urls]
 Homepage = "https://github.com/Ndevu12/stayAwakeBot"
 Repository = "https://github.com/Ndevu12/stayAwakeBot"
+Issues = "https://github.com/Ndevu12/stayAwakeBot/issues"
 
 # Console scripts (available after `pip install`); each maps to an existing thin main() (DRY).
 [project.scripts]

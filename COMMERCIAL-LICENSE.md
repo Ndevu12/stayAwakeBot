@@ -31,7 +31,7 @@ The commercial license is granted by the author under a **separate written agree
 or negotiated fee applies). To request terms and a quote, contact:
 
 - **Author / licensor:** Jean Paul Elisa NIYOKWIZERWA
-- **Contact:** niyokwizerwajeanpaulelisa@gmail.com
+- **Contact:** saw@ndevuspace.com
 
 Please include your company, the product or service, and how you intend to use stayAwakeBot.
 
