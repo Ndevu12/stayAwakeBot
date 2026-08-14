@@ -13,27 +13,29 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
-### Fixed
-- **`saw audit` no longer lets a filename it discovered control your terminal or your CI log.** Names in world-writable directories are chosen by whoever wrote the file, and the audit report printed them unchanged — so a crafted name could clear the screen, retitle the window, scroll a real finding out of view, or emit text a CI system reads as its own instructions. The report now neutralises those sequences while still showing the name. Copy-pasteable commands are unchanged.
-
-### Changed
-- The README's CI-gate section now leads with `saw guard`, which writes and maintains that workflow
-  for you, instead of leaving it as a footnote after the configuration reference.
+## [0.5.2] - 2026-08-14
 
 ### Added
 - **A security policy** (`SECURITY.md`) with a private reporting address, so a vulnerability in the
   scanner can be reported without opening a public issue. **saw@ndevuspace.com** is also now the
   contact for commercial licensing and the package's author address.
 
+### Changed
+- **The README now leads with what `saw` is for** — hunting self-propagating supply-chain packages —
+  and with `saw guard`, which writes and maintains the CI gate for you. The uptime sentinel is
+  documented further down, since it is independent of `saw` and shares only the packaging.
+
 ### Fixed
 - **The README's CI gate example used an input the Action does not accept** (`fail-on-findings`),
   so the line was silently ignored by anyone who copied it. The example is now a working
   configuration taken from a repository running it, with every action pinned by commit SHA.
 
-### Changed
-- The README now leads with what `saw` is for — hunting self-propagating supply-chain packages —
-  and what each command does. The uptime sentinel is documented further down, since it is
-  independent of `saw` and shares only the packaging.
+### Security
+- **`saw audit` no longer lets a filename it discovered control your terminal or your CI log.** Names
+  in world-writable directories are chosen by whoever wrote the file, and the audit report printed
+  them unchanged — so a crafted name could clear the screen, retitle the window, scroll a real
+  finding out of view, or emit text a CI system reads as its own instructions. The report now
+  neutralises those sequences while still showing the name. Copy-pasteable commands are unchanged.
 
 ## [0.5.1] - 2026-08-14
 
@@ -413,7 +415,8 @@ _No user-facing changes were recorded for this release._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel (supply-chain worm
 detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.5.2...HEAD
+[0.5.2]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.4.0...v0.4.1
