@@ -13,6 +13,16 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Fixed
+- **The README's CI gate example used an input the Action does not accept** (`fail-on-findings`),
+  so the line was silently ignored by anyone who copied it. The example is now a working
+  configuration taken from a repository running it, with every action pinned by commit SHA.
+
+### Changed
+- The README now leads with what `saw` is for — hunting self-propagating supply-chain packages —
+  and what each command does. The uptime sentinel is documented further down, since it is
+  independent of `saw` and shares only the packaging.
+
 ## [0.5.1] - 2026-08-14
 
 ### Fixed
