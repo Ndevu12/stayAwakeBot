@@ -14,6 +14,10 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Fixed
+- **`stayawake-health-check` checked nothing unless `--fail-on-unhealthy` was passed.** The flag was
+  evaluated in the same expression as the check itself, and `and` short-circuits — so without it the
+  command contacted no endpoint, printed nothing, and exited `0`. A run that looked successful had
+  done no work. The check now always runs; the flag decides only the exit code.
 - **`saw audit` now judges a start-up program by who signed it, not merely by whether its signature is intact.** A binary carrying only a placeholder signature — which anyone can add in one command, and which is applied automatically to Apple Silicon software at build time — was accepted as properly signed. Separately, genuinely signed third-party applications were being reported as unsigned because of harmless packaging leftovers, which could make ordinary software look unaccountable. Both are corrected.
 - **The README's quick-start scan command did not work.** It passed `--local`, a flag removed in
   0.1.6 — local is the default and `--remote` is the scope toggle — so following the README produced
