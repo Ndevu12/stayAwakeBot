@@ -92,9 +92,10 @@ def _surface_is_absent(graded: list[tuple[str, Path, str]]) -> bool:
         return False
     if not any(label == _ANCHOR_LABEL for label, _p, _state in graded):
         return False
-    # A DANGLING symlink is `absent` to `_coverage` but not to this question: a dotfile manager that
-    # has not run yet leaves `~/.zshrc -> …` visible in `ls` on an obviously configured account.
-    return all(state == "absent" and not p.is_symlink() for _label, p, state in graded)
+    # NOT relaxed for a dangling symlink, though one is visible in `ls` on a configured account: a
+    # wipe of `~/dotfiles` leaves `~/.zshrc -> …` dangling, and `ln -s /nonexistent ~/.zlogin` would
+    # be a one-command off-switch. Measured — either restored "enumerated and clean" on a wiped home.
+    return all(state == "absent" for _label, _p, state in graded)
 
 
 def check_persistence_coverage() -> list[HygieneIssue]:

@@ -195,14 +195,19 @@ class TestWhollyAbsentSurfaceIsNotClean(unittest.TestCase):
         (d / ".zshrc").write_text("export PATH=$PATH\n")
         self.assertEqual(self._issues(self.ABSENT + [(coverage._ANCHOR_LABEL, d / ".zshrc")]), [])
 
-    def test_a_dangling_dotfile_symlink_is_not_nothing(self):
-        # A dotfile manager that has not run yet, or a dotfiles repo on an unmounted volume: the
-        # operator sees `.zshrc -> …` in `ls -la ~`, so a report claiming the location is absent is
-        # wrong even though nothing readable is planted there.
-        home = Path(tempfile.mkdtemp(prefix="cov-stow-"))
+    def test_a_dangling_symlink_does_not_switch_the_verdict_off(self):
+        # A wipe of `~/dotfiles` leaves `~/.zshrc -> …` dangling, and `ln -s /nonexistent ~/.zlogin`
+        # is one command. Treating a link the operator can see as "the surface exists" was measured
+        # to hand back "enumerated and clean — rotating credentials is safe" on a wiped home.
+        home = Path(tempfile.mkdtemp(prefix="cov-dangling-"))
         self.addCleanup(lambda: __import__("shutil").rmtree(home, ignore_errors=True))
-        (home / ".zshrc").symlink_to(home / "dotfiles" / "zshrc")     # target does not exist
-        self.assertEqual(self._issues(self.ABSENT + [(coverage._ANCHOR_LABEL, home / ".zshrc")]), [])
+        for name, target in ((".zshrc", home / "dotfiles" / "zshrc"), (".zlogin", Path("/nonexistent"))):
+            with self.subTest(name=name):
+                link = home / name
+                link.unlink(missing_ok=True)
+                link.symlink_to(target)
+                ids = [i.id for i in self._issues(self.ABSENT + [(coverage._ANCHOR_LABEL, link)])]
+                self.assertEqual(ids, ["persistence-surface-not-established"])
 
     def test_a_surface_carrying_no_anchor_never_fires(self):
         # "everything is absent" over a list holding nothing an in-use account acquires is vacuously
@@ -358,6 +363,15 @@ class TestTheReportDescribesTheRightUnknown(unittest.TestCase):
                 report = self._report(id_)
                 self.assertIn("could not be established", report)
                 self.assertNotIn("could not be fully verified", report)
+
+    def test_the_heading_names_the_state_it_reached(self):
+        # The report's most prominent line, on a host whose home may have just been destroyed. It
+        # said "UNVERIFIED" — the word the verdict below it does not use — and led with "no findings".
+        absent = self._report("persistence-surface-not-established")
+        self.assertIn("nothing was there to examine", absent.splitlines()[0])
+        self.assertNotIn("UNVERIFIED", absent.splitlines()[0])
+        self.assertIn("UNVERIFIED", self._report("persistence-surface-unverified").splitlines()[0])
+        self.assertIn("no issues found", " ".join(hygiene.render([]).splitlines()[:1]))
 
     def test_the_scope_note_does_not_claim_a_read_failure_that_did_not_happen(self):
         absent = self._report("persistence-surface-not-established")

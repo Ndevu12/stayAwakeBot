@@ -110,7 +110,8 @@ _REPORT_FIELD_LIMIT = 4000
 
 def _safe(text: str) -> str:
     """One call for every untrusted field here, so a field added later cannot skip the defanging."""
-    return textsafe.plain(text, limit=_REPORT_FIELD_LIMIT)
+    out = textsafe.plain(text, limit=_REPORT_FIELD_LIMIT)
+    return out if len(out) < _REPORT_FIELD_LIMIT else out + " […]"   # a cut is never silent
 
 
 def _banner(issue_ids: set[str], *, color: bool, width: int) -> list[str]:
@@ -290,9 +291,15 @@ def render(issues: list[HygieneIssue], *, color: bool = False, width: int = 80) 
         # unverified?" because ONE probe emits that pairing today. The rotation verdict, the exit gate
         # and the scope note all key off UNVERIFIED_PERSISTENCE_IDS, so a second unknown-severity id
         # would otherwise split this heading three ways from the verdict printed under it.
-        head = (f"{MARKER['ok']} Local security hygiene: no issues found."
-                if not ({i.id for i in issues} & UNVERIFIED_PERSISTENCE_IDS)
-                else "Local security hygiene: no findings, but the persistence surface is UNVERIFIED.")
+        ids = {i.id for i in issues}
+        if SURFACE_ABSENT_ID in ids:
+            # Not "UNVERIFIED", and not led by "no findings": nothing was there to find, and this is
+            # the report's most prominent line on a host whose home may have just been destroyed.
+            head = "Local security hygiene: nothing was found because nothing was there to examine."
+        elif ids & UNVERIFIED_PERSISTENCE_IDS:
+            head = "Local security hygiene: no findings, but the persistence surface is UNVERIFIED."
+        else:
+            head = f"{MARKER['ok']} Local security hygiene: no issues found."
         code = SEVERITY["ok"] if "no issues" in head else SEVERITY["warning"]
         return "\n".join([paint(head, code, on=color), ""] + rotation
                          + [""] + _scope_note(issues, color=color, width=width)).rstrip()
