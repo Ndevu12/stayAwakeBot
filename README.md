@@ -75,13 +75,15 @@ New here? `saw intro` is a 60-second tour, and `saw search "…"` finds the comm
 > The distribution is published as **`stayawakebot`**; the security CLI is the terse **`saw`**
 > command (see the [CLI guide](docs/CLI.md)).
 
-## Gate any repo's CI (GitHub Action)
+## Don't hand-maintain that workflow
 
-Every repository you own should refuse an infected merge. **Don't hand-maintain that workflow —
-`saw guard` writes it, keeps it pinned, and proves it is enforced**, for one repository or a
-whole organisation. Each command below stands alone; reach for the one you need.
+**Gate any repository's CI with one command — no install, no clone.**
 
-**Set it up with one command.** Writes the gate here, for you to review and commit:
+Every repository you own should refuse an infected merge. `saw guard` writes that GitHub Actions
+workflow, keeps it pinned, and proves it is enforced — for one repository or a whole organisation.
+Each command below stands alone; reach for the one you need.
+
+**Set it up.** Writes the gate here, for you to review and commit:
 
 ```bash
 saw guard setup
