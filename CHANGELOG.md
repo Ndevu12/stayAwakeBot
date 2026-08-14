@@ -13,6 +13,9 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Fixed
+- **`saw audit` no longer lets a filename it discovered control your terminal or your CI log.** Names in world-writable directories are chosen by whoever wrote the file, and the audit report printed them unchanged — so a crafted name could clear the screen, retitle the window, scroll a real finding out of view, or emit text a CI system reads as its own instructions. The report now neutralises those sequences while still showing the name. Copy-pasteable commands are unchanged.
+
 ### Changed
 - The README's CI-gate section now leads with `saw guard`, which writes and maintains that workflow
   for you, instead of leaving it as a footnote after the configuration reference.
