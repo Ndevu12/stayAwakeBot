@@ -426,7 +426,7 @@ signatures:
   # Advisories / OSV.dev malicious-package records into a local cache, and scans match resolved
   # dependencies against it too (#1120). The corpus is a superset of the seed, never a prerequisite.
   # (Behaviorally scanning node_modules content is deliberately deferred — off by default, see
-  # docs/SECURITY_ARCHITECTURE.md → "Malicious upstream dependencies".)
+  # of the malicious-upstream-dependency class.)
   - id: malicious-dependency
     category: supply-chain-dep
     severity: critical

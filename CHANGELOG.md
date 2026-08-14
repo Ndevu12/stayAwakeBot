@@ -13,6 +13,13 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Fixed
+- **The README's quick-start scan command did not work.** It passed `--local`, a flag removed in
+  0.1.6 — local is the default and `--remote` is the scope toggle — so following the README produced
+  `unrecognized arguments: --local`. The README now leads with the security sentinel and shows
+  commands that run.
+- `saw audit`'s scope note no longer refers readers to a document that is not published.
+
 ## [0.5.0] - 2026-08-14
 
 ### Fixed

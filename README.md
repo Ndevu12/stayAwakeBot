@@ -1,15 +1,17 @@
 # StayAwakeBot
 
-StayAwakeBot is a distributable (`pip install`-able) Python monitoring **and** security
+StayAwakeBot is a distributable (`pip install`-able) Python **security and monitoring**
 toolkit. Under one `stayawake` namespace it ships two bots over a shared `core`:
 
-- **Health sentinel** — a URL/uptime availability monitor (HTTP status, latency, TLS,
-  keyword checks) that writes JSON/markdown reports.
 - **Security sentinel** — a supply-chain worm hunter that detects, alerts on, and
-  auto-fixes self-propagating malware, opening remediation PRs and gating CI.
+  auto-fixes self-propagating malware, opening remediation PRs and gating CI. It runs
+  locally through the terse **`saw`** command, and its exit code is the verdict.
+- **Health sentinel** — a URL/uptime availability monitor (HTTP status, latency, TLS,
+  keyword checks) that reports to the terminal, and to a GitHub issue or Slack when you
+  configure one.
 
-Run either bot as a **console script** locally, or as **GitHub Actions** workflows that
-commit reports back to the repository — the same packaged code in both places.
+Run either bot as a **console script** locally, or as a **GitHub Actions** workflow — the
+same packaged code in both places. Neither writes reports into your repository.
 
 ## Quick start
 
@@ -24,16 +26,19 @@ Or the latest from source:
 pip install "stayawakebot @ git+https://github.com/Ndevu12/stayAwakeBot@main"
 ```
 
-Health check
+**Scan for supply-chain worms** — the security sentinel. Local by default; the exit code is
+the verdict (`0` clean, `1` findings), so a CI gate just reads it:
 
 ```bash
-stayawake-health-check  --config config/urls.yml      
+saw scan                                     # the current repository
+saw scan ~/dev                               # every repository under a path
+saw scan --config config/security.yml        # with an operator-chosen allowlist
 ```
 
-Uptime check (remote-only bot)
+**Check uptime** — the health sentinel:
 
 ```bash
-saw scan --config config/security.yml --local                       # worm scan (local security CLI)
+stayawake-health-check --config config/urls.yml
 ```
 
 > The distribution is published as **`stayawakebot`**. Local security runs through the terse **`saw`** command (see the

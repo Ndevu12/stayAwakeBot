@@ -36,10 +36,15 @@ jobs:
 
       - name: Check availability + refresh the status issue
         # One command: check every URL, fold the result into the single dashboard issue (the whole
-        # store — debounce + incidents live in its hidden state block), Slack on transitions, then
-        # exit non-zero if anything is down. No report files, no commits.
+        # store — debounce + incidents live in its hidden state block), then Slack on transitions.
+        # No report files, no commits.
+        #
+        # Deliberately WITHOUT --fail-on-unhealthy. A monitored endpoint being down is the result
+        # this job exists to report, not a failure of the job: reddening the run makes "the service
+        # is down" indistinguishable from "the monitor is broken", and trains the tab to be ignored.
+        # The run fails only when the check itself cannot be performed.
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-        run: stayawake-health-check --config config/urls.yml --fail-on-unhealthy
+        run: stayawake-health-check --config config/urls.yml
