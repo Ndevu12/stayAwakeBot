@@ -107,10 +107,7 @@ corresponds to, so the pin stays readable.
 In production also pin what the Action installs — `version:` selects the `stayawakebot` release from
 PyPI and defaults to the latest. Other inputs: `config-file` to supply your own allowlist, `fail-on`
 to choose the verdict that fails the build (default `infected`), and `upload-sarif` to send findings
-to code scanning. `saw guard setup` writes and pin-bumps this workflow for you, and `saw guard check`
-verifies a repo's gate is present, SHA-pinned, current, and required by branch protection.
-
-See [Security baseline](prevent/SECURITY_BASELINE.md).
+to code scanning. See [Security baseline](prevent/SECURITY_BASELINE.md).
 
 **Don't hand-maintain that workflow — let `saw` manage it.** [`saw guard setup`](docs/CLI.md#saw-guard)
 writes (or *surgically pin-bumps*) exactly this gate for you — locally to review + commit, or
@@ -164,6 +161,7 @@ stayawake-health-check --config config/urls.yml
 - [Prerequisites](docs/PREREQUISITES.md) — supported Python versions and install troubleshooting
 - [Security baseline](prevent/SECURITY_BASELINE.md) — hardening checklist for any repo
 - [Contributing](CONTRIBUTING.md) — development setup and guidelines
+- [Security policy](SECURITY.md) — how to report a security issue privately
 
 ## License
 
@@ -173,7 +171,8 @@ stayAwakeBot is **dual-licensed** (from v0.1.9 onward):
   modify it and convey it or offer it over a network (e.g. as a hosted service), you must release
   your corresponding source under the AGPL too.
 - **[Commercial license](COMMERCIAL-LICENSE.md)** — a paid, proprietary-use option for closed-source
-  or proprietary-SaaS use without the AGPL's source-disclosure obligations. Contact the author for terms.
+  or proprietary-SaaS use without the AGPL's source-disclosure obligations. For terms, contact
+  **saw@ndevuspace.com**.
 
 Releases up to and including v0.1.8 were published under the MIT license and remain MIT for those versions.
 
