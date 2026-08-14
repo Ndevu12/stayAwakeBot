@@ -60,25 +60,56 @@ New here? `saw intro` is a 60-second tour, and `saw search "…"` finds the comm
 
 ## Gate any repo's CI (GitHub Action)
 
-Add the security sentinel to any repository in one step — no install, no clone:
+Add the gate to any repository — no install, no clone. This is a working setup, not a sketch:
 
 ```yaml
-# .github/workflows/worm-guard.yml
-on: [pull_request, push]
+# .github/workflows/worm-scan.yml
+name: Worm scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Auto-remediation needs write access:
+#   contents: write       -> push the security/auto-clean fix branch
+#   pull-requests: write  -> open/update the rolling cleanup PR
+# The scan itself only needs read; these are for the remediate step. Drop them
+# both to `read` if you want detection without remediation.
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
-  worm-guard:
+  strix:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }   # full history required
-      - uses: Ndevu12/strix@v1             # pin to a SHA in production
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0   # v7.0.0
         with:
-          fail-on-findings: 'true'
+          fetch-depth: 0        # full history is required
+
+      - uses: Ndevu12/strix@93fe465d7b0266c6010778999b73b591ae082f3e      # v0.1.4
+        with:
+          # On an infected verdict, open ONE rolling `security/auto-clean` PR.
+          # The gate still goes RED until that PR is merged — remediation opens
+          # the fix, it does not make the check pass. Omit for detection only.
+          remediate: pr
 ```
 
 `Ndevu12/strix` ("StayAwakeBot Strix") is the public Action — a thin wrapper that installs the
-published `stayawakebot` scanner from PyPI. Pin `@<sha>` rather than `@v1` for tamper-evident
-runs. See [Security baseline](prevent/SECURITY_BASELINE.md).
+published `stayawakebot` scanner from PyPI.
+
+**Pin every action by commit SHA, including this one.** A tag can be moved to point at different
+code after you have reviewed it; a SHA cannot. The trailing comment records which release the SHA
+corresponds to, so the pin stays readable.
+
+In production also pin what the Action installs — `version:` selects the `stayawakebot` release from
+PyPI and defaults to the latest. Other inputs: `config-file` to supply your own allowlist, `fail-on`
+to choose the verdict that fails the build (default `infected`), and `upload-sarif` to send findings
+to code scanning. `saw guard setup` writes and pin-bumps this workflow for you, and `saw guard check`
+verifies a repo's gate is present, SHA-pinned, current, and required by branch protection.
+
+See [Security baseline](prevent/SECURITY_BASELINE.md).
 
 **Don't hand-maintain that workflow — let `saw` manage it.** [`saw guard setup`](docs/CLI.md#saw-guard)
 writes (or *surgically pin-bumps*) exactly this gate for you — locally to review + commit, or
