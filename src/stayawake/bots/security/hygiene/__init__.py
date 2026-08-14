@@ -101,6 +101,21 @@ def _icon(severity: str) -> str:
     return MARKER.get(severity, MARKER["info"])
 
 
+# `textsafe.plain` defangs AND truncates, and its 300-char default is sized for a single untrusted
+# VALUE (a discovered path). A hygiene field is composed PROSE with such a value inside it, so that
+# default cut our own message: measured, the #1332 disclosure printed 2 of 11 unreadable locations
+# and the rotation-wiper warning ended mid-sentence — a silent amputation of the one disclosure that
+# exists so a responder is never told the surface is clean when nobody could read it. The bound stays
+# (an attacker still cannot pin a megabyte to the terminal); it is raised past any message we compose.
+_REPORT_FIELD_LIMIT = 4000
+
+
+def _safe(text: str) -> str:
+    """Every untrusted field on this surface goes through here — one call, so a field added later
+    cannot pick a different bound or skip the defanging."""
+    return textsafe.plain(text, limit=_REPORT_FIELD_LIMIT)
+
+
 def _banner(issue_ids: set[str], *, color: bool, width: int) -> list[str]:
     """The incident banner, GRADED to the evidence (proportionality — see models): the full
     isolate → rebuild → rotate-LAST runbook leads ONLY on active host persistence; a lone
@@ -177,8 +192,8 @@ def _unknown_surface_disclosure(issues: list[HygieneIssue], *, color: bool, widt
     for i in issues:
         if i.id not in UNVERIFIED_PERSISTENCE_IDS:
             continue
-        lines += block(textsafe.plain(i.detail), indent=5, width=width)
-        lines += block(textsafe.plain(i.remediation), indent=5, width=width,
+        lines += block(_safe(i.detail), indent=5, width=width)
+        lines += block(_safe(i.remediation), indent=5, width=width,
                        marker=f"{MARKER['detail']} fix  ", code=SEVERITY["info"], color=color)
     return lines
 
@@ -310,9 +325,9 @@ def render(issues: list[HygieneIssue], *, color: bool = False, width: int = 80) 
             # wrap arithmetic AND executes on the terminal. `command` stays verbatim by design (#86);
             # it is built from our own literals, confirmed no discovered path reaches it.
             lines.append(f"  {paint(icon, code, on=color)} "
-                         f"{paint(textsafe.plain(i.title), code, on=color)}")
-            lines += block(textsafe.plain(i.detail), indent=5, width=width)
-            lines += block(textsafe.plain(i.remediation), indent=5, width=width,
+                         f"{paint(_safe(i.title), code, on=color)}")
+            lines += block(_safe(i.detail), indent=5, width=width)
+            lines += block(_safe(i.remediation), indent=5, width=width,
                            marker=f"{MARKER['detail']} fix  ",
                            code=SEVERITY["info"], color=color)
             if i.command:

@@ -103,7 +103,11 @@ def _surface_is_absent(graded: list[tuple[str, Path, str]]) -> bool:
         return False
     if not any(label == _ANCHOR_LABEL for label, _p, _state in graded):
         return False
-    return all(state == "absent" for _label, _p, state in graded)
+    # A DANGLING symlink is `absent` to `_coverage` — correctly, since nothing readable is planted
+    # there — but it is not absent to this question. A dotfile manager that has not run yet, or a
+    # dotfiles repo on an unmounted volume, leaves `~/.zshrc -> …` visible in `ls` on an obviously
+    # configured account; reporting "nothing is here" over a link the operator can see is wrong.
+    return all(state == "absent" and not p.is_symlink() for _label, p, state in graded)
 
 
 def check_persistence_coverage() -> list[HygieneIssue]:

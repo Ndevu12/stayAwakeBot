@@ -197,6 +197,15 @@ class TestWhollyAbsentSurfaceIsNotClean(unittest.TestCase):
         (d / ".zshrc").write_text("export PATH=$PATH\n")
         self.assertEqual(self._issues(self.ABSENT + [(coverage._ANCHOR_LABEL, d / ".zshrc")]), [])
 
+    def test_a_dangling_dotfile_symlink_is_not_nothing(self):
+        # A dotfile manager that has not run yet, or a dotfiles repo on an unmounted volume: the
+        # operator sees `.zshrc -> …` in `ls -la ~`, so a report claiming the location is absent is
+        # wrong even though nothing readable is planted there.
+        home = Path(tempfile.mkdtemp(prefix="cov-stow-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(home, ignore_errors=True))
+        (home / ".zshrc").symlink_to(home / "dotfiles" / "zshrc")     # target does not exist
+        self.assertEqual(self._issues(self.ABSENT + [(coverage._ANCHOR_LABEL, home / ".zshrc")]), [])
+
     def test_a_surface_carrying_no_anchor_never_fires(self):
         # "everything is absent" over a list holding nothing an in-use account acquires is vacuously
         # true, not evidence — so the anchor has to be present for the claim to mean anything.
@@ -264,6 +273,72 @@ class TestWhollyAbsentSurfaceIsNotClean(unittest.TestCase):
         remediation = self._issues(self.ABSENT)[0].remediation
         self.assertIn("image the disk", remediation.lower())
         self.assertIn("recoverable", remediation.lower())
+
+
+class TestTheDisclosureIsNeverAmputated(unittest.TestCase):
+    """The encoder that defangs an attacker-chosen path also TRUNCATES, and its default bound is
+    sized for a single untrusted value, not for a composed sentence carrying one. Applied to a whole
+    hygiene field it silently cut our own message — measured, the surface disclosure printed 2 of 11
+    unreadable locations and the rotation-wiper warning stopped mid-sentence. A disclosure that exists
+    so nobody reads a clean bill of health over locations no one could read must not lose the
+    locations, and an instruction that ends mid-word is not an instruction."""
+
+    def _rendered(self, issue):
+        return hygiene.render([issue], color=False, width=100)
+
+    def test_every_unreadable_location_is_named_however_many_there_are(self):
+        d = Path(tempfile.mkdtemp(prefix="cov-many-"))
+        self.addCleanup(lambda: [os.chmod(p, 0o700) for p in d.iterdir()])
+        self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
+        if os.getuid() == 0:
+            self.skipTest("root bypasses permission bits")
+        locs = []
+        for name in coverage.mechanism._SHELL_RC_FILES:
+            p = d / name.replace("/", "_")
+            p.mkdir()
+            os.chmod(p, 0o000)
+            locs.append((coverage._ANCHOR_LABEL, p))
+        with mock.patch.object(coverage, "_must_verify_locations", return_value=locs):
+            issue = coverage.check_persistence_coverage()[0]
+        report = self._rendered(issue)
+        for _label, p in locs:
+            self.assertIn(p.name, report, f"{p.name} was cut out of the disclosure")
+
+    def test_the_shipped_wording_survives_rendering_whole(self):
+        # Both shipped strings exceed the encoder's default bound; the last clause of each is the
+        # load-bearing one (why the state matters, and the wiper warning).
+        with mock.patch.object(coverage, "_must_verify_locations",
+                               return_value=TestWhollyAbsentSurfaceIsNotClean.ABSENT):
+            issue = coverage.check_persistence_coverage()[0]
+        report = " ".join(self._rendered(issue).split())
+        for field in (issue.detail, issue.remediation):
+            self.assertGreater(len(field), 300, "shorten-the-string is not the fix being pinned")
+            tail = " ".join(field.split())[-40:]
+            self.assertIn(tail, report, f"the field was truncated before: ...{tail}")
+
+
+class TestTheCertifiedSurfaceIsTheScannedSurface(unittest.TestCase):
+    """coverage.py's stated invariant: "a dir we read to DETECT a plant is one we must be able to read
+    to certify the host clean". A shell startup file that the detection probe scans but the coverage
+    probe does not certify makes the audit report that no shell startup file exists while it is at
+    that moment reading one — and on an account whose only shell config is that file, it is the
+    difference between a clean run and exit 3."""
+
+    def test_every_scanned_shell_startup_file_is_also_certified(self):
+        scanned = set(coverage.mechanism._SHELL_RC_FILES)
+        with mock.patch.object(Path, "home", staticmethod(lambda: Path("/h"))):
+            certified = {str(p.relative_to("/h")) for label, p in coverage._must_verify_locations()
+                         if label == coverage._ANCHOR_LABEL}
+        self.assertEqual(scanned - certified, set(),
+                         "scanned but never certified — the audit would report it absent")
+
+    def test_a_fish_only_account_is_not_reported_as_having_nothing(self):
+        home = Path(tempfile.mkdtemp(prefix="cov-fish-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(home, ignore_errors=True))
+        (home / ".config" / "fish").mkdir(parents=True)
+        (home / ".config" / "fish" / "config.fish").write_text("fish_add_path /opt/homebrew/bin\n")
+        with mock.patch.object(Path, "home", staticmethod(lambda: home)):
+            self.assertEqual([i.id for i in coverage.check_persistence_coverage()], [])
 
 
 class TestProbesStayUnconditional(unittest.TestCase):
