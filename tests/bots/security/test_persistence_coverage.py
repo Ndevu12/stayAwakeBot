@@ -351,6 +351,25 @@ class TestTheCertifiedSurfaceIsTheScannedSurface(unittest.TestCase):
         self.assertIn("/x/nushell/config.nu", found)
         self.assertIn("/h/.bashrc", found, "bash rc files stay in $HOME")
 
+    def test_it_resolves_on_every_platform_and_survives_an_empty_env_var(self):
+        # An unset var and one set to "" are different values and the same intent; the macOS-only
+        # location must not appear elsewhere; and neither consumer may raise on any platform.
+        for plat in ("darwin", "linux", "win32"):
+            for env in ({}, {"ZDOTDIR": ""}, {"XDG_CONFIG_HOME": ""}):
+                with self.subTest(platform=plat, env=env), \
+                     mock.patch("sys.platform", plat), \
+                     mock.patch.object(Path, "home", staticmethod(lambda: Path("/h"))), \
+                     mock.patch.dict(os.environ, env, clear=False):
+                    for k in ("ZDOTDIR", "XDG_CONFIG_HOME"):
+                        if k not in env:
+                            os.environ.pop(k, None)
+                    found = coverage.mechanism.shell_rc_locations()
+                    coverage.mechanism._iter_shell_rc()
+                    coverage._must_verify_locations()
+                    self.assertIn(Path("/h/.zshrc"), found, "an empty var must fall back to $HOME")
+                    self.assertEqual(any("Application Support" in str(p) for p in found),
+                                     plat == "darwin")
+
     def test_a_zdotdir_account_is_not_reported_as_having_nothing(self):
         zdot = Path(tempfile.mkdtemp(prefix="cov-zdot-"))
         home = Path(tempfile.mkdtemp(prefix="cov-zhome-"))
