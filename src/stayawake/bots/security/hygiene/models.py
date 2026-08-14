@@ -11,8 +11,17 @@ from __future__ import annotations
 POSIX_SHELLS = ("sh", "bash", "zsh", "dash", "ksh")
 SCRATCH_ROOTS = ("/tmp", "/var/tmp", "/private/tmp", "/dev/shm")
 
+import sys
 from dataclasses import dataclass, asdict
 from typing import Any
+
+
+def persistence_surface_is_enumerable() -> bool:
+    """Does THIS platform have a user-scope persistence surface `saw` enumerates at all?
+
+    ONE authority — the scope note and the coverage probe both ask here, because on Windows every
+    certified location reads absent for a reason that says nothing about the host."""
+    return not sys.platform.startswith("win")
 
 
 @dataclass
@@ -99,12 +108,12 @@ def incident_tier(issue_ids: set[str]) -> str | None:
             return tier
     return None
 
-# UNVERIFIED persistence surface (#1332) — a user-owned persistence location EXISTS but could not be
-# read (permissions / an unreadable path), so this host cannot be certified free of a rotation-wiper.
-# This is the "never claim clean over content you did not read" principle applied to the persistence
-# surface, where the cost of a wrong all-clear is a wiped home directory rather than a missed finding.
-# It is NOT a finding (we found nothing) and NOT clean (we could not look) — it is UNKNOWN.
-UNVERIFIED_PERSISTENCE_IDS = {"persistence-surface-unverified"}
+# The run could not ESTABLISH the surface, so it may not claim clean over it — NOT a finding (nothing
+# was found) and NOT clean (nothing was established). Two causes: a location EXISTS but could not be
+# read (#1332), or the ENTIRE surface is absent so nothing was enumerated (#120, see coverage.py).
+SURFACE_UNREADABLE_ID = "persistence-surface-unverified"
+SURFACE_ABSENT_ID = "persistence-surface-not-established"
+UNVERIFIED_PERSISTENCE_IDS = {SURFACE_UNREADABLE_ID, SURFACE_ABSENT_ID}
 
 # The run may NOT assert that credential rotation is safe when EITHER active persistence was found OR
 # the persistence surface could not be fully enumerated. Both withhold the all-clear (safety dominates:
@@ -131,11 +140,17 @@ def rotation_safety(issue_ids: set[str]) -> str:
 def incident_response_sequence() -> list[str]:
     """The canonical order for responding to a suspected worm compromise. Rotation is
     ALWAYS the last step: rotating while persistence is live can trigger the reported
-    home-directory wiper. Isolate → rebuild → neutralize → THEN rotate."""
+    home-directory wiper. Isolate → image → rebuild → neutralize → THEN rotate."""
     # Steps only — no "1./2." prefixes: the renderer owns the numbering (core.render.marked_list),
     # so this stays pure data (and a non-terminal consumer can renumber/reformat it freely).
     return [
         "Isolate the host from the network before doing anything else.",
+        # BEFORE the rebuild step, which is the one that destroys the evidence a plain delete left
+        # recoverable. `saw scan` already computes the discriminator; nothing asked it here.
+        "If files are missing, image the disk BEFORE rebuilding or using the host further — a plain "
+        "delete leaves the content recoverable in freed blocks, and both rebuilding and ordinary use "
+        "overwrite it. A wipe payload reported by `saw scan` names the variant: DELETES is "
+        "recoverable, OVERWRITES-then-deletes is not.",
         "Take self-hosted CI runners offline and rebuild affected hosts from known-clean "
         "images (watch for a runner named SHA1HULUD).",
         "Neutralize per-host persistence: rogue OS services (e.g. gh-token-monitor.service), "

@@ -297,6 +297,17 @@ read**, the run is **UNKNOWN, not clean** (`saw` never claims clean over content
 The verdict is one of: *safe* (surface enumerated and clean → rotation is safe), or **UNSAFE** —
 active persistence found, or the surface could not be verified.
 
+**A surface that is entirely absent is UNKNOWN too.** If *every* certified location is missing — no
+launch-agent/service dir, no `authorized_keys`, and not one shell startup file — then nothing was
+enumerated, so nothing can be called clean and the all-clear is withheld. That is the expected state
+on a **new account, a container or a CI image**, and it is also what a **destroyed home directory**
+looks like; the two are indistinguishable from disk, so `saw` reports the ambiguity instead of picking
+one. The report says which locations were missing and what to do next, including **imaging the disk
+before further use** if files that should be there are gone — a plain delete leaves content
+recoverable in freed blocks, and continued use overwrites it. Windows is excluded: no user-scope
+persistence surface is enumerated there at all (see the audit's scope note), so absence carries no
+information.
+
 **Novel-foothold monitor (#1333).** Beyond matching known-bad patterns, the audit treats the autorun
 surface (launch agents / systemd user units) as **monitored state** and fuses four static signals per
 entry — **provenance** (is the referenced executable package/app-owned, code-signed, on a trusted path,
@@ -702,10 +713,10 @@ code is the verdict, unconditionally** — a CI gate just checks it, no flag req
 
 | Code | Meaning |
 | --- | --- |
-| `0` | Clean. For `saw scan`, no scanned target is infected. For `saw audit`, the persistence surface is enumerated and clean and no weaker warning gated (**rotation-safe**). For `saw guard check`, every gate is present, pinned, current, and required (or issues found without `-f`); for `saw guard setup`, every repo succeeded or was already up to date. |
+| `0` | Clean. For `saw scan`, no scanned target is infected. For `saw audit`, the persistence surface was enumerated — at least one certified location was actually there — and is clean, and no weaker warning gated (**rotation-safe**). For `saw guard check`, every gate is present, pinned, current, and required (or issues found without `-f`); for `saw guard setup`, every repo succeeded or was already up to date. |
 | `1` | For `saw scan`, at least one target is **infected** — returned unconditionally (there is no `--fail`). For `saw audit`, a **weaker** warning-level hygiene issue was found **and** `-f/--fail` was set. For `saw guard check`, a gate is absent, unpinned, stale, or not required **and** `-f` was set; for `saw guard setup`, a repo errored or a PR could not be opened. |
 | `2` | Usage error (unknown command, bad option, or a missing explicit `--config` path), **or** a scan that could not complete — a malformed config (e.g. an `allowlist` that isn't a list of mappings) or a target that errored during scanning. `saw scan` fails **closed** here: a target it could not scan is never reported as clean. `saw guard setup` also exits `2` when it can't resolve the Strix release SHA (offline → pass `--ref`). |
-| `3` | **`saw audit` only — rotation UNSAFE** (#1332): active host persistence was found, **or** the persistence surface could not be verified (a user-owned location existed but couldn't be read). Gated **unconditionally** (independent of `-f`), because rotating a credential while a persistence daemon is live can arm a home-directory wiper. **Migration:** `3` is additive — code that treats "`0` = ok, non-zero = attention" is already correct and fails safe. Only code that specifically distinguished `saw audit`'s `1` from `2` needs to also handle `3`. `saw scan` / `saw guard` never return `3`. |
+| `3` | **`saw audit` only — rotation UNSAFE** (#1332): active host persistence was found, **or** the persistence surface could not be established — either a user-owned location existed but couldn't be read, or *every* certified location was absent, so nothing was enumerated (a new account, a container or a CI image looks the same as a destroyed home; see [Rotation safety](#saw-audit--local-machine-hygiene)). Gated **unconditionally** (independent of `-f`), because rotating a credential while a persistence daemon is live can arm a home-directory wiper. **Migration:** `3` is additive — code that treats "`0` = ok, non-zero = attention" is already correct and fails safe. Only code that specifically distinguished `saw audit`'s `1` from `2` needs to also handle `3`. `saw scan` / `saw guard` never return `3`. |
 
 ## Command aliases & shell completion
 

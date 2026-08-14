@@ -1350,7 +1350,9 @@ class TestPlatformBoundaryIsDisclosed(unittest.TestCase):
     #1341 defect on the PLATFORM axis rather than the location axis."""
 
     def _note(self, platform):
-        with mock.patch.object(hygiene.sys, "platform", platform):
+        # Patches `sys.platform` itself, not a module alias: the platform question has ONE authority
+        # (models.persistence_surface_is_enumerable), so there is no per-module `sys` to reach through.
+        with mock.patch("sys.platform", platform):
             return hygiene.render([], color=False, width=100)
 
     def test_the_uncovered_windows_surface_is_named_on_every_platform(self):
@@ -1371,7 +1373,7 @@ class TestPlatformBoundaryIsDisclosed(unittest.TestCase):
     def test_the_note_never_becomes_a_finding_or_moves_the_exit_code(self):
         # Presentation only, on every platform — the #1341 contract.
         for platform in ("darwin", "linux", "win32"):
-            with mock.patch.object(hygiene.sys, "platform", platform):
+            with mock.patch("sys.platform", platform):
                 self.assertEqual(hygiene.audit_checks.__name__, "audit_checks")   # sanity
                 issues = []
                 self.assertFalse({i.id for i in issues} & hygiene.ROTATION_UNSAFE_IDS)

@@ -195,14 +195,17 @@ def check_ssh_authorized_keys() -> list[HygieneIssue]:
 # Shell startup files sourced on every interactive/login shell — a fetch-to-shell line here runs
 # on each new terminal (T1546.004). Covers bash/zsh/sh + fish; a symlinked dotfile is followed
 # (read_text) since it's the user's own config.
+# ONE tuple: this probe SCANS these, the coverage probe CERTIFIES them. fish lived only in the scan
+# loop, so a fish account was scanned and simultaneously reported to have no shell startup file.
 _SHELL_RC_FILES = (".bashrc", ".bash_profile", ".bash_login", ".profile",
-                   ".zshrc", ".zprofile", ".zshenv", ".zlogin")
+                   ".zshrc", ".zprofile", ".zshenv", ".zlogin",
+                   ".config/fish/config.fish")
 
 
 def _iter_shell_rc() -> list[Path]:
     home = Path.home()
     found: list[Path] = []
-    for name in (*_SHELL_RC_FILES, ".config/fish/config.fish"):
+    for name in _SHELL_RC_FILES:
         p = home / name
         try:
             if p.is_file():

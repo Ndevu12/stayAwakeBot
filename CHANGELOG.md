@@ -13,6 +13,30 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Fixed
+- **`saw audit` no longer reports a host whose persistence locations are all missing as "enumerated
+  and clean".** When every location the audit certifies is absent, nothing was actually examined, so
+  the run now ends **UNKNOWN** and withholds the rotation all-clear (exit `3`) instead of stating that
+  rotating credentials is safe. **This is the expected state on a new account, a container or a CI
+  image** — the report says so, and says what to check; it is also what a destroyed home directory
+  looks like, and the two cannot be told apart from disk. Windows is unaffected.
+- **`saw audit` no longer cuts a finding's detail or its recommended fix short.** Long text was
+  silently truncated at a fixed length, so a report listing several unreadable locations named only
+  the first two and the credential-rotation warning could stop mid-sentence.
+- **`saw audit` now certifies the fish shell's startup file, which it already read.** A `fish`-only
+  account was scanned for a planted start-up line and then described as having no shell startup file
+  at all.
+- **`saw audit` no longer describes a surface it read as one it could not read.** The verdict, the
+  scope note and the report's opening line said a location had been unreadable even when every
+  location had been read and none existed, sending a reader looking for something that was not there.
+
+### Changed
+- **The incident runbook now offers to image the disk before the step that rebuilds the host**, and
+  says when deleted content is still recoverable. Rebuilding, and ordinary continued use, overwrite
+  it.
+- **`saw audit` now prints the recommended fix for an unverified persistence surface.** It previously
+  reported that rotation was unsafe without printing what would resolve it.
+
 ## [0.5.2] - 2026-08-14
 
 ### Added

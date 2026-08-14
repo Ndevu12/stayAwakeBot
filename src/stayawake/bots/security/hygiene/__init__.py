@@ -21,16 +21,17 @@ default audit never pulls it in (see host_artifacts.check_host_artifacts).
 """
 from __future__ import annotations
 
-import sys
 import subprocess          # noqa: F401  re-exported so tests can patch hygiene.subprocess.run globally
 from pathlib import Path   # noqa: F401  re-exported so tests can patch hygiene.Path.home globally
 from typing import Callable
 
 from .models import (HygieneIssue, INCIDENT_TRIGGER_IDS, ACTIVE_PERSISTENCE_IDS,
                      CREDENTIAL_EXPOSURE_IDS, UNVERIFIED_PERSISTENCE_IDS, ROTATION_UNSAFE_IDS,
+                     SURFACE_UNREADABLE_ID, SURFACE_ABSENT_ID,
                      ROTATION_SAFE, ROTATION_UNSAFE_PERSISTENCE, ROTATION_UNSAFE_UNKNOWN,
                      TIER_ACTIVE_PERSISTENCE, TIER_CREDENTIAL_EXPOSURE, incident_tier,
-                     rotation_safety, incident_response_sequence, credential_exposure_note)
+                     persistence_surface_is_enumerable, rotation_safety,
+                     incident_response_sequence, credential_exposure_note)
 from .credentials import check_credentials
 from .runner import check_runner_persistence
 from .os_service import check_persistence
@@ -78,7 +79,7 @@ def audit_checks(slug: str | None = None, token: str | None = None, branch: str 
         ("VS Code settings", check_vscode),
         ("self-hosted runner", check_runner_persistence),
         ("OS-service persistence", check_persistence),
-        ("persistence surface readable", check_persistence_coverage),   # #1332 enumeration honesty
+        ("persistence surface coverage", check_persistence_coverage),   # #1332 enumeration honesty
         ("host drop-files", lambda: check_host_artifacts(verify=verify_artifacts)),
         ("SSH authorized_keys", check_ssh_authorized_keys),
         ("shell startup files", check_shell_profile),
@@ -99,6 +100,18 @@ def audit_checks(slug: str | None = None, token: str | None = None, branch: str 
 #     keep the emoji deliberately: they are standalone attention lines, not aligned columns.
 def _icon(severity: str) -> str:
     return MARKER.get(severity, MARKER["info"])
+
+
+# `textsafe.plain` defangs AND truncates, and its 300-char default is sized for one untrusted VALUE,
+# not for prose carrying one: measured, it printed 2 of 11 unreadable locations and cut the
+# rotation-wiper warning mid-sentence. Bounded still, just past anything we compose.
+_REPORT_FIELD_LIMIT = 4000
+
+
+def _safe(text: str) -> str:
+    """One call for every untrusted field here, so a field added later cannot skip the defanging."""
+    out = textsafe.plain(text, limit=_REPORT_FIELD_LIMIT)
+    return out if len(out) < _REPORT_FIELD_LIMIT else out + " […]"   # a cut is never silent
 
 
 def _banner(issue_ids: set[str], *, color: bool, width: int) -> list[str]:
@@ -147,25 +160,38 @@ def _rotation_verdict(issues: list[HygieneIssue], *, color: bool, width: int) ->
         # path drives the unconditional exit 3). Painting it `unknown` too would soften an act-now
         # instruction; marking it `warning` would claim we looked and found something. Neither is
         # true alone, which is what having two channels is for.
+        # "established", not "fully verified": one line for both states, and the latter sends an
+        # operator hunting for an unreadable location when there may be none.
         lines = [paint(f"{MARKER['unknown']}  Rotation safety: UNKNOWN — the persistence surface "
-                       "could not be fully verified, so treat credential rotation as UNSAFE "
+                       "could not be established, so treat credential rotation as UNSAFE "
                        "until it is.", SEVERITY["warning"], on=color)]
-    # The unreadable locations are named on BOTH unsafe paths. `rotation_safety` is a PRIORITY
+    # The UNKNOWN surface is disclosed on BOTH unsafe paths. `rotation_safety` is a PRIORITY
     # function — active persistence dominates — so keying this disclosure off its verdict hid the
     # list in the one state that needs it most: a live foothold PLUS a location nobody could read.
     # `unknown` items are split out of the finding groups (see render), so the verdict is their only
     # home; printing nothing meant a responder neutralised what was found, rotated, and was never told
     # a persistence location had gone unexamined — the wiper hazard #1332 exists to close.
-    lines += _unverified_locations(issues, width=width)
+    lines += _unknown_surface_disclosure(issues, color=color, width=width)
     return lines
 
 
-def _unverified_locations(issues: list[HygieneIssue], *, width: int) -> list[str]:
-    """The detail of every location that EXISTS but could not be read, keyed off the id (never off the
-    verdict, and never off `severity`), so the disclosure survives whichever verdict outranks it."""
-    return [line
-            for i in issues if i.id in UNVERIFIED_PERSISTENCE_IDS
-            for line in block(textsafe.plain(i.detail), indent=5, width=width)]
+def _unknown_surface_disclosure(issues: list[HygieneIssue], *, color: bool, width: int) -> list[str]:
+    """What is UNKNOWN about the persistence surface, and what to do about it — which locations exist
+    but could not be read, or that the surface is wholly ABSENT and so was never enumerated (#120).
+    Keyed off the id (never off the verdict, and never off `severity`), so the disclosure survives
+    whichever verdict outranks it.
+
+    The FIX renders here too: `unknown` items are split out of the finding groups, so this is their
+    only home, and printing the problem without the instruction said rotation was unsafe and never
+    what would resolve it."""
+    lines: list[str] = []
+    for i in issues:
+        if i.id not in UNVERIFIED_PERSISTENCE_IDS:
+            continue
+        lines += block(_safe(i.detail), indent=5, width=width)
+        lines += block(_safe(i.remediation), indent=5, width=width,
+                       marker=f"{MARKER['detail']} fix  ", code=SEVERITY["info"], color=color)
+    return lines
 
 
 def _scope_note(issues: list[HygieneIssue], *, color: bool, width: int) -> list[str]:
@@ -193,8 +219,11 @@ def _scope_note(issues: list[HygieneIssue], *, color: bool, width: int) -> list[
     # has an unreadable location returns UNSAFE_PERSISTENCE and would silently take the flat
     # full-coverage wording — restating the over-claim the verdict just withdrew, in the highest-stakes
     # state of all. Presence of the id is the honest question here, not which verdict outranks which.
-    surface_unverified = bool({i.id for i in issues} & UNVERIFIED_PERSISTENCE_IDS)
-    if sys.platform.startswith("win"):
+    # And for the UNREADABLE id specifically, not the UNKNOWN set: "the part it could read" is false
+    # when every location was read and none existed.
+    ids = {i.id for i in issues}
+    surface_unverified = SURFACE_UNREADABLE_ID in ids
+    if not persistence_surface_is_enumerable():
         # `user_persistence_dirs()` is `~/.config/systemd/user` + `~/Library/LaunchAgents`, so on
         # Windows it enumerates NOTHING and every autorun probe returns empty. Claiming to read a
         # surface here would make "no findings" mean "clean" when it means "not examined" — the same
@@ -204,6 +233,11 @@ def _scope_note(issues: list[HygieneIssue], *, color: bool, width: int) -> list[
     elif surface_unverified:
         surface_read = ("reads the part of the host persistence surface it could read, plus a "
                         "targeted set of known drop-paths")
+    elif SURFACE_ABSENT_ID in ids:
+        # A third wording: the flat claim would restate the coverage the verdict just withdrew, and
+        # "the part it could read" is equally wrong — reading was never the problem here.
+        surface_read = ("found no host persistence surface present to read, and reads a targeted "
+                        "set of known drop-paths")
     else:
         surface_read = "reads the host persistence surface and a targeted set of known drop-paths"
     # "Scope your response past what is listed here" presupposes an active compromise whose extent may
@@ -257,9 +291,15 @@ def render(issues: list[HygieneIssue], *, color: bool = False, width: int = 80) 
         # unverified?" because ONE probe emits that pairing today. The rotation verdict, the exit gate
         # and the scope note all key off UNVERIFIED_PERSISTENCE_IDS, so a second unknown-severity id
         # would otherwise split this heading three ways from the verdict printed under it.
-        head = (f"{MARKER['ok']} Local security hygiene: no issues found."
-                if not ({i.id for i in issues} & UNVERIFIED_PERSISTENCE_IDS)
-                else "Local security hygiene: no findings, but the persistence surface is UNVERIFIED.")
+        ids = {i.id for i in issues}
+        if SURFACE_ABSENT_ID in ids:
+            # Not "UNVERIFIED", and not led by "no findings": nothing was there to find, and this is
+            # the report's most prominent line on a host whose home may have just been destroyed.
+            head = "Local security hygiene: nothing was found because nothing was there to examine."
+        elif ids & UNVERIFIED_PERSISTENCE_IDS:
+            head = "Local security hygiene: no findings, but the persistence surface is UNVERIFIED."
+        else:
+            head = f"{MARKER['ok']} Local security hygiene: no issues found."
         code = SEVERITY["ok"] if "no issues" in head else SEVERITY["warning"]
         return "\n".join([paint(head, code, on=color), ""] + rotation
                          + [""] + _scope_note(issues, color=color, width=width)).rstrip()
@@ -295,9 +335,9 @@ def render(issues: list[HygieneIssue], *, color: bool = False, width: int = 80) 
             # wrap arithmetic AND executes on the terminal. `command` stays verbatim by design (#86);
             # it is built from our own literals, confirmed no discovered path reaches it.
             lines.append(f"  {paint(icon, code, on=color)} "
-                         f"{paint(textsafe.plain(i.title), code, on=color)}")
-            lines += block(textsafe.plain(i.detail), indent=5, width=width)
-            lines += block(textsafe.plain(i.remediation), indent=5, width=width,
+                         f"{paint(_safe(i.title), code, on=color)}")
+            lines += block(_safe(i.detail), indent=5, width=width)
+            lines += block(_safe(i.remediation), indent=5, width=width,
                            marker=f"{MARKER['detail']} fix  ",
                            code=SEVERITY["info"], color=color)
             if i.command:
