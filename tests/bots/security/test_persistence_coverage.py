@@ -17,6 +17,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from stayawake.bots.security import hygiene
+from stayawake.utils import textsafe
 from stayawake.bots.security.hygiene import coverage
 from stayawake.bots.security.hygiene.models import (
     HygieneIssue, incident_response_sequence, rotation_safety, ROTATION_SAFE,
@@ -385,6 +386,27 @@ class TestTheReportDescribesTheRightUnknown(unittest.TestCase):
 
     def test_a_clean_run_still_claims_the_full_surface(self):
         self.assertIn("reads the host persistence surface and", " ".join(hygiene.render([]).split()))
+
+
+class TestNoDiscoveredValueRendersVerbatim(unittest.TestCase):
+    """`command` renders verbatim (#86) on the premise that it is built from our own literals. A
+    `git config --show-origin` path breaks that premise: `include.path` in a repo-local `.git/config`
+    names any file, and `/usr/local/git/` counts as a system config without needing root."""
+
+    HOSTILE = "/usr/local/git/x\x1b]0;pwned\x07::error::FAKE-saw-says-clean\x1b[2J##[error]c.cfg"
+
+    def test_a_discovered_config_path_cannot_carry_control_text_into_a_command(self):
+        from stayawake.bots.security.hygiene import credentials
+        store = credentials.KeychainStore(name="the test store", delete_command="delete-it")
+        with mock.patch.object(credentials, "_system_default_helper_origin",
+                               return_value=self.HOSTILE), \
+             mock.patch.object(credentials, "_https_token_status", return_value=None):
+            issue = credentials._keychain_finding(store)
+        self.assertIsNotNone(issue.command, "this path must emit a command for the pin to mean anything")
+        self.assertNotIn("\x1b", issue.command)
+        self.assertNotIn("::error::", issue.command)
+        self.assertNotIn("##[", issue.command)
+        self.assertIn("/usr/local/git/x", issue.command)   # still names the file, still pasteable
 
 
 class TestProbesStayUnconditional(unittest.TestCase):

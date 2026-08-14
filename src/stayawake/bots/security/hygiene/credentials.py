@@ -28,6 +28,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from stayawake.utils import textsafe
 from .models import HygieneIssue, _WIPER_NOTE
 
 # Where the finding's `→ details:` link points — the full, non-destructive walkthrough.
@@ -278,8 +279,13 @@ def _keychain_finding(store: KeychainStore) -> HygieneIssue:
         # (a false 'unused', a stale key) can't cause a silent lockout — the user stops if step 1 fails.
         reset = ""
         if system_origin:
+            # DISCOVERED path inside a COPY-PASTEABLE block. `command` renders verbatim (#86) on the
+            # premise that it is built from our own literals — false here: `git config --show-origin`
+            # reports whatever path an `include.path` names, and a repo-local `.git/config` is written
+            # by whoever wrote the repo. `/usr/local/git/` counts as a system config and is writable
+            # without root on a Homebrew Mac. Defanged so it cannot leave its comment.
             reset = ('git config --global --add credential.helper ""   '
-                     f'# reset the read-only system default ({system_origin})\n')
+                     f'# reset the read-only system default ({textsafe.plain(system_origin, 200)})\n')
         command = (
             "ssh -T git@github.com   # STEP 1: confirm an ALTERNATE path authenticates — STOP if it doesn't\n"
             "git config --show-origin --get-all credential.helper   # find the REAL source\n"
