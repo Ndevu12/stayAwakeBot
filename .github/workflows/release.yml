@@ -259,15 +259,25 @@ jobs:
           load: true
           tags: ghcr.io/ndevu12/stayawakebot:${{ env.VERSION }}
 
+      # Two steps: `format: sarif` rebuilds the report at ALL severities, discarding `severity`, so
+      # one sarif step with exit-code 1 gates on any finding (0.5.2: blocked by 18 MEDIUM, 0 HIGH).
       - name: Vulnerability gate (Trivy) — block on FIXABLE critical/high
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25   # v0.36.0
+        with:
+          image-ref: ghcr.io/ndevu12/stayawakebot:${{ env.VERSION }}
+          format: table          # NOT sarif — sarif is what discards the severity filter
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true   # don't block on CVEs with no upstream fix available yet
+          exit-code: '1'         # a fixable critical/high fails the job before anything is pushed
+
+      - name: Vulnerability report (Trivy SARIF, all severities — never blocks)
+        if: always()
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25   # v0.36.0
         with:
           image-ref: ghcr.io/ndevu12/stayawakebot:${{ env.VERSION }}
           format: sarif
           output: trivy.sarif
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true   # don't block on CVEs with no upstream fix available yet
-          exit-code: '1'         # a fixable critical/high fails the job before anything is pushed
+          exit-code: '0'
 
       - name: Upload Trivy SARIF
         if: always()             # keep the scan record even when the gate fails
