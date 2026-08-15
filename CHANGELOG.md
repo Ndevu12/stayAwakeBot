@@ -14,6 +14,25 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Fixed
+- **`saw scan` no longer reports an ordinary merge as an attack when the branches have no common
+  ancestor.** Merging two unrelated histories has no clean three-way merge to compare against, and
+  every file the other side brought in was being reported as introduced by the merge — one such
+  merge produced 18 findings and marked the repository infected. Such a merge is now judged on its
+  content alone, and a merge that introduces no new content is not a finding.
+
+### Added
+- **An evil-merge finding now says whether the introduced content is still in your working tree.**
+  A merge that smuggled a payload and one whose payload was deleted afterwards need different
+  responses. A file that changed since the merge is reported as **unverified**, never as removed —
+  the introduced lines may still be inside it — and a deleted path still notes that the content
+  remains in history and in any fork.
+- **`saw scan` now catches a merge commit that was edited by hand where git merged cleanly.** If a
+  file merged without conflict, git's result is fixed — a different result means somebody changed it
+  while merging, which no branch's diff shows and no pull-request review renders. This is reported
+  on its own, where previously it was missed unless the edit also matched a signature.
+
+
+### Fixed
 - **`saw audit` now finds shell start-up files that are not kept in your home directory.** A
   configuration under `$ZDOTDIR`, or a `fish`/`nushell` config in `~/.config`, was neither examined
   for a planted start-up line nor counted when the audit decided whether it had a persistence surface

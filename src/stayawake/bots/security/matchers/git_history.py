@@ -7,6 +7,8 @@ import sys
 from stayawake.lib import git as gitutil
 from stayawake.bots.security.models import Finding, Severity
 from stayawake.bots.security.matchers.base import Matcher, build_confirmed_loader_check
+from stayawake.lib.git.merge.liveness import (introduced_liveness, describe,
+                                              PRESENT, CHANGED, GONE, UNKNOWN)
 from stayawake.bots.security.obfuscation import is_generated_context, analyze_delta
 
 
@@ -40,6 +42,20 @@ _MAX_CANDIDATES = 2000
 # on its own — so it routes to the CONFIRMED `evil-merge-loader` id; structural/obfuscation-only
 # corroboration stays HEURISTIC `evil-merge`. Keep this in lockstep with corroborate.py's (b) reason.
 _LOADER_REASON_PREFIX = "merge-introduced hunk matches signature:"
+
+
+def _liveness_note(repo, merge_sha: str, paths) -> str:
+    """Whether the introduced content is STILL in the working tree. A merge that smuggled a payload
+    and a merge whose payload was deleted three commits later need different responses, and the
+    finding alone cannot tell them apart. Reported per state and never collapsed to "removed": a
+    changed file may still carry the introduced lines."""
+    states = [introduced_liveness(repo, merge_sha, p) for p in paths]
+    if any(s == PRESENT for s in states):
+        return f"{sum(s == PRESENT for s in states)} of {len(paths)} {describe(PRESENT)}"
+    for state in (CHANGED, GONE):
+        if any(s == state for s in states):
+            return describe(state)
+    return describe(UNKNOWN)
 
 
 class GitHistoryMatcher(Matcher):
@@ -79,6 +95,7 @@ class GitHistoryMatcher(Matcher):
                 description=sig["description"], remediation=sig.get("remediation", "manual"),
                 evidence=f"{len(evil)} corroborated path(s) introduced beyond a clean "
                          f"3-way merge; e.g. {paths[:3]} ({why}); "
+                         f"{_liveness_note(target.repo_root, sha, paths)}; "
                          f"by {meta.get('author_email','?')}",
                 vector="evil-merge", related_paths=tuple(paths), commit_sha=sha))
         return findings

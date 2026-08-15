@@ -6,7 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from stayawake.lib.git.query import parents, changed_paths, path_exists_at, file_at
-from stayawake.lib.git.merge.tree import auto_merge_tree
+from stayawake.lib.git.merge.tree import auto_merge, auto_merge_tree
 from stayawake.lib.git.merge.corroborate import corroborated
 
 
@@ -57,34 +57,25 @@ def evil_merge_paths(repo: str | Path, merge_sha: str, content_sig=None,
     if len(ps) < 2:
         return {}
 
-    deviating: set[str]
-    base_tree: str | None = None
-    if len(ps) == 2:
-        base_tree = auto_merge_tree(repo, ps[0], ps[1])
-    if base_tree is not None:
-        deviating = changed_paths(repo, base_tree, merge_sha, diff_filter="AM")
+    # The auto-merge is the ONLY baseline an evil-merge claim can rest on. When there is none —
+    # unrelated histories (no merge base), an octopus, a git too old for `merge-tree --write-tree` —
+    # a parent tree is NOT a substitute: measured against the first parent, every path the other
+    # side contributed reads as introduced by the merge, so an ordinary sync merge of two roots
+    # reported 18 paths as an attack. Without a baseline the structural question is unanswerable,
+    # so only CONTENT is asked, and the merge yields findings solely for infected bytes.
+    merged = auto_merge(repo, ps[0], ps[1]) if len(ps) == 2 else None
+    if merged is None:
+        base_tree, conflicted = ps[0], None
     else:
-        # Fallback (octopus / pre-2.38 git): we have no synthesized auto-merge tree, so the
-        # FIRST parent (mainline tip) is the baseline a reviewer would compare against. The
-        # candidate set is every path the merge ADDS/MODIFIES relative to that first parent
-        # — i.e. everything the merge brings onto mainline.
-        #
-        # G2: we deliberately do NOT intersect "changed vs EVERY parent" here. That
-        # intersection drops any path whose merge blob is byte-identical to even one parent
-        # (an octopus that pulls a payload-carrying head, or a `-X theirs` resolution to one
-        # side), so such a payload never reached the corroboration gate and produced NO
-        # finding. The first-parent diff is byte-identity-agnostic: a payload identical to a
-        # non-first parent still differs from the first parent and is examined. Topology
-        # cannot separate evil from benign here; the corroboration gate (worm signature /
-        # new-vs-all-parents / context-aware obfuscation of the introduced hunk) does — so a
-        # benign octopus that merely combines clean branches still yields no finding.
-        base_tree = ps[0]
-        deviating = changed_paths(repo, base_tree, merge_sha, diff_filter="AM")
+        base_tree, conflicted = merged.tree, merged.conflicted
+    deviating = changed_paths(repo, base_tree, merge_sha, diff_filter="AM")
 
     flagged: dict[str, str] = {}
     for path in deviating:
-        ok, reason = corroborated(repo, base_tree, merge_sha, path, ps, content_sig,
-                                  obfuscation_reason)
+        ok, reason = corroborated(repo, base_tree, merge_sha, path, ps,
+                                   conflicted=True if conflicted is None else path in conflicted,
+                                   content_sig=content_sig,
+                                   obfuscation_reason=obfuscation_reason)
         if ok:
             flagged[path] = reason
     return flagged
