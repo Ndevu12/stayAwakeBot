@@ -13,6 +13,13 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Changed
+- **A scan no longer takes every CPU core.** It leaves one free, so the machine stays responsive
+  while a scan runs, and it sizes itself from the CPUs the process is actually allowed to use — so
+  running inside a container with a CPU limit no longer starts workers for the host's cores. Pass
+  `-j N` to choose the number yourself; that is unchanged.
+
+
 ### Fixed
 - **`saw scan` no longer calls a project infected because two unrelated things appear in one file.**
   A file that listed your home directory in one place and deleted something entirely different in

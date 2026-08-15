@@ -8,6 +8,8 @@ I/O of its own. Never executes scanned code; remote repos are cloned read-only a
 from __future__ import annotations
 
 import os
+
+from stayawake.utils.parallel import cpu_budget
 import sys
 import tempfile
 from pathlib import Path
@@ -93,10 +95,12 @@ _MIN_CHUNK_FILES = 16        # …but don't shatter a small set into trivially t
 
 
 def _file_workers(jobs_pref: int | None) -> int:
-    """Worker count for parallelizing ONE target's files: AUTO (`None`) → all cores; an explicit
-    `-j N` caps it; `-j 1` → 1 (sequential, no pool)."""
+    """Worker count for parallelizing ONE target's files: AUTO (`None`) → the shared CPU budget,
+    which leaves the machine a core and honours affinity/cgroup confinement; an explicit `-j N` caps
+    it; `-j 1` → 1 (sequential, no pool). ONE authority — deriving it here as well is how the two
+    paths came to disagree, with this one taking every core."""
     if jobs_pref is None:
-        return os.cpu_count() or 1
+        return cpu_budget()
     return max(1, jobs_pref)
 
 
