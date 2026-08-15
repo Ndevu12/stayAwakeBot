@@ -22,9 +22,14 @@ class TestResolveJobs(unittest.TestCase):
     def test_explicit_one_forces_sequential(self):
         self.assertEqual(parallel.resolve_jobs(1, 10), 1)
 
-    def test_auto_is_min_cpu_and_count(self):
-        self.assertEqual(parallel.resolve_jobs(None, 3), min(os.cpu_count() or 1, 3))
-        self.assertEqual(parallel.resolve_jobs(None, 10_000), os.cpu_count() or 1)
+    def test_auto_is_min_budget_and_count(self):
+        # AUTO no longer means every core: it means the CPU budget, which leaves the machine one and
+        # honours affinity/cgroup confinement. The other half of the old contract is unchanged —
+        # never more workers than there are items.
+        budget = parallel.cpu_budget()
+        self.assertEqual(parallel.resolve_jobs(None, 3), min(budget, 3))
+        self.assertEqual(parallel.resolve_jobs(None, 10_000), budget)
+        self.assertLess(budget, os.cpu_count() or 1) if (os.cpu_count() or 1) > 1 else None
 
     def test_explicit_caps_at_count(self):
         self.assertEqual(parallel.resolve_jobs(2, 10), 2)

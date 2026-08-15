@@ -28,12 +28,68 @@ from __future__ import annotations
 import concurrent.futures as cf
 import multiprocessing as mp
 import os
+from pathlib import Path
 import queue
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable
 
 PROCESS = "process"
 THREAD = "thread"
+
+
+
+def _allowed_cpus() -> int:
+    """How many CPUs this PROCESS may actually use — not how many the machine has.
+
+    `os.cpu_count()` reports the host's cores even when the process is confined, so inside a
+    two-CPU container on a large build host it reports the host and the pool oversubscribes by an
+    order of magnitude. Each source below narrows to what is genuinely permitted: the scheduler's
+    affinity mask, then a cgroup CPU quota. Nothing is hard-coded; on a machine with no confinement
+    they all agree with the core count."""
+    allowed = os.cpu_count() or 1
+    for probe in (getattr(os, "process_cpu_count", None),
+                  (lambda: len(os.sched_getaffinity(0))) if hasattr(os, "sched_getaffinity") else None):
+        if probe is None:
+            continue
+        try:
+            value = probe()
+        except OSError:
+            continue
+        if value:
+            allowed = min(allowed, value)
+    quota = _cgroup_cpu_quota()
+    return max(1, min(allowed, quota) if quota else allowed)
+
+
+def _cgroup_cpu_quota() -> int | None:
+    """Whole CPUs a cgroup CPU quota permits, or None when there is no quota to read."""
+    v2 = Path("/sys/fs/cgroup/cpu.max")
+    try:
+        if v2.is_file():
+            quota, _, period = v2.read_text().strip().partition(" ")
+            if quota != "max" and period:
+                return max(1, int(int(quota) / int(period)))
+        v1_quota = Path("/sys/fs/cgroup/cpu/cpu.cfs_quota_us")
+        v1_period = Path("/sys/fs/cgroup/cpu/cpu.cfs_period_us")
+        if v1_quota.is_file() and v1_period.is_file():
+            quota_us = int(v1_quota.read_text().strip())
+            period_us = int(v1_period.read_text().strip())
+            if quota_us > 0 and period_us > 0:
+                return max(1, int(quota_us / period_us))
+    except (OSError, ValueError):
+        return None
+    return None
+
+
+def cpu_budget() -> int:
+    """Workers an AUTO sweep may use: everything this process is allowed, minus one.
+
+    The reserved CPU is what keeps the machine answering while a scan runs — the scanner reads
+    hostile input, and a sweep that takes every core makes an unresponsive workstation
+    indistinguishable from a scanner that hung. It is a subtraction rather than a fraction or a
+    threshold so there is nothing to tune and no size of machine where the behaviour changes shape.
+    An operator who wants every core still passes `-j`."""
+    return max(1, _allowed_cpus() - 1)
 
 
 def resolve_jobs(requested: int | None, count: int) -> int:
@@ -45,7 +101,7 @@ def resolve_jobs(requested: int | None, count: int) -> int:
     if count <= 1:
         return 1
     if requested is None:
-        return min(os.cpu_count() or 1, count)
+        return min(cpu_budget(), count)
     if requested <= 1:
         return 1
     return min(requested, count)
