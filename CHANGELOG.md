@@ -14,6 +14,14 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Fixed
+- **`saw scan` now sees code written inside a template literal's `${...}`.** Anything spliced into a
+  template was being read as text rather than as code, so a decoded payload handed to a shell that
+  way went unreported while the same payload joined with `+` was caught. Both are now detected, and
+  ordinary templates — building a URL, a command with a variable, a styled component — are still
+  clean.
+
+
+### Fixed
 - **`saw scan` no longer reports ordinary front-end code as obfuscated.** Reading a JWT or a data URI
   with `atob` was treated as executing code, and any list of nine or more numbers — icon sizes, a
   colour table — was treated as a smuggled string. Both now need the step their names imply: a decode
