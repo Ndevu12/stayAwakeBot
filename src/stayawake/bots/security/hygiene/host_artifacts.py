@@ -5,6 +5,7 @@ from __future__ import annotations
 import getpass
 import os
 import socket
+import sys
 import tempfile
 from pathlib import Path
 
@@ -102,9 +103,15 @@ def _host_artifacts() -> tuple[list[str], list[tuple[str, Path]]]:
     # The mundane cause of `~/.node_modules` is Node's own resolution, not a stray install: an
     # `npm install` in $HOME creates `~/node_modules`, with no dot, so naming that as the way to
     # self-clear pointed at a path this probe never looks at.
-    if _present_dir(home / ".node_modules"):
-        weak.append((f"{home}/.node_modules (an npm tree in your home dir — unusual location)",
-                     home / ".node_modules"))
+    # EVERY entry of Node's GLOBAL_FOLDERS, not a subset. Node resolves a global module through
+    # `~/.node_modules`, `~/.node_libraries`, then `$PREFIX/lib/node`; covering some of them draws the
+    # line exactly where an attacker reading the same documentation steps over it. The prefix entry is
+    # reachable WITHOUT root on a Homebrew Mac, where `/usr/local` is user-owned, so it is not a
+    # root-only location the user-level worm model can dismiss.
+    for location in _global_folders():
+        if _present_dir(location):
+            weak.append((f"{location} (a node module tree in a global resolution path — "
+                         "unusual location)", location))
     for t in tmp_dirs:
         if _present(t / ".npm"):
             weak.append((f"{t}/.npm", t / ".npm"))
@@ -126,6 +133,33 @@ def _host_artifacts() -> tuple[list[str], list[tuple[str, Path]]]:
     if scanner is not None:
         strong.append(f"{scanner} (staged secret-scanner binary)")
     return strong, weak
+
+
+
+def _global_folders() -> list[Path]:
+    """Node's GLOBAL_FOLDERS, resolved on ANY platform — every path the runtime loads a global
+    module from.
+
+    The two home-relative entries are the same everywhere. `$PREFIX` is Node's install prefix: read
+    from the environment when set, and otherwise the platform's documented defaults, because a
+    POSIX-only list would leave the equivalent Windows locations uncovered — the same partial
+    coverage this probe exists to remove. `/usr/local` and `%APPDATA%` are user-writable on ordinary
+    installs, so the prefix entry is reachable without administrator rights."""
+    home = Path.home()
+    roots: list[Path] = []
+    for var in ("PREFIX", "NODE_PREFIX", "npm_config_prefix"):
+        if os.environ.get(var):
+            roots.append(Path(os.environ[var]))
+    if sys.platform.startswith("win"):
+        for var in ("APPDATA", "ProgramFiles", "ProgramW6432", "LOCALAPPDATA"):
+            if os.environ.get(var):
+                roots += [Path(os.environ[var]) / "npm", Path(os.environ[var]) / "nodejs"]
+    else:
+        roots += [Path("/usr/local"), Path("/usr"), Path("/opt/homebrew"), Path("/opt/local")]
+    folders = [home / ".node_modules", home / ".node_libraries"]
+    folders += [root / "lib" / "node" for root in roots]
+    seen: set[str] = set()
+    return [f for f in folders if not (str(f) in seen or seen.add(str(f)))]
 
 
 def check_host_artifacts(verify: bool = False) -> list[HygieneIssue]:
@@ -164,8 +198,9 @@ def check_host_artifacts(verify: bool = False) -> list[HygieneIssue]:
         severity="info",
         title="Unusual file/dir on this host (weak supply-chain indicator)",
         detail="Found: " + "; ".join(found) + ". This is a WEAK, single indicator — a location the "
-               "worm sometimes uses, but ordinary tooling makes the same thing: `~/.node_modules` is "
-               "the first entry in Node's own GLOBAL_FOLDERS resolution list, and a pip bootstrap "
+               "worm sometimes uses, but ordinary tooling makes the same thing: `~/.node_modules` and "
+               "`~/.node_libraries` are the home-relative entries in Node's own GLOBAL_FOLDERS "
+               "resolution list, and a pip bootstrap "
                "leaves `get-pip.py`. Existence alone can't tell them apart, so on its own it is not "
                "evidence of malware.",
         remediation="Verify it's yours: inspect the path (e.g. its package.json / contents) for "

@@ -13,6 +13,14 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Added
+- **`saw audit` now checks every location Node loads a global module from**, not just
+  `~/.node_modules`: also `~/.node_libraries` and the install prefix's `lib/node`, resolved from your
+  environment on macOS, Linux and Windows alike. A module tree staged in any of them used to be
+  invisible while the same tree one directory over was reported. All are graded identically,
+  including the rule that only a directory counts.
+
+
 ### Fixed
 - **`saw audit` no longer reports a hardened host as a compromised one.** Prevention guidance in
   circulation tells operators to make `~/.node_modules` a non-directory so a worm cannot stage there.

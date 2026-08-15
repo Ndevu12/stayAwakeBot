@@ -263,7 +263,8 @@ def _scope_note(issues: list[HygieneIssue], *, color: bool, width: int) -> list[
         # therefore true in every state: `tempfile.gettempdir()` honours $TMPDIR, so naming a specific
         # path here (e.g. /var/tmp) would be a false claim on any host that points $TMPDIR at it.
         f"{surface_read} (home, /tmp, the system temp dir, the working directory). It does NOT scan "
-        "other survivor temp dirs, the global npm prefix, Docker images/volumes, other mounted "
+        "other survivor temp dirs, the global npm prefix beyond Node's own module resolution "
+        "paths, Docker images/volumes, other mounted "
         "filesystems, account/organization-level state such as self-hosted runner registrations, "
         "or Windows autorun locations (registry Run keys, the Startup folder, Scheduled Tasks) — "
         "persistence enumeration is macOS and Linux user-scope only. "
