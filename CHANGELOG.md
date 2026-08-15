@@ -14,8 +14,8 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Fixed
-- **`saw scan` no longer reports ordinary HTTP-parsing code as infected.** `String.fromCharCode(127)`
-  is simply how the DEL character is written, so any RFC 7230 control-character table matched a
+- **`saw scan` no longer reports ordinary HTTP-parsing code as infected.** Writing the DEL character
+  by its numeric code is ordinary JavaScript, so any RFC 7230 control-character table matched a
   malware loader fingerprint at the tier that asserts malware — failing a CI gate on a vendored
   bundle. The fingerprint now requires the characters to be assembled and then executed nearby, which
   is what distinguishes a string shuffler from a character table. Real loaders are detected exactly as

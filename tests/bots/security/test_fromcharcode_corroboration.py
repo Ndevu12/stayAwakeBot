@@ -94,6 +94,22 @@ class TestCorroborationIsProximityNotCoPresence(unittest.TestCase):
                 self.assertTrue(self._fires(near))
 
 
+class TestCorroborationSurvivesAWindowBoundary(unittest.TestCase):
+    """The matcher reads a large file in overlapping windows, and corroboration reads a slice AROUND
+    the match — so a match near a window's end has its trailing context truncated.
+
+    Nothing is lost only because consecutive windows overlap by MORE than the corroboration radius:
+    the match reappears in the next window with its context intact. That is load-bearing and
+    implicit, so it is pinned here — lower the overlap or raise the radius and a shuffler whose exec
+    sits just past a boundary goes unreported, silently."""
+
+    def test_the_overlap_exceeds_the_corroboration_radius(self):
+        from stayawake.bots.security.targets.base import _SOURCE_WINDOW_OVERLAP
+        from stayawake.bots.security.matchers.content import _CORROBORATION_RADIUS
+        self.assertGreater(_SOURCE_WINDOW_OVERLAP, _CORROBORATION_RADIUS * 2,
+                           "a match near a window edge would lose its corroborating context")
+
+
 class TestTheCorroboratorNameIsReal(unittest.TestCase):
     def test_every_declared_corroborator_exists(self):
         # A typo would otherwise read as "no corroboration required" for whichever signature has it.
