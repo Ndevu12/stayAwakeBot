@@ -389,21 +389,26 @@ def _scrub_comments_and_strings(s: str, scrub_strings: bool = True) -> str:
                     i += 1
                     break
                 if ch == "$" and i + 1 < n and s[i + 1] == "{":
+                    # An interpolation interior is CODE — the one part of a template that runs — so it
+                    # is scrubbed AS code rather than blanked. Blanking hid every identifier in `${…}`,
+                    # which is why a decode reaching a shell through `` `sh -c ${d}` `` was missed while
+                    # the concatenated form was caught. Emitting it raw is equally wrong: a comment in
+                    # there would be resurrected, so the same scrub is applied recursively.
                     out.append("${")
                     i += 2
-                    depth = 1
+                    start, depth = i, 1
                     while i < n and depth:
                         if s[i] == "{":
                             depth += 1
-                            out.append(" ")
-                            i += 1
                         elif s[i] == "}":
                             depth -= 1
-                            out.append("}" if depth == 0 else " ")
-                            i += 1
-                        else:
-                            out.append(" " if s[i] != "\n" else "\n")
-                            i += 1
+                            if depth == 0:
+                                break
+                        i += 1
+                    out.append(_scrub_comments_and_strings(s[start:i], scrub_strings))
+                    if i < n:
+                        out.append("}")
+                        i += 1
                     continue
                 out.append(ch)
                 i += 1
