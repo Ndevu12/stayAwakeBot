@@ -66,12 +66,14 @@ _RMSYNC_RECURSIVE_HOME = re.compile(
     re.IGNORECASE)
 # A traversal ROOTED AT HOME (readdir/walk/glob/find over home) — pairs with a separate delete sink.
 _WALK_HOME = re.compile(
-    r"(?:\breaddir(?:Sync)?\s*\(|\bwalk(?:Sync)?\s*\(|\bglob(?:Sync)?\s*\(|\bklaw\s*\(|\bfind\s+)"
+    r"(?:\breaddir(?:Sync)?\s*\(|\bwalk(?:Sync)?\s*\(|\bglob(?:Sync)?\s*\(|\bklaw\s*\("
+    r"|\blistdir\s*\(|\bscandir\s*\(|\biterdir\s*\(\s*\)|\bfind\s+)"
     + _W + _HOME, re.IGNORECASE)
 # Any deletion sink (only consulted once a home-rooted WALK is established) — incl. shell `find`
 # terminals (`find $HOME -delete` / `find $HOME -exec rm`).
 _DELETE = re.compile(
     r"\bunlink(?:Sync)?\s*\(|\brmSync\s*\(|\brmdir(?:Sync)?\s*\(|\brimraf\b"
+    r"|\bshutil\s*\.\s*rmtree\s*\(|\bremovedirs\s*\(|\bos\s*\.\s*remove\s*\("
     r"|\bfs\.rm\s*\(|\brm\s+-|-delete\b|-exec\s+\S*\brm\b", re.IGNORECASE)
 
 # OVERWRITE-then-delete → the SECURE, unrecoverable variant.
@@ -96,6 +98,168 @@ _DESTRUCT_FLAG = r"(?:destroy|destruct|self_?destruct|wipe|nuke|purge|detonat|sa
 _DISABLED_FLAG = re.compile(
     r"\b\w*" + _DESTRUCT_FLAG + r"\w*\b\s*[:=]\s*(?:false|0|['\"]?(?:off|no|disabled?)['\"]?)\b",
     re.IGNORECASE)
+
+
+
+# A name bound to the home directory IS the home directory. Requiring the home token inside the
+# delete call meant one assignment defeated the whole arm — `const h = os.homedir()` then
+# `rmSync(h, {recursive:true})` went unreported, which is the shortest possible evasion.
+
+
+
+def _recursive_delete_of_home_name(text: str) -> bool:
+    """A recursive delete whose target is a name that STILL holds the home directory there.
+
+    Binding matters, not co-presence: `result = os.path.expanduser('~')` appears in ordinary library
+    code where `result` is then reused for a dozen unrelated values. Measured on pip's vendored
+    distlib, matching any later delete of that name produced a false positive. So the binding must be
+    the NEAREST one before the delete, must not be rebound in between, and its block must not have
+    closed — the same discipline the decode-to-exec analyzer applies to its own variables."""
+    deletes = (
+        r"(?:\brimraf\s*\(|\brm\s+-[a-z]*(?:rf|fr)[a-z]*\s+)" + _W + r"([A-Za-z_$][\w$]*)\b",
+        r"(?:\brmSync|\bfs\.rm|\brmdirSync)\s*\(" + _W + r"([A-Za-z_$][\w$]*)\b" + _W
+        + r"recursive\s*:\s*true",
+        r"\bshutil\.rmtree\s*\(\s*\$?\{?([A-Za-z_$][\w$]*)\b",
+    )
+    for pattern in deletes:
+        for hit in re.finditer(pattern, text, re.IGNORECASE):
+            name = hit.group(1)
+            bind = _last_home_binding_before(text, name, hit.start())
+            if bind is None:
+                continue
+            gap = text[bind:hit.start()]
+            if _rebound(gap, name) or not _same_scope(gap):
+                continue
+            return True
+    return False
+
+
+def _last_home_binding_before(text: str, name: str, pos: int) -> int | None:
+    """End offset of the nearest `<name> = <home expression>` before `pos`, else None."""
+    binding = re.compile(r"(?:(?:const|let|var)\s+)?(?<![.\w$])" + re.escape(name)
+                         + r"\s*=(?!=)\s*" + _W + _HOME, re.IGNORECASE)
+    last = None
+    for m in binding.finditer(text, 0, pos):
+        last = m.end()
+    return last
+
+
+def _rebound(gap: str, name: str) -> bool:
+    """The name was assigned something else between the binding and the delete."""
+    return bool(re.search(r"(?<![.\w$])" + re.escape(name) + r"\s*=(?!=)", gap))
+
+
+# A new top-level `def`/`class` ends the walk's scope in Python, where there is no closing brace.
+_NEW_TOPLEVEL_DEF = re.compile(r"^(?:def|class)\s", re.MULTILINE)
+
+
+def _same_scope(gap: str) -> bool:
+    """Whether a delete found after a home walk is still INSIDE the walk's scope.
+
+    The arm asks whether this file walks home and deletes what it finds. Searching the whole file for
+    a delete answers a different question — co-presence — so a dotfile manager that lists `$HOME` in
+    one function and unlinks a temp file in another graded INFECTED.
+
+    Braces only: the walk match ends inside its own call, so counting `(` would read that call's own
+    `)` as the scope ending and reject every true positive. Parenthesis nesting is not scope."""
+    depth = 0
+    for ch in gap:
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth < 0:
+                return False
+    return not _NEW_TOPLEVEL_DEF.search(gap)
+
+
+# Splitting the walk and the delete into two functions and wiring them at a call site defeats a
+# lexical scope test — the two are genuinely in different scopes. What still betrays it is the
+# WIRING: the walk's result is handed to the deleter. A dotfile manager that merely owns both
+# functions never connects them, which is exactly the difference the scope rule alone cannot see.
+_JS_CALLABLE = re.compile(
+    r"\bfunction\s+([A-Za-z_$][\w$]*)\s*\(|"
+    r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s+)?(?:function\b|\()", re.IGNORECASE)
+_PY_CALLABLE = re.compile(r"^([ \t]*)def\s+([A-Za-z_]\w*)\s*\(", re.MULTILINE)
+_MAX_CALLABLES = 200          # a hostile file must not turn this into quadratic work
+_WIRING_WINDOW = 300          # how far the deleter may sit from the walk call that feeds it
+
+
+def _callable_bodies(text: str) -> list[tuple[str, str]]:
+    """(name, body) for named callables — brace-matched for JS, indentation-bounded for Python."""
+    bodies: list[tuple[str, str]] = []
+    for m in _JS_CALLABLE.finditer(text):
+        name = m.group(1) or m.group(2)
+        brace = text.find("{", m.end())
+        if name is None or brace == -1 or brace - m.end() > 200:
+            continue
+        depth, i = 0, brace
+        while i < len(text):
+            if text[i] == "{":
+                depth += 1
+            elif text[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            i += 1
+        bodies.append((name, text[brace:i]))
+        if len(bodies) >= _MAX_CALLABLES:
+            return bodies
+    for m in _PY_CALLABLE.finditer(text):
+        indent, name = m.group(1), m.group(2)
+        rest = text[m.end():]
+        end = len(rest)
+        for line in re.finditer(r"^(?![ \t]*(?:#|$))([ \t]*)\S", rest, re.MULTILINE):
+            if len(line.group(1)) <= len(indent) and line.start() > 0:
+                end = line.start()
+                break
+        bodies.append((name, rest[:end]))
+        if len(bodies) >= _MAX_CALLABLES:
+            break
+    return bodies
+
+
+def _walk_result_reaches_a_deleter(text: str) -> bool:
+    """A function that walks home whose RESULT is handed to a function that deletes."""
+    walkers, deleters = [], []
+    for name, body in _callable_bodies(text):
+        if _WALK_HOME.search(body):
+            walkers.append(name)
+        elif _DELETE.search(body):
+            deleters.append(name)
+    if not walkers or not deleters:
+        return False
+    deleter_alt = "(?:" + "|".join(re.escape(d) for d in deleters[:40]) + r")\b"
+    for walker in walkers[:40]:
+        # `(?<!function )` / `(?<!def )`: the DEFINITION is not a call site. Without this the header
+        # itself matched and the next function's name fell inside the window, so a dotfile manager
+        # that never wires the two together read as wired.
+        call = re.compile(r"(?<!function )(?<!def )\b" + re.escape(walker) + r"\s*\(")
+        for hit in call.finditer(text):
+            window = text[hit.end():hit.end() + _WIRING_WINDOW]
+            if re.search(deleter_alt, window):
+                return True
+    return False
+
+
+# Measured: a walk and the delete it feeds sit 16-1,692 characters apart, the far end being a loop
+# with a 120-line body. The co-presence false positive in a real editor bundle sat 336,053 apart — a
+# documented shell command and the word "-delete-char" in help text. Scope alone does not separate
+# them in a FLAT file with no braces, so distance carries that case.
+_MAX_WALK_TO_DELETE = 4_000
+
+
+def _walks_home_and_deletes(text: str) -> bool:
+    """A home-rooted walk with a delete still in its scope — checked at EVERY walk, since an early
+    unrelated one must not decide the file."""
+    for walk in _WALK_HOME.finditer(text):
+        for delete in _DELETE.finditer(text, walk.end()):
+            gap = text[walk.end():delete.start()]
+            if len(gap) > _MAX_WALK_TO_DELETE:
+                break                       # deletes are found in order; the rest are further still
+            if _same_scope(gap):
+                return True
+    return False
 
 
 @dataclass
@@ -131,9 +295,10 @@ def detect_destructive(text: str) -> DestructiveVerdict | None:
     # A recursive delete ROOTED AT HOME (home is the target of rimraf/`rm -rf`/rmSync-recursive), OR a
     # home-rooted WALK paired with a delete sink. The home token must be CO-LOCATED with the op — not
     # merely present in the file — so a coincidental `os.homedir()` + scoped `rimraf('./dist')` is inert.
-    home_recursive_delete = bool(_RECURSIVE_DELETE_HOME.search(text)) \
-        or bool(_RMSYNC_RECURSIVE_HOME.search(text))
-    home_walk_delete = bool(_WALK_HOME.search(text)) and bool(_DELETE.search(text))
+    home_recursive_delete = (bool(_RECURSIVE_DELETE_HOME.search(text))
+                             or bool(_RMSYNC_RECURSIVE_HOME.search(text))
+                             or _recursive_delete_of_home_name(text))
+    home_walk_delete = _walks_home_and_deletes(text) or _walk_result_reaches_a_deleter(text)
     if not (home_recursive_delete or home_walk_delete or root_wipe):
         return None
     home = home_recursive_delete or home_walk_delete
