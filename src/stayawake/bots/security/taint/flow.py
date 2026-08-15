@@ -356,8 +356,34 @@ def _scrub_comments_and_strings(s: str, scrub_strings: bool = True) -> str:
     // or /* */ comment must still be silenced."""
     out: list[str] = []
     i, n = 0, len(s)
+    # ONE pass with an explicit mode stack, never recursion: a recursive descent into each `${…}`
+    # died with RecursionError at ~1000 nested interpolations — 5 KB of scanned file content — and
+    # cost time quadratic in the nesting. A stack keeps it linear and bounded only by memory.
+    # `None` on the stack = inside a template BODY; an int = inside an interpolation, counting the
+    # brace depth so the `}` that closes it is the right one.
+    stack: list[int | None] = []
     while i < n:
         c = s[i]
+
+        if stack and stack[-1] is None:                 # template BODY — data, kept verbatim
+            if c == "\\" and i + 1 < n:
+                out.append(s[i:i + 2])
+                i += 2
+                continue
+            if c == "`":
+                out.append(c)
+                stack.pop()
+                i += 1
+                continue
+            if c == "$" and i + 1 < n and s[i + 1] == "{":
+                out.append("${")                        # the interior is CODE — fall through to it
+                stack.append(0)
+                i += 2
+                continue
+            out.append(c)
+            i += 1
+            continue
+
         if c == "/" and i + 1 < n and s[i + 1] == "/":
             out.append("  ")
             i += 2
@@ -376,42 +402,9 @@ def _scrub_comments_and_strings(s: str, scrub_strings: bool = True) -> str:
                 i += 2
             continue
         if c == "`":
-            out.append("`")
+            out.append(c)
+            stack.append(None)
             i += 1
-            while i < n:
-                ch = s[i]
-                if ch == "\\" and i + 1 < n:
-                    out.append(s[i:i + 2])
-                    i += 2
-                    continue
-                if ch == "`":
-                    out.append("`")
-                    i += 1
-                    break
-                if ch == "$" and i + 1 < n and s[i + 1] == "{":
-                    # An interpolation interior is CODE — the one part of a template that runs — so it
-                    # is scrubbed AS code rather than blanked. Blanking hid every identifier in `${…}`,
-                    # which is why a decode reaching a shell through `` `sh -c ${d}` `` was missed while
-                    # the concatenated form was caught. Emitting it raw is equally wrong: a comment in
-                    # there would be resurrected, so the same scrub is applied recursively.
-                    out.append("${")
-                    i += 2
-                    start, depth = i, 1
-                    while i < n and depth:
-                        if s[i] == "{":
-                            depth += 1
-                        elif s[i] == "}":
-                            depth -= 1
-                            if depth == 0:
-                                break
-                        i += 1
-                    out.append(_scrub_comments_and_strings(s[start:i], scrub_strings))
-                    if i < n:
-                        out.append("}")
-                        i += 1
-                    continue
-                out.append(ch)
-                i += 1
             continue
         if c in "'\"":
             quote = c
@@ -430,6 +423,16 @@ def _scrub_comments_and_strings(s: str, scrub_strings: bool = True) -> str:
                 out.append(ch if not scrub_strings else ("\n" if ch == "\n" else " "))
                 i += 1
             continue
+        if stack:                                       # inside an interpolation: track its braces
+            if c == "{":
+                stack[-1] += 1
+            elif c == "}":
+                if stack[-1] == 0:
+                    out.append(c)
+                    stack.pop()
+                    i += 1
+                    continue
+                stack[-1] -= 1
         out.append(c)
         i += 1
     return "".join(out)
