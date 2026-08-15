@@ -158,3 +158,42 @@ class TestNoMergeBaseMakesNoStructuralClaim(_MergeFixture):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestLivenessSaysWhetherItIsStillThere(_MergeFixture):
+    """"This merge was evil" and "this payload is in the file you are about to run" are different
+    facts, and only the second is actionable. Blob identity settles it, in one direction only: an
+    identical blob PROVES the bytes survive, while a different blob proves only that the file
+    changed — the introduced lines may sit untouched inside it."""
+
+    def _evil_merge(self):
+        self._diverged()
+        self._git("merge", "--no-commit", "--no-ff", "-q", "feat")
+        self._write("app.js", "const a = 1;\nconst stolen = readSecrets();\n")
+        self._commit("Merge feat")
+        return self._git("rev-parse", "HEAD").stdout.strip()
+
+    def test_untouched_since_the_merge_is_reported_present(self):
+        from stayawake.lib.git.merge.liveness import introduced_liveness, PRESENT
+        sha = self._evil_merge()
+        self.assertEqual(introduced_liveness(self.d, sha, "app.js"), PRESENT)
+
+    def test_a_later_edit_is_never_reported_as_removed(self):
+        # The trap: treating "the hash moved" as "the payload is gone". A reformat, a cherry-pick or
+        # an unrelated edit all move the hash while the introduced lines stay.
+        from stayawake.lib.git.merge.liveness import introduced_liveness, CHANGED, describe
+        sha = self._evil_merge()
+        self._write("app.js", "const a = 1;\nconst stolen = readSecrets();\nconst extra = 2;\n")
+        self._commit("later edit")
+        state = introduced_liveness(self.d, sha, "app.js")
+        self.assertEqual(state, CHANGED)
+        self.assertIn("UNVERIFIED", describe(state))
+        self.assertNotIn("removed", describe(state).replace("do not read this as removed", ""))
+
+    def test_a_deleted_path_still_says_it_survives_in_history(self):
+        from stayawake.lib.git.merge.liveness import introduced_liveness, GONE, describe
+        sha = self._evil_merge()
+        (self.d / "app.js").unlink()
+        self._commit("remove")
+        self.assertEqual(introduced_liveness(self.d, sha, "app.js"), GONE)
+        self.assertIn("history", describe(GONE))

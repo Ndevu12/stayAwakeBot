@@ -21,6 +21,11 @@ reader, not the mechanism or the weakness it closed.
   content alone, and a merge that introduces no new content is not a finding.
 
 ### Added
+- **An evil-merge finding now says whether the introduced content is still in your working tree.**
+  A merge that smuggled a payload and one whose payload was deleted afterwards need different
+  responses. A file that changed since the merge is reported as **unverified**, never as removed —
+  the introduced lines may still be inside it — and a deleted path still notes that the content
+  remains in history and in any fork.
 - **`saw scan` now catches a merge commit that was edited by hand where git merged cleanly.** If a
   file merged without conflict, git's result is fixed — a different result means somebody changed it
   while merging, which no branch's diff shows and no pull-request review renders. This is reported
