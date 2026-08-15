@@ -14,10 +14,11 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
-- **`saw audit` now checks `~/.node_libraries` as well as `~/.node_modules`.** Node resolves globally
-  installed modules through both, so a module tree staged in the second was invisible while the same
-  tree one directory over was reported. It is graded exactly like the first, including the rule that
-  only a directory counts.
+- **`saw audit` now checks every location Node loads a global module from**, not just
+  `~/.node_modules`: also `~/.node_libraries` and the install prefix's `lib/node`, resolved from your
+  environment on macOS, Linux and Windows alike. A module tree staged in any of them used to be
+  invisible while the same tree one directory over was reported. All are graded identically,
+  including the rule that only a directory counts.
 
 
 ### Fixed

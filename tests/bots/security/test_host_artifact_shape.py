@@ -8,6 +8,7 @@ hardening a host manufactured the indicator, and the host was then told it might
 """
 from __future__ import annotations
 
+import os
 import pathlib
 import tempfile
 import unittest
@@ -74,11 +75,39 @@ class TestBothHomeRelativeGlobalFoldersAreCovered(TestTheIndicatorTestsTheShapeI
             (tmp / "get-pip.py").write_text("#")))
         self.assertNotIn("host-drop-artifacts", {i.id for i in issues})
 
-    def test_the_third_entry_stays_out_of_scope(self):
-        # `$PREFIX/lib/node` is the global npm prefix, disclosed as unscanned rather than probed —
-        # so a tree there must not silently start counting as this indicator.
-        issues = self._issues(lambda home, tmp: ((home / "lib" / "node").mkdir(parents=True),))
-        self.assertEqual(issues, [])
+    def test_the_prefix_entry_is_covered_too(self):
+        # Not excluded as "system-only": `/usr/local` is user-owned on a Homebrew Mac, so this entry
+        # is reachable by a worm that never gets root. An uncovered load path is a gap to close.
+        from stayawake.bots.security.hygiene.host_artifacts import _global_folders
+        with mock.patch.dict(os.environ, {"PREFIX": "/opt/node"}):
+            resolved = {str(p) for p in _global_folders()}
+        self.assertIn("/opt/node/lib/node", resolved, "$PREFIX from the environment is honoured")
+        self.assertIn("/usr/local/lib/node", resolved, "the default prefix is checked as well")
+
+    def test_it_resolves_on_every_platform_not_just_posix(self):
+        # A POSIX-only prefix list would leave the equivalent Windows locations uncovered — the same
+        # partial coverage this probe exists to remove, one platform over.
+        from stayawake.bots.security.hygiene.host_artifacts import _global_folders
+        windows_env = {"APPDATA": r"C:\Users\u\AppData\Roaming", "ProgramFiles": r"C:\Program Files"}
+        with mock.patch("sys.platform", "win32"), mock.patch.dict(os.environ, windows_env):
+            resolved = {str(path) for path in _global_folders()}
+        self.assertTrue(any("AppData" in path for path in resolved), resolved)
+        self.assertFalse(any(path.startswith("/usr/") for path in resolved),
+                         "POSIX prefixes must not be offered on Windows")
+
+        with mock.patch("sys.platform", "linux"), mock.patch.dict(os.environ, {}, clear=False):
+            for var in ("PREFIX", "NODE_PREFIX", "npm_config_prefix"):
+                os.environ.pop(var, None)
+            posix = {str(path) for path in _global_folders()}
+        self.assertIn("/usr/local/lib/node", posix)
+
+    def test_every_documented_resolution_path_is_probed(self):
+        from stayawake.bots.security.hygiene.host_artifacts import _global_folders
+        resolved = {str(p) for p in _global_folders()}
+        home = str(pathlib.Path.home())
+        for entry in (f"{home}/.node_modules", f"{home}/.node_libraries"):
+            self.assertIn(entry, resolved)
+        self.assertTrue(any(p.endswith("/lib/node") for p in resolved))
 
 
 class TestTheBenignExplanationNamesACauseThatCanProduceThePath(unittest.TestCase):
