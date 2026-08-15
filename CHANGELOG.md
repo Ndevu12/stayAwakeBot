@@ -14,6 +14,18 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Fixed
+- **`saw scan` no longer calls a project infected because two unrelated things appear in one file.**
+  A file that listed your home directory in one place and deleted something entirely different in
+  another was reported as a home-directory wipe — a dotfile manager, or an editor bundle whose
+  documentation happened to contain both. The two now have to belong together.
+
+### Added
+- **The home-wipe detector catches two shapes it used to miss**: deleting the home directory through
+  a variable it was first assigned to, and walking home with `listdir`/`scandir`, which is the most
+  common way to do it in Python.
+
+
+### Fixed
 - **`saw scan` no longer reports ordinary HTTP-parsing code as infected.** Writing the DEL character
   by its numeric code is ordinary JavaScript, so any RFC 7230 control-character table matched a
   malware loader fingerprint at the tier that asserts malware — failing a CI gate on a vendored
