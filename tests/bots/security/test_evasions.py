@@ -42,7 +42,7 @@ class TestScannerEvasions(unittest.TestCase):
     def test_oversized_source_file_tail_is_scanned(self):
         # C2: payload appended past the size cap is still found via head+tail scan.
         opts = ScanOptions(max_file_bytes=200)
-        (self.d / "big.mjs").write_bytes(b"// pad\n" * 100 + b"\nString.fromCharCode(127);\n")
+        (self.d / "big.mjs").write_bytes(b"// pad\n" * 100 + b"\nString.fromCharCode(127);eval(1);\n")
         self.assertIn("loader-fromcharcode-127", _scan(self.d, opts))
 
     def test_oversized_source_file_middle_is_scanned(self):
@@ -51,7 +51,7 @@ class TestScannerEvasions(unittest.TestCase):
         # payload sits between the 100 B head and 100 B tail and is invisible; the windowed
         # content reader streams the whole body so it is found.
         opts = ScanOptions(max_file_bytes=200)
-        body = b"// pad\n" * 60 + b"\nString.fromCharCode(127);\n" + b"// pad\n" * 60
+        body = b"// pad\n" * 60 + b"\nString.fromCharCode(127);eval(1);\n" + b"// pad\n" * 60
         (self.d / "mid.mjs").write_bytes(body)
         self.assertIn("loader-fromcharcode-127", _scan(self.d, opts))
 
@@ -60,7 +60,7 @@ class TestScannerEvasions(unittest.TestCase):
         # window-local one — a payload after thousands of interior lines reports that absolute line.
         opts = ScanOptions(max_file_bytes=200)
         pre = b"// pad\n" * 500                      # 500 lines before the payload
-        (self.d / "line.mjs").write_bytes(pre + b"String.fromCharCode(127);\n" + b"// pad\n" * 50)
+        (self.d / "line.mjs").write_bytes(pre + b"String.fromCharCode(127);eval(1);\n" + b"// pad\n" * 50)
         t = LocalRepoTarget(self.d, "t", opts)
         f = next(f for f in scan_target(t, SIGS, []).findings
                  if f.signature_id == "loader-fromcharcode-127")
@@ -71,7 +71,7 @@ class TestScannerEvasions(unittest.TestCase):
         # overlap exists exactly so a boundary can't split a match. Here window=200, step=100, so the
         # payload at byte ~190 spans the 200-byte boundary; the second window ([100,300)) holds it whole.
         opts = ScanOptions(max_file_bytes=200)
-        payload = b"String.fromCharCode(127);"
+        payload = b"String.fromCharCode(127);eval(1);"
         body = b"x" * (190 - 0) + payload + b"y" * 400
         (self.d / "straddle.mjs").write_bytes(body)
         self.assertIn("loader-fromcharcode-127", _scan(self.d, opts))
@@ -82,7 +82,7 @@ class TestScannerEvasions(unittest.TestCase):
         # documented residual. Patch the ceiling small so we needn't write 64 MB.
         from stayawake.bots.security.targets import base as _base
         opts = ScanOptions(max_file_bytes=200)
-        big = b"// pad\n" * 500 + b"\nString.fromCharCode(127);\n"   # payload in the TAIL
+        big = b"// pad\n" * 500 + b"\nString.fromCharCode(127);eval(1);\n"   # payload in the TAIL
         (self.d / "huge.mjs").write_bytes(big)
         with mock.patch.object(_base, "_MAX_INTERIOR_SCAN_BYTES", 500):  # < file size → fallback path
             self.assertIn("loader-fromcharcode-127", _scan(self.d, opts))
@@ -99,7 +99,7 @@ class TestScannerEvasions(unittest.TestCase):
     def test_case_and_member_access_mutations_detected(self):
         # C3: case-flips, let/const, member access, hex arg must not evade.
         (self.d / "m.mjs").write_text(
-            "LET _$_AB = SFL(0)\nString['fromCharCode'](0x7F)\n", encoding="utf-8")
+            "LET _$_AB = SFL(0)\nString['fromCharCode'](0x7F)\neval(_$_AB)\n", encoding="utf-8")
         ids = _scan(self.d)
         self.assertIn("loader-seed-var", ids)
         self.assertIn("loader-decoder-fn", ids)

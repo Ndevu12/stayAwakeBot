@@ -39,7 +39,7 @@ class TestNonSourceBodyScan(unittest.TestCase):
     # (a) — the confirmed content tier now head-scans NON-source files (#6/#7), FP-safe.
     def test_payload_under_benign_ext_is_caught(self):
         self.assertIn("loader-fromcharcode-127",
-                      _ids({"payload.bin": b"junk\nString.fromCharCode(127)\nmore"}))
+                      _ids({"payload.bin": b"junk\nString.fromCharCode(127);eval(1)\nmore"}))
 
     def test_nul_laden_non_source_is_caught(self):
         # A NUL in the head used to make read_text skip a non-source file wholesale (#7).
@@ -48,12 +48,12 @@ class TestNonSourceBodyScan(unittest.TestCase):
     def test_oversized_non_source_head_is_scanned(self):
         # >2 MB non-source: payload in the head, then padding — used to be skipped wholesale (#6).
         self.assertIn("loader-fromcharcode-127",
-                      _ids({"big.log": b"String.fromCharCode(127)\n" + b"x" * 2_500_000}))
+                      _ids({"big.log": b"String.fromCharCode(127);eval(1)\n" + b"x" * 2_500_000}))
 
     def test_oversized_non_source_tail_is_scanned(self):
         # Head+tail (not head-only): a payload APPENDED past the cap is still seen.
         self.assertIn("loader-fromcharcode-127",
-                      _ids({"big.log": b"x" * 2_500_000 + b"\nString.fromCharCode(127)\n"},
+                      _ids({"big.log": b"x" * 2_500_000 + b"\nString.fromCharCode(127);eval(1)\n"},
                            ScanOptions()))
 
     def test_genuine_binary_is_clean(self):
