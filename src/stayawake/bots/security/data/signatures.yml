@@ -29,7 +29,11 @@ signatures:
     # Tolerate member-access (String['fromCharCode']) and hex args (0x7f) too.
     pattern: 'String\s*[.\[]\s*[''"]?fromCharCode[''"]?\]?\s*\(\s*(?:127|0x7f)\s*\)'
     prefilter: "fromcharcode"   # cheap required-literal reject before the regex
-    description: "Obfuscated loader fingerprint — fromCharCode(127) string shuffler"
+    # DEL is written this way in ordinary code, so the construct alone is not the tell: measured over
+    # 10,831 vendored files it matched two Microsoft-published HTTP token tables at confirmed tier.
+    # A string SHUFFLER differs from a character TABLE in that its output is executed.
+    corroborate: exec-sink
+    description: "Obfuscated loader fingerprint — fromCharCode(127) shuffler feeding an exec sink"
     remediation: recover
 
   - id: loader-seed-var
