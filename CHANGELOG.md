@@ -14,6 +14,11 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Fixed
+- **The release pipeline blocked on vulnerabilities it was configured to ignore.** The container
+  vulnerability gate is meant to stop a release only for a fixable critical or high finding, but it
+  was rejecting releases over low, medium and unrecognised ones — the `0.5.2` release was blocked
+  with no critical or high finding at all. The gate now applies the severity it documents, and the
+  full scan report is still published for every release.
 - **`saw scan` no longer reports an ordinary merge as an attack when the branches have no common
   ancestor.** Merging two unrelated histories has no clean three-way merge to compare against, and
   every file the other side brought in was being reported as introduced by the merge — one such
