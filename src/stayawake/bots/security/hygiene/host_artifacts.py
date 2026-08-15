@@ -86,11 +86,23 @@ def _host_artifacts() -> tuple[list[str], list[tuple[str, Path]]]:
         except OSError:
             return False
 
+    def _present_dir(p: Path) -> bool:
+        """Existence is not the test when the indicator is described as a TREE. A regular file at
+        `~/.node_modules` is what prevention guidance tells operators to CREATE, to deny the staging
+        path — so accepting it reported the hardened host as the compromised one."""
+        try:
+            return p.is_dir()
+        except OSError:
+            return False
+
     # Weak drop-files — a single low-confidence indicator each. Described NEUTRALLY (not "payload"):
-    # each has a mundane explanation (a manual `npm install` in $HOME, a pip bootstrap) as well as the
-    # worm one, and existence alone can't tell them apart — so we surface, we don't accuse. The path
-    # rides along so `--verify` can content-scan it (see check_host_artifacts).
-    if _present(home / ".node_modules"):
+    # each has a mundane explanation as well as the worm one, and existence alone can't tell them
+    # apart — so we surface, we don't accuse. The path rides along so `--verify` can content-scan it.
+    #
+    # The mundane cause of `~/.node_modules` is Node's own resolution, not a stray install: an
+    # `npm install` in $HOME creates `~/node_modules`, with no dot, so naming that as the way to
+    # self-clear pointed at a path this probe never looks at.
+    if _present_dir(home / ".node_modules"):
         weak.append((f"{home}/.node_modules (an npm tree in your home dir — unusual location)",
                      home / ".node_modules"))
     for t in tmp_dirs:
@@ -152,8 +164,9 @@ def check_host_artifacts(verify: bool = False) -> list[HygieneIssue]:
         severity="info",
         title="Unusual file/dir on this host (weak supply-chain indicator)",
         detail="Found: " + "; ".join(found) + ". This is a WEAK, single indicator — a location the "
-               "worm sometimes uses, but a manual `npm install`/`pip` run from your home dir makes "
-               "the same thing. Existence alone can't tell them apart, so on its own it is not "
+               "worm sometimes uses, but ordinary tooling makes the same thing: `~/.node_modules` is "
+               "the first entry in Node's own GLOBAL_FOLDERS resolution list, and a pip bootstrap "
+               "leaves `get-pip.py`. Existence alone can't tell them apart, so on its own it is not "
                "evidence of malware.",
         remediation="Verify it's yours: inspect the path (e.g. its package.json / contents) for "
                     "anything you don't recognize, and recall whether you created it. If it is NOT "

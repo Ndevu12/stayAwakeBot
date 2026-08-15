@@ -14,6 +14,18 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Fixed
+- **`saw audit` no longer reports a hardened host as a compromised one.** Prevention guidance in
+  circulation tells operators to make `~/.node_modules` a non-directory so a worm cannot stage there.
+  The audit described that location as "an npm tree" but accepted anything present, so following the
+  advice created the very indicator, which could combine with one other weak signal into a warning
+  that withheld the credential-rotation all-clear. A real directory there is reported exactly as
+  before.
+- **The explanation offered for that finding named a command that cannot produce it.** It blamed a
+  manual `npm install` in your home directory, which creates `~/node_modules` — without the dot — so
+  the one route a user had to clear the finding themselves pointed at a path the audit never checks.
+
+
+### Fixed
 - **`saw scan` now sees code written inside a template literal's `${...}`.** Anything spliced into a
   template was being read as text rather than as code, so a decoded payload handed to a shell that
   way went unreported while the same payload joined with `+` was caught. Both are now detected, and
