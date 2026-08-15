@@ -13,7 +13,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from stayawake.bots.security.sourcescan import _DATA_URI, _dechunk, _shannon
-from stayawake.bots.security.obfuscation.execsink import _NUM_ARRAY, _has_exec_sink
+from stayawake.bots.security.obfuscation.execsink import (
+    _NUM_ARRAY, _has_exec_sink, _has_exec_sink_beyond_decoding, _is_charcode_shuffler)
 from stayawake.bots.security.obfuscation.heuristics import (
     _escape_run, _longest_nonspace_run,
     _OUTLIER_LINE, _DENSE_LINE, _DENSE_CHARS_FRAC, _ENTROPY_ABS, _MAX_PROSE_SPACE_FRAC,
@@ -55,12 +56,12 @@ def analyze_file(text: str, ext: str = "", constructs_only: bool = False) -> Obf
     # Tier 1 — self-evident constructs over the RAW content (never splitlines, so a
     # wrapped charcode array / base64 blob spanning line breaks is still seen).
     flat = body.replace("\n", "").replace("\r", "")
-    if _NUM_ARRAY.search(flat):
+    if _is_charcode_shuffler(flat):
         return ObfuscationVerdict(True, "charcode/byte numeric-array literal (string shuffler)")
     # Search the raw body AND the newline-flattened form so an exec sink wrapped
     # across line breaks (`sfL['constructor']\n(decoded)`) is still seen.
-    if _has_exec_sink(body) or _has_exec_sink(flat):
-        return ObfuscationVerdict(True, "dynamic-exec sink (eval/Function/atob/fromCharCode/constructor)")
+    if _has_exec_sink_beyond_decoding(body) or _has_exec_sink_beyond_decoding(flat):
+        return ObfuscationVerdict(True, "dynamic-exec sink (eval/Function/constructor/vm-runner)")
     # Decode→exec dropper — the ONE decode→exec-flow detector (see taint/): a baked encoded payload
     # DECODED and then RUN, via a command/module/worker sink (the #1266 nested form and the
     # variable-indirected form, leading arg) OR through a shell `-c` argument (`spawn('sh',['-c',d])`
@@ -139,10 +140,10 @@ def analyze_delta(introduced: str, baseline: str = "") -> ObfuscationVerdict:
         return ObfuscationVerdict(False, "")
 
     # 1) Self-evidently executable obfuscation constructs — sufficient on their own.
-    if _NUM_ARRAY.search(text):
+    if _is_charcode_shuffler(text):
         return ObfuscationVerdict(True, "charcode/byte numeric-array literal (string shuffler)")
-    if _has_exec_sink(text):
-        return ObfuscationVerdict(True, "dynamic-exec sink (eval/Function/atob/fromCharCode/constructor)")
+    if _has_exec_sink_beyond_decoding(text):
+        return ObfuscationVerdict(True, "dynamic-exec sink (eval/Function/constructor/vm-runner)")
     # Decode→exec dropper introduced by the hunk — same ONE detector as analyze_file (leading-arg
     # #1266/var forms AND the shell `-c` form). A lone base64 blob a merge introduces (a token, a
     # cert-pin/JWKS key array, a KAT table) is DATA, not an evil-merge tell (#1212); only the
