@@ -14,6 +14,7 @@ from __future__ import annotations
 import re
 
 from stayawake.bots.security.taint.flow import _has_corroborated_dynamic_exec
+from stayawake.bots.security.taint.model import CP_RUNNERS, CP_MODULES
 
 
 # A numeric array literal of >=8 elements, decimal or hex — the charcode/byte shuffler.
@@ -169,3 +170,52 @@ def _has_exec_sink(s: str, strict: bool = False) -> bool:
         strict or not _NEW_CLONE_PREFIX.search(view[max(0, m.start() - 48):m.start()])
         for m in _CONSTRUCTOR_EXEC.finditer(view)
     )
+
+
+# `atob` and `String.fromCharCode` DECODE; they do not run anything. Grouping them with the exec
+# sinks makes every JWT reader, data-URI handler and base64 utility a finding — measured on a
+# 19-line JWT decoder whose `atob` result reaches `JSON.parse` and is returned.
+#
+# They stay in `_EXEC_SINK` because the REMEDIATION gate (`strict=True`) must keep deferring on them:
+# there, trusting a benign shape can pass an RCE, so a decode primitive in kept code is a reason to
+# stop. Only the FINDING path asks the question below, where the cost of over-firing is the operator
+# learning to dismiss the class.
+_DECODE_PRIMITIVE = re.compile(r"\batob\s*\(|String\s*[.\[]\s*[\"']?fromCharCode", re.IGNORECASE)
+_EXEC_SINK_NO_DECODE = re.compile(
+    "|".join(a for a in _EXEC_SINK.pattern.split("|")
+             if "atob" not in a and "fromCharCode" not in a),
+    re.IGNORECASE,
+)
+
+# What makes a numeric array a string shuffler is being CONSUMED as character codes. The literal
+# alone is every size table, colour table and lookup table in existence — measured on
+# `[72, 96, 128, 144, 152, 180, 192, 384, 512]`, a list of PWA icon pixel sizes.
+# The command runners named by the taint model (`CP_RUNNERS`), which corroborate a decode primitive.
+_COMMAND_RUNNER = re.compile(
+    r"\b(?:" + "|".join(sorted(CP_RUNNERS)) + r")\s*\(|\b(?:" + "|".join(sorted(CP_MODULES)) + r")\b")
+
+_CHARCODE_CONSUMER = re.compile(r"fromCharCode|fromCodePoint", re.IGNORECASE)
+
+
+def _has_exec_sink_beyond_decoding(s: str) -> bool:
+    """True when something in `s` actually RUNS, rather than merely decodes.
+
+    A decode primitive on its own is not that: `atob` returning into `JSON.parse` is every JWT reader
+    in the ecosystem. It counts only when the file also holds a command runner, which is the flow the
+    taint model describes — decode alone is data, sink alone is ordinary code, the pair is the tell.
+
+    The text is NOT edited to ask this. Blanking the decode call first also blinds the decode-to-exec
+    flow detector, which needs both halves; that broke two real detections."""
+    view = _fold_string_concats(s)
+    if (_EXEC_SINK_NO_DECODE.search(view) or _REFLECTIVE_EXEC.search(view)
+            or _has_corroborated_dynamic_exec(view) or _has_obfuscated_exec_forms(view)):
+        return True
+    if any(not _NEW_CLONE_PREFIX.search(view[max(0, m.start() - 48):m.start()])
+           for m in _CONSTRUCTOR_EXEC.finditer(view)):
+        return True
+    return bool(_DECODE_PRIMITIVE.search(view) and _COMMAND_RUNNER.search(view))
+
+
+def _is_charcode_shuffler(s: str) -> bool:
+    """A numeric-array literal that is consumed as character codes."""
+    return bool(_NUM_ARRAY.search(s) and _CHARCODE_CONSUMER.search(s))

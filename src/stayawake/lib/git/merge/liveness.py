@@ -1,16 +1,9 @@
 #!/usr/bin/env python3
 """Is the content a merge introduced STILL in the working tree, or was it removed afterwards?
 
-"This merge was evil" and "this payload is in the file you are about to run" call for different
-responses, and every tool in this space answers only the first. Blob identity answers the second
-cheaply: git addresses content by hash, so the blob a merge recorded at a path either is still the
-blob at HEAD or is not.
-
-The direction of that evidence is asymmetric, which is the whole design. An identical blob PROVES the
-bytes are still there. A different blob proves only that the file changed — the introduced lines may
-be untouched inside it — so it is reported as CHANGED, never as removed. Treating "the hash moved" as
-"the payload is gone" is the mistake the vulnerable-code-lineage literature warns about: a reformat,
-a cherry-pick or an unrelated edit all move the hash while the code stays.
+Blob identity answers it, in ONE direction only: an identical blob proves the bytes survive, while a
+different blob proves only that the file changed — the introduced lines may sit untouched inside it.
+Reading a moved hash as a removed payload is the trap; a reformat or a cherry-pick moves it.
 """
 from __future__ import annotations
 

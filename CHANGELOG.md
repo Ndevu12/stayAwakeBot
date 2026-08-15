@@ -14,6 +14,15 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Fixed
+- **`saw scan` no longer reports ordinary front-end code as obfuscated.** Reading a JWT or a data URI
+  with `atob` was treated as executing code, and any list of nine or more numbers — icon sizes, a
+  colour table — was treated as a smuggled string. Both now need the step their names imply: a decode
+  counts when the file also runs a command, and a number list counts when something consumes it as
+  character codes. Packed loaders and character-code strings feeding `eval` are detected exactly as
+  before.
+
+
+### Fixed
 - **The release pipeline blocked on vulnerabilities it was configured to ignore.** The container
   vulnerability gate is meant to stop a release only for a fixable critical or high finding, but it
   was rejecting releases over low, medium and unrecognised ones — the `0.5.2` release was blocked

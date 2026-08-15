@@ -197,3 +197,50 @@ class TestLivenessSaysWhetherItIsStillThere(_MergeFixture):
         self._commit("remove")
         self.assertEqual(introduced_liveness(self.d, sha, "app.js"), GONE)
         self.assertIn("history", describe(GONE))
+
+
+class TestObfuscationNeedsTheReachabilityItsNameImplies(unittest.TestCase):
+    """A decode is not an execution, and a numeric array is not a shuffler.
+
+    `atob` decodes and returns; grouping it with `eval` makes every JWT reader and data-URI handler a
+    finding. A numeric literal becomes a string shuffler only when something CONSUMES it as character
+    codes — otherwise it is every size table, colour table and lookup table in existence.
+    """
+
+    def _fires(self, source, ext=".ts"):
+        from stayawake.bots.security.obfuscation import analyze_file
+        return bool(analyze_file(source, ext))
+
+    def test_a_jwt_decoder_is_not_a_dynamic_exec_sink(self):
+        self.assertFalse(self._fires(
+            "export function decode(t){const p=t.split('.')[1];"
+            "const j=atob(p);return JSON.parse(j);}"))
+
+    def test_a_data_uri_decode_is_not_a_dynamic_exec_sink(self):
+        self.assertFalse(self._fires(
+            "const bytes=atob(dataUri.split(',')[1]);const blob=new Blob([bytes]);"))
+
+    def test_a_size_table_is_not_a_string_shuffler(self):
+        self.assertFalse(self._fires(
+            "const iosSizes=[72,96,128,144,152,180,192,384,512];\nfor (const s of iosSizes){}", ".js"))
+
+    def test_a_decode_that_feeds_an_exec_still_fires(self):
+        # The decode half was never the signal; the exec half is, and it is untouched.
+        self.assertTrue(self._fires("const p=atob('ZXZpbA==');eval(p);", ".js"))
+        self.assertTrue(self._fires("const s=atob(x); new Function(s)();", ".js"))
+
+    def test_a_numeric_array_consumed_as_charcodes_still_fires(self):
+        self.assertTrue(self._fires(
+            "const _0x=[72,101,108,108,111,44,32,87,111];"
+            "const t=a=>String.fromCharCode(...a);", ".js"))
+
+    def test_the_remediation_gate_still_defers_on_a_bare_decode(self):
+        # Deliberately NOT relaxed: in the gate, trusting a benign shape can pass an RCE, so a decode
+        # primitive left in auto-cleaned code remains a reason to stop.
+        from stayawake.bots.security.obfuscation.execsink import _has_exec_sink
+        self.assertTrue(_has_exec_sink("const j=atob(p);return JSON.parse(j);", strict=True))
+
+    def test_the_reason_no_longer_advertises_a_decode_as_a_sink(self):
+        from stayawake.bots.security.obfuscation import analyze_file
+        verdict = analyze_file("eval(userInput);", ".js")
+        self.assertNotIn("atob", verdict.reason)
