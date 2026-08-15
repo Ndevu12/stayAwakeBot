@@ -12,6 +12,7 @@ carve-out needs to see it.
 from __future__ import annotations
 
 import random
+import time
 import unittest
 
 from stayawake.bots.security.taint import flow
@@ -83,6 +84,37 @@ class TestOrdinaryTemplatesStayClean(unittest.TestCase):
             with self.subTest(case=name):
                 self.assertIsNone(detect_dropper(source))
                 self.assertFalse(analyze_file(source, ".js"))
+
+
+class TestItIsBoundedOnHostileInput(unittest.TestCase):
+    """The scrubber reads attacker-chosen file content, so its limits are attacker-chosen too.
+
+    A recursive descent into each `${…}` died with RecursionError at ~1000 nested interpolations —
+    5 KB of file content — and cost time quadratic in the nesting. Both are reachable by writing a
+    file, which makes them a way to stop the analysis rather than a performance note."""
+
+    def _nested(self, depth):
+        return "`" + "${`" * depth + "x" + "`}" * depth + "`"
+
+    def test_deep_nesting_neither_raises_nor_truncates(self):
+        for depth in (1_000, 20_000):
+            with self.subTest(depth=depth):
+                source = self._nested(depth)
+                scrubbed = flow._scrub_comments_and_strings(source)
+                self.assertEqual(len(scrubbed), len(source), "offsets must survive")
+
+    def test_cost_does_not_explode_with_nesting_depth(self):
+        # Quadratic would make 4x the depth ~16x the time; linear keeps it near 4x. The bound is
+        # generous because a shared runner is noisy — it fails on an order-of-magnitude regression,
+        # not on jitter.
+        def elapsed(depth):
+            source = self._nested(depth)
+            start = time.perf_counter()
+            flow._scrub_comments_and_strings(source)
+            return time.perf_counter() - start
+
+        base = max(elapsed(2_000), 1e-4)
+        self.assertLess(elapsed(8_000), base * 40)
 
 
 if __name__ == "__main__":

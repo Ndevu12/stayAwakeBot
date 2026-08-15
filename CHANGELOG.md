@@ -23,6 +23,10 @@ reader, not the mechanism or the weakness it closed.
 - **The explanation offered for that finding named a command that cannot produce it.** It blamed a
   manual `npm install` in your home directory, which creates `~/node_modules` — without the dot — so
   the one route a user had to clear the finding themselves pointed at a path the audit never checks.
+- **`saw scan` no longer treats code written in a comment as code that runs.** A file was reported as
+  obfuscated for containing a comment such as `// never use eval() here`, or a commented-out line —
+  a warning against the thing read as the thing. Code is still read exactly as before, including
+  constructs assembled inside string literals.
 
 
 ### Fixed
