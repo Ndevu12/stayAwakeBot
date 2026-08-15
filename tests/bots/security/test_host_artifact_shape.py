@@ -54,6 +54,33 @@ class TestTheIndicatorTestsTheShapeItDescribes(unittest.TestCase):
         self.assertTrue(issues, "the pip bootstrap indicator was dropped")
 
 
+class TestBothHomeRelativeGlobalFoldersAreCovered(TestTheIndicatorTestsTheShapeItDescribes):
+    """Node resolves global modules through GLOBAL_FOLDERS: `~/.node_modules`, then
+    `~/.node_libraries`, then `$PREFIX/lib/node`. Probing only the first drew the line one entry
+    above where an attacker reading the same documentation would step over it."""
+
+    def test_the_second_entry_is_reported_like_the_first(self):
+        for entry in (".node_modules", ".node_libraries"):
+            with self.subTest(entry=entry):
+                issues = self._issues(lambda home, tmp, e=entry: (
+                    (home / e).mkdir(),
+                    (tmp / "get-pip.py").write_text("#")))
+                self.assertIn("host-drop-artifacts", {i.id for i in issues})
+
+    def test_the_shape_rule_applies_to_it_too(self):
+        # A FILE at either is the hardening shape, not a tree — the same rule, not a special case.
+        issues = self._issues(lambda home, tmp: (
+            (home / ".node_libraries").write_text(""),
+            (tmp / "get-pip.py").write_text("#")))
+        self.assertNotIn("host-drop-artifacts", {i.id for i in issues})
+
+    def test_the_third_entry_stays_out_of_scope(self):
+        # `$PREFIX/lib/node` is the global npm prefix, disclosed as unscanned rather than probed —
+        # so a tree there must not silently start counting as this indicator.
+        issues = self._issues(lambda home, tmp: ((home / "lib" / "node").mkdir(parents=True),))
+        self.assertEqual(issues, [])
+
+
 class TestTheBenignExplanationNamesACauseThatCanProduceThePath(unittest.TestCase):
     def test_it_no_longer_blames_a_command_that_makes_a_different_path(self):
         # `npm install` in $HOME creates `~/node_modules` — no dot — so telling the user that was the

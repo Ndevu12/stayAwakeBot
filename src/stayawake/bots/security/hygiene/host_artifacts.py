@@ -102,9 +102,16 @@ def _host_artifacts() -> tuple[list[str], list[tuple[str, Path]]]:
     # The mundane cause of `~/.node_modules` is Node's own resolution, not a stray install: an
     # `npm install` in $HOME creates `~/node_modules`, with no dot, so naming that as the way to
     # self-clear pointed at a path this probe never looks at.
-    if _present_dir(home / ".node_modules"):
-        weak.append((f"{home}/.node_modules (an npm tree in your home dir — unusual location)",
-                     home / ".node_modules"))
+    # BOTH home-relative entries of Node's GLOBAL_FOLDERS, not just the first. `~/.node_modules` and
+    # `~/.node_libraries` are resolved by the same runtime for the same purpose, so covering one and
+    # not the other draws the line where an attacker reading the same documentation would step over
+    # it. (`$PREFIX/lib/node` is entry 3 — the global npm prefix, named as unscanned in the audit's
+    # scope note rather than probed here.)
+    for name in ("node_modules", "node_libraries"):
+        location = home / f".{name}"
+        if _present_dir(location):
+            weak.append((f"{location} (a node module tree in your home dir — unusual location)",
+                         location))
     for t in tmp_dirs:
         if _present(t / ".npm"):
             weak.append((f"{t}/.npm", t / ".npm"))
@@ -164,8 +171,9 @@ def check_host_artifacts(verify: bool = False) -> list[HygieneIssue]:
         severity="info",
         title="Unusual file/dir on this host (weak supply-chain indicator)",
         detail="Found: " + "; ".join(found) + ". This is a WEAK, single indicator — a location the "
-               "worm sometimes uses, but ordinary tooling makes the same thing: `~/.node_modules` is "
-               "the first entry in Node's own GLOBAL_FOLDERS resolution list, and a pip bootstrap "
+               "worm sometimes uses, but ordinary tooling makes the same thing: `~/.node_modules` and "
+               "`~/.node_libraries` are the home-relative entries in Node's own GLOBAL_FOLDERS "
+               "resolution list, and a pip bootstrap "
                "leaves `get-pip.py`. Existence alone can't tell them apart, so on its own it is not "
                "evidence of malware.",
         remediation="Verify it's yours: inspect the path (e.g. its package.json / contents) for "
