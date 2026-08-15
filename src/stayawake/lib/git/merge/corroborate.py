@@ -35,17 +35,10 @@ def corroborated(repo: str | Path, base_tree: str, merge_sha: str, path: str,
     if all(not path_exists_at(repo, p, path) for p in parent_shas):
         return True, "introduced file absent from every parent (review-evading)"
 
-    # WHICH baseline the introduced hunk is measured against decides everything.
-    #
-    # The auto-merge tree is the honest one, except at a CONFLICTED path: there the auto-merge blob
-    # already carries both sides' text, so a resolution that takes a payload verbatim from one side
-    # (`-X theirs`) introduces nothing against it and goes unseen (G2). The first parent — the
-    # mainline a reviewer compares against — does see it.
-    #
-    # But the first parent is only a baseline for a path that EXISTS there. For a path the other side
-    # contributed wholesale, the "introduced hunk" becomes the entire file measured against nothing,
-    # and every whole-file property reads as an injected one: that is how 18 ordinary components of a
-    # sync merge were reported as packed payloads.
+    # The auto-merge tree is the honest baseline except at a CONFLICTED path, where it already
+    # carries both sides' text — so a `-X theirs` resolution introduces nothing against it (G2) and
+    # only the first parent sees it. But the first parent is a baseline only for a path that EXISTS
+    # there; otherwise the whole file becomes the "introduced hunk" (18 sync-merge false positives).
     first_parent = parent_shas[0]
     baselines = [base_tree] if first_parent == base_tree else [base_tree, first_parent]
     # A baseline that does not CONTAIN the path gives no "before", so the whole file becomes the
