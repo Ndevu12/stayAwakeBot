@@ -78,5 +78,55 @@ class TestConfinementNarrowsTheBudget(unittest.TestCase):
             self.assertEqual(parallel._cgroup_cpu_quota(), 1)
 
 
+class TestItBehavesOnEveryPlatformItRunsOn(unittest.TestCase):
+    """Probes are feature-detected, not platform-branched, so a missing one narrows nothing rather
+    than raising. Verified across the capability combinations rather than assumed from `sys.platform`,
+    since what matters is which probe EXISTS, not what the OS is called."""
+
+    def _budget(self, cores, process_cpu, affinity, quota):
+        saved_pcc = getattr(parallel.os, "process_cpu_count", None)
+        saved_aff = getattr(parallel.os, "sched_getaffinity", None)
+        try:
+            if process_cpu is None:
+                if saved_pcc:
+                    del parallel.os.process_cpu_count
+            else:
+                parallel.os.process_cpu_count = lambda: process_cpu
+            if affinity is None:
+                if saved_aff:
+                    del parallel.os.sched_getaffinity
+            else:
+                parallel.os.sched_getaffinity = lambda _pid: set(range(affinity))
+            with mock.patch.object(parallel.os, "cpu_count", return_value=cores), \
+                 mock.patch.object(parallel, "_cgroup_cpu_quota", return_value=quota):
+                return parallel.cpu_budget()
+        finally:
+            if saved_pcc:
+                parallel.os.process_cpu_count = saved_pcc
+            elif hasattr(parallel.os, "process_cpu_count"):
+                del parallel.os.process_cpu_count
+            if saved_aff:
+                parallel.os.sched_getaffinity = saved_aff
+            elif hasattr(parallel.os, "sched_getaffinity"):
+                del parallel.os.sched_getaffinity
+
+    def test_every_capability_combination(self):
+        cases = {
+            "no probes at all (macOS, older Windows)": ((16, None, None, None), 15),
+            "affinity only (older Linux)":             ((16, None, 4, None), 3),
+            "process_cpu_count only (Windows 3.13+)": ((16, 4, None, None), 3),
+            "quota only (container)":                  ((16, None, None, 2), 1),
+            "affinity and quota disagree":             ((16, 8, 8, 2), 1),
+            "single core":                             ((1, 1, 1, None), 1),
+        }
+        for name, (args, expected) in cases.items():
+            with self.subTest(environment=name):
+                self.assertEqual(self._budget(*args), expected)
+
+    def test_a_missing_cgroup_tree_is_not_an_error(self):
+        # On a platform with no such path, reading it must return "no quota", never raise.
+        self.assertIsNone(parallel._cgroup_cpu_quota())
+
+
 if __name__ == "__main__":
     unittest.main()
