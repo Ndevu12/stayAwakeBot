@@ -73,6 +73,7 @@ _WALK_HOME = re.compile(
 # terminals (`find $HOME -delete` / `find $HOME -exec rm`).
 _DELETE = re.compile(
     r"\bunlink(?:Sync)?\s*\(|\brmSync\s*\(|\brmdir(?:Sync)?\s*\(|\brimraf\b"
+    r"|\bshutil\s*\.\s*rmtree\s*\(|\bremovedirs\s*\(|\bos\s*\.\s*remove\s*\("
     r"|\bfs\.rm\s*\(|\brm\s+-|-delete\b|-exec\s+\S*\brm\b", re.IGNORECASE)
 
 # OVERWRITE-then-delete → the SECURE, unrecoverable variant.
@@ -172,6 +173,75 @@ def _same_scope(gap: str) -> bool:
     return not _NEW_TOPLEVEL_DEF.search(gap)
 
 
+# Splitting the walk and the delete into two functions and wiring them at a call site defeats a
+# lexical scope test — the two are genuinely in different scopes. What still betrays it is the
+# WIRING: the walk's result is handed to the deleter. A dotfile manager that merely owns both
+# functions never connects them, which is exactly the difference the scope rule alone cannot see.
+_JS_CALLABLE = re.compile(
+    r"\bfunction\s+([A-Za-z_$][\w$]*)\s*\(|"
+    r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s+)?(?:function\b|\()", re.IGNORECASE)
+_PY_CALLABLE = re.compile(r"^([ \t]*)def\s+([A-Za-z_]\w*)\s*\(", re.MULTILINE)
+_MAX_CALLABLES = 200          # a hostile file must not turn this into quadratic work
+_WIRING_WINDOW = 300          # how far the deleter may sit from the walk call that feeds it
+
+
+def _callable_bodies(text: str) -> list[tuple[str, str]]:
+    """(name, body) for named callables — brace-matched for JS, indentation-bounded for Python."""
+    bodies: list[tuple[str, str]] = []
+    for m in _JS_CALLABLE.finditer(text):
+        name = m.group(1) or m.group(2)
+        brace = text.find("{", m.end())
+        if name is None or brace == -1 or brace - m.end() > 200:
+            continue
+        depth, i = 0, brace
+        while i < len(text):
+            if text[i] == "{":
+                depth += 1
+            elif text[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            i += 1
+        bodies.append((name, text[brace:i]))
+        if len(bodies) >= _MAX_CALLABLES:
+            return bodies
+    for m in _PY_CALLABLE.finditer(text):
+        indent, name = m.group(1), m.group(2)
+        rest = text[m.end():]
+        end = len(rest)
+        for line in re.finditer(r"^(?![ \t]*(?:#|$))([ \t]*)\S", rest, re.MULTILINE):
+            if len(line.group(1)) <= len(indent) and line.start() > 0:
+                end = line.start()
+                break
+        bodies.append((name, rest[:end]))
+        if len(bodies) >= _MAX_CALLABLES:
+            break
+    return bodies
+
+
+def _walk_result_reaches_a_deleter(text: str) -> bool:
+    """A function that walks home whose RESULT is handed to a function that deletes."""
+    walkers, deleters = [], []
+    for name, body in _callable_bodies(text):
+        if _WALK_HOME.search(body):
+            walkers.append(name)
+        elif _DELETE.search(body):
+            deleters.append(name)
+    if not walkers or not deleters:
+        return False
+    deleter_alt = "(?:" + "|".join(re.escape(d) for d in deleters[:40]) + r")\b"
+    for walker in walkers[:40]:
+        # `(?<!function )` / `(?<!def )`: the DEFINITION is not a call site. Without this the header
+        # itself matched and the next function's name fell inside the window, so a dotfile manager
+        # that never wires the two together read as wired.
+        call = re.compile(r"(?<!function )(?<!def )\b" + re.escape(walker) + r"\s*\(")
+        for hit in call.finditer(text):
+            window = text[hit.end():hit.end() + _WIRING_WINDOW]
+            if re.search(deleter_alt, window):
+                return True
+    return False
+
+
 # Measured: a walk and the delete it feeds sit 16-1,692 characters apart, the far end being a loop
 # with a 120-line body. The co-presence false positive in a real editor bundle sat 336,053 apart — a
 # documented shell command and the word "-delete-char" in help text. Scope alone does not separate
@@ -228,7 +298,7 @@ def detect_destructive(text: str) -> DestructiveVerdict | None:
     home_recursive_delete = (bool(_RECURSIVE_DELETE_HOME.search(text))
                              or bool(_RMSYNC_RECURSIVE_HOME.search(text))
                              or _recursive_delete_of_home_name(text))
-    home_walk_delete = _walks_home_and_deletes(text)
+    home_walk_delete = _walks_home_and_deletes(text) or _walk_result_reaches_a_deleter(text)
     if not (home_recursive_delete or home_walk_delete or root_wipe):
         return None
     home = home_recursive_delete or home_walk_delete

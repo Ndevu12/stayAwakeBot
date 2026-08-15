@@ -114,5 +114,52 @@ class TestHomeBoundToANameIsStillHome(unittest.TestCase):
             'const dist = path.join(__dirname, "dist");\nfs.rmSync(dist, {recursive:true});\n'))
 
 
+class TestSplittingIntoFunctionsDoesNotEvade(unittest.TestCase):
+    """A lexical scope test is defeated by putting the walk and the delete in two functions — they
+    genuinely are in different scopes. What still betrays it is the WIRING: the walk's result is
+    handed to the deleter. A dotfile manager owns both halves and never connects them, which is the
+    difference scope alone cannot see."""
+
+    WALKER_JS = 'function walkHome(){ return fs.readdirSync(os.homedir()); }\n'
+    DELETER_JS = 'function nuke(f){ fs.rmSync(f, {recursive:true, force:true}); }\n'
+
+    def _fires(self, source):
+        return detect_destructive(source) is not None
+
+    def test_a_callback_reference_is_wiring(self):
+        self.assertTrue(self._fires(self.WALKER_JS + self.DELETER_JS + "walkHome().forEach(nuke);\n"))
+
+    def test_a_loop_over_the_walk_result_is_wiring(self):
+        self.assertTrue(self._fires(
+            self.WALKER_JS + self.DELETER_JS + "for (const f of walkHome()) { nuke(f); }\n"))
+
+    def test_the_python_shape_is_wiring_too(self):
+        self.assertTrue(self._fires(
+            "def walk_home():\n    return os.listdir(os.path.expanduser('~'))\n"
+            "def nuke(f):\n    shutil.rmtree(f)\n"
+            "for f in walk_home():\n    nuke(f)\n"))
+
+    def test_owning_both_halves_without_connecting_them_is_clean(self):
+        self.assertFalse(self._fires(
+            self.WALKER_JS + 'function cleanupTemp(t){ fs.unlinkSync(t); }\n'))
+
+    def test_calling_the_walker_for_something_else_is_clean(self):
+        self.assertFalse(self._fires(
+            self.WALKER_JS + 'function cleanupTemp(t){ fs.unlinkSync(t); }\n'
+            + "console.log(walkHome().length);\n"))
+
+    def test_a_definition_is_not_a_call_site(self):
+        # The header itself matched the call pattern at first, which put the NEXT function's name
+        # inside the window and made an unwired dotfile manager read as wired.
+        self.assertFalse(self._fires(self.WALKER_JS + 'function nuke(f){ fs.unlinkSync(f); }\n'))
+
+
+class TestTheDeleteVocabularyCoversPython(unittest.TestCase):
+    def test_rmtree_is_a_delete(self):
+        # The standard Python recursive delete was absent from the delete vocabulary entirely.
+        self.assertTrue(detect_destructive(
+            "for f in os.listdir(os.path.expanduser('~')):\n    shutil.rmtree(f)\n") is not None)
+
+
 if __name__ == "__main__":
     unittest.main()

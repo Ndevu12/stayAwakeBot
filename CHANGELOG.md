@@ -20,9 +20,10 @@ reader, not the mechanism or the weakness it closed.
   documentation happened to contain both. The two now have to belong together.
 
 ### Added
-- **The home-wipe detector catches two shapes it used to miss**: deleting the home directory through
-  a variable it was first assigned to, and walking home with `listdir`/`scandir`, which is the most
-  common way to do it in Python.
+- **The home-wipe detector catches four shapes it used to miss**: deleting the home directory through
+  a variable it was first assigned to; walking home with `listdir`/`scandir`, which is the most
+  common way to do it in Python; splitting the walk and the delete into two functions that are wired
+  together at a call site; and deleting with `shutil.rmtree`, Python's standard recursive delete.
 
 
 ### Fixed
