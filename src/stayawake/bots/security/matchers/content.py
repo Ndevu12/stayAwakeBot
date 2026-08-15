@@ -12,7 +12,7 @@ from stayawake.bots.security.obfuscation.execsink import _has_exec_sink_beyond_d
 # lives in the signature file and adding one is an entry here plus an entry there.
 #
 # `exec-sink` exists because a construct can be both the malware's tell and ordinary vocabulary.
-# `String.fromCharCode(127)` is how DEL is written, so every RFC 7230 token table matched a
+# Writing DEL by its numeric character code is ordinary JS, so every RFC 7230 token table matched a
 # confirmed-tier loader fingerprint. What separates a string SHUFFLER from a character table is that
 # the shuffler's output is executed.
 CORROBORATORS = {
