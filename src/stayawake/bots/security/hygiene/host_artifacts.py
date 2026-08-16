@@ -197,17 +197,12 @@ def check_host_artifacts(verify: bool = False) -> list[HygieneIssue]:
         id="host-drop-artifact-weak",
         severity="info",
         title="Unusual file/dir on this host (weak supply-chain indicator)",
-        detail="Found: " + "; ".join(found) + ". This is a WEAK, single indicator — a location the "
-               "worm sometimes uses, but ordinary tooling makes the same thing: `~/.node_modules` and "
-               "`~/.node_libraries` are the home-relative entries in Node's own GLOBAL_FOLDERS "
-               "resolution list, and a pip bootstrap "
-               "leaves `get-pip.py`. Existence alone can't tell them apart, so on its own it is not "
-               "evidence of malware.",
-        remediation="Verify it's yours: inspect the path (e.g. its package.json / contents) for "
-                    "anything you don't recognize, and recall whether you created it. If it is NOT "
-                    "yours, treat as possible compromise — isolate the host, neutralize any "
-                    f"persistence, and rotate credentials LAST ({_WIPER_NOTE}). Or run "
-                    "`saw audit --verify` to content-scan it.",
+        # The benign cause is NAMED, not merely asserted: #161 fixed a version of this that blamed a
+        # command which cannot produce the path, leaving the reader no way to clear it themselves.
+        detail="Found: " + "; ".join(found) + ". A weak, single indicator — ordinary tooling creates "
+               "these too (Node's GLOBAL_FOLDERS, a pip bootstrap), so it is not evidence of malware.",
+        remediation="Check whether it is yours (inspect the contents). If not, isolate the host and "
+                    f"rotate credentials LAST: {_WIPER_NOTE}. `saw audit --verify` content-scans it.",
     )]
 
 

@@ -322,13 +322,13 @@ def check_credentials() -> list[HygieneIssue]:
             id="git-credentials-plaintext",
             severity="warning",
             title="Plaintext GitHub credential in ~/.git-credentials",
-            detail=f"{cred_file} stores a github.com credential in PLAINTEXT on disk "
-                   "(credential.helper=store). Unlike the encrypted Keychain, this is a genuine "
-                   "misconfiguration — any process running as you can read the token straight out of "
-                   "the file. This is the git-HTTPS store only; your gh token and SSH keys are separate.",
-            remediation="Switch to an OS keychain helper or SSH, then delete the plaintext file. "
-                        "Rotate the exposed token LAST — only after isolating the host and "
-                        f"neutralizing any persistence (see the incident-response steps): {_WIPER_NOTE}.",
+            # Scope matters and stays: this is the git-HTTPS store only. Why plaintext is worse than
+            # the Keychain does not — the title and the word PLAINTEXT already carry it.
+            detail=f"{cred_file} stores a github.com credential in PLAINTEXT "
+                   "(credential.helper=store) — any process running as you can read it. The "
+                   "git-HTTPS store only; your gh token and SSH keys are separate.",
+            remediation="Switch to a keychain helper or SSH, then delete the file. Rotate the token "
+                        f"LAST, after isolating the host: {_WIPER_NOTE}.",
             command="git config --global credential.helper osxkeychain   # or: gh auth setup-git\n"
                     "rm ~/.git-credentials                                # after the helper is switched",
             reference=CREDENTIAL_HYGIENE_DOC,

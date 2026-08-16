@@ -118,7 +118,7 @@ class TestCredentials(unittest.TestCase):
             issues = hygiene.check_credentials()
         rem = next(i.remediation for i in issues if i.id == "git-credentials-plaintext")
         self.assertIn("gh-token-monitor.service", rem)          # names the wiper tripwire
-        self.assertIn("Rotate the exposed token LAST", rem)     # rotation is sequenced last
+        self.assertIn("Rotate the token LAST", rem)             # rotation is sequenced last
         self.assertNotIn("rotate the exposed token on GitHub", rem)  # old unsafe wording gone
 
     # --- cross-platform detection (#1260) ---------------------------------------------------------
@@ -205,7 +205,7 @@ class TestRunnerPersistence(unittest.TestCase):
         for i in issues:
             rem = i.remediation.lower()
             self.assertIn("do not rotate credentials", rem)          # leads with the guardrail
-            self.assertIn("rotate credentials last", rem)
+            self.assertIn("rotate last", rem)                # rotation is sequenced last
             # The rotation ACTION (the LAST 'rotate' — not the "Do NOT rotate" guardrail) is
             # sequenced AFTER isolation: a meaningful ordering check, not a phrase that never appears.
             self.assertLess(rem.index("isolate the host"), rem.rindex("rotate"))

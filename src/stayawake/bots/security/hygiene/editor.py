@@ -164,9 +164,8 @@ def check_vscode(settings_path: Path | None = None) -> list[HygieneIssue]:
             severity="warning",
             title="VS Code auto-approves ALL terminal commands for chat/agent tools",
             detail=f'{path} auto-approves every terminal command via "chat.tools.terminal.autoApprove" '
-                   "(a blanket true, or a catch-all regex like /.*/) — anything an AI agent proposes "
-                   "runs with no confirmation, the broadest possible unattended-execution vector (a "
-                   "folder-open task or a compromised extension that reaches the agent gets a free shell).",
+                   "(blanket true, or a catch-all regex). Anything an AI agent proposes runs with no "
+                   "confirmation.",
             remediation='Replace the blanket/catch-all with an explicit allowlist object of safe '
                         "commands (or set it to false); never auto-approve everything.",
         ))

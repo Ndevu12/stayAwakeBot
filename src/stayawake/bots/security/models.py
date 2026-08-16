@@ -87,6 +87,10 @@ class Finding:
     commit_sha: str | None = None  # FULL SHA of the commit a commit-keyed finding concerns (e.g. the
                                    # evil merge) — `path` may be a truncated display SHA, so git ops
                                    # (clean-merge-blob recovery) use this
+    # True when `evidence` is a window of the scanned file rather than a sentence saw composed.
+    # Only `matchers.base.evidence()` produces one, and only the report reads this — a synthesized
+    # reason string is the finding itself and must never be fingerprinted away.
+    payload_window: bool = False
     advisory_only: bool = False    # informational (e.g. a dependency CVE) — the scanner routes these
                                    # OUT of the worm verdict into ScanResult.advisories; a repo with
                                    # only advisory_only findings stays CLEAN (reported, never gated).

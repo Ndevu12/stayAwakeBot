@@ -63,11 +63,11 @@ def check_autorun(jobs: int | None = None) -> list[HygieneIssue]:
         issues.append(HygieneIssue(
             id="autorun-baseline-tampered", severity="info",
             title="Autorun baseline failed its integrity check",
-            detail="The stored autorun baseline was modified out-of-band (its integrity hash does not "
-                   "match its contents), so its novelty signal is being ignored this run. This does "
-                   "not weaken detection — provenance, content-shape and correlation still graded "
-                   "every entry — but a tampered baseline can indicate someone tried to launder a "
-                   "foothold into the 'known' set.",
+            # "detection is not weakened" stays — without it this reads as a coverage loss, which is
+            # the one wrong conclusion to draw. The mechanism of the hash check does not stay.
+            detail="The autorun baseline was modified out-of-band, so its novelty signal is ignored "
+                   "this run. Detection is not weakened — every entry was still graded — but a "
+                   "tampered baseline can mean someone tried to launder a foothold into it.",
             remediation="Delete the baseline to re-snapshot from the current (re-graded) surface."))
 
     baseline.save_baseline(entries)          # snapshot for the next run's novelty diff (best-effort)
