@@ -26,10 +26,21 @@ from stayawake.utils import textsafe
 _SEV_COLOR = {s: SEVERITY[s] for s in ("critical", "high", "medium")}
 
 
-def _fmt_evidence(ev: Any) -> str:
-    if isinstance(ev, dict):                 # a redact() fingerprint (persisted artifacts)
+def _fmt_evidence(ev: Any, encode) -> str:
+    """Evidence rendered for ONE surface — `encode` supplies that surface's escaping.
+
+    A `redact()` fingerprint is already inert (a dict of hash, length and a `repr`-ed preview) and
+    renders as-is. A raw snippet is attacker-chosen file bytes and must be encoded: it reached the
+    terminal verbatim, so an escape sequence in a scanned file could retitle the window, clear the
+    screen, or emit text a CI system reads as its own instructions."""
+    if isinstance(ev, dict):
         return render_redacted(ev)
-    return f"`{ev}`"                         # a raw snippet (ephemeral terminal)
+    return encode(ev)
+
+
+def _loc(item: dict, encode) -> str:
+    """`path:line`, with the PATH encoded — whoever writes the repository names the file."""
+    return encode(item["path"]) + (f":{item['line']}" if item.get("line") else "")
 
 
 def _verdict(r: dict[str, Any]) -> tuple[int, str] | None:
@@ -123,12 +134,12 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False,
                     for f in r["findings"]]
             tw = max(len(t) for t in tags)
             for f, tag in zip(r["findings"], tags):
-                loc = f["path"] + (f":{f['line']}" if f.get("line") else "")
+                loc = _loc(f, textsafe.plain)
                 colored = paint(tag.ljust(tw), _SEV_COLOR.get(f["severity"]), on=color)
                 # A visible bullet per finding; evidence sits under it, deeper-indented.
                 out.append(f"    {MARKER['info']} {colored}  {f['signature_id']}  —  {loc}")
                 if f.get("evidence"):
-                    out.append(f"        evidence: {_fmt_evidence(f['evidence'])}")
+                    out.append(f"        evidence: {_fmt_evidence(f['evidence'], textsafe.quoted)}")
                 if f.get("fix_advice"):                          # actionable remediation (#1252)
                     out.append(f"        {MARKER['detail']} fix: {textsafe.plain(f['fix_advice'])}")
                 if f.get("reference"):
@@ -146,10 +157,10 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False,
                 out += ["", f"  {r['target']} — {len(r['advisories'])} advisor"
                             f"{'y' if len(r['advisories']) == 1 else 'ies'}"]
                 for a in r["advisories"]:
-                    loc = a["path"] + (f":{a['line']}" if a.get("line") else "")
+                    loc = _loc(a, textsafe.plain)
                     out.append(f"    {MARKER['info']} [{a['severity']}]  {a['signature_id']}  —  {loc}")
                     if a.get("evidence"):
-                        out.append(f"        {_fmt_evidence(a['evidence'])}")
+                        out.append(f"        {_fmt_evidence(a['evidence'], textsafe.quoted)}")
                     if a.get("fix_advice"):                      # how to actually fix it (#1252)
                         out.append(f"        {MARKER['detail']} fix: {textsafe.plain(a['fix_advice'])}")
                     if a.get("reference"):
@@ -205,12 +216,12 @@ def render_markdown(payload: dict[str, Any]) -> str:
         any_f = True
         out.append(f"### {r['target']}")
         for f in r["findings"]:
-            loc = f["path"] + (f":{f['line']}" if f.get("line") else "")
+            loc = _loc(f, textsafe.sanitize)
             out.append(f"- **[{f['severity']} {MARKER['meta']} {f.get('confidence', 'confirmed')}]** "
                        f"`{f['signature_id']}` — {loc}")
             out.append(f"  - {f['description']}")
             if f.get("evidence"):
-                out.append(f"  - evidence: {_fmt_evidence(f['evidence'])}")
+                out.append(f"  - evidence: {_fmt_evidence(f['evidence'], textsafe.code)}")
             if f.get("fix_advice"):                              # actionable remediation (#1252)
                 # code-span the advice: it embeds an unvalidated package name, and a bare Markdown
                 # string would let `x](http://evil)` render as an active link (textsafe.code contract).
@@ -230,11 +241,11 @@ def render_markdown(payload: dict[str, Any]) -> str:
         for r in advised:
             out.append(f"### {r['target']}")
             for a in r["advisories"]:
-                loc = a["path"] + (f":{a['line']}" if a.get("line") else "")
+                loc = _loc(a, textsafe.sanitize)
                 out.append(f"- **[{a['severity']}]** `{a['signature_id']}` — {loc}")
                 out.append(f"  - {a['description']}")
                 if a.get("evidence"):
-                    out.append(f"  - evidence: {_fmt_evidence(a['evidence'])}")
+                    out.append(f"  - evidence: {_fmt_evidence(a['evidence'], textsafe.code)}")
                 if a.get("fix_advice"):                          # how to actually fix it (#1252)
                     out.append(f"  - **fix:** {textsafe.code(a['fix_advice'])}")   # code-span: see above
                 if a.get("reference"):
