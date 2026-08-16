@@ -20,6 +20,25 @@ bump it there, not in workflow files. (The `worm-scan` action stays pinned expli
 remains self-contained for repos that adopt the gate.) The user-facing version requirement
 lives in [`docs/PREREQUISITES.md`](docs/PREREQUISITES.md).
 
+## Updating the container's dependencies
+
+The container installs from `requirements.lock`, with hashes, rather than resolving dependencies at
+build time. That keeps the image reproducible and means a poisoned release of a dependency cannot
+enter it — pip refuses anything whose SHA-256 does not match.
+
+`pyproject.toml` stays the source of truth and its dependencies stay unpinned: they are a contract
+with people who `pip install stayawakebot`, and pinning there would force versions on them. The lock
+applies to the image only.
+
+After changing a dependency in `pyproject.toml`, regenerate the lock in the same PR:
+
+```bash
+pip install pip-tools
+pip-compile pyproject.toml --generate-hashes --strip-extras -o requirements.lock
+```
+
+Commit the result. The diff shows exactly which versions moved, which is the point.
+
 ## Pull requests
 - Keep commits focused; describe **what** changed (not internal roadmap phases).
 - Run the suite locally; the **Worm Guard** CI gate must pass (it blocks any infected/evil-merge change).
