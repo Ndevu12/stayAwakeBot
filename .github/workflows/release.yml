@@ -115,7 +115,7 @@ jobs:
           # Pin the scanner to a known-good SHA, NEVER the commit under test: a compromised
           # release commit must not be able to certify itself. Bump after an intentional
           # scanner/signature update (kept in sync with worm-guard.yml).
-          sentinel-ref: 9094e46590446565cec33d63f946ef2067905d28   # current main — kept identical to worm-guard.yml (enforced by pin_tools.py synced)
+          sentinel-ref: 57e8e96b067827758ac1ce38ba159e77f06bae06   # current main — kept identical to worm-guard.yml (enforced by pin_tools.py synced)
           fail-on-findings: 'true'
           # Pure exit-code gate: the job conclusion is the scan verdict, nothing else. This
           # commit is also scanned (and, when enabled, uploaded) by worm-guard + security-sentinel,
@@ -211,10 +211,15 @@ jobs:
 
   docker:
     name: Build & publish container (GHCR)
-    # Same gate as the package: only on a tag, and only after the worm self-scan passes — the
-    # image must not ship from a release commit the scanner would reject. Independent of the
-    # PyPI job (the image builds the wheel from source), so it runs in parallel.
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Same gate as the package: only after the worm self-scan passes — the image must not ship
+    # from a release commit the scanner would reject. Independent of the PyPI job (the image
+    # builds the wheel from source), so it runs in parallel.
+    #
+    # Runs on a manual dispatch too, but only as far as building and scanning: the base image is
+    # digest-pinned, so a newly-fixed CVE in it fails the vulnerability gate at release time —
+    # after the tag exists and the version is spent. A dispatch exercises that gate first. The
+    # push step stays tag-only.
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     needs: [build, self-scan]
     runs-on: ubuntu-latest
     permissions:
@@ -225,7 +230,13 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0   # v7.0.0
 
       - name: Derive version from tag (v0.1.0 -> 0.1.0)
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+        # A dispatch has no version tag; the value only labels the locally-loaded scan image.
+        run: |
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            echo "VERSION=dryrun" >> "$GITHUB_ENV"
+          else
+            echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          fi
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5   # v4.1.0
@@ -288,6 +299,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Build & push (with SLSA provenance + SBOM attestations)
+        if: startsWith(github.ref, 'refs/tags/v')   # never push from a dry run
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf   # v7.2.0
         with:
           context: .
