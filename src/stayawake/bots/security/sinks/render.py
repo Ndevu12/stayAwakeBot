@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from stayawake.bots.security.redaction import render_redacted
+from stayawake.bots.security.redaction import redact, render_redacted
 from stayawake.utils.render import MARKER, SEVERITY, STATUS, paint, rule
 from stayawake.utils import textsafe
 
@@ -26,15 +26,21 @@ from stayawake.utils import textsafe
 _SEV_COLOR = {s: SEVERITY[s] for s in ("critical", "high", "medium")}
 
 
-def _fmt_evidence(ev: Any, encode) -> str:
+def _fmt_evidence(ev: Any, encode, *, payload_window: bool = False) -> str:
     """Evidence rendered for ONE surface — `encode` supplies that surface's escaping.
 
     A `redact()` fingerprint is already inert (a dict of hash, length and a `repr`-ed preview) and
     renders as-is. A raw snippet is attacker-chosen file bytes and must be encoded: it reached the
     terminal verbatim, so an escape sequence in a scanned file could retitle the window, clear the
     screen, or emit text a CI system reads as its own instructions."""
-    if isinstance(ev, dict):
+    if isinstance(ev, dict):                      # already a fingerprint (the persisted bundle)
         return render_redacted(ev)
+    if payload_window:
+        # A window of the scanned file. Shown as a fingerprint with a bounded preview rather than a
+        # clean pasteable payload: handing one over invites hand-editing malware, which misses the
+        # second stage and destroys the artifact. The preview is long enough to recognise a false
+        # positive (see redaction.PREVIEW_LEN); `--json` still carries the whole snippet for tooling.
+        return encode(render_redacted(redact(ev)))
     return encode(ev)
 
 
@@ -134,7 +140,8 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False,
                 # A visible bullet per finding; evidence sits under it, deeper-indented.
                 out.append(f"    {MARKER['info']} {colored}  {f['signature_id']}  —  {loc}")
                 if f.get("evidence"):
-                    out.append(f"        evidence: {_fmt_evidence(f['evidence'], textsafe.quoted)}")
+                    out.append(f"        evidence: {_fmt_evidence(f['evidence'], textsafe.quoted,
+                                                         payload_window=f.get('payload_window', False))}")
                 if f.get("fix_advice"):                          # actionable remediation (#1252)
                     out.append(f"        {MARKER['detail']} fix: {textsafe.plain(f['fix_advice'])}")
                 if f.get("reference"):
@@ -226,7 +233,8 @@ def render_markdown(payload: dict[str, Any]) -> str:
                        f"`{f['signature_id']}` — {loc}")
             out.append(f"  - {f['description']}")
             if f.get("evidence"):
-                out.append(f"  - evidence: {_fmt_evidence(f['evidence'], textsafe.code)}")
+                out.append(f"  - evidence: {_fmt_evidence(f['evidence'], textsafe.code,
+                                          payload_window=f.get('payload_window', False))}")
             if f.get("fix_advice"):                              # actionable remediation (#1252)
                 # code-span the advice: it embeds an unvalidated package name, and a bare Markdown
                 # string would let `x](http://evil)` render as an active link (textsafe.code contract).

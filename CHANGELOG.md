@@ -14,6 +14,21 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Changed
+- **Findings say the same things in fewer words.** The audit's guidance was carrying background a
+  developer does not need mid-incident; every claim, warning and instruction is unchanged, including
+  the credential-rotation warning, which still appears at every point where you might rotate. The
+  longest finding lost more than half its length.
+- **`saw scan` no longer prints a matched payload as clean, pasteable text.** A match in a scanned
+  file is now shown as a fingerprint with a bounded preview — long enough to recognise a false
+  positive, not a copy of the payload. Findings whose evidence is saw's own explanation are shown in
+  full, unchanged, and `--json` still carries the complete snippet for tooling.
+
+### Fixed
+- **Saved reports no longer keep advisory evidence in full.** Findings were redacted before writing;
+  advisories were not, so the saved bundle held text the sink promised it would not.
+
+
+### Changed
 - **The container image now installs its dependencies from a hash-pinned lock** rather than
   resolving them fresh at build time. Two builds of the same commit now produce the same image, and
   a package whose contents do not match the recorded hash is refused rather than installed. This

@@ -47,9 +47,14 @@ class HygieneIssue:
 # rotation (MITRE T1485). So the reflexive "rotate everything now" reaction is exactly
 # what turns containment into data loss — isolate and neutralize persistence FIRST.
 
-# Naming the tripwire once, reused in the rotation remediation and the runbook below.
-_WIPER_NOTE = ("Mini Shai-Hulud is reported to install a service (gh-token-monitor.service) "
-               "that wipes the home directory when it detects credential rotation")
+# The tripwire named once, reused at every site where an operator might rotate. It stays at ALL of
+# them: each is a decision point, and the cost of missing it is a wiped home directory.
+#
+# The SERVICE NAME stays too — it is greppable, so it is the actionable half, and #1088 pins it here.
+# What went is the campaign name: the incident record eliminated both candidate campaigns on
+# mechanism, so naming one asserted a guess as fact.
+_WIPER_NOTE = ("rotating can trigger a reported wiper (gh-token-monitor.service) that deletes your "
+               "home directory")
 
 # Response is GRADED to the evidence (proportionality — match the alarm to what was actually found):
 #
@@ -157,16 +162,14 @@ def incident_response_sequence() -> list[str]:
         "Isolate the host from the network before doing anything else.",
         # BEFORE the rebuild step, which is the one that destroys the evidence a plain delete left
         # recoverable. `saw scan` already computes the discriminator; nothing asked it here.
-        "If files are missing, image the disk BEFORE rebuilding or using the host further — a plain "
-        "delete leaves the content recoverable in freed blocks, and both rebuilding and ordinary use "
-        "overwrite it. A wipe payload reported by `saw scan` names the variant: DELETES is "
-        "recoverable, OVERWRITES-then-deletes is not.",
+        "If files are missing, image the disk before rebuilding or using this host — continued use "
+        "overwrites recoverable data. `saw scan` names which wipe variant ran.",
         "Take self-hosted CI runners offline and rebuild affected hosts from known-clean "
         "images (watch for a runner named SHA1HULUD).",
         "Neutralize per-host persistence: rogue OS services (e.g. gh-token-monitor.service), "
         "planted CI workflows, and editor/AI-agent auto-run hooks (.vscode/, .claude/).",
-        "ONLY THEN rotate credentials, in order: npm → GitHub PATs → cloud keys → SSH keys. "
-        f"Rotating earlier is dangerous — {_WIPER_NOTE}.",
+        f"ONLY THEN rotate credentials, in order: npm → GitHub PATs → cloud keys → SSH keys. "
+        f"Rotating earlier is dangerous: {_WIPER_NOTE}.",
     ]
 
 

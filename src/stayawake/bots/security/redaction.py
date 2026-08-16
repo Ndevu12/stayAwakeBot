@@ -13,9 +13,15 @@ import copy
 import hashlib
 from typing import Any
 
-# How many leading characters of the snippet to keep as a human hint. Short enough to be
-# useless as a payload, long enough to recognise a finding at a glance.
-PREVIEW_LEN = 24
+# How many leading characters of the snippet to keep as a human hint. Short enough to be useless as
+# a payload, long enough to RECOGNISE A FALSE POSITIVE — which is the job this preview actually does.
+#
+# 48 is measured, not chosen. The window is cut at `match_start - 12`, so the accused construct sits
+# at the front and the thing that exonerates it is a token further right: `JSON.parse` (a JWT decoder,
+# not an exec sink) needs 33 characters, a UMD banner needs 39, an icon-size array needs 46. At 24,
+# three of five real false positives became untriageable — the reader could see what we accused and
+# not the answer.
+PREVIEW_LEN = 48
 
 
 def redact(evidence: Any) -> dict[str, Any] | None:
@@ -38,10 +44,14 @@ def render_redacted(r: dict[str, Any]) -> str:
 
 
 def redact_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Deep copy of a scan payload with every finding['evidence'] replaced by redact()."""
+    """Deep copy of a scan payload with every evidence snippet replaced by redact().
+
+    ADVISORIES too, not only findings. They were skipped, so a kept-on-disk report persisted their
+    evidence verbatim — contradicting the sink's own contract that a saved report must not
+    re-distribute what it detected."""
     out = copy.deepcopy(payload)
     for result in out.get("results", []):
-        for finding in result.get("findings", []):
-            if finding.get("evidence") is not None:
-                finding["evidence"] = redact(finding["evidence"])
+        for item in [*result.get("findings", []), *result.get("advisories", [])]:
+            if item.get("evidence") is not None:
+                item["evidence"] = redact(item["evidence"])
     return out

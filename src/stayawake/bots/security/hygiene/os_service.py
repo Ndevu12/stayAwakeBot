@@ -84,14 +84,14 @@ def check_persistence() -> list[HygieneIssue]:
         id="os-service-persistence",
         severity="warning",
         title="Planted OS-service persistence (credential-rotation wiper)",
-        detail="Found a planted OS service / launch agent — " + "; ".join(what) + ". The Mini "
-               "Shai-Hulud gh-token-monitor service watches for credential rotation and WIPES the "
-               "home directory when it detects one (T1543/T1485) — so its presence makes rotating "
-               "any token dangerous.",
-        remediation="Do NOT rotate any credential yet. Isolate the host, disable and remove the "
-                    "service/agent (systemctl --user disable --now <unit>, or launchctl bootout + "
-                    "delete the plist), rebuild from a known-clean image, and rotate credentials "
-                    f"LAST — {_WIPER_NOTE}.",
+        # "so rotating is dangerous" is the remediation's own first words; saying it here too was
+        # the third statement of one fact. The MITRE ids belong in the docs, not the finding.
+        detail="Found a planted OS service / launch agent — " + "; ".join(what)
+               + ". It watches for credential rotation and wipes the home directory.",
+        remediation="Do NOT rotate any credential yet. Isolate the host, remove the service/agent, "
+                    f"rebuild from a known-clean image, then rotate LAST: {_WIPER_NOTE}.",
+        command="systemctl --user disable --now <unit>\n"
+                "launchctl bootout gui/$UID/<label> && rm ~/Library/LaunchAgents/<label>.plist",
     )]
 
 

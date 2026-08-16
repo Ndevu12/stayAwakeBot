@@ -80,5 +80,6 @@ class ContentMatcher(Matcher):
                             severity=Severity.parse(s["severity"]), path=rel,
                             description=s["description"], remediation=s.get("remediation", "manual"),
                             line=base_line + text.count("\n", 0, m.start()) + 1,
-                            evidence=evidence(text, m.start(), m.end()), vector=s["category"]))
+                            evidence=evidence(text, m.start(), m.end()), vector=s["category"],
+                            payload_window=True))
         return findings

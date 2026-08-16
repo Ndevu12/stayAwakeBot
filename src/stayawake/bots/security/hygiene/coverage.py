@@ -114,11 +114,10 @@ def check_persistence_coverage() -> list[HygieneIssue]:
             id="persistence-surface-unverified",
             severity="unknown",
             title="Persistence surface could not be fully verified",
-            detail="These user-owned persistence locations exist but could not be read, so this host "
-                   "cannot be certified free of a credential-rotation wiper: " + "; ".join(unverified)
-                   + ". A run that could not enumerate the surface is UNKNOWN, not clean.",
-            remediation="Re-run with permission to read them (or inspect them by hand). Until the "
-                        f"surface is verified, treat credential rotation as UNSAFE — {_WIPER_NOTE}.",
+            detail="These persistence locations exist but could not be read, so this host is "
+                   "UNKNOWN, not clean: " + "; ".join(unverified) + ".",
+            remediation="Read them, or inspect them by hand. Until then do not rotate credentials: "
+                        f"{_WIPER_NOTE}.",
         ))
 
     if _surface_is_absent(graded):
@@ -128,18 +127,16 @@ def check_persistence_coverage() -> list[HygieneIssue]:
             id="persistence-surface-not-established",
             severity="unknown",
             title="Persistence surface could not be established",
-            detail=f"Every user-owned persistence location this audit certifies is absent ({kinds}), "
-                   "so nothing was enumerated here and nothing can be certified clean. A host in this "
-                   "state is a new account, a container or a CI image — or one whose home directory "
-                   "has been destroyed. From disk alone the two are indistinguishable, and a wipe "
-                   "leaves this check looking exactly like a clean host.",
+            detail=f"Every persistence location this audit certifies is absent ({kinds}), so nothing "
+                   "was examined. That is a new account, a container or a CI image — or a destroyed "
+                   "home directory. From disk they are indistinguishable.",
             # Incident reading first: this also renders under an active-persistence verdict, where an
             # operator whose eye stops after one sentence must not have read "nothing to do".
-            remediation="Confirm which it is. If this host had files and they are gone, treat it as "
-                        "an incident: image the disk BEFORE using it further — a plain delete leaves "
-                        "the content recoverable in freed blocks and continued use overwrites it — "
-                        "and treat credential rotation as UNSAFE until the surface is confirmed "
-                        f"({_WIPER_NOTE}). On a new account, a container or a CI image this state is "
-                        "expected and there is nothing to do.",
+            # The INCIDENT reading leads: this also renders under an active-persistence verdict,
+            # where a reader whose eye stops after one sentence must not have read "nothing to do".
+            remediation="Confirm which it is. If files are gone, treat it as an incident: the data "
+                        "is still recoverable, so image the disk before using this host further, and "
+                        f"do not rotate credentials — {_WIPER_NOTE}. On a new account, container or "
+                        "CI image, nothing to do.",
         ))
     return issues

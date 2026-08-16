@@ -324,12 +324,16 @@ class TestTheDisclosureIsNeverAmputated(unittest.TestCase):
     def test_the_shipped_wording_survives_rendering_whole(self):
         # Both shipped strings exceed the encoder's default bound; the last clause of each is the
         # load-bearing one (why the state matters, and the wiper warning).
-        with mock.patch.object(coverage, "_must_verify_locations",
-                               return_value=TestWhollyAbsentSurfaceIsNotClean.ABSENT):
-            issue = coverage.check_persistence_coverage()[0]
+        # SYNTHETIC long fields on purpose: the subject is the RENDERER, which must not truncate,
+        # and the shipped strings are now deliberately short — so reading the corpus would make this
+        # test pass for the wrong reason the moment a finding is shortened.
+        long_detail = "Every certified location is absent. " + "Context that must survive. " * 14
+        long_fix = "Confirm which it is. " + "Then do this next. " * 16
+        issue = HygieneIssue(id="persistence-surface-not-established", severity="unknown",
+                             title="t", detail=long_detail, remediation=long_fix)
         report = " ".join(self._rendered(issue).split())
         for field in (issue.detail, issue.remediation):
-            self.assertGreater(len(field), 300, "shorten-the-string is not the fix being pinned")
+            self.assertGreater(len(field), 300, "the fixture must exceed the old truncation point")
             tail = " ".join(field.split())[-40:]
             self.assertIn(tail, report, f"the field was truncated before: ...{tail}")
 
