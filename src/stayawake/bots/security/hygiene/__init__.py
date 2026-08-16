@@ -30,7 +30,7 @@ from .models import (HygieneIssue, INCIDENT_TRIGGER_IDS, ACTIVE_PERSISTENCE_IDS,
                      SURFACE_UNREADABLE_ID, SURFACE_ABSENT_ID,
                      ROTATION_SAFE, ROTATION_UNSAFE_PERSISTENCE, ROTATION_UNSAFE_UNKNOWN,
                      TIER_ACTIVE_PERSISTENCE, TIER_CREDENTIAL_EXPOSURE, incident_tier,
-                     persistence_surface_is_enumerable, rotation_safety,
+                     persistence_surface_is_enumerable, response_order, rotation_safety,
                      incident_response_sequence, credential_exposure_note)
 from .credentials import check_credentials
 from .runner import check_runner_persistence
@@ -283,8 +283,14 @@ def render(issues: list[HygieneIssue], *, color: bool = False, width: int = 80) 
 
     # `unknown` items (unverified persistence surface) are surfaced in the rotation verdict above, not
     # as findings — they are the ABSENCE of a look, not something found. Split them out of the groups.
-    warnings = [i for i in issues if i.severity == "warning"]
-    reviews = [i for i in issues if i.severity == "info"]
+    # Worst-first WITHIN each group: a live foothold above a credential exposure above the rest,
+    # which is the order the response runbook asks for. Findings arrived in probe-registration
+    # order, so what appeared first was whichever check happened to be listed first.
+    def worst_first(items):
+        return sorted(items, key=lambda i: (response_order(i.id), i.title))
+
+    warnings = worst_first(i for i in issues if i.severity == "warning")
+    reviews = worst_first(i for i in issues if i.severity == "info")
 
     if not (warnings or reviews):
         # No findings. The verdict still stands: "clean" if the surface was verified, "unknown" if not.

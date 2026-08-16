@@ -137,6 +137,16 @@ def rotation_safety(issue_ids: set[str]) -> str:
     return ROTATION_SAFE
 
 
+def response_order(issue_id: str) -> int:
+    """Where one finding sits in the response order — live foothold first, then exposure, then the
+    rest. Reads the SAME `TIER_IDS` table `incident_tier()` does, so a new tier is one entry there
+    and both the banner and the ordering follow. A second table would drift."""
+    for rank, (_tier, ids) in enumerate(TIER_IDS):
+        if issue_id in ids:
+            return rank
+    return len(TIER_IDS)
+
+
 def incident_response_sequence() -> list[str]:
     """The canonical order for responding to a suspected worm compromise. Rotation is
     ALWAYS the last step: rotating while persistence is live can trigger the reported
