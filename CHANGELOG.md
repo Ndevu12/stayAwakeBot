@@ -13,44 +13,56 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
-### Changed
-- **A scan no longer takes every CPU core.** It leaves one free, so the machine stays responsive
-  while a scan runs, and it sizes itself from the CPUs the process is actually allowed to use — so
-  running inside a container with a CPU limit no longer starts workers for the host's cores. Pass
-  `-j N` to choose the number yourself; that is unchanged.
-
+## [0.6.0] - 2026-08-16
 
 ### Fixed
-- **`saw scan` no longer calls a project infected because two unrelated things appear in one file.**
-  A file that listed your home directory in one place and deleted something entirely different in
-  another was reported as a home-directory wipe — a dotfile manager, or an editor bundle whose
-  documentation happened to contain both. The two now have to belong together.
+- **The container image is published again.** The 0.5.2 image was not pushed: its digest-pinned
+  base carried newly-fixed vulnerabilities, and the release's vulnerability gate correctly
+  refused to publish. The base image is updated. `pip install` was unaffected — only the
+  container is new here.
 
 ### Added
 - **The home-wipe detector catches four shapes it used to miss**: deleting the home directory through
   a variable it was first assigned to; walking home with `listdir`/`scandir`, which is the most
   common way to do it in Python; splitting the walk and the delete into two functions that are wired
   together at a call site; and deleting with `shutil.rmtree`, Python's standard recursive delete.
+- **`saw audit` now checks every location Node loads a global module from**, not just
+  `~/.node_modules`: also `~/.node_libraries` and the install prefix's `lib/node`, resolved from your
+  environment on macOS, Linux and Windows alike. A module tree staged in any of them used to be
+  invisible while the same tree one directory over was reported. All are graded identically,
+  including the rule that only a directory counts.
+- **An evil-merge finding now says whether the introduced content is still in your working tree.**
+  A merge that smuggled a payload and one whose payload was deleted afterwards need different
+  responses. A file that changed since the merge is reported as **unverified**, never as removed —
+  the introduced lines may still be inside it — and a deleted path still notes that the content
+  remains in history and in any fork.
+- **`saw scan` now catches a merge commit that was edited by hand where git merged cleanly.** If a
+  file merged without conflict, git's result is fixed — a different result means somebody changed it
+  while merging, which no branch's diff shows and no pull-request review renders. This is reported
+  on its own, where previously it was missed unless the edit also matched a signature.
 
+### Changed
+- **A scan no longer takes every CPU core.** It leaves one free, so the machine stays responsive
+  while a scan runs, and it sizes itself from the CPUs the process is actually allowed to use — so
+  running inside a container with a CPU limit no longer starts workers for the host's cores. Pass
+  `-j N` to choose the number yourself; that is unchanged.
+- **The incident runbook now offers to image the disk before the step that rebuilds the host**, and
+  says when deleted content is still recoverable. Rebuilding, and ordinary continued use, overwrite
+  it.
+- **`saw audit` now prints the recommended fix for an unverified persistence surface.** It previously
+  reported that rotation was unsafe without printing what would resolve it.
 
 ### Fixed
+- **`saw scan` no longer calls a project infected because two unrelated things appear in one file.**
+  A file that listed your home directory in one place and deleted something entirely different in
+  another was reported as a home-directory wipe — a dotfile manager, or an editor bundle whose
+  documentation happened to contain both. The two now have to belong together.
 - **`saw scan` no longer reports ordinary HTTP-parsing code as infected.** Writing the DEL character
   by its numeric code is ordinary JavaScript, so any RFC 7230 control-character table matched a
   malware loader fingerprint at the tier that asserts malware — failing a CI gate on a vendored
   bundle. The fingerprint now requires the characters to be assembled and then executed nearby, which
   is what distinguishes a string shuffler from a character table. Real loaders are detected exactly as
   before.
-
-
-### Added
-- **`saw audit` now checks every location Node loads a global module from**, not just
-  `~/.node_modules`: also `~/.node_libraries` and the install prefix's `lib/node`, resolved from your
-  environment on macOS, Linux and Windows alike. A module tree staged in any of them used to be
-  invisible while the same tree one directory over was reported. All are graded identically,
-  including the rule that only a directory counts.
-
-
-### Fixed
 - **`saw audit` no longer reports a hardened host as a compromised one.** Prevention guidance in
   circulation tells operators to make `~/.node_modules` a non-directory so a worm cannot stage there.
   The audit described that location as "an npm tree" but accepted anything present, so following the
@@ -64,26 +76,17 @@ reader, not the mechanism or the weakness it closed.
   obfuscated for containing a comment such as `// never use eval() here`, or a commented-out line —
   a warning against the thing read as the thing. Code is still read exactly as before, including
   constructs assembled inside string literals.
-
-
-### Fixed
 - **`saw scan` now sees code written inside a template literal's `${...}`.** Anything spliced into a
   template was being read as text rather than as code, so a decoded payload handed to a shell that
   way went unreported while the same payload joined with `+` was caught. Both are now detected, and
   ordinary templates — building a URL, a command with a variable, a styled component — are still
   clean.
-
-
-### Fixed
 - **`saw scan` no longer reports ordinary front-end code as obfuscated.** Reading a JWT or a data URI
   with `atob` was treated as executing code, and any list of nine or more numbers — icon sizes, a
   colour table — was treated as a smuggled string. Both now need the step their names imply: a decode
   counts when the file also runs a command, and a number list counts when something consumes it as
   character codes. Packed loaders and character-code strings feeding `eval` are detected exactly as
   before.
-
-
-### Fixed
 - **The release pipeline blocked on vulnerabilities it was configured to ignore.** The container
   vulnerability gate is meant to stop a release only for a fixable critical or high finding, but it
   was rejecting releases over low, medium and unrecognised ones — the `0.5.2` release was blocked
@@ -94,28 +97,12 @@ reader, not the mechanism or the weakness it closed.
   every file the other side brought in was being reported as introduced by the merge — one such
   merge produced 18 findings and marked the repository infected. Such a merge is now judged on its
   content alone, and a merge that introduces no new content is not a finding.
-
-### Added
-- **An evil-merge finding now says whether the introduced content is still in your working tree.**
-  A merge that smuggled a payload and one whose payload was deleted afterwards need different
-  responses. A file that changed since the merge is reported as **unverified**, never as removed —
-  the introduced lines may still be inside it — and a deleted path still notes that the content
-  remains in history and in any fork.
-- **`saw scan` now catches a merge commit that was edited by hand where git merged cleanly.** If a
-  file merged without conflict, git's result is fixed — a different result means somebody changed it
-  while merging, which no branch's diff shows and no pull-request review renders. This is reported
-  on its own, where previously it was missed unless the edit also matched a signature.
-
-
-### Fixed
 - **`saw audit` now finds shell start-up files that are not kept in your home directory.** A
   configuration under `$ZDOTDIR`, or a `fish`/`nushell` config in `~/.config`, was neither examined
   for a planted start-up line nor counted when the audit decided whether it had a persistence surface
   to certify — so on those setups a line that runs on every new terminal went unreported, and an
   in-use account could be described as having nothing to examine. `fish`'s `conf.d` drop-in
   directory, which is sourced on every start, is now read as well.
-
-### Fixed
 - **`saw audit` no longer reports a host whose persistence locations are all missing as "enumerated
   and clean".** When every location the audit certifies is absent, nothing was actually examined, so
   the run now ends **UNKNOWN** and withholds the rotation all-clear (exit `3`) instead of stating that
@@ -138,13 +125,6 @@ reader, not the mechanism or the weakness it closed.
   you — so a crafted one could put terminal control sequences, or text a CI system reads as its own
   instructions, into a block you are invited to paste. The name is now neutralised while still being
   shown, and the command stays usable.
-
-### Changed
-- **The incident runbook now offers to image the disk before the step that rebuilds the host**, and
-  says when deleted content is still recoverable. Rebuilding, and ordinary continued use, overwrite
-  it.
-- **`saw audit` now prints the recommended fix for an unverified persistence surface.** It previously
-  reported that rotation was unsafe without printing what would resolve it.
 
 ## [0.5.2] - 2026-08-14
 
@@ -548,7 +528,8 @@ _No user-facing changes were recorded for this release._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel (supply-chain worm
 detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.5.2...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.4.1...v0.5.0
