@@ -13,46 +13,11 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
-### Changed
-- **Findings say the same things in fewer words.** The audit's guidance was carrying background a
-  developer does not need mid-incident; every claim, warning and instruction is unchanged, including
-  the credential-rotation warning, which still appears at every point where you might rotate. The
-  longest finding lost more than half its length.
-- **`saw scan` no longer prints a matched payload as clean, pasteable text.** A match in a scanned
-  file is now shown as a fingerprint with a bounded preview — long enough to recognise a false
-  positive, not a copy of the payload. Findings whose evidence is saw's own explanation are shown in
-  full, unchanged, and `--json` still carries the complete snippet for tooling.
-
-### Fixed
-- **Saved reports no longer keep advisory evidence in full.** Findings were redacted before writing;
-  advisories were not, so the saved bundle held text the sink promised it would not.
-
-
-### Changed
-- **The container image now installs its dependencies from a hash-pinned lock** rather than
-  resolving them fresh at build time. Two builds of the same commit now produce the same image, and
-  a package whose contents do not match the recorded hash is refused rather than installed. This
-  does not change what `pip install stayawakebot` gives you — the package's own dependencies are
-  unchanged and remain unpinned.
-- **What matters most is now listed first in every report.** `saw audit` shows a live foothold above
-  a credential exposure above everything else, instead of the order the checks happen to run in; and
-  the saved report bundle lists infected repositories before suspect and clean ones, which it did not
-  order at all before. The scan table is unchanged — the rest now matches it.
-
-### Fixed
-- **`saw scan` no longer lets a scanned repository control your terminal or your CI log.** The
-  matched snippet and the file path were printed unchanged, so a crafted file name or file content
-  could retitle the window, clear the screen, or emit text a CI system reads as its own
-  instructions. Both are now neutralised while still being shown, matching the fix already applied
-  to `saw audit`.
-
 ## [0.6.0] - 2026-08-16
 
 ### Fixed
-- **The container image is published again.** The 0.5.2 image was not pushed: its digest-pinned
-  base carried newly-fixed vulnerabilities, and the release's vulnerability gate correctly
-  refused to publish. The base image is updated. `pip install` was unaffected — only the
-  container is new here.
+- **The package works on Python 3.11 again.** A report-rendering module could not be imported
+  there, so anything that printed a finding failed. Python 3.12 and later were unaffected.
 
 ### Added
 - **The home-wipe detector catches four shapes it used to miss**: deleting the home directory through
@@ -75,6 +40,23 @@ reader, not the mechanism or the weakness it closed.
   on its own, where previously it was missed unless the edit also matched a signature.
 
 ### Changed
+- **Findings say the same things in fewer words.** The audit's guidance was carrying background a
+  developer does not need mid-incident; every claim, warning and instruction is unchanged, including
+  the credential-rotation warning, which still appears at every point where you might rotate. The
+  longest finding lost more than half its length.
+- **`saw scan` no longer prints a matched payload as clean, pasteable text.** A match in a scanned
+  file is now shown as a fingerprint with a bounded preview — long enough to recognise a false
+  positive, not a copy of the payload. Findings whose evidence is saw's own explanation are shown in
+  full, unchanged, and `--json` still carries the complete snippet for tooling.
+- **The container image now installs its dependencies from a hash-pinned lock** rather than
+  resolving them fresh at build time. Two builds of the same commit now produce the same image, and
+  a package whose contents do not match the recorded hash is refused rather than installed. This
+  does not change what `pip install stayawakebot` gives you — the package's own dependencies are
+  unchanged and remain unpinned.
+- **What matters most is now listed first in every report.** `saw audit` shows a live foothold above
+  a credential exposure above everything else, instead of the order the checks happen to run in; and
+  the saved report bundle lists infected repositories before suspect and clean ones, which it did not
+  order at all before. The scan table is unchanged — the rest now matches it.
 - **A scan no longer takes every CPU core.** It leaves one free, so the machine stays responsive
   while a scan runs, and it sizes itself from the CPUs the process is actually allowed to use — so
   running inside a container with a CPU limit no longer starts workers for the host's cores. Pass
@@ -86,6 +68,17 @@ reader, not the mechanism or the weakness it closed.
   reported that rotation was unsafe without printing what would resolve it.
 
 ### Fixed
+- **Saved reports no longer keep advisory evidence in full.** Findings were redacted before writing;
+  advisories were not, so the saved bundle held text the sink promised it would not.
+- **`saw scan` no longer lets a scanned repository control your terminal or your CI log.** The
+  matched snippet and the file path were printed unchanged, so a crafted file name or file content
+  could retitle the window, clear the screen, or emit text a CI system reads as its own
+  instructions. Both are now neutralised while still being shown, matching the fix already applied
+  to `saw audit`.
+- **The container image is published again.** The 0.5.2 image was not pushed: its digest-pinned
+  base carried newly-fixed vulnerabilities, and the release's vulnerability gate correctly
+  refused to publish. The base image is updated. `pip install` was unaffected — only the
+  container is new here.
 - **`saw scan` no longer calls a project infected because two unrelated things appear in one file.**
   A file that listed your home directory in one place and deleted something entirely different in
   another was reported as a home-directory wipe — a dotfile manager, or an editor bundle whose

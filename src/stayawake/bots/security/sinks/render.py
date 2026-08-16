@@ -140,8 +140,11 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False,
                 # A visible bullet per finding; evidence sits under it, deeper-indented.
                 out.append(f"    {MARKER['info']} {colored}  {f['signature_id']}  —  {loc}")
                 if f.get("evidence"):
-                    out.append(f"        evidence: {_fmt_evidence(f['evidence'], textsafe.quoted,
-                                                         payload_window=f.get('payload_window', False))}")
+                    # Bound the call outside the f-string: an expression spanning lines inside one is
+                    # PEP 701 syntax, which 3.12 accepts and 3.11 cannot parse at all.
+                    ev = _fmt_evidence(f["evidence"], textsafe.quoted,
+                                       payload_window=f.get("payload_window", False))
+                    out.append(f"        evidence: {ev}")
                 if f.get("fix_advice"):                          # actionable remediation (#1252)
                     out.append(f"        {MARKER['detail']} fix: {textsafe.plain(f['fix_advice'])}")
                 if f.get("reference"):
@@ -233,8 +236,9 @@ def render_markdown(payload: dict[str, Any]) -> str:
                        f"`{f['signature_id']}` — {loc}")
             out.append(f"  - {f['description']}")
             if f.get("evidence"):
-                out.append(f"  - evidence: {_fmt_evidence(f['evidence'], textsafe.code,
-                                          payload_window=f.get('payload_window', False))}")
+                ev = _fmt_evidence(f["evidence"], textsafe.code,
+                                   payload_window=f.get("payload_window", False))
+                out.append(f"  - evidence: {ev}")
             if f.get("fix_advice"):                              # actionable remediation (#1252)
                 # code-span the advice: it embeds an unvalidated package name, and a bare Markdown
                 # string would let `x](http://evil)` render as an active link (textsafe.code contract).
