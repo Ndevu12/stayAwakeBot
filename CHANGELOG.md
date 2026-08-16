@@ -19,6 +19,10 @@ reader, not the mechanism or the weakness it closed.
   a package whose contents do not match the recorded hash is refused rather than installed. This
   does not change what `pip install stayawakebot` gives you — the package's own dependencies are
   unchanged and remain unpinned.
+- **What matters most is now listed first in every report.** `saw audit` shows a live foothold above
+  a credential exposure above everything else, instead of the order the checks happen to run in; and
+  the saved report bundle lists infected repositories before suspect and clean ones, which it did not
+  order at all before. The scan table is unchanged — the rest now matches it.
 
 ### Fixed
 - **`saw scan` no longer lets a scanned repository control your terminal or your CI log.** The

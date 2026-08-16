@@ -78,14 +78,9 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False,
         out.append("No targets scanned.")
         return "\n".join(out) + "\n"
 
-    # Table, worst-first (infected → suspect → error → clean), then by finding count, then
-    # name — problems sit at the top. For a LARGE fleet the clean rows are collapsed to a
+    # Worst-first (see `report_order`). For a LARGE fleet the clean rows are collapsed to a
     # count (clean = nothing to look at); the full inventory still lives in --json / -d.
-    def sort_key(r):
-        v = _verdict(r)
-        return (v[0] if v else 3, -r["summary"]["total"], r["target"])
-
-    ordered = sorted(results, key=sort_key)
+    ordered = sorted(results, key=report_order)
     collapse = bool(collapse_clean_over) and len(results) > collapse_clean_over
     rows = [r for r in ordered if _verdict(r) is not None] if collapse else ordered
     clean_n = len(results) - len(rows)
@@ -191,6 +186,16 @@ def _coverage_notes(payload: dict[str, Any]) -> list[str]:
     return list(seen)
 
 
+def report_order(result: dict[str, Any]) -> tuple:
+    """Worst-first: infected → suspect → error → clean, then most findings, then name.
+
+    Module-level because BOTH renderers answer the same question, and the persisted bundle used to
+    answer it differently — it listed targets in scan order, so an infected repository could sit
+    below a clean one in the file kept as the record."""
+    verdict = _verdict(result)
+    return (verdict[0] if verdict else 3, -result["summary"]["total"], result["target"])
+
+
 def render_markdown(payload: dict[str, Any]) -> str:
     s = payload["summary"]
     out = [f"# Security scan — {payload['generated_at']}", "",
@@ -202,7 +207,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
            "review, not asserted as malware._", "",
            "| Target | Source | Status | Findings | Top severity |",
            "|--------|--------|--------|----------|--------------|"]
-    for r in payload["results"]:
+    for r in sorted(payload["results"], key=report_order):
         status = ("❌ INFECTED" if r["infected"]
                   else "🟡 SUSPICIOUS" if r.get("suspicious")
                   else "⚠️ error" if r["error"] else "✅ clean")
@@ -210,7 +215,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
                    f"{r['summary']['total']} | {r['summary']['max_severity'] or '—'} |")
     out += ["", "## Findings", ""]
     any_f = False
-    for r in payload["results"]:
+    for r in sorted(payload["results"], key=report_order):
         if not r["findings"]:
             continue
         any_f = True
@@ -233,7 +238,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
         out.append("_No findings — all scanned targets are clean._")
 
     # Dependency advisories — separate, opt-in, and explicitly non-gating.
-    advised = [r for r in payload["results"] if r.get("advisories")]
+    advised = [r for r in sorted(payload["results"], key=report_order) if r.get("advisories")]
     if advised:
         out += ["", "## Dependency advisories", "",
                 "_Informational (ordinary CVEs on declared dependencies). These do **not** affect "
