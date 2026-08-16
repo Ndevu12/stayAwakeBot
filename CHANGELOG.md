@@ -13,6 +13,14 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Fixed
+- **`saw scan` no longer lets a scanned repository control your terminal or your CI log.** The
+  matched snippet and the file path were printed unchanged, so a crafted file name or file content
+  could retitle the window, clear the screen, or emit text a CI system reads as its own
+  instructions. Both are now neutralised while still being shown, matching the fix already applied
+  to `saw audit`.
+
+
 ## [0.6.0] - 2026-08-16
 
 ### Fixed

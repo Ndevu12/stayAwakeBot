@@ -43,6 +43,13 @@ def code(s: str, limit: int = 300) -> str:
     return f"`{sanitize(s, limit)}`"
 
 
+def quoted(s: str, limit: int = 300) -> str:
+    """An untrusted value shown as a quoted span on a TERMINAL line — `code`'s sibling for the other
+    surface. `code` quotes for Markdown and so escapes Markdown; this quotes for a terminal and so
+    escapes what a terminal and a CI log parse. Same shape, same guarantee, different threat."""
+    return f"`{plain(s, limit)}`"
+
+
 def plain(s: str, limit: int = 300) -> str:
     """Sanitize an untrusted string (a repo path, a finding reason/command) for a PLAIN-TEXT line
     on the terminal or a GitHub Actions log — safe to print ANYWHERE, including at line-start.
