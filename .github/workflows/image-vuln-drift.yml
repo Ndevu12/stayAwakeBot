@@ -1,0 +1,97 @@
+name: Image vulnerability drift
+
+# The release pipeline scans the container and refuses to publish a fixable critical/high. That gate
+# is correct and stays. Its problem is WHEN it runs: only at release, so a blocker is found after the
+# tag exists — and releases are immutable, so that version number is already spent. It has cost one.
+#
+# The image itself is fixed: a digest-pinned base and hash-pinned dependencies. What moves is the
+# advisory database, which grows daily — so an unchanged image can pass on Monday and fail on Friday.
+# This job re-runs the same build and the same scan on a schedule, publishes NOTHING, and files a
+# tracking issue when the image would be blocked. Same shape as scanner-pin-drift.yml.
+on:
+  schedule:
+    - cron: '0 6 * * 1'      # Mondays 06:00 UTC, before the pin-drift job
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write              # open/close the tracking issue
+
+concurrency:
+  group: image-vuln-drift
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    name: Rebuild and re-scan the container
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5   # v4.1.0
+
+      - name: Build image locally (never pushed)
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf   # v7.2.0
+        with:
+          context: .
+          build-args: VERSION=0.0.0.dev0
+          load: true
+          push: false
+          tags: stayawakebot:drift-check
+
+      # Same severity and same ignore-unfixed as the release gate, so this reports exactly what the
+      # release would block on — no more, no less. Never fails the job: drift is an issue to file,
+      # not a red workflow nobody reads.
+      - name: Scan with the release gate's settings
+        id: scan
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25   # v0.36.0
+        with:
+          image-ref: stayawakebot:drift-check
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '1'
+          format: table
+          output: trivy-drift.txt
+
+      - name: File, update, or close the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BLOCKED: ${{ steps.scan.outcome == 'failure' }}
+        run: |
+          set -euo pipefail
+          title="Container image would fail the release vulnerability gate"
+          existing="$(gh issue list --state open --search "$title in:title" \
+                      --json number --jq '.[0].number // empty')"
+
+          if [ "$BLOCKED" != "true" ]; then
+            if [ -n "$existing" ]; then
+              gh issue close "$existing" \
+                --comment "The image now passes the release gate. Closing; this reopens if it regresses."
+            fi
+            echo "::notice::Image passes the release gate — nothing to report."
+            exit 0
+          fi
+
+          {
+            echo "The scheduled rebuild of the container image would be **blocked by the release"
+            echo "vulnerability gate**. Publishing a release today would fail at the container step,"
+            echo "after the tag exists — and tags are immutable, so the version would be spent."
+            echo
+            echo "Findings, at the same severity and \`ignore-unfixed\` setting the release gate uses:"
+            echo
+            echo '```'
+            cat trivy-drift.txt 2>/dev/null || echo "(scan produced no table)"
+            echo '```'
+            echo
+            echo "Fix before the next release, or accept that it ships without a container."
+            echo "Closed automatically when a later run passes."
+          } > body.md
+
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body-file body.md
+          else
+            gh issue create --title "$title" --body-file body.md
+          fi

@@ -13,13 +13,19 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Changed
+- **The container image now installs its dependencies from a hash-pinned lock** rather than
+  resolving them fresh at build time. Two builds of the same commit now produce the same image, and
+  a package whose contents do not match the recorded hash is refused rather than installed. This
+  does not change what `pip install stayawakebot` gives you — the package's own dependencies are
+  unchanged and remain unpinned.
+
 ### Fixed
 - **`saw scan` no longer lets a scanned repository control your terminal or your CI log.** The
   matched snippet and the file path were printed unchanged, so a crafted file name or file content
   could retitle the window, clear the screen, or emit text a CI system reads as its own
   instructions. Both are now neutralised while still being shown, matching the fix already applied
   to `saw audit`.
-
 
 ## [0.6.0] - 2026-08-16
 

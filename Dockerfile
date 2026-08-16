@@ -55,10 +55,19 @@ RUN useradd --create-home --uid 10001 sentinel \
  && chown -R sentinel:sentinel /opt/venv
 ENV PATH=/opt/venv/bin:$PATH
 
+# Dependencies come from the lock, verified by hash, NOT resolved fresh at build time. Without
+# this the image installs whatever PyPI serves that minute: two builds of one commit differ, and a
+# poisoned release of any dependency enters the image unnoticed — the exact attack this tool exists
+# to detect. --require-hashes makes pip refuse anything whose SHA-256 does not match the lock.
+COPY --chown=sentinel:sentinel requirements.lock /tmp/
 COPY --from=builder --chown=sentinel:sentinel /dist/*.whl /tmp/
 
 USER sentinel
-RUN pip install --no-cache-dir /tmp/*.whl && rm -f /tmp/*.whl
+# --no-deps on the wheel is load-bearing: dependencies are the lock's job, and the wheel must not be
+# able to pull in anything unpinned alongside it.
+RUN pip install --no-cache-dir --require-hashes -r /tmp/requirements.lock \
+ && pip install --no-cache-dir --no-deps /tmp/*.whl \
+ && rm -f /tmp/*.whl /tmp/requirements.lock
 
 WORKDIR /repo
 

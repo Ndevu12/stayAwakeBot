@@ -4,6 +4,7 @@
 # sdist allowlist in pyproject.toml.
 *
 !pyproject.toml
+!requirements.lock
 !README.md
 !LICENSE
 !COMMERCIAL-LICENSE.md
