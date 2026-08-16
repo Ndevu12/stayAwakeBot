@@ -15,6 +15,10 @@ reader, not the mechanism or the weakness it closed.
 
 ## [0.6.0] - 2026-08-16
 
+### Fixed
+- **The package works on Python 3.11 again.** A report-rendering module could not be imported
+  there, so anything that printed a finding failed. Python 3.12 and later were unaffected.
+
 ### Added
 - **The home-wipe detector catches four shapes it used to miss**: deleting the home directory through
   a variable it was first assigned to; walking home with `listdir`/`scandir`, which is the most
