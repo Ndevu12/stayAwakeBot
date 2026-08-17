@@ -37,7 +37,7 @@ jobs:
           # in-band pin-freshness gate (#1172) fails an engine PR that doesn't bump this, both pin
           # copies must AGREE (pin_tools.py synced, #1210), and scanner-pin-drift opens an issue if
           # it falls behind.
-          sentinel-ref: bde1b1a16e4e38bcb7b7c68f7d66474f723c0c5e   # current main — catches up the audit wording, gate SHA-pinning and reports-dir fixes
+          sentinel-ref: 99f7b82a4c4c7f97f2f55ed5d836a7c328fbf807   # current main — catches up the audit verdict fix and the docs work released in 0.6.2
           fail-on-findings: 'true'
           # This gate never uploads SARIF — the job conclusion is the scan's exit code, nothing
           # else. Code-scanning delivery is owned solely by security-sentinel.yml.
