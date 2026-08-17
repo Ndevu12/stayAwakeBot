@@ -6,6 +6,7 @@ import argparse
 import json
 import sys
 
+from stayawake.cli.helptext import add_command
 from stayawake.core.identity import Intent, require, resolve_session
 from stayawake.lib import github_app
 from stayawake.utils import env
@@ -15,27 +16,67 @@ from stayawake.utils.terminal import supports_color
 
 
 def register(sub) -> None:
-    p = sub.add_parser(
-        "auth", aliases=["a"],
+    p = add_command(
+        sub, "auth", aliases=["a"],
         help="show GitHub credential/capability status; register a StayAwakeBot GitHub App",
-    )
+        description=(
+            "Show your GitHub credential and capability status, and register an "
+            "operator-managed StayAwakeBot GitHub App. Most of saw works offline; auth only "
+            "concerns the paths that need a credential — remote scanning, `saw fix --pr` and "
+            "`saw guard setup --pr`. Bare `saw auth` is `saw auth status`."),
+        examples=[
+            ("saw auth", "credential + capability status"),
+            ("saw auth status --json", "machine-readable; non-zero if guard PRs are denied"),
+            ("saw auth app register", "register + install the App (browser flow)"),
+            ("saw auth app show", "which App is configured, and how to install it"),
+        ])
     asub = p.add_subparsers(dest="auth_cmd", metavar="<auth-command>")
 
-    st = asub.add_parser("status", help="show active credential + capability gate for key intents")
+    st = add_command(
+        asub, "status",
+        help="show active credential + capability gate for key intents",
+        description=(
+            "Report the active credential — source, actor, whether it is live — its scopes or "
+            "capabilities, whether a StayAwakeBot App is configured, and an intent gate: for "
+            "each key action (read a remote, open a fix PR, open a guard PR) whether this "
+            "credential is allowed, what is missing, and the command that fixes it. Exits "
+            "non-zero when a live credential cannot open a guard PR, so it drops into CI."),
+        examples=[
+            ("saw auth status", "credential, capabilities and the intent gate"),
+            ("saw auth status --json", "machine-readable, for a CI gate"),
+        ])
     st.add_argument("--json", action="store_true", help="machine-readable output")
     st.add_argument("--no-stream", action="store_true", help="disable animated output")
     st.set_defaults(func=_status)
 
-    ap = asub.add_parser(
-        "app", help="manage the operator-managed StayAwakeBot GitHub App",
-    )
+    ap = add_command(
+        asub, "app",
+        help="manage the operator-managed StayAwakeBot GitHub App",
+        description=(
+            "Manage the operator-managed StayAwakeBot GitHub App — the recommended credential "
+            "for acting across many repos and accounts, since its per-account installation "
+            "tokens are scoped and revocable. Token signing is built in, so there is no crypto "
+            "extra to install. You own the registration and the credentials."),
+        examples=[
+            ("saw auth app register", "register + install it (browser flow)"),
+            ("saw auth app show", "is one configured, and where?"),
+        ])
     apsub = ap.add_subparsers(dest="app_cmd", metavar="<app-command>")
 
-    reg = apsub.add_parser(
-        "register",
+    reg = add_command(
+        apsub, "register",
         help="register + install a StayAwakeBot App via GitHub's manifest flow "
              "(stores credentials locally)",
-    )
+        description=(
+            "Register and install a new App through GitHub's browser manifest flow, storing the "
+            "credentials locally at mode 0600. Idempotent: with an App already configured it "
+            "mints no duplicate (App names are globally unique) and instead points you at "
+            "installing that same App on more accounts and orgs."),
+        examples=[
+            ("saw auth app register", "browser flow; credentials stay local"),
+            ("saw auth app register --no-browser", "print the URL instead of opening it"),
+            ("saw auth app register --replace", "force a brand-new App"),
+        ])
     reg.add_argument("--name", default="StayAwakeBot",
                      help="App display name (default: StayAwakeBot)")
     reg.add_argument("--no-browser", action="store_true",
@@ -47,7 +88,16 @@ def register(sub) -> None:
     reg.add_argument("--no-stream", action="store_true", help="disable animated output")
     reg.set_defaults(func=_app_register)
 
-    show = apsub.add_parser("show", help="show whether a local StayAwakeBot App config is present")
+    show = add_command(
+        apsub, "show",
+        help="show whether a local StayAwakeBot App config is present",
+        description=(
+            "Show the local App config — id, name, slug, installation — with the URLs for "
+            "installing it on another account or org and for its settings page."),
+        examples=[
+            ("saw auth app show", "which App is configured, and where"),
+            ("saw auth app register", "none configured? register one"),
+        ])
     show.add_argument("--no-stream", action="store_true", help="disable animated output")
     show.set_defaults(func=_app_show)
 

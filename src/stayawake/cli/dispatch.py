@@ -12,6 +12,7 @@ import sys
 from stayawake.cli import commands
 from stayawake.cli._banner import render_welcome
 from stayawake.cli._meta import __version__
+from stayawake.cli.helptext import CommandHelpFormatter, examples_block
 from stayawake.utils.terminal import color_level
 
 
@@ -19,7 +20,14 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="saw",
         description="StayAwakeBot sentinel toolkit — local supply-chain worm hunter.",
-        epilog="Run `saw <command> -h` for command-specific help.",
+        epilog=examples_block([
+            ("saw scan", "hunt worms here; the exit code is the verdict"),
+            ("saw fix --pr", "clean the findings on a PR branch"),
+            ("saw audit", "local hygiene + rotation-safety verdict"),
+            ("saw guard setup --pr", "install the CI gate on this repo"),
+            ("saw <command> -h", "what a command is for, with examples"),
+        ]),
+        formatter_class=CommandHelpFormatter,
     )
     p.add_argument(
         "--version", action="version",

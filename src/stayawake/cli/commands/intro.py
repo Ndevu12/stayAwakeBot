@@ -12,11 +12,23 @@ import sys
 
 from stayawake.cli._banner import render_intro
 from stayawake.cli._meta import __version__
+from stayawake.cli.helptext import add_command
 from stayawake.utils.terminal import color_level
 
 
 def register(sub) -> None:
-    p = sub.add_parser("intro", aliases=["welcome"], help="a 60-second tour of saw")
+    p = add_command(
+        sub, "intro", aliases=["welcome"],
+        help="a 60-second tour of saw",
+        description=(
+            "A branded tour: what saw is, the three verbs, why it is safe to run, and how to "
+            "gate CI. It runs no scan and touches nothing. Bare `saw` prints the shorter "
+            "welcome; the full command list is always at `saw -h`."),
+        examples=[
+            ("saw", "the short welcome banner"),
+            ("saw intro", "the fuller tour"),
+            ("saw intro | cat", "plain text — colour drops when piped"),
+        ])
     p.set_defaults(func=run)
 
 

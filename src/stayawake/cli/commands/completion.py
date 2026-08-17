@@ -5,10 +5,21 @@ from __future__ import annotations
 import argparse
 
 from stayawake.cli._meta import VERBS
+from stayawake.cli.helptext import add_command
 
 
 def register(sub) -> None:
-    p = sub.add_parser("completion", aliases=["comp"], help="emit a shell-completion script")
+    p = add_command(
+        sub, "completion", aliases=["comp"],
+        help="emit a shell-completion script",
+        description=(
+            "Print a shell-completion script for `saw` and `stayawake` on stdout. Source it, or "
+            "save it where your shell looks for completions — nothing is installed for you."),
+        examples=[
+            ("saw completion bash > /etc/bash_completion.d/saw", ""),
+            ('saw completion zsh  > "${fpath[1]}/_saw"', ""),
+            ("saw completion fish > ~/.config/fish/completions/saw.fish", ""),
+        ])
     p.add_argument("shell", choices=["bash", "zsh", "fish"])
     p.set_defaults(func=run)
 

@@ -6,6 +6,7 @@ import argparse
 import sys
 
 from stayawake.bots.security import hygiene
+from stayawake.cli.helptext import add_command
 from stayawake.lib import auth
 from stayawake.utils.render import term_width
 from stayawake.utils.streaming import Streamer, status, stream_enabled
@@ -13,7 +14,21 @@ from stayawake.utils.terminal import supports_color
 
 
 def register(sub) -> None:
-    p = sub.add_parser("audit", aliases=["au"], help="hygiene + branch-protection audit")
+    p = add_command(
+        sub, "audit", aliases=["au"],
+        help="hygiene + branch-protection audit",
+        description=(
+            "Audit local security hygiene: credential exposure, editor settings, host "
+            "persistence and drop-artifacts, and optionally a repository's branch protection. "
+            "Read-only. Every run ends with a rotation-safety verdict, and exit 3 means "
+            "rotating a credential is not safe yet — active persistence was found, or the "
+            "persistence surface could not be verified."),
+        examples=[
+            ("saw audit", "hygiene, persistence, rotation verdict"),
+            ("saw audit --verify", "content-scan a weak ~/.node_modules"),
+            ("saw audit --repo Ndevu12/strix -f", "also gate on branch protection"),
+            ("saw audit; echo $?", "3 = rotation UNSAFE"),
+        ])
     p.add_argument("--repo", metavar="OWNER/NAME", default=None,
                    help="also audit this repo's branch protection (needs a token)")
     p.add_argument("-b", "--branch", default="main",

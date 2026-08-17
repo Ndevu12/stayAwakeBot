@@ -13,10 +13,25 @@ import argparse
 
 from stayawake.bots.security import remediator
 from stayawake.cli.argtypes import add_jobs_arg
+from stayawake.cli.helptext import add_command
 
 
 def register(sub) -> None:
-    p = sub.add_parser("fix", help="prepare a cleanup branch per infected repo (--pr to open a PR)")
+    p = add_command(
+        sub, "fix",
+        help="prepare a cleanup branch per infected repo (--pr to open a PR)",
+        description=(
+            "Clean up detected worm findings on a branch. By default the fix is PREPARED on a "
+            "local `security/auto-clean` branch and nothing else happens — no push, no PR, no "
+            "network — and your working tree is never edited, so review the diff before it goes "
+            "anywhere. Heuristic-only findings are disclosed for review, never auto-touched. "
+            "`saw discard` is the inverse."),
+        examples=[
+            ("saw fix", "prepare a branch per infected local repo"),
+            ("saw fix .", "just this repo; review the diff, then push"),
+            ("saw fix --pr", "also push + open/update one rolling PR"),
+            ("saw fix --remote", "sweep the configured GitHub targets"),
+        ])
     p.add_argument("paths", nargs="*", metavar="TARGETS",
                    help="local repo/dir paths — or, with --remote, owner/repo slugs. "
                         "Omit to fix configured targets or the current repo.")

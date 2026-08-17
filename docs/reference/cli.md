@@ -1,7 +1,9 @@
 # `saw` command reference
 
 Every `saw` flag is documented here, and only here — the guides link to this page rather than
-repeating it. `saw -h` and `saw <command> -h` print the same surface.
+repeating it. `saw <command> -h` states what that command is for, lists its flags, and ends
+with a short `examples:` block — the same invocations used here, so the terminal and this page
+agree.
 
 ```text
 saw <command> [options] [TARGETS...]
