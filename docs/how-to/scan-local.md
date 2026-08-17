@@ -1,3 +1,7 @@
+---
+description: Scan repositories on your own machine with saw. No token, no configuration, and nothing leaves the machine.
+---
+
 # Scan local code
 
 No token, no config, nothing leaves your machine. Every flag is in the

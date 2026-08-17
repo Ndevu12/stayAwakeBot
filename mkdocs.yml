@@ -8,7 +8,10 @@
 # so an unversioned site would describe every older install incorrectly.
 
 site_name: saw
-site_url: https://ndevu12.github.io/stayAwakeBot/
+# The BARE domain. mike's mkdocs plugin appends the version being deployed (`site_url` becomes
+# `…/latest/` during a `mike deploy latest`), so a `latest/` written here would be doubled. A plain
+# `mkdocs build` leaves it bare, which is right for the PR check — that build is never published.
+site_url: https://saw.ndevuspace.com/
 site_description: >-
   saw — an offline-first supply-chain worm scanner and sentinel: detect, report,
   remediate on a branch, and gate CI.
@@ -35,6 +38,7 @@ validation:
 
 theme:
   name: material
+  custom_dir: overrides
   language: en
   logo: assets/stayawakebot-app-icon.png
   favicon: assets/stayawakebot-app-icon.png
@@ -73,12 +77,18 @@ extra_css:
   - assets/extra.css
 
 extra:
+  # Paste the token from Google Search Console here to claim ownership; unset emits no tag.
+  # google_site_verification: ""
   version:
     provider: mike
     default: latest
 
 plugins:
   - search
+  # Pin the canonical URL of EVERY published version to `latest`, so an older version's pages
+  # point search engines at the current ones instead of competing with them.
+  - mike:
+      canonical_version: latest
 
 markdown_extensions:
   - admonition

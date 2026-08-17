@@ -1,3 +1,7 @@
+---
+description: Scan code the moment it lands — a clone, pull, branch switch or rebase — so you are warned before you install, build or open it.
+---
+
 # Scan on clone
 
 A worm fires when you `npm install`, build, or open the folder in an editor — not when you clone.

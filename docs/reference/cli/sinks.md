@@ -1,3 +1,7 @@
+---
+description: Where a saw report can go — terminal, JSON, SARIF, alerts, a reports directory — and what evidence each one carries.
+---
+
 # Report sinks
 
 A report is a message, not a file. Full evidence exists only on the live terminal or via `--json`;

@@ -1,3 +1,7 @@
+---
+description: saw hunts self-propagating supply-chain malware in repositories, lockfiles and installed dependencies — offline, read-only, and remediating only through a pull request.
+---
+
 # StayAwakeBot documentation
 
 `saw` hunts self-propagating supply-chain malware in your repositories, lockfiles, installed

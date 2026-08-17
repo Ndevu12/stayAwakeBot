@@ -1,3 +1,7 @@
+---
+description: Install saw, scan a repository, read the verdict and act on it. A guided first run in about five minutes, with no token and no configuration.
+---
+
 # Your first scan
 
 Install `saw`, scan a repository, read the verdict, act on it. About five minutes.

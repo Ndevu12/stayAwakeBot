@@ -1,3 +1,7 @@
+---
+description: Why a target saw could not scan is never reported as clean, and where that rule shows up across the commands.
+---
+
 # Fail closed
 
 **A target that could not be scanned never reads as clean.**

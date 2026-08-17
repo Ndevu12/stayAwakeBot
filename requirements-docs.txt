@@ -1,3 +1,8 @@
+# Exact pins, CI-only — never installed into the wheel.
+#
+# mkdocs-material is pinned to a 9.x: `overrides/main.html` uses the current theming system,
+# which MkDocs 2.0 rewrites (every theme override breaks). The pin is what makes that a
+# scheduled port rather than a surprise on the next `pip install`.
 # Documentation-site toolchain. CI-only, and deliberately NOT a `[project.optional-dependencies]`
 # group: `saw` is an offline-first scanner whose install must stay dependency-light, and nothing
 # here is importable by the package. Only .github/workflows/docs.yml reads this file.

@@ -1,3 +1,7 @@
+---
+description: What each saw exit code means. The exit code is the contract a CI gate reads: clean, infected, unscannable, or rotation-unsafe.
+---
+
 # Exit codes
 
 The exit code is the contract. For **`saw scan` it is the verdict, unconditionally** — there is no

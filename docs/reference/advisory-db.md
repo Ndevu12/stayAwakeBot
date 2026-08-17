@@ -1,3 +1,7 @@
+---
+description: The offline corpus of malicious-package and CVE advisories a scan consults, how to refresh it and how to gate on its freshness.
+---
+
 # The advisory database
 
 An offline corpus of malicious-package and CVE advisories (OpenSSF, GitHub Advisories, OSV.dev) that

@@ -1,3 +1,7 @@
+---
+description: A layered baseline that keeps a worm from re-entering a repository, applied per repository or across a fleet.
+---
+
 # Harden a repository
 
 A layered baseline that keeps a worm from re-entering a repository. Apply it per repository, or

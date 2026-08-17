@@ -1,3 +1,7 @@
+---
+description: Why saw separates confirmed findings from heuristic ones, what each verdict means, and why advisories never fail a build.
+---
+
 # Verdicts
 
 `saw` reports at two levels of certainty, and they lead to different actions.

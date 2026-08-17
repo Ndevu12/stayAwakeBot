@@ -1,3 +1,7 @@
+---
+description: How saw resolves GitHub targets under --remote, --user and --org, and the order in which selectors win.
+---
+
 # Remote targeting
 
 `--remote` switches [`scan`](scan.md), [`fix`](fix.md), [`discard`](discard.md) and

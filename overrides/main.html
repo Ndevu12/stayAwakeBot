@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{#
+  Discoverability metadata Material does not emit on its own: Open Graph and Twitter cards for
+  link previews, and one JSON-LD block describing the software so a search engine can render a
+  rich result. Everything here is derived from mkdocs.yml — nothing is hardcoded twice.
+#}
+{% block extrahead %}
+  {% set title = page.meta.title if page and page.meta and page.meta.title
+                 else (page.title ~ " — " ~ config.site_name if page and page.title and not page.is_homepage
+                       else config.site_name) %}
+  {% set description = page.meta.description if page and page.meta and page.meta.description
+                       else config.site_description %}
+  {% set image = config.site_url ~ "assets/og-card.png" %}
+  {% set canonical = page.canonical_url if page else config.site_url %}
+
+  {# Search Console ownership. Set `extra.google_site_verification` in mkdocs.yml to the token
+     Google gives you; leaving it unset emits nothing. Verification is optional — robots.txt
+     already points crawlers at the sitemap, so indexing does not depend on it. #}
+  {% if config.extra.google_site_verification %}
+  <meta name="google-site-verification" content="{{ config.extra.google_site_verification }}">
+  {% endif %}
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="{{ config.site_name }}">
+  <meta property="og:title" content="{{ title }}">
+  <meta property="og:description" content="{{ description }}">
+  <meta property="og:image" content="{{ image }}">
+  <meta property="og:url" content="{{ canonical }}">
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{{ title }}">
+  <meta name="twitter:description" content="{{ description }}">
+  <meta name="twitter:image" content="{{ image }}">
+
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "saw",
+      "alternateName": "StayAwakeBot",
+      "applicationCategory": "SecurityApplication",
+      "operatingSystem": "macOS, Linux, Windows",
+      "url": "{{ config.site_url }}",
+      "downloadUrl": "https://pypi.org/project/stayawakebot/",
+      "codeRepository": "{{ config.repo_url }}",
+      "description": "{{ config.site_description | trim }}",
+      "image": "{{ image }}",
+      "screenshot": "{{ image }}",
+      "license": "https://spdx.org/licenses/AGPL-3.0-or-later.html",
+      "author": { "@type": "Person", "name": "{{ config.site_author }}" },
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+    }
+  </script>
+{% endblock %}

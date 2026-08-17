@@ -13,6 +13,11 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Changed
+- **The documentation site is now at <https://saw.ndevuspace.com>.** Every page carries its own
+  summary, a shared link previews with a proper card rather than a bare URL, and the site describes
+  itself to search engines so its pages can be found without going through the repository first.
+
 ### Added
 - **Documented where the report goes when a scan is too large for the terminal.** A big sweep prints
   a summary and writes the full per-finding report to a file; the reference now says where that file
@@ -21,7 +26,7 @@ reader, not the mechanism or the weakness it closed.
 
 ### Added
 - **The documentation is now published as a searchable, versioned site** at
-  <https://ndevu12.github.io/stayAwakeBot/>, with light and dark themes. Because `saw` ships pinned
+  <https://saw.ndevuspace.com>, with light and dark themes. Because `saw` ships pinned
   releases, each release keeps its own copy of the docs, so a pinned install can read the pages that
   describe the version it actually has; `latest` tracks the current documentation.
 

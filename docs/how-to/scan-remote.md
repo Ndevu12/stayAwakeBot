@@ -1,3 +1,7 @@
+---
+description: Scan GitHub repositories with saw — a single repo, a user, or a whole organisation — and how targets are resolved.
+---
+
 # Scan GitHub repositories
 
 Scanning is local unless you say otherwise. `--remote` (and `--user`/`--org`, which imply it) clones
