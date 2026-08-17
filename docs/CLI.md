@@ -134,6 +134,7 @@ something:
 | `-f`, `--fail` | `audit` only | Exit non-zero on a warning-level issue. **`saw scan` has no `--fail`** — its exit code is the verdict unconditionally (see [Exit codes](#exit-codes)). |
 | `--verify` | `audit` only | Content-scan a lone **weak** host artifact (e.g. `~/.node_modules`) to corroborate it — opt-in, bounded, CONFIRMED-only; **never touches `saw scan`**. See [`saw audit`](#saw-audit). |
 | `--no-stream` | `scan`, `fix`, `discard`, `audit`, `db` | Disable the live progress/typewriter output — plain, instant lines. |
+| `-j`, `--jobs N` | `scan`, `fix`, `guard check/setup/drift` | Work on up to N repositories at once. **Default AUTO** (a single repo runs sequentially; several use one worker per CPU core); a number caps it, `-j 1` forces sequential, `auto` restores the default. On **`scan` only** it *also* splits one big repo across workers by file — everywhere else `-j` is strictly multi-repo. |
 
 ## Commands
 
@@ -219,7 +220,7 @@ sweeps GitHub targets (clone → fix → PR). Scope is **local by default**; eac
 **streams live**.
 
 ```text
-saw fix [TARGETS...] [--pr] [-r] [--user U] [--org O] [-p PATH] [-c FILE] [--no-stream]
+saw fix [TARGETS...] [--pr] [-r] [--user U] [--org O] [-p PATH] [-c FILE] [-j N] [--no-stream]
 ```
 
 | Option | Description |
@@ -230,6 +231,7 @@ saw fix [TARGETS...] [--pr] [-r] [--user U] [--org O] [-p PATH] [-c FILE] [--no-
 | `-r`, `--remote` | Sweep GitHub repos (clone → fix → PR) instead of local. See [Remote targeting](#remote-targeting---remote). |
 | `--user USER` / `--org ORG` | Fix this GitHub user's / org's repos (repeatable; **implies `--remote`**). |
 | `-c`, `--config FILE` | Config file. **Optional** — defaults to `config/security.yml` when present, else the current repository. A missing *explicit* path is a clear error (exit `2`), never a crash. |
+| `-j`, `--jobs N` | Fix up to N repositories concurrently. **Multi-repo only** — unlike [`saw scan`](#saw-scan), a single repo is never split across workers. **Default AUTO:** one repo runs sequentially, several use one worker per CPU core; `-j 1` forces sequential, `auto` restores the default. Each repo keeps its own branch, worktree and token, so concurrency never crosses repos. |
 | `--no-stream` | Disable the live per-repo progress output. |
 
 ```bash
@@ -281,6 +283,12 @@ saw discard --branch --remote # delete the branch across the configured GitHub t
 Run a local security hygiene audit: credential exposure, editor (VS Code) settings, host
 persistence / drop-artifacts, and — optionally — a repository's default-branch protection.
 
+A cached-credential finding **informs rather than instructs**: a token in your OS keychain is not
+automatically a problem, and deleting a credential path you actually use is an outage, not a fix.
+[Credential hygiene](CREDENTIAL_HYGIENE.md) is the reasoning those findings link to — what
+determines real risk (lifetime, scope, whether the credential can be copied), and how to remove a
+genuinely redundant one *and verify* you are still authenticated afterwards.
+
 **Rotation safety (#1332).** Every audit ends with a **run-level rotation-safety verdict** — reachable
 even with zero findings — because rotating a credential while a `gh-token-monitor` daemon is live arms
 a home-directory wiper. The audit **enumerates the user-owned persistence surface** (launch agents /
@@ -313,7 +321,7 @@ content, and correlation grade every entry regardless, so a tampered or first-ru
 foothold. Skipped on ephemeral/CI hosts (every run there is a first run).
 
 ```text
-saw audit [--repo OWNER/NAME] [-b BRANCH] [-f] [--verify]
+saw audit [--repo OWNER/NAME] [-b BRANCH] [-f] [--verify] [--no-stream]
 ```
 
 | Option | Description |
@@ -353,7 +361,7 @@ resolved **once** per run; one repo's error never aborts the sweep.
 
 ```text
 saw guard check [TARGETS...] [-p PATH] [-c FILE] [-r] [--user U] [--org O]
-                [--repo OWNER/NAME] [-b BRANCH] [-f] [--no-stream]
+                [--repo OWNER/NAME] [-b BRANCH] [-f] [-j N] [--no-stream]
 ```
 
 | Option | Description |
@@ -362,6 +370,7 @@ saw guard check [TARGETS...] [-p PATH] [-c FILE] [-r] [--user U] [--org O]
 | `--repo OWNER/NAME` | Shorthand for a single remote repo (same as `--remote owner/name`). |
 | `-b`, `--branch` | Branch whose protection must require the gate (default: `main`). |
 | `-f`, `--fail` | Exit `1` when **any** repo's gate is absent, unpinned, stale, or not required — for CI. |
+| `-j`, `--jobs N` | Check up to N repositories concurrently — multi-repo only; see [`-j` in the recurring-flags table](#synopsis--global-options). |
 
 ```bash
 saw guard check .                    # every git repo under the current dir
@@ -392,7 +401,7 @@ and opens a PR. The install PR body lists the two follow-ups a PR can't do itsel
 
 ```text
 saw guard setup [TARGETS...] [-p PATH] [-c FILE] [--pr] [-r] [--user U] [--org O]
-                [--ref SHA|TAG] [-b BRANCH] [--dry-run] [--no-stream]
+                [--ref SHA|TAG] [-b BRANCH] [--dry-run] [-j N] [--no-stream]
 ```
 
 | Option | Description |
@@ -402,6 +411,7 @@ saw guard setup [TARGETS...] [-p PATH] [-c FILE] [--pr] [-r] [--user U] [--org O
 | `--ref SHA\|TAG` | Pin this Strix ref explicitly (offline / deterministic) instead of resolving the latest release. A tag is resolved to its immutable SHA; a SHA is used verbatim. |
 | `-b`, `--branch` | Default branch to target (default: auto-detect). |
 | `--dry-run` | Preview the change (the new file, or the rewritten `uses:` line) without writing anything. |
+| `-j`, `--jobs N` | Set up to N repositories concurrently — multi-repo only; each works in its own clone/worktree. See [`-j` in the recurring-flags table](#synopsis--global-options). |
 
 ```bash
 saw guard check                                 # is the local repo's gate present + SHA-pinned?
@@ -432,11 +442,13 @@ removed, or a stale pin); an operator can sweep a whole fleet with `--remote`.
 
 ```text
 saw guard drift [TARGETS...] [-p PATH] [-c FILE] [-r] [--user U] [--org O] [--repo OWNER/NAME]
+                [-j N] [--no-stream]
 ```
 
 | Option | Description |
 | --- | --- |
 | `TARGETS...` / `-p` / `-c` / `-r` / `--user` / `--org` / `--repo` | Target selection, identical to [`saw guard check`](#saw-guard-check): local paths by default (omit for the current repo), or `owner/repo` slugs under `--remote`. |
+| `-j`, `--jobs N` | Check up to N repositories concurrently — multi-repo only; see [`-j` in the recurring-flags table](#synopsis--global-options). |
 
 ```bash
 saw guard drift                                 # this repo (or configured local targets): file/close the issue

@@ -45,11 +45,11 @@ docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/repo" \
   saw scan /repo -d /repo/reports
 ```
 
-Pin a version (`ghcr.io/ndevu12/stayawakebot:0.1.0`) or a commit (`:sha-<commit>`) for
+Pin a version (`ghcr.io/ndevu12/stayawakebot:0.6.0`) or a commit (`:sha-<commit>`) for
 reproducibility; `:latest` tracks the newest release. To build it yourself:
 
 ```bash
-docker build --build-arg VERSION=0.1.0 -t stayawakebot:local .
+docker build --build-arg VERSION=0.6.0 -t stayawakebot:local .
 ```
 
 ## Health bot — uptime monitoring
@@ -215,7 +215,30 @@ strength of an unreviewed auto-change. See the [`saw` CLI guide](CLI.md#saw-guar
 
 ## Local defense-in-depth (hooks + audit)
 
-Harden a developer machine with layered, dependency-free git hooks:
+### Scan on clone — `saw hook`
+
+**Start here.** `saw hook` installs global git hooks so a fresh **clone**, a **pull**, a **branch
+switch** or a **rebase** scans the code that just landed and warns you *before* you run
+`npm install`, a build, or an editor auto-run task — which is where a supply-chain worm fires:
+
+```bash
+saw hook install                       # future clones/pulls are scanned automatically
+saw hook install -c ~/security.yml     # scan clones against YOUR allowlist
+saw hook status                        # is it active? where is its state?
+saw hook uninstall                     # stop scanning future clones
+SAW_HOOK_DISABLED=1 git clone <url>    # one-off bypass, no uninstall needed
+```
+
+It uses git's `init.templateDir` (not a global `core.hooksPath`), so it is forward-looking —
+existing repos are untouched — coexists with a repo's own hooks, and hijacks nothing. The scan is
+read-only, offline, and never reads a *cloned* repo's own config, so a worm cannot ship an
+allowlist that whitelists itself. It warns and points at [`saw fix`](CLI.md#saw-fix); it can never
+break a git command. See the [CLI guide](CLI.md#saw-hook) for scoping, the timeout, and the limits.
+
+### The repo-local hook scripts
+
+`prevent/install-hooks.sh` is the older, dependency-free layer, kept for repos that want hooks
+committed alongside the code rather than installed per-machine:
 
 ```bash
 prevent/install-hooks.sh                 # this repo: pre-commit + post-merge + post-checkout
@@ -231,8 +254,10 @@ prevent/install-hooks.sh --force         # overwrite a foreign hook instead of b
 - An existing non-StayAwakeBot hook is backed up to `<hook>.pre-stayawake.bak` (never
   silently destroyed); the default install warns if future clones aren't yet protected.
 
-Audit the machine's security posture (cached GitHub credential, VS Code auto-run /
-Workspace Trust), and optionally a repo's branch-protection gate:
+### Audit the machine
+
+`saw audit` checks the machine's own security posture (cached GitHub credential, VS Code auto-run /
+Workspace Trust, host persistence) and, optionally, a repo's branch-protection gate:
 
 ```bash
 saw audit                       # advisory; add --fail for scripts/CI
@@ -248,6 +273,10 @@ yourself." It calls the scan engine on that one directory only and never touches
 `--repo` needs a GitHub credential (an env token or a `gh auth login` session — see
 [Authentication](#authentication)) and warns if the default branch is unprotected or
 the Worm Guard status check isn't required.
+
+A cached-credential finding is **information, not an instruction** — a token in your keychain is
+normal, and deleting a credential path you rely on is an outage rather than a fix. Read
+[Credential hygiene](CREDENTIAL_HYGIENE.md) before acting on one.
 
 ## Authentication
 
