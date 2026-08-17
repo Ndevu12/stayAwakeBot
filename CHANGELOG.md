@@ -14,6 +14,12 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
+- **Documented where the report goes when a scan is too large for the terminal.** A big sweep prints
+  a summary and writes the full per-finding report to a file; the reference now says where that file
+  lands with and without `-d`, that its evidence is redacted like any copy on disk, and that a
+  temporary one is left for your operating system to clear rather than deleted by `saw`.
+
+### Added
 - **The documentation is now published as a searchable, versioned site** at
   <https://ndevu12.github.io/stayAwakeBot/>, with light and dark themes. Because `saw` ships pinned
   releases, each release keeps its own copy of the docs, so a pinned install can read the pages that

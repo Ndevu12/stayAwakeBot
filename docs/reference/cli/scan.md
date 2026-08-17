@@ -38,5 +38,7 @@ saw scan -d /tmp/saw-reports              # opt-in redacted latest.json + latest
 ```
 
 On a terminal, a long sweep streams each target as it completes. A large sweep keeps the terminal to
-a bounded dashboard and moves per-finding evidence into the written report, whose path is printed on
-stderr — nothing is lost to scrollback, and you are never dropped into a pager.
+a bounded dashboard and moves per-finding evidence into a written report, whose path is printed on
+stderr — nothing is lost to scrollback, and you are never dropped into a pager. See
+[the report a long scan writes for you](sinks.md#the-report-a-long-scan-writes-for-you) for where
+that file lands and how long it survives.
