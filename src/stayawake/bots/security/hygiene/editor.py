@@ -9,6 +9,10 @@ from pathlib import Path
 from .models import HygieneIssue
 
 
+_DOCS = ("https://github.com/Ndevu12/stayAwakeBot/blob/main/docs/CLI.md"
+         "#what-saw-audit-does-not-scan")
+
+
 def _vscode_user_settings() -> Path | None:
     """Locate the VS Code user settings.json across macOS / Linux / Windows."""
     home = Path.home()
@@ -124,9 +128,9 @@ def check_vscode(settings_path: Path | None = None) -> list[HygieneIssue]:
             id="vscode-autotasks-default",
             severity="info",
             title="VS Code automatic tasks not explicitly disabled",
-            detail=f'{path} does not set "task.allowAutomaticTasks". Folder-open auto-run is '
-                   "the vector the worm used to execute a disguised font on open.",
-            remediation='Set "task.allowAutomaticTasks": "off" in VS Code user settings.',
+            detail=f'{path} does not set "task.allowAutomaticTasks", so a folder can auto-run tasks '
+                   "when opened.",
+            remediation='Set "task.allowAutomaticTasks": "off".', reference=_DOCS,
         ))
     elif auto.group(1) != "off":
         issues.append(HygieneIssue(
@@ -144,7 +148,7 @@ def check_vscode(settings_path: Path | None = None) -> list[HygieneIssue]:
             severity="warning",
             title="VS Code Workspace Trust is disabled",
             detail=f"{path} disables Workspace Trust, so untrusted folders run code freely.",
-            remediation='Remove the override or set "security.workspace.trust.enabled": true.',
+            remediation='Set "security.workspace.trust.enabled": true.', reference=_DOCS,
         ))
 
     if re.search(r'"security\.workspace\.trust\.untrustedFiles"\s*:\s*"open"', text):
@@ -152,10 +156,9 @@ def check_vscode(settings_path: Path | None = None) -> list[HygieneIssue]:
             id="vscode-untrusted-files-open",
             severity="warning",
             title="VS Code opens untrusted files without prompting",
-            detail=f'{path} sets "security.workspace.trust.untrustedFiles": "open" — files in an '
-                   "untrusted folder open (and their language servers / auto-tasks can run) without the "
-                   "trust prompt, re-opening the folder-open execution vector.",
-            remediation='Set "security.workspace.trust.untrustedFiles": "prompt" (the default).',
+            detail=f'{path} sets "security.workspace.trust.untrustedFiles": "open", so untrusted '
+                   "files open without the trust prompt.",
+            remediation='Set it to "prompt" (the default).', reference=_DOCS,
         ))
 
     if _autoapprove_approves_everything(text):
@@ -163,9 +166,9 @@ def check_vscode(settings_path: Path | None = None) -> list[HygieneIssue]:
             id="vscode-autoapprove-all",
             severity="warning",
             title="VS Code auto-approves ALL terminal commands for chat/agent tools",
-            detail=f'{path} auto-approves every terminal command via "chat.tools.terminal.autoApprove" '
-                   "(blanket true, or a catch-all regex). Anything an AI agent proposes runs with no "
-                   "confirmation.",
+            detail=f'{path} auto-approves EVERY terminal command via '
+                   '"chat.tools.terminal.autoApprove", so anything an AI agent proposes runs '
+                   "unprompted.",
             remediation='Replace the blanket/catch-all with an explicit allowlist object of safe '
                         "commands (or set it to false); never auto-approve everything.",
         ))
@@ -177,11 +180,8 @@ def check_vscode(settings_path: Path | None = None) -> list[HygieneIssue]:
                 severity="warning",
                 title="VS Code auto-approves risky terminal commands for chat/agent tools",
                 detail=f'{path} auto-approves {", ".join(risky)} via '
-                       '"chat.tools.terminal.autoApprove" — an AI agent (or a folder-open task that '
-                       "reaches it) can run these with no confirmation, exactly the unattended-execution "
-                       "vector the worm needs.",
-                remediation='Remove those entries from "chat.tools.terminal.autoApprove" (or set them '
-                            "to false) so risky commands still require a click.",
+                       '"chat.tools.terminal.autoApprove", so an AI agent runs them unprompted.',
+                remediation='Remove those entries, or set them to false.', reference=_DOCS,
             ))
     return issues
 

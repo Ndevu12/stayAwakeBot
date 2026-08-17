@@ -194,6 +194,10 @@ def _unknown_surface_disclosure(issues: list[HygieneIssue], *, color: bool, widt
     return lines
 
 
+_SCOPE_DOCS = ("https://github.com/Ndevu12/stayAwakeBot/blob/main/docs/CLI.md"
+               "#what-saw-audit-does-not-scan")
+
+
 def _scope_note(issues: list[HygieneIssue], *, color: bool, width: int) -> list[str]:
     """REVEAL what this audit does not scan (#1341), so no result is read as a host all-clear over the
     locations supply-chain malware stages in. These are tracked GAPS on a path to closure (#1376 global
@@ -228,50 +232,41 @@ def _scope_note(issues: list[HygieneIssue], *, color: bool, width: int) -> list[
         # Windows it enumerates NOTHING and every autorun probe returns empty. Claiming to read a
         # surface here would make "no findings" mean "clean" when it means "not examined" — the same
         # over-claim #1332 removed on the readability axis, one axis over.
-        surface_read = ("does NOT enumerate a host persistence surface on this platform — it reads "
-                        "only a targeted set of known drop-paths")
+        surface_read = "no host persistence surface is enumerated on this platform"
     elif surface_unverified:
-        surface_read = ("reads the part of the host persistence surface it could read, plus a "
-                        "targeted set of known drop-paths")
+        surface_read = "read the part of the persistence surface it could, plus known drop-paths"
     elif SURFACE_ABSENT_ID in ids:
         # A third wording: the flat claim would restate the coverage the verdict just withdrew, and
         # "the part it could read" is equally wrong — reading was never the problem here.
-        surface_read = ("found no host persistence surface present to read, and reads a targeted "
-                        "set of known drop-paths")
+        surface_read = "found no persistence surface present, and read known drop-paths"
     else:
-        surface_read = "reads the host persistence surface and a targeted set of known drop-paths"
+        surface_read = "read the host persistence surface and known drop-paths"
     # "Scope your response past what is listed here" presupposes an active compromise whose extent may
     # exceed the list — so it is gated on that EXACT tier, asked of `incident_tier()`, the same
     # authority `_banner` consults. Credential exposure is deliberately NOT that: the run says the
     # host is not implicated, so it takes the neutral wording below rather than contradicting the
     # green rotation verdict printed above it.
     if incident_tier({i.id for i in issues}) == TIER_ACTIVE_PERSISTENCE:
-        means = "This may not be the full extent — scope your response past what is listed here."
+        means = "scope your response wider than this list."
     elif surface_unverified:
-        means = ("The surface above could not be fully read, so this is not a clean bill of health for "
-                 "those either.")
+        means = "and the surface above was not fully read."
     elif issues:
-        means = "These locations were not examined."
+        means = "other locations were not examined."
     else:
-        means = "A clean result does not exclude those."
+        means = "a clean result does not exclude what was not scanned."
     # A gap list that omits an axis reads as COVERAGE of it, which is the failure this note exists to
     # prevent. `saw audit` is a DISK scanner: an account-level foothold (a self-hosted runner registered
     # against the org) survives a full host rebuild and is invisible here — so it is named, not implied
     # (#1340, deferred to #1373). The audit's own runner probe is disk-only and reads as broader than it is.
-    return [paint("Scope of this audit:", SEVERITY["info"], on=color)] + block(
-        # "OTHER survivor temp dirs" is relative to the system temp dir named just above, and is
-        # therefore true in every state: `tempfile.gettempdir()` honours $TMPDIR, so naming a specific
-        # path here (e.g. /var/tmp) would be a false claim on any host that points $TMPDIR at it.
-        # EVERY gap stays named — an omitted axis reads as coverage of it, which is the defect this
-        # note exists to remove. The prose around the list is what shrinks.
-        f"{surface_read} (home, /tmp, the system temp dir, the working directory). NOT scanned: "
-        "other survivor temp dirs, the global npm prefix beyond Node's resolution paths, "
-        "Docker images/volumes, other mounted filesystems, account/organization-level state "
-        "such as runner "
-        "registrations, and Windows autorun "
-        "(registry Run keys, Startup folder, Scheduled Tasks) — enumeration is macOS/Linux "
-        f"user-scope only. {means}",
-        indent=2, width=width)
+    # ONE line, and the gap LIST lives in the docs. Every gap still has to be stated somewhere —
+    # an unlisted axis reads as coverage of it — but stating them here put a paragraph of things we
+    # did NOT do at the end of every run, which is the noise this note was accused of being.
+    # clig.dev: don't print by default what the reader can look up, and guard the signal-to-noise.
+    return [paint(f"Scope: {surface_read}. {means}", SEVERITY["info"], on=color)
+            if False else line
+            for line in block(f"Scope: {surface_read}. Not exhaustive — {means} "
+                              f"{_SCOPE_DOCS}", indent=2, width=width,
+                              marker=f"{MARKER['meta']} ", code=SEVERITY["info"], color=color)]
 
 
 def render(issues: list[HygieneIssue], *, color: bool = False, width: int = 80) -> str:
