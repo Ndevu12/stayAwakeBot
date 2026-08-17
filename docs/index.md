@@ -31,3 +31,13 @@ keep an organisation's repositories gated.
 
 The package also ships an unrelated uptime monitor, `stayawake-health-check` — see
 [configuration](reference/configuration.md#the-uptime-monitor-configurlsyml).
+
+## Which version you are reading
+
+Each release keeps its own copy of these pages, and the version selector at the top switches
+between them. `latest` follows the current documentation.
+
+Documented versions begin at **0.6.2**. Earlier releases were published before this site existed,
+so there are no pages describing them — rather than reprinting today's documentation under an older
+number, which would describe behaviour those versions do not have. If you are running something
+earlier, `saw --version` and `saw <command> -h` describe the copy you actually have.
