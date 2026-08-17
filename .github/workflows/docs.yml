@@ -129,6 +129,21 @@ jobs:
           git archive origin/gh-pages | tar -x -C pages-artifact
           test -s pages-artifact/index.html   # fail loudly rather than deploying an empty site
 
+      # The custom domain and the crawl directives have to sit at the SITE ROOT, and mike deploys
+      # each build into a version subdirectory — so neither can come from `docs/`, which lands in
+      # `latest/`. They are written here instead, once, over the whole versioned tree.
+      #
+      # CNAME: Pages stores the custom domain in repository settings for an Actions deployment, but
+      # shipping the file too is what keeps the domain from being dropped by a later deploy.
+      - name: Write the site-root files (custom domain, crawl directives)
+        run: |
+          set -euo pipefail
+          echo 'saw.ndevuspace.com' > pages-artifact/CNAME
+          printf '%s\n' 'User-agent: *' 'Allow: /' '' \
+            'Sitemap: https://saw.ndevuspace.com/latest/sitemap.xml' > pages-artifact/robots.txt
+          cat pages-artifact/robots.txt
+          test -s pages-artifact/latest/sitemap.xml || echo "::warning::latest/sitemap.xml missing"
+
       - name: Configure Pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d   # v6.0.0
 

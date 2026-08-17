@@ -204,6 +204,8 @@ stayawake-health-check --config config/urls.yml
 
 ## Documentation
 
+**[saw.ndevuspace.com](https://saw.ndevuspace.com)** — the full documentation, searchable and versioned.
+
 - [Documentation index](docs/index.md) — everything below, in one place
 - [Your first scan](docs/tutorial/first-scan.md) — install, scan, read the verdict, act
 - [Gate a repository](docs/tutorial/gate-a-repo.md) — from unguarded to a required check

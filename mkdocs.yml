@@ -8,7 +8,10 @@
 # so an unversioned site would describe every older install incorrectly.
 
 site_name: saw
-site_url: https://ndevu12.github.io/stayAwakeBot/
+# Includes the `latest/` prefix on purpose: mike serves each build from a version directory, so a
+# bare-domain site_url would emit canonical links and a sitemap full of URLs that do not exist.
+# A released version's pages then declare `latest` canonical, which consolidates ranking there.
+site_url: https://saw.ndevuspace.com/latest/
 site_description: >-
   saw — an offline-first supply-chain worm scanner and sentinel: detect, report,
   remediate on a branch, and gate CI.
@@ -35,6 +38,7 @@ validation:
 
 theme:
   name: material
+  custom_dir: overrides
   language: en
   logo: assets/stayawakebot-app-icon.png
   favicon: assets/stayawakebot-app-icon.png
