@@ -49,11 +49,30 @@ The sentinel keeps **one self-updating issue per project** (label `stayawakebot-
 
 ## `config/security.yml` (security bot)
 
-Targets (local globs + GitHub users/orgs), `exclude_dirs`, `max_file_bytes`,
-`remote_clone_depth`, `reports_dir` (output location; default `reports/security`),
-allowlist, and alert routing. The signature database ships **inside the package**; point
-at a custom DB with `settings.signatures_path`. Full field reference and the layered
-design are maintained privately.
+Targets (local globs + GitHub users/orgs), scan `settings`, allowlist, and alert routing. The
+signature database ships **inside the package**; point at a custom DB with
+`settings.signatures_path`. The layered design and the detection rules themselves are maintained
+privately.
+
+**`settings`** — every key is optional, and each has a CLI equivalent that wins when both are given:
+
+| Key | Default | Effect |
+|-----|---------|--------|
+| `exclude_dirs` | `.git`, `node_modules`, `.next`, `dist`, `build`, `.malware-quarantine`, `.venv` | Directories never traversed. Keep it minimal: every name here is a place a committed payload could hide from a CI gate that scans with this file. |
+| `max_file_bytes` | `2000000` | Read cap for content matching. A larger *source* file is still scanned head+tail; only non-source assets are skipped. |
+| `remote_clone_depth` | `50` | Shallow-clone depth for `--remote` targets (the history matchers need several commits). |
+| `scan_build_outputs` | `false` | Un-prune `dist`/`build`/`out`/`.next` and run the self-evident construct checks there. Noisier by design; emits heuristic (SUSPICIOUS) findings only. |
+| `deep` | `false` | Content-scan installed dependency code, as `saw scan --deep`. |
+| `dependency_advisories` | `true` | The offline CVE-advisory section. `saw scan --no-advisories` turns it off for one run. Advisories never affect the verdict or exit code. |
+| `external_audit` | `false` | Run installed external auditors, as `saw scan -x`. **The one setting that leaves the offline sandbox.** |
+| `require_db` | `false` | Fail (exit 2) when the advisory DB is missing or fails its integrity check, instead of degrading to the inline seed. As `saw scan --require-db`. |
+| `jobs` | auto | Worker count; an int, or `auto`/empty for automatic. Below 1 is clamped to 1; an unparseable value falls back to automatic rather than failing the scan. `-j/--jobs` wins. |
+| `parallel_min_files` | `256` | File-count floor below which a single target is scanned sequentially (a pool is not worth its startup cost on a small repo). |
+| `reports_dir` | — | Intended fallback location for the report bundle. **Currently inert for `saw scan`** ([#1454](https://github.com/Ndevu12/stayAwakeBot/issues/1454)): the bundle is only written when `-d/--reports-dir DIR` is passed, and that `DIR` then takes precedence over this. Pass `-d` with the path you want. |
+| `signatures_path` | packaged DB | Path to a custom signature database. |
+
+Booleans are parsed strictly, so a quoted `external_audit: "false"` reads as **false** rather than
+being coerced true — a security-sensitive setting can never be enabled by quoting.
 
 `targets.local` is **optional**: for ad-hoc local scans you can pass paths on the command
 line (`saw scan <path>…` / `--path`), and a bare `saw scan` with nothing configured scans

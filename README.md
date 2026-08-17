@@ -115,9 +115,11 @@ not required is decoration.
 Both sweep many repositories at once (`--remote` / `--user` / `--org`), like `saw scan` and
 `saw fix`. See the [CLI guide](docs/CLI.md#saw-guard).
 
-### The workflow it writes
+### The workflow, by hand
 
-Installed for you by `saw guard setup`, and equally valid to drop in by hand:
+A minimal equivalent, if you would rather write it yourself than run `saw guard setup`. The
+installed file is not identical — it also carries a weekly `pin-drift` job and prefers a
+`GH_SECURITY_TOKEN` secret — so run `saw guard setup --dry-run` to see exactly what it would write:
 
 ```yaml
 # .github/workflows/worm-scan.yml
@@ -147,7 +149,7 @@ jobs:
 
       - uses: Ndevu12/strix@93fe465d7b0266c6010778999b73b591ae082f3e      # v0.1.4
         with:
-          version: '0.5.1'      # pin the scanner too; blank tracks latest
+          version: '0.6.0'      # pin the scanner too; blank tracks latest
           # On an infected verdict, open ONE rolling `security/auto-clean` PR.
           # The gate still goes RED until that PR is merged — remediation opens
           # the fix, it does not make the check pass. Omit for detection only.
@@ -205,6 +207,7 @@ stayawake-health-check --config config/urls.yml
 - [CLI command guide](docs/CLI.md) — the `saw` security commands (scan, fix, audit, guard, …)
 - [Usage](docs/USAGE.md) — install, run both bots, secrets, GitHub Actions, deploy your own
 - [Configuration & Reports](docs/CONFIGURATION.md) — config file fields and report formats
+- [Credential hygiene](docs/CREDENTIAL_HYGIENE.md) — what a cached-credential finding means, and how to act on one safely
 - [Prerequisites](docs/PREREQUISITES.md) — supported Python versions and install troubleshooting
 - [Security baseline](prevent/SECURITY_BASELINE.md) — hardening checklist for any repo
 - [Contributing](CONTRIBUTING.md) — development setup and guidelines
