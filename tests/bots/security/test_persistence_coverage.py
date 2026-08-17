@@ -444,16 +444,16 @@ class TestTheReportDescribesTheRightUnknown(unittest.TestCase):
 
     def test_the_scope_note_does_not_claim_a_read_failure_that_did_not_happen(self):
         absent = self._report("persistence-surface-not-established")
-        self.assertNotIn("the part of the host persistence surface it could read", absent)
+        self.assertNotIn("read the part of the persistence surface it could", absent)
         self.assertNotIn("could not be fully read", absent)
-        self.assertIn("found no host persistence surface present to read", absent)
+        self.assertIn("found no persistence surface present", absent)
 
     def test_the_unreadable_state_keeps_its_own_wording(self):
         unreadable = self._report("persistence-surface-unverified")
-        self.assertIn("the part of the host persistence surface it could read", unreadable)
+        self.assertIn("read the part of the persistence surface it could", unreadable)
 
     def test_a_clean_run_still_claims_the_full_surface(self):
-        self.assertIn("reads the host persistence surface and", " ".join(hygiene.render([]).split()))
+        self.assertIn("read the host persistence surface and", " ".join(hygiene.render([]).split()))
 
 
 class TestNoDiscoveredValueRendersVerbatim(unittest.TestCase):
