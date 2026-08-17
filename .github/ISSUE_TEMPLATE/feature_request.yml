@@ -1,0 +1,41 @@
+name: Feature request
+description: Something saw should be able to do and cannot.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: >-
+        What you were trying to do, and where saw left you. Describe the
+        situation before the solution — the problem is what gets prioritised.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like it to do
+      description: >-
+        A command, a flag, an output — as concrete as you can make it. Name the
+        commands it would touch if you know them.
+    validations:
+      required: true
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: What you do today instead
+      description: >-
+        The workaround, script, or other tool you are using. This tells us how
+        much the gap costs.
+    validations:
+      required: false
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Prior art, links, or related issues.
+    validations:
+      required: false

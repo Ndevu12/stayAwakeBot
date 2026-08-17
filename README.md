@@ -211,7 +211,9 @@ stayawake-health-check --config config/urls.yml
 - [Prerequisites](docs/PREREQUISITES.md) — supported Python versions and install troubleshooting
 - [Security baseline](prevent/SECURITY_BASELINE.md) — hardening checklist for any repo
 - [Contributing](CONTRIBUTING.md) — development setup and guidelines
+- [Support](SUPPORT.md) — where to ask a question, file a bug, or report a false positive
 - [Security policy](SECURITY.md) — how to report a security issue privately
+- [Code of conduct](CODE_OF_CONDUCT.md) — what taking part here commits you to
 
 ## License
 
