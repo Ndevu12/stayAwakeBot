@@ -18,7 +18,7 @@ ships — so the matrix evolves on its own. The packaged **floor** is `requires-
 default lives in one place, [`.python-version`](.python-version) (read by `actions/setup-python`) —
 bump it there, not in workflow files. (The `worm-scan` action stays pinned explicitly so it
 remains self-contained for repos that adopt the gate.) The user-facing version requirement
-lives in [`docs/PREREQUISITES.md`](docs/PREREQUISITES.md).
+lives in [`docs/tutorial/first-scan.md`](docs/tutorial/first-scan.md).
 
 ## Updating the container's dependencies
 
@@ -42,7 +42,7 @@ Commit the result. The diff shows exactly which versions moved, which is the poi
 ## Pull requests
 - Keep commits focused; describe **what** changed (not internal roadmap phases).
 - Run the suite locally; the **Worm Guard** CI gate must pass (it blocks any infected/evil-merge change).
-- For security-sensitive changes, see `prevent/SECURITY_BASELINE.md`.
+- For security-sensitive changes, see [`docs/how-to/harden-a-repo.md`](docs/how-to/harden-a-repo.md).
 - Add a `CHANGELOG.md` `[Unreleased]` entry in the same PR for any user-visible change — see below.
 
 ## Changelog entries

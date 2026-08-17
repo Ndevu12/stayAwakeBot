@@ -1,0 +1,19 @@
+# Exit codes
+
+The exit code is the contract. For **`saw scan` it is the verdict, unconditionally** — there is no
+`--fail` flag and nothing to parse.
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Clean. `saw scan`: no target is infected. `saw audit`: the start-up surface was established and is clean, and no weaker warning gated — rotation is safe. `saw guard check`: every gate is present, pinned, current and required (or issues were found without `-f`); `saw guard setup`: every repository succeeded or was already current. |
+| `1` | `saw scan`: at least one target is **infected**. `saw audit`: a weaker warning-level hygiene issue **and** `-f` was set. `saw guard check`: a gate is absent, unpinned, stale or not required **and** `-f` was set; `saw guard setup`: a repository errored, or a PR could not be opened. |
+| `2` | Usage error (unknown command, bad option, a missing explicit `--config` path), **or** a run that could not complete — a malformed config, or a target that errored while being scanned. A target `saw` could not scan is never reported as clean. `saw guard setup` also exits `2` when it cannot resolve the release SHA (offline → pass `--ref`). |
+| `3` | **`saw audit` only — rotation unsafe.** Either something was found running at start-up, or the start-up surface could not be established. It gates independently of `-f`, because rotating a credential on a compromised host hands over the new one. See [audit a machine](../how-to/audit-a-machine.md). |
+
+`saw guard drift` reports as an issue and always exits `0`, so it is safe on a schedule.
+
+**Migrating to `3`.** It is additive. Code that treats "`0` is fine, non-zero needs attention" is
+already correct and fails safe; only code that specifically distinguished `saw audit`'s `1` from its
+`2` needs to handle it. `saw scan` and `saw guard` never return `3`.
+
+Why an unscannable target is an error and not a pass: [fail closed](../explanation/fail-closed.md).
