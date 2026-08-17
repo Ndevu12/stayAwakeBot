@@ -33,7 +33,19 @@ on:
       - '.github/workflows/docs.yml'
   release:
     types: [published]
+  # Publish a version by hand — for backfilling a release that predates this site, or re-cutting
+  # one. Leave `version` empty to refresh `latest` exactly as a push to main does.
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (e.g. 0.6.2). Empty refreshes `latest`.'
+        required: false
+        default: ''
+      set_latest:
+        description: 'Also point the `latest` alias at it'
+        type: boolean
+        required: false
+        default: false
 
 # Least privilege at the top: read-only. Each job widens ONLY what it needs.
 permissions:
@@ -107,12 +119,26 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           TAG: ${{ github.event.release.tag_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_SET_LATEST: ${{ inputs.set_latest }}
         run: |
           set -euo pipefail
           if [ "$EVENT" = "release" ]; then
             version="${TAG#v}"
             [ -n "$version" ] || { echo "::error::release event with an empty tag_name"; exit 1; }
             mike deploy --push "$version"
+          elif [ "$EVENT" = "workflow_dispatch" ] && [ -n "${INPUT_VERSION}" ]; then
+            # A hand-published version: same immutable directory a release would create, so a
+            # release that predates this site can be backfilled without re-tagging it.
+            case "$INPUT_VERSION" in
+              [0-9]*.[0-9]*.[0-9]*) : ;;
+              *) echo "::error::version must look like 1.2.3 (no leading v); got '$INPUT_VERSION'"; exit 1 ;;
+            esac
+            if [ "$INPUT_SET_LATEST" = "true" ]; then
+              mike deploy --push --update-aliases "$INPUT_VERSION" latest
+            else
+              mike deploy --push "$INPUT_VERSION"
+            fi
           else
             mike deploy --push --update-aliases latest
             mike set-default --push latest
