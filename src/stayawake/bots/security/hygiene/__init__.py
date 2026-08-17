@@ -262,13 +262,15 @@ def _scope_note(issues: list[HygieneIssue], *, color: bool, width: int) -> list[
         # "OTHER survivor temp dirs" is relative to the system temp dir named just above, and is
         # therefore true in every state: `tempfile.gettempdir()` honours $TMPDIR, so naming a specific
         # path here (e.g. /var/tmp) would be a false claim on any host that points $TMPDIR at it.
-        f"{surface_read} (home, /tmp, the system temp dir, the working directory). It does NOT scan "
-        "other survivor temp dirs, the global npm prefix beyond Node's own module resolution "
-        "paths, Docker images/volumes, other mounted "
-        "filesystems, account/organization-level state such as self-hosted runner registrations, "
-        "or Windows autorun locations (registry Run keys, the Startup folder, Scheduled Tasks) — "
-        "persistence enumeration is macOS and Linux user-scope only. "
-        f"{means}",
+        # EVERY gap stays named — an omitted axis reads as coverage of it, which is the defect this
+        # note exists to remove. The prose around the list is what shrinks.
+        f"{surface_read} (home, /tmp, the system temp dir, the working directory). NOT scanned: "
+        "other survivor temp dirs, the global npm prefix beyond Node's resolution paths, "
+        "Docker images/volumes, other mounted filesystems, account/organization-level state "
+        "such as runner "
+        "registrations, and Windows autorun "
+        "(registry Run keys, Startup folder, Scheduled Tasks) — enumeration is macOS/Linux "
+        f"user-scope only. {means}",
         indent=2, width=width)
 
 
