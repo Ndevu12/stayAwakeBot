@@ -2,7 +2,7 @@
 
 `saw fix` cleans an infected repository **on a branch**, for you to review. It never edits your
 working tree, and it pushes nothing unless you ask. Flags: [CLI
-reference](../reference/cli.md#saw-fix).
+reference](../reference/cli/fix.md).
 
 ```bash
 saw fix .                  # prepare security/auto-clean for this repository — no push, no network

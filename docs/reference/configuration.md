@@ -1,7 +1,7 @@
 # Configuration
 
 Both files are optional. Local scanning needs neither — pass paths on the command line, or stand in a
-repository. Every CLI flag mentioned here is described in the [CLI reference](cli.md).
+repository. Every CLI flag mentioned here is described in the [CLI reference](cli/index.md).
 
 ## The scanner (`config/security.yml`)
 
@@ -91,4 +91,4 @@ a schedule and whenever that file changes.
 
 Neither tool writes a report into your repository, and nothing is committed back. `saw scan` renders
 to the terminal and persists nothing by default; durable output is one opt-in sink per flag — see
-[report sinks](cli.md#report-sinks).
+[report sinks](cli/sinks.md).

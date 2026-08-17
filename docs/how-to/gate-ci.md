@@ -2,7 +2,7 @@
 
 Stop an infected change from merging. For one repository step by step, see [gate a
 repository](../tutorial/gate-a-repo.md); this is the operational view. Flags: [CLI
-reference](../reference/cli.md#saw-guard).
+reference](../reference/cli/guard.md).
 
 ## Across a fleet
 
@@ -21,7 +21,7 @@ if it cannot resolve the release to a SHA — offline, pass `--ref <sha|tag>`.
 The installed gate opens a rolling fix PR on an infected verdict and stays **red until that PR is
 merged**, so the check never passes on an unreviewed change. To detect without remediating, drop the
 action's `remediate:` input and give the job read-only permissions — see the hand-written workflow in
-the [project README](../../README.md#the-workflow-by-hand), which also lists the action's other
+the [project README](https://github.com/Ndevu12/stayAwakeBot#the-workflow-by-hand), which also lists the action's other
 inputs. To run the scanner straight from this repository rather than from PyPI, reference the in-repo
 composite instead — `uses: Ndevu12/stayAwakeBot/.github/actions/worm-scan@<SHA>`; both forms run the
 same logic.

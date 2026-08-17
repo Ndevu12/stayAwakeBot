@@ -21,13 +21,13 @@ saw auth status
 ```
 
 It names exactly what is missing and the command that fixes it. The resolution order and the least
-privilege each command needs are in [credentials](../reference/cli.md#credentials).
+privilege each command needs are in [credentials](../reference/cli/credentials.md).
 
 ## Which repositories get scanned
 
 First match wins: ad-hoc `--user`/`--org`/`owner/repo` selectors, then configured
 `targets.github`, then the repositories you own (or the ones a GitHub App installation can see). The
-full ladder is in [remote targeting](../reference/cli.md#remote-targeting).
+full ladder is in [remote targeting](../reference/cli/remote.md).
 
 The same ladder applies to `saw fix --remote`, `saw discard --remote` and `saw guard --remote`.
 

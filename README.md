@@ -73,7 +73,7 @@ saw audit
 New here? `saw intro` is a 60-second tour, and `saw search "…"` finds the command you want.
 
 > The distribution is published as **`stayawakebot`**; the security CLI is the terse **`saw`**
-> command (see the [CLI reference](docs/reference/cli.md)).
+> command (see the [CLI reference](docs/reference/cli/index.md)).
 
 ## Don't hand-maintain that workflow
 
@@ -113,7 +113,7 @@ file there" — it verifies branch protection actually **requires** the check, b
 not required is decoration.
 
 Both sweep many repositories at once (`--remote` / `--user` / `--org`), like `saw scan` and
-`saw fix`. See the [CLI reference](docs/reference/cli.md#saw-guard).
+`saw fix`. See the [CLI reference](docs/reference/cli/guard.md).
 
 ### The workflow, by hand
 
@@ -207,7 +207,7 @@ stayawake-health-check --config config/urls.yml
 - [Documentation index](docs/index.md) — everything below, in one place
 - [Your first scan](docs/tutorial/first-scan.md) — install, scan, read the verdict, act
 - [Gate a repository](docs/tutorial/gate-a-repo.md) — from unguarded to a required check
-- [CLI reference](docs/reference/cli.md) — every command and flag, documented once
+- [CLI reference](docs/reference/cli/index.md) — every command and flag, documented once
 - [Configuration](docs/reference/configuration.md) · [exit codes](docs/reference/exit-codes.md) · [advisory DB](docs/reference/advisory-db.md)
 - [Trust model](docs/explanation/trust-model.md) · [verdicts](docs/explanation/verdicts.md) · [fail closed](docs/explanation/fail-closed.md) · [safety envelope](docs/explanation/safety-envelope.md)
 - [Credential hygiene](docs/explanation/credential-hygiene.md) — what a cached-credential finding means, and how to act on one safely

@@ -28,7 +28,7 @@ ignored rather than silently suppressing whatever appears there next.
 Local scanning uses no credential at all. Where one is needed it reaches git through `GIT_ASKPASS`,
 never through a URL or process arguments, so it cannot leak through `ps`, git's error output or a CI
 log. `saw audit` reports on credentials without ever reading a live secret's bytes. See
-[credentials](../reference/cli.md#credentials).
+[credentials](../reference/cli/credentials.md).
 
 ## Evidence stays where you put it
 

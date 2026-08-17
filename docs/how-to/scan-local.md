@@ -1,7 +1,7 @@
 # Scan local code
 
 No token, no config, nothing leaves your machine. Every flag is in the
-[CLI reference](../reference/cli.md#saw-scan).
+[CLI reference](../reference/cli/scan.md).
 
 ```bash
 saw scan                      # the repository you are standing in
@@ -23,7 +23,7 @@ saw scan -j 1                 # force sequential, e.g. on a low-memory box
 A persisted report is byte-identical either way.
 
 **Keep a copy.** A scan writes nothing by default. Pick a sink — see [report
-sinks](../reference/cli.md#report-sinks):
+sinks](../reference/cli/sinks.md):
 
 ```bash
 saw scan --json > report.json     # full evidence, to a pipe

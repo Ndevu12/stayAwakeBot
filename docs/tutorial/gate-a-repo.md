@@ -2,7 +2,7 @@
 
 A repository that scans clean today can still merge an infected change tomorrow. This walks one
 repository from unguarded to *provably* guarded. You need a GitHub token with the `workflow`
-permission (see [credentials](../reference/cli.md#credentials)).
+permission (see [credentials](../reference/cli/credentials.md)).
 
 ## 1. See what is missing
 

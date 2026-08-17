@@ -16,7 +16,7 @@ keep an organisation's repositories gated.
 [gate CI](how-to/gate-ci.md) · [scan on clone](how-to/scan-on-clone.md) ·
 [audit a machine](how-to/audit-a-machine.md) · [harden a repository](how-to/harden-a-repo.md)
 
-**Look it up** — [CLI reference](reference/cli.md) ·
+**Look it up** — [CLI reference](reference/cli/index.md) ·
 [configuration](reference/configuration.md) · [exit codes](reference/exit-codes.md) ·
 [advisory database](reference/advisory-db.md)
 

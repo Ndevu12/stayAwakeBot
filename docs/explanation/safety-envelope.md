@@ -43,4 +43,4 @@ machine alone. See [audit a machine](../how-to/audit-a-machine.md).
 
 Full evidence stays on your terminal or in `--json`. Anything persisted stores a fingerprint instead,
 and alert bodies carry no evidence at all — a security report can never re-distribute live malware.
-See [report sinks](../reference/cli.md#report-sinks).
+See [report sinks](../reference/cli/sinks.md).
