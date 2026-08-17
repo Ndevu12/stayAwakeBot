@@ -33,7 +33,7 @@ and gates CI, so an infected change cannot merge.
 
 ## Quick start
 
-> **Prerequisites:** Python 3.11+ — see [docs/PREREQUISITES.md](docs/PREREQUISITES.md).
+> **Prerequisites:** Python 3.11+ — see [Your first scan](docs/tutorial/first-scan.md).
 
 ```bash
 pip install stayawakebot
@@ -73,7 +73,7 @@ saw audit
 New here? `saw intro` is a 60-second tour, and `saw search "…"` finds the command you want.
 
 > The distribution is published as **`stayawakebot`**; the security CLI is the terse **`saw`**
-> command (see the [CLI guide](docs/CLI.md)).
+> command (see the [CLI reference](docs/reference/cli.md)).
 
 ## Don't hand-maintain that workflow
 
@@ -113,7 +113,7 @@ file there" — it verifies branch protection actually **requires** the check, b
 not required is decoration.
 
 Both sweep many repositories at once (`--remote` / `--user` / `--org`), like `saw scan` and
-`saw fix`. See the [CLI guide](docs/CLI.md#saw-guard).
+`saw fix`. See the [CLI reference](docs/reference/cli.md#saw-guard).
 
 ### The workflow, by hand
 
@@ -168,7 +168,7 @@ corresponds to, so the pin stays readable. In production pin `version:` as well 
 
 Other inputs: `config-file` to supply your own allowlist, `fail-on` to choose the verdict that fails
 the build (default `infected`), and `upload-sarif` to send findings to code scanning.
-See [Security baseline](prevent/SECURITY_BASELINE.md).
+See [Harden a repository](docs/how-to/harden-a-repo.md).
 
 ## Run via Docker (no local Python needed)
 
@@ -196,7 +196,7 @@ built from the same wheel published to PyPI, and ships SLSA provenance + SBOM at
 `stayawakebot` additionally ships a **health sentinel** — a URL/uptime availability monitor
 (HTTP status, latency, TLS and keyword checks) run with `stayawake-health-check`. It is
 independent of `saw` and shares only the packaging. See
-[Usage](docs/USAGE.md) and [Configuration](docs/CONFIGURATION.md).
+[Configuration](docs/reference/configuration.md#the-uptime-monitor-configurlsyml).
 
 ```bash
 stayawake-health-check --config config/urls.yml
@@ -204,12 +204,14 @@ stayawake-health-check --config config/urls.yml
 
 ## Documentation
 
-- [CLI command guide](docs/CLI.md) — the `saw` security commands (scan, fix, audit, guard, …)
-- [Usage](docs/USAGE.md) — install, run both bots, secrets, GitHub Actions, deploy your own
-- [Configuration & Reports](docs/CONFIGURATION.md) — config file fields and report formats
+- [Documentation index](docs/index.md) — everything below, in one place
+- [Your first scan](docs/tutorial/first-scan.md) — install, scan, read the verdict, act
+- [Gate a repository](docs/tutorial/gate-a-repo.md) — from unguarded to a required check
+- [CLI reference](docs/reference/cli.md) — every command and flag, documented once
+- [Configuration](docs/reference/configuration.md) · [exit codes](docs/reference/exit-codes.md) · [advisory DB](docs/reference/advisory-db.md)
+- [Trust model](docs/explanation/trust-model.md) · [verdicts](docs/explanation/verdicts.md) · [fail closed](docs/explanation/fail-closed.md) · [safety envelope](docs/explanation/safety-envelope.md)
 - [Credential hygiene](docs/CREDENTIAL_HYGIENE.md) — what a cached-credential finding means, and how to act on one safely
-- [Prerequisites](docs/PREREQUISITES.md) — supported Python versions and install troubleshooting
-- [Security baseline](prevent/SECURITY_BASELINE.md) — hardening checklist for any repo
+- [Harden a repository](docs/how-to/harden-a-repo.md) — the layered baseline for any repo
 - [Contributing](CONTRIBUTING.md) — development setup and guidelines
 - [Support](SUPPORT.md) — where to ask a question, file a bug, or report a false positive
 - [Security policy](SECURITY.md) — how to report a security issue privately

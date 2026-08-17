@@ -8,7 +8,7 @@
 > a credential path you actually rely on just logs you out.
 
 This page backs the `cached-github-keychain` and `git-credentials-plaintext` findings from
-[`saw audit`](CLI.md#saw-audit). Those findings deliberately **inform** rather than tell you to delete
+[`saw audit`](reference/cli.md#saw-audit). Those findings deliberately **inform** rather than tell you to delete
 something — this page is the reasoning they link to.
 
 ## Who this is for
