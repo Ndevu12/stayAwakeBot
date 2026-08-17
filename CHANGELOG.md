@@ -13,6 +13,8 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-08-17
+
 ### Changed
 - **Local security hygiene says what it found and what to do, and links the rest.** Findings are a
   sentence and a fix; the list of what the audit does not scan moved out of every run and into the
@@ -23,6 +25,10 @@ reader, not the mechanism or the weakness it closed.
   the gate job holds write access in your repository. Re-running `saw guard setup` on a repository
   that already has the gate still rewrites only the scanner pin, so an existing workflow is not
   reformatted; the new pins apply to gates installed from now on.
+- **The cached-credential finding is much shorter.** It keeps the parts that change what you do —
+  that deleting a token a helper is actively serving will log you out, and to confirm you do not rely
+  on HTTPS auth before removing one — and drops the background explanation of why storage location
+  is not the risk. No check, verdict or exit code changes.
 
 ### Fixed
 - **`reports_dir` in your config now works.** Setting it is enough to get the report bundle
@@ -33,10 +39,6 @@ reader, not the mechanism or the weakness it closed.
   setting, a scan writes nothing.
 
 ## [0.6.0] - 2026-08-16
-
-### Fixed
-- **The package works on Python 3.11 again.** A report-rendering module could not be imported
-  there, so anything that printed a finding failed. Python 3.12 and later were unaffected.
 
 ### Added
 - **The home-wipe detector catches four shapes it used to miss**: deleting the home directory through
@@ -87,6 +89,8 @@ reader, not the mechanism or the weakness it closed.
   reported that rotation was unsafe without printing what would resolve it.
 
 ### Fixed
+- **The package works on Python 3.11 again.** A report-rendering module could not be imported
+  there, so anything that printed a finding failed. Python 3.12 and later were unaffected.
 - **Saved reports no longer keep advisory evidence in full.** Findings were redacted before writing;
   advisories were not, so the saved bundle held text the sink promised it would not.
 - **`saw scan` no longer lets a scanned repository control your terminal or your CI log.** The
@@ -573,7 +577,8 @@ _No user-facing changes were recorded for this release._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel (supply-chain worm
 detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.5.0...v0.5.1
