@@ -17,7 +17,7 @@ from pathlib import Path
 import heapq
 
 from stayawake.utils import parallel
-from stayawake.utils.io import resolve_reports_dir
+from stayawake.utils.io import reports_dir_choice, resolve_reports_dir
 from stayawake.utils.streaming import Streamer, status, stream_enabled
 from stayawake.utils.sweep import run_sweep
 from stayawake.utils.timeutil import now_iso
@@ -329,8 +329,13 @@ def scan(config_path: str | None = None, *, remote: bool = False,
                           detail=not spill)]          # spill → same board as large fleet
     if sarif_path:
         sinks.append(SarifSink(sarif_path))
-    if reports_dir:
-        rdir = resolve_reports_dir(reports_dir, settings_value=settings.get("reports_dir"),
+    # Write the bundle when ANY source asks for it — `-d`, the container's STAYAWAKE_REPORTS_DIR, or
+    # config `reports_dir` — not only `-d`. Gating on `-d` alone made the other two unreachable
+    # (#1454): they sit behind `-d` in the same precedence chain, so `-d` always shadowed them.
+    # Persisting stays opt-in; asking via config is simply one of the ways to opt in.
+    settings_reports_dir = settings.get("reports_dir")
+    if reports_dir_choice(reports_dir, settings_value=settings_reports_dir):
+        rdir = resolve_reports_dir(reports_dir, settings_value=settings_reports_dir,
                                    default=REPORTS_DIR, label="security reports")
         sinks.append(FileSink(rdir))
         report_path = Path(rdir) / "latest.md"

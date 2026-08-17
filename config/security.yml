@@ -29,9 +29,9 @@ settings:
   # (SUSPICIOUS) `obfuscated-build-artifact`, never `confirmed`. Noisier by design; provenance is
   # never a trust signal.
   # scan_build_outputs: false
-  # Optional: intended fallback location for the report bundle. Currently INERT (#1454) — the
-  # bundle is written only when `-d/--reports-dir DIR` is passed, and that DIR then wins over
-  # this. Pass `-d` with the path you want.
+  # Optional: where the report bundle is written. Setting this IS the opt-in (no -d needed);
+  # `-d DIR` overrides it for one run, as does STAYAWAKE_REPORTS_DIR. Unset by all three, a
+  # scan writes nothing.
   # reports_dir: reports/security
   # Optional: path to a custom signature DB (default: the one packaged with stayawake).
   # signatures_path: config/my-signatures.yml

@@ -14,73 +14,23 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Changed
-- **Local security hygiene — 4 findings: 2 warnings, 2 to review
-
-✓ Rotation safety: persistence surface enumerated and clean — rotating credentials is safe.
-
-WARNINGS  · act on these
-  ⚠ VS Code auto-approves risky terminal commands for chat/agent tools
-     /Users/ndevu/Library/Application Support/Code/User/settings.json
-     auto-approves npx, yarn, ssh, sed, awk via
-     "chat.tools.terminal.autoApprove" — an AI agent (or a folder-open task that
-     reaches it) can run these with no confirmation, exactly the
-     unattended-execution vector the worm needs.
-     → fix  Remove those entries from "chat.tools.terminal.autoApprove" (or set
-            them to false) so risky commands still require a click.
-
-  ⚠ VS Code opens untrusted files without prompting
-     /Users/ndevu/Library/Application Support/Code/User/settings.json sets
-     "security.workspace.trust.untrustedFiles": "open" — files in an untrusted
-     folder open (and their language servers / auto-tasks can run) without the
-     trust prompt, re-opening the folder-open execution vector.
-     → fix  Set "security.workspace.trust.untrustedFiles": "prompt" (the
-            default).
-
-TO REVIEW  · weaker signals to verify / hygiene
-  • GitHub token cached in the macOS login Keychain — review its lifetime/scope
-     A github.com token is cached in the macOS login Keychain — the recommended,
-     encrypted store. That on its own is NORMAL, not a misconfiguration: a
-     credential has to live somewhere to be usable. What actually determines
-     risk is the token's lifetime, scope, and that a bearer token can be COPIED
-     by a process running as you — not where it's stored. If this is a
-     non-expiring, broadly-scoped personal access token, shorten its lifetime
-     and cut its scope (or move to a hardware-backed SSH key, which a worm can
-     use but cannot copy). A credential helper is actively serving this token
-     here, so HTTPS auth is IN USE — deleting it logs you out. Harden it in
-     place (shorten lifetime, cut scope, or move to a hardware-backed key)
-     rather than removing it. This is the git-HTTPS entry in the macOS login
-     Keychain only. Your gh CLI token and your SSH keys are SEPARATE stores —
-     removing this leaves them untouched.
-     → fix  HTTPS auth is in use here, so don't delete this token (that logs you
-            out). Harden it in place: make it short-lived and least-scope, or
-            move to a hardware-backed SSH key. If you'd rather retire HTTPS
-            entirely, stand up SSH or `gh auth setup-git` FIRST, verify it
-            authenticates, and only then remove it — see the details link.
-     → details: https://github.com/Ndevu12/stayAwakeBot/blob/main/docs/CREDENTIAL_HYGIENE.md
-
-  • VS Code automatic tasks not explicitly disabled
-     /Users/ndevu/Library/Application Support/Code/User/settings.json does not
-     set "task.allowAutomaticTasks". Folder-open auto-run is the vector the worm
-     used to execute a disguised font on open.
-     → fix  Set "task.allowAutomaticTasks": "off" in VS Code user settings.
-
-Scope of this audit:
-  reads the host persistence surface and a targeted set of known drop-paths
-  (home, /tmp, the system temp dir, the working directory). It does NOT scan
-  other survivor temp dirs, the global npm prefix beyond Node's own module
-  resolution paths, Docker images/volumes, other mounted filesystems,
-  account/organization-level state such as self-hosted runner registrations, or
-  Windows autorun locations (registry Run keys, the Startup folder, Scheduled
-  Tasks) — persistence enumeration is macOS and Linux user-scope only. These
-  locations were not examined. says what it found and what to do, and links the rest.** Findings are a sentence and
-  a fix; the list of what the audit does not scan moved out of every run and into the documentation,
-  reached by a link the report still prints. The caveat that a clean audit is not a clean bill of
-  health stays on screen.
+- **Local security hygiene says what it found and what to do, and links the rest.** Findings are a
+  sentence and a fix; the list of what the audit does not scan moved out of every run and into the
+  documentation, reached by a link the report still prints. The caveat that a clean audit is not a
+  clean bill of health stays on screen.
 - **The CI gate `saw guard setup` installs now pins every action it runs to a commit SHA**, not just
   the scanner. A tag can be repointed at different code after you review it; a commit cannot — and
   the gate job holds write access in your repository. Re-running `saw guard setup` on a repository
   that already has the gate still rewrites only the scanner pin, so an existing workflow is not
   reformatted; the new pins apply to gates installed from now on.
+
+### Fixed
+- **`reports_dir` in your config now works.** Setting it is enough to get the report bundle
+  written — previously it was silently ignored unless you also passed `-d/--reports-dir`, which
+  then overrode it, so the setting could never take effect. `STAYAWAKE_REPORTS_DIR` was ignored the
+  same way, which is why a scan inside the container image did not write to the directory the image
+  configures for it. Writing reports is still opt-in: with no flag, no environment variable and no
+  setting, a scan writes nothing.
 
 ## [0.6.0] - 2026-08-16
 
