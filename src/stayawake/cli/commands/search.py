@@ -8,6 +8,8 @@ from __future__ import annotations
 import argparse
 import json
 
+from stayawake.cli.helptext import add_command
+
 # (command, summary, extra search keywords)
 _INDEX = [
     ("saw scan", "hunt supply-chain worms (read-only); local by default, --remote for GitHub",
@@ -32,7 +34,18 @@ _INDEX = [
 
 
 def register(sub) -> None:
-    p = sub.add_parser("search", aliases=["se"], help="fuzzy 'what's the command for…?'")
+    p = add_command(
+        sub, "search", aliases=["se"],
+        help="fuzzy 'what's the command for…?'",
+        description=(
+            "Look up a command by what you want to do, across the whole command tree. Prints "
+            "each matching command with a one-line summary, best match first; no match is a "
+            "normal empty result, not a failure."),
+        examples=[
+            ('saw search "open a pr"', "→ saw fix"),
+            ("saw search persistence", "→ saw audit"),
+            ("saw search worm -q", "just the command names"),
+        ])
     p.add_argument("text", nargs="+", metavar="TEXT")
     p.add_argument("--json", action="store_true", help="machine-readable output")
     p.add_argument("-q", "--quiet", action="store_true", help="print only command names")

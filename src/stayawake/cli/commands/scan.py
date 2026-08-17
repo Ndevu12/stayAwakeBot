@@ -14,10 +14,25 @@ import argparse
 
 from stayawake.bots.security import service
 from stayawake.cli.argtypes import add_jobs_arg
+from stayawake.cli.helptext import add_command
 
 
 def register(sub) -> None:
-    p = sub.add_parser("scan", aliases=["s", "sc"], help="hunt supply-chain worms (read-only)")
+    p = add_command(
+        sub, "scan", aliases=["s", "sc"],
+        help="hunt supply-chain worms (read-only)",
+        description=(
+            "Hunt supply-chain worms across repositories or directories. Read-only — a scan "
+            "never changes a file; remediation lives in `saw fix`. The full report renders to "
+            "the terminal and nothing is persisted unless you ask for it, and the exit code is "
+            "the verdict unconditionally: 0 clean, 1 infected, 2 could not complete."),
+        examples=[
+            ("saw scan", "report to the terminal, writes nothing"),
+            ("saw scan ./svc-a ./svc-b", "specific local paths"),
+            ("saw scan --org UB-TechDEV -j 8", "a whole org, 8 repos at once"),
+            ("saw scan --deep", "content-scan installed dependency code"),
+            ("saw scan; echo $?", "CI gate: the exit code IS the verdict"),
+        ])
     p.add_argument("paths", nargs="*", metavar="TARGETS",
                    help="local repo/dir paths — or, with --remote, owner/repo slugs. "
                         "Omit to scan configured targets or the current repo.")

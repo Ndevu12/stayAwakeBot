@@ -7,12 +7,25 @@ import json
 import shutil
 
 from stayawake.cli._meta import __version__
+from stayawake.cli.helptext import add_command
 from stayawake.core.identity import Intent, require, resolve_session
 from stayawake.lib import github_app
 
 
 def register(sub) -> None:
-    p = sub.add_parser("doctor", aliases=["d", "doc"], help="self-check install + credentials")
+    p = add_command(
+        sub, "doctor", aliases=["d", "doc"],
+        help="self-check install + credentials",
+        description=(
+            "Self-check the installation: confirm `saw` resolves to this install, report the "
+            "active GitHub credential and whether it can open fix and guard PRs, note whether a "
+            "StayAwakeBot App is configured, and confirm the health entry points are present. "
+            "`saw auth status` carries the full intent/capability matrix."),
+        examples=[
+            ("saw doctor", "the full self-check"),
+            ("saw doctor -q", "print only the problems"),
+            ("saw doctor --json", "machine-readable"),
+        ])
     p.add_argument("--json", action="store_true", help="machine-readable output")
     p.add_argument("-q", "--quiet", action="store_true", help="print only problems")
     p.set_defaults(func=run)

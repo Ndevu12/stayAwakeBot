@@ -9,21 +9,40 @@ from __future__ import annotations
 import argparse
 
 from stayawake.cli.argtypes import add_jobs_arg
+from stayawake.cli.helptext import add_command
 
 
 def register(sub) -> None:
-    p = sub.add_parser("guard", aliases=["gd"],
-                       help="install & verify the Strix security-scan CI gate on a repo")
+    p = add_command(
+        sub, "guard", aliases=["gd"],
+        help="install & verify the Strix security-scan CI gate on a repo",
+        description=(
+            "Install and verify the Strix worm-guard CI gate across repos: `check` grades a "
+            "repo's gate (present / SHA-pinned / current / required), `setup` installs it or "
+            "bumps an existing pin, and `drift` files a tracking issue when a pin falls behind. "
+            "`setup` never pushes to a default branch."),
+        examples=[
+            ("saw guard check", "is this repo gated, pinned and current?"),
+            ("saw guard setup --pr", "install/bump the gate via a rolling PR"),
+            ("saw guard drift --org UB-TechDEV", "file a drift issue per behind repo"),
+        ])
     p.set_defaults(func=lambda a: (p.print_help() or 0))
     gsub = p.add_subparsers(dest="guard_command", metavar="<subcommand>")
 
-    ck = gsub.add_parser(
-        "check", help="check the worm gate across repos: present, SHA-pinned, fresh, and required",
+    ck = add_command(
+        gsub, "check",
+        help="check the worm gate across repos: present, SHA-pinned, fresh, and required",
         description="Detect the worm gate (the `Ndevu12/strix` action, a local scan action, or a "
                     "direct `saw` step), grade a Strix pin (a commit SHA is best), report whether it "
                     "is behind the latest release, and — for a remote repo — whether branch protection "
                     "requires it. LOCAL by default (discovers git repos under the given paths / the "
-                    "current repo); --remote (or --user/--org) sweeps GitHub repos. Read-only.")
+                    "current repo); --remote (or --user/--org) sweeps GitHub repos. Read-only.",
+        examples=[
+            ("saw guard check", "the current repo"),
+            ("saw guard check .", "every git repo below the cwd"),
+            ("saw guard check --repo Ndevu12/strix -f", "gate CI on a remote repo"),
+            ("saw guard check --user Ndevu12 -f", "gate CI on all of a user's repos"),
+        ])
     ck.add_argument("targets", nargs="*", metavar="TARGETS",
                     help="local repo/dir paths — or, with --remote, owner/repo slugs. "
                          "Omit to check configured targets or the current repo.")
@@ -51,14 +70,21 @@ def register(sub) -> None:
                     help="disable the typewriter output (plain, instant)")
     ck.set_defaults(func=run_check)
 
-    st = gsub.add_parser(
-        "setup", help="install or update the Strix gate across repos: write locally, or --pr / --remote",
+    st = add_command(
+        gsub, "setup",
+        help="install or update the Strix gate across repos: write locally, or --pr / --remote",
         description="Resolve the latest Strix release to a commit SHA, then install the worm-guard "
                     "workflow (or surgically bump an existing pin — found by its action reference, "
                     "not filename) across the resolved repos. LOCAL by default (discovers git repos; "
                     "writes into each working tree for you to review + commit + PR, or --pr to open "
                     "one PR each); --remote (or --user/--org) clones each GitHub repo and opens a PR. "
-                    "Never pushes to the default branch.")
+                    "Never pushes to the default branch.",
+        examples=[
+            ("saw guard setup", "write it into the working tree to review"),
+            ("saw guard setup --pr", "open a rolling install/bump PR"),
+            ("saw guard setup --dry-run", "preview the change, write nothing"),
+            ("saw guard setup --user Ndevu12", "clone a user's repos, open a gate PR"),
+        ])
     st.add_argument("targets", nargs="*", metavar="TARGETS",
                     help="local repo/dir paths — or, with --remote, owner/repo slugs. "
                          "Omit to set up configured targets or the current repo.")
@@ -89,15 +115,20 @@ def register(sub) -> None:
                     help="disable the typewriter output (plain, instant)")
     st.set_defaults(func=run_setup)
 
-    dr = gsub.add_parser(
-        "drift", help="report worm-guard pin drift across repos (files/closes a tracking issue each)",
+    dr = add_command(
+        gsub, "drift",
+        help="report worm-guard pin drift across repos (files/closes a tracking issue each)",
         description="Out-of-band pin-drift backstop for the worm-guard gate: read each repo's pinned "
                     "`Ndevu12/strix@<sha>`, compare it to the latest Strix release, and open ONE "
                     "de-duplicated tracking issue when it has fallen behind — closing it again "
                     "automatically once the pin catches up. Same target model as `saw guard check`: "
                     "LOCAL by default (discovers git repos; omit targets for the current repo), "
                     "--remote (or --user/--org) sweeps GitHub repos. Reports drift as an issue, never "
-                    "a build failure. `saw guard setup`'s scheduled pin-drift job runs this.")
+                    "a build failure. `saw guard setup`'s scheduled pin-drift job runs this.",
+        examples=[
+            ("saw guard drift", "file or close the tracking issue"),
+            ("saw guard drift --org UB-TechDEV", "sweep an org (implies --remote)"),
+        ])
     dr.add_argument("targets", nargs="*", metavar="TARGETS",
                     help="local repo/dir paths — or, with --remote, owner/repo slugs. "
                          "Omit to check configured targets or the current repo.")

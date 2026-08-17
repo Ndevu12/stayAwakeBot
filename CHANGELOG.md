@@ -13,6 +13,18 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Changed
+- **`-h` on any command now says what the command is for and shows how it is run.** Every
+  subcommand's help opens with a short statement of its purpose — including the safety-relevant
+  part, such as that `saw scan` is read-only and its exit code is the verdict, or that `saw fix`
+  prepares a branch and pushes nothing on its own — and ends with a handful of real example
+  invocations, the everyday one first. The examples are the ones from the CLI guide, so the
+  terminal and the documentation agree.
+
+### Fixed
+- **`saw hook -h` no longer lists an internal `run` entry**, which appeared as a row reading
+  `==SUPPRESS==` and was never meant to be typed by hand.
+
 ## [0.6.1] - 2026-08-17
 
 ### Changed

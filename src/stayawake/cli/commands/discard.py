@@ -13,10 +13,22 @@ from __future__ import annotations
 import argparse
 
 from stayawake.bots.security import remediator
+from stayawake.cli.helptext import add_command
 
 
 def register(sub) -> None:
-    p = sub.add_parser("discard", help="undo `saw fix`: delete the auto-clean branch and/or close its PR")
+    p = add_command(
+        sub, "discard",
+        help="undo `saw fix`: delete the auto-clean branch and/or close its PR",
+        description=(
+            "Remove what `saw fix` produced. It only ever touches the auto-generated "
+            "`security/auto-clean` branch and its PR, never a real branch, so it cannot take "
+            "your own work with it. At least one of --branch / --pr is required."),
+        examples=[
+            ("saw discard --branch", "delete the branch, local + remote"),
+            ("saw discard --pr", "close the PRs, keep the branches"),
+            ("saw discard --branch --remote", "…across the GitHub targets"),
+        ])
     p.add_argument("paths", nargs="*", metavar="TARGETS",
                    help="local repo/dir paths — or, with --remote, owner/repo slugs. "
                         "Omit to act on configured targets or the current repo.")

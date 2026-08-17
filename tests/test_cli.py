@@ -39,6 +39,37 @@ class TestParserIntegrity(unittest.TestCase):
         for verb in cli.VERBS:
             self.assertIn(verb, names)
 
+    def _walk(self, parser=None, path="saw"):
+        """Every parser in the tree, deduplicated (aliases share one parser object)."""
+        parser = parser or cli.build_parser()
+        yield path, parser
+        for action in parser._actions:
+            if isinstance(action, argparse._SubParsersAction):
+                seen = set()
+                for name, child in action._name_parser_map.items():
+                    if id(child) not in seen:
+                        seen.add(id(child))
+                        yield from self._walk(child, f"{path} {name}")
+
+    def test_every_command_help_states_purpose_and_shows_examples(self):
+        # clig.dev: `-h` must say what the command is FOR and show how it is invoked. `hook run`
+        # is exempt — it is the entry the installed git hook calls, not a command anyone types.
+        for path, parser in self._walk():
+            if path == "saw hook run":
+                continue
+            with self.subTest(command=path):
+                self.assertTrue(parser.description, f"{path}: no description")
+                self.assertTrue(parser.epilog, f"{path}: no examples")
+                self.assertIn("examples:", parser.epilog)
+
+    def test_example_lines_fit_an_80_column_terminal(self):
+        # The examples are printed verbatim (they carry aligned comments), so nothing else
+        # protects them from wrapping into an unreadable mess on a default-width terminal.
+        for path, parser in self._walk():
+            for line in (parser.epilog or "").splitlines():
+                with self.subTest(command=path, line=line):
+                    self.assertLessEqual(len(line), 79)
+
 
 class TestScanRouting(unittest.TestCase):
     @mock.patch("stayawake.bots.security.service.scan", return_value=0)

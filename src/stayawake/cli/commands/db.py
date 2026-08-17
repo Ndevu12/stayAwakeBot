@@ -10,18 +10,37 @@ from __future__ import annotations
 import argparse
 import sys
 
+from stayawake.cli.helptext import add_command
 from stayawake.utils.streaming import Streamer, status, stream_enabled
 
 
 def register(sub) -> None:
-    p = sub.add_parser("db", help="manage the offline advisory database")
+    p = add_command(
+        sub, "db",
+        help="manage the offline advisory database",
+        description=(
+            "Manage the offline advisory database — the malicious-package and CVE corpus a "
+            "scan's advisory tier consults. It is cached locally and used fully offline; the "
+            "download names only the ecosystem, never a package, so it cannot leak your "
+            "dependency graph."),
+        examples=[
+            ("saw db update", "fetch/refresh the corpus (all ecosystems)"),
+            ("saw db status", "snapshot, age, counts, integrity"),
+            ("saw db status --max-age-days 30", "CI gate: fail if the corpus is stale"),
+        ])
     p.set_defaults(func=lambda a: (p.print_help() or 0))
     dbsub = p.add_subparsers(dest="db_command", metavar="<subcommand>")
 
-    up = dbsub.add_parser(
-        "update", help="download/refresh the offline malicious-package advisory DB",
+    up = add_command(
+        dbsub, "update",
+        help="download/refresh the offline malicious-package advisory DB",
         description="Fetch the OSV malicious-package corpus (OpenSSF / GitHub Advisories / OSV.dev) "
-                    "into the local cache. Names only the ecosystem — never your packages.")
+                    "into the local cache. Names only the ecosystem — never your packages.",
+        examples=[
+            ("saw db update", "every supported ecosystem"),
+            ("saw db update -e npm -e pypi", "just npm + PyPI"),
+            ("saw db update --cache-dir ./advisories", "into a specific cache"),
+        ])
     up.add_argument("-e", "--ecosystem", action="append", dest="ecosystems", metavar="ECO",
                     help="limit to an ecosystem (repeatable); default: all supported")
     up.add_argument("--cache-dir", default=None,
@@ -30,12 +49,18 @@ def register(sub) -> None:
                     help="disable the per-ecosystem spinner and typewriter output")
     up.set_defaults(func=run_update)
 
-    st = dbsub.add_parser(
-        "status", help="show the advisory DB's snapshot, age, counts and integrity",
+    st = add_command(
+        dbsub, "status",
+        help="show the advisory DB's snapshot, age, counts and integrity",
         description="Report the offline advisory cache: snapshot fingerprint, age, per-ecosystem "
                     "counts, and a content-hash integrity check. Exits non-zero if the DB is absent, "
                     "fails integrity, is older than --max-age-days, or doesn't match --require-snapshot "
-                    "— so CI can pin a reproducible DB.")
+                    "— so CI can pin a reproducible DB.",
+        examples=[
+            ("saw db status", "snapshot, age, counts, integrity"),
+            ("saw db status --max-age-days 30", "CI gate: fail if it is stale"),
+            ("saw db status --require-snapshot DIGEST", "pin a reproducible DB"),
+        ])
     st.add_argument("--cache-dir", default=None, help="advisory cache location")
     st.add_argument("--require-snapshot", metavar="DIGEST", default=None,
                     help="exit non-zero unless the DB's snapshot equals DIGEST (pin for reproducible CI)")
