@@ -210,7 +210,7 @@ stayawake-health-check --config config/urls.yml
 - [CLI reference](docs/reference/cli.md) — every command and flag, documented once
 - [Configuration](docs/reference/configuration.md) · [exit codes](docs/reference/exit-codes.md) · [advisory DB](docs/reference/advisory-db.md)
 - [Trust model](docs/explanation/trust-model.md) · [verdicts](docs/explanation/verdicts.md) · [fail closed](docs/explanation/fail-closed.md) · [safety envelope](docs/explanation/safety-envelope.md)
-- [Credential hygiene](docs/CREDENTIAL_HYGIENE.md) — what a cached-credential finding means, and how to act on one safely
+- [Credential hygiene](docs/explanation/credential-hygiene.md) — what a cached-credential finding means, and how to act on one safely
 - [Harden a repository](docs/how-to/harden-a-repo.md) — the layered baseline for any repo
 - [Contributing](CONTRIBUTING.md) — development setup and guidelines
 - [Support](SUPPORT.md) — where to ask a question, file a bug, or report a false positive

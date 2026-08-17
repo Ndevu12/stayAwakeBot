@@ -5,7 +5,7 @@ A thin ROUTING layer: the dispatcher ([dispatch.py]) wires together one module p
 command ([commands/]) and forwards each verb to the security `service.*` / `remediator` /
 `hygiene` functions — no detection or remediation logic lives here. `saw` is the single
 entry point for the security bot (terminal-first, persists nothing by default). See
-docs/CLI.md for the user guide.
+docs/reference/cli.md for the user guide.
 
 The `saw` and `stayawake` console scripts both resolve to `main` below.
 """

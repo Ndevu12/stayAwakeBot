@@ -10,7 +10,7 @@ from __future__ import annotations
 import pathlib
 import unittest
 
-_DOCS = pathlib.Path(__file__).resolve().parents[3] / "docs/CLI.md"
+_DOCS = pathlib.Path(__file__).resolve().parents[3] / "docs/how-to/audit-a-machine.md"
 _ANCHOR = "### What `saw audit` does not scan"
 
 
@@ -19,7 +19,10 @@ class TestTheScopePageNamesEveryGap(unittest.TestCase):
         text = _DOCS.read_text(encoding="utf-8")
         self.assertIn(_ANCHOR, text, "the section the scope note links to does not exist")
         start = text.index(_ANCHOR)
-        self.section = text[start:text.index("\n### ", start + 1)]
+        # The section may be the last on the page, so a following "### " is not guaranteed;
+        # slice to end-of-file when there is none rather than raising.
+        nxt = text.find("\n### ", start + 1)
+        self.section = text[start:nxt if nxt != -1 else len(text)]
 
     def test_every_axis_is_named(self):
         for gap in ("survivor temp dirs", "global npm prefix", "Docker", "mounted filesystems",

@@ -20,7 +20,7 @@ description: The contribution workflow — feature-branch PRs (never push main),
 ## Every user-facing change
 
 - **Update `CHANGELOG.md` `[Unreleased]` in the SAME PR** — don't let it drift.
-- Update the relevant `docs/` (CLI.md / USAGE.md / etc.).
+- Update the relevant `docs/` (reference/cli.md / how-to/ / etc.).
 
 **What an entry may say.** An entry describes what someone *using* the release observes: new or
 changed behaviour, flags, compatibility, and fixes they would notice. It does **not** describe

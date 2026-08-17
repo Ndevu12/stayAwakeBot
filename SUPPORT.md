@@ -12,11 +12,11 @@ saw intro                 # a 60-second tour
 
 Then the docs:
 
-- [CLI command guide](docs/CLI.md) — every `saw` command, its flags, and its exit codes
-- [Usage](docs/USAGE.md) — install, secrets, GitHub Actions, deploying your own
-- [Configuration & Reports](docs/CONFIGURATION.md) — config fields and report formats
-- [Credential hygiene](docs/CREDENTIAL_HYGIENE.md) — what a cached-credential finding means
-- [Prerequisites](docs/PREREQUISITES.md) — supported Python versions and install troubleshooting
+- [CLI command guide](docs/reference/cli.md) — every `saw` command, its flags, and its exit codes
+- [Usage](docs/index.md) — install, secrets, GitHub Actions, deploying your own
+- [Configuration & Reports](docs/reference/configuration.md) — config fields and report formats
+- [Credential hygiene](docs/explanation/credential-hygiene.md) — what a cached-credential finding means
+- [Prerequisites](docs/tutorial/first-scan.md) — supported Python versions and install troubleshooting
 
 ## Where to take it
 

@@ -194,7 +194,7 @@ def _unknown_surface_disclosure(issues: list[HygieneIssue], *, color: bool, widt
     return lines
 
 
-_SCOPE_DOCS = ("https://github.com/Ndevu12/stayAwakeBot/blob/main/docs/CLI.md"
+_SCOPE_DOCS = ("https://github.com/Ndevu12/stayAwakeBot/blob/main/docs/how-to/audit-a-machine.md"
                "#what-saw-audit-does-not-scan")
 
 
