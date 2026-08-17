@@ -76,7 +76,11 @@ Scope of this audit:
   a fix; the list of what the audit does not scan moved out of every run and into the documentation,
   reached by a link the report still prints. The caveat that a clean audit is not a clean bill of
   health stays on screen.
-
+- **The CI gate `saw guard setup` installs now pins every action it runs to a commit SHA**, not just
+  the scanner. A tag can be repointed at different code after you review it; a commit cannot — and
+  the gate job holds write access in your repository. Re-running `saw guard setup` on a repository
+  that already has the gate still rewrites only the scanner pin, so an existing workflow is not
+  reformatted; the new pins apply to gates installed from now on.
 
 ## [0.6.0] - 2026-08-16
 

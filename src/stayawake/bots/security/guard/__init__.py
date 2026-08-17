@@ -6,7 +6,8 @@ guard`)."""
 from __future__ import annotations
 
 from stayawake.bots.security.guard.constants import (
-    STRIX_OWNER, STRIX_REPO, WORKFLOW_DIR, WORM_GUARD_FILE, SETUP_BRANCH)
+    STRIX_OWNER, STRIX_REPO, WORKFLOW_DIR, WORM_GUARD_FILE, SETUP_BRANCH,
+    ActionPin, CHECKOUT_ACTION, SETUP_PYTHON_ACTION)
 from stayawake.bots.security.guard.detect import (
     StrixRef, classify_pin, find_strix, WormGate, find_worm_gate, Freshness, LatestStrix,
     latest_strix, freshness, GuardStatus, RemoteRead, GateProbe, probe_remote_gate, remote_gate,
@@ -26,6 +27,7 @@ from stayawake.bots.security import resolution
 
 __all__ = [
     "STRIX_OWNER", "STRIX_REPO", "WORKFLOW_DIR", "WORM_GUARD_FILE", "SETUP_BRANCH",
+    "ActionPin", "CHECKOUT_ACTION", "SETUP_PYTHON_ACTION",
     "StrixRef", "classify_pin", "find_strix", "WormGate", "find_worm_gate", "Freshness",
     "LatestStrix", "latest_strix", "freshness", "GuardStatus", "RemoteRead", "GateProbe",
     "probe_remote_gate", "remote_gate", "check", "render",
