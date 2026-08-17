@@ -1,0 +1,84 @@
+name: False positive
+description: saw flagged something you believe is benign.
+labels: ["detection"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        These are the most useful reports we get — a detector is tightened
+        against real code, never loosened on argument, so a concrete case is
+        what moves it.
+
+
+        **The opposite report — saw called something clean that was not, or a
+        finding was suppressed — is a security report.** Send it privately: see
+        [SECURITY.md](https://github.com/Ndevu12/stayAwakeBot/blob/main/SECURITY.md).
+
+
+        Paste only what you are willing to publish. A reduced snippet that still
+        triggers it beats a whole file.
+
+  - type: textarea
+    id: finding
+    attributes:
+      label: The finding, as saw printed it
+      description: >-
+        The finding's name and severity from the report, plus the verdict line
+        and exit code of the run.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: trigger
+    attributes:
+      label: What it fired on
+      description: >-
+        The file, and the smallest piece of it you can share that still gets
+        flagged. If you cannot share the code, describe its shape — generated
+        bundle, minified vendor file, test fixture, encoded asset, build script.
+    validations:
+      required: true
+
+  - type: textarea
+    id: why-benign
+    attributes:
+      label: Why you believe it is benign
+      description: >-
+        Where the code comes from and what it legitimately does — the published
+        package and version, the generator that emitted it, the commit that
+        introduced it. Provenance is the part we cannot work out for you.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: reproducer
+    attributes:
+      label: Can you share a reproducer?
+      description: >-
+        A public repo or a few lines we can commit as a regression fixture is
+        what lets a fix be pinned so it does not come back.
+      options:
+        - "Yes — a public repo or package I can link"
+        - "Yes — a small snippet I can paste here"
+        - "No — I can only describe it"
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `saw --version`.
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: The command you ran
+      description: Include any `--config` allowlist you scanned with.
+      render: shell
+      placeholder: saw scan .
+    validations:
+      required: true

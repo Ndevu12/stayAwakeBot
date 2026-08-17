@@ -1,0 +1,77 @@
+name: Bug report
+description: saw did something other than what it documents.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        A finding you believe is wrong is not a bug report — use **False
+        positive** instead. A way to make saw report clean when it should not is
+        a **security** report: see
+        [SECURITY.md](https://github.com/Ndevu12/stayAwakeBot/blob/main/SECURITY.md),
+        not this form.
+
+  - type: textarea
+    id: command
+    attributes:
+      label: The command you ran
+      description: The exact invocation, with its flags.
+      render: shell
+      placeholder: saw scan ~/dev --deep
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened instead
+      description: >-
+        Output and exit code, as far as you can share them. Redact anything you
+        would not publish — paths, hostnames, repository names.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `saw --version`.
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS and Python
+      description: e.g. macOS 15.2 / Python 3.13, or `ghcr.io/ndevu12/stayawakebot:0.6.1`.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: repo-visibility
+    attributes:
+      label: Is the repository you scanned public?
+      description: >-
+        If it is, a link lets us reproduce directly. If it is not, say so and we
+        will work from what you can share.
+      options:
+        - "Yes — I can link it"
+        - "No — private or local only"
+        - "Not a repository scan (audit, guard, doctor, …)"
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: A link to the public repo, a reduced reproducer, or related issues.
+    validations:
+      required: false

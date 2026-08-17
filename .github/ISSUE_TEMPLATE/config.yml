@@ -1,0 +1,13 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security issue (never a public issue)
+    url: https://github.com/Ndevu12/stayAwakeBot/security/advisories/new
+    about: >-
+      A defect in the tool, or a way to make it report clean when it should not,
+      goes to a private advisory or saw@ndevuspace.com — see SECURITY.md. Do not
+      open a public issue for it.
+  - name: Question or help using saw
+    url: https://github.com/Ndevu12/stayAwakeBot/blob/main/SUPPORT.md
+    about: >-
+      Where to look first — docs/, `saw search`, `saw doctor` — and where to ask
+      if those do not answer it.

@@ -48,6 +48,9 @@ dev = []   # the test suite uses the stdlib `unittest`
 Homepage = "https://github.com/Ndevu12/stayAwakeBot"
 Repository = "https://github.com/Ndevu12/stayAwakeBot"
 Issues = "https://github.com/Ndevu12/stayAwakeBot/issues"
+# No docs site yet — point at the files in the repo rather than at a placeholder.
+Documentation = "https://github.com/Ndevu12/stayAwakeBot/blob/main/docs/CLI.md"
+Changelog = "https://github.com/Ndevu12/stayAwakeBot/blob/main/CHANGELOG.md"
 
 # Console scripts (available after `pip install`); each maps to an existing thin main() (DRY).
 [project.scripts]
