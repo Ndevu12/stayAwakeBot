@@ -14,17 +14,9 @@ pip install "stayawakebot @ git+https://github.com/Ndevu12/stayAwakeBot@main"   
 pip install -e .
 ```
 
-**Default install** covers local scanning and `gh`-based credentials. **App-ready install**
-(adds PyJWT for GitHub App JWT signing — never installed automatically by Saw):
-
-```bash
-pip install "stayawakebot[app]"       # PyPI / git URL install
-pip install -e ".[app]"               # from a clone (editable)
-pipx inject stayawakebot "pyjwt[crypto]>=2.0"   # if you installed via pipx
-```
-
-`saw auth app register` **requires** the App extra (exit 2 with an install hint if it is
-missing). Use `--force` only for browser-only manifest testing; minting still needs `[app]`.
+**One install covers everything** — local scanning, `gh`-based credentials, and GitHub App auth
+alike. There is no extra to add for App registration or token minting: the RS256 signing is built
+in, so `saw auth app register` works straight after `pip install`.
 
 The PyPI distribution is named **`stayawakebot`** because `stayawake` is already taken on
 PyPI by an unrelated project. The import package (`stayawake`) and the `stayawake-*` console
@@ -182,8 +174,11 @@ default — the report renders to the terminal. For a durable copy, reach for an
 
 ```bash
 saw scan -d /tmp/sab-reports                                         # opt-in, redacted, writes only there
-stayawake-health-check  --reports-dir /tmp/sab-reports               # the health bot still writes reports
 ```
+
+The health bot writes no report files either — `stayawake-health-check` probes the URLs and
+refreshes its single status issue on GitHub (plus Slack on a transition). Nothing is written to
+disk and nothing is committed.
 
 ### Enforcing the CI gate (guard)
 
@@ -213,9 +208,10 @@ byte-for-byte. It is **idempotent** (create / bump /
 no-op / already-guarded) and **fails closed** if it can't resolve the SHA (offline → pass
 `--ref <sha|tag>`). It **never pushes to a default branch**: `--pr`/`--remote` plan against
 `origin/<default>` (the PR base) and open a rolling `security/guard-setup` PR whose body carries the
-hardening a file can't do itself (mark the check required, add CODEOWNERS). Auto-remediation of an
-infected default branch needs scoped write and is deliberately **opt-in** — not part of the installer.
-See the [`saw` CLI guide](CLI.md#saw-guard) for every flag.
+hardening a file can't do itself (mark the check required, add CODEOWNERS). Auto-remediation is
+**on by default** in the installed gate (`remediate: pr`): on an infected verdict it opens a rolling
+fix PR, and the gate stays **red until that PR is merged** — so the check never passes on the
+strength of an unreviewed auto-change. See the [`saw` CLI guide](CLI.md#saw-guard) for every flag.
 
 ## Local defense-in-depth (hooks + audit)
 
@@ -313,18 +309,21 @@ organization, and StayAwakeBot treats both the same. You (or an org admin) insta
 once on the chosen repos and it mints a fresh **1-hour installation token** per run,
 scoped to exactly the App's granted permissions — nothing long-lived to leak, fully
 revocable, and the install itself defines which repos are in scope (no `targets.github`
-list needed). The private key stays in memory; signing is delegated to a vetted crypto
-library (never hand-rolled).
+list needed). The private key stays in memory, and the RS256 signing is **built into `saw`** — a
+small stdlib-only signer rather than a crypto dependency. That is deliberate: the JWT
+vulnerability classes (algorithm and key confusion, `crit` headers, JWK injection) are all
+verification-side and cannot apply to a signer, RS256 is deterministic so the output is pinned
+byte-for-byte against `openssl`/PyJWT by the test suite, and it means App auth needs no extra
+install step on any package manager. A non-RSA or passphrase-encrypted key is rejected outright
+rather than accepted with a wrong signature.
 
 For a personal account with a handful of repos, `gh auth login` or a fine-grained PAT is
 simpler. Reach for an App when you want that same rotating, narrowly-scoped, revocable
 token model on your own repos — or when you manage many.
 
-It's an **opt-in extra** so the base install stays stdlib-only (install before
-`saw auth app register` — Saw does not pip-install it for you):
+Point `saw` at an existing App with three environment variables — nothing to install first:
 
 ```bash
-pip install "stayawakebot[app]"       # adds PyJWT[crypto] — only needed for App auth
 export GH_APP_ID=123456
 export GH_APP_PRIVATE_KEY="$(cat your-app.private-key.pem)"   # or GH_APP_PRIVATE_KEY_PATH=…
 # optional; auto-detected when the App has exactly one installation:
@@ -333,9 +332,8 @@ saw scan --remote      # scans every repo the installation can see
 saw fix --remote       # opens a dedup'd fix PR per infected install repo
 ```
 
-If the App env is set without the extra installed, StayAwakeBot prints a clear
-`pip install "stayawakebot[app]"` hint rather than failing obscurely. An explicit
-`GH_SECURITY_TOKEN` still takes precedence (handy for a one-off human override).
+An explicit `GH_SECURITY_TOKEN` still takes precedence over the App (handy for a one-off human
+override).
 
 **Minimal App permissions** (Repository permissions): **Metadata: Read** (always) +
 **Contents: Read** to scan; add **Contents: Read & write** and **Pull requests: Read &
