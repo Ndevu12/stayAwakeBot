@@ -125,7 +125,7 @@ repository's branch protection. Every run ends with a **rotation-safety verdict*
 exits `3` when rotating from this host would be unsafe — see [audit a
 machine](../how-to/audit-a-machine.md) for what to do with each outcome, and [exit
 codes](exit-codes.md) for the contract. Scope: [what `saw audit` does not
-scan](../CLI.md#what-saw-audit-does-not-scan).
+scan](../how-to/audit-a-machine.md#what-saw-audit-does-not-scan).
 
 ```text
 saw audit [--repo OWNER/NAME] [-b BRANCH] [-f] [--verify] [--no-stream]

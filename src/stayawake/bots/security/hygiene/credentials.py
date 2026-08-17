@@ -33,7 +33,7 @@ from .models import HygieneIssue, _WIPER_NOTE
 
 # Where the finding's `→ details:` link points — the full, non-destructive walkthrough.
 CREDENTIAL_HYGIENE_DOC = ("https://github.com/Ndevu12/stayAwakeBot/blob/main/"
-                          "docs/CREDENTIAL_HYGIENE.md")
+                          "docs/explanation/credential-hygiene.md")
 
 
 @dataclass(frozen=True)

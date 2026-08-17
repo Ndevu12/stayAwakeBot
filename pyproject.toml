@@ -49,12 +49,12 @@ Homepage = "https://github.com/Ndevu12/stayAwakeBot"
 Repository = "https://github.com/Ndevu12/stayAwakeBot"
 Issues = "https://github.com/Ndevu12/stayAwakeBot/issues"
 # No docs site yet — point at the files in the repo rather than at a placeholder.
-Documentation = "https://github.com/Ndevu12/stayAwakeBot/blob/main/docs/CLI.md"
+Documentation = "https://github.com/Ndevu12/stayAwakeBot/blob/main/docs/index.md"
 Changelog = "https://github.com/Ndevu12/stayAwakeBot/blob/main/CHANGELOG.md"
 
 # Console scripts (available after `pip install`); each maps to an existing thin main() (DRY).
 [project.scripts]
-# Unified terse CLI (security-only) + a collision-proof long alias. See docs/CLI.md.
+# Unified terse CLI (security-only) + a collision-proof long alias. See docs/reference/cli.md.
 saw                        = "stayawake.cli:main"
 stayawake                  = "stayawake.cli:main"
 # Health bot per-command scripts — FROZEN: remote workflows + Docker depend on these

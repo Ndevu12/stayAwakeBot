@@ -8,7 +8,7 @@ relevant skill before non-trivial work.
 
 `saw` (package `stayawake`) is an **offline-first supply-chain worm scanner + sentinel** — detect,
 report, remediate (PR-only), prevent, plus dependency-CVE auditing and local hygiene. Start with the
-**`saw-overview`** skill and `docs/CLI.md`.
+**`saw-overview`** skill and `docs/reference/cli.md`.
 
 ## Always-on rules (the ones that cost the most when missed)
 

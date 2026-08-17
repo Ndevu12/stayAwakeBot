@@ -7,7 +7,7 @@ description: Read first when working on StayAwakeBot / the `saw` CLI. What the t
 
 `saw` (package `stayawake`) is a distributable **supply-chain worm scanner + sentinel**: it detects,
 reports, remediates, and *prevents* self-propagating package worms, plus does dependency-CVE auditing
-and local hygiene. `docs/CLI.md` is the authoritative command reference; this skill is the mental model.
+and local hygiene. `docs/reference/cli.md` is the authoritative command reference; this skill is the mental model.
 
 ## Non-negotiable safety invariants
 
@@ -29,7 +29,7 @@ maintainer rather than working around it.
 - **Fail closed.** A target that could not be fully scanned (unreadable file, failed clone, malformed
   config) must never read as clean — it exits non-zero. Warn loudly; never fail silently.
 
-## Command surface (see docs/CLI.md for detail)
+## Command surface (see docs/reference/cli.md for detail)
 
 `scan` (read-only hunt) · `fix` (PR-only remediation) · `discard` · `audit` (+ `--verify` content-scans
 a non-repo suspect dir; + credential/dependency hygiene) · `db` (offline advisory corpus) · `guard`
