@@ -39,7 +39,7 @@ class TestCredentials(unittest.TestCase):
         self.assertIn("lifetime", f.detail.lower())
         self.assertIn("scope", f.detail.lower())
         # names the store + scopes the claim: gh / SSH are separate and untouched
-        self.assertIn("SEPARATE stores", f.detail)
+        self.assertIn("SSH keys are separate", f.detail)
         self.assertRegex(f.detail.lower(), r"gh.*ssh|ssh.*gh")
 
     def test_keychain_never_in_the_exposure_banner(self):
@@ -54,7 +54,7 @@ class TestCredentials(unittest.TestCase):
         # served=False → removal candidate. The command must LEAD with an `ssh -T` alternate-path check
         # (so a wrong guess can't silently lock you out), then resolve source + delete + re-probe.
         f = self._keychain(served=False, ssh=True, gh=True)
-        self.assertIn("removal candidate", f.detail)
+        self.assertIn("looks unused", f.detail)
         cmd_lines = f.command.splitlines()
         self.assertIn("ssh -T git@github.com", cmd_lines[0])     # STEP 1 is the alternate-path check
         self.assertIn("STOP if it doesn't", cmd_lines[0])
@@ -68,12 +68,12 @@ class TestCredentials(unittest.TestCase):
             f = self._keychain(served=True, ssh=ssh, gh=gh)
             self.assertIsNone(f.command, f"delete offered with ssh={ssh} gh={gh} while HTTPS in use")
             self.assertIn("IN USE", f.detail)
-            self.assertIn("don't delete this token", f.remediation)
+            self.assertIn("Do not delete it", f.remediation)
 
     def test_unknown_probe_stays_cautious_but_verified(self):
         # served=None (couldn't probe) → don't assert 'unused'; still offer the ssh-T-guarded sequence.
         f = self._keychain(served=None, ssh=False, gh=False)
-        self.assertIn("Couldn't determine", f.detail)
+        self.assertIn("Could not tell", f.detail)
         self.assertIn("ssh -T git@github.com", f.command.splitlines()[0])
 
     def test_system_default_origin_uses_add_reset_not_unset(self):
@@ -1362,8 +1362,11 @@ class TestPlatformBoundaryIsDisclosed(unittest.TestCase):
     def _note(self, platform):
         # Patches `sys.platform` itself, not a module alias: the platform question has ONE authority
         # (models.persistence_surface_is_enumerable), so there is no per-module `sys` to reach through.
+        #
+        # Whitespace is normalised because the CLAIM is that the gap is named, not where the wrapper
+        # happens to break the line — a phrase split across two lines still names it.
         with mock.patch("sys.platform", platform):
-            return hygiene.render([], color=False, width=100)
+            return " ".join(hygiene.render([], color=False, width=100).split())
 
     def test_the_uncovered_windows_surface_is_named_on_every_platform(self):
         for platform in ("darwin", "linux", "win32"):

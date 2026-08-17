@@ -237,41 +237,36 @@ def _keychain_finding(store: KeychainStore) -> HygieneIssue:
     alt_phrase = " and ".join(alts) if alts else None
 
     detail = [
-        f"A github.com token is cached in {store.name} — the recommended, encrypted store. That "
-        "on its own is NORMAL, not a misconfiguration: a credential has to live somewhere to be usable.",
-        "What actually determines risk is the token's lifetime, scope, and that a bearer token can be "
-        "COPIED by a process running as you — not where it's stored. If this is a non-expiring, "
-        "broadly-scoped personal access token, shorten its lifetime and cut its scope (or move to a "
-        "hardware-backed SSH key, which a worm can use but cannot copy).",
+        # NORMAL is stated because this is an `info` item on a healthy machine — without it the
+        # reader treats a correctly-stored credential as a finding. Why storage location is not the
+        # risk, and what a bearer token is, are docs material; the fix names the action.
+        f"A github.com token is cached in {store.name} — normal, not a misconfiguration. What "
+        "matters is its lifetime and scope.",
     ]
     if served is True:
-        detail.append("A credential helper is actively serving this token here, so HTTPS auth is IN "
-                      "USE — deleting it logs you out. Harden it in place (shorten lifetime, cut scope, "
-                      "or move to a hardware-backed key) rather than removing it.")
+        # The lockout guard. Stays, short: deleting this token logs the developer out of GitHub.
+        detail.append("A helper is serving it, so HTTPS auth is IN USE — deleting it logs you out.")
     elif served is False:
-        base = ("No helper is actively serving an HTTPS token here, so the cached token looks unused — "
-                "a removal candidate.")
+        base = "No helper is serving it, so it looks unused."
         if alt_phrase:
-            base += (f" This machine also has {alt_phrase}. If you DO use HTTPS auth for some projects, "
-                     "keep it; another path existing doesn't by itself make it redundant.")
+            base += (f" This machine also has {alt_phrase}, but confirm you do not use HTTPS auth "
+                     "before removing it.")
         else:
-            base += " But confirm you don't rely on HTTPS auth before removing it."
+            base += " Confirm you do not rely on HTTPS auth before removing it."
         detail.append(base)
     else:  # None — probe couldn't run
-        detail.append("Couldn't determine whether HTTPS auth is in use here (git or the keychain wasn't "
-                      "reachable) — verify before changing anything.")
-    detail.append(f"This is the git-HTTPS entry in {store.name} only. Your gh CLI token and your SSH "
-                  "keys are SEPARATE stores — removing this leaves them untouched.")
+        detail.append("Could not tell whether HTTPS auth is in use — verify before changing anything.")
+    # SCOPE stays: without it a reader thinks removing this touches their gh CLI token and SSH keys.
+    detail.append(f"The git-HTTPS entry in {store.name} only — your gh CLI token and SSH keys are "
+                  "separate.")
 
     if served is True:
         # HTTPS is IN USE here — deleting logs you out, full stop. Never offer a delete command; the
         # only right move is to harden the credential in place (this also removes the old contradiction
         # where the prose said "don't delete" while a delete command sat right below it).
-        remediation = ("HTTPS auth is in use here, so don't delete this token (that logs you out). "
-                       "Harden it in place: make it short-lived and least-scope, or move to a "
-                       "hardware-backed SSH key. If you'd rather retire HTTPS entirely, stand up SSH or "
-                       "`gh auth setup-git` FIRST, verify it authenticates, and only then remove it — "
-                       "see the details link.")
+        remediation = ("Do not delete it — that logs you out. Harden in place: short-lived and "
+                       "least-scope, or a hardware-backed SSH key. To retire HTTPS, set up SSH "
+                       "first, verify it works, then remove.")
         command = None
     else:
         # served is False (unused) or None (unknown). Deletion MAY be safe — but never ASSUME it: the
