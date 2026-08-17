@@ -139,10 +139,30 @@ jobs:
         run: |
           set -euo pipefail
           echo 'saw.ndevuspace.com' > pages-artifact/CNAME
+
+          # A sitemap may only list URLs at or below its OWN location, so the per-version
+          # `latest/sitemap.xml` can never speak for the whole host. This index sits at the root and
+          # points at it, which is what robots.txt advertises.
+          printf '%s\n' \
+            '<?xml version="1.0" encoding="UTF-8"?>' \
+            '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' \
+            '  <sitemap><loc>https://saw.ndevuspace.com/latest/sitemap.xml</loc></sitemap>' \
+            '</sitemapindex>' > pages-artifact/sitemap.xml
+
           printf '%s\n' 'User-agent: *' 'Allow: /' '' \
-            'Sitemap: https://saw.ndevuspace.com/latest/sitemap.xml' > pages-artifact/robots.txt
-          cat pages-artifact/robots.txt
-          test -s pages-artifact/latest/sitemap.xml || echo "::warning::latest/sitemap.xml missing"
+            'Sitemap: https://saw.ndevuspace.com/sitemap.xml' > pages-artifact/robots.txt
+
+          # Prove the sitemap the index points at exists AND names this host — a sitemap listing
+          # another host is rejected wholesale, which is exactly how the first deploy failed.
+          test -s pages-artifact/latest/sitemap.xml \
+            || { echo "::error::latest/sitemap.xml missing"; exit 1; }
+          if grep -q '<loc>https://saw\.ndevuspace\.com/' pages-artifact/latest/sitemap.xml; then
+            echo "sitemap host OK"
+          else
+            echo "::error::latest/sitemap.xml does not name saw.ndevuspace.com — Google will reject every URL"
+            grep -o '<loc>https://[^/]*' pages-artifact/latest/sitemap.xml | sort -u
+            exit 1
+          fi
 
       - name: Configure Pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d   # v6.0.0
