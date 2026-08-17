@@ -11,6 +11,7 @@ settings:            # global defaults
   alert_on_recovery: true
   consecutive_failures_before_alert: 1
   consecutive_healthy_before_recovery: 1   # recovery debounce (defaults to the failure threshold)
+  alert_repo: "owner/name"                 # where the status issue lives — required to file one
 urls:
   - name: Example
     url: https://example.com
@@ -30,7 +31,7 @@ urls:
 - `alert_on_recovery` (bool) — enable recovery alerts
 - `consecutive_failures_before_alert` (int) — require this many consecutive failures before alerting
 - `consecutive_healthy_before_recovery` (int, optional) — require this many consecutive healthy checks before declaring recovery (debounces flapping endpoints; defaults to `consecutive_failures_before_alert`)
-- `reports_dir` (string, optional) — where reports are written (default `reports`); also settable per run with `--reports-dir`
+- `alert_repo` (string) — `owner/name` of the repository the status issue is kept in. **No default, on purpose:** an uptime alert names the endpoints it monitors and carries their outage history, so it is never filed into whatever repository happens to host the workflow. Unset ⇒ no issue is filed (the run says so and continues).
 
 ### GitHub issue alerting (health bot)
 
@@ -70,16 +71,22 @@ allowlist:
 
 ## Reports
 
-Reports are written under `reports/` and committed back to the repo.
+**Neither bot writes a report into your repository, and nothing is committed back.**
 
-| File | Contents |
-|------|----------|
-| `reports/latest.json` | latest raw results (`summary` block + `any_unhealthy`) |
-| `reports/history.json` | append-only history of run summaries |
-| `reports/status.json` | machine-readable current status |
-| `reports/YYYY-MM-DD/HH-MM-UTC.md` | human-readable per-run markdown report |
-| `reports/security/latest.{json,md}` | latest security scan results |
+The **health bot** writes no files at all: `stayawake-health-check` probes the URLs, refreshes its
+single GitHub status issue (`settings.alert_repo`), and posts to Slack on a state transition.
 
-The checker writes `latest.json` and appends to `history.json`; the **reporter** produces
-`status.json` and the dated markdown report. (The checker does not write per-run
-JSON files.)
+The **security bot** is terminal-first — `saw scan` renders the full report to `stdout` and
+persists nothing by default. Durable output is opt-in, one sink per flag:
+
+| Sink | Flag | Evidence | Destination |
+|------|------|----------|-------------|
+| Terminal | (default) | full | `stdout` (ephemeral) |
+| JSON | `--json` | full | `stdout` (pipe it; no file) |
+| SARIF | `--sarif FILE` | redacted | `FILE`, for GitHub code-scanning |
+| Alert | `--alert` | evidence-free | GitHub issue + Slack |
+| Reports dir | `-d DIR` | redacted | `DIR/latest.{json,md}` (default `reports/security`, or `settings.reports_dir`) |
+
+Redacted means a persisted artifact stores a `{sha256, preview, len}` fingerprint in place of the
+raw match, so a security report on disk can never re-distribute a live payload. See
+[CLI.md](CLI.md#how-reports-are-stored-evidence--redaction).

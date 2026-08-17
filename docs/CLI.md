@@ -28,7 +28,6 @@ run on your own machine to detect, report, and auto-remediate self-propagating m
 - [Command aliases & shell completion](#command-aliases--shell-completion)
 - [Migrating from the legacy scripts](#migrating-from-the-legacy-scripts)
 - [Compatibility & support](#compatibility--support)
-- [Appendix: design rationale](#appendix-design-rationale)
 
 ## Cheat sheet
 
@@ -64,7 +63,7 @@ saw audit                         # local credential + editor hygiene
 saw guard check                   # is this repo's Strix CI gate present + SHA-pinned + current?
 saw guard setup --pr              # install/bump the gate → one rolling PR (never pushes main)
 saw auth status                   # credential + capability gate (fix vs guard/workflow)
-saw auth app register             # StayAwakeBot App (needs [app]; --force for browser-only test)
+saw auth app register             # register + install the StayAwakeBot App (browser flow)
 
 # Remote (GitHub) sweeps — see "Remote targeting"
 saw scan --remote                 # your own GitHub repos (or configured targets)
@@ -97,17 +96,10 @@ pip install stayawakebot          # from PyPI — scan/fix with `gh` or a PAT
 pip install "stayawakebot @ git+https://github.com/Ndevu12/stayAwakeBot@main"
 ```
 
-**App-ready** (GitHub App registration + installation-token minting — optional PyJWT extra,
-never auto-installed by Saw):
-
-```bash
-pip install "stayawakebot[app]"                          # PyPI / git URL
-pip install -e ".[app]"                                  # editable clone
-pipx inject stayawakebot "pyjwt[crypto]>=2.0"            # pipx install
-```
-
-`saw auth app register` exits with install hints until `[app]` is present; pass `--force`
-to exercise the browser manifest without PyJWT (minting still blocked until you install it).
+**GitHub App auth needs no extra.** Registering an App and minting its installation tokens work
+with the base install on every package manager — the RS256 signing is built in, so there is no
+crypto dependency to add and no per-install-method dance. Go straight to
+[`saw auth app register`](#saw-auth-app).
 
 Installing provides two equivalent binaries:
 
@@ -641,11 +633,10 @@ recording). The full command list is always at `saw -h`.
 
 ### `saw doctor`
 
-Self-check: confirm that `saw` resolves to this installation, report whether a usable GitHub /
-Slack credential is present, and note that the health entry points (`stayawake-health-*`) are
-installed even though they are not `saw` subcommands. When a StayAwakeBot App is configured,
-`saw doctor` also reports whether PyJWT is installed (`app_jwt_available` in `--json`) — same
-readiness signals as `saw auth status`.
+Self-check: confirm that `saw` resolves to this installation, report the active GitHub credential
+(source, actor, whether it is live, its scopes) and whether it can open fix / guard PRs, note
+whether a StayAwakeBot App is configured, and confirm the health entry points are installed even
+though they are not `saw` subcommands. `saw auth status` carries the full intent/capability matrix.
 
 ```text
 saw doctor [--json] [-q]
@@ -716,7 +707,7 @@ code is the verdict, unconditionally** — a CI gate just checks it, no flag req
 | `0` | Clean. For `saw scan`, no scanned target is infected. For `saw audit`, the persistence surface was enumerated — at least one certified location was actually there — and is clean, and no weaker warning gated (**rotation-safe**). For `saw guard check`, every gate is present, pinned, current, and required (or issues found without `-f`); for `saw guard setup`, every repo succeeded or was already up to date. |
 | `1` | For `saw scan`, at least one target is **infected** — returned unconditionally (there is no `--fail`). For `saw audit`, a **weaker** warning-level hygiene issue was found **and** `-f/--fail` was set. For `saw guard check`, a gate is absent, unpinned, stale, or not required **and** `-f` was set; for `saw guard setup`, a repo errored or a PR could not be opened. |
 | `2` | Usage error (unknown command, bad option, or a missing explicit `--config` path), **or** a scan that could not complete — a malformed config (e.g. an `allowlist` that isn't a list of mappings) or a target that errored during scanning. `saw scan` fails **closed** here: a target it could not scan is never reported as clean. `saw guard setup` also exits `2` when it can't resolve the Strix release SHA (offline → pass `--ref`). |
-| `3` | **`saw audit` only — rotation UNSAFE** (#1332): active host persistence was found, **or** the persistence surface could not be established — either a user-owned location existed but couldn't be read, or *every* certified location was absent, so nothing was enumerated (a new account, a container or a CI image looks the same as a destroyed home; see [Rotation safety](#saw-audit--local-machine-hygiene)). Gated **unconditionally** (independent of `-f`), because rotating a credential while a persistence daemon is live can arm a home-directory wiper. **Migration:** `3` is additive — code that treats "`0` = ok, non-zero = attention" is already correct and fails safe. Only code that specifically distinguished `saw audit`'s `1` from `2` needs to also handle `3`. `saw scan` / `saw guard` never return `3`. |
+| `3` | **`saw audit` only — rotation UNSAFE** (#1332): active host persistence was found, **or** the persistence surface could not be established — either a user-owned location existed but couldn't be read, or *every* certified location was absent, so nothing was enumerated (a new account, a container or a CI image looks the same as a destroyed home; see [Rotation safety](#saw-audit)). Gated **unconditionally** (independent of `-f`), because rotating a credential while a persistence daemon is live can arm a home-directory wiper. **Migration:** `3` is additive — code that treats "`0` = ok, non-zero = attention" is already correct and fails safe. Only code that specifically distinguished `saw audit`'s `1` from `2` needs to also handle `3`. `saw scan` / `saw guard` never return `3`. |
 
 ## Command aliases & shell completion
 
