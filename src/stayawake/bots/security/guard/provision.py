@@ -16,7 +16,8 @@ from stayawake.utils.streaming import status as spin_status
 from stayawake.core import proposal
 from stayawake.utils.pathsafe import is_safe_write_target
 from stayawake.bots.security.guard.constants import (
-    STRIX_OWNER, STRIX_REPO, WORKFLOW_DIR, WORM_GUARD_FILE, SETUP_BRANCH)
+    STRIX_OWNER, STRIX_REPO, WORKFLOW_DIR, WORM_GUARD_FILE, SETUP_BRANCH,
+    CHECKOUT_ACTION, SETUP_PYTHON_ACTION)
 from stayawake.bots.security.guard.detect import (
     check, classify_pin, find_strix, find_worm_gate, render,
     _local_workflows, _ref_workflows, _local_action_reader, _ref_action_reader)
@@ -97,7 +98,11 @@ def render_workflow(pin: Pin, default_branch: str = "main") -> str:
         falls behind (`saw guard drift`). Needs only `issues: write`.
 
     The gate is found by its `uses: Ndevu12/strix@<sha>` reference (not this filename), so re-running
-    `saw guard setup` surgically bumps just the pin and leaves the rest of the file untouched."""
+    `saw guard setup` surgically bumps just the pin and leaves the rest of the file untouched.
+
+    EVERY `uses:` here is pinned to a commit SHA, not only the Strix one: this file lands in someone
+    else's repository, and its gate job holds `contents: write`, so a repointed tag on any step would
+    run unreviewed code with that access. `constants.ActionPin` holds the third-party pins."""
     comment = f"  # {pin.tag}" if pin.tag else ""
     return (
         "# Strix worm-guard — installed/updated by `saw guard setup`.\n"
@@ -134,7 +139,7 @@ def render_workflow(pin: Pin, default_branch: str = "main") -> str:
         "      pull-requests: write   # open/update the rolling cleanup PR\n"
         "    steps:\n"
         "      - name: Checkout (full history so evil-merge detection sees the whole graph)\n"
-        "        uses: actions/checkout@v4\n"
+        f"        uses: {CHECKOUT_ACTION.uses()}\n"
         "        with:\n"
         "          fetch-depth: 0\n"
         "      - name: Strix worm scan (+ open a fix PR on an infected verdict)\n"
@@ -150,8 +155,8 @@ def render_workflow(pin: Pin, default_branch: str = "main") -> str:
         "      contents: read         # read the pinned ref from this workflow file\n"
         "      issues: write          # open/close the one drift tracking issue\n"
         "    steps:\n"
-        "      - uses: actions/checkout@v4\n"
-        "      - uses: actions/setup-python@v5\n"
+        f"      - uses: {CHECKOUT_ACTION.uses()}\n"
+        f"      - uses: {SETUP_PYTHON_ACTION.uses()}\n"
         "        with:\n"
         "          python-version: '3.x'\n"
         "      - name: Report if the pinned Strix release is behind\n"

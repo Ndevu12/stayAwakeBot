@@ -392,6 +392,24 @@ class TestRenderWorkflow(unittest.TestCase):
         self.assertEqual(self.doc["jobs"]["worm-guard"]["if"], "github.event_name != 'schedule'")
         self.assertIn("schedule", self.doc["jobs"]["pin-drift"]["if"])
 
+    def test_every_action_is_pinned_by_commit_sha(self):
+        # The file we install lands in someone else's repo, in a job holding `contents: write`. A
+        # moving tag on ANY step there executes unreviewed code in that context, so the rule is every
+        # `uses:`, not just the Strix one — which is the half `saw guard check` grades. Asserted
+        # generically so a step added later cannot reintroduce a tag ref unnoticed.
+        uses = [step["uses"] for job in self.doc["jobs"].values()
+                for step in job["steps"] if "uses" in step]
+        self.assertGreaterEqual(len(uses), 4)          # 2 checkouts + setup-python + strix
+        for ref in uses:
+            self.assertRegex(ref, r"^[\w.-]+/[\w.-]+@[0-9a-f]{40}$",
+                             f"{ref} is not pinned to a commit SHA")
+
+    def test_pinned_actions_name_the_release_tag_they_resolve_to(self):
+        # The SHA is the ref; the tag is a readability comment beside it. Without the comment nobody
+        # can tell which release a 40-hex string is, and the pin rots silently.
+        for action in (guard.CHECKOUT_ACTION, guard.SETUP_PYTHON_ACTION):
+            self.assertIn(f"{action.repo}@{action.sha}   # {action.tag}", self.wf)
+
     def test_repin_preserves_the_two_job_structure(self):
         # A surgical repin must touch ONLY the strix @ref, leaving the remediate/token/drift intact.
         newpin = guard.Pin("b" * 40, "v0.1.5")
