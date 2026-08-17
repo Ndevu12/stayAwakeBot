@@ -68,7 +68,7 @@ privately.
 | `require_db` | `false` | Fail (exit 2) when the advisory DB is missing or fails its integrity check, instead of degrading to the inline seed. As `saw scan --require-db`. |
 | `jobs` | auto | Worker count; an int, or `auto`/empty for automatic. Below 1 is clamped to 1; an unparseable value falls back to automatic rather than failing the scan. `-j/--jobs` wins. |
 | `parallel_min_files` | `256` | File-count floor below which a single target is scanned sequentially (a pool is not worth its startup cost on a small repo). |
-| `reports_dir` | — | Intended fallback location for the report bundle. **Currently inert for `saw scan`** ([#1454](https://github.com/Ndevu12/stayAwakeBot/issues/1454)): the bundle is only written when `-d/--reports-dir DIR` is passed, and that `DIR` then takes precedence over this. Pass `-d` with the path you want. |
+| `reports_dir` | — | Where the report bundle is written. Setting it **is** the opt-in — no `-d` needed — and `-d DIR` overrides it for one run. Precedence: `-d` → `STAYAWAKE_REPORTS_DIR` → this. With none of the three set, a scan writes nothing. |
 | `signatures_path` | packaged DB | Path to a custom signature database. |
 
 Booleans are parsed strictly, so a quoted `external_audit: "false"` reads as **false** rather than

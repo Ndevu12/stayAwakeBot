@@ -44,18 +44,32 @@ def resolve_writable_dir(preferred: str | Path, *, label: str = "reports") -> Pa
     return last
 
 
+def reports_dir_choice(explicit: str | Path | None = None, *,
+                       settings_value: str | Path | None = None) -> str | Path | None:
+    """The first source that ASKS for a report bundle, or None when none does.
+
+    Precedence: `explicit` (a `--reports-dir` / call arg) → `STAYAWAKE_REPORTS_DIR` (the container
+    image sets this to a writable, container-owned path) → `settings.reports_dir`.
+
+    Separate from `resolve_reports_dir` so a caller can tell "nobody asked, write nothing" apart from
+    "asked, and here is where". Conflating the two is what made the env and settings rungs
+    unreachable (#1454): the only caller gated on its own `explicit` value, so the `or` chain could
+    never reach past the first rung. Both functions read the precedence from HERE, so a consumer can
+    never re-derive a different answer."""
+    return explicit or env.get(env.STAYAWAKE_REPORTS_DIR) or settings_value or None
+
+
 def resolve_reports_dir(explicit: str | Path | None = None, *,
                         settings_value: str | Path | None = None,
                         default: str | Path, label: str = "reports") -> Path:
-    """Choose where reports go and make sure it's writable — one place for the precedence
-    so the report writers don't each re-implement it.
+    """Where reports go, guaranteed writable — one place for the precedence so the report writers
+    don't each re-implement it.
 
-    Precedence: `explicit` (a `--reports-dir` / call arg) → `STAYAWAKE_REPORTS_DIR` (the
-    container image sets this to a writable, container-owned path) → `settings.reports_dir`
-    → `default`. The chosen dir is then passed through `resolve_writable_dir`, so an
-    unwritable choice falls back to a temp dir instead of crashing a completed run.
+    `reports_dir_choice` picks the source; `default` applies when none asked. The result is passed
+    through `resolve_writable_dir`, so an unwritable choice falls back to a temp dir instead of
+    crashing a completed run.
     """
-    chosen = explicit or env.get(env.STAYAWAKE_REPORTS_DIR) or settings_value or default
+    chosen = reports_dir_choice(explicit, settings_value=settings_value) or default
     return resolve_writable_dir(chosen, label=label)
 
 
