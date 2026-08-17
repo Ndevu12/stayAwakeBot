@@ -1,3 +1,7 @@
+---
+description: Take one repository from unguarded to a required CI check, so an infected change cannot merge. A step-by-step walkthrough of saw guard setup.
+---
+
 # Gate a repository
 
 A repository that scans clean today can still merge an infected change tomorrow. This walks one

@@ -1,3 +1,7 @@
+---
+description: saw db — manage the offline advisory database of malicious packages and CVEs that a scan consults.
+---
+
 # `saw db`
 
 Manage the [offline advisory database](../advisory-db.md).

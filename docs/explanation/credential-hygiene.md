@@ -1,3 +1,7 @@
+---
+description: What a cached GitHub credential really risks, how to judge it by lifetime, scope and whether it can be copied, and how to remove one safely.
+---
+
 # Credential hygiene: cached GitHub credentials and the worm threat model
 
 > **TL;DR** — A GitHub token cached in your OS keychain is **not** automatically a vulnerability; the

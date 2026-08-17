@@ -1,3 +1,7 @@
+---
+description: Mapping the removed stayawake-security-* scripts to their saw equivalents.
+---
+
 # Migrating from the legacy scripts
 
 The `stayawake-security-*` console scripts have been removed; `saw` is the only local security

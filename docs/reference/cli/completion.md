@@ -1,3 +1,7 @@
+---
+description: saw completion — print a shell completion script for bash, zsh or fish.
+---
+
 # `saw completion`
 
 ```text

@@ -1,3 +1,7 @@
+---
+description: Which saw operations need a GitHub token, the least privilege each one requires, and how the token is handled.
+---
+
 # Credentials
 
 Local scanning needs **no credential**. A GitHub token is only used to clone private repositories and

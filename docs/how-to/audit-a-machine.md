@@ -1,3 +1,7 @@
+---
+description: Audit the developer machine itself: cached credentials, editor auto-run, the start-up surface, and whether rotating credentials is safe.
+---
+
 # Audit a machine
 
 A repository scan says nothing about the machine it runs on. `saw audit` looks at the host: cached

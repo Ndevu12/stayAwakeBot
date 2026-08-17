@@ -1,3 +1,7 @@
+---
+description: saw scan — hunt for supply-chain worms across repositories. Read-only, and the exit code is the verdict. Full option reference.
+---
+
 # `saw scan`
 
 Hunt for supply-chain worms across repositories or directories. The full report — with full match

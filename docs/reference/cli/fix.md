@@ -1,3 +1,7 @@
+---
+description: saw fix — clean detected findings on a branch and publish them only as a pull request. Full option reference.
+---
+
 # `saw fix`
 
 Clean detected findings **on a branch**. By default `fix` prepares `security/auto-clean` locally and

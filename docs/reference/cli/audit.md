@@ -1,3 +1,7 @@
+---
+description: saw audit — check the machine for credential exposure, editor auto-run and host persistence, and whether credential rotation is safe.
+---
+
 # `saw audit`
 
 Audit the machine: credential exposure, editor settings, the start-up surface, and optionally a

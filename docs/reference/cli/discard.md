@@ -1,3 +1,7 @@
+---
+description: saw discard — remove the branch and pull request that saw fix produced, and nothing else. Full option reference.
+---
+
 # `saw discard`
 
 The inverse of `saw fix`: remove what it produced. It only ever touches the generated

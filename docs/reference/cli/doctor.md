@@ -1,3 +1,7 @@
+---
+description: saw doctor — self-check the installation, the active GitHub credential and what it is allowed to do.
+---
+
 # `saw doctor`
 
 ```text

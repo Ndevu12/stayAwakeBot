@@ -1,3 +1,7 @@
+---
+description: What saw is allowed to change and what it will not touch: scan is read-only, fix writes only to its own branch, nothing lands without a merge.
+---
+
 # The safety envelope
 
 What `saw` is allowed to change, and what it will not touch. A security tool that damages a working

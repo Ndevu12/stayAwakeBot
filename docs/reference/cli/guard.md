@@ -1,3 +1,7 @@
+---
+description: saw guard — install, verify and keep current the worm-guard CI gate across one repository or a fleet. Full option reference.
+---
+
 # `saw guard`
 
 Install and verify the **Strix worm-guard CI gate**: `scan` finds worms, `fix` cleans them, `guard`

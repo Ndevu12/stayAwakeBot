@@ -1,3 +1,7 @@
+---
+description: Every setting saw reads from its configuration files, with defaults and the command-line flag each one mirrors.
+---
+
 # Configuration
 
 Both files are optional. Local scanning needs neither — pass paths on the command line, or stand in a

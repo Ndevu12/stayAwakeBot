@@ -1,3 +1,7 @@
+---
+description: saw auth — GitHub credential and capability status, and registration of an operator-managed StayAwakeBot App.
+---
+
 # `saw auth`
 
 Credential and capability status, and registration of an operator-managed StayAwakeBot GitHub App.

@@ -1,3 +1,7 @@
+---
+description: saw hook — install global git hooks that scan a clone, pull or rebase before you run the code. Full option reference.
+---
+
 # `saw hook`
 
 **Scan on clone.** Installs global git hooks so a fresh clone, a pull, a branch switch or a rebase

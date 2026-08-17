@@ -1,3 +1,7 @@
+---
+description: Clean an infected repository with saw fix, which prepares the change on a branch for review and publishes only through a pull request.
+---
+
 # Fix findings
 
 `saw fix` cleans an infected repository **on a branch**, for you to review. It never edits your

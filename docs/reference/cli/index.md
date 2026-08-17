@@ -1,3 +1,7 @@
+---
+description: Every saw command and flag, documented once: scan, fix, discard, audit, guard, hook, auth, db, search, intro, doctor and completion.
+---
+
 # `saw` command reference
 
 Every `saw` flag is documented here, and only here — the guides link to these pages rather than

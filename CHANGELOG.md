@@ -14,9 +14,9 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Changed
-- **The documentation site is now at <https://saw.ndevuspace.com>.** Link previews carry a title,
-  summary and the project mark, and the site describes itself to search engines so its pages can be
-  found without going through the repository first.
+- **The documentation site is now at <https://saw.ndevuspace.com>.** Every page carries its own
+  summary, a shared link previews with a proper card rather than a bare URL, and the site describes
+  itself to search engines so its pages can be found without going through the repository first.
 
 ### Added
 - **Documented where the report goes when a scan is too large for the terminal.** A big sweep prints

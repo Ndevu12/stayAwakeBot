@@ -77,6 +77,8 @@ extra_css:
   - assets/extra.css
 
 extra:
+  # Paste the token from Google Search Console here to claim ownership; unset emits no tag.
+  # google_site_verification: ""
   version:
     provider: mike
     default: latest

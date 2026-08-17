@@ -1,3 +1,7 @@
+---
+description: What saw trusts and what it refuses to: an operator-owned allowlist, an offline default, and evidence that never leaves your terminal.
+---
+
 # Trust model
 
 What `saw` trusts, and what it refuses to.
