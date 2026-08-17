@@ -127,9 +127,17 @@ ROTATION_UNSAFE_IDS = ACTIVE_PERSISTENCE_IDS | UNVERIFIED_PERSISTENCE_IDS
 
 # Rotation-safety verdict states (the run-level property #1332 adds). A property of the WHOLE run,
 # reachable even when no individual finding is present.
+# Findings whose OWN advice defers rotation, pending a check only the operator can make ("is this
+# directory yours?"). They are weak and unattributed, so they must not raise the alarm — but the
+# run-level verdict may not print "rotating is safe" six lines above a fix that says "rotate LAST".
+# Two places were deciding whether rotation is safe: this function and the finding's prose. They
+# disagreed. This is the one table both now answer to.
+VERIFY_BEFORE_ROTATE_IDS = {"host-drop-artifact-weak", "host-artifact-scanned-clean"}
+
 ROTATION_SAFE = "safe"                 # surface enumerated AND clean → rotating credentials is safe
 ROTATION_UNSAFE_PERSISTENCE = "unsafe-persistence"   # active persistence found → rotate LAST
 ROTATION_UNSAFE_UNKNOWN = "unsafe-unknown"           # surface could not be verified → treat as unsafe
+ROTATION_SAFE_PENDING_CHECK = "safe-pending-check"   # safe once the operator confirms a weak item is theirs
 
 
 def rotation_safety(issue_ids: set[str]) -> str:
@@ -139,6 +147,11 @@ def rotation_safety(issue_ids: set[str]) -> str:
         return ROTATION_UNSAFE_PERSISTENCE
     if issue_ids & UNVERIFIED_PERSISTENCE_IDS:
         return ROTATION_UNSAFE_UNKNOWN
+    if issue_ids & VERIFY_BEFORE_ROTATE_IDS:
+        # NOT an alarm and NOT exit 3: these are weak, unattributed signals, and #1337's rule is that
+        # weak context never modulates the verdict. What it does change is the CLAIM — "safe" becomes
+        # "safe once you confirm", which is what the finding underneath already says.
+        return ROTATION_SAFE_PENDING_CHECK
     return ROTATION_SAFE
 
 
