@@ -15,7 +15,9 @@ import unittest
 from unittest import mock
 
 from stayawake.bots.security.hygiene import host_artifacts
-from stayawake.bots.security.hygiene.models import incident_tier, rotation_safety, ROTATION_SAFE
+from stayawake.bots.security.hygiene.models import (incident_tier, rotation_safety,
+                                                    ROTATION_UNSAFE_PERSISTENCE,
+                                                    ROTATION_UNSAFE_UNKNOWN)
 
 
 class TestTheIndicatorTestsTheShapeItDescribes(unittest.TestCase):
@@ -40,7 +42,10 @@ class TestTheIndicatorTestsTheShapeItDescribes(unittest.TestCase):
         ids = {i.id for i in issues}
         self.assertNotIn("host-drop-artifacts", ids, "a file was corroborated as an npm tree")
         self.assertIsNone(incident_tier(ids))
-        self.assertEqual(rotation_safety(ids), ROTATION_SAFE)
+        # The claim is that hardening does not WITHHOLD the all-clear. A lone weak indicator makes
+        # it conditional ("safe once you confirm"), which is not withheld — the unsafe states are.
+        self.assertNotIn(rotation_safety(ids),
+                         (ROTATION_UNSAFE_PERSISTENCE, ROTATION_UNSAFE_UNKNOWN))
 
     def test_a_real_tree_is_still_reported(self):
         issues = self._issues(lambda home, tmp: (

@@ -24,6 +24,10 @@ reader, not the mechanism or the weakness it closed.
 ### Fixed
 - **`saw hook -h` no longer lists an internal `run` entry**, which appeared as a row reading
   `==SUPPRESS==` and was never meant to be typed by hand.
+- **`saw audit` no longer says rotating credentials is safe while telling you to rotate last.** When
+  an unusual file or directory is found, the report asks you to confirm it is yours — and it now says
+  the rotation all-clear depends on that answer, instead of stating it unconditionally a few lines
+  above. Nothing changes for a clean run, for a real incident, or for the exit code.
 
 ## [0.6.1] - 2026-08-17
 

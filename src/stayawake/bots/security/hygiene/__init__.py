@@ -28,7 +28,8 @@ from typing import Callable
 from .models import (HygieneIssue, INCIDENT_TRIGGER_IDS, ACTIVE_PERSISTENCE_IDS,
                      CREDENTIAL_EXPOSURE_IDS, UNVERIFIED_PERSISTENCE_IDS, ROTATION_UNSAFE_IDS,
                      SURFACE_UNREADABLE_ID, SURFACE_ABSENT_ID,
-                     ROTATION_SAFE, ROTATION_UNSAFE_PERSISTENCE, ROTATION_UNSAFE_UNKNOWN,
+                     ROTATION_SAFE, ROTATION_SAFE_PENDING_CHECK,
+                     ROTATION_UNSAFE_PERSISTENCE, ROTATION_UNSAFE_UNKNOWN,
                      TIER_ACTIVE_PERSISTENCE, TIER_CREDENTIAL_EXPOSURE, incident_tier,
                      persistence_surface_is_enumerable, response_order, rotation_safety,
                      incident_response_sequence, credential_exposure_note)
@@ -146,6 +147,10 @@ def _rotation_verdict(issues: list[HygieneIssue], *, color: bool, width: int) ->
     SAFE (surface enumerated + clean), UNSAFE-persistence (a live foothold → the isolate/rotate-LAST
     runbook follows in _banner), UNSAFE-unknown (surface could not be read → treat as unsafe)."""
     verdict = rotation_safety({i.id for i in issues})
+    if verdict == ROTATION_SAFE_PENDING_CHECK:
+        return [paint(f"{MARKER['ok']} Rotation safety: safe once you confirm the item(s) below are "
+                      "yours — if any is not, treat this as an incident and rotate LAST.",
+                      SEVERITY["ok"], on=color)]
     if verdict == ROTATION_SAFE:
         return [paint(f"{MARKER['ok']} Rotation safety: persistence surface enumerated and clean "
                       "— rotating credentials is safe.", SEVERITY["ok"], on=color)]
