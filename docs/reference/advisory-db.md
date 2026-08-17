@@ -26,4 +26,4 @@ saw scan --require-db                            # exit 2 rather than scan witho
 
 Unknown age counts as stale.
 
-Flags: [CLI reference](cli.md#saw-db).
+Flags: [CLI reference](cli/db.md).

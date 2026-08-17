@@ -13,6 +13,18 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Added
+- **The documentation is now published as a searchable, versioned site** at
+  <https://ndevu12.github.io/stayAwakeBot/>, with light and dark themes. Because `saw` ships pinned
+  releases, each release keeps its own copy of the docs, so a pinned install can read the pages that
+  describe the version it actually has; `latest` tracks the current documentation.
+
+### Changed
+- **The CLI reference is now one page per command** instead of a single long page — `saw scan`,
+  `saw fix`, `saw audit` and the rest each have their own page, alongside pages for remote
+  targeting, report sinks and credentials. Existing links into the old page are repointed, and the
+  content is unchanged.
+
 ## [0.6.2] - 2026-08-17
 
 ### Changed

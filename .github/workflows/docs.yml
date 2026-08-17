@@ -1,0 +1,154 @@
+name: Docs — build & publish
+
+# Builds the MkDocs Material site and publishes it to GitHub Pages.
+#
+# `saw` ships PINNED releases, so an unversioned site would misdescribe every older install.
+# `mike` therefore keeps one directory per version on the `gh-pages` branch:
+#   * a push to `main`  -> version `latest` (the default alias; what a bare docs URL resolves to)
+#   * a published release -> an immutable version directory named after the tag (e.g. `0.6.1`)
+# Pages itself is served from the uploaded ARTIFACT (Settings -> Pages -> Source: GitHub Actions),
+# not from the branch; `gh-pages` is only mike's version store.
+#
+# A pull request runs `mkdocs build --strict` and stops there — no branch write, no deploy. Strict
+# mode turns a broken relative link, a dangling #anchor, or a page missing from the nav into a
+# build failure, so a docs regression cannot merge.
+#
+# Every action is pinned to a commit SHA with the tag in a trailing comment (#1453): a moving tag
+# is a supply-chain hole, and this repo does not get to enforce SHA pinning on its users while
+# floating its own.
+
+on:
+  pull_request:
+    paths:
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - 'requirements-docs.txt'
+      - '.github/workflows/docs.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - 'requirements-docs.txt'
+      - '.github/workflows/docs.yml'
+  release:
+    types: [published]
+  workflow_dispatch:
+
+# Least privilege at the top: read-only. Each job widens ONLY what it needs.
+permissions:
+  contents: read
+
+concurrency:
+  # PR runs supersede each other; publishing runs queue, because two mike runs racing on
+  # `gh-pages` would lose a version.
+  group: docs-${{ github.event_name == 'pull_request' && github.ref || 'publish' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # The gate. Runs on every trigger, including pull requests.
+  build:
+    name: Build (strict)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0   # v7.0.0
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1   # v6.3.0
+        with:
+          python-version-file: .python-version
+          cache: 'pip'
+          cache-dependency-path: requirements-docs.txt
+
+      - name: Install the docs toolchain
+        run: pip install -r requirements-docs.txt
+
+      - name: mkdocs build --strict
+        run: mkdocs build --strict
+
+  # Writes the version to `gh-pages` and hands the whole versioned tree to Pages.
+  publish:
+    name: Publish version
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # mike commits the built version to the `gh-pages` branch
+      pages: read
+    steps:
+      - name: Checkout (full history — mike needs the gh-pages branch)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0   # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1   # v6.3.0
+        with:
+          python-version-file: .python-version
+          cache: 'pip'
+          cache-dependency-path: requirements-docs.txt
+
+      - name: Install the docs toolchain
+        run: pip install -r requirements-docs.txt
+
+      - name: Configure the committer
+        run: |
+          set -euo pipefail
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+      # A release publishes its own immutable version directory, named after the tag with the
+      # leading `v` stripped, and leaves `latest` alone — someone on a pinned 0.6.1 keeps a page
+      # that describes 0.6.1. Everything else publishes/refreshes `latest`.
+      - name: Deploy this version with mike
+        env:
+          EVENT: ${{ github.event_name }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "release" ]; then
+            version="${TAG#v}"
+            [ -n "$version" ] || { echo "::error::release event with an empty tag_name"; exit 1; }
+            mike deploy --push "$version"
+          else
+            mike deploy --push --update-aliases latest
+            mike set-default --push latest
+          fi
+          mike list
+
+      # Serve the ENTIRE versioned tree, not just this build, so the version selector and every
+      # older version stay reachable. `git archive` gives a clean tree with no .git in it.
+      - name: Materialise the gh-pages tree for Pages
+        run: |
+          set -euo pipefail
+          git fetch origin gh-pages
+          mkdir -p pages-artifact
+          git archive origin/gh-pages | tar -x -C pages-artifact
+          test -s pages-artifact/index.html   # fail loudly rather than deploying an empty site
+
+      - name: Configure Pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d   # v6.0.0
+
+      - name: Upload the Pages artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9   # v5.0.0
+        with:
+          path: pages-artifact
+
+  deploy:
+    name: Deploy to Pages
+    if: github.event_name != 'pull_request'
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write        # publish the uploaded artifact
+      id-token: write     # OIDC verification of the deployment's origin
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128   # v5.0.0

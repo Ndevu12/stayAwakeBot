@@ -153,8 +153,11 @@ venv.bak/
 # Rope project settings
 .ropeproject
 
-# mkdocs documentation
+# mkdocs documentation — `mkdocs build` writes the rendered site here (mkdocs.yml: site_dir).
+# It is a build artifact: CI rebuilds it, and mike publishes it to the gh-pages branch.
 /site
+# Local docs toolchain venv (requirements-docs.txt); CI-only deps, never committed.
+.venv-docs/
 
 # mypy
 .mypy_cache/

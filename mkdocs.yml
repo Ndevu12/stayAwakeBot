@@ -1,0 +1,137 @@
+# MkDocs Material configuration for the published docs site.
+#
+# Build it locally with the CI-only toolchain:
+#     python -m venv .venv-docs && .venv-docs/bin/pip install -r requirements-docs.txt
+#     .venv-docs/bin/mkdocs build --strict     # --strict turns a broken internal link into an error
+#
+# The site is VERSIONED with `mike` (see .github/workflows/docs.yml): `saw` ships pinned releases,
+# so an unversioned site would describe every older install incorrectly.
+
+site_name: saw
+site_url: https://ndevu12.github.io/stayAwakeBot/
+site_description: >-
+  saw — an offline-first supply-chain worm scanner and sentinel: detect, report,
+  remediate on a branch, and gate CI.
+site_author: Jean Paul Elisa NIYOKWIZERWA
+copyright: >-
+  Dual-licensed AGPL-3.0-or-later or commercial — see COMMERCIAL-LICENSE.md
+
+repo_url: https://github.com/Ndevu12/stayAwakeBot
+repo_name: Ndevu12/stayAwakeBot
+edit_uri: edit/main/docs/
+
+docs_dir: docs
+site_dir: site
+
+# Fail the build on a broken relative link, a dangling #anchor, or a page missing from the nav,
+# so a docs regression cannot merge. `strict` promotes every warning below to an error.
+strict: true
+validation:
+  omitted_files: warn
+  not_found: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+
+theme:
+  name: material
+  language: en
+  logo: assets/stayawakebot-app-icon.png
+  favicon: assets/stayawakebot-app-icon.png
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    # Light mode, and the toggle into dark.
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    # Dark mode, and the toggle back.
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - navigation.indexes
+    - content.action.edit
+    - content.code.copy
+    - search.highlight
+    - search.suggest
+    - toc.follow
+
+extra_css:
+  - assets/extra.css
+
+extra:
+  version:
+    provider: mike
+    default: latest
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.inlinehilite
+
+# Mirrors docs/ exactly (Diátaxis: tutorial / how-to / reference / explanation).
+nav:
+  - Home: index.md
+  - Tutorial:
+      - tutorial/first-scan.md
+      - tutorial/gate-a-repo.md
+  - How-to:
+      - how-to/scan-local.md
+      - how-to/scan-remote.md
+      - how-to/scan-on-clone.md
+      - how-to/fix-findings.md
+      - how-to/audit-a-machine.md
+      - how-to/harden-a-repo.md
+      - how-to/gate-ci.md
+  - Reference:
+      - CLI:
+          - reference/cli/index.md
+          - reference/cli/scan.md
+          - reference/cli/fix.md
+          - reference/cli/discard.md
+          - reference/cli/audit.md
+          - reference/cli/guard.md
+          - reference/cli/hook.md
+          - reference/cli/auth.md
+          - reference/cli/db.md
+          - reference/cli/search.md
+          - reference/cli/intro.md
+          - reference/cli/doctor.md
+          - reference/cli/completion.md
+          - reference/cli/remote.md
+          - reference/cli/sinks.md
+          - reference/cli/credentials.md
+          - reference/cli/migrating.md
+      - reference/configuration.md
+      - reference/exit-codes.md
+      - reference/advisory-db.md
+  - Explanation:
+      - explanation/trust-model.md
+      - explanation/safety-envelope.md
+      - explanation/verdicts.md
+      - explanation/fail-closed.md
+      - explanation/credential-hygiene.md

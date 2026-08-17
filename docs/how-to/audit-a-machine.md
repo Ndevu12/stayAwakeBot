@@ -3,7 +3,7 @@
 A repository scan says nothing about the machine it runs on. `saw audit` looks at the host: cached
 credentials, editor settings, the start-up surface, and — with `--repo` — a repository's branch
 protection. It is read-only, and it never cleans anything. Flags: [CLI
-reference](../reference/cli.md#saw-audit).
+reference](../reference/cli/audit.md).
 
 ```bash
 saw audit                       # hygiene + start-up surface + rotation verdict

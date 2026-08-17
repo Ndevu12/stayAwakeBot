@@ -2,7 +2,7 @@
 
 A worm fires when you `npm install`, build, or open the folder in an editor — not when you clone.
 `saw hook` puts a scan in between: a fresh clone, a pull, a branch switch or a rebase is scanned and
-you are warned *before* you run anything. Flags: [CLI reference](../reference/cli.md#saw-hook).
+you are warned *before* you run anything. Flags: [CLI reference](../reference/cli/hook.md).
 
 ```bash
 saw hook install                       # future clones and pulls are scanned automatically
