@@ -1,24 +1,9 @@
 #!/usr/bin/env python3
-"""Destructive-intent (self-destruct / evidence-removal) detector (#1334).
+"""Detector for code whose purpose is to destroy the user's files.
 
-`saw` already sees that a lifecycle script *runs code*; this sees that the code *deletes the user's home
-directory*. The routine has a static shape: a recursive filesystem walk ROOTED AT THE USER'S HOME (or
-`/`) co-occurring with DELETION — and, reported DISTINCTLY, with OVERWRITE-then-delete (a secure wipe
-that makes the data unrecoverable). That distinction is load-bearing for incident response: plain delete
-leaves recoverable content (image the disk now), a secure overwrite does not (the data is gone).
-
-FUSION, not one heuristic (like #1333): the NECESSARY core is the corroborated co-occurrence
-(home-root ∧ recursive ∧ delete) — each half alone is common and inert (`rm -rf ./dist`, a lone
-`unlink(tmp)`, a `readdir` for config), so nothing fires without all three. On top of that necessary
-core we FUSE amplifiers that enrich the verdict and confirm it is the worm and not a coincidence: the
-dead-man's-switch trigger (armed on a GitHub-auth / token-revocation condition), a co-present
-decode→exec dropper, and the named IoC droppers (`setup_bun.js` / `bun_environment.js`). The core's
-near-zero benign use is what earns the confirmed grade; the amplifiers make the evidence unambiguous.
-
-Model-driven and dependency-free (regex over the `model` taxonomy, like `detect_dropper` — no AST
-engine). Static: the literal + decode-behind shapes are reachable without process visibility; a fully
-computed/obfuscated traversal root, and cross-FILE reach (walk in one file, delete in another), are the
-documented residuals.
+`detect_destructive(text)` returns a finding reason when a chunk of source carries a routine that
+deletes a user's home directory, and distinguishes a plain delete from one that overwrites first.
+Returns None otherwise.
 """
 from __future__ import annotations
 
@@ -29,10 +14,6 @@ from . import model
 
 PLAIN, SECURE = "plain", "secure"
 
-# HOME-ROOT expression, also kept as a raw fragment `_HOME` so we can require it CO-LOCATED with the
-# destructive op (the delete/walk is ROOTED AT home) rather than merely PRESENT somewhere in the file —
-# the latter would false-positive on `os.homedir()` for a config path + a scoped `rimraf('./dist')`.
-# Covers dot AND bracket access (`process.env['HOME']`) so the obvious evasion doesn't slip.
 _HOME = (r"(?:\bos\.homedir\s*\(\)|(?<![\w.])homedir\s*\(\)"
          r"|\bexpanduser\s*\(\s*['\"]~|\bPath\.home\s*\(\)"
          r"|\bprocess\.env\.(?:HOME|USERPROFILE|HOMEPATH)\b"
@@ -42,58 +23,41 @@ _HOME = (r"(?:\bos\.homedir\s*\(\)|(?<![\w.])homedir\s*\(\)"
          r"|(?<![\w.~/])~(?=[/\s'\"]|$))")     # ~/  and a bare `~` path (rm -rf ~) — not `~x` bitwise-not
 _HOME_ROOT = re.compile(_HOME, re.IGNORECASE)
 
-# A recursive delete/walk at the FILESYSTEM ROOT (`/` as the WHOLE argument — never `/tmp/x`).
 _ROOT_WIPE = re.compile(
     r"\brm\s+-[a-z]*(?:rf|fr)[a-z]*\s+/(?:\s|$|['\"])"          # rm -rf /
     r"|\brimraf\s*\(\s*['\"]/['\"]"                            # rimraf("/")
     r"|\brmSync\s*\(\s*['\"]/['\"]", re.IGNORECASE)
 
 # ── The corroborated core: a destructive op ROOTED AT HOME. The home token must appear INSIDE the
-# call, within the SAME statement (`_W`, a bounded/ReDoS-safe window over a delimiter-excluding class).
 _W = r"[^;\n]{0,80}?"
-# A recursive delete whose target is home — POSIX (rimraf(home) / rm -rf home) and WINDOWS
-# (rmdir /s / rd /s / del /s / Remove-Item -Recurse over %USERPROFILE% / $env:USERPROFILE).
 _RECURSIVE_DELETE_HOME = re.compile(
     r"(?:\brimraf\s*\(|\brm\s+-[a-z]*(?:rf|fr)[a-z]*\s+"
     r"|(?:\brmdir|\brd|\bdel)\s+[^;\n]{0,24}?/s\b)" + _W + _HOME             # POSIX + cmd.exe delete
     + r"|\bRemove-Item\b[^;\n]{0,120}?-Recurse[^;\n]{0,120}?" + _HOME        # PowerShell (flag then home)
     + r"|\bRemove-Item\b[^;\n]{0,120}?" + _HOME + r"[^;\n]{0,120}?-Recurse", # PowerShell (home then flag)
     re.IGNORECASE)
-# fs.rmSync(home,{recursive:true}) / fs.rm(home,{recursive:true}) — home AND recursive:true in the call.
 _RMSYNC_RECURSIVE_HOME = re.compile(
     r"(?:\brmSync|\bfs\.rm|\brmdirSync)\s*\(" + _W + _HOME + _W + r"recursive\s*:\s*true"
     r"|(?:\brmSync|\bfs\.rm|\brmdirSync)\s*\(" + _W + r"recursive\s*:\s*true" + _W + _HOME,
     re.IGNORECASE)
-# A traversal ROOTED AT HOME (readdir/walk/glob/find over home) — pairs with a separate delete sink.
 _WALK_HOME = re.compile(
     r"(?:\breaddir(?:Sync)?\s*\(|\bwalk(?:Sync)?\s*\(|\bglob(?:Sync)?\s*\(|\bklaw\s*\("
     r"|\blistdir\s*\(|\bscandir\s*\(|\biterdir\s*\(\s*\)|\bfind\s+)"
     + _W + _HOME, re.IGNORECASE)
-# Any deletion sink (only consulted once a home-rooted WALK is established) — incl. shell `find`
-# terminals (`find $HOME -delete` / `find $HOME -exec rm`).
 _DELETE = re.compile(
     r"\bunlink(?:Sync)?\s*\(|\brmSync\s*\(|\brmdir(?:Sync)?\s*\(|\brimraf\b"
     r"|\bshutil\s*\.\s*rmtree\s*\(|\bremovedirs\s*\(|\bos\s*\.\s*remove\s*\("
     r"|\bfs\.rm\s*\(|\brm\s+-|-delete\b|-exec\s+\S*\brm\b", re.IGNORECASE)
 
-# OVERWRITE-then-delete → the SECURE, unrecoverable variant.
 _OVERWRITE = re.compile(
     r"\bwriteFile(?:Sync)?\s*\(|\brandomBytes\s*\(|\brandomFillSync\s*\(|\bcreateWriteStream\s*\("
     r"|\bshred\b|\bdd\s+if=/dev/(?:urandom|zero)", re.IGNORECASE)
 
-# Amplifiers (raise confidence / enrich — never gate).
 _DEADMAN = re.compile(
     r"\bGITHUB_TOKEN\b|\bNPM_TOKEN\b|\brevoke|\bunauthorized\b|\bauthenticat|\bgetUser\b|\bcreateRepo",
     re.IGNORECASE)
 _NAMED_IOC = re.compile(r"\b(?:setup_bun|bun_environment)\b", re.IGNORECASE)
 
-# #1336 — the destructive capability shipped behind a DISABLED feature flag (the SANDWORM_MODE staging
-# shape: the routine is present + functional, one attacker toggle from running). We deliberately do NOT
-# try to resolve the flag's runtime VALUE — that is unreliable, attacker-controlled, and the polymorphic
-# engine is itself one of the flagged components. We detect a destruct-intent-NAMED flag DECLARED to a
-# disabled value. This is ENRICHMENT ONLY: it changes the finding's WORDING, never the verdict — so an
-# undetected gate simply reads as "armed" (the safer default) and the finding stands either way. Bounded
-# (no nested quantifier) → ReDoS-safe.
 _DESTRUCT_FLAG = r"(?:destroy|destruct|self_?destruct|wipe|nuke|purge|detonat|sandworm|dead_?man|kill_?switch)"
 _DISABLED_FLAG = re.compile(
     r"\b\w*" + _DESTRUCT_FLAG + r"\w*\b\s*[:=]\s*(?:false|0|['\"]?(?:off|no|disabled?)['\"]?)\b",
@@ -103,7 +67,6 @@ _DISABLED_FLAG = re.compile(
 
 # A name bound to the home directory IS the home directory. Requiring the home token inside the
 # delete call meant one assignment defeated the whole arm — `const h = os.homedir()` then
-# `rmSync(h, {recursive:true})` went unreported, which is the shortest possible evasion.
 
 
 
@@ -149,7 +112,6 @@ def _rebound(gap: str, name: str) -> bool:
     return bool(re.search(r"(?<![.\w$])" + re.escape(name) + r"\s*=(?!=)", gap))
 
 
-# A new top-level `def`/`class` ends the walk's scope in Python, where there is no closing brace.
 _NEW_TOPLEVEL_DEF = re.compile(r"^(?:def|class)\s", re.MULTILINE)
 
 
@@ -173,16 +135,12 @@ def _same_scope(gap: str) -> bool:
     return not _NEW_TOPLEVEL_DEF.search(gap)
 
 
-# Splitting the walk and the delete into two functions and wiring them at a call site defeats a
-# lexical scope test — the two are genuinely in different scopes. What still betrays it is the
-# WIRING: the walk's result is handed to the deleter. A dotfile manager that merely owns both
-# functions never connects them, which is exactly the difference the scope rule alone cannot see.
 _JS_CALLABLE = re.compile(
     r"\bfunction\s+([A-Za-z_$][\w$]*)\s*\(|"
     r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s+)?(?:function\b|\()", re.IGNORECASE)
 _PY_CALLABLE = re.compile(r"^([ \t]*)def\s+([A-Za-z_]\w*)\s*\(", re.MULTILINE)
-_MAX_CALLABLES = 200          # a hostile file must not turn this into quadratic work
-_WIRING_WINDOW = 300          # how far the deleter may sit from the walk call that feeds it
+_MAX_CALLABLES = 200
+_WIRING_WINDOW = 300
 
 
 def _callable_bodies(text: str) -> list[tuple[str, str]]:
@@ -231,9 +189,6 @@ def _walk_result_reaches_a_deleter(text: str) -> bool:
         return False
     deleter_alt = "(?:" + "|".join(re.escape(d) for d in deleters[:40]) + r")\b"
     for walker in walkers[:40]:
-        # `(?<!function )` / `(?<!def )`: the DEFINITION is not a call site. Without this the header
-        # itself matched and the next function's name fell inside the window, so a dotfile manager
-        # that never wires the two together read as wired.
         call = re.compile(r"(?<!function )(?<!def )\b" + re.escape(walker) + r"\s*\(")
         for hit in call.finditer(text):
             window = text[hit.end():hit.end() + _WIRING_WINDOW]
@@ -242,10 +197,6 @@ def _walk_result_reaches_a_deleter(text: str) -> bool:
     return False
 
 
-# Measured: a walk and the delete it feeds sit 16-1,692 characters apart, the far end being a loop
-# with a 120-line body. The co-presence false positive in a real editor bundle sat 336,053 apart — a
-# documented shell command and the word "-delete-char" in help text. Scope alone does not separate
-# them in a FLAT file with no braces, so distance carries that case.
 _MAX_WALK_TO_DELETE = 4_000
 
 
@@ -264,9 +215,9 @@ def _walks_home_and_deletes(text: str) -> bool:
 
 @dataclass
 class DestructiveVerdict:
-    variant: str            # PLAIN (recoverable) | SECURE (overwrite-then-delete, unrecoverable)
-    reason: str             # short, redaction-safe evidence string
-    gated: bool = False     # #1336: the capability is PRESENT but guarded behind a DISABLED feature
+    variant: str
+    reason: str
+    gated: bool = False
                             # flag (still a confirmed finding — never a downgrade; the flag is context)
 
 
@@ -292,9 +243,6 @@ def detect_destructive(text: str) -> DestructiveVerdict | None:
     if not text:
         return None
     root_wipe = bool(_ROOT_WIPE.search(text))
-    # A recursive delete ROOTED AT HOME (home is the target of rimraf/`rm -rf`/rmSync-recursive), OR a
-    # home-rooted WALK paired with a delete sink. The home token must be CO-LOCATED with the op — not
-    # merely present in the file — so a coincidental `os.homedir()` + scoped `rimraf('./dist')` is inert.
     home_recursive_delete = (bool(_RECURSIVE_DELETE_HOME.search(text))
                              or bool(_RMSYNC_RECURSIVE_HOME.search(text))
                              or _recursive_delete_of_home_name(text))
@@ -308,10 +256,6 @@ def detect_destructive(text: str) -> DestructiveVerdict | None:
     where = "the filesystem root (/)" if (root_wipe and not home) else "the user's home directory"
     destroys = ("OVERWRITES-then-deletes files (secure wipe — data is unrecoverable)" if variant == SECURE
                 else "DELETES files (recoverable — image the disk before use)")
-    # #1336 — capability-first: the finding is on the routine's PRESENCE, never its reachability. When
-    # the routine is gated behind a DISABLED feature flag it is still CONFIRMED (never downgraded) — the
-    # flag is attacker-controlled context, so the wording shifts to "contains a … CAPABILITY, gated"
-    # rather than the present-tense "wipes …", which is both accurate and more alarming than either half.
     gated = bool(_DISABLED_FLAG.search(text))
     if gated:
         head = (f"contains a routine that recursively walks {where} and {destroys} — a self-destruct "

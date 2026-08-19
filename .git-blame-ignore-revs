@@ -1,0 +1,12 @@
+# Commits that changed formatting or comments only, never behaviour.
+#
+# `git blame` skips these, so a line is attributed to the commit that last changed what the code
+# DOES rather than to a sweep that reflowed the prose around it. GitHub honours this file
+# automatically; locally, turn it on once per clone:
+#
+#     git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# Add a commit here only if it is provably behaviour-neutral — for a change under the scanner, that
+# means the scan output over a fixed corpus is byte-identical before and after.
+#
+# Format: one full 40-character SHA per line, newest last, with the subject as a comment above it.
