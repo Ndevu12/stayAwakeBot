@@ -12,11 +12,9 @@ from pathlib import Path
 from .models import HygieneIssue, _WIPER_NOTE
 
 #
-# Distinct from the runner / OS-service PERSISTENCE probes above (#1092/#1094): these are the
 # drop-files this wave stages on a developer host — downloaded tooling and stolen data bundled
 # before exfil. Some are weak on their own (a stray ~/.node_modules, an npm cache), so a LONE weak
 # indicator is `info`; a strong, specific IoC or a corroborated set (>=2) is a `warning`. A positive
-# means persistence may be LIVE, so the guidance follows the rotate-LAST order (#1088), never first.
 # Every probe is a read-only stat/listdir and degrades to nothing when a path is absent/unreadable.
 
 def _host_user_tag() -> str | None:
@@ -118,8 +116,7 @@ def _host_artifacts() -> tuple[list[str], list[tuple[str, Path]]]:
         if _present(t / "get-pip.py"):
             weak.append((f"{t}/get-pip.py", t / "get-pip.py"))
 
-    # Strong, specific IoCs.
-    tag = _host_user_tag()                                  # <host>$<user> staged exfil archive
+    tag = _host_user_tag()
     if tag:
         for d in (home, home / ".npm", *tmp_dirs, Path.cwd()):
             match = _first_child_named(d, tag)
@@ -197,7 +194,6 @@ def check_host_artifacts(verify: bool = False) -> list[HygieneIssue]:
         id="host-drop-artifact-weak",
         severity="info",
         title="Unusual file/dir on this host (weak supply-chain indicator)",
-        # The benign cause is NAMED, not merely asserted: #161 fixed a version of this that blamed a
         # command which cannot produce the path, leaving the reader no way to clear it themselves.
         detail="Found: " + "; ".join(found) + ". A weak, single indicator — ordinary tooling creates "
                "these too (Node's GLOBAL_FOLDERS, a pip bootstrap), so it is not evidence of malware.",
@@ -261,5 +257,3 @@ def _verify_weak_artifact(item: tuple[str, Path]) -> list[HygieneIssue] | None:
                     "recall whether you created it. If it is NOT yours, isolate the host and rotate "
                     f"credentials LAST ({_WIPER_NOTE}).",
     )]
-
-

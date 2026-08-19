@@ -26,13 +26,13 @@ from typing import Callable
 class ExternalFinding:
     """A vulnerability reported by an external tool, normalized to the advisory tier."""
 
-    ecosystem: str            # canonical PURL type (npm, pypi, …)
+    ecosystem: str
     package: str
     version: str
-    advisory_id: str          # GHSA / CVE / OSV id
-    severity: str             # low | medium | high | critical (best-effort)
-    source_tool: str          # "osv-scanner", …
-    source_path: str = ""     # the lockfile the tool attributed it to (basename), if any
+    advisory_id: str
+    severity: str
+    source_tool: str
+    source_path: str = ""
 
     @property
     def key(self) -> tuple[str, str]:
@@ -54,7 +54,7 @@ def run_tool(argv: list[str], cwd: str | Path, *, timeout: int = 120) -> str | N
 class ExternalAuditor:
     """Base adapter: is the tool installed, and what does it report for a target directory."""
 
-    name: str = ""            # the executable to look for / invoke
+    name: str = ""
 
     def available(self) -> bool:
         return bool(self.name) and shutil.which(self.name) is not None

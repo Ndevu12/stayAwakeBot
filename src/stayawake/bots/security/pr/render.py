@@ -74,8 +74,6 @@ def suspicious_review_lines(suspicious, limit: int = 20) -> str:
 
 
 def _issue_body(slug: str, findings) -> str:
-    # Same injection-safety contract as _pr_body (#1183 invariant #5): the slug, signature ids and
-    # attacker-controlled paths all go through _code so a path like `x`](evil) can't inject markup.
     lines = [f"StayAwakeBot detected self-propagating worm indicators in {textsafe.code(slug)} and could "
              "not open a fix PR automatically (no write access to this repository).",
              "", "## Indicators", ""]
@@ -102,8 +100,8 @@ def _render_submit(res: proposal.SubmitResult, *, slug: str, base: str, partial:
     """Render a `proposal.SubmitResult` into `saw fix`'s exact operator outcome — the fix-domain
     wording (the PARTIAL tag, the 'auto-clean' framing) lives HERE, never in the shared seam. The
     single `_mark_partial` choke point still wraps this return (#1183 invariant #1)."""
-    semi = "PARTIAL (manual review required); " if partial else ""   # upstream-PR tag placement
-    dash = "PARTIAL (manual review required) — " if partial else ""  # fork / floor tag placement
+    semi = "PARTIAL (manual review required); " if partial else ""
+    dash = "PARTIAL (manual review required) — " if partial else ""
     if res.kind == "pr":
         if res.action == "updated":
             return f"{slug}: {semi}updated existing PR #{res.number} ({res.url}) — no duplicate"
@@ -117,7 +115,6 @@ def _render_submit(res: proposal.SubmitResult, *, slug: str, base: str, partial:
         return f"{slug}: forked to {res.fork_slug} but it wasn't ready in time — retry later"
     if res.kind == "fork-pr-create-failed":
         return f"{slug}: pushed to fork {res.fork_slug} but PR creation failed (check token scope)"
-    # floor: patch and/or de-duplicated issue (or, if neither landed, an honest push failure).
     bits = []
     if res.patch_path:
         bits.append(f"saved the fix as a patch at {res.patch_path} "
@@ -156,9 +153,7 @@ def _pr_body(slug: str, changes, computed=(), suspicious=(), manual=()) -> str:
         change_lines.append(f"- …and {len(changes) - 200} more")
     lines += change_lines or ["- (none)"]
     if computed:
-        # #1209 REVIEW-REQUIRED tier: these strips ARE applied on this branch (as a SEPARATE commit
         # from the git-corroborated changes above), but they are NOT git-corroborated — the payload
-        # was cut along a structurally-proven concealment seam, and the ONE residual the whole-file
         # git match would otherwise close (a scanner-invisible injection in the kept code) is closed
         # by THIS human review. So the reviewer MUST read the kept code before merging.
         lines += ["", "## 🔧 Computed strip applied — REVIEW the kept code before merging",
@@ -188,7 +183,6 @@ def _pr_body(slug: str, changes, computed=(), suspicious=(), manual=()) -> str:
             loc = m.path + (f":{m.line}" if getattr(m, "line", None) else "")
             # Every attacker-influenced field goes through _code — reason/action embed the raw path
             # (via classify_recovery), so rendering them BARE would let a path like `[x](evil)` inject
-            # a link/image/HTML. Inside a code span they render literally (adversarial catch, #1183 #5).
             lines.append(f"- [ ] {textsafe.code(loc)} — {textsafe.code(getattr(m, 'signature_id', ''))} "
                          f"({textsafe.code(getattr(m, 'reason', ''), 40)}): "
                          f"{textsafe.code(getattr(m, 'action', ''))}")

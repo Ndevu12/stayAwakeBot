@@ -15,7 +15,6 @@ from typing import Iterator
 from stayawake.bots.security.dependencies.purl import Purl, ResolvedDependency
 from stayawake.bots.security.dependencies.resolvers.base import Resolver
 
-# Exactly four leading spaces, `name (version)`, version starting with a digit → a resolved gem.
 _SPEC = re.compile(r"^ {4}(?P<name>[A-Za-z0-9._-]+) \((?P<version>[0-9][^)]*)\)$")
 
 

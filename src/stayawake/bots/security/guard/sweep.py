@@ -22,7 +22,6 @@ from stayawake.bots.security.guard.pindrift import drift_one, render_drift, Drif
 
 # ── sweep: resolve targets (local repos / remote slugs) and check each — like saw scan/fix ────────
 # `saw guard check` takes positional TARGETS (local paths, or owner/repo slugs under --remote),
-# discovers local git repos, or resolves remote repos via the shared #1075 ladder (resolution.py).
 # Streams per repo; one repo's failure never aborts the run.
 
 def _guard_config(config_path: str | None):
@@ -189,7 +188,7 @@ def check_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
         if not repos:
             prog.line("No local git repositories found.")
             return 0
-        token, _ = auth.resolve_token()      # optional — eases freshness rate limits (public repo works without)
+        token, _ = auth.resolve_token()
         latest = latest_strix(token)
         prog.line(f"Checking {len(repos)} local repositor{'y' if len(repos) == 1 else 'ies'}…")
         items, labels = repos, [_disp(r) for r in repos]
@@ -206,12 +205,10 @@ def check_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
 
     guarded = sum(1 for s in statuses if s.present)
     verified = sum(1 for s in statuses if s.healthy)
-    no_ci = sum(1 for s in statuses if s.no_ci)                  # 404 — no workflows dir (#1243)
-    unreadable = sum(1 for s in statuses if s.error)            # real read failures only
+    no_ci = sum(1 for s in statuses if s.no_ci)
+    unreadable = sum(1 for s in statuses if s.error)
     unhealthy = [s for s in statuses if not s.healthy]
     n = len(statuses)
-    # Count "no CI" (the benign normal state) separately from "unreadable" (a real failure) so the
-    # tally reflects reality instead of one scary bucket (#1243).
     tail = "".join([
         f", {verified} a verified SHA-pinned Strix gate" if guarded else "",
         f", {no_ci} with no CI" if no_ci else "",
@@ -275,7 +272,7 @@ def drift_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
         if not repos:
             prog.line("No local git repositories found.")
             return 0
-        token, source = auth.resolve_token()  # needed to file issues (and eases freshness rate limits)
+        token, source = auth.resolve_token()
         latest = latest_strix(token)
         prog.line(f"Checking pin drift on {len(repos)} local "
                   f"repositor{'y' if len(repos) == 1 else 'ies'}…")
@@ -352,7 +349,7 @@ def setup_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
         if not resolved:
             prog.line(resolution.REMOTE_EMPTY_HINT)
             return 0
-        pin = resolve_pin(token, ref)                    # resolve the latest Strix release ONCE
+        pin = resolve_pin(token, ref)
         if pin is None:
             prog.line("couldn't resolve the latest Strix release (offline? pass --ref <sha|tag>)")
             return 2
@@ -374,7 +371,7 @@ def setup_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
                                    branch=branch, spin=spin)
     else:
         token, source = auth.resolve_token() if (pr or not ref) else (None, None)
-        pin = resolve_pin(token, ref)                    # resolve the latest Strix release ONCE
+        pin = resolve_pin(token, ref)
         if pin is None:
             prog.line("couldn't resolve the latest Strix release (offline? pass --ref <sha|tag>)")
             return 2
@@ -386,9 +383,6 @@ def setup_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
         items, labels = repos, [_disp(r) for r in repos]
 
         def make_result(repo, *, spin):
-            # Only a PUSH (`--pr`) needs the repo's own installation token (multi-account); a plain
-            # working-tree write touches no remote, so it must not mint one (nor fail if the App isn't
-            # installed on that owner).
             tok, aerr = _act(token, source, repo=repo) if pr else (token, None)
             if aerr:
                 return SetupResult(error=f"{_disp(repo)}: {aerr}")
@@ -400,11 +394,6 @@ def setup_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
         lambda label, err: SetupResult(error=f"{label}: setup failed — {err}"),
         prog, jobs=jobs, verb="Setting up", no_stream=no_stream)
 
-    # Honest tally — DON'T say "Set up N" when nothing changed (the user saw "Set up 31" while every
-    # repo was a no-op → looked like 31 PRs that never appeared). Count what ACTUALLY happened, and —
-    # critically — only count a PR that truly opened. `submit is not None` is NOT success: the ladder
-    # returns a SubmitResult for push-succeeded-but-PR-failed / fork-not-ready / no-write-floor too, and
-    # counting those as "opened" would re-introduce the very phantom-PR dishonesty this fixes.
     n = len(results)
     opened = [r for r in results if not r.error and not r.dry_run
               and (r.wrote is not None

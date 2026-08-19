@@ -29,8 +29,6 @@ from pathlib import Path
 from .models import HygieneIssue, _WIPER_NOTE, persistence_surface_is_enumerable
 from . import os_service, runner, mechanism
 
-# The ANCHOR: the location class an account in real USE acquires. `_surface_is_absent` requires it,
-# because "everything is absent" over a list carrying no anchor is vacuously true, not evidence.
 _ANCHOR_LABEL = "shell startup file"
 
 
@@ -62,7 +60,7 @@ def _coverage(p: Path) -> str:
     NEVER opened: opening a FIFO read-blocks forever (the #1226 hazard), and a normal authorized_keys /
     rc / agent is a regular file — a non-regular one there is itself anomalous, not a certifiable clean."""
     try:
-        st = p.stat()                           # follows symlinks; does NOT open (safe on a FIFO)
+        st = p.stat()
     except FileNotFoundError:
         return "absent"
     except OSError:
@@ -94,7 +92,6 @@ def _surface_is_absent(graded: list[tuple[str, Path, str]]) -> bool:
         return False
     # NOT relaxed for a dangling symlink, though one is visible in `ls` on a configured account: a
     # wipe of `~/dotfiles` leaves `~/.zshrc -> …` dangling, and `ln -s /nonexistent ~/.zlogin` would
-    # be a one-command off-switch. Measured — either restored "enumerated and clean" on a wiped home.
     return all(state == "absent" for _label, _p, state in graded)
 
 
@@ -121,7 +118,6 @@ def check_persistence_coverage() -> list[HygieneIssue]:
         ))
 
     if _surface_is_absent(graded):
-        # Named from the DATA: a hand-written list drifts the moment the surface gains or loses a class.
         kinds = ", ".join(sorted({label for label, _p, _state in graded}))
         issues.append(HygieneIssue(
             id="persistence-surface-not-established",

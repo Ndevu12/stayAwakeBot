@@ -21,13 +21,10 @@ from stayawake.bots.security.dependencies.resolvers.base import Resolver
 from stayawake.bots.security.dependencies.resolvers._lockfiles import toml_packages
 from stayawake.bots.security.jsonc import load_jsonc
 
-_TOML_LOCKS = ("poetry.lock", "uv.lock")     # both: TOML with a [[package]] array of {name, version}
-_PIPFILE_LOCK = "Pipfile.lock"               # JSON: {default|develop: {name: {version: "==x"}}}
+_TOML_LOCKS = ("poetry.lock", "uv.lock")
+_PIPFILE_LOCK = "Pipfile.lock"
 
-# PEP 503 name normalization: case-insensitive, runs of -_. → a single -.
 _NAME_SEP = re.compile(r"[-_.]+")
-# An exact `==` pin AFTER markers/comments/options are stripped: `name[extras]==version`, nothing
-# else (a compound `name==1,<2` or a range `name>=1` must NOT match — those defer to the lock).
 _EXACT_PIN = re.compile(r"^(?P<name>[A-Za-z0-9._-]+)(?:\[[^\]]*\])?==(?P<version>[A-Za-z0-9._!+-]+)$")
 
 
@@ -69,9 +66,9 @@ def _requirements_deps(text) -> list[tuple[str, str]]:
         line = raw.strip()
         if not line or line[0] in "#-":       # comment, or an option/include (-r/-c/-e/--hash)
             continue
-        line = line.split(";", 1)[0].split("#", 1)[0]      # drop env marker + inline comment
-        line = re.split(r"\s+--", line, maxsplit=1)[0]     # drop trailing options (e.g. --hash=…)
-        line = re.sub(r"\s*==\s*", "==", line).strip()     # `name == 1` → `name==1`
+        line = line.split(";", 1)[0].split("#", 1)[0]
+        line = re.split(r"\s+--", line, maxsplit=1)[0]
+        line = re.sub(r"\s*==\s*", "==", line).strip()
         m = _EXACT_PIN.match(line)
         if m:
             out.append((m.group("name"), m.group("version")))
@@ -95,7 +92,7 @@ def _pipfile_lock_deps(text) -> list[tuple[str, str]]:
             if isinstance(name, str) and isinstance(meta, dict):
                 spec = meta.get("version")
                 if isinstance(spec, str):
-                    version = spec.lstrip("=").strip()      # "==1.2.3" → "1.2.3"
+                    version = spec.lstrip("=").strip()
                     if version:
                         out.append((name, version))
     return out

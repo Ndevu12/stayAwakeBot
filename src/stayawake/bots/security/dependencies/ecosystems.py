@@ -9,7 +9,6 @@ bridge, so the two representations can never drift out of sync.
 """
 from __future__ import annotations
 
-# PURL type → OSV ecosystem / export bucket name.
 PURL_TO_OSV = {
     "npm": "npm",
     "pypi": "PyPI",
@@ -21,7 +20,6 @@ PURL_TO_OSV = {
     "maven": "Maven",
 }
 
-# OSV ecosystem name (lowercased) → PURL type — the inverse, for canonicalizing advisory records.
 _OSV_TO_PURL = {osv.lower(): purl for purl, osv in PURL_TO_OSV.items()}
 
 

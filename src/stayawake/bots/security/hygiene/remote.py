@@ -29,7 +29,6 @@ def check_branch_protection(slug: str | None, token: str | None,
     contexts = set(rsc.get("contexts") or [])
     contexts |= {c.get("context") for c in (rsc.get("checks") or []) if isinstance(c, dict)}
 
-    # Prefer the PRECISE check (#1230): find the repo's Strix gate by its action reference and require
     # its ACTUAL job context — a job named `strix` (or anything) produces a context the fuzzy "worm"
     # match below would miss, wrongly flagging a correctly-protected repo. Fall back to the heuristic
     # only when no Strix workflow is found.
@@ -37,7 +36,6 @@ def check_branch_protection(slug: str | None, token: str | None,
     probe = guard.probe_remote_gate(slug, token)
     if probe.cause is not None:
         # Couldn't READ the workflows (auth/scope/rate/network) → can't determine the gate; stay
-        # silent rather than laundering a read failure into a false "not required" warning (#1243).
         return []
     ref = probe.ref
     if ref is not None:
@@ -62,5 +60,3 @@ def check_branch_protection(slug: str | None, token: str | None,
                         "required status checks.",
         )]
     return []
-
-

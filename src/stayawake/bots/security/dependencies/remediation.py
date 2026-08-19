@@ -12,9 +12,6 @@ import re
 
 from stayawake.bots.security.dependencies.ecosystems import canonical_ecosystem
 
-# A well-formed advisory id (CVE-…, GHSA-…, MAL-…, PYSEC-…, GO-…, RUSTSEC-…): a letter-led token of
-# id-safe chars. Anything else — a bare number, or an id carrying whitespace/newlines/control chars
-# (a hostile corpus record) — yields NO url rather than a broken or injected link (#1252).
 _ID_RE = re.compile(r"[A-Za-z][A-Za-z0-9._-]{1,80}\Z")
 
 

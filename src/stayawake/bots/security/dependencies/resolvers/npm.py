@@ -32,10 +32,7 @@ _NPM_LOCKS = ("package-lock.json", "npm-shrinkwrap.json")
 _EXACT_VERSION = re.compile(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.\-]+)?$")
 _DECLARED_DEP_FIELDS = ("dependencies", "devDependencies",
                         "optionalDependencies", "peerDependencies")
-_MAX_NPM_V1_DEPTH = 100          # guard the recursive v1 `dependencies` walk against a crafted tree
-# A pnpm `packages:` key: an optional leading '/', a name, then '@version' (v6+/v9) or '/version'
-# (v5), then the version stops before a peer suffix ('(...)' or '_...'). The name capture is
-# non-greedy so the version separator lands on the FIRST '@'/'/' that precedes a digit.
+_MAX_NPM_V1_DEPTH = 100
 _PNPM_KEY = re.compile(r"^/?(?P<name>.+?)[@/](?P<version>\d+\.\d+\.\d+[0-9A-Za-z.\-+]*)")
 
 
@@ -81,7 +78,7 @@ class NpmResolver(Resolver):
         if not isinstance(data, dict):
             return []
         out: list[tuple[str, str]] = []
-        packages = data.get("packages")            # lockfile v2/v3: keyed by install path
+        packages = data.get("packages")
         if isinstance(packages, dict):
             for path, meta in packages.items():
                 if not (isinstance(path, str) and isinstance(meta, dict)):
@@ -89,8 +86,6 @@ class NpmResolver(Resolver):
                 version = meta.get("version")
                 if "node_modules/" not in path or not isinstance(version, str):
                     continue
-                # Prefer the authoritative `name` (set for aliased installs, where the install-path
-                # segment is the ALIAS, not the real package); fall back to the path segment.
                 name = meta.get("name") or path.rsplit("node_modules/", 1)[-1]
                 if isinstance(name, str) and name:
                     out.append((name, version))
@@ -115,11 +110,10 @@ class NpmResolver(Resolver):
         for line in (text or "").splitlines():
             stripped = line.strip()
             if line and not line[0].isspace() and line.rstrip().endswith(":"):
-                header = line.rstrip()[:-1]                  # drop trailing ':'
+                header = line.rstrip()[:-1]
                 names = [_yarn_spec_name(part.strip().strip('"'))
                          for part in header.split(",")]
             elif stripped.startswith("version"):
-                # classic: `version "4.2.11"`  |  berry: `version: 4.2.11`
                 m = re.match(r'version:?\s+"?([^"\s]+)"?', stripped)
                 if m:
                     for name in names:

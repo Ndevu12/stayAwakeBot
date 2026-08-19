@@ -21,14 +21,12 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-_PROBE_TIMEOUT = 5          # a hung dpkg/codesign must never stall the audit
+_PROBE_TIMEOUT = 5
 
-# Executables here are shipped by the OS / a package manager / a signed app → a strong "attributed".
 _TRUSTED_PREFIXES = (
     "/usr/", "/bin/", "/sbin/", "/opt/homebrew/", "/usr/local/", "/System/", "/Library/Apple/",
     "/nix/store/", "/opt/local/",
 )
-# Directories a user-level worm plants and runs payloads from — an ExecStart here is a strong signal.
 _UNTRUSTED_ROOTS = ("/tmp/", "/var/tmp/", "/private/tmp/", "/dev/shm/")
 _UNTRUSTED_COMPONENTS = ("node_modules", ".npm", ".cache", ".claude", ".npm-global", ".cursor")
 
@@ -36,9 +34,9 @@ _UNTRUSTED_COMPONENTS = ("node_modules", ".npm", ".cache", ".claude", ".npm-glob
 @dataclass
 class Attribution:
     """What the entry's referenced executable is statically attributable to."""
-    exec_class: str                 # "trusted" | "untrusted" | "unknown"
-    owner: str | None = None        # package / formula / app-bundle name, or None
-    signed: bool | None = None      # macOS code-signature valid? None = N/A or could-not-check
+    exec_class: str
+    owner: str | None = None
+    signed: bool | None = None
 
     @property
     def attributed(self) -> bool:
@@ -109,12 +107,6 @@ def _codesigned(exec_path: str) -> bool | None:
     p = _norm(exec_path)
     if not os.path.isfile(p):
         return None
-    # `--verify` alone answers "is this signature intact", which an ad-hoc signature satisfies for
-    # free (`codesign -s -`, no certificate) — and on Apple Silicon the linker ad-hoc signs by
-    # DEFAULT (`ld(1)`), so a bare verify is near-inert there. `-R` adds the identity question.
-    # `--strict` is dropped: it fails legitimately signed Developer ID software on "resource fork,
-    # Finder information, or similar detritus" — measured on a shipping notarized browser, whose
-    # authority chain is valid. Both errors were live: ad-hoc read as signed, real vendors as unsigned.
     r = _run(["codesign", "--verify", "-R=anchor apple generic", p])
     if r is None:
         return None

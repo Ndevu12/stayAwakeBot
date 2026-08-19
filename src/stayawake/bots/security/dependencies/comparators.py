@@ -58,7 +58,6 @@ def semver_key(version: str) -> tuple | None:
     return (release, prerelease)
 
 
-# ── PEP 440 (PyPI) — mirrors packaging's canonical _cmpkey, vendored (no dependency) ─────
 _PEP440_RE = re.compile(r"""
     ^\s*v?
     (?:(?P<epoch>[0-9]+)!)?
@@ -93,13 +92,13 @@ def pep440_key(version: str) -> tuple | None:
     dev = int(m.group("dev_n") or 0) if m.group("dev") is not None else None
 
     if pre is None and post is None and dev is not None:
-        pre_key = (-1, 0, 0)                 # dev-only → before all pre-releases
+        pre_key = (-1, 0, 0)
     elif pre is None:
-        pre_key = (1, 0, 0)                  # no pre → after pre (final/post)
+        pre_key = (1, 0, 0)
     else:
         pre_key = (0,) + pre
     post_key = (-1, 0) if post is None else (0, post)
-    dev_key = (0, dev) if dev is not None else (1, 0)    # has-dev sorts below no-dev
+    dev_key = (0, dev) if dev is not None else (1, 0)
     return (epoch, release, pre_key, post_key, dev_key)
 
 
@@ -137,10 +136,6 @@ def gem_key(version: str):
     return None if segs is None else functools.cmp_to_key(_gem_cmp)(segs)
 
 
-# ── Maven (best-effort subset of ComparableVersion) ──────────────────────────────────────
-# Known qualifier ordering; aliases fold in. `""`/ga/final/release are the "null" level; qualifiers
-# below it (alpha…snapshot) are pre-releases, `sp` is above it. Unknown qualifiers sort after known
-# ones. A numeric item outranks any qualifier at the same position; numeric 0 equals the null level.
 _MAVEN_QUALIFIERS = {"alpha": -5, "a": -5, "beta": -4, "b": -4, "milestone": -3, "m": -3,
                      "rc": -2, "cr": -2, "snapshot": -1,
                      "": 0, "ga": 0, "final": 0, "release": 0, "sp": 1}
@@ -191,8 +186,6 @@ def maven_key(version: str):
     return None if not items else functools.cmp_to_key(_maven_cmp)(items)
 
 
-# ── range evaluation ─────────────────────────────────────────────────────────────────────
-# PURL type → the key function for its `ECOSYSTEM`-typed ranges.
 _ECOSYSTEM_KEY: dict[str, Callable[[str], object | None]] = {
     "npm": semver_key, "cargo": semver_key, "golang": semver_key,
     "composer": semver_key, "nuget": semver_key,
@@ -259,7 +252,7 @@ def fixed_version_for(version: str, ranges, ecosystem: str) -> str | None:
     yields a downgrade to 1.5.0 for a 2.x install, and a still-open branch whose only published fix sits
     below the install yields None (no fix for that branch). Conservative: an unparseable version/bound,
     an explicit-version-only advisory, or no qualifying fix → None."""
-    candidates: list[tuple[object, str]] = []          # (comparable key, raw) for fixes above `version`
+    candidates: list[tuple[object, str]] = []
     for r in ranges:
         if not is_version_in_range(version, r, ecosystem):
             continue

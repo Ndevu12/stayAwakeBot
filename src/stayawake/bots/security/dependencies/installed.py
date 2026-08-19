@@ -29,7 +29,6 @@ from typing import Iterator
 from stayawake.bots.security.dependencies.resolvers.pypi import normalize_pypi_name
 
 
-# The keys npm runs AUTOMATICALLY on `npm install` (T1546) — one source, shared with NpmManifestMatcher.
 NPM_LIFECYCLE_KEYS = ("preinstall", "install", "postinstall", "prepare", "preprepare", "postprepare")
 
 
@@ -37,17 +36,17 @@ NPM_LIFECYCLE_KEYS = ("preinstall", "install", "postinstall", "prepare", "prepre
 class InstalledPackage:
     ecosystem: str
     name: str
-    version: str | None       # installed version from the on-disk manifest; None if unreadable
-    path: str                 # rel path of the package's manifest, for anchoring a finding
-    hooks: dict[str, str] | None = None   # install-time lifecycle scripts (npm), for the hook scan
-    entries: tuple[str, ...] = ()         # rel paths of the package's entry files (main/bin), for the sweep
+    version: str | None
+    path: str
+    hooks: dict[str, str] | None = None
+    entries: tuple[str, ...] = ()
 
 
 @dataclass
 class TamperedFile:
     ecosystem: str
-    package: str              # name@version the file belongs to
-    path: str                 # rel path of the file whose bytes changed — anchors the finding
+    package: str
+    path: str
     detail: str
 
 
@@ -56,12 +55,7 @@ class InstalledTree:
     remote clone with no install) — the lockfile audit stays the coverage there. Never follows symlinks
     (workspace/local links are benign, and following them risks loops / repo escape)."""
     ecosystem: str = ""
-    _MAX_DEPTH = 8            # bound a pathological nested tree
-    # Whether an on-disk package ABSENT from the lock reliably means a GHOST. True only when the
-    # ecosystem's lock lists the FULL (transitive) install set — npm's package-lock does, so an
-    # off-lock package is genuinely anomalous. A provider sets this False when the common lock is
-    # incomplete (PyPI's requirements.txt lists only DIRECT deps → every transitive install would
-    # false-positive as a ghost); identity-on-disk still runs there, ghost is suppressed.
+    _MAX_DEPTH = 8
     ghost_reconcilable: bool = True
 
     def read(self, target) -> Iterator[InstalledPackage]:
@@ -106,7 +100,7 @@ def _read_manifest(path: str) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
-_MAX_ENTRIES = 16          # bound the bins a pathological manifest can list
+_MAX_ENTRIES = 16
 
 
 def _npm_entry_files(data: dict, pkg_dir: str, repo_root: Path) -> tuple[str, ...]:
@@ -180,7 +174,7 @@ class NpmInstalledTree(InstalledTree):
                                    version if isinstance(version, str) else None,
                                    str(Path(manifest).relative_to(repo_root)), hooks,
                                    _npm_entry_files(data, pkg_dir, repo_root))
-        nested = Path(pkg_dir) / "node_modules"            # nested (dedupe-miss) installs
+        nested = Path(pkg_dir) / "node_modules"
         if nested.is_dir():
             yield from self._walk(nested, repo_root, depth + 1)
 
@@ -192,15 +186,12 @@ class NpmInstalledTree(InstalledTree):
         (escape/loop — and a symlinked/FIFO entry is not a regular file, so `is_file(follow_symlinks=
         False)` drops it), bounded by depth + a per-package file cap. If the cap is hit, `True` is
         appended to `truncated` so the caller can note the un-scanned tail honestly (#1222)."""
-        pkg_dir = target.root / os.path.dirname(pkg.path)  # the dir holding this package's package.json
+        pkg_dir = target.root / os.path.dirname(pkg.path)
         yield from _walk_source(str(pkg_dir), target.root, truncated if truncated is not None else [])
 
 
-# JS-family extensions where a JS loader fingerprint can hide — compiled AND authored, so a payload in a
-# shipped `.ts`/`.jsx` isn't a blind spot. All are in the base SOURCE_EXTS, so `read_source_windows`
-# streams them in FULL (an oversized bundle's interior is covered, not just head+tail) (#1222 review).
 _SOURCE_EXTS = (".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".cts", ".mts")
-_MAX_PKG_SOURCE_FILES = 2000       # per-package file cap — the total byte budget is the primary DoS bound
+_MAX_PKG_SOURCE_FILES = 2000
 
 
 def _walk_source(pkg_dir: str, repo_root: Path, truncated: list) -> Iterator[str]:
@@ -246,9 +237,8 @@ class PythonInstalledTree(InstalledTree):
     (poetry.lock / uv.lock / Pipfile.lock) is present — until then it stays off to avoid the FP."""
     ecosystem = "pypi"
     ghost_reconcilable = False
-    _MAX_HASH_BYTES = 4_000_000          # skip hashing a single huge (data) file — the tamper vector is
-                                         # a payload in a SOURCE file, which is small; bounds per-file work
-    _INTEGRITY_BUDGET = 500_000_000      # total bytes hashed per scan — a DoS backstop for a giant tree
+    _MAX_HASH_BYTES = 4_000_000
+    _INTEGRITY_BUDGET = 500_000_000
 
     def _site_packages(self, target) -> Iterator[Path]:
         exclude = getattr(target.opts, "exclude_dirs", set())
@@ -348,14 +338,14 @@ class PythonInstalledTree(InstalledTree):
                 label = f"{pkg.name}@{pkg.version}" if pkg else e.name[:-len(".dist-info")]
                 sp_abs = os.path.abspath(sp)
                 for rel, expected in _record_hashes(os.path.join(e.path, "RECORD")):
-                    fp = os.path.normpath(os.path.join(sp, rel))   # matches sp's abs/rel form (for read + path)
+                    fp = os.path.normpath(os.path.join(sp, rel))
                     # A RECORD path must stay INSIDE site-packages — a crafted `../../etc/passwd` or an
                     # absolute path must never be read. abspath BOTH sides for the check so commonpath can't
                     # ValueError on an absolute-vs-relative mix (a relative scan root + absolute RECORD entry).
                     try:
                         inside = os.path.commonpath([os.path.abspath(fp), sp_abs]) == sp_abs
                     except ValueError:
-                        inside = False                    # different drives / undecidable → treat as escape
+                        inside = False
                     if not inside:
                         continue
                     try:
@@ -400,5 +390,4 @@ def _sha256_record(path: str) -> str | None:
     return "sha256=" + base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
 
 
-# Registered providers (Open/Closed — add an ecosystem's tree here). npm + Python now; Composer next.
 INSTALLED_TREES = (NpmInstalledTree(), PythonInstalledTree())

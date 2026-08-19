@@ -23,7 +23,6 @@ def discard_branch(repo: Path) -> str:
         (did if gitutil.delete_remote_branch("origin", FIX_BRANCH, repo=repo)
          else failed).append("remote")
     if failed:
-        # Never claim a discard we didn't make. Note any arm that DID succeed so a partial is honest.
         done = f"; deleted {', '.join(did)}" if did else ""
         return (f"{slug}: FAILED to delete {FIX_BRANCH} ({', '.join(failed)}) — "
                 f"is it checked out?{done}")

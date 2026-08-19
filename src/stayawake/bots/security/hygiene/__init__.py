@@ -94,8 +94,6 @@ def audit_checks(slug: str | None = None, token: str | None = None, branch: str 
 # map, so this surface and the scan report cannot drift on what a glyph means — the same reason
 # SEVERITY lives there. Two things this fixes over the local map it replaces:
 #   * `unknown` now HAS a marker. It used to fall through to the `info` bullet and render
-#     unpainted (no SEVERITY entry either), so "the surface could not be verified" (#1332) was
-#     pixel-identical to a review-worthy nudge — the exact distinction #1332 exists to draw.
 #   * the warning marker is the text glyph `⚠`, not the emoji `⚠️`. The emoji is double-width,
 #     so warning rows sat one column right of info rows in the same list. The banner heads below
 #     keep the emoji deliberately: they are standalone attention lines, not aligned columns.
@@ -103,9 +101,6 @@ def _icon(severity: str) -> str:
     return MARKER.get(severity, MARKER["info"])
 
 
-# `textsafe.plain` defangs AND truncates, and its 300-char default is sized for one untrusted VALUE,
-# not for prose carrying one: measured, it printed 2 of 11 unreadable locations and cut the
-# rotation-wiper warning mid-sentence. Bounded still, just past anything we compose.
 _REPORT_FIELD_LIMIT = 4000
 
 
@@ -123,10 +118,6 @@ def _banner(issue_ids: set[str], *, color: bool, width: int) -> list[str]:
 
     The runbook is a genuine ORDERED procedure (rotate LAST) → a NUMBERED list; the note is a set
     of points/caveats, not a sequence → a BULLETED list. Both go through core.render.marked_list."""
-    # The two banner heads are the deliberate emoji exception. Everything else on this surface takes
-    # its glyph from MARKER, but a banner is a STANDALONE attention line that renders only when an
-    # incident is live — never inside an aligned list — so the width cost that bars emoji from the
-    # marker vocabulary does not apply, and the extra weight is the point.
     tier = incident_tier(issue_ids)
     if tier == TIER_ACTIVE_PERSISTENCE:
         head = "⚠️  Active host persistence detected — respond in THIS order (rotate LAST):"
@@ -159,14 +150,6 @@ def _rotation_verdict(issues: list[HygieneIssue], *, color: bool, width: int) ->
                        "detected; do NOT rotate any credential yet (runbook below).",
                        SEVERITY["warning"], on=color)]
     else:
-        # UNSAFE-unknown: name exactly what could not be read, so the gap is actionable, not vague.
-        # Marker and colour say different things here, on purpose: `?` states the EPISTEMIC fact
-        # (we could not establish this), `warning` states the REQUIRED ACTION (do not rotate — this
-        # path drives the unconditional exit 3). Painting it `unknown` too would soften an act-now
-        # instruction; marking it `warning` would claim we looked and found something. Neither is
-        # true alone, which is what having two channels is for.
-        # "established", not "fully verified": one line for both states, and the latter sends an
-        # operator hunting for an unreadable location when there may be none.
         lines = [paint(f"{MARKER['unknown']}  Rotation safety: UNKNOWN — the persistence surface "
                        "could not be established, so treat credential rotation as UNSAFE "
                        "until it is.", SEVERITY["warning"], on=color)]
@@ -175,7 +158,6 @@ def _rotation_verdict(issues: list[HygieneIssue], *, color: bool, width: int) ->
     # list in the one state that needs it most: a live foothold PLUS a location nobody could read.
     # `unknown` items are split out of the finding groups (see render), so the verdict is their only
     # home; printing nothing meant a responder neutralised what was found, rotated, and was never told
-    # a persistence location had gone unexamined — the wiper hazard #1332 exists to close.
     lines += _unknown_surface_disclosure(issues, color=color, width=width)
     return lines
 
@@ -223,26 +205,13 @@ def _scope_note(issues: list[HygieneIssue], *, color: bool, width: int) -> list[
     * WHAT IT MEANS — "a clean result does not exclude those" is inapplicable once something WAS found;
       a responder needs the compromise scoped WIDER than this list, not a clean-run caveat.
     """
-    # Test for the unverified surface DIRECTLY, never via rotation_safety(): that is a PRIORITY
-    # function (models.rotation_safety) where active persistence DOMINATES, so an incident that also
-    # has an unreadable location returns UNSAFE_PERSISTENCE and would silently take the flat
-    # full-coverage wording — restating the over-claim the verdict just withdrew, in the highest-stakes
-    # state of all. Presence of the id is the honest question here, not which verdict outranks which.
-    # And for the UNREADABLE id specifically, not the UNKNOWN set: "the part it could read" is false
-    # when every location was read and none existed.
     ids = {i.id for i in issues}
     surface_unverified = SURFACE_UNREADABLE_ID in ids
     if not persistence_surface_is_enumerable():
-        # `user_persistence_dirs()` is `~/.config/systemd/user` + `~/Library/LaunchAgents`, so on
-        # Windows it enumerates NOTHING and every autorun probe returns empty. Claiming to read a
-        # surface here would make "no findings" mean "clean" when it means "not examined" — the same
-        # over-claim #1332 removed on the readability axis, one axis over.
         surface_read = "no host persistence surface is enumerated on this platform"
     elif surface_unverified:
         surface_read = "read the part of the persistence surface it could, plus known drop-paths"
     elif SURFACE_ABSENT_ID in ids:
-        # A third wording: the flat claim would restate the coverage the verdict just withdrew, and
-        # "the part it could read" is equally wrong — reading was never the problem here.
         surface_read = "found no persistence surface present, and read known drop-paths"
     else:
         surface_read = "read the host persistence surface and known drop-paths"
@@ -262,7 +231,6 @@ def _scope_note(issues: list[HygieneIssue], *, color: bool, width: int) -> list[
     # A gap list that omits an axis reads as COVERAGE of it, which is the failure this note exists to
     # prevent. `saw audit` is a DISK scanner: an account-level foothold (a self-hosted runner registered
     # against the org) survives a full host rebuild and is invisible here — so it is named, not implied
-    # (#1340, deferred to #1373). The audit's own runner probe is disk-only and reads as broader than it is.
     # ONE line, and the gap LIST lives in the docs. Every gap still has to be stated somewhere —
     # an unlisted axis reads as coverage of it — but stating them here put a paragraph of things we
     # did NOT do at the end of every run, which is the noise this note was accused of being.
@@ -295,15 +263,8 @@ def render(issues: list[HygieneIssue], *, color: bool = False, width: int = 80) 
     reviews = worst_first(i for i in issues if i.severity == "info")
 
     if not (warnings or reviews):
-        # No findings. The verdict still stands: "clean" if the surface was verified, "unknown" if not.
-        # Ask the ids, not `severity == "unknown"`: severity only correlates with "was the surface
-        # unverified?" because ONE probe emits that pairing today. The rotation verdict, the exit gate
-        # and the scope note all key off UNVERIFIED_PERSISTENCE_IDS, so a second unknown-severity id
-        # would otherwise split this heading three ways from the verdict printed under it.
         ids = {i.id for i in issues}
         if SURFACE_ABSENT_ID in ids:
-            # Not "UNVERIFIED", and not led by "no findings": nothing was there to find, and this is
-            # the report's most prominent line on a host whose home may have just been destroyed.
             head = "Local security hygiene: nothing was found because nothing was there to examine."
         elif ids & UNVERIFIED_PERSISTENCE_IDS:
             head = "Local security hygiene: no findings, but the persistence surface is UNVERIFIED."
@@ -326,7 +287,6 @@ def render(issues: list[HygieneIssue], *, color: bool = False, width: int = 80) 
     if banner:
         lines += banner + [""]
 
-    # Group headers only when BOTH tiers are present (otherwise the counts line already says which).
     show_headers = bool(warnings) and bool(reviews)
     for gtitle, gsub, gsev, items in (
             ("WARNINGS", "act on these", "warning", warnings),
@@ -352,7 +312,6 @@ def render(issues: list[HygieneIssue], *, color: bool = False, width: int = 80) 
             if i.command:
                 # The copy-pasteable command renders VERBATIM on its own line(s), never reflowed — a
                 # wrapped command is unsafe to paste, and keeping it out of the prose makes it cleanly
-                # selectable (#1237). Rationale stays in `remediation`; the deep "why" is the details link.
                 lines += [f"       {cmd_line}" for cmd_line in i.command.split("\n")]
             if i.reference:
                 lines.append("     " + paint(f"{MARKER['detail']} details: ", SEVERITY["info"], on=color) + i.reference)

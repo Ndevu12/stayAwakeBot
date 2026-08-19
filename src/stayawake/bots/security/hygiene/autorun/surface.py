@@ -28,15 +28,11 @@ from .. import os_service
 class AutorunEntry:
     """One re-execution point. `argv` is what it runs (argv[0] = the referenced executable); `body`
     is the raw config text (for the digest + content-shape); `persistence` names the re-run triggers."""
-    location: str                       # "launch-agent" | "systemd-user"
-    path: Path                          # the .plist / .service / .timer file
+    location: str
+    path: Path
     argv: list[str] = field(default_factory=list)
     body: str = ""
-    # Every command line this entry executes — argv is only the first. The parser owns the config
-    # grammar, so it publishes these rather than each consumer re-deriving them.
     shell_lines: list[str] = field(default_factory=list)
-    # Whether `argv` came from a structured source (a plist array) or a naive `.split()` that loses
-    # quoting. Only the parser knows, and a consumer that guessed got it wrong both ways.
     argv_is_exact: bool = True
     persistence: list[str] = field(default_factory=list)
 
@@ -79,7 +75,7 @@ def _parse_launch_agent(path: Path) -> AutorunEntry | None:
     if raw is None:
         return None
     try:
-        data = plistlib.loads(raw)                 # handles XML and binary plists
+        data = plistlib.loads(raw)
     except Exception:                              # noqa: BLE001 — a malformed plist → no argv, still surfaced
         data = None
     argv: list[str] = []
@@ -112,8 +108,6 @@ def _parse_launch_agent(path: Path) -> AutorunEntry | None:
 # ── Linux systemd user units (ini-ish) ──────────────────────────────────────────────────
 
 _EXECSTART = re.compile(r"^\s*ExecStart\s*=\s*(.*)$", re.MULTILINE)
-# EVERY executed directive: a oneshot unit may carry several ExecStart=, and ExecStartPre/Post,
-# ExecReload, ExecCondition and ExecStopPost each run a command line argv never sees.
 _EXEC_DIRECTIVE = re.compile(r"^\s*Exec[A-Za-z]*\s*=\s*(.*)$", re.MULTILINE)
 _CONTINUATION = re.compile(r"\\\s*\n\s*")
 _TIMER_KEY = re.compile(r"^\s*(OnUnitActiveSec|OnCalendar|OnBootSec|OnUnitInactiveSec)\s*=\s*(.*)$",

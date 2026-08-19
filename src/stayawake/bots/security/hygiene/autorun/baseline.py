@@ -48,8 +48,8 @@ def _self_hash(entries: dict[str, str]) -> str:
 
 @dataclass
 class Baseline:
-    entries: dict[str, str] = field(default_factory=dict)   # entry-key → content digest
-    status: str = "absent"                                  # loaded | absent | corrupt | tampered
+    entries: dict[str, str] = field(default_factory=dict)
+    status: str = "absent"
 
     @property
     def trusted(self) -> bool:

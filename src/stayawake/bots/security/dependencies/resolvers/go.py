@@ -19,7 +19,7 @@ _GOMOD_REQUIRE = re.compile(r"^(?P<module>[^\s]+)\s+(?P<version>v[^\s/]+)")
 
 
 def _norm_version(v: str) -> str:
-    v = v.split("/", 1)[0]                       # drop a `/go.mod` suffix (go.sum)
+    v = v.split("/", 1)[0]
     return v[1:] if v[:1] == "v" and v[1:2].isdigit() else v   # `v1.2.3` → `1.2.3`
 
 
@@ -52,7 +52,7 @@ def _go_mod_deps(text) -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = []
     in_block = False
     for raw in (text or "").splitlines():
-        line = raw.split("//", 1)[0].strip()        # drop `// indirect` comments
+        line = raw.split("//", 1)[0].strip()
         if not line:
             continue
         if line.startswith("require (") or line == "require (":

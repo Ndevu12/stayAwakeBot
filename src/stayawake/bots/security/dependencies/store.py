@@ -39,7 +39,7 @@ class Advisory:
     fixed_version: str | None = None
 
 
-_CORPUS_UNSET = object()   # sentinel: "corpus not built yet" (distinct from a built-but-absent None)
+_CORPUS_UNSET = object()
 
 
 class AdvisoryStore:
@@ -56,11 +56,10 @@ class AdvisoryStore:
                  vulnerability_signature: dict[str, Any] | None = None,
                  corpus_loader=None):
         self._by_coordinate = by_coordinate
-        self._corpus_signature = corpus_signature   # stamps MALWARE (verdict) corpus hits
-        self._vulnerability_signature = vulnerability_signature   # stamps CVE (advisory) hits
-        # A loader defers the expensive build to first query; a directly-passed corpus is already built.
+        self._corpus_signature = corpus_signature
+        self._vulnerability_signature = vulnerability_signature
         self._corpus_loader = corpus_loader
-        self._corpus = _CORPUS_UNSET if corpus_loader is not None else corpus   # AdvisoryCorpus | None
+        self._corpus = _CORPUS_UNSET if corpus_loader is not None else corpus
 
     def _corpus_or_load(self):
         """The corpus, built on first access (once) — or None when there is no corpus tier."""
@@ -87,9 +86,6 @@ class AdvisoryStore:
         from stayawake.bots.security.dependencies import db
         corpus_sig = next((s for s in signatures if s.get("corpus")), None)
         vuln_sig = next((s for s in signatures if s.get("advisory_corpus")), None)
-        # Pass a LOADER, not a loaded corpus: db.load_corpus (~10s) runs only if a package is actually
-        # queried (a repo with no lockfile/manifest never gets here → the load is skipped, #1163). The
-        # loader is memoized in db, so a repo WITH dependencies still builds it at most once.
         loader = (lambda: db.load_corpus(cache_dir)) if (corpus_sig or vuln_sig) else None
         return cls(cls._inline_index(signatures), corpus_signature=corpus_sig,
                    vulnerability_signature=vuln_sig, corpus_loader=loader)

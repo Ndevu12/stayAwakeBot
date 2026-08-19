@@ -7,16 +7,8 @@ from pathlib import Path
 
 from .models import HygieneIssue, _WIPER_NOTE
 
-#
-# The Mini variant installs a planted OS service — reported as gh-token-monitor.service on
-# Linux (systemd) — that watches for credential rotation and WIPES the home directory when it
-# fires (T1485). Detect it by NAME across the standard unit/agent directories (read-only dir
-# listing, so it works with no systemctl/launchctl and degrades to a no-op when the dirs are
-# absent). Finding it must precede any rotation — it is an INCIDENT_TRIGGER, so render() leads
-# with the rotate-LAST runbook. Consolidates all wiper/OS-service detection in one place
-# (check_runner_persistence handles the runner; this handles the service).
-_PERSIST_NAMED = "gh-token-monitor"             # the reported wiper — strong, named IoC
-_PERSIST_LOOKALIKE = re.compile(r"gh-token|token-monitor", re.IGNORECASE)  # investigate-worthy
+_PERSIST_NAMED = "gh-token-monitor"
+_PERSIST_LOOKALIKE = re.compile(r"gh-token|token-monitor", re.IGNORECASE)
 
 
 def _systemd_unit_dirs() -> tuple[Path, ...]:
@@ -93,5 +85,3 @@ def check_persistence() -> list[HygieneIssue]:
         command="systemctl --user disable --now <unit>\n"
                 "launchctl bootout gui/$UID/<label> && rm ~/Library/LaunchAgents/<label>.plist",
     )]
-
-

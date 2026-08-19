@@ -22,7 +22,6 @@ def _read_config(config_path: str | None) -> dict:
     return load_yaml(config_path)
 
 
-# Project build-output dirs (not third-party node_modules) that the opt-in build-scan un-prunes.
 _BUILD_OUTPUT_DIRS = {"dist", "build", "out", ".next"}
 
 
@@ -59,7 +58,6 @@ def _options(settings: dict, *, no_advisories: bool = False,
         remote_clone_depth=int(settings.get("remote_clone_depth", base.remote_clone_depth)),
         scan_build_outputs=scan_build_outputs,
         # `--deep` (or config `deep: true`): content-scan installed dependency CODE with the confirmed
-        # loader tier (#1222). Strict bool coercion so a quoted `"false"` can't silently enable it.
         deep=deep or _as_bool(settings.get("deep"), base.deep),
         # The offline CVE-advisory tier is ON by default; `--no-advisories` or config
         # `dependency_advisories: false` turns the section off.
@@ -99,7 +97,6 @@ def _require_db_or_error() -> int | None:
         return 2
     if not st.get("schema_compatible", True):
         # Unusable (older format → scan falls back to the inline seed), but not tampering. Fail
-        # closed for CI, with the honest reason so it's not mistaken for a security incident (#1137).
         print(f"saw scan --require-db: advisory DB is an older format (schema {st.get('schema')}) "
               "— run `saw db update`.", file=sys.stderr)
         return 2

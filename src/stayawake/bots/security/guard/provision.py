@@ -28,11 +28,6 @@ from stayawake.bots.security.guard.detect import (
 # and delivers it for review: writes into the working tree by default, or opens a rolling PR with
 # `--pr`. It NEVER commits to the default branch and never emits a floating pin silently.
 
-# Rewrites ONLY the strix `uses:` ref on its line; everything else (indentation, the `uses:` key, the
-# consumer's other steps/triggers) is preserved so a bump can't stomp the file. Tolerates an optional
-# surrounding quote (`uses: "Ndevu12/strix@v0"`) and normalizes to the conventional unquoted form; the
-# trailing `# comment` is replaced with the resolved release tag. If a form still slips past this,
-# `setup()` refuses to claim a repin that changed nothing (never a silent no-op).
 _STRIX_USES_LINE = re.compile(
     r"^(?P<pre>[ \t]*(?:-[ \t]+)?uses:[ \t]*)['\"]?Ndevu12/strix@\S+.*$",
     re.IGNORECASE | re.MULTILINE)
@@ -51,21 +46,21 @@ class SetupPlan:
     """The minimal change setup will make. `content` is the full new file text (create/repin),
     None for a no-op/present/conflict. `old_ref`/`new_ref` drive the human summary; `detail`
     describes an existing non-Strix gate for the `present` action."""
-    action: str                       # "create" | "repin" | "noop" | "present" | "conflict"
-    path: str                         # workflow file, repo-relative
+    action: str
+    path: str
     content: str | None = None
     old_ref: str | None = None
     new_ref: str | None = None
-    detail: str | None = None         # for "present": how the existing gate runs (mechanism label)
+    detail: str | None = None
 
 
 @dataclass
 class SetupResult:
     plan: SetupPlan | None = None
-    wrote: Path | None = None                     # working-tree write path (local mode)
-    submit: proposal.SubmitResult | None = None   # PR-ladder outcome (`--pr`)
+    wrote: Path | None = None
+    submit: proposal.SubmitResult | None = None
     slug: str | None = None
-    signed: bool = True                           # False → the PR commit had to be landed unsigned
+    signed: bool = True
     dry_run: bool = False
     error: str | None = None
 
@@ -186,7 +181,6 @@ def plan_setup(workflows: dict[str, str], default_branch: str, pin: Pin, *,
     gate = find_worm_gate(workflows, read_action=read_action)
     if gate is None:
         # Unguarded by any mechanism — install. But NEVER clobber a non-gate workflow already sitting
-        # at the conventional path (data-loss guard, #1239).
         if WORM_GUARD_FILE in workflows:
             return SetupPlan("conflict", WORM_GUARD_FILE)
         return SetupPlan("create", WORM_GUARD_FILE, render_workflow(pin, default_branch),
@@ -241,8 +235,6 @@ def _setup_pr(repo: Path, plan: SetupPlan, base: str, token: str | None, spin: b
     if not slug:
         return SetupResult(plan=plan, error="no GitHub origin — cannot open a PR (drop --pr to write "
                                             "the file locally, or add a remote)")
-    # AuthZ BEFORE worktree/commit — missing `workflow` must not look like 'no write access' after
-    # expensive work. Uses resolve_session() so App / gh / env all go through one gate.
     decision = require(Intent.OPEN_GUARD_PR, repo_slug=slug)
     if not decision.allowed:
         return SetupResult(plan=plan, slug=slug, error=decision.message)
@@ -315,7 +307,6 @@ def setup(repo: str | Path | None = None, *, token: str | None = None, ref: str 
         return SetupResult(plan=plan)
     if plan.action == "conflict":
         # A file already occupies the install path but isn't a recognizable worm gate — refuse to
-        # overwrite it (data loss, #1239). A real gate at that path resolves to "present" above.
         return SetupResult(plan=plan, error=f"a workflow already exists at {plan.path} but isn't a "
                            "recognizable worm gate — not overwriting it. Remove or rename it, then "
                            "re-run `saw guard setup`.")
@@ -328,7 +319,6 @@ def setup(repo: str | Path | None = None, *, token: str | None = None, ref: str 
         return SetupResult(plan=plan, dry_run=dry_run)
     if pr:
         return _setup_pr(repo, plan, default_branch, token, spin)
-    # LOCAL: write into the working tree for the operator to review, commit on a branch, and PR.
     dest = repo / plan.path
     if not is_safe_write_target(dest, repo):          # never write the gate through a planted symlink (#1218)
         return SetupResult(plan=plan,
@@ -412,5 +402,3 @@ def _render_setup_submit(result: SetupResult, *, color: bool) -> str:
     why = push_failure_message(PushFailure(res.push_reason or "unknown", res.push_detail or ""))
     where = f" (saved a patch at {res.patch_path})" if res.patch_path else ""
     return paint(f"⚠️  {slug}: {why}{where}", warn, on=color) + sign
-
-
