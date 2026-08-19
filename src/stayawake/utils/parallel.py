@@ -1,28 +1,5 @@
 #!/usr/bin/env python3
-"""Ordered, error-isolated parallel execution over a work-list.
-
-ONE shared seam for every multi-item sweep in the CLI (the scanner today; `fix`/`guard`/
-`audit` per). It maps a PURE, PICKLABLE function over items with a bounded worker
-pool and guarantees the three properties every caller needs:
-
-  * ORDER — `Outcome`s come back in SUBMISSION order regardless of completion order, so a
-    persisted report is byte-identical whether run with one worker or many.
-  * ISOLATION / FAIL-CLOSED — one item's exception, or a whole worker PROCESS dying
-    (`BrokenProcessPool`), becomes that item's `Outcome.error`; it never aborts the sweep
-    and never silently vanishes, so the caller can fail closed.
-  * SINGLE-WRITER PROGRESS — `on_start` / `on_done` fire ONLY on the calling thread, so a
-    progress display always has exactly one writer even though work runs concurrently.
-
-Backends (the caller picks by workload — this is the whole point of one seam, two engines):
-  * PROCESS — CPU-bound work (the scanner: `re` matching and the pure-Python char loops in
-    the taint/obfuscation matchers hold the GIL, so threads would NOT parallelize it). Uses
-    a `spawn` context for cross-platform determinism; the mapped fn and its args MUST be
-    module-level and picklable (spawn re-imports the entry module).
-  * THREAD — I/O-bound work (git writes / GitHub API calls release the GIL). No pickling.
-
-`jobs <= 1` (or a single item) runs INLINE — no pool at all: zero startup cost, the
-single-item fast path, and semantics identical to the pooled path. Stdlib only.
-"""
+"""Ordered, error-isolated parallel execution over a work-list."""
 from __future__ import annotations
 
 import concurrent.futures as cf

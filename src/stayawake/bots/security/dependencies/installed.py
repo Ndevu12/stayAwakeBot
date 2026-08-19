@@ -1,19 +1,5 @@
 #!/usr/bin/env python3
-"""What's actually INSTALLED on disk, per ecosystem — the counterpart to the lockfile resolvers.
-
-The dependency audit (dependency_audit.py) reads the LOCKFILE — what SHOULD be there — and matches
-names@versions against the corpus. But the worm's real move is a postinstall that drops a package into the
-installed tree WITHOUT editing the lockfile → invisible to a lockfile-only audit. An `InstalledTree` reads
-the on-disk tree so the matcher can reconcile it against the lock: identity-on-disk (an installed
-name@version is known-malicious) and GHOST (on disk, absent from the lock).
-
-Same Open/Closed seam as `Resolver` — share the INTERFACE, not the layout (node_modules trees ≠ Python
-site-packages dist-info ≠ Composer vendor/), the epic's "not too DRY" boundary. Only ecosystems with a
-PROJECT-LOCAL installed tree get a provider: npm (node_modules) now, Python (site-packages) + Composer
-(vendor) next. Go / Rust / NuGet install to a GLOBAL cache, not a per-project tree, so the on-disk-vs-lock
-model doesn't apply there — their lockfile audit (+ toolchain verification) is the coverage. Value-first:
-no provider where there's no local tree to check. Offline, stdlib only, no new deps.
-"""
+"""What's actually INSTALLED on disk, per ecosystem — the counterpart to the lockfile resolvers."""
 from __future__ import annotations
 
 import base64
@@ -321,9 +307,7 @@ class PythonInstalledTree(InstalledTree):
     def tampered(self, target) -> Iterator[TamperedFile]:
         """Verify each installed file against its package's `.dist-info/RECORD` sha256 — a Python-unique
         offline tamper check (a wheel's RECORD carries a per-file hash; npm has no on-disk equivalent).
-        A mismatch means the file was modified AFTER install: a payload injected into a dependency. Only
-        entries WITH a `sha256=` hash are checked, so `.pyc`/`__pycache__`/RECORD-self (no hash) are
-        skipped → 0 false positives on a clean install (measured). Per-file and total hashing is bounded."""
+        A mismatch means the file was modified AFTER install: a payload injected into a dependency.  Per-file and total hashing is bounded."""
         budget = self._INTEGRITY_BUDGET
         for sp in self._site_packages(target):
             try:

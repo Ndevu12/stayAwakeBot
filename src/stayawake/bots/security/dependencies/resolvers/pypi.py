@@ -1,16 +1,5 @@
 #!/usr/bin/env python3
-"""PyPI resolver — requirements.txt / poetry.lock / Pipfile.lock / uv.lock → `Purl`s.
-
-The second `Resolver` implementation. Building it against the npm-era interface is what proves
-that interface is right — it fit PyPI without change (only the shared whole-file read moved up to
-the base class), so the interface is now frozen for the ecosystem fan-out.
-
-Prefers lockfiles (exact + transitive). `requirements.txt` is the manifest analogue: only exact
-`==` pins are taken; ranges/compound specs/unpinned lines are deferred to the lock, mirroring the
-npm `package.json` rule. Package names are normalized to PEP 503 form (lowercase, runs of `-_.`
-collapsed to `-`) — the same normalization OSV/PyPI advisories use — so a `Flask_Foo` pin and a
-`flask-foo` advisory match.
-"""
+"""PyPI resolver — requirements.txt / poetry.lock / Pipfile.lock / uv.lock → `Purl`s."""
 from __future__ import annotations
 
 import re

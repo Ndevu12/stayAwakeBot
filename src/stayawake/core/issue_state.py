@@ -1,17 +1,5 @@
 #!/usr/bin/env python3
-"""A GitHub issue used as a durable, file-less state store — reusable infrastructure.
-
-A bot often needs a little cross-run state (a debounce counter, a "last seen" marker) but shouldn't
-write files into, or commit to, the repo it operates on. This gives it one **marker-identified
-singleton issue** whose body carries a hidden JSON state block: find it by a stable marker (never by
-title, which churns), read the block, and write it back silently (a body edit sends no
-notification). GitHub persists it for free — no local dir, no `history.json`, no commit.
-
-Generic on purpose (`core`): the health sentinel stores its per-service availability debounce here,
-and any other consumer (e.g. the security `IssueSink`) can reuse the same mechanism instead of
-re-implementing marker lookup + state parsing. Every call is best-effort — a missing token or an
-HTTP error returns None/`{}`, never raises, so a caller's own verdict/exit code is unaffected.
-"""
+"""A GitHub issue used as a durable, file-less state store — reusable infrastructure."""
 from __future__ import annotations
 
 import json

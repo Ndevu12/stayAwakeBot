@@ -1,18 +1,5 @@
 #!/usr/bin/env python3
-"""Advisory corpus — index normalized OSV records for lookup by package.
-
-One responsibility: "given a `Purl`, is there an advisory affecting this exact version?" — matched
-either by the advisory's explicit version list or by a version range. It knows nothing about
-signatures, files, or verdicts — the store wraps a match into an `Advisory`, the matcher emits the
-finding. Ecosystem comparison is canonicalized (OSV's `crates.io`/`PyPI` ↔ our `cargo`/`pypi`) so a
-resolver's PURL keys the same slot as the advisory record.
-
-Scale note: most malware advisories say "this package is malware at *every* version" (a lone
-`introduced: "0"` range). There are hundreds of thousands of those, so they are kept in a compact
-**whole-package** index (a light record per name, no version/range payload, O(1) lookup), separate
-from the smaller set of version- or range-bounded records that need real evaluation. This keeps a
-fully-populated corpus's memory modest even though the malware set is huge.
-"""
+"""Advisory corpus — index normalized OSV records for lookup by package."""
 from __future__ import annotations
 
 from typing import Iterable, NamedTuple

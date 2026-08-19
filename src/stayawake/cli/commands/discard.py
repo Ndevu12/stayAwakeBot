@@ -1,13 +1,5 @@
 #!/usr/bin/env python3
-"""`saw discard` — the inverse of `saw fix`. Routes to remediator.discard.
-
-Removes what `fix` produced; only ever touches the auto-generated `security/auto-clean`
-branch, never a real branch. `--branch`/`-br` deletes it locally and on its remote (pure
-git — works even when the GitHub API is unreachable; deleting the remote branch auto-closes
-its PR). `--pr` closes the open PR via the API (leaves the branch). Scope is LOCAL by default;
-`--remote` (or naming `--user`/`--org`) sweeps GitHub repos (ad-hoc selectors → configured
-targets → your own repos). At least one of `--branch`/`--pr` is required.
-"""
+"""`saw discard` — the inverse of `saw fix`. Routes to remediator.discard."""
 from __future__ import annotations
 
 import argparse

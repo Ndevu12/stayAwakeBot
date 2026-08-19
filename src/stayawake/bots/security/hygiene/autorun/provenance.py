@@ -1,18 +1,5 @@
 #!/usr/bin/env python3
-"""Autorun PROVENANCE — approximate "who put this here" without process-level visibility.
-
-`saw` is an unprivileged static scanner; it cannot see which process wrote a file (that is the
-question). But it CAN read what the entry is statically attributable to, and that is most of the way
-there: is the referenced executable owned by a package, shipped inside an app bundle, code-signed, or
-sitting in a system/package path — versus unowned, unsigned, and running out of a scratch / cache /
-`node_modules` / `~/.claude` directory a worm writes to. Fused with content-shape, novelty and
-correlation (see `grade`), this separates a legitimately-installed autorun entry from a foothold far
-better than any single leg.
-
-FAIL-CLOSED: every subprocess (`dpkg`/`rpm`/`codesign`) is bounded and, on any error/timeout/absence,
-yields UNKNOWN — never a spurious "attributed". An entry we could not attribute is surfaced, not
-blessed. The subprocess legs are what the caller fans out over the shared THREAD parallel seam.
-"""
+"""Autorun PROVENANCE — approximate "who put this here" without process-level visibility."""
 from __future__ import annotations
 
 import os

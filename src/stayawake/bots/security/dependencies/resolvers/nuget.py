@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
-"""NuGet / .NET resolver — packages.lock.json → `pkg:nuget/…` PURLs.
-
-`packages.lock.json` maps each target framework to its packages; the `resolved` field is the exact
-locked version. Package ids and versions map onto the OSV `NuGet` ecosystem. (NuGet ids are
-case-insensitive; we keep the lockfile's casing — a case mismatch vs. an advisory's canonical id is
-a documented residual.)
-"""
+"""NuGet / .NET resolver — packages.lock.json → `pkg:nuget/…` PURLs."""
 from __future__ import annotations
 
 from typing import Iterator

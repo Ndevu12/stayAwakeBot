@@ -1,21 +1,5 @@
 #!/usr/bin/env python3
-"""Content-verify a single SUSPECT directory by scanning it with the worm signatures.
-
-`saw audit`'s host-artifact probe can flag a *weak* indicator — a `~/.node_modules` sitting in
-`$HOME` — that a manual `npm install` produces just as readily as the worm. This turns that weak
-indicator into an actual verdict by looking INSIDE the directory: it scans the tree with the normal
-signatures but with the everyday `exclude_dirs` turned OFF (we deliberately WANT to look inside
-`node_modules`/`dist`/`build` here — the exact opposite of a repository scan).
-
-Deliberately decoupled from `saw scan`: this calls the engine (`scan_target`) directly on one chosen
-directory and NEVER goes through repository discovery (`discover_local_repos`), so `saw scan`'s
-"find and scan every git repo" behaviour is completely untouched. The two only share the engine. It is:
-  * opt-in       — reached from a `saw audit` flag, never run by default;
-  * bounded       — a huge, almost-certainly-legitimate `node_modules` bails rather than hang;
-  * confirmed-only — a tree of minified libraries must NOT be mistaken for malware on heuristic
-                     density alone, so only CONFIRMED signature hits count as markers;
-  * fail-honest   — a read gap or an over-size tree is reported as such, never as "clean".
-"""
+"""Content-verify a single SUSPECT directory by scanning it with the worm signatures."""
 from __future__ import annotations
 
 import os
@@ -40,8 +24,7 @@ _VERIFY_EXCLUDES = {".git"}
 
 @dataclass
 class DirVerdict:
-    """The outcome of content-verifying one suspect directory. `markers` holds CONFIRMED signature
-    ids (heuristic-only hits are deliberately excluded — see the module docstring).
+    """The outcome of content-verifying one suspect directory. 
 
     `scanned_clean` is the ONLY reassuring state and is set ONLY when the whole tree was both walked
     AND fully read. The caller reads the states in priority order: markers → clean → too_large →

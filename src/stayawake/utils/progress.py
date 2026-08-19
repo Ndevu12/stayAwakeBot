@@ -1,21 +1,5 @@
 #!/usr/bin/env python3
-"""Concurrency-aware progress reporting for multi-target sweeps.
-
-The scanner runs targets CONCURRENTLY (utils.parallel), so the old single-line `\\r` spinner
-model — which assumes exactly one writer — no longer fits: several targets are in flight at
-once. This module provides a small `ProgressReporter` that a sweep drives with SEMANTIC events
-(`start` / `item_started` / `item_done` / `finish`), with two implementations:
-
-  * `LiveProgress` — a multi-line LIVE region on a TTY: a header (`done/total · elapsed ·
-    spinner`) plus one line per in-flight target, with each finished target printed as a
-    permanent line that scrolls up out of the region (docker/cargo-style). A SINGLE dedicated
-    render thread owns every terminal write, so concurrent completions can never interleave.
-  * `PlainProgress` — one plain completion line per target (no cursor control). This is what a
-    pipe / CI / `--no-stream` gets, matching the pre-parallel piped behaviour.
-
-Convention (unchanged): progress goes to STDERR; the report goes to STDOUT. So `--json` and
-redirected report output are byte-for-byte unaffected by whatever the board draws.
-"""
+"""Concurrency-aware progress reporting for multi-target sweeps."""
 from __future__ import annotations
 
 import threading

@@ -3,21 +3,6 @@
 
 Single responsibility: inspect the *developer machine* — not repositories — for the worm's entry and
 propagation surfaces, and report actionable hygiene issues. Split per concern into this package:
-
-  * credentials    — a cached GitHub token (Keychain / ~/.git-credentials)
-  * runner         — a self-hosted Actions runner (rotation-surviving foothold)
-  * os_service     — a planted OS service / launch agent (the rotation wiper)
-  * host_artifacts — staged ingress tooling / exfil drop-files
-  * editor         — VS Code auto-run tasks + Workspace Trust
-  * mechanism      — wave-agnostic sinks: ~/.ssh, shell startup files, exec-on-git-command config
-  * remote         — repository branch protection (the only enforced CI gate)
-
-`audit_checks()` here is the SINGLE composition site — neither `audit()` nor the streaming CLI may
-hand-assemble its own subset (that omission is how a probe once got silently dropped). Repository
-indicator scanning lives in the scanner/service; this is complementary. Probes are stdlib-only and
-degrade gracefully when a path/tool is absent — the one exception is the opt-in
-`--verify` content-scan, which delegates to the scanner engine via a LAZY import so the
-default audit never pulls it in (see host_artifacts.check_host_artifacts).
 """
 from __future__ import annotations
 

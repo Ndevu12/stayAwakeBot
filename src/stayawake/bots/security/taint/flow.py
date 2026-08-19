@@ -164,8 +164,7 @@ def _name_rebound(gap: str, name: str) -> bool:
 def _decode_var_into_exec(s: str) -> bool:
     """True if a base64/hex decode assigned to a variable then flows, within a short window AND
     WITHOUT leaving the variable's scope, into a command / dynamic-module / worker sink:
-    `const d = Buffer.from(p, 'base64'); execSync(d)`. This is the residual the nested
-    `_DECODE_INTO_EXEC` misses (decode via a VARIABLE) and the blind spot. The sink set is
+    `const d = Buffer.from(p, 'base64'); execSync(d)`. The sink set is
     standalone `_EXEC_SINK`s so a decoded value reaching THEM is caught without this.
 
     THREE accuracy guards keep a short, ubiquitous var name (`p`, `data`, `config`) from FP'ing on a

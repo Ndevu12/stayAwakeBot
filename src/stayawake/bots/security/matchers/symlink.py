@@ -1,28 +1,8 @@
 #!/usr/bin/env python3
-"""Symlink matcher — two escape-related anomalies, NEVER following the link.
+"""Symlink matcher.
 
-The scanner walks with ``followlinks=False`` (a deliberate cycle/DoS guard), so a symlink is reported
-but never descended into / opened. ``Path.resolve()`` only CANONICALIZES the path — it never reads the
-target's contents, so a link to ``/`` or ``~/.ssh`` is free to resolve; symlink loops (ELOOP) raise and
-are skipped (no infinite walk). Two findings:
-
-  * ``symlink-write-redirect`` (CONFIRMED / critical,) — a committed symlink (file OR directory)
-    whose target escapes the repo into a $HOME/system WRITE-SINK: ``~/.ssh/authorized_keys``, a shell /
-    editor / REPL startup file, git/cloud/service credentials, a GPG keyring, a PATH executable dir, or
-    an OS-persistence directory (LaunchAgents, systemd, autostart, cron). A tool or agent told to WRITE
-    the link's path writes THROUGH it into that sink — the GhostApproval / SymJacking attack. Such a
-    link has no legitimate purpose, so it is decisive on its own (drives INFECTED). Sinks that ALSO
-    exist as a shared PROJECT artifact (``.npmrc``, ``.vscode/``, ``.docker/config.json``) are
-    deliberately excluded to stay false-positive-free — see ``_WRITE_SINKS``.
-
-  * ``symlink-escapes-repo`` (HEURISTIC / high,) — a DIRECTORY symlink escaping the repo root to
-    a NON-sink target: it hides a whole code subtree from every content matcher (followlinks=False). An
-    anomaly, not a payload — legitimate escaping dir links exist (dotfile repos, tooling fixtures) — so
-    it is surfaced for review, never asserted as malware. Escaping FILE symlinks to non-sink targets are
-    overwhelmingly benign dev-env links (a venv ``bin/python -> /usr/.../python3``) and remain a
-    documented residual.
-
-The *contents* behind any symlink stay unscanned by design; only the link's own metadata is inspected.
+Reports two anomalies from a symlink's own metadata — one confirmed, one heuristic — without ever
+following the link or reading what is behind it.
 """
 from __future__ import annotations
 

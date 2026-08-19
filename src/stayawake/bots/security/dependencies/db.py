@@ -1,20 +1,5 @@
 #!/usr/bin/env python3
-"""Offline advisory database — cache + `saw db update` fetch.
-
-The ONE network egress in the whole scanner. `saw db update` bulk-downloads the OSV per-ecosystem
-export (`<base>/<bucket>/all.zip`) into a local cache; every scan then reads only that cache, so
-detection stays offline and deterministic. The download URL names only the **ecosystem** — never
-a package — so an update can't leak the dependency graph (we pull advisories, not your manifest,
-and never query per-package online).
-
-Phase 1b keeps only **malicious** records with an **explicit affected-version list** (see
-`osv.is_malicious` / `parse_osv_record`); ordinary CVEs and range-only advisories are deferred to
-the vulnerability tier and the range comparators. The inline `known_bad` seed in
-signatures.yml always ships, so the DB is a *superset*, never a prerequisite — no cache → scans
-fall back to the seed, exactly as before.
-
-Cache location and snapshot pinning/verification are finalized in the trust-hardening phase; today the cache is a plain user-cache directory with a basic per-ecosystem manifest.
-"""
+"""Offline advisory database — cache + `saw db update` fetch."""
 from __future__ import annotations
 
 import hashlib

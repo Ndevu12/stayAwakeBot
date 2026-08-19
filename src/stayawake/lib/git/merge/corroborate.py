@@ -3,12 +3,6 @@
 
 The evidence available depends on what git could have done at that path, so the two cases are judged
 apart rather than by one heuristic:
-
-  * the auto-merge did NOT conflict — git's algorithm is deterministic, so it could not have produced
-    the recorded content. Somebody edited the file while merging. Decisive with no content analysis.
-  * the auto-merge DID conflict — a human resolution is expected to deviate, so structure says
-    nothing and only CONTENT can: a worm signature, or an executable-obfuscation construct in the
-    introduced hunk.
 """
 from __future__ import annotations
 

@@ -1,22 +1,6 @@
 #!/usr/bin/env python3
 """Shareable terminal-rendering toolkit — the *mechanism* of readable terminal output
 (colour, width, wrapping, rules), with the *format* left entirely to each caller.
-
-Why this exists: two surfaces render human reports — the security scan
-(`bots/security/sinks/render.py`) and the local-hygiene audit
-(`bots/security/hygiene`). They present DIFFERENT data (repo findings with a path/signature/
-evidence vs. host issues with a title/detail/fix + an incident banner), so they must own
-their own *layout*. But they were re-implementing the same *machinery*: ANSI colour with a
-severity palette, TTY-gating, alignment, wrapping. This module holds that machinery ONCE so
-the two never drift on "what colour is critical?" or "how do we wrap a long line?", while each
-caller stays free to compose its own shape.
-
-Design: a small kit of pure functions, no I/O and no environment reads (a dependency-light
-leaf, like `core.terminal`). Colour is applied by `paint()` only when the caller passes
-`on=True` — the caller decides on/off once via `core.terminal.supports_color(stream)`, so the
-gating policy (NO_COLOR / CLICOLOR_FORCE / TTY / CI) lives in that one place and this stays a
-pure formatter. Escapes have no display width, so every width calculation is done on PLAIN
-text and colour is applied AFTER — callers must wrap/pad first, then paint.
 """
 from __future__ import annotations
 

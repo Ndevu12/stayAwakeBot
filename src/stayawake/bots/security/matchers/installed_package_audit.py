@@ -1,21 +1,5 @@
 #!/usr/bin/env python3
-"""Audit the INSTALLED dependency tree against the lockfile + corpus.
-
-The lockfile dependency audit (dependency_audit.py) sees only what a repo DECLARES. This matcher reads
-what's actually ON DISK (dependencies/installed.py) and reconciles it — closing the real gap that a
-postinstall can drop a package into node_modules WITHOUT touching the lockfile, invisible to a lockfile-only
-audit. Two checks, both cheap and offline:
-  * IDENTITY-ON-DISK — an installed name@version is known-malicious (corpus) → `confirmed` (INFECTED),
-    caught even though the lockfile was never edited.
-  * GHOST — a package present on disk but absent from the lockfile → `heuristic` (SUSPICIOUS): npm writes
-    every install into the lockfile, so an off-lockfile package is anomalous (benign cases — locally-linked
-    packages — are symlinks, which the provider skips).
-
-Thin orchestrator (SRP): the `InstalledTree` providers read disk, the `RESOLVERS` give the locked set, the
-`AdvisoryStore` says "is it bad"; this file only reconciles + emits. Runs only when a project-local
-installed tree exists (a remote clone with no install falls back to the lockfile audit). Reuses the same
-memoized corpus as dependency_audit — no new parsing, no new deps.
-"""
+"""Audit the INSTALLED dependency tree against the lockfile + corpus."""
 from __future__ import annotations
 
 import re
@@ -140,9 +124,9 @@ def _loader_finding(sig, pkg, rel, kind, hit) -> Finding:
 
 
 def _scan_file(check, target, rel, budget) -> str | None:
-    """Run the confirmed loader check over the FULL body of `rel` — windowed via `read_source_windows`
-    so an oversized bundle's INTERIOR isn't a blind spot (the head+tail of `read_text` would miss a
-    payload buried mid-file). `read_source_windows` is FIFO-safe. Decrements `budget` (a mutable
+    """Run the confirmed loader check over the full body of `rel`.
+
+    `read_source_windows` is FIFO-safe. Decrements `budget` (a mutable
     1-elt list) by bytes read when given (entries pass None — always scanned). Returns the hit id / None."""
     for _offset, text in target.read_source_windows(rel):
         if budget is not None:

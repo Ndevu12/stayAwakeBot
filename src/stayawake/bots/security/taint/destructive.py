@@ -74,8 +74,7 @@ def _recursive_delete_of_home_name(text: str) -> bool:
     """A recursive delete whose target is a name that STILL holds the home directory there.
 
     Binding matters, not co-presence: `result = os.path.expanduser('~')` appears in ordinary library
-    code where `result` is then reused for a dozen unrelated values. Measured on pip's vendored
-    distlib, matching any later delete of that name produced a false positive. So the binding must be
+    code where `result` is then reused for a dozen unrelated values.  So the binding must be
     the NEAREST one before the delete, must not be rebound in between, and its block must not have
     closed — the same discipline the decode-to-exec analyzer applies to its own variables."""
     deletes = (

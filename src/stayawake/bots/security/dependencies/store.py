@@ -1,18 +1,5 @@
 #!/usr/bin/env python3
-"""Advisory store — maps a resolved package to the advisory that flags it.
-
-One responsibility: "given a package, is it known-bad, and why?" The store knows nothing about
-repos or lockfile formats — resolvers hand it `Purl`s, it answers. The matcher depends on this
-type, not on where the data lives (dependency inversion), so a test can build an in-memory store
-directly and future phases can swap the backing source without touching the matcher.
-
-Two backing sources, checked in order:
-  1. the inline `known_bad` seed shipped in signatures.yml — always in the wheel, so detection
-     needs zero setup and zero network; and
-  2. the offline malicious-package **corpus** (`db.load_corpus`), populated by `saw db update`
-     from OpenSSF / GitHub Advisories / OSV.dev — a *superset* of the seed, never a prerequisite.
-No cache → corpus is None → behaviour is identical to the seed-only path.
-"""
+"""Advisory store — maps a resolved package to the advisory that flags it."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field

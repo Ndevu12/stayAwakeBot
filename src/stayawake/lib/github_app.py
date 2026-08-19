@@ -1,25 +1,5 @@
 #!/usr/bin/env python3
-"""GitHub App authentication — mint short-lived installation tokens.
-
-A GitHub App is
-the production way to scan/remediate/guard org-wide: an admin installs it once on selected
-repos and it mints **1-hour, auto-rotating installation tokens** scoped to exactly the
-granted permissions — no human PAT to leak, fully revocable, and the install itself
-defines scope.
-
-Security: JWT signing uses the built-in dependency-free RS256 signer (`lib/jwtsign`). Tokens/keys are
-returned to callers but never logged here. Credentials may come from env OR from the local
-config written by `saw auth app register` (`~/.config/saw/github-app.json`).
-
-Configuration (env wins over the config file):
-  GH_APP_ID                 numeric App ID (not secret)
-  GH_APP_PRIVATE_KEY        PEM contents of the App private key (secret), OR
-  GH_APP_PRIVATE_KEY_PATH   path to the .pem
-  GH_APP_INSTALLATION_ID    optional; if omitted and the App has exactly one
-                            installation, that one is used
-
-Phase 1 registers an operator-managed App via `saw auth app register` (you own App ID + PEM).
-"""
+"""GitHub App authentication — mint short-lived installation tokens."""
 from __future__ import annotations
 
 import json

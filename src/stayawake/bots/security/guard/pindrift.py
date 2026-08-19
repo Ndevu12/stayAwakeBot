@@ -1,18 +1,6 @@
 #!/usr/bin/env python3
 """Worm-guard PROTECTION backstop: file ONE self-closing issue per repo when its worm-guard gate is
 missing or its pinned Strix release has fallen behind — so a repo stays gated and current over time.
-
-A SHA-pinned gate keeps a later compromise from silently changing what runs, but two things drift
-quietly: the gate can be REMOVED (or never installed) — the repo is then unprotected while you think
-it's covered — and the pin goes STALE, running an old detection engine. This scheduled/one-shot check
-turns either into an actionable, de-duplicated GitHub issue, and closes it once the repo is protected
-and current — so nobody has to remember to look. `saw guard setup`'s scheduled job runs it on the
-repo; an operator sweeps a fleet with `saw guard drift --remote --org …`.
-
-Built ON `detect.check` — the same reader/grader `saw guard check` uses — so a gate is recognized by
-ANY mechanism (Strix action / local action / `saw` step). A gate present by a non-Strix mechanism is
-still PROTECTED (no issue; its release pin just isn't freshness-trackable). Reports as an ISSUE, never
-a build failure. The multi-repo sweep (`drift_targets`) lives in `sweep`.
 """
 from __future__ import annotations
 

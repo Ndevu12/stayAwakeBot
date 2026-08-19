@@ -1,14 +1,5 @@
 #!/usr/bin/env python3
-"""Target resolution — turn CLI/config selectors into the repositories a command acts on.
-
-One shared model for every repo-sweeping verb (`saw scan`, `saw fix`, `saw guard`): discover LOCAL
-repos under given paths/globs (or the enclosing repo), and resolve REMOTE `owner/name` slugs via the ladder (ad-hoc `--user`/`--org`/`owner/repo` selectors → configured `targets.github` → your own
-repos). Pure target math — no scanning, no output, no git writes — so each command layers its own
-per-repo action on top without re-implementing discovery.
-
-Extracted from `service.py` when `saw guard` became the third consumer (after scan and fix), so the
-resolution logic lives in exactly one place instead of being copied per verb.
-"""
+"""Target resolution — turn CLI/config selectors into the repositories a command acts on."""
 from __future__ import annotations
 
 import contextlib

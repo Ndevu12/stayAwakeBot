@@ -1,16 +1,5 @@
 #!/usr/bin/env python3
-"""OSV record parsing + malicious classification.
-
-Every knowledge source we consume — OpenSSF malicious-packages, the GitHub Advisory Database,
-and OSV.dev's per-ecosystem exports — publishes the **same** OSV JSON schema, so there is one
-parser here, not three. `parse_osv_record` normalizes a raw OSV object into the minimal shape
-the corpus matches on; `is_malicious` classifies a record as malware (as opposed to an ordinary
-CVE) using structured signals only — never free-text — so the classification stays honest.
-
-A record matches either by an **explicit affected-version list** (`affected[].versions`) or by an
-affected **range** (`affected[].ranges[]`, evaluated by the per-ecosystem comparators in).
-Pure and I/O-free; all reading/caching lives in `db.py`.
-"""
+"""OSV record parsing + malicious classification."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field

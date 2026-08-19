@@ -1,20 +1,5 @@
 #!/usr/bin/env python3
-"""Propose a repository change as a real, human-reviewed pull request — with a degradation ladder.
-
-This is the shared GitOps machinery behind commands that don't *impose* a change but *propose* one:
-given a git worktree that already has the change committed to a rolling branch, push it and open (or
-update) one deduplicated PR — and when the push is refused (no write access, or a branch that
-requires signed commits), walk the fallback ladder so the work is never lost: **fork → cross-fork
-PR**, else a **git-am-able patch + a deduplicated notify issue**.
-
-It is deliberately domain-neutral: it knows nothing about *what* the change is (a worm remediation,
-a CI-gate install, …). Callers build the worktree/commit, the PR title/body and the issue text, then
-read the structured `SubmitResult` and render their own human outcome — so domain wording (a
-remediation's PARTIAL tag, a gate's hardening checklist) stays with the caller. `saw fix` and
-`saw guard setup` are the two callers; the ladder is written once, here.
-
-Never commits to or force-pushes the default branch — the PR is the unit of review.
-"""
+"""Propose a repository change as a real, human-reviewed pull request — with a degradation ladder."""
 from __future__ import annotations
 
 import time

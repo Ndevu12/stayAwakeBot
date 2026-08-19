@@ -1,20 +1,5 @@
 #!/usr/bin/env python3
-"""Java / Maven resolver — Gradle lockfiles / pom.xml → `pkg:maven/…` PURLs.
-
-Fully-resolved Gradle locks are the authoritative source, across all three formats:
-  * `gradle.lockfile` and `buildscript-gradle.lockfile` (Gradle ≥ 6.8): `group:artifact:version=configs`
-  * legacy `gradle/dependency-locks/<config>.lockfile` (Gradle 4.8–6.7): bare `group:artifact:version`
-`pom.xml` declares `<dependency>` coordinates; only *literal* versions are taken (a `${property}`,
-a `<dependencyManagement>`/BOM-managed version, or a Maven range is unresolved → deferred). The OSV
-`Maven` ecosystem names a package `groupId:artifactId`.
-
-pom.xml is parsed by regex, NOT an XML parser: `saw` must never be DoS'd by a hostile scanned file,
-and XML entity-expansion ("billion laughs") / XXE are exactly that risk. The extraction regex must
-itself be ReDoS-safe — the block body is a TEMPERED run (non-`</dependency>` chars that also don't
-start a NEW `<dependency`), so an opener with no closer can't scan to end-of-file at every opener
-(a plain `(.*?)` did → O(n^2) on `<dependency>`-spam,). `<dependency>` blocks never nest, so
-the tempering is detection-identical.
-"""
+"""Java / Maven resolver — Gradle lockfiles / pom.xml → `pkg:maven/…` PURLs."""
 from __future__ import annotations
 
 import re

@@ -1,17 +1,5 @@
 #!/usr/bin/env python3
-"""GitHub credential resolution.
-
-Preference order (highest first):
-  1. GH_SECURITY_TOKEN / GITHUB_TOKEN in the environment (CI and explicit overrides).
-  2. The user's GitHub CLI session (`gh auth token`) — short-lived and never persisted
-     by us, which is exactly what the hygiene audit recommends over a cached PAT.
-
-Local scanning needs NO credential; this is only for cloning private remotes and for
-writes (PRs, issues, branch-protection reads). Every gh probe degrades gracefully:
-a gh that is missing, not logged in, slow, or erroring never raises — it just yields
-no token, and callers either fall back (anonymous public read) or print an actionable
-hint. Stdlib only. Tokens are returned to callers but never logged here.
-"""
+"""GitHub credential resolution."""
 from __future__ import annotations
 
 import shutil

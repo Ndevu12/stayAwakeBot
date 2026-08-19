@@ -1,18 +1,5 @@
 #!/usr/bin/env python3
-"""Version comparators + OSV range evaluation.
-
-An advisory range says "affected from `introduced` until `fixed`/`last_affected`"; deciding whether
-a resolved version falls inside requires ordering versions the way that *ecosystem* orders them —
-npm semver ≠ PEP 440 ≠ Gem::Version ≠ Maven's qualifier ordering. So each ecosystem has its own
-comparator behind one interface (`is_version_in_range`); there is deliberately NO universal
-`Version` class (the epic's not-too-DRY boundary).
-
-Every comparator is **self-contained** (no third-party dependency — the tool stays offline and
-minimal-dep): a comparator turns a version string into a Python-comparable key, or None when it
-can't parse it (→ the range conservatively does NOT match, so an undecidable bound never raises a
-false INFECTED). Shipped: semver (npm/Cargo/Go/Composer/NuGet + all `SEMVER`-typed ranges), PEP 440
-(PyPI), Gem::Version (RubyGems), and a best-effort Maven ordering.
-"""
+"""Version comparators + OSV range evaluation."""
 from __future__ import annotations
 
 import functools

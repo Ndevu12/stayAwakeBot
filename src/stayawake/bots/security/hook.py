@@ -1,25 +1,8 @@
 #!/usr/bin/env python3
-"""`saw hook` — scan-on-clone: scan a repo the moment its code lands on the machine.
+"""`saw hook` — scan a repository the moment its code lands on the machine.
 
-The dangerous window is between "a repo is cloned/pulled" and "I run something" — `npm install`
-firing a `postinstall`, an editor auto-running a `folderOpen` task — where a supply-chain worm
-executes. GitHub has no clone webhook, so there is nothing to react to server-side; this is purely
-LOCAL. `saw hook install` seeds git's `init.templateDir` so every FUTURE clone/init gets a
-`post-checkout` + `post-merge` hook that scans what just landed and warns BEFORE the payload can run.
-
-Design decisions (see the brainstorm):
-- **`init.templateDir`, not global `core.hooksPath`.** templateDir seeds a new repo's `.git/hooks`
-  at clone/init time: forward-looking (future clones only), coexists with the repo's own hooks, and
-  never hijacks existing repos' hook dispatch (which a global `core.hooksPath` would).
-- **Scan only what landed.** `post-checkout` on a CLONE (old rev = 40 zeros) → full-tree scan; a
-  plain branch switch is skipped (that code was already on the machine). `post-merge` (pull) → scan
-  only the `ORIG_HEAD..HEAD` changed files (via `Target.include_only`,) → near-instant.
-- **Trust: operator config only.** The hook scans UNTRUSTED just-cloned code, so it uses the packaged
-  signatures + the OPERATOR's allowlist (baked in at install via `--config`), NEVER the cloned repo's
-  own `config/security.yml` — a worm would ship an allowlist to whitelist itself.
-- **Warn, don't wreck.** Read-only + offline; warn loudly and guide (`saw fix`), never auto-modify
-  (auto-"fixing" a fresh untrusted clone is the wiper hazard). The hook can't undo a clone and NEVER
-  fails the git command. A SHA cache skips rescanning a tree already scanned.
+Installs, removes and reports on the global git hooks, and runs the scan they trigger, so a clone or
+pull is checked before anything in it is executed.
 """
 from __future__ import annotations
 

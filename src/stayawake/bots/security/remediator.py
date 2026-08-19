@@ -1,17 +1,5 @@
 #!/usr/bin/env python3
-"""Remediator service — `saw fix` and `saw discard`.
-
-`saw fix` (default) PREPARES the fix on a local `security/auto-clean` branch and stops —
-no push, no PR, no network — leaving the branch for the user to review and push. `saw fix
---pr` additionally pushes and opens/updates one rolling PR per repo; `saw fix --remote`
-sweeps the configured GitHub targets (clone → fix → PR). `saw discard` is the inverse:
-`--branch` deletes the auto-clean branch (local + remote, git only), `--pr` closes its PR.
-
-Scope is LOCAL by default; `--remote` targets the configured GitHub repositories. Anything
-that touches the GitHub API (publish/remote, `discard --pr`) is PRE-FLIGHTED once — a broken
-env (e.g. SSL) or bad token fails fast instead of force-pushing branches. Each repo's outcome
-streams live, and one repo's failure never aborts the run.
-"""
+"""Remediator service — `saw fix` and `saw discard`."""
 from __future__ import annotations
 
 import os

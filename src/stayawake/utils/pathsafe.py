@@ -1,16 +1,5 @@
 #!/usr/bin/env python3
-"""Write-target safety — refuse to write/delete through a symlink or outside an intended root.
-
-A tool that writes files inside a directory it does not fully control (a repository it is remediating,
-a worktree it is proposing changes to) can be tricked by a planted **symlink** at a write target — or a
-symlinked ancestor directory — into writing THROUGH the link into a sink outside the tree (`~/.bashrc`,
-`.git/hooks/…`, `/etc/…`). This is the SymJacking / GhostApproval write-through vector (stayawakebot/; the `saw fix` clean-text rewrite was first guarded in). Factored out here as ONE
-pure implementation every write/delete path shares.
-
-Pure and stdlib-only (a `utils` leaf): `Path.resolve()` only CANONICALIZES a path — it never opens or
-follows a target to read it — so it is safe to call on an attacker-controlled path; it turns a symlinked
-ancestor or a `..` escape into a location outside the root, which the containment check then rejects.
-"""
+"""Write-target safety — refuse to write/delete through a symlink or outside an intended root."""
 from __future__ import annotations
 
 import stat

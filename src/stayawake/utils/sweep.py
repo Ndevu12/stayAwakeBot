@@ -1,17 +1,6 @@
 #!/usr/bin/env python3
 """One sweep runner: map a per-item unit of work over a work-list behind a concurrency-aware
 live progress board, returning results in SUBMISSION order.
-
-Every repo-sweeping command (`saw scan` / `fix` / `guard`) needs the SAME orchestration around
-`utils.parallel.run_ordered`: open a progress board, fire per-item start/done events at it, run
-the items with a bounded worker pool, and hand back ordered `Outcome`s so the caller can fail
-closed and render deterministically. That orchestration used to live only in the scanner; this
-extracts it so all three share ONE implementation — and each command inherits its Ctrl-C safety,
-submission-order guarantee, and single-writer progress for free.
-
-What stays with the caller (deliberately): the work function, how a finished result becomes a
-board tag/detail (`describe`), and how the returned outcomes map onto the command's own result
-type and exit code. This module owns only the shared mechanism, never a command's policy.
 """
 from __future__ import annotations
 

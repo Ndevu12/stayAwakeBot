@@ -1,16 +1,5 @@
 #!/usr/bin/env python3
-"""Heuristic matcher — oversized lines and text-in-fontfile detection.
-
-The `oversized-config-line` rule is the formatting-keyed signal for an appended/packed
-payload in a hand-authored config. Raw line length is NOT decisive on its own: real
-configs legitimately carry one very long line (a tailwind `safelist`, an eslint
-`globals` object, an inlined `data:` URI, a long proxy URL). So the long-line signal is
-CORROBORATED with the context-aware confidence lever (G5): a long line is reported only
-when (a) the file's content carries a worm loader fingerprint, OR (b) the file is
-context-scoped obfuscated/packed per `analyze_file` (high-entropy, packed-shape,
-density-dominant — after stripping inline `data:` asset URIs). Vendored/minified/
-generated paths are suppressed there, so dense bundles never reach this rule.
-"""
+"""Heuristic matcher — oversized lines and text-in-fontfile detection."""
 from __future__ import annotations
 
 import re
@@ -126,7 +115,8 @@ class HeuristicMatcher(Matcher):
     def _magic_byte_masquerade(self, target, rel, sig):
         """A file whose EXTENSION claims a binary format (font/image/wasm/pdf) but whose head lacks
         that format's magic bytes AND reads as text/JS → a payload disguised under a benign extension.
-        A real binary starts with its magic, so `startswith(magic)` short-circuits (0 FP on real files)."""
+        """
+
         ext = "." + rel.rsplit(".", 1)[-1].lower() if "." in rel else ""
         magic = FONT_MAGIC.get(ext) or BINARY_MAGIC.get(ext)
         raw = target.read_bytes(rel, limit=512)

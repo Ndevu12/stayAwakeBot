@@ -1,24 +1,6 @@
 #!/usr/bin/env python3
 """Credential-exposure hygiene: a cached GitHub token in the OS keychain (macOS Keychain / Linux
 libsecret-gnome-keyring / Windows Credential Manager) or a plaintext `~/.git-credentials`.
-
-Threat-model note: a token *cached in the encrypted login Keychain is normal* — the Keychain
-is the recommended store, and a credential must live somewhere to be usable. What actually determines
-risk is the token's LIFETIME, SCOPE, and whether a bearer token can be COPIED by a process running as
-you — not where it is stored. And developers legitimately keep several auth methods at once (SSH,
-HTTPS+PAT, gh), often forced by the environment, so the tool must NEVER tell a user to collapse to one
-or to "just delete" a path they may rely on. So the Keychain finding here:
-
-  * is graded `info` (a review item), not `warning` — it's the WORST case only if properties are bad,
-    which we deliberately do not read (saw never reads/transmits a live secret);
-  * frames risk by PROPERTY, names the specific store, and says what a delete does NOT touch;
-  * probes read-only whether a helper is actively SERVING the token (in use) vs it merely sitting
-    there (a removal candidate), and never proposes deleting a sole working auth path first;
-  * resolves the REAL config source (`git config --show-origin`) so its removal command is correct
-    (an inherited read-only system default needs `--add credential.helper ""`, not a no-op `--unset`).
-
-A PLAINTEXT `~/.git-credentials` (credential.helper=store) is a different animal — an actual
-misconfiguration (a secret on disk in the clear), so it stays a `warning`.
 """
 from __future__ import annotations
 

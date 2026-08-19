@@ -1,18 +1,5 @@
 #!/usr/bin/env python3
-"""Typewriter-style streaming writer for human-facing CLI output.
-
-Single responsibility: pace text to a TTY so results *unfold* like writing, with a
-spinner over silent compute phases — while degrading to plain, instant output when
-piped / in CI / disabled. It never changes WHAT is written, only the *cadence*, so
-report artifacts (latest.json / latest.md) and any machine consumer reading stdout are
-byte-for-byte unaffected.
-
-Honest scope: scanner text is computed synchronously, so the typewriter is cosmetic
-pacing of already-known text — not tokens arriving from a model. That is the right call
-for a security tool: detection stays deterministic; only the cadence is animated.
-
-Convention: results go to stdout (Streamer), transient progress to stderr (status).
-"""
+"""Typewriter-style streaming writer for human-facing CLI output."""
 from __future__ import annotations
 
 import itertools

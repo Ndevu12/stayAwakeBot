@@ -1,17 +1,5 @@
 #!/usr/bin/env python3
-"""Autorun SURFACE enumeration — the finite set of places malware arranges to be re-executed.
-
-Payloads are unbounded; the LOCATIONS that re-run a payload are finite and enumerable. This module
-turns each location into a structured `AutorunEntry` — what it runs (the referenced executable + argv),
-its persistence shape (run-at-load / keep-alive / poll interval), and a content digest — so the
-attribution layers (provenance, content-shape, novelty, correlation) can grade it *without* needing a
-signature for the payload. Read-only, stdlib-only; a non-regular file is never opened (the FIFO
-hazard). Locations are sourced from the detection probes' own definitions (single source of truth).
-
-v1 covers the catastrophic persistence surface — macOS LaunchAgents + Linux systemd user units (where
-the rotation wiper lives). The surface is a registry: shell rc, git hooks, agent (`~/.claude`) hooks,
-VS Code tasks, and npm lifecycle extend it without touching the grading layers.
-"""
+"""Autorun SURFACE enumeration — the finite set of places malware arranges to be re-executed."""
 from __future__ import annotations
 
 import plistlib

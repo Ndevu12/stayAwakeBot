@@ -1,26 +1,5 @@
 #!/usr/bin/env python3
-"""Running-process snapshot — the real argv of each live process, or an explicit refusal.
-
-A host that is already compromised still has the implant RUNNING, and on 2026-08-05 that is exactly
-how it was found: a `node -e` payload, reparented to launchd, no controlling terminal, beaconing. It
-was found by hand. This module is the data collection that lets the tool ask the same question.
-
-**Why not `ps`.** `ps -o command=` returns a space-joined, unquoted STRING. Word-splitting it is lossy
-and unrecoverable — measured, a six-element argv came back as eight tokens with the code argument
-destroyed — and every consumer downstream (`resolve_invocation`, the shell lexer) is specified over an
-argv VECTOR. Feeding them a re-split string makes them answer confidently about the wrong command, and
-it fails toward "nothing here". So argv comes from the kernel: `KERN_PROCARGS2` on macOS,
-`/proc/<pid>/cmdline` on Linux, both of which preserve the NUL-separated vector the process was
-executed with.
-
-**Unprivileged and prompt-free by construction.** Measured on macOS 14: no `sudo`, no Full Disk Access,
-no TCC dialog, and argv is NOT truncated (400,000 characters survived a round trip on macOS; Linux
-caps a SINGLE argument at 128 KiB in the kernel, so that is the platform's ceiling and not this
-collector's). A process owned by
-another user simply refuses to yield its arguments, and that refusal is REPORTED rather than rendered
-as an empty command line — a snapshot that silently drops what it cannot read would let a beacon
-running as another user look like an absence of beacons.
-"""
+"""Running-process snapshot — the real argv of each live process, or an explicit refusal."""
 from __future__ import annotations
 
 import ctypes

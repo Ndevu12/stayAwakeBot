@@ -1,23 +1,5 @@
 #!/usr/bin/env python3
-"""Dependency-free RS256 JWT signer for GitHub App auth (stdlib only).
-
-`saw` mints a GitHub App JWT (RS256 = RSASSA-PKCS1-v1.5 + SHA-256) with the operator's RSA private
-key. Rather than an optional `pyjwt[crypto]` extra — which forced a per-package-manager install step and pulled a CVE-prone dependency — this does it with the standard library only: `hashlib`
-(SHA-256), `base64` (base64url), and Python's arbitrary-precision `pow()` (the RSA operation), over a
-tiny DER parse of the PEM key.
-
-Why hand-rolling THIS narrow slice is sound:
-  * We only SIGN our own header/payload with a hardcoded `alg: RS256` and hand the token to GitHub.
-    The dangerous JWT CVE classes (algorithm confusion, key confusion, crit-header, JWK injection)
-    are all VERIFICATION-side — none apply to a signer.
-  * RS256 is DETERMINISTIC → the output is provably byte-for-byte equal to `openssl`/PyJWT (tests).
-  * The RSA op uses BLINDING (`s = (m·r^e)^d · r^-1 mod n`, random `r`) — the same timing-side-channel
-    defense OpenSSL uses; blinding does not change the result, so determinism/correctness is kept.
-    Plain `pow()` (no CRT) also sidesteps CRT-fault key recovery. Correctness needs no randomness, so
-    a weak RNG can only weaken blinding, never corrupt the signature.
-  * Only UNENCRYPTED PKCS#1 / PKCS#8 RSA keys (exactly what GitHub App keys are); an encrypted or
-    non-RSA key raises `JwtSignError` — fail loud, never a wrong-but-accepted signature.
-"""
+"""Dependency-free RS256 JWT signer for GitHub App auth (stdlib only)."""
 from __future__ import annotations
 
 import base64

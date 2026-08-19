@@ -3,17 +3,6 @@
 
 Pure string builders — no I/O, no state, no new dependencies. The dispatcher prints
 `render_welcome()` when `saw` runs with no command; `saw intro` prints `render_intro()`.
-
-Colour is applied for the `ColorLevel` the terminal supports (see `core.terminal`):
-
-  * TRUECOLOR / ANSI256 / ANSI16 → the mint wordmark degrades gracefully across palettes;
-  * NONE → the SAME block art and layout with **zero ANSI**, so piped / CI / NO_COLOR / dumb
-    output stays clean text.
-
-A dependency-light leaf like `_meta` (it imports only `core.terminal`), so the dispatcher and
-the `intro` command import it without cycles. The wordmark is a plain-string constant, composed
-from fixed-width letter grids so its columns always align, and each render branch is testable in
-isolation.
 """
 from __future__ import annotations
 

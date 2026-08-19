@@ -1,21 +1,5 @@
 #!/usr/bin/env python3
-"""npm-ecosystem resolver — package.json + npm/yarn/pnpm lockfiles → `Purl`s.
-
-Relocated verbatim (behaviour-preserving) from the pre-refactor `dependency_audit` matcher.
-yarn and pnpm packages are npm-registry packages, so all three lockfile formats resolve to
-the one `pkg:npm/…` ecosystem — hence a single resolver.
-
-The campaign's PRIMARY spread is republishing backdoored versions of packages, so the next
-`npm install` is the next victim — the payload lands in `node_modules` (which `saw` excludes)
-and never touches the repo tree. This resolver reads what a repo DECLARES and LOCKS so the
-matcher can flag a known-bad `name@version` before that install happens.
-
-Supported: npm `package-lock.json` / `npm-shrinkwrap.json` (v1 `dependencies` tree +
-v2/v3 `packages`), `yarn.lock` (classic v1 `version "x"` AND berry v2+ `version: x`), and
-`pnpm-lock.yaml` (v5 `/name/version`, v6+/v9 `/name@version`, with `(peer)` or `_peer`
-suffixes). Manifest ranges (`^4.2.11`) are deliberately NOT resolved — they're ambiguous, so
-the lockfile's resolved version is the source of truth (only exact pins are emitted).
-"""
+"""npm-ecosystem resolver — package.json + npm/yarn/pnpm lockfiles → `Purl`s."""
 from __future__ import annotations
 
 import re

@@ -1,16 +1,5 @@
 #!/usr/bin/env python3
-"""The one place stayawake reads the process environment.
-
-Every environment variable the app consults is NAMED and READ here — so there are no
-magic-string `os.environ.get("…")` calls scattered across modules, the full env surface is
-discoverable in a single file, and a test can steer behaviour by patching one module. Domain
-logic that happens to consult env (token precedence in `core.auth`, GitHub App auth in
-`core.github_app`) keeps its own logic and just reads names/values from here.
-
-Note: `get()` strips surrounding whitespace and treats an empty/whitespace value as unset, so a
-variable is "set" only when it holds real content — consistent across every toggle and path.
-Stdlib only; imported widely, so it must stay dependency-light and import-cheap.
-"""
+"""The one place stayawake reads the process environment."""
 from __future__ import annotations
 
 import os

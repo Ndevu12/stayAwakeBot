@@ -1,24 +1,5 @@
 #!/usr/bin/env python3
-"""Malicious-upstream-dependency audit — the coordinator.
-
-This matcher is now a thin orchestrator: it asks each ecosystem **resolver** for the packages
-a repo declares/locks (as `Purl`s), asks the **advisory store** whether any is known-bad, and
-emits a `Finding` anchored to the source file. All parsing lives in `dependencies/resolvers/`
-and all "is this bad, and why" lives in `dependencies/store.py` — this file owns only the
-workflow, so `handles = "dependency-audit"` keeps the scanner/REGISTRY/verdict/allowlist
-contract unchanged.
-
-Exactness is the point (preserved from the original): an exact-locked (or exact-pinned)
-`name@version` match is decisive (`confirmed` → INFECTED). Offline, deterministic, cheap; the
-behavioral engine stays the backbone. The store is injectable (`store_factory`) so tests can
-supply an in-memory corpus; the default (`AdvisoryStore.default`) is the inline seed **plus** the
-offline OSV corpus when `saw db update` has populated a cache — absent a cache it is the
-seed alone, so scans stay offline and zero-setup.
-
-Two things feed the advisory tier (never the verdict): the offline CVE corpus (on by default;
-`--no-advisories` to suppress) and, deliberately crossing the offline default, INSTALLED external
-auditors (`--external`, opt-in,).
-"""
+"""Malicious-upstream-dependency audit — the coordinator."""
 from __future__ import annotations
 
 from stayawake.bots.security.models import Finding, Severity

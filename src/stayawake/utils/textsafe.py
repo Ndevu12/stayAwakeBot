@@ -2,20 +2,6 @@
 """Output-encoding for untrusted strings — the safe way to render an attacker-controlled value
 (a repo path, a finding reason, a git ref) into a GitHub Markdown body or a terminal / GitHub
 Actions log.
-
-This is *output encoding*, not detection or layout: given a value that may contain control chars,
-newlines, bidi overrides, backticks or workflow-command introducers, it neutralizes them so the
-value can't break out of its context (a Markdown code span, a log line) or smuggle markup. Two
-sinks, two functions:
-
-- `code(s)` / `sanitize(s)` — for a **Markdown body** (PR/issue). The value MUST be wrapped in a
-  code span (`code()` does this); `sanitize()` is the inner primitive when you compose the span
-  yourself.
-- `plain(s)` — for a **plain-text line** on a terminal or a GitHub Actions log (safe at line-start).
-
-Kept dependency-free (stdlib only) and free of any security-domain knowledge, so every command that
-renders untrusted input into a body or a log shares one hardened implementation instead of copying
-it. The escaping contract originates in/ (Markdown) and the Actions log-injection work.
 """
 from __future__ import annotations
 
