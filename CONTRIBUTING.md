@@ -61,3 +61,23 @@ source distribution, so it is read by everyone including someone looking for a w
 
 If an entry cannot be written without internal detail, that is the signal the change is not
 user-visible and needs no entry.
+
+## Comments and docstrings
+
+Document the interface, not the implementation.
+
+- **Docstrings are wanted.** A module says what it is responsible for; a function says what it does,
+  what it takes and what it returns — enough for someone to use it without reading the body.
+- **Do not narrate internals.** How something decides, what it keys on, the tuning behind a
+  threshold, a measured false-positive rate, an evasion it resists, a coverage residual — none of
+  that belongs in the source. This package ships its own source: every comment reaches the sdist and
+  the wheel, and every docstring is readable at runtime through `help()`. Detection detail published
+  there is detection detail handed to whoever is trying to get past it.
+- **Never comment a variable or a constant.** If a name needs a sentence, the name is wrong.
+- **Long rationale goes in the commit message**, which is where a reader looks for *why this
+  changed*. The code is where they look for *what it does now*.
+
+Because of that last point, keep `git blame` useful: a commit that only moves prose around is listed
+in [`.git-blame-ignore-revs`](.git-blame-ignore-revs) so it does not stand between a line and the
+commit that actually decided it. Run `git config blame.ignoreRevsFile .git-blame-ignore-revs` once
+per clone.

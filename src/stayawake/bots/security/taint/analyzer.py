@@ -1,18 +1,9 @@
 #!/usr/bin/env python3
-"""The decode→exec dropper analyzer — the ONE functionality that traces the model's flow.
+"""The decode-then-execute dropper analyzer.
 
-Given a chunk of hand-authored source, decide whether a baked encoded payload is DECODED and then
-EXECUTED (see `model` for the precise threat this detects and, just as importantly, what it does not).
-This is the single entry point `obfuscation.analyze_file` / `analyze_delta` call for that flow; it
-consolidates the decode→exec arms into one place and closes the shell code-argument gap the
-leading-argument arms miss (`spawn('sh',['-c',<decoded>])`, `execSync('sh -c '+<decoded>)`).
-
-Design: reuse the already-adversarially-hardened leading-argument detection verbatim (no regression),
-and add the shell code-position forms with the SAME discipline — a nested decode is self-evident, a
-decode-through-a-variable is corroborated by a baked blob and scope-guarded (a decoded value reaching
-a shell `-c` slot has no benign analogue, but a bare variable in an args[] array does, so the shell
-interpreter + code-flag structure is what makes it a sink, per the model). Purely static: the recipe
-is matched in text, never decoded or run. Heuristic → SUSPICIOUS.
+`detect_dropper(text)` takes a chunk of hand-authored source and returns a reason string when the
+file carries a concealed payload that is decoded and then run, or None. It is the only entry point
+callers need; `model` holds the vocabulary and `flow` the primitives.
 """
 from __future__ import annotations
 
@@ -21,26 +12,9 @@ import re
 from stayawake.bots.security import sourcescan
 from stayawake.bots.security.taint import flow, model
 
-# Necessary PREFILTER anchors, DERIVED from the threat taxonomy (model.DECODE_CALLS) exactly as
-# flow._DECODE's regex is — so they can never drift (pinned by tests). EVERY detect_dropper arm
-# requires a decode call (flow._DECODE), whose call name's FIRST identifier segment (`Buffer` of
-# `Buffer.from`, `atob`) must appear contiguously in the source. If no anchor can appear, NO arm can
-# match, so detect_dropper early-returns — skipping the expensive regex/blob/scrub pipeline on the
-# ~all files that carry no decode.
-#
-# ⚠ CONTRACT: this gate is byte-identical ONLY while every arm in `_run_dropper_arms` requires a
-# `model.DECODE_CALLS` decode. If you add an arm keyed on a DIFFERENT decode class — e.g.
-# `model.CHARCODE_DECODES` (fromCharCode) — you MUST extend the anchors, or the gate will SILENTLY
-# skip it. `test_scanner_prefilter` enforces this: it fuzzes inputs from all `model` taxonomies and
-# fails if gated `detect_dropper` ever diverges from the un-gated `_run_dropper_arms`.
 _DECODE_ANCHORS = frozenset(name.split(".", 1)[0].lower() for name in model.DECODE_CALLS)
-# Match with the SAME re.IGNORECASE folding flow._DECODE uses — not str.lower() — so the gate has NO
-# case-fold asymmetry (str.lower() and re.IGNORECASE fold some Unicode differently, e.g. ſ/İ): the
-# anchor search matches exactly when a decode token could, making the skip a provably necessary
-# condition for any Unicode input.
 _DECODE_ANCHOR_RE = re.compile("|".join(re.escape(a) for a in sorted(_DECODE_ANCHORS)), re.IGNORECASE)
 
-# Reason strings (redaction-safe evidence).
 _R_DIRECT = "base64/hex decoded and run via a command/module sink (child_process/import/Worker)"
 _R_VAR = "base64 payload decoded via a variable and run (command/module/worker sink)"
 _R_SHELL = "base64/hex decoded and run as a shell command (sh/bash/cmd/powershell -c)"
@@ -48,44 +22,26 @@ _R_SHELL = "base64/hex decoded and run as a shell command (sh/bash/cmd/powershel
 # ── Shell code-position building blocks (from the model, longest-first so `cmd.exe` beats `cmd`) ──
 _SHELL_BASE = "(?:" + "|".join(
     re.escape(s) for s in sorted(model.SHELL_INTERPRETERS, key=len, reverse=True)) + ")"
-# Path-aware: an optional bounded directory prefix so `/opt/homebrew/bin/bash` / `C:\…\cmd.exe` match
-# by BASENAME (the model's stated intent). Bounded {0,80} + `[^'\"\x60\s]` keep it linear (the
-# interpreter must end the program token, forced by the surrounding quote / whitespace-flag).
 _SHELL_ALT = r"(?:[^'\"\x60\s]{0,80}[/\\])?" + _SHELL_BASE
 _FLAG_ALT = "(?:" + "|".join(
     re.escape(f) for f in sorted(model.SHELL_CODE_FLAGS, key=len, reverse=True)) + ")"
 _CP_ALT = "(?:" + "|".join(sorted(model.CP_RUNNERS, key=len, reverse=True)) + ")"
 
-# argv form: `<cp>('<shell>', [ … '<flag>', <PAYLOAD> … ])`. The `('sh', ['-c', …])` shape never
-# occurs for RegExp.exec / an EventEmitter, so the bare runner names are safe HERE (unlike a leading
-# string arg). `[^\]\n]{0,120}?` bounds the pre-flag argv scan (ReDoS-safe) AND skips an `env`-style
-# leading interpreter token (`('env', ['bash','-c',…])`).
 _ARGV_HEAD = (
     r"(?<![.\w$])" + _CP_ALT + r"\s*\(\s*['\"]" + _SHELL_ALT + r"['\"]\s*,\s*\[[^\]\n]{0,120}?"
     r"['\"]" + _FLAG_ALT + r"['\"]\s*,\s*")
-# array form: `['<shell>', … '<flag>', <PAYLOAD> …]` — an array literal `.join`ed into a command
-# (`['sh','-c',d].join(' ')`) or spread; the shell sits INSIDE the array (distinct from _ARGV_HEAD).
 _INARRAY_HEAD = (
     r"\[\s*['\"]" + _SHELL_ALT + r"['\"]\s*,\s*[^\]\n]{0,80}?['\"]" + _FLAG_ALT + r"['\"]\s*,\s*")
-# inline form: `<cp>('<shell> [<interp>] <flag> …' + …)` / `` `…${…}` `` — a leading command STRING
-# beginning with a shell + code-flag, then a concat/interpolation carries the payload. One optional
-# intermediate token covers the `env bash -c …` / `node --flag -e …` shapes.
 _INLINE_HEAD = (
     r"(?<![.\w$])" + _CP_ALT + r"\s*\(\s*['\"\x60]\s*" + _SHELL_ALT
     + r"(?:\s+[^\s'\"\x60]{1,20})?\s+" + _FLAG_ALT + r"\b")
 
-# NESTED decode directly in the shell payload position — self-evident, no blob corroborator needed
-# (running a freshly-decoded value as a shell command is the dropper regardless of blob length).
 _SHELL_ARGV_NESTED = re.compile(_ARGV_HEAD + flow._DECODE, re.IGNORECASE)
 _SHELL_INARRAY_NESTED = re.compile(_INARRAY_HEAD + flow._DECODE, re.IGNORECASE)
 _SHELL_INLINE_NESTED = re.compile(
     _INLINE_HEAD + r"[^'\"\x60\n]{0,80}['\"]?\s*(?:\+|\$\{)\s*" + flow._DECODE, re.IGNORECASE)
 _SHELL_NESTED = (_SHELL_ARGV_NESTED, _SHELL_INARRAY_NESTED, _SHELL_INLINE_NESTED)
 
-# VARIABLE at the shell payload position — capture the identifier so we can confirm it is a decode
-# var, in scope (corroborated by a baked blob at the call site in `detect_dropper`). The tail allows
-# a bounded string-method chain (`d.toString('utf8')`) but not a bare property (a decoded value used
-# directly); bounded repetition + inner length keep it linear (test_redos_safety).
 _IDENT = r"([A-Za-z_$][\w$]*)"
 _VAR_TAIL = r"\s*(?:\.\s*\w+\s*\([^)\n]{0,80}\)){0,4}\s*[,\]]"
 _SHELL_ARGV_VAR = re.compile(_ARGV_HEAD + _IDENT + _VAR_TAIL, re.IGNORECASE)
@@ -113,7 +69,7 @@ def _var_reaches_shell(text: str) -> bool:
     view at the same offsets (so a `}` or `(param)` inside a string can't skew scope) — mirroring the
     discipline of `_decode_var_into_exec`."""
     kept = flow._scrub_comments_and_strings(text, scrub_strings=False)
-    full = flow._scrub_comments_and_strings(text)          # strings blanked; same length/offsets
+    full = flow._scrub_comments_and_strings(text)
     decode_vars = _decode_var_names(full)
     if not decode_vars:
         return False
@@ -122,7 +78,7 @@ def _var_reaches_shell(text: str) -> bool:
             name = m.group(1)
             if name not in decode_vars:
                 continue
-            assign = _last_decode_assign_before(full, name, m.start())   # decode assign is code
+            assign = _last_decode_assign_before(full, name, m.start())
             if assign is None:
                 continue
             gap = full[assign:m.start()]
@@ -186,10 +142,7 @@ def _run_dropper_arms(text: str) -> str | None:
     if baked and flow._decode_var_into_exec(text):
         return _R_VAR
 
-    # 2) Shell code-argument forms — the gap the leading-arg anchor misses. A decoded value in a
-    #    shell `-c` slot has no benign analogue. Nested decode is self-evident; the variable form is
-    #    blob-corroborated + scope-guarded (a decoded value must reach the shell code slot, in scope).
-    kept = flow._scrub_comments_and_strings(text, scrub_strings=False)  # keep the 'sh'/'-c' literals
+    kept = flow._scrub_comments_and_strings(text, scrub_strings=False)
     if any(rx.search(kept) for rx in _SHELL_NESTED):
         return _R_SHELL
     if baked and _var_reaches_shell(text):

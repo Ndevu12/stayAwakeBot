@@ -1,13 +1,8 @@
 #!/usr/bin/env python3
-"""Whole-file obfuscation HEURISTICS — density / entropy / escape-run / minification, and the
-context-aware suppression predicate.
+"""Whole-file obfuscation heuristics, and the predicate that suppresses them in context.
 
-Single responsibility: the corroborated (never self-evident) signals that a chunk of hand-authored
-source is packed/encoded payload — a dense escape-encoded byte run, a whole-file minification+entropy
-anomaly — plus `is_generated_context` (the single source of truth for "obfuscation is EXPECTED here"
-paths) and the authored-extension set. The self-evident exec-sink constructs live in `execsink`; the
-shared text primitives (entropy, data-URI, de-chunk) live in `sourcescan`; the public entry points
-that compose these live in `entry`.
+These are corroborating signals: on their own they mark source as unusual, never as malicious, so
+callers grade them below the self-evident constructs in `execsink`.
 """
 from __future__ import annotations
 
@@ -22,27 +17,16 @@ from stayawake.bots.security.sourcescan import _shannon
 # joined by `+`/`,` (`"\\x41\\x42" + "\\x43…"`), whose quote/sep/space seams break the run.
 # _dechunk normalizes those seams away so the escape-run test sees the reassembled content.
 # (base64 reassembly is no longer tested — a base64 blob is benign data regardless of
-# splitting, #1212 — so _dechunk now serves ONLY the escape-run arm.)
 
-# A contiguous run of >= _MIN_ESCAPE_RUN numeric escapes (hex byte, BMP unicode, unicode
-# code-point, or 3-digit octal). Length alone is NOT decisive (a 12-emoji row is 24 \uXXXX
-# surrogate escapes; a crypto/magic-byte fixture is a short \xNN run), so _escape_run also
-# applies a decoded byte-range + entropy gate — see there. 48 is the floor: above a
-# 12-emoji row and a 32-byte KAT vector, far below any real escape-encoded loader (hundreds
-# to thousands of bytes).
 _MIN_ESCAPE_RUN = 48
 _ESCAPE_RUN = re.compile(
     r"(?:\\x[0-9a-fA-F]{2}|\\u[0-9a-fA-F]{4}|\\u\{[0-9a-fA-F]{1,6}\}|\\[0-3][0-7]{2})"
     r"{%d,}" % _MIN_ESCAPE_RUN
 )
-# Single-escape capture (one alternative group populated per match) for decoding a run.
 _ESCAPE_TOKEN = re.compile(
     r"\\x([0-9a-fA-F]{2})|\\u\{([0-9a-fA-F]{1,6})\}|\\u([0-9a-fA-F]{4})|\\([0-3][0-7]{2})")
-# A real escape-encoded payload decodes to BYTES (0-255) with high entropy. Benign runs
-# that clear the length bar do not: emoji/CJK/combining-mark tables decode to codepoints
-# >255 in a narrow Unicode block, and structured magic-byte/file headers are low-entropy.
-_ESCAPE_BYTE_FRAC = 0.8        # >=80% of decoded values must be in byte range (<=255)
-_ESCAPE_MIN_ENTROPY = 4.5      # decoded-value entropy, mirroring the base64-blob gate
+_ESCAPE_BYTE_FRAC = 0.8
+_ESCAPE_MIN_ENTROPY = 4.5
 
 
 def _decode_escapes(run: str) -> list[int]:
@@ -79,24 +63,15 @@ def _escape_run(s: str) -> bool:
     return False
 
 
-# Minification: a single introduced line at/above this length in a file whose
-# baseline lines were comfortably shorter. Kept well under the 2000-char long-line
-# rule so a split/wrapped payload (G4) that dodges that rule is still caught here.
 _MINIFIED_LINE = 400
 _BASELINE_TYPICAL_MAX = 200  # a normally-formatted source file's lines fit easily under this
 
-# Entropy: payload-grade randomness, AND clearly above the file's own baseline.
-_ENTROPY_ABS = 4.3           # bits/char; English prose ~4.0-4.5, but combined with the
-_ENTROPY_DELTA = 0.8         # delta-vs-baseline gate this only fires on packed/encoded text
+_ENTROPY_ABS = 4.3
+_ENTROPY_DELTA = 0.8
 
 
 
 # ── Context-aware suppression (the single source of truth) ───────────────────────
-# Paths where obfuscation/minification is EXPECTED, so dense/packed content is NOT
-# anomalous: vendored caches, generated bundles, source maps, minified assets. A
-# hand-authored *.config.* or a normal source file is deliberately NOT here — there
-# obfuscation is anomalous and must be flagged. core.git imports this so the merge
-# corroborator and the whole-file matcher share ONE predicate and never drift.
 _GENERATED_PATH = re.compile(
     # Two arms, joined by `|`:
     #  (1) DIRECTORY / slash-anchored segments — must sit at a path-component boundary
@@ -115,7 +90,6 @@ _GENERATED_PATH = re.compile(
     r"node_modules/|site-packages/|vendor/|third[_-]?party/|"
     # BUILD OUTPUT DIRS — a deliberate build-artifact trust decision (NOT provenance): in a
     # compiled bundle minification IS obfuscation, so the density heuristic here would be all
-    # false positives. A payload minified into such a bundle is the documented residual (see the
     # module docstring). Some of these are ALSO pruned at traversal in ScanOptions.exclude_dirs.
     r"dist/|build/|out/|coverage/|storybook-static/|\.output/|\.svelte-kit/|\.nuxt/|\.next/|"
     r"generated/|__generated__/|"
@@ -142,30 +116,16 @@ def is_generated_context(path: str) -> bool:
     return bool(_GENERATED_PATH.search(path))
 
 
-# Extensions that are hand-authored source/config a human edits — where a packed/
-# obfuscated blob is anomalous. Source maps (.map) and *.min.* are NOT here; those
-# are caught (and suppressed) by is_generated_context instead. .json is excluded:
-# a long minified JSON data line is a common benign shape and would need its own FP
-# model; the worm's loader lives in executable modules, which this set covers.
 _AUTHORED_OBFUSCATABLE_EXTS = {
     ".js", ".cjs", ".mjs", ".ts", ".mts", ".cts",
     ".jsx", ".tsx", ".vue", ".svelte",
 }
 
-# Whole-file minification: a payload wrapped onto lines each well under the 2000-char
-# long-line threshold still produces lines FAR longer than a hand-authored file's
-# typical line, AND a big block of such lines. We require BOTH an outlier-long line
-# and that the dense region dominates the file, so an isolated legitimately-long line
-# (a URL, a license header, one inlined constant) does not trip it on its own.
-_OUTLIER_LINE = 400          # a single line this long in authored source is already unusual
-_DENSE_LINE = 220            # lines at/above this count toward the "packed region"
+_OUTLIER_LINE = 400
+_DENSE_LINE = 220
 _DENSE_CHARS_FRAC = 0.5      # packed region must be >=50% of the file's non-blank chars
-# Packed/minified/encoded payload has almost no whitespace and very long unbroken
-# token runs; natural-language prose (which also reaches ~4.3 bits/char) does NOT —
-# prose is ~15-18% spaces with short words. These gates separate the two so a long
-# repeated-prose template constant is not mistaken for packed code.
-_MAX_PROSE_SPACE_FRAC = 0.07   # packed code is <7% whitespace; prose is far above this
-_MIN_UNBROKEN_RUN = 200        # a >=200-char run with no whitespace is not human text
+_MAX_PROSE_SPACE_FRAC = 0.07
+_MIN_UNBROKEN_RUN = 200
 
 
 def _longest_nonspace_run(s: str) -> int:
