@@ -41,14 +41,7 @@ from stayawake.bots.security.service.report import _status_tag, _print_report_po
 
 
 REPORTS_DIR = Path("reports/security")
-# Above this many targets, a terminal can't hold the whole report — if the user didn't
-# already persist it (-d/--json), we drop the full Markdown+JSON in a temp dir and point there.
 LARGE_FLEET = 25
-# #1203: independent of repo count, a report whose aggregate findings+advisories exceed this would
-# overflow a terminal and be trimmed from scrollback (the user can't read the whole result). Above
-# it — for ANY scan, local or remote — the terminal shows the dashboard only and the full per-finding
-# detail moves to the written report. Catches the case the repo-count gate misses: FEW repos (even
-# one), but a wall of findings. A cheap count off data the report already carries — no extra render.
 MANY_FINDINGS = 200
 
 
@@ -86,12 +79,9 @@ def _scan_targets(jobs_batch: list, labels: list[str], sources: list[str], worke
     return results
 
 
-# Within-target file parallelism (#1325) tuning. Below the file-count floor a single target scans
-# sequentially — the pool's startup + per-chunk pickling isn't worth it for a small repo (measured:
-# ~4ms/file, so the floor is ~1s of work). Config `settings.parallel_min_files` overrides the floor.
 WITHIN_TARGET_MIN_FILES = 256
-_CHUNKS_PER_WORKER = 4        # more chunks than workers → the pool load-balances uneven file sizes
-_MIN_CHUNK_FILES = 16        # …but don't shatter a small set into trivially tiny chunks
+_CHUNKS_PER_WORKER = 4
+_MIN_CHUNK_FILES = 16
 
 
 def _file_workers(jobs_pref: int | None) -> int:
@@ -117,9 +107,6 @@ def _balanced_chunks(root, files: list[str], nchunks: int) -> list[list[str]]:
             size = 0
         sized.append((size, rel))
     sized.sort(reverse=True)                      # LPT: place the biggest first
-    # Key is (bytes, file_count, index): balance by size, but tie-break by the LIGHTEST file count so
-    # equal- or zero-size files still spread across chunks — otherwise many 0-byte/uniform files would
-    # all pile onto chunk 0 (load never advances) and there'd be no parallelism.
     heap = [(0, 0, i) for i in range(nchunks)]
     heapq.heapify(heap)
     buckets: list[list[str]] = [[] for _ in range(nchunks)]
@@ -149,9 +136,6 @@ def _scan_one_target_inner(repo, display: str, opts, sigs, allowlist, workers: i
     files = list(LocalRepoTarget(repo, display, opts).iter_files())
     min_files = int(settings.get("parallel_min_files", WITHIN_TARGET_MIN_FILES) or 0)
     if workers <= 1 or len(files) < min_files:
-        # Sequential fast-path — a full scan of the whole target. Reuse the same worker seam as the
-        # multi-repo path (so its behaviour and the tests' mock point stay consistent); capture +
-        # replay any stray output, as elsewhere.
         worker_scan = scan_workers.scan_local(
             scan_workers.LocalScanJob(str(repo), display, opts, sigs, allowlist))
         if worker_scan.diagnostics:
@@ -181,7 +165,7 @@ def _scan_one_target_inner(repo, display: str, opts, sigs, allowlist, workers: i
     worker_error: str | None = None
     for outcome in outcomes:
         if outcome.error:                        # a chunk/matcher worker died → the target is only
-            worker_error = outcome.error         # partially scanned; fail CLOSED (below), never clean
+            worker_error = outcome.error
             continue
         partial = outcome.value
         for name, found in partial.by_matcher.items():
@@ -213,10 +197,6 @@ def scan(config_path: str | None = None, *, remote: bool = False,
     One scope per run. Persists NOTHING by default (terminal-first); files/alerts are opt-in.
     Remediation lives in `saw fix`, never here. Returns the verdict as an exit code: 1 if
     any target is INFECTED, else 0 — unconditionally (a CI gate just reads it)."""
-    # Animate each stream by ITS OWN tty-ness (and not --no-stream / env-disabled). The
-    # spinner + per-target dots live on STDERR, so they must key off stderr — otherwise a
-    # `saw scan --json` (stdout piped to a tool, stderr still the user's terminal) would
-    # lose its progress entirely. The human report lives on STDOUT and keys off stdout.
     progress_on = stream_enabled(sys.stderr, force_off=no_stream)
     report_on = stream_enabled(sys.stdout, force_off=no_stream)
     prog = Streamer(enabled=progress_on, out=sys.stderr)
@@ -224,8 +204,6 @@ def scan(config_path: str | None = None, *, remote: bool = False,
     settings = cfg.get("settings", {})
     opts = _options(settings, no_advisories=no_advisories, external_audit=external_audit, deep=deep)
     sigs = load_signatures(settings.get("signatures_path"))
-    # A null/absent `allowlist` (the common `allowlist:` bare key, or no key) means "no
-    # suppressions" → normalize to []. Only a genuinely wrong SHAPE is rejected below.
     allowlist = cfg.get("allowlist") or []
     # Fail CLOSED on a config we can't apply: an `allowlist` that isn't a list of mappings would
     # otherwise crash the per-target scan (caught as an ERROR with an empty, clean-looking result).
@@ -242,12 +220,9 @@ def scan(config_path: str | None = None, *, remote: bool = False,
         if rc is not None:
             return rc
 
-    # How many targets to scan CONCURRENTLY. CLI `-j/--jobs` wins; else config `settings.jobs`;
-    # else auto (resolved per-scope below against the target count). See `_resolve_workers`.
     jobs_pref = jobs if jobs is not None else _jobs_setting(settings)
 
     # --- WHAT to scan. LOCAL by default (explicit paths / configured globs / current repo);
-    #     `--remote` switches scope to the configured GitHub targets. One scope per run.
     results: list[ScanResult] = []
     if remote:
         bad = invalid_slugs(slugs)
@@ -292,9 +267,6 @@ def scan(config_path: str | None = None, *, remote: bool = False,
         if progress_on and repos:
             prog.line(f"Found {len(repos)} repositor{'y' if len(repos) == 1 else 'ies'} to scan.")
         if len(repos) == 1:
-            # ONE local target → parallelize ACROSS ITS FILES (#1325), so a single big repo/monorepo
-            # uses every core. (A multi-repo sweep instead parallelizes across repos, below — the two
-            # grains stay mutually exclusive so we never oversubscribe / nest pools.)
             home = os.path.expanduser("~")
             display = str(repos[0]).replace(home, "~")
             results = [_scan_one_target(repos[0], display, opts, sigs, allowlist,
@@ -311,28 +283,17 @@ def scan(config_path: str | None = None, *, remote: bool = False,
 
     report = ScanReport(generated_at=now_iso(), results=results)
 
-    # A sweep too big for a terminal shows the SAME dashboard the large-fleet path already uses
-    # (table + collapsed clean; per-finding detail OFF) and moves the full detail to the written
-    # report. "Too big" is EITHER many repos (LARGE_FLEET) OR a large AGGREGATE of
-    # findings+advisories (MANY_FINDINGS, #1203) — both apply to EVERY scan (local, org, account).
-    # Cheap counts off data the report already carries; no extra render. `--json` carries everything.
     detail_units = sum(len(r.findings) + len(r.advisories) for r in results)
     spill = not json_out and (len(results) > LARGE_FLEET or detail_units > MANY_FINDINGS)
 
     # --- compose the output sinks from the flags. Default is terminal-first and persists
-    #     nothing; --json swaps the human report for machine JSON on stdout; --sarif / -d add
-    #     redacted file artifacts; --alert pushes the durable GitHub-issue + Slack record.
-    report_path: Path | None = None   # where the full report landed, for the pointer below
+    report_path: Path | None = None
     sinks: list[Sink] = [
         JsonSink() if json_out
         else TerminalSink(enabled=report_on, pager=report_on and pager,
                           detail=not spill)]          # spill → same board as large fleet
     if sarif_path:
         sinks.append(SarifSink(sarif_path))
-    # Write the bundle when ANY source asks for it — `-d`, the container's STAYAWAKE_REPORTS_DIR, or
-    # config `reports_dir` — not only `-d`. Gating on `-d` alone made the other two unreachable
-    # (#1454): they sit behind `-d` in the same precedence chain, so `-d` always shadowed them.
-    # Persisting stays opt-in; asking via config is simply one of the ways to opt in.
     settings_reports_dir = settings.get("reports_dir")
     if reports_dir_choice(reports_dir, settings_value=settings_reports_dir):
         rdir = resolve_reports_dir(reports_dir, settings_value=settings_reports_dir,
@@ -346,7 +307,6 @@ def scan(config_path: str | None = None, *, remote: bool = False,
 
     # Spilled sweep: guarantee the FULL report exists off-terminal (same path large fleet already
     # used). Reuse -d when given; otherwise a temp dir. Highlight the path whenever a report was
-    # written — local -d OR any spill — so it's never lost (#1203 UX).
     if spill and report_path is None:
         tmp = Path(tempfile.mkdtemp(prefix="sab-report-"))
         FileSink(tmp).emit(report)

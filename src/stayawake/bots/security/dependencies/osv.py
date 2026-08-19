@@ -16,8 +16,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-# Embedded Malicious Code — the CWE GitHub tags on malware advisories; a strong, structured
-# "this is malware, not a vuln" signal that complements the OpenSSF `MAL-` id convention.
 _MALWARE_CWE = "CWE-506"
 
 

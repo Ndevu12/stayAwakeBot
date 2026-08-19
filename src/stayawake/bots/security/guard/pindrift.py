@@ -29,18 +29,17 @@ from stayawake.bots.security.guard import detect
 DRIFT_LABEL = "worm-guard-drift"
 DRIFT_TITLE = "Worm-guard protection needs attention"
 
-# What each finding means for the tracking issue:
-_DEFICIENT = {"no-gate", "no-ci", "behind"}          # → open / refresh the issue
-_PROTECTED = {"fresh", "floating", "not-strix"}      # → close the issue (repo is gated)
+_DEFICIENT = {"no-gate", "no-ci", "behind"}
+_PROTECTED = {"fresh", "floating", "not-strix"}
 # else ("unknown" freshness / "error" reading a remote) → no issue action (never churn on a blip)
 
 
 @dataclass
 class DriftOutcome:
     """What `drift_one` found + did for one repo — the sweep renders and tallies these."""
-    target: str                    # owner/repo (or a local display name)
-    state: str                     # behind | no-gate | no-ci | not-strix | fresh | floating | unknown | error
-    action: str = "none"           # opened | refreshed | closed | none
+    target: str
+    state: str
+    action: str = "none"
     detail: str = ""
     issue: int | None = None
 

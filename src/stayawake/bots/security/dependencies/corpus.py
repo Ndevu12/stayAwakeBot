@@ -49,8 +49,8 @@ class AdvisoryCorpus:
 
     def __init__(self, whole: dict[tuple[str, str], list[OsvRecord]],
                  bounded: dict[tuple[str, str], list[tuple[OsvAffected, OsvRecord]]]):
-        self._whole = whole        # (eco, name) → [light OsvRecord] — affects every version
-        self._bounded = bounded    # (eco, name) → [(affected, record)] — needs version/range check
+        self._whole = whole
+        self._bounded = bounded
 
     @classmethod
     def from_records(cls, records: Iterable[OsvRecord]) -> "AdvisoryCorpus":
@@ -89,7 +89,6 @@ class AdvisoryCorpus:
         upgrade to (`AdvisoryMatch.fixed`), or None when the advisory names no fix (#1252)."""
         eco = _eco(purl.type)
         key = (eco, purl.name)
-        # Whole-package hits cover EVERY version → there is no "upgrade to" target (fixed=None).
         out = [AdvisoryMatch(rec, None) for rec in self._whole.get(key, ()) if not rec.malicious]
         for aff, rec in self._bounded.get(key, ()):
             if not rec.malicious and (

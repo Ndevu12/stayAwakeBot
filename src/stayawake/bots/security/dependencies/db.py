@@ -35,10 +35,8 @@ from stayawake.bots.security.dependencies.osv import (
     OsvAffected, OsvRange, OsvRecord, parse_osv_record)
 from stayawake.utils.timeutil import now_iso
 
-_SCHEMA = 2   # bumped for the #1126 manifest (snapshot + generated_at); older caches lack these
+_SCHEMA = 2
 _OSV_EXPORT_BASE = "https://osv-vulnerabilities.storage.googleapis.com"
-# PURL type → OSV export bucket. The single source of truth lives in `ecosystems.py` (the corpus
-# canonicalizes the other direction from the same table, so they can't drift).
 _OSV_BUCKETS = PURL_TO_OSV
 
 # Verify TLS against certifi's portable CA bundle (the OS store isn't always wired to OpenSSL on
@@ -49,9 +47,6 @@ try:
 except Exception:  # noqa: BLE001 — a TLS-setup hiccup must never crash import
     _SSL_CTX = ssl.create_default_context()
 
-# load_corpus is called once per scanned target; memoize by (cache dir, manifest mtime) so a
-# fleet sweep parses the cache once, and a fresh `db update` (which rewrites the manifest, bumping
-# mtime, and clears this) is picked up.
 _CORPUS_MEMO: dict[tuple[str, float], AdvisoryCorpus | None] = {}
 
 
@@ -122,15 +117,11 @@ def update_ecosystem(eco: str, cache_dir: str | Path | None = None, *,
         raise ValueError(f"unsupported ecosystem: {eco!r} (supported: {supported_ecosystems()})")
     (cache_dir / "records").mkdir(parents=True, exist_ok=True)
 
-    # Keep every record with an explicit affected-version list — BOTH malware (drives the verdict)
-    # and ordinary CVEs (the opt-in advisory tier), including range-based ones (#1124). Each is
-    # tagged with its `malicious` flag so the corpus can serve the two tiers separately.
     records: list[dict[str, Any]] = []
     for raw in _iter_zip_records(fetch(bucket)):
         rec = parse_osv_record(raw)
         if rec is not None:
             records.append(_record_to_json(rec))
-    # Deterministic on-disk bytes (reproducible CI, #1126): sort, then write one record per line and
     # hash incrementally — never materialize the whole file as a single string.
     records.sort(key=lambda r: (r["id"], r["affected"][0]["name"] if r["affected"] else ""))
     hasher = hashlib.sha256()
@@ -294,7 +285,6 @@ def _build_corpus(cache_dir: Path, manifest_path: Path) -> AdvisoryCorpus | None
     if not _schema_compatible(manifest):
         # Old cache from a prior `saw` — a version upgrade, not corruption. Say so calmly (once,
         # thanks to the corpus memo) and fall back to the inline seed; do NOT run the integrity
-        # gate, whose "tampered" alarm must stay reserved for a schema-matching cache (#1137).
         print(f"⚠️  saw: advisory cache is an older format (schema {manifest.get('schema')}; "
               f"this saw expects {_SCHEMA}) — using the inline seed. Run `saw db update` to rebuild.",
               file=sys.stderr)
@@ -324,9 +314,6 @@ def cache_status(cache_dir: str | Path | None = None) -> dict[str, Any]:
         return {"present": False, "cache_dir": str(cache_dir)}
     ecosystems = _ecosystems(manifest)
     schema_compatible = _schema_compatible(manifest)
-    # Only run the byte-level integrity gate on a schema-matching cache — the record filenames
-    # differ across schemas, so hashing across a version skew yields spurious "mismatches" that
-    # read as tampering. Callers branch on `schema_compatible` BEFORE `integrity_ok` (#1137).
     mismatches = [eco for eco, meta in ecosystems.items()
                   if meta.get("sha256")
                   and _file_sha256(_records_path(cache_dir, eco)) != meta["sha256"]] \
@@ -380,6 +367,5 @@ def _record_from_json(raw: dict[str, Any]) -> OsvRecord | None:
                      if x is not None)
     if not affected:
         return None
-    # `malicious` defaults True for back-compat with a #1120 cache (which stored malware only).
     return OsvRecord(id=str(raw.get("id", "")), aliases=tuple(raw.get("aliases", []) or []),
                      malicious=bool(raw.get("malicious", True)), affected=affected)

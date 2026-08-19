@@ -21,39 +21,13 @@ from .models import HygieneIssue, POSIX_SHELLS, SCRATCH_ROOTS, _WIPER_NOTE
 # so grading is signal-strength based (unambiguous backdoor shape → warning; review-worthy anomaly
 # → info) rather than assert-malware. All read-only; absent paths/tools degrade to nothing.
 
-# The shape a persistence line almost never has for a legitimate reason: a network fetch piped or
-# eval'd into an interpreter, or a decode-then-execute. Reused across the shell-rc, SSH
-# forced-command, and git-exec-config probes below. A script run out of a world-writable scratch dir
-# recognised from shell OPERATORS is `_SCRATCH_EXEC`, split out below because it needs shell context. Benign tool
-# init (`eval "$(rbenv init -)"`, `eval "$(brew shellenv)"`) contains no fetch, so it stays clean.
-#
-# A `… | X` SINK executes stdin as CODE only for a POSIX shell (always) or a scripting interpreter that
-# is BARE — no program/module/script argument follows, so the fetched bytes ARE the program. `curl|bash`
-# and `curl|python` (and `curl|python -`, stdin-as-script) fire; the FP pass proved `curl|python -m
-# json.tool` (API pretty-print), `base64 -d|python3 -m json.tool` (JWT decode) and `diff <(curl a)
-# <(curl b)` (proc-sub into a data consumer) are DATA, not exec — the bare-guard keeps them clean.
-# Patterns are DERIVED from the vocabulary in models, never restated.
 _FETCH = r"(?:curl|wget)"
 _POSIX_SHELL = rf"(?:{'|'.join(POSIX_SHELLS)})"
 _SCRIPT_INTERP = r"(?:python[23]?|perl|ruby|node|php)"
 _SCRATCH = rf"(?:{'|'.join(root + '/' for root in SCRATCH_ROOTS)})"
-# stdin-as-code sink: POSIX shell (always), or a scripting interpreter with no program arg. A lone `-`
-# (read the script from stdin) is still exec; `-m`/`-c`/`-e`/a script path make stdin DATA — the
-# `(?!\s*(?:[\w/.]|-\S))` guard clears the latter while keeping bare `python` and `python -` flagged.
 _PIPE_SINK = rf"(?:{_POSIX_SHELL}\b|{_SCRIPT_INTERP}\b(?!\s*(?:[\w/.]|-\S)))"
-# a command that EXECUTES a file / proc-sub argument (shell, interpreter, or `source`). A bare `.`
-# (dot-source) is handled by its OWN statement-boundary arm — elsewhere `.` is the current-dir ARGUMENT
-# (`rsync -a . /tmp/bk`), so matching it after generic whitespace would false-positive.
 _EXEC_CMD = rf"(?:{_POSIX_SHELL}|{_SCRIPT_INTERP}|source)"
-# exec wrappers preceding the real executable, so a scratch payload run via one still flags.
 _EXEC_WRAP = r"(?:env|sudo|nohup|nice|setsid|exec|command|stdbuf|time)"
-# Runs are BOUNDED + POSSESSIVE ({0,512}+ where the class excludes the delimiter `|`), never `*`: an
-# unbounded/backtracking run scans-and-retries toward EOL at EVERY curl/base64 anchor — with a token
-# every few chars that is a too-large linear constant that straddles the ReDoS-guard budget (#1156,
-# found round-3). The possessive `+` kills the per-anchor backtrack; the eval arm (whose class can't
-# exclude its `$(` delimiter) is bounded tight at {0,256} instead. A real fetch→pipe one-liner is far
-# under 512, so detection is identical — and bounding the QUANTIFIER (not truncating the input, a
-# pad-past-it evasion boundary, #1156) keeps it evasion-safe.
 _FETCH_PIPE_EXEC = re.compile(
     rf"\b{_FETCH}\b[^\n|]{{0,512}}+\|\s*{_PIPE_SINK}"                              # curl … | bash / | python[-]
     rf"|\beval\b[^\n]{{0,256}}\$\(\s*{_FETCH}\b"                                   # eval "$(curl …)"
@@ -63,13 +37,6 @@ _FETCH_PIPE_EXEC = re.compile(
     rf"|(?:^|[;&|]|\s){_EXEC_CMD}\b\s+[\"']?{_SCRATCH}",                           # bash /tmp/x ; source /tmp/x
     re.IGNORECASE)
 
-# A scratch path in an EXECUTION POSITION, recognised from shell operators alone — no command is
-# named, so this only means "execute" if the text IS a shell command line. Split out of
-# _FETCH_PIPE_EXEC (#1393): applied to arbitrary payload text those same operators are ordinary
-# syntax in other languages, and every measured false positive came through here — a JS template
-# literal (`` `/tmp/${pid}.sock` ``), a logical-or default (`|| '/tmp/app.sock'`), a pipe inside a
-# comment, and a bare quoted path on its own line. Callers that hold a shell line use it; callers
-# holding arbitrary text ask the structural question (is the payload PATH under scratch?) instead.
 _SCRATCH_EXEC = re.compile(
     rf"(?:^|[;&|])\s*\.\s+[\"']?{_SCRATCH}"                                        # . /tmp/x      (stmt boundary)
     # `(?<!>)` on the pipe: zsh's clobber redirect `>|` is a WRITE, not a pipe, so `pwd >| /tmp/f`
@@ -77,19 +44,10 @@ _SCRATCH_EXEC = re.compile(
     rf"|(?:^|[;&`]|(?<!>)\||&&|\|\||\$\()\s*(?:{_EXEC_WRAP}\s+){{0,4}}(?:\w+=\S*\s+){{0,6}}[\"']?{_SCRATCH}",
     re.IGNORECASE)
 
-# Forced-command on an authorized_keys line: `command="…" ssh-ed25519 …`. Scanned across the WHOLE line
-# (fail-closed): parsing only the option field (before the key type) would SILENTLY DROP a backdoor on
-# an unrecognized key type (`ssh-*-cert-v01@openssh.com`) or one whose command value contains a key-type
-# substring (a self-propagating worm re-adding its own key). The rare cost is a `command="…"` written in
-# the trailing free-text COMMENT being read as a forced command — at worst an info-level restricted-key
-# note (a benign comment carries no real fetch/scratch payload, so it never reaches a warning).
 _FORCED_COMMAND = re.compile(r'\bcommand="((?:[^"\\]|\\.)*)"')
 
 _SSH_AUTHKEYS = ("authorized_keys", "authorized_keys2")
 
-# World-writable scratch roots. A path is treated as "under scratch" only at a real path boundary
-# (equals a root or is a descendant) — NOT an unanchored substring, so a private `/opt/acme/tmp/hooks`
-# or a `command="rrsync … /var/tmp/repo"` DATA path is not mistaken for the system scratch dir.
 _SCRATCH_PATHS = tuple(Path(root) for root in SCRATCH_ROOTS)
 
 
@@ -157,7 +115,7 @@ def check_ssh_authorized_keys() -> list[HygieneIssue]:
             line = raw.strip()
             if not line or line.startswith("#"):
                 continue
-            m = _FORCED_COMMAND.search(line)     # whole line — fail closed (see _FORCED_COMMAND note)
+            m = _FORCED_COMMAND.search(line)
             if m is None:
                 continue
             cmd = m.group(1)
@@ -193,9 +151,6 @@ def check_ssh_authorized_keys() -> list[HygieneIssue]:
     return issues
 
 
-# Shell startup files sourced on every interactive/login shell — a fetch-to-shell line here runs
-# on each new terminal (T1546.004). Covers bash/zsh/sh + fish; a symlinked dotfile is followed
-# (read_text) since it's the user's own config.
 _BASH_RC_FILES = (".bashrc", ".bash_profile", ".bash_login", ".profile")
 _ZSH_RC_FILES = (".zshrc", ".zprofile", ".zshenv", ".zlogin")
 
@@ -210,9 +165,6 @@ def shell_rc_locations() -> list[Path]:
     returned as the DIRECTORY: it is sourced on every start and is the more attractive drop point."""
     home = Path.home()
     xdg = Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config")
-    # zsh reads $ZDOTDIR itself, so we ask the same question it does. It is usually exported from
-    # /etc/zshenv, which a non-zsh parent process will not have run — then this falls back to $HOME,
-    # the same place zsh would look, so the fallback is correct rather than merely safe.
     zdotdir = Path(os.environ.get("ZDOTDIR") or home)
     locations = [home / name for name in _BASH_RC_FILES]
     locations += [zdotdir / name for name in _ZSH_RC_FILES]
@@ -268,21 +220,14 @@ def check_shell_profile() -> list[HygieneIssue]:
     return issues
 
 
-# git config keys whose VALUE git executes (hooks, monitors, pagers, filters, !-aliases). Flag only
-# when the value has a fetch/decode/scratch backdoor shape — `core.pager=less` is fine,
-# `core.pager=!curl …|sh` is not. core.fsmonitor and core.hooksPath get dedicated, stronger rules.
 _GIT_EXEC_KEY = re.compile(
     r"^(?:core\.(?:editor|pager|sshcommand|askpass)"
     r"|sequence\.editor|alias\.[^=]+|filter\.[^=]+\.(?:clean|smudge|process)"
     # credential.(?:<url>.)?helper — a per-URL helper execs too, so the sub-key variant can't slip
     r"|diff\.(?:external|[^=]+\.command)|merge\.[^=]+\.driver|credential\.(?:[^=]+\.)?helper)$")
 
-# git's full boolean vocabulary — core.fsmonitor set to any of these selects the builtin monitor (or
-# disables it), NOT an external command, so it is benign. Only a non-boolean VALUE is a run-a-command.
 _GIT_BOOL = {"true", "false", "yes", "no", "on", "off", "1", "0"}
 
-# keys where git treats a leading `!` as a shell command (aliases, credential.helper) — the sigil is
-# stripped before matching so a no-space `!bash /tmp/x` reaches the scratch-exec arms.
 _GIT_BANG_KEY = re.compile(r"^(?:alias\.[^=]+|credential\.(?:[^=]+\.)?helper)$")
 
 
@@ -290,9 +235,6 @@ def _git_global_config() -> list[tuple[str, str]]:
     """(key, value) pairs from the GLOBAL git config only (never a scanned repo's local config).
     Git-absent / no config → []. Uses -z framing so a multi-line value can't desync the parse."""
     try:
-        # errors="replace": a config VALUE with a non-locale-decodable byte must not crash the audit
-        # (text=True decodes strict by default → UnicodeDecodeError) — that would be an evasion vector
-        # (plant the malicious config + one bad byte to hang the auditor). Mirrors read_text(errors=…).
         r = subprocess.run(["git", "config", "--global", "--list", "-z"],
                            capture_output=True, text=True, errors="replace", timeout=10)
     except (FileNotFoundError, OSError, subprocess.SubprocessError):
@@ -303,7 +245,7 @@ def _git_global_config() -> list[tuple[str, str]]:
     for chunk in r.stdout.split("\0"):
         if not chunk:
             continue
-        key, _, value = chunk.partition("\n")      # `git config -z` = key\nvalue per record
+        key, _, value = chunk.partition("\n")
         pairs.append((key.lower(), value))
     return pairs
 
@@ -364,10 +306,6 @@ def check_git_config_execution() -> list[HygieneIssue]:
                     remediation="If unfamiliar, unset it: git config --global --unset core.hooksPath.",
                 ))
         elif _GIT_EXEC_KEY.match(key):
-            # git runs an alias / credential.helper value prefixed with `!` as a shell command. Strip
-            # that sigil before matching so a no-space `!bash /tmp/x` / `!/tmp/evil.sh` reaches the
-            # scratch-exec arms (which anchor on a statement boundary, not `!`) — a git quirk kept out
-            # of the shared SSH/shell-rc regex. Non-`!` keys (pager/editor/filter) match val directly.
             probe = re.sub(r"^\s*!\s*", "", val) if _GIT_BANG_KEY.match(key) else val
             if _FETCH_PIPE_EXEC.search(probe) or _SCRATCH_EXEC.search(probe):
                 issues.append(HygieneIssue(
@@ -380,5 +318,3 @@ def check_git_config_execution() -> list[HygieneIssue]:
                                 "Treat the host as possibly compromised if you did not set it.",
                 ))
     return issues
-
-

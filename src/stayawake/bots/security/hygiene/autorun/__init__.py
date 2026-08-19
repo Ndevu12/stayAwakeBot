@@ -33,8 +33,6 @@ def check_autorun(jobs: int | None = None) -> list[HygieneIssue]:
     if not entries:
         return []
 
-    # Provenance is the subprocess-heavy leg → fan out over the shared THREAD seam. Submission-order
-    # results keep grading deterministic (-j1 == -jN); a worker error fails closed to UNATTRIBUTED.
     workers = parallel.resolve_jobs(jobs, len(entries))
     outcomes = parallel.run_ordered(provenance.attribute, entries, jobs=workers,
                                     backend=parallel.THREAD)
@@ -48,10 +46,6 @@ def check_autorun(jobs: int | None = None) -> list[HygieneIssue]:
 
     issues: list[HygieneIssue] = []
     for entry, attrib in zip(entries, attribs):
-        # Read the referenced script (the payload usually lives there, not in the unit file) for an
-        # UNATTRIBUTED entry — and ALSO when the entry launders through a trusted interpreter (#1335):
-        # `node /path/daemon.js` is "attributed" to node, but node's trust does not vouch for the
-        # arbitrary script it runs, so that script must still be content-scanned.
         read_ref = not attrib.attributed or grade.launched_via_interpreter(entry)
         shape = grade.content_signal(entry, read_referenced=read_ref)
         issue = grade.grade(entry, attrib, novel.get(entry.key(), baseline.KNOWN),

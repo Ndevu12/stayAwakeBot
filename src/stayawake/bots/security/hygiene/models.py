@@ -6,8 +6,6 @@ Leaf module (no dependency on the check submodules) so every check imports it wi
 from __future__ import annotations
 
 
-# Host vocabulary — WHERE things live and WHAT they are called, shared by the probes. Detection
-# PATTERNS (what a threat looks like) stay with their detector; only the nouns live here.
 POSIX_SHELLS = ("sh", "bash", "zsh", "dash", "ksh")
 SCRATCH_ROOTS = ("/tmp", "/var/tmp", "/private/tmp", "/dev/shm")
 
@@ -27,13 +25,12 @@ def persistence_surface_is_enumerable() -> bool:
 @dataclass
 class HygieneIssue:
     id: str
-    severity: str          # "warning" (act now) | "info" (recommended)
+    severity: str
     title: str
     detail: str
     remediation: str
-    command: str | None = None    # copy-pasteable command(s), rendered VERBATIM on their own selectable
-                                  # line(s) — kept out of `remediation` prose so the fix is selectable (#1237)
-    reference: str | None = None  # optional docs URL, rendered as a "→ details: <url>" line (#1237)
+    command: str | None = None
+    reference: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -47,19 +44,9 @@ class HygieneIssue:
 # rotation (MITRE T1485). So the reflexive "rotate everything now" reaction is exactly
 # what turns containment into data loss — isolate and neutralize persistence FIRST.
 
-# The tripwire named once, reused at every site where an operator might rotate. It stays at ALL of
-# them: each is a decision point, and the cost of missing it is a wiped home directory.
-#
-# The SERVICE NAME stays too — it is greppable, so it is the actionable half, and #1088 pins it here.
-# What went is the campaign name: the incident record eliminated both candidate campaigns on
-# mechanism, so naming one asserted a guess as fact.
 _WIPER_NOTE = ("rotating can trigger a reported wiper (gh-token-monitor.service) that deletes your "
                "home directory")
 
-# Response is GRADED to the evidence (proportionality — match the alarm to what was actually found):
-#
-# ACTIVE_PERSISTENCE — a live foothold/backdoor is present, so the full isolate → neutralize → rebuild
-# → rotate-LAST runbook is warranted. These are the findings that justify "isolate and rebuild".
 ACTIVE_PERSISTENCE_IDS = {"self-hosted-runner-persistence", "os-service-persistence",
                           "host-drop-artifacts",
                           # a content-scan (--verify) found CONFIRMED worm code on the host
@@ -67,31 +54,14 @@ ACTIVE_PERSISTENCE_IDS = {"self-hosted-runner-persistence", "os-service-persiste
                           # active mechanism-based persistence (a live backdoor, not just hardening)
                           "ssh-authorized-keys-forced-command", "shell-profile-fetch-exec",
                           "git-fsmonitor-command", "git-hookspath-unsafe", "git-config-fetch-exec",
-                          # a novel, unattributed autorun foothold caught by state+provenance, #1333
                           "autorun-unattributed-foothold"}
 
-# CREDENTIAL EXPOSURE — a credential in a location that is genuinely a misconfiguration (plaintext on
-# disk) is worth acting on, but is NOT proof of a compromised host. When it is the WORST thing found (no
-# active persistence alongside it), the response is a calm credential note, NOT "isolate and rebuild" —
-# while keeping the one caveat that matters: a hidden rotation-wiper can't be fully excluded, so don't
-# make bulk rotation the first move.
-#
-# NOTE (#1237): a token cached in the *encrypted* login Keychain is deliberately NOT here. The Keychain
-# is the recommended store — a cached token there is normal, not an exposure incident, so it renders as
-# a calm `info` review item (see credentials.py) and never triggers this banner on its own. Only a
-# genuinely misconfigured store — a PLAINTEXT `~/.git-credentials` — counts as exposure.
 CREDENTIAL_EXPOSURE_IDS = {"git-credentials-plaintext"}
 
-# Union kept for back-compat (any finding that carries an incident context, of either tier).
-# DO NOT grade proportionality on this: it FLATTENS the two tiers below, which the report grades apart
-# — that is how a plaintext-credential finding once ended a green, no-incident report with "scope your
-# response". Ask incident_tier() instead; it is the single authority.
 INCIDENT_TRIGGER_IDS = ACTIVE_PERSISTENCE_IDS | CREDENTIAL_EXPOSURE_IDS
 
-# Incident tiers, most severe first. TABLE-DRIVEN so adding a tier is one entry here and every
-# consumer follows — no consumer re-derives the tier, and no test can silently miss the new one.
-TIER_ACTIVE_PERSISTENCE = "active-persistence"     # a live foothold on THIS host
-TIER_CREDENTIAL_EXPOSURE = "credential-exposure"   # a secret is exposed; the host is not implicated
+TIER_ACTIVE_PERSISTENCE = "active-persistence"
+TIER_CREDENTIAL_EXPOSURE = "credential-exposure"
 TIER_IDS: tuple[tuple[str, set[str]], ...] = (
     (TIER_ACTIVE_PERSISTENCE, ACTIVE_PERSISTENCE_IDS),
     (TIER_CREDENTIAL_EXPOSURE, CREDENTIAL_EXPOSURE_IDS),
@@ -113,31 +83,18 @@ def incident_tier(issue_ids: set[str]) -> str | None:
             return tier
     return None
 
-# The run could not ESTABLISH the surface, so it may not claim clean over it — NOT a finding (nothing
-# was found) and NOT clean (nothing was established). Two causes: a location EXISTS but could not be
-# read (#1332), or the ENTIRE surface is absent so nothing was enumerated (#120, see coverage.py).
 SURFACE_UNREADABLE_ID = "persistence-surface-unverified"
 SURFACE_ABSENT_ID = "persistence-surface-not-established"
 UNVERIFIED_PERSISTENCE_IDS = {SURFACE_UNREADABLE_ID, SURFACE_ABSENT_ID}
 
-# The run may NOT assert that credential rotation is safe when EITHER active persistence was found OR
-# the persistence surface could not be fully enumerated. Both withhold the all-clear (safety dominates:
-# the catastrophic axis, encoded orthogonally to the confidence-graded finding verdict).
 ROTATION_UNSAFE_IDS = ACTIVE_PERSISTENCE_IDS | UNVERIFIED_PERSISTENCE_IDS
 
-# Rotation-safety verdict states (the run-level property #1332 adds). A property of the WHOLE run,
-# reachable even when no individual finding is present.
-# Findings whose OWN advice defers rotation, pending a check only the operator can make ("is this
-# directory yours?"). They are weak and unattributed, so they must not raise the alarm — but the
-# run-level verdict may not print "rotating is safe" six lines above a fix that says "rotate LAST".
-# Two places were deciding whether rotation is safe: this function and the finding's prose. They
-# disagreed. This is the one table both now answer to.
 VERIFY_BEFORE_ROTATE_IDS = {"host-drop-artifact-weak", "host-artifact-scanned-clean"}
 
-ROTATION_SAFE = "safe"                 # surface enumerated AND clean → rotating credentials is safe
-ROTATION_UNSAFE_PERSISTENCE = "unsafe-persistence"   # active persistence found → rotate LAST
-ROTATION_UNSAFE_UNKNOWN = "unsafe-unknown"           # surface could not be verified → treat as unsafe
-ROTATION_SAFE_PENDING_CHECK = "safe-pending-check"   # safe once the operator confirms a weak item is theirs
+ROTATION_SAFE = "safe"
+ROTATION_UNSAFE_PERSISTENCE = "unsafe-persistence"
+ROTATION_UNSAFE_UNKNOWN = "unsafe-unknown"
+ROTATION_SAFE_PENDING_CHECK = "safe-pending-check"
 
 
 def rotation_safety(issue_ids: set[str]) -> str:
@@ -148,7 +105,6 @@ def rotation_safety(issue_ids: set[str]) -> str:
     if issue_ids & UNVERIFIED_PERSISTENCE_IDS:
         return ROTATION_UNSAFE_UNKNOWN
     if issue_ids & VERIFY_BEFORE_ROTATE_IDS:
-        # NOT an alarm and NOT exit 3: these are weak, unattributed signals, and #1337's rule is that
         # weak context never modulates the verdict. What it does change is the CLAIM — "safe" becomes
         # "safe once you confirm", which is what the finding underneath already says.
         return ROTATION_SAFE_PENDING_CHECK

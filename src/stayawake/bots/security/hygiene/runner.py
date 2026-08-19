@@ -15,11 +15,6 @@ from .models import HygieneIssue, _WIPER_NOTE
 # rotation-wiper OS service, gh-token-monitor, is a SEPARATE persistence artifact owned by
 # check_persistence() below.) Every probe degrades to a no-op when a tool/path is absent.
 
-# Common self-hosted-runner install locations (the runner may live anywhere, but these
-# cover the documented defaults). We treat a dir as an install only if it holds a `.runner`
-# config — i.e. an actually *registered* runner, not just an extracted tarball. A runner
-# under a dedicated service account or on Windows is a known coverage gap (see the service
-# probe, which is the primary signal); this is a fast best-effort corroborator.
 _RUNNER_DIR_CANDIDATES = (
     Path.home() / "actions-runner",
     Path.home() / "runner",
@@ -76,7 +71,7 @@ def _runner_services() -> list[str]:
                      "--no-legend", "--plain"],
                     capture_output=True, text=True, timeout=10)
             except (FileNotFoundError, OSError, subprocess.SubprocessError):
-                scope = None                    # systemctl absent — stop probing systemd
+                scope = None
                 break
             if r.returncode != 0:
                 continue
@@ -118,5 +113,3 @@ def check_runner_persistence() -> list[HygieneIssue]:
                     "(./config.sh remove) and service, rebuild from a known-clean image, then "
                     f"rotate LAST: {_WIPER_NOTE}.",
     )]
-
-

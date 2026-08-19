@@ -25,8 +25,6 @@ from stayawake.bots.security.dependencies.resolvers.base import Resolver
 
 _DEP_BLOCK = re.compile(
     r"<dependency\b[^>]*>((?:(?!</dependency>)(?!<dependency\b)[\s\S])*)</dependency>", re.S | re.I)
-# `group:artifact:version`, with the version terminated by `=configs` (new format) OR end-of-line
-# (legacy per-configuration format). Comment/`empty=` lines don't start with a coordinate → skipped.
 _GRADLE_LINE = re.compile(r"^(?P<group>[^:\s#]+):(?P<artifact>[^:\s]+):(?P<version>[^=\s]+)(?:=|$)")
 _GRADLE_LOCK_NAMES = ("gradle.lockfile", "buildscript-gradle.lockfile")
 
@@ -36,12 +34,6 @@ def _is_gradle_lock(rel: str, base: str) -> bool:
             or (base.endswith(".lockfile") and "gradle/dependency-locks/" in rel))
 
 
-# Per-tag body extractors, PRECOMPILED at module level (not built per call) — both so the ReDoS guard
-# enumerates them and so the body is unambiguous: `([^<]*)` is greedy with no overlapping `\s*` wrappers.
-# The old `>\s*([^<]+?)\s*<` had THREE whitespace-capable quantifiers around the body → ~O(n^3)
-# catastrophic backtracking on a whitespace-filled tag with no closer (a ~2 KB pom.xml hung the scan,
-# #1158). `[^<]` never matches `<`, so the greedy body can't backtrack across it — linear. Python
-# `.strip()` reproduces the trimming the wrapping `\s*` used to do.
 _TAG_RE = {t: re.compile(rf"<{t}\b[^>]*>([^<]*)</{t}>", re.I)
            for t in ("groupId", "artifactId", "version")}
 

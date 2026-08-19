@@ -30,16 +30,10 @@ def _vscode_user_settings() -> Path | None:
     return None
 
 
-# Terminal commands that are dangerous to auto-approve for chat/agent tools: a worm (or a folder-open
-# task) that reaches the agent can run these with no confirmation. Names are matched inside the
-# `chat.tools.terminal.autoApprove` keys, so `npx`, `git push && npx …`, or a `/^npx/` regex all trip.
 _RISKY_AUTOAPPROVE = ("npx", "npm", "pnpm", "yarn", "node", "ssh", "scp", "curl", "wget",
                       "bash", "sh", "zsh", "eval", "sed", "awk", "python", "python3", "rm")
 
 
-# Regex-KEY bodies (between the `/…/`) that match ANY command line — approving one of these is
-# approve-everything by another spelling. Kept to genuine catch-alls so a SCOPED regex like `/^git /`
-# is not mistaken for a blanket approve.
 _CATCHALL_REGEX_BODIES = {"", ".", ".*", ".+", "^", "$", "^$", "^.*$", "^.*", ".*$", "^.+$", "^.+", ".+$"}
 
 
@@ -121,7 +115,6 @@ def check_vscode(settings_path: Path | None = None) -> list[HygieneIssue]:
     except OSError:
         return issues
 
-    # JSONC-tolerant key probes (settings.json allows comments / trailing commas).
     auto = re.search(r'"task\.allowAutomaticTasks"\s*:\s*"([^"]+)"', text)
     if auto is None:
         issues.append(HygieneIssue(
@@ -184,5 +177,3 @@ def check_vscode(settings_path: Path | None = None) -> list[HygieneIssue]:
                 remediation='Remove those entries, or set them to false.', reference=_DOCS,
             ))
     return issues
-
-

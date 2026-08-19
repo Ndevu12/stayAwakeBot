@@ -18,7 +18,6 @@ from stayawake.utils.io import write_json
 
 class FileSink(Sink):
     def __init__(self, reports_dir: str | Path) -> None:
-        # The dir is already resolved/validated writable by service.scan before construction.
         self.dir = Path(reports_dir)
 
     def emit(self, report: ScanReport) -> None:
@@ -27,4 +26,3 @@ class FileSink(Sink):
         (self.dir / "latest.md").write_text(render_markdown(payload), encoding="utf-8")
         # The report PATH is surfaced by the orchestrator (service.scan), which alone knows the full
         # context — a spilled sweep vs. a plain -d copy vs. a remote run — so the message is uniform
-        # and highlighted in one place (#1203). This sink just writes the bundle.

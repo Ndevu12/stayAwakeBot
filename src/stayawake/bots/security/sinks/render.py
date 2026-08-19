@@ -19,10 +19,6 @@ from stayawake.bots.security.redaction import redact, render_redacted
 from stayawake.utils.render import MARKER, SEVERITY, STATUS, paint, rule
 from stayawake.utils import textsafe
 
-# Colour is emitted only when the terminal sink says stdout is a TTY (and NO_COLOR isn't set) —
-# the palette and `paint()` live in core.render so this surface and the audit report never drift
-# on "what colour is critical?". Scan colours only the three worst severities it grades; padding
-# is done on the PLAIN text first, so the escape codes never throw off column alignment.
 _SEV_COLOR = {s: SEVERITY[s] for s in ("critical", "high", "medium")}
 
 
@@ -84,8 +80,6 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False,
         out.append("No targets scanned.")
         return "\n".join(out) + "\n"
 
-    # Worst-first (see `report_order`). For a LARGE fleet the clean rows are collapsed to a
-    # count (clean = nothing to look at); the full inventory still lives in --json / -d.
     ordered = sorted(results, key=report_order)
     collapse = bool(collapse_clean_over) and len(results) > collapse_clean_over
     rows = [r for r in ordered if _verdict(r) is not None] if collapse else ordered
@@ -101,20 +95,14 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False,
         for label, total, sev, target in body:
             cells = [label.ljust(widths[0]), total.ljust(widths[1]),
                      sev.ljust(widths[2]), target]
-            cells[0] = paint(cells[0], _label_color(label), on=color)  # pad first, then colour
+            cells[0] = paint(cells[0], _label_color(label), on=color)
             out.append("  ".join(cells))
     if clean_n:
         out.append(paint(f"… and {clean_n} clean repositor{'y' if clean_n == 1 else 'ies'} "
                          "— full inventory in the --json / -d report", STATUS["clean"], on=color))
 
-    # Findings detail — only the INFECTED and SUSPECT repos (never clean/error), worst-first,
-    # one block each. Within a block, severity tags are padded to a common width so the
-    # signatures line up; evidence sits on its own, deeper-indented line. A blank line
-    # separates the repo blocks.
     flagged = [r for r in ordered if (r["infected"] or r.get("suspicious")) and r["findings"]]
     if flagged and not detail:
-        # Large fleet: the per-finding evidence would bury the terminal (hundreds of lines),
-        # so the table above is the dashboard and the detail lives in the written report.
         n = len(flagged)
         out += ["", f"Per-finding detail for {n} flagged "
                     f"repositor{'y' if n == 1 else 'ies'} is in the full report (path below)."]
@@ -123,9 +111,6 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False,
         for r in flagged:
             label = _label(r)
             total = r["summary"]["total"]
-            # Project header, then a rule under it so the project is clearly separated from
-            # its findings. The rule length is computed from the PLAIN header (colour codes
-            # have no display width), so it always matches the visible text.
             head_plain = f"{r['target']} — {label} {MARKER['meta']} {total} finding(s)"
             out += ["",
                     f"  {paint(r['target'], _label_color(label), on=color)} — {label} "
@@ -140,8 +125,6 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False,
                 # A visible bullet per finding; evidence sits under it, deeper-indented.
                 out.append(f"    {MARKER['info']} {colored}  {f['signature_id']}  —  {loc}")
                 if f.get("evidence"):
-                    # Bound the call outside the f-string: an expression spanning lines inside one is
-                    # PEP 701 syntax, which 3.12 accepts and 3.11 cannot parse at all.
                     ev = _fmt_evidence(f["evidence"], textsafe.quoted,
                                        payload_window=f.get("payload_window", False))
                     out.append(f"        evidence: {ev}")
@@ -149,8 +132,6 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False,
                     out.append(f"        {MARKER['detail']} fix: {textsafe.plain(f['fix_advice'])}")
                 if f.get("reference"):
                     out.append(f"        {MARKER['detail']} details: {textsafe.plain(f['reference'])}")
-    # Dependency advisories — a SEPARATE, opt-in tier (ordinary CVEs). Listed for any target that
-    # has them, including clean ones, and explicitly labelled as not affecting the verdict.
     advised = [r for r in ordered if r.get("advisories")]
     if advised:
         total_adv = sum(len(r["advisories"]) for r in advised)
@@ -172,10 +153,9 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False,
                         out.append(f"        {MARKER['detail']} details: {textsafe.plain(a['reference'])}")
     if s.get("suspicious"):
         out += ["", "suspicious = heuristic match(es) to review; not asserted as malware."]
-    notes = _coverage_notes(payload)               # honest coverage caveats (#1222) — never gating
+    notes = _coverage_notes(payload)
     if notes:
         out += ["", "Coverage notes (not gating):"] + [f"  {MARKER['info']} {n}" for n in notes]
-    # Host-scope note (#1332): a repo-content scan says nothing about host PERSISTENCE. Surfaced when
     # nothing is infected — the exact moment a user might read "clean" and rotate a token, which can
     # arm a rotation-wiper daemon. Terminal-only, never gates; the authoritative host verdict is
     # `saw audit` (which now withholds its all-clear until the persistence surface is verified).
@@ -249,7 +229,6 @@ def render_markdown(payload: dict[str, Any]) -> str:
     if not any_f:
         out.append("_No findings — all scanned targets are clean._")
 
-    # Dependency advisories — separate, opt-in, and explicitly non-gating.
     advised = [r for r in sorted(payload["results"], key=report_order) if r.get("advisories")]
     if advised:
         out += ["", "## Dependency advisories", "",

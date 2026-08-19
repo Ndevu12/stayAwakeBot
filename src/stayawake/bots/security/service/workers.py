@@ -41,7 +41,7 @@ class LocalScanJob:
     """Picklable descriptor for scanning one on-disk repo."""
     root: str
     display: str
-    opts: object              # ScanOptions (dataclass; picklable)
+    opts: object
     signatures: dict
     allowlist: list = field(default_factory=list)
 
@@ -76,7 +76,6 @@ def scan_remote(job: RemoteScanJob) -> WorkerScan:
     return WorkerScan(result, buf.getvalue())
 
 
-# --- Within-target file parallelism (#1325) -------------------------------------------------------
 #
 # A single big LOCAL target is decomposed into MatcherJobs run in parallel and merged back into one
 # ScanResult via scanner.finalize. Two shapes of job, ONE worker (`collect_partial`):
@@ -85,7 +84,6 @@ def scan_remote(job: RemoteScanJob) -> WorkerScan:
 #     symlink walk) over the FULL target, run exactly once.
 # Each returns RAW per-matcher findings + the chunk's read_errors/coverage_notes; the orchestrator
 # concatenates them and calls scanner.finalize ONCE — so a parallel scan is byte-identical to a
-# sequential one. Stray worker stdout/stderr is captured and replayed after the board, as in #1205.
 
 
 @dataclass

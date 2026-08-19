@@ -13,3 +13,6 @@
 
 # chore(security): document the interface, not the internals — detectors (#1480)
 b851bcafa5d7d6fdf74cdf9f495d33fc1c647df8
+
+# chore(security): take the detection rationale out of the shipped signature DB (#1481)
+7b68e6fa14b9cc72a4020c01afb0128c27dcdf9e

@@ -22,9 +22,6 @@ from typing import Iterator
 
 from stayawake.bots.security.dependencies.purl import ResolvedDependency
 
-# Lockfiles must be parsed WHOLE (a head/tail-truncated lockfile is invalid JSON/TOML/YAML and
-# yields nothing), so read up to this generous cap instead of the scan's default source cap. 32 MB
-# covers any realistic lockfile while bounding memory on a pathological one.
 _MAX_LOCKFILE_BYTES = 32_000_000
 
 

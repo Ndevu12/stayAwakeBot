@@ -31,7 +31,6 @@ from pathlib import Path
 from stayawake.utils import textsafe
 from .models import HygieneIssue, _WIPER_NOTE
 
-# Where the finding's `→ details:` link points — the full, non-destructive walkthrough.
 CREDENTIAL_HYGIENE_DOC = ("https://github.com/Ndevu12/stayAwakeBot/blob/main/"
                           "docs/explanation/credential-hygiene.md")
 
@@ -45,9 +44,6 @@ class KeychainStore:
     delete_command: str
 
 
-# One store per platform. macOS Keychain / Linux libsecret (gnome-keyring) / Windows Credential Manager
-# are all encrypted, recommended stores — a cached token is normal on each; the finding messaging is
-# shared and only these two fields vary.
 _MACOS_STORE = KeychainStore(
     "the macOS login Keychain",
     "security delete-internet-password -s github.com        # remove the cached entry")
@@ -58,11 +54,6 @@ _WINDOWS_STORE = KeychainStore(
     "Windows Credential Manager",
     "cmdkey /delete:git:https://github.com                  # remove it from Windows Credential Manager")
 
-# git config paths that are READ-ONLY system defaults — a helper inherited from one of these can't be
-# `--unset` (that silently no-ops); it must be reset with `--add credential.helper ""` at global scope.
-# The macOS Command Line Tools ship exactly such a default, which is what trips people up (#1237).
-# ANCHORED to absolute-path prefixes/exact paths (not loose substrings): a user's `~/Library/...` or
-# `~/dotfiles/etc/gitconfig` must NOT be misread as a read-only system config.
 _SYSTEM_CONFIG_PREFIXES = ("/library/developer/commandlinetools/",
                            "/applications/xcode.app/", "/usr/local/git/")
 _SYSTEM_CONFIG_EXACT = ("/etc/gitconfig", "/usr/local/etc/gitconfig", "/opt/homebrew/etc/gitconfig")
@@ -78,7 +69,7 @@ def _run(cmd: list[str], *, input_text: str | None = None, timeout: int = 10,
     written to the child's null sink and never enters saw's memory (#1260). saw reads presence, never
     the secret, on every platform."""
     try:
-        env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}   # never block on an interactive prompt
+        env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
         if not capture:
             return subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                   text=True, timeout=timeout, input=input_text, env=env)
@@ -153,7 +144,7 @@ def _credential_helper_origins() -> list[tuple[str, str]]:
         line = line.rstrip("\n")
         if not line.strip():
             continue
-        origin, _, value = line.partition("\t")             # git separates origin and value by a TAB
+        origin, _, value = line.partition("\t")
         pairs.append((origin.strip(), value.strip()))
     return pairs
 
@@ -225,14 +216,10 @@ def _keychain_finding(store: KeychainStore) -> HygieneIssue:
     delete (see module docstring / #1237). Only the store name + removal command vary by platform;
     all the messaging and the lockout-safe gating are shared (#1260)."""
     origins = _credential_helper_origins()
-    served = _https_token_status()                      # True (in use) | False (unused) | None (unknown)
+    served = _https_token_status()
     ssh, gh = _ssh_key_present(), _gh_configured()
     system_origin = _system_default_helper_origin(origins)
 
-    # NOTE: ssh/gh only ENRICH the prose — they never gate the destructive command. We can't verify
-    # offline that a present SSH key or a gh login actually authenticates to github.com (a stale key,
-    # or a gh login to a different host, would lie), so the safety decision keys off `served` and the
-    # command's own `ssh -T` pre-check, NOT these heuristics (#1237 lockout hardening).
     alts = [name for name, present in (("an SSH key", ssh), ("the gh CLI", gh)) if present]
     alt_phrase = " and ".join(alts) if alts else None
 
@@ -261,24 +248,13 @@ def _keychain_finding(store: KeychainStore) -> HygieneIssue:
                   "separate.")
 
     if served is True:
-        # HTTPS is IN USE here — deleting logs you out, full stop. Never offer a delete command; the
-        # only right move is to harden the credential in place (this also removes the old contradiction
-        # where the prose said "don't delete" while a delete command sat right below it).
         remediation = ("Do not delete it — that logs you out. Harden in place: short-lived and "
                        "least-scope, or a hardware-backed SSH key. To retire HTTPS, set up SSH "
                        "first, verify it works, then remove.")
         command = None
     else:
-        # served is False (unused) or None (unknown). Deletion MAY be safe — but never ASSUME it: the
-        # command leads with an `ssh -T` check that must authenticate first, so even a wrong guess
-        # (a false 'unused', a stale key) can't cause a silent lockout — the user stops if step 1 fails.
         reset = ""
         if system_origin:
-            # DISCOVERED path inside a COPY-PASTEABLE block. `command` renders verbatim (#86) on the
-            # premise that it is built from our own literals — false here: `git config --show-origin`
-            # reports whatever path an `include.path` names, and a repo-local `.git/config` is written
-            # by whoever wrote the repo. `/usr/local/git/` counts as a system config and is writable
-            # without root on a Homebrew Mac. Defanged so it cannot leave its comment.
             reset = ('git config --global --add credential.helper ""   '
                      f'# reset the read-only system default ({textsafe.plain(system_origin, 200)})\n')
         command = (

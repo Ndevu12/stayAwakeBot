@@ -17,8 +17,6 @@ from stayawake.utils.render import SEVERITY, paint
 from stayawake.bots.security.guard.constants import (
     STRIX_OWNER, STRIX_REPO, WORKFLOW_DIR, WORM_GUARD_FILE)
 
-# `Ndevu12/strix@<ref>` optionally followed by a trailing `# comment`; owner match is case-insensitive
-# (GitHub owners are case-insensitive) but the ref is preserved verbatim.
 _STRIX_USES = re.compile(r"^Ndevu12/strix@(?P<ref>\S+?)\s*(?:#.*)?$", re.IGNORECASE)
 _SHA = re.compile(r"^[0-9a-f]{40}$", re.IGNORECASE)
 _EXACT_TAG = re.compile(r"^v\d+\.\d+\.\d+$")
@@ -27,10 +25,10 @@ _EXACT_TAG = re.compile(r"^v\d+\.\d+\.\d+$")
 @dataclass
 class StrixRef:
     """One `uses: Ndevu12/strix@<ref>` occurrence and what it tells us."""
-    workflow: str      # workflow file, repo-relative
-    job: str           # the job's status-check context (its `name:`, else the job id)
-    ref: str           # the `@<ref>` exactly as written
-    pin: str           # "sha" (best) | "tag" (exact vX.Y.Z) | "floating" (@v0/@v1/@main/branch)
+    workflow: str
+    job: str
+    ref: str
+    pin: str
 
 
 def classify_pin(ref: str) -> str:
@@ -71,9 +69,6 @@ def find_strix(workflows: dict[str, str]) -> StrixRef | None:
     return None
 
 
-# A step that runs the saw scanner directly — `saw scan`/`saw audit` at a command boundary, or the
-# `stayawakebot` package. This is the signal that a workflow (or a local composite action) IS a worm
-# gate even when it doesn't use the packaged `Ndevu12/strix` action.
 _RUNS_SAW = re.compile(r"(?:^|[\s;&|(])saw\s+(?:scan|audit)\b|\bstayawakebot\b", re.IGNORECASE)
 
 
@@ -134,7 +129,7 @@ def find_worm_gate(workflows: dict[str, str], *, read_action=None) -> WormGate |
 def _local_action_reader(repo: Path):
     """Resolve a `uses: ./path` local composite action to its action.yml text (or None)."""
     def read(uses: str) -> str | None:
-        rel = uses[2:].strip("/")                      # "./.github/actions/x" → ".github/actions/x"
+        rel = uses[2:].strip("/")
         for fn in ("action.yml", "action.yaml"):
             try:
                 return (repo / rel / fn).read_text(encoding="utf-8", errors="replace")
@@ -181,7 +176,7 @@ def _ref_action_reader(repo: Path, ref: str):
 
 @dataclass
 class Freshness:
-    state: str                 # "fresh" | "behind" | "floating" | "unknown"
+    state: str
     latest_tag: str | None = None
     detail: str = ""
 
@@ -191,7 +186,7 @@ class LatestStrix:
     """The latest published Strix release, resolved ONCE. A sweep precomputes this and passes it to
     each repo's `freshness` so the releases API isn't re-hit per repo."""
     tag: str | None = None
-    sha: str | None = None     # commit SHA of tags/<tag>
+    sha: str | None = None
 
 
 def latest_strix(token: str | None = None) -> LatestStrix:
@@ -210,7 +205,7 @@ def freshness(ref: StrixRef, token: str | None = None, *, latest: LatestStrix | 
     if latest is None:
         rel = github_api.latest_release(STRIX_OWNER, STRIX_REPO, token)
         tag = rel.get("tag_name") if isinstance(rel, dict) else None
-        latest = LatestStrix(tag)               # sha fetched lazily below, only if `ref` is SHA-pinned
+        latest = LatestStrix(tag)
     if not latest.tag:
         return Freshness("unknown", detail="couldn't reach the Strix releases API")
     if ref.pin == "floating":
@@ -234,15 +229,12 @@ class GuardStatus:
     present: bool
     ref: StrixRef | None = None
     fresh: Freshness | None = None
-    required: bool | None = None       # None = not checked (local/no token); else branch-protection result
-    branch: str | None = None          # set only for a remote check → also signals "remote" to render()
-    error: str | None = None           # a REAL remote read failure (auth/scope/rate/network) — never a 404
-    # A worm gate present by a NON-Strix mechanism (a local composite action / a direct `saw` step):
-    # `present` is True but `ref` is None — the repo IS guarded, just not by the gradeable Strix action.
-    mechanism: str | None = None       # "local-action" | "saw-run" when ref is None; None otherwise
-    gate_file: str | None = None       # the workflow file that carries the non-Strix gate
-    no_ci: bool = False                # remote repo has no `.github/workflows/` (404) — the NORMAL
-                                       # "nothing to gate" state, NOT a read failure (#1243)
+    required: bool | None = None
+    branch: str | None = None
+    error: str | None = None
+    mechanism: str | None = None
+    gate_file: str | None = None
+    no_ci: bool = False
 
     @property
     def healthy(self) -> bool:
@@ -277,9 +269,9 @@ class RemoteRead:
     """Result of reading a remote repo's `.github/workflows/` (#1243). `cause` distinguishes the
     NORMAL 'no CI' (a 404 — the repo simply has no workflows dir) from a REAL read failure
     (auth/scope/rate/network), which the old bare-`None` conflated into a token-blaming error."""
-    workflows: dict[str, str]          # the workflow files (empty when no CI / a real failure)
-    cause: str | None = None           # None = read OK; "not_found" = no CI (calm); else a real failure
-    retry_after: int | None = None     # seconds until rate-limit reset (for cause="rate_limited")
+    workflows: dict[str, str]
+    cause: str | None = None
+    retry_after: int | None = None
 
 
 def _remote_workflows(owner: str, repo: str, token: str | None) -> RemoteRead:
@@ -328,7 +320,7 @@ class GateProbe:
     so a caller (e.g. `saw audit`) can tell 'this repo has no gate' apart from 'I couldn't read it',
     instead of the old `or {}` that laundered a read failure into a false 'no gate' (#1243)."""
     ref: StrixRef | None = None
-    cause: str | None = None           # None on read OK / 404-no-CI; else the real failure cause
+    cause: str | None = None
 
 
 def probe_remote_gate(slug: str, token: str | None) -> GateProbe:
@@ -446,5 +438,3 @@ def render(status: GuardStatus, *, color: bool = False) -> str:
                          f"  — {status.branch} protection does NOT require “{r.job}”; an infected PR can still merge")
         # status.required is None → no token, couldn't check → stay quiet
     return "\n".join(lines)
-
-
