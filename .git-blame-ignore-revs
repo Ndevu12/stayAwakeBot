@@ -10,3 +10,6 @@
 # means the scan output over a fixed corpus is byte-identical before and after.
 #
 # Format: one full 40-character SHA per line, newest last, with the subject as a comment above it.
+
+# chore(security): document the interface, not the internals — detectors (#1480)
+b851bcafa5d7d6fdf74cdf9f495d33fc1c647df8

@@ -22,11 +22,8 @@ from stayawake.bots.security.dependencies.installed import NPM_LIFECYCLE_KEYS
 
 class NpmManifestMatcher(Matcher):
     handles = "npm-manifest"
-    partitionable = True    # per-file package.json parse; verified #1325
+    partitionable = True
 
-    # The keys npm runs automatically on `npm install` (T1546); `test`/`build`/etc. run only when a
-    # human invokes them, so they are not this vector. One source, shared with the installed-tree hook
-    # scan (the same keys of an installed dependency's package.json).
     LIFECYCLE_KEYS = NPM_LIFECYCLE_KEYS
 
     def scan(self, target, signatures):

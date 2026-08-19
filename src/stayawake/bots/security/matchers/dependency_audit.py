@@ -41,13 +41,11 @@ class DependencyAuditMatcher(Matcher):
         store = self._store_factory(signatures)
         if store.is_empty() and not external_on:
             return []
-        # The vulnerability (CVE) tier is opt-in and never affects the verdict; the malware tier is
-        # always on. `advisory_only` findings are routed out of the verdict by the scanner.
         advisories_on = bool(getattr(target.opts, "dependency_advisories", False))
         findings: list[Finding] = []
-        seen_malware: set[tuple[str, str]] = set()          # (source_path, coordinate)
-        seen_vuln: set[tuple[str, str, str]] = set()        # + advisory id
-        emitted: set[tuple[str, str]] = set()               # (advisory id, coordinate) for external dedup
+        seen_malware: set[tuple[str, str]] = set()
+        seen_vuln: set[tuple[str, str, str]] = set()
+        emitted: set[tuple[str, str]] = set()
         if not store.is_empty():
             for resolver in self._resolvers:
                 for dep in resolver.resolve(target):
@@ -72,7 +70,7 @@ class DependencyAuditMatcher(Matcher):
 
 def _emit(advisory: Advisory, dep: ResolvedDependency) -> Finding:
     sig = advisory.signature
-    cite = f" [{advisory.osv_id}]" if advisory.osv_id else ""      # corpus hits carry an OSV id
+    cite = f" [{advisory.osv_id}]" if advisory.osv_id else ""
     return Finding(
         signature_id=sig["id"], category=sig["category"],
         severity=Severity.parse(sig["severity"]), path=dep.source_path,

@@ -14,28 +14,18 @@ from stayawake.bots.security.models import Finding, Severity
 from stayawake.bots.security.matchers.base import (
     Matcher, load_jsonc, build_confirmed_loader_check, REMOTE_FETCH_INTO_INTERPRETER)
 
-# Claude Code lifecycle events that fire WITHOUT the user invoking a specific tool — the agent
-# analogue of runOn:folderOpen. (PreToolUse/PostToolUse/UserPromptSubmit fire only during active
-# tool use and are commonly legit — formatters/linters — so a bare command hook there is NOT
-# flagged, to avoid false positives; a hook there running a PAYLOAD is still caught, below.)
 _CLAUDE_OPEN_EVENTS = {"SessionStart", "SessionEnd", "Notification", "PreCompact"}
 
-# Unmistakable payload shapes in a hook command → confirmed (INFECTED). Remote-fetch is the shared
-# (bounded) shape from base.py — used by the npm/workflow matchers too, so it can't drift; font-exec
-# mirrors the VS Code vscode-task-runs-font signal (a disguised font/binary run via node). Loader
-# fingerprints are corroborated separately.
 _REMOTE_FETCH = REMOTE_FETCH_INTO_INTERPRETER
 _FONT_EXEC = re.compile(r"\.(?:woff2?|ttf|otf)\b", re.IGNORECASE)
 
 
 class StructuralJsonMatcher(Matcher):
     handles = "structural-json"
-    partitionable = True    # per-file JSONC parse; verified #1325
+    partitionable = True
 
     def scan(self, target, signatures, all_signatures=None):
         by_kind = {s["kind"]: s for s in signatures if s.get("kind")}
-        # Corroborate a hook command against the shared code-loader fingerprints (one source of
-        # truth, so the two never drift). Needs the cross-signature view; falls back gracefully.
         loader_check = build_confirmed_loader_check(all_signatures or signatures)
         findings: list[Finding] = []
         for rel in target.iter_files():
@@ -77,10 +67,6 @@ class StructuralJsonMatcher(Matcher):
             if re.search(r"\.(woff2?|ttf|otf)\b", cmd) and "vscode-task-runs-font" in by_kind:
                 out.append(self._emit(by_kind["vscode-task-runs-font"], rel, cmd[:90]))
         if base == "settings.json" and "vscode-allow-automatic-tasks" in by_kind:
-            # `task.allowAutomaticTasks` enables folder-open autorun for boolean true OR the string
-            # enum value ("on"/"auto") — anything but "off". VS Code actually writes the STRING form,
-            # so the old `is True` check silently missed real settings (#1099). Mirrors
-            # hygiene.check_vscode()'s `!= "off"` semantics so the two surfaces agree.
             value = data.get("task.allowAutomaticTasks")
             if value is True or (isinstance(value, str) and value != "off"):
                 out.append(self._emit(by_kind["vscode-allow-automatic-tasks"], rel,
@@ -100,8 +86,6 @@ class StructuralJsonMatcher(Matcher):
         return None
 
     def _inspect_claude(self, rel, data, by_kind, loader_check):
-        # Schema: {"hooks": {"<Event>": [{"matcher"?: str, "hooks": [{"type":"command",
-        # "command": str}]}]}}. Every field is attacker-shaped, so type-guard each level.
         out = []
         hooks = data.get("hooks")
         if not isinstance(hooks, dict):

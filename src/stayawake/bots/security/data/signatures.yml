@@ -26,12 +26,8 @@ signatures:
     category: code-loader
     severity: critical
     matcher: content
-    # Tolerate member-access (String['fromCharCode']) and hex args (0x7f) too.
     pattern: 'String\s*[.\[]\s*[''"]?fromCharCode[''"]?\]?\s*\(\s*(?:127|0x7f)\s*\)'
     prefilter: "fromcharcode"   # cheap required-literal reject before the regex
-    # DEL is written this way in ordinary code, so the construct alone is not the tell: measured over
-    # 10,831 vendored files it matched two Microsoft-published HTTP token tables at confirmed tier.
-    # A string SHUFFLER differs from a character TABLE in that its output is executed.
     corroborate: exec-sink
     description: "Obfuscated loader fingerprint — fromCharCode(127) shuffler feeding an exec sink"
     remediation: recover
@@ -51,9 +47,6 @@ signatures:
     matcher: content
     pattern: '\bsfL\s*\('
     prefilter: "sfl"   # cheap required-literal reject before the regex
-    # A mangled identifier, and this family regenerates them every build: 0 matches across 35
-    # decrypted revisions and 0 on the captured argv (which names its decoder `lfL`), against
-    # confirmed-tier FPs on published bundles. Mechanism signatures carry the real detection.
     confidence: heuristic
     description: "Obfuscated loader decoder call — the sfL decoder function"
     remediation: recover
@@ -64,8 +57,6 @@ signatures:
     matcher: content
     pattern: "global\\[\\s*['\"]_V['\"]\\s*\\]\\s*="
     prefilter: "global['_v'"   # cheap required-literal reject before the regex
-    # Structure rather than a mangled name: 34/35 decrypted revisions (97%) plus the captured
-    # argv. Keys on the assignment, not the value it is given (that value is N=1). FP 0 / 16,315.
     description: "Loader bootstrap assigning the global['_V'] marker"
     remediation: recover
 
@@ -75,8 +66,6 @@ signatures:
     matcher: content
     pattern: 'failed to run clientCode'
     prefilter: "failed to run clientcode"   # cheap required-literal reject before the regex
-    # FP 0 / 16,315 real JS/TS, but N=1 for stability (one sample, no revision) — enough to
-    # surface, not enough to accuse.
     confidence: heuristic
     description: "Obfuscated loader status string reported to its operator channel"
     remediation: recover
@@ -132,8 +121,6 @@ signatures:
     severity: critical
     matcher: heuristic
     kind: magic-byte-masquerade
-    # Same masquerade as fake-font, extended to image/wasm/pdf: an ext claiming a binary format whose
-    # head lacks its magic bytes and reads as text/JS. SVG is excluded (real XML/text). #1146 blind #7.
     file_globs: ["*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp", "*.bmp", "*.ico", "*.wasm", "*.pdf"]
     description: "Image/wasm/pdf file whose bytes are actually JavaScript/text (disguised payload)"
     remediation: quarantine-file
@@ -151,12 +138,6 @@ signatures:
     remediation: recover
 
   # ── Whitespace / invisible-character concealment (T1027/T1564) ────────────────
-  # The technique, not the payload: content pushed off-screen behind a long horizontal-whitespace
-  # run (the fake-font / postcss.config sample buried its payload behind ~752 spaces), or hidden
-  # with zero-width / bidi-control chars (Trojan Source). Catches the tell even when the concealed
-  # payload itself matches no fingerprint and the line is under the 2000-char long-line threshold.
-  # Context-scoped (minified/generated suppressed) and heuristic → SUSPICIOUS (wide alignment can
-  # rarely produce a long run). remediation: manual — review/recover the concealed content by hand.
   - id: whitespace-concealment
     category: camouflage
     severity: high
@@ -169,11 +150,6 @@ signatures:
     remediation: manual
 
   # ── Whole-file obfuscation (line-agnostic, context-scoped) ───────────────────
-  # Closes G4: a payload SPLIT/WRAPPED across many <2000-char lines, or living in
-  # .jsx/.tsx/.vue/.svelte, defeats the formatting-keyed oversized-config-line rule.
-  # This signature runs loader fingerprints + a context-scoped obfuscation detector
-  # over the RAW file content (not splitlines) for hand-authored source/config only;
-  # vendored/minified/generated paths are suppressed by the matcher's context gate.
   - id: obfuscated-source-file
     category: code-loader
     severity: medium
@@ -183,11 +159,6 @@ signatures:
     description: "Hand-authored source/config file containing packed/obfuscated payload (line-agnostic)"
     remediation: recover
 
-  # Opt-in only (config `scan_build_outputs: true`, #1095b): a self-evident obfuscation construct
-  # (charcode array / exec sink / base64 / escape run) found in a build/minified artifact. The
-  # whole-file density heuristic is NOT run there — density is expected in bundles — so this stays
-  # heuristic → SUSPICIOUS, never confirmed (a bundle can carry these legitimately). remediation:
-  # manual — a build output is regenerated from source, not recovered; review the source instead.
   - id: obfuscated-build-artifact
     category: code-loader
     severity: medium
@@ -198,13 +169,6 @@ signatures:
     remediation: manual
 
   # ── Destructive intent — self-destruct / evidence removal (#1334) ────────────
-  # A recursive filesystem walk ROOTED AT THE USER'S HOME (or /) co-occurring with DELETION — the
-  # Shai-Hulud wipe. CONFIRMED (no `confidence: heuristic`) because the CORROBORATION carries it: the
-  # detector requires home-root ∧ recursive ∧ delete together (see taint/destructive.py) — each half
-  # alone (a scoped `rm -rf ./dist`, a lone `unlink(tmp)`, a `readdir`) is inert, so a package shipping
-  # an ordinary cleanup/build script does NOT trigger this. Reported in TWO variants because
-  # recoverable-or-not is the first question after a wipe (#1344). remediation: manual — a wipe payload
-  # is neutralised by isolating/quarantining the package, not by a code-recovery edit.
   - id: destructive-home-wipe
     category: destructive
     severity: critical
@@ -246,10 +210,6 @@ signatures:
     remediation: remove-foreign-vscode
 
   # ── AI/agent config auto-run — Claude Code hooks (.claude/settings.json) ──────
-  # Same threat class as the VS Code autorun above (T1546), one config layer over. A `hooks`
-  # entry runs a command on a Claude Code lifecycle event; SessionStart is the folderOpen
-  # analogue (fires on opening the project). remediation: manual — the file can hold legit
-  # config (permissions), so recovery is a reviewed edit, never an auto-strip.
   - id: claude-hook-autorun
     category: agent-autorun
     severity: high
@@ -278,15 +238,6 @@ signatures:
     remediation: strip-gitignore-markers
 
   # ── Evil merge (git history) ─────────────────────────────────────────────────
-  # Graded by CORROBORATION STRENGTH (the matcher routes each merge to one of these two ids):
-  #   evil-merge         — structural (new-file-unseen-by-parents) or context-aware obfuscation of the
-  #                        introduced hunk. Review-evading, but no known-malware fingerprint → HEURISTIC.
-  #   evil-merge-loader  — the merge-introduced hunk MATCHES A WORM LOADER SIGNATURE. A known-malware
-  #                        payload smuggled through an unreviewable merge is decisive on its own →
-  #                        CONFIRMED / critical (same grade the loader earns when found directly).
-  # Detection (which merges/paths are flagged) is identical across the two; only the confidence/severity
-  # partition differs. Both defer to MANUAL: the finding is keyed to a merge COMMIT, not a working-tree
-  # file, so `saw fix` gives history-provenance guidance and NEVER rewrites history (a maintainer call).
   - id: evil-merge
     category: evil-merge
     severity: high
@@ -305,10 +256,6 @@ signatures:
     remediation: manual
 
   # ── Shai-Hulud exfiltration / persistence branding (content) ─────────────────
-  # The worm's own vanity labels — cheap, high-signal plain-text matches for the
-  # exfiltration (attacker-repo/commit) and self-hosted-runner persistence stages.
-  # remediation: manual — an external attacker repo / registered runner can't be
-  # fixed by a file edit; the response is host isolation + rotate-LAST (see hygiene).
   - id: exfil-shai-hulud-branding
     category: exfil
     severity: critical
@@ -324,8 +271,6 @@ signatures:
     matcher: content
     pattern: '\bSHA1HULUD\b'
     prefilter: "sha1hulud"   # cheap required-literal reject before the regex
-    # Scoped to runner / workflow / service surfaces so a prose mention of the name
-    # (e.g. a threat writeup) is NOT flagged — only the IoC where it actually lives.
     file_globs: [".github/**", "**/.github/**", ".runner", "**/.runner", "**/actions-runner/**", "*.service"]
     description: "Shai-Hulud persistence — self-hosted runner named SHA1HULUD in runner/workflow config"
     remediation: manual
@@ -341,15 +286,6 @@ signatures:
     remediation: manual
 
   # ── Self-hosted runner persistence — committed install artifacts ─────────────────
-  # The worm registers the host as a self-hosted GitHub Actions runner (reported name
-  # SHA1HULUD) for durable, credential-rotation-surviving persistence (T1543/T1546). A
-  # *registered* runner writes `.runner` (registration config) and `.credentials`; committing
-  # either into a source repo captures that install. Two-tier to stay honest about confidence:
-  # a *file named* `.runner`/`.credentials` is a review signal (heuristic → SUSPICIOUS — the file
-  # could be empty or unrelated), while a `.runner` whose CONTENT is an actual registration
-  # (the serverUrl/gitHubUrl endpoint) is decisive (confirmed → INFECTED). Basename patterns
-  # match at any depth. The SHA1HULUD name string inside such an install is caught by
-  # exfil-sha1hulud-runner (content, path-scoped) above — defined once there, not duplicated.
   - id: runner-registration-config
     category: runner-persistence
     severity: high
@@ -363,8 +299,6 @@ signatures:
     category: runner-persistence
     severity: critical
     matcher: content
-    # A GitHub Actions runner .runner config always carries its registration endpoint. Scoped to
-    # the runner artifact paths so the string can't false-positive on unrelated JSON elsewhere.
     pattern: '"(?:gitHubUrl|serverUrl)"\s*:\s*"https'
     prefilter: "url"   # cheap required-literal reject before the regex
     file_globs: ['.runner', '**/.runner', '**/actions-runner/**']
@@ -381,10 +315,6 @@ signatures:
     remediation: quarantine-file
 
   # ── npm install-time lifecycle-hook execution (package.json) ─────────────────
-  # The npm-manifest matcher inspects ONLY the keys npm auto-runs on `npm install`
-  # (preinstall/install/postinstall/prepare) — never user scripts like test/build — and
-  # tests each signature's `pattern` against those command strings. remediation: manual:
-  # the manifest as a whole may be legitimate, so recovery is a reviewed edit, not a strip.
   - id: npm-lifecycle-dropper
     category: npm-lifecycle
     severity: critical
@@ -397,9 +327,6 @@ signatures:
     category: npm-lifecycle
     severity: critical
     matcher: npm-manifest
-    # `[^|]{0,2048}` is BOUNDED, not `[^|]*`: an unbounded run scans to end-of-string at every curl/wget
-    # anchor when no pipe follows → O(n^2) ReDoS on a crafted command (#1156). A real `curl URL | sh`
-    # one-liner is far under 2048 chars, so the bound is detection-identical.
     pattern: '\b(?:curl|wget)\b[^|]{0,2048}\|\s*(?:sh|bash|node|bun|bunx|deno)\b'
     description: "npm lifecycle hook pipes a remote fetch into an interpreter (curl|wget → sh/bun/node)"
     remediation: manual
@@ -409,28 +336,11 @@ signatures:
     severity: high
     matcher: npm-manifest
     confidence: heuristic
-    # Unusual-at-install-time runtimes/fetchers: Bun/Deno smuggling (EDR evasion) or a remote
-    # fetch in an install hook. Deliberately NOT bare `node` (legit native-module postinstall
-    # runs node) — the confirmed dropper/remote-fetch signatures above catch the real payloads.
     pattern: '\b(?:bun|bunx|deno|curl|wget)\b'
     description: "npm install-time lifecycle hook invokes Bun/Deno or a remote fetch (review)"
     remediation: manual
 
   # ── Malicious upstream dependency (package.json + lockfiles, T1195.001) ───────────
-  # The campaign's PRIMARY spread: a backdoored package version pulled by `npm install`. The
-  # dependency-audit matcher parses package.json (exact-pinned deps only — ranges defer to the
-  # lockfile) and the npm/yarn/pnpm lockfiles (direct + transitive) and flags any dependency whose
-  # exact name@version is on this data-driven blocklist. An exact match is decisive → confirmed
-  # (INFECTED). remediation: manual — remove/replace the package; a dependency can't be auto-fixed.
-  #
-  # REFRESH PATH: two layers. (1) The inline `known_bad` seed below always ships in the wheel — a
-  # zero-setup, zero-network baseline; append `name@version` entries from public advisories (JFrog,
-  # GitHub Advisories, OSV) for the Shai-Hulud / Miasma campaign. (2) `corpus: true` opts this
-  # signature into the DYNAMIC offline corpus: `saw db update` downloads the OpenSSF / GitHub
-  # Advisories / OSV.dev malicious-package records into a local cache, and scans match resolved
-  # dependencies against it too (#1120). The corpus is a superset of the seed, never a prerequisite.
-  # (Behaviorally scanning node_modules content is deliberately deferred — off by default, see
-  # of the malicious-upstream-dependency class.)
   - id: malicious-dependency
     category: supply-chain-dep
     severity: critical
@@ -443,10 +353,6 @@ signatures:
       - "fetch-page-assets@1.2.9"
 
   # ── Installed-tree audit — what's ACTUALLY on disk, reconciled against the lockfile (#1144) ────
-  # The dependency-audit above sees only the DECLARED lockfile. These catch a package a postinstall
-  # dropped into the installed tree (node_modules) WITHOUT editing the lockfile — invisible to a
-  # lockfile-only audit. Run only when a project-local installed tree exists (skipped on a remote
-  # clone). See matchers/installed_package_audit.py + dependencies/installed.py.
   - id: malicious-installed-package
     category: supply-chain-dep
     severity: critical
@@ -459,7 +365,6 @@ signatures:
     severity: high
     matcher: installed-package-audit
     confidence: heuristic  # SUSPICIOUS — npm writes every install to the lockfile, so off-lockfile is
-                           # anomalous, but a benign locally-linked pkg (symlink, skipped) could differ
     description: "A package is present in the installed tree but absent from the lockfile — a postinstall may have dropped it off-lockfile"
     remediation: manual
 
@@ -468,8 +373,6 @@ signatures:
     severity: critical
     matcher: installed-package-audit
     confidence: heuristic  # SUSPICIOUS — a byte mismatch vs the package's OWN RECORD sha256 is a strong
-                           # post-install-modification signal, but a local hotfix/monkeypatch on disk can
-                           # also differ; surface for review rather than assert malware (T1195.001)
     description: "An installed file's bytes differ from its package's .dist-info/RECORD sha256 — modified after install (a payload injected into a dependency)"
     remediation: manual
 
@@ -477,11 +380,6 @@ signatures:
     category: supply-chain-dep
     severity: critical
     matcher: installed-package-audit
-    # No `confidence` → confirmed/INFECTED. The matcher applies ONLY the CONFIRMED npm-lifecycle
-    # patterns (setup_bun dropper, curl|wget→interpreter) to an INSTALLED dependency's package.json —
-    # node_modules is pruned from traversal, so the npm-manifest matcher never sees these. Measured 0
-    # FP over realistic legit postinstalls (node-gyp/husky/binary-downloaders); the heuristic exec
-    # pattern is deliberately NOT applied at install-tree scale (it FPs on legit curl/bun/deno there).
     description: "An INSTALLED dependency's npm lifecycle hook runs a known install-time payload (setup_bun dropper or remote-fetch→interpreter) — invisible to the lockfile/root-manifest audit (T1195.001)"
     remediation: manual
 
@@ -489,22 +387,10 @@ signatures:
     category: supply-chain-dep
     severity: critical
     matcher: installed-package-audit
-    # No `confidence` → confirmed/INFECTED. The matcher runs ONLY the confirmed code-loader fingerprints
-    # (the FP-safe tier, reused via build_confirmed_loader_check) on an installed package's ENTRY files (main/bin).
-    # node_modules is content-pruned, so a novel malicious package's runtime loader in its main entry is
-    # otherwise invisible. TARGETED (entry files only, not brute-force all of node_modules): measured 0
-    # FP over 800 real entry files, ~0.5s.
     description: "An INSTALLED dependency's entry file (main/bin) carries a known code-loader fingerprint — a novel malicious package whose payload runs on require, invisible to the lockfile audit (T1195.001)"
     remediation: manual
 
   # ── Vulnerable (but not malicious) upstream dependency — the OPT-IN advisory tier ─────────────
-  # `advisory_corpus: true` opts this signature into the CVE side of the offline corpus. A match is
-  # an ordinary security advisory (CVE/GHSA) on a declared dependency — NOT malware — so it is
-  # emitted as an ADVISORY (`advisory_only`), routed out of the worm verdict: reported in its own
-  # section, never makes a repo INFECTED. On by default (offline, non-gating); `saw scan
-  # --no-advisories` or config `dependency_advisories: false` suppresses it. severity here is nominal
-  # — the tier is informational, so it never gates. (Range-based advisories light up via the
-  # per-ecosystem version-range comparators, #1124.)
   - id: vulnerable-dependency
     category: supply-chain-vuln
     severity: medium
@@ -514,11 +400,6 @@ signatures:
     advisory_corpus: true
 
   # ── GitHub Actions workflow persistence / camouflage (.github/workflows/*.yml) ───
-  # The workflow-yaml matcher parses each workflow with yaml.safe_load and dispatches by `kind`.
-  # Both are confidence: heuristic → SUSPICIOUS (a repo can legitimately own such a workflow);
-  # remediation: manual — a planted/impersonated workflow is recovered from git or reviewed by a
-  # human, never surgically stripped. (Self-hosted-runner registration inside a workflow is left
-  # to the runner-persistence hardening in #1092 to avoid overlap.)
   - id: workflow-injection-run
     category: workflow-autorun
     severity: high
@@ -552,8 +433,5 @@ signatures:
     severity: critical
     matcher: symlink
     confidence: confirmed   # INFECTED — a committed symlink whose target is ~/.ssh, a shell startup
-                            # file, git/cloud credentials, or an OS-persistence dir has no legitimate
-                            # purpose; a tool/agent told to write the link's path writes THROUGH it
-                            # into the sink (T1547/T1098 persistence, T1564.009 symlink attack).
     description: "A committed symlink points at a sensitive write-target outside the repo (SSH authorized_keys/keys, a shell/editor/REPL startup file, git/cloud/service credentials, a GPG keyring, a PATH executable dir, or an OS-persistence directory such as LaunchAgents/systemd/cron). A tool or agent asked to write the link's path writes THROUGH it into that sink — the GhostApproval / SymJacking write-redirect (#1161)."
     remediation: manual

@@ -23,28 +23,11 @@ from stayawake.bots.security.obfuscation import analyze_file, is_generated_conte
 from stayawake.bots.security.obfuscation.heuristics import _AUTHORED_OBFUSCATABLE_EXTS
 from stayawake.bots.security.matchers.obfuscation import _ext
 
-# Whitespace concealment (T1027/T1564): a payload pushed off-screen behind a long run of
-# horizontal whitespace so the line looks empty in an editor without word-wrap.
-# 120 = content beyond a typical editor width (~80-120 cols) is off-screen; set below the
-# report's `{200,}` grep so an attacker padding to just-under-200 is still caught. The trailing
-# content must be non-trivial (a lone aligned `{` / `*` is not concealment).
 _MIN_HIDDEN_WHITESPACE_RUN = 120
 _MIN_CONCEALED_CONTENT = 4
-# A run of >=120 space / tab / no-break-space chars, then non-whitespace content. Escapes only
-# — a security tool must not carry literal invisible chars in its own source.
-# The leading `(?<![ \t\u00A0])` anchors the run to a line-start / after-non-whitespace boundary, so
-# on an all-whitespace line `re.search` doesn't retry the run at every offset (that O(n) of retries x
-# the O(n) greedy match was an O(n^2) ReDoS \u2014 #1158). `{...,}+` is possessive: the maximal run never
-# backtracks. Detection is identical (a real concealment run always follows a non-whitespace char or
-# the line start; verified parity on every case) \u2014 a 2 MB all-whitespace line ~20 s -> 0.05 s.
 _HIDDEN_WHITESPACE_RUN = re.compile(
     r"(?<![ \t\u00A0])(?P<run>[ \t\u00A0]{%d,}+)(?P<hidden>\S.*)$" % _MIN_HIDDEN_WHITESPACE_RUN)
 
-# Zero-width / bidi-control characters that hide or reorder source text (the "Trojan Source"
-# attack, CVE-2021-42574) and are essentially never legitimate in hand-authored code. Written as
-# escapes on purpose. Deliberately EXCLUDES the emoji zero-width joiner (U+200D), ZWNJ (U+200C),
-# variation selectors, and the BOM (U+FEFF, a legitimate file prefix) — those appear in real
-# string data and would false-positive.
 _CONCEALMENT_CHARS = re.compile(
     "[\u200b\u2060"                          # zero-width space, word joiner
     "\u202a\u202b\u202c\u202d\u202e"       # bidi embeddings/overrides (LRE RLE PDF LRO RLO)
@@ -53,7 +36,7 @@ _CONCEALMENT_CHARS = re.compile(
 
 class HeuristicMatcher(Matcher):
     handles = "heuristic"
-    partitionable = True    # per-file density/masquerade checks; verified #1325
+    partitionable = True
 
     def scan(self, target, signatures, all_signatures=None):
         findings: list[Finding] = []
@@ -86,7 +69,6 @@ class HeuristicMatcher(Matcher):
         if text is None:
             return None
         th = int(sig.get("threshold", 2000))
-        # The raw formatting signal: at least one line longer than the threshold.
         long_hit = next(((i, len(ln)) for i, ln in enumerate(text.splitlines(), 1)
                          if len(ln) > th), None)
         if long_hit is None:
@@ -96,7 +78,6 @@ class HeuristicMatcher(Matcher):
         if is_generated_context(rel):
             return None
         i, n = long_hit
-        # (a) worm loader fingerprint anywhere in the file's content.
         hit = content_sig(text)
         if hit:
             return self._emit(sig, rel, f"line {i}: {n} chars; loader fingerprint: {hit}", i)

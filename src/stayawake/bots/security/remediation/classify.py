@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Code-loader remediation DECISION: given a finding, recover from git, offer a computed `Suggested`
-strip, or defer to `Manual` with a reason. A payload can't be excised by a textual transform (that
-corrupts valid files) — the source of truth is git history. Returns a `Recovery` / `Suggested` /
-`Manual` result. Defer-reason constants live in models.py."""
+"""Chooses the remediation for a finding.
+
+Returns the strategy to apply — recover the file from git, offer a computed change for review, or
+defer to a person with a reason. `models` names the reasons.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -26,7 +27,7 @@ class Recovery:
     `clean_rev` is the source commit for a restore, or a marker for an excision."""
     path: str
     clean_rev: str
-    label: str          # e.g. 'a1b2c3d ("chore: tailwind v4", 2026-05-12)'
+    label: str
     diff: str
     clean_text: str
     excised: bool = False
@@ -66,10 +67,9 @@ class Suggested:
     diff: str
     excised_text: str
     line: int | None = None
-    apply_mode: str = "seam"   # "seam" → re-prove via _seam_strip (the #1209 computed strip); "restore"
+    apply_mode: str = "seam"
                                # → whole-file restore re-proved like a non-excised Recovery
                                # (_safe_to_recover + subsequence). Both stay REVIEW-required (never
-                               # auto-merged); "restore" carries a clean 3-way-merge version (#1363 PR2).
 
 
 def _merge_recovery(work, content_sig, merge_clean, path, sig, line):
@@ -182,9 +182,6 @@ def classify_recovery(repo, finding, content_sig, merge_clean: str | None = None
                 break
 
         if clean is None:
-            # Born via an evil merge? The first-parent chain holds no clean version, but the merge's
-            # clean 3-way auto-merge does. Offer it as a REVIEW-required Suggested (never auto-applied —
-            # it derives from the merge's other parent, which the first-parent walk distrusts). #1363.
             merged = _merge_recovery(work, content_sig, merge_clean, path, sig, line)
             if merged is not None:
                 return merged
@@ -202,12 +199,6 @@ def classify_recovery(repo, finding, content_sig, merge_clean: str | None = None
         label = f'{sha[:7]} ("{_short(meta.get("subject", ""), 40)}", {meta.get("date", "")[:10]})'
         if _safe_to_recover(work, clean_text, content_sig):
             return Recovery(path, sha, label, _recovery_diff(work, clean_text, content_sig), clean_text)
-        # Excision, corroborated by the clean ancestor: auto-apply ONLY when the payload-stripped
-        # working file equals `clean_text` EXACTLY (matches trusted history → safe against even a
-        # scanner-invisible injection). When `_seam_strip` yields a valid excision that DOESN'T match
-        # the ancestor — a legit edit was made since infection — auto-apply is unsafe (the edit isn't
-        # in trusted history), but the strip is still structurally proven, so offer it as a computed
-        # Suggested fix for the operator to review rather than a bare hand-hunt checklist (#1209).
         excised = _seam_strip(work, ext, content_sig)
         if excised == clean_text:
             return Recovery(path, sha, label, _recovery_diff(work, clean_text, content_sig),

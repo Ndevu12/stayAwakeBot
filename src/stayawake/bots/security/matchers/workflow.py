@@ -30,19 +30,11 @@ import yaml
 from stayawake.bots.security.models import Finding, Severity
 from stayawake.bots.security.matchers.base import Matcher, REMOTE_FETCH_INTO_INTERPRETER
 
-# Triggers that run with the BASE repo's write-scoped token while carrying attacker-controllable
-# event payloads — the injection-prone set (GitHub's own "script injection" guidance).
 DANGEROUS_TRIGGERS = frozenset({
     "pull_request_target", "issue_comment", "issues",
     "discussion", "discussion_comment", "workflow_run",
 })
 
-# An untrusted `github.event.<obj>...<leaf>` (or `github.head_ref`) reference where the object is an
-# attacker-writable event field and the leaf a free-text value (title/body/message/ref/...). Numeric/id
-# leaves (`.number`, `.id`, `.sha`) are deliberately excluded — not injectable → fewer FPs. The gap
-# between the object and the leaf is bounded `[^}]{0,256}` — a real nested access (`commits[0]`,
-# `.head.ref`) is short, and the bound keeps this pattern linear even when tested on hostile input in
-# isolation (the ReDoS guard runs it standalone).
 _INJECTION_IN_EXPR = re.compile(
     r"\bgithub\.(?:"
     r"head_ref"
@@ -59,7 +51,6 @@ def untrusted_expr(text: str) -> str | None:
     or None. `${{ … }}` blocks are extracted by a LINEAR str.find scan, then the injection shape is
     matched inside each BOUNDED block. This is both ReDoS-safe — a `${{`-spam run step can't drive a
     scan-to-end-of-string retried at every `${{` (the O(n^2) a single `\\$\\{\\{[^}]*…` regex had,
-    #1158) — and DETECTION-COMPLETE: the outer condition can be arbitrarily long or contain a literal
     `${{`, and the interpolation is still caught (which no fixed gap-bound or tempered run achieves,
     since the attacker authors the workflow)."""
     i = 0
@@ -75,8 +66,6 @@ def untrusted_expr(text: str) -> str | None:
             return block
         i = end + 2
 
-# A remote fetch piped straight into an interpreter — the shared (bounded) shape from base.py, used
-# by the npm-lifecycle and structural-json matchers too, so it can't drift.
 REMOTE_FETCH = REMOTE_FETCH_INTO_INTERPRETER
 SELF_HOSTED = re.compile(r"\bself-hosted\b", re.IGNORECASE)
 DEPENDABOT = re.compile(r"dependabot", re.IGNORECASE)
@@ -84,7 +73,7 @@ DEPENDABOT = re.compile(r"dependabot", re.IGNORECASE)
 
 class WorkflowYamlMatcher(Matcher):
     handles = "workflow-yaml"
-    partitionable = True    # per-file YAML parse; verified #1325
+    partitionable = True
 
     def scan(self, target, signatures):
         by_kind = {s["kind"]: s for s in signatures if s.get("kind")}
@@ -107,8 +96,6 @@ class WorkflowYamlMatcher(Matcher):
     # ── YAML shape helpers (every field is attacker-shaped, so type-guard everything) ──
     @staticmethod
     def _triggers(data: dict) -> set[str]:
-        # PyYAML parses the bareword `on:` key as the boolean True (YAML 1.1), so real
-        # workflows land under data[True]; only a quoted "on" stays a string. Read both.
         raw = data.get("on")
         if raw is None:
             raw = data.get(True)
