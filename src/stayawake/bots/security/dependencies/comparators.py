@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Version comparators + OSV range evaluation (#1124).
+"""Version comparators + OSV range evaluation.
 
 An advisory range says "affected from `introduced` until `fixed`/`last_affected`"; deciding whether
 a resolved version falls inside requires ordering versions the way that *ecosystem* orders them —
@@ -245,7 +245,7 @@ def version_in_any_range(version: str, ranges, ecosystem: str) -> bool:
 
 def fixed_version_for(version: str, ranges, ecosystem: str) -> str | None:
     """The smallest patched version STRICTLY ABOVE `version` among the ranges that currently affect it
-    — the correct upgrade target (#1252).
+    — the correct upgrade target.
 
     Only a `fixed` bound that orders ABOVE the installed version actually resolves the vulnerability, so
     a multi-interval range (backported fixes, e.g. `fixed 1.5.0 … introduced 2.0.0, fixed 2.5.0`) never

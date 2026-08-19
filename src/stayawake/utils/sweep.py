@@ -57,7 +57,7 @@ def run_sweep(work_fn: Callable[[Any], Any], items: Iterable[Any], *, jobs: int,
         if outcome.error:
             progress.item_done(labels[outcome.index], "[ERROR   ]", outcome.error)
         else:
-            rendered = describe(outcome)          # (tag, detail) or (tag, detail, block)
+            rendered = describe(outcome)
             tag, detail = rendered[0], rendered[1]
             block = rendered[2] if len(rendered) > 2 else None
             progress.item_done(labels[outcome.index], tag, detail, block=block)

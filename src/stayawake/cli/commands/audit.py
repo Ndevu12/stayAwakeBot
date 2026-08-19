@@ -48,21 +48,14 @@ def run(a: argparse.Namespace) -> int:
     if a.repo and not token:
         print(auth.no_credential_hint("auditing branch protection") +
               " Skipping the branch-protection check.\n")
-    # Stream like `saw scan`: a spinner over each probe's silent compute (some shell out to
-    # launchctl/systemctl/the GitHub API), then the report typed out. Progress lives on stderr,
-    # the report on stdout — each keys off its own tty-ness so a piped report stays clean.
     progress_on = stream_enabled(sys.stderr, force_off=a.no_stream)
-    # Iterate hygiene.audit_checks() — the single composition site — never hand-assemble a subset.
     issues: list[hygiene.HygieneIssue] = []
     for label, check in hygiene.audit_checks(a.repo, token, a.branch,
                                              verify_artifacts=a.verify_artifacts):
         with status(f"checking {label}…", enabled=progress_on):
             issues += check()
-    # Colour + wrap-width key off stdout the same way scan's TerminalSink does: colour only on a
-    # real TTY (NO_COLOR / CI / pipe → plain), wrapped to the live terminal width (80 when piped).
     report = hygiene.render(issues, color=supports_color(sys.stdout), width=term_width())
     Streamer(enabled=stream_enabled(sys.stdout, force_off=a.no_stream)).line(report)
-    # Exit codes: the CATASTROPHIC axis gates UNCONDITIONALLY (#1332). Active host persistence OR a
     # persistence surface that could not be verified withholds the all-clear → exit 3 ("rotation
     # unsafe / not verified"), regardless of -f, because rotating into a live wiper is data-loss. The
     # weaker hygiene warnings keep their opt-in gate (-f → 1). 3 is additive: every `rc==0`/`rc!=0`

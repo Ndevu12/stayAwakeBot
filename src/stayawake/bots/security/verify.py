@@ -33,14 +33,8 @@ from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions
 # _MAX_INTERIOR_SCAN_BYTES, is only head+tail-scanned, so its middle is unseen).
 from stayawake.bots.security.targets.base import SOURCE_EXTS, _MAX_INTERIOR_SCAN_BYTES
 
-# A worm's staged `~/.node_modules` drop is SMALL (a package.json + a couple of deps); a real
-# project's node_modules is huge. So a moderate cap fully scans the suspicious case and bails on a
-# big, almost certainly legitimate tree — where "too large" is itself a mild reassurance, not a
-# false "clean". Opt-in, so the caller may raise it when the user asks for a deeper look.
 DEFAULT_MAX_FILES = 4000
 
-# Excludes OFF except `.git` — the whole point is to look inside node_modules/dist/build (the dirs a
-# normal repo scan skips). `.git` internals are never worm-drop targets and only slow the walk.
 _VERIFY_EXCLUDES = {".git"}
 
 
@@ -52,15 +46,14 @@ class DirVerdict:
     `scanned_clean` is the ONLY reassuring state and is set ONLY when the whole tree was both walked
     AND fully read. The caller reads the states in priority order: markers → clean → too_large →
     partial → error. Anything but markers/clean means "we did not fully verify" — never rendered as
-    clean (the #1220 rule: don't claim clean when you didn't look)."""
+    clean (the rule: don't claim clean when you didn't look)."""
     path: str
     files: int = 0
     markers: list[str] = field(default_factory=list)
-    scanned_clean: bool = False   # fully walked AND fully read, no confirmed markers
-    too_large: bool = False       # bailed BEFORE scanning — larger than max_files
-    partial: bool = False         # walked, but not fully READ (an oversize file, or an escaping
-                                  # directory symlink whose contents os.walk never descends)
-    error: str | None = None      # not-a-dir, or a read gap that means we CANNOT claim "clean"
+    scanned_clean: bool = False
+    too_large: bool = False
+    partial: bool = False
+    error: str | None = None
 
     @property
     def has_markers(self) -> bool:
@@ -128,7 +121,7 @@ def _survey(root: Path, cap: int, max_file_bytes: int) -> tuple[int | None, bool
 
     def _onerror(_exc: OSError) -> None:
         nonlocal complete
-        complete = False                  # a dir we couldn't list → its contents went unscanned
+        complete = False
 
     for dirpath, dirnames, filenames in os.walk(root, onerror=_onerror):
         kept = []
@@ -167,7 +160,6 @@ def verify_dir(path: str | Path, *, max_files: int = DEFAULT_MAX_FILES,
     except OSError as exc:
         return DirVerdict(path=str(root), error=f"unreadable: {exc}")
 
-    # A fresh, LOCAL ScanOptions — never the defaults `saw scan` uses; excludes off except `.git`.
     opts = ScanOptions(exclude_dirs=set(_VERIFY_EXCLUDES))
     count, complete, scannable = _survey(root, max_files, opts.max_file_bytes)
     if count is None:

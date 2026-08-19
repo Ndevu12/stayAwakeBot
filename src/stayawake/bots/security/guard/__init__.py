@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""`saw guard` — detect/grade the Strix CI gate (#1229), install/update it (proposed-only), and
+"""`saw guard` — detect/grade the Strix CI gate, install/update it (proposed-only), and
 sweep many targets. Split per concern into constants / detect / setup / sweep; this package
 re-exports the flat public API so callers import unchanged (`from stayawake.bots.security import
 guard`)."""

@@ -30,10 +30,10 @@ from stayawake.utils import env
 
 class ColorLevel(IntEnum):
     """How much colour a stream supports. Ordered, so callers can compare (`>= ANSI256`)."""
-    NONE = 0        # plain text — no ANSI at all
-    ANSI16 = 1      # the 8/16 base colours
-    ANSI256 = 2     # 256-colour palette
-    TRUECOLOR = 3   # 24-bit RGB
+    NONE = 0
+    ANSI16 = 1
+    ANSI256 = 2
+    TRUECOLOR = 3
 
 
 def _isatty(stream: TextIO) -> bool:

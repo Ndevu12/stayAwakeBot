@@ -38,7 +38,6 @@ def require(intent: Intent, *, session: Session | None = None,
 
     if sess.capabilities is None:
         # Unknown powers (fine-grained PAT, Actions token without introspectable perms).
-        # Allow past the gate; proposal ladder + push classifier handle residual denies.
         return Decision(
             allowed=True, intent=intent, missing=frozenset(),
             reason="capabilities unknown — proceeding; delivery will classify push failures",

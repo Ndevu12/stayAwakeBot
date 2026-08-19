@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Ruby / RubyGems resolver — Gemfile.lock → `pkg:gem/…` PURLs (#1123).
+"""Ruby / RubyGems resolver — Gemfile.lock → `pkg:gem/…` PURLs.
 
 In `Gemfile.lock`, resolved gems are the 4-space-indented `name (version)` lines under `specs:`;
 the 6-space lines beneath them are dependency *constraints* (ranges) and are skipped. A platform

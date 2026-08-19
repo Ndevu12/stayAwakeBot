@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""What's actually INSTALLED on disk, per ecosystem — the counterpart to the lockfile resolvers (#1144).
+"""What's actually INSTALLED on disk, per ecosystem — the counterpart to the lockfile resolvers.
 
 The dependency audit (dependency_audit.py) reads the LOCKFILE — what SHOULD be there — and matches
 names@versions against the corpus. But the worm's real move is a postinstall that drops a package into the
@@ -71,8 +71,7 @@ class InstalledTree:
 
     def source_files(self, target, pkg: "InstalledPackage",
                      truncated: list | None = None) -> Iterator[str]:
-        """Rel paths of a package's own SOURCE files, for the opt-in `--deep` confirmed-loader sweep
-        (#1222). Default: none — an ecosystem whose loader fingerprints don't apply (the confirmed
+        """Rel paths of a package's own SOURCE files, for the opt-in `--deep` confirmed-loader sweep. Default: none — an ecosystem whose loader fingerprints don't apply (the confirmed
         content-sig tier is JS-shaped, so only npm overrides this). Never follows symlinks; bounded."""
         return
         yield
@@ -80,7 +79,7 @@ class InstalledTree:
 
 def _is_regular(path: str) -> bool:
     """True only for a REGULAR file (following a symlink to its target). False for a FIFO/socket/device
-    — a blocking `open()` on one would HANG the scan forever with no writer (#1226) — or when the path
+    — a blocking `open()` on one would HANG the scan forever with no writer — or when the path
     can't be stat'd. The installed-tree audit walks node_modules/site-packages itself (not through the
     engine's guarded read path), so its own file opens must guard the same way."""
     try:
@@ -90,7 +89,7 @@ def _is_regular(path: str) -> bool:
 
 
 def _read_manifest(path: str) -> dict | None:
-    if not _is_regular(path):                          # never a blocking open() on a FIFO/device (#1226)
+    if not _is_regular(path):                          # never a blocking open() on a FIFO/device
         return None
     try:
         with open(path, encoding="utf-8", errors="replace") as fh:
@@ -185,7 +184,7 @@ class NpmInstalledTree(InstalledTree):
         `node_modules` (those are separate packages, walked in their own right). Never follows a symlink
         (escape/loop — and a symlinked/FIFO entry is not a regular file, so `is_file(follow_symlinks=
         False)` drops it), bounded by depth + a per-package file cap. If the cap is hit, `True` is
-        appended to `truncated` so the caller can note the un-scanned tail honestly (#1222)."""
+        appended to `truncated` so the caller can note the un-scanned tail honestly."""
         pkg_dir = target.root / os.path.dirname(pkg.path)
         yield from _walk_source(str(pkg_dir), target.root, truncated if truncated is not None else [])
 
@@ -298,7 +297,7 @@ class PythonInstalledTree(InstalledTree):
         """Parse the `Name:`/`Version:` headers of a METADATA/PKG-INFO block (RFC822-style; headers end
         at the first blank line)."""
         name = version = None
-        if not _is_regular(meta_path):                 # FIFO/device METADATA → skip, don't hang (#1226)
+        if not _is_regular(meta_path):                 # FIFO/device METADATA → skip, don't hang
             return None
         try:
             with open(meta_path, encoding="utf-8", errors="replace") as fh:
@@ -353,7 +352,7 @@ class PythonInstalledTree(InstalledTree):
                     except OSError:
                         continue                          # listed-but-absent file → not a tamper signal
                     if os.path.islink(fp) or not _is_regular(fp) or size > self._MAX_HASH_BYTES:
-                        continue                          # skip symlinks, FIFO/device (#1226), huge files
+                        continue                          # skip symlinks, FIFO/device, huge files
                     if size > budget:
                         return                            # total hashing budget spent (DoS backstop)
                     budget -= size
@@ -367,7 +366,7 @@ class PythonInstalledTree(InstalledTree):
 def _record_hashes(record_path: str) -> Iterator[tuple[str, str]]:
     """`(relpath, "sha256=<b64>")` for each RECORD row that carries a sha256 (CSV — a path may be
     quoted). Rows with no hash (`.pyc`, RECORD itself) are skipped."""
-    if not _is_regular(record_path):                   # FIFO/device RECORD → skip, don't hang (#1226)
+    if not _is_regular(record_path):                   # FIFO/device RECORD → skip, don't hang
         return
     try:
         with open(record_path, encoding="utf-8", errors="replace", newline="") as fh:
@@ -380,7 +379,7 @@ def _record_hashes(record_path: str) -> Iterator[tuple[str, str]]:
 
 def _sha256_record(path: str) -> str | None:
     """`sha256=<urlsafe-b64-no-pad>` of a file's bytes — the exact form RECORD stores."""
-    if not _is_regular(path):                          # FIFO/device → skip, never a blocking open (#1226)
+    if not _is_regular(path):                          # FIFO/device → skip, never a blocking open
         return None
     try:
         with open(path, "rb") as fh:

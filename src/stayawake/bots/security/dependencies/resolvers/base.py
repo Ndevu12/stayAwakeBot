@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Resolver interface — one ecosystem's manifests/lockfiles → normalized deps (#1119).
+"""Resolver interface — one ecosystem's manifests/lockfiles → normalized deps.
 
 A `Resolver` has a single responsibility: parse an ecosystem's dependency declarations into
 `ResolvedDependency` (a `Purl` + its source file). It knows nothing about advisories or
@@ -11,9 +11,8 @@ requirements/TOML/JSON locks, and later Cargo/Go/…), so a universal parameteri
 would be the wrong abstraction — the epic's explicit "not too DRY" boundary. Adding an ecosystem
 = add a resolver and register it; nothing else changes (Open/Closed).
 
-**Interface status: FROZEN.** Validated by two independent implementations (npm #1119 + PyPI
-#1122): `resolve(target) -> Iterator[ResolvedDependency]`, plus the shared `_read_whole` helper.
-The #1123 fan-out (Go, Rust, Ruby, Composer, .NET, Maven) adds resolvers against this surface
+**Interface status: FROZEN.** Validated by two independent implementations (npm + PyPI): `resolve(target) -> Iterator[ResolvedDependency]`, plus the shared `_read_whole` helper.
+The fan-out (Go, Rust, Ruby, Composer, .NET, Maven) adds resolvers against this surface
 without changing it.
 """
 from __future__ import annotations

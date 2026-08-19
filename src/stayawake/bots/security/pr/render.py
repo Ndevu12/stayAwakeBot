@@ -11,7 +11,7 @@ from stayawake.bots.security.pr.constants import ISSUE_LABEL
 
 def _mark_partial(outcome: str, partial: bool) -> str:
     """Guarantee a PARTIAL fix's outcome carries the marker so `remediator.fix` counts it as
-    needs-review and the run exits non-zero (#1183 invariant #1) — NO MATTER which push / PR /
+    needs-review and the run exits non-zero — NO MATTER which push / PR /
     fork / patch / issue branch produced it. This single structural gate replaces per-branch
     tagging, which an adversarial pass proved too easy to forget (four fallback returns dropped it,
     silently reporting a still-infected partial fix as a clean exit 0)."""
@@ -22,7 +22,7 @@ def _review_lines(items, header: str, limit: int = 20) -> str:
     """Shared CLI-stream renderer for a bounded list of review items (location · reason-code ·
     action). Every field is `_plain`-sanitized (a crafted path can't inject terminal/Actions control
     sequences), the list is bounded (`…and N more`), and only locations / reasons / guidance are
-    shown — the payload bytes are NEVER echoed (#1184 invariants 2–4). Empty when there are none."""
+    shown — the payload bytes are NEVER echoed. Empty when there are none."""
     if not items:
         return ""
     lines = ["", f"    {header}"]
@@ -38,16 +38,16 @@ def _review_lines(items, header: str, limit: int = 20) -> str:
 
 
 def manual_review_lines(manual, limit: int = 20) -> str:
-    """Per-finding manual-review guidance for `saw fix`'s CLI stream (#1184): each residual as
+    """Per-finding manual-review guidance for `saw fix`'s CLI stream: each residual as
     location + reason-code + the recommended (inspect-before-running) command classify_recovery
     already computed. Recovery commands keep their 'review the diff before running' framing;
-    validating a recovery sha's ancestry is #1185's source-trust rule. See `_review_lines` for the
+    validating a recovery sha's ancestry is's source-trust rule. See `_review_lines` for the
     injection-safety contract."""
     return _review_lines(manual, "Manual review needed (inspect before running any command):", limit)
 
 
 def computed_review_lines(computed, limit: int = 20) -> str:
-    """CLI-stream guidance for the #1209 computed strips that WERE applied to the review branch but
+    """CLI-stream guidance for the computed strips that WERE applied to the review branch but
     are NOT git-corroborated: each as location + reason-code + the review-before-merge guidance (the
     operator's review is the trust anchor for the one residual the git-match would otherwise close)."""
     return _review_lines(computed, "Computed strips applied — REVIEW the kept code before merging:", limit)
@@ -57,7 +57,7 @@ def suspicious_review_lines(suspicious, limit: int = 20) -> str:
     """CLI-stream disclosure of HEURISTIC (suspicious) findings that `saw fix` deliberately does NOT
     auto-remediate — a heuristic is not asserted malware, and a surgical edit on a possible FP would
     damage legitimate code (trust model). `saw fix` must still DISCLOSE them (never report "already
-    clean" while `saw scan`/`saw hook` flag the same repo — the #1360 disagreement), so this lists
+    clean" while `saw scan`/`saw hook` flag the same repo — the disagreement), so this lists
     each as location + signature id and points at `saw scan` to inspect. Every field is `_plain`-
     sanitized (a crafted path can't inject terminal/Actions control sequences) and the list is bounded;
     payload bytes are never echoed. Empty when there are none."""
@@ -99,7 +99,7 @@ def _issue_spec(owner: str, name: str, findings) -> proposal.IssueSpec:
 def _render_submit(res: proposal.SubmitResult, *, slug: str, base: str, partial: bool) -> str:
     """Render a `proposal.SubmitResult` into `saw fix`'s exact operator outcome — the fix-domain
     wording (the PARTIAL tag, the 'auto-clean' framing) lives HERE, never in the shared seam. The
-    single `_mark_partial` choke point still wraps this return (#1183 invariant #1)."""
+    single `_mark_partial` choke point still wraps this return."""
     semi = "PARTIAL (manual review required); " if partial else ""
     dash = "PARTIAL (manual review required) — " if partial else ""
     if res.kind == "pr":
@@ -136,7 +136,7 @@ def _render_submit(res: proposal.SubmitResult, *, slug: str, base: str, partial:
 
 
 def _pr_body(slug: str, changes, computed=(), suspicious=(), manual=()) -> str:
-    """Render the PR body. A PARTIAL fix (#1183/#1209) is any tree that is NOT fully git-corroborated
+    """Render the PR body. A PARTIAL fix is any tree that is NOT fully git-corroborated
     clean — either residual CONFIRMED findings with no safe fix (`manual`), OR computed strips that
     ARE applied (a separate commit) but are NOT git-corroborated and MUST be reviewed before merge
     (`computed`). The body says so loudly and lists each. All untrusted text (paths, reasons) goes

@@ -2,7 +2,7 @@
 """Ordered, error-isolated parallel execution over a work-list.
 
 ONE shared seam for every multi-item sweep in the CLI (the scanner today; `fix`/`guard`/
-`audit` per #1327). It maps a PURE, PICKLABLE function over items with a bounded worker
+`audit` per). It maps a PURE, PICKLABLE function over items with a bounded worker
 pool and guarantees the three properties every caller needs:
 
   * ORDER — `Outcome`s come back in SUBMISSION order regardless of completion order, so a
@@ -106,8 +106,6 @@ def resolve_jobs(requested: int | None, count: int) -> int:
         return 1
     return min(requested, count)
 
-# How often the main loop wakes to drain start-signals while waiting on completions. Small
-# enough that a live progress board feels responsive, large enough to add no real overhead.
 _POLL_SECONDS = 0.05
 
 
@@ -250,9 +248,6 @@ def _run_threaded(fn, work, workers, on_start, on_done) -> list[Outcome]:
             raise
 
 
-# Set once per worker PROCESS by the pool initializer; the task wrapper reads it to post a
-# start-signal. A module global (not a closure) because spawn requires picklable, importable
-# callables.
 _WORKER_START_Q = None
 
 
@@ -293,8 +288,6 @@ def _terminate_pool(ex) -> None:
 def _run_process(fn, work, workers, on_start, on_done) -> list[Outcome]:
     ctx = mp.get_context("spawn")
     start_q = ctx.Queue() if on_start else None
-    # Deliberately NOT a `with` block: ProcessPoolExecutor.__exit__ calls shutdown(wait=True), which
-    # re-blocks on running workers on Ctrl-C. We own teardown so it can be non-blocking on interrupt.
     ex = cf.ProcessPoolExecutor(max_workers=workers, mp_context=ctx,
                                 initializer=_worker_init, initargs=(start_q,))
     interrupted = False

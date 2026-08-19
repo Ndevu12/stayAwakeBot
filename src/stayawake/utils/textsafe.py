@@ -15,7 +15,7 @@ sinks, two functions:
 
 Kept dependency-free (stdlib only) and free of any security-domain knowledge, so every command that
 renders untrusted input into a body or a log shares one hardened implementation instead of copying
-it. The escaping contract originates in #1183/#1184 (Markdown) and the Actions log-injection work.
+it. The escaping contract originates in/ (Markdown) and the Actions log-injection work.
 """
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ def sanitize(s: str, limit: int = 300) -> str:
     markup, or spoof text direction; backticks are replaced so it can't break OUT of the code span;
     length is bounded so a hostile value can't bloat the body. Because callers wrap the result in a
     code span (`code`), inline markup like `[x](y)` / `<img>` renders literally — so the value MUST
-    stay inside a code span, never bare. (Invariant #5 of #1183; fuller contract in #1184.)"""
+    stay inside a code span, never bare. (Invariant #5 of; fuller contract in.)"""
     out = "".join(ch if not (unicodedata.category(ch)[0] == "C"
                              or unicodedata.category(ch) in ("Zl", "Zp")) else " "
                   for ch in str(s))

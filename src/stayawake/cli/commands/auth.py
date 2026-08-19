@@ -228,7 +228,6 @@ def _status(a: argparse.Namespace) -> int:
                 if u["command"]:
                     lines.append(_cmd(u["command"], color, indent=8))
     prog.line("\n".join(lines).rstrip())
-    # Exit 1 when guard PR would be denied (the critical fleet path).
     guard = next(r for r in rows if r["intent"] == Intent.OPEN_GUARD_PR.value)
     return 0 if guard["allowed"] or not sess.live else 1
 
@@ -320,7 +319,6 @@ def _already_registered(prog: Streamer, color: bool, width: int, a: argparse.Nam
 def _app_register(a: argparse.Namespace) -> int:
     from stayawake.lib import github_app_manifest as manifest
     prog, color, width = _ui(a)
-    # Idempotency guard: never mint a duplicate App when one is already configured (the reported bug).
     early = _already_registered(prog, color, width, a)
     if early is not None:
         return early

@@ -20,8 +20,6 @@ from typing import Any
 
 from stayawake.lib.adapters import github_api
 
-# The hidden state block: `<!-- state:{...json...} -->`. Non-greedy so it can sit anywhere in a body
-# that also contains a human dashboard.
 _STATE_RE = re.compile(r"<!--\s*state:(\{.*?\})\s*-->", re.DOTALL)
 
 

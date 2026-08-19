@@ -74,9 +74,6 @@ def finalize(display: str, source: str, by_matcher: dict[str, list[Finding]],
     `-j 1`. Findings are consumed in `matcher_order` (the signatures' matcher order), preserving the
     matcher-major insertion order that the final `(-severity, path)` stable sort relies on for ties."""
     result = ScanResult(target=display, source=source)
-    # Confidence is a property of the signature, not the matcher, so stamp it centrally (one source of
-    # truth). Anything not explicitly `heuristic` is treated as `confirmed` — the conservative default,
-    # so a new signature can never silently downgrade itself out of INFECTED.
     confidence_of = {s["id"]: (HEURISTIC if s.get("confidence") == HEURISTIC else CONFIRMED)
                      for s in all_sigs}
     for name in matcher_order:
@@ -97,16 +94,10 @@ def finalize(display: str, source: str, by_matcher: dict[str, list[Finding]],
     # run fails CLOSED (service.scan turns any errored target into a non-zero exit). Findings from the
     # readable files are kept; the target is still marked errored.
     if read_errors and not result.error:
-        # Dedup + sort: a file is read-attempted by several matchers, so it appears multiple times;
-        # count DISTINCT files, and make the sample order-independent of how the scan was partitioned
-        # (parallel chunks accumulate errors file-major, sequential accumulates matcher-major) — so
-        # the message is deterministic and reports files, not read-attempts.
         unique = sorted(set(read_errors))
         shown = ", ".join(unique[:5]) + (" …" if len(unique) > 5 else "")
         result.error = f"{len(unique)} file(s) unreadable: {shown}"
-    # Coverage notes a matcher accumulated (e.g. a truncated --deep sweep, #1222) — non-gating.
     result.notes.extend(coverage_notes or [])
-    # Honesty note (#1222): a normal scan does NOT content-scan vendored dependency CODE — only entry
     # points — so a payload in a non-entry node_modules file reads clean. Say so, so `clean` isn't
     # silently hollow, and point at the opt-in that does look. Coverage note, never gating.
     if opts is not None and root is not None and not getattr(opts, "deep", False):
@@ -124,10 +115,8 @@ def finalize(display: str, source: str, by_matcher: dict[str, list[Finding]],
 def scan_target(target, signatures_by_matcher: dict[str, list[dict[str, Any]]],
                 allowlist: list[dict[str, Any]] | None = None) -> ScanResult:
     """Scan ONE target with EVERY matcher, sequentially — the single-worker path and the reference
-    for the parallel path (#1325), which splits the same matchers across file-chunks and merges into
+    for the parallel path, which splits the same matchers across file-chunks and merges into
     the same `finalize`."""
-    # Flat view of every signature, so a matcher that corroborates against OTHER matchers' signatures
-    # (the evil-merge detector cross-checks the content-loader fingerprints) can reach them.
     all_sigs = [s for group in signatures_by_matcher.values() for s in group]
     order = list(signatures_by_matcher.keys())
     try:

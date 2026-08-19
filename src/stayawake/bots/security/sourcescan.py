@@ -23,18 +23,8 @@ def _shannon(s: str) -> float:
     return -sum((c / n) * math.log2(c / n) for c in counts.values())
 
 
-# A self-describing inline asset (image/font/media data-URI). Stripped before the density
-# and escape-run analysis so a legitimate `data:<mime>;base64,` blob does not inflate a
-# line's length/entropy. (base64 blobs are no longer a standalone signal — see #1212.)
 _DATA_URI = re.compile(r"data:[\w.+-]+/[\w.+-]+;base64,[A-Za-z0-9+/]+={0,2}", re.IGNORECASE)
 
-# A JS string-reassembly seam: a closing quote, a `+` (concat) OR `,` (array element)
-# separator, an opening quote — any whitespace/newlines between. Collapsing it rejoins
-# `"\\x41" + "\\x42"` AND `["\\x41","\\x42"].join("")` into one run. Only quote-SEP-quote
-# seams match, so a `+` inside a chunk, arithmetic `a + b`, a `["x", host]` array with a
-# variable, and a list separator in prose are all untouched. The downstream escape-run gate
-# (48+ run AND decoded byte-range AND entropy) is what keeps this FP-safe: reassembling a
-# legit string array that carries no dense escape run trips nothing.
 _CONCAT_SEAM = re.compile(r"['\"]\s*[,+]\s*['\"]")
 
 

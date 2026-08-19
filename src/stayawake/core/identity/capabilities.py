@@ -19,7 +19,6 @@ class Capability(str, Enum):
     ADMIN_READ = "admin_read"
 
 
-# Classic OAuth scope → capabilities it grants (coarse but reliable for `gh` / classic PATs).
 _SCOPE_GRANTS: dict[str, frozenset[Capability]] = {
     "repo": frozenset({
         Capability.REPO_READ, Capability.CONTENTS_WRITE, Capability.PULL_REQUESTS_WRITE,
@@ -43,7 +42,6 @@ def capabilities_from_oauth_scopes(scopes: frozenset[str] | set[str]) -> frozens
     return frozenset(out)
 
 
-# GitHub App installation permission name → capability at write (or read) level.
 _APP_PERM_WRITE: dict[str, Capability] = {
     "contents": Capability.CONTENTS_WRITE,
     "pull_requests": Capability.PULL_REQUESTS_WRITE,
@@ -60,7 +58,7 @@ _APP_PERM_READ: dict[str, Capability] = {
 
 def capabilities_from_app_permissions(perms: dict[str, str]) -> frozenset[Capability]:
     """Map a GitHub App installation `permissions` object to capabilities."""
-    out: set[Capability] = {Capability.REPO_READ}  # metadata is always granted on install
+    out: set[Capability] = {Capability.REPO_READ}
     for name, level in (perms or {}).items():
         key = name.lower()
         lvl = (level or "").lower()

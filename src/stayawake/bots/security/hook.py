@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""`saw hook` — scan-on-clone: scan a repo the moment its code lands on the machine (#1195).
+"""`saw hook` — scan-on-clone: scan a repo the moment its code lands on the machine.
 
 The dangerous window is between "a repo is cloned/pulled" and "I run something" — `npm install`
 firing a `postinstall`, an editor auto-running a `folderOpen` task — where a supply-chain worm
@@ -7,13 +7,13 @@ executes. GitHub has no clone webhook, so there is nothing to react to server-si
 LOCAL. `saw hook install` seeds git's `init.templateDir` so every FUTURE clone/init gets a
 `post-checkout` + `post-merge` hook that scans what just landed and warns BEFORE the payload can run.
 
-Design decisions (see the #1195 brainstorm):
+Design decisions (see the brainstorm):
 - **`init.templateDir`, not global `core.hooksPath`.** templateDir seeds a new repo's `.git/hooks`
   at clone/init time: forward-looking (future clones only), coexists with the repo's own hooks, and
   never hijacks existing repos' hook dispatch (which a global `core.hooksPath` would).
 - **Scan only what landed.** `post-checkout` on a CLONE (old rev = 40 zeros) → full-tree scan; a
   plain branch switch is skipped (that code was already on the machine). `post-merge` (pull) → scan
-  only the `ORIG_HEAD..HEAD` changed files (via `Target.include_only`, #1325) → near-instant.
+  only the `ORIG_HEAD..HEAD` changed files (via `Target.include_only`,) → near-instant.
 - **Trust: operator config only.** The hook scans UNTRUSTED just-cloned code, so it uses the packaged
   signatures + the OPERATOR's allowlist (baked in at install via `--config`), NEVER the cloned repo's
   own `config/security.yml` — a worm would ship an allowlist to whitelist itself.
@@ -43,14 +43,10 @@ from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.service.config import _options
 
-_MARKER = "stayawake-scan-on-clone"        # identifies OUR hook script (idempotent reinstall / detect)
-# post-checkout → clone + branch switch; post-merge → pull/merge; post-rewrite → rebase (incl
-# `git pull --rebase`) and `commit --amend`. Together these cover the ways OTHERS' code lands.
+_MARKER = "stayawake-scan-on-clone"
 _HOOKS = ("post-checkout", "post-merge", "post-rewrite")
-_NULL_REV = "0" * 40                        # git's "no previous rev" — a clone's post-checkout old-rev
-_BRAND = "StayAwakeBot"                      # the product name (the CLI is `saw`)
-# The concrete actions that would let a just-landed worm EXECUTE — spelled out, not just "run it",
-# so the warning is actionable. Shared by the infected + suspicious messages.
+_NULL_REV = "0" * 40
+_BRAND = "StayAwakeBot"
 _AVOID = ("install its dependencies (`npm install` / `pip install` / `yarn` / `pnpm`), open it in "
           "your editor/IDE (auto-run tasks & extensions fire on open), or build or run it")
 
@@ -59,7 +55,6 @@ class HookError(Exception):
     """A refusal that must NOT proceed (e.g. clobbering a foreign hook) — surfaced to the CLI."""
 
 
-# ── terminal UX (the shared colour vocabulary — utils.render + core.terminal) ───────────
 _LEVELS = {"ok": SEVERITY["ok"], "warn": SEVERITY["warning"], "dim": SEVERITY["info"]}
 
 
@@ -103,8 +98,6 @@ def _saw_executable() -> str:
 def _hook_script(event: str, saw: str, config: str | None) -> str:
     """A tiny POSIX-sh hook. It calls `saw hook run`, then chains to any preserved foreign hook
     (`<event>.local`), and ALWAYS exits 0 — a scan may warn, but must never break clone/checkout."""
-    # shlex.quote both baked paths so a space / `$` / quote / backtick in the saw or config path
-    # can't break the script or shell-expand (POSIX-sh quoting, honoured by git-for-windows' sh too).
     cfg = f" --config {shlex.quote(config)}" if config else ""
     return (
         "#!/bin/sh\n"
@@ -139,10 +132,10 @@ def _write_hooks(hooks_dir: Path, saw: str, config: str | None) -> None:
     for event in _HOOKS:                                     # then commit the writes
         dest = hooks_dir / event
         if dest.exists() and not _is_ours(dest):
-            preserved = hooks_dir / f"{event}.local"        # keep a foreign hook; our script chains to it
+            preserved = hooks_dir / f"{event}.local"
             dest.rename(preserved)
             os.chmod(preserved, 0o755)
-        if not is_safe_write_target(dest, hooks_dir):        # never write THROUGH a symlink (#1218)
+        if not is_safe_write_target(dest, hooks_dir):        # never write THROUGH a symlink
             raise HookError(f"refusing to write {dest} — it is a symlink or escapes {hooks_dir}")
         dest.write_text(_hook_script(event, saw, config), encoding="utf-8")
         os.chmod(dest, 0o755)
@@ -294,7 +287,7 @@ def _remember(root: Path, sha: str) -> None:
 def _scan_scope(event: str, argv: list[str], root: Path):
     """Decide what to scan for this event, as `(include_only, label)`:
       * `(None, label)`  → full-tree scan (a fresh clone / a pull with no ORIG_HEAD),
-      * `(tuple, label)` → scan only those changed files (#1325) — a pull or branch switch,
+      * `(tuple, label)` → scan only those changed files — a pull or branch switch,
       * `(False, None)`  → skip (a file checkout, or nothing changed). The caller skips on label None."""
     if event == "post-checkout":
         old, new, flag = (argv + ["", "", ""])[:3]
@@ -302,8 +295,6 @@ def _scan_scope(event: str, argv: list[str], root: Path):
             return False, None
         if old == _NULL_REV:                # a fresh clone → everything is new
             return None, "clone"
-        # A branch switch materialises possibly-never-scanned code into the working tree, so scan
-        # what CHANGED between the two refs (cheap, quiet when clean) — not skip it.
         changed = _changed_files(root, old, new)
         return (changed, "checkout") if changed else (False, None)
     if event == "post-merge":               # a pull/merge → scan only what the merge brought in
@@ -340,7 +331,7 @@ def _operator_scan(root: Path, include, config_path: str | None, display: str):
         return scan_target(target, sigs, allowlist)
 
 
-_TIMED_OUT = object()   # sentinel: the scan exceeded its wall-clock budget
+_TIMED_OUT = object()
 
 
 def _scan_within_budget(root: Path, include, config_path: str | None, display: str):

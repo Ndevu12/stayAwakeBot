@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""`saw guard` — install & verify the Strix CI gate across repos (#1229).
+"""`saw guard` — install & verify the Strix CI gate across repos.
 
 Thin CLI: parse args and delegate to `guard.check_targets` / `guard.setup_targets`, which resolve
-targets (local discovery / remote #1075 ladder), sweep, and stream — like `saw scan`/`saw fix`.
+targets (local discovery / remote ladder), sweep, and stream — like `saw scan`/`saw fix`.
 """
 from __future__ import annotations
 
@@ -157,7 +157,7 @@ def run_check(a: argparse.Namespace) -> int:
     from stayawake.bots.security import guard   # lazy: pull yaml/API in only when the command runs
 
     positionals = [*a.targets, *a.extra_paths]
-    remote = a.remote or bool(a.user) or bool(a.org) or bool(a.repo)   # any GitHub selector → remote
+    remote = a.remote or bool(a.user) or bool(a.org) or bool(a.repo)
     slugs = list(positionals) if remote else None
     if a.repo:                                    # --repo owner/name is sugar for a single remote target
         slugs = (slugs or []) + [a.repo]
@@ -171,7 +171,7 @@ def run_drift(a: argparse.Namespace) -> int:
     from stayawake.bots.security import guard   # lazy: pull yaml/API in only when the command runs
 
     positionals = [*a.targets, *a.extra_paths]
-    remote = a.remote or bool(a.user) or bool(a.org) or bool(a.repo)   # any GitHub selector → remote
+    remote = a.remote or bool(a.user) or bool(a.org) or bool(a.repo)
     slugs = list(positionals) if remote else None
     if a.repo:                                    # --repo owner/name is sugar for a single remote target
         slugs = (slugs or []) + [a.repo]

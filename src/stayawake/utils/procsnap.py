@@ -32,8 +32,8 @@ from pathlib import Path
 _CTL_KERN = 1
 _KERN_ARGMAX = 8
 _KERN_PROCARGS2 = 49
-_ARGMAX_FALLBACK = 256 * 1024          # if kern.argmax is unreadable, still bound the read
-_PS_TIMEOUT = 10                       # listing pids must never hang an audit
+_ARGMAX_FALLBACK = 256 * 1024
+_PS_TIMEOUT = 10
 
 
 @dataclass(frozen=True)
@@ -56,8 +56,8 @@ class Process:
 class Snapshot:
     """Every process this user could enumerate, and an honest account of what was refused."""
     processes: list[Process] = field(default_factory=list)
-    unreadable: int = 0                # enumerated, but argv refused (almost always another uid)
-    supported: bool = True             # False on a platform with no argv source at all
+    unreadable: int = 0
+    supported: bool = True
 
     def scope_note(self) -> str:
         """What this snapshot did NOT see — for a report that must not imply it saw everything."""
@@ -94,12 +94,11 @@ def _argv_from_procargs2(pid: int, argmax: int) -> tuple[str, ...] | None:
     argc = int.from_bytes(raw[:4], sys.byteorder)
     if argc <= 0:
         return None
-    # The exec path follows argc, then NUL padding, then the arguments themselves.
     parts = raw[4:].split(b"\0")
     args, seen_path = [], False
     for part in parts:
         if not seen_path:
-            seen_path = True            # the first field is the exec path, not argv[0]
+            seen_path = True
             continue
         if not part and not args:
             continue                    # alignment padding between the path and argv[0]

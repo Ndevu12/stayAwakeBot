@@ -18,8 +18,6 @@ class Intent(str, Enum):
     READ_ADMIN = "read_admin"
 
 
-# Required capabilities per intent. OPEN_GUARD_PR uniquely needs WORKFLOWS_WRITE — GitHub
-# rejects pushes that create/update `.github/workflows/*` without it.
 _REQUIREMENTS: dict[Intent, frozenset[Capability]] = {
     Intent.READ_REMOTE: frozenset({Capability.REPO_READ}),
     Intent.OPEN_FIX_PR: frozenset({

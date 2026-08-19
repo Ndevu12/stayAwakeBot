@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The bare-`saw` welcome banner and the `saw intro` tour (issue #1177).
+"""The bare-`saw` welcome banner and the `saw intro` tour (issue).
 
 Pure string builders — no I/O, no state, no new dependencies. The dispatcher prints
 `render_welcome()` when `saw` runs with no command; `saw intro` prints `render_intro()`.
@@ -19,7 +19,6 @@ from __future__ import annotations
 
 from stayawake.utils.terminal import ColorLevel
 
-# ── the endorsed "SAW" wordmark, composed from fixed-width letter grids (columns always align) ──
 _S = [" █████", "██    ", " ████ ", "    ██", "█████ "]
 _A = ["  ███  ", " █████ ", "██   ██", "███████", "██   ██"]
 _W = ["██   ██", "██   ██", "██ █ ██", "███████", " ██ ██ "]
@@ -27,7 +26,6 @@ SAW_LOGO = "\n".join("  ".join(cells) for cells in zip(_S, _A, _W))
 _LOGO_LINES = SAW_LOGO.split("\n")
 _LOGO_W = max(len(ln) for ln in _LOGO_LINES)
 
-# ── semantic palette: (truecolor rgb, ansi-256, ansi-16 SGR) ──────────────────────────────
 _MINT  = ((126, 231, 176), 114, "92")
 _GREEN = ((76, 208, 125), 78, "32")
 _CYAN  = ((95, 211, 221), 80, "96")

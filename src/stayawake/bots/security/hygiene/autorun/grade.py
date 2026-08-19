@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Autorun GRADING (#1333) — fuse novelty + provenance + content-shape + correlation into one verdict.
+"""Autorun GRADING — fuse novelty + provenance + content-shape + correlation into one verdict.
 
 No single signal is enough: a signature misses a novel payload; a bare diff alarms on every install; a
 bare provenance check flags a legitimately hand-installed agent. Fused, they separate a foothold from a
@@ -7,7 +7,7 @@ legit install accurately — and the fusion is what lets a NOVEL payload be flag
 (it is unattributed, runs from a scratch path, and something new appeared), while a signed package agent
 stays quiet even though it, too, is new.
 
-Grades map onto the existing hygiene severities so they flow through #1332's rotation-safety contract:
+Grades map onto the existing hygiene severities so they flow through's rotation-safety contract:
 a high-confidence foothold is a `warning` under `autorun-unattributed-foothold` (an ACTIVE_PERSISTENCE
 id → rotation UNSAFE, exit 3); a merely-new unattributed entry is an `info` review item. Novelty NEVER
 escalates on its own, and — the load-bearing property — provenance/content/correlation run on EVERY
@@ -83,7 +83,7 @@ class Invocation:
 
     Four consumers used to answer this separately — which file to read, whether referenced content is
     shell, which arguments are code, which lines take shell grammar — from argv[0] or from a regex over
-    the joined argv. Four partial answers to one question is how they disagreed (#1393)."""
+    the joined argv. Four partial answers to one question is how they disagreed."""
     interpreter: str | None = None
     is_posix_shell: bool = False
     payload_path: str | None = None
@@ -497,7 +497,7 @@ def _shell_context_text(entry, referenced: str) -> list[str]:
     command position — joining them would anchor only the first.
 
     `shell_lines` is the parser's answer — every Exec* directive, continuations joined. The unit BODY
-    is excluded: that is where a JS template literal or a comment lives (#1393)."""
+    is excluded: that is where a JS template literal or a comment lives."""
     parts, seen_code = [], []
     for line_argv in _command_argvs(entry):
         code_args = shell_code_args(line_argv)
@@ -539,15 +539,13 @@ class ContentSignal:
 def content_signal(entry, *, read_referenced: bool = False) -> ContentSignal:
     """Run the content-shape engines on the entry's command + body — and, when `read_referenced`
     (used for UNATTRIBUTED entries, where the referenced script is worth reading), on the referenced
-    script's content too. `hit` is a decisive shape (act-now regardless of owner).
-
-    #1335 — a malicious daemon that polls a legitimate endpoint (e.g. `api.github.com` every 60s) can't
+    script's content too. `hit` is a decisive shape (act-now regardless of owner). — a malicious daemon that polls a legitimate endpoint (e.g. `api.github.com` every 60s) can't
     be caught by WHERE it connects; the discriminating features are BEHAVIOURAL, and for a script-based
     daemon they are STATIC: the poll interval is a literal in the code / the persistence artifact, and a
     persistence entry is non-interactive (no TTY, launchd/systemd-spawned) BY CONSTRUCTION. So we fuse,
     never blocklist a destination:
       * decisive `hit` — a fetch/decode-to-shell command, a decode→execute dropper, OR the dead-man
-        self-destruct shape (#1334's corroborated `$HOME`-wipe) in the daemon's own code. The Mini
+        self-destruct shape in the daemon's own code. The Mini
         Shai-Hulud wiper is plain code (poll → on token-revoke, delete `$HOME`), NOT a decode→exec
         dropper, so fusing `detect_destructive` here is what actually catches it.
       * corroborating reason — a short poll interval (the timer the dead-man loop runs on). Never

@@ -57,12 +57,6 @@ def evil_merge_paths(repo: str | Path, merge_sha: str, content_sig=None,
     if len(ps) < 2:
         return {}
 
-    # The auto-merge is the ONLY baseline an evil-merge claim can rest on. When there is none —
-    # unrelated histories (no merge base), an octopus, a git too old for `merge-tree --write-tree` —
-    # a parent tree is NOT a substitute: measured against the first parent, every path the other
-    # side contributed reads as introduced by the merge, so an ordinary sync merge of two roots
-    # reported 18 paths as an attack. Without a baseline the structural question is unanswerable,
-    # so only CONTENT is asked, and the merge yields findings solely for infected bytes.
     merged = auto_merge(repo, ps[0], ps[1]) if len(ps) == 2 else None
     if merged is None:
         base_tree, conflicted = ps[0], None

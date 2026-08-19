@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Actionable remediation for a flagged dependency (#1252).
+"""Actionable remediation for a flagged dependency.
 
 The scanner already knows *what* is wrong (advisory X affects package Y) and — for a bounded CVE — the
 first patched version (`AdvisoryMatch.fixed`). This module turns that into advice a reader can act on:

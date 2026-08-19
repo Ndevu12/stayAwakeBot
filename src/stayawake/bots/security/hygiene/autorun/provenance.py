@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Autorun PROVENANCE (#1333) — approximate "who put this here" without process-level visibility.
+"""Autorun PROVENANCE — approximate "who put this here" without process-level visibility.
 
-`saw` is an unprivileged static scanner; it cannot see which process wrote a file (that is the #1338
+`saw` is an unprivileged static scanner; it cannot see which process wrote a file (that is the
 question). But it CAN read what the entry is statically attributable to, and that is most of the way
 there: is the referenced executable owned by a package, shipped inside an app bundle, code-signed, or
 sitting in a system/package path — versus unowned, unsigned, and running out of a scratch / cache /

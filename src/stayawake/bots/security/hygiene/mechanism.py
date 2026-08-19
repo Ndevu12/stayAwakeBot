@@ -2,7 +2,7 @@
 """Mechanism-based persistence & backdoor sinks (wave-agnostic): ~/.ssh/authorized_keys, shell startup
 files, and exec-on-every-git-command git config. Matches the MECHANISM (not a campaign's named IoC),
 so a renamed variant — or a GhostApproval/SymJacking write-redirect into a user config file — is still
-caught (#1161)."""
+caught."""
 from __future__ import annotations
 
 import os

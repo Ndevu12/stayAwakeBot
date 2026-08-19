@@ -9,7 +9,6 @@ from dataclasses import dataclass
 class PushFailure:
     """Typed push refusal — `reason` drives UX; `detail` is the raw stderr snippet."""
     reason: str
-    # reason: workflow_scope | signed_commits | forbidden | auth | network | unknown
     detail: str = ""
 
 

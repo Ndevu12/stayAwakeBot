@@ -73,7 +73,7 @@ def is_shell_interpreter(program: str) -> bool:
     return tail in SHELL_INTERPRETERS
 
 
-# ── 4. DESTRUCTIVE-WIPE CAPABILITY (#1334) ──────────────────────────────────────────────────────
+# ── 4. DESTRUCTIVE-WIPE CAPABILITY ──────────────────────────────────────────────────────
 # The worm's self-destruct / evidence-removal routine: a recursive filesystem walk ROOTED AT THE USER'S
 # HOME (or the filesystem root) co-occurring with DELETION — and, reported distinctly, with OVERWRITE-
 # then-delete (a SECURE wipe that makes the data unrecoverable). Detection is a CORROBORATED co-occurrence

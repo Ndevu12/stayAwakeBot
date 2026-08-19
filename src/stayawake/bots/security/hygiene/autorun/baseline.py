@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Autorun BASELINE (#1333) — cross-run state that adds a NOVELTY signal, and is never trusted for safety.
+"""Autorun BASELINE — cross-run state that adds a NOVELTY signal, and is never trusted for safety.
 
 The baseline records `{entry-path → content-digest}` from a prior run so a later run can tell what is
 NEW or CHANGED. Crucially it is an ENHANCEMENT, not a trust boundary: a user-level worm runs as the
@@ -38,7 +38,7 @@ def baseline_path() -> Path:
 
 def is_ephemeral() -> bool:
     """A disposable host (CI runner) where every run is a first run — no point reading/writing a
-    longitudinal baseline. Ties to #1337's environment distinction without depending on it."""
+    longitudinal baseline. Ties to's environment distinction without depending on it."""
     return env.is_ci()
 
 

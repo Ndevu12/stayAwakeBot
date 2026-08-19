@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""External-auditor orchestration (#1125).
+"""External-auditor orchestration.
 
 Runs each *installed* opted-in auditor over the target and returns their findings, de-duped —
 within the external set, and against the offline-corpus advisories already emitted (`seen`). Adding

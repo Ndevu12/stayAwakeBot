@@ -26,8 +26,6 @@ def resolve_writable_dir(preferred: str | Path, *, label: str = "reports") -> Pa
     for candidate in (preferred, Path(tempfile.gettempdir()) / "stayawake-reports"):
         try:
             candidate.mkdir(parents=True, exist_ok=True)
-            # mkdir(exist_ok=True) succeeds on a dir owned by another uid; prove we can
-            # actually create a file before trusting it.
             fd, probe = tempfile.mkstemp(dir=str(candidate), prefix=".probe-")
             os.close(fd)
             os.remove(probe)
@@ -37,7 +35,6 @@ def resolve_writable_dir(preferred: str | Path, *, label: str = "reports") -> Pa
             print(f"warning: {label} directory {preferred} is not writable; "
                   f"writing to {candidate} instead", file=sys.stderr)
         return candidate
-    # Last resort: a unique, current-user-owned dir (always writable, never collides).
     last = Path(tempfile.mkdtemp(prefix="stayawake-reports-"))
     print(f"warning: {label} directory {preferred} is not writable; "
           f"writing to {last} instead", file=sys.stderr)
@@ -53,7 +50,7 @@ def reports_dir_choice(explicit: str | Path | None = None, *,
 
     Separate from `resolve_reports_dir` so a caller can tell "nobody asked, write nothing" apart from
     "asked, and here is where". Conflating the two is what made the env and settings rungs
-    unreachable (#1454): the only caller gated on its own `explicit` value, so the `or` chain could
+    unreachable: the only caller gated on its own `explicit` value, so the `or` chain could
     never reach past the first rung. Both functions read the precedence from HERE, so a consumer can
     never re-derive a different answer."""
     return explicit or env.get(env.STAYAWAKE_REPORTS_DIR) or settings_value or None

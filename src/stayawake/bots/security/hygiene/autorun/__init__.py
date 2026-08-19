@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Autorun-surface monitor (#1333) — catch a NOVEL foothold in a KNOWN location without a signature.
+"""Autorun-surface monitor — catch a NOVEL foothold in a KNOWN location without a signature.
 
 Signature matching asks "does this location hold something I already recognise?" and fails on a novel
 payload by construction — and with the worm's source public, novel variants are the expected case. This

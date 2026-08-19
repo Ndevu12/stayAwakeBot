@@ -25,7 +25,7 @@ from typing import Iterator, TextIO
 
 from stayawake.utils import env
 
-_WORD = re.compile(r"\S+\s*|\s+")   # a word + its trailing ws, or a run of ws (keeps newlines)
+_WORD = re.compile(r"\S+\s*|\s+")
 
 
 def _disabled_by_env() -> bool:

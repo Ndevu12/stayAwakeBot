@@ -11,7 +11,7 @@ import re
 from stayawake.bots.security.sourcescan import _shannon
 
 
-# ── Wrap/concat-resistant escape-payload-at-rest detection (#1053 Tier-2 hardening) ──
+# ── Wrap/concat-resistant escape-payload-at-rest detection ──
 # A payload encoded as a dense run of \xNN/\uNNNN escapes decoded at runtime (Buffer.from /
 # fromCodePoint) can dodge the escape-run detector by splitting into short quoted chunks
 # joined by `+`/`,` (`"\\x41\\x42" + "\\x43…"`), whose quote/sep/space seams break the run.

@@ -9,7 +9,7 @@ propagation surfaces, and report actionable hygiene issues. Split per concern in
   * os_service     — a planted OS service / launch agent (the rotation wiper)
   * host_artifacts — staged ingress tooling / exfil drop-files
   * editor         — VS Code auto-run tasks + Workspace Trust
-  * mechanism      — wave-agnostic sinks: ~/.ssh, shell startup files, exec-on-git-command config (#1161)
+  * mechanism      — wave-agnostic sinks: ~/.ssh, shell startup files, exec-on-git-command config
   * remote         — repository branch protection (the only enforced CI gate)
 
 `audit_checks()` here is the SINGLE composition site — neither `audit()` nor the streaming CLI may
@@ -80,12 +80,12 @@ def audit_checks(slug: str | None = None, token: str | None = None, branch: str 
         ("VS Code settings", check_vscode),
         ("self-hosted runner", check_runner_persistence),
         ("OS-service persistence", check_persistence),
-        ("persistence surface coverage", check_persistence_coverage),   # #1332 enumeration honesty
+        ("persistence surface coverage", check_persistence_coverage),   # enumeration honesty
         ("host drop-files", lambda: check_host_artifacts(verify=verify_artifacts)),
         ("SSH authorized_keys", check_ssh_authorized_keys),
         ("shell startup files", check_shell_profile),
         ("git exec config", check_git_config_execution),
-        ("autorun surface", check_autorun),                             # #1333 novel-foothold monitor
+        ("autorun surface", check_autorun),                             # novel-foothold monitor
         ("branch protection", lambda: check_branch_protection(slug, token, branch)),
     ]
 
@@ -132,7 +132,7 @@ def _banner(issue_ids: set[str], *, color: bool, width: int) -> list[str]:
 
 
 def _rotation_verdict(issues: list[HygieneIssue], *, color: bool, width: int) -> list[str]:
-    """The run-level ROTATION-SAFETY verdict (#1332) — ALWAYS stated, reachable even with zero
+    """The run-level ROTATION-SAFETY verdict — ALWAYS stated, reachable even with zero
     findings. Says explicitly whether credential rotation is safe, because rotating while a
     `gh-token-monitor` daemon is live arms a home-directory wiper. Three states (see models):
     SAFE (surface enumerated + clean), UNSAFE-persistence (a live foothold → the isolate/rotate-LAST
@@ -164,7 +164,7 @@ def _rotation_verdict(issues: list[HygieneIssue], *, color: bool, width: int) ->
 
 def _unknown_surface_disclosure(issues: list[HygieneIssue], *, color: bool, width: int) -> list[str]:
     """What is UNKNOWN about the persistence surface, and what to do about it — which locations exist
-    but could not be read, or that the surface is wholly ABSENT and so was never enumerated (#120).
+    but could not be read, or that the surface is wholly ABSENT and so was never enumerated.
     Keyed off the id (never off the verdict, and never off `severity`), so the disclosure survives
     whichever verdict outranks it.
 
@@ -186,9 +186,9 @@ _SCOPE_DOCS = ("https://github.com/Ndevu12/stayAwakeBot/blob/main/docs/how-to/au
 
 
 def _scope_note(issues: list[HygieneIssue], *, color: bool, width: int) -> list[str]:
-    """REVEAL what this audit does not scan (#1341), so no result is read as a host all-clear over the
-    locations supply-chain malware stages in. These are tracked GAPS on a path to closure (#1376 global
-    npm prefix, #1377 Docker images/volumes, #1378 `/var/tmp`-class survivors and other mounts, #1373
+    """REVEAL what this audit does not scan, so no result is read as a host all-clear over the
+    locations supply-chain malware stages in. These are tracked GAPS on a path to closure ( global
+    npm prefix, Docker images/volumes, `/var/tmp`-class survivors and other mounts,
     account-level state, and the Windows autorun surface — enumerated nowhere in the tool, so a
     Windows host produces no persistence findings at all), never accepted out-of-scope. Always shown; presentation only — never a
     finding, never affects the verdict or exit code.
@@ -199,7 +199,7 @@ def _scope_note(issues: list[HygieneIssue], *, color: bool, width: int) -> list[
 
     Both halves track the run state, because one fixed sentence misdescribes two of the three:
 
-    * WHAT WAS READ — when the persistence surface could not be fully enumerated (#1332 UNKNOWN), a flat
+    * WHAT WAS READ — when the persistence surface could not be fully enumerated, a flat
       "reads the host persistence surface" would restate, as the report's last word, the very over-claim
       the verdict four lines above just withdrew.
     * WHAT IT MEANS — "a clean result does not exclude those" is inapplicable once something WAS found;
@@ -247,7 +247,7 @@ def render(issues: list[HygieneIssue], *, color: bool = False, width: int = 80) 
     core.terminal.supports_color) and `width` (terminal columns, from core.render.term_width)
     default to plain/80 so a piped or test invocation is deterministic. Findings are grouped
     worst-first (warnings to act on, then weaker items to review); long detail/fix/runbook lines
-    wrap to `width` with a hanging indent. The run-level rotation-safety verdict (#1332) always
+    wrap to `width` with a hanging indent. The run-level rotation-safety verdict always
     leads — reachable even when no individual finding is present."""
     rotation = _rotation_verdict(issues, color=color, width=width)
 

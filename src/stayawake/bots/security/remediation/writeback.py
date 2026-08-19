@@ -15,7 +15,7 @@ from stayawake.bots.security.remediation.classify import Recovery, Suggested
 
 def _backup_write_verify(root: Path, rel: str, new_text: str, quarantine: Path, content_sig) -> bool:
     """The shared write TAIL of every remediation (git RESTORE, git-corroborated EXCISION, and the
-    computed #1209 strip): back up the current file to `quarantine`, write `new_text`, then
+    computed strip): back up the current file to `quarantine`, write `new_text`, then
     verify-or-revert — the written file must read back byte-identical AND carry neither a loader
     literal nor an exec sink (`_carries_payload`), else the original is restored. One home for the
     backup + verify + revert net so it is identical for every write path (never downgraded)."""
@@ -41,7 +41,7 @@ def _apply_seam_excision(root: Path, rel: str, expected: str, quarantine: Path, 
     live bytes; if the file changed since classify, the strip differs and we refuse. Then the
     shared backup → write → verify-or-revert tail.
 
-    Shared by a GIT-CORROBORATED `Recovery(excised=True)` and a COMPUTED `Suggested` (#1209): the
+    Shared by a GIT-CORROBORATED `Recovery(excised=True)` and a COMPUTED `Suggested`: the
     WRITE safety is byte-for-byte identical; they differ ONLY in provenance (whether a clean ancestor
     corroborated `expected`), which the caller reflects in a separate commit / PR section, never in
     the bytes or the proof."""
@@ -57,7 +57,7 @@ def _apply_seam_excision(root: Path, rel: str, expected: str, quarantine: Path, 
 
 
 def _apply_whole_file_restore(root: Path, rel: str, expected: str, quarantine: Path, content_sig) -> bool:
-    """Write a WHOLE-FILE restore (a clean 3-way-merge version, #1363), re-proving `expected` against
+    """Write a WHOLE-FILE restore (a clean 3-way-merge version,), re-proving `expected` against
     the bytes on disk NOW with the SAME gates a non-excised `Recovery` uses — NOT `_seam_strip`, which
     is specific to concealment-seam excisions. `expected` must be a safe write target, carry no
     payload, be `current` minus a provably payload-only delta (`_safe_to_recover`) with no fabricated
@@ -110,7 +110,7 @@ def apply_recovery(repo, rec: Recovery, quarantine: Path, content_sig) -> bool:
 
 
 def apply_suggested(repo, sug: "Suggested", quarantine: Path, content_sig) -> bool:
-    """Apply a COMPUTED (non-git-corroborated) concealment-seam strip — the #1209 Tier-2 write.
+    """Apply a COMPUTED (non-git-corroborated) concealment-seam strip — the Tier-2 write.
     Byte-for-byte the SAME safety as an excised `Recovery` (re-prove `_seam_strip` on the live file,
     then backup → write → verify-or-revert, all via the shared `_apply_seam_excision`). The ONLY
     difference is that no clean ancestor corroborated it, so the CALLER lands it as a separate,
@@ -118,7 +118,7 @@ def apply_suggested(repo, sug: "Suggested", quarantine: Path, content_sig) -> bo
     anchor for the one residual the git-match would otherwise close (a scanner-invisible injection
     in the kept code). Never auto-merged; never presented as a corroborated fix.
 
-    A "restore"-mode Suggested (#1363: a clean 3-way-merge version for a file born via an evil merge)
+    A "restore"-mode Suggested (a clean 3-way-merge version for a file born via an evil merge)
     re-proves through the whole-file restore gates instead of `_seam_strip` — same write safety, still
     review-required."""
     if getattr(sug, "apply_mode", "seam") == "restore":

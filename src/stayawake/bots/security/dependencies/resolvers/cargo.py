@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Rust / Cargo resolver — Cargo.lock → `pkg:cargo/…` PURLs (#1123).
+"""Rust / Cargo resolver — Cargo.lock → `pkg:cargo/…` PURLs.
 
 Cargo.lock is a TOML `[[package]]` array (same shape as poetry.lock / uv.lock), so it reuses the
 shared `toml_packages` parser. Crate names and versions map 1:1 onto the OSV `crates.io` ecosystem.

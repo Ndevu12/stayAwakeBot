@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""npm-ecosystem resolver — package.json + npm/yarn/pnpm lockfiles → `Purl`s (#1119).
+"""npm-ecosystem resolver — package.json + npm/yarn/pnpm lockfiles → `Purl`s.
 
 Relocated verbatim (behaviour-preserving) from the pre-refactor `dependency_audit` matcher.
 yarn and pnpm packages are npm-registry packages, so all three lockfile formats resolve to

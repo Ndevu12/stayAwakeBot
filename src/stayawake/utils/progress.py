@@ -26,7 +26,7 @@ from stayawake.utils import textsafe
 from stayawake.utils.render import LINK, STATUS, paint, term_width
 
 _FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
-_MAX_INFLIGHT_LINES = 8   # cap the live region height; excess in-flight targets collapse to a tally
+_MAX_INFLIGHT_LINES = 8
 
 
 def _tag_color(tag: str) -> str | None:
@@ -93,10 +93,10 @@ class LiveProgress(ProgressReporter):
         self._lock = threading.Lock()
         self._total = 0
         self._done = 0
-        self._active: dict[str, None] = {}     # insertion-ordered set of in-flight labels
-        self._pending: list[str] = []          # permanent completion lines awaiting flush
+        self._active: dict[str, None] = {}
+        self._pending: list[str] = []
         self._spin = 0
-        self._drawn = 0                        # lines the live region currently occupies
+        self._drawn = 0
         self._start_ts = 0.0
         self._running = False
         self._thread: threading.Thread | None = None
@@ -161,8 +161,6 @@ class LiveProgress(ProgressReporter):
         elapsed = int(time.monotonic() - self._start_ts)
         spin = _FRAMES[self._spin % len(_FRAMES)]
         self._spin += 1
-        # Show DONE and RUNNING distinctly: a bare "0/38" early in a sweep reads as stuck / as if it
-        # were counting the wrong thing, when in fact several repos are already in flight.
         running = len(self._active)
         header = self._fit(f"{spin} {self._verb} {self._total} repos — "
                            f"{self._done} done · {running} running · {elapsed}s")
@@ -177,8 +175,6 @@ class LiveProgress(ProgressReporter):
 
     def _completion_line(self, label: str, tag: str, detail: str, block: str | None = None) -> str:
         safe = textsafe.plain(label, limit=200)
-        # Fit the PLAIN header to width first, then colour the tag — so truncation never cuts an
-        # ANSI reset (colour bleed) and the width maths counts visible characters, not bytes.
         line = self._fit(_header_line(self._done, self._total, tag, safe, detail))
         painted = paint(tag, _tag_color(tag), on=self._color)
         header = line.replace(tag, painted, 1) if self._color else line

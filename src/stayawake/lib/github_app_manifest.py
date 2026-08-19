@@ -21,7 +21,6 @@ from typing import Any
 
 from stayawake.lib import github_app
 
-# Permissions required for scan / fix PR / guard workflow PR / optional issue alerts.
 DEFAULT_PERMISSIONS = {
     "metadata": "read",
     "contents": "write",
@@ -46,7 +45,7 @@ def app_icon_path() -> Path | None:
 
 
 def _state_matches(got: str | None, nonce: str) -> bool:
-    """True iff `got` (a request's `state` query value) equals the run's `nonce` (#1292). Fails CLOSED
+    """True iff `got` (a request's `state` query value) equals the run's `nonce`. Fails CLOSED
     on a missing/empty value, and uses a constant-time compare so a near-miss leaks no timing signal."""
     return bool(got) and secrets.compare_digest(got, nonce)
 
@@ -112,10 +111,6 @@ def register_via_browser(*, name: str = _MANIFEST_NAME, open_browser: bool = Tru
         "code": None, "error": None,
         "installation_id": None, "setup_error": None,
     }
-    # Anti-CSRF nonce bound to THIS run (#1292). It rides GitHub's own `state` param: baked into the
-    # new-app form action (echoed back to /callback) and into setup_url (returned to /setup). A forged
-    # local request to the ephemeral loopback port can't know it, so /callback and /setup reject any
-    # request whose `state` doesn't match. Constant-time compared to avoid a timing oracle.
     nonce = secrets.token_urlsafe(32)
     registered = threading.Event()
     installed = threading.Event()
@@ -135,7 +130,6 @@ def register_via_browser(*, name: str = _MANIFEST_NAME, open_browser: bool = Tru
                     setup_url=f"http://127.0.0.1:{port}/setup?state={nonce_q}",
                     name=name,
                 )
-                # state on the new-app form action → GitHub echoes it to /callback with the code.
                 new_app_url = f"https://github.com/settings/apps/new?state={nonce_q}"
                 body = _start_page(manifest, new_app_url=new_app_url).encode("utf-8")
                 self._ok(body)
@@ -189,7 +183,7 @@ def register_via_browser(*, name: str = _MANIFEST_NAME, open_browser: bool = Tru
             self.end_headers()
 
         def _state_ok(self, qs: dict) -> bool:
-            """True iff the request carries the run's anti-CSRF `state` nonce (#1292)."""
+            """True iff the request carries the run's anti-CSRF `state` nonce."""
             return _state_matches((qs.get("state") or [None])[0], nonce)
 
         def _ok(self, body: bytes) -> None:
@@ -267,7 +261,7 @@ def _html(title: str, body: str) -> bytes:
 def _start_page(manifest: dict, *,
                 new_app_url: str = "https://github.com/settings/apps/new") -> str:
     """Auto-submitting HTML form that posts the manifest to GitHub's new-app endpoint. `new_app_url`
-    carries the per-run `?state=` nonce (#1292) so GitHub echoes it back to /callback for CSRF
+    carries the per-run `?state=` nonce so GitHub echoes it back to /callback for CSRF
     verification; it is HTML-escaped into the form action like the manifest body."""
     manifest_json = json.dumps(manifest)
     def _esc(s: str) -> str:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""`saw hook` — scan-on-clone (#1195). Install global git hooks that scan a repo the moment it is
+"""`saw hook` — scan-on-clone. Install global git hooks that scan a repo the moment it is
 cloned/pulled, so a supply-chain worm is caught BEFORE `npm install` or an editor auto-run fires.
 
 Thin CLI: parse args and delegate to `bots.security.hook`. `saw hook run` is the internal entry the
@@ -69,9 +69,6 @@ def register(sub) -> None:
             ("saw hook status", "is it active, and where is its state?"),
         ])
 
-    # Internal — invoked by the installed git hook, never by a person. Passing NO `help=` is what
-    # keeps it out of the listing: argparse only skips a SUPPRESSed subcommand at the top level, so
-    # `help=argparse.SUPPRESS` printed a literal "run  ==SUPPRESS==" row instead of hiding it.
     rn = hsub.add_parser("run")
     rn.add_argument("-c", "--config", default=None)
     rn.add_argument("event")

@@ -153,7 +153,7 @@ def check_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
                   fail: bool = False, no_stream: bool = False, jobs: int | None = None) -> int:
     """`saw guard check` across many repos. LOCAL by default (discover git repos under the given
     paths / configured `targets.local` / the enclosing repo); `remote=True` (or naming users/orgs)
-    resolves GitHub repos via the #1075 ladder and checks each over the API. The latest Strix release
+    resolves GitHub repos via the ladder and checks each over the API. The latest Strix release
     is resolved ONCE and reused for every repo's freshness. A multi-repo sweep checks up to `jobs`
     repos at once (AUTO by default; `-j 1` forces sequential); results render in target order.
     Returns 2 on a missing --config, 1 when `fail` and any gate isn't a healthy pinned Strix gate,
@@ -232,7 +232,7 @@ def drift_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
                   jobs: int | None = None) -> int:
     """`saw guard drift` across many repos — same target model as `saw guard check`. LOCAL by default
     (discover git repos under the given paths / configured `targets.local` / the enclosing repo);
-    `remote=True` (or naming users/orgs) resolves GitHub repos via the #1075 ladder. For each repo it
+    `remote=True` (or naming users/orgs) resolves GitHub repos via the ladder. For each repo it
     grades the pinned Strix gate and files/refreshes/closes ONE de-duplicated drift issue. The latest
     Strix release is resolved ONCE and reused. A multi-repo sweep runs up to `jobs` repos at once
     (AUTO by default; `-j 1` forces sequential); each repo files only its OWN issue. Returns 2 on a
@@ -319,7 +319,7 @@ def setup_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
                   jobs: int | None = None) -> int:
     """`saw guard setup` across many repos, like `saw fix`. LOCAL by default (discover git repos;
     write/prepare the gate into each working tree, or `--pr` to open a PR each); `remote=True`
-    resolves GitHub repos via the #1075 ladder, clones each, and opens a PR (a remote repo has no
+    resolves GitHub repos via the ladder, clones each, and opens a PR (a remote repo has no
     working tree, so `--pr` is implied). Never pushes to a default branch. A multi-repo sweep runs up
     to `jobs` repos at once (AUTO by default; `-j 1` forces sequential) — each repo works in its own
     clone/worktree so concurrency never crosses repos. Returns 2 on a missing --config, 1 if any repo

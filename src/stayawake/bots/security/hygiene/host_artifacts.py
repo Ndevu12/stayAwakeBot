@@ -73,7 +73,7 @@ def _staged_secret_scanner(dirs) -> Path | None:
 
 def _host_artifacts() -> tuple[list[str], list[tuple[str, Path]]]:
     """Return (strong, weak) detected host-IoC drop artifacts. `strong` are descriptions; `weak` are
-    (description, path) pairs so a caller can optionally content-scan the path to corroborate (#1221)."""
+    (description, path) pairs so a caller can optionally content-scan the path to corroborate."""
     home = Path.home()
     tmp_dirs = sorted({Path("/tmp"), Path(tempfile.gettempdir())}, key=str)
     strong: list[str] = []
@@ -164,10 +164,10 @@ def check_host_artifacts(verify: bool = False) -> list[HygieneIssue]:
 
     FP-bounded: a strong/specific IoC or a corroborated set (>=2) is a `warning`; a lone weak
     indicator is `info`. SAFETY: a positive means persistence may be live, so the remediation
-    follows the rotate-LAST order (#1088) — never advise rotating a credential first.
+    follows the rotate-LAST order — never advise rotating a credential first.
 
     `verify=True` (the `saw audit --verify` opt-in) content-scans a lone weak *directory*
-    to turn it into an actual verdict (#1221): CONFIRMED worm markers inside → `warning`; scanned
+    to turn it into an actual verdict: CONFIRMED worm markers inside → `warning`; scanned
     clean → a reassuring `info`; too large / unreadable → the same honest 'verify it yourself'."""
     strong, weak = _host_artifacts()
     weak_descs = [desc for desc, _ in weak]
@@ -203,7 +203,7 @@ def check_host_artifacts(verify: bool = False) -> list[HygieneIssue]:
 
 
 def _verify_weak_artifact(item: tuple[str, Path]) -> list[HygieneIssue] | None:
-    """Content-scan one lone weak artifact and grade honestly (#1221). Returns None when the artifact
+    """Content-scan one lone weak artifact and grade honestly. Returns None when the artifact
     is not a scannable directory (e.g. a lone `get-pip.py` file) so the caller falls back to the
     honest 'verify it yourself' info. The scanner import is LOCAL so the default audit (no
     `--verify`) never pulls the scan engine in."""

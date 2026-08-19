@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PHP / Composer resolver — composer.lock → `pkg:composer/…` PURLs (#1123).
+"""PHP / Composer resolver — composer.lock → `pkg:composer/…` PURLs.
 
 `composer.lock` is JSON with `packages` (+ `packages-dev`), each `{name: "vendor/pkg", version}`.
 Composer sometimes prefixes tags with `v` (`v1.2.3`); the OSV `Packagist` ecosystem uses the bare

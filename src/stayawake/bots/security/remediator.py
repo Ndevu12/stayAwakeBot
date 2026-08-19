@@ -46,7 +46,7 @@ def _options(settings: dict) -> ScanOptions:
 
 
 def _resolve_config(config_path: str | None):
-    """Load the config without ever crashing on a missing file (#1054). None → the packaged
+    """Load the config without ever crashing on a missing file. None → the packaged
     default if it exists, else an empty config — so `saw fix`/`saw discard` work on the
     current repo with no config. An explicit --config that is missing is a clear error."""
     if config_path is None:
@@ -80,7 +80,6 @@ def _preflight(token: str | None, intent=None) -> str | None:
     if not token:
         sess = Session(token=None, source=None, kind="none", live=False)
     else:
-        # Use this module's `github_api` / `env` so tests can patch remediator.github_api.*.
         live = github_api.token_is_valid(token, env.github_repository())
         scopes = github_api.oauth_scopes(token)
         caps = capabilities_from_oauth_scopes(scopes) if scopes is not None else None
@@ -105,7 +104,7 @@ def _disp(repo: Path) -> str:
 
 
 def _needs_review(text: str) -> bool:
-    """A repo needs manual review when its outcome is an error, an abort, or a PARTIAL fix (#1183) —
+    """A repo needs manual review when its outcome is an error, an abort, or a PARTIAL fix —
     the tree isn't provably clean, so `fix` must exit non-zero for it (invariant #1). This is the ONE
     predicate the board tag and the final `fix()` tally both use, so they can never disagree."""
     return "ABORTED" in text or ": error" in text or "PARTIAL" in text
@@ -140,8 +139,6 @@ def _run_fix_sweep(items, labels, make_outcome, prog: Streamer, *, jobs, verb: s
             prog.line(f"      → {text}")
             outcomes.append(text)
         return outcomes
-    # Each repo scrolls up carrying its full outcome (`→ …`) right under its `[i/N] tag label`
-    # header, at completion — labelled, in place, no separate reprint pass.
     swept = run_sweep(
         lambda item: make_outcome(item, spin=False), items, jobs=workers,
         backend=parallel.THREAD, labels=labels,
@@ -177,7 +174,6 @@ def _fix_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *, publish: bo
     def make_outcome(repo, *, spin):
         display = _disp(repo)
         if publish:
-            # A GitHub App mints the token of the installation that owns THIS repo (multi-account).
             tok, aerr = auth.act_token(token, source, gitutil.origin_slug(repo))
             # ": error" marks it needs-review so `fix()` exits non-zero (a repo no credential can
             # reach was NOT fixed — never report it as success).
@@ -194,7 +190,7 @@ def _fix_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *, publish: bo
 
 def _fix_remote(cfg, opts, sigs, allowlist, prog: Streamer, *,
                 users=None, orgs=None, slugs=None, jobs=None) -> list[str]:
-    """Fix REMOTE repositories: resolve targets via the #1075 ladder (ad-hoc `--user`/`--org`
+    """Fix REMOTE repositories: resolve targets via the ladder (ad-hoc `--user`/`--org`
     /`owner/repo` selectors → config → your own repos), clone each, and open/update its PR
     (no local copy exists, so a PR is the only output)."""
     bad = invalid_slugs(slugs)
@@ -213,7 +209,6 @@ def _fix_remote(cfg, opts, sigs, allowlist, prog: Streamer, *,
               f"({_remote_scope(cfg, users, orgs, slugs)})…")
 
     def make_outcome(slug, *, spin):
-        # A GitHub App mints the token of the installation that owns THIS repo (multi-account).
         tok, aerr = auth.act_token(token, source, slug)
         if aerr:
             return f"{slug}: {aerr}"
@@ -235,7 +230,7 @@ def fix(config_path: str | None = None, *, pr: bool = False, remote: bool = Fals
         no_stream: bool = False, jobs: int | None = None) -> int:
     """`saw fix`: prepare a `security/auto-clean` branch per infected repo (no push). With
     `pr=True` (`--pr`) also push + open/update one rolling PR each; with `remote=True`
-    (`--remote`) sweep GitHub targets resolved by the #1075 ladder (ad-hoc `users`/`orgs`/
+    (`--remote`) sweep GitHub targets resolved by the ladder (ad-hoc `users`/`orgs`/
     `slugs` → config → your own repos). A multi-repo sweep runs up to `jobs` repos at once
     (AUTO by default; `-j 1` forces sequential). Streams each repo's outcome. Returns 2 if an
     explicit --config is missing, 1 if any repo needs manual review, else 0."""
@@ -257,8 +252,6 @@ def fix(config_path: str | None = None, *, pr: bool = False, remote: bool = Fals
     if not outcomes:
         prog.line("No repositories to fix.")
         return 0
-    # A PARTIAL fix (#1183) shipped SOME safe changes but confirmed findings remain — the tree is
-    # not clean, so it counts as needs-review and the run exits non-zero (invariant #1).
     needs_review = sum(1 for o in outcomes if "ABORTED" in o or ": error" in o or "PARTIAL" in o)
     n = len(outcomes)
     plural = "y" if n == 1 else "ies"
@@ -278,7 +271,7 @@ def _discard_local(cfg, opts, branch: bool, pr: bool, paths, prog: Streamer) -> 
             prog.line(err)
             if not branch:
                 return []
-            pr = False   # can't close PRs, but --branch (pure git) can still run
+            pr = False
     repos = _local_repos(cfg, opts, paths)
     if not repos:
         return []
@@ -288,7 +281,6 @@ def _discard_local(cfg, opts, branch: bool, pr: bool, paths, prog: Streamer) -> 
         display = _disp(repo)
         prog.line(f"  [{i}/{len(repos)}] {display}")
         parts: list[str] = []
-        # Closing a PR hits the API → a GitHub App needs THIS repo's installation token (multi-account).
         tok, aerr = auth.act_token(token, source, gitutil.origin_slug(repo)) if pr else (None, None)
         with status(f"discarding in {display}…", enabled=prog.enabled):
             if branch:
@@ -322,7 +314,6 @@ def _discard_remote(cfg, opts, branch: bool, pr: bool, prog: Streamer, *,
     for i, slug in enumerate(resolved, 1):
         prog.line(f"  [{i}/{len(resolved)}] {slug}")
         parts: list[str] = []
-        # A GitHub App mints the token of the installation that owns THIS repo (multi-account).
         tok, aerr = auth.act_token(token, source, slug)
         with status(f"discarding {slug}…", enabled=prog.enabled):
             if aerr:
@@ -344,7 +335,7 @@ def discard(config_path: str | None = None, *, branch: bool = False, pr: bool = 
             no_stream: bool = False) -> int:
     """`saw discard`: remove what `fix` produced — the `security/auto-clean` branch
     (`--branch`: local + remote, pure git, SSL-immune) and/or its PR (`--pr`: API). LOCAL by
-    default; `--remote` sweeps GitHub targets resolved by the #1075 ladder (ad-hoc selectors →
+    default; `--remote` sweeps GitHub targets resolved by the ladder (ad-hoc selectors →
     config → your own repos). Requires at least one of `--branch`/`--pr`. Returns 2 on a
     usage/config error, else 0."""
     if not (branch or pr):

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Advisory store — maps a resolved package to the advisory that flags it (#1119, #1120).
+"""Advisory store — maps a resolved package to the advisory that flags it.
 
 One responsibility: "given a package, is it known-bad, and why?" The store knows nothing about
 repos or lockfile formats — resolvers hand it `Purl`s, it answers. The matcher depends on this
@@ -11,7 +11,7 @@ Two backing sources, checked in order:
      needs zero setup and zero network; and
   2. the offline malicious-package **corpus** (`db.load_corpus`), populated by `saw db update`
      from OpenSSF / GitHub Advisories / OSV.dev — a *superset* of the seed, never a prerequisite.
-No cache → corpus is None → behaviour is identical to the seed-only path (#1119).
+No cache → corpus is None → behaviour is identical to the seed-only path.
 """
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ class Advisory:
     `signature` is the source of the finding's id/category/severity (the `malicious-dependency`
     signature, whether the hit came from the inline seed or the corpus). `osv_id`/`aliases` carry
     the advisory identity for corpus hits so the finding can cite it (e.g. `MAL-2024-1234`).
-    `fixed_version` is the first patched version to upgrade to (the remediation target, #1252), or
+    `fixed_version` is the first patched version to upgrade to (the remediation target,), or
     None when the advisory names no fix (whole-package/explicit-version/open-ended, or malware —
     which is removed, not upgraded).
     """
@@ -47,7 +47,7 @@ class AdvisoryStore:
 
     The corpus is loaded LAZILY: building it is ~10s / hundreds of MB, and a scan of a repo with no
     dependency files never resolves a package — so `advisory_for`/`vulnerabilities_for` are never
-    called and the corpus is never built (#1163). `is_empty()` short-circuits on the inline seed and
+    called and the corpus is never built. `is_empty()` short-circuits on the inline seed and
     does not trigger the load unless the seed is empty. A pre-built `corpus` (tests) is used as-is.
     """
 
@@ -69,7 +69,7 @@ class AdvisoryStore:
 
     @classmethod
     def from_signatures(cls, signatures: list[dict[str, Any]]) -> "AdvisoryStore":
-        """Inline-seed-only store (no corpus) — the #1119 constructor, unchanged."""
+        """Inline-seed-only store (no corpus) — the constructor, unchanged."""
         return cls(cls._inline_index(signatures))
 
     @classmethod

@@ -7,32 +7,6 @@ from pathlib import Path
 
 from stayawake.lib.git.run import stdout
 
-# Reachability scope for merge enumeration (G6 resolution).
-#
-# Chosen scope = local branches + tags + remote-tracking refs; deliberately:
-#   - NOT `--all`: `--all` ALSO walks refs/stash (every `git stash` is a 2/3-parent merge
-#     commit — the canonical FP), refs/notes, refs/replace and fetched forge PR refs
-#     (refs/pull/*), none of which a legitimate publish surface uses; all inflate FPs/cost.
-#   - WITH `--remotes`, NOT just `--branches --tags`: an evil merge can live ONLY on a
-#     remote-tracking ref the user has FETCHED (refs/remotes/origin/*) without yet merging
-#     it into a local branch. That object is already in the local store and is a genuine
-#     local compromise; `--branches --tags` alone cannot reach it (no local branch contains
-#     it) and would MISS it. `--remotes` reaches it.
-#
-# Why `--remotes` does NOT re-FP on unauthored origin merges: the evil-merge gate is
-# CONTENT-keyed (`_corroborated`), not ref-keyed. A benign origin-only merge carries no
-# worm signature / no new-vs-all-parents inject / no context-aware obfuscation, so it
-# survives enumeration but produces ZERO findings. Breadth only adds *candidates*; benign
-# candidates are silently discarded by the gate. (Empirically verified against benign vs
-# evil remote-only merges; see tests/bots/security/test_evil_merge.py G6 cases.)
-#
-# Cost/dedup: `git log` deduplicates by commit SHA, so a merge reachable from both a local
-# branch and a remote-tracking ref is enumerated exactly once — `--remotes` adds no
-# duplicate cost in the common (local==origin) case; it only adds genuinely-extra
-# remote-only commits, which is exactly the recall we want. The `_MAX_CANDIDATES` cap in
-# the matcher bounds the confirm phase even on a busy upstream with many merges.
-#
-# One ref family per token.
 _MERGE_REFS = ("--branches", "--tags", "--remotes")
 
 

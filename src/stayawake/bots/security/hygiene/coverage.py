@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Persistence-surface COVERAGE (#1332) — did we actually READ the user-owned persistence locations?
+"""Persistence-surface COVERAGE — did we actually READ the user-owned persistence locations?
 
 `saw` never claims clean over content it did not read. The detection probes (os_service, mechanism)
 degrade gracefully when a path is absent — correct — but they degrade the SAME way when a path exists
@@ -14,7 +14,7 @@ issue naming any that exist but could not be read — so the run reads (and exit
 and the rotation-safety verdict withholds its all-clear. Locations are sourced from the detection
 modules themselves (single source of truth), so the surface we certify is exactly the surface we scan.
 
-**Absent is clean per location; an ENTIRELY absent surface is not (#120).** A wipe does not suppress
+**Absent is clean per location; an ENTIRELY absent surface is not.** A wipe does not suppress
 these checks, it SATISFIES them — every location grades `absent`, so the run reaches "enumerated and
 clean, rotating credentials is safe" on a host whose home was just destroyed. Nothing was enumerated.
 `persistence-surface-not-established` is that third state, and it fails to UNKNOWN and never to a
@@ -57,7 +57,7 @@ def _coverage(p: Path) -> str:
     we can actually enumerate a dir / read a regular file.
 
     A non-regular, non-dir path (FIFO / socket / device) at a persistence location is UNVERIFIED and is
-    NEVER opened: opening a FIFO read-blocks forever (the #1226 hazard), and a normal authorized_keys /
+    NEVER opened: opening a FIFO read-blocks forever (the hazard), and a normal authorized_keys /
     rc / agent is a regular file — a non-regular one there is itself anomalous, not a certifiable clean."""
     try:
         st = p.stat()
@@ -84,7 +84,7 @@ def _coverage(p: Path) -> str:
 
 def _surface_is_absent(graded: list[tuple[str, Path, str]]) -> bool:
     """True when EVERY certified location is absent — nothing was enumerated, so nothing can be called
-    clean (#120). Guarded on the anchor and on the platform: on Windows every certified location is
+    clean. Guarded on the anchor and on the platform: on Windows every certified location is
     absent by construction, so firing there would say nothing about the host."""
     if not persistence_surface_is_enumerable():
         return False

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""External-auditor adapter interface (#1125).
+"""External-auditor adapter interface.
 
 `saw` is offline and never executes scanned code — but a user can *opt in* (`saw scan --external`)
 to having it run **installed** vulnerability auditors (osv-scanner, pip-audit, …) over the target

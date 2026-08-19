@@ -89,7 +89,7 @@ def register(sub) -> None:
 
 def run(a: argparse.Namespace) -> int:
     positionals = [*a.paths, *a.extra_paths]
-    remote = a.remote or bool(a.user) or bool(a.org)   # naming a GitHub account implies --remote
+    remote = a.remote or bool(a.user) or bool(a.org)
     return service.scan(a.config, remote=remote,
                         paths=None if remote else (positionals or None),
                         slugs=(positionals or None) if remote else None,

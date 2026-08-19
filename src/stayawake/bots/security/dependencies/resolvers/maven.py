@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Java / Maven resolver — Gradle lockfiles / pom.xml → `pkg:maven/…` PURLs (#1123).
+"""Java / Maven resolver — Gradle lockfiles / pom.xml → `pkg:maven/…` PURLs.
 
 Fully-resolved Gradle locks are the authoritative source, across all three formats:
   * `gradle.lockfile` and `buildscript-gradle.lockfile` (Gradle ≥ 6.8): `group:artifact:version=configs`
@@ -12,7 +12,7 @@ pom.xml is parsed by regex, NOT an XML parser: `saw` must never be DoS'd by a ho
 and XML entity-expansion ("billion laughs") / XXE are exactly that risk. The extraction regex must
 itself be ReDoS-safe — the block body is a TEMPERED run (non-`</dependency>` chars that also don't
 start a NEW `<dependency`), so an opener with no closer can't scan to end-of-file at every opener
-(a plain `(.*?)` did → O(n^2) on `<dependency>`-spam, #1158). `<dependency>` blocks never nest, so
+(a plain `(.*?)` did → O(n^2) on `<dependency>`-spam,). `<dependency>` blocks never nest, so
 the tempering is detection-identical.
 """
 from __future__ import annotations

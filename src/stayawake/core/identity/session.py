@@ -21,9 +21,9 @@ class Session:
     gate can Deny early (e.g. missing `workflow`) before any clone/worktree work.
     """
     token: str | None
-    source: str | None                 # env var name | "github-app" | "gh" | None
-    kind: str                          # "none" | "user" | "app_installation" | "actions"
-    actor: str | None = None           # login or "installation:<id>"
+    source: str | None
+    kind: str
+    actor: str | None = None
     capabilities: frozenset[Capability] | None = None
     scopes: frozenset[str] | None = None
     live: bool = False

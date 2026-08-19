@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GitHub Actions workflow matcher — planted / impersonated CI persistence (#1091).
+"""GitHub Actions workflow matcher — planted / impersonated CI persistence.
 
 `saw` already walks `.github/workflows/*.yml` (they are not pruned and `.yml`/`.yaml`
 are source extensions), but no matcher inspected them. This YAML-aware structural matcher

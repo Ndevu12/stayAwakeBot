@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Normalized package identity — the PURL spine (#1119).
+"""Normalized package identity — the PURL spine.
 
 `Purl` is a small subset of the package-url spec (`pkg:{type}/{name}@{version}`): the
 lingua franca every ecosystem resolver emits and the advisory store keys on. Adopting the

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""NuGet / .NET resolver — packages.lock.json → `pkg:nuget/…` PURLs (#1123).
+"""NuGet / .NET resolver — packages.lock.json → `pkg:nuget/…` PURLs.
 
 `packages.lock.json` maps each target framework to its packages; the `resolved` field is the exact
 locked version. Package ids and versions map onto the OSV `NuGet` ecosystem. (NuGet ids are

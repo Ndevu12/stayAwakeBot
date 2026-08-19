@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Advisory corpus — index normalized OSV records for lookup by package (#1120, #1124).
+"""Advisory corpus — index normalized OSV records for lookup by package.
 
 One responsibility: "given a `Purl`, is there an advisory affecting this exact version?" — matched
-either by the advisory's explicit version list or by a version range (#1124). It knows nothing about
+either by the advisory's explicit version list or by a version range. It knows nothing about
 signatures, files, or verdicts — the store wraps a match into an `Advisory`, the matcher emits the
 finding. Ecosystem comparison is canonicalized (OSV's `crates.io`/`PyPI` ↔ our `cargo`/`pypi`) so a
 resolver's PURL keys the same slot as the advisory record.
@@ -24,7 +24,7 @@ from stayawake.bots.security.dependencies.osv import OsvAffected, OsvRecord
 
 class AdvisoryMatch(NamedTuple):
     """A vulnerability advisory that affects a queried package, plus the remediation target: `fixed`
-    is the first patched version to upgrade to (#1252), or None when the advisory names no fix
+    is the first patched version to upgrade to, or None when the advisory names no fix
     (a whole-package hit, an explicit-version-only advisory, or an open-ended one)."""
 
     record: OsvRecord
@@ -86,7 +86,7 @@ class AdvisoryCorpus:
     def vulnerability_matches(self, purl) -> list[AdvisoryMatch]:
         """All NON-malware advisories (ordinary CVEs) affecting `purl.version` — the opt-in advisory
         tier, which never moves the worm verdict. Each match carries the first patched version to
-        upgrade to (`AdvisoryMatch.fixed`), or None when the advisory names no fix (#1252)."""
+        upgrade to (`AdvisoryMatch.fixed`), or None when the advisory names no fix."""
         eco = _eco(purl.type)
         key = (eco, purl.name)
         out = [AdvisoryMatch(rec, None) for rec in self._whole.get(key, ()) if not rec.malicious]

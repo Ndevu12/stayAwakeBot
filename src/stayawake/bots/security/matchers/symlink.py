@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Symlink matcher — two escape-related anomalies, NEVER following the link (#1146, #1161).
+"""Symlink matcher — two escape-related anomalies, NEVER following the link.
 
 The scanner walks with ``followlinks=False`` (a deliberate cycle/DoS guard), so a symlink is reported
 but never descended into / opened. ``Path.resolve()`` only CANONICALIZES the path — it never reads the
 target's contents, so a link to ``/`` or ``~/.ssh`` is free to resolve; symlink loops (ELOOP) raise and
 are skipped (no infinite walk). Two findings:
 
-  * ``symlink-write-redirect`` (CONFIRMED / critical, #1161) — a committed symlink (file OR directory)
+  * ``symlink-write-redirect`` (CONFIRMED / critical,) — a committed symlink (file OR directory)
     whose target escapes the repo into a $HOME/system WRITE-SINK: ``~/.ssh/authorized_keys``, a shell /
     editor / REPL startup file, git/cloud/service credentials, a GPG keyring, a PATH executable dir, or
     an OS-persistence directory (LaunchAgents, systemd, autostart, cron). A tool or agent told to WRITE
@@ -15,7 +15,7 @@ are skipped (no infinite walk). Two findings:
     exist as a shared PROJECT artifact (``.npmrc``, ``.vscode/``, ``.docker/config.json``) are
     deliberately excluded to stay false-positive-free — see ``_WRITE_SINKS``.
 
-  * ``symlink-escapes-repo`` (HEURISTIC / high, #1146) — a DIRECTORY symlink escaping the repo root to
+  * ``symlink-escapes-repo`` (HEURISTIC / high,) — a DIRECTORY symlink escaping the repo root to
     a NON-sink target: it hides a whole code subtree from every content matcher (followlinks=False). An
     anomaly, not a payload — legitimate escaping dir links exist (dotfile repos, tooling fixtures) — so
     it is surfaced for review, never asserted as malware. Escaping FILE symlinks to non-sink targets are

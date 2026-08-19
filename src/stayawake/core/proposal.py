@@ -25,8 +25,8 @@ from stayawake.lib.adapters import github_api
 from stayawake.lib import git as gitutil
 from stayawake.utils.pathsafe import is_safe_write_target
 
-PATCHES_DIR = Path("sab-patches")   # where the read-only floor writes .patch files
-_FORK_POLL_TRIES = 10               # async fork readiness: poll up to ~30s
+PATCHES_DIR = Path("sab-patches")
+_FORK_POLL_TRIES = 10
 _FORK_POLL_DELAY = 3
 
 
@@ -55,12 +55,12 @@ class SubmitResult:
     from core.identity.classify (never invent a blanket 'no write access').
     """
     kind: str
-    action: str | None = None          # "opened" | "updated" for a pr/fork-pr
+    action: str | None = None
     number: int | None = None
     url: str = ""
     fork_slug: str | None = None
     patch_path: Path | None = None
-    issue_note: str | None = None      # generic issue outcome fragment, ready to embed
+    issue_note: str | None = None
     push_reason: str | None = None
     push_detail: str = ""
 
@@ -86,12 +86,11 @@ def _save_patch(wt: Path, slug: str, out_dir: Path) -> Path | None:
     try:
         # `out_dir` itself must not be a planted symlink — is_safe_write_target resolves BOTH the
         # target and the root, so a symlinked root would trivially "contain" itself; check it too so a
-        # committed `sab-patches -> $HOME` can't redirect the patch write out of the tree (#1218).
         if out_dir.is_symlink():
             return None
         out_dir.mkdir(parents=True, exist_ok=True)
         dest = out_dir / (slug.replace("/", "-") + ".patch")
-        if not is_safe_write_target(dest, out_dir):   # don't write the patch THROUGH a planted symlink (#1218)
+        if not is_safe_write_target(dest, out_dir):   # don't write the patch THROUGH a planted symlink
             return None
         dest.write_text(patch, encoding="utf-8")
     except OSError:
@@ -125,10 +124,6 @@ def _fork_and_pr(wt: Path, owner: str, name: str, base: str, branch: str,
 
     Handles: no token identity, can't fork (permissions), forking your own repo, async fork not
     ready, push-to-fork failure, and PR-creation failure."""
-    # `get_authenticated_user` (GET /user) is enabledForGitHubApps=false, so an installation token
-    # (the Actions GITHUB_TOKEN) returns None here — no fork identity. That's fine: under Actions the
-    # upstream push succeeds with `contents: write`, so this fork fallback is never reached. The fork
-    # path is for a PAT that lacks upstream write but can fork.
     me = (github_api.get_authenticated_user(token, quiet=True) or {}).get("login")
     if not me or me.lower() == owner.lower():
         return None  # no identity, or it's our own repo (a fork wouldn't help)
@@ -170,7 +165,6 @@ def submit_change_pr(wt: Path, slug: str, base: str, *, branch: str, title: str,
         failure = classify_push_stderr(pushed.stderr)
         # Some refusals can't be fixed by forking, so skip straight to the patch/issue floor:
         #  • workflow_scope / signed_commits — the fork PR would hit the same wall.
-        #  • auth — the CREDENTIAL itself is rejected (#1291), so a fork push (same token) fails too;
         #    attempting it is wasted API calls. (It degraded gracefully before — the fork's
         #    get_authenticated_user returned None — but skipping is honest and cheaper.)
         if failure.reason not in ("workflow_scope", "signed_commits", "auth"):

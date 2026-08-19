@@ -10,7 +10,6 @@ import json
 
 from stayawake.cli.helptext import add_command
 
-# (command, summary, extra search keywords)
 _INDEX = [
     ("saw scan", "hunt supply-chain worms (read-only); local by default, --remote for GitHub",
      "scan check find worm malware detect virus infect supply chain json sarif alert report remote local"),

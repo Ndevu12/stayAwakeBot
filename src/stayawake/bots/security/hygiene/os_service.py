@@ -28,7 +28,7 @@ def _launchd_dirs() -> tuple[Path, ...]:
 def user_persistence_dirs() -> tuple[Path, ...]:
     """The USER-OWNED launch-agent / service dirs a user-level worm can plant into WITHOUT root —
     the home-relative subset of the dirs scanned above. Exposed as the single source of truth for
-    the persistence-coverage probe (#1332): a dir we read to DETECT a plant is one we must be able
+    the persistence-coverage probe: a dir we read to DETECT a plant is one we must be able
     to read to certify the host clean. System dirs (/etc, /Library/…) are best-effort, so their
     unreadability is N/A, not unknown — a system-level plant needs root, outside the npm-worm model."""
     return (_systemd_unit_dirs()[0],    # ~/.config/systemd/user   (Linux; absent elsewhere = N/A)

@@ -49,7 +49,6 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if not getattr(args, "command", None):
-        # Bare `saw` → the branded welcome (issue #1177). Colour degrades per the terminal and
         # is dropped entirely when piped / CI / NO_COLOR, so scripted output stays clean text.
         # The full help still lives at `saw -h`, which argparse handled before we reach here.
         print(render_welcome(color_level(sys.stdout), __version__), end="")

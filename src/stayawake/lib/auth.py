@@ -21,7 +21,7 @@ import sys
 from stayawake.utils import env
 
 ENV_VARS = (env.GH_SECURITY_TOKEN, env.GITHUB_TOKEN)
-_GH_TIMEOUT = 10  # gh auth token is a local keyring read; should be near-instant.
+_GH_TIMEOUT = 10
 
 
 def gh_path() -> str | None:
@@ -35,7 +35,7 @@ def gh_installed() -> bool:
 
 def _env_token() -> tuple[str | None, str | None]:
     for var in ENV_VARS:
-        val = env.get(var)   # strips; empty/whitespace → None
+        val = env.get(var)
         if val:
             return val, var
     return None, None
@@ -67,7 +67,7 @@ def _app_token(repo_slug: str | None = None) -> str | None:
     a configured-but-broken App (bad/encrypted key, unreachable API, or any other failure) is
     reported to stderr and treated as 'no token' so resolution falls through to the gh session —
     exactly like `gh_token`. Diagnostics go to STDERR so they never pollute a command's stdout
-    (e.g. a piped scan report). (#1287)
+    (e.g. a piped scan report).
 
     When `repo_slug` is given, the token is minted from the installation that OWNS that repo
     (multi-account) — see `github_app.installation_token`."""
@@ -145,8 +145,6 @@ def act_token(base_token: str | None, source: str | None,
         guidance = str(e)
     except Exception as e:  # noqa: BLE001 — one repo's auth hiccup must not abort the sweep
         guidance = str(e)
-    # The App can't reach this repo — fall back to the operator's gh session, which may (it covers the
-    # accounts/orgs the human can access, including ones the App isn't installed on).
     fallback = _gh_fallback(hostname)
     if fallback:
         return fallback, None
@@ -158,7 +156,7 @@ def no_credential_hint(action: str = "this operation") -> str:
 
     Names the single token a user configures (GH_SECURITY_TOKEN); the automatic Actions
     GITHUB_TOKEN isn't something to set up, so we don't tell people to."""
-    var = ENV_VARS[0]  # GH_SECURITY_TOKEN — the one credential a user configures
+    var = ENV_VARS[0]
     if not gh_installed():
         return (f"No GitHub credential for {action}. Either install the GitHub CLI "
                 f"(https://cli.github.com) and run `gh auth login`, or set {var} "

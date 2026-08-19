@@ -2,8 +2,7 @@
 """Target resolution — turn CLI/config selectors into the repositories a command acts on.
 
 One shared model for every repo-sweeping verb (`saw scan`, `saw fix`, `saw guard`): discover LOCAL
-repos under given paths/globs (or the enclosing repo), and resolve REMOTE `owner/name` slugs via the
-#1075 ladder (ad-hoc `--user`/`--org`/`owner/repo` selectors → configured `targets.github` → your own
+repos under given paths/globs (or the enclosing repo), and resolve REMOTE `owner/name` slugs via the ladder (ad-hoc `--user`/`--org`/`owner/repo` selectors → configured `targets.github` → your own
 repos). Pure target math — no scanning, no output, no git writes — so each command layers its own
 per-repo action on top without re-implementing discovery.
 
@@ -27,7 +26,6 @@ from stayawake.bots.security.targets import ScanOptions
 
 DEFAULT_CONFIG = "config/security.yml"
 
-# Shared actionable message when a `--remote` run resolves zero repositories.
 REMOTE_EMPTY_HINT = (
     "No GitHub repositories resolved. Name targets with `--user U` / `--org O` / `owner/repo`, "
     "set `targets.github` in the config, or authenticate (`gh auth login` or GH_SECURITY_TOKEN) "
@@ -90,7 +88,7 @@ def remote_scope(cfg: dict, users, orgs, slugs) -> str:
 
 
 def resolve_remote(cfg: dict, opts: ScanOptions, *, users=None, orgs=None, slugs=None):
-    """Resolve `--remote` targets to ('owner/name', ...). Ladder, first match wins (#1075):
+    """Resolve `--remote` targets to ('owner/name', ...). Ladder, first match wins:
       1. ad-hoc CLI selectors — `slugs` (named repos), `--user`/`--org` enumerations — which
          OVERRIDE config so you can target anything without editing a file;
       2. configured `targets.github.users/orgs`;
