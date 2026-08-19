@@ -13,14 +13,6 @@ from stayawake.utils.pathsafe import is_safe_write_target
 from stayawake.bots.security.matchers.base import load_jsonc
 from stayawake.bots.security.models import HEURISTIC, QUARANTINE_DIR
 
-# remediation id → internal action. NOTE: the code-loader family (`strip-appended-payload`)
-# is deliberately ABSENT here — those findings are NEVER fixed by an UNBOUNDED textual transform
-# (that is what corrupted valid files: a substring/regex edit can't reliably excise a polymorphic
-# payload). They go through git RECOVERY (restore the last clean committed version), else the ONE
-# narrowly-gated surgical case — excising a payload hidden behind a concealment SEAM on a line of
-# real code (`_seam_strip`: a provable separator, a packed+confirmed suffix, a non-packed result,
-# re-proven at apply time, original quarantined) — else manual review. See classify_recovery().
-# The actions below are the reliable, structure-safe ones: whole-file quarantine, line/JSON-key removal.
 _ACTIONS = {
     "quarantine-file": "quarantine",
     "quarantine-dir": "quarantine",
@@ -29,9 +21,6 @@ _ACTIONS = {
 }
 _GITIGNORE_MARKERS = {"branch_structure.json", "temp_auto_push.bat", "temp_interactive_push.bat"}
 
-# Quarantine / remediation backups must stay local and never be committed.
-# `ensure_ignored` guarantees a target repo's .gitignore carries this before we
-# `git add` a fix, so backups never leak into a commit or PR.
 _QUARANTINE_COMMENT = "# Malware quarantine / remediation artifacts (kept local, never committed)"
 _QUARANTINE_PATTERNS = (QUARANTINE_DIR + "/",)
 
@@ -53,8 +42,8 @@ def quarantine_path(root: Path) -> Path:
 
 @dataclass(frozen=True)
 class Change:
-    action: str        # strip-payload | quarantine | strip-gitignore | strip-settings
-    path: str          # repo-relative path the action targets
+    action: str
+    path: str
     detail: str = ""
 
 
@@ -184,7 +173,6 @@ def apply(root: Path, changes: list[Change], quarantine: Path) -> list[Change]:
             if not target.exists():
                 continue
             if not is_safe_write_target(target, root):
-                # NEVER read/strip/rewrite THROUGH a planted symlink or outside the worktree (#1218):
                 # `write_text` would follow the link into a sink and `_backup` skips symlinks, so the
                 # backup/verify net is dead. A symlinked/escaping finding defers to manual.
                 continue
@@ -198,5 +186,3 @@ def apply(root: Path, changes: list[Change], quarantine: Path) -> list[Change]:
                 target.write_text(new, encoding="utf-8")
                 applied.append(c)
     return applied
-
-

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Code-loader payload ANALYSIS + the surgical seam-strip — pure functions, no I/O, no git. The
-safety gates that decide whether a line/statement is payload, whether a concealment seam is present,
-and whether a strip is provably safe (`_seam_strip`). Used by `classify` (to decide) and `writeback`
-(to re-prove at apply time)."""
+"""Safety checks that decide whether a fix may be applied automatically.
+
+Pure functions: they inspect a proposed change and answer whether it is provably safe. No I/O, no
+git. A caller that cannot get a yes must defer to a human.
+"""
 from __future__ import annotations
 
 import difflib
@@ -45,12 +46,6 @@ def _carries_payload(text: str, content_sig) -> bool:
     return bool(text) and (bool(content_sig(text)) or _has_exec_sink(text))
 
 
-# A payload-blob line is long, dense (almost no whitespace) and high-entropy — the shape of
-# a packed loader. A *legit* statement that merely contains a loader token — a real DEL-char
-# fromCharCode call, a function carrying the worm's shuffler name, or a line that splices the
-# require-hijack global assignment in front of real code — is short and readable and fails this
-# gate. That distinction is the whole point: content_sig() is a SUBSTRING match, so it can't tell
-# a packed payload from legit code that shares a byte sequence with one. Size+density+entropy can.
 _MIN_PAYLOAD_LINE = 120
 
 
@@ -81,8 +76,6 @@ def _strip_concealment(s: str) -> str:
     return s[i:j]
 
 
-# A base64/hex-ish run — the shape of a packed payload's encoded data. Used to bound a blob's
-# EXTENT so trailing legit code abutting it isn't absorbed. Bounded char class → linear scan.
 _BLOB_RUN = re.compile(r"[A-Za-z0-9+/=]{40,}")
 
 
@@ -121,11 +114,6 @@ def _line_is_pure_payload(ln: str, content_sig) -> bool:
     return all(_stmt_is_payload(stmt, content_sig) for stmt in ln.split(";"))
 
 
-# A concealment SEAM: a run of this many consecutive concealment chars mid-line. Hand-authored
-# code never puts real code, 16+ hiding chars, then MORE code — so a seam is a provable boundary
-# between legit code and an appended payload, which is exactly what the general same-line case
-# (#1185) lacks. The worm uses hundreds; 16 is far above any legit indentation/alignment and far
-# below the worm's runs, so the exact value is not load-bearing (the multi-condition gate below is).
 _MIN_CONCEALMENT_SEAM = 16
 
 
@@ -165,10 +153,6 @@ def _concealment_seam(line: str, content_sig) -> str | None:
     return None
 
 
-# The worm's require-SHIM: an ESM file has no CommonJS `require`, so before a `require`-based
-# payload it prepends `import { createRequire } from 'module'; const require = createRequire(
-# import.meta.url);`. Matched ONLY at the very start of the file (the worm prepends it). Kept
-# tolerant of quote/`node:module`/spacing variants but anchored on the two exact statements.
 _WORM_SHIM = re.compile(
     r"^\s*import\s*\{\s*createRequire\s*\}\s*from\s*['\"](?:node:)?module['\"]\s*;?[ \t]*\r?\n"
     r"(?:[ \t]*\r?\n)*"
@@ -300,8 +284,6 @@ def _seam_strip(work: str, ext: str, content_sig) -> str | None:
     if not changed:
         return None                        # no concealment-seam payload here → not our pattern
     stripped = "".join(out)
-    # With the payload gone, drop the worm's require-shim IFF nothing left uses `require` — an
-    # unused binding, so removing it can't change behaviour (a config that calls require keeps it).
     shim = _worm_shim_block(stripped)
     if shim is not None and _shim_is_dead(stripped[len(shim):]):
         stripped = stripped[len(shim):]
@@ -313,11 +295,9 @@ def _seam_strip(work: str, ext: str, content_sig) -> str | None:
         # benign clone — could be a separate RCE the excision would auto-"clean" past manual review.
         # Refuse: only auto-clean when what remains has no *detectable* exec sink (adversarial catch).
         # NOTE: this is NOT a general RCE guard — it shares the whole scanner's token detection
-        # (`_has_exec_sink`), which now catches the common reflective forms AND the #1207
         # obfuscated forms (split-token via concat-fold, `(0, eval)(`, light alias /
         # runtime-key). It STILL can't see a renamed binding whose RHS is itself computed,
         # a bare dangerous require whose exec is built at runtime past that window, or every
-        # dynamic-import shape. That residual is the pre-existing scanner blind spot, not new
         # here; the PR this fix lands in is human-reviewed, and the original is quarantined.
         return None
     if analyze_file(stripped, ext):        # result still looks packed → not a clean hand-authored file

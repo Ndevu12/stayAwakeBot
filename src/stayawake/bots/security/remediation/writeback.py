@@ -24,7 +24,7 @@ def _backup_write_verify(root: Path, rel: str, new_text: str, quarantine: Path, 
     target.write_text(new_text, encoding="utf-8")
     restored = target.read_text(encoding="utf-8", errors="replace")
     if restored != new_text or _carries_payload(restored, content_sig):
-        backup = quarantine / rel         # verify failed → revert to the original
+        backup = quarantine / rel
         if backup.exists():
             shutil.copy2(backup, target)
         return False
@@ -34,7 +34,6 @@ def _backup_write_verify(root: Path, rel: str, new_text: str, quarantine: Path, 
 def _apply_seam_excision(root: Path, rel: str, expected: str, quarantine: Path, content_sig) -> bool:
     """Write a concealment-seam excision, re-proving `expected` against the bytes on disk NOW:
     non-empty, a safe write target (NEVER through a symlink or outside the worktree — the shared
-    #1218 guard, since `write_text` follows a link and `_backup` skips symlinks, which would leave
     the quarantine + verify net dead), the file exists, the result carries no payload, and — the
     load-bearing check — re-running the deterministic `_seam_strip` on the CURRENT file reproduces
     `expected` EXACTLY. That single equality re-checks every gate (each seam still validates, the
@@ -95,8 +94,6 @@ def apply_recovery(repo, rec: Recovery, quarantine: Path, content_sig) -> bool:
         return _apply_seam_excision(root, rec.path, rec.clean_text, quarantine, content_sig)
     target = root / rec.path
     if not rec.clean_text or not is_safe_write_target(target, root):
-        # Refuse an empty result, and NEVER write through a symlink or outside the worktree (#1204,
-        # now the shared #1218 guard): `write_text` follows the link (could clobber a file outside the
         # worktree) and `_backup` skips symlinks, so the quarantine + verify-or-revert net would be
         # dead. The containment check also closes a symlinked ANCESTOR dir or a `..`. Defers to manual.
         return False

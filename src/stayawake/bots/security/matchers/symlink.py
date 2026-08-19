@@ -35,7 +35,6 @@ from stayawake.bots.security.matchers.base import Matcher
 
 
 # Sensitive WRITE-SINKS — $HOME/system locations a victim's tools write to, where a planted symlink
-# redirects the write into persistence or RCE (GhostApproval / SymJacking, #1161). Matched against the
 # raw link text AND the canonical resolved path, by PATH COMPONENT (bounded by `/` or end), NOT a bare
 # substring — so a benign path that merely contains one of these words as a longer segment does not hit.
 # Matched CASE-INSENSITIVELY: on a case-insensitive FS (macOS/Windows) `~/.SSH/authorized_keys` is the
@@ -45,7 +44,6 @@ from stayawake.bots.security.matchers.base import Matcher
 # legitimately symlink to stays CONFIRMED. Files that ALSO exist as a PROJECT artifact — `.npmrc`,
 # `.docker/config.json`, `.vscode/`, `.claude/`, `.cursor/` — are routinely SHARED across a workspace by
 # a sibling/superproject symlink (a real, benign pattern), so flagging them as confirmed-malware is a
-# false positive; they are deliberately excluded (an escaping DIRECTORY link to one is still surfaced as
 # the `symlink-escapes-repo` HEURISTIC). The label goes into the evidence.
 def _sink(pattern: str, label: str) -> tuple[re.Pattern[str], str]:
     return re.compile(pattern, re.IGNORECASE), label
@@ -110,7 +108,7 @@ def _classify(p: Path, repo_root: Path, resolved_root: Path,
     except OSError:
         return None
     try:
-        resolved = p.resolve()              # canonicalize only — never reads target; loop-safe
+        resolved = p.resolve()
     except (OSError, RuntimeError):
         return None                           # ELOOP / unresolvable → skip
     if resolved == resolved_root or resolved_root in resolved.parents:
@@ -153,15 +151,13 @@ class SymlinkMatcher(Matcher):
             # `dist`/`build` are exactly where build tools write. Pruning only stops DESCENT, and
             # os.walk(followlinks=False) never descends a symlink anyway. For an excluded name we run the
             # write-redirect check ONLY (escape_sig=None): a benign build-output dir link escaping to a
-            # non-sink stays silent as it did before, rather than becoming a new scan-evasion heuristic.
             for name in dirnames:
                 esc = None if name in exclude else escape_sig
                 f = _classify(Path(dirpath) / name, target.root, root, redirect_sig, esc, True)
                 if f is not None:
                     findings.append(f)
-            dirnames[:] = [d for d in dirnames if d not in exclude]  # THEN prune descent
+            dirnames[:] = [d for d in dirnames if d not in exclude]
             # FILE symlinks: a write-redirect can be a file link (the canonical GhostApproval shape); a
-            # scan-evasion escape is only meaningful for a directory, so `is_dir=False` drops the escape.
             for name in filenames:
                 f = _classify(Path(dirpath) / name, target.root, root, redirect_sig, escape_sig, False)
                 if f is not None:

@@ -15,10 +15,6 @@ from stayawake.bots.security.matchers.base import Matcher
 from stayawake.bots.security.targets.base import CODE_EXTS
 from stayawake.bots.security.taint.destructive import detect_destructive, SECURE
 
-# #1337 — impact CONTEXT for a destruction finding on an ephemeral CI runner (a home-wipe's direct
-# damage is limited to the disposable job). Appended to the EVIDENCE only: severity, verdict and exit
-# are environment-invariant (an attacker-forgeable CI signal must never soften an alarm). It reframes
-# the risk toward what matters on a runner; it never quiets the finding.
 _RUNNER_NOTE = (" [ephemeral CI runner: local-wipe impact limited to the disposable job — "
                 "prioritise credential rotation + lateral-movement checks]")
 
@@ -30,7 +26,7 @@ def _ext(rel: str) -> str:
 
 class DestructiveMatcher(Matcher):
     handles = "destructive"
-    partitionable = True        # per-file content analysis (parallel-safe, #1325)
+    partitionable = True
 
     def scan(self, target, signatures, all_signatures=None):
         by_kind = {s.get("kind"): s for s in signatures}
@@ -38,7 +34,7 @@ class DestructiveMatcher(Matcher):
         secure_sig = by_kind.get("secure-home-wipe")
         if not (plain_sig or secure_sig):
             return []
-        note = _RUNNER_NOTE if env.is_ephemeral_runner() else ""   # computed once per scan
+        note = _RUNNER_NOTE if env.is_ephemeral_runner() else ""
         findings: list[Finding] = []
         for rel in target.iter_files():
             if _ext(rel) not in CODE_EXTS:       # code only — never prose/config (no snippet FP)
