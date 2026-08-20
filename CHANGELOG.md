@@ -13,6 +13,14 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Changed
+- **The documentation site has moved to <https://saw-docs.ndevuspace.com>.** The previous address
+  redirects; update a bookmark if you kept one.
+
+### Fixed
+- **A shared link to the documentation shows its preview image again.** The card was addressed with
+  a missing separator, so every link preview requested a page that did not exist.
+
 ### Fixed
 - **`saw audit --verify` no longer treats a clean content scan as reassurance.** Finding nothing
   inside an unusual folder does not make it safe — a staging tree holds ordinary packages, and the

@@ -81,6 +81,25 @@ jobs:
       - name: mkdocs build --strict
         run: mkdocs build --strict
 
+      # Build it the way mike deploys it, and assert the link-preview image resolves. mike rewrites
+      # site_url to ".../latest" with no trailing slash; a template that concatenates rather than
+      # joins produced "/latestassets/og-card.png" — a 404 that a plain build never reproduces,
+      # because there the trailing slash is still present.
+      - name: Card and canonical survive a versioned build
+        run: |
+          set -euo pipefail
+          MIKE_DOCS_VERSION=latest mkdocs build --strict -d /tmp/site-versioned
+          img=$(grep -om1 '<meta property="og:image" content="[^"]*"' /tmp/site-versioned/index.html)
+          echo "$img"
+          case "$img" in
+            *"/latest/assets/og-card.png"*) echo "og:image OK" ;;
+            *) echo "::error::og:image does not resolve under a versioned deploy: $img"; exit 1 ;;
+          esac
+          test -f /tmp/site-versioned/assets/og-card.png
+          grep -q '<link rel="canonical" href="https://saw-docs.ndevuspace.com/latest/' \
+            /tmp/site-versioned/reference/cli/scan/index.html \
+            || { echo "::error::canonical is not the versioned URL"; exit 1; }
+
   # Writes the version to `gh-pages` and hands the whole versioned tree to Pages.
   publish:
     name: Publish version
@@ -164,7 +183,7 @@ jobs:
       - name: Write the site-root files (custom domain, crawl directives)
         run: |
           set -euo pipefail
-          echo 'saw.ndevuspace.com' > pages-artifact/CNAME
+          echo 'saw-docs.ndevuspace.com' > pages-artifact/CNAME
 
           # A sitemap may only list URLs at or below its OWN location, so the per-version
           # `latest/sitemap.xml` can never speak for the whole host. This index sits at the root and
@@ -172,20 +191,20 @@ jobs:
           printf '%s\n' \
             '<?xml version="1.0" encoding="UTF-8"?>' \
             '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' \
-            '  <sitemap><loc>https://saw.ndevuspace.com/latest/sitemap.xml</loc></sitemap>' \
+            '  <sitemap><loc>https://saw-docs.ndevuspace.com/latest/sitemap.xml</loc></sitemap>' \
             '</sitemapindex>' > pages-artifact/sitemap.xml
 
           printf '%s\n' 'User-agent: *' 'Allow: /' '' \
-            'Sitemap: https://saw.ndevuspace.com/sitemap.xml' > pages-artifact/robots.txt
+            'Sitemap: https://saw-docs.ndevuspace.com/sitemap.xml' > pages-artifact/robots.txt
 
           # Prove the sitemap the index points at exists AND names this host — a sitemap listing
           # another host is rejected wholesale, which is exactly how the first deploy failed.
           test -s pages-artifact/latest/sitemap.xml \
             || { echo "::error::latest/sitemap.xml missing"; exit 1; }
-          if grep -q '<loc>https://saw\.ndevuspace\.com/' pages-artifact/latest/sitemap.xml; then
+          if grep -q '<loc>https://saw-docs\.ndevuspace\.com/' pages-artifact/latest/sitemap.xml; then
             echo "sitemap host OK"
           else
-            echo "::error::latest/sitemap.xml does not name saw.ndevuspace.com — Google will reject every URL"
+            echo "::error::latest/sitemap.xml does not name saw-docs.ndevuspace.com — Google will reject every URL"
             grep -o '<loc>https://[^/]*' pages-artifact/latest/sitemap.xml | sort -u
             exit 1
           fi

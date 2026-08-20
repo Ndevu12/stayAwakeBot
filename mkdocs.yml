@@ -11,7 +11,7 @@ site_name: saw
 # The BARE domain. mike's mkdocs plugin appends the version being deployed (`site_url` becomes
 # `…/latest/` during a `mike deploy latest`), so a `latest/` written here would be doubled. A plain
 # `mkdocs build` leaves it bare, which is right for the PR check — that build is never published.
-site_url: https://saw.ndevuspace.com/
+site_url: https://saw-docs.ndevuspace.com/
 site_description: >-
   saw — an offline-first supply-chain worm scanner and sentinel: detect, report,
   remediate on a branch, and gate CI.

@@ -49,7 +49,7 @@ Homepage = "https://github.com/Ndevu12/stayAwakeBot"
 Repository = "https://github.com/Ndevu12/stayAwakeBot"
 Issues = "https://github.com/Ndevu12/stayAwakeBot/issues"
 # The published docs site (MkDocs Material, versioned with mike; `latest` is the default alias).
-Documentation = "https://saw.ndevuspace.com/"
+Documentation = "https://saw-docs.ndevuspace.com/"
 Changelog = "https://github.com/Ndevu12/stayAwakeBot/blob/main/CHANGELOG.md"
 
 # Console scripts (available after `pip install`); each maps to an existing thin main() (DRY).
