@@ -17,7 +17,7 @@ something — this page is the reasoning they link to.
 
 ## Who this is for
 
-Developers on machines that run `npm install`, VS Code auto-tasks, and AI-agent tooling — the
+Developers on machines that install dependencies, run builds, and use editor or AI-agent tooling — the
 population that supply-chain worms (Shai-Hulud and variants) target. `saw audit` flags credential
 *surfaces* on your dev machine; this page explains what those findings do and don't mean.
 

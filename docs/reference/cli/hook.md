@@ -5,7 +5,7 @@ description: saw hook — install global git hooks that scan a clone, pull or re
 # `saw hook`
 
 **Scan on clone.** Installs global git hooks so a fresh clone, a pull, a branch switch or a rebase
-scans what just landed and warns you *before* you run `npm install`, a build, or an editor auto-run
+scans what just landed and warns you *before* a dependency install, a build, or an editor auto-run
 task. It uses git's `init.templateDir` rather than a global `core.hooksPath`, so existing
 repositories are untouched, a repository's own hooks still run, and nothing is hijacked. The hook
 warns and points at [`saw fix`](fix.md); it never modifies anything and can never break a git

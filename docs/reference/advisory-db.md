@@ -31,3 +31,29 @@ saw scan --require-db                            # exit 2 rather than scan witho
 Unknown age counts as stale.
 
 Flags: [CLI reference](cli/db.md).
+
+## Ecosystems `saw` reads
+
+A scan resolves what a repository declares and locks, in every ecosystem below, and matches it
+against the advisory corpus. Nothing here needs configuring — whichever of these files a repository
+has, `saw` reads.
+
+| Language | Ecosystem | Read from |
+| --- | --- | --- |
+| JavaScript / TypeScript | npm | `package.json`, `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `npm-shrinkwrap.json` |
+| Python | PyPI | `requirements*.txt`, `poetry.lock`, `Pipfile.lock`, `uv.lock` |
+| Go | Go modules | `go.mod`, `go.sum` |
+| Java / Kotlin | Maven | `pom.xml`, Gradle lockfiles |
+| Rust | Cargo | `Cargo.lock` |
+| PHP | Composer | `composer.lock` |
+| C# / .NET | NuGet | `packages.lock.json` |
+| Ruby | RubyGems | `Gemfile.lock` |
+
+`saw db update -e <ecosystem>` limits a refresh to one of these; the default refreshes all of them.
+
+Two checks go further than the declared list, and both name their scope on their own page: the
+installed-tree comparison, which reads npm and PyPI trees as they exist on disk, and
+[`saw scan --deep`](cli/scan.md), which reads the contents of installed npm packages.
+
+Everything else `saw` does — the repository scan, the CI gate, `saw audit` on the machine itself —
+is language-agnostic and applies whatever a repository is written in.
