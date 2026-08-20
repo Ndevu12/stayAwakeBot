@@ -96,7 +96,8 @@ jobs:
             *) echo "::error::og:image does not resolve under a versioned deploy: $img"; exit 1 ;;
           esac
           test -f /tmp/site-versioned/assets/og-card.png
-          grep -q '<link rel="canonical" href="https://saw-docs.ndevuspace.com/latest/' \
+          site_url=$(python -c "import mkdocs.utils.yaml as y; print(y.yaml_load(open('mkdocs.yml'))['site_url'])")
+          grep -q "<link rel=\"canonical\" href=\"${site_url%/}/latest/" \
             /tmp/site-versioned/reference/cli/scan/index.html \
             || { echo "::error::canonical is not the versioned URL"; exit 1; }
 
@@ -183,7 +184,12 @@ jobs:
       - name: Write the site-root files (custom domain, crawl directives)
         run: |
           set -euo pipefail
-          echo 'saw-docs.ndevuspace.com' > pages-artifact/CNAME
+          # The domain is written once, in mkdocs.yml. Derive it here rather than repeating it.
+          site_url=$(python -c "import mkdocs.utils.yaml as y; print(y.yaml_load(open('mkdocs.yml'))['site_url'])")
+          host=$(python -c "import urllib.parse; print(urllib.parse.urlparse('$site_url').netloc)")
+          [ -n "$host" ] || { echo "::error::could not read site_url from mkdocs.yml"; exit 1; }
+          echo "site_url=$site_url  host=$host"
+          echo "$host" > pages-artifact/CNAME
 
           # A sitemap may only list URLs at or below its OWN location, so the per-version
           # `latest/sitemap.xml` can never speak for the whole host. This index sits at the root and
@@ -191,20 +197,20 @@ jobs:
           printf '%s\n' \
             '<?xml version="1.0" encoding="UTF-8"?>' \
             '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' \
-            '  <sitemap><loc>https://saw-docs.ndevuspace.com/latest/sitemap.xml</loc></sitemap>' \
+            "  <sitemap><loc>https://$host/latest/sitemap.xml</loc></sitemap>" \
             '</sitemapindex>' > pages-artifact/sitemap.xml
 
           printf '%s\n' 'User-agent: *' 'Allow: /' '' \
-            'Sitemap: https://saw-docs.ndevuspace.com/sitemap.xml' > pages-artifact/robots.txt
+            "Sitemap: https://$host/sitemap.xml" > pages-artifact/robots.txt
 
           # Prove the sitemap the index points at exists AND names this host — a sitemap listing
           # another host is rejected wholesale, which is exactly how the first deploy failed.
           test -s pages-artifact/latest/sitemap.xml \
             || { echo "::error::latest/sitemap.xml missing"; exit 1; }
-          if grep -q '<loc>https://saw-docs\.ndevuspace\.com/' pages-artifact/latest/sitemap.xml; then
+          if grep -q "<loc>https://$host/" pages-artifact/latest/sitemap.xml; then
             echo "sitemap host OK"
           else
-            echo "::error::latest/sitemap.xml does not name saw-docs.ndevuspace.com — Google will reject every URL"
+            echo "::error::latest/sitemap.xml does not name $host — Google will reject every URL"
             grep -o '<loc>https://[^/]*' pages-artifact/latest/sitemap.xml | sort -u
             exit 1
           fi

@@ -24,7 +24,8 @@
   <meta name="google-site-verification" content="{{ config.extra.google_site_verification }}">
   {% endif %}
 
-  <meta property="og:type" content="website">
+  {% set is_doc = page and not page.is_homepage %}
+  <meta property="og:type" content="{{ "article" if is_doc else "website" }}">
   <meta property="og:site_name" content="{{ config.site_name }}">
   <meta property="og:title" content="{{ title }}">
   <meta property="og:description" content="{{ description }}">
@@ -36,23 +37,51 @@
   <meta name="twitter:description" content="{{ description }}">
   <meta name="twitter:image" content="{{ image }}">
 
+  {# The landing page describes the software; every other page is a documentation article, so a
+     search engine can tell the difference between the product and a page about how to use it. #}
   <script type="application/ld+json">
+  {% if is_doc %}
     {
       "@context": "https://schema.org",
-      "@type": "SoftwareApplication",
-      "name": "saw",
-      "alternateName": "StayAwakeBot",
-      "applicationCategory": "SecurityApplication",
-      "operatingSystem": "macOS, Linux, Windows",
-      "url": "{{ base }}",
-      "downloadUrl": "https://pypi.org/project/stayawakebot/",
-      "codeRepository": "{{ config.repo_url }}",
-      "description": "{{ config.site_description | trim }}",
+      "@type": "TechArticle",
+      "headline": "{{ page.title }}",
+      "description": "{{ description }}",
+      "url": "{{ canonical }}",
       "image": "{{ image }}",
-      "screenshot": "{{ image }}",
-      "license": "https://spdx.org/licenses/AGPL-3.0-or-later.html",
+      "inLanguage": "en",
+      "isPartOf": {
+        "@type": "WebSite",
+        "name": "{{ config.site_name }}",
+        "url": "{{ base }}"
+      },
+      "about": {
+        "@type": "SoftwareApplication",
+        "name": "saw",
+        "applicationCategory": "SecurityApplication"
+      },
       "author": { "@type": "Person", "name": "{{ config.site_author }}" },
-      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+      "license": "https://spdx.org/licenses/AGPL-3.0-or-later.html"
     }
+  {% else %}
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "name": "{{ config.site_name }}",
+      "url": "{{ base }}",
+      "description": "{{ description }}",
+      "inLanguage": "en",
+      "about": {
+        "@type": "SoftwareApplication",
+        "name": "saw",
+        "alternateName": "StayAwakeBot",
+        "applicationCategory": "SecurityApplication",
+        "operatingSystem": "macOS, Linux, Windows",
+        "downloadUrl": "https://pypi.org/project/stayawakebot/",
+        "codeRepository": "{{ config.repo_url }}",
+        "license": "https://spdx.org/licenses/AGPL-3.0-or-later.html",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+      }
+    }
+  {% endif %}
   </script>
 {% endblock %}
