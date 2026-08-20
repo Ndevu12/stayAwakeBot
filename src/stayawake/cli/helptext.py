@@ -1,15 +1,5 @@
 #!/usr/bin/env python3
-"""One home for how a command's `-h` reads: what it is for, then real invocations.
-
-Every command parser is built through `add_command` rather than calling `add_parser`
-directly, so no command can ship a bare flag list: `description` (the purpose, incl. the
-safety-relevant fact) and `examples` are required arguments. The examples are the ones from
-docs/CLI.md — the terminal and the guide show the same commands.
-
-argparse reflows the epilog unless the parser opts into a raw formatter, and the stock raw
-formatter freezes the description too (forcing hand-wrapped prose that ignores the terminal
-width). `CommandHelpFormatter` splits the difference: prose wraps, examples stay verbatim.
-"""
+"""One home for how a command's `-h` reads: what it is for, then real invocations."""
 from __future__ import annotations
 
 import argparse

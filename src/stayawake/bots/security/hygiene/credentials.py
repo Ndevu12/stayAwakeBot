@@ -1,24 +1,6 @@
 #!/usr/bin/env python3
 """Credential-exposure hygiene: a cached GitHub token in the OS keychain (macOS Keychain / Linux
 libsecret-gnome-keyring / Windows Credential Manager) or a plaintext `~/.git-credentials`.
-
-Threat-model note (#1237): a token *cached in the encrypted login Keychain is normal* — the Keychain
-is the recommended store, and a credential must live somewhere to be usable. What actually determines
-risk is the token's LIFETIME, SCOPE, and whether a bearer token can be COPIED by a process running as
-you — not where it is stored. And developers legitimately keep several auth methods at once (SSH,
-HTTPS+PAT, gh), often forced by the environment, so the tool must NEVER tell a user to collapse to one
-or to "just delete" a path they may rely on. So the Keychain finding here:
-
-  * is graded `info` (a review item), not `warning` — it's the WORST case only if properties are bad,
-    which we deliberately do not read (saw never reads/transmits a live secret);
-  * frames risk by PROPERTY, names the specific store, and says what a delete does NOT touch;
-  * probes read-only whether a helper is actively SERVING the token (in use) vs it merely sitting
-    there (a removal candidate), and never proposes deleting a sole working auth path first;
-  * resolves the REAL config source (`git config --show-origin`) so its removal command is correct
-    (an inherited read-only system default needs `--add credential.helper ""`, not a no-op `--unset`).
-
-A PLAINTEXT `~/.git-credentials` (credential.helper=store) is a different animal — an actual
-misconfiguration (a secret on disk in the clear), so it stays a `warning`.
 """
 from __future__ import annotations
 
@@ -38,7 +20,7 @@ CREDENTIAL_HYGIENE_DOC = ("https://github.com/Ndevu12/stayAwakeBot/blob/main/"
 @dataclass(frozen=True)
 class KeychainStore:
     """The OS credential store that holds a cached github.com credential on a given platform — its
-    human name (for the finding's prose) and the platform-correct removal command (#1260). The store is
+    human name (for the finding's prose) and the platform-correct removal command. The store is
     encrypted and recommended on every platform; only the name and the delete verb differ."""
     name: str
     delete_command: str
@@ -66,7 +48,7 @@ def _run(cmd: list[str], *, input_text: str | None = None, timeout: int = 10,
 
     `capture=False` DISCARDS the child's stdout/stderr to /dev/null and exposes only the exit code —
     used for a probe whose tool would print a live SECRET (libsecret's `secret-tool`), so the token is
-    written to the child's null sink and never enters saw's memory (#1260). saw reads presence, never
+    written to the child's null sink and never enters saw's memory. saw reads presence, never
     the secret, on every platform."""
     try:
         env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
@@ -99,7 +81,7 @@ def _linux_secret_has_github() -> bool:
 
 def _windows_credential_has_github() -> bool:
     """True if Windows Credential Manager holds a github.com git credential, via `cmdkey /list`. Reads
-    only the target label (never the secret); False when the target is absent (`* NONE *`) (#1260)."""
+    only the target label (never the secret); False when the target is absent (`* NONE *`)."""
     r = _run(["cmdkey", "/list:git:https://github.com"])
     if r is None or r.returncode != 0:
         return False
@@ -109,7 +91,7 @@ def _windows_credential_has_github() -> bool:
 
 def _detect_cached_credential() -> KeychainStore | None:
     """The OS credential store holding a cached github.com credential on THIS platform, or None —
-    macOS Keychain / Linux libsecret / Windows Credential Manager (#1260). Each probe is read-only,
+    macOS Keychain / Linux libsecret / Windows Credential Manager. Each probe is read-only,
     never reads the secret value, and degrades to None when the platform's tool is absent (so an audit
     on a host without the store's CLI simply reports nothing, rather than erroring)."""
     if sys.platform == "darwin":
@@ -169,7 +151,7 @@ def _system_default_helper_origin(origins: list[tuple[str, str]]) -> str | None:
 
 
 def _https_token_status() -> bool | None:
-    """Read-only 'is HTTPS auth actually IN USE here?' probe (#1237). Tri-state on purpose:
+    """Read-only 'is HTTPS auth actually IN USE here?' probe. Tri-state on purpose:
       * True  — a credential helper actively FILLS a github.com token (HTTPS is in use → deleting it
                 logs you out; we must NEVER offer a delete).
       * False — git ran and NO helper served a token (`git credential fill` errors on 'could not read
@@ -213,8 +195,8 @@ def _gh_configured() -> bool:
 def _keychain_finding(store: KeychainStore) -> HygieneIssue:
     """Build the (info-level) cached-credential finding for `store` (the platform's OS keychain) —
     property-framed, multi-path-aware, and config-source-aware, informing rather than prescribing a
-    delete (see module docstring / #1237). Only the store name + removal command vary by platform;
-    all the messaging and the lockout-safe gating are shared (#1260)."""
+    delete (see module docstring /). Only the store name + removal command vary by platform;
+    all the messaging and the lockout-safe gating are shared."""
     origins = _credential_helper_origins()
     served = _https_token_status()
     ssh, gh = _ssh_key_present(), _gh_configured()

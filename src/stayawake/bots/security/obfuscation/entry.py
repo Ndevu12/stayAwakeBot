@@ -38,7 +38,7 @@ def analyze_file(text: str, ext: str = "", constructs_only: bool = False) -> Obf
       1) self-evidently executable obfuscation (charcode/byte array, dynamic-exec sink,
          or a dense escape-encoded byte run) — sufficient on its own, line-independent. A
          base64 blob (contiguous OR arrayed) is NOT here: it is ordinary data (JWT / API
-         token / key array / asset), see #1212.
+         token / key array / asset), see.
       2) a corroborated whole-file minification+entropy anomaly: the file carries an
          outlier-long line AND a dense packed region that dominates it AND the whole
          file reads as high-entropy. This is the in-file analogue of analyze_delta's

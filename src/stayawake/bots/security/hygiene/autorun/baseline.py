@@ -1,19 +1,5 @@
 #!/usr/bin/env python3
-"""Autorun BASELINE (#1333) — cross-run state that adds a NOVELTY signal, and is never trusted for safety.
-
-The baseline records `{entry-path → content-digest}` from a prior run so a later run can tell what is
-NEW or CHANGED. Crucially it is an ENHANCEMENT, not a trust boundary: a user-level worm runs as the
-user and can write this file, so we treat it accordingly —
-
-  * safety never depends on it — provenance + content-shape + correlation grade every entry regardless
-    (see `grade`), so a tampered or first-run baseline cannot hide an unattributed foothold;
-  * a lazily-tampered baseline (an entry added to launder it into "known" without fixing the integrity
-    hash) is DETECTED and the whole baseline is treated as untrusted (novelty ignored);
-  * a missing / corrupt / tampered baseline degrades to "no novelty" — never to a silent all-clear.
-
-Stored under XDG state (`~/.local/state/saw/autorun-baseline.json`), overridable via
-`SAW_AUTORUN_BASELINE`. On an ephemeral / CI host every run is a first run, so the baseline is neither
-read nor written there (novelty is simply absent; the other three signals still run)."""
+"""Autorun BASELINE — cross-run state that adds a NOVELTY signal, and is never trusted for safety."""
 from __future__ import annotations
 
 import json
@@ -38,7 +24,7 @@ def baseline_path() -> Path:
 
 def is_ephemeral() -> bool:
     """A disposable host (CI runner) where every run is a first run — no point reading/writing a
-    longitudinal baseline. Ties to #1337's environment distinction without depending on it."""
+    longitudinal baseline. Ties to's environment distinction without depending on it."""
     return env.is_ci()
 
 

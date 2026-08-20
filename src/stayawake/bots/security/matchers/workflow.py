@@ -1,26 +1,5 @@
 #!/usr/bin/env python3
-"""GitHub Actions workflow matcher — planted / impersonated CI persistence (#1091).
-
-`saw` already walks `.github/workflows/*.yml` (they are not pruned and `.yml`/`.yaml`
-are source extensions), but no matcher inspected them. This YAML-aware structural matcher
-closes the Shai-Hulud 2.0 / Mini "plant-a-workflow" CI-persistence + camouflage blind spot:
-
-  * `workflow-injection-run` — an injection-prone trigger (pull_request_target / issue_comment /
-    issues / discussion / discussion_comment / workflow_run) reaching a `run:` step that
-    interpolates an UNTRUSTED `${{ github.event.* }}` field (the "open a Discussion → payload
-    fires" weakness). Runs with write-scoped secrets, so untrusted text in `run:` = script
-    injection / secret theft.
-  * `workflow-dependabot-impersonation` — a workflow masquerading as Dependabot (name/filename)
-    that also does something Dependabot never does: self-hosted `runs-on`, a remote-fetch-into-
-    interpreter `run:`, or a dangerous injection expression.
-
-Both are `confidence: heuristic` → SUSPICIOUS (a repo can legitimately own such a workflow), so
-they inform the user without a false "infected" alarm. Kept separate from the `.vscode`-scoped
-`structural-json` matcher (whose gate must not be relaxed) and parses YAML, not JSON.
-
-Detection dispatches by the signature `kind` (mirroring StructuralJsonMatcher); the signature
-carries the metadata (id/category/severity/confidence/remediation) and this module the logic.
-"""
+"""GitHub Actions workflow matcher — planted / impersonated CI persistence."""
 from __future__ import annotations
 
 import re

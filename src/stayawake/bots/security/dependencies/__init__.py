@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Dependency-audit domain: resolve a repo's declared/locked packages to `Purl`s and match them
-against an advisory store — inline seed + the offline OSV corpus (#1119, #1120).
+against an advisory store — inline seed + the offline OSV corpus.
 
 Kept a sibling of `matchers/` — not inside it — because these pieces (repo → PURLs, and the
 advisory store/corpus) are reusable beyond the `dependency-audit` matcher (a future SBOM or

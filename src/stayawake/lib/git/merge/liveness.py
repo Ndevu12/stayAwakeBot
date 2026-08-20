@@ -11,10 +11,10 @@ from pathlib import Path
 
 from stayawake.lib.git.run import run
 
-PRESENT = "present"    # byte-identical blob still at HEAD — the introduced content is live
-CHANGED = "changed"    # the file changed since; whether the introduced lines survive is UNKNOWN
-GONE = "gone"          # the path no longer exists at HEAD
-UNKNOWN = "unknown"    # could not be established (detached/empty HEAD, unreadable object)
+PRESENT = "present"
+CHANGED = "changed"
+GONE = "gone"
+UNKNOWN = "unknown"
 
 
 def _blob(repo: str | Path, rev: str, path: str) -> str | None:

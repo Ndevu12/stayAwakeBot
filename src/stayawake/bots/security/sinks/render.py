@@ -128,7 +128,7 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False,
                     ev = _fmt_evidence(f["evidence"], textsafe.quoted,
                                        payload_window=f.get("payload_window", False))
                     out.append(f"        evidence: {ev}")
-                if f.get("fix_advice"):                          # actionable remediation (#1252)
+                if f.get("fix_advice"):                          # actionable remediation
                     out.append(f"        {MARKER['detail']} fix: {textsafe.plain(f['fix_advice'])}")
                 if f.get("reference"):
                     out.append(f"        {MARKER['detail']} details: {textsafe.plain(f['reference'])}")
@@ -147,7 +147,7 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False,
                     out.append(f"    {MARKER['info']} [{a['severity']}]  {a['signature_id']}  —  {loc}")
                     if a.get("evidence"):
                         out.append(f"        {_fmt_evidence(a['evidence'], textsafe.quoted)}")
-                    if a.get("fix_advice"):                      # how to actually fix it (#1252)
+                    if a.get("fix_advice"):                      # how to actually fix it
                         out.append(f"        {MARKER['detail']} fix: {textsafe.plain(a['fix_advice'])}")
                     if a.get("reference"):
                         out.append(f"        {MARKER['detail']} details: {textsafe.plain(a['reference'])}")
@@ -167,8 +167,7 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False,
 
 
 def _coverage_notes(payload: dict[str, Any]) -> list[str]:
-    """Unique, order-preserving coverage notes across all results (e.g. 'node_modules not deep-scanned',
-    #1222) — the same note repeats per repo, so dedup to one line."""
+    """Unique, order-preserving coverage notes across all results (e.g. 'node_modules not deep-scanned',) — the same note repeats per repo, so dedup to one line."""
     seen: dict[str, None] = {}
     for r in payload.get("results", []):
         for n in r.get("notes", []):
@@ -219,7 +218,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
                 ev = _fmt_evidence(f["evidence"], textsafe.code,
                                    payload_window=f.get("payload_window", False))
                 out.append(f"  - evidence: {ev}")
-            if f.get("fix_advice"):                              # actionable remediation (#1252)
+            if f.get("fix_advice"):                              # actionable remediation
                 # code-span the advice: it embeds an unvalidated package name, and a bare Markdown
                 # string would let `x](http://evil)` render as an active link (textsafe.code contract).
                 out.append(f"  - **fix:** {textsafe.code(f['fix_advice'])}")
@@ -242,7 +241,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
                 out.append(f"  - {a['description']}")
                 if a.get("evidence"):
                     out.append(f"  - evidence: {_fmt_evidence(a['evidence'], textsafe.code)}")
-                if a.get("fix_advice"):                          # how to actually fix it (#1252)
+                if a.get("fix_advice"):                          # how to actually fix it
                     out.append(f"  - **fix:** {textsafe.code(a['fix_advice'])}")   # code-span: see above
                 if a.get("reference"):
                     out.append(f"  - details: {textsafe.sanitize(a['reference'])}")

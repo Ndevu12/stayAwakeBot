@@ -10,39 +10,24 @@ from dataclasses import dataclass, field, asdict
 from enum import IntEnum
 from typing import Any
 
-# Single source of truth for the quarantine directory name, shared by the
-# remediation engine (writes backups), the remediator (commits), and the scanner
-# (excludes it from scans). Keep these in sync via this constant only.
 QUARANTINE_DIR = ".malware-quarantine"
 
-# ── Finding confidence — orthogonal to severity (the verdict tier) ───────────────
-# Only a `confirmed` finding — a signature specific enough to be decisive on its own
-# (a known loader literal, the worm's exact tooling markers, an autorun harness) —
-# drives an INFECTED verdict. A `heuristic` finding matches a SHAPE that benign code can
-# also have (a packed/encoded blob, an oversized config line, a review-evading merge);
-# it is surfaced as SUSPICIOUS so the user is informed, but never alone asserts
-# "infected". This keeps the verdict honest: we only say malware when we are sure.
 CONFIRMED = "confirmed"
 HEURISTIC = "heuristic"
 CONFIDENCE_LEVELS = (CONFIRMED, HEURISTIC)
 
-# Repo verdict states (a graded replacement for the old infected/clean boolean).
 CLEAN = "clean"
 SUSPICIOUS = "suspicious"
 INFECTED = "infected"
 
-# ── Remediation manual-review reasons ────────────────────────────────────────────
-# Why an auto-fix deferred a code-loader finding to a human instead of acting on it. Each
-# maps to a specific recommended action in the remediator. Kept here (with the other domain
-# constants) so producers and tests share one source of truth, not an inline literal.
-BORN_INFECTED = "born-infected"             # no clean version in history AND content is packed
-INTRINSIC_MATCH = "intrinsic-match"         # signature is part of committed content (likely test/research)
-LEGIT_CHANGES = "legit-changes"             # clean version exists but payload isn't a separable append
-UNTRACKED = "untracked"                     # file not tracked in git → no clean version to recover
-NO_VCS = "no-vcs"                           # not a git repository
-SUSPECT_HEURISTIC = "suspicious-heuristic"  # heuristic-only match (asset/minified shape) → review, never auto-recover
-INSPECT_FAILED = "inspect-failed"           # git history could not be read (e.g. corrupt repo) → defer, never guess
-MERGE_CLEAN_RECOVERED = "merge-clean-recovered"  # born via an evil merge; the clean 3-way auto-merge
+BORN_INFECTED = "born-infected"
+INTRINSIC_MATCH = "intrinsic-match"
+LEGIT_CHANGES = "legit-changes"
+UNTRACKED = "untracked"
+NO_VCS = "no-vcs"
+SUSPECT_HEURISTIC = "suspicious-heuristic"
+INSPECT_FAILED = "inspect-failed"
+MERGE_CLEAN_RECOVERED = "merge-clean-recovered"
                                             # version is available → offered as a REVIEW-required
                                             # Suggested (second-parent-derived, never auto-applied)
 
@@ -73,30 +58,17 @@ class Finding:
     signature_id: str
     category: str
     severity: Severity
-    path: str                      # repo-relative path (or git ref for history findings)
+    path: str
     description: str
-    remediation: str = "manual"    # the machine STRATEGY keyword that drives `saw fix`
-                                   # (recover/quarantine-*/manual…) — NOT user-facing prose
+    remediation: str = "manual"
     line: int | None = None
     evidence: str | None = None
-    vector: str | None = None      # e.g. "vscode-autorun", "evil-merge"
-    confidence: str = CONFIRMED    # confirmed | heuristic — stamped by the scanner from the signature
-    related_paths: tuple[str, ...] = ()  # working-tree paths a COMMIT-keyed finding concerns (e.g. the
-                                   # files an evil-merge introduced) — `path` there is a merge SHA, so
-                                   # remediation reads the affected files from here, not `path`
-    commit_sha: str | None = None  # FULL SHA of the commit a commit-keyed finding concerns (e.g. the
-                                   # evil merge) — `path` may be a truncated display SHA, so git ops
-                                   # (clean-merge-blob recovery) use this
-    # True when `evidence` is a window of the scanned file rather than a sentence saw composed.
-    # Only `matchers.base.evidence()` produces one, and only the report reads this — a synthesized
-    # reason string is the finding itself and must never be fingerprinted away.
+    vector: str | None = None
+    confidence: str = CONFIRMED
+    related_paths: tuple[str, ...] = ()
+    commit_sha: str | None = None
     payload_window: bool = False
-    advisory_only: bool = False    # informational (e.g. a dependency CVE) — the scanner routes these
-                                   # OUT of the worm verdict into ScanResult.advisories; a repo with
-                                   # only advisory_only findings stays CLEAN (reported, never gated).
-    # Actionable remediation for the reader (#1252) — populated for dependency findings; the render
-    # prints a "→ fix" / "→ details" line when present. `fix_advice` is the human sentence (incl. an
-    # upgrade command), `fixed_version` the structured upgrade target, `reference` the advisory URL.
+    advisory_only: bool = False
     fix_advice: str | None = None
     fixed_version: str | None = None
     reference: str | None = None
@@ -111,16 +83,11 @@ class Finding:
 class ScanResult:
     """All findings for one target (one repository)."""
 
-    target: str                    # display name (repo path or owner/repo)
-    source: str                    # "local" | "remote"
+    target: str
+    source: str
     findings: list[Finding] = field(default_factory=list)
     error: str | None = None
-    # Advisory-tier results (dependency CVEs, opt-in) — deliberately NOT part of `findings`, so the
-    # verdict below can never see them. Reported in their own section; they never gate a scan.
     advisories: list[Finding] = field(default_factory=list)
-    # Non-gating COVERAGE notes — honest caveats about what this scan did NOT look at (e.g. vendored
-    # dependency code not deep-scanned, #1222), so a `clean` verdict is never silently hollow. Shown in
-    # the report footer + the JSON; never affect the verdict/exit code.
     notes: list[str] = field(default_factory=list)
 
     @property

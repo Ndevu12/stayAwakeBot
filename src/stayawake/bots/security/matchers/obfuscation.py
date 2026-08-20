@@ -1,19 +1,5 @@
 #!/usr/bin/env python3
-"""Whole-file obfuscation matcher — line-AGNOSTIC payload detection (G4).
-
-The formatting-keyed long-line rule (heuristic `oversized-config-line`) only fires
-on a single line longer than its threshold. A payload that is SPLIT/WRAPPED onto
-many shorter lines, or that lives in an extension that rule doesn't cover
-(.jsx/.tsx/.vue/.svelte), slips straight past it. This matcher closes that gap: it
-runs the worm content-loader fingerprints AND a context-scoped obfuscation detector
-over the RAW concatenated file content — independent of any single line's length —
-for hand-authored source/config files.
-
-Context-aware confidence is the lever that keeps this FP-free: the detector is
-applied ONLY to hand-authored extensions and ONLY outside vendored/minified/generated
-locations (is_generated_context). In those generated paths obfuscation is expected
-and suppressed; in hand-authored source it is anomalous and reported.
-"""
+"""Whole-file obfuscation matcher — line-AGNOSTIC payload detection (G4)."""
 from __future__ import annotations
 
 from stayawake.bots.security.models import Finding, Severity

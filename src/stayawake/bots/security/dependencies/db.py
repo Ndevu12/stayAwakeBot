@@ -1,21 +1,5 @@
 #!/usr/bin/env python3
-"""Offline advisory database — cache + `saw db update` fetch (#1120).
-
-The ONE network egress in the whole scanner. `saw db update` bulk-downloads the OSV per-ecosystem
-export (`<base>/<bucket>/all.zip`) into a local cache; every scan then reads only that cache, so
-detection stays offline and deterministic. The download URL names only the **ecosystem** — never
-a package — so an update can't leak the dependency graph (we pull advisories, not your manifest,
-and never query per-package online).
-
-Phase 1b keeps only **malicious** records with an **explicit affected-version list** (see
-`osv.is_malicious` / `parse_osv_record`); ordinary CVEs and range-only advisories are deferred to
-the vulnerability tier (#1121) and the range comparators (#1124). The inline `known_bad` seed in
-signatures.yml always ships, so the DB is a *superset*, never a prerequisite — no cache → scans
-fall back to the seed, exactly as before.
-
-Cache location and snapshot pinning/verification are finalized in the trust-hardening phase
-(#1126); today the cache is a plain user-cache directory with a basic per-ecosystem manifest.
-"""
+"""Offline advisory database — cache + `saw db update` fetch."""
 from __future__ import annotations
 
 import hashlib
@@ -53,7 +37,7 @@ _CORPUS_MEMO: dict[tuple[str, float], AdvisoryCorpus | None] = {}
 # ── cache location ────────────────────────────────────────────────────────────────────
 def default_cache_dir() -> Path:
     """`$SAW_ADVISORY_CACHE_DIR`, else `$XDG_CACHE_HOME/saw/advisories`, else
-    `~/.cache/saw/advisories`. (The global-vs-repo-pinned decision is #1126.)"""
+    `~/.cache/saw/advisories`. (The global-vs-repo-pinned decision is.)"""
     override = env.get(env.SAW_ADVISORY_CACHE_DIR)
     if override:
         return Path(override).expanduser()
@@ -211,7 +195,7 @@ def load_corpus(cache_dir: str | Path | None = None) -> AdvisoryCorpus | None:
 def _int(value: Any) -> int:
     """A non-negative int from an untrusted manifest field: 0 for missing/None/bool/float/str/list.
     A corrupt count (`"malicious": null` from a partial write or tamper) must never crash the status
-    report's `sum()` with a `TypeError` — it degrades to 0, like every other malformed field (#1137)."""
+    report's `sum()` with a `TypeError` — it degrades to 0, like every other malformed field."""
     return value if type(value) is int and value >= 0 else 0
 
 

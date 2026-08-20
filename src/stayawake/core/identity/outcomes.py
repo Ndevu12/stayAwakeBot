@@ -12,15 +12,9 @@ from stayawake.core.identity.intents import Intent
 class UpgradePath:
     """How the operator can gain the missing capability."""
     kind: str
-    # kind values:
-    #   "login"            — no credential at all
-    #   "refresh_gh"       — gh auth refresh -s …
-    #   "register_app"     — saw auth app register (manifest self-App, Phase 1)
-    #   "pat_scopes"       — classic / fine-grained PAT needs listed scopes/perms
-    #   "sso"              — org SSO authorize the token
     detail: str = ""
     scopes: tuple[str, ...] = ()
-    command: str = ""          # copy-pasteable command when applicable
+    command: str = ""
 
 
 @dataclass(frozen=True)

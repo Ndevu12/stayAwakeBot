@@ -130,7 +130,6 @@ def run_status(a: argparse.Namespace) -> int:
                for eco, c in s["ecosystems"].items())]
     print("\n".join(lines))
 
-    # CI gates — each prints why it failed and returns non-zero.
     rc = 0
     if not schema_ok:
         # Unusable cache (falls back to the inline seed), but NOT a security incident.

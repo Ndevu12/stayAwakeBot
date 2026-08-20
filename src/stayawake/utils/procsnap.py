@@ -1,26 +1,5 @@
 #!/usr/bin/env python3
-"""Running-process snapshot — the real argv of each live process, or an explicit refusal.
-
-A host that is already compromised still has the implant RUNNING, and on 2026-08-05 that is exactly
-how it was found: a `node -e` payload, reparented to launchd, no controlling terminal, beaconing. It
-was found by hand. This module is the data collection that lets the tool ask the same question.
-
-**Why not `ps`.** `ps -o command=` returns a space-joined, unquoted STRING. Word-splitting it is lossy
-and unrecoverable — measured, a six-element argv came back as eight tokens with the code argument
-destroyed — and every consumer downstream (`resolve_invocation`, the shell lexer) is specified over an
-argv VECTOR. Feeding them a re-split string makes them answer confidently about the wrong command, and
-it fails toward "nothing here". So argv comes from the kernel: `KERN_PROCARGS2` on macOS,
-`/proc/<pid>/cmdline` on Linux, both of which preserve the NUL-separated vector the process was
-executed with.
-
-**Unprivileged and prompt-free by construction.** Measured on macOS 14: no `sudo`, no Full Disk Access,
-no TCC dialog, and argv is NOT truncated (400,000 characters survived a round trip on macOS; Linux
-caps a SINGLE argument at 128 KiB in the kernel, so that is the platform's ceiling and not this
-collector's). A process owned by
-another user simply refuses to yield its arguments, and that refusal is REPORTED rather than rendered
-as an empty command line — a snapshot that silently drops what it cannot read would let a beacon
-running as another user look like an absence of beacons.
-"""
+"""Running-process snapshot — the real argv of each live process, or an explicit refusal."""
 from __future__ import annotations
 
 import ctypes
@@ -32,8 +11,8 @@ from pathlib import Path
 _CTL_KERN = 1
 _KERN_ARGMAX = 8
 _KERN_PROCARGS2 = 49
-_ARGMAX_FALLBACK = 256 * 1024          # if kern.argmax is unreadable, still bound the read
-_PS_TIMEOUT = 10                       # listing pids must never hang an audit
+_ARGMAX_FALLBACK = 256 * 1024
+_PS_TIMEOUT = 10
 
 
 @dataclass(frozen=True)
@@ -56,8 +35,8 @@ class Process:
 class Snapshot:
     """Every process this user could enumerate, and an honest account of what was refused."""
     processes: list[Process] = field(default_factory=list)
-    unreadable: int = 0                # enumerated, but argv refused (almost always another uid)
-    supported: bool = True             # False on a platform with no argv source at all
+    unreadable: int = 0
+    supported: bool = True
 
     def scope_note(self) -> str:
         """What this snapshot did NOT see — for a report that must not imply it saw everything."""
@@ -94,12 +73,11 @@ def _argv_from_procargs2(pid: int, argmax: int) -> tuple[str, ...] | None:
     argc = int.from_bytes(raw[:4], sys.byteorder)
     if argc <= 0:
         return None
-    # The exec path follows argc, then NUL padding, then the arguments themselves.
     parts = raw[4:].split(b"\0")
     args, seen_path = [], False
     for part in parts:
         if not seen_path:
-            seen_path = True            # the first field is the exec path, not argv[0]
+            seen_path = True
             continue
         if not part and not args:
             continue                    # alignment padding between the path and argv[0]

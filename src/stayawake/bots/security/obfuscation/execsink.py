@@ -31,7 +31,7 @@ _REFLECTIVE_EXEC = re.compile(
 _CONSTRUCTOR_EXEC = re.compile(r"\[\s*[\"']constructor[\"']\s*\]\s*\(")
 _NEW_CLONE_PREFIX = re.compile(r"\bnew\s+[\w$.)\]]*\s*$")
 
-# ── #1207 obfuscated exec sinks (after #1206; orthogonal to #1208/#1266) ───────────
+# ── Obfuscated exec sinks ─────────────────────────────────────────────────────
 _STR_CONCAT_FOLD = re.compile(
     r"(['\"])([^'\"\\\n]{0,64})\1\s*\+\s*\1([^'\"\\\n]{0,64})\1"
 )
@@ -49,7 +49,7 @@ _ALIAS_CALL_WINDOW = 240
 
 def _fold_string_concats(s: str, max_passes: int = 24) -> str:
     """Collapse adjacent same-quote string concatenations (`'ev'+'al'` → `'eval'`) so the
-    existing sink regexes see the reassembled token (#1207). Bounded chunk length (64) and
+    existing sink regexes see the reassembled token. Bounded chunk length (64) and
     pass count (24) keep this ReDoS/DoS-safe; a no-op on text with no quote-concat seams."""
     for _ in range(max_passes):
         ns = _STR_CONCAT_FOLD.sub(
@@ -62,7 +62,7 @@ def _fold_string_concats(s: str, max_passes: int = 24) -> str:
 
 def _has_obfuscated_exec_forms(s: str) -> bool:
     """True if `s` (already fold-normalized) has an indirect / light-alias / runtime-key
-    exec form from #1207. Call-required and `new`-clone-carved; Babel `(0, _mod.x)(` stays
+    exec form from. Call-required and `new`-clone-carved; Babel `(0, _mod.x)(` stays
     clean."""
     if _INDIRECT_EVAL.search(s):
         return True
@@ -85,8 +85,8 @@ def _has_obfuscated_exec_forms(s: str) -> bool:
 def _has_exec_sink(s: str, strict: bool = False) -> bool:
     """True if `s` contains a dynamic-execution sink: any literal `_EXEC_SINK` construct, a
     case-sensitive `_REFLECTIVE_EXEC` form (computed-key access to a dangerous global, or a
-    double-constructor Function reach), a #1208 residual form (see `_has_corroborated_dynamic_exec`),
-    a #1207 obfuscated form (split-token via concat-fold, indirect comma-call, light alias /
+    double-constructor Function reach), a residual form (see `_has_corroborated_dynamic_exec`),
+    a obfuscated form (split-token via concat-fold, indirect comma-call, light alias /
     runtime-key), or a SINGLE reflective bracket-constructor call that is NOT a `new`-prefixed
     polymorphic clone (the benign idiom the worm never uses). Every single-constructor occurrence is
     checked, so a `new`-clone earlier can't mask a real sink later.
@@ -94,8 +94,8 @@ def _has_exec_sink(s: str, strict: bool = False) -> bool:
     `strict=True` is the REMEDIATION gate mode (deciding a surgically-excised file is benign enough
     to auto-clean), and makes the whole check MORE conservative in two ways: (1) it DROPS the
     `new`-clone carve-out — every single bracket-constructor call counts; and (2) it enables the
-    BROAD #1208 arms (any non-literal import / constructed child_process command) that are too
-    FP-prone for a scan finding (#1289) but safe as a gate. In both, deferring on a benign shape is a
+    BROAD arms (any non-literal import / constructed child_process command) that are too
+    FP-prone for a scan finding but safe as a gate. In both, deferring on a benign shape is a
     safe false-positive, whereas trusting it could pass an RCE hidden in kept code."""
     view = _fold_string_concats(s)
     if (_EXEC_SINK.search(view) or _REFLECTIVE_EXEC.search(view)

@@ -17,12 +17,6 @@ from typing import TextIO
 
 from stayawake.utils import env
 
-# `-R` keeps colour escapes; we deliberately DON'T pass `-F`/`-X`. `-F` ("quit if it fits one
-# screen") is redundant — we already write short reports straight through, below — and the
-# `-F -X` pair on multi-screen *piped* input makes some `less` builds redraw/repeat the body
-# instead of paging it (the "stuck, garbled, …skipping…" bug). Plain `less -R` uses the
-# alternate screen, so the report pages cleanly and the prompt is restored on quit. `$PAGER`
-# (and `$LESS`) still win when set.
 _DEFAULT_PAGER = "less -R"
 
 
@@ -44,11 +38,6 @@ def page(text: str, *, enabled: bool, out: TextIO | None = None) -> None:
         out.flush()
         return
     cmd = env.get(env.PAGER, _DEFAULT_PAGER)
-    # While the pager owns the terminal, ignore SIGINT in THIS process: a Ctrl+C is the user
-    # quitting the pager, not killing us. Without this the interrupt hits the whole foreground
-    # process group, so we'd die before printing the post-report pointer (the bug where the
-    # "Full report:" line never appeared). Restored in `finally`. Best-effort — `signal()`
-    # only works on the main thread, so a worker-thread call just skips the shield.
     prev = None
     try:
         prev = signal.signal(signal.SIGINT, signal.SIG_IGN)

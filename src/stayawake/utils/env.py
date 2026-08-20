@@ -1,51 +1,33 @@
 #!/usr/bin/env python3
-"""The one place stayawake reads the process environment.
-
-Every environment variable the app consults is NAMED and READ here — so there are no
-magic-string `os.environ.get("…")` calls scattered across modules, the full env surface is
-discoverable in a single file, and a test can steer behaviour by patching one module. Domain
-logic that happens to consult env (token precedence in `core.auth`, GitHub App auth in
-`core.github_app`) keeps its own logic and just reads names/values from here.
-
-Note: `get()` strips surrounding whitespace and treats an empty/whitespace value as unset, so a
-variable is "set" only when it holds real content — consistent across every toggle and path.
-Stdlib only; imported widely, so it must stay dependency-light and import-cheap.
-"""
+"""The one place stayawake reads the process environment."""
 from __future__ import annotations
 
 import os
 
-# ── variable names (single source of truth) ───────────────────────────────────────────
-# GitHub credentials / Actions context
-GH_SECURITY_TOKEN = "GH_SECURITY_TOKEN"   # the one PAT a user configures (see core.auth)
-GITHUB_TOKEN = "GITHUB_TOKEN"             # auto-minted by GitHub Actions (installation token)
-GITHUB_REPOSITORY = "GITHUB_REPOSITORY"   # "owner/name", set by GitHub Actions
+GH_SECURITY_TOKEN = "GH_SECURITY_TOKEN"
+GITHUB_TOKEN = "GITHUB_TOKEN"
+GITHUB_REPOSITORY = "GITHUB_REPOSITORY"
 SLACK_WEBHOOK_URL = "SLACK_WEBHOOK_URL"
-# app directories / behaviour
 STAYAWAKE_REPORTS_DIR = "STAYAWAKE_REPORTS_DIR"
 SAW_ADVISORY_CACHE_DIR = "SAW_ADVISORY_CACHE_DIR"
 XDG_CACHE_HOME = "XDG_CACHE_HOME"
-XDG_CONFIG_HOME = "XDG_CONFIG_HOME"     # base for saw's git-template dir (scan-on-clone hooks)
-XDG_STATE_HOME = "XDG_STATE_HOME"       # base for saw's cross-run state (autorun baseline, #1333)
-SAW_AUTORUN_BASELINE = "SAW_AUTORUN_BASELINE"   # override the autorun baseline path (tests / operators)
-SAW_HOOK_DISABLED = "SAW_HOOK_DISABLED"  # kill-switch: skip the scan-on-clone hook without uninstalling
-SAW_HOOK_TIMEOUT = "SAW_HOOK_TIMEOUT"   # wall-clock budget (s) for a scan-on-clone scan; 0 = no cap
+XDG_CONFIG_HOME = "XDG_CONFIG_HOME"
+XDG_STATE_HOME = "XDG_STATE_HOME"
+SAW_AUTORUN_BASELINE = "SAW_AUTORUN_BASELINE"
+SAW_HOOK_DISABLED = "SAW_HOOK_DISABLED"
+SAW_HOOK_TIMEOUT = "SAW_HOOK_TIMEOUT"
 NO_COLOR = "NO_COLOR"
-CLICOLOR_FORCE = "CLICOLOR_FORCE"   # force colour on even when stdout is not a TTY (e.g. recording)
-CI = "CI"                           # set by CI runners → suppress colour so captured logs stay plain
-# Ephemeral-runner markers (#1337) — runner-SPECIFIC signals set by the CI system (bare `CI=` is not
-# enough; a dev may export it). READ-ONLY: consulted only to add impact CONTEXT to a finding, never to
-# change severity/verdict/exit (see `is_ephemeral_runner`). Not operator-configured.
-GITHUB_ACTIONS = "GITHUB_ACTIONS"   # GitHub Actions
-GITLAB_CI = "GITLAB_CI"             # GitLab CI
-CIRCLECI = "CIRCLECI"               # CircleCI
-BUILDKITE = "BUILDKITE"             # Buildkite
-RUNNER_OS = "RUNNER_OS"             # GitHub Actions runner OS marker
+CLICOLOR_FORCE = "CLICOLOR_FORCE"
+CI = "CI"
+GITHUB_ACTIONS = "GITHUB_ACTIONS"
+GITLAB_CI = "GITLAB_CI"
+CIRCLECI = "CIRCLECI"
+BUILDKITE = "BUILDKITE"
+RUNNER_OS = "RUNNER_OS"
 _RUNNER_MARKERS = (GITHUB_ACTIONS, GITLAB_CI, CIRCLECI, BUILDKITE, RUNNER_OS)
-TERM = "TERM"                       # terminal type ('xterm-256color', 'dumb', …); read by core.terminal
-COLORTERM = "COLORTERM"             # 'truecolor' / '24bit' when 24-bit colour is available
+TERM = "TERM"
+COLORTERM = "COLORTERM"
 PAGER = "PAGER"
-# any of these set (to a non-empty value) disables live streaming
 NO_STREAM = ("STAYAWAKE_NO_STREAM", "NO_STREAM")
 
 
@@ -66,7 +48,7 @@ def any_set(names) -> bool:
 
 def is_ephemeral_runner() -> bool:
     """True only when the host is clearly an EPHEMERAL CI runner. FAILS TOWARD WORKSTATION (False) when
-    ambiguous or absent (#1337): the CI signal is attacker-forgeable, so it may only ever ADD runner
+    ambiguous or absent: the CI signal is attacker-forgeable, so it may only ever ADD runner
     context to an impact finding — never soften its severity/verdict/exit. Requires a runner-specific
     marker AND the absence of a persistent home, so container-on-a-workstation (real `$HOME`/SSH mounted
     through) stays 'workstation'."""
@@ -167,7 +149,7 @@ def xdg_cache_home() -> str:
 
 def xdg_state_home() -> str:
     """`$XDG_STATE_HOME`, else `~/.local/state` (the XDG default) — base for saw's cross-run state
-    (the #1333 autorun baseline). State, not cache: losing it degrades gracefully but it is meant
+    (the autorun baseline). State, not cache: losing it degrades gracefully but it is meant
     to persist longitudinally on a workstation."""
     return get(XDG_STATE_HOME) or os.path.join(os.path.expanduser("~"), ".local", "state")
 

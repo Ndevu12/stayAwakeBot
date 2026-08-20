@@ -24,7 +24,7 @@ def _status_tag(r: ScanResult) -> str:
 
 
 def _print_report_pointer(report_path: Path, *, spilled: bool, reason: str = "") -> None:
-    """Point the user at the written report, PROMINENTLY (#1203) — in EVERY case a report is written
+    """Point the user at the written report, PROMINENTLY — in EVERY case a report is written
     (local `-d`, or any spill — large fleet or many findings, local or remote). A ruled block on
     stderr (kept off stdout so it never mixes into the report body or a pipe). Paths are coloured
     and OSC-8 `file://` hyperlinks when stderr is a colour TTY, so a click opens the file/folder

@@ -1,16 +1,5 @@
 #!/usr/bin/env python3
-"""npm manifest matcher — install-time lifecycle-hook execution in package.json.
-
-npm auto-runs `preinstall`/`install`/`postinstall`/`prepare` on `npm install`, so a command
-planted in one of those keys executes with no user action — the classic Shai-Hulud vector
-(`"preinstall": "node setup_bun.js"`), and the Bun-smuggling / remote-fetch variants.
-
-Kept separate from the VS Code `structural-json` matcher (whose `.vscode/`-only gate must not
-be relaxed). It inspects ONLY the npm-auto-run lifecycle keys' command strings — never user
-scripts like `test`/`build` (which run only when a human invokes them), so a normal manifest
-stays clean. Detection is data-driven: each `matcher: npm-manifest` signature's `pattern` is
-tested against each lifecycle command, so new indicators are a signatures.yml add, no code.
-"""
+"""npm manifest matcher — install-time lifecycle-hook execution in package.json."""
 from __future__ import annotations
 
 import re

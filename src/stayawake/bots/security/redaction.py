@@ -13,14 +13,6 @@ import copy
 import hashlib
 from typing import Any
 
-# How many leading characters of the snippet to keep as a human hint. Short enough to be useless as
-# a payload, long enough to RECOGNISE A FALSE POSITIVE — which is the job this preview actually does.
-#
-# 48 is measured, not chosen. The window is cut at `match_start - 12`, so the accused construct sits
-# at the front and the thing that exonerates it is a token further right: `JSON.parse` (a JWT decoder,
-# not an exec sink) needs 33 characters, a UMD banner needs 39, an icon-size array needs 46. At 24,
-# three of five real false positives became untriageable — the reader could see what we accused and
-# not the answer.
 PREVIEW_LEN = 48
 
 

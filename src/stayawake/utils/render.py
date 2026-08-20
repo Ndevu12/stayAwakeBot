@@ -1,22 +1,6 @@
 #!/usr/bin/env python3
 """Shareable terminal-rendering toolkit — the *mechanism* of readable terminal output
 (colour, width, wrapping, rules), with the *format* left entirely to each caller.
-
-Why this exists: two surfaces render human reports — the security scan
-(`bots/security/sinks/render.py`) and the local-hygiene audit
-(`bots/security/hygiene`). They present DIFFERENT data (repo findings with a path/signature/
-evidence vs. host issues with a title/detail/fix + an incident banner), so they must own
-their own *layout*. But they were re-implementing the same *machinery*: ANSI colour with a
-severity palette, TTY-gating, alignment, wrapping. This module holds that machinery ONCE so
-the two never drift on "what colour is critical?" or "how do we wrap a long line?", while each
-caller stays free to compose its own shape.
-
-Design: a small kit of pure functions, no I/O and no environment reads (a dependency-light
-leaf, like `core.terminal`). Colour is applied by `paint()` only when the caller passes
-`on=True` — the caller decides on/off once via `core.terminal.supports_color(stream)`, so the
-gating policy (NO_COLOR / CLICOLOR_FORCE / TTY / CI) lives in that one place and this stays a
-pure formatter. Escapes have no display width, so every width calculation is done on PLAIN
-text and colour is applied AFTER — callers must wrap/pad first, then paint.
 """
 from __future__ import annotations
 
@@ -29,9 +13,6 @@ from stayawake.utils import textsafe
 
 RESET = "\033[0m"
 
-# The ONE colour vocabulary the whole CLI shares. Callers reference a level by name; the ANSI
-# codes live here once. Severity levels span both surfaces: the scanner grades
-# critical/high/medium/low; the audit grades warning/info; `ok` is the green "all clear".
 SEVERITY: dict[str, str] = {
     "critical": "\033[1;31m",   # bold red
     "high": "\033[31m",         # red
@@ -39,22 +20,10 @@ SEVERITY: dict[str, str] = {
     "low": "\033[33m",          # yellow
     "warning": "\033[1;31m",    # bold red — an audit warning is act-now
     "info": "\033[2m",          # dim — a review-worthy nudge
-    "unknown": "\033[1;33m",    # bold yellow — the check could NOT be completed (#1332)
+    "unknown": "\033[1;33m",    # bold yellow — the check could NOT be completed
     "ok": "\033[32m",           # green — no issue
 }
 
-# The ONE glyph vocabulary, beside the colour one above. It lives here for the same reason
-# SEVERITY does: the scan report, the audit report and the CLI status lines were each choosing
-# their own markers, so "what does a tick mean?" could drift the way "what colour is critical?"
-# no longer can. Callers reference a marker by name; the character lives here once.
-#
-# TEXT GLYPHS ONLY, never emoji. An emoji carries a variation selector and renders DOUBLE-WIDTH,
-# which silently breaks the hanging-indent maths in `block()`/`marked_list()` (those align
-# continuations under the text by `len(marker)`, a count of code points, not display columns).
-# Emoji is fine where width is irrelevant and rendering is richer — a Slack payload, a JSON field.
-#
-# The severity-named keys mirror SEVERITY, so a caller can pair `MARKER[sev]` with
-# `SEVERITY[sev]`; the rest name a ROLE the marker plays rather than a level.
 MARKER: dict[str, str] = {
     # by severity — what the check actually established
     "ok": "✓",          # an established POSITIVE: installed, already guarded, scanned clean
@@ -67,7 +36,6 @@ MARKER: dict[str, str] = {
     "meta": "·",        # separator / dim metadata
 }
 
-# Scan's per-target status tokens (distinct from severity: a verdict, not a level).
 STATUS: dict[str, str] = {
     "INFECTED": "\033[1;31m",   # bold red
     "SUSPECT": "\033[33m",      # yellow
@@ -75,7 +43,6 @@ STATUS: dict[str, str] = {
     "clean": "\033[32m",        # green
 }
 
-# Clickable path convention — bold cyan reads as a link in most terminals.
 LINK = "\033[1;36m"
 
 
@@ -91,18 +58,18 @@ def path_link(path: Path | str, *, on: bool) -> str:
 
     Uses OSC 8 `file://` hyperlinks (iTerm2, VS Code terminal, Windows Terminal, Ghostty, …) so a
     click / Cmd-click opens the file or folder in the OS without typing a command — the UX ask for
-    operators who aren't comfortable with shell navigation (#1203). When `on` is False (piped /
+    operators who aren't comfortable with shell navigation. When `on` is False (piped /
     NO_COLOR / CI) return the plain path string — scripts and logs never see escape sequences.
     The visible text is still the full path, so copy-paste works even where hyperlinks don't.
 
-    Safe for an UNTRUSTED path (#1294): the visible text is run through `textsafe.plain`, so a path
+    Safe for an UNTRUSTED path: the visible text is run through `textsafe.plain`, so a path
     that embeds control/escape (a nested OSC/CSI, a BEL) or bidi-override characters can't hijack the
     terminal or inject a workflow-command into a CI log — those become spaces. The OSC 8 target URI is
     built from the resolved path via `Path.as_uri()` (percent-encoded), so the click destination stays
     exact even after the visible text is sanitized. Today's callers pass a trusted report destination;
     this keeps the shared util safe by default for any future caller that doesn't."""
     p = Path(path)
-    text = textsafe.plain(str(p), limit=4096)   # neutralize terminal/log control·escape·bidi; PATH_MAX-generous
+    text = textsafe.plain(str(p), limit=4096)
     if not on:
         return text
     try:

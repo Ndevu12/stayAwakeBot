@@ -7,10 +7,6 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-# Local git ops (reads, commit, stage, worktree) touch only disk — 60s catches a hung git.
-# Network ops (push, fetch, ls-remote) legitimately take longer on a slow link, so they pass
-# the larger bound: generous enough not to abandon a real transfer, still finite so a dead
-# connection can't hang the sweep forever (the old per-call subprocess had NO timeout at all).
 LOCAL_TIMEOUT = 60
 NETWORK_TIMEOUT = 180
 

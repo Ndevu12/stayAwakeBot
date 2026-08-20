@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Canonical ecosystem correspondence: our PURL type ↔ the OSV ecosystem/export name (#1123).
+"""Canonical ecosystem correspondence: our PURL type ↔ the OSV ecosystem/export name.
 
 One source of truth shared by `db` (fetches the OSV export bucket for a PURL type) and `corpus`
 (canonicalizes an advisory's OSV ecosystem back to the PURL type so a resolver's `Purl` matches).

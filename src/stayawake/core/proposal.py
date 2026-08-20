@@ -1,20 +1,5 @@
 #!/usr/bin/env python3
-"""Propose a repository change as a real, human-reviewed pull request — with a degradation ladder.
-
-This is the shared GitOps machinery behind commands that don't *impose* a change but *propose* one:
-given a git worktree that already has the change committed to a rolling branch, push it and open (or
-update) one deduplicated PR — and when the push is refused (no write access, or a branch that
-requires signed commits), walk the fallback ladder so the work is never lost: **fork → cross-fork
-PR**, else a **git-am-able patch + a deduplicated notify issue**.
-
-It is deliberately domain-neutral: it knows nothing about *what* the change is (a worm remediation,
-a CI-gate install, …). Callers build the worktree/commit, the PR title/body and the issue text, then
-read the structured `SubmitResult` and render their own human outcome — so domain wording (a
-remediation's PARTIAL tag, a gate's hardening checklist) stays with the caller. `saw fix` and
-`saw guard setup` are the two callers; the ladder is written once, here.
-
-Never commits to or force-pushes the default branch — the PR is the unit of review.
-"""
+"""Propose a repository change as a real, human-reviewed pull request — with a degradation ladder."""
 from __future__ import annotations
 
 import time
@@ -25,8 +10,8 @@ from stayawake.lib.adapters import github_api
 from stayawake.lib import git as gitutil
 from stayawake.utils.pathsafe import is_safe_write_target
 
-PATCHES_DIR = Path("sab-patches")   # where the read-only floor writes .patch files
-_FORK_POLL_TRIES = 10               # async fork readiness: poll up to ~30s
+PATCHES_DIR = Path("sab-patches")
+_FORK_POLL_TRIES = 10
 _FORK_POLL_DELAY = 3
 
 
@@ -55,12 +40,12 @@ class SubmitResult:
     from core.identity.classify (never invent a blanket 'no write access').
     """
     kind: str
-    action: str | None = None          # "opened" | "updated" for a pr/fork-pr
+    action: str | None = None
     number: int | None = None
     url: str = ""
     fork_slug: str | None = None
     patch_path: Path | None = None
-    issue_note: str | None = None      # generic issue outcome fragment, ready to embed
+    issue_note: str | None = None
     push_reason: str | None = None
     push_detail: str = ""
 
@@ -86,12 +71,11 @@ def _save_patch(wt: Path, slug: str, out_dir: Path) -> Path | None:
     try:
         # `out_dir` itself must not be a planted symlink — is_safe_write_target resolves BOTH the
         # target and the root, so a symlinked root would trivially "contain" itself; check it too so a
-        # committed `sab-patches -> $HOME` can't redirect the patch write out of the tree (#1218).
         if out_dir.is_symlink():
             return None
         out_dir.mkdir(parents=True, exist_ok=True)
         dest = out_dir / (slug.replace("/", "-") + ".patch")
-        if not is_safe_write_target(dest, out_dir):   # don't write the patch THROUGH a planted symlink (#1218)
+        if not is_safe_write_target(dest, out_dir):   # don't write the patch THROUGH a planted symlink
             return None
         dest.write_text(patch, encoding="utf-8")
     except OSError:
@@ -125,10 +109,6 @@ def _fork_and_pr(wt: Path, owner: str, name: str, base: str, branch: str,
 
     Handles: no token identity, can't fork (permissions), forking your own repo, async fork not
     ready, push-to-fork failure, and PR-creation failure."""
-    # `get_authenticated_user` (GET /user) is enabledForGitHubApps=false, so an installation token
-    # (the Actions GITHUB_TOKEN) returns None here — no fork identity. That's fine: under Actions the
-    # upstream push succeeds with `contents: write`, so this fork fallback is never reached. The fork
-    # path is for a PAT that lacks upstream write but can fork.
     me = (github_api.get_authenticated_user(token, quiet=True) or {}).get("login")
     if not me or me.lower() == owner.lower():
         return None  # no identity, or it's our own repo (a fork wouldn't help)
@@ -170,7 +150,6 @@ def submit_change_pr(wt: Path, slug: str, base: str, *, branch: str, title: str,
         failure = classify_push_stderr(pushed.stderr)
         # Some refusals can't be fixed by forking, so skip straight to the patch/issue floor:
         #  • workflow_scope / signed_commits — the fork PR would hit the same wall.
-        #  • auth — the CREDENTIAL itself is rejected (#1291), so a fork push (same token) fails too;
         #    attempting it is wasted API calls. (It degraded gracefully before — the fork's
         #    get_authenticated_user returned None — but skipping is honest and cheaper.)
         if failure.reason not in ("workflow_scope", "signed_commits", "auth"):

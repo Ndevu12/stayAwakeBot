@@ -29,7 +29,7 @@ def _untrack_quarantine(repo: Path) -> bool:
 def _reconcile_partial_label(owner: str, name: str, number: int, partial: bool, token: str) -> None:
     """Keep the `security: partial` label in sync with the fix's state (best-effort, never
     raises for the caller): add it on a partial fix, drop it when a re-run comes back fully clean
-    so a rolling PR that gets finished isn't left wrongly flagged (#1183 invariants #2, #4)."""
+    so a rolling PR that gets finished isn't left wrongly flagged."""
     if partial:
         github_api.add_labels(owner, name, number, [PARTIAL_LABEL], token, quiet=True)
     else:
@@ -40,10 +40,10 @@ def _reconcile_partial_label(owner: str, name: str, number: int, partial: bool, 
 class _Fix:
     """The result of building a fix: the base branch it sits on, and the changes/findings used to
     commit it to FIX_BRANCH and write the PR body. `applied` are the TRUSTED (structure-safe +
-    git-corroborated) changes; `computed` are the #1209 review-required strips — applied on a SEPARATE
+    git-corroborated) changes; `computed` are the review-required strips — applied on a SEPARATE
     commit but NOT git-corroborated, so they keep the run needs-review until a human reviews them.
     `manual` holds residual CONFIRMED findings that could NOT be auto-fixed. Any of `computed`/`manual`
-    non-empty means a PARTIAL fix (#1183/#1209): the safe changes still ship, but the tree is not a
+    non-empty means a PARTIAL fix: the safe changes still ship, but the tree is not a
     trusted-clean one and the PR/gate must say so. `signed` is False when either fix commit had to be
     landed with signing forced OFF (the repo wanted signed commits but signing couldn't complete)."""
     base: str
@@ -102,7 +102,7 @@ def _suspicious_only_outcome(label: str, fix: "_Fix") -> str:
     """The `saw fix` outcome for a repo whose ONLY findings are heuristic/suspicious — nothing
     confirmed, nothing auto-fixable. It DISCLOSES the set and defers to review, deliberately WITHOUT
     an `ABORTED`/`PARTIAL`/`error` marker so the run stays exit 0, consistent with a suspicious `saw
-    scan` (which exits 0). This is the #1360 fix: `saw fix` must never call such a repo 'already
+    scan` (which exits 0). This is the fix: `saw fix` must never call such a repo 'already
     clean' while `saw scan`/`saw hook` flag it — a self-contradiction that erodes trust."""
     n = len(fix.suspicious)
     plural = "" if n == 1 else "s"
@@ -289,7 +289,7 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
             if fix is None:
                 return outcome
             if not fix.applied and not fix.computed:
-                if not fix.manual:   # suspicious-only → disclose + defer, exit 0 (#1360)
+                if not fix.manual:   # suspicious-only → disclose + defer, exit 0
                     return _suspicious_only_outcome(
                         str(repo).replace(str(Path.home()), "~"), fix)
                 return (f"ABORTED — nothing auto-fixable; {len(fix.manual)} confirmed finding(s) "

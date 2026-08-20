@@ -32,15 +32,15 @@ except Exception:  # noqa: BLE001 — a TLS-setup hiccup must never crash import
 @dataclass
 class ApiRead:
     """Typed outcome of an API call — carries WHY it failed so callers can attribute a read
-    accurately instead of collapsing every failure to a bare `None` (#1243). `cause` is None on
+    accurately instead of collapsing every failure to a bare `None`. `cause` is None on
     success; otherwise one of `not_found` (404) · `unauthorized` (401) · `forbidden` (403, private /
     scope) · `rate_limited` (403 with the primary quota exhausted) · `network` (connection/DNS/TLS/
     timeout) · `http_error` (any other status). `retry_after` (seconds) is set for `rate_limited`."""
     value: Any = None
     cause: str | None = None
     retry_after: int | None = None
-    status: int | None = None        # HTTP status on an HTTP error (for logging / http_error)
-    detail: str = ""                 # response body / error text (for logging)
+    status: int | None = None
+    detail: str = ""
 
 
 def _classify(he: "urllib.error.HTTPError", detail: str) -> ApiRead:
@@ -125,7 +125,6 @@ def oauth_scopes(token: str | None) -> frozenset[str] | None:
     headers = {"Accept": "application/vnd.github+json",
                "User-Agent": "StayAwakeBot/1.0",
                "Authorization": f"Bearer {token}"}
-    # GET /rate_limit is cheap and always allowed for a live token.
     req = urllib.request.Request(_API + "/rate_limit", headers=headers, method="GET")
     try:
         with urllib.request.urlopen(req, timeout=15, context=_SSL_CTX) as resp:
@@ -471,7 +470,7 @@ def ref_commit_sha(owner: str, repo: str, ref: str, token: str | None = None) ->
 
 
 def read_dir(owner: str, repo: str, path: str, token: str | None = None) -> ApiRead:
-    """Contents-API directory listing, TYPED (#1243): `value` is the `[{name, path, type, …}]` list
+    """Contents-API directory listing, TYPED: `value` is the `[{name, path, type, …}]` list
     on success; otherwise `cause` says why (a 404 = the directory doesn't exist, distinct from a real
     read failure). A file (not a dir) at `path` returns a dict → treated as `not_found`."""
     r = _do_request(f"/repos/{owner}/{repo}/contents/{path}", token=token)
@@ -481,7 +480,7 @@ def read_dir(owner: str, repo: str, path: str, token: str | None = None) -> ApiR
 
 
 def read_file(owner: str, repo: str, path: str, token: str | None = None) -> ApiRead:
-    """A repo file's UTF-8 text via the contents API, TYPED (#1243): `value` is the decoded text on
+    """A repo file's UTF-8 text via the contents API, TYPED: `value` is the decoded text on
     success; otherwise `cause` says why."""
     import base64
     r = _do_request(f"/repos/{owner}/{repo}/contents/{path}", token=token)

@@ -1,18 +1,5 @@
 #!/usr/bin/env python3
-"""Autorun GRADING (#1333) — fuse novelty + provenance + content-shape + correlation into one verdict.
-
-No single signal is enough: a signature misses a novel payload; a bare diff alarms on every install; a
-bare provenance check flags a legitimately hand-installed agent. Fused, they separate a foothold from a
-legit install accurately — and the fusion is what lets a NOVEL payload be flagged without a signature
-(it is unattributed, runs from a scratch path, and something new appeared), while a signed package agent
-stays quiet even though it, too, is new.
-
-Grades map onto the existing hygiene severities so they flow through #1332's rotation-safety contract:
-a high-confidence foothold is a `warning` under `autorun-unattributed-foothold` (an ACTIVE_PERSISTENCE
-id → rotation UNSAFE, exit 3); a merely-new unattributed entry is an `info` review item. Novelty NEVER
-escalates on its own, and — the load-bearing property — provenance/content/correlation run on EVERY
-entry regardless of the baseline, so a tampered or first-run baseline can never launder a foothold.
-"""
+"""Autorun GRADING — fuse novelty + provenance + content-shape + correlation into one verdict."""
 from __future__ import annotations
 
 import os
@@ -83,7 +70,7 @@ class Invocation:
 
     Four consumers used to answer this separately — which file to read, whether referenced content is
     shell, which arguments are code, which lines take shell grammar — from argv[0] or from a regex over
-    the joined argv. Four partial answers to one question is how they disagreed (#1393)."""
+    the joined argv. Four partial answers to one question is how they disagreed."""
     interpreter: str | None = None
     is_posix_shell: bool = False
     payload_path: str | None = None
@@ -93,11 +80,7 @@ class Invocation:
 def shell_code_args(argv) -> tuple[str, ...]:
     """The arguments of a command line that are SHELL code.
 
-    Decided AT THE FLAG — the token that owns `-c` — never by resolving the program. `tar -c
-    /tmp/staging` and `sudo -u nobody /bin/sh -c /tmp/x` differ only in that token, and every attempt
-    to answer it by walking the prefix went silent on some real path: NixOS `/run/wrappers/bin/sudo`,
-    linuxbrew, `/usr/local/sbin`, and 49 measured prefix families (`su`, `chrt`, `systemd-run`,
-    `caffeinate`, `direnv`, `poetry run`, …). Anchoring on the shell needs none of them enumerated."""
+    Decided AT THE FLAG — the token that owns `-c` — never by resolving the program.  Anchoring on the shell needs none of them enumerated."""
     argv = list(argv or [])
     if _crosses_a_boundary(argv):
         return ()
@@ -227,9 +210,7 @@ def _program_name(arg: str) -> str:
     so a name added to any of those sets matches every spelling of it. Two defects came from having
     three spellings of this question, and both were silent:
 
-    Case. `_INTERPRETERS` is lowercase, so framework Python — `…/Python.app/Contents/MacOS/Python`,
-    the standard python.org install and 170 of 524 live processes on the measured host — was not an
-    interpreter, and a scratch payload it ran went entirely unreported.
+    Case. 
 
     Suffix. Stripping everything after the first dot read `/tmp/.x/node.evil.js` as the *interpreter*
     `node`, so the payload's own path was lost and its CONTENT was never read: naming a dropper after
@@ -276,10 +257,7 @@ def shell_command_lines(script: str, _depth: int = 0) -> list[str]:
     separates commands, which is the only text where a leading path means execution.
 
     This has to track quoting, because the difference between a command and a datum is entirely
-    quote state. Splitting on newlines and special-casing continuations, heredocs and `case` labels
-    was measured wrong seven ways: a multi-line quoted string, `<<\\EOF`, a `$(…)` spanning lines, a
-    bash array, a delimiter recurring inside its own body, two heredocs opened on one line, and CRLF
-    each turned a data line into a fabricated command position — reaching exit 3 on signed agents.
+    quote state. 
     A `case` label is skipped for the same reason, and `while true; do <payload>` is NOT skipped."""
     out: list[str] = []
     text, i, n = script[:_MAX_SCRIPT], 0, len(script[:_MAX_SCRIPT])
@@ -497,7 +475,7 @@ def _shell_context_text(entry, referenced: str) -> list[str]:
     command position — joining them would anchor only the first.
 
     `shell_lines` is the parser's answer — every Exec* directive, continuations joined. The unit BODY
-    is excluded: that is where a JS template literal or a comment lives (#1393)."""
+    is excluded: that is where a JS template literal or a comment lives."""
     parts, seen_code = [], []
     for line_argv in _command_argvs(entry):
         code_args = shell_code_args(line_argv)
@@ -539,15 +517,13 @@ class ContentSignal:
 def content_signal(entry, *, read_referenced: bool = False) -> ContentSignal:
     """Run the content-shape engines on the entry's command + body — and, when `read_referenced`
     (used for UNATTRIBUTED entries, where the referenced script is worth reading), on the referenced
-    script's content too. `hit` is a decisive shape (act-now regardless of owner).
-
-    #1335 — a malicious daemon that polls a legitimate endpoint (e.g. `api.github.com` every 60s) can't
+    script's content too. `hit` is a decisive shape (act-now regardless of owner). — a malicious daemon that polls a legitimate endpoint (e.g. `api.github.com` every 60s) can't
     be caught by WHERE it connects; the discriminating features are BEHAVIOURAL, and for a script-based
     daemon they are STATIC: the poll interval is a literal in the code / the persistence artifact, and a
     persistence entry is non-interactive (no TTY, launchd/systemd-spawned) BY CONSTRUCTION. So we fuse,
     never blocklist a destination:
       * decisive `hit` — a fetch/decode-to-shell command, a decode→execute dropper, OR the dead-man
-        self-destruct shape (#1334's corroborated `$HOME`-wipe) in the daemon's own code. The Mini
+        self-destruct shape in the daemon's own code. The Mini
         Shai-Hulud wiper is plain code (poll → on token-revoke, delete `$HOME`), NOT a decode→exec
         dropper, so fusing `detect_destructive` here is what actually catches it.
       * corroborating reason — a short poll interval (the timer the dead-man loop runs on). Never

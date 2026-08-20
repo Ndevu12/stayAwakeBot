@@ -17,7 +17,7 @@ from typing import Any
 def _strip_block_comments(text: str) -> str:
     r"""Remove `/* … */` comments in a single LINEAR pass. A regex (`/\*.*?\*/`) re-scans to
     end-of-string at every `/*` when the closing `*/` is absent → O(n^2) ReDoS on a hostile
-    `/*`-spam config (#1158). This str.find scan is O(n) and fully correct — a comment ends at the
+    `/*`-spam config. This str.find scan is O(n) and fully correct — a comment ends at the
     FIRST `*/`, and its body may itself contain `/*` (which a tempered regex would mishandle). An
     unterminated `/*` is left in place (as the old regex did → the JSON then fails to parse)."""
     parts, i = [], 0

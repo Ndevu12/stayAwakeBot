@@ -5,7 +5,7 @@
 
 Bots call `require(Intent.…)` and stop on Deny — never clone/push first and guess why.
 Phase 1 (`saw auth app register`) is the supported operator-managed App path; a
-marketplace App remains optional backlog (#1277).
+marketplace App remains optional backlog.
 """
 from __future__ import annotations
 

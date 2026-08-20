@@ -1,17 +1,5 @@
 #!/usr/bin/env python3
-"""Write-target safety — refuse to write/delete through a symlink or outside an intended root.
-
-A tool that writes files inside a directory it does not fully control (a repository it is remediating,
-a worktree it is proposing changes to) can be tricked by a planted **symlink** at a write target — or a
-symlinked ancestor directory — into writing THROUGH the link into a sink outside the tree (`~/.bashrc`,
-`.git/hooks/…`, `/etc/…`). This is the SymJacking / GhostApproval write-through vector (stayawakebot
-#1161/#1218; the `saw fix` clean-text rewrite was first guarded in #1204). Factored out here as ONE
-pure implementation every write/delete path shares.
-
-Pure and stdlib-only (a `utils` leaf): `Path.resolve()` only CANONICALIZES a path — it never opens or
-follows a target to read it — so it is safe to call on an attacker-controlled path; it turns a symlinked
-ancestor or a `..` escape into a location outside the root, which the containment check then rejects.
-"""
+"""Write-target safety — refuse to write/delete through a symlink or outside an intended root."""
 from __future__ import annotations
 
 import stat
@@ -21,7 +9,7 @@ from pathlib import Path
 def is_regular_file(path: Path) -> bool:
     """True iff `path` is a REGULAR file (follows symlinks; not a dir/FIFO/socket/device). Swallows
     OSError → False. The gate every "read an arbitrary file" path shares: opening a FIFO named like a
-    real file read-BLOCKS forever, so callers must confirm regular-ness BEFORE `open()` (#1226)."""
+    real file read-BLOCKS forever, so callers must confirm regular-ness BEFORE `open()`."""
     try:
         return stat.S_ISREG(path.stat().st_mode)
     except OSError:
@@ -30,7 +18,7 @@ def is_regular_file(path: Path) -> bool:
 
 def read_regular_bytes(path: Path) -> bytes | None:
     """The bytes of a regular file, or None if it is absent / non-regular / unreadable. NEVER opens a
-    non-regular file (a FIFO would block forever — #1226). One shared implementation for every probe
+    non-regular file (a FIFO would block forever —). One shared implementation for every probe
     that reads a possibly-adversarial path on disk."""
     if not is_regular_file(path):
         return None
@@ -44,7 +32,7 @@ def read_regular_text(path: Path, *, errors: str = "replace") -> str | None:
     """The UTF-8 text of a regular file, or None (absent / non-regular / unreadable). Decodes
     tolerantly (`errors="replace"` by default) so a non-UTF-8 byte can't crash a read of an
     attacker-influenced file — the same evasion-safe decoding the scanner uses. Never opens a
-    non-regular file (#1226)."""
+    non-regular file."""
     if not is_regular_file(path):
         return None
     try:

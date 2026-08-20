@@ -29,9 +29,6 @@ SCHEMA = "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata
 TOOL_NAME = "saw"
 INFORMATION_URI = "https://github.com/Ndevu12/stayAwakeBot"
 
-# severity label → SARIF level. critical/high are build-breaking errors, medium is a
-# warning; anything else (low, or a future label) degrades to an informational note so
-# an unknown severity never crashes the emitter.
 _LEVEL_BY_SEVERITY = {"critical": "error", "high": "error", "medium": "warning"}
 
 
@@ -80,9 +77,6 @@ def _rule(finding: dict) -> dict[str, Any]:
 
 
 def _message(finding: dict) -> str:
-    # SARIF is a persisted, uploaded artifact — redact the evidence (fingerprint, not the
-    # raw payload) so the report never re-ships the malware it detected. Redacting here
-    # (not just at the caller) keeps every SARIF the emitter produces safe by construction.
     text = finding.get("description") or finding["signature_id"]
     fp = redaction.redact(finding.get("evidence"))
     return f"{text}\n\nEvidence (redacted): {redaction.render_redacted(fp)}" if fp else text

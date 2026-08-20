@@ -24,7 +24,7 @@ def _name_alt(names) -> str:
     return "(?:" + "|".join(parts) + ")"
 
 
-# ── Decode-then-exec dropper (#1266) ──────────────────────────────────────────────
+# ── Decode-then-exec dropper ──────────────────────────────────────────────
 _DECODE = _name_alt(model.DECODE_CALLS) + r"\s*\("
 _DECODE_INTO_EXEC = re.compile(
     r"\b(?:execSync|execFileSync|execFile|spawnSync|spawn|fork)\s*\(\s*" + _DECODE
@@ -33,7 +33,7 @@ _DECODE_INTO_EXEC = re.compile(
     re.IGNORECASE,
 )
 
-# ── #1208 residual (after #1206 + #1266), TIGHTENED per #1289 ──────────────────────
+# ── Decode-into-sink primitives ───────────────────────────────────────────────
 _CONSTRUCTED_ARG = (
     r"(?:"
     + r"[\"'][^\"'\n]{0,200}[\"']\s*\+"          # 'cmd' + …
@@ -77,7 +77,7 @@ _TIGHT_DYNEXEC_ANCHOR_RE = re.compile("|".join(re.escape(a) for a in _TIGHT_DYNE
                                       re.IGNORECASE)
 
 
-# ── Variable-indirected decode→exec dropper (#1266 residual; restores the #1212 base64 arm,
+# ── Variable-indirected decode→exec dropper ───────────────────────────────────
 #    TIGHTENED so it can never FP on a lone blob) ─────────────────────────────────────────────
 # hardcoded base64 payload decoded through a VARIABLE and then run —
 #     const p = '<blob>'; const d = Buffer.from(p, 'base64'); execSync(d);
@@ -96,7 +96,7 @@ _HEX_BLOB_MIN_ENTROPY = 3.5
 
 def _has_encoded_payload(text: str) -> bool:
     """True if `text` carries a baked base64 OR hex encoded blob (see `_B64_BLOB`/`_HEX_BLOB`). NOT a
-    verdict on its own — the #1212 FP class (a mock JWT / a hex key is exactly this shape) — used
+    verdict on its own — the FP class (a mock JWT / a hex key is exactly this shape) — used
     ONLY to corroborate `_decode_var_into_exec`."""
     for m in _B64_BLOB.finditer(text):
         if _shannon(m.group(0)) >= _B64_BLOB_MIN_ENTROPY:
@@ -164,8 +164,7 @@ def _name_rebound(gap: str, name: str) -> bool:
 def _decode_var_into_exec(s: str) -> bool:
     """True if a base64/hex decode assigned to a variable then flows, within a short window AND
     WITHOUT leaving the variable's scope, into a command / dynamic-module / worker sink:
-    `const d = Buffer.from(p, 'base64'); execSync(d)`. This is the #1266 residual the nested
-    `_DECODE_INTO_EXEC` misses (decode via a VARIABLE) and the #1212 blind spot. The sink set is
+    `const d = Buffer.from(p, 'base64'); execSync(d)`. The sink set is
     standalone `_EXEC_SINK`s so a decoded value reaching THEM is caught without this.
 
     THREE accuracy guards keep a short, ubiquitous var name (`p`, `data`, `config`) from FP'ing on a
@@ -181,7 +180,7 @@ def _decode_var_into_exec(s: str) -> bool:
     depth or match. Bounded window + assignment cap keep it linear. Purely static — matched in text,
     never decoded or run.
 
-    Residuals (all the same #1185 infeasibility family — closing them needs whole-program dataflow,
+    Residuals (all the same infeasibility family — closing them needs whole-program dataflow,
     and each is covered by the CONFIRMED loader-fingerprint tier + Tier-2 density independently):
       • multi-hop reassignment — `d=Buffer.from(); c=d.toString(); exec(c)`;
       • a HOISTED binding assigned inside a nested block, run after the block closes —
@@ -190,7 +189,7 @@ def _decode_var_into_exec(s: str) -> bool:
         which fixes the far more realistic cross-function name-collision FP; the natural dropper keeps
         decode+exec together inside the block (caught), so this shape is contrived;
       • `sh -c <decoded>` as a NON-leading arg — `spawn('sh',['-c',d])` / `execSync('sh -c '+d)`. The
-        LEADING-arg anchor is shared with #1266 and is the FP-safe choice (a decoded value in an
+        LEADING-arg anchor is shared with and is the FP-safe choice (a decoded value in an
         args[] array is often benign); catching the shell-invocation form needs an `sh`/`-c`-aware
         arg scan — a worthwhile follow-up, not this arm's regression;
       • a deliberately-planted same-name arrow decoy between decode and exec — `const d=Buffer.from(p);
@@ -314,8 +313,8 @@ def _scrub_comments_and_strings(s: str, scrub_strings: bool = True) -> str:
 
 
 def _has_corroborated_dynamic_exec(s: str, strict: bool = False) -> bool:
-    """True if `s` has a #1208 residual form still missing after #1266. Folded into
-    `_has_exec_sink`, whose `strict` flag splits the two callers' opposite needs (#1289):
+    """True if `s` has a residual form still missing after. Folded into
+    `_has_exec_sink`, whose `strict` flag splits the two callers' opposite needs:
 
       * ALWAYS (both callers) — the TIGHT, no-benign-analogue arms suitable for a SCAN finding: a
         `data:` executable-module `import(` (its tell lives in the specifier string, so a

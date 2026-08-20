@@ -2,7 +2,7 @@
 """Mechanism-based persistence & backdoor sinks (wave-agnostic): ~/.ssh/authorized_keys, shell startup
 files, and exec-on-every-git-command git config. Matches the MECHANISM (not a campaign's named IoC),
 so a renamed variant — or a GhostApproval/SymJacking write-redirect into a user config file — is still
-caught (#1161)."""
+caught."""
 from __future__ import annotations
 
 import os
@@ -52,9 +52,7 @@ _SCRATCH_PATHS = tuple(Path(root) for root in SCRATCH_ROOTS)
 
 
 def _other_writable(p: Path) -> bool:
-    """True if `p` is writable by 'other' (world). Group-write is deliberately NOT flagged: on
-    distros with per-user private groups (umask 002) a benign file is group-writable by the user's
-    own group — flagging it would be a false positive. World-write is unambiguous."""
+    """True if `p` is writable by 'other' (world).  World-write is unambiguous."""
     try:
         return bool(p.stat().st_mode & 0o002)
     except (OSError, ValueError):     # ValueError: an embedded-NUL path (mirror _under_scratch)

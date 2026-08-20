@@ -252,7 +252,7 @@ def _setup_pr(repo: Path, plan: SetupPlan, base: str, token: str | None, spin: b
         return SetupResult(plan=plan, slug=slug, error="could not create a worktree for the PR")
     try:
         dest = wt / plan.path
-        if not is_safe_write_target(dest, wt):        # never write the gate through a planted symlink (#1218)
+        if not is_safe_write_target(dest, wt):        # never write the gate through a planted symlink
             return SetupResult(plan=plan, slug=slug,
                                error=f"refusing to write {plan.path} — it is a symlink or escapes the worktree")
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -320,7 +320,7 @@ def setup(repo: str | Path | None = None, *, token: str | None = None, ref: str 
     if pr:
         return _setup_pr(repo, plan, default_branch, token, spin)
     dest = repo / plan.path
-    if not is_safe_write_target(dest, repo):          # never write the gate through a planted symlink (#1218)
+    if not is_safe_write_target(dest, repo):          # never write the gate through a planted symlink
         return SetupResult(plan=plan,
                            error=f"refusing to write {plan.path} — it is a symlink or escapes the repo")
     try:

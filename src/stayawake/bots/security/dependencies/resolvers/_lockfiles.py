@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Lockfile parsers shared by more than one resolver (#1123).
+"""Lockfile parsers shared by more than one resolver.
 
 Some ecosystems lock dependencies in the *same on-disk shape* despite being otherwise unrelated —
 a TOML `[[package]]` array of `{name, version}` is used by Cargo, Poetry and uv alike. That is

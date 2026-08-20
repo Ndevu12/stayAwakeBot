@@ -8,8 +8,6 @@ from pathlib import Path
 
 from stayawake.lib.git.run import run
 
-# Author the fix as the bot (not the operator running `saw`) via `-c`, so the commit's identity
-# is stable and doesn't depend on the ambient git config of whoever runs the sweep.
 BOT_AUTHOR = ("-c", "user.name=StayAwakeBot Security",
               "-c", "user.email=security-bot@stayawake.local")
 
@@ -43,8 +41,6 @@ def commit_fix(repo: str | Path, message: str) -> CommitResult:
     res = run(repo, [*BOT_AUTHOR, "commit", "-m", message])
     if res is not None and res.returncode == 0:
         return CommitResult(committed=True, signed=True)
-    # Retry with signing forced off — rescues the signing-failure case (an unavailable key in the
-    # non-interactive worktree). A hook rejection / empty tree still fails here → honest failure.
     res = run(repo, [*BOT_AUTHOR, "-c", "commit.gpgsign=false", "commit", "-m", message])
     if res is not None and res.returncode == 0:
         return CommitResult(committed=True, signed=False)

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Shared argparse helpers, so every repo-sweeping command exposes an IDENTICAL `-j/--jobs`
-UX (#1327) from ONE definition instead of a copy per command."""
+UX from ONE definition instead of a copy per command."""
 from __future__ import annotations
 
 import argparse

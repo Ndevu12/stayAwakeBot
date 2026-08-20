@@ -36,7 +36,7 @@ def _carries_payload(text: str, content_sig) -> bool:
 
     Why literal-OR-exec-sink, not just the literal: a confirmed finding's history can hold an
     EARLIER obfuscation stage where the literal isn't present yet but an `eval(atob(...))`
-    loader already is (#1053). Keying on the literal alone would mark that stage 'clean' and
+    loader already is. Keying on the literal alone would mark that stage 'clean' and
     restore a live payload. Why NOT the full analyze_file() packed/base64 verdict: that
     false-positives on legitimately inlined base64 assets / minified lines, and a FP here
     (marking a clean version 'infected') would push recovery onto an older revision — so we
@@ -98,17 +98,17 @@ def _line_is_pure_payload(ln: str, content_sig) -> bool:
     must be a dense packed blob (`_is_packed_line`) carrying a loader fingerprint (`content_sig`),
     AND every `;`-statement of it must itself be provably payload (`_stmt_is_payload`).
 
-    The per-statement gate is what closes the mixed-line hole (#1190): span-aggregate density is
+    The per-statement gate is what closes the mixed-line hole: span-aggregate density is
     NOT enough — a legit statement concatenated with an appended blob (`module.exports=runServer;
     <blob>`) rides on the blob's average density + a substring fingerprint match and would be
     dropped whole. Requiring each statement to be individually payload defers that instead.
 
-    KNOWN RESIDUAL (same irreducible class as #1189, mitigated by the quarantine backup): this
+    KNOWN RESIDUAL (same irreducible class as, mitigated by the quarantine backup): this
     still can't separate a legit statement that *mimics* a loader token (a real DEL-char char-code
     handler, a function carrying the worm's decoder name) or minified legit code that reads as a
     base64 run, from the worm's own connective code — no byte rule can, on a shared line. It
     strictly REDUCES the exposure (it only ever DEFERS more, never drops more than the prior
-    density-only check); it does not eliminate the class. See #1190."""
+    density-only check); it does not eliminate the class. See."""
     if not (_is_packed_line(ln) and content_sig(ln)):
         return False
     return all(_stmt_is_payload(stmt, content_sig) for stmt in ln.split(";"))
@@ -132,7 +132,7 @@ def _concealment_seam(line: str, content_sig) -> str | None:
         fingerprint, not a generic dynamic-exec sink, is what stops a legit dense line that merely
         USES `atob`/`eval`/`Function` (e.g. a hand-aligned inlined-asset decoder) from being excised
         as if it were payload (adversarial catch — the exec-sink gate dropped real code).
-    The residual (same irreducible class as #1189/#1190): a genuinely packed suffix that carries an
+    The residual (same irreducible class as/): a genuinely packed suffix that carries an
     actual worm literal yet is legit minified code would be excised — bounded by the caller's
     `analyze_file` 'result is normal, not packed' gate, the re-scan-to-confirm, and the quarantine."""
     n, i = len(line), 0
@@ -194,7 +194,7 @@ def _safe_to_recover(work: str, clean: str, content_sig) -> bool:
     and lines that spliced a loader token in front of real code (substring match); `_is_packed_line`
     alone would drop a legitimately-inlined base64 asset; and density-of-the-whole-line alone let a
     legit statement concatenated with an appended blob (`module.exports=runServer;<blob>`) ride
-    along and be dropped (#1190). The per-statement gate closes that. Conservative by design: a
+    along and be dropped. The per-statement gate closes that. Conservative by design: a
     payload split across short bootstrap lines, or any line with a readable non-payload statement,
     defers to manual (the concealment-seam same-line case is handled by the excision path instead)."""
     w, c = work.splitlines(), clean.splitlines()

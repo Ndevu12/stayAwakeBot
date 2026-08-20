@@ -14,7 +14,7 @@ from stayawake.bots.security.obfuscation import is_generated_context, analyze_de
 
 def _obfuscation_reason(path: str, delta: str, baseline: str) -> str | None:
     """Context-aware obfuscation signal (G3) for the evil-merge corroborator, INJECTED into
-    `core.git`'s `evil_merge_paths` so that lower layer never imports the security domain (#1236).
+    `core.git`'s `evil_merge_paths` so that lower layer never imports the security domain.
     Owns the generated-context suppression (obfuscation is expected in vendored/minified paths, so
     a dense bundle there is never an evil-merge finding) and delegates the delta analysis to the
     single shared `analyze_delta` — one source of truth with the whole-file obfuscation matcher."""

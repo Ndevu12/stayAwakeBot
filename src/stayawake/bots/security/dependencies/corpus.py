@@ -1,18 +1,5 @@
 #!/usr/bin/env python3
-"""Advisory corpus — index normalized OSV records for lookup by package (#1120, #1124).
-
-One responsibility: "given a `Purl`, is there an advisory affecting this exact version?" — matched
-either by the advisory's explicit version list or by a version range (#1124). It knows nothing about
-signatures, files, or verdicts — the store wraps a match into an `Advisory`, the matcher emits the
-finding. Ecosystem comparison is canonicalized (OSV's `crates.io`/`PyPI` ↔ our `cargo`/`pypi`) so a
-resolver's PURL keys the same slot as the advisory record.
-
-Scale note: most malware advisories say "this package is malware at *every* version" (a lone
-`introduced: "0"` range). There are hundreds of thousands of those, so they are kept in a compact
-**whole-package** index (a light record per name, no version/range payload, O(1) lookup), separate
-from the smaller set of version- or range-bounded records that need real evaluation. This keeps a
-fully-populated corpus's memory modest even though the malware set is huge.
-"""
+"""Advisory corpus — index normalized OSV records for lookup by package."""
 from __future__ import annotations
 
 from typing import Iterable, NamedTuple
@@ -24,7 +11,7 @@ from stayawake.bots.security.dependencies.osv import OsvAffected, OsvRecord
 
 class AdvisoryMatch(NamedTuple):
     """A vulnerability advisory that affects a queried package, plus the remediation target: `fixed`
-    is the first patched version to upgrade to (#1252), or None when the advisory names no fix
+    is the first patched version to upgrade to, or None when the advisory names no fix
     (a whole-package hit, an explicit-version-only advisory, or an open-ended one)."""
 
     record: OsvRecord
@@ -86,7 +73,7 @@ class AdvisoryCorpus:
     def vulnerability_matches(self, purl) -> list[AdvisoryMatch]:
         """All NON-malware advisories (ordinary CVEs) affecting `purl.version` — the opt-in advisory
         tier, which never moves the worm verdict. Each match carries the first patched version to
-        upgrade to (`AdvisoryMatch.fixed`), or None when the advisory names no fix (#1252)."""
+        upgrade to (`AdvisoryMatch.fixed`), or None when the advisory names no fix."""
         eco = _eco(purl.type)
         key = (eco, purl.name)
         out = [AdvisoryMatch(rec, None) for rec in self._whole.get(key, ()) if not rec.malicious]

@@ -1,16 +1,5 @@
 #!/usr/bin/env python3
-"""Normalized package identity — the PURL spine (#1119).
-
-`Purl` is a small subset of the package-url spec (`pkg:{type}/{name}@{version}`): the
-lingua franca every ecosystem resolver emits and the advisory store keys on. Adopting the
-standard here (rather than inventing our own identity) is the DRY that de-hardcodes "how do
-we name a package" across every ecosystem and every knowledge source — see the dynamic
-dependency-audit epic.
-
-`ResolvedDependency` pairs a `Purl` with the repo-relative manifest/lockfile it was
-declared or locked in, so a finding can be anchored to the exact file the way the
-pre-refactor matcher did.
-"""
+"""Normalized package identity — the PURL spine."""
 from __future__ import annotations
 
 from dataclasses import dataclass

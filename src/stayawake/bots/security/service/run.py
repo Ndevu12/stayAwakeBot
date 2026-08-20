@@ -192,7 +192,7 @@ def scan(config_path: str | None = None, *, remote: bool = False,
          deep: bool = False, require_db: bool = False, jobs: int | None = None) -> int:
     """Scan targets (READ-ONLY) and deliver the result through sinks. Scope is LOCAL by
     default — explicit `paths`, the configured local globs, or the current repo. With
-    remote=True (`saw scan --remote`) it scans GitHub repos resolved by the #1075 ladder:
+    remote=True (`saw scan --remote`) it scans GitHub repos resolved by the ladder:
     ad-hoc `users`/`orgs`/`slugs` selectors → configured `targets.github` → your own repos.
     One scope per run. Persists NOTHING by default (terminal-first); files/alerts are opt-in.
     Remediation lives in `saw fix`, never here. Returns the verdict as an exit code: 1 if

@@ -1,21 +1,5 @@
 #!/usr/bin/env python3
-"""Autorun-surface monitor (#1333) — catch a NOVEL foothold in a KNOWN location without a signature.
-
-Signature matching asks "does this location hold something I already recognise?" and fails on a novel
-payload by construction — and with the worm's source public, novel variants are the expected case. This
-monitor instead treats the autorun surface as monitored state and fuses four orthogonal, statically-
-observable signals per entry:
-
-  1. provenance   — is the referenced executable owned by a package/app, signed, on a trusted path?
-  2. content-shape — does it fetch/decode-execute, poll on a short interval? (the existing engines)
-  3. novelty      — is it new/changed since a trusted baseline? (never escalates alone)
-  4. correlation  — is one unattributed payload wired into several re-run points? (campaign shape)
-
-Provenance is I/O-bound (dpkg/rpm/codesign), so it fans out over the shared THREAD parallel seam;
-results come back in submission order, so the graded findings are byte-identical at any worker count,
-and a provenance worker that errors/times-out fails closed to UNATTRIBUTED (surfaced, never blessed).
-Safety never depends on the baseline — provenance/content/correlation grade every entry regardless.
-"""
+"""Autorun-surface monitor — catch a NOVEL foothold in a KNOWN location without a signature."""
 from __future__ import annotations
 
 from stayawake.utils import parallel

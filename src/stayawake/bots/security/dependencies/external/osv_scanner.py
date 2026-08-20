@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""osv-scanner adapter (#1125).
+"""osv-scanner adapter.
 
 osv-scanner is Google's cross-ecosystem OSV auditor — it reads every lockfile type `saw` resolves
 (and more) and reports OSV advisories, so it's the natural baseline external adapter. Its results

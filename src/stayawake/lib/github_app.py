@@ -1,25 +1,5 @@
 #!/usr/bin/env python3
-"""GitHub App authentication — mint short-lived installation tokens.
-
-A GitHub App is
-the production way to scan/remediate/guard org-wide: an admin installs it once on selected
-repos and it mints **1-hour, auto-rotating installation tokens** scoped to exactly the
-granted permissions — no human PAT to leak, fully revocable, and the install itself
-defines scope.
-
-Security: JWT signing uses the built-in dependency-free RS256 signer (`lib/jwtsign`). Tokens/keys are
-returned to callers but never logged here. Credentials may come from env OR from the local
-config written by `saw auth app register` (`~/.config/saw/github-app.json`).
-
-Configuration (env wins over the config file):
-  GH_APP_ID                 numeric App ID (not secret)
-  GH_APP_PRIVATE_KEY        PEM contents of the App private key (secret), OR
-  GH_APP_PRIVATE_KEY_PATH   path to the .pem
-  GH_APP_INSTALLATION_ID    optional; if omitted and the App has exactly one
-                            installation, that one is used
-
-Phase 1 registers an operator-managed App via `saw auth app register` (you own App ID + PEM).
-"""
+"""GitHub App authentication — mint short-lived installation tokens."""
 from __future__ import annotations
 
 import json
@@ -37,20 +17,10 @@ PRIVATE_KEY_ENV = "GH_APP_PRIVATE_KEY"
 PRIVATE_KEY_PATH_ENV = "GH_APP_PRIVATE_KEY_PATH"
 INSTALLATION_ID_ENV = "GH_APP_INSTALLATION_ID"
 
-_SKEW = 60          # refresh this many seconds before the API-stated expiry
-_JWT_TTL = 540      # App JWT lifetime (≤ 10 min per GitHub)
-# cache_key ((app_id, installation_id)) -> (token, expires_epoch, permissions_dict).
-# Keyed by INSTALLATION (not repo), so a sweep across many repos of the same account/org reuses one
-# token — the installation's own repo selection (all repos / only-select) is the authorization
-# boundary the operator chose, so we mint the whole installation token and honor it.
+_SKEW = 60
+_JWT_TTL = 540
 _cache: dict[tuple[str, str], tuple[str, float, dict]] = {}
-# token -> permissions (so AuthZ can introspect the live installation token)
 _token_perms: dict[str, dict[str, str]] = {}
-# owner (account/org login) -> (installation_id, repository_selection). Memo so per-owner resolution
-# happens once. `repository_selection` ("all" | "selected") decides whether the memo can be REUSED
-# without re-checking: for an "all repositories" install every repo of that owner is reachable, so we
-# skip the per-repo lookup; for a "select repositories" install reachability differs repo-by-repo, so
-# each repo is still checked (the memo is not used to short-circuit).
 _owner_installation: dict[str, tuple[str, str]] = {}
 
 
@@ -87,8 +57,7 @@ def _read_config_file(path: Path) -> dict | None:
 
 
 def _write_private_config(path: Path, data: bytes) -> None:
-    """Write App credentials — which include the App PRIVATE KEY — with NO world-readable window
-    (#1288). `write_text(...)` then `chmod(0600)` creates the file under the process umask (often
+    """Write App credentials — which include the App PRIVATE KEY — with NO world-readable window. `write_text(...)` then `chmod(0600)` creates the file under the process umask (often
     0644) and leaves the secret group/world-readable until the chmod lands. Instead: ensure the
     parent dir is 0700, write to a same-dir temp that is 0600 FROM BIRTH (`mkstemp`), then atomically
     `os.replace` it into place — no window, torn write, or leftover, and an existing 0644 file is
@@ -140,7 +109,7 @@ def load_config() -> dict | None:
 def save_config(app_id: str, private_key_pem: str, *, installation_id: str | None = None,
                 slug: str | None = None, name: str | None = None) -> Path:
     """Persist App credentials from the manifest flow. The file holds the App PRIVATE KEY, so it is
-    written 0600 with no world-readable window and under a 0700 dir (`_write_private_config`, #1288)."""
+    written 0600 with no world-readable window and under a 0700 dir (`_write_private_config`,)."""
     path = config_path()
     payload = {
         "app_id": str(app_id),
@@ -150,7 +119,6 @@ def save_config(app_id: str, private_key_pem: str, *, installation_id: str | Non
         "name": name,
     }
     _write_private_config(path, (json.dumps(payload, indent=2) + "\n").encode("utf-8"))
-    # Drop a leftover legacy file so the two never diverge.
     legacy = legacy_config_path()
     if legacy.is_file() and legacy.resolve() != path.resolve():
         try:
@@ -317,19 +285,15 @@ def installation_token(repo_slug: str | None = None) -> str | None:
     if not (app_id and key):
         return None
 
-    # Resolve the installation id FIRST (so the cache read/write key always matches — the per-repo
-    # reachability check also lives here). Build the App JWT lazily, only when a network step needs it.
     repo = repo_slug if (repo_slug and "/" in repo_slug) else None
     app_jwt: str | None = None
     if repo:
-        # An "all repos" owner is already memoized as reachable → no JWT build, no lookup; a warm token
-        # cache below then means no network at all. Otherwise resolve (and per-repo-check) via the JWT.
         memo = _owner_installation.get(repo.split("/", 1)[0])
         if memo and memo[1] == "all":
             installation_id = memo[0]
         else:
             app_jwt = _build_jwt(str(app_id), key)
-            installation_id = _installation_for_repo(app_jwt, repo)   # per-repo reachability (may raise)
+            installation_id = _installation_for_repo(app_jwt, repo)
     else:
         installation_id = (os.environ.get(INSTALLATION_ID_ENV)
                            or (load_config() or {}).get("installation_id") or "")

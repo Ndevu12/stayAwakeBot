@@ -1,23 +1,6 @@
 #!/usr/bin/env python3
 """Terminal colour-capability detection — the single source of truth for "how much colour
 may we emit?".
-
-A dependency-light leaf (stdlib + `core.env`) so any layer can import it without cycles: the
-`saw` welcome banner and the security TerminalSink both ask this module, so the two never drift.
-
-It answers with a `ColorLevel`, honouring the platform conventions a well-behaved CLI must
-respect, in priority order:
-
-  1. ``NO_COLOR`` (any non-empty value)  → NONE. A user's hard "no colour" preference wins
-     over everything, per https://no-color.org.
-  2. ``CLICOLOR_FORCE`` (truthy)         → force colour on even when the stream is not a TTY
-     (e.g. recording the banner with ``vhs``, or ``saw | tee``). It does NOT override NO_COLOR.
-  3. otherwise the stream must be a real TTY, and must not be a ``dumb`` terminal or a ``CI``
-     run — piped / captured / scripted output stays clean text.
-  4. the tier is then read from ``COLORTERM`` (truecolor) → ``TERM`` (…256…) → 16-colour.
-
-Every env read goes through `core.env` (the one place the process environment is consulted),
-so a test steers this by patching that single surface.
 """
 from __future__ import annotations
 
@@ -30,10 +13,10 @@ from stayawake.utils import env
 
 class ColorLevel(IntEnum):
     """How much colour a stream supports. Ordered, so callers can compare (`>= ANSI256`)."""
-    NONE = 0        # plain text — no ANSI at all
-    ANSI16 = 1      # the 8/16 base colours
-    ANSI256 = 2     # 256-colour palette
-    TRUECOLOR = 3   # 24-bit RGB
+    NONE = 0
+    ANSI16 = 1
+    ANSI256 = 2
+    TRUECOLOR = 3
 
 
 def _isatty(stream: TextIO) -> bool:

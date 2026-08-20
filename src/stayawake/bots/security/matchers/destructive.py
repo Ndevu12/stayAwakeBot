@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Destructive-intent matcher (#1334) — surface the self-destruct / evidence-removal capability.
+"""Destructive-intent matcher — surface the self-destruct / evidence-removal capability.
 
 Runs the model-driven `taint.detect_destructive` flow detector over authored code / shell / manifest
 files and emits the corroborated finding, choosing between the two DISTINCT signatures by variant:

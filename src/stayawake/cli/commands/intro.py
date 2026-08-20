@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""`saw intro` — a short, branded tour of what saw is and how to use it (issue #1177).
+"""`saw intro` — a short, branded tour of what saw is and how to use it (issue).
 
 The fuller companion to the bare-`saw` welcome: the `Get started` block advertises it. Colour
 follows the same rules as the welcome (dropped when piped / CI / NO_COLOR), so `saw intro | cat`

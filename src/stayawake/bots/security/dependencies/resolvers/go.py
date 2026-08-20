@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Go modules resolver — go.sum / go.mod → `pkg:golang/…` PURLs (#1123).
+"""Go modules resolver — go.sum / go.mod → `pkg:golang/…` PURLs.
 
 `go.sum` is the authoritative resolved set (every module@version, two lines each — one for the
 zip, one for `/go.mod`); `go.mod` `require` directives are also exact pins and cover repos that

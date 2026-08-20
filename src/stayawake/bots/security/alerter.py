@@ -80,8 +80,6 @@ def sync_github_issues(payload: dict) -> None:
     results = payload.get("results", [])
     infected = [r for r in results if r.get("infected")]
     suspicious = [r for r in results if r.get("suspicious")]
-    # A suspicious repo is neither infected nor clean: don't auto-close its issue, and
-    # don't open one either — only confirmed-infected repos get a GitHub issue.
     clean = [r for r in results if not r.get("infected")
              and not r.get("suspicious") and not r.get("error")]
 

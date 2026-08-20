@@ -64,7 +64,7 @@ class Target:
         return self.root
 
     def iter_files(self) -> Iterator[str]:
-        if self.include_only is not None:       # #1325: a pre-discovered file-chunk — no re-walk
+        if self.include_only is not None:       #a pre-discovered file-chunk — no re-walk
             yield from self.include_only
             return
         if self._walk_cache is None:            # walk once, memoize (byte-identical replay after)
@@ -80,7 +80,7 @@ class Target:
         """A file present but unreadable is a scan GAP → recorded so the run fails CLOSED — EXCEPT a
         SYMLINK, whose read failure is a loop (ELOOP), an escape, or a broken/dangling target: a benign
         skip, not scannable content (an escaping link is surfaced separately by the symlink matcher).
-        Recording a symlink cycle as an 'unreadable file' would wrongly fail the whole scan (#1146)."""
+        Recording a symlink cycle as an 'unreadable file' would wrongly fail the whole scan."""
         try:
             if p.is_symlink():
                 return                            # symlink loop/escape/broken → benign skip
@@ -169,8 +169,7 @@ class Target:
         """Yield ``(line_offset, text)`` chunks covering the WHOLE body of a source file.
 
         ``read_text`` truncates an oversized source file to head+tail, so the interior (offset
-        ~1 MB .. size-1 MB) is unscanned — a payload buried there is invisible to every matcher
-        (#1145, blind spot #5 of #1141). This reader streams the full file in overlapping windows
+        ~1 MB .. size-1 MB) is unscanned — a payload buried there is invisible to every matcher. This reader streams the full file in overlapping windows
         so no interior region is skipped. It is for the CHEAP, line-local confirmed content-regex
         tier ONLY (ContentMatcher). The expensive whole-file density heuristic deliberately stays
         head/tail-bounded via ``read_text`` — do NOT route it through here (it is FP-prone on the
@@ -195,7 +194,7 @@ class Target:
             self._note_unreadable(rel, p, exc)    # unstattable — a gap (unless a symlink loop/escape)
             return
         if not _stat.S_ISREG(st.st_mode):
-            return                                # FIFO/socket/device → benign skip (no blocking open, #1226)
+            return                                # FIFO/socket/device → benign skip (no blocking open,)
         size = st.st_size
         if ext not in SOURCE_EXTS:
             text = self._nonsource_scan_text(rel, p, size)

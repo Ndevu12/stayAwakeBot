@@ -152,7 +152,7 @@ def _remote_action_reader(owner: str, name: str, token: str | None):
 
 def _ref_workflows(repo: Path, ref: str) -> dict[str, str]:
     """Workflow files as they exist ON a git ref (e.g. `origin/main`) — so `--pr` plans against the
-    PR TARGET (the default branch), not a possibly-untracked working-tree file (#1243 follow-up)."""
+    PR TARGET (the default branch), not a possibly-untracked working-tree file."""
     out: dict[str, str] = {}
     for path in gitutil.list_tree(repo, ref, WORKFLOW_DIR):
         if path.endswith((".yml", ".yaml")):
@@ -266,7 +266,7 @@ def _local_workflows(repo: Path) -> dict[str, str]:
 
 @dataclass
 class RemoteRead:
-    """Result of reading a remote repo's `.github/workflows/` (#1243). `cause` distinguishes the
+    """Result of reading a remote repo's `.github/workflows/`. `cause` distinguishes the
     NORMAL 'no CI' (a 404 — the repo simply has no workflows dir) from a REAL read failure
     (auth/scope/rate/network), which the old bare-`None` conflated into a token-blaming error."""
     workflows: dict[str, str]
@@ -292,7 +292,7 @@ def _remote_workflows(owner: str, repo: str, token: str | None) -> RemoteRead:
 
 def _read_error(slug: str, cause: str, retry_after: int | None = None) -> str:
     """Turn a real remote-read failure cause into an accurate, actionable message — never blaming the
-    token for what is usually just 'this repo has no CI' (#1243). `not_found` is handled upstream as
+    token for what is usually just 'this repo has no CI'. `not_found` is handled upstream as
     the calm no-CI state and never reaches here."""
     if cause == "unauthorized":
         return (f"not authenticated to read {slug} — run `gh auth login` or set GH_SECURITY_TOKEN")
@@ -318,7 +318,7 @@ class GateProbe:
     """`probe_remote_gate` result: the Strix gate (or None if genuinely absent) AND whether the
     workflows could be read. `cause` is set ONLY on a real read failure (auth/scope/rate/network) —
     so a caller (e.g. `saw audit`) can tell 'this repo has no gate' apart from 'I couldn't read it',
-    instead of the old `or {}` that laundered a read failure into a false 'no gate' (#1243)."""
+    instead of the old `or {}` that laundered a read failure into a false 'no gate'."""
     ref: StrixRef | None = None
     cause: str | None = None
 
