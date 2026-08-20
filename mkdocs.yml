@@ -7,14 +7,17 @@
 # The site is VERSIONED with `mike` (see .github/workflows/docs.yml): `saw` ships pinned releases,
 # so an unversioned site would describe every older install incorrectly.
 
-site_name: saw
+site_name: saw documentation
+# THE ONE PLACE THE DOMAIN IS WRITTEN. Everything that can read it does; `pyproject.toml` and the
+# README cannot (static formats) and are pinned to it by tests/core/test_docs_domain_is_single_sourced.py.
+# `DOCS_SITE_URL` overrides it for a staging deploy without editing the file.
 # The BARE domain. mike's mkdocs plugin appends the version being deployed (`site_url` becomes
 # `…/latest/` during a `mike deploy latest`), so a `latest/` written here would be doubled. A plain
 # `mkdocs build` leaves it bare, which is right for the PR check — that build is never published.
-site_url: https://saw-docs.ndevuspace.com/
+site_url: !ENV [DOCS_SITE_URL, "https://saw-docs.ndevuspace.com/"]
 site_description: >-
-  saw — an offline-first supply-chain worm scanner and sentinel: detect, report,
-  remediate on a branch, and gate CI.
+  Documentation for saw — an offline-first supply-chain worm scanner and sentinel. Install it,
+  scan a repository, read the verdict, gate CI, and audit the machine it runs on.
 site_author: Jean Paul Elisa NIYOKWIZERWA
 copyright: >-
   Dual-licensed AGPL-3.0-or-later or commercial — see COMMERCIAL-LICENSE.md

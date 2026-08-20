@@ -1,5 +1,5 @@
 ---
-description: saw hunts self-propagating supply-chain malware in repositories, lockfiles and installed dependencies — offline, read-only, and remediating only through a pull request.
+description: Documentation for saw — an offline-first supply-chain worm scanner. Install it, run your first scan, gate CI, audit a machine, and look up any command or exit code.
 ---
 
 # StayAwakeBot documentation
