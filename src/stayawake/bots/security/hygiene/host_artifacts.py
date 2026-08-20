@@ -194,9 +194,11 @@ def check_host_artifacts(verify: bool = False) -> list[HygieneIssue]:
         id="host-drop-artifact-weak",
         severity="info",
         title="Unusual file/dir on this host (weak supply-chain indicator)",
-        # command which cannot produce the path, leaving the reader no way to clear it themselves.
-        detail="Found: " + "; ".join(found) + ". A weak, single indicator — ordinary tooling creates "
-               "these too (Node's GLOBAL_FOLDERS, a pip bootstrap), so it is not evidence of malware.",
+        # The benign cause is NAMED, not merely asserted: a reader cannot clear the finding
+        # themselves if we blame a command that could not have produced the path.
+        detail="Found: " + "; ".join(found) + ". A weak, single indicator: ordinary tooling creates "
+               "these too (Node's GLOBAL_FOLDERS, a pip bootstrap), so on its own this is not "
+               "evidence of malware.",
         remediation="Check whether it is yours (inspect the contents). If not, isolate the host and "
                     f"rotate credentials LAST: {_WIPER_NOTE}. `saw audit --verify` content-scans it.",
     )]
@@ -222,38 +224,35 @@ def _verify_weak_artifact(item: tuple[str, Path]) -> list[HygieneIssue] | None:
             severity="warning",
             title="Content scan found worm markers inside a host artifact",
             detail=f"Scanned {path} ({v.files} files) and found CONFIRMED malware markers: "
-                   f"{', '.join(v.markers)}. This is no longer a weak indicator — there is worm "
-                   "loader code on this host.",
+                   f"{', '.join(v.markers)}. This is no longer a weak indicator: there is worm "
+                   "code on this host.",
             remediation="Treat as a LIVE compromise. Isolate the host, neutralize any persistence, "
                         "rebuild from a known-clean image, and rotate credentials LAST — "
                         f"{_WIPER_NOTE}.",
         )]
+    # Markers may only PROMOTE this finding, never lower it. Measured on a real incident'''s staged
+    # tree: 488 files fully read, no archives, nothing to find — the loader lived only in argv.
+    # Short sentences, plain words: the previous single sentence nested parentheses, said "not read"
+    # twice, and ended on the reassuring half so the warning read as an all-clear.
+    _NOT_CLEARED = ("That does not clear it: the harmful part can be the program that used these "
+                    "files, not the files themselves.")
     if v.scanned_clean:
-        return [HygieneIssue(
-            id="host-artifact-scanned-clean",
-            severity="info",
-            title="Unusual dir on this host — content-scanned, no worm markers",
-            detail=f"{desc} — scanned {v.files} files inside and found no confirmed malware markers. "
-                   "Consistent with a normal npm tree in an unusual place, not evidence of the worm.",
-            remediation="Low concern. Still confirm you created it (recall the install); if you did "
-                        f"NOT, isolate the host and rotate credentials LAST ({_WIPER_NOTE}).",
-        )]
-    # Bounded out (too large), incomplete coverage, or a read gap — we did NOT fully look inside,
-    # so stay honest (never downgrade concern on a tree we couldn't fully read).
-    if v.too_large:
-        reason = "it is too large to auto-scan"
+        outcome = f"A content scan found no worm markers. {_NOT_CLEARED}"
+    elif v.too_large:
+        outcome = "It is too large to scan automatically, so its contents were not checked."
+    elif v.partial and v.unread:
+        outcome = (f"Not everything was read: {'; '.join(v.unread)}. A content scan of the rest "
+                   f"found no worm markers. {_NOT_CLEARED}")
     elif v.partial:
-        reason = "part of it could not be read (an oversize file, or a symlink leaving the folder)"
+        outcome = "Part of it could not be read, so its contents were not fully checked."
     else:
-        reason = f"it could not be fully scanned ({v.error})"
+        outcome = f"It could not be fully scanned ({v.error}), so its contents were not checked."
     return [HygieneIssue(
         id="host-drop-artifact-weak",
         severity="info",
         title="Unusual file/dir on this host (weak supply-chain indicator)",
-        detail=f"Found: {desc}. WEAK, single indicator — {reason}, so it was not content-verified. "
-               "A manual `npm install` makes the same thing; existence alone is not evidence of "
-               "malware.",
-        remediation="Verify it's yours: inspect the path (e.g. its package.json / contents), and "
-                    "recall whether you created it. If it is NOT yours, isolate the host and rotate "
-                    f"credentials LAST ({_WIPER_NOTE}).",
+        detail=f"Found: {desc}. A weak, single indicator: ordinary tooling creates these too, so on "
+               f"its own this is not evidence of malware. {outcome}",
+        remediation="Check whether you created it (inspect its contents, and recall the install). "
+                    f"If it is NOT yours, isolate the host and rotate credentials LAST: {_WIPER_NOTE}.",
     )]

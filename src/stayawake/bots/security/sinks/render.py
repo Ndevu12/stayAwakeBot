@@ -22,7 +22,7 @@ from stayawake.utils import textsafe
 _SEV_COLOR = {s: SEVERITY[s] for s in ("critical", "high", "medium")}
 
 
-def _fmt_evidence(ev: Any, encode, *, payload_window: bool = False) -> str:
+def _fmt_evidence(ev: Any, encode, *, composed: bool = False) -> str:
     """Evidence rendered for ONE surface — `encode` supplies that surface's escaping.
 
     A `redact()` fingerprint is already inert (a dict of hash, length and a `repr`-ed preview) and
@@ -30,8 +30,8 @@ def _fmt_evidence(ev: Any, encode, *, payload_window: bool = False) -> str:
     terminal verbatim, so an escape sequence in a scanned file could retitle the window, clear the
     screen, or emit text a CI system reads as its own instructions."""
     if isinstance(ev, dict):                      # already a fingerprint (the persisted bundle)
-        return render_redacted(ev)
-    if payload_window:
+        return encode(render_redacted(ev))        # repr() escapes control chars, not markdown
+    if not composed:
         # A window of the scanned file. Shown as a fingerprint with a bounded preview rather than a
         # clean pasteable payload: handing one over invites hand-editing malware, which misses the
         # second stage and destroys the artifact. The preview is long enough to recognise a false
@@ -42,7 +42,15 @@ def _fmt_evidence(ev: Any, encode, *, payload_window: bool = False) -> str:
 
 def _loc(item: dict, encode) -> str:
     """`path:line`, with the PATH encoded — whoever writes the repository names the file."""
-    return encode(item["path"]) + (f":{item['line']}" if item.get("line") else "")
+    line = f":{item['line']}" if item.get("line") else ""
+    # Truncate the PATH, never the line number: encoding the joined string put `:42` inside the
+    # 300-char limit, so a 300+ char path (routine in nested node_modules) silently lost its line.
+    encoded_line = encode(line, _LOC_LIMIT).strip("`") if line else ""
+    room = _LOC_LIMIT - len(encoded_line) - 1
+    path = encode(item["path"], _LOC_LIMIT).strip("`")
+    if len(path) > room:
+        path = "…" + path[-room:]
+    return encode(f"{path}{line}", _LOC_LIMIT + len(path) + len(encoded_line))
 
 
 def _verdict(r: dict[str, Any]) -> tuple[int, str] | None:
@@ -88,7 +96,7 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False,
     if rows:
         headers = ("STATUS", "FINDINGS", "SEVERITY", "TARGET")
         body = [(_label(r), str(r["summary"]["total"]),
-                 r["summary"]["max_severity"] or "—", r["target"]) for r in rows]
+                 r["summary"]["max_severity"] or "—", textsafe.plain(r["target"])) for r in rows]
         widths = [max(len(headers[i]), *(len(row[i]) for row in body)) for i in range(4)]
         out.append("  ".join(headers[i].ljust(widths[i]) for i in range(4)))
         out.append("  ".join(rule(w) for w in widths))
@@ -111,9 +119,10 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False,
         for r in flagged:
             label = _label(r)
             total = r["summary"]["total"]
-            head_plain = f"{r['target']} — {label} {MARKER['meta']} {total} finding(s)"
+            safe_target = textsafe.plain(r["target"])   # repo-derived: never printed raw
+            head_plain = f"{safe_target} — {label} {MARKER['meta']} {total} finding(s)"
             out += ["",
-                    f"  {paint(r['target'], _label_color(label), on=color)} — {label} "
+                    f"  {paint(safe_target, _label_color(label), on=color)} — {label} "
                     f"{MARKER['meta']} {total} finding(s)",
                     "  " + rule(len(head_plain))]
             tags = [f"[{f['severity']} {MARKER['meta']} {f.get('confidence', 'confirmed')}]"
@@ -126,7 +135,7 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False,
                 out.append(f"    {MARKER['info']} {colored}  {f['signature_id']}  —  {loc}")
                 if f.get("evidence"):
                     ev = _fmt_evidence(f["evidence"], textsafe.quoted,
-                                       payload_window=f.get("payload_window", False))
+                                       composed=f.get("composed_evidence", False))
                     out.append(f"        evidence: {ev}")
                 if f.get("fix_advice"):                          # actionable remediation
                     out.append(f"        {MARKER['detail']} fix: {textsafe.plain(f['fix_advice'])}")
@@ -140,13 +149,15 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False,
             out.append("Per-advisory detail is in the full report (path below).")
         else:
             for r in advised:
-                out += ["", f"  {r['target']} — {len(r['advisories'])} advisor"
+                out += ["", f"  {textsafe.plain(r['target'])} — {len(r['advisories'])} advisor"
                             f"{'y' if len(r['advisories']) == 1 else 'ies'}"]
                 for a in r["advisories"]:
                     loc = _loc(a, textsafe.plain)
                     out.append(f"    {MARKER['info']} [{a['severity']}]  {a['signature_id']}  —  {loc}")
                     if a.get("evidence"):
-                        out.append(f"        {_fmt_evidence(a['evidence'], textsafe.quoted)}")
+                        adv_ev = _fmt_evidence(a["evidence"], textsafe.quoted,
+                                               composed=a.get("composed_evidence", False))
+                        out.append(f"        {adv_ev}")
                     if a.get("fix_advice"):                      # how to actually fix it
                         out.append(f"        {MARKER['detail']} fix: {textsafe.plain(a['fix_advice'])}")
                     if a.get("reference"):
@@ -175,6 +186,24 @@ def _coverage_notes(payload: dict[str, Any]) -> list[str]:
     return list(seen)
 
 
+_LOC_LIMIT = 300          # textsafe's own default; named here because `_loc` budgets against it
+
+_URL_SAFE = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+                "-._~:/?#@!$&'*+,;=%")
+
+
+def _md_url(value: str) -> str:
+    """A clean http(s) URL bare so it stays clickable; anything else code-spanned.
+
+    Bare was unsafe (a crafted `reference` injected markdown into the persisted report) and
+    code-spanning everything cost the reader the link. Validating gives both."""
+    text = str(value)
+    if (text.startswith(("https://", "http://")) and len(text) <= 300
+            and all(ch in _URL_SAFE for ch in text)):
+        return text
+    return textsafe.code(text)
+
+
 def report_order(result: dict[str, Any]) -> tuple:
     """Worst-first: infected → suspect → error → clean, then most findings, then name.
 
@@ -200,7 +229,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
         status = ("❌ INFECTED" if r["infected"]
                   else "🟡 SUSPICIOUS" if r.get("suspicious")
                   else "⚠️ error" if r["error"] else "✅ clean")
-        out.append(f"| {r['target']} | {r['source']} | {status} | "
+        out.append(f"| {textsafe.code(r['target'])} | {textsafe.code(r['source'])} | {status} | "
                    f"{r['summary']['total']} | {r['summary']['max_severity'] or '—'} |")
     out += ["", "## Findings", ""]
     any_f = False
@@ -208,22 +237,22 @@ def render_markdown(payload: dict[str, Any]) -> str:
         if not r["findings"]:
             continue
         any_f = True
-        out.append(f"### {r['target']}")
+        out.append(f"### {textsafe.code(r['target'])}")
         for f in r["findings"]:
-            loc = _loc(f, textsafe.sanitize)
+            loc = _loc(f, textsafe.code)
             out.append(f"- **[{f['severity']} {MARKER['meta']} {f.get('confidence', 'confirmed')}]** "
                        f"`{f['signature_id']}` — {loc}")
             out.append(f"  - {f['description']}")
             if f.get("evidence"):
                 ev = _fmt_evidence(f["evidence"], textsafe.code,
-                                   payload_window=f.get("payload_window", False))
+                                   composed=f.get("composed_evidence", False))
                 out.append(f"  - evidence: {ev}")
             if f.get("fix_advice"):                              # actionable remediation
                 # code-span the advice: it embeds an unvalidated package name, and a bare Markdown
                 # string would let `x](http://evil)` render as an active link (textsafe.code contract).
                 out.append(f"  - **fix:** {textsafe.code(f['fix_advice'])}")
             if f.get("reference"):
-                out.append(f"  - details: {textsafe.sanitize(f['reference'])}")
+                out.append(f"  - details: {_md_url(f['reference'])}")
         out.append("")
     if not any_f:
         out.append("_No findings — all scanned targets are clean._")
@@ -234,20 +263,22 @@ def render_markdown(payload: dict[str, Any]) -> str:
                 "_Informational (ordinary CVEs on declared dependencies). These do **not** affect "
                 "the verdict and never gate a scan._", ""]
         for r in advised:
-            out.append(f"### {r['target']}")
+            out.append(f"### {textsafe.code(r['target'])}")
             for a in r["advisories"]:
-                loc = _loc(a, textsafe.sanitize)
+                loc = _loc(a, textsafe.code)
                 out.append(f"- **[{a['severity']}]** `{a['signature_id']}` — {loc}")
                 out.append(f"  - {a['description']}")
                 if a.get("evidence"):
-                    out.append(f"  - evidence: {_fmt_evidence(a['evidence'], textsafe.code)}")
+                    adv_ev = _fmt_evidence(a["evidence"], textsafe.code,
+                                           composed=a.get("composed_evidence", False))
+                    out.append(f"  - evidence: {adv_ev}")
                 if a.get("fix_advice"):                          # how to actually fix it
                     out.append(f"  - **fix:** {textsafe.code(a['fix_advice'])}")   # code-span: see above
                 if a.get("reference"):
-                    out.append(f"  - details: {textsafe.sanitize(a['reference'])}")
+                    out.append(f"  - details: {_md_url(a['reference'])}")
             out.append("")
     notes = _coverage_notes(payload)
     if notes:
         out += ["## Coverage notes", "", "_Not gating — what this scan did not look at._", ""]
-        out += [f"- {n}" for n in notes] + [""]
+        out += [f"- {textsafe.code(n)}" for n in notes] + [""]
     return "\n".join(out) + "\n"

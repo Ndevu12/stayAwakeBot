@@ -89,7 +89,9 @@ UNVERIFIED_PERSISTENCE_IDS = {SURFACE_UNREADABLE_ID, SURFACE_ABSENT_ID}
 
 ROTATION_UNSAFE_IDS = ACTIVE_PERSISTENCE_IDS | UNVERIFIED_PERSISTENCE_IDS
 
-VERIFY_BEFORE_ROTATE_IDS = {"host-drop-artifact-weak", "host-artifact-scanned-clean"}
+# `host-artifact-scanned-clean` retired: a clean content scan no longer renders a calmer
+# finding, so the artifact keeps this grade whether or not `--verify` ran.
+VERIFY_BEFORE_ROTATE_IDS = {"host-drop-artifact-weak"}
 
 ROTATION_SAFE = "safe"
 ROTATION_UNSAFE_PERSISTENCE = "unsafe-persistence"

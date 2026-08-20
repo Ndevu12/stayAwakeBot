@@ -67,7 +67,9 @@ class Finding:
     confidence: str = CONFIRMED
     related_paths: tuple[str, ...] = ()
     commit_sha: str | None = None
-    payload_window: bool = False
+    # Did saw compose this sentence, or is it bytes from the scanned file? Default False so the
+    # report fingerprints unless told otherwise: an opt-in flag was one forgotten call from a leak.
+    composed_evidence: bool = False
     advisory_only: bool = False
     fix_advice: str | None = None
     fixed_version: str | None = None

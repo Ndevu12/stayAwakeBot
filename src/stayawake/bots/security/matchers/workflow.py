@@ -131,7 +131,7 @@ class WorkflowYamlMatcher(Matcher):
             elif any(untrusted_expr(r) for r in runs):
                 reason = "untrusted github.event.* in run"
             if reason:
-                out.append(self._emit(sig, rel, f"Dependabot-named workflow with {reason}"))
+                out.append(self._emit(sig, rel, f"Dependabot-named workflow with {reason}", composed=True))
         return out
 
     @staticmethod
@@ -140,8 +140,8 @@ class WorkflowYamlMatcher(Matcher):
         return bool(DEPENDABOT.search(base) or DEPENDABOT.search(str(data.get("name") or "")))
 
     @staticmethod
-    def _emit(sig, rel, ev):
+    def _emit(sig, rel, ev, *, composed=False):
         return Finding(signature_id=sig["id"], category=sig["category"],
                        severity=Severity.parse(sig["severity"]), path=rel,
                        description=sig["description"], remediation=sig.get("remediation", "manual"),
-                       evidence=ev, vector=sig["category"])
+                       evidence=ev, vector=sig["category"], composed_evidence=composed)

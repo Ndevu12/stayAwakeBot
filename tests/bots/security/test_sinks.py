@@ -65,7 +65,10 @@ class TestTerminalSink(unittest.TestCase):
             TerminalSink(enabled=False).emit(_report())
         out = buf.getvalue()
         self.assertIn("Security scan", out)
-        self.assertIn(PAYLOAD, out)                     # terminal shows full evidence
+        # A payload window is now fingerprinted here, not printed: handing over clean pasteable
+        # malware invites hand-editing it. Composed evidence still renders whole.
+        self.assertNotIn(PAYLOAD, out)
+        self.assertIn("sha256:", out)
         self.assertNotIn("|---", out)                   # aligned table, not raw markdown pipes
 
     def test_table_lists_all_targets_and_details_findings(self):

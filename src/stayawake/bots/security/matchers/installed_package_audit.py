@@ -79,7 +79,7 @@ def _malicious(advisory, pkg) -> Finding:
                  f"(caught even if the lockfile was not edited)",
         vector=sig["category"],
         fix_advice=malware_fix(pkg.name),                         # remove from disk + lockfile, don't upgrade
-        reference=advisory_reference(advisory.osv_id, advisory.aliases))
+        reference=advisory_reference(advisory.osv_id, advisory.aliases), composed_evidence=True)
 
 
 def _ghost(sig, pkg) -> Finding | None:
@@ -91,7 +91,7 @@ def _ghost(sig, pkg) -> Finding | None:
         description=sig["description"], remediation=sig.get("remediation", "manual"),
         evidence=f"{pkg.name}@{pkg.version or '?'} is installed but absent from the lockfile — "
                  f"a postinstall may have dropped it off-lockfile",
-        vector=sig["category"])
+        vector=sig["category"], composed_evidence=True)
 
 
 def _tampered(sig, t) -> Finding:
@@ -99,8 +99,8 @@ def _tampered(sig, t) -> Finding:
         signature_id=sig["id"], category=sig["category"],
         severity=Severity.parse(sig["severity"]), path=t.path,
         description=sig["description"], remediation=sig.get("remediation", "manual"),
-        evidence=f"{t.package}: {t.detail} — installed file modified after install", vector=sig["category"])
-
+        evidence=f"{t.package}: {t.detail} — installed file modified after install",
+        vector=sig["category"], composed_evidence=True)
 
 def _confirmed_lifecycle_patterns(all_signatures):
     """Compiled patterns of the CONFIRMED npm-lifecycle signatures (matcher `npm-manifest`, not
@@ -120,7 +120,7 @@ def _loader_finding(sig, pkg, rel, kind, hit) -> Finding:
         severity=Severity.parse(sig["severity"]), path=rel,
         description=sig["description"], remediation=sig.get("remediation", "manual"),
         evidence=f"{pkg.name}@{pkg.version or '?'} {kind} {rel} carries loader fingerprint {hit}",
-        vector=sig["category"])
+        vector=sig["category"], composed_evidence=True)
 
 
 def _scan_file(check, target, rel, budget) -> str | None:

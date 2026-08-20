@@ -35,8 +35,8 @@ def evidence(text: str, start: int, end: int, width: int = 80) -> str:
     """A window of the SCANNED FILE around a match — attacker bytes, verbatim.
 
     Every other matcher puts a sentence it wrote itself in `Finding.evidence`. This is the one that
-    returns file content, so a caller must set `payload_window=True` on the finding: that flag is
-    what tells the report to show a fingerprint rather than hand over a pasteable payload."""
+    returns file content. The report fingerprints evidence by DEFAULT, so a caller needs no flag;
+    `composed_evidence=True` is the opt-out and must never be set on a window built here."""
     s = max(0, start - 12)
     snippet = text[s:end + width].replace("\n", " ")
     return (snippet[:width] + "…") if len(snippet) > width else snippet

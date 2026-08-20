@@ -59,7 +59,7 @@ def _emit(advisory: Advisory, dep: ResolvedDependency) -> Finding:
         evidence=f"{dep.purl.coordinate} — known-malicious upstream package{cite} ({dep.source_name})",
         vector=sig["category"],
         fix_advice=malware_fix(dep.purl.name),                    # remove, don't upgrade
-        reference=advisory_reference(advisory.osv_id, advisory.aliases))
+        reference=advisory_reference(advisory.osv_id, advisory.aliases), composed_evidence=True)
 
 
 def _emit_advisory(advisory: Advisory, dep: ResolvedDependency) -> Finding:
@@ -74,7 +74,7 @@ def _emit_advisory(advisory: Advisory, dep: ResolvedDependency) -> Finding:
         vector=sig["category"], advisory_only=True,
         fix_advice=vulnerability_fix(dep.purl.type, dep.purl.name, advisory.fixed_version),
         fixed_version=advisory.fixed_version,
-        reference=advisory_reference(advisory.osv_id, advisory.aliases))
+        reference=advisory_reference(advisory.osv_id, advisory.aliases), composed_evidence=True)
 
 
 def _external_findings(target, signatures, seen: set[tuple[str, str]]) -> list[Finding]:
@@ -102,4 +102,4 @@ def _emit_external(sig: dict, finding) -> Finding:
         # its own fix flow rather than inventing an upgrade target.
         fix_advice=(f"Upgrade {finding.package} to a release that resolves {finding.advisory_id} "
                     f"(see the advisory), then re-run {finding.source_tool}."),
-        reference=advisory_reference(finding.advisory_id))
+        reference=advisory_reference(finding.advisory_id), composed_evidence=True)
