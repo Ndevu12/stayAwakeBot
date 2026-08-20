@@ -73,7 +73,7 @@ def _finding(sig: dict, rel: str, evidence: str) -> Finding:
     return Finding(
         signature_id=sig["id"], category=sig["category"], severity=Severity.parse(sig["severity"]),
         path=rel, description=sig["description"], remediation=sig.get("remediation", "manual"),
-        evidence=evidence, vector=sig["category"])
+        evidence=evidence, vector=sig["category"], composed_evidence=True)
 
 
 def _classify(p: Path, repo_root: Path, resolved_root: Path,

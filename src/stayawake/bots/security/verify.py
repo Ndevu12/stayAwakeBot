@@ -15,10 +15,13 @@ from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions
 # The scanner's OWN full-read thresholds — imported so our coverage check can't drift from what the
 # confirmed content tier actually reads (a non-source file over max_file_bytes, or a source file over
 # _MAX_INTERIOR_SCAN_BYTES, is only head+tail-scanned, so its middle is unseen).
-from stayawake.bots.security.targets.base import SOURCE_EXTS, _MAX_INTERIOR_SCAN_BYTES
+from stayawake.bots.security.targets.base import (SOURCE_EXTS, _MAX_INTERIOR_SCAN_BYTES,
+                                                  _ext)
 
 DEFAULT_MAX_FILES = 4000
 
+# Excludes OFF except `.git` — the whole point is to look inside node_modules/dist/build (the dirs a
+# normal repo scan skips). `.git` internals are never worm-drop targets and only slow the walk.
 _VERIFY_EXCLUDES = {".git"}
 
 
@@ -26,10 +29,10 @@ _VERIFY_EXCLUDES = {".git"}
 class DirVerdict:
     """The outcome of content-verifying one suspect directory. 
 
-    `scanned_clean` is the ONLY reassuring state and is set ONLY when the whole tree was both walked
-    AND fully read. The caller reads the states in priority order: markers → clean → too_large →
-    partial → error. Anything but markers/clean means "we did not fully verify" — never rendered as
-    clean (the rule: don't claim clean when you didn't look)."""
+    NO state is reassuring. `scanned_clean` says only that the tree was walked and read without
+    a marker — the caller must not render it as safety: a staging tree holds ordinary packages,
+    and the loader can live only in the process that called them. Markers may PROMOTE a verdict,
+    never lower one."""
     path: str
     files: int = 0
     markers: list[str] = field(default_factory=list)
@@ -37,6 +40,7 @@ class DirVerdict:
     too_large: bool = False
     partial: bool = False
     error: str | None = None
+    unread: list[str] = field(default_factory=list)
 
     @property
     def has_markers(self) -> bool:
@@ -78,17 +82,36 @@ def _coverage(p: Path, max_file_bytes: int) -> str:
         return "partial"                  # ELOOP / unstat-able path → we could not see it
     if not _stat.S_ISREG(st.st_mode):
         return "special"                  # FIFO / socket / device → a blocking open() could hang
+    # Ask the SCANNER whether it reads this file's content — never re-derive it. verify.py used to,
+    # with its own window and decode rule, and each adversarial round walked past the difference.
+    try:
+        with p.open("rb") as fh:
+            head = fh.read(LocalRepoTarget.BINARY_SNIFF_BYTES)
+    except OSError:
+        return "partial"
+    if not LocalRepoTarget.content_was_read(_ext(p.name), head,
+                                            oversized=st.st_size > max_file_bytes):
+        return "opaque"                   # the scan reads the bytes, never the content behind them
     try:
         if p.is_symlink():                # a symlink to a REAL file: confirm the scan can READ it
             with p.open("rb") as fh:      # (a regular-file target won't block on open)
                 fh.read(1)
     except OSError:
         return "partial"                  # exists but unreadable → the scan silently skips it
-    limit = _MAX_INTERIOR_SCAN_BYTES if p.suffix.lower() in SOURCE_EXTS else max_file_bytes
+    limit = _MAX_INTERIOR_SCAN_BYTES if _ext(p.name) in SOURCE_EXTS else max_file_bytes
     return "partial" if st.st_size > limit else "full"
 
 
-def _survey(root: Path, cap: int, max_file_bytes: int) -> tuple[int | None, bool, bool]:
+# One phrase per cause, so the report names what was actually not read.
+_UNREAD_ARCHIVE = "archives and binaries are not opened"
+_UNREAD_PARTIAL = "a file was too large to read in full, or could not be read"
+_UNREAD_DIR = "a folder could not be listed"
+_UNREAD_EXCLUDED = "a .git folder is never scanned"
+_UNREAD_ESCAPING = "a symlink points outside the folder"
+_UNREAD_SPECIAL = "a device or pipe must not be opened"
+
+
+def _survey(root: Path, cap: int, max_file_bytes: int) -> tuple[int | None, bool, bool, list[str]]:
     """Walk `root` (excluding `.git`, not following symlinks — the SAME walk the scan uses) and
     return `(file_count | None if it exceeds cap, complete, scannable)`:
       * `complete` is False whenever the tree could not be fully READ (unreadable/​unlistable dir,
@@ -96,36 +119,47 @@ def _survey(root: Path, cap: int, max_file_bytes: int) -> tuple[int | None, bool
         NOT report it as clean. (A plain unreadable NON-symlink file is caught separately: the scan
         fails CLOSED via result.error.)
       * `scannable` is False when the tree holds a FIFO/socket/device the blocking scan could HANG on
-        — the caller must skip scanning entirely and report an honest 'could not verify'."""
+        — the caller must skip scanning entirely and report an honest 'could not verify';
+      * the fourth value NAMES each shortfall found, so the report says what went unread."""
     root_resolved = root.resolve()
     n = 0
     complete = True
     scannable = True
+    unread: dict[str, None] = {}          # insertion-ordered set — stable wording between runs
 
     def _onerror(_exc: OSError) -> None:
         nonlocal complete
         complete = False
+        unread[_UNREAD_DIR] = None
 
     for dirpath, dirnames, filenames in os.walk(root, onerror=_onerror):
         kept = []
         for d in dirnames:
             if d in _VERIFY_EXCLUDES:
+                complete = False              # pruned at every depth, so declare it at every depth
+                unread[_UNREAD_EXCLUDED] = None
                 continue
             if _escapes_root(Path(dirpath) / d, root_resolved):
                 complete = False
+                unread[_UNREAD_ESCAPING] = None
             kept.append(d)
         dirnames[:] = kept
         for fn in filenames:
             n += 1
             if n > cap:
-                return None, complete, scannable
+                return None, complete, scannable, list(unread)
             cov = _coverage(Path(dirpath) / fn, max_file_bytes)
             if cov == "special":
                 scannable = False
                 complete = False
+                unread[_UNREAD_SPECIAL] = None
+            elif cov == "opaque":
+                complete = False
+                unread[_UNREAD_ARCHIVE] = None
             elif cov == "partial":
                 complete = False
-    return n, complete, scannable
+                unread[_UNREAD_PARTIAL] = None
+    return n, complete, scannable, list(unread)
 
 
 def verify_dir(path: str | Path, *, max_files: int = DEFAULT_MAX_FILES,
@@ -144,11 +178,11 @@ def verify_dir(path: str | Path, *, max_files: int = DEFAULT_MAX_FILES,
         return DirVerdict(path=str(root), error=f"unreadable: {exc}")
 
     opts = ScanOptions(exclude_dirs=set(_VERIFY_EXCLUDES))
-    count, complete, scannable = _survey(root, max_files, opts.max_file_bytes)
+    count, complete, scannable, unread = _survey(root, max_files, opts.max_file_bytes)
     if count is None:
         return DirVerdict(path=str(root), too_large=True)
     if not scannable:              # a FIFO/socket/device present — the scan's open() could HANG; skip it
-        return DirVerdict(path=str(root), files=count, partial=True)
+        return DirVerdict(path=str(root), files=count, partial=True, unread=unread)
 
     sigs = signatures if signatures is not None else load_signatures()
     result = scan_target(LocalRepoTarget(root, str(root), opts), sigs, [])
@@ -157,6 +191,6 @@ def verify_dir(path: str | Path, *, max_files: int = DEFAULT_MAX_FILES,
         return DirVerdict(path=str(root), files=count, markers=markers)
     if result.error:               # a read gap → we did NOT fully see the tree; must not claim "clean"
         return DirVerdict(path=str(root), files=count, error=result.error)
-    if not complete:               # walked, but an oversize file / escaping symlink went UNREAD
-        return DirVerdict(path=str(root), files=count, partial=True)
+    if not complete:               # walked, but something in it went UNREAD (see `unread`)
+        return DirVerdict(path=str(root), files=count, partial=True, unread=unread)
     return DirVerdict(path=str(root), files=count, scanned_clean=True)

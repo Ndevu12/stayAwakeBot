@@ -453,16 +453,19 @@ class TestVerifyArtifactsOptIn(unittest.TestCase):
                                                    "T", "D", "F")]).lower()
         self.assertIn("respond in this order", out)
 
-    def test_scanned_clean_is_reassuring_info(self):
+    def test_a_clean_content_scan_does_not_reassure(self):
         from stayawake.bots.security.verify import DirVerdict
         d, probe = self._weak_dir_probe()
         verdict = DirVerdict(path=str(d), files=120, scanned_clean=True)
         with mock.patch.object(hygiene.host_artifacts, "_host_artifacts", return_value=probe), \
              mock.patch("stayawake.bots.security.verify.verify_dir", return_value=verdict):
             issues = hygiene.check_host_artifacts(verify=True)
+        # The artifact keeps the grade it had BEFORE we looked inside.
         self.assertEqual([(i.id, i.severity) for i in issues],
-                         [("host-artifact-scanned-clean", "info")])
-        self.assertIn("no confirmed malware markers", issues[0].detail.lower())
+                         [("host-drop-artifact-weak", "info")])
+        self.assertIn("no worm markers", issues[0].detail.lower())
+        self.assertIn("does not clear it", issues[0].detail.lower())
+        self.assertNotIn("low concern", issues[0].remediation.lower())
 
     def test_too_large_stays_honest_never_claims_clean(self):
         from stayawake.bots.security.verify import DirVerdict

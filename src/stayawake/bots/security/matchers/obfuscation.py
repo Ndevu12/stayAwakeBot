@@ -56,4 +56,4 @@ class ObfuscationMatcher(Matcher):
         return Finding(signature_id=sig["id"], category=sig["category"],
                        severity=Severity.parse(sig["severity"]), path=rel,
                        description=sig["description"], remediation=sig.get("remediation", "manual"),
-                       evidence=ev, vector=sig["category"])
+                       evidence=ev, vector=sig["category"], composed_evidence=True)

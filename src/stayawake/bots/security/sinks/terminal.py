@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""TerminalSink — the default surface: the full human report to stdout, FULL evidence.
+"""TerminalSink — the default surface: the full human report to stdout, evidence in full where saw composed it, fingerprinted where it is
+file content.
 
 This is ephemeral output for the human at the keyboard, so it carries the raw evidence
 snippets (never redacted). Persisting it is the user's own act (a shell redirect); the

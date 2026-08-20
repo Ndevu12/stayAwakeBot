@@ -13,7 +13,8 @@ import unittest
 from pathlib import Path
 
 from stayawake.bots.security.signatures import load_signatures
-from stayawake.bots.security.verify import DEFAULT_MAX_FILES, verify_dir
+from stayawake.bots.security.verify import (DEFAULT_MAX_FILES, _UNREAD_ARCHIVE,
+                                            _UNREAD_ESCAPING, verify_dir)
 
 
 def _confirmed_payload() -> str:
@@ -103,9 +104,10 @@ class TestVerifyDir(unittest.TestCase):
         v = verify_dir(root)
         self.assertFalse(v.scanned_clean)
         self.assertTrue(v.partial)
+        self.assertIn(_UNREAD_ESCAPING, v.unread)
         self.assertFalse(v.has_markers)             # payload sat behind the (unscanned) link
 
-    def test_oversized_nonsource_file_is_partial_not_clean(self):
+    def test_oversized_nonsource_file_is_not_clean(self):
         # A non-source file over the 2MB cap is only head+tail-scanned; a payload in the middle is
         # unseen, so we must NOT claim clean (regression for the honesty-hunt, PATH B).
         root = _tree()
@@ -113,7 +115,7 @@ class TestVerifyDir(unittest.TestCase):
                                        encoding="utf-8")
         v = verify_dir(root)
         self.assertFalse(v.scanned_clean)
-        self.assertTrue(v.partial)
+        self.assertIn(_UNREAD_ARCHIVE, v.unread)
 
     def test_large_source_file_under_cap_is_still_clean(self):
         # A SOURCE file over 2MB but under the 64MB interior cap is windowed in FULL → it must NOT be

@@ -110,7 +110,7 @@ class HeuristicMatcher(Matcher):
         return Finding(signature_id=sig["id"], category=sig["category"],
                        severity=Severity.parse(sig["severity"]), path=rel,
                        description=sig["description"], remediation=sig.get("remediation", "manual"),
-                       line=line, evidence=ev, vector=sig["category"])
+                       line=line, evidence=ev, vector=sig["category"], composed_evidence=True)
 
     def _magic_byte_masquerade(self, target, rel, sig):
         """A file whose EXTENSION claims a binary format (font/image/wasm/pdf) but whose head lacks

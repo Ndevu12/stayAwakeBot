@@ -131,7 +131,7 @@ class TestRemediationRenders(unittest.TestCase):
         payload = ScanReport(now_iso(), [ScanResult("t", "local", advisories=[self._advisory()])]).to_payload()
         md = render_markdown(payload)
         self.assertIn("**fix:** `Upgrade shaky to 2.5.0", md)      # code-spanned (injection-safe)
-        self.assertIn("details: https://osv.dev/vulnerability/CVE-2024-9", md)
+        self.assertIn("details: https://osv.dev/vulnerability/CVE-2024-9", md)  # clean URL stays clickable
 
     def test_markdown_fix_advice_cannot_inject_active_markup(self):
         # A hostile package name with Markdown link syntax must render inertly (inside a code span),

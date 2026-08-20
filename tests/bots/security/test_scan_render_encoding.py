@@ -82,7 +82,7 @@ class TestTheMarkdownBundleDefangsMarkdown(unittest.TestCase):
 
     def test_an_ordinary_finding_is_unchanged(self):
         out = render_markdown(_payload())
-        self.assertIn("pkg/index.js:1", out)
+        self.assertIn("`pkg/index.js:1`", out)   # inside a code span, per sanitize's contract
 
 
 if __name__ == "__main__":

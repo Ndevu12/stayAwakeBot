@@ -50,5 +50,5 @@ class DestructiveMatcher(Matcher):
                 signature_id=sig["id"], category=sig["category"],
                 severity=Severity.parse(sig["severity"]), path=rel,
                 description=sig["description"], remediation=sig.get("remediation", "manual"),
-                evidence=verdict.reason + note, vector="destructive-wipe"))
+                evidence=verdict.reason + note, vector="destructive-wipe", composed_evidence=True))
         return findings

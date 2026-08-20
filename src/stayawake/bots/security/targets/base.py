@@ -137,6 +137,21 @@ class Target:
             self._note_unreadable(p.name, p, exc)   # unreadable oversized file — a gap (unless a symlink)
             return b""
 
+    # The rule read_text applies, exposed so nothing re-derives it — verify.py did, with its own
+    # window, and every adversarial round walked through the gap between the two.
+    BINARY_SNIFF_BYTES = 8192
+
+    @classmethod
+    def content_was_read(cls, ext: str, raw: bytes | None, oversized: bool) -> bool:
+        """Did read_text() examine this file's content, given what it saw? ONE definition, two callers."""
+        if raw is None:
+            return False
+        if oversized and ext not in SOURCE_EXTS:
+            return False                          # genuinely large binary — skipped wholesale
+        if b"\x00" in raw[:cls.BINARY_SNIFF_BYTES] and ext not in SOURCE_EXTS:
+            return False                          # real binary asset
+        return True
+
     def read_text(self, rel: str) -> str | None:
         p = self.root / rel
         ext = _ext(rel)
