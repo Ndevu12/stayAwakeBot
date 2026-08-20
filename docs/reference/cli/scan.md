@@ -30,7 +30,7 @@ saw scan [TARGETS...] [-r] [--user U] [--org O] [-c FILE] [-p PATH] [-j N]
 | `--pager` | Page the report through `$PAGER` (default `less -R`). Off by default. |
 | `--no-advisories` | Omit the dependency CVE section. Advisories never change the verdict or exit code, so this only quiets the output. |
 | `-x`, `--external` | **Opt-in; the only flag that leaves the offline sandbox.** Also runs *installed* external auditors (`osv-scanner`, …) and folds their vulnerabilities into the advisory tier — such a tool may send your dependency list to its own servers. Absent tools are skipped; the verdict never changes. |
-| `--deep` | **Opt-in:** also examine the installed npm dependency tree itself. Reading every dependency file adds roughly 10–60s on a large `node_modules`; the run stays offline and deterministic. |
+| `--deep` | **Opt-in, npm only:** also examine the contents of installed npm packages. Reading every dependency file adds roughly 10–60s on a large `node_modules`; the run stays offline and deterministic. |
 | `--require-db` | Exit `2` when the [advisory database](../advisory-db.md) is absent or fails its integrity check, instead of continuing without it — for CI that must not lose advisory coverage silently. |
 
 ```bash

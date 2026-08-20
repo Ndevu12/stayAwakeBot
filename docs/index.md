@@ -9,8 +9,10 @@ dependency trees and your machine's start-up surface. It remediates through a pu
 CI, so an infected change cannot merge. A default scan is offline, needs no configuration, and its
 exit code is the verdict.
 
-For developers who run `npm install`, editor auto-tasks and agent tooling, and for the people who
-keep an organisation's repositories gated.
+For developers who ship software — in any of the eight package ecosystems `saw`
+[reads](reference/advisory-db.md#ecosystems-saw-reads) — and for the people who keep an
+organisation's repositories gated. The vector is the same whatever the stack: a dependency
+install, a build, or an editor or agent opening the folder.
 
 **Start here** — [Your first scan](tutorial/first-scan.md) ·
 [Gate a repository](tutorial/gate-a-repo.md)
