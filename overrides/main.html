@@ -11,7 +11,10 @@
                        else config.site_name) %}
   {% set description = page.meta.description if page and page.meta and page.meta.description
                        else config.site_description %}
-  {% set image = config.site_url ~ "assets/og-card.png" %}
+  {# mike rewrites site_url to ".../latest" with NO trailing slash, so this must join rather
+     than concatenate — plain concatenation produced "/latestassets/og-card.png", a 404. #}
+  {% set base = config.site_url if config.site_url.endswith("/") else config.site_url ~ "/" %}
+  {% set image = base ~ "assets/og-card.png" %}
   {% set canonical = page.canonical_url if page else config.site_url %}
 
   {# Search Console ownership. Set `extra.google_site_verification` in mkdocs.yml to the token
@@ -41,7 +44,7 @@
       "alternateName": "StayAwakeBot",
       "applicationCategory": "SecurityApplication",
       "operatingSystem": "macOS, Linux, Windows",
-      "url": "{{ config.site_url }}",
+      "url": "{{ base }}",
       "downloadUrl": "https://pypi.org/project/stayawakebot/",
       "codeRepository": "{{ config.repo_url }}",
       "description": "{{ config.site_description | trim }}",
