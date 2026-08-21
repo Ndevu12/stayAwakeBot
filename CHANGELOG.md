@@ -13,6 +13,22 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Fixed
+- **A `--config` file that does not exist now fails the same way in every command.** `saw scan`
+  reported it as a Python traceback; the others each printed their own wording. All five say the
+  same thing and exit without scanning.
+- **`saw hook` no longer lets a freshly-cloned repository control your terminal.** Scan-on-clone
+  printed the names of the files it flagged exactly as the repository wrote them, so a crafted file
+  name could erase the warning it was printing.
+- **Filed security issues can no longer be reshaped by a repository.** The target and each file name
+  in the issue's table are neutralised, so a crafted name cannot turn a row into a link or shift the
+  table's columns.
+- **`saw fix --remote` no longer reports success for a repository it could not fix.** When the
+  credential cannot reach a repo, or the clone fails, the run now exits non-zero and says the repo
+  needs review — previously it printed the failure but exited 0, so a script checking the exit code
+  believed the repo had been remediated.
+
+
 ### Changed
 - **The documentation site has moved to <https://saw-docs.ndevuspace.com>.** The previous address
   redirects; update a bookmark if you kept one.

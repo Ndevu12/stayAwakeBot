@@ -36,6 +36,12 @@ def quoted(s: str, limit: int = 300) -> str:
     return f"`{plain(s, limit)}`"
 
 
+def table_cell(s: str, limit: int = 300) -> str:
+    """An untrusted value inside a Markdown TABLE cell. `code` is not enough there: GFM splits a row
+    on `|` even within a code span, so one crafted path silently shifts every column after it."""
+    return code(s, limit).replace("|", "\\|")
+
+
 def plain(s: str, limit: int = 300) -> str:
     """Sanitize an untrusted string (a repo path, a finding reason/command) for a PLAIN-TEXT line
     on the terminal or a GitHub Actions log — safe to print ANYWHERE, including at line-start.

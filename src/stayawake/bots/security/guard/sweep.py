@@ -15,6 +15,7 @@ from stayawake.utils.streaming import Streamer, stream_enabled, status as spin_s
 from stayawake.utils.sweep import run_sweep
 from stayawake.utils.terminal import supports_color
 from stayawake.bots.security import resolution
+from stayawake.bots.security.config import resolve_config
 from stayawake.bots.security.targets import ScanOptions
 from stayawake.bots.security.guard.detect import check, render, GuardStatus, latest_strix
 from stayawake.bots.security.guard.provision import setup, render_setup, resolve_pin, SetupResult
@@ -25,16 +26,7 @@ from stayawake.bots.security.guard.pindrift import drift_one, render_drift, Drif
 # Streams per repo; one repo's failure never aborts the run.
 
 def _guard_config(config_path: str | None):
-    """Load the config, tolerating a missing default (like `saw fix`). An explicitly-given --config
-    that is missing is an error (returns None → the caller exits 2)."""
-    if config_path is None:
-        p = Path(resolution.DEFAULT_CONFIG)
-        return load_yaml(p) if p.exists() else {}
-    if not Path(config_path).is_file():
-        print(f"error: config '{config_path}' not found. Pass --config <path>, or omit it to act on "
-              "the current repository.", file=sys.stderr)
-        return None
-    return load_yaml(config_path)
+    return resolve_config(config_path)
 
 
 def _local_patterns(cfg: dict, paths) -> list[str]:

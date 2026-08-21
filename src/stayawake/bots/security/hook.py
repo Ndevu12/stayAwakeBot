@@ -17,6 +17,7 @@ from pathlib import Path
 from stayawake.utils import env
 from stayawake.utils.config import load_yaml
 from stayawake.utils.pathsafe import is_safe_write_target
+from stayawake.utils import textsafe
 from stayawake.utils.render import LINK, SEVERITY, paint
 from stayawake.utils.streaming import status as spin_status, stream_enabled
 from stayawake.utils.terminal import supports_color
@@ -24,6 +25,7 @@ from stayawake.lib import git as gitutil
 from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.signatures import load_signatures
+from stayawake.bots.security.config import resolve_config
 from stayawake.bots.security.service.config import _options
 
 _MARKER = "stayawake-scan-on-clone"
@@ -156,8 +158,7 @@ def install(config_path: str | None = None) -> int:
     chain our hooks INTO it (we can't set two); otherwise point `init.templateDir` at ours."""
     saw = _saw_executable()
     config = os.path.abspath(config_path) if config_path else None
-    if config and not Path(config).is_file():
-        print(f"error: config '{config_path}' not found.", file=sys.stderr)
+    if config and resolve_config(config_path) is None:
         return 2
 
     existing = _global_template_dir()
@@ -348,7 +349,7 @@ def _warn_infected(display: str, result) -> None:
     print("\n" + _paint(f"⚠  {_BRAND}: WORM DETECTED in freshly-landed code — {display}",
                         "warn", err), file=err)
     for f in result.findings[:5]:
-        loc = f"{f.path}:{f.line}" if f.line else f.path
+        loc = textsafe.plain(f"{f.path}:{f.line}" if f.line else f.path)
         print("     " + _paint("•", "warn", err) + f" {f.signature_id}  —  {loc}", file=err)
     extra = len(result.findings) - 5
     if extra > 0:
@@ -403,7 +404,8 @@ def _run_event(event: str, argv: list[str], config_path: str | None) -> int:
     if head and include is None:            # only a full-tree scan is safe to cache by HEAD
         _remember(root, head)
     if result.error:
-        print(_paint(f"{_BRAND}: scan-on-clone hit an error scanning {display} — {result.error}",
+        print(_paint(f"{_BRAND}: scan-on-clone hit an error scanning {display} — "
+                     f"{textsafe.plain(result.error)}",
                      "warn", err), file=err)
         return 2
     if result.infected:
