@@ -1,6 +1,1 @@
-# Sponsorship channels (GitHub renders these as the repository's "Sponsor" button).
-# Only channels that actually exist belong here — an empty template key renders nothing,
-# and a wrong one strands a would-be sponsor on a dead page. The button appears once the
-# GitHub Sponsors profile below is approved; until then this file simply waits.
-
 github: [Ndevu12]
