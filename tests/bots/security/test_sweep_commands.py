@@ -84,7 +84,8 @@ class TestFixSweepFailClosed(unittest.TestCase):
             outcomes = remediator._fix_local({}, ScanOptions(), [], [], paths,
                                              _quiet_streamer(), publish=False, jobs=4)
         self.assertEqual(len(outcomes), 4, "a raising repo must not drop its peers")
-        self.assertTrue(any(": error" in o for o in outcomes))
+        # The flag, not the wording that used to stand in for it.
+        self.assertTrue(any(o.needs_review for o in outcomes))
         # ...and fix() maps any needs-review outcome to a non-zero exit.
         with mock.patch.object(remediator.pr_submit, "prepare_fix", side_effect=prepare):
             rc = remediator.fix(None, paths=paths, no_stream=True, jobs=4)

@@ -13,6 +13,13 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Fixed
+- **`saw fix --remote` no longer reports success for a repository it could not fix.** When the
+  credential cannot reach a repo, or the clone fails, the run now exits non-zero and says the repo
+  needs review — previously it printed the failure but exited 0, so a script checking the exit code
+  believed the repo had been remediated.
+
+
 ### Changed
 - **The documentation site has moved to <https://saw-docs.ndevuspace.com>.** The previous address
   redirects; update a bookmark if you kept one.
