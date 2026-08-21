@@ -13,6 +13,26 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-08-21
+
+### Added
+- **Documented where the report goes when a scan is too large for the terminal.** A big sweep prints
+  a summary and writes the full per-finding report to a file; the reference now says where that file
+  lands with and without `-d`, that its evidence is redacted like any copy on disk, and that a
+  temporary one is left for your operating system to clear rather than deleted by `saw`.
+- **The documentation is now published as a searchable, versioned site** at
+  <https://saw-docs.ndevuspace.com>, with light and dark themes. Every page carries its own summary,
+  a shared link previews with a proper card rather than a bare URL, and the site describes itself to
+  search engines so its pages can be found without going through the repository first. Because `saw`
+  ships pinned releases, each release keeps its own copy of the docs, so a pinned install can read
+  the pages that describe the version it actually has; `latest` tracks the current documentation.
+
+### Changed
+- **The CLI reference is now one page per command** instead of a single long page — `saw scan`,
+  `saw fix`, `saw audit` and the rest each have their own page, alongside pages for remote
+  targeting, report sinks and credentials. Existing links into the old page are repointed, and the
+  content is unchanged.
+
 ### Fixed
 - **A `--config` file that does not exist now fails the same way in every command.** `saw scan`
   reported it as a Python traceback; the others each printed their own wording. All five say the
@@ -27,22 +47,434 @@ reader, not the mechanism or the weakness it closed.
   credential cannot reach a repo, or the clone fails, the run now exits non-zero and says the repo
   needs review — previously it printed the failure but exited 0, so a script checking the exit code
   believed the repo had been remediated.
-
-
-### Changed
-- **The documentation site has moved to <https://saw-docs.ndevuspace.com>.** The previous address
-  redirects; update a bookmark if you kept one.
-
-### Fixed
-- **A shared link to the documentation shows its preview image again.** The card was addressed with
-  a missing separator, so every link preview requested a page that did not exist.
-
-### Fixed
 - **`saw audit --verify` no longer treats a clean content scan as reassurance.** Finding nothing
   inside an unusual folder does not make it safe — a staging tree holds ordinary packages, and the
   code that used them can be gone from disk — so the folder keeps the same "verify this is yours"
   standing it had before the scan, and the report says how many files it could not read (archives
   and binaries are not opened). A scan that finds worm markers still escalates as before.
+
+## [0.6.2] - 2026-08-17
+
+### Changed
+- **`-h` on any command now says what the command is for and shows how it is run.** Every
+  subcommand's help opens with a short statement of its purpose — including the safety-relevant
+  part, such as that `saw scan` is read-only and its exit code is the verdict, or that `saw fix`
+  prepares a branch and pushes nothing on its own — and ends with a handful of real example
+  invocations, the everyday one first. The examples are the ones from the CLI guide, so the
+  terminal and the documentation agree.
+
+### Fixed
+- **`saw hook -h` no longer lists an internal `run` entry**, which appeared as a row reading
+  `==SUPPRESS==` and was never meant to be typed by hand.
+- **`saw audit` no longer says rotating credentials is safe while telling you to rotate last.** When
+  an unusual file or directory is found, the report asks you to confirm it is yours — and it now says
+  the rotation all-clear depends on that answer, instead of stating it unconditionally a few lines
+  above. Nothing changes for a clean run, for a real incident, or for the exit code.
+
+## [0.6.1] - 2026-08-17
+
+### Changed
+- **Local security hygiene says what it found and what to do, and links the rest.** Findings are a
+  sentence and a fix; the list of what the audit does not scan moved out of every run and into the
+  documentation, reached by a link the report still prints. The caveat that a clean audit is not a
+  clean bill of health stays on screen.
+- **The CI gate `saw guard setup` installs now pins every action it runs to a commit SHA**, not just
+  the scanner. A tag can be repointed at different code after you review it; a commit cannot — and
+  the gate job holds write access in your repository. Re-running `saw guard setup` on a repository
+  that already has the gate still rewrites only the scanner pin, so an existing workflow is not
+  reformatted; the new pins apply to gates installed from now on.
+- **The cached-credential finding is much shorter.** It keeps the parts that change what you do —
+  that deleting a token a helper is actively serving will log you out, and to confirm you do not rely
+  on HTTPS auth before removing one — and drops the background explanation of why storage location
+  is not the risk. No check, verdict or exit code changes.
+
+### Fixed
+- **`reports_dir` in your config now works.** Setting it is enough to get the report bundle
+  written — previously it was silently ignored unless you also passed `-d/--reports-dir`, which
+  then overrode it, so the setting could never take effect. `STAYAWAKE_REPORTS_DIR` was ignored the
+  same way, which is why a scan inside the container image did not write to the directory the image
+  configures for it. Writing reports is still opt-in: with no flag, no environment variable and no
+  setting, a scan writes nothing.
+
+## [0.6.0] - 2026-08-16
+
+### Added
+- **The home-wipe detector catches four shapes it used to miss**: deleting the home directory through
+  a variable it was first assigned to; walking home with `listdir`/`scandir`, which is the most
+  common way to do it in Python; splitting the walk and the delete into two functions that are wired
+  together at a call site; and deleting with `shutil.rmtree`, Python's standard recursive delete.
+- **`saw audit` now checks every location Node loads a global module from**, not just
+  `~/.node_modules`: also `~/.node_libraries` and the install prefix's `lib/node`, resolved from your
+  environment on macOS, Linux and Windows alike. A module tree staged in any of them used to be
+  invisible while the same tree one directory over was reported. All are graded identically,
+  including the rule that only a directory counts.
+- **An evil-merge finding now says whether the introduced content is still in your working tree.**
+  A merge that smuggled a payload and one whose payload was deleted afterwards need different
+  responses. A file that changed since the merge is reported as **unverified**, never as removed —
+  the introduced lines may still be inside it — and a deleted path still notes that the content
+  remains in history and in any fork.
+- **`saw scan` now catches a merge commit that was edited by hand where git merged cleanly.** If a
+  file merged without conflict, git's result is fixed — a different result means somebody changed it
+  while merging, which no branch's diff shows and no pull-request review renders. This is reported
+  on its own, where previously it was missed unless the edit also matched a signature.
+
+### Changed
+- **Findings say the same things in fewer words.** The audit's guidance was carrying background a
+  developer does not need mid-incident; every claim, warning and instruction is unchanged, including
+  the credential-rotation warning, which still appears at every point where you might rotate. The
+  longest finding lost more than half its length.
+- **`saw scan` no longer prints a matched payload as clean, pasteable text.** A match in a scanned
+  file is now shown as a fingerprint with a bounded preview — long enough to recognise a false
+  positive, not a copy of the payload. Findings whose evidence is saw's own explanation are shown in
+  full, unchanged, and `--json` still carries the complete snippet for tooling.
+- **The container image now installs its dependencies from a hash-pinned lock** rather than
+  resolving them fresh at build time. Two builds of the same commit now produce the same image, and
+  a package whose contents do not match the recorded hash is refused rather than installed. This
+  does not change what `pip install stayawakebot` gives you — the package's own dependencies are
+  unchanged and remain unpinned.
+- **What matters most is now listed first in every report.** `saw audit` shows a live foothold above
+  a credential exposure above everything else, instead of the order the checks happen to run in; and
+  the saved report bundle lists infected repositories before suspect and clean ones, which it did not
+  order at all before. The scan table is unchanged — the rest now matches it.
+- **A scan no longer takes every CPU core.** It leaves one free, so the machine stays responsive
+  while a scan runs, and it sizes itself from the CPUs the process is actually allowed to use — so
+  running inside a container with a CPU limit no longer starts workers for the host's cores. Pass
+  `-j N` to choose the number yourself; that is unchanged.
+- **The incident runbook now offers to image the disk before the step that rebuilds the host**, and
+  says when deleted content is still recoverable. Rebuilding, and ordinary continued use, overwrite
+  it.
+- **`saw audit` now prints the recommended fix for an unverified persistence surface.** It previously
+  reported that rotation was unsafe without printing what would resolve it.
+
+### Fixed
+- **The package works on Python 3.11 again.** A report-rendering module could not be imported
+  there, so anything that printed a finding failed. Python 3.12 and later were unaffected.
+- **Saved reports no longer keep advisory evidence in full.** Findings were redacted before writing;
+  advisories were not, so the saved bundle held text the sink promised it would not.
+- **`saw scan` no longer lets a scanned repository control your terminal or your CI log.** The
+  matched snippet and the file path were printed unchanged, so a crafted file name or file content
+  could retitle the window, clear the screen, or emit text a CI system reads as its own
+  instructions. Both are now neutralised while still being shown, matching the fix already applied
+  to `saw audit`.
+- **The container image is published again.** The 0.5.2 image was not pushed: its digest-pinned
+  base carried newly-fixed vulnerabilities, and the release's vulnerability gate correctly
+  refused to publish. The base image is updated. `pip install` was unaffected — only the
+  container is new here.
+- **`saw scan` no longer calls a project infected because two unrelated things appear in one file.**
+  A file that listed your home directory in one place and deleted something entirely different in
+  another was reported as a home-directory wipe — a dotfile manager, or an editor bundle whose
+  documentation happened to contain both. The two now have to belong together.
+- **`saw scan` no longer reports ordinary HTTP-parsing code as infected.** Writing the DEL character
+  by its numeric code is ordinary JavaScript, so any RFC 7230 control-character table matched a
+  malware loader fingerprint at the tier that asserts malware — failing a CI gate on a vendored
+  bundle. The fingerprint now requires the characters to be assembled and then executed nearby, which
+  is what distinguishes a string shuffler from a character table. Real loaders are detected exactly as
+  before.
+- **`saw audit` no longer reports a hardened host as a compromised one.** Prevention guidance in
+  circulation tells operators to make `~/.node_modules` a non-directory so a worm cannot stage there.
+  The audit described that location as "an npm tree" but accepted anything present, so following the
+  advice created the very indicator, which could combine with one other weak signal into a warning
+  that withheld the credential-rotation all-clear. A real directory there is reported exactly as
+  before.
+- **The explanation offered for that finding named a command that cannot produce it.** It blamed a
+  manual `npm install` in your home directory, which creates `~/node_modules` — without the dot — so
+  the one route a user had to clear the finding themselves pointed at a path the audit never checks.
+- **`saw scan` no longer treats code written in a comment as code that runs.** A file was reported as
+  obfuscated for containing a comment such as `// never use eval() here`, or a commented-out line —
+  a warning against the thing read as the thing. Code is still read exactly as before, including
+  constructs assembled inside string literals.
+- **`saw scan` now sees code written inside a template literal's `${...}`.** Anything spliced into a
+  template was being read as text rather than as code, so a decoded payload handed to a shell that
+  way went unreported while the same payload joined with `+` was caught. Both are now detected, and
+  ordinary templates — building a URL, a command with a variable, a styled component — are still
+  clean.
+- **`saw scan` no longer reports ordinary front-end code as obfuscated.** Reading a JWT or a data URI
+  with `atob` was treated as executing code, and any list of nine or more numbers — icon sizes, a
+  colour table — was treated as a smuggled string. Both now need the step their names imply: a decode
+  counts when the file also runs a command, and a number list counts when something consumes it as
+  character codes. Packed loaders and character-code strings feeding `eval` are detected exactly as
+  before.
+- **The release pipeline blocked on vulnerabilities it was configured to ignore.** The container
+  vulnerability gate is meant to stop a release only for a fixable critical or high finding, but it
+  was rejecting releases over low, medium and unrecognised ones — the `0.5.2` release was blocked
+  with no critical or high finding at all. The gate now applies the severity it documents, and the
+  full scan report is still published for every release.
+- **`saw scan` no longer reports an ordinary merge as an attack when the branches have no common
+  ancestor.** Merging two unrelated histories has no clean three-way merge to compare against, and
+  every file the other side brought in was being reported as introduced by the merge — one such
+  merge produced 18 findings and marked the repository infected. Such a merge is now judged on its
+  content alone, and a merge that introduces no new content is not a finding.
+- **`saw audit` now finds shell start-up files that are not kept in your home directory.** A
+  configuration under `$ZDOTDIR`, or a `fish`/`nushell` config in `~/.config`, was neither examined
+  for a planted start-up line nor counted when the audit decided whether it had a persistence surface
+  to certify — so on those setups a line that runs on every new terminal went unreported, and an
+  in-use account could be described as having nothing to examine. `fish`'s `conf.d` drop-in
+  directory, which is sourced on every start, is now read as well.
+- **`saw audit` no longer reports a host whose persistence locations are all missing as "enumerated
+  and clean".** When every location the audit certifies is absent, nothing was actually examined, so
+  the run now ends **UNKNOWN** and withholds the rotation all-clear (exit `3`) instead of stating that
+  rotating credentials is safe. **This is the expected state on a new account, a container or a CI
+  image** — the report says so, and says what to check; it is also what a destroyed home directory
+  looks like, and the two cannot be told apart from disk. Windows is unaffected.
+- **`saw audit` no longer cuts a finding's detail or its recommended fix short.** Long text was
+  silently truncated at a fixed length, so a report listing several unreadable locations named only
+  the first two and the credential-rotation warning could stop mid-sentence.
+- **`saw audit` now certifies the fish shell's startup file, which it already read.** A `fish`-only
+  account was scanned for a planted start-up line and then described as having no shell startup file
+  at all.
+- **`saw audit` no longer describes a surface it read as one it could not read.** The verdict, the
+  scope note and the report's opening line said a location had been unreadable even when every
+  location had been read and none existed, sending a reader looking for something that was not there.
+
+### Security
+- **`saw audit` no longer lets a discovered file path reach a copy-pasteable command unchanged.** One
+  removal command named the configuration file it had found, and that name is not always chosen by
+  you — so a crafted one could put terminal control sequences, or text a CI system reads as its own
+  instructions, into a block you are invited to paste. The name is now neutralised while still being
+  shown, and the command stays usable.
+
+## [0.5.2] - 2026-08-14
+
+### Added
+- **A security policy** (`SECURITY.md`) with a private reporting address, so a vulnerability in the
+  scanner can be reported without opening a public issue. **saw@ndevuspace.com** is also now the
+  contact for commercial licensing and the package's author address.
+
+### Changed
+- **The README now leads with what `saw` is for** — hunting self-propagating supply-chain packages —
+  and with `saw guard`, which writes and maintains the CI gate for you. The uptime sentinel is
+  documented further down, since it is independent of `saw` and shares only the packaging.
+
+### Fixed
+- **The README's CI gate example used an input the Action does not accept** (`fail-on-findings`),
+  so the line was silently ignored by anyone who copied it. The example is now a working
+  configuration taken from a repository running it, with every action pinned by commit SHA.
+
+### Security
+- **`saw audit` no longer lets a filename it discovered control your terminal or your CI log.** Names
+  in world-writable directories are chosen by whoever wrote the file, and the audit report printed
+  them unchanged — so a crafted name could clear the screen, retitle the window, scroll a real
+  finding out of view, or emit text a CI system reads as its own instructions. The report now
+  neutralises those sequences while still showing the name. Copy-pasteable commands are unchanged.
+
+## [0.5.1] - 2026-08-14
+
+### Fixed
+- **`stayawake-health-check` did not perform its checks unless `--fail-on-unhealthy` was passed.**
+  A run without the flag reported success without contacting anything, so scheduled monitoring
+  invoked that way recorded no results — re-check your coverage. The check now always runs, and the
+  flag decides only the exit code.
+- **`saw audit` now judges a start-up program by who signed it, not merely by whether its signature
+  is intact.** Some binaries were accepted as properly signed when they should not have been, and
+  separately, genuinely signed third-party applications could be reported as unsigned — making
+  ordinary software look unaccountable. Both are corrected.
+- **The README's quick-start scan command did not work.** It passed `--local`, a flag removed in
+  0.1.6 — local is the default and `--remote` is the scope toggle — so following the README produced
+  `unrecognized arguments: --local`. The README now leads with the security sentinel and shows
+  commands that run.
+- `saw audit`'s scope note no longer refers readers to a document that is not published.
+
+## [0.5.0] - 2026-08-14
+
+### Fixed
+- **`saw audit` no longer misses a start-up entry whose interpreter is capitalised, or whose payload is named after one.** An entry running the standard python.org build of Python — whose executable is capitalised — was reported as nothing at all, however suspicious its payload; and a payload file named after an interpreter, such as `node.something.js`, was never read for content. Both are fixed, and a container command written with different capitalisation is again recognised as running elsewhere rather than on this host.
+- **`saw audit` no longer stops reading a start-up script partway through, and no longer reports an agent that creates a temporary file as active persistence.** A start-up entry could contain shell that caused the rest of it to go unexamined, so anything after that point was never reported. Separately, an entry that made a temporary file in the ordinary way — the idiom stock system scripts use — could be reported as active host persistence, withholding the rotation all-clear and exiting `3`. Both are fixed, and `saw audit` now also reports payloads run through a shell trap or a process substitution.
+- **`saw audit` no longer reports ordinary system agents as host footholds, and no longer misses a multi-line start-up script.** An agent running `tar`, `sort`, `du` or a config-file service with a `-c` option could be reported as active host persistence — withholding the rotation all-clear and exiting `3` — while a start-up entry whose shell script spans several lines was reported nothing at all. Both are fixed, and entries launched through `env`/`sudo` wrappers are now read correctly rather than skipped.
+- **`saw audit` now catches a start-up entry that runs a scratch-directory payload with no punctuation in front of it**, such as a systemd `ExecStopPost=/bin/sh -c '/tmp/x &'`. It was reported only when a shell operator preceded the path.
+- **`saw audit` no longer reports a start-up entry as an unattributable foothold on ordinary code.**
+  A shell-shaped check was being applied to payload text written in other languages, where the same
+  punctuation is routine — a JavaScript template literal, a default value, a comment. Signed,
+  package-installed software could be reported as active host persistence, which withholds the
+  rotation all-clear and exits `3`. Detection of the real shapes is unchanged, including start-up
+  entries that run code from a world-writable scratch directory.
+- **`saw audit` now says that it does not look for Windows start-up entries.** Persistence
+  enumeration covers macOS and Linux user-scope locations only, so on Windows the audit finds no
+  start-up entries because it examines none — not because there are none. It previously reported that
+  silently, which reads as a clean host. The scope note names the gap on every platform, and on
+  Windows the report no longer claims to have read a persistence surface. Presentation only: no new
+  finding, and the verdict and exit code are unchanged.
+
+- **An audit check that could not be completed no longer looks like an ordinary review note.**
+  When `saw audit` cannot fully read the persistence surface it withholds its all-clear and says so
+  — but that "could not establish this" state was rendered identically to a low-priority nudge, so a
+  run that deliberately declined to certify could be read at a glance as a clean one. It is now
+  visually distinct from both a nudge and an act-now warning. Audit rows also align consistently,
+  which they previously did not across the two markers.
+- **`saw scan` no longer reports INFECTED on published, benign packages.** A loader fingerprint
+  collided with ordinary minified code, so vendoring a large published bundle — or running
+  `--deep` on a project that depends on one — could fail your scan with an infected verdict and a
+  non-zero exit. If a scan failed on a dependency you had no other reason to doubt, re-run it. The
+  detection that catches this worm family is unchanged, and remediation is unaffected: a partially
+  cleaned file that still carries loader code is still refused as "fixed".
+
+### Added
+- **A new confirmed indicator for the same worm family**, covering a marker the earlier fingerprints
+  missed.
+
+## [0.4.1] - 2026-08-11
+
+### Fixed
+- **`stayawake-health-check` failed on startup instead of running its checks.** If you run it on a
+  schedule, its results were not being recorded — re-check your monitoring coverage. It now runs
+  normally.
+
+### Removed
+- The `--reports-dir` flag on `stayawake-health-check`. The sentinel has written no report files
+  since 0.1.8, so the flag had no effect.
+
+### Changed
+- **The availability status issue is now filed only where you configure it.** Set
+  `settings.alert_repo: "owner/name"` in the health config; there is no default. With it unset no
+  issue is written, while the check still runs, still prints results, and still sets its exit code.
+- Documentation reorganised: the public repository carries product documentation. Install, usage,
+  configuration, the CLI reference and licensing are unaffected.
+- `saw audit` states the boundary of what it examined, so a clean result is not mistaken for a
+  whole-host all-clear.
+- This changelog now follows the Keep a Changelog standard. Released versions, dates and compare
+  links are unchanged.
+
+### Security
+- Bumped the pinned self-scan engine used by the CI gate and the release self-scan to current `main`,
+  so both validate against the same scanner that ships.
+
+## [0.4.0] - 2026-08-04
+
+### Added
+- **`saw audit` reports whether credential rotation is safe**, and exits `3` when it is not, or could
+  not be verified. `3` is additive and distinct from infected (`1`) and error (`2`); every existing
+  zero/non-zero consumer still fails safe.
+- **`saw audit` reports start-up entries it cannot attribute to installed software**, and background
+  agents that re-run on a schedule — including ones whose network destination is otherwise ordinary.
+  Disabled on ephemeral and CI hosts.
+- **`saw scan` detects payloads that delete the user's home directory**, reported distinctly
+  according to whether the deletion is recoverable, since that is the first question after a wipe.
+  Covers POSIX shells, Windows batch and PowerShell.
+- **`saw fix` can recover a file introduced by an evil merge.** The recovered version is never
+  applied automatically — it lands as a review-required change the operator must approve.
+- `saw scan` clean output notes that a repository scan is not a host all-clear.
+
+### Changed
+- Evil-merge findings are graded by the strength of their corroboration; the strongest are now
+  reported as confirmed rather than suspicious. The same merges and paths are flagged as before.
+- An evil-merge finding now gives history guidance — naming the commit and the files it introduced —
+  rather than offering a file edit. `saw fix` never rewrites history.
+- Where environment affects how a destructive finding should be read, the finding says so. Severity,
+  verdict and exit code never vary with environment.
+
+### Fixed
+- `saw fix` no longer reports a repository "already clean" when its only findings were heuristic. It
+  lists them and defers to review. Exit code unchanged, and heuristics are still never auto-fixed.
+
+## [0.3.1] - 2026-08-03
+
+### Fixed
+- `saw hook` clone and pull warnings state explicitly what to avoid until the code is trusted, and
+  show progress so a scan never looks stuck.
+
+## [0.3.0] - 2026-08-03
+
+### Added
+- **`saw hook` — scan on clone.** `saw hook install` seeds git's template directory so future clones,
+  pulls, branch switches and rebases are scanned before you install dependencies, build, or open the
+  repository in an editor. A clone scans the full tree; an update scans only what changed. It is
+  read-only and offline, warns rather than modifies, and can never break a git command. It uses the
+  packaged signatures and your own allowlist — never one supplied by the repository being scanned.
+  `saw hook uninstall` reverses it, `saw hook status` shows state, `SAW_HOOK_DISABLED=1` disables it
+  per shell, and `SAW_HOOK_TIMEOUT` (default 60s) bounds it — a scan that times out reports the tree
+  unverified, never clean.
+
+## [0.2.0] - 2026-08-03
+
+### Added
+- **`saw scan -j/--jobs N` scans concurrently.** A multi-repository sweep scans several repositories
+  at once, and a single large repository splits its files across workers. The default is `auto` — a
+  small scan stays sequential, a large one uses one worker per core. `-j 1` forces sequential;
+  `settings.jobs` sets the default and `settings.parallel_min_files` the floor. Results are
+  byte-identical whether run with one worker or many, a failed worker still fails the scan closed,
+  and `Ctrl-C` stops in-flight work immediately.
+- `saw fix` and `saw guard` accept `-j/--jobs N` for multi-repository sweeps, with the same defaults
+  and guarantees. `saw audit` is excluded — it has no multi-repository sweep.
+
+### Changed
+- **Scans are substantially faster with identical results** — roughly 1.9× on a 2,000-file tree, and
+  it compounds with `-j`. No new flags.
+- Scan progress is a live board when running concurrently. Piped, CI and `--no-stream` output is
+  unchanged.
+
+## [0.1.19] - 2026-08-02
+
+### Changed
+- **GitHub App authentication works on a base install**, with every install method; the optional
+  `pyjwt[crypto]` extra is no longer needed and has been removed.
+- `saw auth` output is formatted consistently with `saw audit`.
+
+### Fixed
+- A GitHub App now works across every account and organisation it is installed on, not only the
+  personal account.
+
+## [0.1.18] - 2026-08-02
+
+### Added
+- `saw guard setup` installs a complete CI gate: it scans, opens a single rolling fix pull request on
+  an infected verdict, and raises a self-closing issue when the pinned scanner drifts.
+
+### Changed
+- The App registration flow binds an anti-CSRF nonce.
+- Push-failure messages distinguish a bad credential from a missing permission.
+- Untrusted paths are sanitised when displayed.
+
+## [0.1.17] - 2026-07-31
+
+### Added
+- `saw auth app register` — register and manage a StayAwakeBot GitHub App.
+- `saw doctor` reports GitHub App readiness.
+
+### Fixed
+- `saw auth` no longer crashes on a default install without the optional App extra.
+- A repository-access denial is reported as such, rather than as missing write scopes.
+
+### Security
+- The GitHub App private key is no longer written with a window in which it is readable by others.
+
+## [0.1.16] - 2026-07-23
+
+### Changed
+- A long result no longer floods the terminal. Lengthy scans show a summary dashboard on screen and
+  write the full detail to a report file, whose path is highlighted.
+
+## [0.1.15] - 2026-07-21
+
+### Added
+- `saw scan --deep` content-scans installed dependency code. Opt-in, because it adds time on a large
+  dependency tree.
+- `saw scan` tells you how to fix a flagged dependency, not just that it is flagged.
+- `saw audit` detects a cached GitHub credential on Linux and Windows, not only macOS.
+- `saw audit` flags two further editor auto-execution surfaces.
+
+### Changed
+- `saw audit`'s cached-credential finding explains what it does and does not mean, rather than
+  implying the credential should be removed.
+
+### Fixed
+- Base64 tokens, key arrays and inlined assets are no longer flagged as packed payloads.
+- A non-regular file in a scanned repository can no longer hang a scan.
+
+### Security
+- `saw`'s own file write and delete paths are hardened against symlink write-through.
+
+## [0.1.14] - 2026-07-20
+
+### Added
+- `saw guard check` verifies a repository's CI gate; `saw guard setup` installs or updates it.
+- `saw audit --verify` content-scans a suspicious host artifact.
+- `saw scan` flags a repository that ships a write-redirect symlink.
+
+### Changed
+- `saw guard check` and `saw guard setup` discover and sweep repositories like `saw scan` and
+  `saw fix`.
+- `saw audit` right-sizes its incident-response guidance to the evidence, and describes weak
+  indicators honestly rather than accusingly.
+- `saw audit`'s report is easier to read.
 
 ### Fixed
 - `saw guard --remote` no longer blames your token when a repository simply has no CI.
@@ -203,7 +635,8 @@ _No user-facing changes were recorded for this release._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel (supply-chain worm
 detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.6.2...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.6.3...HEAD
+[0.6.3]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.5.2...v0.6.0
