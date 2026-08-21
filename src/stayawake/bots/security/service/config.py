@@ -9,17 +9,11 @@ from pathlib import Path
 
 from stayawake.utils.config import load_yaml
 from stayawake.bots.security.targets import ScanOptions
-from stayawake.bots.security.resolution import DEFAULT_CONFIG
+from stayawake.bots.security.config import resolve_config
 
 
-def _read_config(config_path: str | None) -> dict:
-    """Load the scan config. When `config_path` is None we use the default file if it
-    exists, else an empty config — so a bare `saw scan` in any repo works without a
-    config. An explicitly-given path that is missing is an error."""
-    if config_path is None:
-        p = Path(DEFAULT_CONFIG)
-        return load_yaml(p) if p.exists() else {}
-    return load_yaml(config_path)
+def _read_config(config_path: str | None) -> dict | None:
+    return resolve_config(config_path)
 
 
 _BUILD_OUTPUT_DIRS = {"dist", "build", "out", ".next"}

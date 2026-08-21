@@ -82,10 +82,15 @@ class TestHelpers(unittest.TestCase):
         plain = Path(tempfile.mkdtemp())  # no .git anywhere under tmp
         self.assertEqual(svc.run._enclosing_repo_root(plain), plain.resolve())
 
-    def test_read_config_default_missing_is_empty_but_explicit_missing_raises(self):
-        # explicit but missing path → hard error (don't silently scan nothing)
-        with self.assertRaises(FileNotFoundError):
-            svc.config._read_config("/no/such/security.yml")
+    def test_read_config_default_missing_is_empty_but_explicit_missing_is_an_error(self):
+        # Still a hard error — don't silently scan nothing — but a stated one: it used to reach the
+        # user as a FileNotFoundError traceback while its own docstring promised a check.
+        import io
+        from contextlib import redirect_stderr
+        buf = io.StringIO()
+        with redirect_stderr(buf):
+            self.assertIsNone(svc.config._read_config("/no/such/security.yml"))
+        self.assertIn("not found", buf.getvalue())
         # default (None) with no config file present → empty config, no error
         cwd = os.getcwd()
         tmp = tempfile.mkdtemp()

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import urllib.parse
 
-from stayawake.utils import env
+from stayawake.utils import env, textsafe
 from stayawake.lib.adapters.slack import send_slack
 from stayawake.lib.adapters import github_api
 from stayawake.utils.timeutil import utc_stamp
@@ -31,14 +31,14 @@ def _open_issues(owner: str, name: str, token: str) -> list[dict]:
 
 def _issue_body(result: dict) -> str:
     lines = [f"StayAwakeBot Security Sentinel detected worm indicators in "
-             f"`{result['target']}` ({result['source']}).", "",
+             f"{textsafe.code(result['target'])} ({textsafe.code(result['source'])}).", "",
              f"**Detected at:** {utc_stamp()}",
              f"**Findings:** {result['summary']['total']} "
              f"(max severity: {result['summary']['max_severity']})", "", "| Severity | Signature | Path |",
              "|----------|-----------|------|"]
     for f in result.get("findings", [])[:25]:
-        loc = f["path"] + (f":{f['line']}" if f.get("line") else "")
-        lines.append(f"| {f['severity']} | `{f['signature_id']}` | {loc} |")
+        loc = textsafe.table_cell(f["path"] + (f":{f['line']}" if f.get("line") else ""))
+        lines.append(f"| {f['severity']} | {textsafe.table_cell(f['signature_id'])} | {loc} |")
     lines += ["", "Auto-opened by StayAwakeBot Security Sentinel. Will auto-close when the "
               "target scans clean. Clean with `~/sec-clean-worm.sh` or the remediator (Phase 3)."]
     return "\n".join(lines)

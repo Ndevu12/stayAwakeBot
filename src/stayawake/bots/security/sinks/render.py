@@ -229,7 +229,8 @@ def render_markdown(payload: dict[str, Any]) -> str:
         status = ("❌ INFECTED" if r["infected"]
                   else "🟡 SUSPICIOUS" if r.get("suspicious")
                   else "⚠️ error" if r["error"] else "✅ clean")
-        out.append(f"| {textsafe.code(r['target'])} | {textsafe.code(r['source'])} | {status} | "
+        out.append(f"| {textsafe.table_cell(r['target'])} | {textsafe.table_cell(r['source'])} | "
+                   f"{status} | "
                    f"{r['summary']['total']} | {r['summary']['max_severity'] or '—'} |")
     out += ["", "## Findings", ""]
     any_f = False

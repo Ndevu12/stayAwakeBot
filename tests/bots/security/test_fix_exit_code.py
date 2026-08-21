@@ -69,3 +69,30 @@ class TestTheGradeIsCarriedNotReparsed(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAMissingConfigIsTheSameEverywhere(unittest.TestCase):
+    """One resolver, so naming a config that is not there fails the same way in every command."""
+
+    MISSING = "/no/such/security.yml"
+
+    def test_every_command_refuses_and_says_why(self):
+        import io
+        from contextlib import redirect_stderr
+        from stayawake.bots.security import hook
+        from stayawake.bots.security.guard import sweep
+        from stayawake.bots.security.service import run as scan_run
+        for name, call in (("fix", lambda: remediator.fix(self.MISSING, no_stream=True)),
+                           ("discard", lambda: remediator.discard(self.MISSING, branch=True,
+                                                                  no_stream=True)),
+                           ("scan", lambda: scan_run.scan(config_path=self.MISSING,
+                                                          no_stream=True)),
+                           ("guard", lambda: sweep._guard_config(self.MISSING)),
+                           ("hook", lambda: hook.install(self.MISSING))):
+            with self.subTest(command=name):
+                buf = io.StringIO()
+                with redirect_stderr(buf):
+                    result = call()
+                self.assertIn("not found", buf.getvalue(), f"{name} said nothing")
+                self.assertNotEqual(0, result if isinstance(result, int) else 2,
+                                    f"{name} treated a missing config as success")

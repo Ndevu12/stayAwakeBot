@@ -18,6 +18,7 @@ import heapq
 
 from stayawake.utils import parallel
 from stayawake.utils.io import reports_dir_choice, resolve_reports_dir
+from stayawake.utils import textsafe
 from stayawake.utils.streaming import Streamer, status, stream_enabled
 from stayawake.utils.sweep import run_sweep
 from stayawake.utils.timeutil import now_iso
@@ -201,6 +202,8 @@ def scan(config_path: str | None = None, *, remote: bool = False,
     report_on = stream_enabled(sys.stdout, force_off=no_stream)
     prog = Streamer(enabled=progress_on, out=sys.stderr)
     cfg = _read_config(config_path)
+    if cfg is None:                    # a named config that is not there — the resolver said so
+        return 2
     settings = cfg.get("settings", {})
     opts = _options(settings, no_advisories=no_advisories, external_audit=external_audit, deep=deep)
     sigs = load_signatures(settings.get("signatures_path"))
@@ -325,6 +328,6 @@ def scan(config_path: str | None = None, *, remote: bool = False,
     if report.any_error:
         errored = [r.target for r in results if r.error]
         print(f"error: {len(errored)} target(s) could not be scanned — failing closed (not "
-              f"reporting 'clean'): {', '.join(errored)}", file=sys.stderr)
+              f"reporting 'clean'): {', '.join(textsafe.plain(e) for e in errored)}", file=sys.stderr)
         return 2
     return 0

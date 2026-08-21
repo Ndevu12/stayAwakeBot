@@ -7,7 +7,6 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from stayawake.utils.config import load_yaml
 from stayawake.lib import auth
 from stayawake.utils import env, parallel
 from stayawake.lib import git as gitutil
@@ -17,6 +16,7 @@ from stayawake.utils.sweep import run_sweep
 from stayawake.utils.timeutil import now_iso
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security import resolution
+from stayawake.bots.security.config import resolve_config
 from stayawake.bots.security.resolution import (
     discover_local_repos, invalid_slugs, REMOTE_EMPTY_HINT, DEFAULT_CONFIG,
     enclosing_repo_root as _enclosing_repo_root, remote_scope as _remote_scope,
@@ -34,18 +34,8 @@ def _options(settings: dict) -> ScanOptions:
     )
 
 
-def _resolve_config(config_path: str | None):
-    """Load the config without ever crashing on a missing file. None → the packaged
-    default if it exists, else an empty config — so `saw fix`/`saw discard` work on the
-    current repo with no config. An explicit --config that is missing is a clear error."""
-    if config_path is None:
-        p = Path(DEFAULT_CONFIG)
-        return load_yaml(p) if p.exists() else {}
-    if not Path(config_path).is_file():
-        print(f"error: config '{config_path}' not found. Pass --config <path>, or omit it "
-              "to act on the current repository.", file=sys.stderr)
-        return None
-    return load_yaml(config_path)
+def _resolve_config(config_path: str | None) -> dict | None:
+    return resolve_config(config_path)
 
 
 @dataclass(frozen=True)
