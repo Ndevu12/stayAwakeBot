@@ -219,6 +219,12 @@ stayawake-health-check --config config/urls.yml
 - [Security policy](SECURITY.md) — how to report a security issue privately
 - [Code of conduct](CODE_OF_CONDUCT.md) — what taking part here commits you to
 
+## Sponsor
+
+saw is open source. To sponsor the work, email
+**[saw@ndevuspace.com](mailto:saw@ndevuspace.com?subject=Supporting%20saw)** — the same address
+handles commercial licensing.
+
 ## License
 
 stayAwakeBot is **dual-licensed**:
