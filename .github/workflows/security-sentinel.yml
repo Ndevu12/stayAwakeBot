@@ -39,6 +39,7 @@ jobs:
         uses: ./.github/actions/setup
 
       - name: Scan, alert, and emit SARIF
+        id: scan
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -53,8 +54,17 @@ jobs:
           # Terminal-first: one pass scans, pushes GitHub-issue + Slack alerts (--alert),
           # and writes the SARIF. Exit code is the verdict (non-zero on infected), which
           # surfaces an infected main as a failed run.
+          set +e
           saw scan "${{ github.workspace }}" -c "${{ github.workspace }}/config/security.yml" \
             --alert --sarif "$RUNNER_TEMP/latest.sarif"
+          rc=$?
+          set -e
+          # Say whether the SARIF is there. The uploads below used to ask hashFiles(), which resolves
+          # against the workspace and cannot see RUNNER_TEMP — so it answered "no" on every run and
+          # they skipped whether or not the file had been written.
+          if [ -s "$RUNNER_TEMP/latest.sarif" ]; then echo "sarif=true" >> "$GITHUB_OUTPUT"
+          else echo "sarif=false" >> "$GITHUB_OUTPUT"; fi
+          exit $rc
 
       # security-sentinel is the SOLE owner of code-scanning delivery (the merge/publish gates
       # never upload). It's gated by an explicit, declared capability flag — `vars.ENABLE_CODE_SCANNING`
@@ -65,7 +75,7 @@ jobs:
       # the upload genuinely fails → this NON-GATING job goes RED honestly (blocks no merge/publish).
       # always(): the scan exits non-zero when infected, but the SARIF is written before that verdict.
       - name: Upload SARIF to code-scanning
-        if: ${{ always() && vars.ENABLE_CODE_SCANNING == 'true' && hashFiles(format('{0}/latest.sarif', runner.temp)) != '' }}
+        if: ${{ always() && vars.ENABLE_CODE_SCANNING == 'true' && steps.scan.outputs.sarif == 'true' }}
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: ${{ runner.temp }}/latest.sarif
@@ -82,7 +92,7 @@ jobs:
           fi
 
       - name: Upload SARIF as build artifact
-        if: ${{ always() && hashFiles(format('{0}/latest.sarif', runner.temp)) != '' }}
+        if: ${{ always() && steps.scan.outputs.sarif == 'true' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7.0.1
         with:
           name: security-sarif
