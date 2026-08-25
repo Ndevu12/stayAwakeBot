@@ -1,6 +1,6 @@
 ---
 name: shipping-changes
-description: The contribution workflow — feature-branch PRs (never push main), rebase on origin/main, bare "Closes #NNNN", CHANGELOG in the same PR, signed commits, and gh-CLI style. Apply whenever committing or opening a PR.
+description: The contribution workflow — feature-branch PRs (never push main), rebase on origin/main, bare "Closes #NNNN", CHANGELOG in the same PR, signed commits, the shape of a release PR, and gh-CLI style. Apply whenever committing or opening a PR.
 ---
 
 # Shipping changes (contribution workflow)
@@ -46,6 +46,20 @@ opening the PR rather than discovering the requirements from a red check.
 
 **Releases are the maintainer's, not yours.** Don't cut, tag, or publish one; don't add automation
 that force-pushes consumer-pinned refs or bumps versions without review. Prefer SHA-pinning.
+
+The version exists **only as the git tag** — never add one to the source tree. Preparing the release
+PR is the whole of a contributor's part in it, and it carries exactly three things:
+
+1. Both scanner pins moved to the **same** reviewed SHA — never the commit being released.
+2. `[Unreleased]` cut into `## [X.Y.Z] - <date>`, compare links repointed. A tag whose section was
+   never cut is refused at release time.
+3. The container base digest refreshed, and **the vulnerability gate re-run against the rebuilt
+   image before anything is tagged** — the pin is fixed, the advisory feed is not, so an image that
+   passed last month can block the publish today.
+
+**A published release is immutable.** A step that fails after the tag exists cannot be repaired by
+re-running it, and the version number is spent. Anything checkable before the tag must be checked
+before the tag.
 
 ## gh-CLI & flags
 

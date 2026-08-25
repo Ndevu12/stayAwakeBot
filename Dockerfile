@@ -6,9 +6,8 @@
 #
 # Base is pinned by DIGEST, never a mutable tag (same doctrine as the SHA-pinned Actions).
 # Refresh the digest deliberately:  docker buildx imagetools inspect python:3.14-slim
-# Bumped 2026-07 → the deb13u1 point release, which ships liblzma5 5.8.1-1+deb13u1 and clears the
-# release Trivy gate's fixable CRITICAL/HIGH (CVE-2026-34743 in liblzma5). Multi-arch index digest.
-ARG PYTHON_IMAGE=python:3.14-slim@sha256:ce40764625a4ff50df3548277632e7f96c4e77fe75fa848aae9885476e7df5a4
+# Refresh it in every release PR: the pin is fixed, the advisory feed is not. Multi-arch index digest.
+ARG PYTHON_IMAGE=python:3.14-slim@sha256:83ff1d245a3d57d04152252d3ef9cb361494d0b3395abd65a5ebe91c401c8e83
 
 # ───────────────────────── builder: build the wheel from source ─────────────────────────
 FROM ${PYTHON_IMAGE} AS builder
@@ -47,12 +46,18 @@ LABEL org.opencontainers.image.source="https://github.com/Ndevu12/stayAwakeBot" 
       org.opencontainers.image.description="StayAwakeBot — supply-chain worm hunter + uptime sentinel" \
       org.opencontainers.image.licenses="AGPL-3.0-or-later"
 
-# The scanner only ever reads code and never needs root; run as an unprivileged user, and
-# install the wheel into a user-owned virtualenv so pip runs as `sentinel`, never root. The
-# root steps here are useradd / venv creation / chown only — pip itself runs unprivileged.
-RUN useradd --create-home --uid 10001 sentinel \
- && python -m venv /opt/venv \
- && chown -R sentinel:sentinel /opt/venv
+# The scanner only ever reads code and never needs root; run as an unprivileged user, and install
+# the wheel into a user-owned virtualenv so pip runs as `sentinel`, never root. pip itself is then
+# dropped — nothing installs at run time — with `test -d` first so a layout change fails loudly.
+RUN set -eux; \
+    useradd --create-home --uid 10001 sentinel; \
+    python -m venv /opt/venv; \
+    chown -R sentinel:sentinel /opt/venv; \
+    base_site="$(python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"; \
+    test -d "$base_site/pip"; \
+    rm -rf "$base_site/pip" "$base_site"/pip-*.dist-info \
+           "$(python -c 'import ensurepip, os; print(os.path.dirname(ensurepip.__file__))')" \
+           /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.*
 ENV PATH=/opt/venv/bin:$PATH
 
 # Dependencies come from the lock, verified by hash, NOT resolved fresh at build time. Without
@@ -65,9 +70,17 @@ COPY --from=builder --chown=sentinel:sentinel /dist/*.whl /tmp/
 USER sentinel
 # --no-deps on the wheel is load-bearing: dependencies are the lock's job, and the wheel must not be
 # able to pull in anything unpinned alongside it.
-RUN pip install --no-cache-dir --require-hashes -r /tmp/requirements.lock \
- && pip install --no-cache-dir --no-deps /tmp/*.whl \
- && rm -f /tmp/*.whl /tmp/requirements.lock
+RUN set -eux; \
+    pip install --no-cache-dir --require-hashes -r /tmp/requirements.lock; \
+    pip install --no-cache-dir --no-deps /tmp/*.whl; \
+    rm -f /tmp/*.whl /tmp/requirements.lock; \
+    venv_site="$(python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"; \
+    test -d "$venv_site/pip"; \
+    rm -rf "$venv_site/pip" "$venv_site"/pip-*.dist-info \
+           /opt/venv/bin/pip /opt/venv/bin/pip3 /opt/venv/bin/pip3.*
+
+# Build-time proof the CLI still resolves and runs with pip gone.
+RUN saw --version
 
 WORKDIR /repo
 

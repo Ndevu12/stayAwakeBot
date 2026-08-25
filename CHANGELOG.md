@@ -13,6 +13,8 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-25
+
 ### Added
 - **`saw fix --branch <name>` fixes a branch other than the repository default** (repeatable). The
   named branch is left untouched — the fix is prepared on `saw`'s own branch for you to review, as
@@ -41,13 +43,18 @@ reader, not the mechanism or the weakness it closed.
 ### Changed
 - **`saw discard` removes every `security/auto-clean` branch it finds**, including the plain one left
   by earlier versions.
-
-### Changed
+- **The container image no longer ships `pip`.** `saw` installs nothing while it runs. Running `saw`
+  is unaffected; if you extended the image by installing packages inside it, build a derived image
+  that brings its own installer.
 - **`config/security.yml` is now read only for the directory it belongs to.** Acting on a path
   outside the current directory no longer uses that directory's config; name one with `--config` to
   apply it to any other target. A bare `saw scan` and an explicit `--config` are unchanged.
 - **`saw` states which config it loaded and how many allowlist rules are in effect**, and states
   when it declined to use one.
+
+### Security
+- **The container image is rebuilt on a current base**, so it picks up the operating-system security
+  updates published since the last release.
 
 ## [0.6.3] - 2026-08-21
 
@@ -671,7 +678,8 @@ _No user-facing changes were recorded for this release._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel (supply-chain worm
 detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.6.3...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.6.3...v0.7.0
 [0.6.3]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.6.0...v0.6.1
