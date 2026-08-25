@@ -31,6 +31,7 @@ def register(sub) -> None:
             ("saw fix .", "just this repo; review the diff, then push"),
             ("saw fix --pr", "also push + open/update one rolling PR"),
             ("saw fix --remote", "sweep the configured GitHub targets"),
+            ("saw fix --branch develop", "fix a branch other than the default"),
         ])
     p.add_argument("paths", nargs="*", metavar="TARGETS",
                    help="local repo/dir paths — or, with --remote, owner/repo slugs. "
@@ -52,6 +53,10 @@ def register(sub) -> None:
                          "one repo runs sequentially, several use one worker per CPU core. Pass a "
                          "number to cap it, `-j 1` to force sequential, or `auto`. Each repo keeps "
                          "its own branch/worktree/token, so concurrency never crosses repos.")
+    p.add_argument("--branch", action="append", default=[], metavar="BRANCH",
+                   help="fix this branch instead of the repository default (repeatable). "
+                        "Deleting branches is not something `saw` does — remove any you no longer "
+                        "want on GitHub.")
     p.add_argument("--no-stream", action="store_true", dest="no_stream",
                    help="disable live progress output (plain, instant lines)")
     p.set_defaults(func=run)
@@ -64,4 +69,4 @@ def run(a: argparse.Namespace) -> int:
                           paths=None if remote else (positionals or None),
                           slugs=(positionals or None) if remote else None,
                           users=a.user or None, orgs=a.org or None, no_stream=a.no_stream,
-                          jobs=a.jobs)
+                          jobs=a.jobs, branches=a.branch or None)

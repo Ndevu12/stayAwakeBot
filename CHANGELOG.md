@@ -16,6 +16,10 @@ reader, not the mechanism or the weakness it closed.
 ## [0.7.0] - 2026-08-25
 
 ### Added
+- **`saw fix --branch <name>` fixes a branch other than the repository default** (repeatable). The
+  named branch is left untouched — the fix is prepared on `saw`'s own branch for you to review, as
+  it already was for the default. Naming a branch that does not exist is refused with the reason,
+  rather than falling back to the default.
 - **`saw` now detects the code loader by what it does rather than by how it is written**, so a
   repacked variant is caught as well as the original. A repository carrying one is reported as
   infected and `saw scan` exits `1`, where such a file could previously be reported as only
