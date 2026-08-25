@@ -101,6 +101,9 @@ allowlist:
   - {signature: npm-lifecycle-dropper, path_glob: "tests/**"}
   - {signature: npm-lifecycle-remote-fetch, path_glob: "tests/**"}
   - {signature: npm-lifecycle-exec, path_glob: "tests/**"}
+  # Capability-graded loader signature: matches this repo's own infected corpus and the
+  # loader tests that quote payload shapes.
+  - {signature: loader-require-escapes-esm, path_glob: "tests/**"}
   # Claude Code agent-autorun fixtures (tests/.../fixtures/{infected,clean}/.claude/settings.json)
   - {signature: claude-hook-autorun, path_glob: "tests/**"}
   - {signature: claude-hook-runs-payload, path_glob: "tests/**"}

@@ -13,6 +13,17 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Added
+- **`saw` now detects the code loader by what it does rather than by how it is written**, so a
+  repacked variant is caught as well as the original. A repository carrying one is reported as
+  infected and `saw scan` exits `1`, where such a file could previously be reported as only
+  suspicious.
+- **`saw fix` can now remediate the files this detects**, restoring the affected config to its
+  earlier contents instead of leaving them for manual review.
+- **When a loader is found in a working tree on your own machine, `saw scan` says so plainly** — it
+  may already have run, so it tells you to treat the host as compromised until `saw audit` says
+  otherwise, and not to rotate credentials first. A scan of a remote repository never says this.
+
 ### Fixed
 - **`saw fix --pr` no longer stalls on a repository whose `security/auto-clean` branch is already
   taken.** The fix branch is now named after the branch it targets — `security/auto-clean-main`,

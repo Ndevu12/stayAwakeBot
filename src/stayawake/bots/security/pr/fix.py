@@ -174,15 +174,32 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *,
                     blob = gitutil.clean_merge_blob(wt, f.commit_sha, rp)
                     if blob is not None:
                         merge_clean[rp] = blob
-        for f in findings:
-            if (f.category != "code-loader" or getattr(f, "confidence", "confirmed") != "confirmed"
-                    or f.path in seen_cl):
+        # Recovery used to be gated on the FINDING's tier. Its safety comes from re-proving the
+        # result against a committed version, not from how the finding was graded, so a
+        # heuristic-only path with a provable recovery was deferred to review for nothing.
+        def _corroborated(f) -> bool:
+            return (getattr(f, "category", None) == "code-loader"
+                    and getattr(f, "confidence", "confirmed") == "confirmed")
+
+        # Confirmed loaders claim their path first, so widening cannot steal one from them.
+        for f in sorted(findings, key=lambda x: 0 if _corroborated(x) else 1):
+            if f.path in seen_cl:
                 continue
+            if not _corroborated(f):
+                target = Path(wt) / f.path
+                try:
+                    text = target.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    continue
+                if not remediation.has_concealment_seam(text, f.path, content_sig):
+                    continue          # nothing hidden here — skip the per-path history walk
             seen_cl.add(f.path)
             disp = remediation.classify_recovery(wt, f, content_sig, merge_clean=merge_clean.get(f.path))
             if isinstance(disp, remediation.Recovery) and \
                     remediation.apply_recovery(wt, disp, quarantine, content_sig):
                 applied.append(remediation.Change("recover", disp.path, disp.label))
+            elif not _corroborated(f):
+                continue     # heuristic-only: act on a PROVEN recovery, never a computed strip
             elif isinstance(disp, remediation.Suggested):
                 suggested.append(disp)     # computed strip → applied + committed separately below
             elif isinstance(disp, remediation.Manual):

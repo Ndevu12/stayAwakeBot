@@ -100,6 +100,7 @@ def _sample_matching(sig: dict) -> str:
         "loader-global-v-marker": "global['_V']=",
         "loader-global-bang": "global['!'] =",
         "loader-require-hijack": "global[_$_1e42[0]] = require",
+        "loader-require-escapes-esm": "global['r']=require",
     }
     sample = samples.get(sig["id"])
     if sample is None:
