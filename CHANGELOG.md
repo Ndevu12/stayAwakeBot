@@ -13,6 +13,12 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Fixed
+- **The issue `saw` opens automatically now points at remediation that exists.** It previously told
+  the reader to run a cleanup script that this project has never shipped. It now points at
+  `saw fix --pr`, and says plainly that the issue closing means the repository scans clean — not
+  that a machine which ran the code is clean.
+
 ## [0.7.0] - 2026-08-25
 
 ### Added
