@@ -40,6 +40,13 @@ def ref_exists(repo: str | Path, ref: str) -> bool:
     return res is not None and res.returncode == 0
 
 
+def is_ancestor(repo: str | Path, ancestor: str, descendant: str) -> bool:
+    """True if `ancestor` is reachable from `descendant` — i.e. the update fast-forwards.
+    Distinguishes a fix branch we can extend from one occupied by unrelated work."""
+    res = run(repo, ["merge-base", "--is-ancestor", ancestor, descendant])
+    return res is not None and res.returncode == 0
+
+
 def tracked_under(repo: str | Path, pathspec: str | Path) -> list[str]:
     """Tracked paths under `pathspec` (empty if none). Distinct from `tracked` (one exact path):
     this answers 'is ANYTHING under this directory still tracked?' — the quarantine-clean check."""
@@ -54,6 +61,22 @@ def remote_has_branch(remote: str, branch: str, *, repo: str | Path | None = Non
     discard path); `env` carries credential-safe auth (see `github_https_auth`)."""
     res = run(repo, ["ls-remote", "--heads", remote, branch], env=env, timeout=NETWORK_TIMEOUT)
     return res is not None and res.returncode == 0 and bool(res.stdout.strip())
+
+
+def branches_matching(repo: str | Path, pattern: str) -> list[str]:
+    """Local branch names matching a glob, e.g. 'security/auto-clean*'."""
+    out = stdout(repo, ["for-each-ref", "--format=%(refname:short)", f"refs/heads/{pattern}"])
+    return [ln.strip() for ln in out.splitlines() if ln.strip()]
+
+
+def remote_branches_matching(remote: str, pattern: str, *, repo: str | Path | None = None,
+                             env: dict | None = None) -> list[str]:
+    """Branch names on `remote` matching a glob. Empty when the remote is unreachable."""
+    res = run(repo, ["ls-remote", "--heads", remote, pattern], env=env, timeout=NETWORK_TIMEOUT)
+    if res is None or res.returncode != 0:
+        return []
+    return [ln.split("refs/heads/", 1)[1].strip()
+            for ln in res.stdout.splitlines() if "refs/heads/" in ln]
 
 
 def parents(repo: str | Path, sha: str) -> list[str]:

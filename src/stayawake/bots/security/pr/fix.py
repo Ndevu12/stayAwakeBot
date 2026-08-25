@@ -15,6 +15,7 @@ from stayawake.bots.security.models import QUARANTINE_DIR, CONFIRMED
 from stayawake.bots.security import remediation
 from stayawake.core import proposal
 from stayawake.bots.security.pr.constants import FIX_BRANCH, PARTIAL_LABEL
+from stayawake.bots.security.pr.branches import choose_fix_branch
 from stayawake.bots.security.pr.render import (
     manual_review_lines, computed_review_lines, suspicious_review_lines,
     _issue_spec, _mark_partial, _pr_body, _render_submit)
@@ -39,7 +40,7 @@ def _reconcile_partial_label(owner: str, name: str, number: int, partial: bool, 
 @dataclass(frozen=True)
 class _Fix:
     """The result of building a fix: the base branch it sits on, and the changes/findings used to
-    commit it to FIX_BRANCH and write the PR body. `applied` are the TRUSTED (structure-safe +
+    commit it to `branch` and write the PR body. `applied` are the TRUSTED (structure-safe +
     git-corroborated) changes; `computed` are the review-required strips — applied on a SEPARATE
     commit but NOT git-corroborated, so they keep the run needs-review until a human reviews them.
     `manual` holds residual CONFIRMED findings that could NOT be auto-fixed. Any of `computed`/`manual`
@@ -47,6 +48,7 @@ class _Fix:
     trusted-clean one and the PR/gate must say so. `signed` is False when either fix commit had to be
     landed with signing forced OFF (the repo wanted signed commits but signing couldn't complete)."""
     base: str
+    branch: str
     applied: list
     computed: tuple = ()
     suspicious: list = ()
@@ -72,7 +74,8 @@ def _signing_note(fix: "_Fix | None") -> str:
     wonder why the push bounced."""
     if fix is None or fix.signed:
         return ""
-    return (f"\n    ⚠ the fix commit on '{FIX_BRANCH}' is UNSIGNED (commit signing failed in the "
+    return (f"\n    ⚠ the fix commit on '{getattr(fix, 'branch', FIX_BRANCH)}' is UNSIGNED "
+            "(commit signing failed in the "
             "worktree); if this repo enforces signed commits, re-sign it before pushing/merging.")
 
 
@@ -126,7 +129,13 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *,
 
     wt = Path(tempfile.mkdtemp(prefix="sab-fix-"))
     quarantine = Path(tempfile.mkdtemp(prefix="sab-bak-"))
-    if not gitutil.add_worktree(repo, wt, FIX_BRANCH, baseref):
+    # Only the remote can reject the push (`add_worktree -B` resets any local branch), and this
+    # stays offline, so the predicates read refs already fetched rather than calling out.
+    branch = choose_fix_branch(
+        base,
+        exists=lambda n: gitutil.ref_exists(repo, f"origin/{n}"),
+        fast_forwardable=lambda n: gitutil.is_ancestor(repo, f"origin/{n}", baseref))
+    if not gitutil.add_worktree(repo, wt, branch, baseref):
         return None, "could not create worktree", wt
 
     content_sig = remediation.codeloader_content_sig([s for g in signatures.values() for s in g])
@@ -232,16 +241,16 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *,
             # Nothing was provably safe to ship. If confirmed findings remain, return a NOTIFY-ONLY
             # fix (no changes committed) so the caller files a de-duplicated manual-review issue and
             if residual:
-                return _Fix(base, [], (), suspicious, findings, tuple(manual)), "", wt
+                return _Fix(base, branch, [], (), suspicious, findings, tuple(manual)), "", wt
             # No CONFIRMED indicator and nothing auto-fixable, but HEURISTIC (suspicious) findings
             # remain. This is NOT "already clean" — saying so contradicts `saw scan`/`saw hook`, which
             # fix (no changes, no confirmed manual set) so the caller reports the suspicious findings
             # and defers to review. Heuristics are never auto-fixed (trust model), so — like a
             # suspicious `saw scan` — this stays exit 0; only the truly-empty tree is "already clean".
             if suspicious:
-                return _Fix(base, [], (), suspicious, findings, ()), "", wt
+                return _Fix(base, branch, [], (), suspicious, findings, ()), "", wt
             return None, f"'{base}' already clean — nothing to fix", wt
-    return _Fix(base, applied, tuple(computed), suspicious, findings, tuple(manual),
+    return _Fix(base, branch, applied, tuple(computed), suspicious, findings, tuple(manual),
                 signed=signed), "", wt
 
 
@@ -265,11 +274,11 @@ def prepare_fix(repo: Path, opts, signatures, allowlist, *, spin: bool = False) 
             prepared = len(fix.applied) + len(fix.computed)
             need = ([f"{len(fix.computed)} computed strip(s) need review before merge"] if fix.computed else []) \
                 + ([f"{len(fix.manual)} confirmed finding(s) still need manual review"] if fix.manual else [])
-            return (f"{slug}: PARTIAL — prepared {prepared} change(s) on '{FIX_BRANCH}', "
-                    f"but {' and '.join(need)} (`git -C {repo} diff {fix.base}...{FIX_BRANCH}`)"
+            return (f"{slug}: PARTIAL — prepared {prepared} change(s) on '{fix.branch}', "
+                    f"but {' and '.join(need)} (`git -C {repo} diff {fix.base}...{fix.branch}`)"
                     ) + _signing_note(fix) + computed_review_lines(fix.computed) + manual_review_lines(fix.manual)
-        return (f"{slug}: prepared {len(fix.applied)} change(s) on '{FIX_BRANCH}' — review "
-                f"`git -C {repo} diff {fix.base}...{FIX_BRANCH}`, then `saw fix --pr` to open a PR"
+        return (f"{slug}: prepared {len(fix.applied)} change(s) on '{fix.branch}' — review "
+                f"`git -C {repo} diff {fix.base}...{fix.branch}`, then `saw fix --pr` to open a PR"
                 ) + _signing_note(fix)
     finally:
         if wt:
@@ -296,7 +305,7 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
                         "need manual review (no GitHub origin — cannot file an issue)"
                         ) + manual_review_lines(fix.manual) + suspicious_review_lines(fix.suspicious)
             return _mark_partial(
-                f"no GitHub origin — prepared on '{FIX_BRANCH}'; add a remote and push to open a PR",
+                f"no GitHub origin — prepared on '{fix.branch}'; add a remote and push to open a PR",
                 fix.partial) + _signing_note(fix) + computed_review_lines(fix.computed) + manual_review_lines(fix.manual)
         finally:
             if wt:
@@ -331,7 +340,7 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
                      else "security: auto-remediate worm indicators")
             body = _pr_body(slug, fix.applied, computed=fix.computed,
                             suspicious=fix.suspicious, manual=fix.manual)
-            res = proposal.submit_change_pr(wt, slug, base, branch=FIX_BRANCH, title=title,
+            res = proposal.submit_change_pr(wt, slug, base, branch=fix.branch, title=title,
                                             body=body, token=token,
                                             issue=_issue_spec(owner, name, fix.findings),
                                             patches_dir=patches_dir)

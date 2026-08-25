@@ -527,7 +527,7 @@ class TestForkPr(unittest.TestCase):
             created_pr={"number": 11, "html_url": "fu"})
         self.assertIn("opened fork PR #11", outcome)
         create_pull.assert_called_once()
-        self.assertEqual(create_pull.call_args.kwargs["head"], "me:security/auto-clean")
+        self.assertEqual(create_pull.call_args.kwargs["head"], "me:security/auto-clean-main")
         create_issue.assert_not_called()                 # fork PR succeeded → no issue floor
 
     def test_dedup_existing_fork_pr(self):
@@ -573,7 +573,8 @@ class TestFixPartialInvariant(unittest.TestCase):
     green (exit 0). These cases fail if the `computed` arm is ever dropped."""
 
     def _fix(self, *, computed=(), manual=()):
-        return pr.fix._Fix(base="main", applied=[], computed=computed, manual=manual)
+        return pr.fix._Fix(base="main", branch="security/auto-clean-main",
+                           applied=[], computed=computed, manual=manual)
 
     def test_computed_only_is_partial_even_when_manual_empty(self):
         # THE tripwire: rescan-clean (manual empty) + a computed strip present → still needs-review.

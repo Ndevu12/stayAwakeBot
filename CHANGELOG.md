@@ -13,6 +13,20 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Fixed
+- **`saw fix --pr` no longer stalls on a repository whose `security/auto-clean` branch is already
+  taken.** The fix branch is now named after the branch it targets — `security/auto-clean-main`,
+  `security/auto-clean-develop` — so each base gets its own, and a name held by unrelated work steps
+  to a numbered sibling instead of failing. A branch an earlier run created is reused rather than
+  duplicated.
+- **A push refused by a repository rule is reported as a rule refusal, not as missing access.** It
+  no longer sends you to check permissions, and no longer attempts a fork that would meet the same
+  rule.
+
+### Changed
+- **`saw discard` removes every `security/auto-clean` branch it finds**, including the plain one left
+  by earlier versions.
+
 ### Changed
 - **`config/security.yml` is now read only for the directory it belongs to.** Acting on a path
   outside the current directory no longer uses that directory's config; name one with `--config` to
