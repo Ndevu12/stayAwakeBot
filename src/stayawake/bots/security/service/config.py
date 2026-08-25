@@ -12,8 +12,8 @@ from stayawake.bots.security.targets import ScanOptions
 from stayawake.bots.security.config import resolve_config
 
 
-def _read_config(config_path: str | None) -> dict | None:
-    return resolve_config(config_path)
+def _read_config(config_path: str | None, targets: list[str] | None = None) -> dict | None:
+    return resolve_config(config_path, targets=targets)
 
 
 _BUILD_OUTPUT_DIRS = {"dist", "build", "out", ".next"}
