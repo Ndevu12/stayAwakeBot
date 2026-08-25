@@ -37,6 +37,13 @@ reader, not the mechanism or the weakness it closed.
 ### Changed
 - **`saw discard` removes every `security/auto-clean` branch it finds**, including the plain one left
   by earlier versions.
+- **The container image no longer ships `pip`.** `saw` installs nothing while it runs. Running `saw`
+  is unaffected; if you extended the image by installing packages inside it, build a derived image
+  that brings its own installer.
+
+### Security
+- **The container image is rebuilt on a current base**, so it picks up the operating-system security
+  updates published since the last release.
 
 ### Changed
 - **`config/security.yml` is now read only for the directory it belongs to.** Acting on a path
