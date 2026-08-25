@@ -12,7 +12,8 @@ from __future__ import annotations
 from stayawake.bots.security.remediation.changes import (
     is_auto_fixable, quarantine_path, Change, plan, strip_gitignore_text,
     strip_settings_autorun, ensure_ignored, quarantine_residual, apply)
-from stayawake.bots.security.remediation.gates import codeloader_content_sig
+from stayawake.bots.security.remediation.gates import (
+    codeloader_content_sig, has_concealment_seam)
 from stayawake.bots.security.remediation.classify import (
     Recovery, Manual, Suggested, classify_recovery)
 from stayawake.bots.security.remediation.writeback import apply_recovery, apply_suggested
@@ -26,7 +27,7 @@ __all__ = [
     "is_auto_fixable", "quarantine_path", "Change", "plan", "strip_gitignore_text",
     "strip_settings_autorun", "ensure_ignored", "quarantine_residual", "apply",
     "Recovery", "Manual", "Suggested", "codeloader_content_sig", "classify_recovery",
-    "apply_recovery", "apply_suggested",
+    "apply_recovery", "apply_suggested", "has_concealment_seam",
     "BORN_INFECTED", "INTRINSIC_MATCH", "LEGIT_CHANGES", "UNTRACKED", "NO_VCS", "INSPECT_FAILED",
     "gitutil",
 ]

@@ -252,6 +252,16 @@ def _recovery_diff(work: str, clean: str, content_sig, context: int = 1) -> str:
     return "\n".join(out)
 
 
+def has_concealment_seam(work: str, path: str, content_sig) -> bool:
+    """True if `work` hides content behind a concealment seam, so a recovery is worth attempting.
+
+    A cheap in-memory pre-check: without it, widening recovery beyond confirmed findings would walk
+    file history for every heuristic hit in the repository.
+    """
+    from pathlib import Path as _P
+    return _seam_strip(work, _P(path).suffix.lower(), content_sig) is not None
+
+
 def _seam_strip(work: str, ext: str, content_sig) -> str | None:
     """Build the payload-EXCISED version of `work`: every line hiding a payload behind a
     concealment seam (`_concealment_seam`) is cut back to its clean prefix; EVERY OTHER BYTE is

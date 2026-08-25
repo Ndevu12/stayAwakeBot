@@ -88,6 +88,15 @@ signatures:
     description: "Loader reassigning global.require to smuggle CommonJS into ESM"
     remediation: recover
 
+  - id: loader-require-escapes-esm
+    category: code-loader
+    severity: critical
+    matcher: content
+    pattern: '(?<![\w$.])(?:global|globalThis)\s*(?:\[\s*(?!["''](?:require|module)["'']\s*\])[^;\n]{1,60}\]|\.(?!require\b|module\b)\w{1,24})\s*(?:\?\?=|\|\|=|=)\s*(?:require|module)\b(?![\s]*[.(\[])'
+    prefilter: "global"
+    description: "CommonJS require/module handed to global scope — an ESM module has no legitimate reason to"
+    remediation: recover
+
   # ── Camouflage README (heuristic content) ────────────────────────────────────
   - id: camouflage-blockchain-readme
     category: camouflage

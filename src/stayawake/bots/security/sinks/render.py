@@ -174,7 +174,30 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False,
         out += ["", "Host note: a clean repo scan is NOT a host all-clear — it does not check host "
                     "persistence. Before rotating any credential, run `saw audit` (rotating while a "
                     "persistence daemon is live can arm a home-directory wiper)."]
+    elif _local_loader_paths(payload):
+        # A loader confirmed in a working tree on THIS machine may already have run — the vectors it
+        # arrives through execute on folder-open or build. A remote target says nothing about this
+        # host, so only local ones escalate. Terminal-only: `saw audit` owns the host verdict.
+        out += ["", "Host note: a code loader was found in a working tree ON THIS MACHINE "
+                    f"({', '.join(_local_loader_paths(payload)[:3])}). It may already have run — "
+                    "the ways it arrives execute when the folder is opened or the project is built. "
+                    "Treat this host as compromised until `saw audit` says otherwise, and do NOT "
+                    "rotate credentials first (rotating while a persistence daemon is live can arm "
+                    "a home-directory wiper)."]
     return "\n".join(out) + "\n"
+
+
+def _local_loader_paths(payload: dict[str, Any]) -> list[str]:
+    """Paths of confirmed code-loader findings on LOCAL targets — the ones that put this host at
+    risk. A remote scan reads someone else's repository and says nothing about this machine."""
+    paths: dict[str, None] = {}
+    for r in payload.get("results", []):
+        if r.get("source") != "local":
+            continue
+        for f in r.get("findings", []):
+            if f.get("category") == "code-loader" and f.get("confidence") == "confirmed":
+                paths.setdefault(f.get("path") or "an unnamed file", None)
+    return list(paths)
 
 
 def _coverage_notes(payload: dict[str, Any]) -> list[str]:
