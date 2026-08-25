@@ -19,6 +19,13 @@ from stayawake.utils.timeutil import utc_stamp
 LABEL = "stayawakebot-security"
 
 
+# The published docs are VERSIONED with mike; `latest` is the alias a push to main deploys, so it
+# is the only path that stays correct as releases land.
+DOCS = "https://saw-docs.ndevuspace.com/latest"
+DOCS_FIX = f"{DOCS}/how-to/fix-findings/"
+DOCS_AUDIT = f"{DOCS}/how-to/audit-a-machine/"
+
+
 def _title(target: str) -> str:
     return f"[SECURITY] worm indicators in {target}"
 
@@ -39,8 +46,17 @@ def _issue_body(result: dict) -> str:
     for f in result.get("findings", [])[:25]:
         loc = textsafe.table_cell(f["path"] + (f":{f['line']}" if f.get("line") else ""))
         lines.append(f"| {f['severity']} | {textsafe.table_cell(f['signature_id'])} | {loc} |")
-    lines += ["", "Auto-opened by StayAwakeBot Security Sentinel. Will auto-close when the "
-              "target scans clean. Clean with `~/sec-clean-worm.sh` or the remediator (Phase 3)."]
+    # Published to someone else's tracker under the tool's name, so it claims only what the scan
+    # established — it used to name a cleanup script this project has never contained.
+    lines += ["", "**To remediate:** run `saw fix --pr` against this repository to open a reviewable "
+                  "fix, or `saw fix --branch <name> --pr` for a branch other than the default. "
+                  "Review the change before merging.",
+              "", "This issue was opened automatically, and closes when this repository scans clean. "
+                  "That is a statement about this repository only: a clean repository scan does not "
+                  "establish that any machine which ran this code is clean. If the finding may have "
+                  "executed on a developer machine, run `saw audit` there before rotating any "
+                  "credential.",
+              "", f"Documentation: {DOCS_FIX} · {DOCS_AUDIT}"]
     return "\n".join(lines)
 
 
