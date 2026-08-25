@@ -149,10 +149,28 @@ def _run_fix_sweep(items, labels, make_outcome, prog: Streamer, *, jobs,
             for o in swept]
 
 
+def _bases_for(repo, branches) -> tuple[list[str | None], list[str]]:
+    """One base per requested branch, or `[None]` (the repository default).
+
+    Returns the bases and the names of any that do not exist, so a typo is refused rather than
+    silently fixing the default instead.
+    """
+    if not branches:
+        return [None], []
+    missing = [b for b in branches
+               if not (gitutil.ref_exists(repo, f"refs/heads/{b}")
+                       or gitutil.ref_exists(repo, f"origin/{b}"))]
+    return [b for b in branches if b not in missing], missing
+
+
+def _item_label(display: str, base: str | None) -> str:
+    return display if base is None else f"{display}@{base}"
+
+
 # ── saw fix ──────────────────────────────────────────────────────────────────────
 
 def _fix_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *, publish: bool,
-               jobs=None) -> list[FixOutcome]:
+               jobs=None, branches=None) -> list[FixOutcome]:
     """Fix LOCAL repositories. Default: PREPARE a `security/auto-clean` branch per repo (no
     push, no network). `publish` (`--pr`): also push + open/update a PR (pre-flighted)."""
     token = source = None
@@ -165,25 +183,38 @@ def _fix_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *, publish: bo
     repos = _local_repos(cfg, opts, paths)
     if not repos:
         return []
+    items: list[tuple] = []
+    refused: list[FixOutcome] = []
+    for repo in repos:
+        bases, missing = _bases_for(repo, branches)
+        for name in missing:      # a named branch that isn't there is an error, not a silent default
+            line = (f"{_disp(repo)}: error — no branch '{name}'. "
+                    f"Check the name, or omit --branch to fix the repository default.")
+            prog.line(f"      → {line}")     # the sweep only prints what it PROCESSES
+            refused.append(FixOutcome(line, needs_review=True))
+        items += [(repo, base) for base in bases]
+    if not items:
+        return refused
     verb = "Opening PRs for" if publish else "Preparing fixes for"
-    prog.line(f"{verb} {len(repos)} local repositor{'y' if len(repos) == 1 else 'ies'}…")
+    prog.line(f"{verb} {len(items)} target{'' if len(items) == 1 else 's'}…")
 
     # `spin` is on only in the sequential single-writer path; the concurrent path passes spin=False
     # and shows in-flight state on the board instead (see `_run_fix_sweep`). pr.{prepare_fix,
     # submit_fix_pr} drive their OWN phase-accurate spinners (scanning → fixing → opening PR).
-    def make_outcome(repo, *, spin):
-        display = _disp(repo)
+    def make_outcome(item, *, spin):
+        repo, base = item
+        display = _item_label(_disp(repo), base)
         if publish:
             tok, aerr = auth.act_token(token, source, gitutil.origin_slug(repo))
             if aerr:      # a repo no credential can reach was NOT fixed
                 return FixOutcome(f"{display}: error — {aerr}", needs_review=True)
             return _reviewed(lambda: pr_submit.submit_fix_pr(repo, opts, sigs, allowlist, tok,
-                                                            spin=spin), display)
-        return _reviewed(lambda: pr_submit.prepare_fix(repo, opts, sigs, allowlist, spin=spin),
-                         display)
+                                                            base=base, spin=spin), display)
+        return _reviewed(lambda: pr_submit.prepare_fix(repo, opts, sigs, allowlist, base=base,
+                                                       spin=spin), display)
 
-    return _run_fix_sweep(repos, [_disp(r) for r in repos], make_outcome, prog, jobs=jobs,
-                          verb="Fixing")
+    labels = [_item_label(_disp(r), b) for r, b in items]
+    return refused + _run_fix_sweep(items, labels, make_outcome, prog, jobs=jobs, verb="Fixing")
 
 
 def _fix_remote(cfg, opts, sigs, allowlist, prog: Streamer, *,
@@ -225,7 +256,8 @@ def _fix_remote(cfg, opts, sigs, allowlist, prog: Streamer, *,
 def fix(config_path: str | None = None, *, pr: bool = False, remote: bool = False,
         paths: list[str] | None = None, users: list[str] | None = None,
         orgs: list[str] | None = None, slugs: list[str] | None = None,
-        no_stream: bool = False, jobs: int | None = None) -> int:
+        no_stream: bool = False, jobs: int | None = None,
+        branches: list[str] | None = None) -> int:
     """`saw fix`: prepare a `security/auto-clean` branch per infected repo (no push). With
     `pr=True` (`--pr`) also push + open/update one rolling PR each; with `remote=True`
     (`--remote`) sweep GitHub targets resolved by the ladder (ad-hoc `users`/`orgs`/
@@ -246,7 +278,8 @@ def fix(config_path: str | None = None, *, pr: bool = False, remote: bool = Fals
     outcomes = (_fix_remote(cfg, opts, sigs, allowlist, prog, users=users, orgs=orgs, slugs=slugs,
                             jobs=jobs)
                 if remote
-                else _fix_local(cfg, opts, sigs, allowlist, paths, prog, publish=pr, jobs=jobs))
+                else _fix_local(cfg, opts, sigs, allowlist, paths, prog, publish=pr, jobs=jobs,
+                                branches=branches))
     if not outcomes:
         prog.line("No repositories to fix.")
         return 0

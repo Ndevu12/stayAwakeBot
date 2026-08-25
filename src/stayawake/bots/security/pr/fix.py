@@ -113,7 +113,7 @@ def _suspicious_only_outcome(label: str, fix: "_Fix") -> str:
             "review with `saw scan` (not asserted as malware)") + suspicious_review_lines(fix.suspicious)
 
 
-def _build_fix(repo: Path, opts, signatures, allowlist, *,
+def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = None,
                label: str = "", spin: bool = False) -> tuple["_Fix | None", str, Path | None]:
     """Compute the remediation in a throwaway worktree off the default branch and commit it
     to the local `security/auto-clean` branch. Pure git + scan — **no network, no GitHub
@@ -122,7 +122,7 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *,
     The CALLER owns the returned worktree `wt` and MUST remove it (the branch ref persists
     after removal, ready to review or push). `label`/`spin` drive phase-accurate spinners
     (`scanning …` then `fixing …`) so a long sweep shows what it's actually doing."""
-    base = gitutil.default_branch(repo)
+    base = base or gitutil.default_branch(repo)
     baseref = f"origin/{base}" if gitutil.ref_exists(repo, f"origin/{base}") else base
     if not gitutil.ref_exists(repo, baseref):
         return None, "no default branch to build a fix from — skipped", None
@@ -271,12 +271,14 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *,
                 signed=signed), "", wt
 
 
-def prepare_fix(repo: Path, opts, signatures, allowlist, *, spin: bool = False) -> str:
+def prepare_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = None,
+                spin: bool = False) -> str:
     """`saw fix` (no --pr): build the fix on the local `security/auto-clean` branch and STOP.
     No push, no PR, no GitHub API — offline-safe, zero remote writes. The branch is left in
     the repo for the user to review and push (or publish with `saw fix --pr`)."""
     slug = gitutil.origin_slug(repo) or str(repo).replace(str(Path.home()), "~")
-    fix, outcome, wt = _build_fix(repo, opts, signatures, allowlist, label=slug, spin=spin)
+    fix, outcome, wt = _build_fix(repo, opts, signatures, allowlist, base=base,
+                                  label=slug, spin=spin)
     try:
         if fix is None:
             return f"{slug}: {outcome}"
@@ -303,13 +305,14 @@ def prepare_fix(repo: Path, opts, signatures, allowlist, *, spin: bool = False) 
 
 
 def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
-                  patches_dir: Path | None = None, *, spin: bool = False) -> str:
+                  patches_dir: Path | None = None, *, base: str | None = None,
+                  spin: bool = False) -> str:
     """`saw fix --pr` (and the `--remote` sweep): build the fix, then PUSH `security/auto-clean`
     and open/update one dedup'd PR. If the branch can't be pushed (read-only access), walks the
     fork → patch → issue fallback ladder. Returns an outcome string."""
     slug = gitutil.origin_slug(repo)
     if not slug:
-        fix, outcome, wt = _build_fix(repo, opts, signatures, allowlist,
+        fix, outcome, wt = _build_fix(repo, opts, signatures, allowlist, base=base,
                                       label=str(repo).replace(str(Path.home()), "~"), spin=spin)
         try:
             if fix is None:
@@ -330,7 +333,8 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
 
     owner, name = slug.split("/", 1)
     gitutil.fetch(repo, "origin", gitutil.default_branch(repo))
-    fix, outcome, wt = _build_fix(repo, opts, signatures, allowlist, label=slug, spin=spin)
+    fix, outcome, wt = _build_fix(repo, opts, signatures, allowlist, base=base,
+                                  label=slug, spin=spin)
     try:
         if fix is None:
             return f"{slug}: {outcome}"
