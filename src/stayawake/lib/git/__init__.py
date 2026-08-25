@@ -31,6 +31,9 @@ from stayawake.lib.git.query import (
     introduced_added_text,
     commit_meta,
     remote_has_branch,
+    is_ancestor,
+    branches_matching,
+    remote_branches_matching,
 )
 from stayawake.lib.git.merge import merge_commits, evil_merge_paths, clean_merge_blob
 from stayawake.lib.git.write import (
@@ -54,10 +57,13 @@ __all__ = [
     "run", "run_ok", "stdout", "github_https_auth",
     "is_git_repo", "slug_from_url", "origin_slug", "default_branch", "ref_exists",
     "parents", "changed_paths", "path_exists_at", "file_at", "list_tree", "tracked", "tracked_under",
-    "file_commits", "introduced_added_text", "commit_meta", "remote_has_branch",
+    "file_commits", "introduced_added_text", "commit_meta", "remote_has_branch", "is_ancestor", "branches_matching",
+    "remote_branches_matching", "ref_safe_segment", "choose_branch",
     "merge_commits", "evil_merge_paths", "clean_merge_blob",
     "add_worktree", "remove_worktree", "stage_all", "unstage_cached",
     "commit_fix", "CommitResult", "BOT_AUTHOR", "push_branch", "push_branch_result", "PushResult",
     "delete_remote_branch",
     "format_patch", "fetch", "delete_branch",
 ]
+
+from stayawake.lib.git.naming import ref_safe_segment, choose_branch  # noqa: E402

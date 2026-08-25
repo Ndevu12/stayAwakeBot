@@ -18,6 +18,12 @@ def classify_push_stderr(stderr: str | None) -> PushFailure:
     low = text.lower()
     if not text:
         return PushFailure("unknown", "")
+    # A rule violation or a non-fast-forward is a POLICY result, not an ACCESS one. Both used to
+    # fall through to "unknown" and walk the fork ladder, which reports a taken branch as read-only.
+    if ("gh013" in low or "gh006" in low or "repository rule violations" in low
+            or "non-fast-forward" in low or "fetch first" in low
+            or "declined" in low or "updates were rejected" in low):
+        return PushFailure("occupied", text)
     if ("without `workflow` scope" in low or "without workflow scope" in low
             or "without `workflows` permission" in low
             or "without workflows permission" in low
@@ -52,6 +58,9 @@ def push_failure_message(failure: PushFailure) -> str:
                 "`gh auth refresh -h github.com -s repo,workflow` or `saw auth app register`")
     if failure.reason == "signed_commits":
         return "rejected: branch requires signed commits — re-sign the branch, then retry"
+    if failure.reason == "occupied":
+        return ("rejected by repository policy: the branch is taken or the update is not a "
+                "fast-forward — this is not an access problem")
     if failure.reason == "forbidden":
         return "rejected: no Contents write access to this repository"
     if failure.reason == "network":

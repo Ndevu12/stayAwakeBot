@@ -15,20 +15,23 @@ def discard_branch(repo: Path) -> str:
     slug = gitutil.origin_slug(repo) or str(repo).replace(str(Path.home()), "~")
     did: list[str] = []
     failed: list[str] = []
-    if gitutil.ref_exists(repo, f"refs/heads/{FIX_BRANCH}"):
+    # Fix branches are named per base now, so discard sweeps the family. The bare legacy name is
+    # always included: a repo fixed by an older version keeps it forever otherwise.
+    local = sorted(set(gitutil.branches_matching(repo, f"{FIX_BRANCH}*"))
+                   | ({FIX_BRANCH} if gitutil.ref_exists(repo, f"refs/heads/{FIX_BRANCH}") else set()))
+    remote = sorted(set(gitutil.remote_branches_matching("origin", f"{FIX_BRANCH}*", repo=repo)))
+    for b in local:
         # Fail loud: a local `git branch -D` can be REFUSED (the branch is checked out — in the
         # working tree or a leftover fix worktree), and swallowing that used to report success.
-        (did if gitutil.delete_branch(repo, FIX_BRANCH) else failed).append("local")
-    if gitutil.remote_has_branch("origin", FIX_BRANCH, repo=repo):
-        (did if gitutil.delete_remote_branch("origin", FIX_BRANCH, repo=repo)
-         else failed).append("remote")
+        (did if gitutil.delete_branch(repo, b) else failed).append(f"local {b}")
+    for b in remote:
+        (did if gitutil.delete_remote_branch("origin", b, repo=repo) else failed).append(f"remote {b}")
     if failed:
         done = f"; deleted {', '.join(did)}" if did else ""
-        return (f"{slug}: FAILED to delete {FIX_BRANCH} ({', '.join(failed)}) — "
-                f"is it checked out?{done}")
+        return (f"{slug}: FAILED to delete {', '.join(failed)} — is it checked out?{done}")
     if did:
-        note = " (PR auto-closed)" if "remote" in did else ""
-        return f"{slug}: discarded {FIX_BRANCH} ({', '.join(did)}){note}"
+        note = " (PR auto-closed)" if any(d.startswith("remote") for d in did) else ""
+        return f"{slug}: discarded {', '.join(did)}{note}"
     return f"{slug}: no '{FIX_BRANCH}' branch — nothing to discard"
 
 
