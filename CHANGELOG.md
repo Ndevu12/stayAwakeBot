@@ -13,6 +13,13 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Changed
+- **`config/security.yml` is now read only for the directory it belongs to.** Acting on a path
+  outside the current directory no longer uses that directory's config; name one with `--config` to
+  apply it to any other target. A bare `saw scan` and an explicit `--config` are unchanged.
+- **`saw` states which config it loaded and how many allowlist rules are in effect**, and states
+  when it declined to use one.
+
 ## [0.6.3] - 2026-08-21
 
 ### Added

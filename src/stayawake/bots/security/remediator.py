@@ -34,8 +34,8 @@ def _options(settings: dict) -> ScanOptions:
     )
 
 
-def _resolve_config(config_path: str | None) -> dict | None:
-    return resolve_config(config_path)
+def _resolve_config(config_path: str | None, targets: list[str] | None = None) -> dict | None:
+    return resolve_config(config_path, targets=targets)
 
 
 @dataclass(frozen=True)
@@ -232,7 +232,7 @@ def fix(config_path: str | None = None, *, pr: bool = False, remote: bool = Fals
     `slugs` → config → your own repos). A multi-repo sweep runs up to `jobs` repos at once
     (AUTO by default; `-j 1` forces sequential). Streams each repo's outcome. Returns 2 if an
     explicit --config is missing, 1 if any repo needs manual review, else 0."""
-    cfg = _resolve_config(config_path)
+    cfg = _resolve_config(config_path, targets=None if remote else paths)
     if cfg is None:
         return 2
     settings = cfg.get("settings", {})

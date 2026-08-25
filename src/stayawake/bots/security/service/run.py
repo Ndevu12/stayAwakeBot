@@ -201,7 +201,7 @@ def scan(config_path: str | None = None, *, remote: bool = False,
     progress_on = stream_enabled(sys.stderr, force_off=no_stream)
     report_on = stream_enabled(sys.stdout, force_off=no_stream)
     prog = Streamer(enabled=progress_on, out=sys.stderr)
-    cfg = _read_config(config_path)
+    cfg = _read_config(config_path, targets=paths)
     if cfg is None:                    # a named config that is not there — the resolver said so
         return 2
     settings = cfg.get("settings", {})
