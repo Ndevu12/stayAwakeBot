@@ -56,15 +56,19 @@ ACTIVE_PERSISTENCE_IDS = {"self-hosted-runner-persistence", "os-service-persiste
                           "git-fsmonitor-command", "git-hookspath-unsafe", "git-config-fetch-exec",
                           "autorun-unattributed-foothold"}
 
+UNCONFIRMED_STAGING_IDS = {"host-drop-artifacts-staging"}
+
 CREDENTIAL_EXPOSURE_IDS = {"git-credentials-plaintext"}
 
 INCIDENT_TRIGGER_IDS = ACTIVE_PERSISTENCE_IDS | CREDENTIAL_EXPOSURE_IDS
 
 TIER_ACTIVE_PERSISTENCE = "active-persistence"
 TIER_CREDENTIAL_EXPOSURE = "credential-exposure"
+TIER_UNCONFIRMED_STAGING = "unconfirmed-staging"
 TIER_IDS: tuple[tuple[str, set[str]], ...] = (
     (TIER_ACTIVE_PERSISTENCE, ACTIVE_PERSISTENCE_IDS),
     (TIER_CREDENTIAL_EXPOSURE, CREDENTIAL_EXPOSURE_IDS),
+    (TIER_UNCONFIRMED_STAGING, UNCONFIRMED_STAGING_IDS),
 )
 
 
@@ -87,7 +91,7 @@ SURFACE_UNREADABLE_ID = "persistence-surface-unverified"
 SURFACE_ABSENT_ID = "persistence-surface-not-established"
 UNVERIFIED_PERSISTENCE_IDS = {SURFACE_UNREADABLE_ID, SURFACE_ABSENT_ID}
 
-ROTATION_UNSAFE_IDS = ACTIVE_PERSISTENCE_IDS | UNVERIFIED_PERSISTENCE_IDS
+ROTATION_UNSAFE_IDS = ACTIVE_PERSISTENCE_IDS | UNVERIFIED_PERSISTENCE_IDS | UNCONFIRMED_STAGING_IDS
 
 # `host-artifact-scanned-clean` retired: a clean content scan no longer renders a calmer
 # finding, so the artifact keeps this grade whether or not `--verify` ran.
@@ -95,6 +99,7 @@ VERIFY_BEFORE_ROTATE_IDS = {"host-drop-artifact-weak"}
 
 ROTATION_SAFE = "safe"
 ROTATION_UNSAFE_PERSISTENCE = "unsafe-persistence"
+ROTATION_UNSAFE_STAGING = "unsafe-staging"
 ROTATION_UNSAFE_UNKNOWN = "unsafe-unknown"
 ROTATION_SAFE_PENDING_CHECK = "safe-pending-check"
 
@@ -104,6 +109,8 @@ def rotation_safety(issue_ids: set[str]) -> str:
     (a live wiper), then an unverified surface (couldn't look), else safe. See ROTATION_* above."""
     if issue_ids & ACTIVE_PERSISTENCE_IDS:
         return ROTATION_UNSAFE_PERSISTENCE
+    if issue_ids & UNCONFIRMED_STAGING_IDS:
+        return ROTATION_UNSAFE_STAGING
     if issue_ids & UNVERIFIED_PERSISTENCE_IDS:
         return ROTATION_UNSAFE_UNKNOWN
     if issue_ids & VERIFY_BEFORE_ROTATE_IDS:
@@ -141,6 +148,17 @@ def incident_response_sequence() -> list[str]:
         "planted CI workflows, and editor/AI-agent auto-run hooks (.vscode/, .claude/).",
         f"ONLY THEN rotate credentials, in order: npm → GitHub PATs → cloud keys → SSH keys. "
         f"Rotating earlier is dangerous: {_WIPER_NOTE}.",
+    ]
+
+
+def unconfirmed_staging_note() -> list[str]:
+    """One kind of staging artifact in more than one place: enough to gate rotation, not enough to
+    claim a live implant. Points at what to look at, and keeps rotation last."""
+    return [
+        "Inspect each location before trusting it — ordinary tooling puts one there, not several.",
+        "`saw audit --verify` content-scans them for payload code.",
+        f"Do NOT rotate credentials yet: {_WIPER_NOTE}.",
+        "Rebuild the host only if a scan or your own inspection finds payload code.",
     ]
 
 

@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""Write-target safety — refuse to write/delete through a symlink or outside an intended root."""
+"""Path safety and identity — refuse to write through a symlink, and tell whether two names
+refer to one real object."""
 from __future__ import annotations
 
+import os
 import stat
 from pathlib import Path
 
@@ -63,3 +65,28 @@ def is_safe_write_target(path: Path, root: Path) -> bool:
         return path.resolve().is_relative_to(root.resolve())
     except (OSError, RuntimeError, ValueError):
         return False
+
+
+def canonical_id(path: str | Path) -> tuple | str:
+    """An identity two names for the same object share.
+
+    `(st_dev, st_ino)` only when `st_ino` is truthy — some mounts report 0, and collapsing on that
+    would stop real directories being probed — then non-strict realpath (never `strict=True`: it
+    raises on the missing/ELOOP/EACCES paths still worth probing), then the string. Fails OPEN, so
+    an unresolvable path stays DISTINCT and means more probing, never less.
+    """
+    try:
+        st = os.stat(path)
+        if st.st_ino:
+            return (st.st_dev, st.st_ino)
+    except (OSError, ValueError):
+        pass
+    try:
+        return os.path.realpath(path)
+    except (OSError, ValueError):
+        return str(path)
+
+
+def distinct(paths) -> int:
+    """How many of `paths` name genuinely different objects."""
+    return len({canonical_id(p) for p in paths})

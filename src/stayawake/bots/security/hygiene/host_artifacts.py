@@ -7,7 +7,10 @@ import os
 import socket
 import sys
 import tempfile
+from dataclasses import replace
 from pathlib import Path
+
+from stayawake.utils.pathsafe import canonical_id
 
 from .models import HygieneIssue, _WIPER_NOTE
 
@@ -16,6 +19,23 @@ from .models import HygieneIssue, _WIPER_NOTE
 # before exfil. Some are weak on their own (a stray ~/.node_modules, an npm cache), so a LONE weak
 # indicator is `info`; a strong, specific IoC or a corroborated set (>=2) is a `warning`. A positive
 # Every probe is a read-only stat/listdir and degrades to nothing when a path is absent/unreadable.
+
+KIND_GLOBAL_FOLDER = "node-global-folder"
+KIND_NPM_CACHE = "npm-cache"
+KIND_PIP_BOOTSTRAP = "pip-bootstrap"
+
+
+def _distinct_dirs(paths: list[Path]) -> list[Path]:
+    """`paths` with aliases of one real directory collapsed, in a stable order."""
+    out: list[Path] = []
+    seen: set = set()
+    for p in paths:
+        ident = canonical_id(p)
+        if ident not in seen:
+            seen.add(ident)
+            out.append(p)
+    return sorted(out, key=str)
+
 
 def _host_user_tag() -> str | None:
     """`<hostname>$<username>` — the name the wave gives a staged exfil archive on this host."""
@@ -71,13 +91,14 @@ def _staged_secret_scanner(dirs) -> Path | None:
     return None
 
 
-def _host_artifacts() -> tuple[list[str], list[tuple[str, Path]]]:
+def _host_artifacts() -> tuple[list[str], list[tuple[str, Path, str]]]:
     """Return (strong, weak) detected host-IoC drop artifacts. `strong` are descriptions; `weak` are
-    (description, path) pairs so a caller can optionally content-scan the path to corroborate."""
+    (description, path, kind) triples: the path so a caller can content-scan it, the kind so grading
+    can ask what KINDS of evidence there are rather than how many strings were appended."""
     home = Path.home()
-    tmp_dirs = sorted({Path("/tmp"), Path(tempfile.gettempdir())}, key=str)
+    tmp_dirs = _distinct_dirs([Path("/tmp"), Path(tempfile.gettempdir())])
     strong: list[str] = []
-    weak: list[tuple[str, Path]] = []
+    weak: list[tuple[str, Path, str]] = []
 
     def _present(p: Path) -> bool:
         try:
@@ -109,12 +130,12 @@ def _host_artifacts() -> tuple[list[str], list[tuple[str, Path]]]:
     for location in _global_folders():
         if _present_dir(location):
             weak.append((f"{location} (a node module tree in a global resolution path — "
-                         "unusual location)", location))
+                         "unusual location)", location, KIND_GLOBAL_FOLDER))
     for t in tmp_dirs:
         if _present(t / ".npm"):
-            weak.append((f"{t}/.npm", t / ".npm"))
+            weak.append((f"{t}/.npm", t / ".npm", KIND_NPM_CACHE))
         if _present(t / "get-pip.py"):
-            weak.append((f"{t}/get-pip.py", t / "get-pip.py"))
+            weak.append((f"{t}/get-pip.py", t / "get-pip.py", KIND_PIP_BOOTSTRAP))
 
     tag = _host_user_tag()
     if tag:
@@ -155,8 +176,52 @@ def _global_folders() -> list[Path]:
         roots += [Path("/usr/local"), Path("/usr"), Path("/opt/homebrew"), Path("/opt/local")]
     folders = [home / ".node_modules", home / ".node_libraries"]
     folders += [root / "lib" / "node" for root in roots]
-    seen: set[str] = set()
-    return [f for f in folders if not (str(f) in seen or seen.add(str(f)))]
+    return _distinct_dirs(folders)
+
+
+def _corroborated_issue(found: list[str], *, active: bool) -> HygieneIssue:
+    """The corroborated finding. `active` distinguishes evidence of a live implant from staging in
+    more than one place: same severity and the same rotation gate either way, different claim."""
+    if active:
+        return HygieneIssue(
+            id="host-drop-artifacts",
+            severity="warning",
+            title="Host filesystem artifacts consistent with a supply-chain payload",
+            detail="Found: " + "; ".join(found) + ". These are ingress-tooling / data-staging "
+                   "drop-files (T1105/T1074) this wave leaves on a developer host.",
+            remediation="Do NOT rotate credentials first — treat as possible LIVE compromise. "
+                        "Isolate the host, neutralize any persistence, rebuild from a known-clean "
+                        f"image, and rotate credentials LAST — {_WIPER_NOTE}.",
+        )
+    return HygieneIssue(
+        id="host-drop-artifacts-staging",
+        severity="warning",
+        title="The same staging artifact in more than one location on this host",
+        detail="Found: " + "; ".join(found) + ". One kind of staging drop-file (T1105/T1074) in "
+               "more than one real directory. Ordinary tooling puts it in one place, not several.",
+        remediation="Inspect each location before trusting it, and do NOT rotate any credential "
+                    "yet — see the note above.",
+    )
+
+
+def _escalate_with_scan(issue: HygieneIssue, weak: list[tuple[str, Path, str]]) -> HygieneIssue:
+    """Content-scan every corroborated candidate; markers may only ESCALATE.
+
+    The existence finding is built first and returned unchanged unless a scan finds payload, so a
+    clean or failed scan can never lower a corroborated grade. `_verify_weak_artifact` scanned
+    `weak[0]` alone, which let a clean first location mask an infected second.
+    """
+    for item in weak:
+        try:
+            graded = _verify_weak_artifact(item[:2])
+        except (Exception, KeyboardInterrupt) as exc:      # an aborted scan must not lose the finding
+            return replace(issue, detail=issue.detail +
+                           f" (a content scan of {item[1]} could not complete: "
+                           f"{type(exc).__name__} — the artifacts above were still found.)")
+        for g in graded or []:
+            if g.id == "host-artifact-content-infected":
+                return g
+    return issue
 
 
 def check_host_artifacts(verify: bool = False) -> list[HygieneIssue]:
@@ -166,28 +231,29 @@ def check_host_artifacts(verify: bool = False) -> list[HygieneIssue]:
     indicator is `info`. SAFETY: a positive means persistence may be live, so the remediation
     follows the rotate-LAST order — never advise rotating a credential first.
 
+    Corroboration counts ENTRIES, whose roots are already identity-deduped — collapsing aliases
+    again at the artifact level would let an attacker suppress it by symlinking a second drop at
+    the first.
+
     `verify=True` (the `saw audit --verify` opt-in) content-scans a lone weak *directory*
     to turn it into an actual verdict: CONFIRMED worm markers inside → `warning`; scanned
     clean → a reassuring `info`; too large / unreadable → the same honest 'verify it yourself'."""
     strong, weak = _host_artifacts()
-    weak_descs = [desc for desc, _ in weak]
+    weak_descs = [desc for desc, _, _ in weak]
     found = strong + weak_descs
     if not found:
         return []
-    if strong or len(found) >= 2:
-        return [HygieneIssue(
-            id="host-drop-artifacts",
-            severity="warning",
-            title="Host filesystem artifacts consistent with a supply-chain payload",
-            detail="Found: " + "; ".join(found) + ". These are ingress-tooling / data-staging "
-                   "drop-files (T1105/T1074) this wave leaves on a developer host.",
-            remediation="Do NOT rotate credentials first — treat as possible LIVE compromise. "
-                        "Isolate the host, neutralize any persistence, rebuild from a known-clean "
-                        f"image, and rotate credentials LAST — {_WIPER_NOTE}.",
-        )]
-    # Exactly one weak indicator, no strong. With --verify we can content-scan it.
+    kinds = {kind for _, _, kind in weak}
+    corroborated = bool(strong) or len(weak) >= 2
+
+    if corroborated:
+        active = bool(strong) or len(kinds) >= 2
+        issue = _corroborated_issue(found, active=active)
+        if verify:
+            issue = _escalate_with_scan(issue, weak)
+        return [issue]
     if verify:
-        graded = _verify_weak_artifact(weak[0])
+        graded = _verify_weak_artifact(weak[0][:2])
         if graded is not None:
             return graded
     return [HygieneIssue(          # a single WEAK, unverified indicator — surface honestly, don't accuse

@@ -18,6 +18,18 @@ reader, not the mechanism or the weakness it closed.
   the reader to run a cleanup script that this project has never shipped. It now points at
   `saw fix --pr`, and says plainly that the issue closing means the repository scans clean — not
   that a machine which ran the code is clean.
+- **`saw audit` no longer reports active host persistence over a single ordinary file.** Where a
+  temporary directory is reachable under more than one name — which is normal on macOS — one file
+  could be counted twice and treated as corroborating itself, producing the isolate-and-rebuild
+  runbook and exit `3`.
+
+### Changed
+- **The same kind of artifact in more than one place is now described as staging rather than as a
+  live implant.** Rotation stays gated and the exit code is unchanged; what changes is what you are
+  told to do — inspect the locations, and rebuild only if a scan or your own inspection finds
+  payload code.
+- **`saw audit --verify` content-scans every corroborated location**, not only the first, and a scan
+  that finds nothing — or fails — can no longer lower a finding.
 
 ## [0.7.0] - 2026-08-25
 
