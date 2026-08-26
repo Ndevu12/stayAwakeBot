@@ -47,6 +47,27 @@ saw discard --pr           # close the auto-clean PR, keep the branch
 
 `saw discard` only ever touches the generated `security/auto-clean` branch.
 
+## The fix cleans the tree, not the history
+
+A fix is a forward commit: it changes what the files contain now. It does **not** rewrite history,
+and it never will — a rewrite invalidates every fork, open pull request, existing clone and tag.
+
+So after a merged fix the payload is gone from the working tree and from anything a clone, a build
+or CI will run, but an earlier commit still holds it:
+
+```bash
+saw scan .                       # clean
+git show HEAD~1:postcss.config.mjs   # still returns the old contents
+```
+
+That is residue, not execution — nothing runs it on clone or build. `saw scan` says so in its
+coverage notes rather than letting `clean` imply the repository has no trace of it.
+
+Removing the residue is a separate decision that is yours to make: it needs a history rewrite
+(`git filter-repo`), a force-push of every affected branch, and a request to your hosting provider
+to garbage-collect the unreachable objects — a force-push alone does not delete them. Forks keep
+their own copies regardless.
+
 ## Never on the host
 
 A compromised *machine* is never auto-cleaned. If `saw audit` reports the host as unsafe, follow

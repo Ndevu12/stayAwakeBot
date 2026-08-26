@@ -13,6 +13,7 @@ from typing import Any
 
 from stayawake.bots.security.models import CONFIRMED, HEURISTIC, Finding, ScanResult
 from stayawake.bots.security.matchers import REGISTRY
+from stayawake.lib import git as gitutil
 
 
 def _accepts_all_signatures(matcher) -> bool:
@@ -109,7 +110,40 @@ def finalize(display: str, source: str, by_matcher: dict[str, list[Finding]],
                     "Run `saw scan --deep` to scan vendored code for loader payloads.")
         except OSError:
             pass
+    if root is not None:
+        note = _history_scope_note(root)
+        if note:
+            result.notes.append(note)
     return result
+
+
+def _history_scope_note(root) -> str | None:
+    """What a scan of the working tree did NOT look at.
+
+    A removal-commit remediation leaves the payload reachable from an earlier commit, and one
+    command puts it back on disk: `git checkout <rev>`, a bisect, or a clone of a tag that predates
+    the fix. Stating the axis costs a commit count; scanning it is a separate job.
+    """
+    try:
+        n = gitutil.commit_count(root)
+        branches, tags = gitutil.ref_counts(root)
+    except OSError:
+        return None
+    if n is None:
+        return None
+    earlier, others = n - 1, max(branches - 1, 0)
+    parts = []
+    if earlier:
+        parts.append(f"{earlier} earlier {'commit' if earlier == 1 else 'commits'}")
+    if others:
+        parts.append(f"{others} other {'branch' if others == 1 else 'branches'}")
+    if tags:
+        parts.append(f"{tags} {'tag' if tags == 1 else 'tags'}")
+    if not parts:
+        return None
+    return (f"Only the working tree was scanned; {', '.join(parts)} not examined. Any of them can "
+            "be put on disk by one command (`git checkout <rev>`, `git clone --branch <tag>`), so a "
+            "file cleaned here may still be served from there.")
 
 
 def scan_target(target, signatures_by_matcher: dict[str, list[dict[str, Any]]],

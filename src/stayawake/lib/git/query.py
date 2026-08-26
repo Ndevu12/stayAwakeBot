@@ -63,6 +63,20 @@ def remote_has_branch(remote: str, branch: str, *, repo: str | Path | None = Non
     return res is not None and res.returncode == 0 and bool(res.stdout.strip())
 
 
+def ref_counts(repo: str | Path) -> tuple[int, int]:
+    """(branches, tags) in `repo`. Zero for either when they cannot be listed."""
+    def _n(pattern: str) -> int:
+        out = stdout(repo, ["for-each-ref", "--format=%(refname)", pattern])
+        return len([l for l in out.splitlines() if l.strip()])
+    return _n("refs/heads"), _n("refs/tags")
+
+
+def commit_count(repo: str | Path, ref: str = "HEAD") -> int | None:
+    """Commits reachable from `ref`, or None when it cannot be counted (no commits, unreadable)."""
+    out = stdout(repo, ["rev-list", "--count", ref]).strip()
+    return int(out) if out.isdigit() else None
+
+
 def branches_matching(repo: str | Path, pattern: str) -> list[str]:
     """Local branch names matching a glob, e.g. 'security/auto-clean*'."""
     out = stdout(repo, ["for-each-ref", "--format=%(refname:short)", f"refs/heads/{pattern}"])
