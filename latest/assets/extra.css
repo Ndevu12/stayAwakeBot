@@ -1,0 +1,26 @@
+/* Brand palette, sampled from the app icon (public/stayawakebot-app-icon.png), not guessed.
+   The mark's mint is #80E1AB — 9.5% of the icon's saturated-green pixels, and its ground is
+   #090E14. #80E1AB scores only 1.58:1 on white, so it is the DARK-scheme accent only; the light
+   scheme uses hue-preserving darkenings of the same mint that clear WCAG AA for body text. */
+
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color:        #335a44;  /* 7.82:1 vs white — white header text is safe */
+  --md-primary-fg-color--light: #467c5e;
+  --md-primary-fg-color--dark:  #24402f;
+  --md-accent-fg-color:         #467c5e;  /* 4.88:1 vs white — AA for links and hover */
+  --md-typeset-a-color:         #467c5e;
+}
+
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color:        #090e14;  /* the icon's ground */
+  --md-primary-fg-color--light: #1b2733;
+  --md-primary-fg-color--dark:  #05080b;
+  --md-accent-fg-color:         #80e1ab;  /* the mark's mint, 11.8:1 on Material's slate */
+  --md-typeset-a-color:         #80e1ab;
+}
+
+/* The logo is a full-bleed dark tile; give it a touch of breathing room in the header. */
+.md-header__button.md-logo img {
+  height: 1.5rem;
+  width: 1.5rem;
+}
