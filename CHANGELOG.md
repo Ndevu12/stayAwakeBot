@@ -13,6 +13,16 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Changed
+- **A scan now says that it looked at the working tree only**, and names what it did not look at —
+  earlier commits, other branches and tags. Any of them is one command away from being on disk
+  (`git checkout <rev>`, `git clone --branch <tag>`), and a fix is a forward commit on one branch, so
+  a file cleaned there may still be served from a tag. This is a coverage note: it reports what was
+  not examined and does not change the verdict or the exit code.
+- **`saw fix` documentation states what a fix does and does not remove** — it cleans the tree with a
+  forward commit and never rewrites history, so clearing what remains in history is a separate
+  decision, with what that involves spelled out.
+
 ### Fixed
 - **The issue `saw` opens automatically now points at remediation that exists.** It previously told
   the reader to run a cleanup script that this project has never shipped. It now points at
