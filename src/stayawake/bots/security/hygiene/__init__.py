@@ -15,6 +15,8 @@ from .models import (HygieneIssue, INCIDENT_TRIGGER_IDS, ACTIVE_PERSISTENCE_IDS,
                      SURFACE_UNREADABLE_ID, SURFACE_ABSENT_ID,
                      ROTATION_SAFE, ROTATION_SAFE_PENDING_CHECK,
                      ROTATION_UNSAFE_PERSISTENCE, ROTATION_UNSAFE_UNKNOWN,
+                     ROTATION_UNSAFE_STAGING,
+                     TIER_UNCONFIRMED_STAGING, unconfirmed_staging_note,
                      TIER_ACTIVE_PERSISTENCE, TIER_CREDENTIAL_EXPOSURE, incident_tier,
                      persistence_surface_is_enumerable, response_order, rotation_safety,
                      incident_response_sequence, credential_exposure_note)
@@ -110,6 +112,9 @@ def _banner(issue_ids: set[str], *, color: bool, width: int) -> list[str]:
     elif tier == TIER_CREDENTIAL_EXPOSURE:
         head = "⚠️  Credential exposure — no active host persistence detected:"
         steps, ordered = credential_exposure_note(), False
+    elif tier == TIER_UNCONFIRMED_STAGING:
+        head = "⚠️  The same staging artifact in more than one place — not evidence of a live implant:"
+        steps, ordered = unconfirmed_staging_note(), False
     else:
         return []
     return ([paint(head, SEVERITY["warning"], on=color)] +
@@ -130,7 +135,11 @@ def _rotation_verdict(issues: list[HygieneIssue], *, color: bool, width: int) ->
     if verdict == ROTATION_SAFE:
         return [paint(f"{MARKER['ok']} Rotation safety: persistence surface enumerated and clean "
                       "— rotating credentials is safe.", SEVERITY["ok"], on=color)]
-    if verdict == ROTATION_UNSAFE_PERSISTENCE:
+    if verdict == ROTATION_UNSAFE_STAGING:
+        lines = [paint(f"{MARKER['warning']}  Rotation safety: UNSAFE — a staging artifact is in more "
+                       "than one place; inspect it before rotating any credential (note below).",
+                       SEVERITY["warning"], on=color)]
+    elif verdict == ROTATION_UNSAFE_PERSISTENCE:
         lines = [paint(f"{MARKER['warning']}  Rotation safety: UNSAFE — active host persistence "
                        "detected; do NOT rotate any credential yet (runbook below).",
                        SEVERITY["warning"], on=color)]
