@@ -24,6 +24,27 @@ reader, not the mechanism or the weakness it closed.
   paths is read once, and what the walk did not reach is reported rather than counted as clean.
 
 ### Changed
+- **A check your machine would not let finish is no longer reported as a check that found
+  nothing.** A missing tool or an unreadable path used to produce silence, and silence read as a
+  clean result. Those checks are now listed under **Not checked**, naming what stopped each one,
+  and whatever they did manage to establish is kept. One of them no longer ends the audit — the
+  rest still run.
+- **`saw audit` exit codes now cover a check that did not finish.** One that reads the start-up
+  surface exits `3`, because the surface was not established and rotation is not safe; any other
+  exits `2`, the existing meaning of a run that could not complete. Neither can leave the run at
+  `0`.
+
+### Fixed
+- **An unreadable file inside a start-up directory is no longer reported as a clean directory.** The
+  audit certified that it could list those directories without certifying the records inside them,
+  so a file it could not read produced no finding at all and a host could report "persistence
+  surface enumerated and clean" at exit `0` over a start-up item nobody had read. Every record is
+  now certified alongside its directory, including ones reached through a symlink and ones a
+  directory deeper.
+- **A global git configuration that git itself cannot read is no longer treated as no configuration
+  at all.** A configuration file inside a directory the audit may not inspect was reported as
+  absent, so a host with an entry that runs a command on every git operation could exit `0`.
+
 - **A scan now says that it looked at the working tree only**, and names what it did not look at —
   earlier commits, other branches and tags. Any of them is one command away from being on disk
   (`git checkout <rev>`, `git clone --branch <tag>`), and a fix is a forward commit on one branch, so

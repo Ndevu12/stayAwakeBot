@@ -7,6 +7,7 @@ changes none of their findings.
 """
 from __future__ import annotations
 
+import os
 import stat
 from pathlib import Path
 
@@ -16,19 +17,55 @@ from . import os_service, runner, mechanism
 _ANCHOR_LABEL = "shell startup file"
 
 
+_AGENT_LABEL = "launch-agent / service dir"
+_RUNNER_LABEL = "self-hosted-runner dir"
+_RUNNER_MARKER = ".runner"
+
+_DIRECTORIES_HOLDING_RECORDS = frozenset({_AGENT_LABEL, _ANCHOR_LABEL})
+
+
+_RECORD_SUBDIRECTORY_DEPTH = 1
+
+
+def _record_paths(directory: Path, depth: int = _RECORD_SUBDIRECTORY_DEPTH) -> list[Path]:
+    """Every path inside `directory`, NAMED rather than inspected — `_coverage` is the one place
+    that separates absent from unreadable, and asking twice is how the second answer goes wrong."""
+    try:
+        with os.scandir(directory) as entries:
+            names = sorted(entry.name for entry in entries)
+    except OSError:
+        return []                         # the directory is already graded on its own row
+    found: list[Path] = []
+    for name in names:
+        child = directory / name
+        found.append(child)
+        if depth:
+            found += _record_paths(child, depth - 1)
+    return found
+
+
 def _must_verify_locations() -> list[tuple[str, Path]]:
     """(surface-label, path) for the user-owned persistence locations whose unreadability must
     withhold an all-clear — the launch-agent/service dirs and the self-hosted-runner install dirs
     (active footholds), ~/.ssh/authorized_keys, and shell startup files. Derived from the detection
-    probes' own location definitions so the certified surface can never drift from the scanned one."""
+    probes' own location definitions so the certified surface can never drift from the scanned one.
+
+    A location that HOLDS records is expanded into them: the file is what a probe reads, so the file
+    is what has to be readable for its silence to mean anything."""
     home = Path.home()
-    locs: list[tuple[str, Path]] = [("launch-agent / service dir", d)
-                                    for d in os_service.user_persistence_dirs()]
-    locs += [("self-hosted-runner dir", d) for d in runner.user_runner_dirs()]
+    locs: list[tuple[str, Path]] = [(_AGENT_LABEL, d) for d in os_service.user_persistence_dirs()]
+    locs += [(_RUNNER_LABEL, d) for d in runner.user_runner_dirs()]
     ssh = home / ".ssh"
     locs += [("SSH authorized_keys", ssh / name) for name in mechanism._SSH_AUTHKEYS]
     locs += [(_ANCHOR_LABEL, p) for p in mechanism.shell_rc_locations()]
-    return locs
+    # The runner install dir is not expanded — hundreds of files, of which one is the record.
+    locs += [(_RUNNER_LABEL, d / _RUNNER_MARKER) for d in runner.user_runner_dirs()]
+    expanded: list[tuple[str, Path]] = []
+    for label, path in locs:
+        expanded.append((label, path))
+        if label in _DIRECTORIES_HOLDING_RECORDS:
+            expanded += [(label, child) for child in _record_paths(path)]
+    return expanded
 
 
 def _coverage(p: Path) -> str:

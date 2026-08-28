@@ -42,6 +42,16 @@ ambiguity rather than picking one. If files you expect to be there are gone, **i
 using the machine further**, `saw fix` included. How much survives depends on which wipe variant
 ran, which cannot be told from the host — and every write can overwrite whatever did.
 
+## On a "Not checked" section
+
+Your machine did not let some checks finish — a tool they need is missing, or a path they read is
+not readable by you. Each one names what stopped it.
+
+Fix what it names and re-run, or inspect that surface yourself. Until you do, read the rest of the
+report as covering everything **except** those surfaces. The exit code says how much that costs you:
+`3` if one of them reads the start-up surface, so treat rotation as unsafe until you have checked it
+by hand; `2` otherwise.
+
 ## Credential findings
 
 A token in your OS keychain is not automatically a problem, and deleting a credential path you

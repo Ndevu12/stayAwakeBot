@@ -50,11 +50,12 @@ def run(a: argparse.Namespace) -> int:
         print(auth.no_credential_hint("auditing branch protection") +
               " Skipping the branch-protection check.\n")
     progress_on = stream_enabled(sys.stderr, force_off=a.no_stream)
-    issues: list[hygiene.HygieneIssue] = []
+    outcomes: list[hygiene.CheckOutcome] = []
     for label, check in hygiene.audit_checks(a.repo, token, a.branch,
                                              verify_artifacts=a.verify_artifacts):
         with status(f"checking {label}…", enabled=progress_on):
-            issues += check()
+            outcomes.append(hygiene.run_check(label, check))
+    issues = [i for o in outcomes for i in o.issues]
     report = hygiene.render(issues, color=supports_color(sys.stdout), width=term_width())
     Streamer(enabled=stream_enabled(sys.stdout, force_off=a.no_stream)).line(report)
     # persistence surface that could not be verified withholds the all-clear → exit 3 ("rotation
@@ -63,5 +64,10 @@ def run(a: argparse.Namespace) -> int:
     # consumer fails safe, and it is distinct from infected(1)/error(2). See docs/reference/exit-codes.md.
     if {i.id for i in issues} & hygiene.ROTATION_UNSAFE_IDS:
         return 3
+    # A probe whose own discriminator failed did not answer, and an unanswered probe is the
+    # documented meaning of 2 — "a run that could not complete". It is checked AFTER 3 because a
+    # blocked probe is a gap in what the run covered, while 3 is a hazard in what it found.
+    if any(o.state == hygiene.BLOCKED for o in outcomes):
+        return 2
     warnings = [i for i in issues if i.severity == "warning"]
     return 1 if (a.fail and warnings) else 0
