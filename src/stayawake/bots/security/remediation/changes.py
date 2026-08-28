@@ -122,6 +122,24 @@ def ensure_ignored(root: Path) -> bool:
     return True
 
 
+def _dest_ready(quarantine: Path, dest: Path) -> bool:
+    try:
+        if dest.exists():
+            return False
+        q = quarantine.resolve()
+        p = dest.parent
+        while True:
+            if p.exists() and p.is_symlink():
+                return False
+            if p.resolve() == q:
+                return True
+            if p.parent == p:
+                return False
+            p = p.parent
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
 def _backup(root: Path, rel: str, quarantine: Path) -> None:
     src = root / rel
     if not src.exists():
@@ -129,13 +147,15 @@ def _backup(root: Path, rel: str, quarantine: Path) -> None:
     if src.is_symlink():
         return                            # never dereference a symlinked target into quarantine
     dest = quarantine / rel
+    if not _dest_ready(quarantine, dest):
+        return
     dest.parent.mkdir(parents=True, exist_ok=True)
-    if dest.is_symlink() or not is_safe_write_target(dest, quarantine):
+    if not _dest_ready(quarantine, dest):
         return
     if src.is_dir():
         # symlinks=True recreates inner symlinks as links instead of copying their
         # (possibly out-of-tree) targets' contents into the quarantine.
-        shutil.copytree(src, dest, dirs_exist_ok=True, symlinks=True)
+        shutil.copytree(src, dest, symlinks=True)
     else:
         shutil.copy2(src, dest, follow_symlinks=False)
 
@@ -192,6 +212,11 @@ def apply(root: Path, changes: list[Change], quarantine: Path) -> list[Change]:
             if not is_safe_write_target(target, root):
                 # `write_text` would follow the link into a sink and `_backup` skips symlinks, so the
                 # backup/verify net is dead. A symlinked/escaping finding defers to manual.
+                continue
+            try:
+                if target.stat().st_nlink > 1:
+                    continue
+            except OSError:
                 continue
             original = target.read_text(encoding="utf-8", errors="replace")
             if c.action == "strip-gitignore":

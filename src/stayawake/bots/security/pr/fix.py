@@ -21,6 +21,22 @@ from stayawake.bots.security.pr.render import (
     manual_review_lines, computed_review_lines, suspicious_review_lines,
     _issue_spec, _mark_partial, _pr_body, _render_submit)
 
+class _Frozen:
+    """One read of `confidence` for the whole fix. A later getattr cannot change the gate."""
+    __slots__ = ("_inner", "confidence")
+
+    def __init__(self, inner):
+        object.__setattr__(self, "_inner", inner)
+        object.__setattr__(self, "confidence", getattr(inner, "confidence", None))
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
+def _freeze(findings):
+    return [_Frozen(f) for f in findings]
+
+
 def _untrack_quarantine(repo: Path) -> bool:
     """git only ignores UNTRACKED paths, so untrack any pre-existing tracked
     quarantine dir before staging. Returns True if the quarantine is clean after."""
@@ -178,7 +194,7 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
 
     with status(f"scanning {label}…", enabled=spin):       # phase 1: detection (the slow part)
         scan = _scan()
-        findings = scan.findings
+        findings = _freeze(scan.findings)
 
     # phase 2: apply the TRUSTED tier (structure-safe fixes + git-corroborated recoveries) and commit
     # SEPARATE, review-required commit — two trust levels, two commits, in one rolling PR.
@@ -250,7 +266,7 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
             rescan = _scan()
             auto = []
             if not rescan.error:
-                auto = [f for f in _blocking(rescan.findings) if remediation.is_auto_fixable(f)]
+                auto = [f for f in _blocking(_freeze(rescan.findings)) if remediation.is_auto_fixable(f)]
             if auto:
                 applied += remediation.quarantine_residual(wt, auto, quarantine)
 
@@ -295,7 +311,7 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
             computed: list = []
 
         done = _scan()
-        fs = done.findings
+        fs = _freeze(done.findings)
         residual = _blocking(fs)
         suspicious = [f for f in fs if not _is_blocking(f)]
         manual: list = []

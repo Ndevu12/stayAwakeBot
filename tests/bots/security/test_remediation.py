@@ -128,6 +128,43 @@ class TestStripAndResidual(unittest.TestCase):
         self.assertEqual(host.read_text(encoding="utf-8"), "host\n")
         self.assertTrue((q / "payload.js").is_symlink())
 
+    def test_backup_does_not_mkdir_through_a_linked_parent(self):
+        repo = Path(tempfile.mkdtemp())
+        payload = repo / "a" / "b" / "fonts"
+        payload.mkdir(parents=True)
+        (payload / "x.woff").write_text("x\n", encoding="utf-8")
+        host = Path(tempfile.mkdtemp())
+        q = Path(tempfile.mkdtemp())
+        (q / "a").symlink_to(host)
+        remediation.changes._backup(repo, "a/b/fonts", q)
+        self.assertEqual(list(host.iterdir()), [])
+
+    def test_backup_does_not_merge_into_a_planted_directory(self):
+        repo = Path(tempfile.mkdtemp())
+        src = repo / "payload"
+        src.mkdir()
+        (src / "sink.txt").write_text("from-repo\n", encoding="utf-8")
+        host = Path(tempfile.mkdtemp()) / "sink.txt"
+        host.write_text("host\n", encoding="utf-8")
+        q = Path(tempfile.mkdtemp())
+        dest = q / "payload"
+        dest.mkdir()
+        (dest / "sink.txt").symlink_to(host)
+        remediation.changes._backup(repo, "payload", q)
+        self.assertEqual(host.read_text(encoding="utf-8"), "host\n")
+
+    def test_strip_does_not_write_a_hardlinked_file(self):
+        repo = Path(tempfile.mkdtemp())
+        gi = repo / ".gitignore"
+        gi.write_text("temp_auto_push.bat\nkeep\n", encoding="utf-8")
+        host = Path(tempfile.mkdtemp()) / "victim"
+        os.link(gi, host)
+        applied = remediation.apply(
+            repo, [remediation.Change("strip-gitignore", ".gitignore")],
+            Path(tempfile.mkdtemp()))
+        self.assertEqual(applied, [])
+        self.assertEqual(host.read_text(encoding="utf-8"), "temp_auto_push.bat\nkeep\n")
+
     def test_quarantine_does_not_follow_a_linked_directory(self):
         repo = Path(tempfile.mkdtemp())
         host = Path(tempfile.mkdtemp())

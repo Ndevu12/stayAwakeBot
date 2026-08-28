@@ -16,7 +16,7 @@ reader, not the mechanism or the weakness it closed.
 ### Added
 - **On a confirmed infection, `saw fix` also removes this repository's installed tree, generated
   build outputs, and lockfile.** On CI the lockfile stays. The host is not touched. A scan that
-  did not finish does not remove anything.
+  did not finish does not change the tree.
 
 ### Added
 - **A start-up item that runs something its name cannot account for is now reported.** The name and

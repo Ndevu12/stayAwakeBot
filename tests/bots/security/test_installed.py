@@ -229,7 +229,7 @@ class TestItRefusesWhereRemovalWouldBeAGuess(unittest.TestCase):
             @property
             def confidence(self):
                 type(self).n += 1
-                return HEURISTIC if type(self).n < 10 else "confirmed"
+                return HEURISTIC if type(self).n == 1 else "confirmed"
 
         infected = ScanResult("owner/repo", "local", [Flip()])
         idle = ScanResult("owner/repo", "local", [])
