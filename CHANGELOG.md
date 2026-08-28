@@ -20,6 +20,12 @@ reader, not the mechanism or the weakness it closed.
   to look routine.
 
 ### Fixed
+- **Two host indicators that one command leaves behind no longer read as a live implant.** They are
+  still reported, and credential rotation is still held — what changes is the claim: something staged
+  here, rather than something is running here, which is what the advice to isolate and rebuild
+  depends on.
+
+### Fixed
 - **A task set to run when a folder opens is no longer critical on that alone.** Running on open is
   what the setting is for, and ordinary project configuration uses it. It is now reported as
   something to review, and reaches critical only when the task also hides itself — legitimate

@@ -17,6 +17,20 @@ description: The contribution workflow — feature-branch PRs (never push main),
 - **Signed commits are required** (repo-local SSH signing). A local `%G?` may show `N` — fine.
 - Don't over-produce PRs ("deafening"): align on the reasoning first, then ship focused PRs.
 
+## What a pull request body says
+
+**Short, and about what was done — never how.** A reviewer needs the defect, the change, and what
+proves it. They do not need the approach, the algorithm, the thresholds, the corpus, or a narrative
+of the rounds it took. That belongs in the private tracker, where reasoning about how a check decides
+is allowed to live.
+
+The same holds for the commit message and the issue title. A public body that explains the method is
+both longer than anyone reads and a disclosure — it hands someone tuning against the tool the part
+they cannot get by running it.
+
+A body that is three short paragraphs is usually right. If it needs headings for the method, the
+method is in the wrong repository.
+
 ## Every user-facing change
 
 - **Update `CHANGELOG.md` `[Unreleased]` in the SAME PR** — don't let it drift.
