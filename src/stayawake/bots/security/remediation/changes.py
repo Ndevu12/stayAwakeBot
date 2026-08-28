@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-"""Structure-safe remediation: map a finding to a concrete `Change` (whole-file quarantine, exact-line
-/ JSON-key removal) and apply it — every applied change first backs the original up to quarantine
-(reversible). Pure planning (`plan`) is separate from side-effecting `apply` so dry-run is trivial."""
+"""Map findings to structure-safe changes and apply them."""
 from __future__ import annotations
 
 import json
@@ -11,7 +9,7 @@ from pathlib import Path
 
 from stayawake.utils.pathsafe import is_safe_write_target
 from stayawake.bots.security.matchers.base import load_jsonc
-from stayawake.bots.security.models import HEURISTIC, QUARANTINE_DIR
+from stayawake.bots.security.models import CONFIRMED, QUARANTINE_DIR
 
 _ACTIONS = {
     "quarantine-file": "quarantine",
@@ -26,12 +24,8 @@ _QUARANTINE_PATTERNS = (QUARANTINE_DIR + "/",)
 
 
 def is_auto_fixable(finding) -> bool:
-    """True if a finding has a known automatic remediation AND we are confident enough to
-    auto-edit. A HEURISTIC finding (a packed-blob / oversized-line shape a base64 asset or
-    crypto vector also produces) is surfaced but NEVER auto-stripped — auto-editing a file
-    we are not sure is malicious is exactly how a false positive becomes a corrupted file.
-    Such findings fall through to the manual list instead."""
-    if getattr(finding, "confidence", "confirmed") == HEURISTIC:
+    """True when a confirmed finding has a known automatic remediation."""
+    if getattr(finding, "confidence", None) != CONFIRMED:
         return False
     return getattr(finding, "remediation", "manual") in _ACTIONS
 
@@ -53,7 +47,8 @@ def _fonts_dir(rel: str) -> str:
     if "fonts" in parts:
         i = len(parts) - 1 - parts[::-1].index("fonts")
         return "/".join(parts[: i + 1])
-    return str(Path(rel).parent)
+    parent = str(Path(rel).parent)
+    return rel if parent in (".", "") else parent
 
 
 def plan(findings) -> list[Change]:
@@ -61,11 +56,13 @@ def plan(findings) -> list[Change]:
     changes: dict[tuple[str, str], Change] = {}
     for f in findings:
         if not is_auto_fixable(f):
-            continue                      # manual (e.g. evil-merge) or heuristic — not auto-fixed
+            continue
         action = _ACTIONS[getattr(f, "remediation", "manual")]
         path = f.path
         if f.remediation == "quarantine-dir":
             path = _fonts_dir(f.path)
+        if not path or Path(path) in (Path("."), Path("..")):
+            continue
         if action == "vscode":
             if f.path.endswith("tasks.json"):
                 c = Change("quarantine", f.path, "VS Code auto-run task harness")
@@ -78,8 +75,6 @@ def plan(findings) -> list[Change]:
         changes[(c.action, c.path)] = c
     return list(changes.values())
 
-
-# ── individual transforms (structure-safe: exact-line / JSON-key removal only) ──
 
 def strip_gitignore_text(text: str) -> str:
     return "\n".join(l for l in text.splitlines()
@@ -96,15 +91,10 @@ def strip_settings_autorun(text: str) -> str:
 
 
 def ensure_ignored(root: Path) -> bool:
-    """Guarantee `root/.gitignore` ignores quarantine/remediation artifacts.
-
-    Appends any missing patterns (and the explanatory comment) idempotently.
-    Returns True if the file was changed. Called before `git add` so backups
-    never land in a commit or PR.
-    """
+    """Append quarantine ignore patterns to `root/.gitignore`. True if the file changed."""
     gi = root / ".gitignore"
     if gi.is_symlink():
-        return False                      # refuse to follow a symlinked .gitignore (write-through guard)
+        return False
     text = gi.read_text(encoding="utf-8", errors="replace") if gi.exists() else ""
     present = {l.strip() for l in text.splitlines()}
     missing = [p for p in _QUARANTINE_PATTERNS if p not in present]
@@ -119,30 +109,74 @@ def ensure_ignored(root: Path) -> bool:
     return True
 
 
+def _dest_ready(quarantine: Path, dest: Path) -> bool:
+    try:
+        if dest.is_symlink() or dest.exists():
+            return False
+        try:
+            lexical = dest.relative_to(quarantine)
+        except ValueError:
+            return False
+        if lexical == Path(".") or ".." in lexical.parts:
+            return False
+        q = quarantine.resolve()
+        resolved = dest.resolve()
+        if resolved == q or not resolved.is_relative_to(q):
+            return False
+        p = dest.parent
+        while True:
+            if p.is_symlink():
+                return False
+            pr = p.resolve()
+            if not pr.is_relative_to(q):
+                return False
+            if pr == q:
+                return True
+            if p.parent == p:
+                return False
+            p = p.parent
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
 def _backup(root: Path, rel: str, quarantine: Path) -> None:
+    if Path(rel).is_absolute() or ".." in Path(rel).parts:
+        return
     src = root / rel
     if not src.exists():
         return
     if src.is_symlink():
-        return                            # never dereference a symlinked target into quarantine
+        return
     dest = quarantine / rel
+    if not _dest_ready(quarantine, dest):
+        return
     dest.parent.mkdir(parents=True, exist_ok=True)
+    if not _dest_ready(quarantine, dest):
+        return
     if src.is_dir():
-        # symlinks=True recreates inner symlinks as links instead of copying their
-        # (possibly out-of-tree) targets' contents into the quarantine.
-        shutil.copytree(src, dest, dirs_exist_ok=True, symlinks=True)
+        shutil.copytree(src, dest, symlinks=True)
     else:
         shutil.copy2(src, dest, follow_symlinks=False)
 
 
+def _delete_stays_in(root: Path, target: Path) -> bool:
+    try:
+        base = root.resolve()
+        if target.is_symlink():
+            return target.parent.resolve().is_relative_to(base)
+        if not is_safe_write_target(target, root):
+            return False
+        return target.resolve() != base
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
 def quarantine_residual(root: Path, findings, quarantine: Path) -> list["Change"]:
-    """Quarantine (back up + remove) every distinct file still flagged after a
-    strip/apply pass — the fail-safe so a partially-cleaned file is never left behind.
-    Returns the Changes performed."""
+    """Back up and remove each remaining flagged path."""
     done: list[Change] = []
     for rel in sorted({f.path for f in findings}):
         target = root / rel
-        if not target.exists():
+        if not target.exists() or not _delete_stays_in(root, target):
             continue
         _backup(root, rel, quarantine)
         if target.is_dir() and not target.is_symlink():
@@ -162,10 +196,10 @@ def apply(root: Path, changes: list[Change], quarantine: Path) -> list[Change]:
     for c in changes:
         target = root / c.path
         if c.action == "quarantine":
-            if target.exists():
+            if target.exists() and _delete_stays_in(root, target):
                 _backup(root, c.path, quarantine)
                 if target.is_dir() and not target.is_symlink():
-                    shutil.rmtree(target)          # a symlinked dir → unlink the link, don't rmtree it
+                    shutil.rmtree(target)
                 else:
                     target.unlink()
                 applied.append(c)
@@ -173,8 +207,11 @@ def apply(root: Path, changes: list[Change], quarantine: Path) -> list[Change]:
             if not target.exists():
                 continue
             if not is_safe_write_target(target, root):
-                # `write_text` would follow the link into a sink and `_backup` skips symlinks, so the
-                # backup/verify net is dead. A symlinked/escaping finding defers to manual.
+                continue
+            try:
+                if target.stat().st_nlink > 1:
+                    continue
+            except OSError:
                 continue
             original = target.read_text(encoding="utf-8", errors="replace")
             if c.action == "strip-gitignore":

@@ -1,5 +1,5 @@
 ---
-description: What saw is allowed to change and what it will not touch: scan is read-only, fix writes only to its own branch, nothing lands without a merge.
+description: What saw is allowed to change and what it will not touch: scan is read-only, fix writes the cleanup branch and, on a confirmed infection, the installed tree in this repository, nothing lands without a merge.
 ---
 
 # The safety envelope
@@ -15,10 +15,11 @@ verdict. Remediation lives in a separate command, on purpose — so no one can t
 
 ## `fix` writes only to its own branch
 
-`saw fix` prepares the cleanup on a generated `security/auto-clean` branch and stops. It does not
-touch your working tree, push, or open anything unless you pass `--pr`, and re-running updates the
-same rolling pull request instead of opening another. `saw discard` removes only that branch and that
-PR — never a branch you made.
+`saw fix` prepares the cleanup on a generated `security/auto-clean` branch and stops. Source changes
+land on that branch. It does not push or open anything unless you pass `--pr`, and re-running updates
+the same rolling pull request instead of opening another. On a confirmed infection it also removes
+the installed tree, generated build outputs, and the lockfile in this repository (the lockfile is
+kept on CI). `saw discard` removes only that branch and that PR — never a branch you made.
 
 Nothing lands without a human merge. The CI gate follows the same rule: on an infected verdict it
 opens the fix as a pull request and stays **red until you merge it**. Remediation opens the fix; it

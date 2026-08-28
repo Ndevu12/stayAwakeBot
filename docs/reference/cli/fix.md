@@ -5,9 +5,11 @@ description: saw fix — clean detected findings on a branch and publish them on
 # `saw fix`
 
 Clean detected findings **on a branch**. By default `fix` prepares `security/auto-clean` locally and
-stops — no push, no PR, no network — for you to review. It never edits your working tree. `--pr`
-pushes and opens or updates one rolling PR per repository. See [the safety
-envelope](../../explanation/safety-envelope.md) for what `fix` will and will not touch.
+stops — no push, no PR, no network — for you to review. Source changes land on that branch. On a
+confirmed infection it also removes the installed tree, generated build outputs, and the lockfile
+in this repository (the lockfile is kept on CI). `--pr` pushes and opens or updates one rolling
+PR per repository. See [the safety envelope](../../explanation/safety-envelope.md) for what `fix`
+will and will not touch.
 
 ```text
 saw fix [TARGETS...] [--pr] [-r] [--user U] [--org O] [-p PATH] [-c FILE] [-j N] [--no-stream]

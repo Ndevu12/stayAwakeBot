@@ -92,6 +92,8 @@ class TestStripAndResidual(unittest.TestCase):
         self.assertTrue(remediation.is_auto_fixable(good))
         self.assertFalse(remediation.is_auto_fixable(code_loader))
         self.assertFalse(remediation.is_auto_fixable(manual))
+        missing = type("F", (), {"remediation": "quarantine-file"})()
+        self.assertFalse(remediation.is_auto_fixable(missing))
 
     def test_quarantine_residual_removes_and_backs_up(self):
         repo = Path(tempfile.mkdtemp())
@@ -102,6 +104,134 @@ class TestStripAndResidual(unittest.TestCase):
         self.assertEqual([c.action for c in done], ["quarantine"])
         self.assertFalse((repo / "evil.cjs").exists())          # removed from the tree
         self.assertTrue((q / "evil.cjs").exists())              # backed up first
+
+    def test_quarantine_does_not_remove_the_repository_root(self):
+        repo = Path(tempfile.mkdtemp())
+        keep = repo / "keep.txt"
+        keep.write_text("x\n", encoding="utf-8")
+        q = Path(tempfile.mkdtemp())
+        applied = remediation.apply(repo, [remediation.Change("quarantine", ".", "x")], q)
+        self.assertEqual(applied, [])
+        self.assertTrue(keep.is_file())
+        finding = type("F", (), {"path": ".", "remediation": "quarantine-dir",
+                                 "confidence": "confirmed", "description": "x"})()
+        self.assertNotIn(".", {c.path for c in remediation.plan([finding])})
+
+    def test_backup_does_not_follow_a_planted_destination(self):
+        repo = Path(tempfile.mkdtemp())
+        (repo / "payload.js").write_text("from-repo\n", encoding="utf-8")
+        host = Path(tempfile.mkdtemp()) / "sink"
+        host.write_text("host\n", encoding="utf-8")
+        q = Path(tempfile.mkdtemp())
+        (q / "payload.js").symlink_to(host)
+        remediation.changes._backup(repo, "payload.js", q)
+        self.assertEqual(host.read_text(encoding="utf-8"), "host\n")
+        self.assertTrue((q / "payload.js").is_symlink())
+
+    def test_backup_does_not_mkdir_through_a_linked_parent(self):
+        repo = Path(tempfile.mkdtemp())
+        payload = repo / "a" / "b" / "fonts"
+        payload.mkdir(parents=True)
+        (payload / "x.woff").write_text("x\n", encoding="utf-8")
+        host = Path(tempfile.mkdtemp())
+        q = Path(tempfile.mkdtemp())
+        (q / "a").symlink_to(host)
+        remediation.changes._backup(repo, "a/b/fonts", q)
+        self.assertEqual(list(host.iterdir()), [])
+
+    def test_backup_does_not_merge_into_a_planted_directory(self):
+        repo = Path(tempfile.mkdtemp())
+        src = repo / "payload"
+        src.mkdir()
+        (src / "sink.txt").write_text("from-repo\n", encoding="utf-8")
+        host = Path(tempfile.mkdtemp()) / "sink.txt"
+        host.write_text("host\n", encoding="utf-8")
+        q = Path(tempfile.mkdtemp())
+        dest = q / "payload"
+        dest.mkdir()
+        (dest / "sink.txt").symlink_to(host)
+        remediation.changes._backup(repo, "payload", q)
+        self.assertEqual(host.read_text(encoding="utf-8"), "host\n")
+
+    def test_strip_does_not_write_a_hardlinked_file(self):
+        repo = Path(tempfile.mkdtemp())
+        gi = repo / ".gitignore"
+        gi.write_text("temp_auto_push.bat\nkeep\n", encoding="utf-8")
+        host = Path(tempfile.mkdtemp()) / "victim"
+        os.link(gi, host)
+        applied = remediation.apply(
+            repo, [remediation.Change("strip-gitignore", ".gitignore")],
+            Path(tempfile.mkdtemp()))
+        self.assertEqual(applied, [])
+        self.assertEqual(host.read_text(encoding="utf-8"), "temp_auto_push.bat\nkeep\n")
+
+    def test_backup_does_not_write_outside_quarantine(self):
+        base = Path(tempfile.mkdtemp())
+        repo = base / "repo"
+        repo.mkdir()
+        srcdir = base / "payload"
+        srcdir.mkdir()
+        (srcdir / "inner.txt").write_text("from-repo\n", encoding="utf-8")
+        (base / "srcfile").write_text("from-repo\n", encoding="utf-8")
+        q = base / "q" / "nested"
+        q.mkdir(parents=True)
+        remediation.changes._backup(repo, "../payload", q)
+        remediation.changes._backup(repo, "../srcfile", q)
+        self.assertFalse((base / "q" / "payload").exists())
+        self.assertFalse((base / "q" / "srcfile").exists())
+
+    def test_backup_does_not_mkdir_through_a_bouncing_path(self):
+        base = Path(tempfile.mkdtemp())
+        q = base / "probe" / "q"
+        q.mkdir(parents=True)
+        root = Path(tempfile.mkdtemp()) / "probe" / "q"
+        root.mkdir(parents=True)
+        marker = "EVIL_SAW_R7"
+        rel = f"x/../../{marker}/../q/file"
+        (root / "x").mkdir()
+        (root.parent / marker).mkdir()
+        (root / "file").write_text("from-repo\n", encoding="utf-8")
+        remediation.changes._backup(root, rel, q)
+        self.assertFalse((base / "probe" / marker).exists())
+        self.assertFalse((q / "file").exists())
+
+    def test_backup_does_not_follow_a_dangling_destination(self):
+        repo = Path(tempfile.mkdtemp())
+        (repo / "payload.js").write_text("from-repo\n", encoding="utf-8")
+        host = Path(tempfile.mkdtemp()) / "sink"
+        q = Path(tempfile.mkdtemp())
+        (q / "payload.js").symlink_to(host)
+        remediation.changes._backup(repo, "payload.js", q)
+        self.assertFalse(host.exists())
+        self.assertTrue((q / "payload.js").is_symlink())
+
+    def test_writeback_does_not_write_a_hardlinked_file(self):
+        from stayawake.bots.security.remediation import writeback
+        repo = Path(tempfile.mkdtemp())
+        src = repo / "code.js"
+        src.write_text("payload\n", encoding="utf-8")
+        host = Path(tempfile.mkdtemp()) / "victim"
+        os.link(src, host)
+        ok = writeback._backup_write_verify(
+            repo, "code.js", "stripped\n", Path(tempfile.mkdtemp()), None)
+        self.assertFalse(ok)
+        self.assertEqual(host.read_text(encoding="utf-8"), "payload\n")
+
+    def test_quarantine_does_not_follow_a_linked_directory(self):
+        repo = Path(tempfile.mkdtemp())
+        host = Path(tempfile.mkdtemp())
+        payload = host / "payload.js"
+        payload.write_text("x\n", encoding="utf-8")
+        (repo / "escdir").symlink_to(host)
+        q = remediation.quarantine_path(repo)
+        finding = type("F", (), {"path": "escdir/payload.js"})()
+        done = remediation.quarantine_residual(repo, [finding], q)
+        self.assertEqual(done, [])
+        self.assertTrue(payload.is_file())
+        applied = remediation.apply(
+            repo, [remediation.Change("quarantine", "escdir/payload.js")], q)
+        self.assertEqual(applied, [])
+        self.assertTrue(payload.is_file())
 
     def test_backup_skips_symlink(self):
         repo = Path(tempfile.mkdtemp())

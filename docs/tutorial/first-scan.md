@@ -55,7 +55,8 @@ That is the whole CI contract: [verdicts](../explanation/verdicts.md) ·
 ## 4. Act
 
 - **infected** → [fix the findings](../how-to/fix-findings.md). `saw fix` prepares the cleanup on a
-  branch for you to review; it never edits your working tree.
+  branch for you to review. On a confirmed infection it also removes the installed tree in this
+  repository.
 - **suspicious** → read the report and decide. Nothing here is auto-fixed.
 - **error** → resolve what could not be read, then scan again.
 - **clean** → keep it that way: [gate the repository's CI](gate-a-repo.md), and install

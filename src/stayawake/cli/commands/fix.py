@@ -23,8 +23,9 @@ def register(sub) -> None:
         description=(
             "Clean up detected worm findings on a branch. By default the fix is PREPARED on a "
             "local `security/auto-clean` branch and nothing else happens — no push, no PR, no "
-            "network — and your working tree is never edited, so review the diff before it goes "
-            "anywhere. Heuristic-only findings are disclosed for review, never auto-touched. "
+            "network. Source changes land on that branch. On a confirmed infection it also removes "
+            "the installed tree, generated build outputs, and lockfile in this repository. "
+            "Heuristic-only findings are disclosed for review, never auto-touched. "
             "`saw discard` is the inverse."),
         examples=[
             ("saw fix", "prepare a branch per infected local repo"),
