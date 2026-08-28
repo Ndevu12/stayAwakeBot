@@ -31,7 +31,7 @@ _HYGIENE = pathlib.Path(__file__).resolve().parents[3] / "src/stayawake/bots/sec
 KNOWN_LONG = {
     "cached-github-keychain": (64, 88),
     "host-drop-artifact-weak": (99, 31),
-    "persistence-surface-not-established": (37, 45),
+    "persistence-surface-not-established": (37, 44),
     "grade.py:630": (45, 20),
     "self-hosted-runner-persistence": (35, 24),
     "os-service-persistence": (35, 21),

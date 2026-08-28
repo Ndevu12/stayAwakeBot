@@ -507,6 +507,33 @@ class TestProbesStayUnconditional(unittest.TestCase):
         self.assertEqual(len(registered), 1, f"the probe set varies with arguments: {registered}")
 
 
+class TestHostGuidanceNeverPromisesRecovery(unittest.TestCase):
+    """#122 — whether a wipe overwrote or only unlinked is a property of the PAYLOAD, and `saw`
+    reads it on the scan path. The host path never sees it. It said "the data is still recoverable"
+    anyway, which sends a secure-wipe victim carving empty blocks for hours and reads as a promise
+    the tool cannot keep. Every recoverability sentence here names what it depends on."""
+
+    def _guidance(self):
+        with mock.patch.object(coverage, "_must_verify_locations",
+                               return_value=[("shell startup file", Path("/nope/.zshrc"))]):
+            issues = coverage.check_persistence_coverage()
+        yield "the wiped-home finding", issues[0].remediation
+        for step in incident_response_sequence():
+            if "image the disk" in step.lower():
+                yield "the runbook imaging step", step
+
+    def test_recoverability_is_tied_to_the_variant_rather_than_asserted(self):
+        seen = 0
+        for where, text in self._guidance():
+            with self.subTest(where=where):
+                self.assertIn("recoverab", text.lower(), "the recoverability question vanished")
+                self.assertIn("depends on the wipe variant", text.lower(),
+                              "recoverability is asserted instead of tied to what decides it")
+                self.assertNotIn("still recoverable", text.lower())
+                seen += 1
+        self.assertEqual(seen, 2, "a guidance site moved — re-anchor this pin")
+
+
 class TestRunbookImagesBeforeItOverwrites(unittest.TestCase):
     """#120 — `saw` already computes whether a wipe payload plain-deletes (content survives in freed
     blocks) or overwrites-then-deletes (it does not), and the runbook's rebuild step is precisely the
