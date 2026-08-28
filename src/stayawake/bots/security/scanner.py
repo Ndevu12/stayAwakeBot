@@ -11,7 +11,8 @@ from pathlib import Path
 from fnmatch import fnmatch
 from typing import Any
 
-from stayawake.bots.security.models import CONFIRMED, HEURISTIC, Finding, ScanResult
+from stayawake.bots.security.models import (CONFIRMED, HEURISTIC, RESIDUE, QUARANTINE_DIR,
+                                            Finding, ScanResult, Severity)
 from stayawake.bots.security.matchers import REGISTRY
 from stayawake.lib import git as gitutil
 
@@ -75,7 +76,8 @@ def finalize(display: str, source: str, by_matcher: dict[str, list[Finding]],
     `-j 1`. Findings are consumed in `matcher_order` (the signatures' matcher order), preserving the
     matcher-major insertion order that the final `(-severity, path)` stable sort relies on for ties."""
     result = ScanResult(target=display, source=source)
-    confidence_of = {s["id"]: (HEURISTIC if s.get("confidence") == HEURISTIC else CONFIRMED)
+    confidence_of = {s["id"]: (s["confidence"] if s.get("confidence") in (HEURISTIC, RESIDUE)
+                               else CONFIRMED)
                      for s in all_sigs}
     for name in matcher_order:
         for finding in by_matcher.get(name, []):
@@ -111,10 +113,55 @@ def finalize(display: str, source: str, by_matcher: dict[str, list[Finding]],
         except OSError:
             pass
     if root is not None:
+        finding = _cleanup_residue(Path(root))
+        if finding is not None:
+            result.findings.append(finding)
         note = _history_scope_note(root)
         if note:
             result.notes.append(note)
     return result
+
+
+def _cleanup_residue(root: Path) -> Finding | None:
+    """Files a cleanup backed up and then did not change.
+
+    The quarantine holds the original of every file a fix rewrote, so a quarantined copy that is
+    byte-identical to the live file means the backup happened and the rewrite did not. Nothing new
+    executes, and the tree is not what the project would carry — the state neither CLEAN nor
+    INFECTED could express. Comparing bytes to bytes, so there is no shape to be wrong about."""
+    quarantine = root / QUARANTINE_DIR
+    unchanged: list[str] = []
+    try:
+        if not quarantine.is_dir():
+            return None
+        for original in sorted(quarantine.rglob("*")):
+            if not original.is_file() or original.is_symlink():
+                continue
+            relative = original.relative_to(quarantine)
+            live = root / relative
+            try:
+                if live.is_file() and live.read_bytes() == original.read_bytes():
+                    unchanged.append(str(relative))
+            except OSError:
+                continue
+    except OSError:
+        return None
+    if not unchanged:
+        return None
+    shown = ", ".join(unchanged[:5]) + (" …" if len(unchanged) > 5 else "")
+    return Finding(
+        signature_id="cleanup-residue",
+        category="remediation-residue",
+        severity=Severity.LOW,
+        path=unchanged[0],
+        description=f"A cleanup backed up {len(unchanged)} file(s) here and then left them "
+                    f"unchanged: {shown}. Nothing new executes, and this is not what the project "
+                    "would carry.",
+        remediation="Re-run the cleanup, or restore these from the quarantined originals and "
+                    "clean them by hand.",
+        confidence=RESIDUE,
+        composed_evidence=True,
+    )
 
 
 def _history_scope_note(root) -> str | None:

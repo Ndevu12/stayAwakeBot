@@ -40,6 +40,7 @@ STATUS: dict[str, str] = {
     "INFECTED": "\033[1;31m",   # bold red
     "SUSPECT": "\033[33m",      # yellow
     "ERROR": "\033[35m",        # magenta
+    "RESIDUE": "\033[36m",      # cyan
     "clean": "\033[32m",        # green
 }
 
