@@ -1807,11 +1807,11 @@
 </tr>
 <tr>
 <td><code>2</code></td>
-<td>Usage error (unknown command, bad option, a missing explicit <code>--config</code> path), <strong>or</strong> a run that could not complete — a malformed config, or a target that errored while being scanned. A target <code>saw</code> could not scan is never reported as clean. <code>saw guard setup</code> also exits <code>2</code> when it cannot resolve the release SHA (offline → pass <code>--ref</code>).</td>
+<td>Usage error (unknown command, bad option, a missing explicit <code>--config</code> path), <strong>or</strong> a run that could not complete — a malformed config, or a target that errored while being scanned. A target <code>saw</code> could not scan is never reported as clean. <code>saw audit</code> exits <code>2</code> when a check could not run: its own self-test failed, or it stopped with an error. A check that did not answer has not established the surface it covers, so its quiet is not a clean result. <code>saw guard setup</code> also exits <code>2</code> when it cannot resolve the release SHA (offline → pass <code>--ref</code>).</td>
 </tr>
 <tr>
 <td><code>3</code></td>
-<td><strong><code>saw audit</code> only — rotation unsafe.</strong> Either something was found running at start-up, or the start-up surface could not be established. It gates independently of <code>-f</code>, because rotating a credential on a compromised host hands over the new one. See <a href="../../how-to/audit-a-machine/">audit a machine</a>.</td>
+<td><strong><code>saw audit</code> only — rotation unsafe.</strong> Either something was found running at start-up, or the start-up surface could not be established — including because a check that reads it could not run. It gates independently of <code>-f</code>, because rotating a credential on a compromised host hands over the new one. It outranks <code>2</code>: a hazard in what was found is more urgent than a gap in what was covered. See <a href="../../how-to/audit-a-machine/">audit a machine</a>.</td>
 </tr>
 </tbody>
 </table>

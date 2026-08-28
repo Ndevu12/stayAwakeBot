@@ -749,6 +749,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#on-a-not-checked-section" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        On a "Not checked" section
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#credential-findings" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1839,6 +1850,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#on-a-not-checked-section" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        On a "Not checked" section
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#credential-findings" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1950,6 +1972,13 @@ account, a container and a destroyed home directory look identical from disk, so
 ambiguity rather than picking one. If files you expect to be there are gone, <strong>image the disk before
 using the machine further</strong>, <code>saw fix</code> included. How much survives depends on which wipe variant
 ran, which cannot be told from the host — and every write can overwrite whatever did.</p>
+<h2 id="on-a-not-checked-section">On a "Not checked" section<a class="headerlink" href="#on-a-not-checked-section" title="Permanent link">&para;</a></h2>
+<p>Your machine did not let some checks finish — a tool they need is missing, or a path they read is
+not readable by you. Each one names what stopped it.</p>
+<p>Fix what it names and re-run, or inspect that surface yourself. Until you do, read the rest of the
+report as covering everything <strong>except</strong> those surfaces. The exit code says how much that costs you:
+<code>3</code> if one of them reads the start-up surface, so treat rotation as unsafe until you have checked it
+by hand; <code>2</code> otherwise.</p>
 <h2 id="credential-findings">Credential findings<a class="headerlink" href="#credential-findings" title="Permanent link">&para;</a></h2>
 <p>A token in your OS keychain is not automatically a problem, and deleting a credential path you
 actually use is an outage, not a fix. These findings inform rather than instruct: read <a href="../../explanation/credential-hygiene/">credential
