@@ -13,6 +13,7 @@ from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.targets import LocalRepoTarget
 from stayawake.bots.security.models import QUARANTINE_DIR, CONFIRMED
 from stayawake.bots.security import remediation
+from stayawake.bots.security.remediation import installed
 from stayawake.core import proposal
 from stayawake.bots.security.pr.constants import FIX_BRANCH, PARTIAL_LABEL
 from stayawake.bots.security.pr.branches import choose_fix_branch
@@ -55,6 +56,7 @@ class _Fix:
     findings: list = ()
     manual: tuple = ()
     signed: bool = True
+    tree_note: str = ""
 
     @property
     def partial(self) -> bool:
@@ -64,6 +66,25 @@ class _Fix:
         # that keeps a not-git-corroborated tree from going green. See the invariant at the `fs =
         # `bool(self.manual)`.
         return bool(self.manual) or bool(self.computed)
+
+
+def _with_tree(outcome: str, note: str) -> str:
+    return outcome if not note else f"{outcome}\n    {note}"
+
+
+def _lockfile_changes(wt: Path, report: installed.Report) -> list:
+    changes = []
+    try:
+        origin = wt.resolve()
+    except OSError:
+        return changes
+    for path in report.removed_lockfiles:
+        try:
+            rel = path.resolve().relative_to(origin)
+        except (OSError, ValueError):
+            continue
+        changes.append(remediation.Change("remove", rel.as_posix()))
+    return changes
 
 
 def _signing_note(fix: "_Fix | None") -> str:
@@ -160,8 +181,21 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
 
     # phase 2: apply the TRUSTED tier (structure-safe fixes + git-corroborated recoveries) and commit
     # SEPARATE, review-required commit — two trust levels, two commits, in one rolling PR.
+    tree_note = ""
     with status(f"fixing {label}…", enabled=spin):
-        applied = remediation.apply(wt, remediation.plan(findings), quarantine)
+        lockfile_changes: list = []
+        if _blocking(findings):
+            try:
+                report = installed.remove_rebuildable(
+                    repo,
+                    exclude_dirs=getattr(opts, "exclude_dirs", None),
+                    remove_lockfiles=not installed.lockfile_stays(),
+                    lockfile_root=wt)
+                tree_note = report.note()
+                lockfile_changes = _lockfile_changes(wt, report)
+            except OSError as exc:
+                tree_note = f"could not remove the installed tree ({exc})"
+        applied = lockfile_changes + remediation.apply(wt, remediation.plan(findings), quarantine)
         seen_cl: set = set()
         manual_reviews: dict = {}
         suggested: list = []
@@ -213,15 +247,16 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
         # levels land as cleanly separated commits (`stage_all` after each write group captures only
         # that group's changes, since the previous group is already committed).
         if not _untrack_quarantine(wt):
-            return None, f"ABORTED — could not untrack {QUARANTINE_DIR}/ (would commit backups)", wt
+            return None, _with_tree(
+                f"ABORTED — could not untrack {QUARANTINE_DIR}/ (would commit backups)", tree_note), wt
         signed = True
         if applied:
             if not gitutil.stage_all(wt):
-                return None, "ABORTED — could not stage the fix (git add failed)", wt
+                return None, _with_tree("ABORTED — could not stage the fix (git add failed)", tree_note), wt
             commit = gitutil.commit_fix(wt, "security: auto-remediate worm indicators\n\n"
                                         + "\n".join(f"- {c.action}: {c.path}" for c in applied))
             if not commit.committed:
-                return None, "ABORTED — could not commit the fix (git commit failed)", wt
+                return None, _with_tree("ABORTED — could not commit the fix (git commit failed)", tree_note), wt
             signed = commit.signed
 
         computed: list = []
@@ -235,12 +270,14 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
                     "review and remove the payload manually.", disp.line)
         if computed:
             if not gitutil.stage_all(wt):
-                return None, "ABORTED — could not stage the computed strip (git add failed)", wt
+                return None, _with_tree(
+                    "ABORTED — could not stage the computed strip (git add failed)", tree_note), wt
             commit = gitutil.commit_fix(
                 wt, "security: computed payload strip — REVIEW REQUIRED (not git-corroborated)\n\n"
                 + "\n".join(f"- strip-computed: {d.path}" for d in computed))
             if not commit.committed:
-                return None, "ABORTED — could not commit the computed strip (git commit failed)", wt
+                return None, _with_tree(
+                    "ABORTED — could not commit the computed strip (git commit failed)", tree_note), wt
             signed = signed and commit.signed
 
         fs = _scan()
@@ -258,17 +295,19 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
             # Nothing was provably safe to ship. If confirmed findings remain, return a NOTIFY-ONLY
             # fix (no changes committed) so the caller files a de-duplicated manual-review issue and
             if residual:
-                return _Fix(base, branch, [], (), suspicious, findings, tuple(manual)), "", wt
+                return _Fix(base, branch, [], (), suspicious, findings, tuple(manual),
+                            tree_note=tree_note), "", wt
             # No CONFIRMED indicator and nothing auto-fixable, but HEURISTIC (suspicious) findings
             # remain. This is NOT "already clean" — saying so contradicts `saw scan`/`saw hook`, which
             # fix (no changes, no confirmed manual set) so the caller reports the suspicious findings
             # and defers to review. Heuristics are never auto-fixed (trust model), so — like a
             # suspicious `saw scan` — this stays exit 0; only the truly-empty tree is "already clean".
             if suspicious:
-                return _Fix(base, branch, [], (), suspicious, findings, ()), "", wt
-            return None, f"'{base}' already clean — nothing to fix", wt
+                return _Fix(base, branch, [], (), suspicious, findings, (),
+                            tree_note=tree_note), "", wt
+            return None, _with_tree(f"'{base}' already clean — nothing to fix", tree_note), wt
     return _Fix(base, branch, applied, tuple(computed), suspicious, findings, tuple(manual),
-                signed=signed), "", wt
+                signed=signed, tree_note=tree_note), "", wt
 
 
 def prepare_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = None,
@@ -286,19 +325,25 @@ def prepare_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = N
             # Nothing auto-fixable. Suspicious-only (heuristics, nothing confirmed) → disclose + defer,
             # no network, so no issue is filed here) and stay needs-review.
             if not fix.manual:
-                return _suspicious_only_outcome(slug, fix)
-            return (f"{slug}: ABORTED — nothing auto-fixable; {len(fix.manual)} confirmed finding(s) "
-                    "need manual review") + manual_review_lines(fix.manual) + suspicious_review_lines(fix.suspicious)
+                return _with_tree(_suspicious_only_outcome(slug, fix), fix.tree_note)
+            return _with_tree(
+                (f"{slug}: ABORTED — nothing auto-fixable; {len(fix.manual)} confirmed finding(s) "
+                 "need manual review") + manual_review_lines(fix.manual) + suspicious_review_lines(fix.suspicious),
+                fix.tree_note)
         if fix.partial:
             prepared = len(fix.applied) + len(fix.computed)
             need = ([f"{len(fix.computed)} computed strip(s) need review before merge"] if fix.computed else []) \
                 + ([f"{len(fix.manual)} confirmed finding(s) still need manual review"] if fix.manual else [])
-            return (f"{slug}: PARTIAL — prepared {prepared} change(s) on '{fix.branch}', "
-                    f"but {' and '.join(need)} (`git -C {repo} diff {fix.base}...{fix.branch}`)"
-                    ) + _signing_note(fix) + computed_review_lines(fix.computed) + manual_review_lines(fix.manual)
-        return (f"{slug}: prepared {len(fix.applied)} change(s) on '{fix.branch}' — review "
-                f"`git -C {repo} diff {fix.base}...{fix.branch}`, then `saw fix --pr` to open a PR"
-                ) + _signing_note(fix)
+            return _with_tree(
+                (f"{slug}: PARTIAL — prepared {prepared} change(s) on '{fix.branch}', "
+                 f"but {' and '.join(need)} (`git -C {repo} diff {fix.base}...{fix.branch}`)"
+                 ) + _signing_note(fix) + computed_review_lines(fix.computed) + manual_review_lines(fix.manual),
+                fix.tree_note)
+        return _with_tree(
+            (f"{slug}: prepared {len(fix.applied)} change(s) on '{fix.branch}' — review "
+             f"`git -C {repo} diff {fix.base}...{fix.branch}`, then `saw fix --pr` to open a PR"
+             ) + _signing_note(fix),
+            fix.tree_note)
     finally:
         if wt:
             gitutil.remove_worktree(repo, wt)
@@ -319,14 +364,18 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
                 return outcome
             if not fix.applied and not fix.computed:
                 if not fix.manual:   # suspicious-only → disclose + defer, exit 0
-                    return _suspicious_only_outcome(
-                        str(repo).replace(str(Path.home()), "~"), fix)
-                return (f"ABORTED — nothing auto-fixable; {len(fix.manual)} confirmed finding(s) "
-                        "need manual review (no GitHub origin — cannot file an issue)"
-                        ) + manual_review_lines(fix.manual) + suspicious_review_lines(fix.suspicious)
-            return _mark_partial(
-                f"no GitHub origin — prepared on '{fix.branch}'; add a remote and push to open a PR",
-                fix.partial) + _signing_note(fix) + computed_review_lines(fix.computed) + manual_review_lines(fix.manual)
+                    return _with_tree(_suspicious_only_outcome(
+                        str(repo).replace(str(Path.home()), "~"), fix), fix.tree_note)
+                return _with_tree(
+                    (f"ABORTED — nothing auto-fixable; {len(fix.manual)} confirmed finding(s) "
+                     "need manual review (no GitHub origin — cannot file an issue)"
+                     ) + manual_review_lines(fix.manual) + suspicious_review_lines(fix.suspicious),
+                    fix.tree_note)
+            return _with_tree(
+                _mark_partial(
+                    f"no GitHub origin — prepared on '{fix.branch}'; add a remote and push to open a PR",
+                    fix.partial) + _signing_note(fix) + computed_review_lines(fix.computed) + manual_review_lines(fix.manual),
+                fix.tree_note)
         finally:
             if wt:
                 gitutil.remove_worktree(repo, wt)
@@ -342,7 +391,7 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
             # review issue (a heuristic isn't asserted malware — filing would over-alarm and spam the
             # repo); just disclose and defer. Exit 0, consistent with a suspicious `saw scan`.
             if not fix.manual:
-                return _suspicious_only_outcome(slug, fix)
+                return _with_tree(_suspicious_only_outcome(slug, fix), fix.tree_note)
             # to push, so file a de-duplicated manual-review issue (the read-only floor's mechanism)
             # and abort with the count. The gate stays red (outcome carries ABORTED). Degrades
             # gracefully — no issue permission just drops the note, still aborts.
@@ -350,8 +399,10 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
                 issue = proposal.file_dedup_issue(owner, name,
                                                   _issue_spec(owner, name, fix.findings), token)
             note = f"; {issue}" if issue else ""
-            return (f"{slug}: ABORTED — nothing auto-fixable; {len(fix.manual)} confirmed finding(s) "
-                    f"need manual review{note}") + manual_review_lines(fix.manual) + suspicious_review_lines(fix.suspicious)
+            return _with_tree(
+                (f"{slug}: ABORTED — nothing auto-fixable; {len(fix.manual)} confirmed finding(s) "
+                 f"need manual review{note}") + manual_review_lines(fix.manual) + suspicious_review_lines(fix.suspicious),
+                fix.tree_note)
         base = fix.base
 
         def _publish() -> str:
@@ -371,8 +422,10 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
 
         # Single choke point: whatever branch _publish() returned, a PARTIAL fix is guaranteed to be
         # and the per-finding manual-review guidance + any unsigned-commit warning are appended.
-        return (_mark_partial(_publish(), fix.partial)
-                + _signing_note(fix) + computed_review_lines(fix.computed) + manual_review_lines(fix.manual))
+        return _with_tree(
+            _mark_partial(_publish(), fix.partial)
+            + _signing_note(fix) + computed_review_lines(fix.computed) + manual_review_lines(fix.manual),
+            fix.tree_note)
     finally:
         if wt:
             gitutil.remove_worktree(repo, wt)

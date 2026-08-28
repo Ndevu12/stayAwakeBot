@@ -21,9 +21,11 @@ maintainer rather than working around it.
 - **The allowlist is operator-owned, never target-owned.** Suppressions come from ONE operator-chosen
   config per run — `saw` never takes suppression input from the repository it is scanning. Allowlist
   rules must be signature-scoped.
-- **`scan` is read-only; `fix` writes only via a PR.** `scan`'s exit code *is* the verdict
-  (0 clean / 1 infected / 2 errored-fail-closed), unconditionally — a CI gate just reads it.
-  `saw fix` prepares a local branch and only publishes with `--pr`. Remediation NEVER lives in `scan`.
+- **`scan` is read-only; `fix` writes only what this repository owns.** `scan`'s exit code *is* the
+  verdict (0 clean / 1 infected / 2 errored-fail-closed), unconditionally — a CI gate just reads it.
+  `saw fix` prepares a local branch and only publishes with `--pr`. On a confirmed infection it also
+  removes the installed tree, generated build outputs, and lockfile in that repository. Remediation
+  NEVER lives in `scan`.
 - **Heuristic/SUSPECT findings are never auto-fixed**, and a compromised *host* is never
   "auto-cleaned".
 - **Fail closed.** A target that could not be fully scanned (unreadable file, failed clone, malformed
@@ -31,8 +33,9 @@ maintainer rather than working around it.
 
 ## Command surface (see docs/reference/cli/index.md for detail)
 
-`scan` (read-only hunt) · `fix` (PR-only remediation) · `discard` · `audit` (+ `--verify` content-scans
-a non-repo suspect dir; + credential/dependency hygiene) · `db` (offline advisory corpus) · `guard`
+`scan` (read-only hunt) · `fix` (PR-only remediation; on confirmed infection also removes the
+installed tree in this repository) · `discard` · `audit` (+ `--verify` content-scans a non-repo
+suspect dir; + credential/dependency hygiene) · `db` (offline advisory corpus) · `guard`
 (install/verify the CI gate) · `search` · `intro` · `doctor` · `completion`.
 
 Scan scope is **local by default** (given paths / configured globs / current repo); `--remote`

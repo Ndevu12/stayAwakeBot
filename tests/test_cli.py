@@ -258,6 +258,12 @@ class TestDispatcherOwnedCommands(unittest.TestCase):
             self.assertEqual(cli.main(["search", "open", "a", "pr"]), 0)
         self.assertIn("saw fix", buf.getvalue())
 
+    def test_search_finds_installed_tree_on_fix(self):
+        with redirect_stdout(io.StringIO()) as buf:
+            self.assertEqual(cli.main(["search", "installed", "tree"]), 0)
+        self.assertIn("saw fix", buf.getvalue())
+        self.assertNotIn("saw condemn", buf.getvalue())
+
     def test_search_no_match_returns_zero(self):
         with redirect_stdout(io.StringIO()):
             self.assertEqual(cli.main(["search", "zzzznotacommand"]), 0)

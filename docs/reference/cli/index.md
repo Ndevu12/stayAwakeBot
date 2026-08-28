@@ -19,7 +19,7 @@ alias, for scripts where a three-letter name might clash on `PATH`.
 | Command | What it does | Writes? |
 | --- | --- | --- |
 | [`scan`](scan.md) | Hunt for supply-chain worms and report | read-only |
-| [`fix`](fix.md) | Prepare the cleanup on a `security/auto-clean` branch | that branch only; pushes with `--pr` |
+| [`fix`](fix.md) | Prepare the cleanup on a `security/auto-clean` branch; on confirmed infection also removes the installed tree in this repository | that branch; the installed tree, build outputs, and lockfile in this repository (lockfile kept on CI); pushes with `--pr` |
 | [`discard`](discard.md) | Undo `saw fix` | git / GitHub API |
 | [`audit`](audit.md) | Machine hygiene, start-up surface, branch protection | read-only |
 | [`guard`](guard.md) | Install and verify the Strix CI gate | `check`/`drift` read-only; `setup` writes a workflow or a PR |
