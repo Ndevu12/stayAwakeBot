@@ -20,6 +20,11 @@ def _backup_write_verify(root: Path, rel: str, new_text: str, quarantine: Path, 
     literal nor an exec sink (`_carries_payload`), else the original is restored. One home for the
     backup + verify + revert net so it is identical for every write path (never downgraded)."""
     target = root / rel
+    try:
+        if target.stat().st_nlink > 1:
+            return False
+    except OSError:
+        return False
     _backup(root, rel, quarantine)
     target.write_text(new_text, encoding="utf-8")
     restored = target.read_text(encoding="utf-8", errors="replace")

@@ -165,6 +165,43 @@ class TestStripAndResidual(unittest.TestCase):
         self.assertEqual(applied, [])
         self.assertEqual(host.read_text(encoding="utf-8"), "temp_auto_push.bat\nkeep\n")
 
+    def test_backup_does_not_write_outside_quarantine(self):
+        base = Path(tempfile.mkdtemp())
+        repo = base / "repo"
+        repo.mkdir()
+        srcdir = base / "payload"
+        srcdir.mkdir()
+        (srcdir / "inner.txt").write_text("from-repo\n", encoding="utf-8")
+        (base / "srcfile").write_text("from-repo\n", encoding="utf-8")
+        q = base / "q" / "nested"
+        q.mkdir(parents=True)
+        remediation.changes._backup(repo, "../payload", q)
+        remediation.changes._backup(repo, "../srcfile", q)
+        self.assertFalse((base / "q" / "payload").exists())
+        self.assertFalse((base / "q" / "srcfile").exists())
+
+    def test_backup_does_not_follow_a_dangling_destination(self):
+        repo = Path(tempfile.mkdtemp())
+        (repo / "payload.js").write_text("from-repo\n", encoding="utf-8")
+        host = Path(tempfile.mkdtemp()) / "sink"
+        q = Path(tempfile.mkdtemp())
+        (q / "payload.js").symlink_to(host)
+        remediation.changes._backup(repo, "payload.js", q)
+        self.assertFalse(host.exists())
+        self.assertTrue((q / "payload.js").is_symlink())
+
+    def test_writeback_does_not_write_a_hardlinked_file(self):
+        from stayawake.bots.security.remediation import writeback
+        repo = Path(tempfile.mkdtemp())
+        src = repo / "code.js"
+        src.write_text("payload\n", encoding="utf-8")
+        host = Path(tempfile.mkdtemp()) / "victim"
+        os.link(src, host)
+        ok = writeback._backup_write_verify(
+            repo, "code.js", "stripped\n", Path(tempfile.mkdtemp()), None)
+        self.assertFalse(ok)
+        self.assertEqual(host.read_text(encoding="utf-8"), "payload\n")
+
     def test_quarantine_does_not_follow_a_linked_directory(self):
         repo = Path(tempfile.mkdtemp())
         host = Path(tempfile.mkdtemp())

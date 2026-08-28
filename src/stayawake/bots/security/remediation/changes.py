@@ -124,14 +124,20 @@ def ensure_ignored(root: Path) -> bool:
 
 def _dest_ready(quarantine: Path, dest: Path) -> bool:
     try:
-        if dest.exists():
+        if dest.is_symlink() or dest.exists():
             return False
         q = quarantine.resolve()
+        resolved = dest.resolve()
+        if resolved == q or not resolved.is_relative_to(q):
+            return False
         p = dest.parent
         while True:
-            if p.exists() and p.is_symlink():
+            if p.is_symlink():
                 return False
-            if p.resolve() == q:
+            pr = p.resolve()
+            if not pr.is_relative_to(q):
+                return False
+            if pr == q:
                 return True
             if p.parent == p:
                 return False
