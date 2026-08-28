@@ -69,3 +69,12 @@ A comment attached to a constant is a name that failed. `_FIRST_READ_BYTES` need
 `_CHUNK_BYTES` with a paragraph above it is the same information, worse placed. Long rationale does
 not belong beside the code at all: it goes where the reasoning is kept.
 
+**It breaks most often when the constant is a lookup table**, because the mapping feels like it needs
+explaining. It does not — it needs naming. `_TOOLCHAIN` wants a paragraph;
+`_TOOLCHAIN_THAT_LEAVES_EACH_KIND` wants nothing.
+
+**Where the reasoning legitimately goes is the function that uses it.** A docstring says what the
+code establishes and why the answer is shaped that way; a comment over a constant is restating the
+constant. If you have written three lines above a name, move them into the function below it and see
+how much survives.
+
