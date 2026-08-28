@@ -21,11 +21,12 @@ maintainer rather than working around it.
 - **The allowlist is operator-owned, never target-owned.** Suppressions come from ONE operator-chosen
   config per run — `saw` never takes suppression input from the repository it is scanning. Allowlist
   rules must be signature-scoped.
-- **`scan` is read-only; `fix` writes only what this repository owns.** `scan`'s exit code *is* the
-  verdict (0 clean / 1 infected / 2 errored-fail-closed), unconditionally — a CI gate just reads it.
-  `saw fix` prepares a local branch and only publishes with `--pr`. On a confirmed infection it also
-  removes the installed tree, generated build outputs, and lockfile in that repository. Remediation
-  NEVER lives in `scan`.
+- **`scan` is read-only; `fix` writes only what this repository owns; `harden` writes only
+  the host.** `scan`'s exit code *is* the verdict (0 clean / 1 infected / 2 errored-fail-closed),
+  unconditionally — a CI gate just reads it. `saw fix` prepares a local branch and only publishes
+  with `--pr`. On a confirmed infection it also removes the installed tree, generated build outputs,
+  and lockfile in that repository. Remediation NEVER lives in `scan`. `saw harden` creates host
+  denials and never removes a project's tree.
 - **Heuristic/SUSPECT findings are never auto-fixed**, and a compromised *host* is never
   "auto-cleaned".
 - **Fail closed.** A target that could not be fully scanned (unreadable file, failed clone, malformed
@@ -35,7 +36,8 @@ maintainer rather than working around it.
 
 `scan` (read-only hunt) · `fix` (PR-only remediation; on confirmed infection also removes the
 installed tree in this repository) · `discard` · `audit` (+ `--verify` content-scans a non-repo
-suspect dir; + credential/dependency hygiene) · `db` (offline advisory corpus) · `guard`
+suspect dir; + credential/dependency hygiene) · `harden` (host denials; in place only after a
+read-back; never a project's tree) · `db` (offline advisory corpus) · `guard`
 (install/verify the CI gate) · `search` · `intro` · `doctor` · `completion`.
 
 Scan scope is **local by default** (given paths / configured globs / current repo); `--remote`

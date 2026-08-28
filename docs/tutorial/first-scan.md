@@ -67,6 +67,8 @@ Then check the machine itself, which no repository scan covers:
 
 ```bash
 saw audit
+sudo saw harden
 ```
 
-See [audit a machine](../how-to/audit-a-machine.md).
+See [audit a machine](../how-to/audit-a-machine.md) and
+[harden this machine](../how-to/harden-this-machine.md).

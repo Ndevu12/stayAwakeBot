@@ -34,8 +34,8 @@ class TestTheIndicatorTestsTheShapeItDescribes(unittest.TestCase):
                 return host_artifacts.check_host_artifacts()
 
     def test_the_hardened_shape_is_not_reported_as_a_tree(self):
-        # The control says: make `~/.node_modules` a NON-DIRECTORY. Following it must not produce a
-        # corroborated finding, nor withhold the rotation all-clear.
+        # A file is not a tree. Putting a file at the path must not produce a corroborated
+        # finding, nor withhold the rotation all-clear.
         issues = self._issues(lambda home, tmp: (
             (home / ".node_modules").write_text(""),
             (tmp / "get-pip.py").write_text("#")))
@@ -74,7 +74,7 @@ class TestBothHomeRelativeGlobalFoldersAreCovered(TestTheIndicatorTestsTheShapeI
                 self.assertIn("host-drop-artifacts", {i.id for i in issues})
 
     def test_the_shape_rule_applies_to_it_too(self):
-        # A FILE at either is the hardening shape, not a tree — the same rule, not a special case.
+        # A FILE at either is not a tree — the same rule, not a special case.
         issues = self._issues(lambda home, tmp: (
             (home / ".node_libraries").write_text(""),
             (tmp / "get-pip.py").write_text("#")))

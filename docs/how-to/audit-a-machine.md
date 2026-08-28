@@ -6,7 +6,8 @@ description: Audit the developer machine itself: cached credentials, editor auto
 
 A repository scan says nothing about the machine it runs on. `saw audit` looks at the host: cached
 credentials, editor settings, the start-up surface, and — with `--repo` — a repository's branch
-protection. It is read-only, and it never cleans anything. Flags: [CLI
+protection. It is read-only, and it never cleans anything. Host denials are
+[`saw harden`](harden-this-machine.md). Flags: [CLI
 reference](../reference/cli/audit.md).
 
 ```bash

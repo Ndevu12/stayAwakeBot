@@ -19,6 +19,8 @@ _INDEX = [
      "discard undo revert cleanup delete branch close pr abandon drop remove remote local"),
     ("saw audit", "credential + editor + runner-persistence + branch-protection hygiene audit",
      "audit hygiene credential token branch protection vscode editor runner self-hosted persistence"),
+    ("saw harden", "create host denials; reports in place only after a read-back",
+     "harden host deny control"),
     ("saw guard", "install/verify the Strix worm-guard CI gate (setup needs workflow scope)",
      "guard gate worm-guard strix ci workflow setup check pin"),
     ("saw auth", "credential/capability status; register a self-owned Saw GitHub App",

@@ -33,6 +33,7 @@ Scan what arrives before you run it:
 ```bash
 saw hook install        # see docs/how-to/scan-on-clone.md
 saw audit               # the machine's own posture
+sudo saw harden         # host denials; in place only after a read-back
 ```
 
 For a repository that would rather commit its hooks alongside its code than have each developer

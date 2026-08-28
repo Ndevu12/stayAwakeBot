@@ -21,15 +21,15 @@ class TestBanner(unittest.TestCase):
 
     def test_welcome_carries_the_essentials(self):
         out = render_welcome(ColorLevel.NONE, "9.9.9")
-        for needle in ("saw scan", "saw intro", "supply-chain worm hunter",
+        for needle in ("saw scan", "saw intro", "saw harden", "supply-chain worm hunter",
                        "zero code runs at install", "v9.9.9",
                        "github.com/Ndevu12/stayAwakeBot"):
             self.assertIn(needle, out)
 
     def test_intro_covers_the_tour(self):
         out = render_intro(ColorLevel.NONE, "1.0.0")
-        for needle in ("What it is", "Three verbs", "Why it's safe", "Gate CI",
-                       "saw fix", "--pr", "the exit code IS the verdict"):
+        for needle in ("What it is", "Four verbs", "Why it's safe", "Gate CI",
+                       "saw fix", "saw harden", "--pr", "the exit code IS the verdict"):
             self.assertIn(needle, out)
 
     def test_truecolor_uses_24bit_sequences(self):

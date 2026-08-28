@@ -29,6 +29,7 @@ and gates CI, so an infected change cannot merge.
 | **Remediate** | `saw fix` — prepares a cleanup branch per infected repo, `--pr` to publish. Never rewrites history; `saw discard` undoes it. |
 | **Prevent** | `saw guard` — install and verify the CI gate on any repo. `saw hook` — scan on clone and pull, *before* you install or build. |
 | **Audit** | `saw audit` — host hygiene and branch-protection posture, stating plainly what it did **not** examine. |
+| **Harden** | `saw harden` — create host denials; in place only after a read-back. Never a project's tree. |
 | **Advisories** | `saw db` — an offline corpus for dependency CVE and malicious-package matching. |
 
 ## Quick start

@@ -20,7 +20,8 @@ install, a build, or an editor or agent opening the folder.
 **Do a task** — [scan local code](how-to/scan-local.md) ·
 [scan GitHub repositories](how-to/scan-remote.md) · [fix findings](how-to/fix-findings.md) ·
 [gate CI](how-to/gate-ci.md) · [scan on clone](how-to/scan-on-clone.md) ·
-[audit a machine](how-to/audit-a-machine.md) · [harden a repository](how-to/harden-a-repo.md)
+[audit a machine](how-to/audit-a-machine.md) · [harden this machine](how-to/harden-this-machine.md) ·
+[harden a repository](how-to/harden-a-repo.md)
 
 **Look it up** — [CLI reference](reference/cli/index.md) ·
 [configuration](reference/configuration.md) · [exit codes](reference/exit-codes.md) ·

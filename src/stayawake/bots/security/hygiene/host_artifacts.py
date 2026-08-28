@@ -11,6 +11,7 @@ import tempfile
 from dataclasses import replace
 from pathlib import Path
 
+from stayawake.utils import hostdenial
 from stayawake.utils.pathsafe import canonical_id, grade
 
 from .models import HygieneIssue, _WIPER_NOTE, could_not_read
@@ -159,6 +160,8 @@ def _host_artifacts() -> tuple[list[str], list[tuple[str, Path, str]], list[Path
     # reachable WITHOUT root on a Homebrew Mac, where `/usr/local` is user-owned, so it is not a
     # root-only location the user-level worm model can dismiss.
     for location in _global_folders():
+        if hostdenial.holds(location):
+            continue
         if _present_dir(location):
             weak.append((f"{location} (a node module tree in a global resolution path — "
                          "unusual location)", location, KIND_GLOBAL_FOLDER))

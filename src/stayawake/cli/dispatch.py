@@ -24,6 +24,7 @@ def build_parser() -> argparse.ArgumentParser:
             ("saw scan", "hunt worms here; the exit code is the verdict"),
             ("saw fix --pr", "clean the findings on a PR branch"),
             ("saw audit", "local hygiene + rotation-safety verdict"),
+            ("saw harden", "host denials, read back before they count"),
             ("saw guard setup --pr", "install the CI gate on this repo"),
             ("saw <command> -h", "what a command is for, with examples"),
         ]),
