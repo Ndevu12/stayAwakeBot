@@ -22,7 +22,7 @@ from stayawake.bots.security.pr.render import (
     _issue_spec, _mark_partial, _pr_body, _render_submit)
 
 class _Frozen:
-    """One read of `confidence` for the whole fix. A later getattr cannot change the gate."""
+    """One read of `confidence` for the whole fix. A later getattr or assign cannot change the gate."""
     __slots__ = ("_inner", "confidence")
 
     def __init__(self, inner):
@@ -31,6 +31,12 @@ class _Frozen:
 
     def __getattr__(self, name):
         return getattr(self._inner, name)
+
+    def __setattr__(self, name, value):
+        raise AttributeError("frozen")
+
+    def __delattr__(self, name):
+        raise AttributeError("frozen")
 
 
 def _freeze(findings):

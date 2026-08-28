@@ -244,6 +244,21 @@ class TestItRefusesWhereRemovalWouldBeAGuess(unittest.TestCase):
             ))
         self.assertEqual(stripped, [])
 
+    def test_a_frozen_finding_does_not_take_a_later_grade(self):
+        from stayawake.bots.security.models import Finding, HEURISTIC, Severity
+        from stayawake.bots.security.pr.fix import _Frozen
+        from stayawake.bots.security import remediation
+
+        wrap = _Frozen(Finding(
+            "x", "persistence", Severity.HIGH, "payload.js", "drop",
+            remediation="quarantine-file", confidence=HEURISTIC))
+        with self.assertRaises(AttributeError):
+            wrap.confidence = "confirmed"
+        with self.assertRaises(AttributeError):
+            del wrap.confidence
+        self.assertFalse(remediation.is_auto_fixable(wrap))
+        self.assertEqual(remediation.plan([wrap]), [])
+
     def test_a_scan_that_did_not_finish_does_not_quarantine(self):
         from stayawake.bots.security import pr
         from stayawake.bots.security.models import Finding, ScanResult, Severity
