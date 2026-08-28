@@ -13,6 +13,12 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Added
+- **A start-up item that runs something its name cannot account for is now reported.** The name and
+  the path were both already read and never compared. Neither is suspicious alone — the
+  contradiction between them is, and it is the shape an item takes when it borrows a familiar name
+  to look routine.
+
 ### Fixed
 - **Two host indicators that one command leaves behind no longer read as a live implant.** They are
   still reported, and credential rotation is still held — what changes is the claim: something staged

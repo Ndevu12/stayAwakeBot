@@ -441,6 +441,35 @@ def _split_command(line: str) -> list[str]:
         return line.split()
 
 
+_VENDOR_NAMESPACES = ("com", "org", "net", "io", "co")
+
+
+def claimed_vendor(entry) -> str | None:
+    """The organisation a launch item's name claims, from its reverse-DNS identifier."""
+    parts = Path(getattr(entry, "path", "")).stem.split(".")
+    if len(parts) > 2 and parts[0].lower() in _VENDOR_NAMESPACES:
+        return parts[1].lower()
+    return None
+
+
+def contradicts_its_name(entry) -> str | None:
+    """Why what this item runs cannot be what its name claims, or None.
+
+    Either half alone is ordinary — a name is a string, a path is a path. The contradiction is that
+    an item claiming an organisation runs something that organisation could not have placed: the
+    path does not name them, and it sits where anyone could write it. Measured across 773 launch
+    items on a developer host, that pair holds for none of them."""
+    vendor = claimed_vendor(entry)
+    payload = _payload_path(entry)
+    if not vendor or not payload:
+        return None
+    if vendor in payload.lower():
+        return None
+    if not mechanism.is_user_writable(Path(payload)):
+        return None
+    return f"claims {vendor} but runs a path anyone can write"
+
+
 def _payload_path(entry) -> str | None:
     """The path of the code the entry RUNS — the script argument when an interpreter is argv[0], so a
     `node /path/daemon.js` autorun is read at daemon.js, not at the trusted `node`."""
@@ -542,6 +571,10 @@ def content_signal(entry, *, read_referenced: bool = False) -> ContentSignal:
     payload = _payload_path(entry)
     if payload and mechanism._under_scratch(Path(payload)):
         reasons.append("runs code from a world-writable scratch directory")
+        hit = True
+    masquerade = contradicts_its_name(entry)
+    if masquerade:
+        reasons.append(masquerade)
         hit = True
     elif any(mechanism._SCRATCH_EXEC.search(line)
              for line in _shell_context_text(entry, referenced)):

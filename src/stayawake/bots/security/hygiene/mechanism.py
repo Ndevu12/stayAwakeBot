@@ -59,6 +59,18 @@ def _other_writable(p: Path) -> bool:
         return False
 
 
+def is_user_writable(path: Path) -> bool:
+    """Whether this user could place what sits at `path`, asking the nearest existing ancestor so a
+    file that has since been removed still answers about where it lived."""
+    import os
+    try:
+        while not path.exists() and path != path.parent:
+            path = path.parent
+        return os.access(path, os.W_OK)
+    except OSError:
+        return False
+
+
 def _under_scratch(p: Path) -> bool:
     """True if `p` resolves (textually — no symlink follow / existence needed) to a world-writable
     scratch dir or a descendant of one, at a path boundary. Used for the SSH forced-command executable
