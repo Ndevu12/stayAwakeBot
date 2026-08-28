@@ -10,7 +10,7 @@ from .models import HygieneIssue
 
 
 _DOCS = ("https://github.com/Ndevu12/stayAwakeBot/blob/main/docs/how-to/audit-a-machine.md"
-         "#what-saw-audit-does-not-scan")
+         "#what-a-clean-audit-does-and-does-not-mean")
 
 
 def _vscode_user_settings() -> Path | None:

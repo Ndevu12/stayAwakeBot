@@ -29,6 +29,7 @@ from .os_service import check_persistence
 from .coverage import check_persistence_coverage
 from .autorun import check_autorun
 from .host_artifacts import check_host_artifacts
+from .process import check_live_processes, live_process_scope_note
 from .app_bundle import check_app_bundles
 from .editor import check_vscode
 from .mechanism import (check_ssh_authorized_keys, check_shell_profile,
@@ -44,6 +45,7 @@ __all__ = [
     "check_persistence_coverage", "check_autorun", "check_host_artifacts",
     "check_app_bundles",
     "check_vscode", "check_ssh_authorized_keys", "check_shell_profile", "check_git_config_execution",
+    "check_live_processes",
     "check_branch_protection", "audit", "audit_checks", "audit_outcomes", "run_check", "render",
     "CheckOutcome", "CHECKED_CLEAN", "FOUND", "UNKNOWN", "BLOCKED", "NOT_IMPLEMENTED",
 ]
@@ -58,13 +60,14 @@ _SURFACE_PROBES = frozenset({
     "VS Code settings", "self-hosted runner", "OS-service persistence",
     "persistence surface coverage", "host drop-files", "SSH authorized_keys",
     "shell startup files", "git exec config", "autorun surface", "application bundles",
+    "running processes",
 })
 
 _NON_SURFACE_PROBES = frozenset({"cached credentials", "branch protection"})
 
 _POSIX_ONLY_PROBES = frozenset({
     "self-hosted runner", "OS-service persistence", "SSH authorized_keys",
-    "shell startup files", "autorun surface",
+    "shell startup files", "autorun surface", "running processes",
 })
 
 
@@ -123,6 +126,7 @@ def audit_checks(slug: str | None = None, token: str | None = None, branch: str 
         ("shell startup files", check_shell_profile),
         ("git exec config", check_git_config_execution),
         ("autorun surface", check_autorun),                             # novel-foothold monitor
+        ("running processes", check_live_processes),
         ("branch protection", lambda: check_branch_protection(slug, token, branch)),
     ]
 
@@ -227,7 +231,7 @@ def _unknown_surface_disclosure(issues: list[HygieneIssue], *, color: bool, widt
 
 
 _SCOPE_DOCS = ("https://github.com/Ndevu12/stayAwakeBot/blob/main/docs/how-to/audit-a-machine.md"
-               "#what-saw-audit-does-not-scan")
+               "#what-a-clean-audit-does-and-does-not-mean")
 
 
 def _scope_note(issues: list[HygieneIssue], *, color: bool, width: int) -> list[str]:
@@ -280,11 +284,16 @@ def _scope_note(issues: list[HygieneIssue], *, color: bool, width: int) -> list[
     # an unlisted axis reads as coverage of it — but stating them here put a paragraph of things we
     # did NOT do at the end of every run, which is the noise this note was accused of being.
     # clig.dev: don't print by default what the reader can look up, and guard the signal-to-noise.
-    return [paint(f"Scope: {surface_read}. {means}", SEVERITY["info"], on=color)
-            if False else line
-            for line in block(f"Scope: {surface_read}. Not exhaustive — {means} "
-                              f"{_SCOPE_DOCS}", indent=2, width=width,
-                              marker=f"{MARKER['meta']} ", code=SEVERITY["info"], color=color)]
+    processes = live_process_scope_note()
+    text = f"Scope: {surface_read}. Not exhaustive — {means} {_SCOPE_DOCS}"
+    lines = block(text, indent=2, width=width, marker=f"{MARKER['meta']} ",
+                  code=SEVERITY["info"], color=color)
+    if processes:
+        # Every machine runs processes this user may not read. Disclosed, never gating: withholding
+        # the verdict on that would withhold it on every unprivileged run.
+        lines += block(processes.capitalize() + ".", indent=2, width=width,
+                       marker=f"{MARKER['meta']} ", code=SEVERITY["info"], color=color)
+    return lines
 
 
 _BLOCKED_IDS = {BLOCKED_ID, BLOCKED_SURFACE_ID}

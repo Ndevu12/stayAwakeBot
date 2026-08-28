@@ -8,8 +8,8 @@ Audit the machine: credential exposure, editor settings, the start-up surface, a
 repository's branch protection. Every run ends with a **rotation-safety verdict**, and `saw audit`
 exits `3` when rotating from this host would be unsafe — see [audit a
 machine](../../how-to/audit-a-machine.md) for what to do with each outcome, and [exit
-codes](../exit-codes.md) for the contract. Scope: [what `saw audit` does not
-scan](../../how-to/audit-a-machine.md#what-saw-audit-does-not-scan).
+codes](../exit-codes.md) for the contract. Scope: [what a clean audit does and does not
+mean](../../how-to/audit-a-machine.md#what-a-clean-audit-does-and-does-not-mean).
 
 ```text
 saw audit [--repo OWNER/NAME] [-b BRANCH] [-f] [--verify] [--no-stream]
