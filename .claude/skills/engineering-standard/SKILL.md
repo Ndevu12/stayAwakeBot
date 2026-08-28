@@ -51,3 +51,21 @@ patch ("the accurate and quality one, not because it's easy or low-risk"). And w
   recommendation.
 
 Related: `working-with-this-codebase`, `shipping-changes`.
+
+## A guard must exercise what it guards
+
+A self-test that re-derives what the check does is a second implementation, and the two drift. The
+drift shows up as a **miss** (the guard passes while the check is blind) or a **false alarm** (the
+guard is stricter than the check and blocks a host the check reads happily). Both have happened here.
+
+Call the check's own code. Share the function that answers the question — the field selector, the
+decoder, the resolver — so a change to one cannot leave the other behind. Where the guard depends on
+something the check does not, ask **that** authority rather than trusting a registry to have been
+right about a platform nobody tested.
+
+## Never document a variable — fix the name
+
+A comment attached to a constant is a name that failed. `_FIRST_READ_BYTES` needs no sentence;
+`_CHUNK_BYTES` with a paragraph above it is the same information, worse placed. Long rationale does
+not belong beside the code at all: it goes where the reasoning is kept.
+

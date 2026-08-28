@@ -41,3 +41,42 @@ Scan scope is **local by default** (given paths / configured globs / current rep
 pager is opt-in (`--pager`), never default.
 
 Related: `engineering-standard`, `working-with-this-codebase`, `shipping-changes`.
+
+## The direction: reporting → acting
+
+`saw` is being standardised from a tool that **reports** into one that **acts**. The complaint it is
+answering is that it flags things for a human to review and solves nothing. Judge every proposal by
+whether it moves off that: **prefer doing the thing over instructing the user to do it, and one line
+of output over a runbook.** Good antivirus quarantines and says one sentence.
+
+That direction does not loosen anything below — it is why the rules below exist. A tool that only
+reports can afford a loose verdict; one that acts turns every false positive into damage.
+
+**What acting is allowed to touch:** only what can be PROVEN derivable, and only after what cannot be
+is preserved. **`saw` removes; it does not rebuild** — a rebuild re-runs the delivery path. **Capture
+comes before anything destructive**, and a control that merely makes something fail is destruction by
+another route, bound by the same rule. **Every action is gated on a confirmed finding**, never a
+heuristic one.
+
+## Boundaries that settle questions before you reason about them
+
+Each of these was crossed in real work, and each crossing changed what a user was told.
+
+- **Silence is not a clean result — on every axis.** A check that could not run, a platform with no
+  implementation, a file that could not be read, a process the kernel would not describe: each
+  returns what a clean host returns. Say which one it was. A run that could not establish its answer
+  never exits `0`.
+- **A verdict that fires on an ordinary host is a defect, not caution.** It teaches operators to
+  ignore the one code that matters, which protects the real findings underneath. Narrow it to the
+  case that is actually a hole, and measure that it does not fire on a healthy machine.
+- **`saw` reports on the host, never on itself.** No internal vocabulary reaches an operator. What
+  they read is a condition of their machine and what to do about it — never that the tool may have
+  failed its own checks.
+- **`saw` may say what its own actions will destroy. It may not say what you can restore.** Advice
+  to back up or preserve costs nothing; enumerating or auditing recovery tooling is someone else's
+  capability, and out of scope.
+- **`audit` audits and reports.** Nothing in that path may signal, stop or end a process. Acting is a
+  different command's job, and it is gated on capture existing first.
+- **Escalate on corroboration, never on the trigger.** A condition a feature exists to provide is not
+  evidence of abuse of it, and two indicators one action creates are one act observed twice.
+

@@ -61,6 +61,23 @@ PR is the whole of a contributor's part in it, and it carries exactly three thin
 re-running it, and the version number is spent. Anything checkable before the tag must be checked
 before the tag.
 
+## Traps that fail a build after the review looks fine
+
+- **The pins are the releaser's to move, not yours.** A change to the detection engine trips the
+  freshness gate; the answer is the **deferral label**, not a bump. Bumping them in an ordinary PR
+  moves a consumer-facing pin outside the release that is supposed to own it, and two PRs doing it
+  conflict on the same line. They move once, in the release PR, to the same reviewed commit — which
+  is already written under *Releases* below.
+- **Renaming a documentation heading breaks every link to it**, and the docs build is strict — a
+  dangling anchor fails it. Re-sweep for the old anchor across docs, source and tests *after* the
+  rename, not before.
+- **A test that fakes the running platform for a whole command run** reaches libraries that key
+  their own behaviour off it, and then fails for a reason of its own making. Assert the rule, not
+  the platform.
+- **A pull request is tested merged with `main`.** A registry that is complete on your branch can be
+  incomplete against a probe someone else added while you worked. Rebase before assuming a failure
+  is spurious.
+
 ## gh-CLI & flags
 
 Descriptive kebab long names + single-letter shorts; drop a word that collides with a command
