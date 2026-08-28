@@ -1955,8 +1955,9 @@ ran, which cannot be told from the host — and every write can overwrite whatev
 actually use is an outage, not a fix. These findings inform rather than instruct: read <a href="../../explanation/credential-hygiene/">credential
 hygiene</a> before acting on one.</p>
 <h3 id="what-saw-audit-does-not-scan">What <code>saw audit</code> does not scan<a class="headerlink" href="#what-saw-audit-does-not-scan" title="Permanent link">&para;</a></h3>
-<p><code>saw audit</code> reads the host persistence surface and a targeted set of known drop-paths: your home
-directory, <code>/tmp</code>, the system temp dir, and the working directory.</p>
+<p><code>saw audit</code> reads the host persistence surface, a targeted set of known drop-paths — your home
+directory, <code>/tmp</code>, the system temp dir, the working directory — and the JavaScript that installed
+applications load. Use <code>saw audit --verify</code> to look harder at what it flags; it is much slower.</p>
 <p><strong>It does not scan</strong> — so a clean audit is not a clean bill of health for any of these:</p>
 <table>
 <thead>
@@ -1990,8 +1991,29 @@ directory, <code>/tmp</code>, the system temp dir, and the working directory.</p
 <td>Windows autorun</td>
 <td>registry Run keys, the Startup folder and Scheduled Tasks are enumerated nowhere — persistence enumeration is macOS and Linux user-scope only</td>
 </tr>
+<tr>
+<td>an application shipped as a packed archive</td>
+<td>only unpacked application trees are read</td>
+</tr>
+<tr>
+<td>editor and browser extensions</td>
+<td>enumerated nowhere</td>
+</tr>
+<tr>
+<td>whether a file is what its publisher shipped</td>
+<td>nothing is compared against a published copy</td>
+</tr>
 </tbody>
 </table>
+<p>Three results not to over-read:</p>
+<ul>
+<li><strong>A green <code>saw guard</code> in CI says nothing about this machine.</strong> <code>guard</code> gates a repository; run
+  <code>saw audit</code> on the machine itself.</li>
+<li><strong>A clean editor result covers settings only.</strong> An application's own JavaScript is checked
+  separately; neither result stands in for the other.</li>
+<li><strong>A clean result over an application's own JavaScript is not proof the application is untouched.</strong>
+  Treat it as one signal among several.</li>
+</ul>
 
 
 
