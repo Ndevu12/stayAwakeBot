@@ -14,6 +14,14 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
+- **`saw condemn` removes an installed dependency tree instead of telling you to.** On a repository
+  that scans confirmed-infected, it removes the packages your lockfile can rebuild and keeps
+  everything the lockfile does not account for — a tree that has drifted is the only record of what
+  actually ran, so it is copied aside first, and if that copy fails nothing is removed. It refuses on
+  any other verdict, and it does not reinstall: installing re-runs the scripts the payload arrived
+  by. `--dry-run` shows the split without touching anything.
+
+### Added
 - **A start-up item that runs something its name cannot account for is now reported.** The name and
   the path were both already read and never compared. Neither is suspicious alone — the
   contradiction between them is, and it is the shape an item takes when it borrows a familiar name
