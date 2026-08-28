@@ -32,6 +32,7 @@ class TestTheScopePageNamesEveryGap(unittest.TestCase):
 
     def test_it_says_an_unrun_check_is_not_a_clean_one(self):
         self.assertIn("could not run", self.section)
+        self.assertIn("could not be read", self.section)
         self.assertIn("rotation as unsafe", self.section)
 
     def test_it_does_not_publish_where_the_tool_looks(self):

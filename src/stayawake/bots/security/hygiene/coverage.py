@@ -8,9 +8,9 @@ changes none of their findings.
 from __future__ import annotations
 
 import os
-import stat
 from pathlib import Path
 
+from stayawake.utils.pathsafe import grade
 from .models import (HygieneIssue, SURFACE_NOT_IMPLEMENTED_ID, _WIPER_NOTE,
                      persistence_surface_is_enumerable)
 from . import os_service, runner, mechanism
@@ -70,38 +70,7 @@ def _must_verify_locations() -> list[tuple[str, Path]]:
 
 
 def _coverage(p: Path) -> str:
-    """'ok' (read it) | 'absent' (nothing planted here) | 'unverified' (exists but can't be certified).
-
-    ABSENT is clean: a user-level worm planting persistence must CREATE the path (as the user, who can
-    then read it), so a path that does not exist carries nothing. UNVERIFIED is the unsafe case — it
-    exists but could not be read (a permission/OS error, or an unreadable PARENT). `stat` separates the
-    two: FileNotFoundError → absent; any other OSError → unverified. Existence isn't enough — we confirm
-    we can actually enumerate a dir / read a regular file.
-
-    A non-regular, non-dir path (FIFO / socket / device) at a persistence location is UNVERIFIED and is
-    NEVER opened: opening a FIFO read-blocks forever (the hazard), and a normal authorized_keys /
-    rc / agent is a regular file — a non-regular one there is itself anomalous, not a certifiable clean."""
-    try:
-        st = p.stat()
-    except FileNotFoundError:
-        return "absent"
-    except OSError:
-        return "unverified"                     # e.g. an unreadable PARENT — exists-ish, can't confirm
-    if stat.S_ISDIR(st.st_mode):
-        try:
-            for _ in p.iterdir():               # can we actually list it?
-                break
-        except OSError:
-            return "unverified"
-        return "ok"
-    if stat.S_ISREG(st.st_mode):
-        try:
-            with p.open("rb"):                  # regular file → safe to open; can we actually read it?
-                pass
-        except OSError:
-            return "unverified"
-        return "ok"
-    return "unverified"                         # FIFO/socket/device — anomalous AND unsafe to open
+    return grade(p)
 
 
 def _surface_is_absent(graded: list[tuple[str, Path, str]]) -> bool:

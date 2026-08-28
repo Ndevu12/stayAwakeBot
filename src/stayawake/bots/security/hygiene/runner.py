@@ -6,7 +6,9 @@ import subprocess
 from pathlib import Path
 from typing import Callable
 
-from .models import HygieneIssue, _WIPER_NOTE
+from stayawake.utils.pathsafe import grade
+
+from .models import HygieneIssue, _WIPER_NOTE, could_not_read
 
 #
 # Shai-Hulud 2.0 / Mini registers the compromised host as a self-hosted GitHub Actions
@@ -34,14 +36,17 @@ def user_runner_dirs() -> tuple[Path, ...]:
     return tuple(d for d in _RUNNER_DIR_CANDIDATES if d == home or home in d.parents)
 
 
-def _installed_runner_dir() -> Path | None:
+def _installed_runner_dir() -> tuple[Path | None, list[Path]]:
+    unread: list[Path] = []
+    found = None
     for d in _RUNNER_DIR_CANDIDATES:
-        try:
-            if (d / ".runner").is_file():
-                return d
-        except OSError:
-            continue
-    return None
+        marker = d / ".runner"
+        state = grade(marker)
+        if state == "unverified":
+            unread.append(marker)
+        elif state == "ok":
+            found = found or d
+    return found, unread
 
 
 def _is_runner_label(name: str) -> bool:
@@ -147,11 +152,12 @@ def check_runner_persistence() -> list[HygieneIssue]:
     SAFETY: the remediation must NOT tell the user to rotate credentials first — rotating
     while the runner persistence is still live can trip the reported home-dir wiper.
     Advise isolate → runner offline + registration/service removed → rebuild → THEN rotate."""
-    runner_dir = _installed_runner_dir()
+    runner_dir, unread = _installed_runner_dir()
     runner_services = _runner_services()
 
+    extra = [could_not_read(unread)] if unread else []
     if runner_dir is None and not runner_services:
-        return []
+        return extra
     where = []
     if runner_dir is not None:
         where.append(f"install at {runner_dir} (.runner config present)")
@@ -169,4 +175,4 @@ def check_runner_persistence() -> list[HygieneIssue]:
         remediation="Do NOT rotate credentials first. Isolate the host, remove the registration "
                     "(./config.sh remove) and service, rebuild from a known-clean image, then "
                     f"rotate LAST: {_WIPER_NOTE}.",
-    )]
+    )] + extra

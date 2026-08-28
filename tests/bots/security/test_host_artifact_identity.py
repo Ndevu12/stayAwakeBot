@@ -82,8 +82,8 @@ class Grading(unittest.TestCase):
             mock.patch.object(h.Path, "home", staticmethod(lambda: self.home)),
             mock.patch.object(h, "_global_folders", lambda: list(global_folders)),
             mock.patch.object(h, "_host_user_tag", lambda: None),
-            mock.patch.object(h, "_sideloaded_python_dir", lambda: None),
-            mock.patch.object(h, "_staged_secret_scanner", lambda d: None),
+            mock.patch.object(h, "_sideloaded_python_dir", lambda *_a, **_k: None),
+            mock.patch.object(h, "_staged_secret_scanner", lambda *_a, **_k: None),
         ]
         for p in patches:
             p.start(); self.addCleanup(p.stop)
@@ -149,8 +149,8 @@ class VerifyEscalatesOnly(unittest.TestCase):
             mock.patch.object(h.Path, "home", staticmethod(lambda: self.home)),
             mock.patch.object(h, "_global_folders", lambda: []),
             mock.patch.object(h, "_host_user_tag", lambda: None),
-            mock.patch.object(h, "_sideloaded_python_dir", lambda: None),
-            mock.patch.object(h, "_staged_secret_scanner", lambda d: None),
+            mock.patch.object(h, "_sideloaded_python_dir", lambda *_a, **_k: None),
+            mock.patch.object(h, "_staged_secret_scanner", lambda *_a, **_k: None),
             mock.patch.object(h, "_verify_weak_artifact", scan),
         ]
         for p in patches:

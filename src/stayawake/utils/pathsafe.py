@@ -43,6 +43,31 @@ def read_regular_text(path: Path, *, errors: str = "replace") -> str | None:
         return None
 
 
+def grade(path: Path) -> str:
+    """'ok', 'absent', or 'unverified'. Never opens a FIFO, socket, or device."""
+    try:
+        st = path.stat()
+    except FileNotFoundError:
+        return "absent"
+    except OSError:
+        return "unverified"
+    if stat.S_ISDIR(st.st_mode):
+        try:
+            for _ in path.iterdir():
+                break
+        except OSError:
+            return "unverified"
+        return "ok"
+    if stat.S_ISREG(st.st_mode):
+        try:
+            with path.open("rb"):
+                pass
+        except OSError:
+            return "unverified"
+        return "ok"
+    return "unverified"
+
+
 def is_safe_write_target(path: Path, root: Path) -> bool:
     """True only if writing to / deleting `path` stays inside `root` and does NOT go through a symlink.
 

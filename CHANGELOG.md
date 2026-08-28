@@ -13,6 +13,11 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Fixed
+- **A location a check could not read is no longer reported as a clean result.** Those checks
+  used to return the same empty answer they return on a clean host. They now say the location
+  could not be read, and the run is UNKNOWN rather than clean.
+
 ### Added
 - **On a confirmed infection, `saw fix` also removes this repository's installed tree, generated
   build outputs, and lockfile.** On CI the lockfile stays. The host is not touched. A scan that

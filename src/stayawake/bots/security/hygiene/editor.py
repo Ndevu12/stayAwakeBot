@@ -6,33 +6,34 @@ import os
 import re
 from pathlib import Path
 
-from .models import HygieneIssue
+from stayawake.utils.pathsafe import grade
+
+from .models import HygieneIssue, could_not_read
 
 
 _DOCS = ("https://github.com/Ndevu12/stayAwakeBot/blob/main/docs/how-to/audit-a-machine.md"
          "#what-a-clean-audit-does-and-does-not-mean")
 
 
-def _vscode_user_settings() -> Path | None:
-    """Locate the VS Code user settings.json across macOS / Linux / Windows."""
+def _vscode_user_settings() -> tuple[Path | None, bool]:
     home = Path.home()
     candidates = [
-        home / "Library/Application Support/Code/User/settings.json",   # macOS
-        home / ".config/Code/User/settings.json",                       # Linux
-        Path(os.environ.get("APPDATA", home / "AppData/Roaming")) / "Code/User/settings.json",  # Windows
+        home / "Library/Application Support/Code/User/settings.json",
+        home / ".config/Code/User/settings.json",
+        Path(os.environ.get("APPDATA", home / "AppData/Roaming")) / "Code/User/settings.json",
     ]
     for c in candidates:
-        try:
-            if c.is_file():
-                return c
-        except OSError:
+        state = grade(c)
+        if state == "absent":
             continue
-    return None
+        if state == "unverified":
+            return c, True
+        return c, False
+    return None, False
 
 
 _RISKY_AUTOAPPROVE = ("npx", "npm", "pnpm", "yarn", "node", "ssh", "scp", "curl", "wget",
                       "bash", "sh", "zsh", "eval", "sed", "awk", "python", "python3", "rm")
-
 
 _CATCHALL_REGEX_BODIES = {"", ".", ".*", ".+", "^", "$", "^$", "^.*$", "^.*", ".*$", "^.+$", "^.+", ".+$"}
 
@@ -107,13 +108,18 @@ def _risky_autoapprove_entries(text: str) -> list[str]:
 
 def check_vscode(settings_path: Path | None = None) -> list[HygieneIssue]:
     issues: list[HygieneIssue] = []
-    path = settings_path if settings_path is not None else _vscode_user_settings()
+    if settings_path is not None:
+        path, unread = settings_path, grade(settings_path) == "unverified"
+    else:
+        path, unread = _vscode_user_settings()
+    if unread:
+        return [could_not_read([path])]
     if path is None:
-        return issues  # VS Code not detected — nothing to assert
+        return issues
     try:
         text = path.read_text(encoding="utf-8", errors="ignore")
     except OSError:
-        return issues
+        return [could_not_read([path])]
 
     auto = re.search(r'"task\.allowAutomaticTasks"\s*:\s*"([^"]+)"', text)
     if auto is None:

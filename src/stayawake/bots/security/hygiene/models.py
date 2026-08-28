@@ -100,6 +100,19 @@ PROCESSES_NOT_READABLE_ID = "process-arguments-not-readable"
 UNVERIFIED_PERSISTENCE_IDS = {SURFACE_UNREADABLE_ID, SURFACE_ABSENT_ID, BLOCKED_SURFACE_ID,
                               SURFACE_NOT_IMPLEMENTED_ID, PROCESSES_NOT_READABLE_ID}
 
+
+def could_not_read(paths) -> HygieneIssue:
+    shown = "; ".join(str(p) for p in paths)
+    return HygieneIssue(
+        id=SURFACE_UNREADABLE_ID,
+        severity="unknown",
+        title="A location this check needed could not be read",
+        detail="These locations exist but could not be read, so this host is UNKNOWN, not clean: "
+               + shown + ".",
+        remediation="Read them, or inspect them by hand. Until then do not rotate credentials: "
+                    f"{_WIPER_NOTE}.",
+    )
+
 ROTATION_UNSAFE_IDS = ACTIVE_PERSISTENCE_IDS | UNVERIFIED_PERSISTENCE_IDS | UNCONFIRMED_STAGING_IDS
 
 # `host-artifact-scanned-clean` retired: a clean content scan no longer renders a calmer
