@@ -49,8 +49,9 @@ hygiene](../explanation/credential-hygiene.md) before acting on one.
 
 ### What `saw audit` does not scan
 
-`saw audit` reads the host persistence surface and a targeted set of known drop-paths: your home
-directory, `/tmp`, the system temp dir, and the working directory.
+`saw audit` reads the host persistence surface, a targeted set of known drop-paths — your home
+directory, `/tmp`, the system temp dir, the working directory — and the JavaScript that installed
+applications load. Use `saw audit --verify` to look harder at what it flags; it is much slower.
 
 **It does not scan** — so a clean audit is not a clean bill of health for any of these:
 
@@ -62,3 +63,15 @@ directory, `/tmp`, the system temp dir, and the working directory.
 | other mounted filesystems | only the paths above are walked |
 | account and organization state | a self-hosted runner registered against the org survives a host rebuild |
 | Windows autorun | registry Run keys, the Startup folder and Scheduled Tasks are enumerated nowhere — persistence enumeration is macOS and Linux user-scope only |
+| an application shipped as a packed archive | only unpacked application trees are read |
+| editor and browser extensions | enumerated nowhere |
+| whether a file is what its publisher shipped | nothing is compared against a published copy |
+
+Three results not to over-read:
+
+- **A green `saw guard` in CI says nothing about this machine.** `guard` gates a repository; run
+  `saw audit` on the machine itself.
+- **A clean editor result covers settings only.** An application's own JavaScript is checked
+  separately; neither result stands in for the other.
+- **A clean result over an application's own JavaScript is not proof the application is untouched.**
+  Treat it as one signal among several.

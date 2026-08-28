@@ -19,13 +19,14 @@ def register(sub) -> None:
         help="hygiene + branch-protection audit",
         description=(
             "Audit local security hygiene: credential exposure, editor settings, host "
-            "persistence and drop-artifacts, and optionally a repository's branch protection. "
+            "persistence and drop-artifacts, the JavaScript installed applications load, and "
+            "optionally a repository's branch protection. "
             "Read-only. Every run ends with a rotation-safety verdict, and exit 3 means "
             "rotating a credential is not safe yet — active persistence was found, or the "
             "persistence surface could not be verified."),
         examples=[
             ("saw audit", "hygiene, persistence, rotation verdict"),
-            ("saw audit --verify", "content-scan a weak ~/.node_modules"),
+            ("saw audit --verify", "content-scan what a weak signal names"),
             ("saw audit --repo Ndevu12/strix -f", "also gate on branch protection"),
             ("saw audit; echo $?", "3 = rotation UNSAFE"),
         ])
@@ -38,8 +39,8 @@ def register(sub) -> None:
     p.add_argument("--no-stream", action="store_true", dest="no_stream",
                    help="disable the per-check spinner and typewriter output (plain, instant)")
     p.add_argument("--verify", action="store_true", dest="verify_artifacts",
-                   help="content-scan a lone weak host artifact (e.g. ~/.node_modules) to corroborate "
-                        "it — slower; bounded and scans inside node_modules (does not touch saw scan)")
+                   help="content-scan what a weak signal points at, to corroborate it. Much "
+                        "slower, and bounded (does not touch saw scan)")
     p.set_defaults(func=run)
 
 

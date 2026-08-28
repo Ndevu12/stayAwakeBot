@@ -13,6 +13,16 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Added
+- **`saw audit` now reads the JavaScript an installed application loads.** That code belongs to the
+  application, not to a dependency — no manifest lists it and no lockfile covers it, so
+  reinstalling dependencies never reached it, and it is where a cleanup can be undone from. A
+  module it flags
+  is reported so you can check it against the publisher's copy; `saw audit --verify` looks harder at
+  one, and a confirmed result there is treated as an active foothold that holds credential rotation.
+  Applications are found by their layout rather than by a list of names, a tree reachable under two
+  paths is read once, and what the walk did not reach is reported rather than counted as clean.
+
 ### Changed
 - **A scan now says that it looked at the working tree only**, and names what it did not look at —
   earlier commits, other branches and tags. Any of them is one command away from being on disk

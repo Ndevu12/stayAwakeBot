@@ -26,6 +26,7 @@ from .os_service import check_persistence
 from .coverage import check_persistence_coverage
 from .autorun import check_autorun
 from .host_artifacts import check_host_artifacts
+from .app_bundle import check_app_bundles
 from .editor import check_vscode
 from .mechanism import check_ssh_authorized_keys, check_shell_profile, check_git_config_execution
 from .remote import check_branch_protection
@@ -37,6 +38,7 @@ __all__ = [
     "incident_response_sequence",
     "check_credentials", "check_runner_persistence", "check_persistence",
     "check_persistence_coverage", "check_autorun", "check_host_artifacts",
+    "check_app_bundles",
     "check_vscode", "check_ssh_authorized_keys", "check_shell_profile", "check_git_config_execution",
     "check_branch_protection", "audit", "audit_checks", "render",
 ]
@@ -69,6 +71,7 @@ def audit_checks(slug: str | None = None, token: str | None = None, branch: str 
         ("OS-service persistence", check_persistence),
         ("persistence surface coverage", check_persistence_coverage),   # enumeration honesty
         ("host drop-files", lambda: check_host_artifacts(verify=verify_artifacts)),
+        ("application bundles", lambda: check_app_bundles(verify=verify_artifacts)),
         ("SSH authorized_keys", check_ssh_authorized_keys),
         ("shell startup files", check_shell_profile),
         ("git exec config", check_git_config_execution),

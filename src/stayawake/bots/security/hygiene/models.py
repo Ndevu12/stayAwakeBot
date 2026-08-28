@@ -51,6 +51,8 @@ ACTIVE_PERSISTENCE_IDS = {"self-hosted-runner-persistence", "os-service-persiste
                           "host-drop-artifacts",
                           # a content-scan (--verify) found CONFIRMED worm code on the host
                           "host-artifact-content-infected",
+                          # worm code appended to a module an installed application loads at startup
+                          "app-bundle-payload",
                           # active mechanism-based persistence (a live backdoor, not just hardening)
                           "ssh-authorized-keys-forced-command", "shell-profile-fetch-exec",
                           "git-fsmonitor-command", "git-hookspath-unsafe", "git-config-fetch-exec",
