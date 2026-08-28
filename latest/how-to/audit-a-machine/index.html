@@ -1948,7 +1948,8 @@ the new one straight to whatever is running there.</p>
 <p>The verdict is also withheld when the start-up surface could not be established at all. A fresh
 account, a container and a destroyed home directory look identical from disk, so <code>saw</code> reports the
 ambiguity rather than picking one. If files you expect to be there are gone, <strong>image the disk before
-using the machine further</strong> — a delete leaves content recoverable, and continued use overwrites it.</p>
+using the machine further</strong>, <code>saw fix</code> included. How much survives depends on which wipe variant
+ran, which cannot be told from the host — and every write can overwrite whatever did.</p>
 <h2 id="credential-findings">Credential findings<a class="headerlink" href="#credential-findings" title="Permanent link">&para;</a></h2>
 <p>A token in your OS keychain is not automatically a problem, and deleting a credential path you
 actually use is an outage, not a fix. These findings inform rather than instruct: read <a href="../../explanation/credential-hygiene/">credential
