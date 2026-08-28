@@ -1,0 +1,20 @@
+---
+description: Always-on governing principles for stayAwakeBot / saw. Copied from CLAUDE.md — do not drift.
+alwaysApply: true
+---
+
+# stayAwakeBot / `saw`
+
+Read `AGENTS.md` (same text as `CLAUDE.md`) and the matching skill in `.cursor/skills/` before
+non-trivial work. Skills publish **obligations**, never detection mechanisms.
+
+1. **Zero downgrade.** Detection/perf changes are byte-identical in findings — prove it. Tighten, never downgrade.
+2. **Align first.** Plan before consequential/security code. Decide and recommend — no option menus.
+3. **Feature-branch PRs only.** Never push `main`. Rebase on `origin/main`. Bare `Closes #NNNN`. CHANGELOG `[Unreleased]` in the same PR for user-visible change. Signed commits. Merging/releasing are the maintainer's.
+4. **Security subtree.** Changes under `src/stayawake/bots/security/**` need the approach agreed before the PR, extra checks, and a draft PR until an adversarial round comes back clean.
+5. **Adversarial verify.** Parallel refuters, lens matched to the risk, re-verify until clean. Two rounds have never been enough.
+6. **Layers.** `utils → lib → core → bots → cli`. Import down-only. `test_layering` enforces it.
+7. **Offline & trust.** Accurate with zero flags. Only `-x/--external` leaves the sandbox. Allowlist is operator-owned. Fail closed.
+8. **Engineering.** Value before coverage. Measure before optimizing. Reuse before building. Right depth. Self-documenting names. Never comment a variable — fix the name.
+
+Tests are the spec. Never delete one to go green. Mutate the pin. Public surfaces say what a user observes.
