@@ -24,6 +24,11 @@ which analysis, where coverage ends, or how a control could be satisfied without
 protects. That material is maintained privately, because published detection mechanics are an
 evasion aid.
 
+**A map of where the tool looks — or does not look — is the same disclosure.** Enumerating the paths
+examined, or the surfaces skipped, tells a reader where to hide and tells an operator nothing they
+can act on. Public documentation states the **bound** — what a clean result covers and what it does
+not — never the locations. The same goes for output, help text and commit messages.
+
 Apply that test to every edit. "A detection change must be proven byte-identical before it ships" is
 an obligation and belongs here. Naming the specific inputs a detector keys on is a mechanism and does
 not — even when it would make the guidance more useful. If a skill feels thin because the useful

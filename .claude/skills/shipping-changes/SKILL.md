@@ -61,6 +61,21 @@ PR is the whole of a contributor's part in it, and it carries exactly three thin
 re-running it, and the version number is spent. Anything checkable before the tag must be checked
 before the tag.
 
+## Traps that fail a build after the review looks fine
+
+- **Touching the detection engine requires moving BOTH pinned SHAs**, to the same reviewed commit.
+  Bumping one fails a different check than not bumping either, so fix both at once and confirm with
+  the repository's own pin tooling before pushing.
+- **Renaming a documentation heading breaks every link to it**, and the docs build is strict — a
+  dangling anchor fails it. Re-sweep for the old anchor across docs, source and tests *after* the
+  rename, not before.
+- **A test that fakes the running platform for a whole command run** reaches libraries that key
+  their own behaviour off it, and then fails for a reason of its own making. Assert the rule, not
+  the platform.
+- **A pull request is tested merged with `main`.** A registry that is complete on your branch can be
+  incomplete against a probe someone else added while you worked. Rebase before assuming a failure
+  is spurious.
+
 ## gh-CLI & flags
 
 Descriptive kebab long names + single-letter shorts; drop a word that collides with a command
