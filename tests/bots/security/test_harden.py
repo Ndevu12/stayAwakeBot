@@ -44,6 +44,32 @@ class TestRunContract(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("could not be examined", text.lower())
 
+    def test_an_unexamined_table_is_refused(self):
+        from stayawake.bots.security.hygiene import process
+        from stayawake.utils.procsnap import Snapshot
+        apply = mock.Mock()
+        with mock.patch.object(process, "_snapshot", return_value=Snapshot()):
+            code, text = harden.run(
+                supported=lambda: True, privileged=lambda: True,
+                live=process.check_live_processes,
+                folders=lambda: [Path("/denial")], apply=apply)
+        self.assertEqual(code, 1)
+        self.assertIn("could not be examined", text.lower())
+        apply.assert_not_called()
+
+    def test_unread_arguments_on_an_examined_table_do_not_refuse(self):
+        from stayawake.bots.security.hygiene import process
+        from stayawake.utils.procsnap import Process, Snapshot
+        p = Path("/denial")
+        snap = Snapshot(processes=[Process(pid=1, argv_unreadable=True)], unreadable=1)
+        with mock.patch.object(process, "_snapshot", return_value=snap):
+            code, _ = harden.run(
+                supported=lambda: True, privileged=lambda: True,
+                live=process.check_live_processes,
+                folders=lambda: [p],
+                apply=lambda path: denial.PathOutcome(path, denial.ENFORCING, "in place"))
+        self.assertEqual(code, 0)
+
     def test_enforcing_only_when_every_target_reads_back(self):
         p = Path("/denial")
         code, text = harden.run(

@@ -49,7 +49,7 @@ def check_live_processes() -> list[HygieneIssue]:
     is code — the same answer the start-up checks use, so the two cannot disagree — and it is what
     keeps this off the whole process table. The obfuscation engine decides what that code is."""
     snapshot = _snapshot()
-    if not snapshot.supported:
+    if not snapshot.supported or not snapshot.processes:
         # Asked of the reader, not of the platform name: the registry that marks probes unimplemented
         # keys off a different question, and the two answer alike only on the platforms we run.
         return [HygieneIssue(
