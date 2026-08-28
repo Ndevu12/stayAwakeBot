@@ -24,6 +24,15 @@ KIND_GLOBAL_FOLDER = "node-global-folder"
 KIND_NPM_CACHE = "npm-cache"
 KIND_PIP_BOOTSTRAP = "pip-bootstrap"
 
+_TOOLCHAIN_THAT_LEAVES_EACH_KIND = {KIND_GLOBAL_FOLDER: "node", KIND_NPM_CACHE: "node",
+                                    KIND_PIP_BOOTSTRAP: "python"}
+
+
+def _toolchains_represented(weak: list[tuple[str, Path, str]]) -> set[str]:
+    """How many separate acts these indicators are evidence of. One command leaves a resolution path
+    and a cache together, so both are one act; a second toolchain is a second act."""
+    return {_TOOLCHAIN_THAT_LEAVES_EACH_KIND.get(kind, kind) for _desc, _path, kind in weak}
+
 
 def _distinct_dirs(paths: list[Path]) -> list[Path]:
     """`paths` with aliases of one real directory collapsed, in a stable order."""
@@ -242,11 +251,10 @@ def check_host_artifacts(verify: bool = False) -> list[HygieneIssue]:
     found = strong + weak_descs
     if not found:
         return []
-    kinds = {kind for _, _, kind in weak}
     corroborated = bool(strong) or len(weak) >= 2
 
     if corroborated:
-        active = bool(strong) or len(kinds) >= 2
+        active = bool(strong) or len(_toolchains_represented(weak)) >= 2
         issue = _corroborated_issue(found, active=active)
         if verify:
             issue = _escalate_with_scan(issue, weak)

@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest import mock
 
 from stayawake.bots.security.hygiene import host_artifacts
-from stayawake.bots.security.hygiene.models import ACTIVE_PERSISTENCE_IDS
+from stayawake.bots.security.hygiene.models import ACTIVE_PERSISTENCE_IDS, ROTATION_UNSAFE_IDS
 from stayawake.bots.security.matchers.structural import StructuralJsonMatcher, _conceals_itself
 from stayawake.bots.security.models import Severity
 from stayawake.bots.security.signatures import load_signatures
@@ -89,21 +89,19 @@ class TestAnAbortedScanNeverEscapes(unittest.TestCase):
                              ["host-drop-artifact-weak"])
 
 
-class TestCorroborationStillCountsOccurrences(unittest.TestCase):
-    """CHARACTERISATION — this locks in behaviour that is still wrong, so a fix has to change it
-    deliberately rather than by accident, and so the evidence is not lost.
+class TestCorroborationSeparatesIndicatorsByWhatMadeThem(unittest.TestCase):
+    """`saw#243` — two indicators one operator action creates were read as two votes, and reached the
+    tier whose advice is isolate, rebuild, rotate last.
 
-    `saw#243`: two weak indicators one operator action creates are read as corroboration and reach
-    the tier whose advice is isolate, rebuild, rotate last.
+    What separates them is the toolchain that would have produced each: one command leaves both a
+    resolution path and a cache, so those corroborate that something STAGED, never that something is
+    running. A second toolchain is a second act.
 
-    An attempted fix — require an indicator to hold something before it corroborates — is WITHDRAWN.
-    It is a false negative against a shipped contract: an empty global resolution folder is itself
-    the indicator, because the signal is that the directory exists in that location at all, not what
-    is in it (`test_host_artifact_shape`). Whatever closes #243 has to separate indicators by their
-    ORIGIN, and emptiness is not that. Recorded so the next attempt does not repeat it."""
+    A refuted earlier attempt, kept here so it is not tried again: requiring an indicator to hold
+    something. An empty global resolution folder IS the indicator — the signal is that the directory
+    exists in that location at all — so that rule was a false negative against `test_host_artifact_shape`."""
 
     def _weak(self, *kinds):
-        import tempfile
         out = []
         for kind in kinds:
             d = Path(tempfile.mkdtemp()) / "indicator"
@@ -111,31 +109,38 @@ class TestCorroborationStillCountsOccurrences(unittest.TestCase):
             out.append((str(d), d, kind))
         return out
 
-    def test_two_empty_indicators_of_different_kinds_reach_the_active_tier(self):
-        weak = self._weak(host_artifacts.KIND_GLOBAL_FOLDER, host_artifacts.KIND_NPM_CACHE)
-        with mock.patch.object(host_artifacts, "_host_artifacts", return_value=([], weak)):
-            issues = host_artifacts.check_host_artifacts()
-        self.assertEqual([i.id for i in issues], ["host-drop-artifacts"])
-        self.assertIn(issues[0].id, ACTIVE_PERSISTENCE_IDS)   # <- saw#243: not yet independent
+    def _ids(self, *kinds):
+        with mock.patch.object(host_artifacts, "_host_artifacts",
+                               return_value=([], self._weak(*kinds))):
+            return [i.id for i in host_artifacts.check_host_artifacts()]
 
-    def test_one_kind_in_two_places_is_staging_and_that_part_is_correct(self):
-        weak = self._weak(host_artifacts.KIND_GLOBAL_FOLDER, host_artifacts.KIND_GLOBAL_FOLDER)
-        with mock.patch.object(host_artifacts, "_host_artifacts", return_value=([], weak)):
-            self.assertEqual([i.id for i in host_artifacts.check_host_artifacts()],
-                             ["host-drop-artifacts-staging"])
+    def test_two_artifacts_of_one_toolchain_do_not_claim_a_live_implant(self):
+        ids = self._ids(host_artifacts.KIND_GLOBAL_FOLDER, host_artifacts.KIND_NPM_CACHE)
+        self.assertEqual(ids, ["host-drop-artifacts-staging"])
+        self.assertNotIn("host-drop-artifacts", ids)
+
+    def test_two_toolchains_are_two_acts_and_still_escalate(self):
+        ids = self._ids(host_artifacts.KIND_GLOBAL_FOLDER, host_artifacts.KIND_PIP_BOOTSTRAP)
+        self.assertEqual(ids, ["host-drop-artifacts"])
+        self.assertIn(ids[0], ACTIVE_PERSISTENCE_IDS)
+
+    def test_the_same_kind_in_two_places_is_still_staging(self):
+        self.assertEqual(self._ids(host_artifacts.KIND_NPM_CACHE, host_artifacts.KIND_NPM_CACHE),
+                         ["host-drop-artifacts-staging"])
 
     def test_a_single_indicator_never_corroborates_itself(self):
-        weak = self._weak(host_artifacts.KIND_GLOBAL_FOLDER)
-        with mock.patch.object(host_artifacts, "_host_artifacts", return_value=([], weak)):
-            self.assertEqual([i.id for i in host_artifacts.check_host_artifacts()],
-                             ["host-drop-artifact-weak"])
+        self.assertEqual(self._ids(host_artifacts.KIND_NPM_CACHE), ["host-drop-artifact-weak"])
 
-    def test_the_withdrawn_rule_would_have_dropped_a_real_indicator(self):
-        # The evidence that killed it, kept executable: an empty global resolution folder alongside
-        # a second kind must still reach a warning. Requiring content made this weak.
-        weak = self._weak(host_artifacts.KIND_GLOBAL_FOLDER, host_artifacts.KIND_PIP_BOOTSTRAP)
-        with mock.patch.object(host_artifacts, "_host_artifacts", return_value=([], weak)):
-            self.assertEqual([i.severity for i in host_artifacts.check_host_artifacts()], ["warning"])
+    def test_an_empty_indicator_still_counts(self):
+        # The refuted rule would have dropped this: the directory existing there is the signal.
+        self.assertTrue(self._ids(host_artifacts.KIND_GLOBAL_FOLDER))
+
+    def test_the_staging_tier_still_holds_rotation(self):
+        with mock.patch.object(host_artifacts, "_host_artifacts", return_value=(
+                [], self._weak(host_artifacts.KIND_GLOBAL_FOLDER, host_artifacts.KIND_NPM_CACHE))):
+            issue = host_artifacts.check_host_artifacts()[0]
+        self.assertIn(issue.id, ROTATION_UNSAFE_IDS)
+        self.assertIn("do NOT rotate", issue.remediation)
 
 
 if __name__ == "__main__":
