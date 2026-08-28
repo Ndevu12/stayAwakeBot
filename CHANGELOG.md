@@ -13,6 +13,9 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Changed
+- **Operator documentation describes the verdict, not process status.**
+
 ### Added
 - **`saw harden` creates host denials and only reports them as in place after a read-back.**
   It never touches a project's dependency tree. An unverifiable write is unknown, never success.

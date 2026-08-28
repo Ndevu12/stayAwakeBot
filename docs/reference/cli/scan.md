@@ -1,12 +1,12 @@
 ---
-description: saw scan — hunt for supply-chain worms across repositories. Read-only, and the exit code is the verdict. Full option reference.
+description: saw scan — hunt for supply-chain worms across repositories. Read-only. Full option reference.
 ---
 
 # `saw scan`
 
 Hunt for supply-chain worms across repositories or directories. The full report — with full match
 evidence — renders to stdout and **nothing is persisted** unless you ask for a sink; progress goes to
-stderr; the [exit code is the verdict](../exit-codes.md). `scan` never changes a file.
+stderr. `scan` never changes a file.
 
 ```text
 saw scan [TARGETS...] [-r] [--user U] [--org O] [-c FILE] [-p PATH] [-j N]
@@ -28,10 +28,10 @@ saw scan [TARGETS...] [-r] [--user U] [--org O] [-c FILE] [-p PATH] [-j N]
 | `-j`, `--jobs N` | Scan concurrently; see [shared flags](index.md#flags-shared-by-several-commands). A persisted report is byte-identical to a sequential run, and a worker that dies is an error, not a pass. |
 | `--no-stream` | Disable live progress. (Already off when piped, in CI, or with `STAYAWAKE_NO_STREAM=1`.) |
 | `--pager` | Page the report through `$PAGER` (default `less -R`). Off by default. |
-| `--no-advisories` | Omit the dependency CVE section. Advisories never change the verdict or exit code, so this only quiets the output. |
+| `--no-advisories` | Omit the dependency CVE section. Advisories never change the verdict, so this only quiets the output. |
 | `-x`, `--external` | **Opt-in; the only flag that leaves the offline sandbox.** Also runs *installed* external auditors (`osv-scanner`, …) and folds their vulnerabilities into the advisory tier — such a tool may send your dependency list to its own servers. Absent tools are skipped; the verdict never changes. |
 | `--deep` | **Opt-in, npm only:** also examine the contents of installed npm packages. Reading every dependency file adds roughly 10–60s on a large `node_modules`; the run stays offline and deterministic. |
-| `--require-db` | Exit `2` when the [advisory database](../advisory-db.md) is absent or fails its integrity check, instead of continuing without it — for CI that must not lose advisory coverage silently. |
+| `--require-db` | Fail the run when the [advisory database](../advisory-db.md) is absent or fails its integrity check, instead of continuing without it — for CI that must not lose advisory coverage silently. |
 
 ```bash
 saw scan                                  # the repository you are standing in

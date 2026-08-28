@@ -12,7 +12,7 @@ saw intro                 # a 60-second tour
 
 Then the docs:
 
-- [CLI command guide](docs/reference/cli/index.md) — every `saw` command, its flags, and its exit codes
+- [CLI command guide](docs/reference/cli/index.md) — every `saw` command and its flags
 - [Usage](docs/index.md) — install, secrets, GitHub Actions, deploying your own
 - [Configuration & Reports](docs/reference/configuration.md) — config fields and report formats
 - [Credential hygiene](docs/explanation/credential-hygiene.md) — what a cached-credential finding means

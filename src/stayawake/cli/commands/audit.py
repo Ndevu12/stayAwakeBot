@@ -60,7 +60,7 @@ def run(a: argparse.Namespace) -> int:
     # persistence surface that could not be verified withholds the all-clear → exit 3 ("rotation
     # unsafe / not verified"), regardless of -f, because rotating into a live wiper is data-loss. The
     # weaker hygiene warnings keep their opt-in gate (-f → 1). 3 is additive: every `rc==0`/`rc!=0`
-    # consumer fails safe, and it is distinct from infected(1)/error(2). See docs/reference/exit-codes.md.
+    # consumer fails safe, and it is distinct from infected(1)/error(2).
     if {i.id for i in issues} & hygiene.ROTATION_UNSAFE_IDS:
         return 3
     # A probe whose own discriminator failed did not answer, and an unanswered probe is the

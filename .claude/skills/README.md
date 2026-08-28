@@ -29,6 +29,9 @@ examined, or the surfaces skipped, tells a reader where to hide and tells an ope
 can act on. Public documentation states the **bound** — what a clean result covers and what it does
 not — never the locations. The same goes for output, help text and commit messages.
 
+**Operator documentation never mentions exit codes.** Process status is a CI implementation detail.
+Operators read the verdict on the report. There is no exit-codes page; do not recreate it.
+
 Apply that test to every edit. "A detection change must be proven byte-identical before it ships" is
 an obligation and belongs here. Naming the specific inputs a detector keys on is a mechanism and does
 not — even when it would make the guidance more useful. If a skill feels thin because the useful

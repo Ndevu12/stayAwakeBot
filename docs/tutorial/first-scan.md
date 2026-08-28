@@ -40,17 +40,16 @@ terminal.
 
 ## 3. Read the verdict
 
-The last line names the verdict, and the exit code repeats it (`saw scan; echo $?`):
+The last line names the verdict:
 
-| Verdict | Exit | What it means |
-| --- | --- | --- |
-| clean | `0` | Nothing was found, and every target was fully scanned. |
-| suspicious | `0` | Something wants a human look; it is not a confirmed infection. |
-| infected | `1` | Confirmed malicious content is present. |
-| error | `2` | A target could not be scanned — treat it as unknown, not clean. |
+| Verdict | What it means |
+| --- | --- |
+| clean | Nothing was found, and every target was fully scanned. |
+| suspicious | Something wants a human look; it is not a confirmed infection. |
+| infected | Confirmed malicious content is present. |
+| error | A target could not be scanned — treat it as unknown, not clean. |
 
-That is the whole CI contract: [verdicts](../explanation/verdicts.md) ·
-[exit codes](../reference/exit-codes.md).
+That is the whole CI contract: [verdicts](../explanation/verdicts.md).
 
 ## 4. Act
 

@@ -14,18 +14,19 @@ reference](../reference/cli/audit.md).
 saw audit                       # hygiene + start-up surface + rotation verdict
 saw audit --repo owner/name -f  # also gate on that repository's branch protection
 saw audit --verify              # content-scan a suspicious directory the audit flagged
-saw audit; echo $?
 ```
 
 ## Read the result
 
-| Exit | Meaning | Do this |
-| --- | --- | --- |
-| `0` | Nothing found, and rotating credentials from this host is safe. | Nothing. |
-| `1` | A weaker hygiene warning, and you passed `-f`. | Read it; act if it applies to you. |
-| `3` | **Rotation unsafe** — either something is running at start-up that should not be, or the start-up surface could not be established. | Below. |
+The report ends with a rotation-safety verdict.
 
-`3` gates whether or not you passed `-f`, because rotating a credential on a compromised host hands
+| Result | Do this |
+| --- | --- |
+| Nothing found, and rotating credentials from this host is safe. | Nothing. |
+| A weaker hygiene warning, and you passed `-f`. | Read it; act if it applies to you. |
+| **Rotation unsafe** — either something is running at start-up that should not be, or the start-up surface could not be established. | Below. |
+
+Rotation-unsafe gates whether or not you passed `-f`, because rotating a credential on a compromised host hands
 the new one straight to whatever is running there.
 
 ## On a rotation-unsafe result
@@ -49,9 +50,8 @@ Your machine did not let some checks finish — a tool they need is missing, or 
 not readable by you. Each one names what stopped it.
 
 Fix what it names and re-run, or inspect that surface yourself. Until you do, read the rest of the
-report as covering everything **except** those surfaces. The exit code says how much that costs you:
-`3` if one of them reads the start-up surface, so treat rotation as unsafe until you have checked it
-by hand; `2` otherwise.
+report as covering everything **except** those surfaces. If one of them reads the start-up surface,
+treat rotation as unsafe until you have checked it by hand.
 
 ## Credential findings
 

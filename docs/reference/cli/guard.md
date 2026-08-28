@@ -26,7 +26,7 @@ saw guard check [TARGETS...] [-p PATH] [-c FILE] [-r] [--user U] [--org O]
 | `TARGETS...` / `-p` / `-c` / `-r` / `--user` / `--org` / `-j` / `--no-stream` | As for [`saw scan`](scan.md). |
 | `--repo OWNER/NAME` | Shorthand for a single remote repository. |
 | `-b`, `--branch` | Branch whose protection must require the gate (default: `main`). |
-| `-f`, `--fail` | Exit `1` when any repository's gate is absent, unpinned, stale, or not required. |
+| `-f`, `--fail` | Fail the run when any repository's gate is absent, unpinned, stale, or not required. |
 
 ## `saw guard setup`
 
@@ -54,8 +54,8 @@ saw guard setup [TARGETS...] [-p PATH] [-c FILE] [--pr] [-r] [--user U] [--org O
 
 Keeps each repository gated and current by maintaining one de-duplicated, self-closing tracking
 issue: it opens the issue when a repository has no gate or its pin has fallen behind, and closes it
-once the repository is protected and current. It reports as an issue and never fails a build (exit
-`0`), so it is safe on a schedule.
+once the repository is protected and current. It reports as an issue and never fails a build, so it
+is safe on a schedule.
 
 ```text
 saw guard drift [TARGETS...] [-p PATH] [-c FILE] [-r] [--user U] [--org O] [--repo OWNER/NAME]

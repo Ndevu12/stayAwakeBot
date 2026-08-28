@@ -49,7 +49,7 @@ Three sections apply across commands: [remote targeting](remote.md), [report sin
 | --- | --- | --- |
 | `--json` | `scan`, `auth status`, `doctor`, `search` | Machine-readable output on stdout. |
 | `-q`, `--quiet` | `doctor`, `search` | Only the essentials. |
-| `-f`, `--fail` | `audit`, `guard check` | Exit non-zero on a warning-level issue. **`saw scan` has no `--fail`** — its exit code is the verdict unconditionally. |
+| `-f`, `--fail` | `audit`, `guard check` | Fail the run on a warning-level issue. **`saw scan` has no `--fail`** — the last line of the report is the verdict unconditionally. |
 | `--no-stream` | `scan`, `fix`, `discard`, `audit`, `guard`, `auth`, `db` | Plain instant lines instead of live progress. |
 | `-j`, `--jobs N` | `scan`, `fix`, `guard check`/`setup`/`drift` | Work on up to N repositories at once. Default `auto` (one repo sequential, several use one worker per core); `-j 1` forces sequential. On `scan` it also splits one large repository across workers. |
 

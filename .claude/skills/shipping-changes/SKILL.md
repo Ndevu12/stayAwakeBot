@@ -35,6 +35,10 @@ method is in the wrong repository.
 
 - **Update `CHANGELOG.md` `[Unreleased]` in the SAME PR** — don't let it drift.
 - Update the relevant `docs/` (reference/cli/index.md / how-to/ / etc.).
+- **Never mention exit codes in operator documentation.** No exit-codes page, no Exit tables, no
+  process-status numbers, no `echo $?`. Describe the **verdict** (clean, infected, unknown,
+  rotation unsafe, in place). CI still gates on process status; that contract is code and skills,
+  not a user-facing page. New changelog entries follow the same rule.
 
 **What an entry may say.** An entry describes what someone *using* the release observes: new or
 changed behaviour, flags, compatibility, and fixes they would notice. It does **not** describe

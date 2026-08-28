@@ -44,7 +44,7 @@ that is not required is decoration — anyone can merge past it.
 saw guard check -f
 ```
 
-`-f` makes it exit non-zero if the gate is absent, unpinned, stale, or not required, so this same
+`-f` makes it fail the run if the gate is absent, unpinned, stale, or not required, so this same
 line works as a CI step. Repeat for every repository at once with `--user` or `--org`:
 
 ```bash

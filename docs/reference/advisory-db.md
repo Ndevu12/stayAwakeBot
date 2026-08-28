@@ -14,7 +14,7 @@ saw db update -e npm -e pypi      # just these
 saw db status                     # fingerprint, age, per-ecosystem counts, integrity
 ```
 
-Advisories are reported alongside findings but **never change the verdict or the exit code** — a CVE
+Advisories are reported alongside findings but **never change the verdict** — a CVE
 in a dependency is not an infection. Quiet them for one run with `saw scan --no-advisories`.
 
 ## In CI
@@ -25,7 +25,7 @@ not lose that coverage silently, require it:
 ```bash
 saw db status --max-age-days 30                  # fail if the corpus is stale or missing
 saw db status --require-snapshot <digest>        # pin an exact snapshot for reproducibility
-saw scan --require-db                            # exit 2 rather than scan without it
+saw scan --require-db                            # fail rather than scan without it
 ```
 
 Unknown age counts as stale.

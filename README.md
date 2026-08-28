@@ -21,7 +21,7 @@ dependency tree, and your machine's start-up surface. It then remediates through
 and gates CI, so an infected change cannot merge.
 
 **Offline and accurate with zero flags.** A default scan needs no network and no configuration.
-`saw scan`'s exit code *is* the verdict, so a CI gate is one line.
+A CI gate is one line: run `saw scan`.
 
 | | |
 | --- | --- |
@@ -180,8 +180,8 @@ docker run --rm -v "$PWD:/repo:ro" ghcr.io/ndevu12/stayawakebot \
   saw scan /repo
 ```
 
-The exit code is the verdict (`0` clean, `1` findings). To keep the report file too, mount a
-writable dir and run as your own user so the bind-mount is writable:
+To keep the report file too, mount a writable dir and run as your own user so the bind-mount is
+writable:
 
 ```bash
 docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/repo" \
@@ -211,7 +211,7 @@ stayawake-health-check --config config/urls.yml
 - [Your first scan](docs/tutorial/first-scan.md) — install, scan, read the verdict, act
 - [Gate a repository](docs/tutorial/gate-a-repo.md) — from unguarded to a required check
 - [CLI reference](docs/reference/cli/index.md) — every command and flag, documented once
-- [Configuration](docs/reference/configuration.md) · [exit codes](docs/reference/exit-codes.md) · [advisory DB](docs/reference/advisory-db.md)
+- [Configuration](docs/reference/configuration.md) · [advisory DB](docs/reference/advisory-db.md)
 - [Trust model](docs/explanation/trust-model.md) · [verdicts](docs/explanation/verdicts.md) · [fail closed](docs/explanation/fail-closed.md) · [safety envelope](docs/explanation/safety-envelope.md)
 - [Credential hygiene](docs/explanation/credential-hygiene.md) — what a cached-credential finding means, and how to act on one safely
 - [Harden a repository](docs/how-to/harden-a-repo.md) — the layered baseline for any repo

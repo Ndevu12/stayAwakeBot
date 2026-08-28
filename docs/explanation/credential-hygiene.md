@@ -134,7 +134,7 @@ git config --get-all credential.helper   # shows: osxkeychain <newline> (blank) 
 
 ```bash
 security find-internet-password -s github.com          # macOS: presence (add -g to view the secret)
-secret-tool lookup server github.com >/dev/null; echo $?   # Linux (libsecret): 0 = present (secret discarded)
+secret-tool lookup server github.com >/dev/null        # Linux (libsecret): succeeds if present (secret discarded)
 cmdkey /list:git:https://github.com                    # Windows: show the Credential Manager entry
 ```
 
