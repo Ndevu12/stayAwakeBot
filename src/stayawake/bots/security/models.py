@@ -14,9 +14,11 @@ QUARANTINE_DIR = ".malware-quarantine"
 
 CONFIRMED = "confirmed"
 HEURISTIC = "heuristic"
-CONFIDENCE_LEVELS = (CONFIRMED, HEURISTIC)
+RESIDUE = "residue"
+CONFIDENCE_LEVELS = (CONFIRMED, HEURISTIC, RESIDUE)
 
 CLEAN = "clean"
+RESIDUE_VERDICT = "residue"
 SUSPICIOUS = "suspicious"
 INFECTED = "infected"
 
@@ -94,18 +96,25 @@ class ScanResult:
 
     @property
     def verdict(self) -> str:
-        """Three-state, confidence-graded repo verdict.
+        """Four-state, confidence-graded repo verdict.
 
         INFECTED only when at least one CONFIRMED finding is present (a signature
         decisive on its own). Findings that are all HEURISTIC — a shape benign code can
         share — are SUSPICIOUS: surfaced for review, but never asserted as malware. This
         is the honest replacement for the old `bool(findings)`, which labelled a base64
-        avatar or a crypto test vector "infected"."""
+        avatar or a crypto test vector "infected".
+
+        RESIDUE is the state neither of those could express: nothing here executes, and the
+        tree is not what the project would carry. Calling it clean hides that someone has
+        already been inside it; calling it infected starts an incident the evidence does not
+        support. It is the weakest state, so it can never mask one of the others."""
         if not self.findings:
             return CLEAN
         if any(f.confidence == CONFIRMED for f in self.findings):
             return INFECTED
-        return SUSPICIOUS
+        if any(f.confidence == HEURISTIC for f in self.findings):
+            return SUSPICIOUS
+        return RESIDUE_VERDICT
 
     @property
     def infected(self) -> bool:
@@ -116,6 +125,10 @@ class ScanResult:
     @property
     def suspicious(self) -> bool:
         return self.verdict == SUSPICIOUS
+
+    @property
+    def residue(self) -> bool:
+        return self.verdict == RESIDUE_VERDICT
 
     @property
     def max_severity(self) -> Severity | None:
@@ -145,6 +158,7 @@ class ScanResult:
             "verdict": self.verdict,
             "infected": self.infected,
             "suspicious": self.suspicious,
+            "residue": self.residue,
             "error": self.error,
             "summary": self.summary(),
             "findings": [f.to_dict() for f in self.findings],
@@ -174,6 +188,10 @@ class ScanReport:
         return any(r.suspicious for r in self.results)
 
     @property
+    def any_residue(self) -> bool:
+        return any(r.residue for r in self.results)
+
+    @property
     def any_error(self) -> bool:
         """True if any target could not be scanned (an unreadable/malformed config, a read
         failure, a failed clone). Such a target carries NO verdict — the gate must fail closed
@@ -189,6 +207,7 @@ class ScanReport:
                 "targets": len(results),
                 "infected": sum(1 for r in results if r.infected),
                 "suspicious": sum(1 for r in results if r.suspicious),
+                "residue": sum(1 for r in results if r.residue),
                 "findings": sum(len(r.findings) for r in results),
                 "critical": sum(1 for r in results for f in r.findings
                                 if f.severity.label() == "critical"),
@@ -198,6 +217,7 @@ class ScanReport:
             },
             "any_infected": self.any_infected,
             "any_suspicious": self.any_suspicious,
+            "any_residue": self.any_residue,
             "any_error": self.any_error,
             "results": [r.to_dict() for r in results],
         }

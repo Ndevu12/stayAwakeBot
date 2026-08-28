@@ -61,6 +61,8 @@ def _verdict(r: dict[str, Any]) -> tuple[int, str] | None:
         return 1, "SUSPECT"
     if r["error"]:
         return 2, "ERROR"
+    if r.get("residue"):
+        return 3, "RESIDUE"
     return None
 
 
@@ -77,7 +79,7 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False,
                     collapse_clean_over: int = 0, detail: bool = True) -> str:
     s = payload["summary"]
     header = (f"{s['targets']} targets · {s['infected']} infected · "
-              f"{s.get('suspicious', 0)} suspicious · "
+              f"{s.get('suspicious', 0)} suspicious · {s.get('residue', 0)} residue · "
               f"{s['findings']} findings ({s['critical']} critical, {s['high']} high)")
     if s.get("advisories"):
         header += f" {MARKER['meta']} {s['advisories']} advisories"
@@ -109,7 +111,8 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False,
         out.append(paint(f"… and {clean_n} clean repositor{'y' if clean_n == 1 else 'ies'} "
                          "— full inventory in the --json / -d report", STATUS["clean"], on=color))
 
-    flagged = [r for r in ordered if (r["infected"] or r.get("suspicious")) and r["findings"]]
+    flagged = [r for r in ordered
+               if (r["infected"] or r.get("suspicious") or r.get("residue")) and r["findings"]]
     if flagged and not detail:
         n = len(flagged)
         out += ["", f"Per-finding detail for {n} flagged "
@@ -164,6 +167,8 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False,
                         out.append(f"        {MARKER['detail']} details: {textsafe.plain(a['reference'])}")
     if s.get("suspicious"):
         out += ["", "suspicious = heuristic match(es) to review; not asserted as malware."]
+    if s.get("residue"):
+        out += ["", "residue = nothing here executes, but this is not what the project would carry."]
     notes = _coverage_notes(payload)
     if notes:
         out += ["", "Coverage notes (not gating):"] + [f"  {MARKER['info']} {n}" for n in notes]
@@ -234,24 +239,26 @@ def report_order(result: dict[str, Any]) -> tuple:
     answer it differently — it listed targets in scan order, so an infected repository could sit
     below a clean one in the file kept as the record."""
     verdict = _verdict(result)
-    return (verdict[0] if verdict else 3, -result["summary"]["total"], result["target"])
+    return (verdict[0] if verdict else 4, -result["summary"]["total"], result["target"])
 
 
 def render_markdown(payload: dict[str, Any]) -> str:
     s = payload["summary"]
     out = [f"# Security scan — {payload['generated_at']}", "",
            f"**{s['targets']} targets** · {s['infected']} infected · "
-           f"{s.get('suspicious', 0)} suspicious · "
+           f"{s.get('suspicious', 0)} suspicious · {s.get('residue', 0)} residue · "
            f"{s['findings']} findings ({s['critical']} critical, {s['high']} high)", "",
            "_Verdict: **infected** = a confirmed (high-confidence) signature matched; "
            "**suspicious** = only heuristic match(es) that benign code can also produce — "
-           "review, not asserted as malware._", "",
+           "review, not asserted as malware; **residue** = nothing here executes, but this is "
+           "not what the project would carry._", "",
            "| Target | Source | Status | Findings | Top severity |",
            "|--------|--------|--------|----------|--------------|"]
     for r in sorted(payload["results"], key=report_order):
         status = ("❌ INFECTED" if r["infected"]
                   else "🟡 SUSPICIOUS" if r.get("suspicious")
-                  else "⚠️ error" if r["error"] else "✅ clean")
+                  else "⚠️ error" if r["error"]
+                  else "🧹 RESIDUE" if r.get("residue") else "✅ clean")
         out.append(f"| {textsafe.table_cell(r['target'])} | {textsafe.table_cell(r['source'])} | "
                    f"{status} | "
                    f"{r['summary']['total']} | {r['summary']['max_severity'] or '—'} |")

@@ -14,6 +14,13 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
+- **A scan can now say `residue`.** A cleanup that backed a file up and then left it unchanged was
+  reported as either clean or infected, and both were wrong: nothing new executes there, but the
+  file is not what the project would carry. `residue` is the weakest verdict, so it can never mask
+  a suspicious or infected one, and it does not fire the CI gate — a scan that finds only residue
+  still exits `0`, and says so rather than reporting a clean bill of health. A cleanup that finished
+  leaves the tree clean, as before.
+
 - **`saw audit` now reads the JavaScript an installed application loads.** That code belongs to the
   application, not to a dependency — no manifest lists it and no lockfile covers it, so
   reinstalling dependencies never reached it, and it is where a cleanup can be undone from. A
