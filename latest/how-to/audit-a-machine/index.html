@@ -1989,8 +1989,9 @@ hygiene</a> before acting on one.</p>
 <p><strong>A clean audit is not a clean bill of health.</strong> It covers this machine, at this moment, over the
 surfaces this build examines — not your images, not your registries, not the accounts your machine
 is enrolled in, and not whether an installed file is the one its publisher released. Where a check
-could not run, or a surface is not covered on your platform, the run says so and treats credential
-rotation as unsafe rather than reporting a clean machine.</p>
+could not run, a location it needed could not be read, or a surface is not covered on your
+platform, the run says so and treats credential rotation as unsafe rather than reporting a clean
+machine.</p>
 <p>Three results not to over-read:</p>
 <ul>
 <li><strong>A green <code>saw guard</code> in CI says nothing about this machine.</strong> <code>guard</code> gates a repository; run
