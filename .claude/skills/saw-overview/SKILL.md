@@ -41,3 +41,26 @@ Scan scope is **local by default** (given paths / configured globs / current rep
 pager is opt-in (`--pager`), never default.
 
 Related: `engineering-standard`, `working-with-this-codebase`, `shipping-changes`.
+
+## Boundaries that settle questions before you reason about them
+
+Each of these was crossed in real work, and each crossing changed what a user was told.
+
+- **Silence is not a clean result — on every axis.** A check that could not run, a platform with no
+  implementation, a file that could not be read, a process the kernel would not describe: each
+  returns what a clean host returns. Say which one it was. A run that could not establish its answer
+  never exits `0`.
+- **A verdict that fires on an ordinary host is a defect, not caution.** It teaches operators to
+  ignore the one code that matters, which protects the real findings underneath. Narrow it to the
+  case that is actually a hole, and measure that it does not fire on a healthy machine.
+- **`saw` reports on the host, never on itself.** No internal vocabulary reaches an operator. What
+  they read is a condition of their machine and what to do about it — never that the tool may have
+  failed its own checks.
+- **`saw` may say what its own actions will destroy. It may not say what you can restore.** Advice
+  to back up or preserve costs nothing; enumerating or auditing recovery tooling is someone else's
+  capability, and out of scope.
+- **`audit` audits and reports.** Nothing in that path may signal, stop or end a process. Acting is a
+  different command's job, and it is gated on capture existing first.
+- **Escalate on corroboration, never on the trigger.** A condition a feature exists to provide is not
+  evidence of abuse of it, and two indicators one action creates are one act observed twice.
+

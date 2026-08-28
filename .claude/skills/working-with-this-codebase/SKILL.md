@@ -46,4 +46,42 @@ them to hunt only downsides. Consider all sides, but the objective is the best u
 honestly reject non-fitting ideas rather than force them. Adversarial *refuters*, used to gate a
 security change, are the deliberate opposite — don't conflate the two.
 
+## A passing test is not a pin — mutate it
+
+For every property that matters, revert the line that implements it and confirm the suite fails. A
+**surviving** mutation means one of two things, and both need action: the test does not cover the
+property, or the code is dead. An **anchor that did not match** is a false pass, not a pass — the
+harness has to report the miss, or you will read "OK" and believe it.
+
+Expect the first attempt to leave the load-bearing decision unpinned. That has been the norm here,
+not the exception, and the fixtures written to kill a surviving mutation are usually the best tests
+in the change.
+
+## Adversarial rounds: re-verify until clean
+
+Fixing a violation usually leaves the same class one level deeper — **including inside the fix you
+just wrote**. Re-run on the amended tree, fresh, and tell the verifiers which residuals are already
+accepted so they hunt new ground. Two rounds have never been enough; three has been.
+
+## Pace: run what you changed, let CI run everything
+
+The full suite is minutes; the affected modules are seconds. Run the modules locally, push, and let
+CI be the authority on the whole suite across every supported interpreter — it is faster, and it
+tests the platform matrix a single developer machine cannot.
+
+Never run two full suites at once; they contend and each takes twice as long.
+
+## Verify state, do not infer it
+
+Read merged state from the repository (`git show origin/main:<path>`), never from push output or from
+what you remember opening. Confirm an issue or PR number by reading it back before linking it. When
+you find something already shipped that a plan says is outstanding, say so instead of building it
+again.
+
+## Fix it where you found it
+
+Work that a change surfaces belongs in that change, not in a new ticket. File only what genuinely
+needs a decision someone else must make, and say in the issue why it could not simply be fixed. A
+backlog of things you noticed is not progress.
+
 Related: `engineering-standard`, `shipping-changes`.
