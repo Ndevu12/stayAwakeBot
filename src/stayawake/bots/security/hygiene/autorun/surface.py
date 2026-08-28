@@ -9,6 +9,7 @@ from hashlib import sha256
 from pathlib import Path
 
 from stayawake.utils import pathsafe
+from stayawake.utils.pathsafe import grade
 from .. import os_service
 
 
@@ -42,17 +43,28 @@ class AutorunEntry:
         return " ".join(self.argv) + "\n" + self.body
 
 
-def _iter_files(dirs, suffixes) -> list[Path]:
-    """Regular files under `dirs` whose name ends with one of `suffixes`. A missing/unreadable dir is
-    skipped; a non-regular entry is skipped (never opened) via the shared `pathsafe` guard."""
+def _iter_files(dirs, suffixes, unread: list) -> list[Path]:
     out: list[Path] = []
     for d in dirs:
+        state = grade(d)
+        if state == "absent":
+            continue
+        if state == "unverified":
+            unread.append(d)
+            continue
         try:
             entries = sorted(d.iterdir())
         except OSError:
+            unread.append(d)
             continue
-        out += [p for p in entries
-                if p.name.lower().endswith(suffixes) and pathsafe.is_regular_file(p)]
+        for p in entries:
+            if not p.name.lower().endswith(suffixes):
+                continue
+            state = grade(p)
+            if state == "unverified":
+                unread.append(p)
+            elif state == "ok" and pathsafe.is_regular_file(p):
+                out.append(p)
     return out
 
 
@@ -144,19 +156,20 @@ def _parse_systemd_unit(path: Path) -> AutorunEntry | None:
                         argv_is_exact=False)
 
 
-def enumerate_entries() -> list[AutorunEntry]:
+def enumerate_entries() -> tuple[list[AutorunEntry], list[Path]]:
     """Every autorun entry on the catastrophic persistence surface (launch agents + systemd user
     units/timers), parsed. Dispatch is by FILE EXTENSION across the user-owned persistence dirs
     (`.plist` → launch agent, `.service`/`.timer` → systemd) — not by directory name — so it is
     robust and testable. Order is deterministic (sorted by path within each type)."""
     dirs = os_service.user_persistence_dirs()
+    unread: list[Path] = []
     entries: list[AutorunEntry] = []
-    for p in _iter_files(dirs, (".plist",)):
+    for p in _iter_files(dirs, (".plist",), unread):
         e = _parse_launch_agent(p)
         if e is not None:
             entries.append(e)
-    for p in _iter_files(dirs, (".service", ".timer")):
+    for p in _iter_files(dirs, (".service", ".timer"), unread):
         e = _parse_systemd_unit(p)
         if e is not None:
             entries.append(e)
-    return entries
+    return entries, unread

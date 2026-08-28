@@ -66,8 +66,9 @@ hygiene](../explanation/credential-hygiene.md) before acting on one.
 **A clean audit is not a clean bill of health.** It covers this machine, at this moment, over the
 surfaces this build examines — not your images, not your registries, not the accounts your machine
 is enrolled in, and not whether an installed file is the one its publisher released. Where a check
-could not run, or a surface is not covered on your platform, the run says so and treats credential
-rotation as unsafe rather than reporting a clean machine.
+could not run, a location it needed could not be read, or a surface is not covered on your
+platform, the run says so and treats credential rotation as unsafe rather than reporting a clean
+machine.
 
 Three results not to over-read:
 

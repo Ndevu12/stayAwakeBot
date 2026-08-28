@@ -58,22 +58,35 @@ class _Surface(unittest.TestCase):
 class TestSurfaceParse(_Surface):
     def test_parses_launch_agent_exec_and_persistence(self):
         self.write("x.plist", ProgramArguments=["/tmp/p", "-q"], RunAtLoad=True, StartInterval=60)
-        (e,) = surface.enumerate_entries()
+        (e,) = surface.enumerate_entries()[0]
         self.assertEqual(e.exec_path, "/tmp/p")
         self.assertIn("run-at-load", e.persistence)
         self.assertIn("poll-interval=60s", e.persistence)
 
     def test_parses_systemd_execstart(self):
         (self.d / "w.service").write_text("[Service]\nExecStart=-/usr/bin/foo --bar\n[Install]\nWantedBy=default.target\n")
-        (e,) = surface.enumerate_entries()
+        (e,) = surface.enumerate_entries()[0]
         self.assertEqual(e.exec_path, "/usr/bin/foo")     # leading `-` modifier stripped
         self.assertIn("enabled", e.persistence)
 
     def test_non_regular_file_is_never_opened(self):
         if not hasattr(os, "mkfifo"):
             self.skipTest("no mkfifo")
-        os.mkfifo(self.d / "evil.plist")                  # a FIFO named like a plist would hang open()
-        self.assertEqual(surface.enumerate_entries(), [])  # skipped via pathsafe, returns quickly
+        fifo = self.d / "evil.plist"
+        os.mkfifo(fifo)                  # a FIFO named like a plist would hang open()
+        entries, unread = surface.enumerate_entries()
+        self.assertEqual(entries, [])
+        self.assertEqual(unread, [fifo])
+
+    @unittest.skipIf(os.getuid() == 0, "root bypasses permission bits")
+    def test_unlistable_dir_is_not_clean(self):
+        os.chmod(self.d, 0o000)
+        try:
+            issues = check_autorun()
+        finally:
+            os.chmod(self.d, 0o700)
+        self.assertEqual([i.id for i in issues], ["persistence-surface-unverified"])
+        self.assertEqual(issues[0].severity, "unknown")
 
 
 class TestProvenance(unittest.TestCase):
@@ -178,7 +191,7 @@ class TestDeadmanDaemon(_Surface):
     def test_deadman_reason_names_the_behaviour_not_the_endpoint(self):
         (self.d / "d.js").write_text(_DEADMAN)
         self.write("m.plist", ProgramArguments=[str(self.d / "d.js")], RunAtLoad=True, StartInterval=60)
-        (entry,) = surface.enumerate_entries()
+        (entry,) = surface.enumerate_entries()[0]
         sig = grade.content_signal(entry, read_referenced=True)
         self.assertTrue(sig.hit)
         self.assertTrue(any("self-destruct" in r for r in sig.reasons))      # the dead-man shape
@@ -192,7 +205,7 @@ class TestDeadmanDaemon(_Surface):
         (self.d / "updater.js").write_text(_BENIGN_TIMER)
         self.write("u.plist", ProgramArguments=["/usr/bin/node", str(self.d / "updater.js")],
                    StartInterval=60)
-        (entry,) = surface.enumerate_entries()
+        (entry,) = surface.enumerate_entries()[0]
         sig = grade.content_signal(entry, read_referenced=True)
         self.assertFalse(sig.hit)                                            # not decisive
         self.assertFalse(any("self-destruct" in r for r in sig.reasons))    # no dead-man reason
@@ -210,7 +223,7 @@ class TestDeadmanDaemon(_Surface):
         (scratch / "updater.js").write_text(_BENIGN_TIMER)
         self.write("u.plist", ProgramArguments=["/usr/bin/node", str(scratch / "updater.js")],
                    StartInterval=60)
-        (entry,) = surface.enumerate_entries()
+        (entry,) = surface.enumerate_entries()[0]
         sig = grade.content_signal(entry, read_referenced=True)
         self.assertTrue(sig.hit)
         self.assertIn("scratch", " ".join(sig.reasons))
@@ -231,7 +244,7 @@ class TestDeadmanDaemon(_Surface):
             f"[Service]\nExecStart=/usr/bin/node {self.d / 'd.js'}\n"
             "[Timer]\nOnUnitActiveSec=60\n[Install]\nWantedBy=default.target\n")
         # find the .service entry and confirm the systemd cadence is parsed as a short poll interval
-        entries = surface.enumerate_entries()
+        entries, _unread = surface.enumerate_entries()
         svc = next(e for e in entries if e.path.name == "w.service")
         sig = grade.content_signal(svc, read_referenced=True)
         self.assertTrue(any("short poll interval (60s)" in r for r in sig.reasons))

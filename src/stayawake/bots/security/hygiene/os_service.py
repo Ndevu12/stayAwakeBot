@@ -5,7 +5,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from .models import HygieneIssue, _WIPER_NOTE
+from stayawake.utils.pathsafe import grade
+
+from .models import HygieneIssue, _WIPER_NOTE, could_not_read
 
 _PERSIST_NAMED = "gh-token-monitor"
 _PERSIST_LOOKALIKE = re.compile(r"gh-token|token-monitor", re.IGNORECASE)
@@ -35,15 +37,23 @@ def user_persistence_dirs() -> tuple[Path, ...]:
             _launchd_dirs()[0])         # ~/Library/LaunchAgents    (macOS; absent elsewhere = N/A)
 
 
-def _scan_service_dirs(dirs, suffixes) -> list[tuple[Path, bool]]:
-    """(path, is_named) for unit/agent files whose NAME matches the wiper or a lookalike.
-    Read-only directory listing; a missing/unreadable dir is skipped (graceful degradation)."""
+def _scan_service_dirs(dirs, suffixes, *, note_unread: bool) -> tuple[list[tuple[Path, bool]], list[Path]]:
     hits: list[tuple[Path, bool]] = []
+    unread: list[Path] = []
     for d in dirs:
+        state = grade(d)
+        if state == "absent":
+            continue
+        if state == "unverified":
+            if note_unread:
+                unread.append(d)
+            continue
         try:
             entries = sorted(d.iterdir())
         except (OSError, ValueError):
-            continue                             # dir absent/unreadable — skip
+            if note_unread:
+                unread.append(d)
+            continue
         for p in entries:
             name = p.name.lower()
             if not name.endswith(suffixes):
@@ -52,7 +62,7 @@ def _scan_service_dirs(dirs, suffixes) -> list[tuple[Path, bool]]:
                 hits.append((p, True))
             elif _PERSIST_LOOKALIKE.search(name):
                 hits.append((p, False))
-    return hits
+    return hits, unread
 
 
 def check_persistence() -> list[HygieneIssue]:
@@ -61,10 +71,21 @@ def check_persistence() -> list[HygieneIssue]:
 
     SAFETY: its mere presence makes rotation dangerous, so the remediation sequences isolate +
     neutralize BEFORE any credential rotation (the wiper tripwire)."""
-    hits = (_scan_service_dirs(_systemd_unit_dirs(), (".service", ".timer"))
-            + _scan_service_dirs(_launchd_dirs(), (".plist",)))
+    user = set(user_persistence_dirs())
+    hits, unread = [], []
+    for dirs, suffixes in (
+            (_systemd_unit_dirs(), (".service", ".timer")),
+            (_launchd_dirs(), (".plist",))):
+        owned = [d for d in dirs if d in user]
+        other = [d for d in dirs if d not in user]
+        h, u = _scan_service_dirs(owned, suffixes, note_unread=True)
+        hits += h
+        unread += u
+        h, _ = _scan_service_dirs(other, suffixes, note_unread=False)
+        hits += h
+    extra = [could_not_read(unread)] if unread else []
     if not hits:
-        return []
+        return extra
     named = sorted({str(p) for p, is_named in hits if is_named})
     lookalike = sorted({str(p) for p, is_named in hits if not is_named})
     what = []
@@ -84,4 +105,4 @@ def check_persistence() -> list[HygieneIssue]:
                     f"rebuild from a known-clean image, then rotate LAST: {_WIPER_NOTE}.",
         command="systemctl --user disable --now <unit>\n"
                 "launchctl bootout gui/$UID/<label> && rm ~/Library/LaunchAgents/<label>.plist",
-    )]
+    )] + extra

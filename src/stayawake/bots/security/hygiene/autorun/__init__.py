@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from stayawake.utils import parallel
 
-from ..models import HygieneIssue
+from ..models import HygieneIssue, could_not_read
 from . import surface, provenance, baseline, grade
 
 __all__ = ["check_autorun", "surface", "provenance", "baseline", "grade"]
@@ -13,9 +13,10 @@ __all__ = ["check_autorun", "surface", "provenance", "baseline", "grade"]
 def check_autorun(jobs: int | None = None) -> list[HygieneIssue]:
     """The audit probe. Enumerate the autorun surface, attribute every entry (in parallel), fuse the
     signals, and return graded issues. Snapshots the surface for the next run's novelty diff."""
-    entries = surface.enumerate_entries()
+    entries, unread = surface.enumerate_entries()
+    issues: list[HygieneIssue] = [could_not_read(unread)] if unread else []
     if not entries:
-        return []
+        return issues
 
     workers = parallel.resolve_jobs(jobs, len(entries))
     outcomes = parallel.run_ordered(provenance.attribute, entries, jobs=workers,
@@ -28,7 +29,6 @@ def check_autorun(jobs: int | None = None) -> list[HygieneIssue]:
     novel = baseline.novelty(entries, base)
     correlated = grade.correlate(entries, attributed)
 
-    issues: list[HygieneIssue] = []
     for entry, attrib in zip(entries, attribs):
         read_ref = not attrib.attributed or grade.launched_via_interpreter(entry)
         shape = grade.content_signal(entry, read_referenced=read_ref)

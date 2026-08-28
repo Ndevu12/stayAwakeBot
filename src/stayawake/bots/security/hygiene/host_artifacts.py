@@ -4,21 +4,22 @@ from __future__ import annotations
 
 import getpass
 import os
+import pathlib
 import socket
 import sys
 import tempfile
 from dataclasses import replace
 from pathlib import Path
 
-from stayawake.utils.pathsafe import canonical_id
+from stayawake.utils.pathsafe import canonical_id, grade
 
-from .models import HygieneIssue, _WIPER_NOTE
+from .models import HygieneIssue, _WIPER_NOTE, could_not_read
 
 #
 # drop-files this wave stages on a developer host — downloaded tooling and stolen data bundled
 # before exfil. Some are weak on their own (a stray ~/.node_modules, an npm cache), so a LONE weak
-# indicator is `info`; a strong, specific IoC or a corroborated set (>=2) is a `warning`. A positive
-# Every probe is a read-only stat/listdir and degrades to nothing when a path is absent/unreadable.
+# indicator is `info`; a strong, specific IoC or a corroborated set (>=2) is a `warning`. A path that
+# exists but cannot be read is reported, not treated as clean.
 
 KIND_GLOBAL_FOLDER = "node-global-folder"
 KIND_NPM_CACHE = "npm-cache"
@@ -56,17 +57,30 @@ def _host_user_tag() -> str | None:
     return f"{host}${user}" if host and user else None
 
 
-def _first_child_named(directory: Path, prefix: str) -> Path | None:
+def _unreadable(unread: list[Path], path: Path) -> bool:
+    if grade(path) == "unverified":
+        unread.append(path)
+        return True
+    return False
+
+
+def _first_child_named(directory: Path, prefix: str, unread: list[Path]) -> Path | None:
+    state = grade(directory)
+    if state == "unverified":
+        unread.append(directory)
+        return None
+    if state != "ok":
+        return None
     try:
         for entry in sorted(directory.iterdir()):
             if entry.name.startswith(prefix):
                 return entry
     except OSError:
-        pass
+        unread.append(directory)
     return None
 
 
-def _sideloaded_python_dir() -> Path | None:
+def _sideloaded_python_dir(unread: list[Path]) -> Path | None:
     """A Windows `%LOCALAPPDATA%\\…\\Python3127\\` dir carrying the sideloaded interpreter/archiver
     (python.exe/python.zip/python.7z/7zr.exe). No-op off Windows (LOCALAPPDATA unset)."""
     local = os.environ.get("LOCALAPPDATA")
@@ -76,52 +90,60 @@ def _sideloaded_python_dir() -> Path | None:
     for pattern in ("Python3127", "*/Python3127", "*/*/Python3127"):   # bounded, not a full walk
         try:
             for d in Path(local).glob(pattern):
+                if _unreadable(unread, d):
+                    continue
                 try:
                     if d.is_dir() and {f.name.lower() for f in d.iterdir()} & sideload:
                         return d
                 except OSError:
+                    unread.append(d)
                     continue
         except OSError:
-            continue
+            unread.append(Path(local))
+            break
     return None
 
 
-def _staged_secret_scanner(dirs) -> Path | None:
+def _staged_secret_scanner(dirs, unread: list[Path]) -> Path | None:
     """A trufflehog secret-scanner BINARY staged in a cache/temp dir (T1588.002/T1552). Matches a
     FILE only — trufflehog's own `~/.cache/trufflehog` DIR (a legit user's cache) is not a hit."""
     for d in dirs:
         for name in ("trufflehog", "trufflehog.exe"):
             p = d / name
+            if _unreadable(unread, p):
+                continue
             try:
                 if p.is_file():
                     return p
             except OSError:
-                continue
+                unread.append(p)
     return None
 
 
-def _host_artifacts() -> tuple[list[str], list[tuple[str, Path, str]]]:
-    """Return (strong, weak) detected host-IoC drop artifacts. `strong` are descriptions; `weak` are
-    (description, path, kind) triples: the path so a caller can content-scan it, the kind so grading
-    can ask what KINDS of evidence there are rather than how many strings were appended."""
+def _host_artifacts() -> tuple[list[str], list[tuple[str, Path, str]], list[Path]]:
+    """Return (strong, weak, unread). `weak` are (description, path, kind) triples."""
     home = Path.home()
     tmp_dirs = _distinct_dirs([Path("/tmp"), Path(tempfile.gettempdir())])
     strong: list[str] = []
     weak: list[tuple[str, Path, str]] = []
+    unread: list[Path] = []
 
     def _present(p: Path) -> bool:
+        if _unreadable(unread, p):
+            return False
         try:
             return p.exists()
         except OSError:
+            unread.append(p)
             return False
 
     def _present_dir(p: Path) -> bool:
-        """Existence is not the test when the indicator is described as a TREE. A regular file at
-        `~/.node_modules` is what prevention guidance tells operators to CREATE, to deny the staging
-        path — so accepting it reported the hardened host as the compromised one."""
+        if _unreadable(unread, p):
+            return False
         try:
             return p.is_dir()
         except OSError:
+            unread.append(p)
             return False
 
     # Weak drop-files — a single low-confidence indicator each. Described NEUTRALLY (not "payload"):
@@ -148,18 +170,18 @@ def _host_artifacts() -> tuple[list[str], list[tuple[str, Path, str]]]:
 
     tag = _host_user_tag()
     if tag:
-        for d in (home, home / ".npm", *tmp_dirs, Path.cwd()):
-            match = _first_child_named(d, tag)
+        for d in (home, home / ".npm", *tmp_dirs, pathlib.Path.cwd()):
+            match = _first_child_named(d, tag, unread)
             if match is not None:
                 strong.append(f"{match} (<host>$<user> exfil staging archive)")
                 break
-    sideloaded = _sideloaded_python_dir()
+    sideloaded = _sideloaded_python_dir(unread)
     if sideloaded is not None:
         strong.append(f"{sideloaded} (sideloaded Python3127 interpreter)")
-    scanner = _staged_secret_scanner((home / ".cache", home / ".npm", *tmp_dirs))
+    scanner = _staged_secret_scanner((home / ".cache", home / ".npm", *tmp_dirs), unread)
     if scanner is not None:
         strong.append(f"{scanner} (staged secret-scanner binary)")
-    return strong, weak
+    return strong, weak, unread
 
 
 
@@ -246,11 +268,12 @@ def check_host_artifacts(verify: bool = False) -> list[HygieneIssue]:
     `verify=True` (the `saw audit --verify` opt-in) content-scans a lone weak *directory*
     to turn it into an actual verdict: CONFIRMED worm markers inside → `warning`; scanned
     clean → a reassuring `info`; too large / unreadable → the same honest 'verify it yourself'."""
-    strong, weak = _host_artifacts()
+    strong, weak, unread = _host_artifacts()
     weak_descs = [desc for desc, _, _ in weak]
     found = strong + weak_descs
+    extra = [could_not_read(dict.fromkeys(unread))] if unread else []
     if not found:
-        return []
+        return extra
     corroborated = bool(strong) or len(weak) >= 2
 
     if corroborated:
@@ -258,23 +281,21 @@ def check_host_artifacts(verify: bool = False) -> list[HygieneIssue]:
         issue = _corroborated_issue(found, active=active)
         if verify:
             issue = _escalate_with_scan(issue, weak)
-        return [issue]
+        return [issue] + extra
     if verify:
         graded, _failure = _scan_or_reason(weak[0][:2])
         if graded is not None:
-            return graded
-    return [HygieneIssue(          # a single WEAK, unverified indicator — surface honestly, don't accuse
+            return graded + extra
+    return [HygieneIssue(
         id="host-drop-artifact-weak",
         severity="info",
         title="Unusual file/dir on this host (weak supply-chain indicator)",
-        # The benign cause is NAMED, not merely asserted: a reader cannot clear the finding
-        # themselves if we blame a command that could not have produced the path.
         detail="Found: " + "; ".join(found) + ". A weak, single indicator: ordinary tooling creates "
                "these too (Node's GLOBAL_FOLDERS, a pip bootstrap), so on its own this is not "
                "evidence of malware.",
         remediation="Check whether it is yours (inspect the contents). If not, isolate the host and "
                     f"rotate credentials LAST: {_WIPER_NOTE}. `saw audit --verify` content-scans it.",
-    )]
+    )] + extra
 
 
 def _scan_or_reason(item: tuple[str, Path]) -> tuple[list[HygieneIssue] | None, str | None]:
@@ -292,10 +313,12 @@ def _verify_weak_artifact(item: tuple[str, Path]) -> list[HygieneIssue] | None:
     honest 'verify it yourself' info. The scanner import is LOCAL so the default audit (no
     `--verify`) never pulls the scan engine in."""
     desc, path = item
+    if grade(path) == "unverified":
+        return [could_not_read([path])]
     try:
         is_dir = path.is_dir()
     except OSError:
-        is_dir = False
+        return [could_not_read([path])]
     if not is_dir:
         return None
     from stayawake.bots.security.verify import verify_dir   # opt-in only — keep the default audit lean
