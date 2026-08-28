@@ -16,6 +16,7 @@ CHECKED_CLEAN = "checked-clean"
 FOUND = "found"
 UNKNOWN = "unknown"
 BLOCKED = "blocked"
+NOT_IMPLEMENTED = "not-implemented"
 
 
 @dataclass(frozen=True)
