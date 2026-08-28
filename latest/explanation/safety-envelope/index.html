@@ -132,7 +132,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#description-what-saw-is-allowed-to-change-and-what-it-will-not-touch-scan-is-read-only-fix-writes-only-to-its-own-branch-nothing-lands-without-a-merge" class="md-skip">
+        <a href="#description-what-saw-is-allowed-to-change-and-what-it-will-not-touch-scan-is-read-only-fix-writes-the-cleanup-branch-and-on-a-confirmed-infection-the-installed-tree-in-this-repository-nothing-lands-without-a-merge" class="md-skip">
           Skip to content
         </a>
       
@@ -1592,10 +1592,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#description-what-saw-is-allowed-to-change-and-what-it-will-not-touch-scan-is-read-only-fix-writes-only-to-its-own-branch-nothing-lands-without-a-merge" class="md-nav__link">
+  <a href="#description-what-saw-is-allowed-to-change-and-what-it-will-not-touch-scan-is-read-only-fix-writes-the-cleanup-branch-and-on-a-confirmed-infection-the-installed-tree-in-this-repository-nothing-lands-without-a-merge" class="md-nav__link">
     <span class="md-ellipsis">
       
-        description: What saw is allowed to change and what it will not touch: scan is read-only, fix writes only to its own branch, nothing lands without a merge.
+        description: What saw is allowed to change and what it will not touch: scan is read-only, fix writes the cleanup branch and, on a confirmed infection, the installed tree in this repository, nothing lands without a merge.
       
     </span>
   </a>
@@ -1810,10 +1810,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#description-what-saw-is-allowed-to-change-and-what-it-will-not-touch-scan-is-read-only-fix-writes-only-to-its-own-branch-nothing-lands-without-a-merge" class="md-nav__link">
+  <a href="#description-what-saw-is-allowed-to-change-and-what-it-will-not-touch-scan-is-read-only-fix-writes-the-cleanup-branch-and-on-a-confirmed-infection-the-installed-tree-in-this-repository-nothing-lands-without-a-merge" class="md-nav__link">
     <span class="md-ellipsis">
       
-        description: What saw is allowed to change and what it will not touch: scan is read-only, fix writes only to its own branch, nothing lands without a merge.
+        description: What saw is allowed to change and what it will not touch: scan is read-only, fix writes the cleanup branch and, on a confirmed infection, the installed tree in this repository, nothing lands without a merge.
       
     </span>
   </a>
@@ -1929,7 +1929,7 @@
 
 
 <hr />
-<h2 id="description-what-saw-is-allowed-to-change-and-what-it-will-not-touch-scan-is-read-only-fix-writes-only-to-its-own-branch-nothing-lands-without-a-merge">description: What saw is allowed to change and what it will not touch: scan is read-only, fix writes only to its own branch, nothing lands without a merge.<a class="headerlink" href="#description-what-saw-is-allowed-to-change-and-what-it-will-not-touch-scan-is-read-only-fix-writes-only-to-its-own-branch-nothing-lands-without-a-merge" title="Permanent link">&para;</a></h2>
+<h2 id="description-what-saw-is-allowed-to-change-and-what-it-will-not-touch-scan-is-read-only-fix-writes-the-cleanup-branch-and-on-a-confirmed-infection-the-installed-tree-in-this-repository-nothing-lands-without-a-merge">description: What saw is allowed to change and what it will not touch: scan is read-only, fix writes the cleanup branch and, on a confirmed infection, the installed tree in this repository, nothing lands without a merge.<a class="headerlink" href="#description-what-saw-is-allowed-to-change-and-what-it-will-not-touch-scan-is-read-only-fix-writes-the-cleanup-branch-and-on-a-confirmed-infection-the-installed-tree-in-this-repository-nothing-lands-without-a-merge" title="Permanent link">&para;</a></h2>
 <h1 id="the-safety-envelope">The safety envelope<a class="headerlink" href="#the-safety-envelope" title="Permanent link">&para;</a></h1>
 <p>What <code>saw</code> is allowed to change, and what it will not touch. A security tool that damages a working
 repository gets uninstalled, so the boundaries are deliberately narrow.</p>
@@ -1938,10 +1938,11 @@ repository gets uninstalled, so the boundaries are deliberately narrow.</p>
 verdict. Remediation lives in a separate command, on purpose — so no one can trip into it, and so
 <code>scan</code> is safe to run on anything.</p>
 <h2 id="fix-writes-only-to-its-own-branch"><code>fix</code> writes only to its own branch<a class="headerlink" href="#fix-writes-only-to-its-own-branch" title="Permanent link">&para;</a></h2>
-<p><code>saw fix</code> prepares the cleanup on a generated <code>security/auto-clean</code> branch and stops. It does not
-touch your working tree, push, or open anything unless you pass <code>--pr</code>, and re-running updates the
-same rolling pull request instead of opening another. <code>saw discard</code> removes only that branch and that
-PR — never a branch you made.</p>
+<p><code>saw fix</code> prepares the cleanup on a generated <code>security/auto-clean</code> branch and stops. Source changes
+land on that branch. It does not push or open anything unless you pass <code>--pr</code>, and re-running updates
+the same rolling pull request instead of opening another. On a confirmed infection it also removes
+the installed tree, generated build outputs, and the lockfile in this repository (the lockfile is
+kept on CI). <code>saw discard</code> removes only that branch and that PR — never a branch you made.</p>
 <p>Nothing lands without a human merge. The CI gate follows the same rule: on an infected verdict it
 opens the fix as a pull request and stays <strong>red until you merge it</strong>. Remediation opens the fix; it
 never makes the check pass.</p>

@@ -1798,8 +1798,8 @@ alias, for scripts where a three-letter name might clash on <code>PATH</code>.</
 </tr>
 <tr>
 <td><a href="fix/"><code>fix</code></a></td>
-<td>Prepare the cleanup on a <code>security/auto-clean</code> branch</td>
-<td>that branch only; pushes with <code>--pr</code></td>
+<td>Prepare the cleanup on a <code>security/auto-clean</code> branch; on confirmed infection also removes the installed tree in this repository</td>
+<td>that branch; the installed tree, build outputs, and lockfile in this repository (lockfile kept on CI); pushes with <code>--pr</code></td>
 </tr>
 <tr>
 <td><a href="discard/"><code>discard</code></a></td>

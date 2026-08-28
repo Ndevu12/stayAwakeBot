@@ -1892,7 +1892,8 @@ terminal.</p>
 <h2 id="4-act">4. Act<a class="headerlink" href="#4-act" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>infected</strong> → <a href="../../how-to/fix-findings/">fix the findings</a>. <code>saw fix</code> prepares the cleanup on a
-  branch for you to review; it never edits your working tree.</li>
+  branch for you to review. On a confirmed infection it also removes the installed tree in this
+  repository.</li>
 <li><strong>suspicious</strong> → read the report and decide. Nothing here is auto-fixed.</li>
 <li><strong>error</strong> → resolve what could not be read, then scan again.</li>
 <li><strong>clean</strong> → keep it that way: <a href="../gate-a-repo/">gate the repository's CI</a>, and install

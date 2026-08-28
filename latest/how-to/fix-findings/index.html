@@ -1857,9 +1857,10 @@
 
 
 <h1 id="fix-findings">Fix findings<a class="headerlink" href="#fix-findings" title="Permanent link">&para;</a></h1>
-<p><code>saw fix</code> cleans an infected repository <strong>on a branch</strong>, for you to review. It never edits your
-working tree, and it pushes nothing unless you ask. Flags: <a href="../../reference/cli/fix/">CLI
-reference</a>.</p>
+<p><code>saw fix</code> cleans an infected repository <strong>on a branch</strong>, for you to review. Source changes land
+there and it pushes nothing unless you ask. On a confirmed infection it also removes the installed
+tree, generated build outputs, and the lockfile in this repository (the lockfile is kept on CI).
+Flags: <a href="../../reference/cli/fix/">CLI reference</a>.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw<span class="w"> </span>fix<span class="w"> </span>.<span class="w">                  </span><span class="c1"># prepare security/auto-clean for this repository — no push, no network</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>git<span class="w"> </span>diff<span class="w"> </span>main...security/auto-clean
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>saw<span class="w"> </span>fix<span class="w"> </span>--pr<span class="w">               </span><span class="c1"># also push and open (or update) one rolling PR per repository</span>
