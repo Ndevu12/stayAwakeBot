@@ -265,6 +265,63 @@ class TestApplyOne(unittest.TestCase):
         self.assertEqual(out.state, denial.OCCUPIED)
         self.assertTrue((target / "payload").exists())
 
+    def test_a_linked_parent_is_not_created_through(self):
+        victim = self.d / "victim"
+        victim.mkdir()
+        (victim / "KEEPME").write_text("x")
+        parent = self.d / "parent"
+        parent.symlink_to(victim)
+        target = parent / "denial"
+        with mock.patch.object(hostdenial, "holds", return_value=False):
+            out = denial.apply_one(target)
+        self.assertEqual(out.state, denial.UNKNOWN)
+        self.assertFalse((victim / "denial").exists())
+        self.assertEqual({p.name for p in victim.iterdir()}, {"KEEPME"})
+
+    def test_a_linked_ancestor_is_not_created_through(self):
+        victim = self.d / "victim"
+        victim.mkdir()
+        prefix = self.d / "prefix"
+        prefix.symlink_to(victim)
+        target = prefix / "lib" / "node"
+        with mock.patch.object(hostdenial, "holds", return_value=False):
+            out = denial.apply_one(target)
+        self.assertEqual(out.state, denial.UNKNOWN)
+        self.assertEqual(list(victim.iterdir()), [])
+
+    def test_a_root_owned_system_link_is_still_created_under(self):
+        victim = self.d / "real"
+        victim.mkdir()
+        parent = self.d / "link"
+        parent.symlink_to(victim)
+        target = parent / "denial"
+        link_st = parent.lstat()
+        root_owned = mock.Mock()
+        root_owned.st_mode = link_st.st_mode
+        root_owned.st_uid = 0
+        real_lstat = Path.lstat
+        def lstat(self_path):
+            if self_path == parent:
+                return root_owned
+            return real_lstat(self_path)
+        with mock.patch.object(hostdenial, "holds", return_value=False), \
+             mock.patch.object(Path, "lstat", lstat), \
+             mock.patch("stayawake.bots.security.harden.denial.os.chown"), \
+             mock.patch.object(hostdenial, "set_immutable", return_value=False):
+            out = denial.apply_one(target)
+        self.assertEqual(out.state, denial.UNKNOWN)
+        self.assertTrue((victim / "denial").is_dir())
+
+    def test_a_missing_path_under_real_parents_is_created(self):
+        target = self.d / "lib" / "node_modules"
+        with mock.patch.object(hostdenial, "holds", return_value=False), \
+             mock.patch("stayawake.bots.security.harden.denial.os.chown"), \
+             mock.patch.object(hostdenial, "set_immutable", return_value=False):
+            out = denial.apply_one(target)
+        self.assertEqual(out.state, denial.UNKNOWN)
+        self.assertTrue(target.is_dir())
+        self.assertFalse(target.is_symlink())
+
     def test_mode_writes_pass_follow_symlinks_false(self):
         target = self.d / "empty"
         target.mkdir()

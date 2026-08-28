@@ -25,7 +25,9 @@ reader, not the mechanism or the weakness it closed.
   anything else.
 
 ### Fixed
-- **A host write does not follow a symbolic link, and a path that is no longer empty is not frozen.**
+- **A host control is created where it was named.** A write does not follow a symbolic link, a
+  location that is no longer empty is not frozen, and a link anyone but root could have placed on
+  the way to that location is refused rather than written through.
 - **A check of running processes that examined none of them is no longer a clean result.** Applying
   a host control is refused in that case, not applied.
 - **A location a check could not read is no longer reported as a clean result.** Those checks
