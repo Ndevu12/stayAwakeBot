@@ -21,6 +21,14 @@ reader, not the mechanism or the weakness it closed.
   it treats credential rotation as unsafe until you have looked yourself.
 
 ### Added
+- **`saw audit` now examines the code that running processes were handed.** A loader passed to an
+  interpreter as an argument never touches the disk, so every check that reads files was looking in
+  the wrong place — and that is the shape a real incident took. An audit now reports one when it
+  finds it, holds credential rotation, and tells you to capture the process before you end it. It
+  also says how many processes it was not permitted to read, and says so outright where the system
+  will not hand arguments over at all, so a quiet result is not read as covering the whole machine.
+  It reports; it never stops or ends anything.
+
 - **A scan can now say `residue`.** A cleanup that backed a file up and then left it unchanged was
   reported as either clean or infected, and both were wrong: nothing new executes there, but the
   file is not what the project would carry. `residue` is the weakest verdict, so it can never mask

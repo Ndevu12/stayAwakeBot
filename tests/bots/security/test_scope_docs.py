@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""The scope note points at a page. That page has to name every gap, or the pointer is a lie.
+"""The scope note points at a page. That page has to bound what a clean result means.
 
-The list used to print after every run; it moved to the docs because a paragraph of things saw did
-not do is noise at the end of a clean audit. Moving it is only safe while the page really carries it
-— an unnamed axis reads as coverage of that axis, which is the defect the note exists to remove.
+It used to enumerate every surface examined and every one skipped. That list is a map of where to
+hide, and it is worth less to an operator than the bound is: what a clean result covers, and what it
+does not. So the page states the consequence, and this pins the consequence rather than the map.
 """
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import pathlib
 import unittest
 
 _DOCS = pathlib.Path(__file__).resolve().parents[3] / "docs/how-to/audit-a-machine.md"
-_ANCHOR = "### What `saw audit` does not scan"
+_ANCHOR = "### What a clean audit does and does not mean"
 
 
 class TestTheScopePageNamesEveryGap(unittest.TestCase):
@@ -24,12 +24,23 @@ class TestTheScopePageNamesEveryGap(unittest.TestCase):
         nxt = text.find("\n### ", start + 1)
         self.section = text[start:nxt if nxt != -1 else len(text)]
 
-    def test_every_axis_is_named(self):
-        for gap in ("survivor temp dirs", "global npm prefix", "Docker", "mounted filesystems",
-                    "organization", "Windows autorun", "Run keys", "Startup folder",
-                    "Scheduled Tasks"):
-            with self.subTest(gap=gap):
-                self.assertIn(gap, self.section)
+    def test_it_bounds_what_a_clean_result_covers(self):
+        for bound in ("this machine", "at this moment", "not your images",
+                      "not the accounts", "publisher released"):
+            with self.subTest(bound=bound):
+                self.assertIn(bound, self.section)
+
+    def test_it_says_an_unrun_check_is_not_a_clean_one(self):
+        self.assertIn("could not run", self.section)
+        self.assertIn("rotation as unsafe", self.section)
+
+    def test_it_does_not_publish_where_the_tool_looks(self):
+        # A list of the paths examined, and of the ones skipped, is a map of where to hide. An
+        # operator acts on the bound; only someone tuning against the tool needs the locations.
+        for location in ("/tmp", "$TMPDIR", "npm prefix", "Run keys", "Startup folder",
+                         "Scheduled Tasks", "LaunchAgents", "systemd", "node_modules"):
+            with self.subTest(location=location):
+                self.assertNotIn(location, self.section)
 
     def test_it_says_a_clean_audit_is_not_a_clean_bill_of_health(self):
         self.assertIn("not a clean bill of health", self.section)

@@ -18,9 +18,8 @@ def register(sub) -> None:
         sub, "audit", aliases=["au"],
         help="hygiene + branch-protection audit",
         description=(
-            "Audit local security hygiene: credential exposure, editor settings, host "
-            "persistence and drop-artifacts, the JavaScript installed applications load, and "
-            "optionally a repository's branch protection. "
+            "Audit this machine's security posture, and optionally a repository's branch "
+            "protection. "
             "Read-only. Every run ends with a rotation-safety verdict, and exit 3 means "
             "rotating a credential is not safe yet — active persistence was found, or the "
             "persistence surface could not be verified."),

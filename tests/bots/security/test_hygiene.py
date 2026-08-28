@@ -1161,13 +1161,13 @@ class TestScanScopeHonesty(unittest.TestCase):
         self.assertIn("Scope:", out)             # but bounds the claim
         # The gap LIST is pinned on the docs page by test_scope_docs; the terminal carries the
         # caveat and the link that reaches it.
-        for gap in ("#what-saw-audit-does-not-scan", "Not exhaustive"):
+        for gap in ("#what-a-clean-audit-does-and-does-not-mean", "Not exhaustive"):
             self.assertIn(gap, out)                           # names the gaps explicitly
 
     def test_scope_note_present_when_findings_exist(self):
         out = hygiene.render([hygiene.HygieneIssue("x", "warning", "T", "D", "F")])
         self.assertIn("Scope:", out)
-        self.assertIn("#what-saw-audit-does-not-scan", out)
+        self.assertIn("#what-a-clean-audit-does-and-does-not-mean", out)
 
     def test_the_gap_list_stays_reachable_and_the_account_axis_is_on_it(self):
         # A gap list that omits an axis reads as COVERAGE of it. The LIST moved to the docs, so the
@@ -1176,7 +1176,7 @@ class TestScanScopeHonesty(unittest.TestCase):
         for issues in ([], [hygiene.HygieneIssue("x", "warning", "T", "D", "F")]):
             out = self._flowed(issues)
             self.assertIn("Not exhaustive", out)
-            self.assertIn("#what-saw-audit-does-not-scan", out)
+            self.assertIn("#what-a-clean-audit-does-and-does-not-mean", out)
 
     def test_scope_note_names_only_paths_the_probe_actually_reads(self):
         # The note must not claim a path the probe does not read (/var/tmp is deferred to #1378) nor
@@ -1386,7 +1386,7 @@ class TestPlatformBoundaryIsDisclosed(unittest.TestCase):
         for platform in ("darwin", "linux", "win32"):
             note = self._note(platform)
             self.assertIn("Not exhaustive", note, f"the caveat is missing on {platform}")
-            self.assertIn("#what-saw-audit-does-not-scan", note, f"no gap link on {platform}")
+            self.assertIn("#what-a-clean-audit-does-and-does-not-mean", note, f"no gap link on {platform}")
 
     def test_on_windows_it_does_not_claim_to_read_a_persistence_surface(self):
         # The one gap that must stay on the TERMINAL: a Windows user reading "no findings" has to

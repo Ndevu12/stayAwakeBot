@@ -53,6 +53,8 @@ ACTIVE_PERSISTENCE_IDS = {"self-hosted-runner-persistence", "os-service-persiste
                           "host-artifact-content-infected",
                           # worm code appended to a module an installed application loads at startup
                           "app-bundle-payload",
+                          # code running right now that never touched the disk
+                          "live-obfuscated-process",
                           # active mechanism-based persistence (a live backdoor, not just hardening)
                           "ssh-authorized-keys-forced-command", "shell-profile-fetch-exec",
                           "git-fsmonitor-command", "git-hookspath-unsafe", "git-config-fetch-exec",
@@ -94,8 +96,9 @@ SURFACE_ABSENT_ID = "persistence-surface-not-established"
 BLOCKED_ID = "check-blocked"
 BLOCKED_SURFACE_ID = "surface-check-blocked"
 SURFACE_NOT_IMPLEMENTED_ID = "persistence-surface-not-implemented"
+PROCESSES_NOT_READABLE_ID = "process-arguments-not-readable"
 UNVERIFIED_PERSISTENCE_IDS = {SURFACE_UNREADABLE_ID, SURFACE_ABSENT_ID, BLOCKED_SURFACE_ID,
-                              SURFACE_NOT_IMPLEMENTED_ID}
+                              SURFACE_NOT_IMPLEMENTED_ID, PROCESSES_NOT_READABLE_ID}
 
 ROTATION_UNSAFE_IDS = ACTIVE_PERSISTENCE_IDS | UNVERIFIED_PERSISTENCE_IDS | UNCONFIRMED_STAGING_IDS
 

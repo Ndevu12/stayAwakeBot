@@ -58,31 +58,22 @@ A token in your OS keychain is not automatically a problem, and deleting a crede
 actually use is an outage, not a fix. These findings inform rather than instruct: read [credential
 hygiene](../explanation/credential-hygiene.md) before acting on one.
 
-### What `saw audit` does not scan
+### What a clean audit does and does not mean
 
-`saw audit` reads the host persistence surface, a targeted set of known drop-paths — your home
-directory, `/tmp`, the system temp dir, the working directory — and the JavaScript that installed
-applications load. Use `saw audit --verify` to look harder at what it flags; it is much slower.
+`saw audit` reads this machine's start-up surface and the code it finds running. Use
+`saw audit --verify` to look harder at what it flags; it is much slower.
 
-**It does not scan** — so a clean audit is not a clean bill of health for any of these:
-
-| not scanned | why it matters |
-| --- | --- |
-| other survivor temp dirs | a payload staged where `$TMPDIR` does not point survives a reboot |
-| the global npm prefix, beyond Node's own resolution paths | a globally installed package is not read |
-| Docker images and volumes | a compromised image is untouched by a host scan |
-| other mounted filesystems | only the paths above are walked |
-| account and organization state | a self-hosted runner registered against the org survives a host rebuild |
-| Windows autorun | Run keys, the Startup folder and Scheduled Tasks are not covered yet — an audit there says so and treats rotation as unsafe, rather than reporting a clean machine |
-| an application shipped as a packed archive | only unpacked application trees are read |
-| editor and browser extensions | enumerated nowhere |
-| whether a file is what its publisher shipped | nothing is compared against a published copy |
+**A clean audit is not a clean bill of health.** It covers this machine, at this moment, over the
+surfaces this build examines — not your images, not your registries, not the accounts your machine
+is enrolled in, and not whether an installed file is the one its publisher released. Where a check
+could not run, or a surface is not covered on your platform, the run says so and treats credential
+rotation as unsafe rather than reporting a clean machine.
 
 Three results not to over-read:
 
 - **A green `saw guard` in CI says nothing about this machine.** `guard` gates a repository; run
   `saw audit` on the machine itself.
-- **A clean editor result covers settings only.** An application's own JavaScript is checked
-  separately; neither result stands in for the other.
-- **A clean result over an application's own JavaScript is not proof the application is untouched.**
-  Treat it as one signal among several.
+- **A clean editor result covers settings only.** An application's own code is checked separately;
+  neither result stands in for the other.
+- **A clean result over an application's own code is not proof the application is untouched.** Treat
+  it as one signal among several.
