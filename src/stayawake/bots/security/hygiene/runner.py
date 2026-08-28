@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from typing import Callable
 
 from .models import HygieneIssue, _WIPER_NOTE
 
@@ -47,6 +48,56 @@ def _is_runner_label(name: str) -> bool:
     return name.startswith("actions.runner.")
 
 
+def _label_shaped(field: str) -> bool:
+    """What a service label looks like to both managers: dotted, alphabetic, and not a path. Each
+    clause replaced a value the read column actually held once that column had moved."""
+    if "." not in field or field.startswith(".") or field.endswith("."):
+        return False
+    if any(bad in field for bad in ("/", "\\", "=")):
+        return False
+    return any(part.isalpha() for part in field.replace("-", "_").split("."))
+
+
+_LAUNCHCTL = ["launchctl", "list"]
+_SYSTEMCTL_SCOPES = (["--system"], ["--user"])
+_SYSTEMCTL_VERBS = ("list-units", "list-unit-files")
+
+
+def _run_tool(cmd: list[str]) -> str | None:
+    """The tool's stdout, or None when it is absent or refuses. One helper, and `errors="replace"`
+    so a byte a locale cannot decode is not the difference between an answer and silence."""
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, errors="replace", timeout=10)
+    except (FileNotFoundError, OSError, subprocess.SubprocessError):
+        return None
+    return r.stdout if r.returncode == 0 else None
+
+
+def _launchctl_fields(out: str) -> list[str]:
+    """The field of each `launchctl list` row that the label is expected to occupy. The extractor
+    and its discriminator both read THIS, so neither can drift into reading a different column."""
+    return [parts[-1] for parts in (ln.split() for ln in out.splitlines()[1:]) if parts]
+
+
+def _systemctl_fields(out: str) -> list[str]:
+    return [parts[0] for parts in (ln.split() for ln in out.splitlines()) if parts]
+
+
+def _service_listings() -> list[tuple[str, list[str], Callable[[str], list[str]]]]:
+    """(name, argv, field selector) for EVERY listing the check reads.
+
+    The check and its discriminator walk this one list, so a scope the check depends on cannot end
+    up unchecked."""
+    listings: list[tuple[str, list[str], Callable[[str], list[str]]]] = [
+        ("launchctl", _LAUNCHCTL, _launchctl_fields)]
+    for scope in _SYSTEMCTL_SCOPES:
+        for verb in _SYSTEMCTL_VERBS:
+            listings.append((f"systemctl {scope[0].lstrip('-')} {verb}",
+                             ["systemctl", *scope, verb, "--type=service", "--all",
+                              "--no-legend", "--plain"], _systemctl_fields))
+    return listings
+
+
 def _runner_services() -> list[str]:
     """Best-effort list of registered self-hosted-runner service labels on this host.
 
@@ -54,34 +105,40 @@ def _runner_services() -> list[str]:
     via `list-unit-files` too, so an installed-but-not-started unit is seen, not just running
     ones. Absent tools / missing session buses degrade to a no-op. Order-preserving de-dup."""
     found: list[str] = []
-    try:                                    # macOS launchd — actions.runner.<...>
-        r = subprocess.run(["launchctl", "list"], capture_output=True, text=True, timeout=10)
-        if r.returncode == 0:
-            for ln in r.stdout.splitlines():
-                parts = ln.split()
-                if parts and _is_runner_label(parts[-1]):
-                    found.append(parts[-1])
-    except (FileNotFoundError, OSError, subprocess.SubprocessError, IndexError):
-        pass
-    for scope in (["--system"], ["--user"]):    # Linux systemd — system + user managers
-        for verb in ("list-units", "list-unit-files"):
-            try:
-                r = subprocess.run(
-                    ["systemctl", *scope, verb, "--type=service", "--all",
-                     "--no-legend", "--plain"],
-                    capture_output=True, text=True, timeout=10)
-            except (FileNotFoundError, OSError, subprocess.SubprocessError):
-                scope = None
-                break
-            if r.returncode != 0:
-                continue
-            for ln in r.stdout.splitlines():
-                parts = ln.split()
-                if parts and _is_runner_label(parts[0]):
-                    found.append(parts[0])
-        if scope is None:
-            break
+    for _name, cmd, fields in _service_listings():
+        out = _run_tool(cmd)
+        if out is not None:
+            found += [f for f in fields(out) if _is_runner_label(f)]
     return list(dict.fromkeys(found))            # de-dup, preserve order
+
+
+def services_predicate() -> str | None:
+    """Prove the label extractor is still reading the column labels are in.
+
+    It reads the SAME listings through the SAME field selection the check uses: a discriminator that
+    re-derives the parse drifts from it, and the drift shows up as a miss or a false alarm.
+
+    Two things are deliberately NOT blocks: a host with no service manager, where a service-
+    registered runner cannot exist, and one listing that answers with no rows, which an idle user
+    manager legitimately does."""
+    answered = 0
+    with_rows = 0
+    for name, cmd, fields in _service_listings():
+        out = _run_tool(cmd)
+        if out is None:
+            continue
+        answered += 1
+        rows = fields(out)
+        if not rows:
+            continue
+        with_rows += 1
+        if sum(_label_shaped(f) for f in rows) * 2 <= len(rows):
+            return (f"This host's `{name}` output is not in a form this check can read, so a "
+                    "runner registered as a service would not have been seen.")
+    if answered and not with_rows:
+        return ("The service managers on this host answered with nothing to read, so a runner "
+                "registered as a service would not have been seen.")
+    return None
 
 
 def check_runner_persistence() -> list[HygieneIssue]:

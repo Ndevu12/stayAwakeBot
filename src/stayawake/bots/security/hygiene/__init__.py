@@ -11,6 +11,7 @@ from pathlib import Path   # noqa: F401  re-exported so tests can patch hygiene.
 from typing import Callable
 
 from .models import (HygieneIssue, INCIDENT_TRIGGER_IDS, ACTIVE_PERSISTENCE_IDS,
+                     BLOCKED_ID, BLOCKED_SURFACE_ID,
                      CREDENTIAL_EXPOSURE_IDS, UNVERIFIED_PERSISTENCE_IDS, ROTATION_UNSAFE_IDS,
                      SURFACE_UNREADABLE_ID, SURFACE_ABSENT_ID,
                      ROTATION_SAFE, ROTATION_SAFE_PENDING_CHECK,
@@ -20,15 +21,17 @@ from .models import (HygieneIssue, INCIDENT_TRIGGER_IDS, ACTIVE_PERSISTENCE_IDS,
                      TIER_ACTIVE_PERSISTENCE, TIER_CREDENTIAL_EXPOSURE, incident_tier,
                      persistence_surface_is_enumerable, response_order, rotation_safety,
                      incident_response_sequence, credential_exposure_note)
-from .credentials import check_credentials
-from .runner import check_runner_persistence
+from .outcome import (CheckOutcome, run_probe, CHECKED_CLEAN, FOUND, UNKNOWN, BLOCKED)
+from .credentials import check_credentials, keychain_predicate
+from .runner import check_runner_persistence, services_predicate
 from .os_service import check_persistence
 from .coverage import check_persistence_coverage
 from .autorun import check_autorun
 from .host_artifacts import check_host_artifacts
 from .app_bundle import check_app_bundles
 from .editor import check_vscode
-from .mechanism import check_ssh_authorized_keys, check_shell_profile, check_git_config_execution
+from .mechanism import (check_ssh_authorized_keys, check_shell_profile,
+                        check_git_config_execution, git_config_predicate)
 from .remote import check_branch_protection
 from stayawake.utils import textsafe
 from stayawake.utils.render import MARKER, SEVERITY, block, marked_list, paint
@@ -40,8 +43,39 @@ __all__ = [
     "check_persistence_coverage", "check_autorun", "check_host_artifacts",
     "check_app_bundles",
     "check_vscode", "check_ssh_authorized_keys", "check_shell_profile", "check_git_config_execution",
-    "check_branch_protection", "audit", "audit_checks", "render",
+    "check_branch_protection", "audit", "audit_checks", "audit_outcomes", "run_check", "render",
+    "CheckOutcome", "CHECKED_CLEAN", "FOUND", "UNKNOWN", "BLOCKED",
 ]
+
+_PREDICATES: dict[str, Callable[[], str | None]] = {
+    "cached credentials": keychain_predicate,
+    "self-hosted runner": services_predicate,
+    "git exec config": git_config_predicate,
+}
+
+_SURFACE_PROBES = frozenset({
+    "VS Code settings", "self-hosted runner", "OS-service persistence",
+    "persistence surface coverage", "host drop-files", "SSH authorized_keys",
+    "shell startup files", "git exec config", "autorun surface", "application bundles",
+})
+
+_NON_SURFACE_PROBES = frozenset({"cached credentials", "branch protection"})
+
+
+def run_check(label: str, check: Callable[[], list[HygieneIssue]]) -> CheckOutcome:
+    """One probe's outcome — the ONE place a probe's own self-test is looked up and applied, so the
+    streaming CLI and the all-at-once path cannot differ on whether a check was trusted."""
+    return run_probe(label, check, _PREDICATES.get(label),
+                     certifies_surface=label not in _NON_SURFACE_PROBES)
+
+
+def audit_outcomes(slug: str | None = None, token: str | None = None, branch: str = "main",
+                   *, verify_artifacts: bool = False) -> list[CheckOutcome]:
+    """Every probe's OUTCOME rather than only its findings — what it established, and whether it
+    was in a position to establish anything."""
+    return [run_check(label, check)
+            for label, check in audit_checks(slug, token, branch,
+                                             verify_artifacts=verify_artifacts)]
 
 def audit(slug: str | None = None, token: str | None = None,
           branch: str = "main", *, verify_artifacts: bool = False) -> list[HygieneIssue]:
@@ -49,11 +83,11 @@ def audit(slug: str | None = None, token: str | None = None,
 
     Delegates to audit_checks() so the SINGLE definition of what an audit runs is shared with the
     streaming CLI — neither may hand-assemble its own subset (that omission is how a probe once got
-    silently dropped)."""
-    issues: list[HygieneIssue] = []
-    for _label, check in audit_checks(slug, token, branch, verify_artifacts=verify_artifacts):
-        issues += check()
-    return issues
+    silently dropped). A caller that needs to know whether a check was in a position to answer, and
+    not only what it found, wants `audit_outcomes()`: the issue list alone cannot say."""
+    return [issue
+            for outcome in audit_outcomes(slug, token, branch, verify_artifacts=verify_artifacts)
+            for issue in outcome.issues]
 
 
 def audit_checks(slug: str | None = None, token: str | None = None, branch: str = "main",
@@ -167,10 +201,11 @@ def _unknown_surface_disclosure(issues: list[HygieneIssue], *, color: bool, widt
 
     The FIX renders here too: `unknown` items are split out of the finding groups, so this is their
     only home, and printing the problem without the instruction said rotation was unsafe and never
-    what would resolve it."""
+    what would resolve it. A BLOCKED check is the exception — it has a home of its own that names
+    which check went quiet, which this line cannot."""
     lines: list[str] = []
     for i in issues:
-        if i.id not in UNVERIFIED_PERSISTENCE_IDS:
+        if i.id not in UNVERIFIED_PERSISTENCE_IDS or i.id in _BLOCKED_IDS:
             continue
         lines += block(_safe(i.detail), indent=5, width=width)
         lines += block(_safe(i.remediation), indent=5, width=width,
@@ -203,7 +238,7 @@ def _scope_note(issues: list[HygieneIssue], *, color: bool, width: int) -> list[
       a responder needs the compromise scoped WIDER than this list, not a clean-run caveat.
     """
     ids = {i.id for i in issues}
-    surface_unverified = SURFACE_UNREADABLE_ID in ids
+    surface_unverified = bool(ids & {SURFACE_UNREADABLE_ID, BLOCKED_SURFACE_ID})
     if not persistence_surface_is_enumerable():
         surface_read = "no host persistence surface is enumerated on this platform"
     elif surface_unverified:
@@ -239,6 +274,26 @@ def _scope_note(issues: list[HygieneIssue], *, color: bool, width: int) -> list[
                               marker=f"{MARKER['meta']} ", code=SEVERITY["info"], color=color)]
 
 
+_BLOCKED_IDS = {BLOCKED_ID, BLOCKED_SURFACE_ID}
+
+
+def _blocked_block(issues: list[HygieneIssue], *, color: bool, width: int) -> list[str]:
+    """The checks that did not run — neither a finding nor the absence of one, so printed on its own,
+    under every headline including the reassuring ones, where it is most easily missed."""
+    blocked = [i for i in issues if i.id in _BLOCKED_IDS]
+    if not blocked:
+        return []
+    out = [paint(f"{MARKER['warning']}  Not checked — this run did not cover these:",
+                 SEVERITY["warning"], on=color)]
+    for issue in blocked:
+        out.append(f"  {paint(MARKER['unknown'], SEVERITY['warning'], on=color)} "
+                   f"{paint(_safe(issue.title), SEVERITY['warning'], on=color)}")
+        out += block(_safe(issue.detail), indent=5, width=width)
+        out += block(_safe(issue.remediation), indent=5, width=width,
+                     marker=f"{MARKER['detail']} fix  ", code=SEVERITY["info"], color=color)
+    return out + [""]
+
+
 def render(issues: list[HygieneIssue], *, color: bool = False, width: int = 80) -> str:
     """Human-facing audit report. `color` (ANSI, gated by the caller via
     core.terminal.supports_color) and `width` (terminal columns, from core.render.term_width)
@@ -258,18 +313,25 @@ def render(issues: list[HygieneIssue], *, color: bool = False, width: int = 80) 
 
     warnings = worst_first(i for i in issues if i.severity == "warning")
     reviews = worst_first(i for i in issues if i.severity == "info")
+    unrun = _blocked_block(issues, color=color, width=width)
 
     if not (warnings or reviews):
         ids = {i.id for i in issues}
         if SURFACE_ABSENT_ID in ids:
+            # This one leads even when a check was also blocked: it is the destroyed-home reading,
+            # and it was lost when "some checks did not run" was tested ahead of it.
             head = "Local security hygiene: nothing was found because nothing was there to examine."
+            if unrun:
+                head += " Some checks did not run either."
+        elif unrun:
+            head = "Local security hygiene: nothing was found, and some checks did not run."
         elif ids & UNVERIFIED_PERSISTENCE_IDS:
             head = "Local security hygiene: no findings, but the persistence surface is UNVERIFIED."
         else:
             head = f"{MARKER['ok']} Local security hygiene: no issues found."
         code = SEVERITY["ok"] if "no issues" in head else SEVERITY["warning"]
-        return "\n".join([paint(head, code, on=color), ""] + rotation
-                         + [""] + _scope_note(issues, color=color, width=width)).rstrip()
+        return "\n".join([paint(head, code, on=color), ""] + rotation + [""] + unrun
+                         + _scope_note(issues, color=color, width=width)).rstrip()
 
     counts = []
     if warnings:
@@ -283,6 +345,7 @@ def render(issues: list[HygieneIssue], *, color: bool = False, width: int = 80) 
     banner = _banner({i.id for i in issues}, color=color, width=width)
     if banner:
         lines += banner + [""]
+    lines += unrun
 
     show_headers = bool(warnings) and bool(reviews)
     for gtitle, gsub, gsev, items in (

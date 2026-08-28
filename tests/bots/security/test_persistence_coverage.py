@@ -74,6 +74,88 @@ class TestCoverageState(unittest.TestCase):
         self.assertEqual(box["r"], "unverified")
 
 
+class TestTheRecordsInsideADirectoryAreCertifiedToo(unittest.TestCase):
+    """Listing a start-up directory certifies the FOLDER. The records inside it are what a probe
+    reads, so they are what has to be readable for that probe's silence to mean anything."""
+
+    def _graded(self, home):
+        with mock.patch.object(coverage.os_service, "user_persistence_dirs",
+                               return_value=(home / "Library" / "LaunchAgents",)), \
+             mock.patch.object(coverage.runner, "user_runner_dirs", return_value=()), \
+             mock.patch.object(coverage.mechanism, "shell_rc_locations",
+                               return_value=(home / ".zshrc",)):
+            return coverage.check_persistence_coverage()
+
+    def _home(self):
+        home = Path(tempfile.mkdtemp())
+        (home / "Library" / "LaunchAgents").mkdir(parents=True)
+        (home / ".zshrc").write_text("export X=1\n", encoding="utf-8")
+        return home
+
+    def test_a_readable_agent_leaves_the_surface_certified(self):
+        home = self._home()
+        (home / "Library" / "LaunchAgents" / "com.example.plist").write_text(
+            "<plist/>", encoding="utf-8")
+        self.assertEqual(self._graded(home), [])
+
+    def test_one_unreadable_agent_does_not_hide_its_siblings(self):
+        # A regression pin: one unreadable child must not take its siblings out of the listing.
+        home = self._home()
+        agents = home / "Library" / "LaunchAgents"
+        for name in ("a.plist", "b.plist", "c.plist"):
+            (agents / name).write_text("<plist/>", encoding="utf-8")
+        os.chmod(agents, 0o600)                      # listable, not searchable: stat on each fails
+        try:
+            issues = self._graded(home)
+        finally:
+            os.chmod(agents, 0o755)
+        self.assertEqual([i.id for i in issues], ["persistence-surface-unverified"])
+        for name in ("a.plist", "b.plist", "c.plist"):
+            self.assertIn(name, issues[0].detail, f"{name} was dropped with its sibling")
+
+    def test_a_symlinked_record_is_certified_like_any_other(self):
+        # A package manager commonly symlinks agents into place; only the filesystem shape differs.
+        home = self._home()
+        elsewhere = home / "elsewhere.plist"
+        elsewhere.write_text("<plist/>", encoding="utf-8")
+        os.chmod(elsewhere, 0o000)
+        os.symlink(elsewhere, home / "Library" / "LaunchAgents" / "com.example.plist")
+        try:
+            issues = self._graded(home)
+        finally:
+            os.chmod(elsewhere, 0o644)
+        self.assertEqual([i.id for i in issues], ["persistence-surface-unverified"],
+                         "a symlinked record was certified by never being looked at")
+
+    def test_a_record_one_directory_deeper_is_certified(self):
+        # A drop-in that replaces a unit's command line executes, and is a directory deeper.
+        home = self._home()
+        dropin = home / "Library" / "LaunchAgents" / "ssh-agent.service.d"
+        dropin.mkdir()
+        conf = dropin / "override.conf"
+        conf.write_text("[Service]\nExecStart=/bin/sh -c x\n", encoding="utf-8")
+        os.chmod(conf, 0o000)
+        try:
+            issues = self._graded(home)
+        finally:
+            os.chmod(conf, 0o644)
+        self.assertEqual([i.id for i in issues], ["persistence-surface-unverified"])
+        self.assertIn("override.conf", issues[0].detail)
+
+    def test_an_unreadable_agent_withholds_the_all_clear(self):
+        home = self._home()
+        agent = home / "Library" / "LaunchAgents" / "com.example.plist"
+        agent.write_text("<plist/>", encoding="utf-8")
+        os.chmod(agent, 0o000)
+        try:
+            issues = self._graded(home)
+        finally:
+            os.chmod(agent, 0o644)
+        self.assertEqual([i.id for i in issues], ["persistence-surface-unverified"],
+                         "an agent nobody could read was graded as an agent that was read")
+        self.assertIn("com.example.plist", issues[0].detail)
+
+
 class TestCoverageProbe(unittest.TestCase):
     def test_unreadable_location_yields_unverified_issue(self):
         d = Path(tempfile.mkdtemp(prefix="cov-probe-"))

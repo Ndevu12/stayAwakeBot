@@ -248,6 +248,52 @@ def _git_global_config() -> list[tuple[str, str]]:
     return pairs
 
 
+def _global_git_config_paths() -> list[Path]:
+    """Where git itself looks for a global config, in its own order of precedence."""
+    override = os.environ.get("GIT_CONFIG_GLOBAL")
+    if override:
+        return [Path(override)]
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    base = Path(xdg) if xdg else Path.home() / ".config"
+    return [base / "git" / "config", Path.home() / ".gitconfig"]
+
+
+def _has_global_git_config() -> bool:
+    """Whether git has a global configuration to read. `os.lstat`, not `Path.is_file()`, which
+    answers False for a path it is not permitted to stat rather than raising."""
+    for path in _global_git_config_paths():
+        try:
+            os.lstat(path)
+            return True
+        except FileNotFoundError:
+            continue
+        except NotADirectoryError:
+            continue                      # a parent component is a file: nothing can live here
+        except OSError:
+            return True                   # it is there and unreadable, which is not "not there"
+    return False
+
+
+def git_config_predicate() -> str | None:
+    """Separate "nothing is configured" from "the configuration was never read".
+
+    The discriminator is the FILE, not the tool: a host with no global config has nothing to execute
+    whether or not git is installed, while a config that exists and was not read is a surface this
+    check did not cover."""
+    if not _has_global_git_config():
+        return None                       # nothing on disk to be configured to run
+    try:
+        listing = subprocess.run(["git", "config", "--global", "--list", "-z"],
+                                 capture_output=True, text=True, errors="replace", timeout=10)
+    except (FileNotFoundError, OSError, subprocess.SubprocessError):
+        return ("A global git configuration exists but git could not be run to read it, so what it "
+                "makes git execute was not examined.")
+    if listing.returncode != 0:
+        return ("A global git configuration exists but git would not list it, so what it makes git "
+                "execute was not examined.")
+    return None
+
+
 def check_git_config_execution() -> list[HygieneIssue]:
     """Flag a GLOBAL git config that makes git execute an attacker command on ordinary operations:
     a non-boolean core.fsmonitor (runs every git op), a core.hooksPath under a world-writable or

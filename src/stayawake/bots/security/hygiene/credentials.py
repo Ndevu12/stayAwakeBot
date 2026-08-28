@@ -61,6 +61,29 @@ def _run(cmd: list[str], *, input_text: str | None = None, timeout: int = 10,
         return None
 
 
+_IMPOSSIBLE_KEYCHAIN_HOST = "saw-selftest-no-such-host.invalid"
+
+
+def keychain_predicate() -> str | None:
+    """Ask the keychain for something that cannot be there, and require it to say no.
+
+    Presence is read from an exit code, so a tool that is not answering the question returns the same
+    "no" a clean host does. A query for a name that cannot exist must fail; if it succeeds, the
+    answers do not separate present from absent.
+
+    What this does and does not separate, and why, is recorded on `saw#250`."""
+    if sys.platform != "darwin":
+        return None
+    r = _run(["security", "find-internet-password", "-s", _IMPOSSIBLE_KEYCHAIN_HOST])
+    if r is None:
+        return ("`security` did not run, so the keychain was not read and nothing found here says "
+                "a credential is absent from it.")
+    if r.returncode == 0:
+        return ("This host's credential store did not answer as expected, so the keychain was not "
+                "read.")
+    return None
+
+
 def _macos_keychain_has_github() -> bool:
     """True if a github.com internet password is cached in the macOS Keychain."""
     r = _run(["security", "find-internet-password", "-s", "github.com"])
