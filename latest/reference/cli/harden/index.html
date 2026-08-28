@@ -6,19 +6,19 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="saw auth — GitHub credential and capability status, and registration of an operator-managed StayAwakeBot App.">
+        <meta name="description" content="saw harden — create host-level denials on this machine, and report them as in place only after a read-back.">
       
       
         <meta name="author" content="Jean Paul Elisa NIYOKWIZERWA">
       
       
-        <link rel="canonical" href="https://saw-docs.ndevuspace.com/latest/reference/cli/auth/">
+        <link rel="canonical" href="https://saw-docs.ndevuspace.com/latest/reference/cli/harden/">
       
       
-        <link rel="prev" href="../hook/">
+        <link rel="prev" href="../audit/">
       
       
-        <link rel="next" href="../db/">
+        <link rel="next" href="../guard/">
       
       
         
@@ -29,7 +29,7 @@
     
     
       
-        <title>saw auth - saw documentation</title>
+        <title>saw harden - saw documentation</title>
       
     
     
@@ -76,14 +76,14 @@
   
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="saw documentation">
-  <meta property="og:title" content="saw auth — saw documentation">
-  <meta property="og:description" content="saw auth — GitHub credential and capability status, and registration of an operator-managed StayAwakeBot App.">
+  <meta property="og:title" content="saw harden — saw documentation">
+  <meta property="og:description" content="saw harden — create host-level denials on this machine, and report them as in place only after a read-back.">
   <meta property="og:image" content="https://saw-docs.ndevuspace.com/latest/assets/og-card.png">
-  <meta property="og:url" content="https://saw-docs.ndevuspace.com/latest/reference/cli/auth/">
+  <meta property="og:url" content="https://saw-docs.ndevuspace.com/latest/reference/cli/harden/">
 
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="saw auth — saw documentation">
-  <meta name="twitter:description" content="saw auth — GitHub credential and capability status, and registration of an operator-managed StayAwakeBot App.">
+  <meta name="twitter:title" content="saw harden — saw documentation">
+  <meta name="twitter:description" content="saw harden — create host-level denials on this machine, and report them as in place only after a read-back.">
   <meta name="twitter:image" content="https://saw-docs.ndevuspace.com/latest/assets/og-card.png">
 
   
@@ -92,9 +92,9 @@
     {
       "@context": "https://schema.org",
       "@type": "TechArticle",
-      "headline": "saw auth",
-      "description": "saw auth — GitHub credential and capability status, and registration of an operator-managed StayAwakeBot App.",
-      "url": "https://saw-docs.ndevuspace.com/latest/reference/cli/auth/",
+      "headline": "saw harden",
+      "description": "saw harden — create host-level denials on this machine, and report them as in place only after a read-back.",
+      "url": "https://saw-docs.ndevuspace.com/latest/reference/cli/harden/",
       "image": "https://saw-docs.ndevuspace.com/latest/assets/og-card.png",
       "inLanguage": "en",
       "isPartOf": {
@@ -132,7 +132,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#saw-auth" class="md-skip">
+        <a href="#saw-harden" class="md-skip">
           Skip to content
         </a>
       
@@ -171,7 +171,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              saw auth
+              saw harden
             
           </span>
         </div>
@@ -1038,10 +1038,19 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../harden/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1057,6 +1066,7 @@
   
 
       </a>
+      
     </li>
   
 
@@ -1122,19 +1132,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../auth/" class="md-nav__link">
         
   
   
@@ -1150,7 +1151,6 @@
   
 
       </a>
-      
     </li>
   
 
@@ -1725,7 +1725,7 @@
 
 
   
-    <a href="https://github.com/Ndevu12/stayAwakeBot/edit/main/docs/reference/cli/auth.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+    <a href="https://github.com/Ndevu12/stayAwakeBot/edit/main/docs/reference/cli/harden.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
     </a>
@@ -1733,50 +1733,15 @@
   
 
 
-<h1 id="saw-auth"><code>saw auth</code><a class="headerlink" href="#saw-auth" title="Permanent link">&para;</a></h1>
-<p>Credential and capability status, and registration of an operator-managed StayAwakeBot GitHub App.
-Most of <code>saw</code> is offline; <code>auth</code> is only about the credential used for the network paths — remote
-scanning, <code>saw fix --pr</code>, and <code>saw guard setup --pr</code>. Bare <code>saw auth</code> is <code>saw auth status</code>.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw auth status [--json] [--no-stream]
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>saw auth app register [--name NAME] [--no-browser] [--replace] [--no-stream]
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>saw auth app show [--no-stream]
+<h1 id="saw-harden"><code>saw harden</code><a class="headerlink" href="#saw-harden" title="Permanent link">&para;</a></h1>
+<p>Create host-level controls on this machine. It never touches a project's dependency tree — that is
+<a href="../fix/"><code>saw fix</code></a>. A write is reported as in place only after it is read back. An unverifiable
+write is unknown, never success. The result does not claim that one control protects anything else.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw harden
 </code></pre></div>
-<table>
-<thead>
-<tr>
-<th>Option / subcommand</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>status</code></td>
-<td>The active credential (source, actor, whether it is live), its scopes, whether an App is configured, and per-intent gating: for each key action, whether this credential is allowed and, if not, the command that fixes it. Exits non-zero when a live credential could not open a guard PR, so it drops straight into CI.</td>
-</tr>
-<tr>
-<td><code>app register</code></td>
-<td>Register and install an App through GitHub's browser manifest flow, storing the credentials locally (mode <code>0600</code>). Idempotent: with an App already configured it points you at installing that same App elsewhere.</td>
-</tr>
-<tr>
-<td><code>app show</code></td>
-<td>Whether a local App config is present, with its install and settings URLs.</td>
-</tr>
-<tr>
-<td><code>--name NAME</code></td>
-<td>App display name (default: <code>StayAwakeBot</code>).</td>
-</tr>
-<tr>
-<td><code>--no-browser</code></td>
-<td>Print the manifest URL instead of opening a browser.</td>
-</tr>
-<tr>
-<td><code>--replace</code></td>
-<td>Register a brand-new App even if one is configured.</td>
-</tr>
-</tbody>
-</table>
-<p>Which credential <code>saw</code> picks, and the least privilege each command needs, are in
-<a href="../credentials/">credentials</a>.</p>
+<p>This command must run as root. If a running process still holds code that is not on disk, it
+refuses: capture that process first.</p>
+<p>See <a href="../../../how-to/audit-a-machine/">audit a machine</a> for the read-only view of the same host.</p>
 
 
 

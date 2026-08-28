@@ -484,6 +484,8 @@
       
         
       
+        
+      
     
     
     
@@ -656,6 +658,34 @@
     
   
     Audit a machine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../harden-this-machine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Harden this machine
   
 
     
@@ -862,8 +892,6 @@
       
         
       
-        
-      
     
     
     
@@ -920,6 +948,8 @@
       
         
           
+        
+      
         
       
         
@@ -1104,6 +1134,34 @@
     
   
     saw audit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/cli/harden/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    saw harden
   
 
     
@@ -1496,34 +1554,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../reference/exit-codes/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Exit codes
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../reference/advisory-db/" class="md-nav__link">
         
   
@@ -1891,7 +1921,7 @@
 repository</a>; this is the operational view. Flags: <a href="../../reference/cli/guard/">CLI
 reference</a>.</p>
 <h2 id="across-a-fleet">Across a fleet<a class="headerlink" href="#across-a-fleet" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw<span class="w"> </span>guard<span class="w"> </span>check<span class="w"> </span>--org<span class="w"> </span>your-org<span class="w"> </span>-f<span class="w">     </span><span class="c1"># exit 1 if any repository lacks a required gate</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw<span class="w"> </span>guard<span class="w"> </span>check<span class="w"> </span>--org<span class="w"> </span>your-org<span class="w"> </span>-f<span class="w">     </span><span class="c1"># fail if any repository lacks a required gate</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>saw<span class="w"> </span>guard<span class="w"> </span>setup<span class="w"> </span>--org<span class="w"> </span>your-org<span class="w">        </span><span class="c1"># clone each repository and open a gate PR</span>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>saw<span class="w"> </span>guard<span class="w"> </span>drift<span class="w"> </span>--org<span class="w"> </span>your-org<span class="w">        </span><span class="c1"># file/close one drift issue per repository behind its pin</span>
 </code></pre></div>
@@ -1907,15 +1937,14 @@ inputs. To run the scanner straight from this repository rather than from PyPI, 
 composite instead — <code>uses: Ndevu12/stayAwakeBot/.github/actions/worm-scan@&lt;SHA&gt;</code>; both forms run the
 same logic.</p>
 <h2 id="in-any-other-ci">In any other CI<a class="headerlink" href="#in-any-other-ci" title="Permanent link">&para;</a></h2>
-<p><code>saw scan</code>'s exit code is the whole contract — no flag, no parsing:</p>
+<p><code>saw scan</code> is the whole contract — no flag, no parsing:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>pip<span class="w"> </span>install<span class="w"> </span>stayawakebot<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>saw<span class="w"> </span>scan
 </code></pre></div>
 <p>or with no Python at all:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>docker<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>-v<span class="w"> </span><span class="s2">"</span><span class="nv">$PWD</span><span class="s2">:/repo:ro"</span><span class="w"> </span>ghcr.io/ndevu12/stayawakebot<span class="w"> </span>saw<span class="w"> </span>scan<span class="w"> </span>/repo
 </code></pre></div>
-<p><code>0</code> clean, <code>1</code> infected, <code>2</code> could-not-scan — see <a href="../../reference/exit-codes/">exit codes</a>. Upload
-findings to code scanning with <code>--sarif</code>, and pass <code>--require-db</code> when the job must not lose advisory
-coverage silently.</p>
+<p>The last line of the report is the verdict. Upload findings to code scanning with <code>--sarif</code>, and
+pass <code>--require-db</code> when the job must not lose advisory coverage silently.</p>
 <h2 id="prove-the-gate-is-enforced">Prove the gate is enforced<a class="headerlink" href="#prove-the-gate-is-enforced" title="Permanent link">&para;</a></h2>
 <p>A gate that branch protection does not <strong>require</strong> is decoration. <code>saw guard check</code> checks the
 requirement, not just the file; <code>saw audit --repo owner/name -f</code> reports it alongside the rest of a

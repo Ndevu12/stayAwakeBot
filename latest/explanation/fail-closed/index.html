@@ -482,6 +482,8 @@
       
         
       
+        
+      
     
     
     
@@ -674,6 +676,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../how-to/harden-this-machine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Harden this machine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../how-to/harden-a-repo/" class="md-nav__link">
         
   
@@ -745,8 +775,6 @@
       
         
       
-        
-      
     
     
     
@@ -803,6 +831,8 @@
       
         
           
+        
+      
         
       
         
@@ -987,6 +1017,34 @@
     
   
     saw audit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/cli/harden/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    saw harden
   
 
     
@@ -1379,34 +1437,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../reference/exit-codes/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Exit codes
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../reference/advisory-db/" class="md-nav__link">
         
   
@@ -1652,10 +1682,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#why-the-exit-code-is-the-contract" class="md-nav__link">
+  <a href="#why-a-ci-gate-is-one-line" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Why the exit code is the contract
+        Why a CI gate is one line
       
     </span>
   </a>
@@ -1733,10 +1763,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#why-the-exit-code-is-the-contract" class="md-nav__link">
+  <a href="#why-a-ci-gate-is-one-line" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Why the exit code is the contract
+        Why a CI gate is one line
       
     </span>
   </a>
@@ -1771,12 +1801,12 @@
 <h1 id="fail-closed">Fail closed<a class="headerlink" href="#fail-closed" title="Permanent link">&para;</a></h1>
 <p><strong>A target that could not be scanned never reads as clean.</strong></p>
 <p>Silence has two causes — there was nothing to find, or nothing was looked at — and only one of them
-is good news. Wherever <code>saw</code> cannot tell the two apart, it says so and exits non-zero rather than
+is good news. Wherever <code>saw</code> cannot tell the two apart, it says so and fails the run rather than
 returning the comfortable answer.</p>
 <p>In practice:</p>
 <ul>
 <li>A file that cannot be read, a clone that failed, a malformed config, a worker that died mid-scan —
-  each ends the run at <a href="../../reference/exit-codes/">exit <code>2</code></a>, never <code>0</code>.</li>
+  each fails the run, never as clean.</li>
 <li>A scan-on-clone hook that hits its time budget reports the tree as <strong>unverified</strong>, not clean.</li>
 <li><code>saw audit</code> withholds the all-clear when the start-up surface could not be established, and says
   which locations it could not account for.</li>
@@ -1787,11 +1817,11 @@ returning the comfortable answer.</p>
 </ul>
 <p>Where a check is not certain, <code>saw</code> warns loudly rather than degrading in silence. Warning noise is
 recoverable; a false all-clear is not.</p>
-<h2 id="why-the-exit-code-is-the-contract">Why the exit code is the contract<a class="headerlink" href="#why-the-exit-code-is-the-contract" title="Permanent link">&para;</a></h2>
-<p><code>saw scan</code> has no <code>--fail</code> flag. The verdict <em>is</em> the exit status, unconditionally, so a CI gate is
-one line with nothing to configure and no way to accidentally configure it away. The same property
-makes the failure modes safe: an unscannable target and an infected one both come back non-zero, so a
-gate that only ever checks "did this pass" already handles both.</p>
+<h2 id="why-a-ci-gate-is-one-line">Why a CI gate is one line<a class="headerlink" href="#why-a-ci-gate-is-one-line" title="Permanent link">&para;</a></h2>
+<p><code>saw scan</code> has no <code>--fail</code> flag. The last line of the report <em>is</em> the verdict, unconditionally, so a
+CI gate is one line with nothing to configure and no way to accidentally configure it away. The same
+property makes the failure modes safe: an unscannable target and an infected one both fail the run,
+so a gate that only ever checks "did this pass" already handles both.</p>
 <p>The one deliberate default in the other direction is the advisory corpus: without it a scan continues
 with less advisory coverage instead of failing, because advisories never gate anyway. <code>--require-db</code>
 makes it strict when you need that.</p>

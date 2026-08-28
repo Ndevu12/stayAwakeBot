@@ -41,6 +41,10 @@
          <lastmod>2026-08-28</lastmod>
     </url>
     <url>
+         <loc>https://saw-docs.ndevuspace.com/latest/how-to/harden-this-machine/</loc>
+         <lastmod>2026-08-28</lastmod>
+    </url>
+    <url>
          <loc>https://saw-docs.ndevuspace.com/latest/how-to/scan-local/</loc>
          <lastmod>2026-08-28</lastmod>
     </url>
@@ -58,10 +62,6 @@
     </url>
     <url>
          <loc>https://saw-docs.ndevuspace.com/latest/reference/configuration/</loc>
-         <lastmod>2026-08-28</lastmod>
-    </url>
-    <url>
-         <loc>https://saw-docs.ndevuspace.com/latest/reference/exit-codes/</loc>
          <lastmod>2026-08-28</lastmod>
     </url>
     <url>
@@ -102,6 +102,10 @@
     </url>
     <url>
          <loc>https://saw-docs.ndevuspace.com/latest/reference/cli/guard/</loc>
+         <lastmod>2026-08-28</lastmod>
+    </url>
+    <url>
+         <loc>https://saw-docs.ndevuspace.com/latest/reference/cli/harden/</loc>
          <lastmod>2026-08-28</lastmod>
     </url>
     <url>

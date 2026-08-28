@@ -15,7 +15,7 @@
         <link rel="canonical" href="https://saw-docs.ndevuspace.com/latest/how-to/harden-a-repo/">
       
       
-        <link rel="prev" href="../audit-a-machine/">
+        <link rel="prev" href="../harden-this-machine/">
       
       
         <link rel="next" href="../gate-ci/">
@@ -484,6 +484,8 @@
       
         
       
+        
+      
     
     
     
@@ -673,6 +675,34 @@
                 
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../harden-this-machine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Harden this machine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
     
   
   
@@ -838,8 +868,6 @@
       
         
       
-        
-      
     
     
     
@@ -896,6 +924,8 @@
       
         
           
+        
+      
         
       
         
@@ -1080,6 +1110,34 @@
     
   
     saw audit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/cli/harden/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    saw harden
   
 
     
@@ -1472,34 +1530,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../reference/exit-codes/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Exit codes
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../reference/advisory-db/" class="md-nav__link">
         
   
@@ -1855,6 +1885,7 @@ moved to different code after you reviewed it, a SHA cannot.</p>
 <p>Scan what arrives before you run it:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>saw<span class="w"> </span>hook<span class="w"> </span>install<span class="w">        </span><span class="c1"># see docs/how-to/scan-on-clone.md</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>saw<span class="w"> </span>audit<span class="w">               </span><span class="c1"># the machine's own posture</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>sudo<span class="w"> </span>saw<span class="w"> </span>harden<span class="w">         </span><span class="c1"># host denials; in place only after a read-back</span>
 </code></pre></div>
 <p>For a repository that would rather commit its hooks alongside its code than have each developer
 install them, <code>prevent/install-hooks.sh</code> is a dependency-free alternative that installs a <code>pre-commit</code>

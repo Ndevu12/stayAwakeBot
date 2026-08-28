@@ -6,19 +6,19 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Documentation for saw — an offline-first supply-chain worm scanner and sentinel. Install it, scan a repository, read the verdict, gate CI, and audit the machine it runs on.">
+        <meta name="description" content="Create host-level denials on this machine with saw harden. Reports in place only after a read-back.">
       
       
         <meta name="author" content="Jean Paul Elisa NIYOKWIZERWA">
       
       
-        <link rel="canonical" href="https://saw-docs.ndevuspace.com/latest/reference/exit-codes/">
+        <link rel="canonical" href="https://saw-docs.ndevuspace.com/latest/how-to/harden-this-machine/">
       
       
-        <link rel="prev" href="../configuration/">
+        <link rel="prev" href="../audit-a-machine/">
       
       
-        <link rel="next" href="../advisory-db/">
+        <link rel="next" href="../harden-a-repo/">
       
       
         
@@ -29,7 +29,7 @@
     
     
       
-        <title>Exit codes - saw documentation</title>
+        <title>Harden this machine - saw documentation</title>
       
     
     
@@ -76,14 +76,14 @@
   
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="saw documentation">
-  <meta property="og:title" content="Exit codes — saw documentation">
-  <meta property="og:description" content="Documentation for saw — an offline-first supply-chain worm scanner and sentinel. Install it, scan a repository, read the verdict, gate CI, and audit the machine it runs on.">
+  <meta property="og:title" content="Harden this machine — saw documentation">
+  <meta property="og:description" content="Create host-level denials on this machine with saw harden. Reports in place only after a read-back.">
   <meta property="og:image" content="https://saw-docs.ndevuspace.com/latest/assets/og-card.png">
-  <meta property="og:url" content="https://saw-docs.ndevuspace.com/latest/reference/exit-codes/">
+  <meta property="og:url" content="https://saw-docs.ndevuspace.com/latest/how-to/harden-this-machine/">
 
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Exit codes — saw documentation">
-  <meta name="twitter:description" content="Documentation for saw — an offline-first supply-chain worm scanner and sentinel. Install it, scan a repository, read the verdict, gate CI, and audit the machine it runs on.">
+  <meta name="twitter:title" content="Harden this machine — saw documentation">
+  <meta name="twitter:description" content="Create host-level denials on this machine with saw harden. Reports in place only after a read-back.">
   <meta name="twitter:image" content="https://saw-docs.ndevuspace.com/latest/assets/og-card.png">
 
   
@@ -92,9 +92,9 @@
     {
       "@context": "https://schema.org",
       "@type": "TechArticle",
-      "headline": "Exit codes",
-      "description": "Documentation for saw — an offline-first supply-chain worm scanner and sentinel. Install it, scan a repository, read the verdict, gate CI, and audit the machine it runs on.",
-      "url": "https://saw-docs.ndevuspace.com/latest/reference/exit-codes/",
+      "headline": "Harden this machine",
+      "description": "Create host-level denials on this machine with saw harden. Reports in place only after a read-back.",
+      "url": "https://saw-docs.ndevuspace.com/latest/how-to/harden-this-machine/",
       "image": "https://saw-docs.ndevuspace.com/latest/assets/og-card.png",
       "inLanguage": "en",
       "isPartOf": {
@@ -132,7 +132,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#description-what-each-saw-exit-code-means-the-exit-code-is-the-contract-a-ci-gate-reads-clean-infected-unscannable-or-rotation-unsafe" class="md-skip">
+        <a href="#harden-this-machine" class="md-skip">
           Skip to content
         </a>
       
@@ -171,7 +171,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Exit codes
+              Harden this machine
             
           </span>
         </div>
@@ -463,8 +463,10 @@
       
   
   
+    
   
   
+  
     
     
       
@@ -482,6 +484,8 @@
       
         
       
+        
+      
     
     
     
@@ -491,11 +495,11 @@
       
     
     
-    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
         
           
           <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
@@ -516,7 +520,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
             
@@ -534,7 +538,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../how-to/scan-local/" class="md-nav__link">
+      <a href="../scan-local/" class="md-nav__link">
         
   
   
@@ -562,7 +566,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../how-to/scan-remote/" class="md-nav__link">
+      <a href="../scan-remote/" class="md-nav__link">
         
   
   
@@ -590,7 +594,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../how-to/scan-on-clone/" class="md-nav__link">
+      <a href="../scan-on-clone/" class="md-nav__link">
         
   
   
@@ -618,7 +622,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../how-to/fix-findings/" class="md-nav__link">
+      <a href="../fix-findings/" class="md-nav__link">
         
   
   
@@ -646,7 +650,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../how-to/audit-a-machine/" class="md-nav__link">
+      <a href="../audit-a-machine/" class="md-nav__link">
         
   
   
@@ -671,10 +675,48 @@
                 
   
   
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Harden this machine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
   
   
     <li class="md-nav__item">
-      <a href="../../how-to/harden-a-repo/" class="md-nav__link">
+      <a href="../harden-a-repo/" class="md-nav__link">
         
   
   
@@ -702,7 +744,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../how-to/gate-ci/" class="md-nav__link">
+      <a href="../gate-ci/" class="md-nav__link">
         
   
   
@@ -734,14 +776,10 @@
       
   
   
-    
   
   
-  
     
     
-      
-        
       
         
       
@@ -758,11 +796,11 @@
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
         
           
           <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
@@ -783,7 +821,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_4">
             <span class="md-nav__icon md-icon"></span>
             
@@ -839,6 +877,8 @@
       
         
       
+        
+      
     
     
     
@@ -853,7 +893,7 @@
         
           
           <div class="md-nav__link md-nav__container">
-            <a href="../cli/" class="md-nav__link ">
+            <a href="../../reference/cli/" class="md-nav__link ">
               
   
   
@@ -897,7 +937,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../cli/scan/" class="md-nav__link">
+      <a href="../../reference/cli/scan/" class="md-nav__link">
         
   
   
@@ -925,7 +965,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../cli/fix/" class="md-nav__link">
+      <a href="../../reference/cli/fix/" class="md-nav__link">
         
   
   
@@ -953,7 +993,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../cli/discard/" class="md-nav__link">
+      <a href="../../reference/cli/discard/" class="md-nav__link">
         
   
   
@@ -981,7 +1021,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../cli/audit/" class="md-nav__link">
+      <a href="../../reference/cli/audit/" class="md-nav__link">
         
   
   
@@ -1009,7 +1049,35 @@
   
   
     <li class="md-nav__item">
-      <a href="../cli/guard/" class="md-nav__link">
+      <a href="../../reference/cli/harden/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    saw harden
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/cli/guard/" class="md-nav__link">
         
   
   
@@ -1037,7 +1105,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../cli/hook/" class="md-nav__link">
+      <a href="../../reference/cli/hook/" class="md-nav__link">
         
   
   
@@ -1065,7 +1133,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../cli/auth/" class="md-nav__link">
+      <a href="../../reference/cli/auth/" class="md-nav__link">
         
   
   
@@ -1093,7 +1161,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../cli/db/" class="md-nav__link">
+      <a href="../../reference/cli/db/" class="md-nav__link">
         
   
   
@@ -1121,7 +1189,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../cli/search/" class="md-nav__link">
+      <a href="../../reference/cli/search/" class="md-nav__link">
         
   
   
@@ -1149,7 +1217,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../cli/intro/" class="md-nav__link">
+      <a href="../../reference/cli/intro/" class="md-nav__link">
         
   
   
@@ -1177,7 +1245,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../cli/doctor/" class="md-nav__link">
+      <a href="../../reference/cli/doctor/" class="md-nav__link">
         
   
   
@@ -1205,7 +1273,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../cli/completion/" class="md-nav__link">
+      <a href="../../reference/cli/completion/" class="md-nav__link">
         
   
   
@@ -1233,7 +1301,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../cli/remote/" class="md-nav__link">
+      <a href="../../reference/cli/remote/" class="md-nav__link">
         
   
   
@@ -1261,7 +1329,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../cli/sinks/" class="md-nav__link">
+      <a href="../../reference/cli/sinks/" class="md-nav__link">
         
   
   
@@ -1289,7 +1357,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../cli/credentials/" class="md-nav__link">
+      <a href="../../reference/cli/credentials/" class="md-nav__link">
         
   
   
@@ -1317,7 +1385,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../cli/migrating/" class="md-nav__link">
+      <a href="../../reference/cli/migrating/" class="md-nav__link">
         
   
   
@@ -1353,7 +1421,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../configuration/" class="md-nav__link">
+      <a href="../../reference/configuration/" class="md-nav__link">
         
   
   
@@ -1378,103 +1446,10 @@
                 
   
   
-    
-  
-  
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Exit codes
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Exit codes
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#description-what-each-saw-exit-code-means-the-exit-code-is-the-contract-a-ci-gate-reads-clean-infected-unscannable-or-rotation-unsafe" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        description: What each saw exit code means. The exit code is the contract a CI gate reads: clean, infected, unscannable, or rotation-unsafe.
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#exit-codes" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Exit codes
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
   
   
     <li class="md-nav__item">
-      <a href="../advisory-db/" class="md-nav__link">
+      <a href="../../reference/advisory-db/" class="md-nav__link">
         
   
   
@@ -1730,36 +1705,8 @@
   
   
   
+    
   
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#description-what-each-saw-exit-code-means-the-exit-code-is-the-contract-a-ci-gate-reads-clean-infected-unscannable-or-rotation-unsafe" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        description: What each saw exit code means. The exit code is the contract a CI gate reads: clean, infected, unscannable, or rotation-unsafe.
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#exit-codes" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Exit codes
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
   
 </nav>
                   </div>
@@ -1776,7 +1723,7 @@
 
 
   
-    <a href="https://github.com/Ndevu12/stayAwakeBot/edit/main/docs/reference/exit-codes.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+    <a href="https://github.com/Ndevu12/stayAwakeBot/edit/main/docs/how-to/harden-this-machine.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
     </a>
@@ -1784,48 +1731,25 @@
   
 
 
-<hr />
-<h2 id="description-what-each-saw-exit-code-means-the-exit-code-is-the-contract-a-ci-gate-reads-clean-infected-unscannable-or-rotation-unsafe">description: What each saw exit code means. The exit code is the contract a CI gate reads: clean, infected, unscannable, or rotation-unsafe.<a class="headerlink" href="#description-what-each-saw-exit-code-means-the-exit-code-is-the-contract-a-ci-gate-reads-clean-infected-unscannable-or-rotation-unsafe" title="Permanent link">&para;</a></h2>
-<h1 id="exit-codes">Exit codes<a class="headerlink" href="#exit-codes" title="Permanent link">&para;</a></h1>
-<p>The exit code is the contract. For <strong><code>saw scan</code> it is the verdict, unconditionally</strong> — there is no
-<code>--fail</code> flag and nothing to parse.</p>
-<table>
-<thead>
-<tr>
-<th>Code</th>
-<th>Meaning</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>0</code></td>
-<td>Clean. <code>saw scan</code>: no target is infected. <code>saw audit</code>: the start-up surface was established and is clean, and no weaker warning gated — rotation is safe. <code>saw guard check</code>: every gate is present, pinned, current and required (or issues were found without <code>-f</code>); <code>saw guard setup</code>: every repository succeeded or was already current.</td>
-</tr>
-<tr>
-<td><code>1</code></td>
-<td><code>saw scan</code>: at least one target is <strong>infected</strong>. <code>saw audit</code>: a weaker warning-level hygiene issue <strong>and</strong> <code>-f</code> was set. <code>saw guard check</code>: a gate is absent, unpinned, stale or not required <strong>and</strong> <code>-f</code> was set; <code>saw guard setup</code>: a repository errored, or a PR could not be opened.</td>
-</tr>
-<tr>
-<td><code>2</code></td>
-<td>Usage error (unknown command, bad option, a missing explicit <code>--config</code> path), <strong>or</strong> a run that could not complete — a malformed config, or a target that errored while being scanned. A target <code>saw</code> could not scan is never reported as clean. <code>saw audit</code> exits <code>2</code> when a check could not run: its own self-test failed, or it stopped with an error. A check that did not answer has not established the surface it covers, so its quiet is not a clean result. <code>saw guard setup</code> also exits <code>2</code> when it cannot resolve the release SHA (offline → pass <code>--ref</code>).</td>
-</tr>
-<tr>
-<td><code>3</code></td>
-<td><strong><code>saw audit</code> only — rotation unsafe.</strong> Either something was found running at start-up, or the start-up surface could not be established — including because a check that reads it could not run. It gates independently of <code>-f</code>, because rotating a credential on a compromised host hands over the new one. It outranks <code>2</code>: a hazard in what was found is more urgent than a gap in what was covered. See <a href="../../how-to/audit-a-machine/">audit a machine</a>.</td>
-</tr>
-</tbody>
-</table>
-<p><code>saw guard drift</code> reports as an issue and always exits <code>0</code>, so it is safe on a schedule.</p>
-<p><strong>Migrating to <code>3</code>.</strong> It is additive. Code that treats "<code>0</code> is fine, non-zero needs attention" is
-already correct and fails safe; only code that specifically distinguished <code>saw audit</code>'s <code>1</code> from its
-<code>2</code> needs to handle it. <code>saw scan</code> and <code>saw guard</code> never return <code>3</code>.</p>
-<p>Why an unscannable target is an error and not a pass: <a href="../../explanation/fail-closed/">fail closed</a>.</p>
+<h1 id="harden-this-machine">Harden this machine<a class="headerlink" href="#harden-this-machine" title="Permanent link">&para;</a></h1>
+<p><a href="../audit-a-machine/"><code>saw audit</code></a> reports. <a href="../../reference/cli/harden/"><code>saw harden</code></a> acts on the
+host. It never touches a project's dependency tree — that is <a href="../fix-findings/"><code>saw fix</code></a>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>sudo<span class="w"> </span>saw<span class="w"> </span>harden
+</code></pre></div>
+<p>A write counts as in place only after it is read back. An unverifiable write is unknown, never
+success. If a target already has something in it, it is left unchanged — clear it, then run again.
+If a running process still holds code that is not on disk, the command refuses until that process
+is captured.</p>
+<p>It does not claim that one control protects anything else.</p>
 
 
 
 
 
 
+
+  
+  
 
 
 

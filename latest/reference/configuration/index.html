@@ -18,7 +18,7 @@
         <link rel="prev" href="../cli/migrating/">
       
       
-        <link rel="next" href="../exit-codes/">
+        <link rel="next" href="../advisory-db/">
       
       
         
@@ -482,6 +482,8 @@
       
         
       
+        
+      
     
     
     
@@ -674,6 +676,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../how-to/harden-this-machine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Harden this machine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../how-to/harden-a-repo/" class="md-nav__link">
         
   
@@ -747,8 +777,6 @@
       
         
       
-        
-      
     
     
     
@@ -805,6 +833,8 @@
       
         
           
+        
+      
         
       
         
@@ -989,6 +1019,34 @@
     
   
     saw audit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/harden/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    saw harden
   
 
     
@@ -1461,34 +1519,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../exit-codes/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Exit codes
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../advisory-db/" class="md-nav__link">
         
   
@@ -1856,7 +1886,7 @@ signature database ships inside the package.</p>
 <tr>
 <td><code>dependency_advisories</code></td>
 <td><code>true</code></td>
-<td>The offline CVE-advisory section. Advisories never affect the verdict or exit code.</td>
+<td>The offline CVE-advisory section. Advisories never affect the verdict.</td>
 </tr>
 <tr>
 <td><code>external_audit</code></td>
@@ -1905,7 +1935,7 @@ model</a>.</p>
 unrelated to <code>saw</code>. It writes no files and commits nothing: it probes each URL, refreshes one
 self-updating GitHub issue per project, and posts to Slack on a state change.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>stayawake-health-check<span class="w"> </span>--config<span class="w"> </span>config/urls.yml
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>stayawake-health-check<span class="w"> </span>--config<span class="w"> </span>config/urls.yml<span class="w"> </span>--fail-on-unhealthy<span class="w">   </span><span class="c1"># exit non-zero when down</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>stayawake-health-check<span class="w"> </span>--config<span class="w"> </span>config/urls.yml<span class="w"> </span>--fail-on-unhealthy<span class="w">   </span><span class="c1"># fail the run when down</span>
 </code></pre></div>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">settings</span><span class="p">:</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">timeout_seconds</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10</span>

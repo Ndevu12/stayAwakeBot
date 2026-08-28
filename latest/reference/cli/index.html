@@ -132,7 +132,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#description-every-saw-command-and-flag-documented-once-scan-fix-discard-audit-guard-hook-auth-db-search-intro-doctor-and-completion" class="md-skip">
+        <a href="#description-every-saw-command-and-flag-documented-once-scan-fix-discard-audit-harden-guard-hook-auth-db-search-intro-doctor-and-completion" class="md-skip">
           Skip to content
         </a>
       
@@ -482,6 +482,8 @@
       
         
       
+        
+      
     
     
     
@@ -674,6 +676,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../how-to/harden-this-machine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Harden this machine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../how-to/harden-a-repo/" class="md-nav__link">
         
   
@@ -747,8 +777,6 @@
       
         
       
-        
-      
     
     
     
@@ -807,6 +835,8 @@
       
         
           
+        
+      
         
       
         
@@ -991,6 +1021,34 @@
     
   
     saw audit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="harden/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    saw harden
   
 
     
@@ -1383,34 +1441,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../exit-codes/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Exit codes
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../advisory-db/" class="md-nav__link">
         
   
@@ -1675,10 +1705,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#description-every-saw-command-and-flag-documented-once-scan-fix-discard-audit-guard-hook-auth-db-search-intro-doctor-and-completion" class="md-nav__link">
+  <a href="#description-every-saw-command-and-flag-documented-once-scan-fix-discard-audit-harden-guard-hook-auth-db-search-intro-doctor-and-completion" class="md-nav__link">
     <span class="md-ellipsis">
       
-        description: Every saw command and flag, documented once: scan, fix, discard, audit, guard, hook, auth, db, search, intro, doctor and completion.
+        description: Every saw command and flag, documented once: scan, fix, discard, audit, harden, guard, hook, auth, db, search, intro, doctor and completion.
       
     </span>
   </a>
@@ -1772,7 +1802,7 @@
 
 
 <hr />
-<h2 id="description-every-saw-command-and-flag-documented-once-scan-fix-discard-audit-guard-hook-auth-db-search-intro-doctor-and-completion">description: Every saw command and flag, documented once: scan, fix, discard, audit, guard, hook, auth, db, search, intro, doctor and completion.<a class="headerlink" href="#description-every-saw-command-and-flag-documented-once-scan-fix-discard-audit-guard-hook-auth-db-search-intro-doctor-and-completion" title="Permanent link">&para;</a></h2>
+<h2 id="description-every-saw-command-and-flag-documented-once-scan-fix-discard-audit-harden-guard-hook-auth-db-search-intro-doctor-and-completion">description: Every saw command and flag, documented once: scan, fix, discard, audit, harden, guard, hook, auth, db, search, intro, doctor and completion.<a class="headerlink" href="#description-every-saw-command-and-flag-documented-once-scan-fix-discard-audit-harden-guard-hook-auth-db-search-intro-doctor-and-completion" title="Permanent link">&para;</a></h2>
 <h1 id="saw-command-reference"><code>saw</code> command reference<a class="headerlink" href="#saw-command-reference" title="Permanent link">&para;</a></h1>
 <p>Every <code>saw</code> flag is documented here, and only here — the guides link to these pages rather than
 repeating them. <code>saw &lt;command&gt; -h</code> states what that command is for, lists its flags, and ends
@@ -1810,6 +1840,11 @@ alias, for scripts where a three-letter name might clash on <code>PATH</code>.</
 <td><a href="audit/"><code>audit</code></a></td>
 <td>Machine hygiene, start-up surface, branch protection</td>
 <td>read-only</td>
+</tr>
+<tr>
+<td><a href="harden/"><code>harden</code></a></td>
+<td>Create host denials; in place only after a read-back</td>
+<td>this machine</td>
 </tr>
 <tr>
 <td><a href="guard/"><code>guard</code></a></td>
@@ -1898,7 +1933,7 @@ alias, for scripts where a three-letter name might clash on <code>PATH</code>.</
 <tr>
 <td><code>-f</code>, <code>--fail</code></td>
 <td><code>audit</code>, <code>guard check</code></td>
-<td>Exit non-zero on a warning-level issue. <strong><code>saw scan</code> has no <code>--fail</code></strong> — its exit code is the verdict unconditionally.</td>
+<td>Fail the run on a warning-level issue. <strong><code>saw scan</code> has no <code>--fail</code></strong> — the last line of the report is the verdict unconditionally.</td>
 </tr>
 <tr>
 <td><code>--no-stream</code></td>
@@ -1915,7 +1950,7 @@ alias, for scripts where a three-letter name might clash on <code>PATH</code>.</
 <h2 id="command-aliases">Command aliases<a class="headerlink" href="#command-aliases" title="Permanent link">&para;</a></h2>
 <p>Accepted anywhere the full verb is: <code>scan</code> → <code>s</code>, <code>sc</code>; <code>audit</code> → <code>au</code>;
 <code>guard</code> → <code>gd</code>; <code>search</code> → <code>se</code>; <code>intro</code> → <code>welcome</code>; <code>doctor</code> → <code>d</code>, <code>doc</code>; <code>completion</code> → <code>comp</code>.
-<code>fix</code> and <code>discard</code> are always spelled out.</p>
+<code>fix</code> and <code>discard</code> and <code>harden</code> are always spelled out.</p>
 <h2 id="environment-variables">Environment variables<a class="headerlink" href="#environment-variables" title="Permanent link">&para;</a></h2>
 <table>
 <thead>

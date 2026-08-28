@@ -482,6 +482,8 @@
       
         
       
+        
+      
     
     
     
@@ -674,6 +676,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../how-to/harden-this-machine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Harden this machine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../how-to/harden-a-repo/" class="md-nav__link">
         
   
@@ -745,8 +775,6 @@
       
         
       
-        
-      
     
     
     
@@ -803,6 +831,8 @@
       
         
           
+        
+      
         
       
         
@@ -987,6 +1017,34 @@
     
   
     saw audit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/cli/harden/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    saw harden
   
 
     
@@ -1359,34 +1417,6 @@
     
   
     Configuration
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../reference/exit-codes/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Exit codes
   
 
     
@@ -1848,29 +1878,24 @@ exist.</p>
 <thead>
 <tr>
 <th>Verdict</th>
-<th>Exit</th>
 <th>What it means</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>clean</td>
-<td><code>0</code></td>
 <td>Nothing found, and the target was fully scanned.</td>
 </tr>
 <tr>
 <td>suspicious</td>
-<td><code>0</code></td>
 <td>Heuristic findings only. Read them; nothing was changed.</td>
 </tr>
 <tr>
 <td>infected</td>
-<td><code>1</code></td>
 <td>At least one confirmed finding.</td>
 </tr>
 <tr>
 <td>error</td>
-<td><code>2</code></td>
 <td>The target could not be fully scanned — unknown, not clean.</td>
 </tr>
 </tbody>
@@ -1881,13 +1906,13 @@ unconditionally — there is no flag that makes it pass, and no flag needed to m
 <p>A repository with heuristic findings only is never reported as "already clean" by any command; it is
 reported as what it is, with the findings shown.</p>
 <h2 id="advisories-are-a-separate-axis">Advisories are a separate axis<a class="headerlink" href="#advisories-are-a-separate-axis" title="Permanent link">&para;</a></h2>
-<p>Known CVEs in your dependencies are reported alongside findings and <strong>never change the verdict or the
-exit code</strong>. A vulnerable dependency is a thing to plan, not an infection to contain, and folding the
-two together would make the gate meaningless in both directions. See <a href="../../reference/advisory-db/">the advisory
+<p>Known CVEs in your dependencies are reported alongside findings and <strong>never change the verdict</strong>. A
+vulnerable dependency is a thing to plan, not an infection to contain, and folding the two together
+would make the gate meaningless in both directions. See <a href="../../reference/advisory-db/">the advisory
 database</a>.</p>
 <h2 id="the-host-verdict-is-its-own-thing">The host verdict is its own thing<a class="headerlink" href="#the-host-verdict-is-its-own-thing" title="Permanent link">&para;</a></h2>
 <p><code>saw audit</code> does not report clean or infected. It reports whether rotating credentials from this
-machine is safe, and exits <code>3</code> when it is not — see <a href="../../how-to/audit-a-machine/">audit a
+machine is safe — see <a href="../../how-to/audit-a-machine/">audit a
 machine</a>. A repository verdict never says anything about the machine,
 and the machine's verdict never says anything about a repository.</p>
 

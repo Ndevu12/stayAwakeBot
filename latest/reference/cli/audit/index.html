@@ -18,7 +18,7 @@
         <link rel="prev" href="../discard/">
       
       
-        <link rel="next" href="../guard/">
+        <link rel="next" href="../harden/">
       
       
         
@@ -482,6 +482,8 @@
       
         
       
+        
+      
     
     
     
@@ -674,6 +676,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../../how-to/harden-this-machine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Harden this machine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../../how-to/harden-a-repo/" class="md-nav__link">
         
   
@@ -747,8 +777,6 @@
       
         
       
-        
-      
     
     
     
@@ -807,6 +835,8 @@
       
         
           
+        
+      
         
       
         
@@ -1009,6 +1039,34 @@
 
       </a>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../harden/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    saw harden
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1393,34 +1451,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../exit-codes/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Exit codes
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../advisory-db/" class="md-nav__link">
         
   
@@ -1705,10 +1735,9 @@
 
 <h1 id="saw-audit"><code>saw audit</code><a class="headerlink" href="#saw-audit" title="Permanent link">&para;</a></h1>
 <p>Audit the machine: credential exposure, editor settings, the start-up surface, and optionally a
-repository's branch protection. Every run ends with a <strong>rotation-safety verdict</strong>, and <code>saw audit</code>
-exits <code>3</code> when rotating from this host would be unsafe — see <a href="../../../how-to/audit-a-machine/">audit a
-machine</a> for what to do with each outcome, and <a href="../../exit-codes/">exit
-codes</a> for the contract. Scope: <a href="../../../how-to/audit-a-machine/#what-a-clean-audit-does-and-does-not-mean">what a clean audit does and does not
+repository's branch protection. Every run ends with a <strong>rotation-safety verdict</strong>. See <a href="../../../how-to/audit-a-machine/">audit a
+machine</a> for what to do with each outcome. Scope: <a href="../../../how-to/audit-a-machine/#what-a-clean-audit-does-and-does-not-mean">what a clean
+audit does and does not
 mean</a>.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw audit [--repo OWNER/NAME] [-b BRANCH] [-f] [--verify] [--no-stream]
 </code></pre></div>
@@ -1730,7 +1759,7 @@ mean</a>.</p>
 </tr>
 <tr>
 <td><code>-f</code>, <code>--fail</code></td>
-<td>Exit <code>1</code> on a weaker warning-level hygiene issue. The rotation-safety axis gates unconditionally, independent of this flag.</td>
+<td>Fail the run on a weaker warning-level hygiene issue. The rotation-safety axis gates unconditionally, independent of this flag.</td>
 </tr>
 <tr>
 <td><code>--verify</code></td>

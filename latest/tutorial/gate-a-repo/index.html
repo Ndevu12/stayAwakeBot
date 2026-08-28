@@ -597,6 +597,8 @@
       
         
       
+        
+      
     
     
     
@@ -789,6 +791,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../how-to/harden-this-machine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Harden this machine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../how-to/harden-a-repo/" class="md-nav__link">
         
   
@@ -860,8 +890,6 @@
       
         
       
-        
-      
     
     
     
@@ -918,6 +946,8 @@
       
         
           
+        
+      
         
       
         
@@ -1102,6 +1132,34 @@
     
   
     saw audit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/cli/harden/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    saw harden
   
 
     
@@ -1474,34 +1532,6 @@
     
   
     Configuration
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../reference/exit-codes/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Exit codes
   
 
     
@@ -1902,7 +1932,7 @@ that is not required is decoration — anyone can merge past it.</p>
 <h2 id="4-prove-it">4. Prove it<a class="headerlink" href="#4-prove-it" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>saw<span class="w"> </span>guard<span class="w"> </span>check<span class="w"> </span>-f
 </code></pre></div>
-<p><code>-f</code> makes it exit non-zero if the gate is absent, unpinned, stale, or not required, so this same
+<p><code>-f</code> makes it fail the run if the gate is absent, unpinned, stale, or not required, so this same
 line works as a CI step. Repeat for every repository at once with <code>--user</code> or <code>--org</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>saw<span class="w"> </span>guard<span class="w"> </span>check<span class="w"> </span>--org<span class="w"> </span>your-org<span class="w"> </span>-f
 </code></pre></div>

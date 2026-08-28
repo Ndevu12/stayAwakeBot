@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Documentation for saw — an offline-first supply-chain worm scanner. Install it, run your first scan, gate CI, audit a machine, and look up any command or exit code.">
+        <meta name="description" content="Documentation for saw — an offline-first supply-chain worm scanner. Install it, run your first scan, gate CI, audit a machine, and look up any command.">
       
       
         <meta name="author" content="Jean Paul Elisa NIYOKWIZERWA">
@@ -75,13 +75,13 @@
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="saw documentation">
   <meta property="og:title" content="saw documentation">
-  <meta property="og:description" content="Documentation for saw — an offline-first supply-chain worm scanner. Install it, run your first scan, gate CI, audit a machine, and look up any command or exit code.">
+  <meta property="og:description" content="Documentation for saw — an offline-first supply-chain worm scanner. Install it, run your first scan, gate CI, audit a machine, and look up any command.">
   <meta property="og:image" content="https://saw-docs.ndevuspace.com/latest/assets/og-card.png">
   <meta property="og:url" content="https://saw-docs.ndevuspace.com/latest/">
 
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="saw documentation">
-  <meta name="twitter:description" content="Documentation for saw — an offline-first supply-chain worm scanner. Install it, run your first scan, gate CI, audit a machine, and look up any command or exit code.">
+  <meta name="twitter:description" content="Documentation for saw — an offline-first supply-chain worm scanner. Install it, run your first scan, gate CI, audit a machine, and look up any command.">
   <meta name="twitter:image" content="https://saw-docs.ndevuspace.com/latest/assets/og-card.png">
 
   
@@ -92,7 +92,7 @@
       "@type": "WebSite",
       "name": "saw documentation",
       "url": "https://saw-docs.ndevuspace.com/latest/",
-      "description": "Documentation for saw — an offline-first supply-chain worm scanner. Install it, run your first scan, gate CI, audit a machine, and look up any command or exit code.",
+      "description": "Documentation for saw — an offline-first supply-chain worm scanner. Install it, run your first scan, gate CI, audit a machine, and look up any command.",
       "inLanguage": "en",
       "about": {
         "@type": "SoftwareApplication",
@@ -536,6 +536,8 @@
       
         
       
+        
+      
     
     
     
@@ -728,6 +730,34 @@
   
   
     <li class="md-nav__item">
+      <a href="how-to/harden-this-machine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Harden this machine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="how-to/harden-a-repo/" class="md-nav__link">
         
   
@@ -799,8 +829,6 @@
       
         
       
-        
-      
     
     
     
@@ -857,6 +885,8 @@
       
         
           
+        
+      
         
       
         
@@ -1041,6 +1071,34 @@
     
   
     saw audit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="reference/cli/harden/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    saw harden
   
 
     
@@ -1433,34 +1491,6 @@
   
   
     <li class="md-nav__item">
-      <a href="reference/exit-codes/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Exit codes
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="reference/advisory-db/" class="md-nav__link">
         
   
@@ -1765,8 +1795,8 @@
 <h1 id="stayawakebot-documentation">StayAwakeBot documentation<a class="headerlink" href="#stayawakebot-documentation" title="Permanent link">&para;</a></h1>
 <p><code>saw</code> hunts self-propagating supply-chain malware in your repositories, lockfiles, installed
 dependency trees and your machine's start-up surface. It remediates through a pull request and gates
-CI, so an infected change cannot merge. A default scan is offline, needs no configuration, and its
-exit code is the verdict.</p>
+CI, so an infected change cannot merge. A default scan is offline, needs no configuration, and
+the last line of the report is the verdict.</p>
 <p>For developers who ship software — in any of the eight package ecosystems <code>saw</code>
 <a href="reference/advisory-db/#ecosystems-saw-reads">reads</a> — and for the people who keep an
 organisation's repositories gated. The vector is the same whatever the stack: a dependency
@@ -1776,10 +1806,10 @@ install, a build, or an editor or agent opening the folder.</p>
 <p><strong>Do a task</strong> — <a href="how-to/scan-local/">scan local code</a> ·
 <a href="how-to/scan-remote/">scan GitHub repositories</a> · <a href="how-to/fix-findings/">fix findings</a> ·
 <a href="how-to/gate-ci/">gate CI</a> · <a href="how-to/scan-on-clone/">scan on clone</a> ·
-<a href="how-to/audit-a-machine/">audit a machine</a> · <a href="how-to/harden-a-repo/">harden a repository</a></p>
+<a href="how-to/audit-a-machine/">audit a machine</a> · <a href="how-to/harden-this-machine/">harden this machine</a> ·
+<a href="how-to/harden-a-repo/">harden a repository</a></p>
 <p><strong>Look it up</strong> — <a href="reference/cli/">CLI reference</a> ·
-<a href="reference/configuration/">configuration</a> · <a href="reference/exit-codes/">exit codes</a> ·
-<a href="reference/advisory-db/">advisory database</a></p>
+<a href="reference/configuration/">configuration</a> · <a href="reference/advisory-db/">advisory database</a></p>
 <p><strong>What the tool promises</strong> — <a href="explanation/trust-model/">trust model</a> ·
 <a href="explanation/verdicts/">verdicts</a> · <a href="explanation/fail-closed/">fail closed</a> ·
 <a href="explanation/safety-envelope/">safety envelope</a> ·

@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="saw scan — hunt for supply-chain worms across repositories. Read-only, and the exit code is the verdict. Full option reference.">
+        <meta name="description" content="saw scan — hunt for supply-chain worms across repositories. Read-only. Full option reference.">
       
       
         <meta name="author" content="Jean Paul Elisa NIYOKWIZERWA">
@@ -77,13 +77,13 @@
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="saw documentation">
   <meta property="og:title" content="saw scan — saw documentation">
-  <meta property="og:description" content="saw scan — hunt for supply-chain worms across repositories. Read-only, and the exit code is the verdict. Full option reference.">
+  <meta property="og:description" content="saw scan — hunt for supply-chain worms across repositories. Read-only. Full option reference.">
   <meta property="og:image" content="https://saw-docs.ndevuspace.com/latest/assets/og-card.png">
   <meta property="og:url" content="https://saw-docs.ndevuspace.com/latest/reference/cli/scan/">
 
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="saw scan — saw documentation">
-  <meta name="twitter:description" content="saw scan — hunt for supply-chain worms across repositories. Read-only, and the exit code is the verdict. Full option reference.">
+  <meta name="twitter:description" content="saw scan — hunt for supply-chain worms across repositories. Read-only. Full option reference.">
   <meta name="twitter:image" content="https://saw-docs.ndevuspace.com/latest/assets/og-card.png">
 
   
@@ -93,7 +93,7 @@
       "@context": "https://schema.org",
       "@type": "TechArticle",
       "headline": "saw scan",
-      "description": "saw scan — hunt for supply-chain worms across repositories. Read-only, and the exit code is the verdict. Full option reference.",
+      "description": "saw scan — hunt for supply-chain worms across repositories. Read-only. Full option reference.",
       "url": "https://saw-docs.ndevuspace.com/latest/reference/cli/scan/",
       "image": "https://saw-docs.ndevuspace.com/latest/assets/og-card.png",
       "inLanguage": "en",
@@ -482,6 +482,8 @@
       
         
       
+        
+      
     
     
     
@@ -674,6 +676,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../../how-to/harden-this-machine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Harden this machine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../../how-to/harden-a-repo/" class="md-nav__link">
         
   
@@ -747,8 +777,6 @@
       
         
       
-        
-      
     
     
     
@@ -807,6 +835,8 @@
       
         
           
+        
+      
         
       
         
@@ -1001,6 +1031,34 @@
     
   
     saw audit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../harden/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    saw harden
   
 
     
@@ -1393,34 +1451,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../exit-codes/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Exit codes
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../advisory-db/" class="md-nav__link">
         
   
@@ -1706,7 +1736,7 @@
 <h1 id="saw-scan"><code>saw scan</code><a class="headerlink" href="#saw-scan" title="Permanent link">&para;</a></h1>
 <p>Hunt for supply-chain worms across repositories or directories. The full report — with full match
 evidence — renders to stdout and <strong>nothing is persisted</strong> unless you ask for a sink; progress goes to
-stderr; the <a href="../../exit-codes/">exit code is the verdict</a>. <code>scan</code> never changes a file.</p>
+stderr. <code>scan</code> never changes a file.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw scan [TARGETS...] [-r] [--user U] [--org O] [-c FILE] [-p PATH] [-j N]
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>         [--json] [--sarif FILE] [--alert] [-d DIR] [--no-stream] [--pager]
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>         [--no-advisories] [-x | --external] [--deep] [--require-db]
@@ -1769,7 +1799,7 @@ stderr; the <a href="../../exit-codes/">exit code is the verdict</a>. <code>scan
 </tr>
 <tr>
 <td><code>--no-advisories</code></td>
-<td>Omit the dependency CVE section. Advisories never change the verdict or exit code, so this only quiets the output.</td>
+<td>Omit the dependency CVE section. Advisories never change the verdict, so this only quiets the output.</td>
 </tr>
 <tr>
 <td><code>-x</code>, <code>--external</code></td>
@@ -1781,7 +1811,7 @@ stderr; the <a href="../../exit-codes/">exit code is the verdict</a>. <code>scan
 </tr>
 <tr>
 <td><code>--require-db</code></td>
-<td>Exit <code>2</code> when the <a href="../../advisory-db/">advisory database</a> is absent or fails its integrity check, instead of continuing without it — for CI that must not lose advisory coverage silently.</td>
+<td>Fail the run when the <a href="../../advisory-db/">advisory database</a> is absent or fails its integrity check, instead of continuing without it — for CI that must not lose advisory coverage silently.</td>
 </tr>
 </tbody>
 </table>

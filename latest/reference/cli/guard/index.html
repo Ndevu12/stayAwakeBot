@@ -15,7 +15,7 @@
         <link rel="canonical" href="https://saw-docs.ndevuspace.com/latest/reference/cli/guard/">
       
       
-        <link rel="prev" href="../audit/">
+        <link rel="prev" href="../harden/">
       
       
         <link rel="next" href="../hook/">
@@ -482,6 +482,8 @@
       
         
       
+        
+      
     
     
     
@@ -674,6 +676,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../../how-to/harden-this-machine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Harden this machine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../../how-to/harden-a-repo/" class="md-nav__link">
         
   
@@ -747,8 +777,6 @@
       
         
       
-        
-      
     
     
     
@@ -807,6 +835,8 @@
       
         
           
+        
+      
         
       
         
@@ -991,6 +1021,34 @@
     
   
     saw audit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../harden/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    saw harden
   
 
     
@@ -1463,34 +1521,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../exit-codes/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Exit codes
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../advisory-db/" class="md-nav__link">
         
   
@@ -1849,7 +1879,7 @@ it behind the latest release, and — for a remote repository — does branch pr
 </tr>
 <tr>
 <td><code>-f</code>, <code>--fail</code></td>
-<td>Exit <code>1</code> when any repository's gate is absent, unpinned, stale, or not required.</td>
+<td>Fail the run when any repository's gate is absent, unpinned, stale, or not required.</td>
 </tr>
 </tbody>
 </table>
@@ -1896,8 +1926,8 @@ default branch</strong>. See <a href="../../../how-to/gate-ci/">gate CI</a>.</p>
 <h2 id="saw-guard-drift"><code>saw guard drift</code><a class="headerlink" href="#saw-guard-drift" title="Permanent link">&para;</a></h2>
 <p>Keeps each repository gated and current by maintaining one de-duplicated, self-closing tracking
 issue: it opens the issue when a repository has no gate or its pin has fallen behind, and closes it
-once the repository is protected and current. It reports as an issue and never fails a build (exit
-<code>0</code>), so it is safe on a schedule.</p>
+once the repository is protected and current. It reports as an issue and never fails a build, so it
+is safe on a schedule.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>saw guard drift [TARGETS...] [-p PATH] [-c FILE] [-r] [--user U] [--org O] [--repo OWNER/NAME]
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>                [-j N] [--no-stream]
 </code></pre></div>

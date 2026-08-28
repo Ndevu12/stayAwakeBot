@@ -480,6 +480,8 @@
       
         
       
+        
+      
     
     
     
@@ -672,6 +674,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../how-to/harden-this-machine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Harden this machine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../how-to/harden-a-repo/" class="md-nav__link">
         
   
@@ -743,8 +773,6 @@
       
         
       
-        
-      
     
     
     
@@ -801,6 +829,8 @@
       
         
           
+        
+      
         
       
         
@@ -985,6 +1015,34 @@
     
   
     saw audit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/cli/harden/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    saw harden
   
 
     
@@ -1357,34 +1415,6 @@
     
   
     Configuration
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../reference/exit-codes/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Exit codes
   
 
     
@@ -2068,7 +2098,7 @@ list):</p>
 </code></pre></div>
 <p><strong>c. Inspect before deleting</strong> (avoid nuking the wrong entry if you have several):</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>security<span class="w"> </span>find-internet-password<span class="w"> </span>-s<span class="w"> </span>github.com<span class="w">          </span><span class="c1"># macOS: presence (add -g to view the secret)</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>secret-tool<span class="w"> </span>lookup<span class="w"> </span>server<span class="w"> </span>github.com<span class="w"> </span>&gt;/dev/null<span class="p">;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="nv">$?</span><span class="w">   </span><span class="c1"># Linux (libsecret): 0 = present (secret discarded)</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>secret-tool<span class="w"> </span>lookup<span class="w"> </span>server<span class="w"> </span>github.com<span class="w"> </span>&gt;/dev/null<span class="w">        </span><span class="c1"># Linux (libsecret): succeeds if present (secret discarded)</span>
 <a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>cmdkey<span class="w"> </span>/list:git:https://github.com<span class="w">                    </span><span class="c1"># Windows: show the Credential Manager entry</span>
 </code></pre></div>
 <p><strong>d. Delete the cached token</strong> — use your platform's store (<code>saw audit</code> prints the one for your OS):</p>

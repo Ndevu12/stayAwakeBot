@@ -15,7 +15,7 @@
         <link rel="canonical" href="https://saw-docs.ndevuspace.com/latest/reference/advisory-db/">
       
       
-        <link rel="prev" href="../exit-codes/">
+        <link rel="prev" href="../configuration/">
       
       
         <link rel="next" href="../../explanation/trust-model/">
@@ -482,6 +482,8 @@
       
         
       
+        
+      
     
     
     
@@ -674,6 +676,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../how-to/harden-this-machine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Harden this machine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../how-to/harden-a-repo/" class="md-nav__link">
         
   
@@ -747,8 +777,6 @@
       
         
       
-        
-      
     
     
     
@@ -805,6 +833,8 @@
       
         
           
+        
+      
         
       
         
@@ -989,6 +1019,34 @@
     
   
     saw audit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/harden/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    saw harden
   
 
     
@@ -1361,34 +1419,6 @@
     
   
     Configuration
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../exit-codes/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Exit codes
   
 
     
@@ -1798,14 +1828,14 @@ entirely offline; downloading it is the only step that needs a network.</p>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>saw<span class="w"> </span>db<span class="w"> </span>update<span class="w"> </span>-e<span class="w"> </span>npm<span class="w"> </span>-e<span class="w"> </span>pypi<span class="w">      </span><span class="c1"># just these</span>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>saw<span class="w"> </span>db<span class="w"> </span>status<span class="w">                     </span><span class="c1"># fingerprint, age, per-ecosystem counts, integrity</span>
 </code></pre></div>
-<p>Advisories are reported alongside findings but <strong>never change the verdict or the exit code</strong> — a CVE
+<p>Advisories are reported alongside findings but <strong>never change the verdict</strong> — a CVE
 in a dependency is not an infection. Quiet them for one run with <code>saw scan --no-advisories</code>.</p>
 <h2 id="in-ci">In CI<a class="headerlink" href="#in-ci" title="Permanent link">&para;</a></h2>
 <p>Without the corpus a scan continues with less advisory coverage rather than failing. When a job must
 not lose that coverage silently, require it:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>saw<span class="w"> </span>db<span class="w"> </span>status<span class="w"> </span>--max-age-days<span class="w"> </span><span class="m">30</span><span class="w">                  </span><span class="c1"># fail if the corpus is stale or missing</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>saw<span class="w"> </span>db<span class="w"> </span>status<span class="w"> </span>--require-snapshot<span class="w"> </span>&lt;digest&gt;<span class="w">        </span><span class="c1"># pin an exact snapshot for reproducibility</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>saw<span class="w"> </span>scan<span class="w"> </span>--require-db<span class="w">                            </span><span class="c1"># exit 2 rather than scan without it</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>saw<span class="w"> </span>scan<span class="w"> </span>--require-db<span class="w">                            </span><span class="c1"># fail rather than scan without it</span>
 </code></pre></div>
 <p>Unknown age counts as stale.</p>
 <p>Flags: <a href="../cli/db/">CLI reference</a>.</p>

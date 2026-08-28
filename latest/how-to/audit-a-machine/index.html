@@ -18,7 +18,7 @@
         <link rel="prev" href="../fix-findings/">
       
       
-        <link rel="next" href="../harden-a-repo/">
+        <link rel="next" href="../harden-this-machine/">
       
       
         
@@ -484,6 +484,8 @@
       
         
       
+        
+      
     
     
     
@@ -808,6 +810,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../harden-this-machine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Harden this machine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../harden-a-repo/" class="md-nav__link">
         
   
@@ -879,8 +909,6 @@
       
         
       
-        
-      
     
     
     
@@ -937,6 +965,8 @@
       
         
           
+        
+      
         
       
         
@@ -1121,6 +1151,34 @@
     
   
     saw audit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/cli/harden/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    saw harden
   
 
     
@@ -1493,34 +1551,6 @@
     
   
     Configuration
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../reference/exit-codes/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Exit codes
   
 
     
@@ -1923,41 +1953,38 @@
 <h1 id="audit-a-machine">Audit a machine<a class="headerlink" href="#audit-a-machine" title="Permanent link">&para;</a></h1>
 <p>A repository scan says nothing about the machine it runs on. <code>saw audit</code> looks at the host: cached
 credentials, editor settings, the start-up surface, and — with <code>--repo</code> — a repository's branch
-protection. It is read-only, and it never cleans anything. Flags: <a href="../../reference/cli/audit/">CLI
+protection. It is read-only, and it never cleans anything. Host denials are
+<a href="../harden-this-machine/"><code>saw harden</code></a>. Flags: <a href="../../reference/cli/audit/">CLI
 reference</a>.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw<span class="w"> </span>audit<span class="w">                       </span><span class="c1"># hygiene + start-up surface + rotation verdict</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>saw<span class="w"> </span>audit<span class="w"> </span>--repo<span class="w"> </span>owner/name<span class="w"> </span>-f<span class="w">  </span><span class="c1"># also gate on that repository's branch protection</span>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>saw<span class="w"> </span>audit<span class="w"> </span>--verify<span class="w">              </span><span class="c1"># content-scan a suspicious directory the audit flagged</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>saw<span class="w"> </span>audit<span class="p">;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="nv">$?</span>
 </code></pre></div>
 <h2 id="read-the-result">Read the result<a class="headerlink" href="#read-the-result" title="Permanent link">&para;</a></h2>
+<p>The report ends with a rotation-safety verdict.</p>
 <table>
 <thead>
 <tr>
-<th>Exit</th>
-<th>Meaning</th>
+<th>Result</th>
 <th>Do this</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>0</code></td>
 <td>Nothing found, and rotating credentials from this host is safe.</td>
 <td>Nothing.</td>
 </tr>
 <tr>
-<td><code>1</code></td>
 <td>A weaker hygiene warning, and you passed <code>-f</code>.</td>
 <td>Read it; act if it applies to you.</td>
 </tr>
 <tr>
-<td><code>3</code></td>
 <td><strong>Rotation unsafe</strong> — either something is running at start-up that should not be, or the start-up surface could not be established.</td>
 <td>Below.</td>
 </tr>
 </tbody>
 </table>
-<p><code>3</code> gates whether or not you passed <code>-f</code>, because rotating a credential on a compromised host hands
+<p>Rotation-unsafe gates whether or not you passed <code>-f</code>, because rotating a credential on a compromised host hands
 the new one straight to whatever is running there.</p>
 <h2 id="on-a-rotation-unsafe-result">On a rotation-unsafe result<a class="headerlink" href="#on-a-rotation-unsafe-result" title="Permanent link">&para;</a></h2>
 <p>Work in this order, and rotate <strong>last</strong>:</p>
@@ -1976,9 +2003,8 @@ ran, which cannot be told from the host — and every write can overwrite whatev
 <p>Your machine did not let some checks finish — a tool they need is missing, or a path they read is
 not readable by you. Each one names what stopped it.</p>
 <p>Fix what it names and re-run, or inspect that surface yourself. Until you do, read the rest of the
-report as covering everything <strong>except</strong> those surfaces. The exit code says how much that costs you:
-<code>3</code> if one of them reads the start-up surface, so treat rotation as unsafe until you have checked it
-by hand; <code>2</code> otherwise.</p>
+report as covering everything <strong>except</strong> those surfaces. If one of them reads the start-up surface,
+treat rotation as unsafe until you have checked it by hand.</p>
 <h2 id="credential-findings">Credential findings<a class="headerlink" href="#credential-findings" title="Permanent link">&para;</a></h2>
 <p>A token in your OS keychain is not automatically a problem, and deleting a credential path you
 actually use is an outage, not a fix. These findings inform rather than instruct: read <a href="../../explanation/credential-hygiene/">credential
