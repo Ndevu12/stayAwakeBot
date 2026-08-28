@@ -53,7 +53,8 @@ def _fonts_dir(rel: str) -> str:
     if "fonts" in parts:
         i = len(parts) - 1 - parts[::-1].index("fonts")
         return "/".join(parts[: i + 1])
-    return str(Path(rel).parent)
+    parent = str(Path(rel).parent)
+    return rel if parent in (".", "") else parent
 
 
 def plan(findings) -> list[Change]:
@@ -66,6 +67,8 @@ def plan(findings) -> list[Change]:
         path = f.path
         if f.remediation == "quarantine-dir":
             path = _fonts_dir(f.path)
+        if not path or Path(path) in (Path("."), Path("..")):
+            continue
         if action == "vscode":
             if f.path.endswith("tasks.json"):
                 c = Change("quarantine", f.path, "VS Code auto-run task harness")
@@ -127,6 +130,8 @@ def _backup(root: Path, rel: str, quarantine: Path) -> None:
         return                            # never dereference a symlinked target into quarantine
     dest = quarantine / rel
     dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.is_symlink() or not is_safe_write_target(dest, quarantine):
+        return
     if src.is_dir():
         # symlinks=True recreates inner symlinks as links instead of copying their
         # (possibly out-of-tree) targets' contents into the quarantine.
@@ -137,9 +142,12 @@ def _backup(root: Path, rel: str, quarantine: Path) -> None:
 
 def _delete_stays_in(root: Path, target: Path) -> bool:
     try:
+        base = root.resolve()
         if target.is_symlink():
-            return target.parent.resolve().is_relative_to(root.resolve())
-        return is_safe_write_target(target, root)
+            return target.parent.resolve().is_relative_to(base)
+        if not is_safe_write_target(target, root):
+            return False
+        return target.resolve() != base
     except (OSError, RuntimeError, ValueError):
         return False
 

@@ -198,6 +198,52 @@ class TestItRefusesWhereRemovalWouldBeAGuess(unittest.TestCase):
             ))
         self.assertEqual(recovered, [])
 
+    def test_a_confidence_that_changes_mid_loop_is_not_a_computed_strip(self):
+        from stayawake.bots.security import pr
+        from stayawake.bots.security.models import HEURISTIC, ScanResult, Severity
+        from stayawake.bots.security.remediation.classify import Suggested
+
+        stripped = []
+
+        def spy_strip(*a, **k):
+            stripped.append(1)
+            return True
+
+        def plant(repo, wt, *a, **k):
+            Path(wt).mkdir(parents=True, exist_ok=True)
+            (Path(wt) / "index.js").write_text("x\n", encoding="utf-8")
+            return True
+
+        class Flip:
+            n = 0
+            path = "index.js"
+            signature_id = "x"
+            category = "code-loader"
+            vector = None
+            commit_sha = None
+            related_paths = ()
+            line = None
+            severity = Severity.CRITICAL
+            description = "x"
+
+            @property
+            def confidence(self):
+                type(self).n += 1
+                return HEURISTIC if type(self).n < 10 else "confirmed"
+
+        infected = ScanResult("owner/repo", "local", [Flip()])
+        idle = ScanResult("owner/repo", "local", [])
+        sug = Suggested("index.js", "x", "untracked", "review", "", "stripped\n")
+        _prepare_fix_against(
+            [infected, idle, idle], lambda *a, **k: installed.Report(),
+            extra=(
+                mock.patch.object(pr.gitutil, "add_worktree", side_effect=plant),
+                mock.patch.object(pr.remediation, "has_concealment_seam", return_value=True),
+                mock.patch.object(pr.remediation, "classify_recovery", return_value=sug),
+                mock.patch.object(pr.remediation, "apply_suggested", side_effect=spy_strip),
+            ))
+        self.assertEqual(stripped, [])
+
     def test_a_scan_that_did_not_finish_does_not_quarantine(self):
         from stayawake.bots.security import pr
         from stayawake.bots.security.models import Finding, ScanResult, Severity

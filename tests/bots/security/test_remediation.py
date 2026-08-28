@@ -105,6 +105,29 @@ class TestStripAndResidual(unittest.TestCase):
         self.assertFalse((repo / "evil.cjs").exists())          # removed from the tree
         self.assertTrue((q / "evil.cjs").exists())              # backed up first
 
+    def test_quarantine_does_not_remove_the_repository_root(self):
+        repo = Path(tempfile.mkdtemp())
+        keep = repo / "keep.txt"
+        keep.write_text("x\n", encoding="utf-8")
+        q = Path(tempfile.mkdtemp())
+        applied = remediation.apply(repo, [remediation.Change("quarantine", ".", "x")], q)
+        self.assertEqual(applied, [])
+        self.assertTrue(keep.is_file())
+        finding = type("F", (), {"path": ".", "remediation": "quarantine-dir",
+                                 "confidence": "confirmed", "description": "x"})()
+        self.assertNotIn(".", {c.path for c in remediation.plan([finding])})
+
+    def test_backup_does_not_follow_a_planted_destination(self):
+        repo = Path(tempfile.mkdtemp())
+        (repo / "payload.js").write_text("from-repo\n", encoding="utf-8")
+        host = Path(tempfile.mkdtemp()) / "sink"
+        host.write_text("host\n", encoding="utf-8")
+        q = Path(tempfile.mkdtemp())
+        (q / "payload.js").symlink_to(host)
+        remediation.changes._backup(repo, "payload.js", q)
+        self.assertEqual(host.read_text(encoding="utf-8"), "host\n")
+        self.assertTrue((q / "payload.js").is_symlink())
+
     def test_quarantine_does_not_follow_a_linked_directory(self):
         repo = Path(tempfile.mkdtemp())
         host = Path(tempfile.mkdtemp())

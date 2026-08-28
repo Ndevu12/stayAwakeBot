@@ -222,8 +222,11 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
             for f in sorted(findings, key=lambda x: 0 if _corroborated(x) else 1):
                 if f.path in seen_cl:
                     continue
-                if not _corroborated(f):
-                    if getattr(f, "confidence", None) != HEURISTIC:
+                conf = getattr(f, "confidence", None)
+                corroborated = (getattr(f, "category", None) == "code-loader"
+                                and conf == CONFIRMED)
+                if not corroborated:
+                    if conf != HEURISTIC:
                         continue
                     target = Path(wt) / f.path
                     try:
@@ -237,7 +240,7 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
                 if isinstance(disp, remediation.Recovery) and \
                         remediation.apply_recovery(wt, disp, quarantine, content_sig):
                     applied.append(remediation.Change("recover", disp.path, disp.label))
-                elif not _corroborated(f):
+                elif not corroborated:
                     continue     # heuristic-only: act on a PROVEN recovery, never a computed strip
                 elif isinstance(disp, remediation.Suggested):
                     suggested.append(disp)     # computed strip → applied + committed separately below
