@@ -34,6 +34,14 @@ reader, not the mechanism or the weakness it closed.
   decision, with what that involves spelled out.
 
 ### Fixed
+- **Guidance after a suspected wipe no longer promises that missing data is recoverable.** Whether
+  anything survives depends on which wipe variant ran, and a host-side audit cannot tell — so the
+  incident runbook and the wiped-home finding now state that as a condition rather than asserting
+  it. Both still tell you to image first, because imaging is what preserves the case where recovery
+  is possible, and the step now names `saw fix` among the writes to hold off until then.
+- **The runbook now says what to do when neutralization cannot be confirmed** — image first and
+  rotate anyway, rather than leaving the credentials live: the trigger stays armed for as long as
+  they are valid, and a wipe against an imaged host costs nothing.
 - **The issue `saw` opens automatically now points at remediation that exists.** It previously told
   the reader to run a cleanup script that this project has never shipped. It now points at
   `saw fix --pr`, and says plainly that the issue closing means the repository scans clean — not

@@ -39,7 +39,8 @@ Work in this order, and rotate **last**:
 The verdict is also withheld when the start-up surface could not be established at all. A fresh
 account, a container and a destroyed home directory look identical from disk, so `saw` reports the
 ambiguity rather than picking one. If files you expect to be there are gone, **image the disk before
-using the machine further** — a delete leaves content recoverable, and continued use overwrites it.
+using the machine further**, `saw fix` included. How much survives depends on which wipe variant
+ran, which cannot be told from the host — and every write can overwrite whatever did.
 
 ## Credential findings
 
