@@ -25,11 +25,10 @@ reader, not the mechanism or the weakness it closed.
   anything else.
 
 ### Fixed
-- **A host control is created where it was named.** A write does not follow a symbolic link, a
-  location that is no longer empty is not frozen, and a link anyone but root could have placed on
-  the way to that location is refused rather than written through.
-- **A check of running processes that examined none of them is no longer a clean result.** Applying
-  a host control is refused in that case, not applied.
+- **`saw harden` applies a control only at the location it named, and only when it can confirm that
+  is where the control went.** Anything it cannot confirm is left as it was and reported, never
+  counted as applied.
+- **A run that examined nothing on this machine is refused rather than applied.**
 - **A location a check could not read is no longer reported as a clean result.** Those checks
   used to return the same empty answer they return on a clean host. They now say the location
   could not be read, and the run is UNKNOWN rather than clean.
