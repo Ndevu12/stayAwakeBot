@@ -266,8 +266,13 @@ def remove_rebuildable(root: Path, *, exclude_dirs=None, remove_lockfiles: bool 
     def _evidence() -> Path:
         nonlocal quarantine
         if quarantine is None:
-            quarantine = next_quarantine(root, quarantine_path(root))
-            quarantine.mkdir(parents=True, exist_ok=True)
+            candidate = next_quarantine(root, quarantine_path(root))
+            if not is_safe_write_target(candidate, root):
+                raise OSError(f"quarantine is not inside {root}")
+            candidate.mkdir(parents=True, exist_ok=True)
+            if not is_safe_write_target(candidate, root):
+                raise OSError(f"quarantine is not inside {root}")
+            quarantine = candidate
         return quarantine
 
     copies: list[Path] = []

@@ -162,7 +162,7 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
     content_sig = remediation.codeloader_content_sig([s for g in signatures.values() for s in g])
 
     def _scan():
-        return scan_target(LocalRepoTarget(wt, str(repo), opts), signatures, allowlist).findings
+        return scan_target(LocalRepoTarget(wt, str(repo), opts), signatures, allowlist)
 
     def _is_blocking(f):
         # Keeps the tree infected iff it would drive the scanner's INFECTED verdict — i.e. ANY
@@ -171,20 +171,21 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
         # ones (code-loader, exfil, npm-lifecycle, supply-chain, evil-merge) go to the manual
         # checklist. Only a HEURISTIC finding is "suspicious" (non-blocking). Keying on code-loader
         # alone silently demoted confirmed non-loader malware to suspicious/clean (adversarial catch).
-        return getattr(f, "confidence", CONFIRMED) == CONFIRMED
+        return getattr(f, "confidence", None) == CONFIRMED
 
     def _blocking(fs):
         return [f for f in fs if _is_blocking(f)]
 
     with status(f"scanning {label}…", enabled=spin):       # phase 1: detection (the slow part)
-        findings = _scan()
+        scan = _scan()
+        findings = scan.findings
 
     # phase 2: apply the TRUSTED tier (structure-safe fixes + git-corroborated recoveries) and commit
     # SEPARATE, review-required commit — two trust levels, two commits, in one rolling PR.
     tree_note = ""
     with status(f"fixing {label}…", enabled=spin):
         lockfile_changes: list = []
-        if _blocking(findings):
+        if _blocking(findings) and not scan.error:
             try:
                 report = installed.remove_rebuildable(
                     repo,
@@ -239,7 +240,7 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
             elif isinstance(disp, remediation.Manual):
                 manual_reviews[disp.path] = disp
 
-        auto = [f for f in _blocking(_scan()) if remediation.is_auto_fixable(f)]
+        auto = [f for f in _blocking(_scan().findings) if remediation.is_auto_fixable(f)]
         if auto:
             applied += remediation.quarantine_residual(wt, auto, quarantine)
 
@@ -280,7 +281,7 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
                     "ABORTED — could not commit the computed strip (git commit failed)", tree_note), wt
             signed = signed and commit.signed
 
-        fs = _scan()
+        fs = _scan().findings
         residual = _blocking(fs)
         suspicious = [f for f in fs if not _is_blocking(f)]
         manual: list = []

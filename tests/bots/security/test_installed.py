@@ -106,6 +106,43 @@ class TestItRefusesWhereRemovalWouldBeAGuess(unittest.TestCase):
         _prepare_fix_against([suspect, idle, idle], spy)
         self.assertEqual(called, [])
 
+    def test_a_scan_that_did_not_finish_does_not_reach_the_remover(self):
+        from stayawake.bots.security.models import Finding, ScanResult, Severity
+
+        called = []
+
+        def spy(root, **kw):
+            called.append(root)
+            return installed.Report()
+
+        finding = Finding("x", "code-loader", Severity.CRITICAL, "postcss.config.mjs",
+                          "loader", remediation="strip-appended-payload")
+        partial = ScanResult("owner/repo", "local", [finding],
+                             error="1 file(s) unreadable: secret.env")
+        idle = ScanResult("owner/repo", "local", [])
+        _prepare_fix_against([partial, idle, idle], spy)
+        self.assertEqual(called, [])
+
+    def test_a_finding_that_does_not_say_it_is_confirmed_does_not_reach_the_remover(self):
+        from types import SimpleNamespace
+
+        from stayawake.bots.security.models import ScanResult, Severity
+
+        called = []
+
+        def spy(root, **kw):
+            called.append(root)
+            return installed.Report()
+
+        finding = SimpleNamespace(
+            path="index.js", signature_id="x", category="other",
+            vector=None, commit_sha=None, related_paths=(), line=None,
+            severity=Severity.CRITICAL, description="x")
+        infected = ScanResult("owner/repo", "local", [finding])
+        idle = ScanResult("owner/repo", "local", [])
+        _prepare_fix_against([infected, idle, idle], spy)
+        self.assertEqual(called, [])
+
     def test_without_a_lockfile_nothing_proves_the_tree(self):
         plan = installed.plan_removal(Path("/nowhere"), {("a", "1")}, [])
         self.assertFalse(plan.safe_to_remove)
@@ -396,6 +433,35 @@ class TestTheProjectTreeIsRemovedOnTheRepo(unittest.TestCase):
         self.assertTrue(marker.is_file())
         self.assertTrue((repo.root / installed.INSTALLED_DIR).is_symlink())
 
+    def test_a_nested_linked_tree_is_not_removed(self):
+        repo = _Repo()
+        package = repo.install("left-pad", "1.0.0")
+        host = Path(tempfile.mkdtemp())
+        inner = host / "left-pad"
+        inner.mkdir()
+        (inner / "package.json").write_text(
+            json.dumps({"name": "left-pad", "version": "1.0.0"}), encoding="utf-8")
+        marker = inner / "keep"
+        marker.write_text("x", encoding="utf-8")
+        nested = package / installed.INSTALLED_DIR
+        nested.symlink_to(host)
+        installed.remove_rebuildable(repo.root)
+        self.assertTrue(marker.is_file())
+
+    def test_a_linked_quarantine_is_not_written(self):
+        repo = _Repo()
+        package = repo.install("left-pad", "1.0.0")
+        host = Path(tempfile.mkdtemp())
+        marker = host / "keep"
+        marker.write_text("x", encoding="utf-8")
+        (repo.root / ".malware-quarantine").symlink_to(host)
+        with self.assertRaises(OSError):
+            installed.remove_rebuildable(repo.root)
+        self.assertTrue(marker.is_file())
+        self.assertTrue(package.is_dir())
+        self.assertTrue(repo.lock.is_file())
+        self.assertEqual(list(host.iterdir()), [marker])
+
 
 class TestConfirmedFixReachesTheRemover(unittest.TestCase):
     def test_a_confirmed_scan_calls_the_remover_on_that_repository(self):
@@ -414,7 +480,10 @@ class TestConfirmedFixReachesTheRemover(unittest.TestCase):
         _prepare_fix_against([infected, idle, idle], spy)
         self.assertEqual(len(called), 1)
         self.assertEqual(called[0][0], Path("/repo"))
-        self.assertNotEqual(called[0][1].get("lockfile_root"), Path("/repo"))
+        lockfile_root = called[0][1].get("lockfile_root")
+        self.assertIsNotNone(lockfile_root)
+        self.assertNotEqual(lockfile_root, called[0][0])
+        self.assertIn("sab-fix-", Path(lockfile_root).name)
 
     def test_ci_tells_the_remover_to_keep_the_lockfile(self):
         from stayawake.bots.security import pr
