@@ -138,16 +138,19 @@ def incident_response_sequence() -> list[str]:
     # so this stays pure data (and a non-terminal consumer can renumber/reformat it freely).
     return [
         "Isolate the host from the network before doing anything else.",
-        # BEFORE the rebuild step, which is the one that destroys the evidence a plain delete left
-        # recoverable. `saw scan` already computes the discriminator; nothing asked it here.
-        "If files are missing, image the disk before rebuilding or using this host — continued use "
-        "overwrites recoverable data. `saw scan` names which wipe variant ran.",
+        # BEFORE the rebuild step, which destroys what a plain delete left recoverable. Whether any
+        # survives is a property of the PAYLOAD this host-side path never saw — so it is not asserted.
+        "If files are missing, image the disk before rebuilding, running `saw fix`, or otherwise "
+        "using this host — every write can overwrite recoverable content. How much is recoverable "
+        "depends on the wipe variant; `saw scan` names it when the payload is still in a repository.",
         "Take self-hosted CI runners offline and rebuild affected hosts from known-clean "
         "images (watch for a runner named SHA1HULUD).",
         "Neutralize per-host persistence: rogue OS services (e.g. gh-token-monitor.service), "
         "planted CI workflows, and editor/AI-agent auto-run hooks (.vscode/, .claude/).",
         f"ONLY THEN rotate credentials, in order: npm → GitHub PATs → cloud keys → SSH keys. "
-        f"Rotating earlier is dangerous: {_WIPER_NOTE}.",
+        f"Rotating earlier is dangerous: {_WIPER_NOTE}. If the previous step could not be "
+        "confirmed, image first and rotate anyway — the trigger stays armed for as long as the "
+        "credentials are valid, and a wipe against an imaged host costs nothing.",
     ]
 
 

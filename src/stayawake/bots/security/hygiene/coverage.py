@@ -110,13 +110,11 @@ def check_persistence_coverage() -> list[HygieneIssue]:
             detail=f"Every persistence location this audit certifies is absent ({kinds}), so nothing "
                    "was examined. That is a new account, a container or a CI image — or a destroyed "
                    "home directory. From disk they are indistinguishable.",
-            # Incident reading first: this also renders under an active-persistence verdict, where an
-            # operator whose eye stops after one sentence must not have read "nothing to do".
             # The INCIDENT reading leads: this also renders under an active-persistence verdict,
             # where a reader whose eye stops after one sentence must not have read "nothing to do".
-            remediation="Confirm which it is. If files are gone, treat it as an incident: the data "
-                        "is still recoverable, so image the disk before using this host further, and "
-                        f"do not rotate credentials — {_WIPER_NOTE}. On a new account, container or "
-                        "CI image, nothing to do.",
+            remediation="Confirm which it is. If files are gone, treat it as an incident: image the "
+                        "disk before any further write — what is recoverable depends on the wipe "
+                        f"variant. Do not rotate credentials — {_WIPER_NOTE}. New account, "
+                        "container or CI image: nothing to do.",
         ))
     return issues
