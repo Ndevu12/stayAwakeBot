@@ -126,6 +126,12 @@ def _dest_ready(quarantine: Path, dest: Path) -> bool:
     try:
         if dest.is_symlink() or dest.exists():
             return False
+        try:
+            lexical = dest.relative_to(quarantine)
+        except ValueError:
+            return False
+        if lexical == Path(".") or ".." in lexical.parts:
+            return False
         q = quarantine.resolve()
         resolved = dest.resolve()
         if resolved == q or not resolved.is_relative_to(q):
@@ -147,6 +153,8 @@ def _dest_ready(quarantine: Path, dest: Path) -> bool:
 
 
 def _backup(root: Path, rel: str, quarantine: Path) -> None:
+    if Path(rel).is_absolute() or ".." in Path(rel).parts:
+        return
     src = root / rel
     if not src.exists():
         return

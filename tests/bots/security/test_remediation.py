@@ -180,6 +180,21 @@ class TestStripAndResidual(unittest.TestCase):
         self.assertFalse((base / "q" / "payload").exists())
         self.assertFalse((base / "q" / "srcfile").exists())
 
+    def test_backup_does_not_mkdir_through_a_bouncing_path(self):
+        base = Path(tempfile.mkdtemp())
+        q = base / "probe" / "q"
+        q.mkdir(parents=True)
+        root = Path(tempfile.mkdtemp()) / "probe" / "q"
+        root.mkdir(parents=True)
+        marker = "EVIL_SAW_R7"
+        rel = f"x/../../{marker}/../q/file"
+        (root / "x").mkdir()
+        (root.parent / marker).mkdir()
+        (root / "file").write_text("from-repo\n", encoding="utf-8")
+        remediation.changes._backup(root, rel, q)
+        self.assertFalse((base / "probe" / marker).exists())
+        self.assertFalse((q / "file").exists())
+
     def test_backup_does_not_follow_a_dangling_destination(self):
         repo = Path(tempfile.mkdtemp())
         (repo / "payload.js").write_text("from-repo\n", encoding="utf-8")
