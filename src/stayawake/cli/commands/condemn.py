@@ -12,7 +12,7 @@ from pathlib import Path
 from stayawake.bots.security.dependencies.resolvers.npm import NpmResolver
 from stayawake.bots.security.remediation.changes import quarantine_path
 from stayawake.bots.security.remediation.condemn import (INSTALLED_DIR, carry_out,
-                                                         plan_condemnation)
+                                                         next_quarantine, plan_condemnation)
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions
@@ -36,14 +36,24 @@ def register(sub) -> None:
     p.set_defaults(func=run)
 
 
+_LOCKFILES = {"package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml"}
+
+
 def _declared(root: Path) -> tuple[set[tuple[str, str]], list[Path]]:
-    """What the lockfiles say should be installed, and which files said it."""
+    """What the LOCKFILES say should be installed, and which files said it.
+
+    A manifest is excluded even where it pins an exact version. It records what someone asked for,
+    not what an install produced — a dependency added and never installed, or a peer dependency that
+    is never written into a tree at all, would otherwise prove a package removable that nothing
+    would put back."""
     target = LocalRepoTarget(root, str(root), ScanOptions())
     declared, lockfiles = set(), []
     for dependency in NpmResolver().resolve(target):
-        declared.add((dependency.purl.name, dependency.purl.version))
         path = root / dependency.source_path
-        if path.name != "package.json" and path not in lockfiles:
+        if path.name not in _LOCKFILES:
+            continue
+        declared.add((dependency.purl.name, dependency.purl.version))
+        if path not in lockfiles:
             lockfiles.append(path)
     return declared, lockfiles
 
@@ -71,8 +81,9 @@ def run(a: argparse.Namespace) -> int:
               f"{len(plan.preserve)} it does not account for would be kept.")
         return 0
 
-    quarantine = quarantine_path(root)
+    quarantine = next_quarantine(root, quarantine_path(root))
     preserved, removed = carry_out(plan, quarantine)
     print(f"Removed {removed} packages. Kept {preserved} the lockfile does not account for, in "
-          f"{quarantine.name}. Reinstall when you are ready — it re-runs install scripts.")
+          f"{quarantine.relative_to(root)}. Reinstall when you are ready — it re-runs "
+          "install scripts.")
     return 0

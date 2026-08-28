@@ -1,5 +1,5 @@
 ---
-description: Every saw command and flag, documented once: scan, fix, discard, audit, guard, hook, auth, db, search, intro, doctor and completion.
+description: Every saw command and flag, documented once: scan, fix, condemn, discard, audit, guard, hook, auth, db, search, intro, doctor and completion.
 ---
 
 # `saw` command reference
@@ -20,6 +20,7 @@ alias, for scripts where a three-letter name might clash on `PATH`.
 | --- | --- | --- |
 | [`scan`](scan.md) | Hunt for supply-chain worms and report | read-only |
 | [`fix`](fix.md) | Prepare the cleanup on a `security/auto-clean` branch | that branch only; pushes with `--pr` |
+| [`condemn`](condemn.md) | Remove an installed dependency tree the lockfile can rebuild | the installed tree; refuses unless confirmed infected |
 | [`discard`](discard.md) | Undo `saw fix` | git / GitHub API |
 | [`audit`](audit.md) | Machine hygiene, start-up surface, branch protection | read-only |
 | [`guard`](guard.md) | Install and verify the Strix CI gate | `check`/`drift` read-only; `setup` writes a workflow or a PR |
@@ -56,7 +57,7 @@ Three sections apply across commands: [remote targeting](remote.md), [report sin
 
 Accepted anywhere the full verb is: `scan` → `s`, `sc`; `audit` → `au`;
 `guard` → `gd`; `search` → `se`; `intro` → `welcome`; `doctor` → `d`, `doc`; `completion` → `comp`.
-`fix` and `discard` are always spelled out.
+`fix`, `discard` and `condemn` are always spelled out.
 
 ## Environment variables
 

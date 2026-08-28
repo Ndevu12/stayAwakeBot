@@ -170,6 +170,63 @@ class TestTheTreeIsWalkedAsItActuallyIs(unittest.TestCase):
         self.assertTrue(outside.is_dir(), "a link's target was removed")
 
 
+class TestOnlyALockfileMayProveAnything(unittest.TestCase):
+    """A manifest records what someone asked for. It does not record what an install produced, and
+    a peer dependency is never written into a tree at all."""
+
+    def _declared(self, repo):
+        from stayawake.cli.commands.condemn import _declared
+        return _declared(repo.root)
+
+    def test_a_manifest_pin_does_not_make_a_package_removable(self):
+        repo = _Repo()
+        (repo.root / "package.json").write_text(json.dumps(
+            {"name": "app", "version": "1.0.0",
+             "dependencies": {"left-pad": "1.0.0", "ghost": "9.9.9"}}), encoding="utf-8")
+        declared, _lockfiles = self._declared(repo)
+        self.assertIn(("left-pad", "1.0.0"), declared)
+        self.assertNotIn(("ghost", "9.9.9"), declared, "a manifest proved a package removable")
+
+    def test_a_manifest_elsewhere_in_the_repository_proves_nothing(self):
+        # A test fixture's own manifest is not a statement about this install.
+        repo = _Repo()
+        fixture = repo.root / "tests" / "fixtures" / "broken"
+        fixture.mkdir(parents=True)
+        (fixture / "package.json").write_text(json.dumps(
+            {"name": "f", "version": "1.0.0", "dependencies": {"victim": "4.2.0"}}),
+            encoding="utf-8")
+        declared, _lockfiles = self._declared(repo)
+        self.assertNotIn(("victim", "4.2.0"), declared)
+
+
+class TestRemovalIsDeepestFirst(unittest.TestCase):
+    def test_a_nested_derivable_package_does_not_abort_the_run(self):
+        # Removing the parent first takes the child with it, and the walk then deletes a path that
+        # is already gone — raising part-way through a destructive operation.
+        repo = _Repo()
+        parent = repo.install("left-pad", "1.0.0")
+        nested = parent / condemn.INSTALLED_DIR / "ms"
+        nested.mkdir(parents=True)
+        (nested / "package.json").write_text(json.dumps({"name": "ms", "version": "1.0.0"}),
+                                             encoding="utf-8")
+        plan = condemn.plan_condemnation(
+            repo.root, {("left-pad", "1.0.0"), ("ms", "1.0.0")}, [repo.lock])
+        self.assertEqual(len(plan.derivable), 2)
+        preserved, removed = condemn.carry_out(plan, repo.root / "q")
+        self.assertEqual((preserved, removed), (0, 2))
+        self.assertFalse(parent.exists())
+
+
+class TestEachRunKeepsItsOwnEvidence(unittest.TestCase):
+    def test_a_second_run_does_not_write_into_the_first(self):
+        repo = _Repo()
+        base = repo.root / ".malware-quarantine"
+        first = condemn.next_quarantine(repo.root, base)
+        first.mkdir(parents=True)
+        second = condemn.next_quarantine(repo.root, base)
+        self.assertNotEqual(first, second)
+
+
 class TestPreservationHappensBeforeRemoval(unittest.TestCase):
     def test_the_kept_copy_exists_before_anything_is_deleted(self):
         repo = _Repo()

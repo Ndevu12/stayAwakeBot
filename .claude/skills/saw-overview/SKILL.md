@@ -31,9 +31,10 @@ maintainer rather than working around it.
 
 ## Command surface (see docs/reference/cli/index.md for detail)
 
-`scan` (read-only hunt) · `fix` (PR-only remediation) · `discard` · `audit` (+ `--verify` content-scans
-a non-repo suspect dir; + credential/dependency hygiene) · `db` (offline advisory corpus) · `guard`
-(install/verify the CI gate) · `search` · `intro` · `doctor` · `completion`.
+`scan` (read-only hunt) · `fix` (PR-only remediation) · `condemn` (remove an installed tree a lockfile
+can rebuild; confirmed-infected only; does not reinstall) · `discard` · `audit` (+ `--verify`
+content-scans a non-repo suspect dir; + credential/dependency hygiene) · `db` (offline advisory corpus)
+· `guard` (install/verify the CI gate) · `hook` · `auth` · `search` · `intro` · `doctor` · `completion`.
 
 Scan scope is **local by default** (given paths / configured globs / current repo); `--remote`
 (or `--user`/`--org`) switches to GitHub repos. One scope per run. The scan CLI is repo-oriented

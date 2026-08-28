@@ -68,6 +68,13 @@ Removing the residue is a separate decision that is yours to make: it needs a hi
 to garbage-collect the unreachable objects — a force-push alone does not delete them. Forks keep
 their own copies regardless.
 
+## The installed tree
+
+`saw fix` remediates repository files on a branch. The installed dependency tree is a different
+object: part of it the lockfile can rebuild, and part of it exists only on this disk. [`saw
+condemn`](../reference/cli/condemn.md) removes the first and keeps the second. It refuses unless
+the repository is confirmed infected, and it does not reinstall.
+
 ## Never on the host
 
 A compromised *machine* is never auto-cleaned. If `saw audit` reports the host as unsafe, follow

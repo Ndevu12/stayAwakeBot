@@ -39,6 +39,11 @@ class TestParserIntegrity(unittest.TestCase):
         for verb in cli.VERBS:
             self.assertIn(verb, names)
 
+    def test_completion_verbs_cover_every_registered_command(self):
+        from stayawake.cli import commands as cmds
+        registered = [m.__name__.rsplit(".", 1)[-1] for m in cmds.REGISTRARS]
+        self.assertEqual(registered, list(cli.VERBS))
+
     def _walk(self, parser=None, path="saw"):
         """Every parser in the tree, deduplicated (aliases share one parser object)."""
         parser = parser or cli.build_parser()
@@ -257,6 +262,11 @@ class TestDispatcherOwnedCommands(unittest.TestCase):
         with redirect_stdout(io.StringIO()) as buf:
             self.assertEqual(cli.main(["search", "open", "a", "pr"]), 0)
         self.assertIn("saw fix", buf.getvalue())
+
+    def test_search_finds_condemn(self):
+        with redirect_stdout(io.StringIO()) as buf:
+            self.assertEqual(cli.main(["search", "installed", "tree"]), 0)
+        self.assertIn("saw condemn", buf.getvalue())
 
     def test_search_no_match_returns_zero(self):
         with redirect_stdout(io.StringIO()):

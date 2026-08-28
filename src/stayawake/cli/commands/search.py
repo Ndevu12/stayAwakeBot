@@ -15,6 +15,8 @@ _INDEX = [
      "scan check find worm malware detect virus infect supply chain json sarif alert report remote local"),
     ("saw fix", "prepare a cleanup branch per infected repo; --pr to open a PR; --remote sweeps GitHub",
      "fix remediate clean repair remove branch pr pull request open publish remote local sweep"),
+    ("saw condemn", "remove an installed dependency tree the lockfile can rebuild; confirmed-infected only",
+     "condemn remove installed tree node_modules lockfile rebuild quarantine"),
     ("saw discard", "undo `saw fix`: --branch deletes the auto-clean branch, --pr closes its PR",
      "discard undo revert cleanup delete branch close pr abandon drop remove remote local"),
     ("saw audit", "credential + editor + runner-persistence + branch-protection hygiene audit",

@@ -134,7 +134,11 @@ def plan_condemnation(root: Path, declared: set[tuple[str, str]], lockfiles: lis
 
 def carry_out(plan: CondemnPlan, quarantine: Path) -> tuple[int, int]:
     """(preserved, removed). Preservation happens FIRST and completely: if any part of it fails,
-    nothing is removed, because the copy being preserved is the only one that exists."""
+    nothing is removed, because the copy being preserved is the only one that exists.
+
+    Removal runs deepest-first. A package the lockfile accounts for can contain another, and
+    removing the parent first takes the child with it — leaving the walk to delete a path that is
+    already gone, mid-way through a destructive operation."""
     if not plan.safe_to_remove:
         return 0, 0
     preserved = 0
@@ -144,7 +148,19 @@ def carry_out(plan: CondemnPlan, quarantine: Path) -> tuple[int, int]:
         shutil.copytree(package.path, destination, symlinks=True, dirs_exist_ok=True)
         preserved += 1
     removed = 0
-    for package in plan.derivable:
+    for package in sorted(plan.derivable, key=lambda p: len(p.path.parts), reverse=True):
+        if not package.path.exists():
+            continue                      # its parent went first; it went with it
         shutil.rmtree(package.path, ignore_errors=False)
         removed += 1
     return preserved, removed
+
+
+def next_quarantine(root: Path, base: Path) -> Path:
+    """A directory of its own for this run. Reusing one merges two incidents' evidence into a single
+    tree, and lets a retry write over a copy that failed half way with no way to tell them apart."""
+    for index in range(1, 1000):
+        candidate = base / f"condemned-{index}"
+        if not candidate.exists():
+            return candidate
+    raise OSError(f"cannot make a fresh quarantine under {base}")
