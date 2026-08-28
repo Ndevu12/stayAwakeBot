@@ -63,9 +63,10 @@ before the tag.
 
 ## Traps that fail a build after the review looks fine
 
-- **Touching the detection engine requires moving BOTH pinned SHAs**, to the same reviewed commit.
-  Bumping one fails a different check than not bumping either, so fix both at once and confirm with
-  the repository's own pin tooling before pushing.
+- **The pins are the releaser's to move, not yours.** A change to the detection engine trips the
+  freshness gate; the answer is the **deferral label**, not a bump. Bumping them in an ordinary PR
+  moves a consumer-facing pin outside the release meant to own it, and two PRs doing it conflict on
+  the same line. They move once, in the release PR — already written under *Releases* below.
 - **Renaming a documentation heading breaks every link to it**, and the docs build is strict — a
   dangling anchor fails it. Re-sweep for the old anchor across docs, source and tests *after* the
   rename, not before.

@@ -42,6 +42,21 @@ pager is opt-in (`--pager`), never default.
 
 Related: `engineering-standard`, `working-with-this-codebase`, `shipping-changes`.
 
+## The direction: reporting → acting
+
+`saw` is being standardised from a tool that **reports** into one that **acts**. The complaint it
+answers is that it flags things for a human to review and solves nothing. Judge every proposal by
+whether it moves off that: **prefer doing the thing over instructing the user to do it, and one line
+of output over a runbook.** Good antivirus quarantines and says one sentence.
+
+The direction does not loosen anything below — it is why those rules exist. A tool that only reports
+can afford a loose verdict; one that acts turns every false positive into damage.
+
+**What acting may touch:** only what can be PROVEN derivable, and only after what cannot be is
+preserved. **`saw` removes; it does not rebuild** — a rebuild re-runs the delivery path. **Capture
+comes before anything destructive**, and a control that merely makes something fail is destruction by
+another route, bound by the same rule. **Every action is gated on a confirmed finding.**
+
 ## Boundaries that settle questions before you reason about them
 
 Each of these was crossed in real work, and each crossing changed what a user was told.

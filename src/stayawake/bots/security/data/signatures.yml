@@ -202,6 +202,15 @@ signatures:
     description: "VS Code task auto-running a command on folderOpen (executes on open)"
     remediation: remove-foreign-vscode
 
+  - id: vscode-task-autorun-visible
+    category: vscode-autorun
+    severity: low
+    matcher: structural-json
+    confidence: heuristic
+    kind: vscode-task-autorun-visible
+    description: "VS Code task set to run on folder open (ordinary configuration; review it if it is not yours)"
+    remediation: manual
+
   - id: vscode-task-runs-font
     category: vscode-autorun
     severity: critical

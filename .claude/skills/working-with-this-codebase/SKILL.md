@@ -46,6 +46,30 @@ them to hunt only downsides. Consider all sides, but the objective is the best u
 honestly reject non-fitting ideas rather than force them. Adversarial *refuters*, used to gate a
 security change, are the deliberate opposite — don't conflate the two.
 
+## Tests are the spec — you may not delete one to go green
+
+A test failing after your edit means **you violated a contract you did not read**. Read it, and the
+code it guards, before touching either.
+
+- **Never remove a test to make a change pass.** That removes the evidence, and the next person
+  cannot tell a deliberate decision from an accident.
+- One may be removed **only when it is proven to test the wrong thing** — and the proof is
+  executable, not an argument. Show the case where its assertion is false about behaviour anyone
+  actually wants, then remove it in a change that says so.
+- **Update a test only when your change affected it directly or through its dependencies.** If your
+  change was withdrawn, its tests end at net zero against `main` — verify that, don't assume it.
+- When you do update one, **improve it rather than change it.** Editing a fixture so your code passes
+  is not an improvement; adding the assertion that pins the risk your change introduces is.
+- **A withdrawn fix leaves its tests behind as characterisation** — locking in the behaviour that is
+  still wrong, keeping the evidence executable, and forcing the next attempt to change them
+  deliberately.
+
+## Read the CI log before you touch anything
+
+Every failure this project has produced was a real defect in the change, not flakiness. Read the
+failing job's output and find the assertion. A local run is one machine, one interpreter, one
+platform — it cannot tell you what a merge with `main` will do.
+
 ## A passing test is not a pin — mutate it
 
 For every property that matters, revert the line that implements it and confirm the suite fails. A
