@@ -22,7 +22,7 @@ _NOT_A_BUILD = frozenset({".git", INSTALLED_DIR, QUARANTINE_DIR, ".venv"})
 
 @dataclass(frozen=True)
 class InstalledPackage:
-    """One package as it exists ON DISK, which is not necessarily what any file declares."""
+    """One package as it exists on disk."""
     name: str
     version: str | None
     path: Path
@@ -34,7 +34,7 @@ class InstalledPackage:
 
 @dataclass
 class RemovalPlan:
-    """What may be removed, and what may not. `preserve` is read first and never deleted."""
+    """What may be removed, and what is kept."""
     root: Path
     derivable: list[InstalledPackage] = field(default_factory=list)
     preserve: list[InstalledPackage] = field(default_factory=list)
@@ -43,17 +43,11 @@ class RemovalPlan:
 
     @property
     def safe_to_remove(self) -> bool:
-        """A tree is removable only when something proves it reconstructible. No lockfile, or a
-        lockfile that declares nothing, means nothing was proven and nothing is removed."""
         return self.reason is None and bool(self.derivable)
 
 
 def installed_packages(root: Path) -> list[InstalledPackage]:
-    """Every package present in the installed tree, read from what each one says it is.
-
-    Nested trees are walked too. A package the lockfile accounts for can contain one it does not,
-    and removing the parent would take the child with it before anything had looked at it.
-    A linked tree is not walked: its target lives somewhere this repository does not own."""
+    """Packages present under the installed tree."""
     tree = root / INSTALLED_DIR
     if not _is_real_directory(tree):
         return []
@@ -86,7 +80,7 @@ def _scoped_children(scope: Path) -> list[Path]:
 
 
 def _is_real_directory(path: Path) -> bool:
-    """A link is not ours to remove — its target lives somewhere this tree does not own."""
+    """True when `path` is a directory and not a symlink."""
     try:
         return path.is_dir() and not path.is_symlink()
     except OSError:
@@ -94,10 +88,7 @@ def _is_real_directory(path: Path) -> bool:
 
 
 def _sits_where_its_name_says(package: InstalledPackage) -> bool:
-    """Whether an install would put this package back at this path.
-
-    A directory whose contents claim a different name is not reconstructible HERE — an install
-    recreates the name's own location and leaves this one missing, so it is not derivable."""
+    """True when the package's path matches its name."""
     parts = package.name.split("/")
     location = package.path.parts[-len(parts):]
     return list(location) == parts
@@ -116,11 +107,7 @@ def _read_package(package: Path) -> InstalledPackage:
 
 
 def plan_removal(root: Path, declared: set[tuple[str, str]], lockfiles: list[Path]) -> RemovalPlan:
-    """Split the installed tree by what `declared` proves, without touching the filesystem.
-
-    An installed package matches only on name AND version: a tree at a different version than the
-    lockfile pins is drift, and drift is the case where the lockfile reads clean and the tree does
-    not. A package with no readable version proves nothing about itself and is preserved."""
+    """Split the installed tree by what `declared` proves. Does not write."""
     plan = RemovalPlan(root=root, lockfiles=lockfiles)
     if not lockfiles:
         plan.reason = "no lockfile, so nothing proves what the tree should contain"
@@ -141,12 +128,7 @@ def plan_removal(root: Path, declared: set[tuple[str, str]], lockfiles: list[Pat
 
 
 def apply_removal(plan: RemovalPlan, quarantine: Path) -> tuple[int, int]:
-    """(preserved, removed). Preservation happens FIRST and completely: if any part of it fails,
-    nothing is removed, because the copy being preserved is the only one that exists.
-
-    Removal runs deepest-first. A package the lockfile accounts for can contain another, and
-    removing the parent first takes the child with it — leaving the walk to delete a path that is
-    already gone, mid-way through a destructive operation."""
+    """Preserve first, then remove. Returns (preserved, removed)."""
     if not plan.safe_to_remove:
         return 0, 0
     preserved = 0
@@ -158,7 +140,7 @@ def apply_removal(plan: RemovalPlan, quarantine: Path) -> tuple[int, int]:
     removed = 0
     for package in sorted(plan.derivable, key=lambda p: len(p.path.parts), reverse=True):
         if not package.path.exists():
-            continue                      # its parent went first; it went with it
+            continue
         if not is_safe_write_target(package.path, plan.root):
             continue
         shutil.rmtree(package.path, ignore_errors=False)
@@ -167,8 +149,7 @@ def apply_removal(plan: RemovalPlan, quarantine: Path) -> tuple[int, int]:
 
 
 def next_quarantine(root: Path, base: Path) -> Path:
-    """A directory of its own for this run. Reusing one merges two incidents' evidence into a single
-    tree, and lets a retry write over a copy that failed half way with no way to tell them apart."""
+    """A new subdirectory under `base` for this run."""
     for index in range(1, 1000):
         candidate = base / f"installed-{index}"
         if not candidate.exists():
@@ -177,12 +158,7 @@ def next_quarantine(root: Path, base: Path) -> Path:
 
 
 def declared_from_lockfiles(root: Path) -> tuple[set[tuple[str, str]], list[Path]]:
-    """What the LOCKFILES say should be installed, and which files said it.
-
-    A manifest is excluded even where it pins an exact version. It records what someone asked for,
-    not what an install produced — a dependency added and never installed, or a peer dependency that
-    is never written into a tree at all, would otherwise prove a package removable that nothing
-    would put back."""
+    """Declared (name, version) pairs and the lockfiles they came from."""
     target = LocalRepoTarget(root, str(root), ScanOptions())
     declared, lockfiles = set(), []
     for dependency in NpmResolver().resolve(target):
@@ -198,16 +174,14 @@ def declared_from_lockfiles(root: Path) -> tuple[set[tuple[str, str]], list[Path
 
 
 def lockfile_stays() -> bool:
-    """True when this process looks like CI: the lockfile is left in place.
-
-    A forged CI signal only prevents deletion, which is the safe direction."""
+    """True when this process looks like CI."""
     return env.is_ci() or env.any_set(
         (env.GITHUB_ACTIONS, env.GITLAB_CI, env.CIRCLECI, env.BUILDKITE, env.RUNNER_OS))
 
 
 @dataclass
 class Report:
-    """What this run actually did to one repository tree. Empty when there was nothing to do."""
+    """What this run did to one repository tree."""
     preserved_packages: int = 0
     removed_packages: int = 0
     removed_lockfiles: list[Path] = field(default_factory=list)
@@ -227,8 +201,7 @@ class Report:
 
 
 def build_output_dirs(root: Path, exclude_dirs) -> list[Path]:
-    """Project-local generated trees. Named build outputs plus any extra the run already treats as
-    non-source, minus VCS, the installed tree, quarantine, and a local virtualenv."""
+    """Project-local generated trees under `root`."""
     names = set(_BUILD_OUTPUTS) | set(ScanOptions().exclude_dirs)
     if exclude_dirs:
         names |= set(exclude_dirs)
@@ -250,7 +223,7 @@ def _relative_to(path: Path, root: Path) -> Path | None:
 
 def remove_rebuildable(root: Path, *, exclude_dirs=None, remove_lockfiles: bool = True,
                        lockfile_root: Path | None = None) -> Report:
-    """Preserve what is not reconstructible, then remove what is. Bounded to `root`."""
+    """Remove this repository's installed tree, lockfile, and generated outputs. Bounded to `root`."""
     report = Report()
     try:
         if not root.is_dir():

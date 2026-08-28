@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""`saw fix` — build the remediation change set, prepare it into the working tree, or submit it as a PR (proposed-only). Includes the small pre/post-submit git & label helpers."""
+"""`saw fix` — prepare a cleanup branch, or submit it as a PR."""
 from __future__ import annotations
 
 import tempfile
@@ -22,7 +22,7 @@ from stayawake.bots.security.pr.render import (
     _issue_spec, _mark_partial, _pr_body, _render_submit)
 
 class _Frozen:
-    """One read of `confidence` for the whole fix. A later getattr or assign cannot change the gate."""
+    """A finding whose `confidence` is read once."""
     __slots__ = ("_inner", "confidence")
 
     def __init__(self, inner):
@@ -44,16 +44,13 @@ def _freeze(findings):
 
 
 def _untrack_quarantine(repo: Path) -> bool:
-    """git only ignores UNTRACKED paths, so untrack any pre-existing tracked
-    quarantine dir before staging. Returns True if the quarantine is clean after."""
+    """Untrack the quarantine directory. True if nothing under it is tracked after."""
     gitutil.unstage_cached(repo, QUARANTINE_DIR)
     return not gitutil.tracked_under(repo, QUARANTINE_DIR)
 
 
 def _reconcile_partial_label(owner: str, name: str, number: int, partial: bool, token: str) -> None:
-    """Keep the `security: partial` label in sync with the fix's state (best-effort, never
-    raises for the caller): add it on a partial fix, drop it when a re-run comes back fully clean
-    so a rolling PR that gets finished isn't left wrongly flagged."""
+    """Add or drop the partial label to match `partial`."""
     if partial:
         github_api.add_labels(owner, name, number, [PARTIAL_LABEL], token, quiet=True)
     else:
@@ -62,14 +59,7 @@ def _reconcile_partial_label(owner: str, name: str, number: int, partial: bool, 
 
 @dataclass(frozen=True)
 class _Fix:
-    """The result of building a fix: the base branch it sits on, and the changes/findings used to
-    commit it to `branch` and write the PR body. `applied` are the TRUSTED (structure-safe +
-    git-corroborated) changes; `computed` are the review-required strips — applied on a SEPARATE
-    commit but NOT git-corroborated, so they keep the run needs-review until a human reviews them.
-    `manual` holds residual CONFIRMED findings that could NOT be auto-fixed. Any of `computed`/`manual`
-    non-empty means a PARTIAL fix: the safe changes still ship, but the tree is not a
-    trusted-clean one and the PR/gate must say so. `signed` is False when either fix commit had to be
-    landed with signing forced OFF (the repo wanted signed commits but signing couldn't complete)."""
+    """A prepared fix: branch, applied changes, and leftover findings."""
     base: str
     branch: str
     applied: list
@@ -82,11 +72,6 @@ class _Fix:
 
     @property
     def partial(self) -> bool:
-        # A computed strip is applied but NOT git-corroborated — it MUST be reviewed before merge, so
-        # The `computed` arm is LOAD-BEARING, not redundant: after a computed strip the post-strip
-        # rescan can report the tree CLEAN (empty `manual`), so `bool(self.computed)` is the only thing
-        # that keeps a not-git-corroborated tree from going green. See the invariant at the `fs =
-        # `bool(self.manual)`.
         return bool(self.manual) or bool(self.computed)
 
 
@@ -110,11 +95,7 @@ def _lockfile_changes(wt: Path, report: installed.Report) -> list:
 
 
 def _signing_note(fix: "_Fix | None") -> str:
-    """A one-line ⚠ warning appended to the operator's outcome when the fix commit is UNSIGNED
-    (signing failed in the worktree, so it was committed with `commit.gpgsign=false`). Empty
-    otherwise. The fix still lands — but a repo that enforces signed commits will reject the
-    push/merge until the branch is re-signed, so the operator must be told rather than left to
-    wonder why the push bounced."""
+    """Warning when the fix commit is unsigned."""
     if fix is None or fix.signed:
         return ""
     return (f"\n    ⚠ the fix commit on '{getattr(fix, 'branch', FIX_BRANCH)}' is UNSIGNED "
@@ -123,12 +104,7 @@ def _signing_note(fix: "_Fix | None") -> str:
 
 
 def _manual_for(f0, path: str) -> "remediation.Manual":
-    """Build the manual-review entry for a confirmed residual finding. Most are working-tree files
-    ("remove/recover manually"), but an EVIL-MERGE finding is keyed to a merge COMMIT (`path` is the
-    SHA, `related_paths` the files it introduced), so a generic "remove this from the file" is
-    nonsensical. It gets history-provenance guidance instead: `saw fix` never rewrites history — that
-    breaks every clone/fork/tag and is the maintainer's decision — so the honest action is to verify
-    the payload's reach and decide on a rewrite by hand."""
+    """Manual-review entry for a confirmed residual."""
     if getattr(f0, "vector", None) == "evil-merge":
         files = ", ".join(getattr(f0, "related_paths", ()) or []) or "see evidence"
         return remediation.Manual(
@@ -145,11 +121,7 @@ def _manual_for(f0, path: str) -> "remediation.Manual":
 
 
 def _suspicious_only_outcome(label: str, fix: "_Fix") -> str:
-    """The `saw fix` outcome for a repo whose ONLY findings are heuristic/suspicious — nothing
-    confirmed, nothing auto-fixable. It DISCLOSES the set and defers to review, deliberately WITHOUT
-    an `ABORTED`/`PARTIAL`/`error` marker so the run stays exit 0, consistent with a suspicious `saw
-    scan` (which exits 0). This is the fix: `saw fix` must never call such a repo 'already
-    clean' while `saw scan`/`saw hook` flag it — a self-contradiction that erodes trust."""
+    """Outcome when the only findings are heuristic."""
     n = len(fix.suspicious)
     plural = "" if n == 1 else "s"
     return (f"{label}: {n} suspicious (heuristic) finding{plural} — not auto-remediable; "
@@ -158,13 +130,7 @@ def _suspicious_only_outcome(label: str, fix: "_Fix") -> str:
 
 def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = None,
                label: str = "", spin: bool = False) -> tuple["_Fix | None", str, Path | None]:
-    """Compute the remediation in a throwaway worktree off the default branch and commit it
-    to the local `security/auto-clean` branch. Pure git + scan — **no network, no GitHub
-    API** — so it works offline and never force-pushes. Returns `(fix, outcome, wt)`:
-    `fix` is None for skip/clean/abort (with `outcome` explaining), else the committed fix.
-    The CALLER owns the returned worktree `wt` and MUST remove it (the branch ref persists
-    after removal, ready to review or push). `label`/`spin` drive phase-accurate spinners
-    (`scanning …` then `fixing …`) so a long sweep shows what it's actually doing."""
+    """Build the fix in a throwaway worktree. Returns `(fix, outcome, worktree)`."""
     base = base or gitutil.default_branch(repo)
     baseref = f"origin/{base}" if gitutil.ref_exists(repo, f"origin/{base}") else base
     if not gitutil.ref_exists(repo, baseref):
@@ -172,8 +138,6 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
 
     wt = Path(tempfile.mkdtemp(prefix="sab-fix-"))
     quarantine = Path(tempfile.mkdtemp(prefix="sab-bak-"))
-    # Only the remote can reject the push (`add_worktree -B` resets any local branch), and this
-    # stays offline, so the predicates read refs already fetched rather than calling out.
     branch = choose_fix_branch(
         base,
         exists=lambda n: gitutil.ref_exists(repo, f"origin/{n}"),
@@ -187,23 +151,15 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
         return scan_target(LocalRepoTarget(wt, str(repo), opts), signatures, allowlist)
 
     def _is_blocking(f):
-        # Keeps the tree infected iff it would drive the scanner's INFECTED verdict — i.e. ANY
-        # CONFIRMED finding (models.ScanResult.verdict = INFECTED when any f.confidence == CONFIRMED).
-        # Auto-fixable findings are confirmed and get fixed/quarantined; confirmed non-auto-fixable
-        # ones (code-loader, exfil, npm-lifecycle, supply-chain, evil-merge) go to the manual
-        # checklist. Only a HEURISTIC finding is "suspicious" (non-blocking). Keying on code-loader
-        # alone silently demoted confirmed non-loader malware to suspicious/clean (adversarial catch).
         return getattr(f, "confidence", None) == CONFIRMED
 
     def _blocking(fs):
         return [f for f in fs if _is_blocking(f)]
 
-    with status(f"scanning {label}…", enabled=spin):       # phase 1: detection (the slow part)
+    with status(f"scanning {label}…", enabled=spin):
         scan = _scan()
         findings = _freeze(scan.findings)
 
-    # phase 2: apply the TRUSTED tier (structure-safe fixes + git-corroborated recoveries) and commit
-    # SEPARATE, review-required commit — two trust levels, two commits, in one rolling PR.
     tree_note = ""
     with status(f"fixing {label}…", enabled=spin):
         lockfile_changes: list = []
@@ -233,14 +189,10 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
                         blob = gitutil.clean_merge_blob(wt, f.commit_sha, rp)
                         if blob is not None:
                             merge_clean[rp] = blob
-            # Recovery used to be gated on the FINDING's tier. Its safety comes from re-proving the
-            # result against a committed version, not from how the finding was graded, so a
-            # heuristic-only path with a provable recovery was deferred to review for nothing.
             def _corroborated(f) -> bool:
                 return (getattr(f, "category", None) == "code-loader"
                         and getattr(f, "confidence", None) == CONFIRMED)
 
-            # Confirmed loaders claim their path first, so widening cannot steal one from them.
             for f in sorted(findings, key=lambda x: 0 if _corroborated(x) else 1):
                 if f.path in seen_cl:
                     continue
@@ -256,16 +208,16 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
                     except OSError:
                         continue
                     if not remediation.has_concealment_seam(text, f.path, content_sig):
-                        continue          # nothing hidden here — skip the per-path history walk
+                        continue
                 seen_cl.add(f.path)
                 disp = remediation.classify_recovery(wt, f, content_sig, merge_clean=merge_clean.get(f.path))
                 if isinstance(disp, remediation.Recovery) and \
                         remediation.apply_recovery(wt, disp, quarantine, content_sig):
                     applied.append(remediation.Change("recover", disp.path, disp.label))
                 elif not corroborated:
-                    continue     # heuristic-only: act on a PROVEN recovery, never a computed strip
+                    continue
                 elif isinstance(disp, remediation.Suggested):
-                    suggested.append(disp)     # computed strip → applied + committed separately below
+                    suggested.append(disp)
                 elif isinstance(disp, remediation.Manual):
                     manual_reviews[disp.path] = disp
 
@@ -276,9 +228,6 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
             if auto:
                 applied += remediation.quarantine_residual(wt, auto, quarantine)
 
-            # Commit the TRUSTED tier FIRST — before any computed strip touches disk — so the two trust
-            # levels land as cleanly separated commits (`stage_all` after each write group captures only
-            # that group's changes, since the previous group is already committed).
             if not _untrack_quarantine(wt):
                 return None, _with_tree(
                     f"ABORTED — could not untrack {QUARANTINE_DIR}/ (would commit backups)", tree_note), wt
@@ -329,16 +278,9 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
             manual.append(m)
 
         if not applied and not computed:
-            # Nothing was provably safe to ship. If confirmed findings remain, return a NOTIFY-ONLY
-            # fix (no changes committed) so the caller files a de-duplicated manual-review issue and
             if residual:
                 return _Fix(base, branch, [], (), suspicious, findings, tuple(manual),
                             tree_note=tree_note), "", wt
-            # No CONFIRMED indicator and nothing auto-fixable, but HEURISTIC (suspicious) findings
-            # remain. This is NOT "already clean" — saying so contradicts `saw scan`/`saw hook`, which
-            # fix (no changes, no confirmed manual set) so the caller reports the suspicious findings
-            # and defers to review. Heuristics are never auto-fixed (trust model), so — like a
-            # suspicious `saw scan` — this stays exit 0; only the truly-empty tree is "already clean".
             if suspicious:
                 return _Fix(base, branch, [], (), suspicious, findings, (),
                             tree_note=tree_note), "", wt
@@ -351,9 +293,7 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
 
 def prepare_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = None,
                 spin: bool = False) -> str:
-    """`saw fix` (no --pr): build the fix on the local `security/auto-clean` branch and STOP.
-    No push, no PR, no GitHub API — offline-safe, zero remote writes. The branch is left in
-    the repo for the user to review and push (or publish with `saw fix --pr`)."""
+    """Prepare the fix on a local branch and stop. No push, no PR."""
     slug = gitutil.origin_slug(repo) or str(repo).replace(str(Path.home()), "~")
     fix, outcome, wt = _build_fix(repo, opts, signatures, allowlist, base=base,
                                   label=slug, spin=spin)
@@ -361,8 +301,6 @@ def prepare_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = N
         if fix is None:
             return f"{slug}: {outcome}"
         if not fix.applied and not fix.computed:
-            # Nothing auto-fixable. Suspicious-only (heuristics, nothing confirmed) → disclose + defer,
-            # no network, so no issue is filed here) and stay needs-review.
             if not fix.manual:
                 return _with_tree(_suspicious_only_outcome(slug, fix), fix.tree_note)
             return _with_tree(
@@ -391,9 +329,7 @@ def prepare_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = N
 def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
                   patches_dir: Path | None = None, *, base: str | None = None,
                   spin: bool = False) -> str:
-    """`saw fix --pr` (and the `--remote` sweep): build the fix, then PUSH `security/auto-clean`
-    and open/update one dedup'd PR. If the branch can't be pushed (read-only access), walks the
-    fork → patch → issue fallback ladder. Returns an outcome string."""
+    """Push the fix branch and open or update one PR."""
     slug = gitutil.origin_slug(repo)
     if not slug:
         fix, outcome, wt = _build_fix(repo, opts, signatures, allowlist, base=base,
@@ -402,7 +338,7 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
             if fix is None:
                 return outcome
             if not fix.applied and not fix.computed:
-                if not fix.manual:   # suspicious-only → disclose + defer, exit 0
+                if not fix.manual:
                     return _with_tree(_suspicious_only_outcome(
                         str(repo).replace(str(Path.home()), "~"), fix), fix.tree_note)
                 return _with_tree(
@@ -427,13 +363,8 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
         if fix is None:
             return f"{slug}: {outcome}"
         if not fix.applied and not fix.computed:
-            # review issue (a heuristic isn't asserted malware — filing would over-alarm and spam the
-            # repo); just disclose and defer. Exit 0, consistent with a suspicious `saw scan`.
             if not fix.manual:
                 return _with_tree(_suspicious_only_outcome(slug, fix), fix.tree_note)
-            # to push, so file a de-duplicated manual-review issue (the read-only floor's mechanism)
-            # and abort with the count. The gate stays red (outcome carries ABORTED). Degrades
-            # gracefully — no issue permission just drops the note, still aborts.
             with status(f"filing manual-review issue for {slug}…", enabled=spin):
                 issue = proposal.file_dedup_issue(owner, name,
                                                   _issue_spec(owner, name, fix.findings), token)
@@ -445,7 +376,7 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
         base = fix.base
 
         def _publish() -> str:
-          with status(f"opening PR for {slug}…", enabled=spin):   # phase 3: push + PR / fallback
+          with status(f"opening PR for {slug}…", enabled=spin):
             partial = fix.partial
             title = ("security: PARTIAL auto-remediation — manual review required" if partial
                      else "security: auto-remediate worm indicators")
@@ -459,8 +390,6 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
                 _reconcile_partial_label(owner, name, res.number, partial, token)
             return _render_submit(res, slug=slug, base=base, partial=partial)
 
-        # Single choke point: whatever branch _publish() returned, a PARTIAL fix is guaranteed to be
-        # and the per-finding manual-review guidance + any unsigned-commit warning are appended.
         return _with_tree(
             _mark_partial(_publish(), fix.partial)
             + _signing_note(fix) + computed_review_lines(fix.computed) + manual_review_lines(fix.manual),
