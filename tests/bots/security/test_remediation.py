@@ -92,6 +92,8 @@ class TestStripAndResidual(unittest.TestCase):
         self.assertTrue(remediation.is_auto_fixable(good))
         self.assertFalse(remediation.is_auto_fixable(code_loader))
         self.assertFalse(remediation.is_auto_fixable(manual))
+        missing = type("F", (), {"remediation": "quarantine-file"})()
+        self.assertFalse(remediation.is_auto_fixable(missing))
 
     def test_quarantine_residual_removes_and_backs_up(self):
         repo = Path(tempfile.mkdtemp())

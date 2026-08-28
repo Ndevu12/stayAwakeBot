@@ -11,7 +11,7 @@ from pathlib import Path
 
 from stayawake.utils.pathsafe import is_safe_write_target
 from stayawake.bots.security.matchers.base import load_jsonc
-from stayawake.bots.security.models import HEURISTIC, QUARANTINE_DIR
+from stayawake.bots.security.models import CONFIRMED, QUARANTINE_DIR
 
 _ACTIONS = {
     "quarantine-file": "quarantine",
@@ -31,7 +31,7 @@ def is_auto_fixable(finding) -> bool:
     crypto vector also produces) is surfaced but NEVER auto-stripped — auto-editing a file
     we are not sure is malicious is exactly how a false positive becomes a corrupted file.
     Such findings fall through to the manual list instead."""
-    if getattr(finding, "confidence", "confirmed") == HEURISTIC:
+    if getattr(finding, "confidence", None) != CONFIRMED:
         return False
     return getattr(finding, "remediation", "manual") in _ACTIONS
 

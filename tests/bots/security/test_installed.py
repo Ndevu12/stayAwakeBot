@@ -123,6 +123,26 @@ class TestItRefusesWhereRemovalWouldBeAGuess(unittest.TestCase):
         _prepare_fix_against([partial, idle, idle], spy)
         self.assertEqual(called, [])
 
+    def test_a_scan_that_did_not_finish_does_not_apply_a_plan(self):
+        from stayawake.bots.security import pr
+        from stayawake.bots.security.models import Finding, ScanResult, Severity
+
+        planned = []
+
+        def spy_apply(*a, **k):
+            planned.append(1)
+            return []
+
+        finding = Finding("x", "code-loader", Severity.CRITICAL, "postcss.config.mjs",
+                          "loader", remediation="strip-appended-payload")
+        partial = ScanResult("owner/repo", "local", [finding],
+                             error="1 file(s) unreadable: secret.env")
+        idle = ScanResult("owner/repo", "local", [])
+        _prepare_fix_against(
+            [partial, idle, idle], lambda *a, **k: installed.Report(),
+            extra=(mock.patch.object(pr.remediation, "apply", side_effect=spy_apply),))
+        self.assertEqual(planned, [])
+
     def test_a_finding_that_does_not_say_it_is_confirmed_does_not_reach_the_remover(self):
         from types import SimpleNamespace
 
@@ -142,6 +162,49 @@ class TestItRefusesWhereRemovalWouldBeAGuess(unittest.TestCase):
         idle = ScanResult("owner/repo", "local", [])
         _prepare_fix_against([infected, idle, idle], spy)
         self.assertEqual(called, [])
+
+    def test_a_finding_that_does_not_say_it_is_confirmed_is_not_recovered(self):
+        from types import SimpleNamespace
+
+        from stayawake.bots.security import pr
+        from stayawake.bots.security.models import ScanResult, Severity
+
+        classified = []
+
+        def spy_cls(*a, **k):
+            classified.append(1)
+            return None
+
+        finding = SimpleNamespace(
+            path="index.js", signature_id="x", category="code-loader",
+            vector=None, commit_sha=None, related_paths=(), line=None,
+            severity=Severity.CRITICAL, description="x")
+        infected = ScanResult("owner/repo", "local", [finding])
+        idle = ScanResult("owner/repo", "local", [])
+        _prepare_fix_against(
+            [infected, idle, idle], lambda *a, **k: installed.Report(),
+            extra=(mock.patch.object(pr.remediation, "classify_recovery", side_effect=spy_cls),))
+        self.assertEqual(classified, [])
+
+    def test_a_scan_that_did_not_finish_does_not_quarantine(self):
+        from stayawake.bots.security import pr
+        from stayawake.bots.security.models import Finding, ScanResult, Severity
+
+        quarantined = []
+
+        def spy_q(root, findings, q):
+            quarantined.extend(findings)
+            return []
+
+        finding = Finding("x", "persistence", Severity.HIGH, "telemetry.js",
+                          "drop", remediation="quarantine-file")
+        partial = ScanResult("owner/repo", "local", [finding],
+                             error="1 file(s) unreadable: secret.env")
+        idle = ScanResult("owner/repo", "local", [])
+        _prepare_fix_against(
+            [partial, partial, idle], lambda *a, **k: installed.Report(),
+            extra=(mock.patch.object(pr.remediation, "quarantine_residual", side_effect=spy_q),))
+        self.assertEqual(quarantined, [])
 
     def test_without_a_lockfile_nothing_proves_the_tree(self):
         plan = installed.plan_removal(Path("/nowhere"), {("a", "1")}, [])
