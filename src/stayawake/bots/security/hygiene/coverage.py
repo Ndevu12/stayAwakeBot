@@ -11,7 +11,8 @@ import os
 import stat
 from pathlib import Path
 
-from .models import HygieneIssue, _WIPER_NOTE, persistence_surface_is_enumerable
+from .models import (HygieneIssue, SURFACE_NOT_IMPLEMENTED_ID, _WIPER_NOTE,
+                     persistence_surface_is_enumerable)
 from . import os_service, runner, mechanism
 
 _ANCHOR_LABEL = "shell startup file"
@@ -123,6 +124,16 @@ def check_persistence_coverage() -> list[HygieneIssue]:
 
     The two states are mutually exclusive by construction (an unreadable location is not an absent
     one), so each condition is asked independently and neither has to know about the other."""
+    if not persistence_surface_is_enumerable():
+        return [HygieneIssue(
+            id=SURFACE_NOT_IMPLEMENTED_ID,
+            severity="unknown",
+            title="No start-up surface is examined on this platform",
+            detail="Nothing here enumerates where this platform starts programs, so no check "
+                   "looked at it and no result covers it.",
+            remediation="Inspect the start-up surface yourself, and do not rotate credentials "
+                        f"until you have — {_WIPER_NOTE}.",
+        )]
     graded = [(label, p, _coverage(p)) for label, p in _must_verify_locations()]
     issues: list[HygieneIssue] = []
 

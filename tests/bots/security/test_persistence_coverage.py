@@ -306,11 +306,14 @@ class TestWhollyAbsentSurfaceIsNotClean(unittest.TestCase):
         # true, not evidence — so the anchor has to be present for the claim to mean anything.
         self.assertEqual(self._issues([("launch-agent / service dir", Path("/no/such/agents"))]), [])
 
-    def test_it_stays_silent_where_the_platform_has_no_enumerable_surface(self):
-        # On Windows every certified location is absent by construction, so this would fire on every
-        # host and say nothing about it. That gap is disclosed by the scope note instead.
+    def test_the_vacuous_claim_never_fires_where_the_platform_has_no_surface(self):
+        # On Windows every certified location is absent by construction, so "everything is absent"
+        # would fire on every host and say nothing about it. What the run says there is that nothing
+        # examined the surface — a different claim, and the one that is true.
         with mock.patch("sys.platform", "win32"):
-            self.assertEqual(self._issues(self.ABSENT), [])
+            ids = [i.id for i in self._issues(self.ABSENT)]
+        self.assertNotIn("persistence-surface-not-established", ids)
+        self.assertEqual(ids, ["persistence-surface-not-implemented"])
 
     @unittest.skipIf(os.getuid() == 0, "root bypasses permission bits")
     def test_an_unreadable_location_is_the_other_state_not_this_one(self):

@@ -73,7 +73,7 @@ applications load. Use `saw audit --verify` to look harder at what it flags; it 
 | Docker images and volumes | a compromised image is untouched by a host scan |
 | other mounted filesystems | only the paths above are walked |
 | account and organization state | a self-hosted runner registered against the org survives a host rebuild |
-| Windows autorun | registry Run keys, the Startup folder and Scheduled Tasks are enumerated nowhere — persistence enumeration is macOS and Linux user-scope only |
+| Windows autorun | Run keys, the Startup folder and Scheduled Tasks are not covered yet — an audit there says so and treats rotation as unsafe, rather than reporting a clean machine |
 | an application shipped as a packed archive | only unpacked application trees are read |
 | editor and browser extensions | enumerated nowhere |
 | whether a file is what its publisher shipped | nothing is compared against a published copy |

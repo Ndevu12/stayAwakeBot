@@ -21,7 +21,8 @@ from .models import (HygieneIssue, INCIDENT_TRIGGER_IDS, ACTIVE_PERSISTENCE_IDS,
                      TIER_ACTIVE_PERSISTENCE, TIER_CREDENTIAL_EXPOSURE, incident_tier,
                      persistence_surface_is_enumerable, response_order, rotation_safety,
                      incident_response_sequence, credential_exposure_note)
-from .outcome import (CheckOutcome, run_probe, CHECKED_CLEAN, FOUND, UNKNOWN, BLOCKED)
+from .outcome import (CheckOutcome, run_probe, CHECKED_CLEAN, FOUND, UNKNOWN, BLOCKED,
+                      NOT_IMPLEMENTED)
 from .credentials import check_credentials, keychain_predicate
 from .runner import check_runner_persistence, services_predicate
 from .os_service import check_persistence
@@ -44,7 +45,7 @@ __all__ = [
     "check_app_bundles",
     "check_vscode", "check_ssh_authorized_keys", "check_shell_profile", "check_git_config_execution",
     "check_branch_protection", "audit", "audit_checks", "audit_outcomes", "run_check", "render",
-    "CheckOutcome", "CHECKED_CLEAN", "FOUND", "UNKNOWN", "BLOCKED",
+    "CheckOutcome", "CHECKED_CLEAN", "FOUND", "UNKNOWN", "BLOCKED", "NOT_IMPLEMENTED",
 ]
 
 _PREDICATES: dict[str, Callable[[], str | None]] = {
@@ -61,10 +62,22 @@ _SURFACE_PROBES = frozenset({
 
 _NON_SURFACE_PROBES = frozenset({"cached credentials", "branch protection"})
 
+_POSIX_ONLY_PROBES = frozenset({
+    "self-hosted runner", "OS-service persistence", "SSH authorized_keys",
+    "shell startup files", "autorun surface",
+})
+
 
 def run_check(label: str, check: Callable[[], list[HygieneIssue]]) -> CheckOutcome:
     """One probe's outcome — the ONE place a probe's own self-test is looked up and applied, so the
-    streaming CLI and the all-at-once path cannot differ on whether a check was trusted."""
+    streaming CLI and the all-at-once path cannot differ on whether a check was trusted.
+
+    A probe with no implementation for the running platform is NOT clean. It returns nothing for the
+    same reason it returns nothing on a clean host, and grading the two alike is how a Windows run
+    reported per-check clean results over a surface no code enumerates. The run-level finding comes
+    from the coverage probe, so the report carries the gap once rather than five times."""
+    if label in _POSIX_ONLY_PROBES and not persistence_surface_is_enumerable():
+        return CheckOutcome(label, NOT_IMPLEMENTED)
     return run_probe(label, check, _PREDICATES.get(label),
                      certifies_surface=label not in _NON_SURFACE_PROBES)
 

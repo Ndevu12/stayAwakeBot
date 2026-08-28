@@ -13,6 +13,13 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Fixed
+- **On a platform `saw` does not yet cover, checks no longer report that they found nothing.** Most
+  of the start-up surface has no Windows implementation, so those checks returned nothing — the same
+  answer they give on a clean machine — and a Windows run came back clean at exit `0` over a surface
+  nothing had examined. Those checks now say the platform is not covered, the run says so once, and
+  it treats credential rotation as unsafe until you have looked yourself.
+
 ### Added
 - **A scan can now say `residue`.** A cleanup that backed a file up and then left it unchanged was
   reported as either clean or infected, and both were wrong: nothing new executes there, but the
