@@ -2,6 +2,7 @@
 """Host-level denials: enforcing only after read-back; never remove what is already there."""
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -203,6 +204,54 @@ class TestApplyOne(unittest.TestCase):
                         side_effect=OSError):
             out = denial.apply_one(target)
         self.assertEqual(out.state, denial.UNKNOWN)
+
+    def test_writes_do_not_follow_a_symlink(self):
+        victim = self.d / "victim"
+        victim.write_text("x")
+        os.chmod(victim, 0o644)
+        target = self.d / "staging"
+        target.symlink_to(victim)
+        dir_st = mock.Mock()
+        dir_st.st_mode = __import__("stat").S_IFDIR | 0o755
+        real_lstat = Path.lstat
+        def lstat(self_path):
+            if getattr(lstat, "once", True):
+                lstat.once = False
+                return dir_st
+            return real_lstat(self_path)
+        with mock.patch.object(hostdenial, "holds", return_value=False), \
+             mock.patch.object(Path, "lstat", lstat), \
+             mock.patch.object(hostdenial, "empty_dir", return_value=True):
+            denial.apply_one(target)
+        self.assertEqual(victim.stat().st_mode & 0o777, 0o644)
+
+    def test_does_not_freeze_a_directory_that_gained_children(self):
+        target = self.d / "empty"
+        target.mkdir()
+        (target / "payload").write_text("x")
+        with mock.patch.object(hostdenial, "holds", return_value=False), \
+             mock.patch.object(hostdenial, "empty_dir", side_effect=[True, False]), \
+             mock.patch("stayawake.bots.security.harden.denial.os.chmod"), \
+             mock.patch("stayawake.bots.security.harden.denial.os.chown"), \
+             mock.patch.object(hostdenial, "set_immutable") as setter:
+            out = denial.apply_one(target)
+        setter.assert_not_called()
+        self.assertEqual(out.state, denial.OCCUPIED)
+        self.assertTrue((target / "payload").exists())
+
+    def test_mode_writes_pass_follow_symlinks_false(self):
+        target = self.d / "empty"
+        target.mkdir()
+        with mock.patch.object(hostdenial, "holds", return_value=False), \
+             mock.patch.object(hostdenial, "empty_dir", return_value=True), \
+             mock.patch("stayawake.bots.security.harden.denial.os.chmod") as chmod, \
+             mock.patch("stayawake.bots.security.harden.denial.os.chown") as chown, \
+             mock.patch.object(hostdenial, "set_immutable", return_value=False):
+            denial.apply_one(target)
+        self.assertTrue(chmod.called)
+        self.assertFalse(chmod.call_args.kwargs.get("follow_symlinks", True))
+        self.assertTrue(chown.called)
+        self.assertFalse(chown.call_args.kwargs.get("follow_symlinks", True))
 
 
 class TestAuditDoesNotTreatADenialAsADrop(unittest.TestCase):

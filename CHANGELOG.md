@@ -25,6 +25,7 @@ reader, not the mechanism or the weakness it closed.
   anything else.
 
 ### Fixed
+- **A host write does not follow a symbolic link, and a path that is no longer empty is not frozen.**
 - **A location a check could not read is no longer reported as a clean result.** Those checks
   used to return the same empty answer they return on a clean host. They now say the location
   could not be read, and the run is UNKNOWN rather than clean.

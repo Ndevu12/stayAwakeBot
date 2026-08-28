@@ -65,5 +65,28 @@ class TestHolds(unittest.TestCase):
         self.assertFalse(hostdenial.holds(target))
 
 
+class TestImmutableReadBack(unittest.TestCase):
+    def test_a_path_token_is_not_an_attribute_set(self):
+        with mock.patch.object(hostdenial, "sys") as sysmod:
+            sysmod.platform = "linux"
+            r = mock.Mock(returncode=0, stdout=".node_libraries --------------\n")
+            with mock.patch.object(hostdenial.subprocess, "run", return_value=r):
+                self.assertFalse(hostdenial.immutable(Path("/x")))
+
+    def test_a_flags_token_with_i_is_immutable(self):
+        with mock.patch.object(hostdenial, "sys") as sysmod:
+            sysmod.platform = "linux"
+            r = mock.Mock(returncode=0, stdout="----i--------- /x\n")
+            with mock.patch.object(hostdenial.subprocess, "run", return_value=r):
+                self.assertTrue(hostdenial.immutable(Path("/x")))
+
+    def test_set_immutable_refuses_a_symlink(self):
+        d = Path(tempfile.mkdtemp(prefix="hostdenial-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
+        target = d / "link"
+        target.symlink_to(d / "elsewhere")
+        self.assertFalse(hostdenial.set_immutable(target))
+
+
 if __name__ == "__main__":
     unittest.main()
