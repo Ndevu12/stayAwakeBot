@@ -21,21 +21,28 @@ maintainer rather than working around it.
 - **The allowlist is operator-owned, never target-owned.** Suppressions come from ONE operator-chosen
   config per run — `saw` never takes suppression input from the repository it is scanning. Allowlist
   rules must be signature-scoped.
-- **`scan` is read-only; `fix` writes only what this repository owns.** `scan`'s exit code *is* the
-  verdict (0 clean / 1 infected / 2 errored-fail-closed), unconditionally — a CI gate just reads it.
-  `saw fix` prepares a local branch and only publishes with `--pr`. On a confirmed infection it also
-  removes the installed tree, generated build outputs, and lockfile in that repository. Remediation
-  NEVER lives in `scan`.
+- **`scan` is read-only; `fix` writes only what this repository owns; `harden` writes only
+  the host.** `scan`'s exit code *is* the verdict (0 clean / 1 infected / 2 errored-fail-closed),
+  unconditionally — a CI gate just reads it. `saw fix` prepares a local branch and only publishes
+  with `--pr`. On a confirmed infection it also removes the installed tree, generated build outputs,
+  and lockfile in that repository. Remediation NEVER lives in `scan`. `saw harden` creates host
+  denials and never removes a project's tree. CI still gates on process status; that mapping
+  lives here and in the code, **never in operator documentation**.
 - **Heuristic/SUSPECT findings are never auto-fixed**, and a compromised *host* is never
   "auto-cleaned".
 - **Fail closed.** A target that could not be fully scanned (unreadable file, failed clone, malformed
-  config) must never read as clean — it exits non-zero. Warn loudly; never fail silently.
+  config) must never read as clean — the run fails. Warn loudly; never fail silently.
+- **Operator documentation never mentions exit codes.** No `docs/reference/exit-codes.md`, no Exit
+  tables, no `0`/`1`/`2`/`3` as command results, no `echo $?`. Operators read the **verdict** on the
+  report. Do not put process-status numbers in `docs/`, `README.md`, `SUPPORT.md`, or a new
+  changelog entry. Historical changelog sections already shipped may keep their wording.
 
 ## Command surface (see docs/reference/cli/index.md for detail)
 
 `scan` (read-only hunt) · `fix` (PR-only remediation; on confirmed infection also removes the
 installed tree in this repository) · `discard` · `audit` (+ `--verify` content-scans a non-repo
-suspect dir; + credential/dependency hygiene) · `db` (offline advisory corpus) · `guard`
+suspect dir; + credential/dependency hygiene) · `harden` (host denials; in place only after a
+read-back; never a project's tree) · `db` (offline advisory corpus) · `guard`
 (install/verify the CI gate) · `search` · `intro` · `doctor` · `completion`.
 
 Scan scope is **local by default** (given paths / configured globs / current repo); `--remote`
@@ -67,7 +74,7 @@ Each of these was crossed in real work, and each crossing changed what a user wa
 - **Silence is not a clean result — on every axis.** A check that could not run, a platform with no
   implementation, a file that could not be read, a process the kernel would not describe: each
   returns what a clean host returns. Say which one it was. A run that could not establish its answer
-  never exits `0`.
+  never reports a clean result.
 - **A verdict that fires on an ordinary host is a defect, not caution.** It teaches operators to
   ignore the one code that matters, which protects the real findings underneath. Narrow it to the
   case that is actually a hole, and measure that it does not fire on a healthy machine.

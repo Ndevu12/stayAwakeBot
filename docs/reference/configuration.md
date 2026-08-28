@@ -21,7 +21,7 @@ Every `settings` key is optional, and the CLI equivalent wins when both are give
 | `remote_clone_depth` | `50` | Clone depth for `--remote` targets. |
 | `scan_build_outputs` | `false` | Also examine `dist`/`build`/`out`/`.next`. Noisier by design; heuristic findings only. |
 | `deep` | `false` | As `saw scan --deep`. |
-| `dependency_advisories` | `true` | The offline CVE-advisory section. Advisories never affect the verdict or exit code. |
+| `dependency_advisories` | `true` | The offline CVE-advisory section. Advisories never affect the verdict. |
 | `external_audit` | `false` | As `saw scan -x`. **The one setting that leaves the offline sandbox.** |
 | `require_db` | `false` | As `saw scan --require-db`. |
 | `jobs` | auto | Worker count; an int, or `auto`. An unparseable value falls back to automatic rather than failing the scan. `-j` wins. |
@@ -52,7 +52,7 @@ self-updating GitHub issue per project, and posts to Slack on a state change.
 
 ```bash
 stayawake-health-check --config config/urls.yml
-stayawake-health-check --config config/urls.yml --fail-on-unhealthy   # exit non-zero when down
+stayawake-health-check --config config/urls.yml --fail-on-unhealthy   # fail the run when down
 ```
 
 ```yaml

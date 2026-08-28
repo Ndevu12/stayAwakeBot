@@ -15,5 +15,5 @@ saw db status [--cache-dir DIR] [--require-snapshot DIGEST] [--max-age-days N]
 | --- | --- |
 | `-e`, `--ecosystem ECO` | Limit the refresh to an ecosystem (repeatable); default: all supported. |
 | `--cache-dir DIR` | Cache location (default: `~/.cache/saw/advisories`). |
-| `--require-snapshot DIGEST` | `status` exits non-zero unless the snapshot equals `DIGEST` — pin it for reproducible CI. |
-| `--max-age-days N` | `status` exits non-zero if the corpus is older than `N` days. Unknown age counts as stale. |
+| `--require-snapshot DIGEST` | `status` fails unless the snapshot equals `DIGEST` — pin it for reproducible CI. |
+| `--max-age-days N` | `status` fails if the corpus is older than `N` days. Unknown age counts as stale. |

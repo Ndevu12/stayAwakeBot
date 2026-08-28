@@ -11,7 +11,7 @@ reference](../reference/cli/guard.md).
 ## Across a fleet
 
 ```bash
-saw guard check --org your-org -f     # exit 1 if any repository lacks a required gate
+saw guard check --org your-org -f     # fail if any repository lacks a required gate
 saw guard setup --org your-org        # clone each repository and open a gate PR
 saw guard drift --org your-org        # file/close one drift issue per repository behind its pin
 ```
@@ -32,7 +32,7 @@ same logic.
 
 ## In any other CI
 
-`saw scan`'s exit code is the whole contract — no flag, no parsing:
+`saw scan` is the whole contract — no flag, no parsing:
 
 ```bash
 pip install stayawakebot && saw scan
@@ -44,9 +44,8 @@ or with no Python at all:
 docker run --rm -v "$PWD:/repo:ro" ghcr.io/ndevu12/stayawakebot saw scan /repo
 ```
 
-`0` clean, `1` infected, `2` could-not-scan — see [exit codes](../reference/exit-codes.md). Upload
-findings to code scanning with `--sarif`, and pass `--require-db` when the job must not lose advisory
-coverage silently.
+The last line of the report is the verdict. Upload findings to code scanning with `--sarif`, and
+pass `--require-db` when the job must not lose advisory coverage silently.
 
 ## Prove the gate is enforced
 

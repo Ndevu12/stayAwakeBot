@@ -72,10 +72,11 @@ def render_welcome(level: ColorLevel, version: str) -> str:
     ])
     lines += ["", C("Get started", _WHITE, bold=True)]
     cmds = [
-        ("saw scan .", "hunt this repo for supply-chain worms (read-only)"),
-        ("saw audit", "credential · editor · CI hygiene"),
-        ("saw intro", "a 60-second tour"),
-        ("saw <command> -h", "help for any command"),
+            ("saw scan .", "hunt this repo for supply-chain worms (read-only)"),
+            ("saw audit", "credential · editor · CI hygiene"),
+            ("saw harden", "host denials, read back before they count"),
+            ("saw intro", "a 60-second tour"),
+            ("saw <command> -h", "help for any command"),
     ]
     w = max(len(c) for c, _ in cmds)
     for cmd, desc in cmds:
@@ -103,12 +104,13 @@ def render_intro(level: ColorLevel, version: str) -> str:
         C("  A local supply-chain worm hunter — it detects, reports, and auto-fixes", _DIM),
         C("  self-propagating malware: obfuscated loaders, fake fonts, VS Code", _DIM),
         C('  auto-run tasks, and stealth "evil merges".', _DIM),
-        "", C("Three verbs", _WHITE, bold=True),
-        "  " + C("saw scan ", _CYAN, bold=True) + C("  hunt worms (read-only) — ", _DIM)
+        "", C("Four verbs", _WHITE, bold=True),
+        "  " + C("saw scan  ", _CYAN, bold=True) + C("  hunt worms (read-only) — ", _DIM)
         + C("the exit code IS the verdict", _FG),
-        "  " + C("saw fix  ", _CYAN, bold=True) + C("  recover from git onto a clean branch; ", _DIM)
+        "  " + C("saw fix   ", _CYAN, bold=True) + C("  recover from git onto a clean branch; ", _DIM)
         + C("--pr", _MINT) + C(" opens a PR", _DIM),
-        "  " + C("saw audit", _CYAN, bold=True) + C("  credential · editor · CI hygiene", _DIM),
+        "  " + C("saw audit ", _CYAN, bold=True) + C("  credential · editor · CI hygiene", _DIM),
+        "  " + C("saw harden", _CYAN, bold=True) + C("  host denials; in place only after a read-back", _DIM),
         "", C("Why it's safe", _WHITE, bold=True),
         "  " + C("· runs ", _DIM) + C("zero code at install", _GREEN)
         + C(" (that's the very vector it hunts)", _DIM),

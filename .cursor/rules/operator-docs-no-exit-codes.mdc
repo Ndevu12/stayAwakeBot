@@ -1,0 +1,18 @@
+---
+description: Never mention exit codes in operator documentation.
+alwaysApply: true
+---
+
+# No exit codes in operator documentation
+
+Never mention exit codes, process-status numbers (`0`/`1`/`2`/`3` as command results), or `echo $?`
+in operator documentation: `docs/`, `README.md`, `SUPPORT.md`, and new `CHANGELOG.md` entries.
+
+There is no `docs/reference/exit-codes.md`. Do not recreate it. Do not add Exit tables to command
+pages.
+
+Operators read the **verdict** on the report (clean / infected / suspicious / error / rotation
+unsafe / in place / unknown). CI still gates on process status — that contract lives in code, tests,
+and skills, never in operator docs.
+
+Historical changelog sections already shipped may keep their wording.

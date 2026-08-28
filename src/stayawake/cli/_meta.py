@@ -15,4 +15,4 @@ except PackageNotFoundError:               # running from a source tree without 
 
 DEFAULT_REPORTS = "reports/security"
 
-VERBS = ["scan", "fix", "discard", "audit", "guard", "search", "intro", "doctor", "completion"]
+VERBS = ["scan", "fix", "discard", "audit", "harden", "guard", "search", "intro", "doctor", "completion"]

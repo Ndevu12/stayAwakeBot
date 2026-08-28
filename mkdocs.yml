@@ -118,6 +118,7 @@ nav:
       - how-to/scan-on-clone.md
       - how-to/fix-findings.md
       - how-to/audit-a-machine.md
+      - how-to/harden-this-machine.md
       - how-to/harden-a-repo.md
       - how-to/gate-ci.md
   - Reference:
@@ -127,6 +128,7 @@ nav:
           - reference/cli/fix.md
           - reference/cli/discard.md
           - reference/cli/audit.md
+          - reference/cli/harden.md
           - reference/cli/guard.md
           - reference/cli/hook.md
           - reference/cli/auth.md
@@ -140,7 +142,6 @@ nav:
           - reference/cli/credentials.md
           - reference/cli/migrating.md
       - reference/configuration.md
-      - reference/exit-codes.md
       - reference/advisory-db.md
   - Explanation:
       - explanation/trust-model.md

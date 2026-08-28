@@ -31,6 +31,8 @@ report, remediate (PR-only), prevent, plus dependency-CVE auditing and local hyg
    allowlist is operator-owned and never taken from a scanned repo; fail closed. → `saw-overview`.
 8. **Value before coverage; measure/profile before optimizing; reuse before building; right depth, no
    bandaids; self-documenting names.** → `engineering-standard`.
+9. **Operator documentation never mentions exit codes.** No exit-codes page, no Exit tables, no
+   process-status numbers. Operators read the verdict. → `saw-overview`, `shipping-changes`.
 
 ## Skills index
 

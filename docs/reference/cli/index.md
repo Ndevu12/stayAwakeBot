@@ -1,5 +1,5 @@
 ---
-description: Every saw command and flag, documented once: scan, fix, discard, audit, guard, hook, auth, db, search, intro, doctor and completion.
+description: Every saw command and flag, documented once: scan, fix, discard, audit, harden, guard, hook, auth, db, search, intro, doctor and completion.
 ---
 
 # `saw` command reference
@@ -22,6 +22,7 @@ alias, for scripts where a three-letter name might clash on `PATH`.
 | [`fix`](fix.md) | Prepare the cleanup on a `security/auto-clean` branch; on confirmed infection also removes the installed tree in this repository | that branch; the installed tree, build outputs, and lockfile in this repository (lockfile kept on CI); pushes with `--pr` |
 | [`discard`](discard.md) | Undo `saw fix` | git / GitHub API |
 | [`audit`](audit.md) | Machine hygiene, start-up surface, branch protection | read-only |
+| [`harden`](harden.md) | Create host denials; in place only after a read-back | this machine |
 | [`guard`](guard.md) | Install and verify the Strix CI gate | `check`/`drift` read-only; `setup` writes a workflow or a PR |
 | [`hook`](hook.md) | Scan what a clone or pull just brought in | your global git config |
 | [`auth`](auth.md) | Credential and capability status; register a GitHub App | local config |
@@ -48,7 +49,7 @@ Three sections apply across commands: [remote targeting](remote.md), [report sin
 | --- | --- | --- |
 | `--json` | `scan`, `auth status`, `doctor`, `search` | Machine-readable output on stdout. |
 | `-q`, `--quiet` | `doctor`, `search` | Only the essentials. |
-| `-f`, `--fail` | `audit`, `guard check` | Exit non-zero on a warning-level issue. **`saw scan` has no `--fail`** — its exit code is the verdict unconditionally. |
+| `-f`, `--fail` | `audit`, `guard check` | Fail the run on a warning-level issue. **`saw scan` has no `--fail`** — the last line of the report is the verdict unconditionally. |
 | `--no-stream` | `scan`, `fix`, `discard`, `audit`, `guard`, `auth`, `db` | Plain instant lines instead of live progress. |
 | `-j`, `--jobs N` | `scan`, `fix`, `guard check`/`setup`/`drift` | Work on up to N repositories at once. Default `auto` (one repo sequential, several use one worker per core); `-j 1` forces sequential. On `scan` it also splits one large repository across workers. |
 
@@ -56,7 +57,7 @@ Three sections apply across commands: [remote targeting](remote.md), [report sin
 
 Accepted anywhere the full verb is: `scan` → `s`, `sc`; `audit` → `au`;
 `guard` → `gd`; `search` → `se`; `intro` → `welcome`; `doctor` → `d`, `doc`; `completion` → `comp`.
-`fix` and `discard` are always spelled out.
+`fix` and `discard` and `harden` are always spelled out.
 
 ## Environment variables
 

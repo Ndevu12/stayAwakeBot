@@ -246,6 +246,20 @@ class TestAudit(unittest.TestCase):
         self.assertEqual(m_checks.call_args.args[2], "dev")   # branch forwarded through
 
 
+class TestHarden(unittest.TestCase):
+    @mock.patch("stayawake.bots.security.harden.run", return_value=(0, "in place\n"))
+    def test_prints_the_report_and_propagates_exit(self, m):
+        with redirect_stdout(io.StringIO()) as buf:
+            self.assertEqual(cli.main(["harden"]), 0)
+        m.assert_called_once_with()
+        self.assertIn("in place", buf.getvalue())
+
+    @mock.patch("stayawake.bots.security.harden.run", return_value=(2, "This command must run as root."))
+    def test_not_root_is_nonzero(self, _):
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(cli.main(["harden"]), 2)
+
+
 class TestDispatcherOwnedCommands(unittest.TestCase):
     @mock.patch("stayawake.lib.auth.resolve_token", return_value=(None, None))
     def test_doctor_runs(self, _):
@@ -263,6 +277,16 @@ class TestDispatcherOwnedCommands(unittest.TestCase):
             self.assertEqual(cli.main(["search", "installed", "tree"]), 0)
         self.assertIn("saw fix", buf.getvalue())
         self.assertNotIn("saw condemn", buf.getvalue())
+
+    def test_search_finds_harden(self):
+        with redirect_stdout(io.StringIO()) as buf:
+            self.assertEqual(cli.main(["search", "host", "deny"]), 0)
+        self.assertIn("saw harden", buf.getvalue())
+
+    def test_search_finds_audit(self):
+        with redirect_stdout(io.StringIO()) as buf:
+            self.assertEqual(cli.main(["search", "hygiene"]), 0)
+        self.assertIn("saw audit", buf.getvalue())
 
     def test_search_no_match_returns_zero(self):
         with redirect_stdout(io.StringIO()):
@@ -289,7 +313,8 @@ class TestTopLevel(unittest.TestCase):
     def test_intro_prints_tour(self):
         with redirect_stdout(io.StringIO()) as buf:
             self.assertEqual(cli.main(["intro"]), 0)
-        self.assertIn("Three verbs", buf.getvalue())
+        self.assertIn("Four verbs", buf.getvalue())
+        self.assertIn("saw harden", buf.getvalue())
 
     def test_welcome_alias_routes_to_intro(self):
         with redirect_stdout(io.StringIO()) as buf:

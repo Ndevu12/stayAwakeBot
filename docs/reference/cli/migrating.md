@@ -9,7 +9,7 @@ surface. The `stayawake-health-*` scripts are unchanged.
 
 | Legacy command (removed) | `saw` equivalent |
 | --- | --- |
-| `stayawake-security-scan` | `saw scan` (the exit code **is** the verdict — no flag) |
+| `stayawake-security-scan` | `saw scan` |
 | `stayawake-security-report` | `saw scan` (the report renders to the terminal) |
 | `stayawake-security-alert` | `saw scan --alert` |
 | `stayawake-security-remediate [--apply --open-pr\|--remote]` | `saw fix [--pr\|--remote]` |

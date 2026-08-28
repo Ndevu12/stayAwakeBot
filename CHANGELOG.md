@@ -13,6 +13,17 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Changed
+- **Operator documentation describes the verdict, not process status.**
+
+### Added
+- **`saw harden` creates host denials and only reports them as in place after a read-back.**
+  It never touches a project's dependency tree. An unverifiable write is unknown, never success.
+  A path that already has something in it is left unchanged. If a running process still holds
+  code that is not on disk, it refuses until that process is captured. A denial that is in
+  place is not reported as a drop artifact. It does not claim that one control protects
+  anything else.
+
 ### Fixed
 - **A location a check could not read is no longer reported as a clean result.** Those checks
   used to return the same empty answer they return on a clean host. They now say the location

@@ -1,13 +1,13 @@
 ---
-description: Documentation for saw — an offline-first supply-chain worm scanner. Install it, run your first scan, gate CI, audit a machine, and look up any command or exit code.
+description: Documentation for saw — an offline-first supply-chain worm scanner. Install it, run your first scan, gate CI, audit a machine, and look up any command.
 ---
 
 # StayAwakeBot documentation
 
 `saw` hunts self-propagating supply-chain malware in your repositories, lockfiles, installed
 dependency trees and your machine's start-up surface. It remediates through a pull request and gates
-CI, so an infected change cannot merge. A default scan is offline, needs no configuration, and its
-exit code is the verdict.
+CI, so an infected change cannot merge. A default scan is offline, needs no configuration, and
+the last line of the report is the verdict.
 
 For developers who ship software — in any of the eight package ecosystems `saw`
 [reads](reference/advisory-db.md#ecosystems-saw-reads) — and for the people who keep an
@@ -20,11 +20,11 @@ install, a build, or an editor or agent opening the folder.
 **Do a task** — [scan local code](how-to/scan-local.md) ·
 [scan GitHub repositories](how-to/scan-remote.md) · [fix findings](how-to/fix-findings.md) ·
 [gate CI](how-to/gate-ci.md) · [scan on clone](how-to/scan-on-clone.md) ·
-[audit a machine](how-to/audit-a-machine.md) · [harden a repository](how-to/harden-a-repo.md)
+[audit a machine](how-to/audit-a-machine.md) · [harden this machine](how-to/harden-this-machine.md) ·
+[harden a repository](how-to/harden-a-repo.md)
 
 **Look it up** — [CLI reference](reference/cli/index.md) ·
-[configuration](reference/configuration.md) · [exit codes](reference/exit-codes.md) ·
-[advisory database](reference/advisory-db.md)
+[configuration](reference/configuration.md) · [advisory database](reference/advisory-db.md)
 
 **What the tool promises** — [trust model](explanation/trust-model.md) ·
 [verdicts](explanation/verdicts.md) · [fail closed](explanation/fail-closed.md) ·

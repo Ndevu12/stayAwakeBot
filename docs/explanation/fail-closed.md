@@ -7,13 +7,13 @@ description: Why a target saw could not scan is never reported as clean, and whe
 **A target that could not be scanned never reads as clean.**
 
 Silence has two causes — there was nothing to find, or nothing was looked at — and only one of them
-is good news. Wherever `saw` cannot tell the two apart, it says so and exits non-zero rather than
+is good news. Wherever `saw` cannot tell the two apart, it says so and fails the run rather than
 returning the comfortable answer.
 
 In practice:
 
 - A file that cannot be read, a clone that failed, a malformed config, a worker that died mid-scan —
-  each ends the run at [exit `2`](../reference/exit-codes.md), never `0`.
+  each fails the run, never as clean.
 - A scan-on-clone hook that hits its time budget reports the tree as **unverified**, not clean.
 - `saw audit` withholds the all-clear when the start-up surface could not be established, and says
   which locations it could not account for.
@@ -25,12 +25,12 @@ In practice:
 Where a check is not certain, `saw` warns loudly rather than degrading in silence. Warning noise is
 recoverable; a false all-clear is not.
 
-## Why the exit code is the contract
+## Why a CI gate is one line
 
-`saw scan` has no `--fail` flag. The verdict *is* the exit status, unconditionally, so a CI gate is
-one line with nothing to configure and no way to accidentally configure it away. The same property
-makes the failure modes safe: an unscannable target and an infected one both come back non-zero, so a
-gate that only ever checks "did this pass" already handles both.
+`saw scan` has no `--fail` flag. The last line of the report *is* the verdict, unconditionally, so a
+CI gate is one line with nothing to configure and no way to accidentally configure it away. The same
+property makes the failure modes safe: an unscannable target and an infected one both fail the run,
+so a gate that only ever checks "did this pass" already handles both.
 
 The one deliberate default in the other direction is the advisory corpus: without it a scan continues
 with less advisory coverage instead of failing, because advisories never gate anyway. `--require-db`
