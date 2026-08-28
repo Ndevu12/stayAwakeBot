@@ -212,12 +212,11 @@ def _escalate_with_scan(issue: HygieneIssue, weak: list[tuple[str, Path, str]]) 
     `weak[0]` alone, which let a clean first location mask an infected second.
     """
     for item in weak:
-        try:
-            graded = _verify_weak_artifact(item[:2])
-        except (Exception, KeyboardInterrupt) as exc:      # an aborted scan must not lose the finding
+        graded, failure = _scan_or_reason(item[:2])
+        if failure is not None:                            # an aborted scan must not lose the finding
             return replace(issue, detail=issue.detail +
                            f" (a content scan of {item[1]} could not complete: "
-                           f"{type(exc).__name__} — the artifacts above were still found.)")
+                           f"{failure} — the artifacts above were still found.)")
         for g in graded or []:
             if g.id == "host-artifact-content-infected":
                 return g
@@ -253,7 +252,7 @@ def check_host_artifacts(verify: bool = False) -> list[HygieneIssue]:
             issue = _escalate_with_scan(issue, weak)
         return [issue]
     if verify:
-        graded = _verify_weak_artifact(weak[0][:2])
+        graded, _failure = _scan_or_reason(weak[0][:2])
         if graded is not None:
             return graded
     return [HygieneIssue(          # a single WEAK, unverified indicator — surface honestly, don't accuse
@@ -268,6 +267,15 @@ def check_host_artifacts(verify: bool = False) -> list[HygieneIssue]:
         remediation="Check whether it is yours (inspect the contents). If not, isolate the host and "
                     f"rotate credentials LAST: {_WIPER_NOTE}. `saw audit --verify` content-scans it.",
     )]
+
+
+def _scan_or_reason(item: tuple[str, Path]) -> tuple[list[HygieneIssue] | None, str | None]:
+    """(findings, why it could not run). ONE place the content scan's failure is caught, so both
+    callers inherit it — the lone-indicator path did not, and an aborted scan escaped from there."""
+    try:
+        return _verify_weak_artifact(item), None
+    except (Exception, KeyboardInterrupt) as exc:
+        return None, type(exc).__name__
 
 
 def _verify_weak_artifact(item: tuple[str, Path]) -> list[HygieneIssue] | None:

@@ -20,6 +20,24 @@ _REMOTE_FETCH = REMOTE_FETCH_INTO_INTERPRETER
 _FONT_EXEC = re.compile(r"\.(?:woff2?|ttf|otf)\b", re.IGNORECASE)
 
 
+_HIDDEN_PRESENTATION = {"reveal": {"never", "silent"}, "panel": {"dedicated"},
+                        "echo": {False}, "showReuseMessage": {False}, "focus": {False}}
+
+
+def _conceals_itself(task: dict) -> bool:
+    """Whether the task keeps its own execution off the screen.
+
+    `hide` removes it from the task list; a presentation that never reveals, does not echo the
+    command or suppresses the reuse message runs it without the terminal surfacing it."""
+    if task.get("hide") is True:
+        return True
+    presentation = task.get("presentation")
+    if not isinstance(presentation, dict):
+        return False
+    return any(presentation.get(key) in values
+               for key, values in _HIDDEN_PRESENTATION.items() if key in presentation)
+
+
 class StructuralJsonMatcher(Matcher):
     handles = "structural-json"
     partitionable = True
@@ -61,9 +79,14 @@ class StructuralJsonMatcher(Matcher):
         for task in self._tasks(data):
             run_on = (task.get("runOptions", {}) or {}).get("runOn") or task.get("runOn")
             cmd = str(task.get("command", ""))
-            if run_on == "folderOpen" and "vscode-task-autorun" in by_kind:
-                out.append(self._emit(by_kind["vscode-task-autorun"], rel,
-                                      f"task '{task.get('label','?')}' runOn=folderOpen"))
+            if run_on == "folderOpen":
+                # Auto-running is what the setting is FOR. Legitimate auto-run tasks are ordinary;
+                # legitimate auto-run tasks that hide themselves are not, so the pair is the signal.
+                kind = ("vscode-task-autorun" if _conceals_itself(task)
+                        else "vscode-task-autorun-visible")
+                if kind in by_kind:
+                    out.append(self._emit(by_kind[kind], rel,
+                                          f"task '{task.get('label','?')}' runOn=folderOpen"))
             if re.search(r"\.(woff2?|ttf|otf)\b", cmd) and "vscode-task-runs-font" in by_kind:
                 out.append(self._emit(by_kind["vscode-task-runs-font"], rel, cmd[:90]))
         if base == "settings.json" and "vscode-allow-automatic-tasks" in by_kind:

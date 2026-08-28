@@ -14,6 +14,13 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Fixed
+- **A task set to run when a folder opens is no longer critical on that alone.** Running on open is
+  what the setting is for, and ordinary project configuration uses it. It is now reported as
+  something to review, and reaches critical only when the task also hides itself — legitimate
+  auto-run tasks are common, ones that keep their own execution off the screen are not. Nothing
+  stops being reported; the grade changes.
+
+### Fixed
 - **On a platform `saw` does not yet cover, checks no longer report that they found nothing.** Most
   of the start-up surface has no Windows implementation, so those checks returned nothing — the same
   answer they give on a clean machine — and a Windows run came back clean at exit `0` over a surface
