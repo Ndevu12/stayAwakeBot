@@ -13,6 +13,12 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Added
+- **A start-up item that runs something its name cannot account for is now reported.** The name and
+  the path were both already read and never compared. Neither is suspicious alone — the
+  contradiction between them is, and it is the shape an item takes when it borrows a familiar name
+  to look routine.
+
 ### Fixed
 - **A task set to run when a folder opens is no longer critical on that alone.** Running on open is
   what the setting is for, and ordinary project configuration uses it. It is now reported as
