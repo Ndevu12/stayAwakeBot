@@ -168,12 +168,18 @@ class TestItRefusesWhereRemovalWouldBeAGuess(unittest.TestCase):
 
         from stayawake.bots.security import pr
         from stayawake.bots.security.models import ScanResult, Severity
+        from stayawake.bots.security.remediation.classify import Recovery
 
-        classified = []
+        recovered = []
 
-        def spy_cls(*a, **k):
-            classified.append(1)
-            return None
+        def spy_rec(*a, **k):
+            recovered.append(1)
+            return True
+
+        def plant(repo, wt, *a, **k):
+            Path(wt).mkdir(parents=True, exist_ok=True)
+            (Path(wt) / "index.js").write_text("x\n", encoding="utf-8")
+            return True
 
         finding = SimpleNamespace(
             path="index.js", signature_id="x", category="code-loader",
@@ -181,10 +187,16 @@ class TestItRefusesWhereRemovalWouldBeAGuess(unittest.TestCase):
             severity=Severity.CRITICAL, description="x")
         infected = ScanResult("owner/repo", "local", [finding])
         idle = ScanResult("owner/repo", "local", [])
+        rec = Recovery("index.js", "HEAD", "restored", "", "ok")
         _prepare_fix_against(
             [infected, idle, idle], lambda *a, **k: installed.Report(),
-            extra=(mock.patch.object(pr.remediation, "classify_recovery", side_effect=spy_cls),))
-        self.assertEqual(classified, [])
+            extra=(
+                mock.patch.object(pr.gitutil, "add_worktree", side_effect=plant),
+                mock.patch.object(pr.remediation, "has_concealment_seam", return_value=True),
+                mock.patch.object(pr.remediation, "classify_recovery", return_value=rec),
+                mock.patch.object(pr.remediation, "apply_recovery", side_effect=spy_rec),
+            ))
+        self.assertEqual(recovered, [])
 
     def test_a_scan_that_did_not_finish_does_not_quarantine(self):
         from stayawake.bots.security import pr
@@ -203,6 +215,27 @@ class TestItRefusesWhereRemovalWouldBeAGuess(unittest.TestCase):
         idle = ScanResult("owner/repo", "local", [])
         _prepare_fix_against(
             [partial, partial, idle], lambda *a, **k: installed.Report(),
+            extra=(mock.patch.object(pr.remediation, "quarantine_residual", side_effect=spy_q),))
+        self.assertEqual(quarantined, [])
+
+    def test_an_unfinished_first_scan_does_not_quarantine_off_a_later_one(self):
+        from stayawake.bots.security import pr
+        from stayawake.bots.security.models import Finding, ScanResult, Severity
+
+        quarantined = []
+
+        def spy_q(root, findings, q):
+            quarantined.extend(findings)
+            return []
+
+        finding = Finding("x", "persistence", Severity.HIGH, "telemetry.js",
+                          "drop", remediation="quarantine-file")
+        partial = ScanResult("owner/repo", "local", [finding],
+                             error="1 file(s) unreadable: secret.env")
+        later = ScanResult("owner/repo", "local", [finding])
+        idle = ScanResult("owner/repo", "local", [])
+        _prepare_fix_against(
+            [partial, later, idle], lambda *a, **k: installed.Report(),
             extra=(mock.patch.object(pr.remediation, "quarantine_residual", side_effect=spy_q),))
         self.assertEqual(quarantined, [])
 

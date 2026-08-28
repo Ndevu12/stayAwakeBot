@@ -135,6 +135,15 @@ def _backup(root: Path, rel: str, quarantine: Path) -> None:
         shutil.copy2(src, dest, follow_symlinks=False)
 
 
+def _delete_stays_in(root: Path, target: Path) -> bool:
+    try:
+        if target.is_symlink():
+            return target.parent.resolve().is_relative_to(root.resolve())
+        return is_safe_write_target(target, root)
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
 def quarantine_residual(root: Path, findings, quarantine: Path) -> list["Change"]:
     """Quarantine (back up + remove) every distinct file still flagged after a
     strip/apply pass — the fail-safe so a partially-cleaned file is never left behind.
@@ -142,7 +151,7 @@ def quarantine_residual(root: Path, findings, quarantine: Path) -> list["Change"
     done: list[Change] = []
     for rel in sorted({f.path for f in findings}):
         target = root / rel
-        if not target.exists():
+        if not target.exists() or not _delete_stays_in(root, target):
             continue
         _backup(root, rel, quarantine)
         if target.is_dir() and not target.is_symlink():
@@ -162,7 +171,7 @@ def apply(root: Path, changes: list[Change], quarantine: Path) -> list[Change]:
     for c in changes:
         target = root / c.path
         if c.action == "quarantine":
-            if target.exists():
+            if target.exists() and _delete_stays_in(root, target):
                 _backup(root, c.path, quarantine)
                 if target.is_dir() and not target.is_symlink():
                     shutil.rmtree(target)          # a symlinked dir → unlink the link, don't rmtree it

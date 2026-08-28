@@ -105,6 +105,22 @@ class TestStripAndResidual(unittest.TestCase):
         self.assertFalse((repo / "evil.cjs").exists())          # removed from the tree
         self.assertTrue((q / "evil.cjs").exists())              # backed up first
 
+    def test_quarantine_does_not_follow_a_linked_directory(self):
+        repo = Path(tempfile.mkdtemp())
+        host = Path(tempfile.mkdtemp())
+        payload = host / "payload.js"
+        payload.write_text("x\n", encoding="utf-8")
+        (repo / "escdir").symlink_to(host)
+        q = remediation.quarantine_path(repo)
+        finding = type("F", (), {"path": "escdir/payload.js"})()
+        done = remediation.quarantine_residual(repo, [finding], q)
+        self.assertEqual(done, [])
+        self.assertTrue(payload.is_file())
+        applied = remediation.apply(
+            repo, [remediation.Change("quarantine", "escdir/payload.js")], q)
+        self.assertEqual(applied, [])
+        self.assertTrue(payload.is_file())
+
     def test_backup_skips_symlink(self):
         repo = Path(tempfile.mkdtemp())
         secret = repo / "secret.txt"

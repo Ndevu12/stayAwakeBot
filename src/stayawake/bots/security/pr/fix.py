@@ -11,7 +11,7 @@ from stayawake.lib import git as gitutil
 from stayawake.utils.streaming import status
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.targets import LocalRepoTarget
-from stayawake.bots.security.models import QUARANTINE_DIR, CONFIRMED
+from stayawake.bots.security.models import QUARANTINE_DIR, CONFIRMED, HEURISTIC
 from stayawake.bots.security import remediation
 from stayawake.bots.security.remediation import installed
 from stayawake.core import proposal
@@ -223,6 +223,8 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
                 if f.path in seen_cl:
                     continue
                 if not _corroborated(f):
+                    if getattr(f, "confidence", None) != HEURISTIC:
+                        continue
                     target = Path(wt) / f.path
                     try:
                         text = target.read_text(encoding="utf-8", errors="replace")
@@ -242,49 +244,52 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
                 elif isinstance(disp, remediation.Manual):
                     manual_reviews[disp.path] = disp
 
-        rescan = _scan()
-        auto = []
-        if not rescan.error:
-            auto = [f for f in _blocking(rescan.findings) if remediation.is_auto_fixable(f)]
-        if auto:
-            applied += remediation.quarantine_residual(wt, auto, quarantine)
+            rescan = _scan()
+            auto = []
+            if not rescan.error:
+                auto = [f for f in _blocking(rescan.findings) if remediation.is_auto_fixable(f)]
+            if auto:
+                applied += remediation.quarantine_residual(wt, auto, quarantine)
 
-        # Commit the TRUSTED tier FIRST — before any computed strip touches disk — so the two trust
-        # levels land as cleanly separated commits (`stage_all` after each write group captures only
-        # that group's changes, since the previous group is already committed).
-        if not _untrack_quarantine(wt):
-            return None, _with_tree(
-                f"ABORTED — could not untrack {QUARANTINE_DIR}/ (would commit backups)", tree_note), wt
-        signed = True
-        if applied:
-            if not gitutil.stage_all(wt):
-                return None, _with_tree("ABORTED — could not stage the fix (git add failed)", tree_note), wt
-            commit = gitutil.commit_fix(wt, "security: auto-remediate worm indicators\n\n"
-                                        + "\n".join(f"- {c.action}: {c.path}" for c in applied))
-            if not commit.committed:
-                return None, _with_tree("ABORTED — could not commit the fix (git commit failed)", tree_note), wt
-            signed = commit.signed
+            # Commit the TRUSTED tier FIRST — before any computed strip touches disk — so the two trust
+            # levels land as cleanly separated commits (`stage_all` after each write group captures only
+            # that group's changes, since the previous group is already committed).
+            if not _untrack_quarantine(wt):
+                return None, _with_tree(
+                    f"ABORTED — could not untrack {QUARANTINE_DIR}/ (would commit backups)", tree_note), wt
+            signed = True
+            if applied:
+                if not gitutil.stage_all(wt):
+                    return None, _with_tree("ABORTED — could not stage the fix (git add failed)", tree_note), wt
+                commit = gitutil.commit_fix(wt, "security: auto-remediate worm indicators\n\n"
+                                            + "\n".join(f"- {c.action}: {c.path}" for c in applied))
+                if not commit.committed:
+                    return None, _with_tree("ABORTED — could not commit the fix (git commit failed)", tree_note), wt
+                signed = commit.signed
 
-        computed: list = []
-        for disp in suggested:
-            if remediation.apply_suggested(wt, disp, quarantine, content_sig):
-                computed.append(disp)
-            else:
-                manual_reviews[disp.path] = remediation.Manual(
-                    disp.path, disp.signature_id, disp.reason,
-                    "A computed payload strip could not be re-proved against the file on disk — "
-                    "review and remove the payload manually.", disp.line)
-        if computed:
-            if not gitutil.stage_all(wt):
-                return None, _with_tree(
-                    "ABORTED — could not stage the computed strip (git add failed)", tree_note), wt
-            commit = gitutil.commit_fix(
-                wt, "security: computed payload strip — REVIEW REQUIRED (not git-corroborated)\n\n"
-                + "\n".join(f"- strip-computed: {d.path}" for d in computed))
-            if not commit.committed:
-                return None, _with_tree(
-                    "ABORTED — could not commit the computed strip (git commit failed)", tree_note), wt
-            signed = signed and commit.signed
+            computed: list = []
+            for disp in suggested:
+                if remediation.apply_suggested(wt, disp, quarantine, content_sig):
+                    computed.append(disp)
+                else:
+                    manual_reviews[disp.path] = remediation.Manual(
+                        disp.path, disp.signature_id, disp.reason,
+                        "A computed payload strip could not be re-proved against the file on disk — "
+                        "review and remove the payload manually.", disp.line)
+            if computed:
+                if not gitutil.stage_all(wt):
+                    return None, _with_tree(
+                        "ABORTED — could not stage the computed strip (git add failed)", tree_note), wt
+                commit = gitutil.commit_fix(
+                    wt, "security: computed payload strip — REVIEW REQUIRED (not git-corroborated)\n\n"
+                    + "\n".join(f"- strip-computed: {d.path}" for d in computed))
+                if not commit.committed:
+                    return None, _with_tree(
+                        "ABORTED — could not commit the computed strip (git commit failed)", tree_note), wt
+                signed = signed and commit.signed
+        else:
+            signed = True
+            computed: list = []
 
         done = _scan()
         fs = done.findings
