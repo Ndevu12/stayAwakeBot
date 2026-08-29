@@ -139,10 +139,11 @@ class TestPartialFix(unittest.TestCase):
     _EXFIL = Finding("x", "exfil", Severity.CRITICAL, "telemetry.js",
                      "shai-hulud", remediation="manual")
     # A confirmed evil-merge (#1360 PR2): keyed to a merge SHA (path), with the introduced files in
-    # `related_paths` — its remediation is history-provenance guidance, not a working-tree edit.
+    # `related_paths` — history guidance always names the commit; working-tree recovery is a
+    # separate act keyed to those files when they still carry the payload.
     _EVIL_MERGE = Finding("evil-merge-loader", "evil-merge", Severity.CRITICAL, "96dcbd397c",
                           "smuggled loader", remediation="manual", vector="evil-merge",
-                          related_paths=("tailwind.config.js",))
+                          related_paths=("tailwind.config.js",), commit_sha="96dcbd397c")
     _SAFE = Change("strip-gitignore", ".gitignore")
 
     def _run(self, *, residual, applied=(_SAFE,), existing_pulls=(),
@@ -200,13 +201,141 @@ class TestPartialFix(unittest.TestCase):
     def test_evil_merge_gets_history_provenance_guidance(self):
         # A confirmed evil-merge is keyed to a merge COMMIT, not a file — the generic "remove/recover
         # manually" is nonsensical. It must get history-provenance guidance: name the SHA + files and
-        # state that `saw fix` never rewrites history (a maintainer decision).
+        # state that `saw fix` never rewrites history (a maintainer decision). Liveness is UNKNOWN
+        # here (no real merge in the fake worktree), so it must not claim the tree is clean.
         r = self._run(residual=[self._EVIL_MERGE], applied=())
         self.assertIn("ABORTED", r.outcome)                     # confirmed → needs-review, exit 1
         self.assertIn("96dcbd397c", r.outcome)                  # location is the merge SHA
         self.assertIn("tailwind.config.js", r.outcome)          # the introduced file is named
         self.assertIn("never rewrites history", r.outcome)      # the load-bearing safety guidance
         self.assertNotIn("remove/recover manually", r.outcome)  # NOT the generic file action
+        self.assertIn("do not treat the tree as clean", r.outcome)
+        self.assertNotIn("the tree is clean but the commit persists", r.outcome)
+
+    def test_evil_merge_gone_from_tree_is_history_only(self):
+        from stayawake.lib.git.merge.liveness import GONE
+        with mock.patch.object(pr.fix, "introduced_liveness", return_value=GONE), \
+             mock.patch.object(pr.remediation, "classify_recovery") as classify:
+            r = self._run(residual=[self._EVIL_MERGE], applied=())
+        classify.assert_not_called()
+        self.assertIn("ABORTED", r.outcome)
+        self.assertIn("96dcbd397c", r.outcome)
+        self.assertIn("tailwind.config.js", r.outcome)
+        self.assertIn("never rewrites history", r.outcome)
+        self.assertIn("the tree is clean but the commit persists", r.outcome)
+
+    def test_evil_merge_changed_file_is_not_rewritten(self):
+        from stayawake.lib.git.merge.liveness import CHANGED
+        with mock.patch.object(pr.fix, "introduced_liveness", return_value=CHANGED), \
+             mock.patch.object(pr.remediation, "classify_recovery") as classify:
+            r = self._run(residual=[self._EVIL_MERGE], applied=())
+        classify.assert_not_called()
+        self.assertIn("ABORTED", r.outcome)
+        self.assertIn("do not treat the tree as clean", r.outcome)
+        self.assertNotIn("the tree is clean but the commit persists", r.outcome)
+
+    def test_evil_merge_live_file_is_offered_on_the_review_branch(self):
+        # When the introduced file still carries the payload, `saw fix` must recover that file
+        # onto the review branch — not report a history-only "tree is clean".
+        from stayawake.lib.git.merge.liveness import PRESENT
+        sug = pr.remediation.Suggested(
+            "tailwind.config.js", "evil-merge-loader", "merge-clean-recovered",
+            "review the restored file before merging", "diff", "clean\n", 1, apply_mode="restore")
+        infected = ScanResult("owner/repo", "local", [self._EVIL_MERGE])
+        with _patch_git(), \
+             mock.patch.object(pr.fix, "scan_target", return_value=infected), \
+             mock.patch.object(pr.fix, "introduced_liveness", return_value=PRESENT), \
+             mock.patch.object(pr.remediation, "plan", return_value=[]), \
+             mock.patch.object(pr.remediation, "apply", return_value=[]), \
+             mock.patch.object(pr.remediation, "quarantine_residual", return_value=[]), \
+             mock.patch.object(pr.remediation, "classify_recovery", return_value=sug) as classify, \
+             mock.patch.object(pr.remediation, "apply_suggested", return_value=True) as applyer, \
+             mock.patch.object(pr.github_api, "list_open_pulls", return_value=[]), \
+             mock.patch.object(pr.github_api, "add_labels"), \
+             mock.patch.object(pr.github_api, "remove_label"), \
+             mock.patch.object(pr.github_api, "list_open_issues", return_value=[]), \
+             mock.patch.object(pr.github_api, "create_issue",
+                               return_value={"number": 9, "html_url": "iu"}), \
+             mock.patch.object(pr.github_api, "create_pull",
+                               return_value={"number": 55, "html_url": "u"}) as create:
+            outcome = pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t")
+        classify.assert_called()
+        self.assertEqual(classify.call_args.args[1].path, "tailwind.config.js")
+        applyer.assert_called_once()
+        create.assert_called_once()
+        body = create.call_args.kwargs["body"]
+        self.assertIn("PARTIAL", outcome)
+        self.assertIn("tailwind.config.js", outcome)
+        self.assertIn("96dcbd397c", body)
+        self.assertIn("still carries it in the working tree", body)
+        self.assertNotIn("the tree is clean but the commit persists", body)
+        self.assertIn("never rewrites history", body)
+
+    def test_heuristic_evil_merge_live_file_is_offered_for_review(self):
+        # Heuristic grade on the merge does not skip recovering a live introduced file; the
+        # restore is review-required, never a trusted auto-apply.
+        from stayawake.lib.git.merge.liveness import PRESENT
+        heuristic = Finding("evil-merge", "evil-merge", Severity.HIGH, "96dcbd397c",
+                            "smuggled loader", remediation="manual", vector="evil-merge",
+                            confidence="heuristic", related_paths=("postcss.config.mjs",),
+                            commit_sha="96dcbd397c")
+        sug = pr.remediation.Suggested(
+            "postcss.config.mjs", "evil-merge", "merge-clean-recovered",
+            "review the restored file before merging", "diff", "clean\n", 1, apply_mode="restore")
+        infected = ScanResult("owner/repo", "local", [heuristic])
+        with _patch_git(), \
+             mock.patch.object(pr.fix, "scan_target", return_value=infected), \
+             mock.patch.object(pr.fix, "introduced_liveness", return_value=PRESENT), \
+             mock.patch.object(pr.remediation, "plan", return_value=[]), \
+             mock.patch.object(pr.remediation, "apply", return_value=[]), \
+             mock.patch.object(pr.remediation, "quarantine_residual", return_value=[]), \
+             mock.patch.object(pr.remediation, "classify_recovery", return_value=sug) as classify, \
+             mock.patch.object(pr.remediation, "apply_suggested", return_value=True) as applyer, \
+             mock.patch.object(pr.github_api, "list_open_pulls", return_value=[]), \
+             mock.patch.object(pr.github_api, "add_labels"), \
+             mock.patch.object(pr.github_api, "remove_label"), \
+             mock.patch.object(pr.github_api, "create_issue"), \
+             mock.patch.object(pr.github_api, "create_pull",
+                               return_value={"number": 55, "html_url": "u"}) as create:
+            outcome = pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t")
+        classify.assert_called()
+        self.assertEqual(classify.call_args.args[1].path, "postcss.config.mjs")
+        applyer.assert_called_once()
+        create.assert_called_once()
+        self.assertIn("PARTIAL", outcome)
+        self.assertIn("postcss.config.mjs", outcome)
+
+    def test_evil_merge_history_note_survives_a_clean_rescan(self):
+        # Restoring the live file can make a later scan look clean; the merge commit is still
+        # there and the operator must still be told `saw fix` never rewrites history.
+        from stayawake.lib.git.merge.liveness import PRESENT
+        sug = pr.remediation.Suggested(
+            "tailwind.config.js", "evil-merge-loader", "merge-clean-recovered",
+            "review the restored file before merging", "diff", "clean\n", 1, apply_mode="restore")
+        infected = ScanResult("owner/repo", "local", [self._EVIL_MERGE])
+        clean = ScanResult("owner/repo", "local", [])
+        scans = [infected, infected, clean]
+        with _patch_git(), \
+             mock.patch.object(pr.fix, "scan_target",
+                               side_effect=lambda *a, **k: scans.pop(0) if scans else clean), \
+             mock.patch.object(pr.fix, "introduced_liveness", return_value=PRESENT), \
+             mock.patch.object(pr.remediation, "plan", return_value=[]), \
+             mock.patch.object(pr.remediation, "apply", return_value=[]), \
+             mock.patch.object(pr.remediation, "quarantine_residual", return_value=[]), \
+             mock.patch.object(pr.remediation, "classify_recovery", return_value=sug), \
+             mock.patch.object(pr.remediation, "apply_suggested", return_value=True), \
+             mock.patch.object(pr.github_api, "list_open_pulls", return_value=[]), \
+             mock.patch.object(pr.github_api, "add_labels"), \
+             mock.patch.object(pr.github_api, "remove_label"), \
+             mock.patch.object(pr.github_api, "list_open_issues", return_value=[]), \
+             mock.patch.object(pr.github_api, "create_issue"), \
+             mock.patch.object(pr.github_api, "create_pull",
+                               return_value={"number": 55, "html_url": "u"}) as create:
+            outcome = pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t")
+        body = create.call_args.kwargs["body"]
+        self.assertIn("PARTIAL", outcome)
+        self.assertIn("96dcbd397c", body)
+        self.assertIn("never rewrites history", body)
 
     def test_nothing_fixable_dedups_issue(self):
         # A re-run with an existing open issue must not open a duplicate (idempotent notify).

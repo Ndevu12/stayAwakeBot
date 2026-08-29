@@ -23,7 +23,13 @@ Re-running updates the same PR rather than opening another.
 A payload is restored from git history — the real previous content, not a reconstruction — or the
 file is quarantined whole. `saw` never surgically edits a source file, so a fix cannot corrupt valid
 code. Where a clean version cannot be proven safe to restore, the finding is **deferred to review**
-with the exact reason and the command to inspect it.
+with the exact reason and the command to inspect it. When a merge finding is still live in the
+working tree, those files are restored on the review branch; the merge commit itself is left in
+place.
+
+Heuristic (`suspicious`) findings are **never auto-fixed**. A repository with only heuristic findings
+is disclosed and deferred, never reported "already clean". See [the safety
+envelope](../explanation/safety-envelope.md).
 
 Heuristic (`suspicious`) findings are **never auto-fixed**. A repository with only heuristic findings
 is disclosed and deferred, never reported "already clean". See [the safety
@@ -54,7 +60,8 @@ A fix is a forward commit: it changes what the files contain now. It does **not*
 and it never will — a rewrite invalidates every fork, open pull request, existing clone and tag.
 
 So after a merged fix the payload is gone from the working tree and from anything a clone, a build
-or CI will run, but an earlier commit still holds it:
+or CI will run, but an earlier commit still holds it. A run that finds the payload still in the
+files now restores those files on the branch; it does not claim the tree is already clean.
 
 ```bash
 saw scan .                       # clean

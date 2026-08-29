@@ -13,6 +13,12 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Fixed
+- **`saw fix` no longer reports a working tree as clean when a merge finding is still live in it.**
+  Files that still carry the payload are restored on the review branch. The merge commit stays;
+  `saw fix` still never rewrites history. If it cannot tell whether those files still carry it,
+  it does not treat the tree as clean.
+
 ### Changed
 - **Operator documentation describes the verdict, not process status.**
 
