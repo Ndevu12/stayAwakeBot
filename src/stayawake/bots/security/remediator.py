@@ -255,7 +255,7 @@ def _fix_remote(cfg, opts, sigs, allowlist, prog: Streamer, *,
 
 def amend(config_path: str | None = None, *, paths: list[str] | None = None,
           no_stream: bool = False) -> int:
-    """`saw fix amend`: replace a confirmed merge on the current branch. Local only."""
+    """`saw fix amend`: replace past commits that still carry the payload. Local only."""
     cfg = _resolve_config(config_path, targets=paths)
     if cfg is None:
         return 2
@@ -276,7 +276,7 @@ def amend(config_path: str | None = None, *, paths: list[str] | None = None,
         display = _disp(repo)
         prog.line(f"  [{i}/{len(repos)}] {display}")
         line = _safe(lambda r=repo: pr_submit.amend_repo(r, opts, sigs, allowlist), display)
-        needs = "replaced merge" not in line
+        needs = "replaced commit" not in line
         outcomes.append(FixOutcome(line, needs_review=needs))
         prog.line(f"      → {line}")
     needs_review = sum(1 for o in outcomes if o.needs_review)

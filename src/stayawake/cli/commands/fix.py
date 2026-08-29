@@ -27,7 +27,7 @@ def register(sub) -> None:
             "network. Source changes land on that branch. On a confirmed infection it also removes "
             "the installed tree, generated build outputs, and lockfile in this repository. "
             "Heuristic-only findings are disclosed for review, never auto-touched. "
-            "`saw fix amend` replaces a confirmed merge on the current branch; it is local "
+            "`saw fix amend` replaces past commits that still carry the payload; it is local "
             "and does not publish. `saw discard` is the inverse of the branch/PR path."),
         examples=[
             ("saw fix", "prepare a branch per infected local repo"),
@@ -35,7 +35,7 @@ def register(sub) -> None:
             ("saw fix --pr", "also push + open/update one rolling PR"),
             ("saw fix --remote", "sweep the configured GitHub targets"),
             ("saw fix --branch develop", "fix a branch other than the default"),
-            ("saw fix amend", "replace a confirmed merge on this branch (local; not a PR)"),
+            ("saw fix amend", "replace past commits that still carry the payload (local; not a PR)"),
         ])
     p.add_argument("paths", nargs="*", metavar="TARGETS",
                    help="local repo/dir paths — or, with --remote, owner/repo slugs. "

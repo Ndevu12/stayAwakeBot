@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""`saw fix amend` replaces a confirmed merge; it does not run on heuristic-only or `--pr`."""
+"""`saw fix amend` replaces past commits that still carry the payload; it does not run on heuristic-only or `--pr`."""
 from __future__ import annotations
 
 import io
@@ -77,7 +77,7 @@ class TestFixAmendRepo(unittest.TestCase):
             ["git", "-C", str(self.d), "rev-parse", "HEAD"],
             capture_output=True, text=True, check=True).stdout.strip()
         line = amend_repo(self.d, ScanOptions(), _sigs(), [])
-        self.assertIn("replaced merge", line)
+        self.assertIn("replaced commit", line)
         self.assertIn(merge[:12], line)
         head = subprocess.run(
             ["git", "-C", str(self.d), "rev-parse", "HEAD"],
@@ -98,7 +98,7 @@ class TestFixAmendRepo(unittest.TestCase):
         _git(self.d, "add", "later.txt")
         _git(self.d, "commit", "-qm", "later work")
         line = amend_repo(self.d, ScanOptions(), _sigs(), [])
-        self.assertIn("replaced merge", line)
+        self.assertIn("replaced commit", line)
         self.assertIn("1 later commit", line)
         text = subprocess.run(
             ["git", "-C", str(self.d), "show", "HEAD:x.js"],
@@ -119,7 +119,7 @@ class TestFixAmendRepo(unittest.TestCase):
             ["git", "-C", str(self.d), "rev-parse", "HEAD"],
             capture_output=True, text=True, check=True).stdout.strip()
         line = amend_repo(self.d, ScanOptions(), _sigs(), [])
-        self.assertIn("no confirmed merge to replace", line)
+        self.assertIn("no confirmed payload in past commits to replace", line)
         after = subprocess.run(
             ["git", "-C", str(self.d), "rev-parse", "HEAD"],
             capture_output=True, text=True, check=True).stdout.strip()

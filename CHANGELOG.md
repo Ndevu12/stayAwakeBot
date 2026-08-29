@@ -14,9 +14,10 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
-- **`saw fix amend` replaces a confirmed merge on the current branch.** It is local and does not
-  publish. Tags are not moved. The previous objects remain until collected. Bare `saw fix` is
-  unchanged.
+- **`saw fix amend` replaces past commits that still carry the payload.** The payload got there
+  by propagating into history, not only into the working tree. It is local and does not publish.
+  Tags are not moved. The previous objects remain until collected. Bare `saw fix` still only
+  cleans the tip.
 
 ### Fixed
 - **`saw fix` no longer reports a working tree as clean when a merge finding is still live in it.**

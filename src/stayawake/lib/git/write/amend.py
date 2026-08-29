@@ -15,7 +15,7 @@ from stayawake.lib.git.write.commit import BOT_AUTHOR
 from stayawake.lib.git.write.worktree import add_worktree, remove_worktree
 
 
-_MSG = "security: replace merge that introduced the payload\n"
+_MSG = "security: remove payload that propagated into this commit\n"
 
 
 def branch_name(repo: str | Path) -> str | None:

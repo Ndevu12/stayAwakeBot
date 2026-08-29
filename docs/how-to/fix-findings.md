@@ -14,7 +14,7 @@ saw fix .                  # prepare security/auto-clean for this repository —
 git diff main...security/auto-clean
 saw fix --pr               # also push and open (or update) one rolling PR per repository
 saw fix --remote           # sweep GitHub targets: clone, fix, PR
-saw fix amend              # replace a confirmed merge on this branch — local, not a PR
+saw fix amend              # replace past commits that still carry the payload — local, not a PR
 ```
 
 Re-running updates the same PR rather than opening another.
@@ -26,8 +26,9 @@ file is quarantined whole. `saw` never surgically edits a source file, so a fix 
 code. Where a clean version cannot be proven safe to restore, the finding is **deferred to review**
 with the exact reason and the command to inspect it. When a merge finding is still live in the
 working tree, those files are restored on the review branch; the merge commit itself is left in
-place. `saw fix amend` replaces that merge on the current branch. It does not publish, and it
-does not move tags. The previous objects remain until collected.
+place. `saw fix amend` is for payload that propagated into past commits, not for the working
+tree alone. It replaces those commits on the current branch. It does not publish, and it does
+not move tags. The previous objects remain until collected.
 
 Heuristic (`suspicious`) findings are **never auto-fixed**. A repository with only heuristic findings
 is disclosed and deferred, never reported "already clean". See [the safety
@@ -69,10 +70,10 @@ git show HEAD~1:postcss.config.mjs   # still returns the old contents
 That is residue, not execution — nothing runs it on clone or build. `saw scan` says so in its
 coverage notes rather than letting `clean` imply the repository has no trace of it.
 
-Removing the residue is a separate decision that is yours to make: it needs a history rewrite
-(`git filter-repo`), a force-push of every affected branch, and a request to your hosting provider
-to garbage-collect the unreachable objects — a force-push alone does not delete them. Forks keep
-their own copies regardless.
+Removing the residue from **this branch** is `saw fix amend`. It replaces the past commits that
+still carry the payload. It does not publish, it does not move tags, and it does not clear forks
+or objects the hosting platform still serves. A repository-wide rewrite remains a separate
+decision of yours.
 
 ## Never on the host
 

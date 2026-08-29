@@ -21,8 +21,9 @@ the same rolling pull request instead of opening another. On a confirmed infecti
 the installed tree, generated build outputs, and the lockfile in this repository (the lockfile is
 kept on CI). `saw discard` removes only that branch and that PR — never a branch you made.
 
-`saw fix amend` is a separate act: it moves the current branch. It does not publish, it does not
-move tags, and `saw discard` does not undo it. The previous objects remain until collected.
+`saw fix amend` is a separate act: it replaces past commits that still carry the payload and
+moves the current branch. It does not publish, it does not move tags, and `saw discard` does
+not undo it. The previous objects remain until collected.
 
 Nothing lands on a protected branch without a human merge. The CI gate follows the same rule: on an
 infected verdict it opens the fix as a pull request and stays **red until you merge it**. Remediation
