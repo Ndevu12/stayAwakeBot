@@ -142,6 +142,14 @@ class TestFixAmendRepo(unittest.TestCase):
             capture_output=True, text=True)
         return r.returncode == 0
 
+    def _porcelain(self):
+        return subprocess.run(
+            ["git", "-C", str(self.d), "status", "--porcelain"],
+            capture_output=True, text=True, check=True).stdout
+
+    def _worktree(self, rel):
+        return (self.d / rel).read_text()
+
     def _loader_merge(self):
         (self.d / "x.js").write_text("var ok = 1;\n")
         _git(self.d, "add", "x.js")
@@ -234,6 +242,8 @@ class TestFixAmendRepo(unittest.TestCase):
         self.assertEqual(before, self._rev())
         self.assertIn("fromCharCode", self._show("HEAD:x.js"))
         self.assertIn("fromCharCode", self._show(f"{before}:x.js"))
+        self.assertIn("fromCharCode", self._worktree("x.js"))
+        self.assertEqual(self._porcelain(), "")
 
     def test_a_failed_push_leaves_the_past_commit(self):
         self._loader_merge()
@@ -250,6 +260,8 @@ class TestFixAmendRepo(unittest.TestCase):
         self.assertTrue(self._is_ancestor(merge))
         self.assertIn("fromCharCode", self._show(f"{merge}:x.js"))
         self.assertIn("fromCharCode", self._show("HEAD:x.js"))
+        self.assertIn("fromCharCode", self._worktree("x.js"))
+        self.assertEqual(self._porcelain(), "")
 
     def test_a_push_that_does_not_move_the_remote_is_not_a_fix(self):
         self._loader_merge()
@@ -262,18 +274,9 @@ class TestFixAmendRepo(unittest.TestCase):
         self.assertIn("was not force-updated", line)
         self.assertNotIn("force-updated '", line)
         self.assertEqual(before, self._rev())
-
-    def test_a_push_that_does_not_move_the_remote_is_not_a_fix(self):
-        self._loader_merge()
-        before = self._rev()
-        with mock.patch("stayawake.bots.security.pr.amend._push_amended",
-                        return_value=PushResult(True)), \
-             mock.patch("stayawake.bots.security.pr.amend._remote_sha",
-                        return_value=before):
-            line = self._amend(pusher=None)
-        self.assertIn("was not force-updated", line)
-        self.assertNotIn("force-updated '", line)
-        self.assertEqual(before, self._rev())
+        self.assertIn("fromCharCode", self._show(f"{before}:x.js"))
+        self.assertIn("fromCharCode", self._worktree("x.js"))
+        self.assertEqual(self._porcelain(), "")
 
     def test_heuristic_only_is_not_replaced(self):
         _git(self.d, "merge", "--no-ff", "--no-commit", "feature")
@@ -340,6 +343,7 @@ class TestFixAmendRepo(unittest.TestCase):
 
     def test_a_partial_push_still_needs_review(self):
         self._loader_merge()
+        merge = self._rev()
         _git(self.d, "branch", "also")
 
         def pusher(branch, dest, lease):
@@ -351,6 +355,33 @@ class TestFixAmendRepo(unittest.TestCase):
         self.assertIn("was not force-updated", line)
         self.assertIn("force-updated '", line)
         self.assertTrue(_amend_line_needs(line))
+        self.assertEqual(self._rev("also"), merge)
+        self.assertNotEqual(self._rev(self.base), merge)
+        self.assertIn("fromCharCode", self._show("also:x.js"))
+        self.assertNotIn("fromCharCode", self._show(f"{self.base}:x.js"))
+        self.assertNotIn("fromCharCode", self._worktree("x.js"))
+        self.assertEqual(self._porcelain(), "")
+
+    def test_a_failed_current_branch_is_reset(self):
+        self._loader_merge()
+        merge = self._rev()
+        _git(self.d, "branch", "also")
+        _git(self.d, "checkout", "-q", "also")
+
+        def pusher(branch, dest, lease):
+            if branch == "also":
+                return PushResult(False, "denied")
+            return PushResult(True)
+
+        line = self._amend(pusher=pusher)
+        self.assertIn("was not force-updated", line)
+        self.assertIn("force-updated '", line)
+        self.assertEqual(self._rev("also"), merge)
+        self.assertNotEqual(self._rev(self.base), merge)
+        self.assertIn("fromCharCode", self._show("also:x.js"))
+        self.assertNotIn("fromCharCode", self._show(f"{self.base}:x.js"))
+        self.assertIn("fromCharCode", self._worktree("x.js"))
+        self.assertEqual(self._porcelain(), "")
 
     def test_mixed_amend_line_is_not_done(self):
         line = ("acme/app: force-updated 'also'; 'main' was not force-updated "
