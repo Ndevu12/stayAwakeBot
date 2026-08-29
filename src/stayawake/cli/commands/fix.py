@@ -27,15 +27,17 @@ def register(sub) -> None:
             "network. Source changes land on that branch. On a confirmed infection it also removes "
             "the installed tree, generated build outputs, and lockfile in this repository. "
             "Heuristic-only findings are disclosed for review, never auto-touched. "
-            "`saw fix amend` replaces past commits that still carry the payload; it is local "
-            "and does not publish. `saw discard` is the inverse of the branch/PR path."),
+            "`saw fix amend` replaces past commits that still carry the payload and "
+            "force-updates each branch they sat on when this identity may. It does not "
+            "open a pull request. `saw discard` is the inverse of the branch/PR path."),
         examples=[
             ("saw fix", "prepare a branch per infected local repo"),
             ("saw fix .", "just this repo; review the diff, then push"),
             ("saw fix --pr", "also push + open/update one rolling PR"),
             ("saw fix --remote", "sweep the configured GitHub targets"),
             ("saw fix --branch develop", "fix a branch other than the default"),
-            ("saw fix amend", "replace past commits that still carry the payload (local; not a PR)"),
+            ("saw fix amend", "replace past commits and force-update those branches"),
+            ("saw fix amend --remote", "clone GitHub targets, replace, force-update"),
         ])
     p.add_argument("paths", nargs="*", metavar="TARGETS",
                    help="local repo/dir paths — or, with --remote, owner/repo slugs. "
@@ -69,11 +71,16 @@ def register(sub) -> None:
 def run(a: argparse.Namespace) -> int:
     positionals = [*a.paths, *a.extra_paths]
     if positionals[:1] == ["amend"]:
-        if a.pr or a.remote or a.user or a.org:
-            print("saw fix amend is local and does not publish", file=sys.stderr)
+        if a.pr:
+            print("saw fix amend does not open a pull request", file=sys.stderr)
             return 2
         rest = positionals[1:] or None
-        return remediator.amend(a.config, paths=rest, no_stream=a.no_stream)
+        remote = a.remote or bool(a.user) or bool(a.org)
+        return remediator.amend(a.config, paths=None if remote else rest,
+                                remote=remote,
+                                slugs=(rest or None) if remote else None,
+                                users=a.user or None, orgs=a.org or None,
+                                no_stream=a.no_stream, jobs=a.jobs)
     remote = a.remote or bool(a.user) or bool(a.org)
     return remediator.fix(a.config, pr=a.pr, remote=remote,
                           paths=None if remote else (positionals or None),

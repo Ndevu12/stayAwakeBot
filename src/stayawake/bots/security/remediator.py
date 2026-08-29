@@ -254,9 +254,13 @@ def _fix_remote(cfg, opts, sigs, allowlist, prog: Streamer, *,
 
 
 def amend(config_path: str | None = None, *, paths: list[str] | None = None,
-          no_stream: bool = False) -> int:
-    """`saw fix amend`: replace past commits that still carry the payload. Local only."""
-    cfg = _resolve_config(config_path, targets=paths)
+          remote: bool = False, slugs: list[str] | None = None,
+          users: list[str] | None = None, orgs: list[str] | None = None,
+          no_stream: bool = False, jobs=None) -> int:
+    """`saw fix amend`: replace past commits that still carry the payload, then force-update
+    each branch they sat on when this identity may. `--remote` clones GitHub targets and
+    does the same. Never `--pr`."""
+    cfg = _resolve_config(config_path, targets=None if remote else paths)
     if cfg is None:
         return 2
     settings = cfg.get("settings", {})
@@ -266,25 +270,77 @@ def amend(config_path: str | None = None, *, paths: list[str] | None = None,
     prog = Streamer(enabled=stream_enabled(sys.stderr, force_off=no_stream), out=sys.stderr)
     prog.line(f"Security amend — {now_iso()}")
     prog.line("")
-    repos = _local_repos(cfg, opts, paths)
-    if not repos:
-        prog.line("No repositories to amend.")
+    if remote:
+        outcomes = _amend_remote(cfg, opts, sigs, allowlist, prog,
+                                 users=users, orgs=orgs, slugs=slugs, jobs=jobs)
+    else:
+        outcomes = _amend_local(cfg, opts, sigs, allowlist, paths, prog, jobs=jobs)
+    if not outcomes:
         return 0
-    prog.line(f"Amending {len(repos)} local repositor{'y' if len(repos) == 1 else 'ies'}…")
-    outcomes: list[FixOutcome] = []
-    for i, repo in enumerate(repos, 1):
-        display = _disp(repo)
-        prog.line(f"  [{i}/{len(repos)}] {display}")
-        line = _safe(lambda r=repo: pr_submit.amend_repo(r, opts, sigs, allowlist), display)
-        needs = "replaced commit" not in line
-        outcomes.append(FixOutcome(line, needs_review=needs))
-        prog.line(f"      → {line}")
     needs_review = sum(1 for o in outcomes if o.needs_review)
     n = len(outcomes)
     plural = "y" if n == 1 else "ies"
     prog.line(f"\nProcessed {n} repositor{plural}"
               + (f"; {needs_review} need review." if needs_review else "."))
     return 1 if needs_review else 0
+
+
+def _amend_line_needs(line: str) -> bool:
+    return "replaced commit" not in line or "was not fully updated" in line
+
+
+def _amend_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *, jobs=None) -> list[FixOutcome]:
+    token, source = auth.resolve_token()
+    repos = _local_repos(cfg, opts, paths)
+    if not repos:
+        prog.line("No repositories to amend.")
+        return []
+    prog.line(f"Amending {len(repos)} repositor{'y' if len(repos) == 1 else 'ies'}…")
+
+    def make_outcome(repo, *, spin):
+        display = _disp(repo)
+        tok, aerr = auth.act_token(token, source, gitutil.origin_slug(repo))
+        if aerr:
+            tok = None
+        line = _safe(lambda r=repo, t=tok: pr_submit.amend_repo(r, opts, sigs, allowlist, t),
+                     display)
+        return FixOutcome(line, _amend_line_needs(line))
+
+    labels = [_disp(r) for r in repos]
+    return _run_fix_sweep(repos, labels, make_outcome, prog, jobs=jobs, verb="Amending")
+
+
+def _amend_remote(cfg, opts, sigs, allowlist, prog: Streamer, *,
+                  users=None, orgs=None, slugs=None, jobs=None) -> list[FixOutcome]:
+    bad = invalid_slugs(slugs)
+    if bad:
+        prog.line(f"error: --remote targets must be owner/repo slugs; got {bad}")
+        return []
+    resolved, token, source = _resolve_remote(cfg, opts, users=users, orgs=orgs, slugs=slugs)
+    from stayawake.core.identity import Intent
+    err = _preflight(token, intent=Intent.AMEND_REFS)
+    if err:
+        prog.line(err)
+        return []
+    if not resolved:
+        prog.line(REMOTE_EMPTY_HINT)
+        return []
+    prog.line(f"Sweeping {len(resolved)} GitHub repositor{'y' if len(resolved) == 1 else 'ies'} "
+              f"({_remote_scope(cfg, users, orgs, slugs)})…")
+
+    def make_outcome(slug, *, spin):
+        tok, aerr = auth.act_token(token, source, slug)
+        if aerr:
+            return FixOutcome(f"{slug}: {aerr}", needs_review=True)
+        with status(f"cloning {slug}…", enabled=spin), \
+                resolution.cloned_repo(slug, tok, depth=None) as clone:
+            if clone is None:
+                return FixOutcome(f"{slug}: clone failed (check token access)", needs_review=True)
+            line = _safe(lambda c=clone, t=tok: pr_submit.amend_repo(c, opts, sigs, allowlist, t),
+                         slug)
+            return FixOutcome(line, _amend_line_needs(line))
+
+    return _run_fix_sweep(resolved, list(resolved), make_outcome, prog, jobs=jobs, verb="Amending")
 
 
 def fix(config_path: str | None = None, *, pr: bool = False, remote: bool = False,

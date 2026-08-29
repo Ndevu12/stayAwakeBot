@@ -83,6 +83,45 @@ def branches_matching(repo: str | Path, pattern: str) -> list[str]:
     return [ln.strip() for ln in out.splitlines() if ln.strip()]
 
 
+def branches_carrying(repo: str | Path, sha: str) -> list[tuple[str, str, str]]:
+    """Each branch that still reaches `sha`: `(name, replay_tip, cas_old)`.
+
+    `origin/*` is included so a commit that only sits on a fetched remote-tracking
+    ref is still a branch this identity may have to update. A local head for the
+    same name wins the tip. `cas_old` is that local tip, or the zero SHA when the
+    local ref does not exist yet.
+    """
+    full = stdout(repo, ["rev-parse", sha]).strip() or sha
+    found: dict[str, str] = {}
+    remote = stdout(repo, ["for-each-ref", "--format=%(refname:short) %(objectname)",
+                           f"--contains={full}", "refs/remotes/origin"])
+    for line in remote.splitlines():
+        parts = line.split()
+        if len(parts) != 2:
+            continue
+        name, tip = parts[0].strip(), parts[1].strip()
+        if name in ("origin/HEAD", "HEAD") or not name.startswith("origin/"):
+            continue
+        short = name[len("origin/"):]
+        if short.startswith("saw-amend/"):
+            continue
+        found[short] = tip
+    local = stdout(repo, ["for-each-ref", "--format=%(refname:short) %(objectname)",
+                          f"--contains={full}", "refs/heads"])
+    local_tips: dict[str, str] = {}
+    for line in local.splitlines():
+        parts = line.split()
+        if len(parts) != 2:
+            continue
+        name, tip = parts[0].strip(), parts[1].strip()
+        if not name or name.startswith("saw-amend/"):
+            continue
+        local_tips[name] = tip
+        found[name] = tip
+    zero = "0" * 40
+    return [(name, tip, local_tips.get(name, zero)) for name, tip in found.items()]
+
+
 def remote_branches_matching(remote: str, pattern: str, *, repo: str | Path | None = None,
                              env: dict | None = None) -> list[str]:
     """Branch names on `remote` matching a glob. Empty when the remote is unreachable."""

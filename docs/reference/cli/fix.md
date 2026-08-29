@@ -9,17 +9,18 @@ stops — no push, no PR, no network — for you to review. Source changes land 
 confirmed infection it also removes the installed tree, generated build outputs, and the lockfile
 in this repository (the lockfile is kept on CI). A merge finding that is still live in the working
 tree is restored there; the merge commit is left in history. `--pr` pushes and opens or updates one
-rolling PR per repository. `saw fix amend` replaces past commits that still carry the payload — it
-is local and does not publish. See [the safety envelope](../../explanation/safety-envelope.md) for
-what `fix` will and will not touch.
+rolling PR per repository. `saw fix amend` replaces past commits that still carry the payload and
+force-updates each branch they sat on when this identity may. It does not open a pull request.
+See [the safety envelope](../../explanation/safety-envelope.md) for what `fix` will and will not touch.
 
 ```text
 saw fix [TARGETS...] [--pr] [-r] [--user U] [--org O] [-p PATH] [-c FILE] [-j N] [--no-stream]
 saw fix amend [TARGETS...]
+saw fix amend --remote [--user U] [--org O]
 ```
 
 | Option | Description |
 | --- | --- |
 | `TARGETS...` / `-p` / `-c` / `-r` / `--user` / `--org` / `-j` / `--no-stream` | As for [`saw scan`](scan.md). A missing *explicit* `--config` path is a clear error, never a crash. |
 | `--pr`, `--open-pr` | Also push the branch and open/update one rolling, de-duplicated PR per repository. Needs a credential with repo + PR write; the API is pre-flighted before any push. Not accepted with `amend`. |
-| `amend` | Replace past commits that still carry the payload. Local only. Tags are not moved. The previous objects remain until collected. |
+| `amend` | Replace past commits that still carry the payload and force-update each branch they sat on when this identity may. A protected branch is not force-updated; a corrected copy is pushed under its own name. Tags are not moved. The previous objects remain until collected. |

@@ -18,14 +18,22 @@ class PushResult:
 
 
 def push_branch_result(repo: str | Path, slug: str, branch: str, token: str | None,
-                       *, force: bool = True) -> PushResult:
+                       *, force: bool = True, remote_branch: str | None = None,
+                       lease: str | None = None) -> PushResult:
     """Push local `branch` to `github.com/<slug>`; return ok + stderr so AuthZ can classify
-    workflow-scope / signed-commit / forbidden failures instead of collapsing to 'no write'."""
+    workflow-scope / signed-commit / forbidden failures instead of collapsing to 'no write'.
+
+    `remote_branch` is the destination name (defaults to `branch`). `lease` is the SHA the
+    remote ref must still be at (`--force-with-lease`); it takes precedence over `force`.
+    """
+    dest = remote_branch or branch
     with github_https_auth(token) as (prefix, env):
         args = ["push"]
-        if force:
+        if lease:
+            args.append(f"--force-with-lease=refs/heads/{dest}:{lease}")
+        elif force:
             args.append("--force")
-        args += [f"{prefix}{slug}.git", f"{branch}:{branch}"]
+        args += [f"{prefix}{slug}.git", f"{branch}:{dest}"]
         res = run(repo, args, env=env, timeout=NETWORK_TIMEOUT)
     if res is None:
         return PushResult(False, "git push could not run")

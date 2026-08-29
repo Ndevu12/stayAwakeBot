@@ -14,10 +14,11 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
-- **`saw fix amend` replaces past commits that still carry the payload.** The payload got there
-  by propagating into history, not only into the working tree. It is local and does not publish.
-  Tags are not moved. The previous objects remain until collected. Bare `saw fix` still only
-  cleans the tip.
+- **`saw fix amend` replaces past commits that still carry the payload and force-updates
+  each branch they sat on when this identity may.** It does not open a pull request. A
+  protected branch is not force-updated; a corrected copy is pushed under its own name.
+  Tags are not moved. The previous objects remain until collected. Bare `saw fix` still
+  only cleans the tip.
 
 ### Fixed
 - **`saw fix` no longer reports a working tree as clean when a merge finding is still live in it.**

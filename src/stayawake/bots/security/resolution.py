@@ -116,18 +116,24 @@ def invalid_slugs(slugs) -> list[str]:
 
 
 @contextlib.contextmanager
-def cloned_repo(slug: str, token: str | None, *, depth: int = 50):
-    """Shallow-clone a remote `owner/name` into a throwaway directory (authenticated HTTPS — the
+def cloned_repo(slug: str, token: str | None, *, depth: int | None = 50):
+    """Clone a remote `owner/name` into a throwaway directory (authenticated HTTPS — the
     token goes via the git-askpass env, never in the URL/argv), yield the clone `Path`, and remove
     it on exit. Yields `None` if the clone fails. The one shared way a command (`saw fix`,
-    `saw guard setup`) acts on a remote repo it hasn't got checked out."""
+    `saw guard setup`, `saw fix amend`) acts on a remote repo it hasn't got checked out.
+
+    `depth=None` is a full clone (every branch). A shallow clone is `--single-branch` and
+    cannot see commits or refs the amend path has to update.
+    """
     tmp = Path(tempfile.mkdtemp(prefix="sab-clone-"))
     clone = tmp / "repo"
     try:
         with gitutil.github_https_auth(token) as (prefix, env):
-            r = subprocess.run(["git", "clone", "--quiet", "--depth", str(depth),
-                                f"{prefix}{slug}.git", str(clone)],
-                               capture_output=True, text=True, check=False, env=env)
+            cmd = ["git", "clone", "--quiet"]
+            if depth is not None:
+                cmd += ["--depth", str(depth)]
+            cmd += [f"{prefix}{slug}.git", str(clone)]
+            r = subprocess.run(cmd, capture_output=True, text=True, check=False, env=env)
         yield clone if r.returncode == 0 else None
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
