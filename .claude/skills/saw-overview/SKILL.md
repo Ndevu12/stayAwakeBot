@@ -40,8 +40,9 @@ maintainer rather than working around it.
 ## Command surface (see docs/reference/cli/index.md for detail)
 
 `scan` (read-only hunt) · `fix` (PR-only remediation; on confirmed infection also removes the
-installed tree in this repository; `fix amend` replaces past commits that still carry the
-payload, locally, and does not publish) · `discard` · `audit` (+ `--verify` content-scans a non-repo
+installed tree in this repository; `fix amend` is a subverb of `fix` — it replaces past
+commits the payload has already propagated into, locally, and does not publish; it is not a
+merge-specific command) · `discard` · `audit` (+ `--verify` content-scans a non-repo
 suspect dir; + credential/dependency hygiene) · `harden` (host denials; in place only after a
 read-back; never a project's tree) · `db` (offline advisory corpus) · `guard`
 (install/verify the CI gate) · `search` · `intro` · `doctor` · `completion`.
