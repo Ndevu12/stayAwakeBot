@@ -99,6 +99,33 @@ class TestFixAmendRepo(unittest.TestCase):
             ["git", "-C", str(self.d), "rev-parse", ref],
             capture_output=True, text=True, check=True).stdout.strip()
 
+    def _show(self, spec):
+        return subprocess.run(
+            ["git", "-C", str(self.d), "show", spec],
+            capture_output=True, text=True, check=True).stdout
+
+    def _log_format(self, fmt, ref="HEAD"):
+        return subprocess.run(
+            ["git", "-C", str(self.d), "log", "-1", f"--format={fmt}", ref],
+            capture_output=True, text=True, check=True).stdout.strip()
+
+    def _log_subjects(self, ref="HEAD"):
+        return subprocess.run(
+            ["git", "-C", str(self.d), "log", "--format=%s", ref],
+            capture_output=True, text=True, check=True).stdout
+
+    def _parents(self, sha):
+        out = subprocess.run(
+            ["git", "-C", str(self.d), "rev-list", "--parents", "-n", "1", sha],
+            capture_output=True, text=True, check=True).stdout.split()
+        return out[1:]
+
+    def _is_ancestor(self, anc, desc="HEAD"):
+        r = subprocess.run(
+            ["git", "-C", str(self.d), "merge-base", "--is-ancestor", anc, desc],
+            capture_output=True, text=True)
+        return r.returncode == 0
+
     def _loader_merge(self):
         (self.d / "x.js").write_text("var ok = 1;\n")
         _git(self.d, "add", "x.js")
@@ -106,7 +133,8 @@ class TestFixAmendRepo(unittest.TestCase):
         _git(self.d, "merge", "--no-ff", "--no-commit", "feature")
         (self.d / "x.js").write_text("var ok = 1;\neval(String.fromCharCode(1, 2, 3));\n")
         _git(self.d, "add", "x.js")
-        _git(self.d, "commit", "-qm", "merge (smuggled loader)")
+        _git(self.d, "-c", "user.name=Injected", "-c", "user.email=inj@t.test",
+             "commit", "-qm", "merge (smuggled loader)")
 
     def _amend(self, pusher=_ok_push, **kw):
         with mock.patch("stayawake.bots.security.pr.amend.gitutil.origin_slug",
@@ -136,10 +164,12 @@ class TestFixAmendRepo(unittest.TestCase):
         self.assertIn("force-updated", line)
         self.assertNotIn("was not force-updated", line)
         self.assertNotEqual(self._rev(), merge)
-        text = subprocess.run(
-            ["git", "-C", str(self.d), "show", "HEAD:x.js"],
-            capture_output=True, text=True, check=True).stdout
-        self.assertNotIn("fromCharCode", text)
+        self.assertEqual(self._parents(self._rev()), self._parents(merge))
+        self.assertEqual(self._log_format("%s"), "merge (smuggled loader)")
+        self.assertEqual(self._log_format("%an"), "Injected")
+        self.assertNotIn("security: remove payload", self._log_subjects())
+        self.assertIn("fromCharCode", self._show(f"{merge}:x.js"))
+        self.assertNotIn("fromCharCode", self._show("HEAD:x.js"))
         self.assertTrue((self.d / ".git" / "saw-amend" / merge[:12] / "capture.json").is_file())
 
     def test_replays_a_later_commit(self):
@@ -150,12 +180,18 @@ class TestFixAmendRepo(unittest.TestCase):
         _git(self.d, "commit", "-qm", "later work")
         line = self._amend()
         self.assertIn("force-updated", line)
-        text = subprocess.run(
-            ["git", "-C", str(self.d), "show", "HEAD:x.js"],
-            capture_output=True, text=True, check=True).stdout
-        self.assertNotIn("fromCharCode", text)
+        rewritten = self._rev("HEAD~1")
+        self.assertEqual(self._parents(rewritten), self._parents(merge))
+        self.assertEqual(self._log_format("%s", rewritten), "merge (smuggled loader)")
+        self.assertEqual(self._log_format("%an", rewritten), "Injected")
+        self.assertIn("later work", self._log_subjects())
+        self.assertIn("merge (smuggled loader)", self._log_subjects())
+        self.assertNotIn("security: remove payload", self._log_subjects())
+        self.assertNotIn("fromCharCode", self._show("HEAD:x.js"))
+        self.assertIn("fromCharCode", self._show(f"{merge}:x.js"))
         self.assertTrue((self.d / "later.txt").exists())
         self.assertNotEqual(self._rev(), merge)
+        self.assertFalse(self._is_ancestor(merge))
 
     def test_force_updates_every_branch_that_carries_the_commit(self):
         self._loader_merge()
@@ -180,10 +216,24 @@ class TestFixAmendRepo(unittest.TestCase):
         self.assertIn("was not force-updated", line)
         self.assertNotIn("force-updated '", line)
         self.assertEqual(before, self._rev())
-        text = subprocess.run(
-            ["git", "-C", str(self.d), "show", "HEAD:x.js"],
-            capture_output=True, text=True, check=True).stdout
-        self.assertIn("fromCharCode", text)
+        self.assertIn("fromCharCode", self._show("HEAD:x.js"))
+        self.assertIn("fromCharCode", self._show(f"{before}:x.js"))
+
+    def test_a_failed_push_leaves_the_past_commit(self):
+        self._loader_merge()
+        merge = self._rev()
+        (self.d / "later.txt").write_text("ok\n")
+        _git(self.d, "add", "later.txt")
+        _git(self.d, "commit", "-qm", "later work")
+        tip = self._rev()
+        line = self._amend(pusher=lambda *_a: PushResult(False, "denied"))
+        self.assertIn("was not force-updated", line)
+        self.assertNotIn("force-updated '", line)
+        self.assertEqual(tip, self._rev())
+        self.assertTrue((self.d / "later.txt").exists())
+        self.assertTrue(self._is_ancestor(merge))
+        self.assertIn("fromCharCode", self._show(f"{merge}:x.js"))
+        self.assertIn("fromCharCode", self._show("HEAD:x.js"))
 
     def test_a_push_that_does_not_move_the_remote_is_not_a_fix(self):
         self._loader_merge()

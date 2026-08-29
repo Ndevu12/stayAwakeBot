@@ -11,11 +11,9 @@ from pathlib import Path
 from stayawake.lib.git.merge.tree import auto_merge
 from stayawake.lib.git.query import parents, commit_meta, is_ancestor, branches_carrying
 from stayawake.lib.git.run import run, run_ok, stdout
-from stayawake.lib.git.write.commit import BOT_AUTHOR
 from stayawake.lib.git.write.worktree import add_worktree, remove_worktree
 
 
-_MSG = "security: remove payload that propagated into this commit\n"
 _ZERO = "0" * 40
 
 
@@ -35,9 +33,10 @@ def descendant_shas(repo: str | Path, merge: str, head: str = "HEAD") -> list[st
 
 
 def reconstruct_merge(repo: str | Path, merge_sha: str) -> str | None:
-    """A new merge commit whose tree is the clean 3-way merge of `merge_sha`'s parents.
+    """The same commit with the payload removed: same parents, same message, same author,
+    a tree that is the clean 3-way merge of those parents.
 
-    None when the merge is not two-parent, when there is no clean auto-merge, or when that
+    None when the commit is not two-parent, when there is no clean auto-merge, or when that
     auto-merge conflicted — those are not guessed at.
     """
     ps = parents(repo, merge_sha)
@@ -46,8 +45,33 @@ def reconstruct_merge(repo: str | Path, merge_sha: str) -> str | None:
     merged = auto_merge(repo, ps[0], ps[1])
     if merged is None or merged.conflicted:
         return None
-    res = run(repo, [*BOT_AUTHOR, "-c", "commit.gpgsign=false",
-                     "commit-tree", merged.tree, "-p", ps[0], "-p", ps[1], "-m", _MSG])
+    msg = stdout(repo, ["show", "-s", "--format=%B", merge_sha])
+    if not msg:
+        return None
+    env = dict(os.environ)
+    an = stdout(repo, ["show", "-s", "--format=%an", merge_sha]).strip()
+    ae = stdout(repo, ["show", "-s", "--format=%ae", merge_sha]).strip()
+    ad = stdout(repo, ["show", "-s", "--format=%aI", merge_sha]).strip()
+    if an:
+        env["GIT_AUTHOR_NAME"] = an
+    if ae:
+        env["GIT_AUTHOR_EMAIL"] = ae
+    if ad:
+        env["GIT_AUTHOR_DATE"] = ad
+    msg_path = None
+    res = None
+    try:
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as fh:
+            fh.write(msg if msg.endswith("\n") else msg + "\n")
+            msg_path = fh.name
+        res = run(repo, ["-c", "commit.gpgsign=false", "commit-tree", merged.tree,
+                         "-p", ps[0], "-p", ps[1], "-F", msg_path], env=env)
+    finally:
+        if msg_path:
+            try:
+                os.unlink(msg_path)
+            except OSError:
+                pass
     if res is None or res.returncode != 0:
         return None
     sha = (res.stdout or "").strip()
@@ -56,7 +80,7 @@ def reconstruct_merge(repo: str | Path, merge_sha: str) -> str | None:
 
 def capture_bundle(repo: str | Path, merge_sha: str, related: tuple[str, ...],
                    branches: dict[str, str]) -> Path:
-    """Write the identifiers that will stop being the tip, before any ref moves."""
+    """Write the identifiers of the commit being replaced, before any ref moves."""
     root = Path(repo) / ".git" / "saw-amend" / merge_sha[:12]
     root.mkdir(parents=True, exist_ok=True)
     blobs = {}
