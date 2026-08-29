@@ -36,7 +36,7 @@ def register(sub) -> None:
             ("saw fix --pr", "also push + open/update one rolling PR"),
             ("saw fix --remote", "sweep the configured GitHub targets"),
             ("saw fix --branch develop", "fix a branch other than the default"),
-            ("saw fix amend", "replace past commits and force-update those branches"),
+            ("saw fix amend", "force-update branches that still carry it"),
             ("saw fix amend --remote", "clone GitHub targets, replace, force-update"),
         ])
     p.add_argument("paths", nargs="*", metavar="TARGETS",
