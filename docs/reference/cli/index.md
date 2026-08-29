@@ -19,7 +19,7 @@ alias, for scripts where a three-letter name might clash on `PATH`.
 | Command | What it does | Writes? |
 | --- | --- | --- |
 | [`scan`](scan.md) | Hunt for supply-chain worms and report | read-only |
-| [`fix`](fix.md) | Prepare the cleanup on a `security/auto-clean` branch; on confirmed infection also removes the installed tree in this repository | that branch; the installed tree, build outputs, and lockfile in this repository (lockfile kept on CI); pushes with `--pr` |
+| [`fix`](fix.md) | Prepare the cleanup on a `security/auto-clean` branch; on confirmed infection also removes the installed tree in this repository. `saw fix amend` replaces a confirmed merge locally | that branch; the installed tree, build outputs, and lockfile in this repository (lockfile kept on CI); pushes with `--pr`; `amend` moves the current branch |
 | [`discard`](discard.md) | Undo `saw fix` | git / GitHub API |
 | [`audit`](audit.md) | Machine hygiene, start-up surface, branch protection | read-only |
 | [`harden`](harden.md) | Create host denials; in place only after a read-back | this machine |

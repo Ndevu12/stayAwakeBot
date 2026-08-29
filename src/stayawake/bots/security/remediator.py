@@ -253,6 +253,40 @@ def _fix_remote(cfg, opts, sigs, allowlist, prog: Streamer, *,
     return _run_fix_sweep(resolved, list(resolved), make_outcome, prog, jobs=jobs, verb="Fixing")
 
 
+def amend(config_path: str | None = None, *, paths: list[str] | None = None,
+          no_stream: bool = False) -> int:
+    """`saw fix amend`: replace a confirmed merge on the current branch. Local only."""
+    cfg = _resolve_config(config_path, targets=paths)
+    if cfg is None:
+        return 2
+    settings = cfg.get("settings", {})
+    opts = _options(settings)
+    sigs = load_signatures(settings.get("signatures_path"))
+    allowlist = cfg.get("allowlist", [])
+    prog = Streamer(enabled=stream_enabled(sys.stderr, force_off=no_stream), out=sys.stderr)
+    prog.line(f"Security amend — {now_iso()}")
+    prog.line("")
+    repos = _local_repos(cfg, opts, paths)
+    if not repos:
+        prog.line("No repositories to amend.")
+        return 0
+    prog.line(f"Amending {len(repos)} local repositor{'y' if len(repos) == 1 else 'ies'}…")
+    outcomes: list[FixOutcome] = []
+    for i, repo in enumerate(repos, 1):
+        display = _disp(repo)
+        prog.line(f"  [{i}/{len(repos)}] {display}")
+        line = _safe(lambda r=repo: pr_submit.amend_repo(r, opts, sigs, allowlist), display)
+        needs = "replaced merge" not in line
+        outcomes.append(FixOutcome(line, needs_review=needs))
+        prog.line(f"      → {line}")
+    needs_review = sum(1 for o in outcomes if o.needs_review)
+    n = len(outcomes)
+    plural = "y" if n == 1 else "ies"
+    prog.line(f"\nProcessed {n} repositor{plural}"
+              + (f"; {needs_review} need review." if needs_review else "."))
+    return 1 if needs_review else 0
+
+
 def fix(config_path: str | None = None, *, pr: bool = False, remote: bool = False,
         paths: list[str] | None = None, users: list[str] | None = None,
         orgs: list[str] | None = None, slugs: list[str] | None = None,

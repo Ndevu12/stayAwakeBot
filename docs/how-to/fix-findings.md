@@ -14,6 +14,7 @@ saw fix .                  # prepare security/auto-clean for this repository —
 git diff main...security/auto-clean
 saw fix --pr               # also push and open (or update) one rolling PR per repository
 saw fix --remote           # sweep GitHub targets: clone, fix, PR
+saw fix amend              # replace a confirmed merge on this branch — local, not a PR
 ```
 
 Re-running updates the same PR rather than opening another.
@@ -25,11 +26,8 @@ file is quarantined whole. `saw` never surgically edits a source file, so a fix 
 code. Where a clean version cannot be proven safe to restore, the finding is **deferred to review**
 with the exact reason and the command to inspect it. When a merge finding is still live in the
 working tree, those files are restored on the review branch; the merge commit itself is left in
-place.
-
-Heuristic (`suspicious`) findings are **never auto-fixed**. A repository with only heuristic findings
-is disclosed and deferred, never reported "already clean". See [the safety
-envelope](../explanation/safety-envelope.md).
+place. `saw fix amend` replaces that merge on the current branch. It does not publish, and it
+does not move tags. The previous objects remain until collected.
 
 Heuristic (`suspicious`) findings are **never auto-fixed**. A repository with only heuristic findings
 is disclosed and deferred, never reported "already clean". See [the safety

@@ -13,8 +13,8 @@ from stayawake.cli.helptext import add_command
 _INDEX = [
     ("saw scan", "hunt supply-chain worms (read-only); local by default, --remote for GitHub",
      "scan check find worm malware detect virus infect supply chain json sarif alert report remote local"),
-    ("saw fix", "prepare a cleanup branch per infected repo; --pr to open a PR; on confirmed infection also removes the installed tree",
-     "fix remediate clean repair remove branch pr pull request open publish remote local sweep installed tree"),
+    ("saw fix", "prepare a cleanup branch per infected repo; --pr to open a PR; on confirmed infection also removes the installed tree; amend replaces a confirmed merge locally",
+     "fix remediate clean repair remove branch pr pull request open publish remote local sweep installed tree amend merge"),
     ("saw discard", "undo `saw fix`: --branch deletes the auto-clean branch, --pr closes its PR",
      "discard undo revert cleanup delete branch close pr abandon drop remove remote local"),
     ("saw audit", "credential + editor + runner-persistence + branch-protection hygiene audit",

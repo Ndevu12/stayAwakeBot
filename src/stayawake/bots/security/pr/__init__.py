@@ -8,6 +8,7 @@ from __future__ import annotations
 from stayawake.bots.security.pr.constants import FIX_BRANCH, ISSUE_LABEL, PARTIAL_LABEL
 from stayawake.bots.security.pr.render import manual_review_lines, computed_review_lines
 from stayawake.bots.security.pr.fix import prepare_fix, submit_fix_pr
+from stayawake.bots.security.pr.amend import amend_repo
 from stayawake.bots.security.pr.discard import (
     discard_branch, discard_pr, discard_remote_branch, discard_remote_pr)
 # Module singletons re-exported so `pr.github_api` / `pr.gitutil` / `pr.remediation` resolve (tests
@@ -19,6 +20,7 @@ from stayawake.bots.security import remediation
 __all__ = [
     "FIX_BRANCH", "ISSUE_LABEL", "PARTIAL_LABEL",
     "manual_review_lines", "computed_review_lines", "prepare_fix", "submit_fix_pr",
+    "amend_repo",
     "discard_branch", "discard_pr", "discard_remote_branch", "discard_remote_pr",
     "github_api", "gitutil", "remediation",
 ]
