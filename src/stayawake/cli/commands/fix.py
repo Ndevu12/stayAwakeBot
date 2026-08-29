@@ -28,8 +28,8 @@ def register(sub) -> None:
             "the installed tree, generated build outputs, and lockfile in this repository. "
             "Heuristic-only findings are disclosed for review, never auto-touched. "
             "`saw fix amend` replaces past commits that still carry the payload and "
-            "force-updates each branch they sat on when this identity may. It does not "
-            "open a pull request. `saw discard` is the inverse of the branch/PR path."),
+            "force-updates each branch they sat on. It does not open a pull request. "
+            "`saw discard` is the inverse of the branch/PR path."),
         examples=[
             ("saw fix", "prepare a branch per infected local repo"),
             ("saw fix .", "just this repo; review the diff, then push"),

@@ -15,8 +15,7 @@ reader, not the mechanism or the weakness it closed.
 
 ### Added
 - **`saw fix amend` replaces past commits that still carry the payload and force-updates
-  each branch they sat on when this identity may.** It does not open a pull request. A
-  protected branch is not force-updated; a corrected copy is pushed under its own name.
+  each branch they sat on.** That force-update is the fix. It does not open a pull request.
   Tags are not moved. The previous objects remain until collected. Bare `saw fix` still
   only cleans the tip.
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""`saw fix amend` replaces past commits that still carry the payload and force-updates those branches; it does not run on heuristic-only or `--pr`."""
+"""`saw fix amend` force-updates branches that still carry the payload; it does not run on heuristic-only or `--pr`."""
 from __future__ import annotations
 
 import io
@@ -23,6 +23,10 @@ def _sigs():
     for s in EVIL_SIG:
         by.setdefault(s["matcher"], []).append(s)
     return by
+
+
+def _ok_push(branch, dest, lease):
+    return PushResult(True)
 
 
 class TestFixAmendCli(unittest.TestCase):
@@ -84,12 +88,33 @@ class TestFixAmendRepo(unittest.TestCase):
         _git(self.d, "add", "x.js")
         _git(self.d, "commit", "-qm", "merge (smuggled loader)")
 
-    def test_replaces_a_confirmed_merge_at_head(self):
+    def _amend(self, pusher=_ok_push, **kw):
+        with mock.patch("stayawake.bots.security.pr.amend.gitutil.origin_slug",
+                        return_value="acme/app"):
+            return amend_repo(self.d, ScanOptions(), _sigs(), [], token="t",
+                              pusher=pusher, **kw)
+
+    def test_no_remote_is_not_a_fix(self):
+        self._loader_merge()
+        before = self._rev()
+        line = amend_repo(self.d, ScanOptions(), _sigs(), [])
+        self.assertIn("nothing was force-updated", line)
+        self.assertEqual(before, self._rev())
+
+    def test_force_updates_the_branch_that_carries_the_commit(self):
         self._loader_merge()
         merge = self._rev()
-        line = amend_repo(self.d, ScanOptions(), _sigs(), [])
-        self.assertIn("replaced commit", line)
-        self.assertIn(merge[:12], line)
+        calls = []
+
+        def pusher(branch, dest, lease):
+            calls.append((branch, dest, lease))
+            return PushResult(True)
+
+        line = self._amend(pusher=pusher)
+        self.assertTrue(calls)
+        self.assertEqual(calls[0][0], calls[0][1])
+        self.assertIn("force-updated", line)
+        self.assertNotIn("was not force-updated", line)
         self.assertNotEqual(self._rev(), merge)
         text = subprocess.run(
             ["git", "-C", str(self.d), "show", "HEAD:x.js"],
@@ -103,9 +128,8 @@ class TestFixAmendRepo(unittest.TestCase):
         (self.d / "later.txt").write_text("ok\n")
         _git(self.d, "add", "later.txt")
         _git(self.d, "commit", "-qm", "later work")
-        line = amend_repo(self.d, ScanOptions(), _sigs(), [])
-        self.assertIn("replaced commit", line)
-        self.assertIn("1 later commit", line)
+        line = self._amend()
+        self.assertIn("force-updated", line)
         text = subprocess.run(
             ["git", "-C", str(self.d), "show", "HEAD:x.js"],
             capture_output=True, text=True, check=True).stdout
@@ -113,59 +137,27 @@ class TestFixAmendRepo(unittest.TestCase):
         self.assertTrue((self.d / "later.txt").exists())
         self.assertNotEqual(self._rev(), merge)
 
-    def test_updates_every_local_branch_that_carries_the_commit(self):
+    def test_force_updates_every_branch_that_carries_the_commit(self):
         self._loader_merge()
         merge = self._rev()
         _git(self.d, "branch", "also")
-        line = amend_repo(self.d, ScanOptions(), _sigs(), [])
-        self.assertIn("replaced commit", line)
+        calls = []
+
+        def pusher(branch, dest, lease):
+            calls.append(branch)
+            return PushResult(True)
+
+        line = self._amend(pusher=pusher)
+        self.assertIn("force-updated", line)
+        self.assertEqual(set(calls), {self.base, "also"})
         self.assertEqual(self._rev(), self._rev("also"))
         self.assertNotEqual(self._rev("also"), merge)
 
-    def test_force_updates_a_writable_branch(self):
+    def test_a_failed_push_is_not_a_fix(self):
         self._loader_merge()
-        calls = []
-
-        def pusher(branch, dest, lease):
-            calls.append((branch, dest, lease))
-            return PushResult(True)
-
-        with mock.patch("stayawake.bots.security.pr.amend.gitutil.origin_slug",
-                        return_value="acme/app"):
-            line = amend_repo(self.d, ScanOptions(), _sigs(), [], token="t",
-                              force_update=lambda _b: "allowed", pusher=pusher)
-        self.assertTrue(calls)
-        self.assertEqual(calls[0][0], calls[0][1])
-        self.assertIn("force-updated", line)
-        self.assertNotIn("was not fully updated", line)
-
-    def test_protected_branch_is_not_force_updated(self):
-        self._loader_merge()
-        calls = []
-
-        def pusher(branch, dest, lease):
-            calls.append((branch, dest, lease))
-            return PushResult(True)
-
-        with mock.patch("stayawake.bots.security.pr.amend.gitutil.origin_slug",
-                        return_value="acme/app"):
-            line = amend_repo(self.d, ScanOptions(), _sigs(), [], token="t",
-                              force_update=lambda _b: "protected", pusher=pusher)
-        self.assertTrue(calls)
-        self.assertTrue(calls[0][1].startswith("saw-amend/"))
-        self.assertIn("protected", line)
-        self.assertIn("was not fully updated", line)
-
-    def test_unreadable_rights_are_not_a_push(self):
-        self._loader_merge()
-        pusher = mock.Mock(return_value=PushResult(True))
-        with mock.patch("stayawake.bots.security.pr.amend.gitutil.origin_slug",
-                        return_value="acme/app"):
-            line = amend_repo(self.d, ScanOptions(), _sigs(), [], token="t",
-                              force_update=lambda _b: "unknown", pusher=pusher)
-        pusher.assert_not_called()
-        self.assertIn("could not be established", line)
-        self.assertIn("was not fully updated", line)
+        line = self._amend(pusher=lambda *_a: PushResult(False, "denied"))
+        self.assertIn("was not force-updated", line)
+        self.assertNotIn("force-updated '", line)
 
     def test_heuristic_only_is_not_replaced(self):
         _git(self.d, "merge", "--no-ff", "--no-commit", "feature")
@@ -173,7 +165,7 @@ class TestFixAmendRepo(unittest.TestCase):
         _git(self.d, "add", "evil.txt")
         _git(self.d, "commit", "-qm", "merge with new file")
         before = self._rev()
-        line = amend_repo(self.d, ScanOptions(), _sigs(), [])
+        line = self._amend()
         self.assertIn("no confirmed payload in past commits to replace", line)
         self.assertEqual(before, self._rev())
 
@@ -181,7 +173,7 @@ class TestFixAmendRepo(unittest.TestCase):
         self._loader_merge()
         (self.d / "dirty.txt").write_text("nope\n")
         before = self._rev()
-        line = amend_repo(self.d, ScanOptions(), _sigs(), [])
+        line = self._amend()
         self.assertIn("working tree is not clean", line)
         self.assertEqual(before, self._rev())
 

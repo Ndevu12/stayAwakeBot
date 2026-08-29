@@ -257,9 +257,9 @@ def amend(config_path: str | None = None, *, paths: list[str] | None = None,
           remote: bool = False, slugs: list[str] | None = None,
           users: list[str] | None = None, orgs: list[str] | None = None,
           no_stream: bool = False, jobs=None) -> int:
-    """`saw fix amend`: replace past commits that still carry the payload, then force-update
-    each branch they sat on when this identity may. `--remote` clones GitHub targets and
-    does the same. Never `--pr`."""
+    """`saw fix amend`: replace past commits that still carry the payload and force-update
+    each branch they sat on. `--remote` clones GitHub targets and does the same. Never `--pr`.
+    A local rewrite that does not update the remote is not a fix."""
     cfg = _resolve_config(config_path, targets=None if remote else paths)
     if cfg is None:
         return 2
@@ -286,7 +286,9 @@ def amend(config_path: str | None = None, *, paths: list[str] | None = None,
 
 
 def _amend_line_needs(line: str) -> bool:
-    return "replaced commit" not in line or "was not fully updated" in line
+    return ("force-updated '" not in line
+            or "was not force-updated" in line
+            or "nothing was force-updated" in line)
 
 
 def _amend_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *, jobs=None) -> list[FixOutcome]:

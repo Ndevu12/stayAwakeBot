@@ -28,9 +28,9 @@ code. Where a clean version cannot be proven safe to restore, the finding is **d
 with the exact reason and the command to inspect it. When a merge finding is still live in the
 working tree, those files are restored on the review branch; the merge commit itself is left in
 place. `saw fix amend` is for payload that propagated into past commits, not for the working
-tree alone. It replaces those commits and force-updates each branch they sat on when this
-identity may. It does not open a pull request, and it does not move tags. The previous
-objects remain until collected.
+tree alone. It replaces those commits and force-updates each branch they sat on. That
+force-update is the fix. It does not open a pull request, and it does not move tags. The
+previous objects remain until collected.
 
 Heuristic (`suspicious`) findings are **never auto-fixed**. A repository with only heuristic findings
 is disclosed and deferred, never reported "already clean". See [the safety
@@ -71,9 +71,9 @@ That is residue, not execution — nothing runs it on clone or build. `saw scan`
 coverage notes rather than letting `clean` imply the repository has no trace of it.
 
 `saw fix amend` is the history act. It replaces past commits the payload has already propagated
-into and force-updates each branch they sat on when this identity may. It does not open a pull
-request, it does not move tags, and it does not clear forks or objects the hosting platform
-still serves. A repository-wide rewrite remains a separate decision of yours.
+into and force-updates each branch they sat on. That force-update is the fix. It does not open
+a pull request, it does not move tags, and it does not clear forks or objects the hosting
+platform still serves.
 
 ## Never on the host
 

@@ -456,22 +456,6 @@ def get_branch_protection(owner: str, repo: str, branch: str,
         return None
 
 
-def _quoted_branch_path(owner: str, repo: str, branch: str, extra: str = "") -> str:
-    enc = urllib.parse.quote(branch, safe="")
-    return f"/repos/{owner}/{repo}/branches/{enc}{extra}"
-
-
-def read_branch(owner: str, repo: str, branch: str, token: str | None) -> ApiRead:
-    """GET /branches/{branch} — `protected` is readable without admin. Typed so a 403 is
-    not collapsed into 'unprotected'."""
-    return _do_request(_quoted_branch_path(owner, repo, branch), token=token)
-
-
-def read_branch_protection(owner: str, repo: str, branch: str, token: str | None) -> ApiRead:
-    """GET /branches/{branch}/protection. Typed: 404 is not-protected, 403 is unknown."""
-    return _do_request(_quoted_branch_path(owner, repo, branch, "/protection"), token=token)
-
-
 def latest_release(owner: str, repo: str, token: str | None = None) -> dict | None:
     """The repo's latest published release object ({tag_name, …}), or None. Quiet."""
     res = request(f"/repos/{owner}/{repo}/releases/latest", token=token, quiet=True)
