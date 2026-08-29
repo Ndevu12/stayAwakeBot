@@ -374,6 +374,51 @@ class TestPartialFix(unittest.TestCase):
         recover.assert_called_once()
         self.assertEqual(recover.call_args.args[1].path, "tailwind.config.js")
 
+    def test_heuristic_loader_does_not_block_merge_restore(self):
+        # A heuristic code-loader on the same path must not mark the file handled if it
+        # did not restore it — the live merge file still has to land on the review branch.
+        from stayawake.lib.git.merge.liveness import PRESENT
+        heuristic = Finding("oversized-config-line", "code-loader", Severity.MEDIUM,
+                            "tailwind.config.js", "long line", remediation="recover",
+                            confidence="heuristic")
+        sug = pr.remediation.Suggested(
+            "tailwind.config.js", "evil-merge-loader", "merge-clean-recovered",
+            "review the restored file before merging", "diff", "clean\n", 1, apply_mode="restore")
+
+        def add_wt(_repo, path, _branch, _baseref):
+            p = Path(path)
+            p.mkdir(parents=True, exist_ok=True)
+            (p / "tailwind.config.js").write_text("x" * 80)
+            return True
+
+        classified = []
+
+        def classify(_wt, finding, *_a, **_k):
+            classified.append((finding.path, getattr(finding, "vector", None)))
+            return sug
+
+        infected = ScanResult("owner/repo", "local", [heuristic, self._EVIL_MERGE])
+        with _patch_git(add_worktree=add_wt), \
+             mock.patch.object(pr.fix, "scan_target", return_value=infected), \
+             mock.patch.object(pr.fix, "introduced_liveness", return_value=PRESENT), \
+             mock.patch.object(pr.remediation, "plan", return_value=[]), \
+             mock.patch.object(pr.remediation, "apply", return_value=[]), \
+             mock.patch.object(pr.remediation, "quarantine_residual", return_value=[]), \
+             mock.patch.object(pr.remediation, "has_concealment_seam", return_value=True), \
+             mock.patch.object(pr.remediation, "classify_recovery", side_effect=classify), \
+             mock.patch.object(pr.remediation, "apply_suggested", return_value=True) as applyer, \
+             mock.patch.object(pr.github_api, "list_open_pulls", return_value=[]), \
+             mock.patch.object(pr.github_api, "add_labels"), \
+             mock.patch.object(pr.github_api, "remove_label"), \
+             mock.patch.object(pr.github_api, "list_open_issues", return_value=[]), \
+             mock.patch.object(pr.github_api, "create_issue"), \
+             mock.patch.object(pr.github_api, "create_pull",
+                               return_value={"number": 55, "html_url": "u"}):
+            outcome = pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t")
+        self.assertIn(("tailwind.config.js", "evil-merge"), classified)
+        applyer.assert_called_once()
+        self.assertIn("PARTIAL", outcome)
+
     def test_nothing_fixable_dedups_issue(self):
         # A re-run with an existing open issue must not open a duplicate (idempotent notify).
         with _patch_git(), \

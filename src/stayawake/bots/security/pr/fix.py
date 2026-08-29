@@ -257,14 +257,15 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
                         continue
                     if not remediation.has_concealment_seam(text, f.path, content_sig):
                         continue
-                seen_cl.add(f.path)
                 disp = remediation.classify_recovery(wt, f, content_sig, merge_clean=merge_clean.get(f.path))
                 if isinstance(disp, remediation.Recovery) and \
                         remediation.apply_recovery(wt, disp, quarantine, content_sig):
+                    seen_cl.add(f.path)
                     applied.append(remediation.Change("recover", disp.path, disp.label))
                 elif not corroborated:
                     continue
                 elif isinstance(disp, remediation.Suggested):
+                    seen_cl.add(f.path)
                     suggested.append(disp)
                 elif isinstance(disp, remediation.Manual):
                     manual_reviews[disp.path] = disp
