@@ -29,7 +29,8 @@ def register(sub) -> None:
             "Heuristic-only findings are disclosed for review, never auto-touched. "
             "`saw fix amend` replaces past commits that still carry the payload and "
             "force-updates each branch they sat on. The replaced commit keeps its "
-            "original message. It does not open a pull request. "
+            "original message. It does not open a pull request and it does not take "
+            "`--branch`. Bare `saw fix` still only prepares a cleanup branch. "
             "`saw discard` is the inverse of the branch/PR path."),
         examples=[
             ("saw fix", "prepare a branch per infected local repo"),
@@ -74,6 +75,9 @@ def run(a: argparse.Namespace) -> int:
     if positionals[:1] == ["amend"]:
         if a.pr:
             print("saw fix amend does not open a pull request", file=sys.stderr)
+            return 2
+        if a.branch:
+            print("saw fix amend does not take --branch", file=sys.stderr)
             return 2
         rest = positionals[1:] or None
         remote = a.remote or bool(a.user) or bool(a.org)

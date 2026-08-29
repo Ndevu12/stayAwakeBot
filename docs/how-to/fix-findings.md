@@ -72,8 +72,9 @@ coverage notes rather than letting `clean` imply the repository has no trace of 
 
 `saw fix amend` is the history act. It replaces past commits the payload has already propagated
 into and force-updates each branch they sat on. That force-update is the fix. The replaced
-commit keeps its original message. It does not open a pull request, it does not move tags, and
-it does not clear forks or objects the hosting platform still serves.
+commit keeps its original message. It does not open a pull request, it does not take
+`--branch`, it does not move tags, and it does not clear forks or objects the hosting
+platform still serves.
 
 ## Never on the host
 

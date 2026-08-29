@@ -18,23 +18,36 @@ class PushResult:
 
 
 def push_branch_result(repo: str | Path, slug: str, branch: str, token: str | None,
-                       *, force: bool = True, remote_branch: str | None = None,
-                       lease: str | None = None) -> PushResult:
+                       *, force: bool = True) -> PushResult:
     """Push local `branch` to `github.com/<slug>`; return ok + stderr so AuthZ can classify
-    workflow-scope / signed-commit / forbidden failures instead of collapsing to 'no write'.
+    workflow-scope / signed-commit / forbidden failures instead of collapsing to 'no write'."""
+    with github_https_auth(token) as (prefix, env):
+        args = ["push"]
+        if force:
+            args.append("--force")
+        args += [f"{prefix}{slug}.git", f"{branch}:{branch}"]
+        res = run(repo, args, env=env, timeout=NETWORK_TIMEOUT)
+    if res is None:
+        return PushResult(False, "git push could not run")
+    if res.returncode == 0:
+        return PushResult(True, "")
+    return PushResult(False, (res.stderr or res.stdout or "").strip())
 
-    `remote_branch` is the destination branch name (defaults to `branch`); the dest ref is
-    always `refs/heads/…` so a same-named tag is not updated. `lease` is the SHA the
-    remote ref must still be at (`--force-with-lease`); it takes precedence over `force`.
+
+def force_update_head(repo: str | Path, slug: str, branch: str, token: str | None,
+                      *, lease: str | None = None) -> PushResult:
+    """Force-update `refs/heads/<branch>` only. The PR path does not call this.
+
+    `lease` is the SHA the remote heads ref must still be at. The dest is always a heads
+    ref so a same-named tag is not updated.
     """
-    dest = remote_branch or branch
     with github_https_auth(token) as (prefix, env):
         args = ["push"]
         if lease:
-            args.append(f"--force-with-lease=refs/heads/{dest}:{lease}")
-        elif force:
+            args.append(f"--force-with-lease=refs/heads/{branch}:{lease}")
+        else:
             args.append("--force")
-        args += [f"{prefix}{slug}.git", f"{branch}:refs/heads/{dest}"]
+        args += [f"{prefix}{slug}.git", f"{branch}:refs/heads/{branch}"]
         res = run(repo, args, env=env, timeout=NETWORK_TIMEOUT)
     if res is None:
         return PushResult(False, "git push could not run")

@@ -12,6 +12,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from stayawake.lib import git as gitutil
 from stayawake.lib.git.write.commit import CommitResult
@@ -193,6 +194,54 @@ class TestBranchAndRemote(unittest.TestCase):
                        check=True, capture_output=True)
         self.assertTrue(gitutil.remote_has_branch(str(remote), "main"))   # repo=None
         self.assertFalse(gitutil.remote_has_branch(str(remote), "nope"))
+
+
+class TestPushBranch(unittest.TestCase):
+    def _capture(self, fn):
+        seen = []
+
+        def fake_run(repo, args, **kw):
+            seen.append(list(args))
+            class R:
+                returncode = 0
+                stdout = ""
+                stderr = ""
+            return R()
+
+        from stayawake.lib.git.write import push as gitpush
+        with mock.patch.object(gitpush, "run", fake_run):
+            fn(gitpush)
+        return seen
+
+    def test_publishes_the_named_branch(self):
+        def go(gitpush):
+            res = gitpush.push_branch_result(
+                "/tmp/r", "acme/app", "security/auto-clean", "tok")
+            self.assertTrue(res.ok)
+
+        seen = self._capture(go)
+        args = seen[0]
+        self.assertEqual(args[0], "push")
+        self.assertIn("--force", args)
+        self.assertTrue(all(not a.startswith("--force-with-lease") for a in args))
+        self.assertEqual(args[-1], "security/auto-clean:security/auto-clean")
+
+    def test_pr_push_does_not_take_a_lease(self):
+        from stayawake.lib.git.write.push import push_branch_result
+        with self.assertRaises(TypeError):
+            push_branch_result("/tmp/r", "acme/app", "security/auto-clean", "tok",
+                               lease="abc")
+
+    def test_force_update_head_is_not_the_pr_push(self):
+        def go(gitpush):
+            res = gitpush.force_update_head(
+                "/tmp/r", "acme/app", "main", "tok", lease="abc")
+            self.assertTrue(res.ok)
+
+        seen = self._capture(go)
+        args = seen[0]
+        self.assertTrue(any(a.startswith("--force-with-lease=refs/heads/main:") for a in args))
+        self.assertEqual(args[-1], "main:refs/heads/main")
 
 
 if __name__ == "__main__":

@@ -56,6 +56,14 @@ class TestFixAmendCli(unittest.TestCase):
         m.assert_not_called()
         self.assertIn("does not open a pull request", err.getvalue())
 
+    @mock.patch("stayawake.bots.security.remediator.amend")
+    def test_amend_refuses_a_named_branch(self, m):
+        with redirect_stderr(io.StringIO()) as err:
+            rc = cli.main(["fix", "amend", "--branch", "develop"])
+        self.assertEqual(rc, 2)
+        m.assert_not_called()
+        self.assertIn("does not take --branch", err.getvalue())
+
     @mock.patch("stayawake.bots.security.pr.amend.amend_repo")
     @mock.patch("stayawake.bots.security.remediator.fix", return_value=0)
     def test_bare_fix_does_not_amend(self, mfix, mamend):
@@ -70,6 +78,14 @@ class TestFixAmendCli(unittest.TestCase):
         rc = cli.main(["fix", "--pr"])
         self.assertEqual(rc, 0)
         self.assertTrue(mfix.call_args.kwargs["pr"])
+        mamend.assert_not_called()
+
+    @mock.patch("stayawake.bots.security.pr.amend.amend_repo")
+    @mock.patch("stayawake.bots.security.remediator.fix", return_value=0)
+    def test_fix_named_branch_does_not_amend(self, mfix, mamend):
+        rc = cli.main(["fix", "--branch", "develop"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(mfix.call_args.kwargs["branches"], ["develop"])
         mamend.assert_not_called()
 
 

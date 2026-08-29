@@ -23,8 +23,8 @@ kept on CI). `saw discard` removes only that branch and that PR — never a bran
 
 `saw fix amend` is a separate act: it replaces past commits that still carry the payload and
 force-updates each branch they sat on. That force-update is the fix. It does not open a pull
-request, it does not move tags, and `saw discard` does not undo it. The previous objects remain
-until collected.
+request, it does not take `--branch`, it does not move tags, and `saw discard` does not undo it.
+The previous objects remain until collected.
 
 Nothing lands on a protected branch without a human merge. The CI gate follows the same rule: on an
 infected verdict it opens the fix as a pull request and stays **red until you merge it**. Remediation

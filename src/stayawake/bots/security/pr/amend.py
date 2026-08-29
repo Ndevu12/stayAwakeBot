@@ -14,7 +14,7 @@ from stayawake.bots.security.targets import LocalRepoTarget
 from stayawake.lib.git.auth import github_https_auth
 from stayawake.lib.git.run import NETWORK_TIMEOUT, run
 from stayawake.lib.git.write import amend as gitamend
-from stayawake.lib.git.write.push import PushResult
+from stayawake.lib.git.write.push import PushResult, force_update_head
 from stayawake.lib import git as gitutil
 
 
@@ -52,8 +52,7 @@ def _remote_sha(repo: Path, slug: str, branch: str, token: str | None) -> str | 
 
 def _push_amended(repo: Path, slug: str, branch: str, token: str | None,
                   lease: str | None) -> PushResult:
-    return gitutil.push_branch_result(
-        repo, slug, branch, token, force=True, remote_branch=branch, lease=lease)
+    return force_update_head(repo, slug, branch, token, lease=lease)
 
 
 def _force_update_branch(repo: Path, slug: str, branch: str, token: str | None, *,

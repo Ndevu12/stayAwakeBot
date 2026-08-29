@@ -15,10 +15,10 @@ reader, not the mechanism or the weakness it closed.
 
 ### Added
 - **`saw fix amend` replaces past commits that still carry the payload and force-updates
-  each branch they sat on.** That force-update is the fix. It does not open a pull request.
-  The replaced commit keeps its original message. Tags and notes are not moved. If the remote
-  does not move, local branches are left as they stood. The previous objects remain until
-  collected. Bare `saw fix` still only cleans the tip.
+  each branch they sat on.** That force-update is the fix. It does not open a pull request
+  and it does not take `--branch`. The replaced commit keeps its original message. Tags and
+  notes are not moved. If the remote does not move, local branches are left as they stood.
+  The previous objects remain until collected. Bare `saw fix` still only cleans the tip.
 
 ### Fixed
 - **`saw fix` no longer reports a working tree as clean when a merge finding is still live in it.**

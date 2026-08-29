@@ -42,8 +42,8 @@ maintainer rather than working around it.
 `scan` (read-only hunt) · `fix` (PR-only remediation; on confirmed infection also removes the
 installed tree in this repository; `fix amend` is a subverb of `fix` — it replaces past
 commits the payload has already propagated into and force-updates those branches; the replaced
-commit keeps its original message; it is not a merge-specific command and it does not open a
-pull request) · `discard` · `audit` (+ `--verify` content-scans a non-repo
+commit keeps its original message; it is not a merge-specific command, it does not open a
+pull request, and it does not take `--branch`) · `discard` · `audit` (+ `--verify` content-scans a non-repo
 suspect dir; + credential/dependency hygiene) · `harden` (host denials; in place only after a
 read-back; never a project's tree) · `db` (offline advisory corpus) · `guard`
 (install/verify the CI gate) · `search` · `intro` · `doctor` · `completion`.
