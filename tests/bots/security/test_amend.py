@@ -56,6 +56,22 @@ class TestFixAmendCli(unittest.TestCase):
         m.assert_not_called()
         self.assertIn("does not open a pull request", err.getvalue())
 
+    @mock.patch("stayawake.bots.security.pr.amend.amend_repo")
+    @mock.patch("stayawake.bots.security.remediator.fix", return_value=0)
+    def test_bare_fix_does_not_amend(self, mfix, mamend):
+        rc = cli.main(["fix"])
+        self.assertEqual(rc, 0)
+        mfix.assert_called_once()
+        mamend.assert_not_called()
+
+    @mock.patch("stayawake.bots.security.pr.amend.amend_repo")
+    @mock.patch("stayawake.bots.security.remediator.fix", return_value=0)
+    def test_fix_pr_does_not_amend(self, mfix, mamend):
+        rc = cli.main(["fix", "--pr"])
+        self.assertEqual(rc, 0)
+        self.assertTrue(mfix.call_args.kwargs["pr"])
+        mamend.assert_not_called()
+
 
 class TestFixAmendRepo(unittest.TestCase):
     def setUp(self):
@@ -159,9 +175,15 @@ class TestFixAmendRepo(unittest.TestCase):
 
     def test_a_failed_push_is_not_a_fix(self):
         self._loader_merge()
+        before = self._rev()
         line = self._amend(pusher=lambda *_a: PushResult(False, "denied"))
         self.assertIn("was not force-updated", line)
         self.assertNotIn("force-updated '", line)
+        self.assertEqual(before, self._rev())
+        text = subprocess.run(
+            ["git", "-C", str(self.d), "show", "HEAD:x.js"],
+            capture_output=True, text=True, check=True).stdout
+        self.assertIn("fromCharCode", text)
 
     def test_heuristic_only_is_not_replaced(self):
         _git(self.d, "merge", "--no-ff", "--no-commit", "feature")
@@ -260,6 +282,73 @@ class TestFixAmendRepo(unittest.TestCase):
                         wrapped):
             self._amend()
         self.assertTrue(seen)
+
+    def test_empty_scan_error_is_not_a_fix(self):
+        self._loader_merge()
+        before = self._rev()
+        scan = ScanResult(target=str(self.d), source="local",
+                          findings=[self._confirmed_finding(before)],
+                          error="")
+        calls = []
+        with mock.patch("stayawake.bots.security.pr.amend.scan_target", return_value=scan):
+            line = self._amend(pusher=lambda *a: calls.append(a) or PushResult(True))
+        self.assertIn("scan did not finish", line)
+        self.assertEqual(before, self._rev())
+        self.assertEqual(calls, [])
+
+    def test_whitespace_token_is_not_a_credential(self):
+        self._loader_merge()
+        before = self._rev()
+        with mock.patch("stayawake.bots.security.pr.amend.gitutil.origin_slug",
+                        return_value="acme/app"):
+            line = amend_repo(self.d, ScanOptions(), _sigs(), [], token=" ")
+        self.assertIn("no credential", line)
+        self.assertEqual(before, self._rev())
+
+    def test_no_remote_does_not_rewrite_even_with_a_pusher(self):
+        self._loader_merge()
+        before = self._rev()
+        calls = []
+        line = amend_repo(self.d, ScanOptions(), _sigs(), [], token="t",
+                          pusher=lambda *a: calls.append(a) or PushResult(True))
+        self.assertIn("no remote", line)
+        self.assertEqual(before, self._rev())
+        self.assertEqual(calls, [])
+
+    def test_path_is_not_a_commit_identity(self):
+        self._loader_merge()
+        before = self._rev()
+        finding = self._confirmed_finding(before)
+        finding.commit_sha = None
+        finding.path = before[:10]
+        scan = ScanResult(target=str(self.d), source="local", findings=[finding])
+        calls = []
+        with mock.patch("stayawake.bots.security.pr.amend.scan_target", return_value=scan):
+            line = self._amend(pusher=lambda *a: calls.append(a) or PushResult(True))
+        self.assertIn("no confirmed payload in past commits to replace", line)
+        self.assertEqual(before, self._rev())
+        self.assertEqual(calls, [])
+
+    def test_force_push_names_a_heads_ref(self):
+        self._loader_merge()
+        seen = []
+
+        def fake_run(repo, args, **kw):
+            seen.append(list(args))
+            class R:
+                returncode = 1
+                stdout = ""
+                stderr = "denied"
+            return R()
+
+        with mock.patch("stayawake.bots.security.pr.amend._remote_sha", return_value=None), \
+             mock.patch("stayawake.lib.git.write.push.run", fake_run):
+            line = self._amend(pusher=None)
+        self.assertIn("was not force-updated", line)
+        specs = [a[-1] for a in seen if a and a[0] == "push"]
+        self.assertTrue(specs)
+        self.assertTrue(all(s.endswith("refs/heads/" + self.base) or ":refs/heads/" in s
+                            for s in specs))
 
 
 if __name__ == "__main__":

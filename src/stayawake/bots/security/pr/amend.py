@@ -19,7 +19,7 @@ from stayawake.lib import git as gitutil
 
 
 def _full(repo: Path, sha: str) -> str:
-    return gitutil.stdout(repo, ["rev-parse", sha]).strip() or sha
+    return gitutil.stdout(repo, ["rev-parse", "--verify", f"{sha}^{{commit}}"]).strip()
 
 
 def _confirmed_commits(scan) -> list:
@@ -30,7 +30,7 @@ def _confirmed_commits(scan) -> list:
             continue
         if getattr(f, "confidence", None) != CONFIRMED:
             continue
-        sha = getattr(f, "commit_sha", None) or getattr(f, "path", None)
+        sha = getattr(f, "commit_sha", None)
         if not sha or sha in seen:
             continue
         seen.add(sha)
@@ -83,22 +83,25 @@ def amend_repo(repo: Path, opts, signatures, allowlist, token: str | None = None
     slug = gitutil.origin_slug(repo)
     if not slug:
         return f"{display}: no remote — nothing was force-updated"
-    if not token and pusher is None:
+    if not (token or "").strip() and pusher is None:
         return f"{display}: no credential — nothing was force-updated"
 
     scan = scan_target(LocalRepoTarget(repo, str(repo), opts), signatures, allowlist)
-    if scan.error:
+    if scan.error is not None:
         return f"{display}: scan did not finish — nothing was force-updated"
     commits = _confirmed_commits(scan)
     if not commits:
         return f"{display}: no confirmed payload in past commits to replace"
     if len(commits) > 1:
-        shas = ", ".join(_full(repo, getattr(f, "commit_sha", None) or f.path)[:12] for f in commits)
+        shas = ", ".join((_full(repo, getattr(f, "commit_sha", None) or "") or f.path)[:12]
+                         for f in commits)
         return (f"{display}: {len(commits)} confirmed past commits "
                 f"— nothing was force-updated ({shas})")
 
     finding = commits[0]
-    old = _full(repo, finding.commit_sha or finding.path)
+    old = _full(repo, finding.commit_sha or "")
+    if not old:
+        return f"{display}: confirmed commit is not a commit — nothing was force-updated"
     heads = gitamend.carrying_branches(repo, old)
     if not heads:
         return (f"{display}: confirmed commit {old[:12]} is not on any branch "
@@ -120,10 +123,15 @@ def amend_repo(repo: Path, opts, signatures, allowlist, token: str | None = None
 
     notes = []
     complete = True
+    failed: list[str] = []
     for branch in moved:
         note, ok = _force_update_branch(repo, slug, branch, token, pusher=pusher)
         notes.append(note)
         complete = complete and ok
+        if not ok:
+            failed.append(branch)
+    if failed:
+        gitamend.restore_branches(repo, heads, moved, failed)
     line = f"{display}: {'; '.join(notes)} (commit {old[:12]})"
     if not complete:
         line += ". The remote was not fully updated"

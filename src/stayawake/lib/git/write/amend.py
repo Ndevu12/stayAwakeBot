@@ -74,6 +74,21 @@ def capture_bundle(repo: str | Path, merge_sha: str, related: tuple[str, ...],
     return root
 
 
+def restore_branches(repo: str | Path, heads: list[tuple[str, str, str]],
+                     moved: dict[str, str], failed: list[str]) -> None:
+    """Put `failed` branches back to their captured tips. Created local heads are deleted."""
+    by_name = {name: cas_old for name, _tip, cas_old in heads}
+    for name in failed:
+        new_tip = moved.get(name)
+        cas_old = by_name.get(name)
+        if not new_tip or cas_old is None:
+            continue
+        if cas_old == _ZERO:
+            run_ok(repo, ["update-ref", "-d", f"refs/heads/{name}"])
+            continue
+        point_branch_at(repo, name, cas_old, new_tip)
+
+
 def point_branch_at(repo: str | Path, branch: str, new: str, old: str) -> bool:
     """Compare-and-swap `refs/heads/branch` from `old` to `new`.
 

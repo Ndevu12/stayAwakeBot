@@ -23,7 +23,8 @@ def push_branch_result(repo: str | Path, slug: str, branch: str, token: str | No
     """Push local `branch` to `github.com/<slug>`; return ok + stderr so AuthZ can classify
     workflow-scope / signed-commit / forbidden failures instead of collapsing to 'no write'.
 
-    `remote_branch` is the destination name (defaults to `branch`). `lease` is the SHA the
+    `remote_branch` is the destination branch name (defaults to `branch`); the dest ref is
+    always `refs/heads/…` so a same-named tag is not updated. `lease` is the SHA the
     remote ref must still be at (`--force-with-lease`); it takes precedence over `force`.
     """
     dest = remote_branch or branch
@@ -33,7 +34,7 @@ def push_branch_result(repo: str | Path, slug: str, branch: str, token: str | No
             args.append(f"--force-with-lease=refs/heads/{dest}:{lease}")
         elif force:
             args.append("--force")
-        args += [f"{prefix}{slug}.git", f"{branch}:{dest}"]
+        args += [f"{prefix}{slug}.git", f"{branch}:refs/heads/{dest}"]
         res = run(repo, args, env=env, timeout=NETWORK_TIMEOUT)
     if res is None:
         return PushResult(False, "git push could not run")
