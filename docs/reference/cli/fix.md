@@ -23,4 +23,4 @@ saw fix amend --remote [--user U] [--org O]
 | --- | --- |
 | `TARGETS...` / `-p` / `-c` / `-r` / `--user` / `--org` / `-j` / `--no-stream` | As for [`saw scan`](scan.md). A missing *explicit* `--config` path is a clear error, never a crash. |
 | `--pr`, `--open-pr` | Also push the branch and open/update one rolling, de-duplicated PR per repository. Needs a credential with repo + PR write; the API is pre-flighted before any push. Not accepted with `amend`. |
-| `amend` | Replace past commits that still carry the payload and force-update each branch they sat on. That force-update is the fix. Tags are not moved. The previous objects remain until collected. |
+| `amend` | Replace past commits that still carry the payload and force-update each branch they sat on. That force-update is the fix. Tags and notes are not moved. The previous objects remain until collected. |

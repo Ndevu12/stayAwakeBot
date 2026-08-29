@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 
 from stayawake.lib import git as gitutil
-from stayawake.bots.security.models import Finding, Severity
+from stayawake.bots.security.models import Finding, Severity, CONFIRMED, HEURISTIC
 from stayawake.bots.security.matchers.base import Matcher, build_confirmed_loader_check
 from stayawake.lib.git.merge.liveness import (introduced_liveness, describe,
                                               PRESENT, CHANGED, GONE, UNKNOWN)
@@ -78,5 +78,6 @@ class GitHistoryMatcher(Matcher):
                          f"{_liveness_note(target.repo_root, sha, paths)}; "
                          f"by {meta.get('author_email','?')}",
                 vector="evil-merge", related_paths=tuple(paths), commit_sha=sha,
+                confidence=(HEURISTIC if sig.get("confidence") == "heuristic" else CONFIRMED),
                 composed_evidence=True))
         return findings

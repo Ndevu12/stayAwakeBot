@@ -87,33 +87,38 @@ def branches_carrying(repo: str | Path, sha: str) -> list[tuple[str, str, str]]:
     """Each branch that still reaches `sha`: `(name, replay_tip, cas_old)`.
 
     `origin/*` is included so a commit that only sits on a fetched remote-tracking
-    ref is still a branch this identity may have to update. A local head for the
-    same name wins the tip. `cas_old` is that local tip, or the zero SHA when the
-    local ref does not exist yet.
+    ref is still a branch this identity may have to update. Notes and replace refs
+    are not branches. A local head for the same name wins the tip. `cas_old` is
+    that local tip, or the zero SHA when the local ref does not exist yet.
     """
     full = stdout(repo, ["rev-parse", sha]).strip() or sha
     found: dict[str, str] = {}
-    remote = stdout(repo, ["for-each-ref", "--format=%(refname:short) %(objectname)",
+    remote = stdout(repo, ["for-each-ref", "--format=%(refname) %(objectname)",
                            f"--contains={full}", "refs/remotes/origin"])
     for line in remote.splitlines():
         parts = line.split()
         if len(parts) != 2:
             continue
-        name, tip = parts[0].strip(), parts[1].strip()
-        if name in ("origin/HEAD", "HEAD") or not name.startswith("origin/"):
+        ref, tip = parts[0].strip(), parts[1].strip()
+        if not ref.startswith("refs/remotes/origin/"):
             continue
-        short = name[len("origin/"):]
-        if short.startswith("saw-amend/"):
+        short = ref[len("refs/remotes/origin/"):]
+        if not short or short == "HEAD" or short.startswith("saw-amend/"):
+            continue
+        if short == "notes" or short.startswith("notes/") or short.startswith("replace/"):
             continue
         found[short] = tip
-    local = stdout(repo, ["for-each-ref", "--format=%(refname:short) %(objectname)",
+    local = stdout(repo, ["for-each-ref", "--format=%(refname) %(objectname)",
                           f"--contains={full}", "refs/heads"])
     local_tips: dict[str, str] = {}
     for line in local.splitlines():
         parts = line.split()
         if len(parts) != 2:
             continue
-        name, tip = parts[0].strip(), parts[1].strip()
+        ref, tip = parts[0].strip(), parts[1].strip()
+        if not ref.startswith("refs/heads/"):
+            continue
+        name = ref[len("refs/heads/"):]
         if not name or name.startswith("saw-amend/"):
             continue
         local_tips[name] = tip

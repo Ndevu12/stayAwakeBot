@@ -12,8 +12,12 @@ from unittest import mock
 from contextlib import redirect_stderr
 
 from stayawake import cli
+from stayawake.bots.security.models import CONFIRMED, Finding, ScanResult, Severity
 from stayawake.bots.security.pr.amend import amend_repo
+from stayawake.bots.security.remediator import _amend_line_needs
 from stayawake.bots.security.targets import ScanOptions
+from stayawake.lib.git.query import branches_carrying
+from stayawake.lib.git.write import amend as gitamend
 from stayawake.lib.git.write.push import PushResult
 from tests.bots.security.test_evil_merge import EVIL_SIG, _git
 
@@ -176,6 +180,86 @@ class TestFixAmendRepo(unittest.TestCase):
         line = self._amend()
         self.assertIn("working tree is not clean", line)
         self.assertEqual(before, self._rev())
+
+    def _confirmed_finding(self, sha):
+        return Finding(
+            signature_id="evil-merge-loader", category="evil-merge",
+            severity=Severity.CRITICAL, path=sha[:10], description="x",
+            vector="evil-merge", commit_sha=sha, related_paths=("x.js",),
+            confidence=CONFIRMED)
+
+    def test_notes_are_not_carrying_branches(self):
+        self._loader_merge()
+        merge = self._rev()
+        _git(self.d, "update-ref", "refs/remotes/origin/ghost", merge)
+        _git(self.d, "update-ref", "refs/remotes/origin/notes/commits", merge)
+        _git(self.d, "update-ref", "refs/notes/commits", merge)
+        names = {n for n, _, _ in branches_carrying(self.d, merge)}
+        self.assertIn("ghost", names)
+        self.assertNotIn("notes/commits", names)
+
+    def test_an_unfinished_scan_is_not_a_fix(self):
+        self._loader_merge()
+        before = self._rev()
+        scan = ScanResult(target=str(self.d), source="local",
+                          findings=[self._confirmed_finding(before)],
+                          error="worker died")
+        calls = []
+        with mock.patch("stayawake.bots.security.pr.amend.scan_target", return_value=scan):
+            line = self._amend(pusher=lambda *a: calls.append(a) or PushResult(True))
+        self.assertIn("scan did not finish", line)
+        self.assertEqual(before, self._rev())
+        self.assertEqual(calls, [])
+
+    def test_two_confirmed_commits_are_not_a_fix(self):
+        self._loader_merge()
+        before = self._rev()
+        other = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+        scan = ScanResult(target=str(self.d), source="local",
+                          findings=[self._confirmed_finding(before),
+                                    self._confirmed_finding(other)])
+        calls = []
+        with mock.patch("stayawake.bots.security.pr.amend.scan_target", return_value=scan):
+            line = self._amend(pusher=lambda *a: calls.append(a) or PushResult(True))
+        self.assertIn("2 confirmed past commits", line)
+        self.assertIn("nothing was force-updated", line)
+        self.assertEqual(before, self._rev())
+        self.assertEqual(calls, [])
+
+    def test_a_partial_push_still_needs_review(self):
+        self._loader_merge()
+        _git(self.d, "branch", "also")
+
+        def pusher(branch, dest, lease):
+            if branch == "also":
+                return PushResult(False, "denied")
+            return PushResult(True)
+
+        line = self._amend(pusher=pusher)
+        self.assertIn("was not force-updated", line)
+        self.assertIn("force-updated '", line)
+        self.assertTrue(_amend_line_needs(line))
+
+    def test_mixed_amend_line_is_not_done(self):
+        line = ("acme/app: force-updated 'also'; 'main' was not force-updated "
+                "(commit abcdefabcdef)")
+        self.assertTrue(_amend_line_needs(line))
+
+    def test_capture_exists_before_refs_move(self):
+        self._loader_merge()
+        seen = []
+        real = gitamend.apply_replacement
+
+        def wrapped(repo, old, new, heads):
+            cap = Path(repo) / ".git" / "saw-amend" / old[:12] / "capture.json"
+            self.assertTrue(cap.is_file())
+            seen.append(True)
+            return real(repo, old, new, heads)
+
+        with mock.patch("stayawake.bots.security.pr.amend.gitamend.apply_replacement",
+                        wrapped):
+            self._amend()
+        self.assertTrue(seen)
 
 
 if __name__ == "__main__":
