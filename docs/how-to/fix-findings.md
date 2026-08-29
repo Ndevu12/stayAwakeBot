@@ -53,14 +53,12 @@ saw discard --pr           # close the auto-clean PR, keep the branch
 
 `saw discard` only ever touches the generated `security/auto-clean` branch.
 
-## The fix cleans the tree, not the history
+## The tree and the history are different acts
 
-A fix is a forward commit: it changes what the files contain now. It does **not** rewrite history,
-and it never will — a rewrite invalidates every fork, open pull request, existing clone and tag.
-
-So after a merged fix the payload is gone from the working tree and from anything a clone, a build
-or CI will run, but an earlier commit still holds it. A run that finds the payload still in the
-files now restores those files on the branch; it does not claim the tree is already clean.
+Bare `saw fix` is a forward commit: it changes what the files contain now. After it, the payload
+is gone from the working tree and from anything a clone, a build or CI will run, but an earlier
+commit can still hold it. A run that finds the payload still in the files now restores those
+files on the branch; it does not claim the tree is already clean.
 
 ```bash
 saw scan .                       # clean
@@ -70,10 +68,9 @@ git show HEAD~1:postcss.config.mjs   # still returns the old contents
 That is residue, not execution — nothing runs it on clone or build. `saw scan` says so in its
 coverage notes rather than letting `clean` imply the repository has no trace of it.
 
-Removing the residue from **this branch** is `saw fix amend`. It replaces the past commits that
-still carry the payload. It does not publish, it does not move tags, and it does not clear forks
-or objects the hosting platform still serves. A repository-wide rewrite remains a separate
-decision of yours.
+`saw fix amend` is the history act. It replaces past commits the payload has already propagated
+into. It does not publish, it does not move tags, and it does not clear forks or objects the
+hosting platform still serves. A repository-wide rewrite remains a separate decision of yours.
 
 ## Never on the host
 
