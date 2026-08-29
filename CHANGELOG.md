@@ -21,6 +21,9 @@ reader, not the mechanism or the weakness it closed.
   The previous objects remain until collected. Bare `saw fix` still only cleans the tip.
 
 ### Fixed
+- **`saw fix --pr` publishes the cleanup branch; it does not overwrite a remote ref.** A
+  branch that is not fast-forwardable is refused, not force-updated. `saw fix amend` is the
+  act that force-updates.
 - **`saw fix` no longer reports a working tree as clean when a merge finding is still live in it.**
   Files that still carry the payload are restored on the review branch. The merge commit stays;
   `saw fix` still never rewrites history. If it cannot tell whether those files still carry it,

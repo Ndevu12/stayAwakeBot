@@ -17,15 +17,15 @@ class PushResult:
     stderr: str = ""
 
 
-def push_branch_result(repo: str | Path, slug: str, branch: str, token: str | None,
-                       *, force: bool = True) -> PushResult:
+def push_branch_result(repo: str | Path, slug: str, branch: str, token: str | None) -> PushResult:
     """Push local `branch` to `github.com/<slug>`; return ok + stderr so AuthZ can classify
-    workflow-scope / signed-commit / forbidden failures instead of collapsing to 'no write'."""
+    workflow-scope / signed-commit / forbidden failures instead of collapsing to 'no write'.
+
+    Does not overwrite a remote ref. A branch that is not fast-forwardable is a refused
+    push, not a force-update.
+    """
     with github_https_auth(token) as (prefix, env):
-        args = ["push"]
-        if force:
-            args.append("--force")
-        args += [f"{prefix}{slug}.git", f"{branch}:{branch}"]
+        args = ["push", f"{prefix}{slug}.git", f"{branch}:{branch}"]
         res = run(repo, args, env=env, timeout=NETWORK_TIMEOUT)
     if res is None:
         return PushResult(False, "git push could not run")
@@ -56,13 +56,12 @@ def force_update_head(repo: str | Path, slug: str, branch: str, token: str | Non
     return PushResult(False, (res.stderr or res.stdout or "").strip())
 
 
-def push_branch(repo: str | Path, slug: str, branch: str, token: str | None,
-                *, force: bool = True) -> bool:
+def push_branch(repo: str | Path, slug: str, branch: str, token: str | None) -> bool:
     """Push local `branch` to `github.com/<slug>` as `branch`, with the token kept OUT of argv
     and the URL (via GIT_ASKPASS). Returns True on success, False on any failure (no write
     access, network/TLS) so the caller can fall back. Prefer `push_branch_result` when the
     caller must classify the failure (workflow scope vs write access)."""
-    return push_branch_result(repo, slug, branch, token, force=force).ok
+    return push_branch_result(repo, slug, branch, token).ok
 
 
 def delete_remote_branch(remote: str, branch: str, *, repo: str | Path | None = None,

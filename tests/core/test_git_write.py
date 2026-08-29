@@ -222,8 +222,7 @@ class TestPushBranch(unittest.TestCase):
         seen = self._capture(go)
         args = seen[0]
         self.assertEqual(args[0], "push")
-        self.assertIn("--force", args)
-        self.assertTrue(all(not a.startswith("--force-with-lease") for a in args))
+        self.assertTrue(all(not a.startswith("--force") for a in args))
         self.assertEqual(args[-1], "security/auto-clean:security/auto-clean")
 
     def test_pr_push_does_not_take_a_lease(self):
@@ -231,6 +230,12 @@ class TestPushBranch(unittest.TestCase):
         with self.assertRaises(TypeError):
             push_branch_result("/tmp/r", "acme/app", "security/auto-clean", "tok",
                                lease="abc")
+
+    def test_pr_push_does_not_take_force(self):
+        from stayawake.lib.git.write.push import push_branch_result
+        with self.assertRaises(TypeError):
+            push_branch_result("/tmp/r", "acme/app", "security/auto-clean", "tok",
+                               force=True)
 
     def test_force_update_head_is_not_the_pr_push(self):
         def go(gitpush):
