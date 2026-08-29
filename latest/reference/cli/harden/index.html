@@ -1740,7 +1740,8 @@ write is unknown, never success. The result does not claim that one control prot
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw harden
 </code></pre></div>
 <p>This command must run as root. If a running process still holds code that is not on disk, it
-refuses: capture that process first.</p>
+refuses: capture that process first. If it could not examine what is running on this machine, it
+refuses as well.</p>
 <p>See <a href="../../../how-to/audit-a-machine/">audit a machine</a> for the read-only view of the same host.</p>
 
 
