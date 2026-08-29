@@ -8,6 +8,7 @@ from pathlib import Path
 
 from stayawake.lib.adapters import github_api
 from stayawake.lib import git as gitutil
+from stayawake.lib.git.merge.liveness import introduced_liveness, PRESENT, GONE
 from stayawake.utils.streaming import status
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.targets import LocalRepoTarget
@@ -103,17 +104,63 @@ def _signing_note(fix: "_Fix | None") -> str:
             "worktree); if this repo enforces signed commits, re-sign it before pushing/merging.")
 
 
-def _manual_for(f0, path: str) -> "remediation.Manual":
+class _AtPath:
+    """A finding viewed at a working-tree path. Evil-merge findings are keyed to a commit."""
+
+    def __init__(self, inner, path: str):
+        self._inner = inner
+        self.path = path
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
+def _merge_sha(finding) -> str | None:
+    if getattr(finding, "vector", None) != "evil-merge":
+        return None
+    return getattr(finding, "commit_sha", None) or getattr(finding, "path", None)
+
+
+def _present_related(repo: Path | None, sha: str | None, paths) -> tuple[str, ...]:
+    if repo is None or not sha:
+        return ()
+    return tuple(p for p in paths if introduced_liveness(repo, sha, p) == PRESENT)
+
+
+def _related_all_gone(repo: Path | None, sha: str | None, paths) -> bool:
+    if repo is None or not sha or not paths:
+        return False
+    return all(introduced_liveness(repo, sha, p) == GONE for p in paths)
+
+
+def _manual_for(f0, path: str, repo: Path | None = None) -> "remediation.Manual":
     """Manual-review entry for a confirmed residual."""
     if getattr(f0, "vector", None) == "evil-merge":
-        files = ", ".join(getattr(f0, "related_paths", ()) or []) or "see evidence"
+        related = getattr(f0, "related_paths", ()) or ()
+        files = ", ".join(related) or "see evidence"
+        sha = _merge_sha(f0) or path
+        live = _present_related(repo, sha, related)
+        if live:
+            text = (
+                f"Worm payload smuggled via this merge COMMIT (files: {files}). "
+                f"{', '.join(live)} still carries it in the working tree. "
+                "`saw fix` never rewrites history — the commit remains in clones/forks/tags."
+            )
+        elif _related_all_gone(repo, sha, related):
+            text = (
+                "Worm payload smuggled via this merge COMMIT (a history finding, not a file edit; "
+                f"files: {files}). `saw fix` never rewrites history — it breaks clones/forks/tags. If the "
+                "payload is gone from your working tree the tree is clean but the commit persists; verify "
+                "no fork/tag still ships it, then decide on a history rewrite (git filter-repo) yourself."
+            )
+        else:
+            text = (
+                f"Worm payload smuggled via this merge COMMIT (files: {files}). "
+                "Whether those files still carry it in the working tree could not be established — "
+                "do not treat the tree as clean. `saw fix` never rewrites history."
+            )
         return remediation.Manual(
-            path, f0.signature_id, "evil-merge",
-            "Worm payload smuggled via this merge COMMIT (a history finding, not a file edit; "
-            f"files: {files}). `saw fix` never rewrites history — it breaks clones/forks/tags. If the "
-            "payload is gone from your working tree the tree is clean but the commit persists; verify "
-            "no fork/tag still ships it, then decide on a history rewrite (git filter-repo) yourself.",
-            getattr(f0, "line", None))
+            path, f0.signature_id, "evil-merge", text, getattr(f0, "line", None))
     return remediation.Manual(
         path, f0.signature_id, "residual",
         "Confirmed indicator still present after remediation — review and remove/recover manually.",
@@ -182,11 +229,12 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
                     tree_note = f"could not remove the installed tree ({exc})"
             applied = lockfile_changes + remediation.apply(wt, remediation.plan(findings), quarantine)
             for f in findings:
-                if getattr(f, "vector", None) != "evil-merge" or not getattr(f, "commit_sha", None):
+                sha = _merge_sha(f)
+                if not sha:
                     continue
                 for rp in getattr(f, "related_paths", ()):
                     if rp not in merge_clean:
-                        blob = gitutil.clean_merge_blob(wt, f.commit_sha, rp)
+                        blob = gitutil.clean_merge_blob(wt, sha, rp)
                         if blob is not None:
                             merge_clean[rp] = blob
             def _corroborated(f) -> bool:
@@ -209,17 +257,39 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
                         continue
                     if not remediation.has_concealment_seam(text, f.path, content_sig):
                         continue
-                seen_cl.add(f.path)
                 disp = remediation.classify_recovery(wt, f, content_sig, merge_clean=merge_clean.get(f.path))
                 if isinstance(disp, remediation.Recovery) and \
                         remediation.apply_recovery(wt, disp, quarantine, content_sig):
+                    seen_cl.add(f.path)
                     applied.append(remediation.Change("recover", disp.path, disp.label))
                 elif not corroborated:
                     continue
                 elif isinstance(disp, remediation.Suggested):
+                    seen_cl.add(f.path)
                     suggested.append(disp)
                 elif isinstance(disp, remediation.Manual):
                     manual_reviews[disp.path] = disp
+            for f in findings:
+                sha = _merge_sha(f)
+                if not sha:
+                    continue
+                conf = getattr(f, "confidence", None)
+                for rp in getattr(f, "related_paths", ()):
+                    if rp in seen_cl:
+                        continue
+                    if introduced_liveness(wt, sha, rp) != PRESENT:
+                        continue
+                    disp = remediation.classify_recovery(
+                        wt, _AtPath(f, rp), content_sig, merge_clean=merge_clean.get(rp))
+                    if conf == CONFIRMED and isinstance(disp, remediation.Recovery) and \
+                            remediation.apply_recovery(wt, disp, quarantine, content_sig):
+                        seen_cl.add(rp)
+                        applied.append(remediation.Change("recover", disp.path, disp.label))
+                    elif isinstance(disp, remediation.Suggested):
+                        seen_cl.add(rp)
+                        suggested.append(disp)
+                    elif isinstance(disp, remediation.Manual):
+                        manual_reviews[rp] = disp
 
             rescan = _scan()
             auto = []
@@ -274,8 +344,18 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
             m = manual_reviews.get(path)
             if m is None:
                 f0 = next(f for f in residual if f.path == path)
-                m = _manual_for(f0, path)
+                m = _manual_for(f0, path, repo=wt)
             manual.append(m)
+        have = {m.path for m in manual}
+        for f in findings:
+            if getattr(f, "confidence", None) != CONFIRMED:
+                continue
+            sha = _merge_sha(f)
+            if not sha or sha in have:
+                continue
+            # Restoring the live files does not remove the merge commit. Keep the history note.
+            manual.append(_manual_for(f, sha, repo=wt))
+            have.add(sha)
 
         if not applied and not computed:
             if residual:
