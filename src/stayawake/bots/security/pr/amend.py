@@ -61,6 +61,11 @@ def _force_update_branch(repo: Path, slug: str, branch: str, token: str | None, 
     if pusher is None:
         lease = _remote_sha(repo, slug, branch, token)
         result = _push_amended(repo, slug, branch, token, lease)
+        if result.ok:
+            remote = _remote_sha(repo, slug, branch, token)
+            local = gitutil.stdout(repo, ["rev-parse", f"refs/heads/{branch}"]).strip()
+            if not remote or not local or remote != local:
+                result = PushResult(False)
     else:
         result = pusher(branch, branch, None)
     if not result.ok:

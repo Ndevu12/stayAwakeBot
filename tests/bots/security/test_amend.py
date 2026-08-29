@@ -185,6 +185,30 @@ class TestFixAmendRepo(unittest.TestCase):
             capture_output=True, text=True, check=True).stdout
         self.assertIn("fromCharCode", text)
 
+    def test_a_push_that_does_not_move_the_remote_is_not_a_fix(self):
+        self._loader_merge()
+        before = self._rev()
+        with mock.patch("stayawake.bots.security.pr.amend._push_amended",
+                        return_value=PushResult(True)), \
+             mock.patch("stayawake.bots.security.pr.amend._remote_sha",
+                        return_value=before):
+            line = self._amend(pusher=None)
+        self.assertIn("was not force-updated", line)
+        self.assertNotIn("force-updated '", line)
+        self.assertEqual(before, self._rev())
+
+    def test_a_push_that_does_not_move_the_remote_is_not_a_fix(self):
+        self._loader_merge()
+        before = self._rev()
+        with mock.patch("stayawake.bots.security.pr.amend._push_amended",
+                        return_value=PushResult(True)), \
+             mock.patch("stayawake.bots.security.pr.amend._remote_sha",
+                        return_value=before):
+            line = self._amend(pusher=None)
+        self.assertIn("was not force-updated", line)
+        self.assertNotIn("force-updated '", line)
+        self.assertEqual(before, self._rev())
+
     def test_heuristic_only_is_not_replaced(self):
         _git(self.d, "merge", "--no-ff", "--no-commit", "feature")
         (self.d / "evil.txt").write_text("injected only in the merge\n")
