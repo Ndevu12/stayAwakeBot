@@ -44,7 +44,10 @@ def immutable(path: Path) -> bool:
             return False
         if r.returncode != 0 or not r.stdout.split():
             return False
-        return "i" in r.stdout.split()[0]
+        flags = r.stdout.split()[0]
+        if not flags or not all(c.isalpha() or c == "-" for c in flags):
+            return False
+        return "i" in flags
     return False
 
 
@@ -62,12 +65,18 @@ def holds(path: Path) -> bool:
 
 
 def set_immutable(path: Path) -> bool:
+    try:
+        st = path.lstat()
+    except OSError:
+        return False
+    if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
+        return False
     if sys.platform == "darwin":
         try:
-            flags = path.lstat().st_flags
-            os.chflags(path, flags | _UF_IMMUTABLE)
+            flags = st.st_flags
+            os.chflags(path, flags | _UF_IMMUTABLE, follow_symlinks=False)
             return immutable(path)
-        except OSError:
+        except (OSError, NotImplementedError):
             return False
     if sys.platform == "linux":
         try:

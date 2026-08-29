@@ -13,6 +13,7 @@ saw harden
 ```
 
 This command must run as root. If a running process still holds code that is not on disk, it
-refuses: capture that process first.
+refuses: capture that process first. If it could not examine what is running on this machine, it
+refuses as well.
 
 See [audit a machine](../../how-to/audit-a-machine.md) for the read-only view of the same host.

@@ -361,14 +361,14 @@ class TestHostArtifacts(unittest.TestCase):
 
     # ── severity / remediation logic (mock the probe to control the artifact set) ──
     def test_lone_weak_indicator_is_info(self):
-        with mock.patch.object(hygiene.host_artifacts, "_host_artifacts", return_value=([], [("~/.node_modules", Path("~/.node_modules"), hygiene.host_artifacts.KIND_GLOBAL_FOLDER)], [])):
+        with mock.patch.object(hygiene.host_artifacts, "_host_artifacts", return_value=([], [("~/.node_modules", Path("~/.node_modules"), hygiene.host_artifacts.KIND_GLOBAL_FOLDER)], [], [])):
             issues = hygiene.check_host_artifacts()
         self.assertEqual([(i.id, i.severity) for i in issues], [("host-drop-artifact-weak", "info")])
 
     def test_weak_indicator_language_is_not_accusatory(self):
         # Honesty (#1220): a lone WEAK indicator must not be described as a "payload" or accuse
         # compromise — existence alone can't tell worm-staging from a manual npm install.
-        with mock.patch.object(hygiene.host_artifacts, "_host_artifacts", return_value=([], [("~/.node_modules", Path("~/.node_modules"), hygiene.host_artifacts.KIND_GLOBAL_FOLDER)], [])):
+        with mock.patch.object(hygiene.host_artifacts, "_host_artifacts", return_value=([], [("~/.node_modules", Path("~/.node_modules"), hygiene.host_artifacts.KIND_GLOBAL_FOLDER)], [], [])):
             f = hygiene.check_host_artifacts()[0]
         self.assertEqual(f.severity, "info")
         self.assertNotIn("payload", (f.title + " " + f.detail).lower())   # no "payload-created" accusation
@@ -376,25 +376,25 @@ class TestHostArtifacts(unittest.TestCase):
 
     def test_strong_ioc_is_warning(self):
         with mock.patch.object(hygiene.host_artifacts, "_host_artifacts",
-                               return_value=(["host$user exfil archive"], [], [])):
+                               return_value=(["host$user exfil archive"], [], [], [])):
             issues = hygiene.check_host_artifacts()
         self.assertEqual([(i.id, i.severity) for i in issues], [("host-drop-artifacts", "warning")])
 
     def test_two_weak_indicators_corroborate_to_warning(self):
         with mock.patch.object(hygiene.host_artifacts, "_host_artifacts",
                                return_value=([], [("~/.node_modules", Path("~/.node_modules"), hygiene.host_artifacts.KIND_GLOBAL_FOLDER),
-                                                  ("/tmp/.npm", Path("/tmp/.npm"), hygiene.host_artifacts.KIND_NPM_CACHE)], [])):
+                                                  ("/tmp/.npm", Path("/tmp/.npm"), hygiene.host_artifacts.KIND_NPM_CACHE)], [], [])):
             issues = hygiene.check_host_artifacts()
         self.assertEqual([i.severity for i in issues], ["warning"])
 
     def test_clean_host_has_no_issue(self):
-        with mock.patch.object(hygiene.host_artifacts, "_host_artifacts", return_value=([], [], [])):
+        with mock.patch.object(hygiene.host_artifacts, "_host_artifacts", return_value=([], [], [], [])):
             self.assertEqual(hygiene.check_host_artifacts(), [])
 
     def test_an_unreadable_location_is_not_a_clean_host(self):
         p = Path("/unreadable/drop")
         with mock.patch.object(hygiene.host_artifacts, "_host_artifacts",
-                               return_value=([], [], [p])):
+                               return_value=([], [], [p], [])):
             issues = hygiene.check_host_artifacts()
         self.assertEqual([i.id for i in issues], ["persistence-surface-unverified"])
         self.assertEqual(issues[0].severity, "unknown")
@@ -418,7 +418,7 @@ class TestHostArtifacts(unittest.TestCase):
             __import__("shutil").rmtree(d, ignore_errors=True)
 
     def test_remediation_is_rotate_last(self):
-        for probe in (([], [("~/.node_modules", Path("~/.node_modules"), hygiene.host_artifacts.KIND_GLOBAL_FOLDER)], []), (["host$user archive"], [], [])):
+        for probe in (([], [("~/.node_modules", Path("~/.node_modules"), hygiene.host_artifacts.KIND_GLOBAL_FOLDER)], [], []), (["host$user archive"], [], [], [])):
             with mock.patch.object(hygiene.host_artifacts, "_host_artifacts", return_value=probe):
                 rem = hygiene.check_host_artifacts()[0].remediation.lower()
             # Rotation is sequenced last / after isolation (warning says "LAST"; info "BEFORE
@@ -437,7 +437,7 @@ class TestHostArtifacts(unittest.TestCase):
         d = Path(tempfile.mkdtemp())
         (d / ".node_modules").mkdir()
         with mock.patch.object(hygiene.Path, "home", return_value=d):
-            strong, weak, _unread = hygiene.host_artifacts._host_artifacts()
+            strong, weak, _unread, _controlled = hygiene.host_artifacts._host_artifacts()
         self.assertTrue(any(".node_modules" in desc for desc, _, _ in weak))
         self.assertEqual(strong, [])
 
@@ -446,7 +446,7 @@ class TestHostArtifacts(unittest.TestCase):
         tag = hygiene.host_artifacts._host_user_tag()
         (d / (tag + ".tar.gz")).write_text("x", encoding="utf-8")
         with mock.patch.object(hygiene.Path, "home", return_value=d):
-            strong, _weak, _unread = hygiene.host_artifacts._host_artifacts()
+            strong, _weak, _unread, _controlled = hygiene.host_artifacts._host_artifacts()
         self.assertTrue(any("exfil staging archive" in s for s in strong))
 
     def test_trufflehog_dir_is_not_flagged_but_binary_is(self):
@@ -479,7 +479,7 @@ class TestVerifyArtifactsOptIn(unittest.TestCase):
     def _weak_dir_probe(self):
         d = Path(tempfile.mkdtemp())          # a real dir so path.is_dir() is True
         return d, ([], [(f"{d} (an npm tree — unusual location)", d,
-                         hygiene.host_artifacts.KIND_NPM_CACHE)], [])
+                         hygiene.host_artifacts.KIND_NPM_CACHE)], [], [])
 
     def test_default_audit_does_not_scan(self):
         # Without the flag the weak dir stays the honest info and verify_dir is NEVER called.
@@ -559,7 +559,7 @@ class TestVerifyArtifactsOptIn(unittest.TestCase):
         f.write_text("x", encoding="utf-8")
         with mock.patch.object(hygiene.host_artifacts, "_host_artifacts",
                                return_value=([], [(str(f), f,
-                                                   hygiene.host_artifacts.KIND_PIP_BOOTSTRAP)], [])), \
+                                                   hygiene.host_artifacts.KIND_PIP_BOOTSTRAP)], [], [])), \
              mock.patch("stayawake.bots.security.verify.verify_dir") as vd:
             issues = hygiene.check_host_artifacts(verify=True)
         vd.assert_not_called()
@@ -1384,7 +1384,7 @@ class TestScanScopeHonesty(unittest.TestCase):
                 with mock.patch.object(host_artifacts.Path, "exists", fake_exists), \
                      mock.patch.object(host_artifacts.tempfile, "gettempdir", lambda: tmpdir), \
                      mock.patch.object(host_artifacts.Path, "home", staticmethod(lambda: Path("/h"))):
-                    _strong, weak, _unread = host_artifacts._host_artifacts()
+                    _strong, weak, _unread, _c = host_artifacts._host_artifacts()
                 read = {d.rsplit("/", 1)[0] for d, _, _ in weak if d.startswith("/")}
                 self.assertTrue(read <= {"/tmp", tmpdir}, f"probe read outside /tmp+$TMPDIR: {read}")
         self.assertIn("Not exhaustive", self._flowed([]))

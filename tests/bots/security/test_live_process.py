@@ -168,6 +168,10 @@ class TestAPlatformItCannotReadIsNotClean(unittest.TestCase):
         issues = _check(_snapshot(Process(pid=13, argv=("node", "-e", _loader())), supported=False))
         self.assertEqual([i.id for i in issues], ["process-arguments-not-readable"])
 
+    def test_an_empty_table_is_not_a_clean_examination(self):
+        issues = _check(_snapshot())
+        self.assertEqual([i.id for i in issues], ["process-arguments-not-readable"])
+
     def test_that_withholds_the_rotation_all_clear(self):
         self.assertIn("process-arguments-not-readable", ROTATION_UNSAFE_IDS)
 
