@@ -1737,9 +1737,10 @@
 <p>Clean detected findings <strong>on a branch</strong>. By default <code>fix</code> prepares <code>security/auto-clean</code> locally and
 stops — no push, no PR, no network — for you to review. Source changes land on that branch. On a
 confirmed infection it also removes the installed tree, generated build outputs, and the lockfile
-in this repository (the lockfile is kept on CI). <code>--pr</code> pushes and opens or updates one rolling
-PR per repository. See <a href="../../../explanation/safety-envelope/">the safety envelope</a> for what <code>fix</code>
-will and will not touch.</p>
+in this repository (the lockfile is kept on CI). A merge finding that is still live in the working
+tree is restored there; the merge commit is left in history. <code>--pr</code> pushes and opens or updates one
+rolling PR per repository. See <a href="../../../explanation/safety-envelope/">the safety envelope</a> for what
+<code>fix</code> will and will not touch.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw fix [TARGETS...] [--pr] [-r] [--user U] [--org O] [-p PATH] [-c FILE] [-j N] [--no-stream]
 </code></pre></div>
 <table>

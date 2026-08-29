@@ -1901,7 +1901,12 @@ Flags: <a href="../../reference/cli/fix/">CLI reference</a>.</p>
 <p>A payload is restored from git history — the real previous content, not a reconstruction — or the
 file is quarantined whole. <code>saw</code> never surgically edits a source file, so a fix cannot corrupt valid
 code. Where a clean version cannot be proven safe to restore, the finding is <strong>deferred to review</strong>
-with the exact reason and the command to inspect it.</p>
+with the exact reason and the command to inspect it. When a merge finding is still live in the
+working tree, those files are restored on the review branch; the merge commit itself is left in
+place.</p>
+<p>Heuristic (<code>suspicious</code>) findings are <strong>never auto-fixed</strong>. A repository with only heuristic findings
+is disclosed and deferred, never reported "already clean". See <a href="../../explanation/safety-envelope/">the safety
+envelope</a>.</p>
 <p>Heuristic (<code>suspicious</code>) findings are <strong>never auto-fixed</strong>. A repository with only heuristic findings
 is disclosed and deferred, never reported "already clean". See <a href="../../explanation/safety-envelope/">the safety
 envelope</a>.</p>
@@ -1922,7 +1927,8 @@ envelope</a>.</p>
 <p>A fix is a forward commit: it changes what the files contain now. It does <strong>not</strong> rewrite history,
 and it never will — a rewrite invalidates every fork, open pull request, existing clone and tag.</p>
 <p>So after a merged fix the payload is gone from the working tree and from anything a clone, a build
-or CI will run, but an earlier commit still holds it:</p>
+or CI will run, but an earlier commit still holds it. A run that finds the payload still in the
+files now restores those files on the branch; it does not claim the tree is already clean.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>saw<span class="w"> </span>scan<span class="w"> </span>.<span class="w">                       </span><span class="c1"># clean</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>git<span class="w"> </span>show<span class="w"> </span>HEAD~1:postcss.config.mjs<span class="w">   </span><span class="c1"># still returns the old contents</span>
 </code></pre></div>
