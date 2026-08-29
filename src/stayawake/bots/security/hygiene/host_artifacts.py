@@ -251,9 +251,8 @@ def _outside_a_control_issue(found: list[str]) -> HygieneIssue:
         id="host-drop-artifact-outside-a-control",
         severity="warning",
         title="A global resolution path on this host was left outside a control that covers another",
-        detail="Found: " + "; ".join(found) + ". Another global resolution path on this host is "
-               "already under a control, so this is a location that control did not cover and "
-               "whatever is in it was left as it stood.",
+        detail="Found: " + "; ".join(found) + ". A control covers another path on this host; "
+               "this one was left as it stood.",
         remediation="Inspect it before trusting it, and do NOT rotate any credential yet — "
                     f"{_WIPER_NOTE}.",
     )
