@@ -14,7 +14,7 @@ from stayawake.bots.security.targets import LocalRepoTarget
 from stayawake.lib.git.auth import github_https_auth
 from stayawake.lib.git.run import NETWORK_TIMEOUT, run
 from stayawake.lib.git.write import amend as gitamend
-from stayawake.lib.git.write.push import PushResult, force_update_head
+from stayawake.lib.git.write.push import PushResult, force_update_head, publish_head
 from stayawake.lib import git as gitutil
 
 
@@ -38,32 +38,59 @@ def _confirmed_commits(scan) -> list:
     return found
 
 
-def _remote_sha(repo: Path, slug: str, branch: str, token: str | None) -> str | None:
+_OID = set("0123456789abcdef")
+
+
+def _is_oid(s: str) -> bool:
+    s = (s or "").strip().lower()
+    return len(s) == 40 and all(c in _OID for c in s)
+
+
+def _read_remote_head(repo: Path, slug: str, branch: str,
+                      token: str | None) -> tuple[bool, str | None]:
+    """`(known, sha)`. `known` False means the lookup did not finish. `sha` None when
+    `known` is True means the heads ref is absent."""
     with github_https_auth(token) as (prefix, env):
         res = run(repo, ["ls-remote", "--heads", f"{prefix}{slug}.git", f"refs/heads/{branch}"],
                   env=env, timeout=NETWORK_TIMEOUT)
     if res is None or res.returncode != 0:
-        return None
+        return False, None
     lines = [ln for ln in (res.stdout or "").splitlines() if ln.strip()]
     if not lines:
-        return None
-    return lines[0].split()[0]
+        return True, None
+    sha = lines[0].split()[0]
+    if not _is_oid(sha):
+        return False, None
+    return True, sha
+
+
+def _collect_remote_heads(repo: Path, slug: str, names: list[str],
+                          token: str | None) -> tuple[dict[str, str | None] | None, str | None]:
+    """Each branch's remote SHA (`None` if absent). `(None, name)` when `name` could not be read."""
+    found: dict[str, str | None] = {}
+    for name in names:
+        known, sha = _read_remote_head(repo, slug, name, token)
+        if not known:
+            return None, name
+        found[name] = sha
+    return found, None
 
 
 def _push_amended(repo: Path, slug: str, branch: str, token: str | None,
                   lease: str | None) -> PushResult:
+    if lease is None:
+        return publish_head(repo, slug, branch, token)
     return force_update_head(repo, slug, branch, token, lease=lease)
 
 
 def _force_update_branch(repo: Path, slug: str, branch: str, token: str | None, *,
-                         pusher) -> tuple[str, bool]:
+                         pusher, lease: str | None = None) -> tuple[str, bool]:
     if pusher is None:
-        lease = _remote_sha(repo, slug, branch, token)
         result = _push_amended(repo, slug, branch, token, lease)
         if result.ok:
-            remote = _remote_sha(repo, slug, branch, token)
+            known, remote = _read_remote_head(repo, slug, branch, token)
             local = gitutil.stdout(repo, ["rev-parse", f"refs/heads/{branch}"]).strip()
-            if not remote or not local or remote != local:
+            if not known or not remote or not local or remote != local:
                 result = PushResult(False)
     else:
         result = pusher(branch, branch, None)
@@ -112,6 +139,14 @@ def amend_repo(repo: Path, opts, signatures, allowlist, token: str | None = None
                 "— nothing was force-updated")
 
     related = tuple(getattr(finding, "related_paths", ()) or ())
+    leases: dict[str, str | None] | None = None
+    if pusher is None:
+        leases, unread = _collect_remote_heads(
+            repo, slug, [name for name, _, _ in heads], token)
+        if unread is not None:
+            return (f"{display}: remote branch '{unread}' could not be read "
+                    "— nothing was force-updated")
+
     new = gitamend.reconstruct_merge(repo, old)
     if new is None:
         return (f"{display}: could not replace commit {old[:12]} "
@@ -129,7 +164,8 @@ def amend_repo(repo: Path, opts, signatures, allowlist, token: str | None = None
     complete = True
     failed: list[str] = []
     for branch in moved:
-        note, ok = _force_update_branch(repo, slug, branch, token, pusher=pusher)
+        lease = None if leases is None else leases.get(branch)
+        note, ok = _force_update_branch(repo, slug, branch, token, pusher=pusher, lease=lease)
         notes.append(note)
         complete = complete and ok
         if not ok:

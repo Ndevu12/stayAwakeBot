@@ -74,7 +74,7 @@ coverage notes rather than letting `clean` imply the repository has no trace of 
 into and force-updates each branch they sat on. That force-update is the fix. The replaced
 commit keeps its original message. It does not open a pull request, it does not take
 `--branch`, it does not move tags, and it does not clear forks or objects the hosting
-platform still serves.
+platform still serves. If a remote branch cannot be read, nothing is force-updated.
 
 ## Never on the host
 

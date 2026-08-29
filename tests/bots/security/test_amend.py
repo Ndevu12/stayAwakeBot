@@ -268,8 +268,8 @@ class TestFixAmendRepo(unittest.TestCase):
         before = self._rev()
         with mock.patch("stayawake.bots.security.pr.amend._push_amended",
                         return_value=PushResult(True)), \
-             mock.patch("stayawake.bots.security.pr.amend._remote_sha",
-                        return_value=before):
+             mock.patch("stayawake.bots.security.pr.amend._read_remote_head",
+                        return_value=(True, before)):
             line = self._amend(pusher=None)
         self.assertIn("was not force-updated", line)
         self.assertNotIn("force-updated '", line)
@@ -450,8 +450,25 @@ class TestFixAmendRepo(unittest.TestCase):
         self.assertEqual(before, self._rev())
         self.assertEqual(calls, [])
 
+    def test_unread_remote_is_not_a_force_update(self):
+        self._loader_merge()
+        before = self._rev()
+        calls = []
+        with mock.patch("stayawake.bots.security.pr.amend._read_remote_head",
+                        return_value=(False, None)), \
+             mock.patch("stayawake.bots.security.pr.amend._push_amended",
+                        side_effect=lambda *a, **k: calls.append(a) or PushResult(True)):
+            line = self._amend(pusher=None)
+        self.assertIn("could not be read", line)
+        self.assertIn("nothing was force-updated", line)
+        self.assertEqual(before, self._rev())
+        self.assertEqual(calls, [])
+        self.assertIn("fromCharCode", self._worktree("x.js"))
+        self.assertEqual(self._porcelain(), "")
+
     def test_force_push_names_a_heads_ref(self):
         self._loader_merge()
+        before = self._rev()
         seen = []
 
         def fake_run(repo, args, **kw):
@@ -462,7 +479,8 @@ class TestFixAmendRepo(unittest.TestCase):
                 stderr = "denied"
             return R()
 
-        with mock.patch("stayawake.bots.security.pr.amend._remote_sha", return_value=None), \
+        with mock.patch("stayawake.bots.security.pr.amend._read_remote_head",
+                        return_value=(True, before)), \
              mock.patch("stayawake.lib.git.write.push.run", fake_run):
             line = self._amend(pusher=None)
         self.assertIn("was not force-updated", line)
@@ -470,6 +488,9 @@ class TestFixAmendRepo(unittest.TestCase):
         self.assertTrue(specs)
         self.assertTrue(all(s.endswith("refs/heads/" + self.base) or ":refs/heads/" in s
                             for s in specs))
+        self.assertTrue(any(any(x.startswith("--force-with-lease=refs/heads/") for x in a)
+                            for a in seen if a and a[0] == "push"))
+        self.assertTrue(all("--force" not in a for a in seen if a and a[0] == "push"))
 
 
 if __name__ == "__main__":

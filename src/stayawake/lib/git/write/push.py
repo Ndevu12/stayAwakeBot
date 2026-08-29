@@ -35,19 +35,29 @@ def push_branch_result(repo: str | Path, slug: str, branch: str, token: str | No
 
 
 def force_update_head(repo: str | Path, slug: str, branch: str, token: str | None,
-                      *, lease: str | None = None) -> PushResult:
-    """Force-update `refs/heads/<branch>` only. The PR path does not call this.
+                      *, lease: str) -> PushResult:
+    """Force-update `refs/heads/<branch>` only when `lease` is the SHA it must still be at.
 
-    `lease` is the SHA the remote heads ref must still be at. The dest is always a heads
-    ref so a same-named tag is not updated.
+    No lease is not a force-update. The PR path does not call this. The dest is always a
+    heads ref so a same-named tag is not updated.
     """
+    if not (lease or "").strip():
+        return PushResult(False, "remote branch could not be read")
     with github_https_auth(token) as (prefix, env):
-        args = ["push"]
-        if lease:
-            args.append(f"--force-with-lease=refs/heads/{branch}:{lease}")
-        else:
-            args.append("--force")
-        args += [f"{prefix}{slug}.git", f"{branch}:refs/heads/{branch}"]
+        args = ["push", f"--force-with-lease=refs/heads/{branch}:{lease}",
+                f"{prefix}{slug}.git", f"{branch}:refs/heads/{branch}"]
+        res = run(repo, args, env=env, timeout=NETWORK_TIMEOUT)
+    if res is None:
+        return PushResult(False, "git push could not run")
+    if res.returncode == 0:
+        return PushResult(True, "")
+    return PushResult(False, (res.stderr or res.stdout or "").strip())
+
+
+def publish_head(repo: str | Path, slug: str, branch: str, token: str | None) -> PushResult:
+    """Create `refs/heads/<branch>` on the remote. Does not overwrite an existing ref."""
+    with github_https_auth(token) as (prefix, env):
+        args = ["push", f"{prefix}{slug}.git", f"{branch}:refs/heads/{branch}"]
         res = run(repo, args, env=env, timeout=NETWORK_TIMEOUT)
     if res is None:
         return PushResult(False, "git push could not run")

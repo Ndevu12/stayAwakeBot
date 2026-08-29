@@ -17,8 +17,9 @@ reader, not the mechanism or the weakness it closed.
 - **`saw fix amend` replaces past commits that still carry the payload and force-updates
   each branch they sat on.** That force-update is the fix. It does not open a pull request
   and it does not take `--branch`. The replaced commit keeps its original message. Tags and
-  notes are not moved. If the remote does not move, local branches are left as they stood.
-  The previous objects remain until collected. Bare `saw fix` still only cleans the tip.
+  notes are not moved. If a remote branch cannot be read, nothing is force-updated. If the
+  remote does not move, local branches are left as they stood. The previous objects remain
+  until collected. Bare `saw fix` still only cleans the tip.
 
 ### Fixed
 - **`saw fix --pr` publishes the cleanup branch; it does not overwrite a remote ref.** A

@@ -247,6 +247,34 @@ class TestPushBranch(unittest.TestCase):
         args = seen[0]
         self.assertTrue(any(a.startswith("--force-with-lease=refs/heads/main:") for a in args))
         self.assertEqual(args[-1], "main:refs/heads/main")
+        self.assertNotIn("--force", args)
+
+    def test_force_update_head_without_a_lease_does_not_push(self):
+        seen = []
+
+        def fake_run(repo, args, **kw):
+            seen.append(list(args))
+            class R:
+                returncode = 0
+                stdout = ""
+                stderr = ""
+            return R()
+
+        from stayawake.lib.git.write import push as gitpush
+        with mock.patch.object(gitpush, "run", fake_run):
+            res = gitpush.force_update_head("/tmp/r", "acme/app", "main", "tok", lease="")
+        self.assertFalse(res.ok)
+        self.assertEqual(seen, [])
+
+    def test_publish_head_does_not_force(self):
+        def go(gitpush):
+            res = gitpush.publish_head("/tmp/r", "acme/app", "also", "tok")
+            self.assertTrue(res.ok)
+
+        seen = self._capture(go)
+        args = seen[0]
+        self.assertTrue(all(not a.startswith("--force") for a in args))
+        self.assertEqual(args[-1], "also:refs/heads/also")
 
 
 if __name__ == "__main__":

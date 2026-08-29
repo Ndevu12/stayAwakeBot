@@ -43,7 +43,8 @@ maintainer rather than working around it.
 installed tree in this repository; `fix amend` is a subverb of `fix` — it replaces past
 commits the payload has already propagated into and force-updates those branches; the replaced
 commit keeps its original message; it is not a merge-specific command, it does not open a
-pull request, and it does not take `--branch`) · `discard` · `audit` (+ `--verify` content-scans a non-repo
+pull request, and it does not take `--branch`; if a remote branch cannot be read, nothing is
+force-updated) · `discard` · `audit` (+ `--verify` content-scans a non-repo
 suspect dir; + credential/dependency hygiene) · `harden` (host denials; in place only after a
 read-back; never a project's tree) · `db` (offline advisory corpus) · `guard`
 (install/verify the CI gate) · `search` · `intro` · `doctor` · `completion`.

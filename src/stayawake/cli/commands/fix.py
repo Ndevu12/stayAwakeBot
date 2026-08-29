@@ -30,7 +30,8 @@ def register(sub) -> None:
             "`saw fix amend` replaces past commits that still carry the payload and "
             "force-updates each branch they sat on. The replaced commit keeps its "
             "original message. It does not open a pull request and it does not take "
-            "`--branch`. Bare `saw fix` still only prepares a cleanup branch. "
+            "`--branch`. If a remote branch cannot be read, nothing is force-updated. "
+            "Bare `saw fix` still only prepares a cleanup branch. "
             "`saw discard` is the inverse of the branch/PR path."),
         examples=[
             ("saw fix", "prepare a branch per infected local repo"),
