@@ -237,26 +237,6 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
                         blob = gitutil.clean_merge_blob(wt, sha, rp)
                         if blob is not None:
                             merge_clean[rp] = blob
-            for f in findings:
-                sha = _merge_sha(f)
-                if not sha:
-                    continue
-                conf = getattr(f, "confidence", None)
-                for rp in getattr(f, "related_paths", ()):
-                    if rp in seen_cl:
-                        continue
-                    if introduced_liveness(wt, sha, rp) != PRESENT:
-                        continue
-                    seen_cl.add(rp)
-                    disp = remediation.classify_recovery(
-                        wt, _AtPath(f, rp), content_sig, merge_clean=merge_clean.get(rp))
-                    if conf == CONFIRMED and isinstance(disp, remediation.Recovery) and \
-                            remediation.apply_recovery(wt, disp, quarantine, content_sig):
-                        applied.append(remediation.Change("recover", disp.path, disp.label))
-                    elif isinstance(disp, remediation.Suggested):
-                        suggested.append(disp)
-                    elif isinstance(disp, remediation.Manual):
-                        manual_reviews[rp] = disp
             def _corroborated(f) -> bool:
                 return (getattr(f, "category", None) == "code-loader"
                         and getattr(f, "confidence", None) == CONFIRMED)
@@ -288,6 +268,27 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
                     suggested.append(disp)
                 elif isinstance(disp, remediation.Manual):
                     manual_reviews[disp.path] = disp
+            for f in findings:
+                sha = _merge_sha(f)
+                if not sha:
+                    continue
+                conf = getattr(f, "confidence", None)
+                for rp in getattr(f, "related_paths", ()):
+                    if rp in seen_cl:
+                        continue
+                    if introduced_liveness(wt, sha, rp) != PRESENT:
+                        continue
+                    disp = remediation.classify_recovery(
+                        wt, _AtPath(f, rp), content_sig, merge_clean=merge_clean.get(rp))
+                    if conf == CONFIRMED and isinstance(disp, remediation.Recovery) and \
+                            remediation.apply_recovery(wt, disp, quarantine, content_sig):
+                        seen_cl.add(rp)
+                        applied.append(remediation.Change("recover", disp.path, disp.label))
+                    elif isinstance(disp, remediation.Suggested):
+                        seen_cl.add(rp)
+                        suggested.append(disp)
+                    elif isinstance(disp, remediation.Manual):
+                        manual_reviews[rp] = disp
 
             rescan = _scan()
             auto = []

@@ -337,6 +337,43 @@ class TestPartialFix(unittest.TestCase):
         self.assertIn("96dcbd397c", body)
         self.assertIn("never rewrites history", body)
 
+    def test_failed_merge_restore_does_not_block_file_recovery(self):
+        # A live merge file that cannot be restored from the merge must not prevent a
+        # first-parent recovery of the same path (the file is also a code-loader finding).
+        from stayawake.lib.git.merge.liveness import PRESENT
+        loader = Finding("x", "code-loader", Severity.CRITICAL, "tailwind.config.js",
+                         "loader", remediation="strip-appended-payload")
+        merge_manual = pr.remediation.Manual(
+            "tailwind.config.js", "evil-merge-loader", "born-infected", "no merge parent")
+        rec = pr.remediation.Recovery(
+            "tailwind.config.js", "abc1234", "clean", "diff", "clean\n")
+
+        def classify(_wt, finding, *_a, **_k):
+            if getattr(finding, "vector", None) == "evil-merge":
+                return merge_manual
+            return rec
+
+        infected = ScanResult("owner/repo", "local", [self._EVIL_MERGE, loader])
+        with _patch_git(), \
+             mock.patch.object(pr.fix, "scan_target", return_value=infected), \
+             mock.patch.object(pr.fix, "introduced_liveness", return_value=PRESENT), \
+             mock.patch.object(pr.remediation, "plan", return_value=[]), \
+             mock.patch.object(pr.remediation, "apply", return_value=[]), \
+             mock.patch.object(pr.remediation, "quarantine_residual", return_value=[]), \
+             mock.patch.object(pr.remediation, "classify_recovery", side_effect=classify), \
+             mock.patch.object(pr.remediation, "apply_recovery", return_value=True) as recover, \
+             mock.patch.object(pr.github_api, "list_open_pulls", return_value=[]), \
+             mock.patch.object(pr.github_api, "add_labels"), \
+             mock.patch.object(pr.github_api, "remove_label"), \
+             mock.patch.object(pr.github_api, "list_open_issues", return_value=[]), \
+             mock.patch.object(pr.github_api, "create_issue",
+                               return_value={"number": 9, "html_url": "iu"}), \
+             mock.patch.object(pr.github_api, "create_pull",
+                               return_value={"number": 55, "html_url": "u"}):
+            pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t")
+        recover.assert_called_once()
+        self.assertEqual(recover.call_args.args[1].path, "tailwind.config.js")
+
     def test_nothing_fixable_dedups_issue(self):
         # A re-run with an existing open issue must not open a duplicate (idempotent notify).
         with _patch_git(), \
