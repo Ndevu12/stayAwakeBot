@@ -70,6 +70,33 @@ class TestRunContract(unittest.TestCase):
                 apply=lambda path: denial.PathOutcome(path, denial.ENFORCING, "in place"))
         self.assertEqual(code, 0)
 
+    def test_a_run_that_denied_nothing_does_not_claim_it_did(self):
+        p = Path("/usr/local/lib/node")
+        code, text = harden.run(
+            supported=lambda: True, privileged=lambda: True, live=lambda: [],
+            folders=lambda: [p],
+            apply=lambda path: denial.PathOutcome(path, denial.OCCUPIED,
+                                                  "already had something in it, so it was not changed"))
+        self.assertEqual(code, 3)
+        self.assertNotIn("is denied", text)
+        self.assertIn("NOT in place", text)
+        self.assertIn("do not rotate", text.lower())
+        self.assertIn("inspect", text.lower())
+
+    def test_one_denied_among_untouched_does_not_claim_the_host(self):
+        a, b = Path("/a"), Path("/b")
+        def apply(path):
+            if path == a:
+                return denial.PathOutcome(path, denial.ENFORCING, "in place")
+            return denial.PathOutcome(path, denial.OCCUPIED,
+                                      "already had something in it, so it was not changed")
+        code, text = harden.run(
+            supported=lambda: True, privileged=lambda: True, live=lambda: [],
+            folders=lambda: [a, b], apply=apply)
+        self.assertEqual(code, 3)
+        self.assertNotIn("is denied", text)
+        self.assertIn("NOT in place", text)
+
     def test_enforcing_only_when_every_target_reads_back(self):
         p = Path("/denial")
         code, text = harden.run(
@@ -348,7 +375,7 @@ class TestAuditDoesNotTreatADenialAsADrop(unittest.TestCase):
              mock.patch.object(host_artifacts, "_sideloaded_python_dir", lambda *_a, **_k: None), \
              mock.patch.object(host_artifacts, "_staged_secret_scanner", lambda *_a, **_k: None), \
              mock.patch.object(host_artifacts, "_distinct_dirs", lambda paths: []):
-            strong, weak, unread = host_artifacts._host_artifacts()
+            strong, weak, unread, _controlled = host_artifacts._host_artifacts()
         self.assertEqual(strong, [])
         self.assertEqual(weak, [])
         self.assertEqual(unread, [])
@@ -364,10 +391,48 @@ class TestAuditDoesNotTreatADenialAsADrop(unittest.TestCase):
              mock.patch.object(host_artifacts, "_sideloaded_python_dir", lambda *_a, **_k: None), \
              mock.patch.object(host_artifacts, "_staged_secret_scanner", lambda *_a, **_k: None), \
              mock.patch.object(host_artifacts, "_distinct_dirs", lambda paths: []):
-            strong, weak, unread = host_artifacts._host_artifacts()
+            strong, weak, unread, _controlled = host_artifacts._host_artifacts()
         self.assertTrue(any(str(fake) in item[0] for item in weak), weak)
         self.assertEqual(strong, [])
         self.assertEqual(unread, [])
+
+
+class TestAControlDoesNotMakeTheHostReadSafer(unittest.TestCase):
+    """Applying the control removes the location it covers from the audit's evidence. A host whose
+    remaining location still carries a tree must not come out of the rotation gate because of it."""
+
+    def _grade(self, locations, holding):
+        from stayawake.bots.security.hygiene import host_artifacts
+        with mock.patch.object(host_artifacts, "_global_folders", return_value=locations), \
+             mock.patch.object(hostdenial, "holds", lambda p: p in holding), \
+             mock.patch.object(host_artifacts, "_host_user_tag", return_value=None), \
+             mock.patch.object(host_artifacts, "_sideloaded_python_dir", lambda *_a, **_k: None), \
+             mock.patch.object(host_artifacts, "_staged_secret_scanner", lambda *_a, **_k: None), \
+             mock.patch.object(host_artifacts, "_distinct_dirs", lambda paths: []):
+            return host_artifacts.check_host_artifacts()
+
+    def setUp(self):
+        self.d = Path(tempfile.mkdtemp(prefix="control-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.d, ignore_errors=True))
+        self.covered = self.d / "covered"
+        self.covered.mkdir()
+        self.left = self.d / "left"
+        (self.left / "pkg").mkdir(parents=True)
+
+    def test_rotation_stays_unsafe_when_a_location_was_left_as_it_stood(self):
+        from stayawake.bots.security.hygiene.models import ROTATION_UNSAFE_IDS, rotation_safety
+        before = {i.id for i in self._grade([self.covered, self.left], holding=set())}
+        self.assertTrue(before & ROTATION_UNSAFE_IDS, before)
+        after = self._grade([self.covered, self.left], holding={self.covered})
+        ids = {i.id for i in after}
+        self.assertTrue(ids & ROTATION_UNSAFE_IDS, ids)
+        self.assertNotEqual(rotation_safety(ids), "safe")
+        self.assertEqual([i.severity for i in after], ["warning"])
+        self.assertIn(str(self.left), after[0].detail)
+        self.assertIn("do not rotate", after[0].remediation.lower())
+
+    def test_a_fully_controlled_host_reports_nothing(self):
+        self.assertEqual(self._grade([self.covered], holding={self.covered}), [])
 
 
 if __name__ == "__main__":

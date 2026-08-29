@@ -121,13 +121,15 @@ def _staged_secret_scanner(dirs, unread: list[Path]) -> Path | None:
     return None
 
 
-def _host_artifacts() -> tuple[list[str], list[tuple[str, Path, str]], list[Path]]:
-    """Return (strong, weak, unread). `weak` are (description, path, kind) triples."""
+def _host_artifacts() -> tuple[list[str], list[tuple[str, Path, str]], list[Path], list[Path]]:
+    """Return (strong, weak, unread, controlled). `weak` are (description, path, kind) triples;
+    `controlled` are the locations a host control already holds."""
     home = Path.home()
     tmp_dirs = _distinct_dirs([Path("/tmp"), Path(tempfile.gettempdir())])
     strong: list[str] = []
     weak: list[tuple[str, Path, str]] = []
     unread: list[Path] = []
+    controlled: list[Path] = []
 
     def _present(p: Path) -> bool:
         if _unreadable(unread, p):
@@ -161,6 +163,7 @@ def _host_artifacts() -> tuple[list[str], list[tuple[str, Path, str]], list[Path
     # root-only location the user-level worm model can dismiss.
     for location in _global_folders():
         if hostdenial.holds(location):
+            controlled.append(location)
             continue
         if _present_dir(location):
             weak.append((f"{location} (a node module tree in a global resolution path — "
@@ -184,7 +187,7 @@ def _host_artifacts() -> tuple[list[str], list[tuple[str, Path, str]], list[Path
     scanner = _staged_secret_scanner((home / ".cache", home / ".npm", *tmp_dirs), unread)
     if scanner is not None:
         strong.append(f"{scanner} (staged secret-scanner binary)")
-    return strong, weak, unread
+    return strong, weak, unread, controlled
 
 
 
@@ -238,6 +241,24 @@ def _corroborated_issue(found: list[str], *, active: bool) -> HygieneIssue:
     )
 
 
+def _outside_a_control_issue(found: list[str]) -> HygieneIssue:
+    """A lone indicator that keeps its grade when a control covers a sibling location.
+
+    Applying a control removes the location it covers from this evidence, which on its own would
+    make a host with one remaining artifact read more safely after the control than before it. The
+    remaining location is the one the control did not cover, and that is what it says."""
+    return HygieneIssue(
+        id="host-drop-artifact-outside-a-control",
+        severity="warning",
+        title="A global resolution path on this host was left outside a control that covers another",
+        detail="Found: " + "; ".join(found) + ". Another global resolution path on this host is "
+               "already under a control, so this is a location that control did not cover and "
+               "whatever is in it was left as it stood.",
+        remediation="Inspect it before trusting it, and do NOT rotate any credential yet — "
+                    f"{_WIPER_NOTE}.",
+    )
+
+
 def _escalate_with_scan(issue: HygieneIssue, weak: list[tuple[str, Path, str]]) -> HygieneIssue:
     """Content-scan every corroborated candidate; markers may only ESCALATE.
 
@@ -271,7 +292,7 @@ def check_host_artifacts(verify: bool = False) -> list[HygieneIssue]:
     `verify=True` (the `saw audit --verify` opt-in) content-scans a lone weak *directory*
     to turn it into an actual verdict: CONFIRMED worm markers inside → `warning`; scanned
     clean → a reassuring `info`; too large / unreadable → the same honest 'verify it yourself'."""
-    strong, weak, unread = _host_artifacts()
+    strong, weak, unread, controlled = _host_artifacts()
     weak_descs = [desc for desc, _, _ in weak]
     found = strong + weak_descs
     extra = [could_not_read(dict.fromkeys(unread))] if unread else []
@@ -282,6 +303,11 @@ def check_host_artifacts(verify: bool = False) -> list[HygieneIssue]:
     if corroborated:
         active = bool(strong) or len(_toolchains_represented(weak)) >= 2
         issue = _corroborated_issue(found, active=active)
+        if verify:
+            issue = _escalate_with_scan(issue, weak)
+        return [issue] + extra
+    if controlled:
+        issue = _outside_a_control_issue(found)
         if verify:
             issue = _escalate_with_scan(issue, weak)
         return [issue] + extra

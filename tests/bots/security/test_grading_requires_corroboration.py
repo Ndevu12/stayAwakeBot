@@ -83,7 +83,7 @@ class TestAnAbortedScanNeverEscapes(unittest.TestCase):
         def boom(_item):
             raise KeyboardInterrupt("boom")
         weak = [("a", Path(tempfile.mkdtemp()), host_artifacts.KIND_GLOBAL_FOLDER)]
-        with mock.patch.object(host_artifacts, "_host_artifacts", return_value=([], weak, [])), \
+        with mock.patch.object(host_artifacts, "_host_artifacts", return_value=([], weak, [], [])), \
              mock.patch.object(host_artifacts, "_verify_weak_artifact", boom):
             self.assertEqual([i.id for i in host_artifacts.check_host_artifacts(verify=True)],
                              ["host-drop-artifact-weak"])
@@ -111,7 +111,7 @@ class TestCorroborationSeparatesIndicatorsByWhatMadeThem(unittest.TestCase):
 
     def _ids(self, *kinds):
         with mock.patch.object(host_artifacts, "_host_artifacts",
-                               return_value=([], self._weak(*kinds), [])):
+                               return_value=([], self._weak(*kinds), [], [])):
             return [i.id for i in host_artifacts.check_host_artifacts()]
 
     def test_two_artifacts_of_one_toolchain_do_not_claim_a_live_implant(self):
@@ -137,7 +137,7 @@ class TestCorroborationSeparatesIndicatorsByWhatMadeThem(unittest.TestCase):
 
     def test_the_staging_tier_still_holds_rotation(self):
         with mock.patch.object(host_artifacts, "_host_artifacts", return_value=(
-                [], self._weak(host_artifacts.KIND_GLOBAL_FOLDER, host_artifacts.KIND_NPM_CACHE), [])):
+                [], self._weak(host_artifacts.KIND_GLOBAL_FOLDER, host_artifacts.KIND_NPM_CACHE), [], [])):
             issue = host_artifacts.check_host_artifacts()[0]
         self.assertIn(issue.id, ROTATION_UNSAFE_IDS)
         self.assertIn("do NOT rotate", issue.remediation)

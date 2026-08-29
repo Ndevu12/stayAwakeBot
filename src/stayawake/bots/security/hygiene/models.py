@@ -60,7 +60,8 @@ ACTIVE_PERSISTENCE_IDS = {"self-hosted-runner-persistence", "os-service-persiste
                           "git-fsmonitor-command", "git-hookspath-unsafe", "git-config-fetch-exec",
                           "autorun-unattributed-foothold"}
 
-UNCONFIRMED_STAGING_IDS = {"host-drop-artifacts-staging"}
+UNCONFIRMED_STAGING_IDS = {"host-drop-artifacts-staging",
+                           "host-drop-artifact-outside-a-control"}
 
 CREDENTIAL_EXPOSURE_IDS = {"git-credentials-plaintext"}
 

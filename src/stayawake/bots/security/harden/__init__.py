@@ -26,6 +26,11 @@ _CLAIM = (
     "The observed staging path is denied. A payload that guards the write and uses "
     "the runtime's built-in transport is unaffected."
 )
+_NOT_EVERYWHERE = (
+    "This control is NOT in place. Any location below that it did not take was left exactly as it "
+    "stood — this command removes nothing — so inspect each one yourself and do NOT rotate any "
+    "credential until you have."
+)
 
 
 def run(*, live=check_live_processes, folders=_global_folders,
@@ -43,10 +48,9 @@ def run(*, live=check_live_processes, folders=_global_folders,
         return 1, _REFUSED_LIVE
 
     outcomes = [apply(p) for p in folders()]
-    lines = [_CLAIM, ""]
+    applied = bool(outcomes) and all(o.state == ENFORCING for o in outcomes)
+    lines = [_CLAIM if applied else _NOT_EVERYWHERE, ""]
     for o in outcomes:
         lines.append(f"  {o.state}: {o.path} — {o.detail}")
     body = "\n".join(lines).rstrip()
-    if outcomes and all(o.state == ENFORCING for o in outcomes):
-        return 0, body
-    return 3, body
+    return (0, body) if applied else (3, body)
