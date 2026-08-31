@@ -13,6 +13,7 @@ from stayawake.core.identity.capabilities import Capability
 class Intent(str, Enum):
     READ_REMOTE = "read_remote"
     OPEN_FIX_PR = "open_fix_pr"
+    AMEND_REFS = "amend_refs"
     OPEN_GUARD_PR = "open_guard_pr"
     WRITE_ISSUES = "write_issues"
     READ_ADMIN = "read_admin"
@@ -23,6 +24,7 @@ _REQUIREMENTS: dict[Intent, frozenset[Capability]] = {
     Intent.OPEN_FIX_PR: frozenset({
         Capability.CONTENTS_WRITE, Capability.PULL_REQUESTS_WRITE,
     }),
+    Intent.AMEND_REFS: frozenset({Capability.CONTENTS_WRITE}),
     Intent.OPEN_GUARD_PR: frozenset({
         Capability.CONTENTS_WRITE, Capability.PULL_REQUESTS_WRITE,
         Capability.WORKFLOWS_WRITE,

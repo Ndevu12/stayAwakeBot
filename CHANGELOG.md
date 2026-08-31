@@ -13,7 +13,37 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Added
+- **`saw fix amend` replaces past commits that still carry the payload and force-updates
+  each branch they sat on.** That force-update is the fix. It does not open a pull request
+  and it does not take `--branch`. The replaced commit keeps its original message. Tags and
+  notes are not moved. If a remote branch cannot be read, nothing is force-updated. If the
+  remote does not move, local branches are left as they stood. The previous objects remain
+  until collected. Bare `saw fix` still only cleans the tip.
+
+  It refuses before anything moves when the credential may not rewrite that repository, when the
+  remote branches cannot be refreshed, when the repository is set to sign commits and no signature
+  can be made, when the replacement would drop content the finding does not cover, or when the
+  previous commits cannot be captured first. A protected branch is never force-updated: the
+  amended history is published beside it under its own name and a person opens the pull request,
+  and a protection rule that cannot be read is treated the same way. A replacement that changes
+  commits it should not have is put back rather than pushed, and a branch that is moved and cannot
+  be put back is reported as exactly that. There is no account-wide form: each repository is
+  named, and a named path that does not exist is an error rather than a wider sweep.
+
+  Signed history stays signed. Whether the replacement and the replayed commits are signed
+  follows the commits being replaced, not only this clone's settings, so history signed elsewhere
+  — by a merge made on the web, or on a machine that is not this one — is not quietly replaced
+  with unsigned commits. A repository that needs a signature and cannot produce one refuses.
+
+  A clone that does not have everything its remote branch has is refused rather than
+  force-updated, so commits that exist only on the remote are not deleted unseen. Forks are
+  counted rather than assumed. A run that examined no repository is not reported as success.
+
 ### Fixed
+- **`saw fix --pr` publishes the cleanup branch; it does not overwrite a remote ref.** A
+  branch that is not fast-forwardable is refused, not force-updated. `saw fix amend` is the
+  act that force-updates.
 - **`saw fix` no longer reports a working tree as clean when a merge finding is still live in it.**
   Files that still carry the payload are restored on the review branch. The merge commit stays;
   `saw fix` still never rewrites history. If it cannot tell whether those files still carry it,

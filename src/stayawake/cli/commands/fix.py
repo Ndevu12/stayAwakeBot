@@ -10,6 +10,7 @@ own repos), cloning each. Scope is LOCAL by default. Each repo's outcome streams
 from __future__ import annotations
 
 import argparse
+import sys
 
 from stayawake.bots.security import remediator
 from stayawake.cli.argtypes import add_jobs_arg
@@ -26,13 +27,20 @@ def register(sub) -> None:
             "network. Source changes land on that branch. On a confirmed infection it also removes "
             "the installed tree, generated build outputs, and lockfile in this repository. "
             "Heuristic-only findings are disclosed for review, never auto-touched. "
-            "`saw discard` is the inverse."),
+            "`saw fix amend` replaces past commits that still carry the payload and "
+            "force-updates each branch they sat on. The replaced commit keeps its "
+            "original message. It does not open a pull request and it does not take "
+            "`--branch`. If a remote branch cannot be read, nothing is force-updated. "
+            "Bare `saw fix` still only prepares a cleanup branch. "
+            "`saw discard` is the inverse of the branch/PR path."),
         examples=[
             ("saw fix", "prepare a branch per infected local repo"),
             ("saw fix .", "just this repo; review the diff, then push"),
             ("saw fix --pr", "also push + open/update one rolling PR"),
             ("saw fix --remote", "sweep the configured GitHub targets"),
             ("saw fix --branch develop", "fix a branch other than the default"),
+            ("saw fix amend", "force-update branches that still carry it"),
+            ("saw fix amend --remote", "clone GitHub targets, replace, force-update"),
         ])
     p.add_argument("paths", nargs="*", metavar="TARGETS",
                    help="local repo/dir paths — or, with --remote, owner/repo slugs. "
@@ -65,6 +73,22 @@ def register(sub) -> None:
 
 def run(a: argparse.Namespace) -> int:
     positionals = [*a.paths, *a.extra_paths]
+    if positionals[:1] == ["amend"]:
+        if a.pr:
+            print("saw fix amend does not open a pull request", file=sys.stderr)
+            return 2
+        if a.branch:
+            print("saw fix amend does not take --branch", file=sys.stderr)
+            return 2
+        if a.user or a.org:
+            print("saw fix amend does not take --user or --org; name each repository with "
+                  "--remote owner/name", file=sys.stderr)
+            return 2
+        rest = positionals[1:] or None
+        return remediator.amend(a.config, paths=None if a.remote else rest,
+                                remote=a.remote,
+                                slugs=(rest or None) if a.remote else None,
+                                no_stream=a.no_stream, jobs=a.jobs)
     remote = a.remote or bool(a.user) or bool(a.org)
     return remediator.fix(a.config, pr=a.pr, remote=remote,
                           paths=None if remote else (positionals or None),

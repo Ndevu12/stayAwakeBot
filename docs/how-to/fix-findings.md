@@ -14,6 +14,8 @@ saw fix .                  # prepare security/auto-clean for this repository —
 git diff main...security/auto-clean
 saw fix --pr               # also push and open (or update) one rolling PR per repository
 saw fix --remote           # sweep GitHub targets: clone, fix, PR
+saw fix amend              # replace past commits and force-update those branches
+saw fix amend --remote     # clone GitHub targets, replace, force-update
 ```
 
 Re-running updates the same PR rather than opening another.
@@ -25,11 +27,10 @@ file is quarantined whole. `saw` never surgically edits a source file, so a fix 
 code. Where a clean version cannot be proven safe to restore, the finding is **deferred to review**
 with the exact reason and the command to inspect it. When a merge finding is still live in the
 working tree, those files are restored on the review branch; the merge commit itself is left in
-place.
-
-Heuristic (`suspicious`) findings are **never auto-fixed**. A repository with only heuristic findings
-is disclosed and deferred, never reported "already clean". See [the safety
-envelope](../explanation/safety-envelope.md).
+place. `saw fix amend` is for payload that propagated into past commits, not for the working
+tree alone. It replaces those commits and force-updates each branch they sat on. That
+force-update is the fix. It does not open a pull request, and it does not move tags. The
+previous objects remain until collected.
 
 Heuristic (`suspicious`) findings are **never auto-fixed**. A repository with only heuristic findings
 is disclosed and deferred, never reported "already clean". See [the safety
@@ -54,14 +55,12 @@ saw discard --pr           # close the auto-clean PR, keep the branch
 
 `saw discard` only ever touches the generated `security/auto-clean` branch.
 
-## The fix cleans the tree, not the history
+## The tree and the history are different acts
 
-A fix is a forward commit: it changes what the files contain now. It does **not** rewrite history,
-and it never will — a rewrite invalidates every fork, open pull request, existing clone and tag.
-
-So after a merged fix the payload is gone from the working tree and from anything a clone, a build
-or CI will run, but an earlier commit still holds it. A run that finds the payload still in the
-files now restores those files on the branch; it does not claim the tree is already clean.
+Bare `saw fix` is a forward commit: it changes what the files contain now. After it, the payload
+is gone from the working tree and from anything a clone, a build or CI will run, but an earlier
+commit can still hold it. A run that finds the payload still in the files now restores those
+files on the branch; it does not claim the tree is already clean.
 
 ```bash
 saw scan .                       # clean
@@ -71,10 +70,11 @@ git show HEAD~1:postcss.config.mjs   # still returns the old contents
 That is residue, not execution — nothing runs it on clone or build. `saw scan` says so in its
 coverage notes rather than letting `clean` imply the repository has no trace of it.
 
-Removing the residue is a separate decision that is yours to make: it needs a history rewrite
-(`git filter-repo`), a force-push of every affected branch, and a request to your hosting provider
-to garbage-collect the unreachable objects — a force-push alone does not delete them. Forks keep
-their own copies regardless.
+`saw fix amend` is the history act. It replaces past commits the payload has already propagated
+into and force-updates each branch they sat on. That force-update is the fix. The replaced
+commit keeps its original message. It does not open a pull request, it does not take
+`--branch`, it does not move tags, and it does not clear forks or objects the hosting
+platform still serves. If a remote branch cannot be read, nothing is force-updated.
 
 ## Never on the host
 

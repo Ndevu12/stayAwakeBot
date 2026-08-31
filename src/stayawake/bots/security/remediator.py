@@ -64,6 +64,17 @@ def _safe(fn, display: str) -> str:
         return f"{display}: error — {exc}"
 
 
+def _amend_outcome(fn, display: str) -> FixOutcome:
+    """One repo's amend, as a structure. `needs_review` comes from the act itself rather than from
+    reading its own sentence back, and an exception is never a clean result."""
+    from stayawake.bots.security.pr.outcome import render_amend_line
+    try:
+        outcome = fn()
+    except Exception as exc:  # noqa: BLE001 — isolate a single repo, keep the run going
+        return FixOutcome(f"{display}: error — {exc}", needs_review=True)
+    return FixOutcome(render_amend_line(outcome), outcome.needs_review)
+
+
 def _preflight(token: str | None, intent=None) -> str | None:
     """Authorize BEFORE any push/close via core.identity — never start privileged work on a
     dead/under-scoped credential. Returns an error message, or None when good to go."""
@@ -235,7 +246,7 @@ def _fix_remote(cfg, opts, sigs, allowlist, prog: Streamer, *,
         prog.line(REMOTE_EMPTY_HINT)
         return []
     prog.line(f"Sweeping {len(resolved)} GitHub repositor{'y' if len(resolved) == 1 else 'ies'} "
-              f"({_remote_scope(cfg, users, orgs, slugs)})…")
+              f"({_remote_scope(cfg, None, None, slugs)})…")
 
     def make_outcome(slug, *, spin):
         tok, aerr = auth.act_token(token, source, slug)
@@ -251,6 +262,112 @@ def _fix_remote(cfg, opts, sigs, allowlist, prog: Streamer, *,
                                                             spin=spin), slug)
 
     return _run_fix_sweep(resolved, list(resolved), make_outcome, prog, jobs=jobs, verb="Fixing")
+
+
+def amend(config_path: str | None = None, *, paths: list[str] | None = None,
+          remote: bool = False, slugs: list[str] | None = None,
+          no_stream: bool = False, jobs=None) -> int:
+    """`saw fix amend`: replace past commits that still carry the payload and force-update
+    each branch they sat on. `--remote` clones the named GitHub targets and does the same.
+    Never `--pr`. A local rewrite that does not update the remote is not a fix.
+
+    There is deliberately no account-wide form. `--user`/`--org` resolve their target list at run
+    time, so the operator names a set whose members they have not seen; that is acceptable for a
+    scan and not for a verb that force-updates branches. Each repository is named.
+    """
+    cfg = _resolve_config(config_path, targets=None if remote else paths)
+    if cfg is None:
+        return 2
+    settings = cfg.get("settings", {})
+    opts = _options(settings)
+    sigs = load_signatures(settings.get("signatures_path"))
+    allowlist = cfg.get("allowlist", [])
+    prog = Streamer(enabled=stream_enabled(sys.stderr, force_off=no_stream), out=sys.stderr)
+    prog.line(f"Security amend — {now_iso()}")
+    prog.line("")
+    if remote:
+        outcomes = _amend_remote(cfg, opts, sigs, allowlist, prog, slugs=slugs, jobs=jobs)
+    else:
+        outcomes = _amend_local(cfg, opts, sigs, allowlist, paths, prog, jobs=jobs)
+    if not outcomes:
+        # Nothing was examined. The four paths that reach here — a denied preflight, a malformed
+        # slug, an empty resolution, a named path that matched no repository — all printed an
+        # error and did no work; reporting success would let a CI gate read "no credential" as
+        # "no payload".
+        return 2
+    needs_review = sum(1 for o in outcomes if o.needs_review)
+    n = len(outcomes)
+    plural = "y" if n == 1 else "ies"
+    prog.line(f"\nProcessed {n} repositor{plural}"
+              + (f"; {needs_review} need review." if needs_review else "."))
+    return 1 if needs_review else 0
+
+
+
+
+
+def _amend_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *,
+                 jobs=None) -> list[FixOutcome]:
+    token, source = auth.resolve_token()
+    # A named path that does not exist falls back to its PARENT during discovery, which turns one
+    # typo into every repository beside the intended one. Harmless for a scan; this verb
+    # force-updates branches, so a path it cannot find is an error rather than a wider sweep.
+    missing = sorted(p for p in (paths or [])
+                     if not any(c in p for c in "*?[")
+                     and not Path(p).expanduser().exists())
+    if missing:
+        prog.line(f"error: no such path: {', '.join(missing)}")
+        return []
+    repos = _local_repos(cfg, opts, paths)
+    if not repos:
+        prog.line("No repositories to amend.")
+        return []
+    prog.line(f"Amending {len(repos)} repositor{'y' if len(repos) == 1 else 'ies'}…")
+
+    def make_outcome(repo, *, spin):
+        display = _disp(repo)
+        tok, aerr = auth.act_token(token, source, gitutil.origin_slug(repo))
+        if aerr:
+            tok = None
+        from stayawake.bots.security.pr.amend import amend_outcome
+        return _amend_outcome(lambda r=repo, t=tok: amend_outcome(
+            r, display, opts, sigs, allowlist, t), display)
+
+    labels = [_disp(r) for r in repos]
+    return _run_fix_sweep(repos, labels, make_outcome, prog, jobs=jobs, verb="Amending")
+
+
+def _amend_remote(cfg, opts, sigs, allowlist, prog: Streamer, *,
+                  slugs=None, jobs=None) -> list[FixOutcome]:
+    bad = invalid_slugs(slugs)
+    if bad:
+        prog.line(f"error: --remote targets must be owner/repo slugs; got {bad}")
+        return []
+    resolved, token, source = _resolve_remote(cfg, opts, slugs=slugs)
+    from stayawake.core.identity import Intent
+    err = _preflight(token, intent=Intent.AMEND_REFS)
+    if err:
+        prog.line(err)
+        return []
+    if not resolved:
+        prog.line(REMOTE_EMPTY_HINT)
+        return []
+    prog.line(f"Sweeping {len(resolved)} GitHub repositor{'y' if len(resolved) == 1 else 'ies'} "
+              f"({_remote_scope(cfg, None, None, slugs)})…")
+
+    def make_outcome(slug, *, spin):
+        tok, aerr = auth.act_token(token, source, slug)
+        if aerr:
+            return FixOutcome(f"{slug}: {aerr}", needs_review=True)
+        with status(f"cloning {slug}…", enabled=spin), \
+                resolution.cloned_repo(slug, tok, depth=None) as clone:
+            if clone is None:
+                return FixOutcome(f"{slug}: clone failed (check token access)", needs_review=True)
+            from stayawake.bots.security.pr.amend import amend_outcome
+            return _amend_outcome(lambda c=clone, t=tok: amend_outcome(
+                c, slug, opts, sigs, allowlist, t), slug)
+
+    return _run_fix_sweep(resolved, list(resolved), make_outcome, prog, jobs=jobs, verb="Amending")
 
 
 def fix(config_path: str | None = None, *, pr: bool = False, remote: bool = False,

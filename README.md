@@ -26,7 +26,7 @@ A CI gate is one line: run `saw scan`.
 | | |
 | --- | --- |
 | **Detect** | `saw scan` — repositories, lockfiles and installed dependency trees. Read-only, always. |
-| **Remediate** | `saw fix` — prepares a cleanup branch per infected repo, `--pr` to publish. Never rewrites history; `saw discard` undoes it. |
+| **Remediate** | `saw fix` — prepares a cleanup branch per infected repo, `--pr` to publish. `saw fix amend` replaces past commits that still carry the payload and force-updates those branches. `saw discard` undoes the branch/PR path. |
 | **Prevent** | `saw guard` — install and verify the CI gate on any repo. `saw hook` — scan on clone and pull, *before* you install or build. |
 | **Audit** | `saw audit` — host hygiene and branch-protection posture, stating plainly what it did **not** examine. |
 | **Harden** | `saw harden` — create host denials; in place only after a read-back. Never a project's tree. |

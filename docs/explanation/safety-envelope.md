@@ -17,13 +17,20 @@ verdict. Remediation lives in a separate command, on purpose — so no one can t
 
 `saw fix` prepares the cleanup on a generated `security/auto-clean` branch and stops. Source changes
 land on that branch. It does not push or open anything unless you pass `--pr`, and re-running updates
-the same rolling pull request instead of opening another. On a confirmed infection it also removes
+the same rolling pull request instead of opening another. That publish does not overwrite a remote
+ref. On a confirmed infection it also removes
 the installed tree, generated build outputs, and the lockfile in this repository (the lockfile is
 kept on CI). `saw discard` removes only that branch and that PR — never a branch you made.
 
-Nothing lands without a human merge. The CI gate follows the same rule: on an infected verdict it
-opens the fix as a pull request and stays **red until you merge it**. Remediation opens the fix; it
-never makes the check pass.
+`saw fix amend` is a separate act: it replaces past commits that still carry the payload and
+force-updates each branch they sat on. That force-update is the fix. It does not open a pull
+request, it does not take `--branch`, it does not move tags, and `saw discard` does not undo it.
+If a remote branch cannot be read, nothing is force-updated. The previous objects remain until
+collected.
+
+Nothing lands on a protected branch without a human merge. The CI gate follows the same rule: on an
+infected verdict it opens the fix as a pull request and stays **red until you merge it**. Remediation
+opens the fix; it never makes the check pass. `saw fix amend` is not on that path.
 
 ## Fixes are recovered, not reconstructed
 

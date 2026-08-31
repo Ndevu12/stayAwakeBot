@@ -7,6 +7,7 @@ from unittest import mock
 
 from stayawake.core.identity import (
     Capability, Intent, classify_push_stderr, push_failure_message, require,
+    requirements,
 )
 from stayawake.core.identity.capabilities import (
     capabilities_from_app_permissions, capabilities_from_oauth_scopes,
@@ -98,6 +99,14 @@ class TestGate(unittest.TestCase):
     def test_unknown_capabilities_allow_after_liveness(self):
         sess = Session(token="t", source="gh", kind="user", capabilities=None, live=True)
         self.assertTrue(require(Intent.OPEN_GUARD_PR, session=sess).allowed)
+
+
+class TestIntents(unittest.TestCase):
+    def test_amend_does_not_need_pull_requests(self):
+        self.assertNotIn(Capability.PULL_REQUESTS_WRITE, requirements(Intent.AMEND_REFS))
+        self.assertIn(Capability.PULL_REQUESTS_WRITE, requirements(Intent.OPEN_FIX_PR))
+        self.assertNotIn(Capability.WORKFLOWS_WRITE, requirements(Intent.AMEND_REFS))
+        self.assertNotIn(Capability.WORKFLOWS_WRITE, requirements(Intent.OPEN_FIX_PR))
 
 
 class TestClassify(unittest.TestCase):
