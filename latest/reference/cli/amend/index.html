@@ -6,35 +6,37 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Documentation for saw — an offline-first supply-chain worm scanner. Install it, run your first scan, gate CI, audit a machine, and look up any command.">
+        <meta name="description" content="saw fix amend — amend the infected commits and force-update the branches they sat on. Read the caution first.">
       
       
         <meta name="author" content="Jean Paul Elisa NIYOKWIZERWA">
       
       
-        <link rel="canonical" href="https://saw-docs.ndevuspace.com/latest/">
+        <link rel="canonical" href="https://saw-docs.ndevuspace.com/latest/reference/cli/amend/">
       
       
+        <link rel="prev" href="../fix/">
       
-        <link rel="next" href="tutorial/first-scan/">
+      
+        <link rel="next" href="../discard/">
       
       
         
       
       
-      <link rel="icon" href="assets/stayawakebot-app-icon.png">
+      <link rel="icon" href="../../../assets/stayawakebot-app-icon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
-        <title>saw documentation</title>
+        <title>saw fix amend - saw documentation</title>
       
     
     
-      <link rel="stylesheet" href="assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.ec1eaa64.min.css">
       
         
-        <link rel="stylesheet" href="assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../../../assets/stylesheets/palette.ab4e12ef.min.css">
       
       
 
@@ -53,9 +55,9 @@
       
     
     
-      <link rel="stylesheet" href="assets/extra.css">
+      <link rel="stylesheet" href="../../../assets/extra.css">
     
-    <script>__md_scope=new URL(".",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
@@ -72,16 +74,16 @@
   
 
   
-  <meta property="og:type" content="website">
+  <meta property="og:type" content="article">
   <meta property="og:site_name" content="saw documentation">
-  <meta property="og:title" content="saw documentation">
-  <meta property="og:description" content="Documentation for saw — an offline-first supply-chain worm scanner. Install it, run your first scan, gate CI, audit a machine, and look up any command.">
+  <meta property="og:title" content="saw fix amend — saw documentation">
+  <meta property="og:description" content="saw fix amend — amend the infected commits and force-update the branches they sat on. Read the caution first.">
   <meta property="og:image" content="https://saw-docs.ndevuspace.com/latest/assets/og-card.png">
-  <meta property="og:url" content="https://saw-docs.ndevuspace.com/latest/">
+  <meta property="og:url" content="https://saw-docs.ndevuspace.com/latest/reference/cli/amend/">
 
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="saw documentation">
-  <meta name="twitter:description" content="Documentation for saw — an offline-first supply-chain worm scanner. Install it, run your first scan, gate CI, audit a machine, and look up any command.">
+  <meta name="twitter:title" content="saw fix amend — saw documentation">
+  <meta name="twitter:description" content="saw fix amend — amend the infected commits and force-update the branches they sat on. Read the caution first.">
   <meta name="twitter:image" content="https://saw-docs.ndevuspace.com/latest/assets/og-card.png">
 
   
@@ -89,22 +91,24 @@
   
     {
       "@context": "https://schema.org",
-      "@type": "WebSite",
-      "name": "saw documentation",
-      "url": "https://saw-docs.ndevuspace.com/latest/",
-      "description": "Documentation for saw — an offline-first supply-chain worm scanner. Install it, run your first scan, gate CI, audit a machine, and look up any command.",
+      "@type": "TechArticle",
+      "headline": "saw fix amend",
+      "description": "saw fix amend — amend the infected commits and force-update the branches they sat on. Read the caution first.",
+      "url": "https://saw-docs.ndevuspace.com/latest/reference/cli/amend/",
+      "image": "https://saw-docs.ndevuspace.com/latest/assets/og-card.png",
       "inLanguage": "en",
+      "isPartOf": {
+        "@type": "WebSite",
+        "name": "saw documentation",
+        "url": "https://saw-docs.ndevuspace.com/latest/"
+      },
       "about": {
         "@type": "SoftwareApplication",
         "name": "saw",
-        "alternateName": "StayAwakeBot",
-        "applicationCategory": "SecurityApplication",
-        "operatingSystem": "macOS, Linux, Windows",
-        "downloadUrl": "https://pypi.org/project/stayawakebot/",
-        "codeRepository": "https://github.com/Ndevu12/stayAwakeBot",
-        "license": "https://spdx.org/licenses/AGPL-3.0-or-later.html",
-        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
-      }
+        "applicationCategory": "SecurityApplication"
+      },
+      "author": { "@type": "Person", "name": "Jean Paul Elisa NIYOKWIZERWA" },
+      "license": "https://spdx.org/licenses/AGPL-3.0-or-later.html"
     }
   
   </script>
@@ -128,7 +132,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#stayawakebot-documentation" class="md-skip">
+        <a href="#saw-fix-amend" class="md-skip">
           Skip to content
         </a>
       
@@ -148,9 +152,9 @@
 
 <header class="md-header md-header--shadow" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="." title="saw documentation" class="md-header__button md-logo" aria-label="saw documentation" data-md-component="logo">
+    <a href="../../.." title="saw documentation" class="md-header__button md-logo" aria-label="saw documentation" data-md-component="logo">
       
-  <img src="assets/stayawakebot-app-icon.png" alt="logo">
+  <img src="../../../assets/stayawakebot-app-icon.png" alt="logo">
 
     </a>
     <label class="md-header__button md-icon" for="__drawer">
@@ -167,7 +171,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Home
+              saw fix amend
             
           </span>
         </div>
@@ -285,9 +289,9 @@
 
 <nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="." title="saw documentation" class="md-nav__button md-logo" aria-label="saw documentation" data-md-component="logo">
+    <a href="../../.." title="saw documentation" class="md-nav__button md-logo" aria-label="saw documentation" data-md-component="logo">
       
-  <img src="assets/stayawakebot-app-icon.png" alt="logo">
+  <img src="../../../assets/stayawakebot-app-icon.png" alt="logo">
 
     </a>
     saw documentation
@@ -311,37 +315,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Home
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="." class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../.." class="md-nav__link">
         
   
   
@@ -357,37 +334,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#which-version-you-are-reading" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Which version you are reading
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -457,7 +403,7 @@
   
   
     <li class="md-nav__item">
-      <a href="tutorial/first-scan/" class="md-nav__link">
+      <a href="../../../tutorial/first-scan/" class="md-nav__link">
         
   
   
@@ -485,7 +431,7 @@
   
   
     <li class="md-nav__item">
-      <a href="tutorial/gate-a-repo/" class="md-nav__link">
+      <a href="../../../tutorial/gate-a-repo/" class="md-nav__link">
         
   
   
@@ -590,7 +536,7 @@
   
   
     <li class="md-nav__item">
-      <a href="how-to/scan-local/" class="md-nav__link">
+      <a href="../../../how-to/scan-local/" class="md-nav__link">
         
   
   
@@ -618,7 +564,7 @@
   
   
     <li class="md-nav__item">
-      <a href="how-to/scan-remote/" class="md-nav__link">
+      <a href="../../../how-to/scan-remote/" class="md-nav__link">
         
   
   
@@ -646,7 +592,7 @@
   
   
     <li class="md-nav__item">
-      <a href="how-to/scan-on-clone/" class="md-nav__link">
+      <a href="../../../how-to/scan-on-clone/" class="md-nav__link">
         
   
   
@@ -674,7 +620,7 @@
   
   
     <li class="md-nav__item">
-      <a href="how-to/fix-findings/" class="md-nav__link">
+      <a href="../../../how-to/fix-findings/" class="md-nav__link">
         
   
   
@@ -702,7 +648,7 @@
   
   
     <li class="md-nav__item">
-      <a href="how-to/audit-a-machine/" class="md-nav__link">
+      <a href="../../../how-to/audit-a-machine/" class="md-nav__link">
         
   
   
@@ -730,7 +676,7 @@
   
   
     <li class="md-nav__item">
-      <a href="how-to/harden-this-machine/" class="md-nav__link">
+      <a href="../../../how-to/harden-this-machine/" class="md-nav__link">
         
   
   
@@ -758,7 +704,7 @@
   
   
     <li class="md-nav__item">
-      <a href="how-to/harden-a-repo/" class="md-nav__link">
+      <a href="../../../how-to/harden-a-repo/" class="md-nav__link">
         
   
   
@@ -786,7 +732,7 @@
   
   
     <li class="md-nav__item">
-      <a href="how-to/gate-ci/" class="md-nav__link">
+      <a href="../../../how-to/gate-ci/" class="md-nav__link">
         
   
   
@@ -818,8 +764,10 @@
       
   
   
+    
   
   
+  
     
     
       
@@ -838,11 +786,11 @@
       
     
     
-    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
         
           
           <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
@@ -863,7 +811,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_4">
             <span class="md-nav__icon md-icon"></span>
             
@@ -878,6 +826,8 @@
                 
   
   
+    
+  
   
   
     
@@ -929,15 +879,15 @@
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_1" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_1" checked>
         
           
           <div class="md-nav__link md-nav__container">
-            <a href="reference/cli/" class="md-nav__link ">
+            <a href="../" class="md-nav__link ">
               
   
   
@@ -961,7 +911,7 @@
             
           </div>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_1_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_1_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_4_1">
             <span class="md-nav__icon md-icon"></span>
             
@@ -981,7 +931,7 @@
   
   
     <li class="md-nav__item">
-      <a href="reference/cli/scan/" class="md-nav__link">
+      <a href="../scan/" class="md-nav__link">
         
   
   
@@ -1009,7 +959,7 @@
   
   
     <li class="md-nav__item">
-      <a href="reference/cli/fix/" class="md-nav__link">
+      <a href="../fix/" class="md-nav__link">
         
   
   
@@ -1034,10 +984,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="reference/cli/amend/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    saw fix amend
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1053,6 +1030,59 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-you-need-first" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What you need first
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#it-stops-before-moving-anything" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        It stops before moving anything
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-it-leaves-for-you" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it leaves for you
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1065,7 +1095,7 @@
   
   
     <li class="md-nav__item">
-      <a href="reference/cli/discard/" class="md-nav__link">
+      <a href="../discard/" class="md-nav__link">
         
   
   
@@ -1093,7 +1123,7 @@
   
   
     <li class="md-nav__item">
-      <a href="reference/cli/audit/" class="md-nav__link">
+      <a href="../audit/" class="md-nav__link">
         
   
   
@@ -1121,7 +1151,7 @@
   
   
     <li class="md-nav__item">
-      <a href="reference/cli/harden/" class="md-nav__link">
+      <a href="../harden/" class="md-nav__link">
         
   
   
@@ -1149,7 +1179,7 @@
   
   
     <li class="md-nav__item">
-      <a href="reference/cli/guard/" class="md-nav__link">
+      <a href="../guard/" class="md-nav__link">
         
   
   
@@ -1177,7 +1207,7 @@
   
   
     <li class="md-nav__item">
-      <a href="reference/cli/hook/" class="md-nav__link">
+      <a href="../hook/" class="md-nav__link">
         
   
   
@@ -1205,7 +1235,7 @@
   
   
     <li class="md-nav__item">
-      <a href="reference/cli/auth/" class="md-nav__link">
+      <a href="../auth/" class="md-nav__link">
         
   
   
@@ -1233,7 +1263,7 @@
   
   
     <li class="md-nav__item">
-      <a href="reference/cli/db/" class="md-nav__link">
+      <a href="../db/" class="md-nav__link">
         
   
   
@@ -1261,7 +1291,7 @@
   
   
     <li class="md-nav__item">
-      <a href="reference/cli/search/" class="md-nav__link">
+      <a href="../search/" class="md-nav__link">
         
   
   
@@ -1289,7 +1319,7 @@
   
   
     <li class="md-nav__item">
-      <a href="reference/cli/intro/" class="md-nav__link">
+      <a href="../intro/" class="md-nav__link">
         
   
   
@@ -1317,7 +1347,7 @@
   
   
     <li class="md-nav__item">
-      <a href="reference/cli/doctor/" class="md-nav__link">
+      <a href="../doctor/" class="md-nav__link">
         
   
   
@@ -1345,7 +1375,7 @@
   
   
     <li class="md-nav__item">
-      <a href="reference/cli/completion/" class="md-nav__link">
+      <a href="../completion/" class="md-nav__link">
         
   
   
@@ -1373,7 +1403,7 @@
   
   
     <li class="md-nav__item">
-      <a href="reference/cli/remote/" class="md-nav__link">
+      <a href="../remote/" class="md-nav__link">
         
   
   
@@ -1401,7 +1431,7 @@
   
   
     <li class="md-nav__item">
-      <a href="reference/cli/sinks/" class="md-nav__link">
+      <a href="../sinks/" class="md-nav__link">
         
   
   
@@ -1429,7 +1459,7 @@
   
   
     <li class="md-nav__item">
-      <a href="reference/cli/credentials/" class="md-nav__link">
+      <a href="../credentials/" class="md-nav__link">
         
   
   
@@ -1457,7 +1487,7 @@
   
   
     <li class="md-nav__item">
-      <a href="reference/cli/migrating/" class="md-nav__link">
+      <a href="../migrating/" class="md-nav__link">
         
   
   
@@ -1493,7 +1523,7 @@
   
   
     <li class="md-nav__item">
-      <a href="reference/configuration/" class="md-nav__link">
+      <a href="../../configuration/" class="md-nav__link">
         
   
   
@@ -1521,7 +1551,7 @@
   
   
     <li class="md-nav__item">
-      <a href="reference/advisory-db/" class="md-nav__link">
+      <a href="../../advisory-db/" class="md-nav__link">
         
   
   
@@ -1620,7 +1650,7 @@
   
   
     <li class="md-nav__item">
-      <a href="explanation/trust-model/" class="md-nav__link">
+      <a href="../../../explanation/trust-model/" class="md-nav__link">
         
   
   
@@ -1648,7 +1678,7 @@
   
   
     <li class="md-nav__item">
-      <a href="explanation/safety-envelope/" class="md-nav__link">
+      <a href="../../../explanation/safety-envelope/" class="md-nav__link">
         
   
   
@@ -1676,7 +1706,7 @@
   
   
     <li class="md-nav__item">
-      <a href="explanation/verdicts/" class="md-nav__link">
+      <a href="../../../explanation/verdicts/" class="md-nav__link">
         
   
   
@@ -1704,7 +1734,7 @@
   
   
     <li class="md-nav__item">
-      <a href="explanation/fail-closed/" class="md-nav__link">
+      <a href="../../../explanation/fail-closed/" class="md-nav__link">
         
   
   
@@ -1732,7 +1762,7 @@
   
   
     <li class="md-nav__item">
-      <a href="explanation/credential-hygiene/" class="md-nav__link">
+      <a href="../../../explanation/credential-hygiene/" class="md-nav__link">
         
   
   
@@ -1787,10 +1817,32 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#which-version-you-are-reading" class="md-nav__link">
+  <a href="#what-you-need-first" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Which version you are reading
+        What you need first
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#it-stops-before-moving-anything" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        It stops before moving anything
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-it-leaves-for-you" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it leaves for you
       
     </span>
   </a>
@@ -1814,7 +1866,7 @@
 
 
   
-    <a href="https://github.com/Ndevu12/stayAwakeBot/edit/main/docs/index.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+    <a href="https://github.com/Ndevu12/stayAwakeBot/edit/main/docs/reference/cli/amend.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
     </a>
@@ -1822,37 +1874,70 @@
   
 
 
-<h1 id="stayawakebot-documentation">StayAwakeBot documentation<a class="headerlink" href="#stayawakebot-documentation" title="Permanent link">&para;</a></h1>
-<p><code>saw</code> hunts self-propagating supply-chain malware in your repositories, lockfiles, installed
-dependency trees and your machine's start-up surface. It remediates through a pull request and gates
-CI, so an infected change cannot merge. A default scan is offline, needs no configuration, and
-the last line of the report is the verdict.</p>
-<p>For developers who ship software — in any of the eight package ecosystems <code>saw</code>
-<a href="reference/advisory-db/#ecosystems-saw-reads">reads</a> — and for the people who keep an
-organisation's repositories gated. The vector is the same whatever the stack: a dependency
-install, a build, or an editor or agent opening the folder.</p>
-<p><strong>Start here</strong> — <a href="tutorial/first-scan/">Your first scan</a> ·
-<a href="tutorial/gate-a-repo/">Gate a repository</a></p>
-<p><strong>Do a task</strong> — <a href="how-to/scan-local/">scan local code</a> ·
-<a href="how-to/scan-remote/">scan GitHub repositories</a> · <a href="how-to/fix-findings/">fix findings</a> ·
-<a href="how-to/gate-ci/">gate CI</a> · <a href="how-to/scan-on-clone/">scan on clone</a> ·
-<a href="how-to/audit-a-machine/">audit a machine</a> · <a href="how-to/harden-this-machine/">harden this machine</a> ·
-<a href="how-to/harden-a-repo/">harden a repository</a></p>
-<p><strong>Look it up</strong> — <a href="reference/cli/">CLI reference</a> ·
-<a href="reference/configuration/">configuration</a> · <a href="reference/advisory-db/">advisory database</a></p>
-<p><strong>What the tool promises</strong> — <a href="explanation/trust-model/">trust model</a> ·
-<a href="explanation/verdicts/">verdicts</a> · <a href="explanation/fail-closed/">fail closed</a> ·
-<a href="explanation/safety-envelope/">safety envelope</a> ·
-<a href="explanation/credential-hygiene/">credential hygiene</a></p>
-<p>The package also ships an unrelated uptime monitor, <code>stayawake-health-check</code> — see
-<a href="reference/configuration/#the-uptime-monitor-configurlsyml">configuration</a>.</p>
-<h2 id="which-version-you-are-reading">Which version you are reading<a class="headerlink" href="#which-version-you-are-reading" title="Permanent link">&para;</a></h2>
-<p>Each release keeps its own copy of these pages, and the version selector at the top switches
-between them. <code>latest</code> follows the current documentation.</p>
-<p>Documented versions begin at <strong>0.6.2</strong>. Earlier releases were published before this site existed,
-so there are no pages describing them — rather than reprinting today's documentation under an older
-number, which would describe behaviour those versions do not have. If you are running something
-earlier, <code>saw --version</code> and <code>saw &lt;command&gt; -h</code> describe the copy you actually have.</p>
+<h1 id="saw-fix-amend"><code>saw fix amend</code><a class="headerlink" href="#saw-fix-amend" title="Permanent link">&para;</a></h1>
+<div class="admonition warning">
+<p class="admonition-title">This amends the infected commits</p>
+<p>Every branch that reached the payload is force-updated on the remote. Anyone who already has
+those branches must reset to the new tips, and work started from the old ones will not merge
+cleanly. Tell your collaborators before you run it. If you are not sure you want that, use
+<a href="../fix/"><code>saw fix</code></a>, which only prepares a cleanup branch.</p>
+</div>
+<p>Replace a past commit that still carries the payload and force-update each branch it sat on. That
+force-update is the fix: an amend that never reaches the remote is not one. The replaced
+commit keeps its original message and its original author, and the commits after it are replayed
+onto the replacement.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw fix amend [TARGETS...]
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>saw fix amend --remote OWNER/REPO [OWNER/REPO...]
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TARGETS...</code></td>
+<td>Repositories to amend. A named path that does not exist is an error, not a wider sweep.</td>
+</tr>
+<tr>
+<td><code>--remote</code></td>
+<td>Clone the named GitHub repositories and amend them. Slugs only.</td>
+</tr>
+<tr>
+<td><code>-c FILE</code> / <code>-j N</code> / <code>--no-stream</code></td>
+<td>As for <a href="../scan/"><code>saw scan</code></a>.</td>
+</tr>
+</tbody>
+</table>
+<p><code>--pr</code>, <code>--branch</code>, <code>--user</code> and <code>--org</code> are not accepted. There is no account-wide form: name each
+repository.</p>
+<h2 id="what-you-need-first">What you need first<a class="headerlink" href="#what-you-need-first" title="Permanent link">&para;</a></h2>
+<ul>
+<li>A credential that owns the repository or holds admin on it. Permission to push is not enough.</li>
+<li>A clone that is up to date with the remote branches you are amending.</li>
+<li><code>user.name</code> and <code>user.email</code> set, so the amend records who made it.</li>
+<li>A signing key, if the repository signs commits or the commits being replaced are signed.</li>
+</ul>
+<h2 id="it-stops-before-moving-anything">It stops before moving anything<a class="headerlink" href="#it-stops-before-moving-anything" title="Permanent link">&para;</a></h2>
+<p>It tells you and changes nothing when any of the above is missing, when the remote branches cannot
+be refreshed or read, when the replacement would drop content the finding does not cover, when the
+previous commits cannot be captured first, or when the working tree — or another worktree holding
+one of those branches — has uncommitted work.</p>
+<p>If it cannot finish, it puts the branches back and says so. If it moved a branch and could not put
+it back, it names that branch: look at that repository before doing anything else with it.</p>
+<h2 id="what-it-leaves-for-you">What it leaves for you<a class="headerlink" href="#what-it-leaves-for-you" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>A protected branch is never force-updated.</strong> The amended history is published beside it under
+  its own name, for you to open the pull request. A protection rule it cannot read is treated the
+  same way.</li>
+<li><strong>Tags and forks are reported, not changed.</strong> A tag or a fork that still reaches the replaced
+  commit keeps a copy of it, and the run tells you.</li>
+<li><strong>The previous commits stay on the remote</strong> until GitHub collects them.</li>
+</ul>
+<p>See <a href="../../../explanation/safety-envelope/">the safety envelope</a> for what <code>fix</code> will and will not
+touch, and <a href="../discard/"><code>saw discard</code></a> to undo a <code>saw fix</code> branch — <code>amend</code> is not undone that way.</p>
 
 
 
@@ -1915,10 +2000,10 @@ earlier, <code>saw --version</code> and <code>saw &lt;command&gt; -h</code> desc
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": ".", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.top", "navigation.indexes", "content.action.edit", "content.code.copy", "search.highlight", "search.suggest", "toc.follow"], "search": "assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "latest", "provider": "mike"}}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.top", "navigation.indexes", "content.action.edit", "content.code.copy", "search.highlight", "search.suggest", "toc.follow"], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "latest", "provider": "mike"}}</script>
     
     
-      <script src="assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../../../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>
