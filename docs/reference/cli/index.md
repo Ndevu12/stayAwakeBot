@@ -19,7 +19,8 @@ alias, for scripts where a three-letter name might clash on `PATH`.
 | Command | What it does | Writes? |
 | --- | --- | --- |
 | [`scan`](scan.md) | Hunt for supply-chain worms and report | read-only |
-| [`fix`](fix.md) | Prepare the cleanup on a `security/auto-clean` branch; on confirmed infection also removes the installed tree in this repository. `saw fix amend` replaces past commits that still carry the payload and force-updates those branches | that branch; the installed tree, build outputs, and lockfile in this repository (lockfile kept on CI); pushes with `--pr`; `amend` force-updates the branches that carried those commits |
+| [`fix`](fix.md) | Prepare the cleanup on a `security/auto-clean` branch; on confirmed infection also removes the installed tree in this repository | that branch; the installed tree, build outputs, and lockfile in this repository (lockfile kept on CI); pushes with `--pr` |
+| [`fix amend`](amend.md) | Amend the infected commits and force-update the branches they sat on. **Force-updates the remote** | the branches that carried those commits, on the remote |
 | [`discard`](discard.md) | Undo `saw fix` | git / GitHub API |
 | [`audit`](audit.md) | Machine hygiene, start-up surface, branch protection | read-only |
 | [`harden`](harden.md) | Create host denials; in place only after a read-back | this machine |

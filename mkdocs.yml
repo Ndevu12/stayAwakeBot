@@ -126,6 +126,7 @@ nav:
           - reference/cli/index.md
           - reference/cli/scan.md
           - reference/cli/fix.md
+          - reference/cli/amend.md
           - reference/cli/discard.md
           - reference/cli/audit.md
           - reference/cli/harden.md
