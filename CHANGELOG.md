@@ -13,6 +13,11 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Changed
+- **`saw fix amend` has its own reference page, with the caution first.** It states what the
+  command needs before it will act, what it stops for, and what it leaves for a person to
+  finish.
+
 ### Added
 - **`saw fix amend` replaces past commits that still carry the payload and force-updates
   each branch they sat on.** That force-update is the fix. It does not open a pull request
