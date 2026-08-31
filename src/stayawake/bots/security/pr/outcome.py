@@ -60,12 +60,13 @@ class Cause(Enum):
     REMOTE_DID_NOT_MOVE = "remote-did-not-move"
     LOCAL_MISSING_REMOTE_COMMITS = "local-missing-remote-commits"
     TAGS_AT_REPLACED_COMMIT = "tags-at-replaced-commit"
+    TAGS_NOT_ESTABLISHED = "tags-not-established"
     FORKS_EXIST = "forks-exist"
     FORKS_NOT_ESTABLISHED = "forks-not-established"
     PREVIOUS_OBJECTS_UNCOLLECTED = "previous-objects-uncollected"
 
 
-_NEEDING_NO_ACTION = frozenset({Cause.PREVIOUS_OBJECTS_UNCOLLECTED})
+_NEEDING_NO_ACTION = frozenset({Cause.PREVIOUS_OBJECTS_UNCOLLECTED, Cause.NO_CONFIRMED_PAYLOAD})
 
 
 @dataclass(frozen=True)
@@ -113,8 +114,17 @@ class AmendOutcome:
     @property
     def needs_review(self) -> bool:
         """Whether a person still has to act. Read from the structure, never from the rendered
-        line — that is the defect this type exists to close."""
-        return not self.completed or any(r.cause not in _NEEDING_NO_ACTION for r in self.reasons)
+        line — that is the defect this type exists to close.
+
+        A refusal is graded on its reason. `not completed` used to decide this on its own, which
+        made every refusal need review — including "this repository is clean", so a sweep of forty
+        repositories reported thirty-nine as needing work and the grading below could never run.
+        A branch that reached the payload and did not move is different: that IS work, whatever
+        the reasons say.
+        """
+        if self.branches and not self.completed:
+            return True
+        return any(r.cause not in _NEEDING_NO_ACTION for r in self.reasons)
 
 
 def refused(repository: str, cause: Cause, detail: str = "",
@@ -176,6 +186,8 @@ _PHRASE = {
     Cause.PUSH_REFUSED: "the push was refused",
     Cause.TAGS_AT_REPLACED_COMMIT: "tags still point at it",
     Cause.FORKS_EXIST: "forks still carry it",
+    Cause.TAGS_NOT_ESTABLISHED:
+        "whether a tag still points at the replaced commit could not be established",
     Cause.FORKS_NOT_ESTABLISHED: "could not check for forks",
     Cause.PREVIOUS_OBJECTS_UNCOLLECTED: "previous objects remain until collected",
 }

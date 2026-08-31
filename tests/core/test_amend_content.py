@@ -11,6 +11,7 @@ belongs in that function rather than three call layers above it.
 """
 from __future__ import annotations
 
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -294,6 +295,52 @@ class TestPointBranchAtGuard(unittest.TestCase):
         self.assertEqual(_rev(repo, "refs/heads/side"), target)
         self.assertEqual((repo / "app.js").read_text(encoding="utf-8"),
                          "base\nuncommitted work\n")
+
+
+class TestEveryCheckoutIsGuarded(unittest.TestCase):
+    """`git update-ref` moves a branch a LINKED worktree has checked out — it has no
+    checked-out-branch protection — and that tree is then left at the old content with the
+    difference STAGED, so the operator's next commit there restores the payload on top of the
+    clean history. Asking `symbolic-ref HEAD` answered for one checkout and skipped the rest."""
+
+    def _linked(self, repo: Path, branch: str) -> Path:
+        wt = Path(tempfile.mkdtemp(prefix="saw-linked-")) / "wt"
+        _git(repo, "worktree", "add", "-q", str(wt), branch)
+        self.addCleanup(shutil.rmtree, wt.parent, True)
+        return wt
+
+    def test_uncommitted_work_in_another_worktree_refuses_the_move(self):
+        repo, evil = _repo_with_evil_merge()
+        _git(repo, "branch", "release")
+        before = _rev(repo, "refs/heads/release")
+        target = _rev(repo, f"{evil}^1")
+        linked = self._linked(repo, "release")
+        (linked / "WIP.txt").write_text("uncommitted\n", encoding="utf-8")
+
+        self.assertFalse(amend.is_dirty(repo), "this tree is clean — the old guard saw only this")
+        self.assertEqual(amend.checkout_holding(repo, "release").resolve(), linked.resolve())
+        self.assertFalse(amend.point_branch_at(repo, "release", target, before))
+        self.assertEqual(_rev(repo, "refs/heads/release"), before)
+        self.assertEqual((linked / "WIP.txt").read_text(encoding="utf-8"), "uncommitted\n")
+
+    def test_a_clean_worktree_elsewhere_is_moved_with_its_branch(self):
+        repo, evil = _repo_with_evil_merge()
+        _git(repo, "branch", "release")
+        before = _rev(repo, "refs/heads/release")
+        target = _rev(repo, f"{evil}^1")
+        linked = self._linked(repo, "release")
+
+        self.assertTrue(amend.point_branch_at(repo, "release", target, before))
+        self.assertEqual(_rev(repo, "refs/heads/release"), target)
+        self.assertEqual(_git(linked, "status", "--porcelain"), "",
+                         "the branch moved, so its checkout has to move with it")
+
+    def test_a_branch_no_worktree_holds_needs_no_reset(self):
+        repo, evil = _repo_with_evil_merge()
+        _git(repo, "branch", "unheld")
+        before = _rev(repo, "refs/heads/unheld")
+        self.assertIsNone(amend.checkout_holding(repo, "unheld"))
+        self.assertTrue(amend.point_branch_at(repo, "unheld", _rev(repo, f"{evil}^1"), before))
 
 
 if __name__ == "__main__":

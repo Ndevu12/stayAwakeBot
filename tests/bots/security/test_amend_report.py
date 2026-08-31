@@ -118,12 +118,16 @@ class TestWhatSurvivesACompletedAct(unittest.TestCase):
 
 
 class TestEveryRefusalIsItsOwnAnswer(unittest.TestCase):
-    def test_each_refusal_needs_review_and_says_nothing_moved(self):
+    def test_each_refusal_says_nothing_moved_and_is_graded_on_its_reason(self):
+        """A refusal used to need review because it was a refusal. That made "this repository is
+        clean" indistinguishable from "we could not act", so a sweep of forty clean repositories
+        reported thirty-nine as needing work — and the grading below could never run. What a
+        refusal MEANS decides it now; anything not declared actionless still needs a person."""
         for cause in _REFUSALS_TODAY:
             with self.subTest(cause=cause.value):
                 outcome = refused("o/r", cause)
                 self.assertFalse(outcome.completed)
-                self.assertTrue(outcome.needs_review)
+                self.assertEqual(outcome.needs_review, cause not in ao._NEEDING_NO_ACTION)
                 self.assertEqual(outcome.branches, ())
                 line = render_amend_line(outcome)
                 self.assertIn("nothing was force-updated", line)
@@ -178,8 +182,18 @@ class TestTheVerdictIsStructural(unittest.TestCase):
                 outcome = _complete(Reason(cause))
                 self.assertEqual(outcome.needs_review, cause not in ao._NEEDING_NO_ACTION)
 
-    def test_only_the_uncollected_objects_are_declared_actionless(self):
-        self.assertEqual(ao._NEEDING_NO_ACTION, frozenset({Cause.PREVIOUS_OBJECTS_UNCOLLECTED}))
+    def test_the_actionless_set_is_exactly_these_two(self):
+        """Fail-closed: a cause needs review until someone declares it actionless, so this set is
+        an allow-list that has to be argued for. Objects that remain until git collects them are
+        not work; neither is a repository with no confirmed payload to replace."""
+        self.assertEqual(ao._NEEDING_NO_ACTION,
+                         frozenset({Cause.PREVIOUS_OBJECTS_UNCOLLECTED, Cause.NO_CONFIRMED_PAYLOAD}))
+
+    def test_a_branch_that_did_not_move_needs_review_whatever_the_reasons_say(self):
+        outcome = AmendOutcome("o/r", completed=False, commit="abc123456789",
+                               branches=(BranchResult("dev", False),),
+                               reasons=(Reason(Cause.PREVIOUS_OBJECTS_UNCOLLECTED),))
+        self.assertTrue(outcome.needs_review)
 
 
 class TestAnInconsistentOutcomeIsRefused(unittest.TestCase):

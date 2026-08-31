@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import os
 import shutil
 import subprocess
 import tempfile
@@ -22,6 +23,13 @@ from stayawake.lib.git.query import branches_carrying
 from stayawake.lib.git.write import amend as gitamend
 from stayawake.lib.git.write.push import PushResult
 from tests.bots.security.test_evil_merge import EVIL_SIG, _git
+
+
+class _NoRemoteTags:
+    """What `git ls-remote --tags` looks like for a remote carrying no tags."""
+    returncode = 0
+    stdout = ""
+    stderr = ""
 
 
 def _sigs():
@@ -96,6 +104,18 @@ class _AmendFixture(unittest.TestCase):
     amend path must get before it may move anything."""
 
     def setUp(self):
+        # The host's own git config decided these outcomes: this machine enables ssh signing
+        # globally, so every replacement and every replayed commit was really signed — the suite
+        # took ten times as long here than on a machine that does not sign, and "does it sign?"
+        # was answered by the laptop rather than by the fixture. State goes to a temp dir too, so
+        # no test writes a capture into the operator's own state directory.
+        self._state = tempfile.mkdtemp(prefix="saw-teststate-")
+        self.addCleanup(shutil.rmtree, self._state, True)
+        isolated = mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": "/dev/null",
+                                                "GIT_CONFIG_SYSTEM": "/dev/null",
+                                                "XDG_STATE_HOME": self._state})
+        isolated.start()
+        self.addCleanup(isolated.stop)
         self.d = Path(tempfile.mkdtemp(prefix="amend-"))
         _git(self.d, "init", "-q")
         _git(self.d, "config", "user.email", "t@t.test")
@@ -183,9 +203,13 @@ class _AmendFixture(unittest.TestCase):
                     reason="owner" if permitted else "unauthorized"))),
                 ("authority.ref_protection", dict(return_value=mock.Mock(
                     protected=protected, reason="rule_read"))),
+                ("authority.fork_count", dict(return_value=0)),
                 ("gitutil.fetch_refs", dict(return_value=mock.Mock(ok=True, reason=""))),
                 ("_read_remote_head",
                  dict(side_effect=lambda r, s, b, tk: (True, self._rev(b)))),
+                # `_tags_at` asks the REMOTE for tags; unstubbed every gate test would wait out
+                # the network timeout against a repository that does not exist.
+                ("run", dict(return_value=_NoRemoteTags())),
             ):
                 held = amendmod
                 for part in target.split("."):
@@ -239,7 +263,7 @@ class TestFixAmendRepo(_AmendFixture):
         self.assertNotIn("security: remove payload", self._log_subjects())
         self.assertIn("fromCharCode", self._show(f"{merge}:x.js"))
         self.assertNotIn("fromCharCode", self._show("HEAD:x.js"))
-        self.assertTrue((self.d / ".git" / "saw-amend" / merge[:12] / "capture.bundle").is_file())
+        self.assertTrue(amendmod._capture_path("acme/app", merge[:12]).is_file())
 
     def test_replays_a_later_commit(self):
         self._loader_merge()
@@ -438,7 +462,7 @@ class TestFixAmendRepo(_AmendFixture):
         real = gitamend.apply_replacement
 
         def wrapped(repo, old, new, heads, signing=None):
-            cap = Path(repo) / ".git" / "saw-amend" / old[:12] / "capture.bundle"
+            cap = amendmod._capture_path("acme/app", old[:12])
             self.assertTrue(cap.is_file())
             seen.append(True)
             return real(repo, old, new, heads, signing)
@@ -754,6 +778,59 @@ class TestAmendGates(_AmendFixture):
             amendmod._push_to(self.d, "acme/app", "security/amend-abc123def456",
                               "security/amend-abc123def456", "t", "deadbeef", None, force=False)
         self.assertEqual(seen, [("publish",)])
+
+    def test_a_tag_only_on_the_remote_still_needs_a_person(self):
+        """The run's own refresh is `--no-tags`, so a tag pushed since the last fetch is invisible
+        in this clone — and one `clone --branch <tag>` puts the payload back on disk."""
+        self._loader_merge()
+        old = self._rev()
+
+        class R:
+            returncode = 0
+            stdout = f"{old}\trefs/tags/v1.0^{{}}\n"
+            stderr = ""
+
+        with mock.patch(self.AT + "run", return_value=R()), \
+             mock.patch(self.AT + "authority.fork_count", return_value=0):
+            outcome = self._act()
+        self.assertIn(Cause.TAGS_AT_REPLACED_COMMIT, self._causes(outcome))
+        self.assertIn("v1.0", outcome.reasons[1].detail)
+        self.assertTrue(outcome.needs_review)
+
+    def test_tags_that_could_not_be_listed_are_not_reported_as_none(self):
+        self._loader_merge()
+
+        class R:
+            returncode = 128
+            stdout = ""
+            stderr = "could not read"
+
+        with mock.patch(self.AT + "run", return_value=R()), \
+             mock.patch(self.AT + "authority.fork_count", return_value=0):
+            outcome = self._act()
+        self.assertIn(Cause.TAGS_NOT_ESTABLISHED, self._causes(outcome))
+        self.assertTrue(outcome.needs_review)
+
+    def test_a_repository_with_nothing_to_replace_is_not_work_for_a_person(self):
+        """`saw fix amend ~/dev` over forty clean repositories used to report thirty-nine as
+        needing review, because a refusal was graded on `not completed` rather than on why."""
+        outcome = self._act()
+        self.assertIn(Cause.NO_CONFIRMED_PAYLOAD, self._causes(outcome))
+        self.assertFalse(outcome.needs_review)
+
+    def test_a_repository_that_could_not_be_acted_on_is_still_work(self):
+        self._loader_merge()
+        outcome = self._act(permitted=False)
+        self.assertTrue(outcome.needs_review)
+
+    def test_a_glob_or_home_relative_target_is_not_treated_as_missing(self):
+        from stayawake.bots.security import remediator
+        from stayawake.utils.streaming import Streamer
+        out = io.StringIO()
+        remediator._amend_local({}, ScanOptions(), _sigs(), [],
+                                [str(self.d.parent / "*")],
+                                Streamer(enabled=False, out=out), jobs=1)
+        self.assertNotIn("no such path", out.getvalue())
 
 
 if __name__ == "__main__":

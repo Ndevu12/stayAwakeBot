@@ -21,6 +21,7 @@ from stayawake.lib.git.write.capture import capture_bundle
 from stayawake.lib.git.write.push import PushResult, force_update_head, publish_head
 from stayawake.lib.git.write import sign
 from stayawake.lib import git as gitutil
+from stayawake.utils import env
 
 
 def _full(repo: Path, sha: str) -> str:
@@ -141,22 +142,17 @@ def _force_update_branch(repo: Path, slug: str, branch: str, token: str | None, 
     return BranchResult(branch, False, Reason(Cause.REMOTE_DID_NOT_MOVE, branch))
 
 
-def _capture_path(repo: Path, sha12: str) -> Path:
+def _capture_path(slug: str, sha12: str) -> Path:
     """Where the objects the replacement orphans are captured before any ref moves.
 
-    Inside the git directory, never the worktree: a new file in the worktree makes the tree
-    dirty, and a dirty tree is precisely what `point_branch_at` refuses to move a branch over —
-    so capturing there would abort the very amend it exists to make safe.
+    Outside the repository entirely. Inside the worktree a new file makes the tree dirty and the
+    ref move is then refused; inside the git directory the capture dies with the checkout, and on
+    `--remote` that checkout is a temporary clone deleted seconds after the remote refs move — so
+    the evidence had a shorter life than the destruction it authorised. Cross-run state is the one
+    place that outlives both.
     """
-    # The COMMON directory, not this worktree's. `--absolute-git-dir` in a linked worktree names
-    # `.git/worktrees/<name>/`, which `git worktree remove|prune` deletes recursively — evidence
-    # with a shorter lifetime than the rewrite it covers.
-    git_dir = gitutil.stdout(repo, ["rev-parse", "--path-format=absolute",
-                                    "--git-common-dir"]).strip()
-    if not git_dir:
-        git_dir = gitutil.stdout(repo, ["rev-parse", "--absolute-git-dir"]).strip()
-    root = Path(git_dir) if git_dir else Path(repo) / ".git"
-    return root / "saw-amend" / sha12 / "capture.bundle"
+    safe = "".join(c if c.isalnum() or c in "-._" else "-" for c in slug) or "repository"
+    return Path(env.xdg_state_home()) / "saw" / "amend" / safe / sha12 / "capture.bundle"
 
 
 def _reconstruction_cause(repo: Path, sha: str) -> Cause:
@@ -165,6 +161,28 @@ def _reconstruction_cause(repo: Path, sha: str) -> Cause:
     if len(gitutil.parents(repo, sha)) != 2:
         return Cause.COMMIT_SHAPE_NOT_MODELLED
     return Cause.MERGE_WOULD_NOT_RESOLVE
+
+
+def _tags_at(repo: Path, slug: str, old: str, token: str | None) -> tuple[list[str], bool]:
+    """Tag names still pointing at the replaced commit, and whether that could be established.
+
+    Asked of the REMOTE, not of this clone. The refresh this run does is `--no-tags`, so a tag
+    pushed since the operator last fetched is invisible here — and one `clone --branch <tag>` puts
+    the payload back on disk. `ls-remote --tags` reports both the tag object and its peeled `^{}`
+    line, so an annotated tag is matched by the commit it resolves to.
+    """
+    local = gitutil.stdout(repo, ["tag", "--points-at", old]).split()
+    with github_https_auth(token) as (prefix, env_):
+        res = run(repo, ["ls-remote", "--tags", f"{prefix}{slug}.git"],
+                  env=env_, timeout=NETWORK_TIMEOUT)
+    if res is None or res.returncode != 0:
+        return sorted(set(local)), False
+    remote = []
+    for line in (res.stdout or "").splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[0].strip() == old and parts[1].startswith("refs/tags/"):
+            remote.append(parts[1][len("refs/tags/"):].removesuffix("^{}"))
+    return sorted(set(local) | set(remote)), True
 
 
 def _survivors(repo: Path, slug: str, old: str, token: str | None) -> list[Reason]:
@@ -176,9 +194,11 @@ def _survivors(repo: Path, slug: str, old: str, token: str | None) -> list[Reaso
     need a person.
     """
     reasons = [Reason(Cause.PREVIOUS_OBJECTS_UNCOLLECTED)]
-    tags = gitutil.stdout(repo, ["tag", "--points-at", old]).split()
+    tags, established = _tags_at(repo, slug, old, token)
     if tags:
         reasons.append(Reason(Cause.TAGS_AT_REPLACED_COMMIT, ", ".join(sorted(tags))))
+    elif not established:
+        reasons.append(Reason(Cause.TAGS_NOT_ESTABLISHED))
     forks = authority.fork_count(slug, token)
     if forks is None:
         reasons.append(Reason(Cause.FORKS_NOT_ESTABLISHED))
@@ -240,6 +260,10 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
 
     # Asked AFTER the commits are known: whether this rewrite owes a signature depends on what
     # the history carries, not only on what this clone's config asks for.
+    # The ancestry path is exactly the set of commits the replay REWRITES: a commit in `old..tip`
+    # that does not descend from `old` keeps an unchanged parent and the sequencer fast-forwards it
+    # verbatim, signature and all. Widening this to `old..tip` would ask for signatures the rewrite
+    # never touches.
     replaced = [old] + [s for _n, tip, _c in heads
                         for s in gitamend.descendant_shas(repo, old, tip)]
     signing = sign.signing_status(repo, history_is_signed=sign.any_signed(repo, replaced))
@@ -266,7 +290,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
                        ", ".join(sorted(unexplained)[:5]))
 
     captured = capture_bundle(repo, [(tip, new) for _n, tip, _c in heads],
-                              _capture_path(repo, old[:12]))
+                              _capture_path(slug, old[:12]))
     if not captured.ok:
         return refused(display, Cause.CAPTURE_FAILED, captured.reason)
 

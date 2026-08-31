@@ -20,11 +20,6 @@ from stayawake.lib.git.write.worktree import add_worktree, remove_worktree
 _ZERO = "0" * 40
 
 
-def branch_name(repo: str | Path) -> str | None:
-    name = stdout(repo, ["symbolic-ref", "--short", "HEAD"]).strip()
-    return name or None
-
-
 def is_dirty(repo: str | Path) -> bool:
     return bool(stdout(repo, ["status", "--porcelain"]).strip())
 
@@ -189,22 +184,41 @@ def restore_branches(repo: str | Path, heads: list[tuple[str, str, str]],
     return unrestored
 
 
+def checkout_holding(repo: str | Path, branch: str) -> Path | None:
+    """The worktree with `branch` checked out, or None when no worktree has it.
+
+    Every worktree, not just `repo`'s own. `git update-ref` will happily move a branch that a
+    LINKED worktree has checked out, and that worktree's tree is then left at the old content
+    with the difference staged — so asking only `symbolic-ref HEAD` here answered for one
+    checkout and silently skipped the rest.
+    """
+    listed = stdout(repo, ["worktree", "list", "--porcelain"])
+    path: str | None = None
+    for line in listed.splitlines():
+        if line.startswith("worktree "):
+            path = line[len("worktree "):].strip()
+        elif line.strip() == f"branch refs/heads/{branch}" and path:
+            return Path(path)
+    return None
+
+
 def point_branch_at(repo: str | Path, branch: str, new: str, old: str) -> bool:
     """Compare-and-swap `refs/heads/branch` from `old` to `new`.
 
-    The worktree is reset only when that branch is the one currently checked out — so this
-    refuses outright, before the ref moves, while that tree holds uncommitted work. The guard
-    sits here rather than with the caller because `reset --hard` is here: a checked-out branch
-    reaches this function from the amend path, from the restore path, and from anything added
-    next, and only one of those has to forget the check for the work to be gone.
+    The worktree holding that branch — any worktree, not only this one — is reset with it, so
+    this refuses outright, before the ref moves, while that tree holds uncommitted work. The
+    guard sits here rather than with the caller because `reset --hard` is here: a checked-out
+    branch reaches this function from the amend path, from the restore path, and from anything
+    added next, and only one of those has to forget the check for the work to be gone.
     """
-    if branch_name(repo) == branch and is_dirty(repo):
+    holder = checkout_holding(repo, branch)
+    if holder is not None and is_dirty(holder):
         return False
     if not run_ok(repo, ["update-ref", f"refs/heads/{branch}", new, old]):
         return False
-    if branch_name(repo) != branch:
+    if holder is None:
         return True
-    if run_ok(repo, ["reset", "--hard", "--quiet", "HEAD"]):
+    if run_ok(holder, ["reset", "--hard", "--quiet", "HEAD"]):
         return True
     # The ref is at `new` and the tree is not. A held `index.lock` or an unwritable file is enough
     # (measured: `update-ref` succeeds, `reset` exits 128). Returning False from here told the
@@ -212,7 +226,7 @@ def point_branch_at(repo: str | Path, branch: str, new: str, old: str) -> bool:
     # as a change — the operator's next commit would put the payload back on top of the clean
     # history. So the ref goes back, and a refusal is only reported once the branch AND the tree
     # are demonstrably where they started.
-    if run_ok(repo, ["update-ref", f"refs/heads/{branch}", old, new]) and not is_dirty(repo):
+    if run_ok(repo, ["update-ref", f"refs/heads/{branch}", old, new]) and not is_dirty(holder):
         return False
     raise AmendUnwindFailed(repo, unrestored=[branch], moved={branch: new})
 
