@@ -1970,12 +1970,18 @@ verdict. Remediation lives in a separate command, on purpose — so no one can t
 <h2 id="fix-writes-only-to-its-own-branch"><code>fix</code> writes only to its own branch<a class="headerlink" href="#fix-writes-only-to-its-own-branch" title="Permanent link">&para;</a></h2>
 <p><code>saw fix</code> prepares the cleanup on a generated <code>security/auto-clean</code> branch and stops. Source changes
 land on that branch. It does not push or open anything unless you pass <code>--pr</code>, and re-running updates
-the same rolling pull request instead of opening another. On a confirmed infection it also removes
+the same rolling pull request instead of opening another. That publish does not overwrite a remote
+ref. On a confirmed infection it also removes
 the installed tree, generated build outputs, and the lockfile in this repository (the lockfile is
 kept on CI). <code>saw discard</code> removes only that branch and that PR — never a branch you made.</p>
-<p>Nothing lands without a human merge. The CI gate follows the same rule: on an infected verdict it
-opens the fix as a pull request and stays <strong>red until you merge it</strong>. Remediation opens the fix; it
-never makes the check pass.</p>
+<p><code>saw fix amend</code> is a separate act: it replaces past commits that still carry the payload and
+force-updates each branch they sat on. That force-update is the fix. It does not open a pull
+request, it does not take <code>--branch</code>, it does not move tags, and <code>saw discard</code> does not undo it.
+If a remote branch cannot be read, nothing is force-updated. The previous objects remain until
+collected.</p>
+<p>Nothing lands on a protected branch without a human merge. The CI gate follows the same rule: on an
+infected verdict it opens the fix as a pull request and stays <strong>red until you merge it</strong>. Remediation
+opens the fix; it never makes the check pass. <code>saw fix amend</code> is not on that path.</p>
 <h2 id="fixes-are-recovered-not-reconstructed">Fixes are recovered, not reconstructed<a class="headerlink" href="#fixes-are-recovered-not-reconstructed" title="Permanent link">&para;</a></h2>
 <p>A cleaned file comes from git history — the real previous content — or the file is quarantined whole.
 <code>saw</code> never surgically edits a source file, so a fix cannot corrupt valid code. When a clean version

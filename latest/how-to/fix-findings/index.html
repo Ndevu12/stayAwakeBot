@@ -715,10 +715,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#the-fix-cleans-the-tree-not-the-history" class="md-nav__link">
+  <a href="#the-tree-and-the-history-are-different-acts" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The fix cleans the tree, not the history
+        The tree and the history are different acts
       
     </span>
   </a>
@@ -1840,10 +1840,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#the-fix-cleans-the-tree-not-the-history" class="md-nav__link">
+  <a href="#the-tree-and-the-history-are-different-acts" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The fix cleans the tree, not the history
+        The tree and the history are different acts
       
     </span>
   </a>
@@ -1895,6 +1895,8 @@ Flags: <a href="../../reference/cli/fix/">CLI reference</a>.</p>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>git<span class="w"> </span>diff<span class="w"> </span>main...security/auto-clean
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>saw<span class="w"> </span>fix<span class="w"> </span>--pr<span class="w">               </span><span class="c1"># also push and open (or update) one rolling PR per repository</span>
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>saw<span class="w"> </span>fix<span class="w"> </span>--remote<span class="w">           </span><span class="c1"># sweep GitHub targets: clone, fix, PR</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>saw<span class="w"> </span>fix<span class="w"> </span>amend<span class="w">              </span><span class="c1"># replace past commits and force-update those branches</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>saw<span class="w"> </span>fix<span class="w"> </span>amend<span class="w"> </span>--remote<span class="w">     </span><span class="c1"># clone GitHub targets, replace, force-update</span>
 </code></pre></div>
 <p>Re-running updates the same PR rather than opening another.</p>
 <h2 id="what-gets-fixed-and-what-does-not">What gets fixed, and what does not<a class="headerlink" href="#what-gets-fixed-and-what-does-not" title="Permanent link">&para;</a></h2>
@@ -1903,10 +1905,10 @@ file is quarantined whole. <code>saw</code> never surgically edits a source file
 code. Where a clean version cannot be proven safe to restore, the finding is <strong>deferred to review</strong>
 with the exact reason and the command to inspect it. When a merge finding is still live in the
 working tree, those files are restored on the review branch; the merge commit itself is left in
-place.</p>
-<p>Heuristic (<code>suspicious</code>) findings are <strong>never auto-fixed</strong>. A repository with only heuristic findings
-is disclosed and deferred, never reported "already clean". See <a href="../../explanation/safety-envelope/">the safety
-envelope</a>.</p>
+place. <code>saw fix amend</code> is for payload that propagated into past commits, not for the working
+tree alone. It replaces those commits and force-updates each branch they sat on. That
+force-update is the fix. It does not open a pull request, and it does not move tags. The
+previous objects remain until collected.</p>
 <p>Heuristic (<code>suspicious</code>) findings are <strong>never auto-fixed</strong>. A repository with only heuristic findings
 is disclosed and deferred, never reported "already clean". See <a href="../../explanation/safety-envelope/">the safety
 envelope</a>.</p>
@@ -1923,21 +1925,21 @@ envelope</a>.</p>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>saw<span class="w"> </span>discard<span class="w"> </span>--pr<span class="w">           </span><span class="c1"># close the auto-clean PR, keep the branch</span>
 </code></pre></div>
 <p><code>saw discard</code> only ever touches the generated <code>security/auto-clean</code> branch.</p>
-<h2 id="the-fix-cleans-the-tree-not-the-history">The fix cleans the tree, not the history<a class="headerlink" href="#the-fix-cleans-the-tree-not-the-history" title="Permanent link">&para;</a></h2>
-<p>A fix is a forward commit: it changes what the files contain now. It does <strong>not</strong> rewrite history,
-and it never will — a rewrite invalidates every fork, open pull request, existing clone and tag.</p>
-<p>So after a merged fix the payload is gone from the working tree and from anything a clone, a build
-or CI will run, but an earlier commit still holds it. A run that finds the payload still in the
-files now restores those files on the branch; it does not claim the tree is already clean.</p>
+<h2 id="the-tree-and-the-history-are-different-acts">The tree and the history are different acts<a class="headerlink" href="#the-tree-and-the-history-are-different-acts" title="Permanent link">&para;</a></h2>
+<p>Bare <code>saw fix</code> is a forward commit: it changes what the files contain now. After it, the payload
+is gone from the working tree and from anything a clone, a build or CI will run, but an earlier
+commit can still hold it. A run that finds the payload still in the files now restores those
+files on the branch; it does not claim the tree is already clean.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>saw<span class="w"> </span>scan<span class="w"> </span>.<span class="w">                       </span><span class="c1"># clean</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>git<span class="w"> </span>show<span class="w"> </span>HEAD~1:postcss.config.mjs<span class="w">   </span><span class="c1"># still returns the old contents</span>
 </code></pre></div>
 <p>That is residue, not execution — nothing runs it on clone or build. <code>saw scan</code> says so in its
 coverage notes rather than letting <code>clean</code> imply the repository has no trace of it.</p>
-<p>Removing the residue is a separate decision that is yours to make: it needs a history rewrite
-(<code>git filter-repo</code>), a force-push of every affected branch, and a request to your hosting provider
-to garbage-collect the unreachable objects — a force-push alone does not delete them. Forks keep
-their own copies regardless.</p>
+<p><code>saw fix amend</code> is the history act. It replaces past commits the payload has already propagated
+into and force-updates each branch they sat on. That force-update is the fix. The replaced
+commit keeps its original message. It does not open a pull request, it does not take
+<code>--branch</code>, it does not move tags, and it does not clear forks or objects the hosting
+platform still serves. If a remote branch cannot be read, nothing is force-updated.</p>
 <h2 id="never-on-the-host">Never on the host<a class="headerlink" href="#never-on-the-host" title="Permanent link">&para;</a></h2>
 <p>A compromised <em>machine</em> is never auto-cleaned. If <code>saw audit</code> reports the host as unsafe, follow
 <a href="../audit-a-machine/">audit a machine</a> instead.</p>
