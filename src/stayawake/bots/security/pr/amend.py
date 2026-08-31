@@ -155,12 +155,31 @@ def _capture_path(slug: str, sha12: str) -> Path:
     return Path(env.xdg_state_home()) / "saw" / "amend" / safe / sha12 / "capture.bundle"
 
 
-def _reconstruction_cause(repo: Path, sha: str) -> Cause:
-    """Why no replacement exists. "This shape is not modelled" and "the merge would not resolve"
-    are different answers and the operator acts differently on each."""
-    if len(gitutil.parents(repo, sha)) != 2:
-        return Cause.COMMIT_SHAPE_NOT_MODELLED
-    return Cause.MERGE_WOULD_NOT_RESOLVE
+# One authority for what a refused replacement means to an operator. A `kind` with no entry
+# reaches REPLACEMENT_NOT_WRITTEN rather than a default that reads like a clean result.
+_REPLACEMENT_CAUSE = {
+    "conflicted": Cause.MERGE_WOULD_NOT_RESOLVE,
+    "shape": Cause.COMMIT_SHAPE_NOT_MODELLED,
+    "submodule": Cause.PAYLOAD_IN_A_SUBMODULE,
+    "unnamed": Cause.COMMIT_SHAPE_NOT_MODELLED,
+    "not-applied": Cause.REPLACEMENT_DID_NOT_APPLY,
+    "headers": Cause.COMMIT_RECORDS_MORE_THAN_A_REPLACEMENT_CARRIES,
+    "message-encoding": Cause.COMMIT_RECORDS_MORE_THAN_A_REPLACEMENT_CARRIES,
+    "message": Cause.REPLACEMENT_NOT_WRITTEN,
+    "baseline-carries-payload": Cause.PAYLOAD_PREDATES_THIS_COMMIT,
+}
+
+
+def _survives(signatures) -> object:
+    """Whether content still looks loader-shaped, for judging what a revert would restore.
+
+    Every tier, not only the confirmed one: this asks whether anything survived an excision, and
+    a heuristic match must still block a claim that the payload is gone.
+    """
+    from stayawake.bots.security.matchers.base import build_any_loader_check
+    flat = [s for group in (signatures or {}).values() for s in group] \
+        if isinstance(signatures, dict) else list(signatures or [])
+    return build_any_loader_check(flat)
 
 
 def _tags_at(repo: Path, slug: str, old: str, token: str | None) -> tuple[list[str], bool]:
@@ -280,11 +299,15 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     if behind:
         return refused(display, Cause.LOCAL_MISSING_REMOTE_COMMITS, ", ".join(behind))
 
-    new = gitamend.reconstruct_merge(repo, old, signing)
-    if new is None:
-        return refused(display, _reconstruction_cause(repo, old), old[:12])
-
     signature_paths = tuple(getattr(finding, "related_paths", ()) or ())
+    replacement = gitamend.replacement_commit(repo, old, signature_paths, signing,
+                                             _survives(signatures))
+    if not replacement.ok:
+        return refused(display,
+                       _REPLACEMENT_CAUSE.get(replacement.kind, Cause.REPLACEMENT_NOT_WRITTEN),
+                       replacement.refusal or old[:12])
+    new = replacement.sha
+
     lost = gitamend.discarded_delta(repo, old, new)
     unexplained = [p for p in lost if p not in signature_paths]
     if unexplained:

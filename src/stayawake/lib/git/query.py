@@ -199,12 +199,19 @@ def changed_paths(repo: str | Path, base: str, target: str,
     paths `target` Adds or Modifies and drops Deletions) — callers that care about content
     `target` *introduces* want to ignore paths it merely removes.
     """
-    args = ["diff", "--name-only"]
+    # `-z` is load-bearing, exactly as in `_differing_paths`: without it git C-quotes and
+    # octal-escapes any path holding a non-ASCII byte, a quote, a backslash, a tab or a newline.
+    # That spelling matches nothing when it is later looked up, so the path reads as absent —
+    # and a remediation path that treats "absent" as "this commit introduced it" then reports
+    # having removed something it never found.
+    args = ["diff", "--name-only", "-z"]
     if diff_filter:
         args.append(f"--diff-filter={diff_filter}")
     args += [base, target]
-    out = stdout(repo, args)
-    return {line.strip() for line in out.splitlines() if line.strip()}
+    res = run(repo, args)
+    if res is None or res.returncode != 0:
+        return set()
+    return {p for p in (res.stdout or "").split("\0") if p}
 
 
 def path_exists_at(repo: str | Path, treeish: str, path: str) -> bool:
@@ -213,6 +220,24 @@ def path_exists_at(repo: str | Path, treeish: str, path: str) -> bool:
     that decodes to '' is never mistaken for an absent file."""
     res = run(repo, ["cat-file", "-e", f"{treeish}:{path}"])
     return res is not None and res.returncode == 0
+
+
+def tree_entry(repo: str | Path, treeish: str, path: str) -> tuple[str, str] | None:
+    """`(mode, oid)` for `path` at a commit/tree, or None when it is not there.
+
+    The MODE travels with the object: writing a blob back into an index without it turns an
+    executable into a plain file and a symlink into a file holding its target as text.
+    """
+    res = run(repo, ["ls-tree", "--full-tree", treeish, "--", path])
+    if res is None or res.returncode != 0:
+        return None
+    line = (res.stdout or "").strip()
+    if not line:
+        return None
+    head = line.split("\t", 1)[0].split()
+    if len(head) < 3:
+        return None
+    return head[0], head[2]
 
 
 def file_at(repo: str | Path, treeish: str, path: str) -> str:

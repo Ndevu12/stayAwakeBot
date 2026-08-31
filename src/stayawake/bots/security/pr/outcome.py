@@ -43,6 +43,11 @@ class Cause(Enum):
     COMMIT_ON_NO_BRANCH = "commit-on-no-branch"
     REMOTE_BRANCH_UNREADABLE = "remote-branch-unreadable"
     COMMIT_SHAPE_NOT_MODELLED = "commit-shape-not-modelled"
+    PAYLOAD_IN_A_SUBMODULE = "payload-in-a-submodule"
+    REPLACEMENT_NOT_WRITTEN = "replacement-not-written"
+    REPLACEMENT_DID_NOT_APPLY = "replacement-did-not-apply"
+    PAYLOAD_PREDATES_THIS_COMMIT = "payload-predates-this-commit"
+    COMMIT_RECORDS_MORE_THAN_A_REPLACEMENT_CARRIES = "commit-records-more-than-a-replacement-carries"
     MERGE_WOULD_NOT_RESOLVE = "merge-would-not-resolve"
     RECONSTRUCTION_UNAVAILABLE = "reconstruction-unavailable"
     REPLAY_FAILED = "replay-failed"
@@ -183,6 +188,15 @@ _PHRASE = {
     Cause.CONFIRMED_COMMIT_UNRESOLVED: "the confirmed commit could not be resolved",
     Cause.COMMIT_ON_NO_BRANCH: "the commit is not on any branch",
     Cause.REMOTE_BRANCH_UNREADABLE: "a remote branch could not be read",
+    Cause.PAYLOAD_IN_A_SUBMODULE:
+        "the payload is in a submodule, which this repository only points at",
+    Cause.REPLACEMENT_NOT_WRITTEN: "the replacement could not be written",
+    Cause.REPLACEMENT_DID_NOT_APPLY: "the replacement did not change what it named",
+    Cause.PAYLOAD_PREDATES_THIS_COMMIT:
+        "the payload was already there before this commit, so replacing this one does not "
+        "remove it",
+    Cause.COMMIT_RECORDS_MORE_THAN_A_REPLACEMENT_CARRIES:
+        "this commit records something a replacement cannot reproduce",
     Cause.COMMIT_SHAPE_NOT_MODELLED: "this commit shape is not modelled",
     Cause.MERGE_WOULD_NOT_RESOLVE: "the merge would not resolve cleanly",
     Cause.RECONSTRUCTION_UNAVAILABLE: "the replacement could not be built",
