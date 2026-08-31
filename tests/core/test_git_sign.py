@@ -26,7 +26,8 @@ from unittest import mock
 from stayawake.lib.git.run import run
 from stayawake.lib.git.write import sign
 from stayawake.lib.git.write.sign import (
-    SigningStatus, any_signed, carries_signature, sign_flags, signing_args,
+    SigningStatus, any_signed, carries_signature, committer_identity, sign_flags,
+    signing_args,
     signing_available, signing_env, signing_status,
 )
 
@@ -272,18 +273,35 @@ class TestCommitterIsTheOperator(SigningFixture):
         self.assertIn("committer The Operator <operator@example.test>", headers)
         self.assertNotIn("Impostor", headers)
 
-    def test_an_ambient_committer_cannot_take_over_a_repo_with_no_configured_identity(self):
-        # MEASURED: with no user.name/user.email, git auto-detects an identity but an ambient
-        # GIT_COMMITTER_NAME still wins — so dropping those variables is what holds the line.
+    def test_an_ambient_committer_is_dropped_even_with_nothing_to_replace_it(self):
+        """Dropping the ambient variables is what holds the line, and it has to hold when the
+        repository has no identity to put in their place.
+
+        This asserted the resulting COMMIT before, which made it a question about the machine: a
+        workstation lets git invent an identity and commit, a bare runner has none and
+        `commit-tree` fails, so the same code passed here and errored in CI. The environment
+        handed to the rewrite is the thing under test and it is the same everywhere.
+        """
         repo = self.signing_works()
         _git(repo, "config", "--unset", "user.name")
         _git(repo, "config", "--unset", "user.email")
         env = signing_env(repo, base={**os.environ,
                                       "GIT_COMMITTER_NAME": "Replayed Impostor",
                                       "GIT_COMMITTER_EMAIL": "impostor@example.test"})
-        tree = _git(repo, "rev-parse", "HEAD^{tree}").strip()
-        res = run(repo, ["commit-tree", tree, "-m", "rewritten"], env=env)
-        self.assertNotIn("Impostor", _headers(repo, res.stdout.strip()))
+        self.assertNotIn("GIT_COMMITTER_NAME", env)
+        self.assertNotIn("GIT_COMMITTER_EMAIL", env)
+        self.assertIsNone(committer_identity(repo),
+                          "and with no identity to record, the caller refuses rather than "
+                          "letting git invent one")
+
+    def test_a_repository_with_an_identity_reports_it(self):
+        self.assertEqual(committer_identity(self.signing_works()),
+                         ("The Operator", "operator@example.test"))
+
+    def test_a_half_configured_identity_is_no_identity(self):
+        repo = self.signing_works()
+        _git(repo, "config", "--unset", "user.email")
+        self.assertIsNone(committer_identity(repo))
 
     def test_the_operator_comes_from_the_repository_being_remediated(self):
         # The replay runs in a throwaway worktree, not in `repo`. Dropping the ambient variables

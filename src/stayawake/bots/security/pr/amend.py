@@ -269,6 +269,8 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     signing = sign.signing_status(repo, history_is_signed=sign.any_signed(repo, replaced))
     if signing.must_refuse:
         return refused(display, Cause.SIGNING_UNAVAILABLE, signing.reason)
+    if sign.committer_identity(repo) is None:
+        return refused(display, Cause.NO_COMMITTER_IDENTITY)
 
     leases, unread = _collect_remote_heads(repo, slug, [n for n, _, _ in heads], token)
     if unread is not None:

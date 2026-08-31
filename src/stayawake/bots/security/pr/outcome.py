@@ -50,6 +50,7 @@ class Cause(Enum):
     NOT_PERMITTED_TO_REWRITE = "not-permitted-to-rewrite"
     REMOTE_REFS_UNREADABLE = "remote-refs-unreadable"
     SIGNING_UNAVAILABLE = "signing-unavailable"
+    NO_COMMITTER_IDENTITY = "no-committer-identity"
     REPLACEMENT_LOSES_MORE_THAN_THE_PAYLOAD = "replacement-loses-more-than-the-payload"
     CAPTURE_FAILED = "capture-failed"
     REPLAY_CHANGED_UNRELATED_COMMITS = "replay-changed-unrelated-commits"
@@ -157,6 +158,9 @@ _PHRASE = {
     Cause.NOT_PERMITTED_TO_REWRITE: "this identity may not rewrite here",
     Cause.REMOTE_REFS_UNREADABLE: "the remote branches could not be refreshed",
     Cause.SIGNING_UNAVAILABLE: "this repository signs commits and a signature could not be made",
+    Cause.NO_COMMITTER_IDENTITY:
+        "this repository resolves no user.name and user.email, so the rewrite would be recorded "
+        "against an identity git invented",
     Cause.REPLACEMENT_LOSES_MORE_THAN_THE_PAYLOAD:
         "the replacement would drop content the finding does not cover",
     Cause.CAPTURE_FAILED: "the previous commits could not be captured first",

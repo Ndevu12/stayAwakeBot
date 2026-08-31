@@ -832,6 +832,19 @@ class TestAmendGates(_AmendFixture):
                                 Streamer(enabled=False, out=out), jobs=1)
         self.assertNotIn("no such path", out.getvalue())
 
+    def test_a_machine_with_no_git_identity_refuses_rather_than_inventing_one(self):
+        """CI runners are the case: with nothing configured git either invents an identity from
+        the host or cannot commit at all, and which one you get depends on the machine."""
+        self._loader_merge()
+        before = self._rev()
+        calls = []
+        _git(self.d, "config", "--unset", "user.email")
+        outcome = self._act(pusher=lambda *a: calls.append(a) or PushResult(True))
+        self.assertIn(Cause.NO_COMMITTER_IDENTITY, self._causes(outcome))
+        self.assertEqual(calls, [])
+        self.assertEqual(before, self._rev())
+        self.assertTrue(outcome.needs_review)
+
 
 if __name__ == "__main__":
     unittest.main()

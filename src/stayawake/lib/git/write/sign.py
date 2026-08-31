@@ -156,6 +156,20 @@ def signing_available(repo: str | Path, *, history_is_signed: bool = False) -> t
     return status.available, status.reason
 
 
+def committer_identity(repo: str | Path) -> tuple[str, str] | None:
+    """The name and email the rewrite will be committed under, or None when the repository
+    resolves neither.
+
+    A rewrite attributed to a guessed identity is not a record of who made it. With nothing
+    configured git invents one from the host on a workstation and refuses outright on a bare CI
+    runner, so which of the two an operator gets depends on the machine — the caller refuses
+    instead, on every machine.
+    """
+    name = _config_value(repo, "user.name")
+    email = _config_value(repo, "user.email")
+    return (name, email) if name and email else None
+
+
 def signing_env(repo: str | Path, base: Mapping[str, str] | None = None) -> dict:
     """The environment for the rewriting command: the committer is the OPERATOR.
 
