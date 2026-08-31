@@ -13,6 +13,21 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Fixed
+- **`saw fix amend` takes the payload and leaves the rest of the commit alone.** It used to
+  rebuild the commit from its parents, which discarded everything else that commit contributed —
+  a conflict resolution, an edit made while the merge was open, a file it deleted — so it refused
+  in the cases that actually occur, including a merge that resolved a conflict and carried the
+  payload. The replacement is now the commit's own content with only the reported paths put back,
+  and those are the only paths that change.
+
+  A correction is confirmed to have taken effect before the replacement is used, so a path that
+  could not be matched is reported rather than counted as removed. File modes are kept, so an
+  executable stays executable and a symlink stays a symlink. The message and the author are
+  reproduced exactly, and a commit recording something a replacement cannot carry is refused
+  rather than altered. If the reported content was already there before this commit, replacing
+  this one does not remove it and the run says so.
+
 ### Changed
 - **`saw fix amend` has its own reference page, with the caution first.** It states what the
   command needs before it will act, what it stops for, and what it leaves for a person to

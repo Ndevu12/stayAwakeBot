@@ -29,7 +29,15 @@ def auto_merge(repo: str | Path, a: str, b: str) -> AutoMerge | None:
     oid = lines[0].strip() if lines else ""
     if not (oid and len(oid) in (40, 64) and all(c in "0123456789abcdef" for c in oid)):
         return None
-    return AutoMerge(oid, frozenset(ln.strip() for ln in lines[1:] if ln.strip()))
+    # `<oid>`, the conflicted paths, a BLANK LINE, then git's own messages. Skipping blanks
+    # instead of stopping at the first one put `Auto-merging f.txt` and `CONFLICT (content): ...`
+    # in the conflict set — read as paths by anything that iterates it.
+    conflicted = []
+    for line in lines[1:]:
+        if not line.strip():
+            break
+        conflicted.append(line.strip())
+    return AutoMerge(oid, frozenset(conflicted))
 
 
 def auto_merge_tree(repo: str | Path, a: str, b: str) -> str | None:

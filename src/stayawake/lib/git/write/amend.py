@@ -11,7 +11,8 @@ from pathlib import Path
 
 from stayawake.lib.git.merge.tree import auto_merge
 from stayawake.lib.git.query import parents, commit_meta, is_ancestor, branches_carrying
-from stayawake.lib.git.run import run, run_ok, stdout
+from stayawake.lib.git.run import run, run_ok, stdout, stdout_bytes
+from stayawake.lib.git.write.replace import Replacement, replacement_tree
 from stayawake.lib.git.write.sign import (SigningStatus, sign_flags, signing_args, signing_env,
                                           signing_status)
 from stayawake.lib.git.write.worktree import add_worktree, remove_worktree
@@ -60,44 +61,96 @@ def _tree_paths(repo: str | Path, treeish: str) -> list[str]:
     return sorted({p for p in (res.stdout or "").split("\0") if p})
 
 
-def reconstruct_merge(repo: str | Path, merge_sha: str,
-                      signing: SigningStatus | None = None) -> str | None:
-    """The same commit with the payload removed: same parents, same message, same author,
-    a tree that is the clean 3-way merge of those parents.
+_CARRIED_HEADERS = (b"tree", b"parent", b"author", b"committer", b"gpgsig")
 
-    None when the commit is not two-parent, when there is no clean auto-merge, or when that
-    auto-merge conflicted — those are not guessed at. `signing` decides whether the replacement
-    is signed; measured from the repository when the caller does not hold one already.
+
+def _uncarried_headers(headers: bytes) -> list[str]:
+    """Header names this rewrite cannot reproduce. `gpgsig` is expected — the replacement is a
+    different object and gets its own signature — but an `encoding` or a `mergetag` says
+    something about the commit that would silently disappear."""
+    seen = []
+    for line in headers.split(b"\n"):
+        if line.startswith(b" ") or not line.strip():
+            continue                     # a continuation of the header above it
+        name = line.split(b" ", 1)[0]
+        if name and name not in _CARRIED_HEADERS:
+            seen.append(name.decode("ascii", "replace"))
+    return sorted(set(seen))
+
+
+def _author_env(headers: bytes) -> dict | None:
+    """The author of the commit being replaced, exactly as recorded.
+
+    Every field is set even when empty: skipping an empty email let `commit-tree` fall back to
+    the OPERATOR's identity and write them into the author slot of a commit they did not author.
+    The date is the raw `<timestamp> <tz>`, so git's "timezone unknown" `-0000` is not normalised
+    to `+0000`. `surrogateescape` carries bytes that are not valid UTF-8 through the environment
+    unchanged.
     """
-    signing = signing_status(repo) if signing is None else signing
-    ps = parents(repo, merge_sha)
-    if len(ps) != 2:
+    line = next((ln for ln in headers.split(b"\n") if ln.startswith(b"author ")), None)
+    if line is None:
         return None
-    merged = auto_merge(repo, ps[0], ps[1])
-    if merged is None or merged.conflicted:
-        return None
-    msg = stdout(repo, ["show", "-s", "--format=%B", merge_sha])
-    if not msg:
+    rest = line[len(b"author "):]
+    open_at = rest.rfind(b" <")
+    close_at = rest.find(b">", open_at + 1) if open_at >= 0 else -1
+    if open_at < 0 or close_at < 0:
         return None
     env = dict(os.environ)
-    an = stdout(repo, ["show", "-s", "--format=%an", merge_sha]).strip()
-    ae = stdout(repo, ["show", "-s", "--format=%ae", merge_sha]).strip()
-    ad = stdout(repo, ["show", "-s", "--format=%aI", merge_sha]).strip()
-    if an:
-        env["GIT_AUTHOR_NAME"] = an
-    if ae:
-        env["GIT_AUTHOR_EMAIL"] = ae
-    if ad:
-        env["GIT_AUTHOR_DATE"] = ad
+    env["GIT_AUTHOR_NAME"] = rest[:open_at].decode("utf-8", "surrogateescape")
+    env["GIT_AUTHOR_EMAIL"] = rest[open_at + 2:close_at].decode("utf-8", "surrogateescape")
+    env["GIT_AUTHOR_DATE"] = rest[close_at + 1:].strip().decode("utf-8", "surrogateescape")
+    return env
+
+
+def replacement_commit(repo: str | Path, commit: str, flagged_paths,
+                       signing: SigningStatus | None = None,
+                       still_carries=None) -> Replacement:
+    """`commit` with the payload removed: same parents, same message, same author, and a tree
+    that is its own with only the flagged paths put back to what they should have been.
+
+    It is not rebuilt from its parents. Everything the commit contributed beyond the payload — a
+    conflict resolution, an edit made during the merge, a file it deleted — is what the recorded
+    tree already holds, and replacing that tree wholesale is what used to make this refuse.
+    """
+    signing = signing_status(repo) if signing is None else signing
+    corrected = replacement_tree(repo, commit, flagged_paths, still_carries)
+    if not corrected.ok:
+        return corrected
+    ps = parents(repo, commit)
+    raw = stdout_bytes(repo, ["cat-file", "commit", commit])
+    if not raw:
+        return Replacement(kind="message", refusal="the original commit could not be read")
+    headers, _, body = raw.partition(b"\n\n")
+    uncarried = _uncarried_headers(headers)
+    if uncarried:
+        return Replacement(kind="headers",
+                           refusal="this commit records " + ", ".join(uncarried)
+                                   + ", which a replacement cannot carry")
+    try:
+        body.decode("utf-8")
+    except UnicodeDecodeError:
+        # MEASURED: `commit-tree` warns "commit message did not conform to UTF-8" and converts
+        # from the LOCALE charset, so the replacement's message depends on the machine that ran
+        # it. There is no encoding to convert back from once the header is gone.
+        return Replacement(kind="message-encoding",
+                           refusal="this commit's message is not UTF-8 and a replacement cannot "
+                                   "reproduce it")
+    env = _author_env(headers)
+    if env is None:
+        return Replacement(kind="message", refusal="the original author could not be read")
+    parent_args = [arg for p in ps for arg in ("-p", p)]
     msg_path = None
     res = None
     try:
-        with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as fh:
-            fh.write(msg if msg.endswith("\n") else msg + "\n")
+        # The BODY BYTES, written verbatim. `--format=%B` appends a newline of its own and decodes
+        # through `errors="replace"`, so a message in a legacy encoding came back as U+FFFD and
+        # every replacement grew a trailing blank line — both irreversible once pushed.
+        with tempfile.NamedTemporaryFile("wb", delete=False) as fh:
+            fh.write(body)
             msg_path = fh.name
-        res = run(repo, [*signing_args(signing), "commit-tree", *sign_flags(signing,
-                         "commit-tree"), merged.tree,
-                         "-p", ps[0], "-p", ps[1], "-F", msg_path],
+        res = run(repo, [*signing_args(signing), "commit-tree",
+                         *sign_flags(signing, "commit-tree"), corrected.tree,
+                         *parent_args, "-F", msg_path],
                   env=signing_env(repo, env))
     finally:
         if msg_path:
@@ -106,9 +159,12 @@ def reconstruct_merge(repo: str | Path, merge_sha: str,
             except OSError:
                 pass
     if res is None or res.returncode != 0:
-        return None
+        return Replacement(kind="write", refusal="the replacement commit could not be written")
     sha = (res.stdout or "").strip()
-    return sha or None
+    if not sha:
+        return Replacement(kind="write", refusal="the replacement commit could not be written")
+    return Replacement(tree=corrected.tree, sha=sha, reverted=corrected.reverted,
+                       removed=corrected.removed)
 
 
 def discarded_delta(repo: str | Path, merge_sha: str, reconstructed_tree: str) -> list[str]:

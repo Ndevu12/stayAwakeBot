@@ -52,6 +52,20 @@ def run_ok(repo: str | Path | None, args: list[str], *, env: dict | None = None,
     return res is not None and res.returncode == 0
 
 
+def stdout_bytes(repo: str | Path, args: list[str]) -> bytes | None:
+    """Raw stdout, undecoded — None on any failure.
+
+    For content whose BYTES are the thing: a commit message stored in a legacy encoding decodes
+    through `errors="replace"` into U+FFFD and cannot be encoded back, so a rewrite that reads a
+    message as text destroys it.
+    """
+    try:
+        res = subprocess.run(_argv(repo, args), capture_output=True, timeout=LOCAL_TIMEOUT)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return res.stdout if res.returncode == 0 else None
+
+
 def stdout(repo: str | Path, args: list[str]) -> str:
     """Run a git command; return its stdout ('' on any failure) — for read helpers that
     deliberately degrade to empty rather than raise."""
