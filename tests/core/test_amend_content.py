@@ -14,6 +14,7 @@ from __future__ import annotations
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from stayawake.lib.git.write import amend
@@ -217,6 +218,41 @@ class TestPointBranchAtGuard(unittest.TestCase):
                          "refusing must happen BEFORE the ref moves")
         self.assertEqual((repo / "app.js").read_text(encoding="utf-8"),
                          "base\nuncommitted work\n")
+
+    def test_a_reset_that_fails_puts_the_ref_back_before_refusing(self):
+        """`update-ref` succeeds and `reset --hard` then fails — a held `.git/index.lock` is
+        enough. Returning False with the ref already at the replacement told the caller nothing
+        had moved while the branch sat on rewritten history with the old content staged, so the
+        operator's next commit would put the payload back on top of the clean history."""
+        repo, evil = _repo_with_evil_merge()
+        before = _rev(repo, "refs/heads/main")
+        target = _rev(repo, f"{evil}^1")
+        (repo / ".git" / "index.lock").write_text("", encoding="utf-8")
+        self.addCleanup(lambda: (repo / ".git" / "index.lock").unlink(missing_ok=True))
+
+        moved = amend.point_branch_at(repo, "main", target, before)
+
+        self.assertFalse(moved)
+        self.assertEqual(_rev(repo, "refs/heads/main"), before,
+                         "a refusal must mean the branch is where it started")
+
+    def test_a_ref_that_cannot_be_put_back_is_raised_not_reported_as_unmoved(self):
+        repo, evil = _repo_with_evil_merge()
+        before = _rev(repo, "refs/heads/main")
+        target = _rev(repo, f"{evil}^1")
+        real = amend.run_ok
+
+        def only_the_first_update_ref(r, args, **kw):
+            if args[:1] == ["reset"]:
+                return False
+            if args[:1] == ["update-ref"] and args[2:3] == [before]:
+                return False          # the put-back is refused too
+            return real(r, args, **kw)
+
+        with mock.patch.object(amend, "run_ok", only_the_first_update_ref):
+            with self.assertRaises(amend.AmendUnwindFailed) as raised:
+                amend.point_branch_at(repo, "main", target, before)
+        self.assertEqual(raised.exception.unrestored, ["main"])
 
     def test_refuses_while_an_untracked_file_would_be_overwritten(self):
         repo, evil = _repo_with_evil_merge()

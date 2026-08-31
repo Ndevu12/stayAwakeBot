@@ -26,7 +26,8 @@ from unittest import mock
 from stayawake.lib.git.run import run
 from stayawake.lib.git.write import sign
 from stayawake.lib.git.write.sign import (
-    SigningStatus, sign_flags, signing_args, signing_available, signing_env, signing_status,
+    SigningStatus, any_signed, carries_signature, sign_flags, signing_args,
+    signing_available, signing_env, signing_status,
 )
 
 
@@ -111,21 +112,21 @@ class SigningFixture(unittest.TestCase):
 class TestThreeStates(SigningFixture):
     def test_signing_off_is_unconfigured_and_not_a_refusal(self):
         status = signing_status(self.signing_off())
-        self.assertFalse(status.configured)
+        self.assertFalse(status.required)
         self.assertFalse(status.available)
         self.assertFalse(status.must_refuse, "an unsigned repo must not block remediation")
         self.assertIn("commit.gpgsign", status.reason)
 
     def test_working_signing_is_available_only_once_a_signature_was_made(self):
         status = signing_status(self.signing_works())
-        self.assertTrue(status.configured)
+        self.assertTrue(status.required)
         self.assertTrue(status.available, status.reason)
         self.assertFalse(status.must_refuse)
         self.assertEqual(status.signature_format, "ssh")
 
     def test_broken_key_is_a_refusal_not_a_silent_downgrade(self):
         status = signing_status(self.signing_broken())
-        self.assertTrue(status.configured, "commit.gpgsign=true is still configured")
+        self.assertTrue(status.required, "commit.gpgsign=true is still configured")
         self.assertFalse(status.available, "an unloadable key cannot produce a signature")
         self.assertTrue(status.must_refuse, "the caller must refuse before any ref moves")
         self.assertIn("no ssh signature could be produced", status.reason)
@@ -135,7 +136,7 @@ class TestThreeStates(SigningFixture):
         works = signing_status(self.signing_works())
         broken = signing_status(self.signing_broken())
         self.assertEqual(
-            [(s.configured, s.available, s.must_refuse) for s in (off, works, broken)],
+            [(s.required, s.available, s.must_refuse) for s in (off, works, broken)],
             [(False, False, False), (True, True, False), (True, False, True)])
 
     def test_available_tuple_agrees_with_the_status(self):
@@ -230,7 +231,7 @@ class TestArgumentsActuallySign(SigningFixture):
 
     def test_unavailable_signing_produces_an_unsigned_object(self):
         repo = self.signing_works()
-        unsigned = SigningStatus(configured=False, available=False, reason="", signature_format="")
+        unsigned = SigningStatus(required=False, available=False, reason="", signature_format="")
         self.assertNotIn("gpgsig", _headers(repo, self._commit_tree(repo, unsigned)))
 
     def test_rebase_flag_overrides_a_repository_that_signs_by_default(self):
@@ -243,7 +244,7 @@ class TestArgumentsActuallySign(SigningFixture):
         _git(repo, "add", "-A")
         _git(repo, "commit", "-qm", "new base")
         _git(repo, "checkout", "-q", "main")
-        unsigned = SigningStatus(configured=False, available=False, reason="", signature_format="")
+        unsigned = SigningStatus(required=False, available=False, reason="", signature_format="")
         self.assertEqual(sign_flags(unsigned, "rebase"), ("--no-gpg-sign",))
         _git(repo, *signing_args(unsigned), "rebase", *sign_flags(unsigned, "rebase"),
              "--rebase-merges", "--onto", "newbase", "start")
@@ -310,6 +311,76 @@ class TestCommitterIsTheOperator(SigningFixture):
         self.assertGreater(committed_at, 1_600_000_000,
                            "a rewrite must be dated when it happened, not by an ambient "
                            f"GIT_COMMITTER_DATE ({committer})")
+
+
+class TestTheHistoryDecidesWhatIsOwed(SigningFixture):
+    """`commit.gpgsign` is a property of THIS clone. Whether the commits being replaced are signed
+    is a property of the history, and it is the one that decides what a rewrite owes.
+
+    A merge made with GitHub's merge button is signed server-side with no local config at all, and
+    a CI checkout sets `commit.gpgsign` essentially never — reading the config alone reported
+    "nothing asked for a signature" and the rewrite went out with `--no-gpg-sign`.
+    """
+
+    def _signed_then_config_off(self) -> Path:
+        repo = self.signing_works()
+        (repo / "later.js").write_text("later\n", encoding="utf-8")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-qm", "signed later")
+        _git(repo, "config", "--unset", "commit.gpgsign")
+        return repo
+
+    def test_signed_history_still_owes_a_signature_when_the_config_never_asked(self):
+        repo = self._signed_then_config_off()
+        self.assertFalse(signing_status(repo).required,
+                         "the config alone asks for nothing — that is the trap")
+        status = signing_status(repo, history_is_signed=True)
+        self.assertTrue(status.required, "the commits being replaced are signed")
+        self.assertTrue(status.available)
+        self.assertFalse(status.must_refuse)
+        self.assertEqual(sign_flags(status, "rebase"), ("--gpg-sign",))
+        self.assertEqual(sign_flags(status, "commit-tree"), ("-S",))
+
+    def test_signed_history_with_no_usable_key_is_a_refusal_not_a_downgrade(self):
+        repo = self.signing_broken()
+        _git(repo, "config", "--unset", "commit.gpgsign")
+        status = signing_status(repo, history_is_signed=True)
+        self.assertTrue(status.required)
+        self.assertFalse(status.available)
+        self.assertTrue(status.must_refuse)
+
+    def test_unsigned_history_and_no_config_owes_nothing(self):
+        status = signing_status(self.signing_off(), history_is_signed=False)
+        self.assertFalse(status.required)
+        self.assertFalse(status.must_refuse)
+
+
+class TestSignaturePresenceIsReadFromTheObject(SigningFixture):
+    """Presence, never `%G?`. That reports VERIFICATION, so a correctly signed ssh commit reads as
+    `N` on any host with no `allowedSignersFile` — and a rewrite would strip a signature it had
+    just decided was not there."""
+
+    def test_a_signed_commit_counts_even_when_it_cannot_be_verified(self):
+        repo = self.signing_works()
+        head = _git(repo, "rev-parse", "HEAD~0").strip()
+        _git(repo, "commit", "--allow-empty", "-qm", "signed")
+        signed = _git(repo, "rev-parse", "HEAD").strip()
+        self.assertIn("gpgsig", _headers(repo, signed))
+        self.assertEqual(_git(repo, "log", "-1", "--format=%G?", signed).strip(), "N",
+                         "this host cannot verify it, which must not mean unsigned")
+        self.assertTrue(carries_signature(repo, signed))
+        self.assertTrue(any_signed(repo, [head, signed]))
+
+    def test_an_unsigned_commit_does_not_count(self):
+        repo = self.signing_off()
+        head = _git(repo, "rev-parse", "HEAD").strip()
+        self.assertFalse(carries_signature(repo, head))
+        self.assertFalse(any_signed(repo, [head]))
+
+    def test_a_commit_git_cannot_read_is_not_evidence_of_nothing_signed(self):
+        repo = self.signing_off()
+        self.assertIsNone(carries_signature(repo, "0" * 40))
+        self.assertTrue(any_signed(repo, ["0" * 40]))
 
 
 if __name__ == "__main__":

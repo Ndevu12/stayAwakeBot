@@ -9,11 +9,22 @@ preserved, committer the operator, signed by the operator**. Signing is therefor
 repository that asks for signatures but cannot produce one is a REFUSAL the caller detects up
 front — never a silent downgrade to unsigned.
 
+Signatures are REQUIRED by either of two things, and reading only the first was a real hole:
+`commit.gpgsign=true` in this clone's config, OR the history about to be replaced already
+carrying signatures. A merge made with GitHub's merge button is signed server-side with no local
+config at all, and CI checkouts set `commit.gpgsign` essentially never — so config alone said "not
+asked for" and the rewrite went out with `--no-gpg-sign`, stripping signatures nobody was told
+about. The history is the authority on what this rewrite owes; the config is one input to it.
+
 The three states a caller must tell apart, all carried by `SigningStatus`:
 
-    configured=False              signing was never asked for  -> rewrite unsigned, disclose it
-    configured=True, available    signing asked for and proven -> rewrite signed
-    configured=True, not avail.   asked for, cannot be made    -> `must_refuse`, rewrite nothing
+    required=False               nothing here needs a signature -> rewrite unsigned
+    required=True, available     needed and proven producible   -> rewrite signed
+    required=True, not available needed, cannot be made         -> `must_refuse`, rewrite nothing
+
+Format is never assumed. `gpg.format` selects openpgp (gpg), x509 (gpgsm) or ssh (ssh-keygen),
+each with its own program key, and the probe makes a REAL signature through whichever git
+resolves — so a host is never judged by the format this one happens to use.
 """
 from __future__ import annotations
 
@@ -65,47 +76,83 @@ class SigningStatus:
     """What this repository's signing configuration can actually do, established by making a
     real throwaway signature — never by reading `commit.gpgsign` and believing it."""
 
-    configured: bool
+    required: bool
     available: bool
     reason: str
     signature_format: str
+    config: tuple[tuple[str, str], ...] = ()
+    """The signing keys git resolved, carried so the rewrite can be given them explicitly. A
+    replay runs in a throwaway worktree on its own branch, where an `includeIf "onbranch:"` or a
+    per-worktree config resolves differently from where the probe ran — passing what was proven
+    makes the rewrite independent of where it executes."""
 
     @property
     def must_refuse(self) -> bool:
-        """The hard refusal condition: signatures were asked for and cannot be produced. The
+        """The hard refusal condition: signatures are needed here and cannot be produced. The
         caller checks this BEFORE the first ref moves; rewriting anyway would replace signed
         history with unsigned commits that keep their original authors."""
-        return self.configured and not self.available
+        return self.required and not self.available
 
 
-def signing_status(repo: str | Path) -> SigningStatus:
-    """Whether `repo` is configured to sign AND can prove it, with a reason either way.
+def signing_status(repo: str | Path, *, history_is_signed: bool = False) -> SigningStatus:
+    """Whether `repo` needs to sign AND can prove it, with a reason either way.
 
-    Runs a git subprocess and a real signing attempt, so hold the result and pass it around
-    rather than calling this once per commit.
+    `history_is_signed` is the caller's answer to "do the commits I am about to replace carry
+    signatures" — pass it and a repository whose config never asked to sign still signs, rather
+    than silently stripping what it found. Runs a git subprocess and a real signing attempt, so
+    hold the result and pass it around rather than calling this once per commit.
     """
     config = _resolved_signing_config(repo)
     signature_format = config.get("gpg.format") or "openpgp"
-    if config.get("commit.gpgsign") != "true":
+    carried = tuple(sorted(config.items()))
+    asked = config.get("commit.gpgsign") == "true"
+    if not (asked or history_is_signed):
         return SigningStatus(
-            configured=False, available=False, signature_format=signature_format,
-            reason="commit signing is not enabled here (commit.gpgsign is not true)")
+            required=False, available=False, signature_format=signature_format, config=carried,
+            reason="nothing here asks for a signature: commit.gpgsign is not true and the commits being "
+                   "replaced carry none")
+    because = "commit.gpgsign is true" if asked else "the commits being replaced are signed"
     failure = _first_probe_failure(config)
     if failure is None:
         return SigningStatus(
-            configured=True, available=True, signature_format=signature_format,
+            required=True, available=True, signature_format=signature_format, config=carried,
             reason=f"a test {signature_format} signature was produced")
     return SigningStatus(
-        configured=True, available=False, signature_format=signature_format,
-        reason=f"commit.gpgsign is true but no {signature_format} signature "
-               f"could be produced: {failure}")
+        required=True, available=False, signature_format=signature_format, config=carried,
+        reason=f"{because} but no {signature_format} signature could be produced: {failure}")
 
 
-def signing_available(repo: str | Path) -> tuple[bool, str]:
-    """`(can this repo produce a signature, why not)` — the two-value form. A caller that has to
-    tell "never asked for" apart from "asked for and broken" needs `signing_status` instead:
-    only the second is a refusal."""
-    status = signing_status(repo)
+def carries_signature(repo: str | Path, sha: str) -> bool | None:
+    """Whether the commit object holds a signature header. None when git could not be asked.
+
+    The header, never `%G?`: that reports VERIFICATION, so a perfectly signed ssh commit reads as
+    `N` on a host with no `allowedSignersFile` — and a rewrite would then strip a signature it had
+    just decided was not there.
+    """
+    res = run(repo, ["cat-file", "commit", sha], timeout=PROBE_TIMEOUT)
+    if res is None or res.returncode != 0:
+        return None
+    headers = res.stdout.split("\n\n", 1)[0]
+    return any(line.startswith("gpgsig") for line in headers.splitlines())
+
+
+def any_signed(repo: str | Path, shas) -> bool:
+    """True when any of `shas` carries a signature, and ALSO when git could not answer for one of
+    them — an unreadable commit is not evidence that nothing was signed."""
+    for sha in shas:
+        if carries_signature(repo, sha) is not False:
+            return True
+    return False
+
+
+def signing_available(repo: str | Path, *, history_is_signed: bool = False) -> tuple[bool, str]:
+    """`(will this rewrite be signed, why not)` — the two-value form.
+
+    False also covers "no signature is needed here", because the probe only runs once something
+    asks for one. A caller that has to tell "nothing asked" apart from "asked and broken" needs
+    `signing_status`: only the second is a refusal.
+    """
+    status = signing_status(repo, history_is_signed=history_is_signed)
     return status.available, status.reason
 
 
@@ -130,9 +177,15 @@ def signing_env(repo: str | Path, base: Mapping[str, str] | None = None) -> dict
 
 
 def signing_args(status: SigningStatus) -> tuple[str, ...]:
-    """The `-c` overrides to place before the subcommand, pinning the decision so an ambient or
-    included config cannot flip it. Not sufficient on its own — see `sign_flags`."""
-    return ("-c", f"commit.gpgsign={'true' if status.available else 'false'}")
+    """The `-c` overrides to place before the subcommand, pinning the decision AND the key so an
+    ambient, included or per-worktree config cannot flip either. Not sufficient on its own — see
+    `sign_flags`."""
+    args = ["-c", f"commit.gpgsign={'true' if status.available else 'false'}"]
+    if status.available:
+        for key, value in status.config:
+            if key not in ("commit.gpgsign", "user.name", "user.email"):
+                args += ["-c", f"{key}={value}"]
+    return tuple(args)
 
 
 def sign_flags(status: SigningStatus, command: str) -> tuple[str, ...]:

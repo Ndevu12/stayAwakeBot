@@ -13,8 +13,9 @@ from contextlib import ExitStack, contextmanager, redirect_stderr
 
 from stayawake import cli
 from stayawake.bots.security.models import CONFIRMED, Finding, ScanResult, Severity
+from stayawake.bots.security.pr import amend as amendmod
 from stayawake.bots.security.pr.amend import amend_outcome, amend_repo
-from stayawake.bots.security.pr.amend_outcome import (BranchResult, Cause, Reason, amended,
+from stayawake.bots.security.pr.outcome import (BranchResult, Cause, Reason, amended,
                                                       render_amend_line)
 from stayawake.bots.security.targets import ScanOptions
 from stayawake.lib.git.query import branches_carrying
@@ -567,9 +568,9 @@ class TestAmendGates(_AmendFixture):
     def test_a_repository_that_signs_and_cannot_is_refused_before_anything_moves(self):
         self._loader_merge()
         before = self._rev()
-        unavailable = mock.Mock(must_refuse=True, available=False, configured=True,
-                                reason="no secret key")
-        with mock.patch(self.AT + "signing_status", return_value=unavailable):
+        unavailable = mock.Mock(must_refuse=True, available=False, required=True,
+                                reason="no secret key", config=())
+        with mock.patch(self.AT + "sign.signing_status", return_value=unavailable):
             outcome = self._act()
         self.assertIn(Cause.SIGNING_UNAVAILABLE, self._causes(outcome))
         self.assertEqual(before, self._rev())
@@ -654,6 +655,105 @@ class TestAmendGates(_AmendFixture):
             code = cli.main(["fix", "amend", "--user", "acme"])
         self.assertEqual(code, 2)
         self.assertIn("--user", err.getvalue())
+
+
+    def test_the_verb_reaches_the_act_through_its_real_call_site(self):
+        """The gates above all call `amend_outcome` directly. This one goes through the sweep the
+        CLI actually uses — the call site where a name that resolved to the module instead of the
+        function made the whole verb inert while every test above stayed green."""
+        from stayawake.bots.security import remediator
+        from stayawake.utils.streaming import Streamer
+        self._loader_merge()
+        prog = Streamer(enabled=False, out=io.StringIO())
+        with self._remote():
+            outcomes = remediator._amend_local({}, ScanOptions(), _sigs(), [],
+                                               [str(self.d)], prog, jobs=1)
+        self.assertEqual(len(outcomes), 1)
+        self.assertNotIn("error —", outcomes[0].summary)
+        self.assertIn("force-updated", outcomes[0].summary)
+
+    def test_a_named_path_that_does_not_exist_does_not_widen_the_sweep(self):
+        from stayawake.bots.security import remediator
+        from stayawake.utils.streaming import Streamer
+        out = io.StringIO()
+        outcomes = remediator._amend_local({}, ScanOptions(), _sigs(), [],
+                                           [str(self.d / "no-such-repo")],
+                                           Streamer(enabled=False, out=out), jobs=1)
+        self.assertEqual(outcomes, [])
+        self.assertIn("no such path", out.getvalue())
+
+    def test_a_run_that_examined_nothing_is_not_success(self):
+        from stayawake.bots.security import remediator
+        err = io.StringIO()
+        with redirect_stderr(err), \
+             mock.patch.object(remediator, "_amend_local", return_value=[]), \
+             mock.patch.object(remediator, "_resolve_config", return_value={"settings": {}}), \
+             mock.patch.object(remediator, "load_signatures", return_value={}):
+            self.assertEqual(remediator.amend(paths=["/nowhere"]), 2)
+
+    def test_a_repository_nobody_forked_does_not_carry_a_standing_warning(self):
+        self._loader_merge()
+        with mock.patch(self.AT + "authority.fork_count", return_value=0):
+            outcome = self._act()
+        self.assertTrue(outcome.completed)
+        self.assertFalse(outcome.needs_review)
+
+    def test_forks_that_could_not_be_counted_still_need_a_person(self):
+        self._loader_merge()
+        with mock.patch(self.AT + "authority.fork_count", return_value=None):
+            outcome = self._act()
+        self.assertTrue(outcome.completed)
+        self.assertTrue(outcome.needs_review)
+
+    def test_a_clone_missing_remote_commits_is_never_force_updated(self):
+        """The lease matching only says the remote is where we last read it. It does not say this
+        clone contains what the remote has, and force-pushing a branch that is behind deletes
+        commits that were never captured because they were never here."""
+        self._loader_merge()
+        before = self._rev()
+        calls = []
+        unseen = "f" * 40
+        with mock.patch(self.AT + "_read_remote_head", return_value=(True, unseen)):
+            outcome = self._act(pusher=lambda *a: calls.append(a) or PushResult(True))
+        self.assertIn(Cause.LOCAL_MISSING_REMOTE_COMMITS, self._causes(outcome))
+        self.assertEqual(calls, [])
+        self.assertEqual(before, self._rev())
+
+    def test_a_decoy_ref_cannot_choose_the_lease(self):
+        """`ls-remote <pattern>` tail-matches at `/`, so `refs/heads/a/refs/heads/main` answers a
+        query for `refs/heads/main` and sorts first. Anyone who can push could otherwise pick the
+        SHA used as the lease and as the post-push check."""
+        self._loader_merge()
+        real = self._rev()
+        decoy = "1" * 40
+
+        class R:
+            returncode = 0
+            stdout = (f"{decoy}\trefs/heads/a/refs/heads/{self.base}\n"
+                      f"{real}\trefs/heads/{self.base}\n")
+            stderr = ""
+
+        with mock.patch(self.AT + "run", return_value=R()):
+            known, sha = amendmod._read_remote_head(self.d, "acme/app", self.base, "t")
+        self.assertTrue(known)
+        self.assertEqual(sha, real)
+
+    def test_a_branch_named_like_the_aside_ref_is_still_not_force_updated(self):
+        """`_destination` decides; the transport must not re-decide from `dest != branch`. A
+        branch already named `security/amend-<sha12>` makes those two names equal."""
+        seen = []
+
+        def pusher(branch, dest, lease):
+            seen.append((branch, dest, lease))
+            return PushResult(True)
+
+        with mock.patch(self.AT + "publish_head",
+                        side_effect=lambda *a, **k: seen.append(("publish",)) or PushResult(True)), \
+             mock.patch(self.AT + "force_update_head",
+                        side_effect=lambda *a, **k: seen.append(("force",)) or PushResult(True)):
+            amendmod._push_to(self.d, "acme/app", "security/amend-abc123def456",
+                              "security/amend-abc123def456", "t", "deadbeef", None, force=False)
+        self.assertEqual(seen, [("publish",)])
 
 
 if __name__ == "__main__":

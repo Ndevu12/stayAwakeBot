@@ -13,13 +13,13 @@ from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.targets import LocalRepoTarget
 from stayawake.lib.git.auth import github_https_auth
 from stayawake.lib.git.run import NETWORK_TIMEOUT, run
-from stayawake.bots.security.pr.amend_outcome import (AmendOutcome, BranchResult, Cause, Reason,
+from stayawake.bots.security.pr.outcome import (AmendOutcome, BranchResult, Cause, Reason,
                                                       amended, refused, render_amend_line)
 from stayawake.lib.git import authority
 from stayawake.lib.git.write import amend as gitamend
 from stayawake.lib.git.write.capture import capture_bundle
 from stayawake.lib.git.write.push import PushResult, force_update_head, publish_head
-from stayawake.lib.git.write.sign import signing_status
+from stayawake.lib.git.write import sign
 from stayawake.lib import git as gitutil
 
 
@@ -60,13 +60,17 @@ def _read_remote_head(repo: Path, slug: str, branch: str,
                   env=env, timeout=NETWORK_TIMEOUT)
     if res is None or res.returncode != 0:
         return False, None
-    lines = [ln for ln in (res.stdout or "").splitlines() if ln.strip()]
-    if not lines:
-        return True, None
-    sha = lines[0].split()[0]
-    if not _is_oid(sha):
-        return False, None
-    return True, sha
+    # `ls-remote <pattern>` tail-matches at `/`, so `refs/heads/a/refs/heads/main` answers a query
+    # for `refs/heads/main` and sorts first. Anyone who can push can therefore choose the SHA this
+    # returns, which is both the lease and the post-push check. Only the exact ref counts.
+    wanted = f"refs/heads/{branch}"
+    for line in (res.stdout or "").splitlines():
+        parts = line.split()
+        if len(parts) < 2 or parts[1].strip() != wanted:
+            continue
+        sha = parts[0].strip()
+        return (True, sha) if _is_oid(sha) else (False, None)
+    return True, None
 
 
 def _collect_remote_heads(repo: Path, slug: str, names: list[str],
@@ -98,12 +102,16 @@ def _destination(slug: str, branch: str, token: str | None,
 
 
 def _push_to(repo: Path, slug: str, branch: str, dest: str, token: str | None,
-             lease: str | None, pusher) -> PushResult:
-    """The transport, and the only part a caller may substitute. Force-updating needs a lease and
-    a destination equal to the source; everything else creates a ref and overwrites nothing."""
+             lease: str | None, pusher, *, force: bool) -> PushResult:
+    """The transport, and the only part a caller may substitute.
+
+    `force` is passed in rather than re-derived from `dest != branch`: a branch named exactly like
+    the aside ref makes those two names equal, and the transport would then force-update the very
+    ref the destination decision had just protected.
+    """
     if pusher is not None:
         return pusher(branch, dest, lease)
-    if dest != branch or lease is None:
+    if not force or lease is None:
         return publish_head(repo, slug, branch, token, dest=dest)
     return force_update_head(repo, slug, branch, token, lease=lease)
 
@@ -112,18 +120,25 @@ def _force_update_branch(repo: Path, slug: str, branch: str, token: str | None, 
                          pusher, lease: str | None = None,
                          sha12: str = "") -> BranchResult:
     dest, aside = _destination(slug, branch, token, sha12)
-    result = _push_to(repo, slug, branch, dest, token, lease, pusher)
+    result = _push_to(repo, slug, branch, dest, token, lease, pusher,
+                      force=aside is None)
     if aside is not None:
         return BranchResult(branch, False,
                             aside if result.ok else Reason(Cause.PUSH_REFUSED, branch))
-    if result.ok and pusher is None:
-        known, remote = _read_remote_head(repo, slug, branch, token)
-        local = gitutil.stdout(repo, ["rev-parse", f"refs/heads/{branch}"]).strip()
-        if not known or not remote or not local or remote != local:
-            result = PushResult(False)
     if not result.ok:
         return BranchResult(branch, False, Reason(Cause.PUSH_REFUSED, branch))
-    return BranchResult(branch, True)
+    if pusher is not None:
+        return BranchResult(branch, True)
+    known, remote = _read_remote_head(repo, slug, branch, token)
+    local = gitutil.stdout(repo, ["rev-parse", f"refs/heads/{branch}"]).strip()
+    if known and remote and local and remote == local:
+        return BranchResult(branch, True)
+    if not known:
+        # An accepted push whose result cannot be read back is not a refusal. Calling it one used
+        # to send the local branch back to the payload tip, which GUARANTEES the divergence the
+        # restore was meant to avoid: the remote most likely holds the replacement.
+        return BranchResult(branch, False, Reason(Cause.PUSH_NOT_CONFIRMED, branch))
+    return BranchResult(branch, False, Reason(Cause.REMOTE_DID_NOT_MOVE, branch))
 
 
 def _capture_path(repo: Path, sha12: str) -> Path:
@@ -133,7 +148,13 @@ def _capture_path(repo: Path, sha12: str) -> Path:
     dirty, and a dirty tree is precisely what `point_branch_at` refuses to move a branch over —
     so capturing there would abort the very amend it exists to make safe.
     """
-    git_dir = gitutil.stdout(repo, ["rev-parse", "--absolute-git-dir"]).strip()
+    # The COMMON directory, not this worktree's. `--absolute-git-dir` in a linked worktree names
+    # `.git/worktrees/<name>/`, which `git worktree remove|prune` deletes recursively — evidence
+    # with a shorter lifetime than the rewrite it covers.
+    git_dir = gitutil.stdout(repo, ["rev-parse", "--path-format=absolute",
+                                    "--git-common-dir"]).strip()
+    if not git_dir:
+        git_dir = gitutil.stdout(repo, ["rev-parse", "--absolute-git-dir"]).strip()
     root = Path(git_dir) if git_dir else Path(repo) / ".git"
     return root / "saw-amend" / sha12 / "capture.bundle"
 
@@ -146,17 +167,23 @@ def _reconstruction_cause(repo: Path, sha: str) -> Cause:
     return Cause.MERGE_WOULD_NOT_RESOLVE
 
 
-def _survivors(repo: Path, old: str) -> list[Reason]:
+def _survivors(repo: Path, slug: str, old: str, token: str | None) -> list[Reason]:
     """What the force-update leaves reachable. Each one makes the run need review.
 
-    Forks are never established: nothing an origin owner does removes an object from a fork, and
-    this path does not enumerate them — so the run says it did not look rather than that there
-    are none."""
+    Forks are counted rather than assumed. Reporting "forks were not established" on every run
+    made `needs_review` True for every outcome the module could produce, refused and completed
+    alike — a flag that fires every time carries no information and hides the runs that really do
+    need a person.
+    """
     reasons = [Reason(Cause.PREVIOUS_OBJECTS_UNCOLLECTED)]
     tags = gitutil.stdout(repo, ["tag", "--points-at", old]).split()
     if tags:
         reasons.append(Reason(Cause.TAGS_AT_REPLACED_COMMIT, ", ".join(sorted(tags))))
-    reasons.append(Reason(Cause.FORKS_NOT_ESTABLISHED))
+    forks = authority.fork_count(slug, token)
+    if forks is None:
+        reasons.append(Reason(Cause.FORKS_NOT_ESTABLISHED))
+    elif forks:
+        reasons.append(Reason(Cause.FORKS_EXIST, str(forks)))
     return reasons
 
 
@@ -192,10 +219,6 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     if not fetched.ok:
         return refused(display, Cause.REMOTE_REFS_UNREADABLE, fetched.reason)
 
-    signing = signing_status(repo)
-    if signing.must_refuse:
-        return refused(display, Cause.SIGNING_UNAVAILABLE, signing.reason)
-
     scan = scan_target(LocalRepoTarget(repo, str(repo), opts), signatures, allowlist)
     if scan.error is not None:
         return refused(display, Cause.SCAN_DID_NOT_FINISH)
@@ -215,9 +238,21 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     if not heads:
         return refused(display, Cause.COMMIT_ON_NO_BRANCH, old[:12])
 
+    # Asked AFTER the commits are known: whether this rewrite owes a signature depends on what
+    # the history carries, not only on what this clone's config asks for.
+    replaced = [old] + [s for _n, tip, _c in heads
+                        for s in gitamend.descendant_shas(repo, old, tip)]
+    signing = sign.signing_status(repo, history_is_signed=sign.any_signed(repo, replaced))
+    if signing.must_refuse:
+        return refused(display, Cause.SIGNING_UNAVAILABLE, signing.reason)
+
     leases, unread = _collect_remote_heads(repo, slug, [n for n, _, _ in heads], token)
     if unread is not None:
         return refused(display, Cause.REMOTE_BRANCH_UNREADABLE, unread)
+    behind = sorted(name for name, tip, _cas in heads
+                    if leases.get(name) and not gitutil.is_ancestor(repo, leases[name], tip))
+    if behind:
+        return refused(display, Cause.LOCAL_MISSING_REMOTE_COMMITS, ", ".join(behind))
 
     new = gitamend.reconstruct_merge(repo, old, signing)
     if new is None:
@@ -235,6 +270,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     if not captured.ok:
         return refused(display, Cause.CAPTURE_FAILED, captured.reason)
 
+    checked: set[tuple[str, str]] = set()
     try:
         moved = gitamend.apply_replacement(repo, old, new, heads, signing)
     except gitamend.AmendUnwindFailed as unwound:
@@ -242,9 +278,20 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     if moved is None:
         return refused(display, Cause.REPLAY_FAILED, ", ".join(n for n, _, _ in heads))
 
-    faithful, drift = gitamend.replay_is_faithful(repo, heads[0][1], moved[heads[0][0]], old, new,
-                                                 signature_paths)
-    if not faithful:
+    # Every replayed line, not just the first: branches that reached the payload have different
+    # tips, so checking one of them says nothing about the others.
+    drift: list[str] = []
+    for name, tip, _cas in heads:
+        new_tip = moved.get(name)
+        if new_tip is None or (tip, new_tip) in checked:
+            continue
+        checked.add((tip, new_tip))
+        faithful, found = gitamend.replay_is_faithful(repo, tip, new_tip, old, new,
+                                                     signature_paths)
+        if not faithful:
+            drift = [f"{name}: {d}" for d in found]
+            break
+    if drift:
         unrestored = gitamend.restore_branches(repo, heads, moved, list(moved))
         if unrestored:
             return refused(display, Cause.LEFT_PART_WAY, ", ".join(unrestored))
@@ -256,8 +303,18 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
         result = _force_update_branch(repo, slug, branch, token, pusher=pusher,
                                       lease=(leases or {}).get(branch), sha12=old[:12])
         results.append(result)
-        if not result.force_updated:
+        cause = result.reason.cause if result.reason is not None else None
+        if not result.force_updated and cause is not Cause.PUSH_NOT_CONFIRMED:
             failed.append(branch)
+    survivors = _survivors(repo, slug, old, token)
     if failed:
-        gitamend.restore_branches(repo, heads, moved, failed)
-    return amended(display, old[:12], tuple(results), tuple(_survivors(repo, old)))
+        try:
+            unrestored = gitamend.restore_branches(repo, heads, moved, failed)
+        except gitamend.AmendUnwindFailed as unwound:
+            unrestored = unwound.unrestored
+        if unrestored:
+            # The pre-push caller already reports this; reporting it here too is the point — the
+            # same refused restore was silent on this side, and a local branch left on rewritten
+            # history is the operator's problem whether or not any push succeeded.
+            survivors.insert(0, Reason(Cause.LEFT_PART_WAY, ", ".join(unrestored)))
+    return amended(display, old[:12], tuple(results), tuple(survivors))

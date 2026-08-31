@@ -144,6 +144,27 @@ def may_rewrite(slug: str, token: str | None) -> Authority:
                      login=login, owner=owner_login)
 
 
+def fork_count(slug: str, token: str | None) -> int | None:
+    """How many forks `owner/name` has, or None when that could not be established.
+
+    A force-update removes nothing from a fork, so this decides whether the operator still has
+    work after every branch has moved. None and a positive count both mean they do; only a read
+    that came back zero settles it. Reported as a count rather than a guess so a run on a repo
+    nobody forked stops carrying a warning that fires every time and therefore says nothing.
+    """
+    if not token:
+        return None
+    parts = _split_slug(slug)
+    if parts is None:
+        return None
+    owner, name = parts
+    repo = _read(f"/repos/{_seg(owner)}/{_seg(name)}", token)
+    if repo.cause is not None or not isinstance(repo.value, dict):
+        return None
+    forks = repo.value.get("forks_count")
+    return forks if isinstance(forks, int) and not isinstance(forks, bool) and forks >= 0 else None
+
+
 def ref_protection(slug: str, branch: str, token: str | None) -> Protection:
     """What protects `branch` on `owner/name` — protected at all, signatures required, force-push
     allowed. Unreadable rules come back as None (unknown), never as "not protected". Never raises.

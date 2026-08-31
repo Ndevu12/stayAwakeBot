@@ -67,7 +67,7 @@ def _safe(fn, display: str) -> str:
 def _amend_outcome(fn, display: str) -> FixOutcome:
     """One repo's amend, as a structure. `needs_review` comes from the act itself rather than from
     reading its own sentence back, and an exception is never a clean result."""
-    from stayawake.bots.security.pr.amend_outcome import render_amend_line
+    from stayawake.bots.security.pr.outcome import render_amend_line
     try:
         outcome = fn()
     except Exception as exc:  # noqa: BLE001 — isolate a single repo, keep the run going
@@ -290,7 +290,11 @@ def amend(config_path: str | None = None, *, paths: list[str] | None = None,
     else:
         outcomes = _amend_local(cfg, opts, sigs, allowlist, paths, prog, jobs=jobs)
     if not outcomes:
-        return 0
+        # Nothing was examined. The four paths that reach here — a denied preflight, a malformed
+        # slug, an empty resolution, a named path that matched no repository — all printed an
+        # error and did no work; reporting success would let a CI gate read "no credential" as
+        # "no payload".
+        return 2
     needs_review = sum(1 for o in outcomes if o.needs_review)
     n = len(outcomes)
     plural = "y" if n == 1 else "ies"
@@ -302,8 +306,16 @@ def amend(config_path: str | None = None, *, paths: list[str] | None = None,
 
 
 
-def _amend_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *, jobs=None) -> list[FixOutcome]:
+def _amend_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *,
+                 jobs=None) -> list[FixOutcome]:
     token, source = auth.resolve_token()
+    # A named path that does not exist falls back to its PARENT during discovery, which turns one
+    # typo into every repository beside the intended one. Harmless for a scan; this verb
+    # force-updates branches, so a path it cannot find is an error rather than a wider sweep.
+    missing = sorted(p for p in (paths or []) if not Path(p).exists())
+    if missing:
+        prog.line(f"error: no such path: {', '.join(missing)}")
+        return []
     repos = _local_repos(cfg, opts, paths)
     if not repos:
         prog.line("No repositories to amend.")
@@ -315,7 +327,8 @@ def _amend_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *, jobs=None
         tok, aerr = auth.act_token(token, source, gitutil.origin_slug(repo))
         if aerr:
             tok = None
-        return _amend_outcome(lambda r=repo, t=tok: pr_submit.amend_outcome(
+        from stayawake.bots.security.pr.amend import amend_outcome
+        return _amend_outcome(lambda r=repo, t=tok: amend_outcome(
             r, display, opts, sigs, allowlist, t), display)
 
     labels = [_disp(r) for r in repos]
@@ -348,7 +361,8 @@ def _amend_remote(cfg, opts, sigs, allowlist, prog: Streamer, *,
                 resolution.cloned_repo(slug, tok, depth=None) as clone:
             if clone is None:
                 return FixOutcome(f"{slug}: clone failed (check token access)", needs_review=True)
-            return _amend_outcome(lambda c=clone, t=tok: pr_submit.amend_outcome(
+            from stayawake.bots.security.pr.amend import amend_outcome
+            return _amend_outcome(lambda c=clone, t=tok: amend_outcome(
                 c, slug, opts, sigs, allowlist, t), slug)
 
     return _run_fix_sweep(resolved, list(resolved), make_outcome, prog, jobs=jobs, verb="Amending")

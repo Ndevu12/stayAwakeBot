@@ -181,7 +181,10 @@ def restore_branches(repo: str | Path, heads: list[tuple[str, str, str]],
             if not run_ok(repo, ["update-ref", "-d", f"refs/heads/{name}"]):
                 unrestored.append(name)
             continue
-        if not point_branch_at(repo, name, cas_old, new_tip):
+        try:
+            if not point_branch_at(repo, name, cas_old, new_tip):
+                unrestored.append(name)
+        except AmendUnwindFailed:
             unrestored.append(name)
     return unrestored
 
@@ -199,9 +202,19 @@ def point_branch_at(repo: str | Path, branch: str, new: str, old: str) -> bool:
         return False
     if not run_ok(repo, ["update-ref", f"refs/heads/{branch}", new, old]):
         return False
-    if branch_name(repo) == branch:
-        return run_ok(repo, ["reset", "--hard", "--quiet", "HEAD"])
-    return True
+    if branch_name(repo) != branch:
+        return True
+    if run_ok(repo, ["reset", "--hard", "--quiet", "HEAD"]):
+        return True
+    # The ref is at `new` and the tree is not. A held `index.lock` or an unwritable file is enough
+    # (measured: `update-ref` succeeds, `reset` exits 128). Returning False from here told the
+    # caller nothing had moved while the branch sat on the replacement with the old content staged
+    # as a change — the operator's next commit would put the payload back on top of the clean
+    # history. So the ref goes back, and a refusal is only reported once the branch AND the tree
+    # are demonstrably where they started.
+    if run_ok(repo, ["update-ref", f"refs/heads/{branch}", old, new]) and not is_dirty(repo):
+        return False
+    raise AmendUnwindFailed(repo, unrestored=[branch], moved={branch: new})
 
 
 def replayed_head(repo: str | Path, old_merge: str, new_merge: str, old_head: str,

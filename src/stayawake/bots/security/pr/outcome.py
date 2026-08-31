@@ -56,6 +56,9 @@ class Cause(Enum):
     LEFT_PART_WAY = "left-part-way"
     BRANCH_PROTECTED = "branch-protected"
     PROTECTION_UNKNOWN = "protection-unknown"
+    PUSH_NOT_CONFIRMED = "push-not-confirmed"
+    REMOTE_DID_NOT_MOVE = "remote-did-not-move"
+    LOCAL_MISSING_REMOTE_COMMITS = "local-missing-remote-commits"
     TAGS_AT_REPLACED_COMMIT = "tags-at-replaced-commit"
     FORKS_EXIST = "forks-exist"
     FORKS_NOT_ESTABLISHED = "forks-not-established"
@@ -151,6 +154,13 @@ _PHRASE = {
     Cause.BRANCH_PROTECTED: "the branch is protected — the amended history is on",
     Cause.PROTECTION_UNKNOWN:
         "the protection rule could not be read — the amended history is on",
+    Cause.PUSH_NOT_CONFIRMED:
+        "the push was accepted and the remote could not be read back, so this branch may or may "
+        "not have moved",
+    Cause.REMOTE_DID_NOT_MOVE: "the remote branch did not move",
+    Cause.LOCAL_MISSING_REMOTE_COMMITS:
+        "this clone does not have everything the remote branch has, so a force-update would "
+        "delete commits nothing here has seen",
     Cause.LEFT_PART_WAY:
         "branches were moved and could not be put back — inspect this repository",
     Cause.SCAN_DID_NOT_FINISH: "the scan did not finish",

@@ -4,8 +4,9 @@ back before the caller is told it exists.
 
 A record of object IDs is a record of POINTERS: the next `git gc` prunes what they point at and
 the evidence base is gone. A bundle carries the objects themselves, so the captured commits can
-be restored into any clone afterwards. The destination is the caller's — `.git/` is not cloned
-and is not where anyone looks for evidence.
+be restored into any clone afterwards. The destination is the caller's; it has to be somewhere
+that outlives the rewrite, which rules out both the worktree (a new file there makes the tree
+dirty and the ref move is then refused) and a linked worktree's admin directory (git deletes it).
 
 The capture spans exactly what the rewrite orphans (`old --not new`) and no more: a bundle of a
 whole history is unusable on a large repository, and re-reading it would not distinguish the
@@ -27,6 +28,10 @@ CAPTURE_REF_PREFIX = "refs/saw-capture/"
 class BundleResult:
     """What `capture_bundle` established, so the caller can abort the rewrite on anything short
     of a bundle it has read back.
+
+    `verified` means git parsed the bundle's header and accepted its prerequisites against the
+    repository. It does NOT mean the packfile was read: `git bundle verify` does not walk it, and a
+    truncated pack still verifies. It is the strongest cheap check, not a guarantee of readback.
 
     `ok` is the only field a caller should gate on. Nothing orphaned is an EMPTY capture, not a
     failure: `ok` is True with `path` None and `verified` False, because no bundle was written
@@ -128,8 +133,9 @@ def capture_bundle(repo: str | Path, orphaned: list[tuple[str, str]],
     """Bundle every object that moving each `(old_tip, new_tip)` will make unreachable into
     `destination`, then read the written file back with `git bundle verify`.
 
-    Written is not readable: the bundle is only reported as captured once git has parsed it and
-    accepted its prerequisites against `repo`. Ordinary failures — an unwritable destination, a
+    Written is not readable: the bundle is only reported as captured once git has parsed its
+    header and accepted its prerequisites against `repo` — see `BundleResult` for what that check
+    does and does not establish. Ordinary failures — an unwritable destination, a
     git that will not run, a file that does not read back — are RETURNED, never raised, so the
     caller can abort with every object still in place.
 

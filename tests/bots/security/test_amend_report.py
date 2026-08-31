@@ -11,8 +11,8 @@ from __future__ import annotations
 import unittest
 from unittest import mock
 
-from stayawake.bots.security.pr import amend_outcome as ao
-from stayawake.bots.security.pr.amend_outcome import (AmendOutcome, BranchResult, Cause, Reason,
+from stayawake.bots.security.pr import outcome as ao
+from stayawake.bots.security.pr.outcome import (AmendOutcome, BranchResult, Cause, Reason,
                                                       amended, refused, render_amend_line)
 
 _SHA = "abc123456789"
