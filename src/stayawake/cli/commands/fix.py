@@ -80,12 +80,14 @@ def run(a: argparse.Namespace) -> int:
         if a.branch:
             print("saw fix amend does not take --branch", file=sys.stderr)
             return 2
+        if a.user or a.org:
+            print("saw fix amend does not take --user or --org; name each repository with "
+                  "--remote owner/name", file=sys.stderr)
+            return 2
         rest = positionals[1:] or None
-        remote = a.remote or bool(a.user) or bool(a.org)
-        return remediator.amend(a.config, paths=None if remote else rest,
-                                remote=remote,
-                                slugs=(rest or None) if remote else None,
-                                users=a.user or None, orgs=a.org or None,
+        return remediator.amend(a.config, paths=None if a.remote else rest,
+                                remote=a.remote,
+                                slugs=(rest or None) if a.remote else None,
                                 no_stream=a.no_stream, jobs=a.jobs)
     remote = a.remote or bool(a.user) or bool(a.org)
     return remediator.fix(a.config, pr=a.pr, remote=remote,

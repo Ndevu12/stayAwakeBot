@@ -64,6 +64,17 @@ def _safe(fn, display: str) -> str:
         return f"{display}: error — {exc}"
 
 
+def _amend_outcome(fn, display: str) -> FixOutcome:
+    """One repo's amend, as a structure. `needs_review` comes from the act itself rather than from
+    reading its own sentence back, and an exception is never a clean result."""
+    from stayawake.bots.security.pr.amend_outcome import render_amend_line
+    try:
+        outcome = fn()
+    except Exception as exc:  # noqa: BLE001 — isolate a single repo, keep the run going
+        return FixOutcome(f"{display}: error — {exc}", needs_review=True)
+    return FixOutcome(render_amend_line(outcome), outcome.needs_review)
+
+
 def _preflight(token: str | None, intent=None) -> str | None:
     """Authorize BEFORE any push/close via core.identity — never start privileged work on a
     dead/under-scoped credential. Returns an error message, or None when good to go."""
@@ -235,7 +246,7 @@ def _fix_remote(cfg, opts, sigs, allowlist, prog: Streamer, *,
         prog.line(REMOTE_EMPTY_HINT)
         return []
     prog.line(f"Sweeping {len(resolved)} GitHub repositor{'y' if len(resolved) == 1 else 'ies'} "
-              f"({_remote_scope(cfg, users, orgs, slugs)})…")
+              f"({_remote_scope(cfg, None, None, slugs)})…")
 
     def make_outcome(slug, *, spin):
         tok, aerr = auth.act_token(token, source, slug)
@@ -255,11 +266,15 @@ def _fix_remote(cfg, opts, sigs, allowlist, prog: Streamer, *,
 
 def amend(config_path: str | None = None, *, paths: list[str] | None = None,
           remote: bool = False, slugs: list[str] | None = None,
-          users: list[str] | None = None, orgs: list[str] | None = None,
           no_stream: bool = False, jobs=None) -> int:
     """`saw fix amend`: replace past commits that still carry the payload and force-update
-    each branch they sat on. `--remote` clones GitHub targets and does the same. Never `--pr`.
-    A local rewrite that does not update the remote is not a fix."""
+    each branch they sat on. `--remote` clones the named GitHub targets and does the same.
+    Never `--pr`. A local rewrite that does not update the remote is not a fix.
+
+    There is deliberately no account-wide form. `--user`/`--org` resolve their target list at run
+    time, so the operator names a set whose members they have not seen; that is acceptable for a
+    scan and not for a verb that force-updates branches. Each repository is named.
+    """
     cfg = _resolve_config(config_path, targets=None if remote else paths)
     if cfg is None:
         return 2
@@ -271,8 +286,7 @@ def amend(config_path: str | None = None, *, paths: list[str] | None = None,
     prog.line(f"Security amend — {now_iso()}")
     prog.line("")
     if remote:
-        outcomes = _amend_remote(cfg, opts, sigs, allowlist, prog,
-                                 users=users, orgs=orgs, slugs=slugs, jobs=jobs)
+        outcomes = _amend_remote(cfg, opts, sigs, allowlist, prog, slugs=slugs, jobs=jobs)
     else:
         outcomes = _amend_local(cfg, opts, sigs, allowlist, paths, prog, jobs=jobs)
     if not outcomes:
@@ -285,10 +299,7 @@ def amend(config_path: str | None = None, *, paths: list[str] | None = None,
     return 1 if needs_review else 0
 
 
-def _amend_line_needs(line: str) -> bool:
-    return ("force-updated '" not in line
-            or "was not force-updated" in line
-            or "nothing was force-updated" in line)
+
 
 
 def _amend_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *, jobs=None) -> list[FixOutcome]:
@@ -304,21 +315,20 @@ def _amend_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *, jobs=None
         tok, aerr = auth.act_token(token, source, gitutil.origin_slug(repo))
         if aerr:
             tok = None
-        line = _safe(lambda r=repo, t=tok: pr_submit.amend_repo(r, opts, sigs, allowlist, t),
-                     display)
-        return FixOutcome(line, _amend_line_needs(line))
+        return _amend_outcome(lambda r=repo, t=tok: pr_submit.amend_outcome(
+            r, display, opts, sigs, allowlist, t), display)
 
     labels = [_disp(r) for r in repos]
     return _run_fix_sweep(repos, labels, make_outcome, prog, jobs=jobs, verb="Amending")
 
 
 def _amend_remote(cfg, opts, sigs, allowlist, prog: Streamer, *,
-                  users=None, orgs=None, slugs=None, jobs=None) -> list[FixOutcome]:
+                  slugs=None, jobs=None) -> list[FixOutcome]:
     bad = invalid_slugs(slugs)
     if bad:
         prog.line(f"error: --remote targets must be owner/repo slugs; got {bad}")
         return []
-    resolved, token, source = _resolve_remote(cfg, opts, users=users, orgs=orgs, slugs=slugs)
+    resolved, token, source = _resolve_remote(cfg, opts, slugs=slugs)
     from stayawake.core.identity import Intent
     err = _preflight(token, intent=Intent.AMEND_REFS)
     if err:
@@ -328,7 +338,7 @@ def _amend_remote(cfg, opts, sigs, allowlist, prog: Streamer, *,
         prog.line(REMOTE_EMPTY_HINT)
         return []
     prog.line(f"Sweeping {len(resolved)} GitHub repositor{'y' if len(resolved) == 1 else 'ies'} "
-              f"({_remote_scope(cfg, users, orgs, slugs)})…")
+              f"({_remote_scope(cfg, None, None, slugs)})…")
 
     def make_outcome(slug, *, spin):
         tok, aerr = auth.act_token(token, source, slug)
@@ -338,9 +348,8 @@ def _amend_remote(cfg, opts, sigs, allowlist, prog: Streamer, *,
                 resolution.cloned_repo(slug, tok, depth=None) as clone:
             if clone is None:
                 return FixOutcome(f"{slug}: clone failed (check token access)", needs_review=True)
-            line = _safe(lambda c=clone, t=tok: pr_submit.amend_repo(c, opts, sigs, allowlist, t),
-                         slug)
-            return FixOutcome(line, _amend_line_needs(line))
+            return _amend_outcome(lambda c=clone, t=tok: pr_submit.amend_outcome(
+                c, slug, opts, sigs, allowlist, t), slug)
 
     return _run_fix_sweep(resolved, list(resolved), make_outcome, prog, jobs=jobs, verb="Amending")
 

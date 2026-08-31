@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 """Read-only git queries — answer questions about a repository's history and trees WITHOUT
-ever executing repository code. The evil-merge detector and the recovery walks build on these."""
+ever executing repository code. The evil-merge detector and the recovery walks build on these.
+
+`fetch_refs` is the one helper here that writes: it refreshes the remote-tracking refs the
+other queries read, because a query can only answer for refs the clone actually has."""
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
+from stayawake.lib.git.auth import github_https_auth
 from stayawake.lib.git.run import run, stdout, NETWORK_TIMEOUT
 
 
@@ -81,6 +86,50 @@ def branches_matching(repo: str | Path, pattern: str) -> list[str]:
     """Local branch names matching a glob, e.g. 'security/auto-clean*'."""
     out = stdout(repo, ["for-each-ref", "--format=%(refname:short)", f"refs/heads/{pattern}"])
     return [ln.strip() for ln in out.splitlines() if ln.strip()]
+
+
+@dataclass(frozen=True)
+class FetchResult:
+    """Outcome of `fetch_refs`. `ok=False` means the remote-tracking refs were NOT refreshed and
+    `reason` says why — a refusal the caller must surface, never a smaller branch set."""
+    ok: bool
+    reason: str = ""
+
+
+def _without_token(text: str, token: str | None) -> str:
+    return text.replace(token, "***") if token else text
+
+
+def fetch_refs(repo: str | Path, *, token: str | None = None) -> FetchResult:
+    """Refresh every `refs/remotes/origin/*` from the remote, pruning the ones it no longer has.
+
+    `branches_carrying` can only see branches this clone fetched, so on a stale clone a branch
+    that carries an infected commit is invisible and a sweep reports it updated every carrier
+    when it did not. The explicit `+refs/heads/*:refs/remotes/origin/*` is what makes the
+    refresh complete: a bare `git fetch origin` honours the clone's CONFIGURED refspec, which a
+    `--single-branch` clone narrows to one branch, and stays blind to the rest. `--prune` is
+    the other half — a branch deleted on the remote must stop counting as a carrier.
+
+    Never raises, and never reports success it did not achieve: git failing, being unable to
+    run, or exceeding `NETWORK_TIMEOUT` all return `ok=False` with a reason. `write.fetch` is
+    the neighbouring single-ref helper; it returns a bare bool and cannot express that refusal.
+
+    `token` authenticates through `github_https_auth`, so the secret reaches git only in the
+    child environment. Trap: that helper falls back to credential-in-URL on Windows, so git's
+    own message is scrubbed of the token before it becomes a `reason` anyone may log.
+    """
+    slug = origin_slug(repo) if token else None
+    with github_https_auth(token) as (prefix, env):
+        target = f"{prefix}{slug}.git" if slug else "origin"
+        res = run(repo, ["fetch", "--prune", "--no-tags", target,
+                         "+refs/heads/*:refs/remotes/origin/*"],
+                  env=env, timeout=NETWORK_TIMEOUT)
+    if res is None:
+        return FetchResult(False, "git fetch could not run, or exceeded the network timeout")
+    if res.returncode == 0:
+        return FetchResult(True)
+    reported = (res.stderr or res.stdout or "").strip() or f"git fetch exited {res.returncode}"
+    return FetchResult(False, _without_token(reported, token))
 
 
 def branches_carrying(repo: str | Path, sha: str) -> list[tuple[str, str, str]]:

@@ -54,10 +54,13 @@ def force_update_head(repo: str | Path, slug: str, branch: str, token: str | Non
     return PushResult(False, (res.stderr or res.stdout or "").strip())
 
 
-def publish_head(repo: str | Path, slug: str, branch: str, token: str | None) -> PushResult:
-    """Create `refs/heads/<branch>` on the remote. Does not overwrite an existing ref."""
+def publish_head(repo: str | Path, slug: str, branch: str, token: str | None,
+                 *, dest: str | None = None) -> PushResult:
+    """Create `refs/heads/<dest>` on the remote from local `branch`. Does not overwrite an
+    existing ref, so publishing beside a protected branch can destroy nothing."""
+    target = dest or branch
     with github_https_auth(token) as (prefix, env):
-        args = ["push", f"{prefix}{slug}.git", f"{branch}:refs/heads/{branch}"]
+        args = ["push", f"{prefix}{slug}.git", f"{branch}:refs/heads/{target}"]
         res = run(repo, args, env=env, timeout=NETWORK_TIMEOUT)
     if res is None:
         return PushResult(False, "git push could not run")

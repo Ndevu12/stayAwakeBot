@@ -9,12 +9,13 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
-from contextlib import redirect_stderr
+from contextlib import ExitStack, contextmanager, redirect_stderr
 
 from stayawake import cli
 from stayawake.bots.security.models import CONFIRMED, Finding, ScanResult, Severity
-from stayawake.bots.security.pr.amend import amend_repo
-from stayawake.bots.security.remediator import _amend_line_needs
+from stayawake.bots.security.pr.amend import amend_outcome, amend_repo
+from stayawake.bots.security.pr.amend_outcome import (BranchResult, Cause, Reason, amended,
+                                                      render_amend_line)
 from stayawake.bots.security.targets import ScanOptions
 from stayawake.lib.git.query import branches_carrying
 from stayawake.lib.git.write import amend as gitamend
@@ -89,7 +90,10 @@ class TestFixAmendCli(unittest.TestCase):
         mamend.assert_not_called()
 
 
-class TestFixAmendRepo(unittest.TestCase):
+class _AmendFixture(unittest.TestCase):
+    """A repository carrying the payload in a past merge, and the remote answers the
+    amend path must get before it may move anything."""
+
     def setUp(self):
         self.d = Path(tempfile.mkdtemp(prefix="amend-"))
         _git(self.d, "init", "-q")
@@ -161,10 +165,50 @@ class TestFixAmendRepo(unittest.TestCase):
              "commit", "-qm", "merge (smuggled loader)")
 
     def _amend(self, pusher=_ok_push, **kw):
-        with mock.patch("stayawake.bots.security.pr.amend.gitutil.origin_slug",
-                        return_value="acme/app"):
-            return amend_repo(self.d, ScanOptions(), _sigs(), [], token="t",
-                              pusher=pusher, **kw)
+        return render_amend_line(self._act(pusher=pusher, **kw))
+
+    @contextmanager
+    def _remote(self, *, permitted=True, protected=False):
+        """The answers this path must get from GitHub before it may move anything: who may
+        rewrite, whether the refs refreshed, and what each remote branch is at. Every amend goes
+        through them, so the harness supplies them rather than letting them be skipped."""
+        import stayawake.bots.security.pr.amend as amendmod
+        at = "stayawake.bots.security.pr.amend."
+        with ExitStack() as stack:
+            for target, patch in (
+                ("gitutil.origin_slug", dict(return_value="acme/app")),
+                ("authority.may_rewrite", dict(return_value=mock.Mock(
+                    permitted=permitted, conclusive=True,
+                    reason="owner" if permitted else "unauthorized"))),
+                ("authority.ref_protection", dict(return_value=mock.Mock(
+                    protected=protected, reason="rule_read"))),
+                ("gitutil.fetch_refs", dict(return_value=mock.Mock(ok=True, reason=""))),
+                ("_read_remote_head",
+                 dict(side_effect=lambda r, s, b, tk: (True, self._rev(b)))),
+            ):
+                held = amendmod
+                for part in target.split("."):
+                    held = getattr(held, part)
+                if isinstance(held, mock.Mock):
+                    continue  # a test that supplies its own answer keeps it
+                stack.enter_context(mock.patch(at + target, **patch))
+            yield
+
+    def _act(self, pusher=_ok_push, *, permitted=True, protected=False, **kw):
+        with self._remote(permitted=permitted, protected=protected):
+            return amend_outcome(self.d, "acme/app", ScanOptions(), _sigs(), [],
+                                 "t", pusher=pusher, **kw)
+
+    def _confirmed_finding(self, sha):
+        return Finding(
+            signature_id="evil-merge-loader", category="evil-merge",
+            severity=Severity.CRITICAL, path=sha[:10], description="x",
+            vector="evil-merge", commit_sha=sha, related_paths=("x.js",),
+            confidence=CONFIRMED)
+
+
+class TestFixAmendRepo(_AmendFixture):
+    """Replacing the commit and moving the branches that reached it."""
 
     def test_no_remote_is_not_a_fix(self):
         self._loader_merge()
@@ -194,7 +238,7 @@ class TestFixAmendRepo(unittest.TestCase):
         self.assertNotIn("security: remove payload", self._log_subjects())
         self.assertIn("fromCharCode", self._show(f"{merge}:x.js"))
         self.assertNotIn("fromCharCode", self._show("HEAD:x.js"))
-        self.assertTrue((self.d / ".git" / "saw-amend" / merge[:12] / "capture.json").is_file())
+        self.assertTrue((self.d / ".git" / "saw-amend" / merge[:12] / "capture.bundle").is_file())
 
     def test_replays_a_later_commit(self):
         self._loader_merge()
@@ -266,7 +310,7 @@ class TestFixAmendRepo(unittest.TestCase):
     def test_a_push_that_does_not_move_the_remote_is_not_a_fix(self):
         self._loader_merge()
         before = self._rev()
-        with mock.patch("stayawake.bots.security.pr.amend._push_amended",
+        with mock.patch("stayawake.bots.security.pr.amend._push_to",
                         return_value=PushResult(True)), \
              mock.patch("stayawake.bots.security.pr.amend._read_remote_head",
                         return_value=(True, before)):
@@ -295,13 +339,6 @@ class TestFixAmendRepo(unittest.TestCase):
         line = self._amend()
         self.assertIn("working tree is not clean", line)
         self.assertEqual(before, self._rev())
-
-    def _confirmed_finding(self, sha):
-        return Finding(
-            signature_id="evil-merge-loader", category="evil-merge",
-            severity=Severity.CRITICAL, path=sha[:10], description="x",
-            vector="evil-merge", commit_sha=sha, related_paths=("x.js",),
-            confidence=CONFIRMED)
 
     def test_notes_are_not_carrying_branches(self):
         self._loader_merge()
@@ -351,10 +388,11 @@ class TestFixAmendRepo(unittest.TestCase):
                 return PushResult(False, "denied")
             return PushResult(True)
 
-        line = self._amend(pusher=pusher)
+        outcome = self._act(pusher=pusher)
+        line = render_amend_line(outcome)
         self.assertIn("was not force-updated", line)
         self.assertIn("force-updated '", line)
-        self.assertTrue(_amend_line_needs(line))
+        self.assertTrue(outcome.needs_review)
         self.assertEqual(self._rev("also"), merge)
         self.assertNotEqual(self._rev(self.base), merge)
         self.assertIn("fromCharCode", self._show("also:x.js"))
@@ -383,21 +421,26 @@ class TestFixAmendRepo(unittest.TestCase):
         self.assertIn("fromCharCode", self._worktree("x.js"))
         self.assertEqual(self._porcelain(), "")
 
-    def test_mixed_amend_line_is_not_done(self):
-        line = ("acme/app: force-updated 'also'; 'main' was not force-updated "
-                "(commit abcdefabcdef)")
-        self.assertTrue(_amend_line_needs(line))
+    def test_a_mixed_result_is_not_done(self):
+        """One branch moving does not settle the run: the outcome carries each branch, so a
+        partial sweep needs review whatever its sentence happens to read like."""
+        outcome = amended("acme/app", "abcdefabcdef", (
+            BranchResult("also", True),
+            BranchResult("main", False, Reason(Cause.PUSH_REFUSED, "denied")),
+        ))
+        self.assertTrue(outcome.needs_review)
+        self.assertIn("was not force-updated", render_amend_line(outcome))
 
     def test_capture_exists_before_refs_move(self):
         self._loader_merge()
         seen = []
         real = gitamend.apply_replacement
 
-        def wrapped(repo, old, new, heads):
-            cap = Path(repo) / ".git" / "saw-amend" / old[:12] / "capture.json"
+        def wrapped(repo, old, new, heads, signing=None):
+            cap = Path(repo) / ".git" / "saw-amend" / old[:12] / "capture.bundle"
             self.assertTrue(cap.is_file())
             seen.append(True)
-            return real(repo, old, new, heads)
+            return real(repo, old, new, heads, signing)
 
         with mock.patch("stayawake.bots.security.pr.amend.gitamend.apply_replacement",
                         wrapped):
@@ -456,7 +499,7 @@ class TestFixAmendRepo(unittest.TestCase):
         calls = []
         with mock.patch("stayawake.bots.security.pr.amend._read_remote_head",
                         return_value=(False, None)), \
-             mock.patch("stayawake.bots.security.pr.amend._push_amended",
+             mock.patch("stayawake.bots.security.pr.amend._push_to",
                         side_effect=lambda *a, **k: calls.append(a) or PushResult(True)):
             line = self._amend(pusher=None)
         self.assertIn("could not be read", line)
@@ -491,6 +534,126 @@ class TestFixAmendRepo(unittest.TestCase):
         self.assertTrue(any(any(x.startswith("--force-with-lease=refs/heads/") for x in a)
                             for a in seen if a and a[0] == "push"))
         self.assertTrue(all("--force" not in a for a in seen if a and a[0] == "push"))
+
+
+class TestAmendGates(_AmendFixture):
+    """Each gate the act passes through before a ref moves, and what it leaves behind."""
+
+    AT = "stayawake.bots.security.pr.amend."
+
+    def _causes(self, outcome):
+        return [r.cause for r in outcome.reasons]
+
+    def test_an_identity_that_may_not_rewrite_moves_nothing(self):
+        self._loader_merge()
+        before = self._rev()
+        calls = []
+        outcome = self._act(pusher=lambda *a: calls.append(a) or PushResult(True),
+                            permitted=False)
+        self.assertIn(Cause.NOT_PERMITTED_TO_REWRITE, self._causes(outcome))
+        self.assertEqual(calls, [])
+        self.assertEqual(before, self._rev())
+        self.assertTrue(outcome.needs_review)
+
+    def test_refs_that_did_not_refresh_stop_the_act(self):
+        self._loader_merge()
+        before = self._rev()
+        with mock.patch(self.AT + "gitutil.fetch_refs",
+                        return_value=mock.Mock(ok=False, reason="network_error")):
+            outcome = self._act()
+        self.assertIn(Cause.REMOTE_REFS_UNREADABLE, self._causes(outcome))
+        self.assertEqual(before, self._rev())
+
+    def test_a_repository_that_signs_and_cannot_is_refused_before_anything_moves(self):
+        self._loader_merge()
+        before = self._rev()
+        unavailable = mock.Mock(must_refuse=True, available=False, configured=True,
+                                reason="no secret key")
+        with mock.patch(self.AT + "signing_status", return_value=unavailable):
+            outcome = self._act()
+        self.assertIn(Cause.SIGNING_UNAVAILABLE, self._causes(outcome))
+        self.assertEqual(before, self._rev())
+        self.assertIn("fromCharCode", self._worktree("x.js"))
+
+    def test_a_protected_branch_is_published_beside_never_over(self):
+        self._loader_merge()
+        before = self._rev()
+        pushes = []
+        outcome = self._act(pusher=lambda *a: pushes.append(a) or PushResult(True),
+                            protected=True)
+        self.assertEqual([b.force_updated for b in outcome.branches], [False])
+        self.assertEqual(self._causes(outcome)[:0], [])
+        self.assertEqual(outcome.branches[0].reason.cause, Cause.BRANCH_PROTECTED)
+        self.assertTrue(pushes and pushes[0][1].startswith("security/amend-"))
+        self.assertNotEqual(pushes[0][0], pushes[0][1])
+        self.assertTrue(outcome.needs_review)
+        self.assertEqual(before, self._rev())
+
+    def test_an_unreadable_protection_rule_is_not_permission(self):
+        self._loader_merge()
+        pushes = []
+        outcome = self._act(pusher=lambda *a: pushes.append(a) or PushResult(True),
+                            protected=None)
+        self.assertEqual(outcome.branches[0].reason.cause, Cause.PROTECTION_UNKNOWN)
+        self.assertTrue(pushes and pushes[0][1].startswith("security/amend-"))
+        self.assertTrue(outcome.needs_review)
+
+    def test_a_replacement_that_drops_more_than_the_payload_is_refused(self):
+        self._loader_merge()
+        before = self._rev()
+        with mock.patch(self.AT + "gitamend.discarded_delta",
+                        return_value=["README.md", "x.js"]):
+            outcome = self._act()
+        self.assertIn(Cause.REPLACEMENT_LOSES_MORE_THAN_THE_PAYLOAD, self._causes(outcome))
+        self.assertIn("README.md", outcome.reasons[0].detail)
+        self.assertEqual(before, self._rev())
+
+    def test_nothing_moves_when_the_previous_objects_were_not_captured(self):
+        self._loader_merge()
+        before = self._rev()
+        calls = []
+        with mock.patch(self.AT + "capture_bundle",
+                        return_value=mock.Mock(ok=False, reason="unwritable")):
+            outcome = self._act(pusher=lambda *a: calls.append(a) or PushResult(True))
+        self.assertIn(Cause.CAPTURE_FAILED, self._causes(outcome))
+        self.assertEqual(calls, [])
+        self.assertEqual(before, self._rev())
+
+    def test_a_replay_that_changed_unrelated_commits_puts_the_branches_back(self):
+        self._loader_merge()
+        before = self._rev()
+        calls = []
+        with mock.patch(self.AT + "gitamend.replay_is_faithful",
+                        return_value=(False, ["deadbeef: message changed"])):
+            outcome = self._act(pusher=lambda *a: calls.append(a) or PushResult(True))
+        self.assertIn(Cause.REPLAY_CHANGED_UNRELATED_COMMITS, self._causes(outcome))
+        self.assertEqual(calls, [])
+        self.assertEqual(before, self._rev())
+        self.assertEqual(self._porcelain(), "")
+
+    def test_a_branch_left_moved_is_reported_as_part_way(self):
+        self._loader_merge()
+        with mock.patch(self.AT + "gitamend.apply_replacement",
+                        side_effect=gitamend.AmendUnwindFailed(
+                            self.d, unrestored=["main"], moved={"main": "abc"})):
+            outcome = self._act()
+        self.assertIn(Cause.LEFT_PART_WAY, self._causes(outcome))
+        self.assertIn("main", outcome.reasons[0].detail)
+        self.assertTrue(outcome.needs_review)
+
+    def test_the_lease_reaches_the_push(self):
+        self._loader_merge()
+        before = self._rev()
+        seen = []
+        self._act(pusher=lambda b, d, lease: seen.append(lease) or PushResult(True))
+        self.assertEqual(seen, [before])
+
+    def test_an_account_wide_amend_is_not_offered(self):
+        err = io.StringIO()
+        with redirect_stderr(err):
+            code = cli.main(["fix", "amend", "--user", "acme"])
+        self.assertEqual(code, 2)
+        self.assertIn("--user", err.getvalue())
 
 
 if __name__ == "__main__":

@@ -6,11 +6,14 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+from collections.abc import Iterable
 from pathlib import Path
 
 from stayawake.lib.git.merge.tree import auto_merge
 from stayawake.lib.git.query import parents, commit_meta, is_ancestor, branches_carrying
 from stayawake.lib.git.run import run, run_ok, stdout
+from stayawake.lib.git.write.sign import (SigningStatus, sign_flags, signing_args, signing_env,
+                                          signing_status)
 from stayawake.lib.git.write.worktree import add_worktree, remove_worktree
 
 
@@ -27,18 +30,51 @@ def is_dirty(repo: str | Path) -> bool:
 
 
 def descendant_shas(repo: str | Path, merge: str, head: str = "HEAD") -> list[str]:
-    """Commits after `merge` on the way to `head`, oldest first. Empty when `merge` is `head`."""
-    out = stdout(repo, ["rev-list", "--reverse", "--ancestry-path", f"{merge}..{head}"])
+    """Commits after `merge` on the way to `head`, oldest first. Empty when `merge` is `head`.
+
+    Ordered by the graph, not by date: a replay stamps every commit with the same committer
+    second, so date order would not line an original up against the commit that replaced it.
+    """
+    out = stdout(repo, ["rev-list", "--reverse", "--topo-order", "--ancestry-path",
+                        f"{merge}..{head}"])
     return [ln.strip() for ln in out.splitlines() if ln.strip()]
 
 
-def reconstruct_merge(repo: str | Path, merge_sha: str) -> str | None:
+def _differing_paths(repo: str | Path, base: str, target: str) -> list[str] | None:
+    """Repo-relative paths where two commits/trees differ, or None when git could not compare
+    them — each caller decides what an unanswerable comparison means.
+
+    `-z` is load-bearing: git otherwise quotes a non-ASCII path, so a payload under such a
+    directory would be reported under a name matching nothing the caller holds. Renames stay
+    off — the claim is about the content at a path, not about identity across a move.
+    """
+    res = run(repo, ["diff", "--name-only", "--no-renames", "-z", base, target])
+    if res is None or res.returncode != 0:
+        return None
+    return sorted({p for p in (res.stdout or "").split("\0") if p})
+
+
+def _message(repo: str | Path, sha: str) -> str:
+    return stdout(repo, ["show", "-s", "--format=%B", sha])
+
+
+def _tree_paths(repo: str | Path, treeish: str) -> list[str]:
+    res = run(repo, ["ls-tree", "-r", "--name-only", "-z", treeish])
+    if res is None or res.returncode != 0:
+        return []
+    return sorted({p for p in (res.stdout or "").split("\0") if p})
+
+
+def reconstruct_merge(repo: str | Path, merge_sha: str,
+                      signing: SigningStatus | None = None) -> str | None:
     """The same commit with the payload removed: same parents, same message, same author,
     a tree that is the clean 3-way merge of those parents.
 
     None when the commit is not two-parent, when there is no clean auto-merge, or when that
-    auto-merge conflicted — those are not guessed at.
+    auto-merge conflicted — those are not guessed at. `signing` decides whether the replacement
+    is signed; measured from the repository when the caller does not hold one already.
     """
+    signing = signing_status(repo) if signing is None else signing
     ps = parents(repo, merge_sha)
     if len(ps) != 2:
         return None
@@ -64,8 +100,10 @@ def reconstruct_merge(repo: str | Path, merge_sha: str) -> str | None:
         with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as fh:
             fh.write(msg if msg.endswith("\n") else msg + "\n")
             msg_path = fh.name
-        res = run(repo, ["-c", "commit.gpgsign=false", "commit-tree", merged.tree,
-                         "-p", ps[0], "-p", ps[1], "-F", msg_path], env=env)
+        res = run(repo, [*signing_args(signing), "commit-tree", *sign_flags(signing,
+                         "commit-tree"), merged.tree,
+                         "-p", ps[0], "-p", ps[1], "-F", msg_path],
+                  env=signing_env(repo, env))
     finally:
         if msg_path:
             try:
@@ -76,6 +114,22 @@ def reconstruct_merge(repo: str | Path, merge_sha: str) -> str | None:
         return None
     sha = (res.stdout or "").strip()
     return sha or None
+
+
+def discarded_delta(repo: str | Path, merge_sha: str, reconstructed_tree: str) -> list[str]:
+    """Every repo-relative path where the reconstruction fails to reproduce what `merge_sha`
+    recorded — the part of the merge's contribution that replacing it destroys.
+
+    The CONFIRMED signature proves that SOME content the merge introduced is payload; it never
+    proves that all of it is. A conflict resolution, an edit made by hand during the merge, and
+    a file the merge deleted all land here beside the payload. Reporting them is all this does:
+    refusing, or disclosing and going ahead, is the caller's decision.
+
+    When git cannot compare the two, every path the merge recorded is returned — nothing can be
+    shown to survive, and an empty list would read as "the reconstruction loses nothing".
+    """
+    delta = _differing_paths(repo, merge_sha, reconstructed_tree)
+    return _tree_paths(repo, merge_sha) if delta is None else delta
 
 
 def capture_bundle(repo: str | Path, merge_sha: str, related: tuple[str, ...],
@@ -98,26 +152,51 @@ def capture_bundle(repo: str | Path, merge_sha: str, related: tuple[str, ...],
     return root
 
 
+class AmendUnwindFailed(RuntimeError):
+    """A branch was moved and could not be put back. The repository is in neither state, so the
+    caller must not continue and must not describe the outcome as though it knew what happened."""
+
+    def __init__(self, repo, *, unrestored: list[str], moved: dict[str, str]):
+        self.repo = str(repo)
+        self.unrestored = list(unrestored)
+        self.moved = dict(moved)
+        super().__init__(f"{self.repo}: could not restore {', '.join(self.unrestored)}")
+
+
 def restore_branches(repo: str | Path, heads: list[tuple[str, str, str]],
-                     moved: dict[str, str], failed: list[str]) -> None:
-    """Put `failed` branches back to their captured tips. Created local heads are deleted."""
+                     moved: dict[str, str], failed: list[str]) -> list[str]:
+    """Put `failed` branches back to their captured tips. Created local heads are deleted.
+
+    Returns the names it could NOT restore — empty when every one is back. It used to return
+    nothing, so a refused restore was silent and the operator was told branches were put back
+    when one was not."""
     by_name = {name: cas_old for name, _tip, cas_old in heads}
+    unrestored: list[str] = []
     for name in failed:
         new_tip = moved.get(name)
         cas_old = by_name.get(name)
         if not new_tip or cas_old is None:
             continue
         if cas_old == _ZERO:
-            run_ok(repo, ["update-ref", "-d", f"refs/heads/{name}"])
+            if not run_ok(repo, ["update-ref", "-d", f"refs/heads/{name}"]):
+                unrestored.append(name)
             continue
-        point_branch_at(repo, name, cas_old, new_tip)
+        if not point_branch_at(repo, name, cas_old, new_tip):
+            unrestored.append(name)
+    return unrestored
 
 
 def point_branch_at(repo: str | Path, branch: str, new: str, old: str) -> bool:
     """Compare-and-swap `refs/heads/branch` from `old` to `new`.
 
-    The worktree is reset only when that branch is the one currently checked out.
+    The worktree is reset only when that branch is the one currently checked out — so this
+    refuses outright, before the ref moves, while that tree holds uncommitted work. The guard
+    sits here rather than with the caller because `reset --hard` is here: a checked-out branch
+    reaches this function from the amend path, from the restore path, and from anything added
+    next, and only one of those has to forget the check for the work to be gone.
     """
+    if branch_name(repo) == branch and is_dirty(repo):
+        return False
     if not run_ok(repo, ["update-ref", f"refs/heads/{branch}", new, old]):
         return False
     if branch_name(repo) == branch:
@@ -125,9 +204,13 @@ def point_branch_at(repo: str | Path, branch: str, new: str, old: str) -> bool:
     return True
 
 
-def replayed_head(repo: str | Path, old_merge: str, new_merge: str,
-                  old_head: str) -> str | None:
-    """The SHA after replaying `old_head`'s suffix onto `new_merge`. No ref is moved."""
+def replayed_head(repo: str | Path, old_merge: str, new_merge: str, old_head: str,
+                  signing: SigningStatus | None = None) -> str | None:
+    """The SHA after replaying `old_head`'s suffix onto `new_merge`. No ref is moved.
+
+    The suffix keeps whatever signing the repository is configured for: replaying signed commits
+    unsigned strips the very property the history was published with."""
+    signing = signing_status(repo) if signing is None else signing
     desc = descendant_shas(repo, old_merge, old_head)
     if not desc:
         return new_merge
@@ -137,10 +220,11 @@ def replayed_head(repo: str | Path, old_merge: str, new_merge: str,
     if not add_worktree(repo, wt, label, old_head):
         return None
     try:
-        if not run_ok(wt, ["-c", "commit.gpgsign=false", "rebase", "--rebase-merges",
-                           "--onto", new_merge, old_merge],
-                      env=dict(os.environ, GIT_EDITOR="true", GIT_SEQUENCE_EDITOR="true",
-                               GIT_TERMINAL_PROMPT="0")):
+        if not run_ok(wt, [*signing_args(signing), "rebase", *sign_flags(signing, "rebase"),
+                           "--rebase-merges", "--onto", new_merge, old_merge],
+                      env=signing_env(repo, dict(os.environ, GIT_EDITOR="true",
+                                                 GIT_SEQUENCE_EDITOR="true",
+                                                 GIT_TERMINAL_PROMPT="0"))):
             run_ok(wt, ["rebase", "--abort"])
             return None
         new_head = stdout(wt, ["rev-parse", "HEAD"]).strip()
@@ -154,16 +238,54 @@ def replayed_head(repo: str | Path, old_merge: str, new_merge: str,
             pass
 
 
+def replay_is_faithful(repo: str | Path, old_head: str, new_head: str, old_base: str,
+                       new_base: str, allowed_paths: Iterable[str]) -> tuple[bool, list[str]]:
+    """Whether the replayed suffix carries the same content as the suffix it replaced, once the
+    paths the replacement itself changed (`allowed_paths`) are set aside.
+
+    `--rebase-merges` rebuilds a merge in the suffix by merging its parents again. A conflict
+    aborts the rebase and is safe; a clean re-merge is not, because it silently substitutes
+    git's automatic answer for whatever was committed by hand into that merge — in a commit
+    nobody flagged. So the replay is walked against the original commit for commit.
+
+    Returns `(faithful, report)` with `<old> -> <new>: <path>` lines. It reports; it does not
+    abort. Two limits are deliberate: sequences that cannot be walked pairwise are reported
+    unfaithful rather than assumed clean, and a commit reached only through a suffix merge's
+    second parent is observed through that merge's tree, not on its own.
+    """
+    old_seq = descendant_shas(repo, old_base, old_head)
+    new_seq = descendant_shas(repo, new_base, new_head)
+    if len(old_seq) != len(new_seq):
+        return False, [f"replay produced {len(new_seq)} commits for {len(old_seq)} originals"]
+    allowed = set(allowed_paths)
+    report: list[str] = []
+    for old_sha, new_sha in zip(old_seq, new_seq):
+        pair = f"{old_sha[:12]} -> {new_sha[:12]}"
+        if _message(repo, old_sha) != _message(repo, new_sha):
+            report.append(f"{pair}: replayed commit does not correspond to the original")
+            continue
+        differing = _differing_paths(repo, old_sha, new_sha)
+        if differing is None:
+            report.append(f"{pair}: trees could not be compared")
+            continue
+        report += [f"{pair}: {path}" for path in differing if path not in allowed]
+    return not report, report
+
+
 def apply_replacement(repo: str | Path, old_commit: str, new_commit: str,
-                      heads: list[tuple[str, str, str]]) -> dict[str, str] | None:
+                      heads: list[tuple[str, str, str]],
+                      signing: SigningStatus | None = None) -> dict[str, str] | None:
     """Repoint every `(name, replay_tip, cas_old)` onto `new_commit`. None if any replay fails
-    before refs move. A failed compare-and-swap stops the rest."""
+    before refs move.
+
+    A compare-and-swap that fails part way used to leave the branches before it moved while the
+    caller reported that nothing had. Anything already moved is put back before returning."""
     by_tip: dict[str, list[tuple[str, str]]] = {}
     for name, tip, cas_old in heads:
         by_tip.setdefault(tip, []).append((name, cas_old))
     planned: dict[str, tuple[str, str]] = {}
     for tip, named in by_tip.items():
-        new_tip = replayed_head(repo, old_commit, new_commit, tip)
+        new_tip = replayed_head(repo, old_commit, new_commit, tip, signing)
         if new_tip is None:
             return None
         for name, cas_old in named:
@@ -171,6 +293,9 @@ def apply_replacement(repo: str | Path, old_commit: str, new_commit: str,
     moved: dict[str, str] = {}
     for name, (cas_old, new_tip) in planned.items():
         if not point_branch_at(repo, name, new_tip, cas_old):
+            unrestored = restore_branches(repo, heads, moved, list(moved))
+            if unrestored:
+                raise AmendUnwindFailed(repo, unrestored=unrestored, moved=moved)
             return None
         moved[name] = new_tip
     return moved

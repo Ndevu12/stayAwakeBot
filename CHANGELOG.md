@@ -21,6 +21,16 @@ reader, not the mechanism or the weakness it closed.
   remote does not move, local branches are left as they stood. The previous objects remain
   until collected. Bare `saw fix` still only cleans the tip.
 
+  It refuses before anything moves when the credential may not rewrite that repository, when the
+  remote branches cannot be refreshed, when the repository is set to sign commits and no signature
+  can be made, when the replacement would drop content the finding does not cover, or when the
+  previous commits cannot be captured first. A protected branch is never force-updated: the
+  amended history is published beside it under its own name and a person opens the pull request,
+  and a protection rule that cannot be read is treated the same way. A replacement that changes
+  commits it should not have is put back rather than pushed, and a branch that is moved and cannot
+  be put back is reported as exactly that. There is no account-wide form: each repository is
+  named. Signed history stays signed.
+
 ### Fixed
 - **`saw fix --pr` publishes the cleanup branch; it does not overwrite a remote ref.** A
   branch that is not fast-forwardable is refused, not force-updated. `saw fix amend` is the
