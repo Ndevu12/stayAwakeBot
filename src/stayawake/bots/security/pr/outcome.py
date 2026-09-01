@@ -48,6 +48,7 @@ class Cause(Enum):
     REPLACEMENT_DID_NOT_APPLY = "replacement-did-not-apply"
     PAYLOAD_PREDATES_THIS_COMMIT = "payload-predates-this-commit"
     PAYLOAD_CHANGED_AFTER_THIS_COMMIT = "payload-changed-after-this-commit"
+    PAYLOAD_STILL_REACHABLE = "payload-still-reachable"
     COMMIT_RECORDS_MORE_THAN_A_REPLACEMENT_CARRIES = "commit-records-more-than-a-replacement-carries"
     MERGE_WOULD_NOT_RESOLVE = "merge-would-not-resolve"
     RECONSTRUCTION_UNAVAILABLE = "reconstruction-unavailable"
@@ -193,6 +194,8 @@ _PHRASE = {
         "the payload is in a submodule, which this repository only points at",
     Cause.REPLACEMENT_NOT_WRITTEN: "the replacement could not be written",
     Cause.REPLACEMENT_DID_NOT_APPLY: "the replacement did not change what it named",
+    Cause.PAYLOAD_STILL_REACHABLE:
+        "the rebuilt history still reaches the payload, so nothing was moved",
     Cause.PAYLOAD_CHANGED_AFTER_THIS_COMMIT:
         "a later commit edited a reported file and it still carries the payload there",
     Cause.PAYLOAD_PREDATES_THIS_COMMIT:
