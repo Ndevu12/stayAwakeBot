@@ -98,8 +98,13 @@ BLOCKED_ID = "check-blocked"
 BLOCKED_SURFACE_ID = "surface-check-blocked"
 SURFACE_NOT_IMPLEMENTED_ID = "persistence-surface-not-implemented"
 PROCESSES_NOT_READABLE_ID = "process-arguments-not-readable"
+# A module an application loads at start-up looks modified AND the scan that would settle it could
+# not run. Both halves are required, so this is not a bare "the engine failed" alarm: it fires only
+# where the run already has an anomaly it was asked to resolve and could not.
+SCAN_BLOCKED_ID = "app-bundle-scan-blocked"
 UNVERIFIED_PERSISTENCE_IDS = {SURFACE_UNREADABLE_ID, SURFACE_ABSENT_ID, BLOCKED_SURFACE_ID,
-                              SURFACE_NOT_IMPLEMENTED_ID, PROCESSES_NOT_READABLE_ID}
+                              SURFACE_NOT_IMPLEMENTED_ID, PROCESSES_NOT_READABLE_ID,
+                              SCAN_BLOCKED_ID}
 
 
 def could_not_read(paths) -> HygieneIssue:

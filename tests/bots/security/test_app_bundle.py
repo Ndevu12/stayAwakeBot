@@ -6,14 +6,36 @@ Grading rationale, the corpus the bounds were calibrated against, and the limits
 An uncorroborated hit stays `info`; only the opt-in corroboration makes it an active foothold."""
 from __future__ import annotations
 
+import contextlib
 import os
+import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
 
-from stayawake.bots.security.hygiene import app_bundle, audit_checks
-from stayawake.bots.security.hygiene.models import ACTIVE_PERSISTENCE_IDS, ROTATION_UNSAFE_IDS
+from stayawake.bots.security.hygiene import app_bundle, audit_checks, render
+from stayawake.bots.security.hygiene.models import (ACTIVE_PERSISTENCE_IDS, ROTATION_UNSAFE_IDS,
+                                                    ROTATION_UNSAFE_UNKNOWN, SCAN_BLOCKED_ID,
+                                                    rotation_safety)
+
+
+def _raising(exc):
+    def engine(_directory):
+        raise exc
+    return engine
+
+
+def _engine_loads() -> bool:
+    """Whether the content-scan engine is importable here. The confirmed-marker path needs it, and
+    without this the test asserting that path failed on any host missing one of its dependencies —
+    which is a hole in the run, not a finding, and now says so instead of reading as a defect."""
+    try:
+        from stayawake.bots.security.verify import verify_dir      # noqa: F401
+        return True
+    except Exception:
+        return False
 
 _PAD = " " * 200
 _CLEAN = "module.exports = function (a, b) { return a + b; };\n"
@@ -198,6 +220,7 @@ class TestMarkersEscalateAndNothingElseDoes(unittest.TestCase):
         host.write(_appended([_confirmed_payload()]))
         return host
 
+    @unittest.skipUnless(_engine_loads(), "the content-scan engine is not importable here")
     def test_confirmed_markers_make_it_an_active_foothold(self):
         issues = self._planted().check(verify=True)
         self.assertEqual([i.id for i in issues], ["app-bundle-payload"])
@@ -220,6 +243,118 @@ class TestMarkersEscalateAndNothingElseDoes(unittest.TestCase):
         host = _Host()
         host.write(_confirmed_payload())
         self.assertEqual(host.check(verify=True), [])
+
+
+class TestAScanThatCouldNotRunIsNotAScanThatFoundNothing(unittest.TestCase):
+    """`--verify` is the operator asking for the harder look. Every failure of the engine used to
+    be answered with the empty list a clean scan returns, so the run reported the weak finding —
+    whose own advice is to run `--verify` — over a scan that never happened."""
+
+    def _planted(self):
+        host = _Host()
+        host.write(_appended([_confirmed_payload()]))
+        return host
+
+    @contextlib.contextmanager
+    def _engine(self, verify_dir):
+        stub = types.ModuleType("stayawake.bots.security.verify")
+        stub.verify_dir = verify_dir
+        with mock.patch.dict(sys.modules, {"stayawake.bots.security.verify": stub}):
+            yield
+
+    def _blocked_by(self, exc):
+        with self._engine(_raising(exc)):
+            return self._planted().check(verify=True)
+
+    def test_an_engine_that_will_not_run_leaves_the_hole_as_its_own_item(self):
+        """Two findings, not one hedged: the module keeps its `info` grade for what was observed,
+        and the look that did not happen is a separate `unknown`. The report groups them
+        differently, and one item that is both reads as neither."""
+        issues = self._blocked_by(RuntimeError("signature store unreadable"))
+        self.assertEqual([i.id for i in issues],
+                         ["app-bundle-appended-module", SCAN_BLOCKED_ID])
+        self.assertEqual(issues[0].severity, "info")
+        self.assertEqual(issues[1].severity, "unknown")
+        self.assertIn("signature store unreadable", issues[1].detail)
+
+    def test_an_engine_that_will_not_import_is_reported_the_same_way(self):
+        """The failure this actually shipped with: the import itself is what went wrong."""
+        with mock.patch.dict(sys.modules, {"stayawake.bots.security.verify": None}):
+            ids = [i.id for i in self._planted().check(verify=True)]
+        self.assertIn(SCAN_BLOCKED_ID, ids)
+
+    def test_it_never_tells_the_operator_to_run_what_they_just_ran(self):
+        for issue in self._blocked_by(RuntimeError("boom")):
+            self.assertNotIn("--verify", issue.remediation)
+        detail = self._blocked_by(RuntimeError("boom"))[0].detail
+        self.assertNotIn("`saw audit --verify` looks harder", detail)
+        self.assertIn("did not run", detail)
+
+    def test_the_run_is_never_reported_as_having_found_nothing(self):
+        """`unknown` items are surfaced as the ABSENCE of a look, not as findings, so a lone
+        `unknown` headlines as "no findings". Something WAS found here."""
+        text = render(self._blocked_by(RuntimeError("boom")), width=90)
+        self.assertNotIn("no findings", text)
+        self.assertIn("looks modified", text)
+
+    def test_it_withholds_the_rotation_all_clear(self):
+        # Rotating while a live foothold sits in an application bundle is the reported wiper
+        # trigger, and a scan that did not run cannot say there is none.
+        self.assertIn(SCAN_BLOCKED_ID, ROTATION_UNSAFE_IDS)
+        self.assertEqual(rotation_safety({SCAN_BLOCKED_ID}), ROTATION_UNSAFE_UNKNOWN)
+        self.assertNotIn(SCAN_BLOCKED_ID, ACTIVE_PERSISTENCE_IDS,
+                         "not confirmed persistence — it is a hole, and must not outrank one")
+        ids = {i.id for i in self._blocked_by(RuntimeError("boom"))}
+        self.assertEqual(rotation_safety(ids), ROTATION_UNSAFE_UNKNOWN)
+
+    def test_one_item_for_the_run_however_many_modules(self):
+        """The modules are named above, one line each; the cause is the same for all of them and
+        is stated once. Counting the item alone did not pin this — the reason was listed once per
+        module inside a single item, which is the same noise one layer down."""
+        host = self._planted()
+        host.write(_appended([_confirmed_payload()]), name="other.js")
+        with self._engine(_raising(RuntimeError("boom"))):
+            issues = host.check(verify=True)
+        ids = [i.id for i in issues]
+        self.assertEqual(ids.count(SCAN_BLOCKED_ID), 1)
+        self.assertEqual(ids.count("app-bundle-appended-module"), 2)
+        hole = next(i for i in issues if i.id == SCAN_BLOCKED_ID)
+        self.assertEqual(hole.detail.count("RuntimeError: boom"), 1)
+
+    def test_causes_that_differ_are_all_named(self):
+        host = self._planted()
+        host.write(_appended([_confirmed_payload()]), name="other.js")
+        causes = iter([RuntimeError("first cause"), RuntimeError("second cause")])
+
+        def engine(_directory):
+            raise next(causes)
+
+        with self._engine(engine):
+            issues = host.check(verify=True)
+        hole = next(i for i in issues if i.id == SCAN_BLOCKED_ID)
+        self.assertIn("first cause", hole.detail)
+        self.assertIn("second cause", hole.detail)
+
+    def test_a_scan_that_ran_and_found_nothing_says_so(self):
+        """The other direction: not every unconfirmed module becomes UNKNOWN. A scan that ran
+        clean leaves the shape finding at `info` and the rotation verdict untouched — and it now
+        reports the negative result the operator paid for instead of advising the same flag."""
+        with self._engine(lambda _d: mock.Mock(markers=[])):
+            issues = self._planted().check(verify=True)
+        self.assertEqual([i.id for i in issues], ["app-bundle-appended-module"])
+        self.assertIn("found no worm markers", issues[0].detail)
+        self.assertFalse({i.id for i in issues} & ROTATION_UNSAFE_IDS)
+
+    def test_not_asking_for_the_scan_is_unchanged(self):
+        issues = self._planted().check()
+        self.assertEqual([i.id for i in issues], ["app-bundle-appended-module"])
+        self.assertIn("--verify", issues[0].detail)
+
+    def test_an_interrupt_stops_the_audit_rather_than_one_module(self):
+        """Swallowing it here cost one interrupt per file to stop a run, and everything the run
+        went on to report would carry scans nobody performed."""
+        with self._engine(_raising(KeyboardInterrupt())), self.assertRaises(KeyboardInterrupt):
+            self._planted().check(verify=True)
 
 
 class TestCoverageIsNeverSilentlyBounded(unittest.TestCase):

@@ -43,6 +43,14 @@ reader, not the mechanism or the weakness it closed.
   rather than refused with a reason that was not true of a privileged run. Without `sudo` it is
   named, and says so. `--take-back` still leaves it alone: it removes only what it placed.
 
+### Fixed
+- **`saw audit --verify` never reports a scan that could not run as one that found nothing.** If
+  the harder look you asked for does not happen, the run says so and says why, names the modules it
+  did not settle, and withholds the credential-rotation all-clear until it can. It used to report
+  the weaker finding instead — whose own advice is to run `--verify`.
+- **A module that was scanned and came back clean now says so**, rather than repeating the advice
+  to run the scan that had just cleared it.
+
 ### Changed
 - **`saw harden` no longer requires root.** Run as yourself it acts where it can, and names
   anything it did not take rather than stopping. Run again with `sudo` to act on the rest and to

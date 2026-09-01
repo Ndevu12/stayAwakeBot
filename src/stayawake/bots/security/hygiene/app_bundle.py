@@ -7,11 +7,12 @@ from __future__ import annotations
 
 import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from stayawake.utils.pathsafe import canonical_id
 
-from .models import HygieneIssue, _WIPER_NOTE
+from .models import HygieneIssue, SCAN_BLOCKED_ID, _WIPER_NOTE
 
 _JS_SUFFIXES = (".js", ".mjs", ".cjs")
 
@@ -172,14 +173,45 @@ def _appended_line(lines: list[bytes]) -> tuple[int, int] | None:
     return None
 
 
-def _scan_markers(directory: Path) -> list[str]:
-    """CONFIRMED markers in one module's own directory, or []. The engine import is LOCAL, and the
-    scan is opt-in because it is slow — see `saw#218` for the measurement."""
+@dataclass(frozen=True)
+class _MarkerScan:
+    """What a content scan of one module's directory established — including whether it happened.
+
+    Three states, and an empty marker list used to be all of them: nobody asked, it ran and found
+    nothing, and it could not run. That is the collapse `outcome.py` exists to prevent, one level
+    further down — the engine import is local and can fail on its own, and every failure was
+    answered with the list a clean scan returns.
+    """
+
+    markers: tuple[str, ...] = ()
+    stopped_by: str | None = None
+    asked: bool = False
+
+    @property
+    def blocked(self) -> bool:
+        return self.stopped_by is not None
+
+    @property
+    def ran(self) -> bool:
+        return self.asked and not self.blocked
+
+
+_NOT_ASKED = _MarkerScan()
+
+
+def _scan_markers(directory: Path) -> _MarkerScan:
+    """CONFIRMED markers in one module's own directory. The engine import is LOCAL, and the scan is
+    opt-in because it is slow — see `saw#218` for the measurement.
+
+    `KeyboardInterrupt` is deliberately not caught, as in `run_probe`: this runs once per module,
+    so swallowing it here costs one interrupt per file to stop an audit, and the run that carried
+    on would report scans nobody performed.
+    """
     try:
         from stayawake.bots.security.verify import verify_dir
-        return list(verify_dir(directory).markers)
-    except (Exception, KeyboardInterrupt):
-        return []
+        return _MarkerScan(markers=tuple(verify_dir(directory).markers), asked=True)
+    except Exception as exc:
+        return _MarkerScan(stopped_by=f"{type(exc).__name__}: {exc}", asked=True)
 
 
 def check_app_bundles(verify: bool = False) -> list[HygieneIssue]:
@@ -188,9 +220,14 @@ def check_app_bundles(verify: bool = False) -> list[HygieneIssue]:
     The shape alone is `info`: a build emits neither the pad nor a file that ends right after one,
     but a user-patched bundle is a real thing. `verify=True` (`saw audit --verify`) content-scans
     the module's own directory, and CONFIRMED markers corroborate it into an active foothold — two
-    findings rather than one with a hedge, so the rotation gate follows evidence, not shape."""
+    findings rather than one with a hedge, so the rotation gate follows evidence, not shape.
+
+    A scan that could not run is the same two-findings shape: the module keeps its `info` grade for
+    what was observed, and the hole is its own item — something found and a look that did not
+    happen are different claims, and the report groups them differently."""
     issues: list[HygieneIssue] = []
     unbounded = truncated = 0
+    unscanned: list[str] = []
     walked: set = set()
     for root, max_depth in app_bundle_js_roots():
         examined = 0
@@ -217,12 +254,14 @@ def check_app_bundles(verify: bool = False) -> list[HygieneIssue]:
                 shape = _appended_line(lines) if lines else None
                 if shape is None:
                     continue
-                markers = _scan_markers(module.parent) if verify else []
-                issues.append(_finding(module, *shape, markers))
+                scan = _scan_markers(module.parent) if verify else _NOT_ASKED
+                if scan.blocked and scan.stopped_by not in unscanned:
+                    unscanned.append(scan.stopped_by)
+                issues.append(_finding(module, *shape, scan))
             if examined >= _MAX_FILES_PER_ROOT:
                 break                      # this tree only — the next application still gets read
-    note = _unexamined_note(unbounded, truncated)
-    return issues + ([note] if note else [])
+    notes = [_unexamined_note(unbounded, truncated), _unscanned_note(unscanned)]
+    return issues + [n for n in notes if n]
 
 
 def _depth(root: Path, directory: Path) -> int:
@@ -250,14 +289,35 @@ def _unexamined_note(unbounded: int, truncated: int) -> HygieneIssue | None:
     )
 
 
-def _finding(module: Path, pad: int, body: int, markers: list[str]) -> HygieneIssue:
-    if markers:
+def _unscanned_note(reasons: list[str]) -> HygieneIssue | None:
+    """The corroboration `--verify` promised and did not deliver.
+
+    One item for the run rather than one per module: the modules are already named above, and the
+    cause is the same for all of them. It carries the rotation gate, because a scan that did not
+    run cannot say there is no live foothold — and rotating over one is the reported wiper trigger.
+    """
+    if not reasons:
+        return None
+    return HygieneIssue(
+        id=SCAN_BLOCKED_ID,
+        severity="unknown",
+        title="A module that looks modified could not be scanned",
+        detail="`--verify` was asked for and the scan that would confirm or clear these modules "
+               "did not run: " + "; ".join(reasons) + ". They are UNKNOWN, not clean.",
+        remediation="Resolve what stopped it and re-run, or compare each module against the "
+                    "vendor's copy. Do not rotate credentials yet: "
+                    f"{_WIPER_NOTE}.",
+    )
+
+
+def _finding(module: Path, pad: int, body: int, scan: _MarkerScan) -> HygieneIssue:
+    if scan.markers:
         return HygieneIssue(
             id="app-bundle-payload",
             severity="warning",
             title="Worm markers inside an installed application's own JavaScript",
             detail=f"{module} looks modified, and a scan of its directory is CONFIRMED: "
-                   f"{', '.join(markers)}.",
+                   f"{', '.join(scan.markers)}.",
             remediation="Treat as a LIVE compromise: isolate the host, reinstall the application, "
                         f"rotate credentials LAST — {_WIPER_NOTE}.",
         )
@@ -265,8 +325,24 @@ def _finding(module: Path, pad: int, body: int, markers: list[str]) -> HygieneIs
         id="app-bundle-appended-module",
         severity="info",
         title="An application module looks modified",
-        detail=f"{module} carries content its build would not have produced. "
-               "`saw audit --verify` looks harder at it.",
+        detail=f"{module} carries content its build would not have produced. {_corroboration(scan)}",
         remediation="Compare it against the vendor's published copy, or reinstall the application. "
                     "If it is not theirs, isolate this host.",
     )
+
+
+def _corroboration(scan: _MarkerScan) -> str:
+    """What the content scan contributed, said accurately.
+
+    One sentence used to cover all three states, and it read "`saw audit --verify` looks harder at
+    it" — which is advice to run what the operator had just run, over a scan that failed, and a
+    result withheld from one that succeeded.
+
+    Keep each branch to one short sentence by hand: the word-budget test reads string literals out
+    of the `HygieneIssue(...)` call, so it cannot see these and will not stop them growing.
+    """
+    if scan.blocked:
+        return "The scan that would confirm or clear it did not run."
+    if scan.ran:
+        return "A scan of its directory found no worm markers."
+    return "`saw audit --verify` looks harder at it."
