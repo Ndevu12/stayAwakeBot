@@ -17,6 +17,7 @@ from stayawake.bots.security.pr.outcome import (AmendOutcome, BranchResult, Caus
                                                       amended, refused, render_amend_line)
 from stayawake.lib.git import authority
 from stayawake.lib.git.write import amend as gitamend
+from stayawake.lib.git.write import rebuild as gitrebuild
 from stayawake.lib.git.write.capture import capture_bundle
 from stayawake.lib.git.write.push import PushResult, force_update_head, publish_head
 from stayawake.lib.git.write import sign
@@ -28,13 +29,32 @@ def _full(repo: Path, sha: str) -> str:
     return gitutil.stdout(repo, ["rev-parse", "--verify", f"{sha}^{{commit}}"]).strip()
 
 
+def _branches_carrying_any(repo: Path, infected) -> list[tuple[str, str, str]]:
+    """Every branch that reaches ANY of the infected commits, each named once.
+
+    A branch is rebuilt from the oldest payload it carries, so a branch reaching two of them is
+    still one branch to move.
+    """
+    heads: dict[str, tuple[str, str, str]] = {}
+    for sha in infected:
+        for name, tip, cas_old in gitutil.branches_carrying(repo, sha):
+            heads.setdefault(name, (name, tip, cas_old))
+    return list(heads.values())
+
+
 def _confirmed_commits(scan) -> list:
+    """Confirmed findings that name a commit and the paths in it to correct.
+
+    The shape of the commit no longer decides this — an ordinary commit that introduced the
+    payload is as replaceable as a merge that smuggled it, and the reconstruction picks the clean
+    content from the commit's own shape.
+    """
     found = []
     seen: set[str] = set()
     for f in scan.findings:
-        if getattr(f, "vector", None) != "evil-merge":
-            continue
         if getattr(f, "confidence", None) != CONFIRMED:
+            continue
+        if not getattr(f, "related_paths", None):
             continue
         sha = getattr(f, "commit_sha", None)
         if not sha or sha in seen:
@@ -167,6 +187,7 @@ _REPLACEMENT_CAUSE = {
     "message-encoding": Cause.COMMIT_RECORDS_MORE_THAN_A_REPLACEMENT_CARRIES,
     "message": Cause.REPLACEMENT_NOT_WRITTEN,
     "baseline-carries-payload": Cause.PAYLOAD_PREDATES_THIS_COMMIT,
+    "changed-downstream": Cause.PAYLOAD_CHANGED_AFTER_THIS_COMMIT,
 }
 
 
@@ -182,7 +203,7 @@ def _survives(signatures) -> object:
     return build_any_loader_check(flat)
 
 
-def _tags_at(repo: Path, slug: str, old: str, token: str | None) -> tuple[list[str], bool]:
+def _tags_at(repo: Path, slug: str, olds: list[str], token: str | None) -> tuple[list[str], bool]:
     """Tag names still pointing at the replaced commit, and whether that could be established.
 
     Asked of the REMOTE, not of this clone. The refresh this run does is `--no-tags`, so a tag
@@ -190,7 +211,8 @@ def _tags_at(repo: Path, slug: str, old: str, token: str | None) -> tuple[list[s
     the payload back on disk. `ls-remote --tags` reports both the tag object and its peeled `^{}`
     line, so an annotated tag is matched by the commit it resolves to.
     """
-    local = gitutil.stdout(repo, ["tag", "--points-at", old]).split()
+    local = [name for sha in olds
+             for name in gitutil.stdout(repo, ["tag", "--points-at", sha]).split()]
     with github_https_auth(token) as (prefix, env_):
         res = run(repo, ["ls-remote", "--tags", f"{prefix}{slug}.git"],
                   env=env_, timeout=NETWORK_TIMEOUT)
@@ -199,12 +221,12 @@ def _tags_at(repo: Path, slug: str, old: str, token: str | None) -> tuple[list[s
     remote = []
     for line in (res.stdout or "").splitlines():
         parts = line.split()
-        if len(parts) == 2 and parts[0].strip() == old and parts[1].startswith("refs/tags/"):
+        if len(parts) == 2 and parts[0].strip() in set(olds) and parts[1].startswith("refs/tags/"):
             remote.append(parts[1][len("refs/tags/"):].removesuffix("^{}"))
     return sorted(set(local) | set(remote)), True
 
 
-def _survivors(repo: Path, slug: str, old: str, token: str | None) -> list[Reason]:
+def _survivors(repo: Path, slug: str, olds: list[str], token: str | None) -> list[Reason]:
     """What the force-update leaves reachable. Each one makes the run need review.
 
     Forks are counted rather than assumed. Reporting "forks were not established" on every run
@@ -213,7 +235,7 @@ def _survivors(repo: Path, slug: str, old: str, token: str | None) -> list[Reaso
     need a person.
     """
     reasons = [Reason(Cause.PREVIOUS_OBJECTS_UNCOLLECTED)]
-    tags, established = _tags_at(repo, slug, old, token)
+    tags, established = _tags_at(repo, slug, olds, token)
     if tags:
         reasons.append(Reason(Cause.TAGS_AT_REPLACED_COMMIT, ", ".join(sorted(tags))))
     elif not established:
@@ -264,28 +286,36 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     commits = _confirmed_commits(scan)
     if not commits:
         return refused(display, Cause.NO_CONFIRMED_PAYLOAD)
-    if len(commits) > 1:
-        shas = ", ".join((_full(repo, getattr(f, "commit_sha", None) or "") or f.path)[:12]
-                         for f in commits)
-        return refused(display, Cause.MANY_CONFIRMED_COMMITS, str(len(commits)), shas)
 
-    finding = commits[0]
-    old = _full(repo, finding.commit_sha or "")
-    if not old:
-        return refused(display, Cause.CONFIRMED_COMMIT_UNRESOLVED)
-    heads = gitamend.carrying_branches(repo, old)
+    infected: dict[str, tuple[str, ...]] = {}
+    for finding in commits:
+        sha = _full(repo, getattr(finding, "commit_sha", None) or "")
+        if not sha:
+            return refused(display, Cause.CONFIRMED_COMMIT_UNRESOLVED)
+        paths = tuple(getattr(finding, "related_paths", ()) or ())
+        if not paths:
+            return refused(display, Cause.COMMIT_SHAPE_NOT_MODELLED, sha[:12])
+        infected[sha] = tuple(dict.fromkeys(infected.get(sha, ()) + paths))
+
+    heads = _branches_carrying_any(repo, infected)
     if not heads:
-        return refused(display, Cause.COMMIT_ON_NO_BRANCH, old[:12])
+        return refused(display, Cause.COMMIT_ON_NO_BRANCH,
+                       ", ".join(sorted(s[:12] for s in infected)))
 
-    # Asked AFTER the commits are known: whether this rewrite owes a signature depends on what
-    # the history carries, not only on what this clone's config asks for.
-    # The ancestry path is exactly the set of commits the replay REWRITES: a commit in `old..tip`
-    # that does not descend from `old` keeps an unchanged parent and the sequencer fast-forwards it
-    # verbatim, signature and all. Widening this to `old..tip` would ask for signatures the rewrite
-    # never touches.
-    replaced = [old] + [s for _n, tip, _c in heads
-                        for s in gitamend.descendant_shas(repo, old, tip)]
-    signing = sign.signing_status(repo, history_is_signed=sign.any_signed(repo, replaced))
+    graph = gitrebuild.ordered_graph(repo, [tip for _n, tip, _c in heads])
+    plan = gitrebuild.commits_to_rebuild(graph, set(infected))
+    uncovered = sorted(s for s in infected if s not in {sha for sha, _ps in plan})
+    if uncovered:
+        # A confirmed commit no branch reaches is not amendable here, and counting it as replaced
+        # would report commits the run never touched.
+        return refused(display, Cause.COMMIT_ON_NO_BRANCH,
+                       ", ".join(s[:12] for s in uncovered))
+    oldest = plan[0][0]
+
+    # Asked AFTER the set is known: whether this owes a signature depends on what the commits
+    # being rewritten carry, not only on what this clone's config asks for.
+    signing = sign.signing_status(
+        repo, history_is_signed=sign.any_signed(repo, [sha for sha, _ps in plan]))
     if signing.must_refuse:
         return refused(display, Cause.SIGNING_UNAVAILABLE, signing.reason)
     if sign.committer_identity(repo) is None:
@@ -299,63 +329,65 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     if behind:
         return refused(display, Cause.LOCAL_MISSING_REMOTE_COMMITS, ", ".join(behind))
 
-    signature_paths = tuple(getattr(finding, "related_paths", ()) or ())
-    replacement = gitamend.replacement_commit(repo, old, signature_paths, signing,
-                                             _survives(signatures))
-    if not replacement.ok:
+    survives = _survives(signatures)
+    replacements = {}
+    for sha, paths in infected.items():
+        replacement = gitamend.replacement_commit(repo, sha, paths, signing, survives)
+        if not replacement.ok:
+            return refused(display,
+                           _REPLACEMENT_CAUSE.get(replacement.kind,
+                                                  Cause.REPLACEMENT_NOT_WRITTEN),
+                           replacement.refusal or sha[:12])
+        beyond = [p for p in gitamend.discarded_delta(repo, sha, replacement.sha)
+                  if p not in paths]
+        if beyond:
+            return refused(display, Cause.REPLACEMENT_LOSES_MORE_THAN_THE_PAYLOAD,
+                           ", ".join(sorted(beyond)[:5]))
+        replacements[sha] = replacement
+
+    # Objects only — no reference moves until the capture below has been read back.
+    rebuilt = gitrebuild.rebuild_without_payload(
+        repo, plan, replacements,
+        lambda sha, tree, new_parents: gitamend.rewrite_commit(repo, sha, tree, new_parents,
+                                                               signing),
+        survives)
+    if not rebuilt.ok:
         return refused(display,
-                       _REPLACEMENT_CAUSE.get(replacement.kind, Cause.REPLACEMENT_NOT_WRITTEN),
-                       replacement.refusal or old[:12])
-    new = replacement.sha
+                       _REPLACEMENT_CAUSE.get(rebuilt.kind, Cause.REPLACEMENT_NOT_WRITTEN),
+                       rebuilt.refusal)
 
-    lost = gitamend.discarded_delta(repo, old, new)
-    unexplained = [p for p in lost if p not in signature_paths]
-    if unexplained:
-        return refused(display, Cause.REPLACEMENT_LOSES_MORE_THAN_THE_PAYLOAD,
-                       ", ".join(sorted(unexplained)[:5]))
+    new_tips = {tip: rebuilt.tip(tip) for _n, tip, _c in heads}
+    flagged = {p for paths in infected.values() for p in paths}
+    for name, tip, _cas in heads:
+        beyond = [p for p in gitamend.discarded_delta(repo, tip, new_tips[tip])
+                  if p not in flagged]
+        if beyond:
+            return refused(display, Cause.REPLAY_CHANGED_UNRELATED_COMMITS,
+                           f"{name}: " + ", ".join(sorted(beyond)[:3]))
 
-    captured = capture_bundle(repo, [(tip, new) for _n, tip, _c in heads],
-                              _capture_path(slug, old[:12]))
+    captured = capture_bundle(repo, [(tip, new_tips[tip]) for _n, tip, _c in heads],
+                              _capture_path(slug, oldest[:12]))
     if not captured.ok:
         return refused(display, Cause.CAPTURE_FAILED, captured.reason)
 
-    checked: set[tuple[str, str]] = set()
     try:
-        moved = gitamend.apply_replacement(repo, old, new, heads, signing)
+        moved = gitamend.point_branches(repo, heads, new_tips)
     except gitamend.AmendUnwindFailed as unwound:
         return refused(display, Cause.LEFT_PART_WAY, ", ".join(unwound.unrestored))
     if moved is None:
         return refused(display, Cause.REPLAY_FAILED, ", ".join(n for n, _, _ in heads))
 
-    # Every replayed line, not just the first: branches that reached the payload have different
-    # tips, so checking one of them says nothing about the others.
-    drift: list[str] = []
-    for name, tip, _cas in heads:
-        new_tip = moved.get(name)
-        if new_tip is None or (tip, new_tip) in checked:
-            continue
-        checked.add((tip, new_tip))
-        faithful, found = gitamend.replay_is_faithful(repo, tip, new_tip, old, new,
-                                                     signature_paths)
-        if not faithful:
-            drift = [f"{name}: {d}" for d in found]
-            break
-    if drift:
-        unrestored = gitamend.restore_branches(repo, heads, moved, list(moved))
-        if unrestored:
-            return refused(display, Cause.LEFT_PART_WAY, ", ".join(unrestored))
-        return refused(display, Cause.REPLAY_CHANGED_UNRELATED_COMMITS, "; ".join(drift[:3]))
-
     results: list[BranchResult] = []
     failed: list[str] = []
     for branch in moved:
         result = _force_update_branch(repo, slug, branch, token, pusher=pusher,
-                                      lease=(leases or {}).get(branch), sha12=old[:12])
+                                      lease=(leases or {}).get(branch),
+                                      sha12=oldest[:12])
         results.append(result)
         cause = result.reason.cause if result.reason is not None else None
         if not result.force_updated and cause is not Cause.PUSH_NOT_CONFIRMED:
             failed.append(branch)
-    survivors = _survivors(repo, slug, old, token)
+    survivors = _survivors(repo, slug, sorted(infected), token)
     if failed:
         try:
             unrestored = gitamend.restore_branches(repo, heads, moved, failed)
@@ -366,4 +398,6 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
             # same refused restore was silent on this side, and a local branch left on rewritten
             # history is the operator's problem whether or not any push succeeded.
             survivors.insert(0, Reason(Cause.LEFT_PART_WAY, ", ".join(unrestored)))
-    return amended(display, old[:12], tuple(results), tuple(survivors))
+    label = (oldest[:12] if len(rebuilt.replaced) == 1
+             else f"{len(rebuilt.replaced)} commits from {oldest[:12]}")
+    return amended(display, label, tuple(results), tuple(survivors))

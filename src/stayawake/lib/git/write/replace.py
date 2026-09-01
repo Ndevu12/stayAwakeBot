@@ -20,7 +20,7 @@ from pathlib import Path
 
 from stayawake.lib.git.merge.tree import auto_merge
 from stayawake.lib.git.query import file_at, parents, path_exists_at, tree_entry
-from stayawake.lib.git.run import run, run_ok
+from stayawake.lib.git.run import run, run_ok, stdout
 
 _GITLINK = "160000"
 
@@ -38,6 +38,10 @@ class Replacement:
     """The replacement commit, once one has been written. `replacement_tree` leaves it empty."""
     reverted: tuple[str, ...] = ()
     removed: tuple[str, ...] = ()
+    plan: tuple[tuple[str, tuple[str, str] | None], ...] = ()
+    """What was decided per path — `(path, entry)` to put that entry back, `(path, None)` to
+    remove it. The commits AFTER this one inherit it: their trees still hold the payload blob at
+    that path, and correcting them the same way is what makes the branch tip clean."""
     kind: str = ""
     refusal: str = ""
 
@@ -118,7 +122,7 @@ def replacement_tree(repo: str | Path, commit: str, flagged_paths,
     if untouched:
         return _refused("not-applied",
                         "the correction did not take effect at " + ", ".join(untouched))
-    return Replacement(tree=tree,
+    return Replacement(tree=tree, plan=tuple(plan),
                        reverted=tuple(p for p, entry in plan if entry is not None),
                        removed=tuple(p for p, entry in plan if entry is None))
 
@@ -142,6 +146,38 @@ def _not_applied(repo: str | Path, tree: str,
         elif written != entry:
             missed.append(path)
     return missed
+
+
+def carried_forward(repo: str | Path, commit: str,
+                    corrections: dict[str, tuple[str, tuple[str, str] | None]],
+                    still_carries=None) -> tuple[str | None, str]:
+    """`commit`'s recorded tree with each correction carried into it. Returns `(tree, blocked)`.
+
+    A tree is a snapshot: every commit after the infected one records the payload again at that
+    path, so remapping parents alone leaves the branch tip carrying it.
+
+    Blob identity answers survival in ONE DIRECTION, which `merge/liveness` already states: an
+    identical blob proves the bytes are still there, a different one proves only that the file
+    changed — the payload lines may sit untouched inside it. So an unchanged blob is corrected,
+    and a CHANGED one is checked for content rather than assumed clean. `blocked` names a path a
+    later commit edited that still carries the payload: correcting it would either miss the
+    payload or throw that commit's work away, and neither is this function's call to make.
+    """
+    plan = []
+    for path, (payload_blob, entry) in corrections.items():
+        current = tree_entry(repo, commit, path)
+        if current is None:
+            continue
+        if current[1] == payload_blob:
+            plan.append((path, entry))
+        elif still_carries and still_carries(file_at(repo, commit, path)):
+            return None, path
+    if not plan:
+        return (stdout(repo, ["rev-parse", f"{commit}^{{tree}}"]).strip() or None), ""
+    tree = _write_corrected(repo, commit, plan)
+    if tree is None or _not_applied(repo, tree, plan):
+        return None, ""
+    return tree, ""
 
 
 def _write_corrected(repo: str | Path, commit: str,
