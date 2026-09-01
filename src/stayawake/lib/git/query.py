@@ -152,7 +152,7 @@ def branches_carrying(repo: str | Path, sha: str) -> list[tuple[str, str, str]]:
         if not ref.startswith("refs/remotes/origin/"):
             continue
         short = ref[len("refs/remotes/origin/"):]
-        if not short or short == "HEAD" or short.startswith("saw-amend/"):
+        if not short or short == "HEAD":
             continue
         if short == "notes" or short.startswith("notes/") or short.startswith("replace/"):
             continue
@@ -168,7 +168,7 @@ def branches_carrying(repo: str | Path, sha: str) -> list[tuple[str, str, str]]:
         if not ref.startswith("refs/heads/"):
             continue
         name = ref[len("refs/heads/"):]
-        if not name or name.startswith("saw-amend/"):
+        if not name:
             continue
         local_tips[name] = tip
         found[name] = tip

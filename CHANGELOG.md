@@ -13,6 +13,19 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Changed
+- **`saw fix amend` clears every infected commit in one run.** It used to stop when more than one
+  commit carried the payload, which left the repository infected after a run that had already
+  established it could act. The stretch of history rewritten is decided by the oldest of them, so
+  clearing several is the same rewrite as clearing one, and commits before that keep their
+  identity. The shape of the history is unchanged: a merge stays a merge with its parents in
+  their original order, its recorded content intact, and each commit keeps its own author.
+
+  It stops without changing anything when a confirmed commit is on no branch it can reach, and
+  when a later commit edited one of the reported files and that file still carries the payload
+  there — replacing it would either miss the payload or discard that commit's work, so the run
+  reports it instead. A commit is no longer required to be a merge to be replaced.
+
 ### Fixed
 - **`saw fix amend` takes the payload and leaves the rest of the commit alone.** It used to
   rebuild the commit from its parents, which discarded everything else that commit contributed —

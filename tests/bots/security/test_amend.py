@@ -185,6 +185,9 @@ class _AmendFixture(unittest.TestCase):
         _git(self.d, "-c", "user.name=Injected", "-c", "user.email=inj@t.test",
              "commit", "-qm", "merge (smuggled loader)")
 
+    def _causes(self, outcome):
+        return [r.cause for r in outcome.reasons]
+
     def _amend(self, pusher=_ok_push, **kw):
         return render_amend_line(self._act(pusher=pusher, **kw))
 
@@ -224,11 +227,11 @@ class _AmendFixture(unittest.TestCase):
             return amend_outcome(self.d, "acme/app", ScanOptions(), _sigs(), [],
                                  "t", pusher=pusher, **kw)
 
-    def _confirmed_finding(self, sha):
+    def _confirmed_finding(self, sha, paths=("x.js",)):
         return Finding(
             signature_id="evil-merge-loader", category="evil-merge",
             severity=Severity.CRITICAL, path=sha[:10], description="x",
-            vector="evil-merge", commit_sha=sha, related_paths=("x.js",),
+            vector="evil-merge", commit_sha=sha, related_paths=tuple(paths),
             confidence=CONFIRMED)
 
 
@@ -388,18 +391,65 @@ class TestFixAmendRepo(_AmendFixture):
         self.assertEqual(before, self._rev())
         self.assertEqual(calls, [])
 
-    def test_two_confirmed_commits_are_not_a_fix(self):
+    def test_every_confirmed_commit_is_amended_in_one_run(self):
+        """Replacing one while another still carries the payload is not a partial fix: the
+        repository stays infected and the run reports success. This used to refuse outright,
+        which bought no safety — the stretch rewritten is set by the OLDEST of them either way."""
         self._loader_merge()
-        before = self._rev()
-        other = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+        merge = self._rev()
+        (self.d / "later.js").write_text("eval(String.fromCharCode(4, 5, 6));\n")
+        _git(self.d, "add", "-A")
+        _git(self.d, "commit", "-qm", "a second payload, later")
+        second = self._rev()
         scan = ScanResult(target=str(self.d), source="local",
-                          findings=[self._confirmed_finding(before),
-                                    self._confirmed_finding(other)])
+                          findings=[self._confirmed_finding(merge),
+                                    self._confirmed_finding(second, ("later.js",))])
+        with mock.patch("stayawake.bots.security.pr.amend.scan_target", return_value=scan):
+            outcome = self._act()
+
+        self.assertTrue(outcome.completed, render_amend_line(outcome))
+        self.assertIn("2 commits", render_amend_line(outcome))
+        self.assertNotIn("fromCharCode", self._show("HEAD:x.js"))
+        listed = subprocess.run(["git", "-C", str(self.d), "ls-tree", "--name-only", "HEAD",
+                                 "--", "later.js"], capture_output=True, text=True).stdout
+        self.assertEqual(listed.strip(), "", "the second payload is gone too")
+
+    def test_a_confirmed_commit_no_branch_reaches_stops_the_run(self):
+        """It used to be dropped from the rebuild while the outcome still counted it, so the line
+        claimed commits the run never touched."""
+        self._loader_merge()
+        merge = self._rev()
+        before = merge
+        _git(self.d, "checkout", "-q", "-b", "orphan")
+        (self.d / "gone.js").write_text("eval(String.fromCharCode(7, 8, 9));\n")
+        _git(self.d, "add", "-A")
+        _git(self.d, "commit", "-qm", "payload on a branch about to vanish")
+        stranded = self._rev()
+        _git(self.d, "checkout", "-q", self.base)
+        _git(self.d, "branch", "-qD", "orphan")
+        scan = ScanResult(target=str(self.d), source="local",
+                          findings=[self._confirmed_finding(merge),
+                                    self._confirmed_finding(stranded, ("gone.js",))])
         calls = []
         with mock.patch("stayawake.bots.security.pr.amend.scan_target", return_value=scan):
-            line = self._amend(pusher=lambda *a: calls.append(a) or PushResult(True))
-        self.assertIn("2 confirmed past commits", line)
-        self.assertIn("nothing was force-updated", line)
+            outcome = self._act(pusher=lambda *a: calls.append(a) or PushResult(True))
+
+        self.assertIn(Cause.COMMIT_ON_NO_BRANCH, self._causes(outcome))
+        self.assertIn(stranded[:12], outcome.reasons[0].detail)
+        self.assertEqual(calls, [])
+        self.assertEqual(before, self._rev())
+
+    def test_a_commit_the_repository_does_not_have_is_not_amended(self):
+        self._loader_merge()
+        before = self._rev()
+        scan = ScanResult(target=str(self.d), source="local",
+                          findings=[self._confirmed_finding(before),
+                                    self._confirmed_finding("deadbeef" * 5)])
+        calls = []
+        with mock.patch("stayawake.bots.security.pr.amend.scan_target", return_value=scan):
+            outcome = self._act(pusher=lambda *a: calls.append(a) or PushResult(True))
+        self.assertIn(Cause.CONFIRMED_COMMIT_UNRESOLVED,
+                      [r.cause for r in outcome.reasons])
         self.assertEqual(before, self._rev())
         self.assertEqual(calls, [])
 
@@ -459,15 +509,15 @@ class TestFixAmendRepo(_AmendFixture):
     def test_capture_exists_before_refs_move(self):
         self._loader_merge()
         seen = []
-        real = gitamend.apply_replacement
+        real = gitamend.point_branches
 
-        def wrapped(repo, old, new, heads, signing=None):
-            cap = amendmod._capture_path("acme/app", old[:12])
-            self.assertTrue(cap.is_file())
+        def wrapped(repo, heads, new_tips):
+            oldest = self._rev()
+            self.assertTrue(amendmod._capture_path("acme/app", oldest[:12]).is_file())
             seen.append(True)
-            return real(repo, old, new, heads, signing)
+            return real(repo, heads, new_tips)
 
-        with mock.patch("stayawake.bots.security.pr.amend.gitamend.apply_replacement",
+        with mock.patch("stayawake.bots.security.pr.amend.gitamend.point_branches",
                         wrapped):
             self._amend()
         self.assertTrue(seen)
@@ -566,9 +616,6 @@ class TestAmendGates(_AmendFixture):
 
     AT = "stayawake.bots.security.pr.amend."
 
-    def _causes(self, outcome):
-        return [r.cause for r in outcome.reasons]
-
     def test_an_identity_that_may_not_rewrite_moves_nothing(self):
         self._loader_merge()
         before = self._rev()
@@ -644,12 +691,34 @@ class TestAmendGates(_AmendFixture):
         self.assertEqual(calls, [])
         self.assertEqual(before, self._rev())
 
-    def test_a_replay_that_changed_unrelated_commits_puts_the_branches_back(self):
+    def test_a_replacement_that_drops_more_than_its_own_paths_stops_the_run(self):
         self._loader_merge()
         before = self._rev()
         calls = []
-        with mock.patch(self.AT + "gitamend.replay_is_faithful",
-                        return_value=(False, ["deadbeef: message changed"])):
+        with mock.patch(self.AT + "gitamend.discarded_delta", return_value=["unrelated.txt"]):
+            outcome = self._act(pusher=lambda *a: calls.append(a) or PushResult(True))
+        self.assertIn(Cause.REPLACEMENT_LOSES_MORE_THAN_THE_PAYLOAD, self._causes(outcome))
+        self.assertEqual(calls, [])
+        self.assertEqual(before, self._rev())
+
+    def test_a_rebuild_that_changed_an_unnamed_path_stops_before_the_refs_move(self):
+        """The tip invariant: from each old tip to its new one, only the reported paths may
+        differ. The delta is answered per COMMIT for the replacements and per BRANCH for this —
+        an earlier version of this test mocked both at once, so the replacement check fired first
+        and this one never ran while the test still passed."""
+        self._loader_merge()
+        # A commit AFTER the payload, so the branch tip is not the infected commit itself and the
+        # per-branch delta is distinguishable from the per-replacement one.
+        (self.d / "after.txt").write_text("later\n")
+        _git(self.d, "add", "-A")
+        _git(self.d, "commit", "-qm", "later work")
+        before = self._rev()
+        calls = []
+
+        def only_at_the_tip(repo, base, target):
+            return ["unrelated.txt"] if base == before else []
+
+        with mock.patch(self.AT + "gitamend.discarded_delta", side_effect=only_at_the_tip):
             outcome = self._act(pusher=lambda *a: calls.append(a) or PushResult(True))
         self.assertIn(Cause.REPLAY_CHANGED_UNRELATED_COMMITS, self._causes(outcome))
         self.assertEqual(calls, [])
@@ -658,7 +727,7 @@ class TestAmendGates(_AmendFixture):
 
     def test_a_branch_left_moved_is_reported_as_part_way(self):
         self._loader_merge()
-        with mock.patch(self.AT + "gitamend.apply_replacement",
+        with mock.patch(self.AT + "gitamend.point_branches",
                         side_effect=gitamend.AmendUnwindFailed(
                             self.d, unrestored=["main"], moved={"main": "abc"})):
             outcome = self._act()
@@ -824,11 +893,16 @@ class TestAmendGates(_AmendFixture):
         self.assertTrue(outcome.needs_review)
 
     def test_a_glob_or_home_relative_target_is_not_treated_as_missing(self):
+        # The glob goes under a parent this test OWNS. `self.d.parent` is the system temp
+        # directory, so globbing it pointed a verb that force-updates branches at every
+        # repository on the machine's temp space — it swept the scratch repos of whatever else
+        # was running and did not finish.
         from stayawake.bots.security import remediator
         from stayawake.utils.streaming import Streamer
+        parent = Path(tempfile.mkdtemp(prefix="amend-glob-"))
+        self.addCleanup(shutil.rmtree, parent, True)
         out = io.StringIO()
-        remediator._amend_local({}, ScanOptions(), _sigs(), [],
-                                [str(self.d.parent / "*")],
+        remediator._amend_local({}, ScanOptions(), _sigs(), [], [str(parent / "*")],
                                 Streamer(enabled=False, out=out), jobs=1)
         self.assertNotIn("no such path", out.getvalue())
 

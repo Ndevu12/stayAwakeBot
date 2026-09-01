@@ -5,9 +5,7 @@ payload, against REAL local git repos (no network, no mocks).
 The replacement is the commit's OWN tree with the flagged paths corrected, so the rules pinned
 here are about what must not move: every other path, the file modes, and the commit's message and
 author. A git command exiting 0 is not evidence it changed anything, so each correction is read
-back. `--rebase-merges` rebuilds a suffix merge by merging again, so a clean-but-different
-re-resolution lands in a commit nobody flagged: `replay_is_faithful` has to catch it. And
-`point_branch_at` runs `reset --hard` on the worktree holding the branch — any worktree — so the
+back. And `point_branch_at` runs `reset --hard` on the worktree holding the branch — any worktree — so the
 uncommitted-work guard belongs in that function rather than three call layers above it.
 """
 from __future__ import annotations
@@ -20,8 +18,9 @@ from unittest import mock
 from pathlib import Path
 
 from stayawake.lib.git.merge.tree import auto_merge
+from stayawake.lib.git import query
 from stayawake.lib.git.query import changed_paths
-from stayawake.lib.git.write import amend
+from stayawake.lib.git.write import amend, rebuild
 
 _ABSENT = "0" * 40
 
@@ -95,24 +94,6 @@ def _repo_with_evil_merge() -> tuple[Path, str]:
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "Merge branch 'side'")
     return repo, _rev(repo, "HEAD")
-
-
-def _repo_with_handmade_suffix_merge() -> tuple[Path, str, str]:
-    """`(repo, evil_merge, head)` where the suffix after the evil merge ends in a SECOND merge
-    that also carries content from neither parent. Its parents re-merge cleanly, so the rebase
-    that replays the suffix will not conflict — it will just quietly drop `notes.txt`."""
-    repo, evil = _repo_with_evil_merge()
-    _git(repo, "checkout", "-q", "-b", "feature")
-    _write(repo, "feat.txt", "feature\n")
-    _commit(repo, "feature work")
-    _git(repo, "checkout", "-q", "main")
-    _write(repo, "app.js", "base\nmainline\n")
-    _commit(repo, "mainline work")
-    _git(repo, "merge", "--no-ff", "--no-commit", "-q", "feature")
-    _write(repo, "notes.txt", "resolved by hand\n")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-qm", "Merge branch 'feature'")
-    return repo, evil, _rev(repo, "HEAD")
 
 
 class TestDiscardedDelta(unittest.TestCase):
@@ -217,63 +198,6 @@ class TestDiscardedDelta(unittest.TestCase):
         self.assertIn("payload.js", dropped)
         self.assertIn("app.js", dropped,
                       "with no comparison, no path can be shown to survive")
-
-
-class TestReplayIsFaithful(unittest.TestCase):
-    """B — `--rebase-merges` re-resolves later merges instead of preserving them."""
-
-    def test_reports_a_suffix_merge_that_git_re_resolved(self):
-        repo, evil, old_head = _repo_with_handmade_suffix_merge()
-        new_merge = amend.replacement_commit(repo, evil, ["payload.js"]).sha
-        replaced = amend.discarded_delta(repo, evil, new_merge)
-        new_head = amend.replayed_head(repo, evil, new_merge, old_head)
-        self.assertIsNotNone(new_head, "the fixture's suffix must replay without conflicting")
-
-        faithful, report = amend.replay_is_faithful(
-            repo, old_head, new_head, evil, new_merge, replaced)
-
-        self.assertFalse(faithful, report)
-        self.assertTrue(any("notes.txt" in line for line in report), report)
-
-    def test_a_suffix_with_nothing_hand_made_replays_faithfully(self):
-        repo, evil = _repo_with_evil_merge()
-        _write(repo, "app.js", "base\nlater\n")
-        _commit(repo, "later work")
-        old_head = _rev(repo, "HEAD")
-        new_merge = amend.replacement_commit(repo, evil, ["payload.js"]).sha
-        replaced = amend.discarded_delta(repo, evil, new_merge)
-        new_head = amend.replayed_head(repo, evil, new_merge, old_head)
-
-        faithful, report = amend.replay_is_faithful(
-            repo, old_head, new_head, evil, new_merge, replaced)
-
-        self.assertTrue(faithful, report)
-        self.assertEqual(report, [])
-
-    def test_the_paths_the_replacement_changed_are_not_reported_again(self):
-        repo, evil = _repo_with_evil_merge()
-        _write(repo, "app.js", "base\nlater\n")
-        _commit(repo, "later work")
-        old_head = _rev(repo, "HEAD")
-        new_merge = amend.replacement_commit(repo, evil, ["payload.js"]).sha
-        new_head = amend.replayed_head(repo, evil, new_merge, old_head)
-
-        faithful, report = amend.replay_is_faithful(
-            repo, old_head, new_head, evil, new_merge, ())
-
-        self.assertFalse(faithful, "with nothing allowed, the removed payload IS a difference")
-        self.assertTrue(any("payload.js" in line for line in report), report)
-
-    def test_sequences_that_cannot_be_walked_pairwise_are_not_assumed_clean(self):
-        repo, evil, old_head = _repo_with_handmade_suffix_merge()
-        new_merge = amend.replacement_commit(repo, evil, ["payload.js"]).sha
-        new_head = amend.replayed_head(repo, evil, new_merge, old_head)
-
-        faithful, report = amend.replay_is_faithful(
-            repo, old_head, new_head, evil, new_head, ())
-
-        self.assertFalse(faithful, "no replayed commits to compare is not evidence of fidelity")
-        self.assertTrue(report)
 
 
 class TestPointBranchAtGuard(unittest.TestCase):
@@ -621,6 +545,184 @@ class TestTheCommitItselfIsReproduced(unittest.TestCase):
 
         self.assertFalse(replacement.ok)
         self.assertEqual(replacement.kind, "message-encoding")
+
+
+def _carries(marker: str = "PAYLOAD"):
+    return lambda text: "still carries it" if marker in (text or "") else None
+
+
+def _rebuild(repo: Path, infected: dict, tips: list[str], still_carries=None):
+    """The whole act at lib level: replace each infected commit, rebuild what follows."""
+    replacements = {sha: amend.replacement_commit(repo, sha, paths, None, still_carries)
+                    for sha, paths in infected.items()}
+    graph = rebuild.ordered_graph(repo, tips)
+    plan = rebuild.commits_to_rebuild(graph, set(infected))
+    out = rebuild.rebuild_without_payload(
+        repo, plan, replacements,
+        lambda sha, tree, parents: amend.rewrite_commit(repo, sha, tree, parents),
+        still_carries)
+    return out, plan
+
+
+class TestEveryInfectedCommitInOneRun(unittest.TestCase):
+    """Replacing one commit while others still carry the payload is not a partial fix — the
+    repository is still infected and the run reports success. The stretch rebuilt is bounded by
+    the OLDEST payload, which is the same stretch replacing that one commit alone would already
+    have re-identified, so cleaning several is the same rewrite rather than several times the
+    blast radius."""
+
+    def _three(self) -> tuple[Path, dict, str, str]:
+        repo = _new_repo()
+        _write(repo, "app.js", "base\n")
+        _commit(repo, "C0 clean")
+        clean = _rev(repo, "HEAD")
+        _write(repo, "one.js", "PAYLOAD ONE\n")
+        _commit(repo, "C1 infected")
+        first = _rev(repo, "HEAD")
+        _write(repo, "app.js", "base\nmore\n")
+        _commit(repo, "C2 clean")
+        _write(repo, "two.js", "PAYLOAD TWO\n")
+        _commit(repo, "C3 infected")
+        second = _rev(repo, "HEAD")
+        _git(repo, "checkout", "-q", "-b", "feat")
+        _write(repo, "feat.txt", "feature\n")
+        _commit(repo, "feature work")
+        _git(repo, "checkout", "-q", "main")
+        _write(repo, "app.js", "base\nmore\nmainline\n")
+        _commit(repo, "mainline work")
+        _git(repo, "merge", "--no-ff", "--no-commit", "-q", "feat")
+        _write(repo, "notes.txt", "HAND MADE IN THE MERGE\n")
+        _write(repo, "three.js", "PAYLOAD THREE\n")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-qm", "C5 merge, also infected")
+        merge = _rev(repo, "HEAD")
+        _write(repo, "app.js", "base\nmore\nmainline\ntail\n")
+        _commit(repo, "C6 clean")
+        infected = {first: ("one.js",), second: ("two.js",), merge: ("three.js",)}
+        return repo, infected, clean, merge
+
+    def test_one_run_clears_every_payload_from_the_branch_tip(self):
+        repo, infected, _clean, _merge = self._three()
+        head = _rev(repo, "HEAD")
+
+        out, _plan = _rebuild(repo, infected, [head])
+
+        self.assertTrue(out.ok, out.refusal)
+        new_head = out.tip(head)
+        for path in ("one.js", "two.js", "three.js"):
+            self.assertFalse(_git(repo, "ls-tree", "--name-only", new_head, "--", path).strip(),
+                             f"{path} still reachable from the new tip")
+        self.assertEqual(len(out.replaced), 3)
+
+    def test_nothing_but_the_payload_paths_differs_at_the_tip(self):
+        repo, infected, _clean, _merge = self._three()
+        head = _rev(repo, "HEAD")
+
+        out, _plan = _rebuild(repo, infected, [head])
+
+        self.assertEqual(sorted(_git(repo, "diff", "--name-only", head, out.tip(head)).split()),
+                         ["one.js", "three.js", "two.js"])
+        self.assertEqual(_git(repo, "show", f"{out.tip(head)}:notes.txt").strip(),
+                         "HAND MADE IN THE MERGE",
+                         "a resolution made by hand in the merge is not the payload")
+
+    def test_the_shape_of_the_history_is_unchanged(self):
+        repo, infected, _clean, merge = self._three()
+        head = _rev(repo, "HEAD")
+
+        out, _plan = _rebuild(repo, infected, [head])
+
+        self.assertEqual(len(_git(repo, "rev-list", out.tip(head)).split()),
+                         len(_git(repo, "rev-list", head).split()))
+        self.assertEqual(
+            len(_git(repo, "rev-list", "--parents", "-n1", out.tip(merge)).split()) - 1, 2,
+            "the merge is rebuilt as a merge, never re-merged into something else")
+
+    def test_commits_before_the_oldest_payload_keep_their_identity(self):
+        repo, infected, clean, _merge = self._three()
+        head = _rev(repo, "HEAD")
+
+        out, plan = _rebuild(repo, infected, [head])
+
+        self.assertNotIn(clean, out.mapping, "it carries nothing and nothing before it moved")
+        self.assertNotIn(clean, [sha for sha, _parents in plan])
+        self.assertTrue(_git(repo, "rev-list", out.tip(head)).split().count(clean),
+                        "and it is still reachable, by the same name")
+
+    def test_a_path_a_later_commit_changed_itself_is_left_alone(self):
+        """The correction applies where the payload blob is STILL there. A later commit that
+        replaced that file with something else holds different content, and overwriting it would
+        be the over-broad behaviour the replacement exists to avoid."""
+        repo = _new_repo()
+        _write(repo, "app.js", "base\n")
+        _commit(repo, "C0")
+        _write(repo, "x.js", "PAYLOAD\n")
+        _commit(repo, "C1 infected")
+        first = _rev(repo, "HEAD")
+        _write(repo, "x.js", "rewritten by a person\n")
+        _commit(repo, "C2 replaces it deliberately")
+        head = _rev(repo, "HEAD")
+
+        out, _plan = _rebuild(repo, {first: ("x.js",)}, [head])
+
+        self.assertTrue(out.ok, out.refusal)
+        self.assertEqual(_git(repo, "show", f"{out.tip(head)}:x.js").strip(),
+                         "rewritten by a person")
+        self.assertFalse(_git(repo, "ls-tree", "--name-only", out.tip(first), "--", "x.js").strip(),
+                         "and it is gone from the commit that introduced it")
+
+
+class TestAMovedBlobIsNotARemovedPayload(unittest.TestCase):
+    """`merge/liveness` states it: an identical blob proves the bytes survive, a different one
+    proves only that the file changed — the introduced lines may sit untouched inside it. Reading
+    a moved hash as a removed payload left the payload at the branch tip while the run reported
+    it amended."""
+
+    def _edited_after(self, later: str) -> tuple[Path, dict, str]:
+        repo = _new_repo()
+        _write(repo, "util.js", "export const clean = 1;\n")
+        _commit(repo, "C0")
+        _write(repo, "util.js", "export const clean = 1;\nPAYLOAD\n")
+        _commit(repo, "C1 infected")
+        first = _rev(repo, "HEAD")
+        _write(repo, "util.js", later)
+        _commit(repo, "C2 edits the same file")
+        return repo, {first: ("util.js",)}, _rev(repo, "HEAD")
+
+    def test_a_later_edit_that_keeps_the_payload_stops_the_run(self):
+        repo, infected, head = self._edited_after(
+            "export const clean = 1;\nPAYLOAD\nexport const two = 2;\n")
+
+        out, _plan = _rebuild(repo, infected, [head], _carries())
+
+        self.assertFalse(out.ok)
+        self.assertEqual(out.kind, "changed-downstream")
+        self.assertIn("util.js", out.refusal)
+
+    def test_a_later_edit_that_removed_it_is_left_alone(self):
+        repo, infected, head = self._edited_after("export const clean = 1;\ncleaned up\n")
+
+        out, _plan = _rebuild(repo, infected, [head], _carries())
+
+        self.assertTrue(out.ok, out.refusal)
+        self.assertEqual(_git(repo, "show", f"{out.tip(head)}:util.js"),
+                         "export const clean = 1;\ncleaned up\n")
+
+
+class TestABranchNameCannotHideFromTheSweep(unittest.TestCase):
+    def test_a_branch_named_like_the_tools_own_is_still_seen(self):
+        """`branches_carrying` skipped `saw-amend/*` because the replay created branches by that
+        name. The replay is gone, so the filter had become a name an attacker could hide behind."""
+        repo = _new_repo()
+        _write(repo, "app.js", "base\n")
+        _commit(repo, "C0")
+        _write(repo, "p.js", "PAYLOAD\n")
+        _commit(repo, "C1 infected")
+        _git(repo, "branch", "saw-amend/keep")
+
+        names = [n for n, _tip, _cas in query.branches_carrying(repo, _rev(repo, "HEAD"))]
+
+        self.assertIn("saw-amend/keep", names)
 
 
 if __name__ == "__main__":
