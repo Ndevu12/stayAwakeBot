@@ -109,9 +109,8 @@ def _read_remote_head(repo: Path, slug: str, branch: str,
                   env=env, timeout=NETWORK_TIMEOUT)
     if res is None or res.returncode != 0:
         return False, None
-    # `ls-remote <pattern>` tail-matches at `/`, so `refs/heads/a/refs/heads/main` answers a query
-    # for `refs/heads/main` and sorts first. Anyone who can push can therefore choose the SHA this
-    # returns, which is both the lease and the post-push check. Only the exact ref counts.
+    # `ls-remote <pattern>` tail-matches at `/`, so a ref named `a/refs/heads/main` answers a query
+    # for `main` and sorts first — anyone who can push could choose the SHA this returns.
     wanted = f"refs/heads/{branch}"
     for line in (res.stdout or "").splitlines():
         parts = line.split()
@@ -203,9 +202,7 @@ def _capture_path(slug: str, sha12: str) -> Path:
     return Path(env.xdg_state_home()) / "saw" / "amend" / safe / sha12 / "capture.bundle"
 
 
-# One authority for what a refused replacement means to an operator. A `kind` with no entry
-# reaches REPLACEMENT_NOT_WRITTEN rather than a default that reads like a clean result.
-_REPLACEMENT_CAUSE = {
+_CAUSE_PER_REFUSAL_KIND = {
     "conflicted": Cause.MERGE_WOULD_NOT_RESOLVE,
     "shape": Cause.COMMIT_SHAPE_NOT_MODELLED,
     "submodule": Cause.PAYLOAD_IN_A_SUBMODULE,
@@ -363,7 +360,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
         replacement = gitamend.replacement_commit(repo, sha, paths, signing, survives)
         if not replacement.ok:
             return refused(display,
-                           _REPLACEMENT_CAUSE.get(replacement.kind,
+                           _CAUSE_PER_REFUSAL_KIND.get(replacement.kind,
                                                   Cause.REPLACEMENT_NOT_WRITTEN),
                            replacement.refusal or sha[:12])
         beyond = [p for p in gitamend.discarded_delta(repo, sha, replacement.sha)
@@ -381,7 +378,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
         survives)
     if not rebuilt.ok:
         return refused(display,
-                       _REPLACEMENT_CAUSE.get(rebuilt.kind, Cause.REPLACEMENT_NOT_WRITTEN),
+                       _CAUSE_PER_REFUSAL_KIND.get(rebuilt.kind, Cause.REPLACEMENT_NOT_WRITTEN),
                        rebuilt.refusal)
 
     new_tips = {tip: rebuilt.tip(tip) for _n, tip, _c in heads}

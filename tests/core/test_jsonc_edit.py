@@ -119,5 +119,20 @@ class TestOneEntryInsideATable(unittest.TestCase):
                                            "false"))
 
 
+class TestTheModuleCanBeImported(unittest.TestCase):
+    """It shipped unable to be imported and nothing noticed, because nothing imports it yet. A
+    module with no caller has no other way of being told it is broken."""
+
+    def test_the_planner_imports(self):
+        import importlib
+        importlib.import_module("stayawake.bots.security.harden.settings")
+
+    def test_it_asks_the_check_which_entries_are_risky(self):
+        """The finding's sentence is a rendering of that answer, not the answer."""
+        from stayawake.bots.security.harden import settings
+        from stayawake.bots.security.hygiene import editor
+        self.assertIs(settings.risky_autoapprove_entries, editor.risky_autoapprove_entries)
+
+
 if __name__ == "__main__":
     unittest.main()

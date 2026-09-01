@@ -89,7 +89,7 @@ def _autoapprove_approves_everything(text: str) -> bool:
     return False
 
 
-def _risky_autoapprove_entries(text: str) -> list[str]:
+def risky_autoapprove_entries(text: str) -> list[str]:
     """Best-effort: risky command names auto-approved via `chat.tools.terminal.autoApprove`. Flags a
     key CONTAINING a risky name that is approved either directly (`"npx": true`) or via the object form
     (`"npx": { "approve": true }`). A name set to `false` (a deny) is NOT flagged."""
@@ -172,7 +172,7 @@ def check_vscode(settings_path: Path | None = None) -> list[HygieneIssue]:
                         "commands (or set it to false); never auto-approve everything.",
         ))
     else:
-        risky = _risky_autoapprove_entries(text)
+        risky = risky_autoapprove_entries(text)
         if risky:
             issues.append(HygieneIssue(
                 id="vscode-autoapprove-risky",

@@ -228,10 +228,8 @@ def _global_folders() -> list[Path]:
     # nothing is installed there, so it is not a path the runtime resolves through and there is
     # nothing to find or to deny. Naming it anyway would have a control create the prefix of a
     # package manager the host does not have.
-    # Every entry the runtime resolves through, present or not. This answers ONE question — where
-    # does Node look — and it serves a probe that only reads as well as a control that writes.
-    # Filtering absent locations out here starved the probe of the platform's own locations, which
-    # it enumerates for coverage; what a control may CREATE is that control's decision to make.
+    # Present or not: this answers where the runtime looks, and what a control may CREATE is that
+    # control's decision. Filtering here starved the probe of locations it enumerates for coverage.
     folders = [home / ".node_modules", home / ".node_libraries"]
     folders += [root / "lib" / "node" for root in declared + roots]
     return _distinct_dirs(folders)

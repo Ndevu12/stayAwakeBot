@@ -18,9 +18,16 @@ reader, not the mechanism or the weakness it closed.
   reports anything it did not remove. A location holding anything is left as it stands.
 
 ### Fixed
-- **`saw harden` reports a control as in place only on evidence it cannot be fed.** What it reads
-  to decide that is no longer influenced by the environment of whoever runs it.
-- **Raising a control no longer risks closing over something that arrived while it was open.**
+- **`saw harden` reports a control as in place only on evidence it cannot be fed.** Neither what it
+  reads to decide that nor which account it decides it for is influenced by the environment of
+  whoever runs it, so a control that is in place stays visible and one that is not is never
+  reported as though it were.
+- **Raising a control to root no longer risks closing over something that arrived while it was
+  briefly open.** If anything has, the location is handed back to you — unlocked, yours, and
+  writable so you can clear it — and the run names it and does not pass, instead of reporting the
+  location as untouched.
+- **`saw harden --take-back` no longer reports a run as complete over a location it left open**,
+  and says which locations to look at first.
 - **`saw harden` recognises the operator whichever way privilege was raised**, and when it cannot
   establish who that is it says so instead of assuming.
 

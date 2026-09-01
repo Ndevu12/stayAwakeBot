@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import stat
 import tempfile
+import contextlib
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -66,19 +67,43 @@ class TestHolds(unittest.TestCase):
 
 
 class TestImmutableReadBack(unittest.TestCase):
-    def test_a_path_token_is_not_an_attribute_set(self):
+    """What `lsattr` prints, parsed. The Linux platform is simulated, so the tool has to be too:
+    looking it up on the running host made both of these depend on whether the machine happens to
+    have `lsattr`. The one below asserting False then passed on every host that does not — for the
+    reason that there was no tool, never once reaching the parse it names."""
+
+    @contextlib.contextmanager
+    def _lsattr_printing(self, line: str):
         with mock.patch.object(hostdenial, "sys") as sysmod:
             sysmod.platform = "linux"
-            r = mock.Mock(returncode=0, stdout=".node_libraries --------------\n")
-            with mock.patch.object(hostdenial.subprocess, "run", return_value=r):
-                self.assertFalse(hostdenial.immutable(Path("/x")))
+            r = mock.Mock(returncode=0, stdout=line)
+            with mock.patch.object(hostdenial, "_attr_tool", lambda name: "/usr/bin/lsattr"), \
+                 mock.patch.object(hostdenial.subprocess, "run", return_value=r):
+                yield
+
+    def test_a_path_token_is_not_an_attribute_set(self):
+        with self._lsattr_printing(".node_libraries --------------\n"):
+            self.assertFalse(hostdenial.immutable(Path("/x")))
 
     def test_a_flags_token_with_i_is_immutable(self):
+        with self._lsattr_printing("----i--------- /x\n"):
+            self.assertTrue(hostdenial.immutable(Path("/x")))
+
+    def test_a_flags_field_without_i_is_not_immutable(self):
+        """The ordinary case, and nothing pinned it: a mutation making every flags field read as
+        immutable survived, which is every unlocked directory on the host reported as denied."""
+        with self._lsattr_printing("-------------e--- /x\n"):
+            self.assertFalse(hostdenial.immutable(Path("/x")))
+
+    def test_a_tool_that_is_not_there_is_never_read_as_unlocked(self):
+        """Absent is a different answer from "not locked", and it must not reach a success state."""
         with mock.patch.object(hostdenial, "sys") as sysmod:
             sysmod.platform = "linux"
-            r = mock.Mock(returncode=0, stdout="----i--------- /x\n")
-            with mock.patch.object(hostdenial.subprocess, "run", return_value=r):
-                self.assertTrue(hostdenial.immutable(Path("/x")))
+            with mock.patch.object(hostdenial, "_attr_tool", lambda name: None), \
+                 mock.patch.object(hostdenial.subprocess, "run") as ran:
+                self.assertFalse(hostdenial.immutable(Path("/x")))
+                self.assertFalse(hostdenial.set_immutable(Path("/x")))
+            ran.assert_not_called()
 
     def test_set_immutable_refuses_a_symlink(self):
         d = Path(tempfile.mkdtemp(prefix="hostdenial-"))

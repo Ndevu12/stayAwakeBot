@@ -12,19 +12,22 @@ from stayawake.utils import operator
 
 _UF_IMMUTABLE = getattr(stat, "UF_IMMUTABLE", 0x00000002)
 
-# Absolute, because the answer these give decides whether a control is reported as in place. Found
-# by name they come from `PATH`, and this command now runs unprivileged by design — where `PATH`
-# belongs to whoever ran it, and a program earlier in it that prints a flags field containing `i`
-# makes an unlocked directory read back as locked. A tool that is not at one of these is absent,
-# which is a different answer from "not locked" and is never success.
-_ATTR_TOOLS = {
+_ATTR_TOOL_ABSOLUTE_PATHS = {
     "lsattr": ("/usr/bin/lsattr", "/bin/lsattr", "/usr/sbin/lsattr"),
     "chattr": ("/usr/bin/chattr", "/bin/chattr", "/usr/sbin/chattr"),
 }
 
 
 def _attr_tool(name: str) -> str | None:
-    for candidate in _ATTR_TOOLS[name]:
+    """Where `name` is, or None when it is not anywhere this will look.
+
+    Never through `PATH`. What these tools report decides whether a control is called in place, and
+    this command runs unprivileged by design — so `PATH` belongs to whoever ran it, and a program
+    earlier in it that prints a flags field containing `i` would make an unlocked directory read
+    back as locked. None means absent, which is a different answer from "not locked" and is never
+    success.
+    """
+    for candidate in _ATTR_TOOL_ABSOLUTE_PATHS[name]:
         if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
             return candidate
     return None
@@ -106,9 +109,9 @@ def held_by(path: Path) -> str | None:
 def holds(path: Path) -> bool:
     """True only when a read-back shows a root-owned immutable empty directory.
 
-    The strict form, kept for callers that must not treat a lock the operator can clear as
-    equivalent — the host-artifact probe is one, since a self-held denial is still a location a
-    payload can open up again.
+    The strict form, for the one caller that must not accept a lock the operator can clear: the
+    read-back after a control is raised to root. `held_by` answers the wider question and is what
+    the probes ask; this one says "root's, and nothing weaker".
     """
     return held_by(path) == ROOT_HELD
 

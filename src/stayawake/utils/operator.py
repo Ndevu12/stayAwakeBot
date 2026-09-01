@@ -55,66 +55,68 @@ def resolve(env=None) -> Operator | None:
                     home=Path(home), via="environment")
 
 
-# Every way privilege is commonly raised, and the variable each one leaves behind. Recognising
-# only `sudo` fixed the grading for one tool and left the same defect under the next: `doas` and
-# `pkexec` set none of sudo's variables, so the effective uid — root — was taken as the operator's.
 _ESCALATION_UIDS = ("SUDO_UID", "PKEXEC_UID")
 _ESCALATION_NAMES = ("SUDO_USER", "DOAS_USER")
 
 
 def _raised(env) -> bool:
-    """Whether something raised privilege to run this.
+    """Whether this process is running as root on somebody else's behalf.
 
-    An effective uid of 0 with no marker counts: it is the case this cannot answer, and answering
-    it from `HOME` is what produced the defect this exists to prevent.
+    Only the kernel answers this. An escalation marker in the environment is a CLAIM, not a fact:
+    each one is an ordinary variable any unprivileged process can export, and this used to read
+    their mere presence as proof — so one line in a shell rc, the surface this worm family writes
+    to, made the tool grade every location against an account it was not running as, and a control
+    that was in place read as absent for good. The markers name the invoker below; they never
+    decide that there was one.
+
+    It also answers the honest case: `sudo -u <account>` sets the same markers while leaving the
+    effective uid that account's, and there the account IS who this acts for.
     """
-    if any(env.get(v) for v in _ESCALATION_UIDS + _ESCALATION_NAMES):
-        return True
     geteuid = getattr(os, "geteuid", None)
     return geteuid is not None and geteuid() == 0
 
 
-def _from_escalation(env) -> Operator | None:
+def _account_named_by_uid(env):
     for var in _ESCALATION_UIDS:
         uid = env.get(var)
         if uid and uid.isdigit():
             try:
-                record = pwd.getpwuid(int(uid))
+                return pwd.getpwuid(int(uid))
             except KeyError:
                 continue
-            return Operator(name=record.pw_name, uid=record.pw_uid,
-                            home=Path(record.pw_dir), via="raised")
+    return None
+
+
+def _account_named_by_name(env):
     for var in _ESCALATION_NAMES:
         name = env.get(var)
         if not name:
             continue
         try:
-            record = pwd.getpwnam(name)
+            return pwd.getpwnam(name)
         except KeyError:
             continue
-        return Operator(name=record.pw_name, uid=record.pw_uid,
-                        home=Path(record.pw_dir), via="raised")
     return None
 
 
-def _from_sudo(env) -> Operator | None:
-    uid = env.get("SUDO_UID")
-    if uid and uid.isdigit():
-        try:
-            record = pwd.getpwuid(int(uid))
-        except KeyError:
-            record = None
-        if record is not None:
-            return Operator(name=record.pw_name, uid=record.pw_uid,
-                            home=Path(record.pw_dir), via="sudo")
-    name = env.get("SUDO_USER")
-    if name:
-        try:
-            record = pwd.getpwnam(name)
-        except KeyError:
-            return None
-        return Operator(name=record.pw_name, home=Path(record.pw_dir), via="sudo")
-    return None
+def _from_escalation(env) -> Operator | None:
+    """The invoking account, when every marker present agrees on which one it is.
+
+    `sudo` and `doas` write the uid and the name from one decision, so two markers naming
+    different accounts is evidence the environment was not built by an escalation tool. Taking the
+    first digit-valued one and never reading the rest let whichever half an attacker controlled
+    win silently; a disagreement is refused instead, which reaches the caller as "cannot be
+    established" — the answer this module already fails to.
+    """
+    by_uid = _account_named_by_uid(env)
+    by_name = _account_named_by_name(env)
+    if by_uid is not None and by_name is not None and by_uid.pw_uid != by_name.pw_uid:
+        return None
+    record = by_uid or by_name
+    if record is None:
+        return None
+    return Operator(name=record.pw_name, uid=record.pw_uid,
+                    home=Path(record.pw_dir), via="raised")
 
 
 def acting_uid(env=None) -> int:

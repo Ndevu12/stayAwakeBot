@@ -17,6 +17,9 @@ IN_A_LIVE_INSTALL = "in-a-live-install"
 NOT_HERE_YET = "not-here-yet"
 REMOVED = "removed"
 NOTHING_TO_REMOVE = "nothing-to-remove"
+LOCKED_OVER_CONTENT = "locked-over-content"
+LEFT_OPEN_OVER_CONTENT = "left-open-over-content"
+NOT_WHERE_IT_WAS_NAMED = "not-where-it-was-named"
 UNKNOWN = "unknown"
 OCCUPIED = "occupied"
 
@@ -124,6 +127,10 @@ def _take_ownership(path: Path) -> PathOutcome:
     The flag has to come off to change the owner and go back on afterwards, so this is only worth
     doing with the privilege to finish it — a half-done upgrade leaves the location open.
     """
+    try:
+        owner_before = path.lstat().st_uid
+    except OSError:
+        return _unknown(path, "could not be raised to root")
     if not hostdenial.clear_immutable(path):
         return _unknown(path, "could not be raised to root")
     try:
@@ -133,12 +140,36 @@ def _take_ownership(path: Path) -> PathOutcome:
         return _unknown(path, "could not be raised to root")
     # The owner cannot be changed while the flag is set, so the location is briefly open. Anything
     # that arrives in that gap must NOT be sealed in: locking it would put content beyond the
-    # operator's reach at the exact location this exists to keep empty.
+    # operator's reach at the exact location this exists to keep empty. Reporting that as
+    # "not changed" was false twice over — the lock is off and the owner is now root — and left the
+    # arrived file unremovable without sudo, at a location every later run then skipped.
     if not hostdenial.empty_dir(path):
-        return _occupied(path)
+        return _hand_back(path, owner_before)
     if not hostdenial.set_immutable(path) or not hostdenial.holds(path):
         return _unknown(path, "could not be verified")
     return PathOutcome(path, ENFORCING, _ROOT_DETAIL)
+
+
+def _hand_back(path: Path, owner: int) -> PathOutcome:
+    """Give a location back to the operator after something arrived while its lock was off.
+
+    Both halves of the control come off, not just the flag. `0o555` denies the write to the owner
+    as well, so handing the directory back without it leaves the operator unable to delete the file
+    that arrived from a directory they own — and MEASURED, that is the state the earlier version
+    reported as "not changed". `0o700` rather than what was there before: the location is known to
+    be holding something now, and nobody else needs to read it.
+    """
+    try:
+        os.chmod(path, 0o700, follow_symlinks=False)
+        os.chown(path, owner, -1, follow_symlinks=False)
+    except (OSError, NotImplementedError):
+        return PathOutcome(path, LEFT_OPEN_OVER_CONTENT,
+                           "something arrived while the lock was off; the lock was NOT put back, "
+                           "so nothing is sealed in, but the directory is root's — read what is in "
+                           "it with sudo before anything else")
+    return PathOutcome(path, LEFT_OPEN_OVER_CONTENT,
+                       "something arrived while the lock was off; it has been left unlocked and "
+                       "yours, so you can read and remove what is in it")
 
 
 def _parent_is_here(path: Path) -> bool:
@@ -222,6 +253,20 @@ def apply_one(path: Path) -> PathOutcome:
     return _unknown(path, "could not be verified")
 
 
+def _reached_where_it_was_named(path: Path) -> bool:
+    """Whether every step to `path` stays where the caller said.
+
+    The same check the creating side makes, for the same reason: a link anyone could have planted
+    on the way redirects what follows. Creating through one puts a denial somewhere unintended;
+    REMOVING through one unlocks and deletes somewhere unintended, which is the worse half, and it
+    had no check at all.
+    """
+    for ancestor in reversed(path.parents):
+        if not _trusted_ancestor(ancestor):
+            return False
+    return True
+
+
 def remove_one(path: Path) -> PathOutcome:
     """Take back a denial this tool placed, and nothing else.
 
@@ -231,8 +276,16 @@ def remove_one(path: Path) -> PathOutcome:
     does not target, is not this command's to open. The removal is read back; a directory still
     there afterwards is never reported as gone.
     """
+    if not _reached_where_it_was_named(path):
+        return PathOutcome(path, NOT_WHERE_IT_WAS_NAMED,
+                           "something on the way to this location redirects it elsewhere, so it "
+                           "was not opened")
     held = hostdenial.held_by(path)
     if held is None:
+        if hostdenial.immutable(path):
+            return PathOutcome(path, LOCKED_OVER_CONTENT,
+                               "locked, and holding something — this command did not put that "
+                               "there and will not open it; look at it before anything else")
         return PathOutcome(path, NOTHING_TO_REMOVE, "no control of this tool's here")
     if held == hostdenial.ROOT_HELD and not hostdenial.privileged():
         return PathOutcome(path, NEEDS_ROOT,
@@ -240,12 +293,17 @@ def remove_one(path: Path) -> PathOutcome:
     if not hostdenial.clear_immutable(path):
         return _unknown(path, "the lock could not be taken off")
     if not hostdenial.empty_dir(path):
-        hostdenial.set_immutable(path)
-        return _occupied(path)
+        # Something arrived while the lock was off. Locking it back would seal it in, which is
+        # what the sibling that raises a control refuses to do for the same window — content at
+        # this location put beyond the operator's reach is worse than a location left open.
+        return PathOutcome(path, LEFT_OPEN_OVER_CONTENT,
+                           "something arrived while the lock was off; it has been left unlocked "
+                           "so you can read and remove what is in it")
     try:
         os.rmdir(path)
     except OSError:
-        hostdenial.set_immutable(path)
+        if not hostdenial.set_immutable(path):
+            return _unknown(path, "could not be removed, and the lock could not be put back")
         return _unknown(path, "could not be removed")
     if path.exists():
         return _unknown(path, "could not be verified")
