@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from stayawake.utils import operator
+
 _UF_IMMUTABLE = getattr(stat, "UF_IMMUTABLE", 0x00000002)
 
 
@@ -51,17 +53,86 @@ def immutable(path: Path) -> bool:
     return False
 
 
+ROOT_HELD = "root"
+SELF_HELD = "self"
+
+
+def held_by(path: Path) -> str | None:
+    """Who holds the denial at `path`, or None when nothing does.
+
+    `root` is the durable form: an immutable empty directory root owns, which code running as the
+    operator cannot unlock. `self` is the same lock owned by the operator — MEASURED, its owner
+    clears the flag with one call and no privilege, so it is a weaker control and the caller must
+    never report the two as the same thing.
+
+    Both are worth setting. An unguarded write to either throws and takes the writing process with
+    it; only the second can be undone by whatever it was set against.
+    """
+    try:
+        st = path.lstat()
+    except OSError:
+        return None
+    if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
+        return None
+    if not (immutable(path) and empty_dir(path)):
+        return None
+    if st.st_uid == 0:
+        return ROOT_HELD
+    if st.st_uid == operator.acting_uid():
+        return SELF_HELD
+    return None
+
+
 def holds(path: Path) -> bool:
-    """True only when a read-back shows a root-owned immutable empty directory."""
+    """True only when a read-back shows a root-owned immutable empty directory.
+
+    The strict form, kept for callers that must not treat a lock the operator can clear as
+    equivalent — the host-artifact probe is one, since a self-held denial is still a location a
+    payload can open up again.
+    """
+    return held_by(path) == ROOT_HELD
+
+
+def can_write_into(path: Path) -> bool:
+    """Whether a denial could be created at `path` without raising privilege.
+
+    Asked of the nearest parent that exists, because that is the directory the creation writes
+    into. A command that requires root for every path asks for privilege it does not need on
+    most of them.
+    """
+    for candidate in [path] + list(path.parents):
+        try:
+            candidate.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            return False
+        return os.access(candidate, os.W_OK)
+    return False
+
+
+def clear_immutable(path: Path) -> bool:
+    """Take the flag off, so the owner can be changed and the flag put back."""
     try:
         st = path.lstat()
     except OSError:
         return False
     if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
         return False
-    if st.st_uid != 0:
-        return False
-    return immutable(path) and empty_dir(path)
+    if sys.platform == "darwin":
+        try:
+            os.chflags(path, st.st_flags & ~_UF_IMMUTABLE, follow_symlinks=False)
+            return not immutable(path)
+        except (OSError, NotImplementedError):
+            return False
+    if sys.platform == "linux":
+        try:
+            r = subprocess.run(["chattr", "-i", "--", str(path)],
+                               capture_output=True, text=True, timeout=5)
+        except (OSError, subprocess.SubprocessError):
+            return False
+        return r.returncode == 0 and not immutable(path)
+    return False
 
 
 def set_immutable(path: Path) -> bool:

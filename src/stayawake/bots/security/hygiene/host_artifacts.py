@@ -6,6 +6,7 @@ import getpass
 import os
 import pathlib
 import socket
+import stat
 import sys
 import tempfile
 from dataclasses import replace
@@ -161,8 +162,17 @@ def _host_artifacts() -> tuple[list[str], list[tuple[str, Path, str]], list[Path
     # line exactly where an attacker reading the same documentation steps over it. The prefix entry is
     # reachable WITHOUT root on a Homebrew Mac, where `/usr/local` is user-owned, so it is not a
     # root-only location the user-level worm model can dismiss.
+    # A denial is recognised by its SHAPE, not by a marker: an empty directory nothing can write
+    # into is what the control IS, so no mark is needed and none is possible — a marker inside it
+    # would end the emptiness that does the work. Either grade counts, because either is this
+    # tool's own work; how strong each one is belongs in what `harden` says about it, not in
+    # whether this probe accuses it.
+    #
+    # Emptiness is NOT the discriminator, and using it lost a real signal: the indicator here is
+    # that the location EXISTS AT ALL. Nothing ordinary creates one — an `npm install` in $HOME
+    # makes `node_modules` with no dot — so an empty one is still something that was put there.
     for location in _global_folders():
-        if hostdenial.holds(location):
+        if hostdenial.held_by(location) is not None:
             controlled.append(location)
             continue
         if _present_dir(location):
@@ -201,19 +211,45 @@ def _global_folders() -> list[Path]:
     coverage this probe exists to remove. `/usr/local` and `%APPDATA%` are user-writable on ordinary
     installs, so the prefix entry is reachable without administrator rights."""
     home = Path.home()
-    roots: list[Path] = []
+    declared: list[Path] = []
     for var in ("PREFIX", "NODE_PREFIX", "npm_config_prefix"):
-        if os.environ.get(var):
-            roots.append(Path(os.environ[var]))
+        named = _usable_prefix(os.environ.get(var))
+        if named is not None:
+            declared.append(named)
+    roots: list[Path] = []
     if sys.platform.startswith("win"):
         for var in ("APPDATA", "ProgramFiles", "ProgramW6432", "LOCALAPPDATA"):
             if os.environ.get(var):
                 roots += [Path(os.environ[var]) / "npm", Path(os.environ[var]) / "nodejs"]
     else:
         roots += [Path("/usr/local"), Path("/usr"), Path("/opt/homebrew"), Path("/opt/local")]
+    # The two home entries are targeted whether or not they exist — absent is the state a payload
+    # creates them from. A PREFIX entry is different: if the prefix root is not on this machine,
+    # nothing is installed there, so it is not a path the runtime resolves through and there is
+    # nothing to find or to deny. Naming it anyway would have a control create the prefix of a
+    # package manager the host does not have.
+    # Every entry the runtime resolves through, present or not. This answers ONE question — where
+    # does Node look — and it serves a probe that only reads as well as a control that writes.
+    # Filtering absent locations out here starved the probe of the platform's own locations, which
+    # it enumerates for coverage; what a control may CREATE is that control's decision to make.
     folders = [home / ".node_modules", home / ".node_libraries"]
-    folders += [root / "lib" / "node" for root in roots]
+    folders += [root / "lib" / "node" for root in declared + roots]
     return _distinct_dirs(folders)
+
+
+def _usable_prefix(raw: str | None) -> Path | None:
+    """A prefix this may act on, or None.
+
+    Absolute and already normalised, or nothing. A relative prefix resolves against the working
+    directory — `PREFIX=.` had a host-level control create an immutable `lib/node` inside whatever
+    repository it was run from. A `..` is worse than untidy: the kernel resolves it while walking,
+    so the per-component check that exists to refuse a planted symlink never sees the link.
+    """
+    if not raw or not raw.strip():
+        return None
+    if os.path.normpath(raw) != raw or not os.path.isabs(raw):
+        return None
+    return Path(raw)
 
 
 def _corroborated_issue(found: list[str], *, active: bool) -> HygieneIssue:
