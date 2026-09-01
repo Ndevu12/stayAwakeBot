@@ -7,6 +7,7 @@ An uncorroborated hit stays `info`; only the opt-in corroboration makes it an ac
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import os
 import sys
 import tempfile
@@ -25,6 +26,26 @@ def _raising(exc):
     def engine(_directory):
         raise exc
     return engine
+
+
+@dataclasses.dataclass
+class _Verdict:
+    """A stand-in for the engine's `DirVerdict`, field for field.
+
+    A `mock.Mock(markers=[])` answers `.markers` and nothing else, so it stubs away the very fields
+    the verdict uses to say it could not finish — every "clean scan" test drove a stub that could
+    not represent an unclean one. The engine is not importable without its dependencies, hence a
+    local mirror; `test_the_stand_in_still_matches_the_engine` holds it to the real shape.
+    """
+
+    path: str = "/x"
+    files: int = 0
+    markers: list = dataclasses.field(default_factory=list)
+    scanned_clean: bool = False
+    too_large: bool = False
+    partial: bool = False
+    error: str | None = None
+    unread: list = dataclasses.field(default_factory=list)
 
 
 def _engine_loads() -> bool:
@@ -288,7 +309,7 @@ class TestAScanThatCouldNotRunIsNotAScanThatFoundNothing(unittest.TestCase):
             self.assertNotIn("--verify", issue.remediation)
         detail = self._blocked_by(RuntimeError("boom"))[0].detail
         self.assertNotIn("`saw audit --verify` looks harder", detail)
-        self.assertIn("did not run", detail)
+        self.assertIn("did not complete", detail)
 
     def test_the_run_is_never_reported_as_having_found_nothing(self):
         """`unknown` items are surfaced as the ABSENCE of a look, not as findings, so a lone
@@ -339,11 +360,56 @@ class TestAScanThatCouldNotRunIsNotAScanThatFoundNothing(unittest.TestCase):
         """The other direction: not every unconfirmed module becomes UNKNOWN. A scan that ran
         clean leaves the shape finding at `info` and the rotation verdict untouched — and it now
         reports the negative result the operator paid for instead of advising the same flag."""
-        with self._engine(lambda _d: mock.Mock(markers=[])):
+        with self._engine(lambda _d: _Verdict(scanned_clean=True)):
             issues = self._planted().check(verify=True)
         self.assertEqual([i.id for i in issues], ["app-bundle-appended-module"])
         self.assertIn("found no worm markers", issues[0].detail)
         self.assertFalse({i.id for i in issues} & ROTATION_UNSAFE_IDS)
+
+    def test_only_a_clean_scan_clears_a_module(self):
+        """`verify_dir` almost never raises — it reports a tree it could not fully read IN the
+        verdict, and its own docstring says the caller must not render that as clean. Reading
+        `.markers` alone turned every one of those into "scanned, found nothing", including the
+        two that return before the scanner runs at all."""
+        cases = {
+            "too large": _Verdict(too_large=True),
+            "a pipe or device present": _Verdict(partial=True,
+                                                 unread=["a device or pipe must not be opened"]),
+            "something went unread": _Verdict(partial=True),
+            "a read gap": _Verdict(error="permission denied"),
+            "no field set at all": _Verdict(),
+        }
+        for label, verdict in cases.items():
+            with self.subTest(verdict=label):
+                with self._engine(lambda _d, v=verdict: v):
+                    issues = self._planted().check(verify=True)
+                ids = [i.id for i in issues]
+                self.assertIn(SCAN_BLOCKED_ID, ids, f"{label} is not a clean scan")
+                shape = next(i for i in issues if i.id == "app-bundle-appended-module")
+                self.assertNotIn("found no worm markers", shape.detail)
+                self.assertEqual(rotation_safety(set(ids)), ROTATION_UNSAFE_UNKNOWN)
+                hole = next(i for i in issues if i.id == SCAN_BLOCKED_ID)
+                self.assertNotIn("modules: .", hole.detail,
+                                 "a hole with a blank reason tells the operator nothing")
+
+    def test_the_reason_the_scan_gave_reaches_the_operator(self):
+        with self._engine(lambda _d: _Verdict(partial=True, unread=["archives are not opened"])):
+            issues = self._planted().check(verify=True)
+        hole = next(i for i in issues if i.id == SCAN_BLOCKED_ID)
+        self.assertIn("archives are not opened", hole.detail)
+
+    def test_a_marker_wins_over_an_incomplete_scan(self):
+        """Markers PROMOTE a verdict and never lower one — a confirmed hit in a tree that was only
+        partly read is still a confirmed hit."""
+        with self._engine(lambda _d: _Verdict(markers=["loader-decoder-fn"], partial=True)):
+            ids = [i.id for i in self._planted().check(verify=True)]
+        self.assertEqual(ids, ["app-bundle-payload"])
+
+    @unittest.skipUnless(_engine_loads(), "the content-scan engine is not importable here")
+    def test_the_stand_in_still_matches_the_engine(self):
+        from stayawake.bots.security.verify import DirVerdict
+        self.assertEqual({f.name for f in dataclasses.fields(_Verdict)},
+                         {f.name for f in dataclasses.fields(DirVerdict)})
 
     def test_not_asking_for_the_scan_is_unchanged(self):
         issues = self._planted().check()

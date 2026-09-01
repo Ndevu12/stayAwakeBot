@@ -44,10 +44,11 @@ reader, not the mechanism or the weakness it closed.
   named, and says so. `--take-back` still leaves it alone: it removes only what it placed.
 
 ### Fixed
-- **`saw audit --verify` never reports a scan that could not run as one that found nothing.** If
-  the harder look you asked for does not happen, the run says so and says why, names the modules it
-  did not settle, and withholds the credential-rotation all-clear until it can. It used to report
-  the weaker finding instead — whose own advice is to run `--verify`.
+- **`saw audit --verify` never reports a scan that did not clear a module as one that found
+  nothing.** Only a scan that read the whole directory and found no markers clears it. A scan that
+  could not start, could not finish, or could not read everything now says so and says why, names
+  the modules it did not settle, and withholds the credential-rotation all-clear until it can. It
+  used to report the weaker finding instead — whose own advice is to run `--verify`.
 - **A module that was scanned and came back clean now says so**, rather than repeating the advice
   to run the scan that had just cleared it.
 

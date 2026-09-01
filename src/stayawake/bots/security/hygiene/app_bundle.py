@@ -209,9 +209,40 @@ def _scan_markers(directory: Path) -> _MarkerScan:
     """
     try:
         from stayawake.bots.security.verify import verify_dir
-        return _MarkerScan(markers=tuple(verify_dir(directory).markers), asked=True)
+        return _from_verdict(verify_dir(directory))
     except Exception as exc:
         return _MarkerScan(stopped_by=f"{type(exc).__name__}: {exc}", asked=True)
+
+
+def _from_verdict(verdict) -> _MarkerScan:
+    """The scan's own account of itself, not just its marker list.
+
+    `verify_dir` almost never raises — it reports a tree it could not fully read in the verdict,
+    and its docstring says the caller must NOT render that as clean. Reading `.markers` alone made
+    every one of those "scanned, found nothing", including the two that return before the scanner
+    runs at all: a directory too large to scan, and one holding a pipe or device the scan must not
+    open. `scanned_clean` is the only field that means it looked and there was nothing.
+
+    The sibling consumer in `host_artifacts` reads all of these already; this asks the same
+    questions rather than a narrower one.
+    """
+    if verdict.markers:
+        return _MarkerScan(markers=tuple(verdict.markers), asked=True)
+    if verdict.scanned_clean:
+        return _MarkerScan(asked=True)
+    return _MarkerScan(stopped_by=_why_not_cleared(verdict), asked=True)
+
+
+def _why_not_cleared(verdict) -> str:
+    if verdict.too_large:
+        return "it is too large to scan automatically"
+    if verdict.partial and verdict.unread:
+        return "not everything in it was read (" + "; ".join(verdict.unread) + ")"
+    if verdict.partial:
+        return "part of it could not be read"
+    if verdict.error:
+        return f"it could not be fully scanned ({verdict.error})"
+    return "the scan did not report a result"
 
 
 def check_app_bundles(verify: bool = False) -> list[HygieneIssue]:
@@ -301,9 +332,9 @@ def _unscanned_note(reasons: list[str]) -> HygieneIssue | None:
     return HygieneIssue(
         id=SCAN_BLOCKED_ID,
         severity="unknown",
-        title="A module that looks modified could not be scanned",
-        detail="`--verify` was asked for and the scan that would confirm or clear these modules "
-               "did not run: " + "; ".join(reasons) + ". They are UNKNOWN, not clean.",
+        title="A module that looks modified was not cleared",
+        detail="`--verify` was asked for and the scan did not clear these modules: "
+               + "; ".join(reasons) + ". They are UNKNOWN, not clean.",
         remediation="Resolve what stopped it and re-run, or compare each module against the "
                     "vendor's copy. Do not rotate credentials yet: "
                     f"{_WIPER_NOTE}.",
@@ -342,7 +373,7 @@ def _corroboration(scan: _MarkerScan) -> str:
     of the `HygieneIssue(...)` call, so it cannot see these and will not stop them growing.
     """
     if scan.blocked:
-        return "The scan that would confirm or clear it did not run."
+        return "The scan that would clear it did not complete."
     if scan.ran:
         return "A scan of its directory found no worm markers."
     return "`saw audit --verify` looks harder at it."
