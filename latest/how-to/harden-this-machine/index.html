@@ -1764,12 +1764,18 @@
 <h1 id="harden-this-machine">Harden this machine<a class="headerlink" href="#harden-this-machine" title="Permanent link">&para;</a></h1>
 <p><a href="../audit-a-machine/"><code>saw audit</code></a> reports. <a href="../../reference/cli/harden/"><code>saw harden</code></a> acts on the
 host. It never touches a project's dependency tree — that is <a href="../fix-findings/"><code>saw fix</code></a>.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>sudo<span class="w"> </span>saw<span class="w"> </span>harden
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw<span class="w"> </span>harden
 </code></pre></div>
+<p>Root is not required. It acts where it can and names anything it did not take.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>sudo<span class="w"> </span>saw<span class="w"> </span>harden
+</code></pre></div>
+<p>Run it again with <code>sudo</code> to act on the rest and to strengthen what is already in place. The result
+tells you which controls root holds and which you hold.</p>
 <p>A write counts as in place only after it is read back. An unverifiable write is unknown, never
-success. If a target already has something in it, it is left unchanged — clear it, then run again.
-If a running process still holds code that is not on disk, the command refuses until that process
-is captured.</p>
+success. Anything already in use is left unchanged — clear it, then run again. If a running process
+still holds code that is not on disk, the command refuses until that process is captured.</p>
+<p>To remove a control it placed: <code>chflags nouchg &lt;path&gt;</code> on macOS or <code>chattr -i &lt;path&gt;</code> on Linux,
+then <code>rmdir &lt;path&gt;</code>, as its owner.</p>
 <p>It does not claim that one control protects anything else.</p>
 
 

@@ -1768,10 +1768,16 @@
 <a href="../fix/"><code>saw fix</code></a>. A write is reported as in place only after it is read back. An unverifiable
 write is unknown, never success. The result does not claim that one control protects anything else.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw harden
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>sudo saw harden
 </code></pre></div>
-<p>This command must run as root. If a running process still holds code that is not on disk, it
-refuses: capture that process first. If it could not examine what is running on this machine, it
-refuses as well.</p>
+<p>Root is not required. Run it as yourself and it acts where it can; anything it did not take is
+named in the result, and left exactly as it stood.</p>
+<p>Run it again with <code>sudo</code> to act on the rest and to strengthen what is already in place. The result
+distinguishes a control root holds from one you hold, and tells you which you have.</p>
+<p>If a running process still holds code that is not on disk, it refuses: capture that process first.
+If it could not examine what is running on this machine, it refuses as well. Neither depends on
+whether you gave it root.</p>
+<p>Anything already in use is left unchanged.</p>
 <p>See <a href="../../../how-to/audit-a-machine/">audit a machine</a> for the read-only view of the same host.</p>
 
 
