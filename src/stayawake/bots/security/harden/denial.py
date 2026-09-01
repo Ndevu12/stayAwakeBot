@@ -11,8 +11,15 @@ from stayawake.utils import hostdenial
 
 
 ENFORCING = "enforcing"
+SELF_ENFORCING = "enforcing-as-you"
+NEEDS_ROOT = "needs-root"
+IN_A_LIVE_INSTALL = "in-a-live-install"
 UNKNOWN = "unknown"
 OCCUPIED = "occupied"
+
+_ROOT_DETAIL = "in place; only root can remove it"
+_SELF_DETAIL = ("in place; anything running as you can remove it — run again with sudo to make it "
+                "root-owned")
 
 
 @dataclass(frozen=True)
@@ -88,10 +95,73 @@ def _still_empty_dir(path: Path) -> bool:
     return hostdenial.empty_dir(path)
 
 
+def _graded(path: Path) -> PathOutcome | None:
+    """The outcome for a denial that is already there, or None when none is.
+
+    A lock the operator holds is RAISED when there is privilege to finish the job — that is what
+    the report tells them to re-run for. It used to be unreachable: the grade was decided by
+    comparing the owner against the EFFECTIVE uid, which under `sudo` is root, so an
+    operator-owned lock graded as nobody's and the run fell through to a `chmod` that an immutable
+    directory refuses even from its owner. The advice said re-run with sudo; doing so reported the
+    host as not denied while the locks were untouched.
+    """
+    held = hostdenial.held_by(path)
+    if held == hostdenial.ROOT_HELD:
+        return PathOutcome(path, ENFORCING, _ROOT_DETAIL)
+    if held == hostdenial.SELF_HELD:
+        if hostdenial.privileged():
+            return _take_ownership(path)
+        return PathOutcome(path, SELF_ENFORCING, _SELF_DETAIL)
+    return None
+
+
+def _take_ownership(path: Path) -> PathOutcome:
+    """Raise a denial the operator holds to one root holds.
+
+    The flag has to come off to change the owner and go back on afterwards, so this is only worth
+    doing with the privilege to finish it — a half-done upgrade leaves the location open.
+    """
+    if not hostdenial.clear_immutable(path):
+        return _unknown(path, "could not be raised to root")
+    try:
+        os.chown(path, 0, 0, follow_symlinks=False)
+    except (OSError, NotImplementedError):
+        hostdenial.set_immutable(path)
+        return _unknown(path, "could not be raised to root")
+    if not hostdenial.set_immutable(path) or not hostdenial.holds(path):
+        return _unknown(path, "could not be verified")
+    return PathOutcome(path, ENFORCING, _ROOT_DETAIL)
+
+
+def _inside_a_node_installation(path: Path) -> bool:
+    """Whether `path` sits inside a Node installation somebody manages.
+
+    `<prefix>/lib/node` is a real resolution path, and locking it there is also locking a
+    directory inside the install — after which `nvm uninstall`, `volta uninstall` and
+    `brew uninstall node` all fail on it, with an error naming neither the flag nor this tool.
+    The version manager's own removal is `rm -rf <prefix>`, and an immutable child defeats it.
+    """
+    prefix = path.parent.parent
+    try:
+        return (prefix / "bin" / "node").exists()
+    except OSError:
+        return False
+
+
 def apply_one(path: Path) -> PathOutcome:
-    """Create the denial at `path` if the location is free; never remove what is already there."""
-    if hostdenial.holds(path):
-        return PathOutcome(path, ENFORCING, "in place")
+    """Create the denial at `path` if the location is free; never remove what is already there.
+
+    Privilege is asked of the PATH, not of the command: most locations a payload stages into are
+    the operator's own, and refusing to act on any of them until the whole run is root turns a
+    control most people could have into one most people will not run.
+    """
+    already = _graded(path)
+    if already is not None:
+        return already
+    if _inside_a_node_installation(path):
+        return PathOutcome(path, IN_A_LIVE_INSTALL,
+                           "inside a Node installation — locking it here would stop that version "
+                           "being removed or upgraded, so it was left as it stood")
     try:
         st = path.lstat()
     except FileNotFoundError:
@@ -102,16 +172,23 @@ def apply_one(path: Path) -> PathOutcome:
         if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode) or not hostdenial.empty_dir(path):
             return _occupied(path)
     elif not _create_where_it_was_named(path):
+        if not hostdenial.privileged() and not hostdenial.can_write_into(path):
+            return PathOutcome(path, NEEDS_ROOT,
+                               "this location is not yours to write to — run again with sudo")
         return _unknown(path, "could not be created")
     try:
         os.chmod(path, 0o555, follow_symlinks=False)
-        os.chown(path, 0, 0, follow_symlinks=False)
+        if hostdenial.privileged():
+            os.chown(path, 0, 0, follow_symlinks=False)
     except (OSError, NotImplementedError):
         return _unknown(path, "could not be written")
     if not _still_empty_dir(path):
         return _occupied(path)
     if not hostdenial.set_immutable(path):
         return _unknown(path, "could not be verified")
-    if not hostdenial.holds(path):
-        return _unknown(path, "could not be verified")
-    return PathOutcome(path, ENFORCING, "in place")
+    held = hostdenial.held_by(path)
+    if held == hostdenial.ROOT_HELD:
+        return PathOutcome(path, ENFORCING, _ROOT_DETAIL)
+    if held == hostdenial.SELF_HELD:
+        return PathOutcome(path, SELF_ENFORCING, _SELF_DETAIL)
+    return _unknown(path, "could not be verified")

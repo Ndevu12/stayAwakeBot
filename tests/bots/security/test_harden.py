@@ -10,8 +10,9 @@ from unittest import mock
 
 from stayawake.bots.security import harden
 from stayawake.bots.security.harden import denial
+from stayawake.bots.security.hygiene import host_artifacts
 from stayawake.bots.security.hygiene.models import HygieneIssue, PROCESSES_NOT_READABLE_ID
-from stayawake.utils import hostdenial
+from stayawake.utils import hostdenial, operator
 
 
 def _issue(id_):
@@ -24,10 +25,20 @@ class TestRunContract(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("not implemented", text.lower())
 
-    def test_not_root_is_not_success(self):
-        code, text = harden.run(supported=lambda: True, privileged=lambda: False, live=lambda: [])
-        self.assertEqual(code, 2)
-        self.assertIn("root", text.lower())
+    def test_without_root_it_still_takes_what_it_can(self):
+        """Root is asked of the PATH, not of the command. Refusing the whole run because one
+        location needs privilege withheld a control from everyone unwilling to give a security
+        tool root — and the locations that need it are named rather than skipped in silence."""
+        mine, theirs = Path("/mine"), Path("/theirs")
+        code, text = harden.run(
+            supported=lambda: True, privileged=lambda: False, live=lambda: [],
+            folders=lambda: [mine, theirs],
+            apply=lambda p: denial.PathOutcome(p, denial.SELF_ENFORCING, "in place")
+            if p == mine else denial.PathOutcome(p, denial.NEEDS_ROOT, "not yours to write to"))
+        self.assertIn("enforcing-as-you: /mine", text)
+        self.assertIn("needs-root: /theirs", text)
+        self.assertIn("sudo", text)
+        self.assertNotEqual(code, 0, "a location it could not take is not a complete result")
 
     def test_live_loader_is_refused(self):
         code, text = harden.run(supported=lambda: True, privileged=lambda: True,
@@ -180,11 +191,34 @@ class TestRunContract(unittest.TestCase):
         self.assertEqual(code, 1)
         apply.assert_not_called()
 
-    def test_not_root_does_not_write(self):
-        apply = mock.Mock()
+    def test_without_root_it_does_write(self):
+        """The inverse of what this used to pin: the run no longer stops before trying."""
+        apply = mock.Mock(return_value=denial.PathOutcome(Path("/denial"),
+                                                          denial.SELF_ENFORCING, "in place"))
         harden.run(supported=lambda: True, privileged=lambda: False, live=lambda: [],
                    folders=lambda: [Path("/denial")], apply=apply)
+        apply.assert_called_once()
+
+    def test_capture_still_comes_before_any_write_without_root(self):
+        """The one gate privilege never relaxed: a live loader is the only copy of the second
+        stage, and a denied write kills the process that holds it."""
+        apply = mock.Mock()
+        code, _ = harden.run(
+            supported=lambda: True, privileged=lambda: False,
+            live=lambda: [_issue("live-obfuscated-process")],
+            folders=lambda: [Path("/denial")], apply=apply)
+        self.assertEqual(code, 1)
         apply.assert_not_called()
+
+    def test_a_self_held_result_is_never_reported_as_root_held(self):
+        code, text = harden.run(
+            supported=lambda: True, privileged=lambda: False, live=lambda: [],
+            folders=lambda: [Path("/mine")],
+            apply=lambda p: denial.PathOutcome(p, denial.SELF_ENFORCING, "in place"))
+        self.assertIn("enforcing-as-you", text)
+        self.assertIn("code running as you can take the lock off first", text)
+        self.assertNotIn("only root can remove it", text)
+        self.assertEqual(code, 0, "it took every location it was given")
 
 
 class TestApplyOne(unittest.TestCase):
@@ -231,7 +265,7 @@ class TestApplyOne(unittest.TestCase):
     def test_already_holding_is_enforcing_without_rewriting(self):
         target = self.d / "empty"
         target.mkdir()
-        with mock.patch.object(hostdenial, "holds", return_value=True), \
+        with mock.patch.object(hostdenial, "held_by", return_value=hostdenial.ROOT_HELD), \
              mock.patch.object(hostdenial, "set_immutable") as setter:
             out = denial.apply_one(target)
         setter.assert_not_called()
@@ -350,9 +384,12 @@ class TestApplyOne(unittest.TestCase):
         self.assertFalse(target.is_symlink())
 
     def test_mode_writes_pass_follow_symlinks_false(self):
+        """With privilege, because taking ownership is the step that reaches `chown` — the write
+        of the owner is exactly the one a planted link would redirect."""
         target = self.d / "empty"
         target.mkdir()
-        with mock.patch.object(hostdenial, "holds", return_value=False), \
+        with mock.patch.object(hostdenial, "held_by", return_value=None), \
+             mock.patch.object(hostdenial, "privileged", return_value=True), \
              mock.patch.object(hostdenial, "empty_dir", return_value=True), \
              mock.patch("stayawake.bots.security.harden.denial.os.chmod") as chmod, \
              mock.patch("stayawake.bots.security.harden.denial.os.chown") as chown, \
@@ -370,7 +407,7 @@ class TestAuditDoesNotTreatADenialAsADrop(unittest.TestCase):
         fake = Path(tempfile.mkdtemp(prefix="holding-"))
         self.addCleanup(lambda: __import__("shutil").rmtree(fake, ignore_errors=True))
         with mock.patch.object(host_artifacts, "_global_folders", return_value=[fake]), \
-             mock.patch.object(hostdenial, "holds", return_value=True), \
+             mock.patch.object(hostdenial, "held_by", return_value=hostdenial.ROOT_HELD), \
              mock.patch.object(host_artifacts, "_host_user_tag", return_value=None), \
              mock.patch.object(host_artifacts, "_sideloaded_python_dir", lambda *_a, **_k: None), \
              mock.patch.object(host_artifacts, "_staged_secret_scanner", lambda *_a, **_k: None), \
@@ -404,7 +441,8 @@ class TestAControlDoesNotMakeTheHostReadSafer(unittest.TestCase):
     def _grade(self, locations, holding):
         from stayawake.bots.security.hygiene import host_artifacts
         with mock.patch.object(host_artifacts, "_global_folders", return_value=locations), \
-             mock.patch.object(hostdenial, "holds", lambda p: p in holding), \
+             mock.patch.object(hostdenial, "held_by",
+                               lambda p: hostdenial.ROOT_HELD if p in holding else None), \
              mock.patch.object(host_artifacts, "_host_user_tag", return_value=None), \
              mock.patch.object(host_artifacts, "_sideloaded_python_dir", lambda *_a, **_k: None), \
              mock.patch.object(host_artifacts, "_staged_secret_scanner", lambda *_a, **_k: None), \
@@ -414,8 +452,10 @@ class TestAControlDoesNotMakeTheHostReadSafer(unittest.TestCase):
     def setUp(self):
         self.d = Path(tempfile.mkdtemp(prefix="control-"))
         self.addCleanup(lambda: __import__("shutil").rmtree(self.d, ignore_errors=True))
+        # Both carry a real tree. An empty directory is not evidence of one, so a fixture built
+        # from empty directories tests nothing about what covering a location does.
         self.covered = self.d / "covered"
-        self.covered.mkdir()
+        (self.covered / "pkg").mkdir(parents=True)
         self.left = self.d / "left"
         (self.left / "pkg").mkdir(parents=True)
 
@@ -433,6 +473,283 @@ class TestAControlDoesNotMakeTheHostReadSafer(unittest.TestCase):
 
     def test_a_fully_controlled_host_reports_nothing(self):
         self.assertEqual(self._grade([self.covered], holding={self.covered}), [])
+
+
+class TestTheTwoGradesAreNeverConflated(unittest.TestCase):
+    """A lock the operator holds is a weaker control than one root holds — MEASURED, its owner
+    clears the flag with one call and no privilege. Reporting them alike would hand someone an
+    assurance that code running as them can undo."""
+
+    def setUp(self):
+        self.d = Path(tempfile.mkdtemp(prefix="harden-grade-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.d, ignore_errors=True))
+
+    def _locked(self, name: str) -> Path:
+        target = self.d / name
+        target.mkdir()
+        self.addCleanup(lambda: hostdenial.clear_immutable(target))
+        self.assertTrue(hostdenial.set_immutable(target), "the fixture must really be locked")
+        return target
+
+    def test_a_lock_this_account_owns_reads_back_as_self_held(self):
+        self.assertEqual(hostdenial.held_by(self._locked("mine")), hostdenial.SELF_HELD)
+
+    def test_the_strict_reading_still_answers_only_for_root(self):
+        """`holds` is what the host-artifact probe asks. A location the operator can reopen is
+        not one it may call controlled."""
+        self.assertFalse(hostdenial.holds(self._locked("mine")))
+
+    def test_an_unlocked_directory_is_held_by_nobody(self):
+        target = self.d / "open"
+        target.mkdir()
+        self.assertIsNone(hostdenial.held_by(target))
+
+    def test_a_directory_with_something_in_it_is_held_by_nobody(self):
+        target = self.d / "full"
+        target.mkdir()
+        (target / "payload.js").write_text("x")
+        self.addCleanup(lambda: hostdenial.clear_immutable(target))
+        hostdenial.set_immutable(target)
+        self.assertIsNone(hostdenial.held_by(target))
+
+    def test_applying_without_privilege_reports_the_weaker_grade(self):
+        target = self.d / "fresh"
+        with mock.patch.object(hostdenial, "privileged", return_value=False):
+            out = denial.apply_one(target)
+        self.addCleanup(lambda: hostdenial.clear_immutable(target))
+        self.assertEqual(out.state, denial.SELF_ENFORCING)
+        self.assertIn("running as you can remove it", out.detail)
+
+
+class TestWhereItCannotWriteWithoutRoot(unittest.TestCase):
+    def test_a_location_this_account_cannot_write_to_is_named_not_guessed(self):
+        with mock.patch.object(hostdenial, "privileged", return_value=False), \
+             mock.patch.object(hostdenial, "held_by", return_value=None), \
+             mock.patch.object(hostdenial, "can_write_into", return_value=False):
+            out = denial.apply_one(Path("/somewhere/not/mine"))
+        self.assertEqual(out.state, denial.NEEDS_ROOT)
+        self.assertIn("sudo", out.detail)
+
+    def test_a_writable_location_is_not_reported_as_needing_root(self):
+        self.assertTrue(hostdenial.can_write_into(Path.home() / ".node_modules_probe"))
+
+
+class TestOnlyPrefixesThisMachineHas(unittest.TestCase):
+    """Under privilege the creation walks up making missing ancestors, so naming a prefix the host
+    does not have would have a control create the prefix of a package manager nobody installed —
+    and there is nothing to deny there, because the runtime never resolves through it."""
+
+    def test_a_prefix_that_is_not_here_is_dropped(self):
+        self.assertFalse(host_artifacts._prefix_on_this_machine(Path("/opt/no-such-prefix")))
+
+    def test_a_prefix_that_is_here_is_kept(self):
+        self.assertTrue(host_artifacts._prefix_on_this_machine(Path("/usr")))
+
+    def test_a_prefix_that_cannot_be_read_is_kept_so_it_can_be_reported(self):
+        """`is_dir()` answers False for absent and unreadable alike. Dropping the second would
+        take the location out of the list before anything could record that it could not be read."""
+        with mock.patch("stayawake.bots.security.hygiene.host_artifacts.os.stat",
+                        side_effect=PermissionError):
+            self.assertTrue(host_artifacts._prefix_on_this_machine(Path("/anything")))
+
+    def test_a_platform_default_the_host_lacks_is_not_targeted(self):
+        """Through the target list, not the helper: a test that calls the helper directly still
+        passes when the call site is removed.
+
+        A GUESSED default only — this used to assert the same of a prefix the operator DECLARED,
+        which silently removed a resolution path from the run while it still reported success.
+        """
+        absent = [r for r in ("/opt/homebrew", "/opt/local") if not Path(r).exists()]
+        if not absent:
+            self.skipTest("this host has every platform default installed")
+        targets = [str(p) for p in host_artifacts._global_folders()]
+        for root in absent:
+            self.assertNotIn(f"{root}/lib/node", targets)
+
+    def test_a_prefix_the_environment_names_and_the_host_has_is_targeted(self):
+        """The positive control, so the test above cannot pass because nothing is targeted."""
+        with mock.patch.dict(os.environ, {"PREFIX": "/usr"}):
+            targets = [str(p) for p in host_artifacts._global_folders()]
+        self.assertIn("/usr/lib/node", targets)
+
+    def test_the_home_entries_are_named_whether_or_not_they_exist(self):
+        """Absent is the state a payload creates them from, so they are targeted regardless."""
+        names = {p.name for p in host_artifacts._global_folders()}
+        self.assertIn(".node_modules", names)
+        self.assertIn(".node_libraries", names)
+
+
+class TestItDoesNotAccuseItsOwnWork(unittest.TestCase):
+    """`saw audit` reported the directories `saw harden` had just created as a corroborated
+    supply-chain staging warning, on a real machine. The claim was "a node module tree" while the
+    test was only "does this path exist" — so an EMPTY directory was called a tree."""
+
+    def setUp(self):
+        self.d = Path(tempfile.mkdtemp(prefix="harden-probe-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.d, ignore_errors=True))
+
+    def _findings_for(self, target: Path):
+        with mock.patch.object(host_artifacts, "_global_folders", lambda: [target]):
+            return [i.id for i in host_artifacts.check_host_artifacts()]
+
+    def test_a_denial_this_tool_placed_is_not_a_finding(self):
+        target = self.d / "denied"
+        target.mkdir()
+        self.addCleanup(lambda: hostdenial.clear_immutable(target))
+        self.assertTrue(hostdenial.set_immutable(target))
+        self.assertEqual(hostdenial.held_by(target), hostdenial.SELF_HELD)
+        self.assertEqual(self._findings_for(target), [])
+
+    def test_an_empty_location_nothing_holds_is_still_a_finding(self):
+        """The signal is that the location EXISTS, not what is in it — nothing ordinary creates
+        one. Suppressing an empty directory to stop the self-accusation lost that, and the hygiene
+        suite caught it: the discriminator has to be the control, not the contents."""
+        target = self.d / "empty"
+        target.mkdir()
+        self.assertTrue(self._findings_for(target))
+
+    def test_a_denial_the_operator_holds_still_counts_as_a_control(self):
+        """Not only "do not accuse it" — CREDIT it. A finding elsewhere must read as being outside
+        a control that covers a sibling, which is a different grade from a lone indicator. The
+        strict root-only reading left an operator-held denial out of that account entirely."""
+        denied, staged = self.d / "denied", self.d / "staged"
+        denied.mkdir()
+        (staged / "pkg").mkdir(parents=True)
+        self.addCleanup(lambda: hostdenial.clear_immutable(denied))
+        self.assertTrue(hostdenial.set_immutable(denied))
+
+        with mock.patch.object(host_artifacts, "_global_folders", lambda: [denied, staged]):
+            ids = [i.id for i in host_artifacts.check_host_artifacts()]
+
+        self.assertIn("host-drop-artifact-outside-a-control", ids)
+
+    def test_a_directory_with_modules_in_it_is_still_a_finding(self):
+        """The positive control: narrowing the claim must not lose what it was for."""
+        target = self.d / "staged"
+        (target / "evil").mkdir(parents=True)
+        self.assertTrue(self._findings_for(target), "a real tree must still be reported")
+
+
+class TestTheUpgradePathIsReachable(unittest.TestCase):
+    """The report tells the operator to re-run with sudo to raise an operator-held lock. That path
+    was unreachable: the grade compared the owner against the EFFECTIVE uid, which is root under
+    sudo, so an operator-owned lock graded as nobody's."""
+
+    def setUp(self):
+        self.d = Path(tempfile.mkdtemp(prefix="harden-upgrade-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.d, ignore_errors=True))
+
+    def test_the_operator_is_who_invoked_not_who_is_running(self):
+        mine = os.getuid()
+        self.assertEqual(operator.acting_uid({"HOME": "/var/root", "SUDO_UID": str(mine)}), mine)
+
+    def test_a_lock_the_operator_holds_is_seen_as_theirs_under_sudo(self):
+        target = self.d / "held"
+        target.mkdir()
+        self.addCleanup(lambda: hostdenial.clear_immutable(target))
+        hostdenial.set_immutable(target)
+        with mock.patch.object(os, "geteuid", lambda: 0), \
+             mock.patch.dict(os.environ, {"SUDO_UID": str(os.getuid())}):
+            self.assertEqual(hostdenial.held_by(target), hostdenial.SELF_HELD)
+
+    def test_running_with_privilege_raises_it_instead_of_failing(self):
+        target = self.d / "raise-me"
+        target.mkdir()
+        self.addCleanup(lambda: hostdenial.clear_immutable(target))
+        hostdenial.set_immutable(target)
+        reached = []
+        with mock.patch.object(os, "geteuid", lambda: 0), \
+             mock.patch.dict(os.environ, {"SUDO_UID": str(os.getuid())}), \
+             mock.patch.object(denial, "_take_ownership",
+                               side_effect=lambda p: reached.append(p) or
+                               denial.PathOutcome(p, denial.ENFORCING, "raised")):
+            out = denial.apply_one(target)
+        self.assertTrue(reached, "the only path that raises a lock must be reachable")
+        self.assertEqual(out.state, denial.ENFORCING)
+
+    def test_an_upgrade_that_did_not_take_is_unknown_never_enforcing(self):
+        target = self.d / "pretend"
+        target.mkdir()
+        self.addCleanup(lambda: hostdenial.clear_immutable(target))
+        hostdenial.set_immutable(target)
+        with mock.patch.object(os, "geteuid", lambda: 0), \
+             mock.patch.dict(os.environ, {"SUDO_UID": str(os.getuid())}), \
+             mock.patch.object(denial.os, "chown", lambda *a, **k: None):
+            out = denial.apply_one(target)
+        self.assertEqual(out.state, denial.UNKNOWN)
+
+
+class TestAPrefixIsAbsoluteAndNormalised(unittest.TestCase):
+    def test_a_relative_prefix_is_refused(self):
+        """`PREFIX=.` had a host-level control create an immutable `lib/node` inside whatever
+        repository it was run from — against this module's own stated invariant."""
+        for raw in (".", "..", "build", "lib/node"):
+            with self.subTest(raw=raw):
+                self.assertIsNone(host_artifacts._usable_prefix(raw))
+
+    def test_a_prefix_carrying_dot_dot_is_refused(self):
+        """The kernel resolves `..` while walking, so the per-component symlink check never sees
+        the link it exists to refuse."""
+        self.assertIsNone(host_artifacts._usable_prefix("/usr/local/../../etc"))
+
+    def test_an_absolute_normalised_prefix_is_accepted(self):
+        self.assertEqual(host_artifacts._usable_prefix("/usr/local"), Path("/usr/local"))
+
+    def test_nothing_at_all_is_refused(self):
+        for raw in (None, "", "   "):
+            with self.subTest(raw=raw):
+                self.assertIsNone(host_artifacts._usable_prefix(raw))
+
+
+class TestADeclaredPrefixIsNotDropped(unittest.TestCase):
+    def test_a_prefix_the_operator_declared_is_targeted_even_when_absent(self):
+        """Filtering it out removed it from the list entirely — so no line was printed, no note
+        fired, and the run still exited claiming the staging path was denied."""
+        with mock.patch.dict(os.environ, {"PREFIX": "/opt/declared-but-absent"}):
+            targets = [str(p) for p in host_artifacts._global_folders()]
+        self.assertIn("/opt/declared-but-absent/lib/node", targets)
+
+    def test_a_platform_default_the_host_lacks_is_still_dropped(self):
+        with mock.patch.dict(os.environ, {}, clear=False):
+            targets = [str(p) for p in host_artifacts._global_folders()]
+        self.assertNotIn("/opt/no-such-prefix/lib/node", targets)
+
+
+class TestALiveInstallIsLeftRemovable(unittest.TestCase):
+    """`<prefix>/lib/node` is a real resolution path and also a directory inside the install. A
+    version manager removes a version with `rm -rf <prefix>`, which an immutable child defeats."""
+
+    def setUp(self):
+        self.d = Path(tempfile.mkdtemp(prefix="harden-nvm-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.d, ignore_errors=True))
+
+    def test_a_prefix_holding_a_node_binary_is_not_locked(self):
+        prefix = self.d / "versions" / "node" / "v22.11.0"
+        (prefix / "bin").mkdir(parents=True)
+        (prefix / "bin" / "node").write_text("#!/bin/sh\n")
+
+        out = denial.apply_one(prefix / "lib" / "node")
+
+        self.assertEqual(out.state, denial.IN_A_LIVE_INSTALL)
+        self.assertFalse((prefix / "lib" / "node").exists(), "nothing was created")
+
+    def test_the_version_can_still_be_removed_afterwards(self):
+        prefix = self.d / "v1"
+        (prefix / "bin").mkdir(parents=True)
+        (prefix / "bin" / "node").write_text("#!/bin/sh\n")
+        denial.apply_one(prefix / "lib" / "node")
+
+        __import__("shutil").rmtree(prefix)
+
+        self.assertFalse(prefix.exists())
+
+    def test_a_prefix_with_no_node_in_it_is_still_taken(self):
+        prefix = self.d / "bare"
+        (prefix / "lib").mkdir(parents=True)
+        target = prefix / "lib" / "node"
+        self.addCleanup(lambda: hostdenial.clear_immutable(target))
+
+        self.assertEqual(denial.apply_one(target).state, denial.SELF_ENFORCING)
 
 
 if __name__ == "__main__":

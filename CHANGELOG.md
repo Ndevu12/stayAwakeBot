@@ -14,6 +14,26 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Changed
+- **`saw harden` no longer requires root.** Run as yourself it acts where it can, and names
+  anything it did not take rather than stopping. Run again with `sudo` to act on the rest and to
+  strengthen what is already in place; the result distinguishes a control root holds from one you
+  hold and tells you which you have. Anything already in use is still left unchanged, and it still
+  refuses while a running process holds code that is not on disk.
+
+### Fixed
+- **`saw audit` no longer reports the controls `saw harden` placed as a finding.** A location that
+  holds a control is credited as one; a finding elsewhere reads as being outside it. An empty
+  directory in one of these locations is no longer described as something it is not.
+- **`saw harden` acts only where it was told to.** A location named relative to where the command
+  happened to be run is refused rather than acted on, so it cannot reach a directory outside the
+  machine-level scope it states. A location the environment names is acted on whether or not it
+  exists yet, instead of being dropped from the run while the result still claimed it.
+- **A location that something else depends on is left able to be removed.** Acting there would have
+  stopped an installed toolchain being uninstalled or upgraded, with an error naming nothing.
+- **Running again with `sudo` now strengthens what you already hold.** It reported such a host as
+  not protected, and advised against rotating credentials, while the controls were in place.
+
+### Changed
 - **`saw fix` now points at `saw fix amend` for a commit it cannot change.** Its review note sent
   operators to an external tool for the job `saw fix amend` does, and said `saw fix` "never
   rewrites history" — it does not change past commits, which is what it meant and what it now
