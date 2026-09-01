@@ -29,6 +29,34 @@ def _full(repo: Path, sha: str) -> str:
     return gitutil.stdout(repo, ["rev-parse", "--verify", f"{sha}^{{commit}}"]).strip()
 
 
+def _payload_left(repo: Path, infected, rebuilt, new_tips: dict[str, str],
+                  still_carries) -> list[str]:
+    """What the rebuild produced that still reaches the payload. Empty means it did its job.
+
+    Every other check in this path asks what CHANGED. None of them asks whether anything infected
+    REMAINS, and those are different questions — a correction that quietly did nothing changes
+    nothing and passes them all.
+
+    Asked of the rebuilt objects, before any reference moves, so a failure needs nothing put back.
+    Re-scanning the repository instead would be answered by the OLD commits, which are still
+    reachable through the remote-tracking refs this run has not pushed over yet.
+    """
+    left = []
+    for old in sorted(infected):
+        for tip in sorted(set(new_tips.values())):
+            if gitutil.is_ancestor(repo, old, tip):
+                left.append(f"{old[:12]} is still reachable from the rebuilt history")
+    if not still_carries:
+        return left
+    paths = {p for group in infected.values() for p in group}
+    for sha in sorted(set(rebuilt.mapping.values())):
+        for path in sorted(paths):
+            carried = still_carries(gitutil.file_at(repo, sha, path))
+            if carried:
+                left.append(f"{sha[:12]} still carries {path} ({carried})")
+    return left
+
+
 def _branches_carrying_any(repo: Path, infected) -> list[tuple[str, str, str]]:
     """Every branch that reaches ANY of the infected commits, each named once.
 
@@ -364,6 +392,10 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
         if beyond:
             return refused(display, Cause.REPLAY_CHANGED_UNRELATED_COMMITS,
                            f"{name}: " + ", ".join(sorted(beyond)[:3]))
+
+    left = _payload_left(repo, infected, rebuilt, new_tips, survives)
+    if left:
+        return refused(display, Cause.PAYLOAD_STILL_REACHABLE, "; ".join(left[:3]))
 
     captured = capture_bundle(repo, [(tip, new_tips[tip]) for _n, tip, _c in heads],
                               _capture_path(slug, oldest[:12]))

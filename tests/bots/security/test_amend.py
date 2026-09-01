@@ -735,6 +735,110 @@ class TestAmendGates(_AmendFixture):
         self.assertIn("main", outcome.reasons[0].detail)
         self.assertTrue(outcome.needs_review)
 
+    def test_a_rebuild_that_left_the_payload_reachable_stops_the_run(self):
+        """Every other check asks what CHANGED. None asks whether anything infected REMAINS, and
+        a correction that quietly did nothing passes all of them — it changes nothing."""
+        self._loader_merge()
+        before = self._rev()
+        calls = []
+
+        class Unchanged:
+            mapping = {before: before}
+            replaced = (before,)
+            carried = ()
+            kind = ""
+            refusal = ""
+            ok = True
+
+            def tip(self, old):
+                return old
+
+        with mock.patch(self.AT + "gitrebuild.rebuild_without_payload",
+                        return_value=Unchanged()):
+            outcome = self._act(pusher=lambda *a: calls.append(a) or PushResult(True))
+
+        self.assertIn(Cause.PAYLOAD_STILL_REACHABLE, self._causes(outcome))
+        self.assertEqual(calls, [], "nothing is pushed")
+        self.assertEqual(before, self._rev(), "and no reference moved, so nothing to put back")
+        self.assertTrue(outcome.needs_review)
+
+    def test_the_infected_commit_is_named_when_it_is_still_reachable(self):
+        self._loader_merge()
+        before = self._rev()
+
+        class Unchanged:
+            mapping = {before: before}
+            replaced = (before,)
+            carried = ()
+            kind = ""
+            refusal = ""
+            ok = True
+
+            def tip(self, old):
+                return old
+
+        with mock.patch(self.AT + "gitrebuild.rebuild_without_payload",
+                        return_value=Unchanged()):
+            outcome = self._act()
+        self.assertIn(before[:12], outcome.reasons[0].detail)
+
+    def _rebuild_landing_on(self, sha: str, infected: str):
+        """A rebuild that claims success and points the branch at `sha`."""
+        class Landed:
+            mapping = {infected: sha}
+            replaced = (infected,)
+            carried = ()
+            kind = ""
+            refusal = ""
+            ok = True
+
+            def tip(self, old, _to=sha):
+                return _to
+        return Landed()
+
+    def test_a_result_that_still_descends_from_the_payload_stops_the_run(self):
+        """Content alone is not enough: a tip whose files are clean but which still has the
+        infected commit as an ancestor leaves it one `clone --branch` away."""
+        self._loader_merge()
+        before = self._rev()
+        _git(self.d, "rm", "-q", "x.js")
+        _git(self.d, "commit", "-qm", "delete the file, keep the commit")
+        descends_but_clean = self._rev()
+        _git(self.d, "reset", "-q", "--hard", before)
+
+        with mock.patch(self.AT + "gitrebuild.rebuild_without_payload",
+                        return_value=self._rebuild_landing_on(descends_but_clean, before)):
+            outcome = self._act()
+
+        self.assertIn(Cause.PAYLOAD_STILL_REACHABLE, self._causes(outcome))
+        self.assertIn("still reachable", outcome.reasons[0].detail)
+
+    def test_a_result_that_carries_the_payload_stops_the_run_and_moves_nothing(self):
+        """Ancestry alone is not enough either: a tip that does not descend from the infected
+        commit can still hold the same content. And the check runs BEFORE any reference moves,
+        so a failure leaves nothing to put back."""
+        self._loader_merge()
+        before = self._rev()
+        # The tip's OWN tree on an unrelated parent: nothing drifts, nothing descends from the
+        # infected commit, and the payload is still in it.
+        def git(*args):
+            return subprocess.run(["git", "-C", str(self.d), *args],
+                                  capture_output=True, text=True).stdout.strip()
+        carries_but_unrelated = subprocess.run(
+            ["git", "-C", str(self.d), "commit-tree", git("rev-parse", f"{before}^{{tree}}"),
+             "-p", git("rev-parse", f"{before}^1"), "-m", "same content, unrelated line"],
+            capture_output=True, text=True).stdout.strip()
+        calls = []
+
+        with mock.patch(self.AT + "gitrebuild.rebuild_without_payload",
+                        return_value=self._rebuild_landing_on(carries_but_unrelated, before)):
+            outcome = self._act(pusher=lambda *a: calls.append(a) or PushResult(True))
+
+        self.assertIn(Cause.PAYLOAD_STILL_REACHABLE, self._causes(outcome))
+        self.assertIn("still carries", outcome.reasons[0].detail)
+        self.assertEqual(calls, [])
+        self.assertEqual(before, self._rev(), "the branch never moved")
+
     def test_the_lease_reaches_the_push(self):
         self._loader_merge()
         before = self._rev()

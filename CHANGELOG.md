@@ -13,6 +13,13 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Added
+- **`saw fix amend` checks that the payload is actually gone before it moves anything.** Every
+  other check it makes asks what changed; this one asks whether anything reported is still
+  there. A result that still reaches a reported commit, or that still holds the reported content,
+  stops the run — and because the check happens before any branch moves, a repository that fails
+  it is left exactly as it was.
+
 ### Changed
 - **`saw fix amend` clears every infected commit in one run.** It used to stop when more than one
   commit carried the payload, which left the repository infected after a run that had already
