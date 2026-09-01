@@ -144,20 +144,19 @@ def _manual_for(f0, path: str, repo: Path | None = None) -> "remediation.Manual"
             text = (
                 f"Worm payload smuggled via this merge COMMIT (files: {files}). "
                 f"{', '.join(live)} still carries it in the working tree. "
-                "`saw fix` never rewrites history — the commit remains in clones/forks/tags."
+                "`saw fix` does not change past commits; `saw fix amend` replaces this one."
             )
         elif _related_all_gone(repo, sha, related):
             text = (
-                "Worm payload smuggled via this merge COMMIT (a history finding, not a file edit; "
-                f"files: {files}). `saw fix` never rewrites history — it breaks clones/forks/tags. If the "
-                "payload is gone from your working tree the tree is clean but the commit persists; verify "
-                "no fork/tag still ships it, then decide on a history rewrite (git filter-repo) yourself."
+                f"Worm payload smuggled via this merge COMMIT (files: {files}); your working tree "
+                "no longer carries it. `saw fix` does not change past commits, so this one stays "
+                "— as does any clone, fork or tag of it. `saw fix amend` replaces it."
             )
         else:
             text = (
                 f"Worm payload smuggled via this merge COMMIT (files: {files}). "
-                "Whether those files still carry it in the working tree could not be established — "
-                "do not treat the tree as clean. `saw fix` never rewrites history."
+                "Whether those files still carry it could not be established — do not treat the "
+                "tree as clean. `saw fix` does not change past commits; `saw fix amend` replaces it."
             )
         return remediation.Manual(
             path, f0.signature_id, "evil-merge", text, getattr(f0, "line", None))

@@ -201,13 +201,13 @@ class TestPartialFix(unittest.TestCase):
     def test_evil_merge_gets_history_provenance_guidance(self):
         # A confirmed evil-merge is keyed to a merge COMMIT, not a file — the generic "remove/recover
         # manually" is nonsensical. It must get history-provenance guidance: name the SHA + files and
-        # state that `saw fix` never rewrites history (a maintainer decision). Liveness is UNKNOWN
+        # state that `saw fix` does not change past commits (a maintainer decision). Liveness is UNKNOWN
         # here (no real merge in the fake worktree), so it must not claim the tree is clean.
         r = self._run(residual=[self._EVIL_MERGE], applied=())
         self.assertIn("ABORTED", r.outcome)                     # confirmed → needs-review, exit 1
         self.assertIn("96dcbd397c", r.outcome)                  # location is the merge SHA
         self.assertIn("tailwind.config.js", r.outcome)          # the introduced file is named
-        self.assertIn("never rewrites history", r.outcome)      # the load-bearing safety guidance
+        self.assertIn("does not change past commits", r.outcome)      # the load-bearing safety guidance
         self.assertNotIn("remove/recover manually", r.outcome)  # NOT the generic file action
         self.assertIn("do not treat the tree as clean", r.outcome)
         self.assertNotIn("the tree is clean but the commit persists", r.outcome)
@@ -221,8 +221,8 @@ class TestPartialFix(unittest.TestCase):
         self.assertIn("ABORTED", r.outcome)
         self.assertIn("96dcbd397c", r.outcome)
         self.assertIn("tailwind.config.js", r.outcome)
-        self.assertIn("never rewrites history", r.outcome)
-        self.assertIn("the tree is clean but the commit persists", r.outcome)
+        self.assertIn("does not change past commits", r.outcome)
+        self.assertIn("your working tree no longer carries it", r.outcome)
 
     def test_evil_merge_changed_file_is_not_rewritten(self):
         from stayawake.lib.git.merge.liveness import CHANGED
@@ -269,7 +269,7 @@ class TestPartialFix(unittest.TestCase):
         self.assertIn("96dcbd397c", body)
         self.assertIn("still carries it in the working tree", body)
         self.assertNotIn("the tree is clean but the commit persists", body)
-        self.assertIn("never rewrites history", body)
+        self.assertIn("does not change past commits", body)
 
     def test_heuristic_evil_merge_live_file_is_offered_for_review(self):
         # Heuristic grade on the merge does not skip recovering a live introduced file; the
@@ -307,7 +307,7 @@ class TestPartialFix(unittest.TestCase):
 
     def test_evil_merge_history_note_survives_a_clean_rescan(self):
         # Restoring the live file can make a later scan look clean; the merge commit is still
-        # there and the operator must still be told `saw fix` never rewrites history.
+        # there and the operator must still be told `saw fix` does not change past commits.
         from stayawake.lib.git.merge.liveness import PRESENT
         sug = pr.remediation.Suggested(
             "tailwind.config.js", "evil-merge-loader", "merge-clean-recovered",
@@ -335,7 +335,7 @@ class TestPartialFix(unittest.TestCase):
         body = create.call_args.kwargs["body"]
         self.assertIn("PARTIAL", outcome)
         self.assertIn("96dcbd397c", body)
-        self.assertIn("never rewrites history", body)
+        self.assertIn("does not change past commits", body)
 
     def test_failed_merge_restore_does_not_block_file_recovery(self):
         # A live merge file that cannot be restored from the merge must not prevent a
