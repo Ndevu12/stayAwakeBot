@@ -6,13 +6,14 @@ reaches it. Grading rationale, corpus and limits: `Ndevu12/saw#218`."""
 from __future__ import annotations
 
 import os
+import stat
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 from stayawake.utils.pathsafe import canonical_id
 
-from .models import HygieneIssue, SCAN_BLOCKED_ID, _WIPER_NOTE
+from .models import HygieneIssue, MODULE_UNREADABLE_ID, SCAN_BLOCKED_ID, _WIPER_NOTE
 
 _JS_SUFFIXES = (".js", ".mjs", ".cjs")
 
@@ -127,18 +128,36 @@ def _indent(line: bytes) -> int:
     return at
 
 
-def _tail_lines(path: Path) -> tuple[list[bytes] | None, bool]:
-    """(the file's last `_TRAILING_LINES_MAX` lines, whether they were established).
+READ = "read"
+TOO_FAR_BACK = "too-far-back"
+UNREADABLE = "unreadable"
 
-    `(None, False)` means they do not begin within `_MAX_TAIL_BYTES`, which the caller reports
-    rather than counting as nothing found."""
+
+def _tail_lines(path: Path) -> tuple[list[bytes], str]:
+    """(the file's last `_TRAILING_LINES_MAX` lines, what happened while reading them).
+
+    Three answers, and an unreadable file used to give the same one as a file that was read and
+    held nothing: `([], True)`. It then fell through the shape check with no finding, no count and
+    no mention anywhere in the report — the tier below the content scan, deciding whether that scan
+    happens at all, saying nothing when it could not decide.
+
+    A file that is not a regular file is not read either. `open()` on a FIFO blocks until something
+    writes to it, with no timeout, so anything able to append to a bundle module can also stop the
+    audit by creating one named `*.js` beside it. The engine guards exactly this before its own
+    read; this side did not.
+    """
     wanted = _TRAILING_LINES_MAX
+    try:
+        if not stat.S_ISREG(os.stat(path).st_mode):
+            return [], UNREADABLE
+    except OSError:
+        return [], UNREADABLE
     try:
         with path.open("rb") as handle:
             handle.seek(0, os.SEEK_END)
             position = handle.tell()
             if position < _PAD_MIN + _BODY_MIN:
-                return [], True
+                return [], READ
             parts: list[bytes] = []
             newlines = read = 0
             while position > 0:
@@ -152,11 +171,11 @@ def _tail_lines(path: Path) -> tuple[list[bytes] | None, bool]:
                 if newlines > wanted:
                     break
                 if read > _MAX_TAIL_BYTES:
-                    return None, False
+                    return [], TOO_FAR_BACK
             tail = b"".join(reversed(parts))
     except OSError:
-        return [], True
-    return tail.rstrip(b"\r\n").split(b"\n")[-wanted:], True
+        return [], UNREADABLE
+    return tail.rstrip(b"\r\n").split(b"\n")[-wanted:], READ
 
 
 def _appended_line(lines: list[bytes]) -> tuple[int, int] | None:
@@ -237,7 +256,9 @@ def _why_not_cleared(verdict) -> str:
     if verdict.too_large:
         return "it is too large to scan automatically"
     if verdict.partial and verdict.unread:
-        return "not everything in it was read (" + "; ".join(verdict.unread) + ")"
+        # Not "not everything was read": one of the two states behind this returns before the
+        # scanner runs at all, so asserting a partial scan would overstate what happened.
+        return "it was not fully scanned (" + "; ".join(verdict.unread) + ")"
     if verdict.partial:
         return "part of it could not be read"
     if verdict.error:
@@ -257,7 +278,7 @@ def check_app_bundles(verify: bool = False) -> list[HygieneIssue]:
     what was observed, and the hole is its own item — something found and a look that did not
     happen are different claims, and the report groups them differently."""
     issues: list[HygieneIssue] = []
-    unbounded = truncated = 0
+    unbounded = truncated = unreadable = 0
     unscanned: list[str] = []
     walked: set = set()
     for root, max_depth in app_bundle_js_roots():
@@ -278,8 +299,11 @@ def check_app_bundles(verify: bool = False) -> list[HygieneIssue]:
                     break
                 examined += 1
                 module = Path(dirpath) / name
-                lines, established = _tail_lines(module)
-                if not established:
+                lines, how = _tail_lines(module)
+                if how == UNREADABLE:
+                    unreadable += 1
+                    continue
+                if how == TOO_FAR_BACK:
                     unbounded += 1
                     continue
                 shape = _appended_line(lines) if lines else None
@@ -291,7 +315,8 @@ def check_app_bundles(verify: bool = False) -> list[HygieneIssue]:
                 issues.append(_finding(module, *shape, scan))
             if examined >= _MAX_FILES_PER_ROOT:
                 break                      # this tree only — the next application still gets read
-    notes = [_unexamined_note(unbounded, truncated), _unscanned_note(unscanned)]
+    notes = [_unexamined_note(unbounded, truncated), _unreadable_note(unreadable),
+             _unscanned_note(unscanned)]
     return issues + [n for n in notes if n]
 
 
@@ -306,7 +331,7 @@ def _unexamined_note(unbounded: int, truncated: int) -> HygieneIssue | None:
     """What the walk did NOT read. A bound that is not reported reads as coverage of what it cut."""
     parts: list[str] = []
     if truncated:
-        parts.append(f"{truncated} trees hold more modules than one audit reads")
+        parts.append(f"{truncated} tree(s) hold more modules than one audit reads")
     if unbounded:
         parts.append(f"{unbounded} do not end within the lookback")
     if not parts:
@@ -317,6 +342,27 @@ def _unexamined_note(unbounded: int, truncated: int) -> HygieneIssue | None:
         title="Some application modules were not examined",
         detail="Not every module an installed application loads was read: " + "; ".join(parts) + ".",
         remediation="Read them by hand, or reinstall the applications they belong to.",
+    )
+
+
+def _unreadable_note(count: int) -> HygieneIssue | None:
+    """Modules the host would not let this read at all.
+
+    Its own grade, not folded into the note above: the two counted there are bounds THIS TOOL
+    chose, and a location the host refused is a hole, which is the one that withholds the rotation
+    all-clear. MEASURED before gating it — 22477 modules under 44 enumerated roots on an ordinary
+    macOS host, none of them unreadable and none of them anything but a regular file.
+    """
+    if not count:
+        return None
+    return HygieneIssue(
+        id=MODULE_UNREADABLE_ID,
+        severity="unknown",
+        title="An application module could not be read",
+        detail=f"{count} module(s) an installed application loads could not be read at all, so "
+               "nothing about them was established. They are UNKNOWN, not clean.",
+        remediation="Read them yourself, or reinstall the applications. Do not rotate credentials "
+                    f"yet: {_WIPER_NOTE}.",
     )
 
 
@@ -375,5 +421,9 @@ def _corroboration(scan: _MarkerScan) -> str:
     if scan.blocked:
         return "The scan that would clear it did not complete."
     if scan.ran:
-        return "A scan of its directory found no worm markers."
+        # Hedged, because the field behind it is CONFIRMED-only: the engine drops its weaker tiers
+        # before answering, so "clean" here is narrower than an operator reads it. The sibling
+        # consumer attaches the same caution to the same field, and the first version of this
+        # dropped it.
+        return "A scan of its directory found no confirmed markers, which does not clear it."
     return "`saw audit --verify` looks harder at it."

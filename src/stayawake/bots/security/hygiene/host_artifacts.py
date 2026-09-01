@@ -15,7 +15,8 @@ from pathlib import Path
 from stayawake.utils import hostdenial
 from stayawake.utils.pathsafe import canonical_id, grade
 
-from .models import HygieneIssue, _WIPER_NOTE, could_not_read
+from .models import (ARTIFACT_SCAN_BLOCKED_ID, HygieneIssue, _WIPER_NOTE,
+                     could_not_read)
 
 #
 # drop-files this wave stages on a developer host — downloaded tooling and stolen data bundled
@@ -348,9 +349,14 @@ def check_host_artifacts(verify: bool = False) -> list[HygieneIssue]:
             issue = _escalate_with_scan(issue, weak)
         return [issue] + extra
     if verify:
-        graded, _failure = _scan_or_reason(weak[0][:2])
+        graded, failure = _scan_or_reason(weak[0][:2])
         if graded is not None:
             return graded + extra
+        if failure is not None:
+            # `graded is None` means two different things — "not a scannable directory, fall back
+            # to the honest advice" and "the scan blew up". Conflated, a failed scan printed the
+            # fallback, which tells the operator to run `--verify`: the command they just ran.
+            extra = [_scan_blocked_issue(weak[0][1], failure)] + extra
     return [HygieneIssue(
         id="host-drop-artifact-weak",
         severity="info",
@@ -361,6 +367,19 @@ def check_host_artifacts(verify: bool = False) -> list[HygieneIssue]:
         remediation="Check whether it is yours (inspect the contents). If not, isolate the host and "
                     f"rotate credentials LAST: {_WIPER_NOTE}. `saw audit --verify` content-scans it.",
     )] + extra
+
+
+def _scan_blocked_issue(path: Path, failure: str) -> HygieneIssue:
+    """The content scan `--verify` promised and did not deliver, on this surface."""
+    return HygieneIssue(
+        id=ARTIFACT_SCAN_BLOCKED_ID,
+        severity="unknown",
+        title="The content scan asked for did not run",
+        detail=f"`--verify` was asked for and the scan of {path} did not run ({failure}), so its "
+               "contents are UNKNOWN, not clean.",
+        remediation="Resolve what stopped it and re-run, or inspect it by hand. Do not rotate "
+                    f"credentials yet: {_WIPER_NOTE}.",
+    )
 
 
 def _scan_or_reason(item: tuple[str, Path]) -> tuple[list[HygieneIssue] | None, str | None]:
@@ -411,8 +430,11 @@ def _verify_weak_artifact(item: tuple[str, Path]) -> list[HygieneIssue] | None:
     elif v.too_large:
         outcome = "It is too large to scan automatically, so its contents were not checked."
     elif v.partial and v.unread:
-        outcome = (f"Not everything was read: {'; '.join(v.unread)}. A content scan of the rest "
-                   f"found no worm markers. {_NOT_CLEARED}")
+        # No claim that anything WAS scanned: one of the two states behind this returns before the
+        # scanner runs at all, and asserting a clean scan of "the rest" there is a scan that never
+        # happened being reported as a negative result.
+        outcome = (f"It was not fully scanned: {'; '.join(v.unread)}. Its contents were not "
+                   f"cleared. {_NOT_CLEARED}")
     elif v.partial:
         outcome = "Part of it could not be read, so its contents were not fully checked."
     else:

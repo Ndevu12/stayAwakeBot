@@ -49,8 +49,16 @@ reader, not the mechanism or the weakness it closed.
   could not start, could not finish, or could not read everything now says so and says why, names
   the modules it did not settle, and withholds the credential-rotation all-clear until it can. It
   used to report the weaker finding instead — whose own advice is to run `--verify`.
-- **A module that was scanned and came back clean now says so**, rather than repeating the advice
-  to run the scan that had just cleared it.
+- **A module that was scanned and came back clean now says so** — and says what that does and does
+  not settle — rather than repeating the advice to run the scan that had just cleared it.
+- **A module the host will not let `saw audit` read is reported.** It used to produce nothing at
+  all: no finding, no count, no mention, indistinguishable from a module that was read and held
+  nothing. It now names how many, and withholds the credential-rotation all-clear.
+- **A pipe or device named like an application module no longer stops the audit.** Reading one had
+  no timeout, so anything able to write into an application's own directory could hang the run.
+- **The same fixes on the host-artifact surface.** `--verify` there also reported a scan that blew
+  up as the advice to run `--verify`, and described a directory it had not scanned as one where a
+  content scan found nothing.
 
 ### Changed
 - **`saw harden` no longer requires root.** Run as yourself it acts where it can, and names

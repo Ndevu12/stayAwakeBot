@@ -102,9 +102,18 @@ PROCESSES_NOT_READABLE_ID = "process-arguments-not-readable"
 # not run. Both halves are required, so this is not a bare "the engine failed" alarm: it fires only
 # where the run already has an anomaly it was asked to resolve and could not.
 SCAN_BLOCKED_ID = "app-bundle-scan-blocked"
+# A module an application loads at start-up that could not be read AT ALL — the tier below the one
+# above, deciding whether that scan even runs. Not the bounds this tool chooses for itself, which
+# stay an `info` note: this is the host refusing, and it measured zero across 22477 modules under
+# 44 enumerated roots on an ordinary host.
+MODULE_UNREADABLE_ID = "app-bundle-module-unreadable"
+# The same claim on the host-artifact surface: `--verify` was asked for and the content scan did not
+# run. Its own id because the two surfaces are reported separately everywhere else.
+ARTIFACT_SCAN_BLOCKED_ID = "host-artifact-scan-blocked"
 UNVERIFIED_PERSISTENCE_IDS = {SURFACE_UNREADABLE_ID, SURFACE_ABSENT_ID, BLOCKED_SURFACE_ID,
                               SURFACE_NOT_IMPLEMENTED_ID, PROCESSES_NOT_READABLE_ID,
-                              SCAN_BLOCKED_ID}
+                              SCAN_BLOCKED_ID, MODULE_UNREADABLE_ID,
+                              ARTIFACT_SCAN_BLOCKED_ID}
 
 
 def could_not_read(paths) -> HygieneIssue:

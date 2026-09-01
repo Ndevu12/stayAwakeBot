@@ -9,6 +9,7 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import os
+import subprocess
 import sys
 import tempfile
 import types
@@ -16,8 +17,10 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from stayawake.bots.security.hygiene import app_bundle, audit_checks, render
-from stayawake.bots.security.hygiene.models import (ACTIVE_PERSISTENCE_IDS, ROTATION_UNSAFE_IDS,
+from stayawake.bots.security.hygiene import app_bundle, audit_checks, host_artifacts, render
+from stayawake.bots.security.hygiene.models import (ACTIVE_PERSISTENCE_IDS,
+                                                    ARTIFACT_SCAN_BLOCKED_ID,
+                                                    MODULE_UNREADABLE_ID, ROTATION_UNSAFE_IDS,
                                                     ROTATION_UNSAFE_UNKNOWN, SCAN_BLOCKED_ID,
                                                     rotation_safety)
 
@@ -46,6 +49,10 @@ class _Verdict:
     partial: bool = False
     error: str | None = None
     unread: list = dataclasses.field(default_factory=list)
+
+    @property
+    def has_markers(self) -> bool:
+        return bool(self.markers)
 
 
 def _engine_loads() -> bool:
@@ -220,14 +227,18 @@ class TestTheConcealmentIsWhatIsGraded(unittest.TestCase):
         host.write(_CLEAN + _PAD + "\n")
         self.assertEqual(host.check(), [])
 
-    def test_a_file_that_cannot_be_read_is_skipped_rather_than_crashing(self):
+    def test_a_file_that_cannot_be_read_is_reported_rather_than_crashing(self):
+        """The contract this has always held is that the run survives. It expressed that as "no
+        findings at all", which also made the SILENCE the spec: a module carrying the payload and
+        a benign one were both reported as nothing, and neither was counted anywhere."""
         host = _Host()
         target = host.write(_appended(["z" * 200]))
         os.chmod(target, 0o000)
         try:
-            self.assertEqual(host.check(), [])
+            ids = [i.id for i in host.check()]
         finally:
             os.chmod(target, 0o644)
+        self.assertEqual(ids, ["app-bundle-module-unreadable"])
 
     def test_non_javascript_in_the_same_tree_is_not_examined(self):
         host = _Host()
@@ -363,7 +374,7 @@ class TestAScanThatCouldNotRunIsNotAScanThatFoundNothing(unittest.TestCase):
         with self._engine(lambda _d: _Verdict(scanned_clean=True)):
             issues = self._planted().check(verify=True)
         self.assertEqual([i.id for i in issues], ["app-bundle-appended-module"])
-        self.assertIn("found no worm markers", issues[0].detail)
+        self.assertIn("no confirmed markers", issues[0].detail)
         self.assertFalse({i.id for i in issues} & ROTATION_UNSAFE_IDS)
 
     def test_only_a_clean_scan_clears_a_module(self):
@@ -386,7 +397,7 @@ class TestAScanThatCouldNotRunIsNotAScanThatFoundNothing(unittest.TestCase):
                 ids = [i.id for i in issues]
                 self.assertIn(SCAN_BLOCKED_ID, ids, f"{label} is not a clean scan")
                 shape = next(i for i in issues if i.id == "app-bundle-appended-module")
-                self.assertNotIn("found no worm markers", shape.detail)
+                self.assertNotIn("no confirmed markers", shape.detail)
                 self.assertEqual(rotation_safety(set(ids)), ROTATION_UNSAFE_UNKNOWN)
                 hole = next(i for i in issues if i.id == SCAN_BLOCKED_ID)
                 self.assertNotIn("modules: .", hole.detail,
@@ -407,9 +418,13 @@ class TestAScanThatCouldNotRunIsNotAScanThatFoundNothing(unittest.TestCase):
 
     @unittest.skipUnless(_engine_loads(), "the content-scan engine is not importable here")
     def test_the_stand_in_still_matches_the_engine(self):
+        """Fields AND the derived reads on top of them — comparing only fields let the stand-in
+        ship without `has_markers`, which the other consumer of this verdict asks for first."""
         from stayawake.bots.security.verify import DirVerdict
         self.assertEqual({f.name for f in dataclasses.fields(_Verdict)},
                          {f.name for f in dataclasses.fields(DirVerdict)})
+        self.assertEqual({n for n in dir(_Verdict) if not n.startswith("_")},
+                         {n for n in dir(DirVerdict) if not n.startswith("_")})
 
     def test_not_asking_for_the_scan_is_unchanged(self):
         issues = self._planted().check()
@@ -470,6 +485,125 @@ class TestItIsPartOfAnAudit(unittest.TestCase):
     def test_the_probe_is_registered(self):
         self.assertIn("application bundles", [label for label, _check in audit_checks()])
 
+
+class TestAModuleThatCouldNotBeReadIsNotAModuleThatHeldNothing(unittest.TestCase):
+    """The tier below the content scan: it decides whether that scan runs at all, and it answered
+    an unreadable file exactly as it answered one it read and found nothing."""
+
+    def _planted_beside(self, make):
+        host = _Host()
+        host.write(_appended([_confirmed_payload()]), name="readable.js")
+        make(host.module_dir / "zz.js")
+        return host
+
+    def test_an_unreadable_module_never_hides_a_readable_one(self):
+        host = self._planted_beside(lambda p: None)
+        hidden = host.write(_appended([_confirmed_payload()]), name="hidden.js")
+        os.chmod(hidden, 0o000)
+        try:
+            issues = host.check()
+        finally:
+            os.chmod(hidden, 0o644)
+        ids = [i.id for i in issues]
+        self.assertIn("app-bundle-appended-module", ids)
+        self.assertIn(MODULE_UNREADABLE_ID, ids)
+
+    def test_it_withholds_the_rotation_all_clear(self):
+        """MEASURED before gating this: 22477 modules under 44 enumerated roots on an ordinary
+        host, none unreadable and none anything but a regular file."""
+        self.assertIn(MODULE_UNREADABLE_ID, ROTATION_UNSAFE_IDS)
+        self.assertEqual(rotation_safety({MODULE_UNREADABLE_ID}), ROTATION_UNSAFE_UNKNOWN)
+        host = _Host()
+        hidden = host.write(_appended([_confirmed_payload()]), name="hidden.js")
+        os.chmod(hidden, 0o000)
+        try:
+            note = next(i for i in host.check() if i.id == MODULE_UNREADABLE_ID)
+        finally:
+            os.chmod(hidden, 0o644)
+        self.assertEqual(note.severity, "unknown",
+                         "a hole, not a finding — the report groups the two differently")
+
+    def test_the_bounds_this_tool_chooses_are_not_the_same_claim(self):
+        """`app-bundle-partly-examined` counts limits WE set, so it stays an `info` note and does
+        not gate rotation. A location the host refused is a different claim."""
+        self.assertNotIn("app-bundle-partly-examined", ROTATION_UNSAFE_IDS)
+
+    def test_anything_that_is_not_a_regular_file_is_not_read(self):
+        """Asked of the read itself. Through the walk a directory never reaches here — it is
+        descended into — but the guard is what stops the read from being attempted at all."""
+        d = Path(tempfile.mkdtemp())
+        (d / "adir.js").mkdir()
+        self.assertEqual(app_bundle._tail_lines(d / "adir.js")[1], app_bundle.UNREADABLE)
+        self.assertEqual(app_bundle._tail_lines(d / "gone.js")[1], app_bundle.UNREADABLE)
+
+    def test_a_pipe_named_like_a_module_does_not_stop_the_audit(self):
+        """`open()` on a FIFO blocks until something writes to it, with no timeout, so anything
+        able to append to a bundle module could also stop the audit by creating one beside it. Run
+        in a subprocess: if the guard regresses, this fails on the timeout instead of hanging."""
+        host = _Host()
+        host.write(_appended([_confirmed_payload()]))
+        os.mkfifo(host.module_dir / "zz.js")
+        src = str(Path(app_bundle.__file__).resolve().parents[4])
+        script = ("import sys; sys.path.insert(0, %r)\n"
+                  "from stayawake.bots.security.hygiene.app_bundle import _tail_lines, UNREADABLE\n"
+                  "from pathlib import Path\n"
+                  "assert _tail_lines(Path(%r))[1] == UNREADABLE\n"
+                  "print('done')") % (src, str(host.module_dir / "zz.js"))
+        done = subprocess.run([sys.executable, "-c", script], capture_output=True,
+                              text=True, timeout=20)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("done", done.stdout)
+
+
+class TestTheSiblingSurfaceAnswersTheSameWay(unittest.TestCase):
+    """The host-artifact probe is the other `verify_dir` consumer and had the same defect: it threw
+    away the reason a scan failed, so `--verify` over a broken engine printed the fallback whose
+    own advice is to run `--verify`."""
+
+    def setUp(self):
+        self.d = Path(tempfile.mkdtemp())
+        self.artifact = self.d / ".node_modules"
+        self.artifact.mkdir()
+        (self.artifact / "x.js").write_text("y")
+
+    @contextlib.contextmanager
+    def _only_this_artifact(self):
+        with mock.patch.object(host_artifacts, "_global_folders", lambda: [self.artifact]), \
+             mock.patch.object(host_artifacts, "_host_user_tag", lambda: None), \
+             mock.patch.object(host_artifacts, "_sideloaded_python_dir", lambda unread: None), \
+             mock.patch.object(host_artifacts, "_staged_secret_scanner",
+                               lambda dirs, unread: None):
+            yield
+
+    def test_a_scan_that_blew_up_is_not_the_advice_to_run_it(self):
+        with self._only_this_artifact(), \
+             mock.patch.object(host_artifacts, "_verify_weak_artifact",
+                               _raising(RuntimeError("engine gone"))):
+            issues = host_artifacts.check_host_artifacts(verify=True)
+        ids = {i.id for i in issues}
+        self.assertIn(ARTIFACT_SCAN_BLOCKED_ID, ids)
+        self.assertEqual(rotation_safety(ids), ROTATION_UNSAFE_UNKNOWN)
+
+    def test_an_artifact_that_is_not_a_scannable_directory_still_falls_back(self):
+        """The other meaning of the same `None`: nothing failed, there was just nothing to scan."""
+        with self._only_this_artifact(), \
+             mock.patch.object(host_artifacts, "_verify_weak_artifact", lambda item: None):
+            ids = {i.id for i in host_artifacts.check_host_artifacts(verify=True)}
+        self.assertNotIn(ARTIFACT_SCAN_BLOCKED_ID, ids)
+        self.assertIn("host-drop-artifact-weak", ids)
+
+    def test_it_never_claims_a_scan_of_the_rest(self):
+        """One of the two states behind `partial` returns before the scanner runs at all, so
+        "a content scan of the rest found no worm markers" described a scan that never happened."""
+        stub = types.ModuleType("stayawake.bots.security.verify")
+        stub.verify_dir = lambda _p: _Verdict(
+            partial=True, unread=["a device or pipe must not be opened"])
+        with mock.patch.dict(sys.modules, {"stayawake.bots.security.verify": stub}), \
+             self._only_this_artifact():
+            issues = host_artifacts.check_host_artifacts(verify=True)
+        weak = next(i for i in issues if i.id == "host-drop-artifact-weak")
+        self.assertNotIn("found no worm markers", weak.detail + weak.remediation)
+        self.assertIn("not fully scanned", weak.detail + weak.remediation)
 
 if __name__ == "__main__":
     unittest.main()
