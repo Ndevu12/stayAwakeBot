@@ -14,6 +14,7 @@ ENFORCING = "enforcing"
 SELF_ENFORCING = "enforcing-as-you"
 NEEDS_ROOT = "needs-root"
 IN_A_LIVE_INSTALL = "in-a-live-install"
+NOT_HERE_YET = "not-here-yet"
 UNKNOWN = "unknown"
 OCCUPIED = "occupied"
 
@@ -133,6 +134,22 @@ def _take_ownership(path: Path) -> PathOutcome:
     return PathOutcome(path, ENFORCING, _ROOT_DETAIL)
 
 
+def _parent_is_here(path: Path) -> bool:
+    """Whether the directory this denial would go IN already exists.
+
+    A control creates the leaf, never the tree above it. Creating the tree meant a location named
+    for a package manager the host does not have got that manager's prefix built for it — and an
+    unreadable parent is treated as present, so "could not tell" is answered by the attempt and
+    its read-back rather than by skipping in silence.
+    """
+    try:
+        return stat.S_ISDIR(os.stat(path.parent).st_mode)
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+
+
 def _inside_a_node_installation(path: Path) -> bool:
     """Whether `path` sits inside a Node installation somebody manages.
 
@@ -158,6 +175,10 @@ def apply_one(path: Path) -> PathOutcome:
     already = _graded(path)
     if already is not None:
         return already
+    if not _parent_is_here(path):
+        return PathOutcome(path, NOT_HERE_YET,
+                           "the directory this would go in is not on this machine, so nothing "
+                           "was created")
     if _inside_a_node_installation(path):
         return PathOutcome(path, IN_A_LIVE_INSTALL,
                            "inside a Node installation — locking it here would stop that version "

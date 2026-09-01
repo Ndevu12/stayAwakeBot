@@ -228,14 +228,12 @@ def _global_folders() -> list[Path]:
     # nothing is installed there, so it is not a path the runtime resolves through and there is
     # nothing to find or to deny. Naming it anyway would have a control create the prefix of a
     # package manager the host does not have.
-    # A DECLARED prefix is the operator saying where the runtime resolves, so it is named whether
-    # or not it exists yet — the same reason the home entries are, and the window between
-    # `npm config set prefix` and the directory existing is exactly when it is worth claiming.
-    # A GUESSED one is this code's assumption about the platform, and assuming a prefix the host
-    # does not have would have a control create the prefix of a package manager nobody installed.
+    # Every entry the runtime resolves through, present or not. This answers ONE question — where
+    # does Node look — and it serves a probe that only reads as well as a control that writes.
+    # Filtering absent locations out here starved the probe of the platform's own locations, which
+    # it enumerates for coverage; what a control may CREATE is that control's decision to make.
     folders = [home / ".node_modules", home / ".node_libraries"]
-    folders += [root / "lib" / "node" for root in declared]
-    folders += [root / "lib" / "node" for root in roots if _prefix_on_this_machine(root)]
+    folders += [root / "lib" / "node" for root in declared + roots]
     return _distinct_dirs(folders)
 
 
@@ -252,21 +250,6 @@ def _usable_prefix(raw: str | None) -> Path | None:
     if os.path.normpath(raw) != raw or not os.path.isabs(raw):
         return None
     return Path(raw)
-
-
-def _prefix_on_this_machine(root: Path) -> bool:
-    """Whether `root` is a prefix this host actually has.
-
-    An unreadable one is KEPT. `Path.is_dir()` answers False for absent and for unreadable alike,
-    and dropping the second would take a location out of the list before anything could record
-    that it could not be read — turning "could not tell" into silence.
-    """
-    try:
-        return stat.S_ISDIR(os.stat(root).st_mode)
-    except FileNotFoundError:
-        return False
-    except OSError:
-        return True
 
 
 def _corroborated_issue(found: list[str], *, active: bool) -> HygieneIssue:

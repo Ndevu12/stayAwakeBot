@@ -26,8 +26,9 @@ reader, not the mechanism or the weakness it closed.
   directory in one of these locations is no longer described as something it is not.
 - **`saw harden` acts only where it was told to.** A location named relative to where the command
   happened to be run is refused rather than acted on, so it cannot reach a directory outside the
-  machine-level scope it states. A location the environment names is acted on whether or not it
-  exists yet, instead of being dropped from the run while the result still claimed it.
+  machine-level scope it states. It creates the location it was aimed at and nothing above it, so
+  a location named for something the machine does not have no longer gets built out for it — that
+  location is named in the result instead.
 - **A location that something else depends on is left able to be removed.** Acting there would have
   stopped an installed toolchain being uninstalled or upgraded, with an error naming nothing.
 - **Running again with `sudo` now strengthens what you already hold.** It reported such a host as
