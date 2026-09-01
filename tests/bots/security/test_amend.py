@@ -23,6 +23,7 @@ from stayawake.lib.git.query import branches_carrying
 from stayawake.lib.git.write import amend as gitamend
 from stayawake.lib.git.write.push import PushResult
 from tests.bots.security.test_evil_merge import EVIL_SIG, _git
+from tests.support.gitrepo import GitSandbox
 
 
 class _NoRemoteTags:
@@ -99,41 +100,26 @@ class TestFixAmendCli(unittest.TestCase):
         mamend.assert_not_called()
 
 
-class _AmendFixture(unittest.TestCase):
+class _AmendFixture(GitSandbox):
     """A repository carrying the payload in a past merge, and the remote answers the
-    amend path must get before it may move anything."""
+    amend path must get before it may move anything.
+
+    `GitSandbox` supplies the isolation. It is not incidental here: this repository lives under a
+    root the test owns, so a target given as a pattern reaches only this test's own fixtures — a
+    test that globbed `self.d.parent` when that was the system temp directory pointed a
+    branch-force-updating verb at every repository on the machine.
+    """
 
     def setUp(self):
-        # The host's own git config decided these outcomes: this machine enables ssh signing
-        # globally, so every replacement and every replayed commit was really signed — the suite
-        # took ten times as long here than on a machine that does not sign, and "does it sign?"
-        # was answered by the laptop rather than by the fixture. State goes to a temp dir too, so
-        # no test writes a capture into the operator's own state directory.
-        self._state = tempfile.mkdtemp(prefix="saw-teststate-")
-        self.addCleanup(shutil.rmtree, self._state, True)
-        isolated = mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": "/dev/null",
-                                                "GIT_CONFIG_SYSTEM": "/dev/null",
-                                                "XDG_STATE_HOME": self._state})
-        isolated.start()
-        self.addCleanup(isolated.stop)
-        self.d = Path(tempfile.mkdtemp(prefix="amend-"))
-        _git(self.d, "init", "-q")
-        _git(self.d, "config", "user.email", "t@t.test")
-        _git(self.d, "config", "user.name", "Tester")
-        (self.d / "a.txt").write_text("base\n")
-        _git(self.d, "add", ".")
-        _git(self.d, "commit", "-qm", "init")
-        self.base = subprocess.run(
-            ["git", "-C", str(self.d), "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True, text=True, check=True).stdout.strip()
-        _git(self.d, "checkout", "-qb", "feature")
-        (self.d / "b.txt").write_text("feature\n")
-        _git(self.d, "add", ".")
-        _git(self.d, "commit", "-qm", "feature work")
-        _git(self.d, "checkout", "-q", self.base)
-
-    def tearDown(self):
-        shutil.rmtree(self.d, ignore_errors=True)
+        super().setUp()
+        self.d = self.new_repo("amend", user__name="Tester")
+        self.write(self.d, "a.txt", "base\n")
+        self.commit(self.d, "init")
+        self.base = self.git(self.d, "rev-parse", "--abbrev-ref", "HEAD").strip()
+        self.git(self.d, "checkout", "-qb", "feature")
+        self.write(self.d, "b.txt", "feature\n")
+        self.commit(self.d, "feature work")
+        self.git(self.d, "checkout", "-q", self.base)
 
     def _rev(self, ref="HEAD"):
         return subprocess.run(
