@@ -32,8 +32,16 @@ reader, not the mechanism or the weakness it closed.
   establish who that is it says so instead of assuming. A control it cannot attribute to itself is
   reported as a lock held by another account rather than as an absent one, and neither command
   will open or remove it.
-- **The lock never goes back on over something that arrived while it was off** — on every path out,
-  including the two where the run was already failing for another reason and said nothing about it.
+- **The lock never goes back on over something that arrived while it was off.** Every path that
+  sets it, in both commands, now confirms afterwards that it closed over an empty location — asking
+  first and not looking again is what let an arrival through — and takes it straight off again if
+  it did not.
+- **A location this command changed and could not finish with is handed back to you.** It used to
+  be left read-only, so the file you were being told to go and look at could not be removed from a
+  directory you own, and `--take-back` could not see what had been left behind.
+- **Run again with `sudo` and a control held by another account on the machine is taken over**
+  rather than refused with a reason that was not true of a privileged run. Without `sudo` it is
+  named, and says so. `--take-back` still leaves it alone: it removes only what it placed.
 
 ### Changed
 - **`saw harden` no longer requires root.** Run as yourself it acts where it can, and names
