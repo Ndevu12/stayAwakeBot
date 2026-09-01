@@ -41,7 +41,7 @@ def _issue(id_):
 
 class TestRunContract(unittest.TestCase):
     def test_not_implemented_is_not_success(self):
-        code, text = harden.run(supported=lambda: False, privileged=lambda: True, live=lambda: [])
+        code, text = harden.run(supported=lambda: False, live=lambda: [])
         self.assertEqual(code, 2)
         self.assertIn("not implemented", text.lower())
 
@@ -51,7 +51,7 @@ class TestRunContract(unittest.TestCase):
         tool root — and the locations that need it are named rather than skipped in silence."""
         mine, theirs = Path("/mine"), Path("/theirs")
         code, text = harden.run(
-            supported=lambda: True, privileged=lambda: False, live=lambda: [],
+            supported=lambda: True, live=lambda: [],
             folders=lambda: [mine, theirs],
             apply=lambda p: denial.PathOutcome(p, denial.SELF_ENFORCING, "in place")
             if p == mine else denial.PathOutcome(p, denial.NEEDS_ROOT, "not yours to write to"))
@@ -61,17 +61,15 @@ class TestRunContract(unittest.TestCase):
         self.assertNotEqual(code, 0, "a location it could not take is not a complete result")
 
     def test_live_loader_is_refused(self):
-        code, text = harden.run(supported=lambda: True, privileged=lambda: True,
-                                live=lambda: [_issue("live-obfuscated-process")],
-                                folders=lambda: [], apply=lambda p: None)
+        code, text = harden.run(supported=lambda: True, folders=lambda: [], apply=lambda p: None,
+                                live=lambda: [_issue("live-obfuscated-process")])
         self.assertEqual(code, 1)
         self.assertIn("capture", text.lower())
         self.assertNotIn("enforcing", text)
 
     def test_unreadable_processes_are_refused(self):
-        code, text = harden.run(supported=lambda: True, privileged=lambda: True,
-                                live=lambda: [_issue(PROCESSES_NOT_READABLE_ID)],
-                                folders=lambda: [], apply=lambda p: None)
+        code, text = harden.run(supported=lambda: True, folders=lambda: [], apply=lambda p: None,
+                                live=lambda: [_issue(PROCESSES_NOT_READABLE_ID)])
         self.assertEqual(code, 1)
         self.assertIn("could not be examined", text.lower())
 
@@ -81,8 +79,7 @@ class TestRunContract(unittest.TestCase):
         apply = mock.Mock()
         with mock.patch.object(process, "_snapshot", return_value=Snapshot()):
             code, text = harden.run(
-                supported=lambda: True, privileged=lambda: True,
-                live=process.check_live_processes,
+                supported=lambda: True, live=process.check_live_processes,
                 folders=lambda: [Path("/denial")], apply=apply)
         self.assertEqual(code, 1)
         self.assertIn("could not be examined", text.lower())
@@ -95,8 +92,7 @@ class TestRunContract(unittest.TestCase):
         snap = Snapshot(processes=[Process(pid=1, argv_unreadable=True)], unreadable=1)
         with mock.patch.object(process, "_snapshot", return_value=snap):
             code, _ = harden.run(
-                supported=lambda: True, privileged=lambda: True,
-                live=process.check_live_processes,
+                supported=lambda: True, live=process.check_live_processes,
                 folders=lambda: [p],
                 apply=lambda path: denial.PathOutcome(path, denial.ENFORCING, "in place"))
         self.assertEqual(code, 0)
@@ -104,7 +100,7 @@ class TestRunContract(unittest.TestCase):
     def test_a_run_that_denied_nothing_does_not_claim_it_did(self):
         p = Path("/usr/local/lib/node")
         code, text = harden.run(
-            supported=lambda: True, privileged=lambda: True, live=lambda: [],
+            supported=lambda: True, live=lambda: [],
             folders=lambda: [p],
             apply=lambda path: denial.PathOutcome(path, denial.OCCUPIED,
                                                   "already had something in it, so it was not changed"))
@@ -122,7 +118,7 @@ class TestRunContract(unittest.TestCase):
             return denial.PathOutcome(path, denial.OCCUPIED,
                                       "already had something in it, so it was not changed")
         code, text = harden.run(
-            supported=lambda: True, privileged=lambda: True, live=lambda: [],
+            supported=lambda: True, live=lambda: [],
             folders=lambda: [a, b], apply=apply)
         self.assertEqual(code, 3)
         self.assertNotIn("is denied", text)
@@ -131,7 +127,7 @@ class TestRunContract(unittest.TestCase):
     def test_enforcing_only_when_every_target_reads_back(self):
         p = Path("/denial")
         code, text = harden.run(
-            supported=lambda: True, privileged=lambda: True, live=lambda: [],
+            supported=lambda: True, live=lambda: [],
             folders=lambda: [p],
             apply=lambda path: denial.PathOutcome(path, denial.ENFORCING, "in place"))
         self.assertEqual(code, 0)
@@ -142,7 +138,7 @@ class TestRunContract(unittest.TestCase):
     def test_a_write_that_is_not_read_back_is_unknown_never_success(self):
         p = Path("/denial")
         code, text = harden.run(
-            supported=lambda: True, privileged=lambda: True, live=lambda: [],
+            supported=lambda: True, live=lambda: [],
             folders=lambda: [p],
             apply=lambda path: denial.PathOutcome(path, denial.UNKNOWN, "could not be verified"))
         self.assertEqual(code, 3)
@@ -152,7 +148,7 @@ class TestRunContract(unittest.TestCase):
     def test_occupied_is_not_success_and_names_that_it_was_not_changed(self):
         p = Path("/denial")
         code, text = harden.run(
-            supported=lambda: True, privileged=lambda: True, live=lambda: [],
+            supported=lambda: True, live=lambda: [],
             folders=lambda: [p],
             apply=lambda path: denial.PathOutcome(path, denial.OCCUPIED,
                                                   "already had something in it, so it was not changed"))
@@ -167,13 +163,13 @@ class TestRunContract(unittest.TestCase):
             return denial.PathOutcome(path, denial.OCCUPIED,
                                       "already had something in it, so it was not changed")
         code, _ = harden.run(
-            supported=lambda: True, privileged=lambda: True, live=lambda: [],
+            supported=lambda: True, live=lambda: [],
             folders=lambda: [a, b], apply=apply)
         self.assertEqual(code, 3)
 
     def test_no_targets_is_not_success(self):
         code, _ = harden.run(
-            supported=lambda: True, privileged=lambda: True, live=lambda: [],
+            supported=lambda: True, live=lambda: [],
             folders=lambda: [], apply=lambda p: None)
         self.assertEqual(code, 3)
 
@@ -184,7 +180,7 @@ class TestRunContract(unittest.TestCase):
             seen.append(path)
             return denial.PathOutcome(path, denial.ENFORCING, "in place")
         code, _ = harden.run(
-            supported=lambda: True, privileged=lambda: True, live=lambda: [],
+            supported=lambda: True, live=lambda: [],
             folders=lambda: paths, apply=apply)
         self.assertEqual(code, 0)
         self.assertEqual(seen, paths)
@@ -196,8 +192,7 @@ class TestRunContract(unittest.TestCase):
     def test_other_live_findings_do_not_refuse(self):
         p = Path("/denial")
         code, _ = harden.run(
-            supported=lambda: True, privileged=lambda: True,
-            live=lambda: [_issue("some-other-hygiene")],
+            supported=lambda: True, live=lambda: [_issue("some-other-hygiene")],
             folders=lambda: [p],
             apply=lambda path: denial.PathOutcome(path, denial.ENFORCING, "in place"))
         self.assertEqual(code, 0)
@@ -205,8 +200,7 @@ class TestRunContract(unittest.TestCase):
     def test_capture_refuses_before_any_write(self):
         apply = mock.Mock()
         code, _ = harden.run(
-            supported=lambda: True, privileged=lambda: True,
-            live=lambda: [_issue("live-obfuscated-process")],
+            supported=lambda: True, live=lambda: [_issue("live-obfuscated-process")],
             folders=lambda: [Path("/denial")], apply=apply)
         self.assertEqual(code, 1)
         apply.assert_not_called()
@@ -215,7 +209,7 @@ class TestRunContract(unittest.TestCase):
         """The inverse of what this used to pin: the run no longer stops before trying."""
         apply = mock.Mock(return_value=denial.PathOutcome(Path("/denial"),
                                                           denial.SELF_ENFORCING, "in place"))
-        harden.run(supported=lambda: True, privileged=lambda: False, live=lambda: [],
+        harden.run(supported=lambda: True, live=lambda: [],
                    folders=lambda: [Path("/denial")], apply=apply)
         apply.assert_called_once()
 
@@ -224,15 +218,14 @@ class TestRunContract(unittest.TestCase):
         stage, and a denied write kills the process that holds it."""
         apply = mock.Mock()
         code, _ = harden.run(
-            supported=lambda: True, privileged=lambda: False,
-            live=lambda: [_issue("live-obfuscated-process")],
+            supported=lambda: True, live=lambda: [_issue("live-obfuscated-process")],
             folders=lambda: [Path("/denial")], apply=apply)
         self.assertEqual(code, 1)
         apply.assert_not_called()
 
     def test_a_self_held_result_is_never_reported_as_root_held(self):
         code, text = harden.run(
-            supported=lambda: True, privileged=lambda: False, live=lambda: [],
+            supported=lambda: True, live=lambda: [],
             folders=lambda: [Path("/mine")],
             apply=lambda p: denial.PathOutcome(p, denial.SELF_ENFORCING, "in place"))
         self.assertIn("enforcing-as-you", text)

@@ -79,8 +79,7 @@ def take_back(*, folders=_global_folders, remove=remove_one,
 
 
 def run(*, live=check_live_processes, folders=_global_folders,
-        apply=apply_one, privileged=hostdenial.privileged,
-        supported=hostdenial.platform_supported) -> tuple[int, str]:
+        apply=apply_one, supported=hostdenial.platform_supported) -> tuple[int, str]:
     """Apply the denial at every global-resolution entry. Enforcing only after read-back.
 
     Root is asked of the PATH rather than of the command. Most of these locations belong to the
