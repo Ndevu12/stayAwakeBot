@@ -12,6 +12,23 @@ from stayawake.utils import operator
 
 _UF_IMMUTABLE = getattr(stat, "UF_IMMUTABLE", 0x00000002)
 
+# Absolute, because the answer these give decides whether a control is reported as in place. Found
+# by name they come from `PATH`, and this command now runs unprivileged by design — where `PATH`
+# belongs to whoever ran it, and a program earlier in it that prints a flags field containing `i`
+# makes an unlocked directory read back as locked. A tool that is not at one of these is absent,
+# which is a different answer from "not locked" and is never success.
+_ATTR_TOOLS = {
+    "lsattr": ("/usr/bin/lsattr", "/bin/lsattr", "/usr/sbin/lsattr"),
+    "chattr": ("/usr/bin/chattr", "/bin/chattr", "/usr/sbin/chattr"),
+}
+
+
+def _attr_tool(name: str) -> str | None:
+    for candidate in _ATTR_TOOLS[name]:
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
 
 def privileged() -> bool:
     geteuid = getattr(os, "geteuid", None)
@@ -39,8 +56,11 @@ def immutable(path: Path) -> bool:
         except (OSError, AttributeError):
             return False
     if sys.platform == "linux":
+        tool = _attr_tool("lsattr")
+        if tool is None:
+            return False
         try:
-            r = subprocess.run(["lsattr", "-d", "--", str(path)],
+            r = subprocess.run([tool, "-d", "--", str(path)],
                                capture_output=True, text=True, timeout=5)
         except (OSError, subprocess.SubprocessError):
             return False
@@ -126,8 +146,11 @@ def clear_immutable(path: Path) -> bool:
         except (OSError, NotImplementedError):
             return False
     if sys.platform == "linux":
+        tool = _attr_tool("chattr")
+        if tool is None:
+            return False
         try:
-            r = subprocess.run(["chattr", "-i", "--", str(path)],
+            r = subprocess.run([tool, "-i", "--", str(path)],
                                capture_output=True, text=True, timeout=5)
         except (OSError, subprocess.SubprocessError):
             return False
@@ -150,8 +173,11 @@ def set_immutable(path: Path) -> bool:
         except (OSError, NotImplementedError):
             return False
     if sys.platform == "linux":
+        tool = _attr_tool("chattr")
+        if tool is None:
+            return False
         try:
-            r = subprocess.run(["chattr", "+i", "--", str(path)],
+            r = subprocess.run([tool, "+i", "--", str(path)],
                                capture_output=True, text=True, timeout=5)
         except (OSError, subprocess.SubprocessError):
             return False

@@ -35,7 +35,7 @@ class Operator:
     @property
     def raised(self) -> bool:
         """Whether privilege was raised to run this — i.e. `HOME` may not be the operator's."""
-        return self.via == "sudo"
+        return self.via == "raised"
 
 
 def resolve(env=None) -> Operator | None:
@@ -45,16 +45,56 @@ def resolve(env=None) -> Operator | None:
     and acting on root's home while reporting success is the failure this exists to prevent.
     """
     env = os.environ if env is None else env
-    raised = env.get("SUDO_UID") or env.get("SUDO_USER")
-    if raised:
-        record = _from_sudo(env)
-        return record
+    if _raised(env):
+        return _from_escalation(env)
     home = env.get("HOME")
     if not home:
         return None
     geteuid = getattr(os, "geteuid", None)
     return Operator(name=env.get("USER") or "", uid=geteuid() if geteuid else -1,
                     home=Path(home), via="environment")
+
+
+# Every way privilege is commonly raised, and the variable each one leaves behind. Recognising
+# only `sudo` fixed the grading for one tool and left the same defect under the next: `doas` and
+# `pkexec` set none of sudo's variables, so the effective uid — root — was taken as the operator's.
+_ESCALATION_UIDS = ("SUDO_UID", "PKEXEC_UID")
+_ESCALATION_NAMES = ("SUDO_USER", "DOAS_USER")
+
+
+def _raised(env) -> bool:
+    """Whether something raised privilege to run this.
+
+    An effective uid of 0 with no marker counts: it is the case this cannot answer, and answering
+    it from `HOME` is what produced the defect this exists to prevent.
+    """
+    if any(env.get(v) for v in _ESCALATION_UIDS + _ESCALATION_NAMES):
+        return True
+    geteuid = getattr(os, "geteuid", None)
+    return geteuid is not None and geteuid() == 0
+
+
+def _from_escalation(env) -> Operator | None:
+    for var in _ESCALATION_UIDS:
+        uid = env.get(var)
+        if uid and uid.isdigit():
+            try:
+                record = pwd.getpwuid(int(uid))
+            except KeyError:
+                continue
+            return Operator(name=record.pw_name, uid=record.pw_uid,
+                            home=Path(record.pw_dir), via="raised")
+    for var in _ESCALATION_NAMES:
+        name = env.get(var)
+        if not name:
+            continue
+        try:
+            record = pwd.getpwnam(name)
+        except KeyError:
+            continue
+        return Operator(name=record.pw_name, uid=record.pw_uid,
+                        home=Path(record.pw_dir), via="raised")
+    return None
 
 
 def _from_sudo(env) -> Operator | None:

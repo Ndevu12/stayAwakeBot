@@ -13,6 +13,17 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Added
+- **`saw harden --take-back` removes the controls the command placed.** It removes only those, and
+  reports anything it did not remove. A location holding anything is left as it stands.
+
+### Fixed
+- **`saw harden` reports a control as in place only on evidence it cannot be fed.** What it reads
+  to decide that is no longer influenced by the environment of whoever runs it.
+- **Raising a control no longer risks closing over something that arrived while it was open.**
+- **`saw harden` recognises the operator whichever way privilege was raised**, and when it cannot
+  establish who that is it says so instead of assuming.
+
 ### Changed
 - **`saw harden` no longer requires root.** Run as yourself it acts where it can, and names
   anything it did not take rather than stopping. Run again with `sudo` to act on the rest and to

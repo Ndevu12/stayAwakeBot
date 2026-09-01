@@ -11,6 +11,7 @@ write is unknown, never success. The result does not claim that one control prot
 ```text
 saw harden
 sudo saw harden
+saw harden --take-back
 ```
 
 Root is not required. Run it as yourself and it acts where it can; anything it did not take is
@@ -24,5 +25,7 @@ If it could not examine what is running on this machine, it refuses as well. Nei
 whether you gave it root.
 
 Anything already in use is left unchanged.
+
+`--take-back` removes the controls this command placed, and reports anything it did not remove.
 
 See [audit a machine](../../how-to/audit-a-machine.md) for the read-only view of the same host.

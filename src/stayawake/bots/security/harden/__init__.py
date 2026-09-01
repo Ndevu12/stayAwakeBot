@@ -6,11 +6,13 @@ from stayawake.bots.security.hygiene.host_artifacts import _global_folders
 from stayawake.bots.security.hygiene.models import PROCESSES_NOT_READABLE_ID
 from stayawake.bots.security.hygiene.process import check_live_processes
 from stayawake.utils import hostdenial
-from .denial import (ENFORCING, IN_A_LIVE_INSTALL, NEEDS_ROOT, NOT_HERE_YET, OCCUPIED,
-                     SELF_ENFORCING, UNKNOWN, PathOutcome, apply_one)
+from .denial import (ENFORCING, IN_A_LIVE_INSTALL, NEEDS_ROOT, NOT_HERE_YET,
+                     NOTHING_TO_REMOVE, OCCUPIED, REMOVED, SELF_ENFORCING, UNKNOWN,
+                     PathOutcome, apply_one, remove_one)
 
 __all__ = ["run", "apply_one", "PathOutcome", "ENFORCING", "SELF_ENFORCING",
-           "NEEDS_ROOT", "IN_A_LIVE_INSTALL", "NOT_HERE_YET", "UNKNOWN", "OCCUPIED"]
+           "NEEDS_ROOT", "IN_A_LIVE_INSTALL", "NOT_HERE_YET", "REMOVED",
+           "NOTHING_TO_REMOVE", "UNKNOWN", "OCCUPIED", "remove_one"]
 
 
 _LIVE = "live-obfuscated-process"
@@ -39,6 +41,29 @@ _NOT_EVERYWHERE = (
     "stood — this command removes nothing — so inspect each one yourself and do NOT rotate any "
     "credential until you have."
 )
+
+
+_TOOK_BACK = "Every control this tool placed here has been taken back."
+_NOT_ALL_BACK = ("Not every control was taken back. Anything below that is still in place was "
+                 "left exactly as it stood.")
+
+
+def take_back(*, folders=_global_folders, remove=remove_one,
+              supported=hostdenial.platform_supported) -> tuple[int, str]:
+    """Remove the denials this tool placed. Removed only after a read-back says the path is gone.
+
+    No capture gate here: this opens a location rather than closing one, so it cannot crash a
+    process that a payload is holding open — which is the reason applying one waits for capture.
+    """
+    if not supported():
+        return 2, _NOT_HERE
+    outcomes = [remove(p) for p in folders()]
+    settled = {REMOVED, NOTHING_TO_REMOVE}
+    done = bool(outcomes) and all(o.state in settled for o in outcomes)
+    lines = [_TOOK_BACK if done else _NOT_ALL_BACK, ""]
+    for o in outcomes:
+        lines.append(f"  {o.state}: {o.path} — {o.detail}")
+    return (0, "\n".join(lines).rstrip()) if done else (3, "\n".join(lines).rstrip())
 
 
 def run(*, live=check_live_processes, folders=_global_folders,

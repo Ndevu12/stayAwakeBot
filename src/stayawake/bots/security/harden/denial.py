@@ -15,6 +15,8 @@ SELF_ENFORCING = "enforcing-as-you"
 NEEDS_ROOT = "needs-root"
 IN_A_LIVE_INSTALL = "in-a-live-install"
 NOT_HERE_YET = "not-here-yet"
+REMOVED = "removed"
+NOTHING_TO_REMOVE = "nothing-to-remove"
 UNKNOWN = "unknown"
 OCCUPIED = "occupied"
 
@@ -129,6 +131,11 @@ def _take_ownership(path: Path) -> PathOutcome:
     except (OSError, NotImplementedError):
         hostdenial.set_immutable(path)
         return _unknown(path, "could not be raised to root")
+    # The owner cannot be changed while the flag is set, so the location is briefly open. Anything
+    # that arrives in that gap must NOT be sealed in: locking it would put content beyond the
+    # operator's reach at the exact location this exists to keep empty.
+    if not hostdenial.empty_dir(path):
+        return _occupied(path)
     if not hostdenial.set_immutable(path) or not hostdenial.holds(path):
         return _unknown(path, "could not be verified")
     return PathOutcome(path, ENFORCING, _ROOT_DETAIL)
@@ -213,3 +220,33 @@ def apply_one(path: Path) -> PathOutcome:
     if held == hostdenial.SELF_HELD:
         return PathOutcome(path, SELF_ENFORCING, _SELF_DETAIL)
     return _unknown(path, "could not be verified")
+
+
+def remove_one(path: Path) -> PathOutcome:
+    """Take back a denial this tool placed, and nothing else.
+
+    What it will remove is decided by SHAPE, the same way a denial is recognised: an empty
+    directory nothing can write into, at a location this tool targets. That is deliberately not
+    "unlock what I am pointed at" — a location holding someone's content, or a lock at a path this
+    does not target, is not this command's to open. The removal is read back; a directory still
+    there afterwards is never reported as gone.
+    """
+    held = hostdenial.held_by(path)
+    if held is None:
+        return PathOutcome(path, NOTHING_TO_REMOVE, "no control of this tool's here")
+    if held == hostdenial.ROOT_HELD and not hostdenial.privileged():
+        return PathOutcome(path, NEEDS_ROOT,
+                           "root holds this one — run again with sudo to take it back")
+    if not hostdenial.clear_immutable(path):
+        return _unknown(path, "the lock could not be taken off")
+    if not hostdenial.empty_dir(path):
+        hostdenial.set_immutable(path)
+        return _occupied(path)
+    try:
+        os.rmdir(path)
+    except OSError:
+        hostdenial.set_immutable(path)
+        return _unknown(path, "could not be removed")
+    if path.exists():
+        return _unknown(path, "could not be verified")
+    return PathOutcome(path, REMOVED, "taken back")

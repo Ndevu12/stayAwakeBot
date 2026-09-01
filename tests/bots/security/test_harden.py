@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 import contextlib
+import pwd
 from unittest import mock
 
 from stayawake.bots.security import harden
@@ -25,13 +26,13 @@ def locked(*paths: Path):
     grading logic on one platform and nothing on the other. The flag is the OS's business and is
     covered separately, where it can actually be set.
     """
-    wanted = {Path(p).resolve() for p in paths}
-    real = hostdenial.immutable
-    with mock.patch.object(hostdenial, "immutable",
-                           lambda p: Path(p).resolve() in wanted or real(p)), \
+    held = {Path(p).resolve() for p in paths}
+    with mock.patch.object(hostdenial, "immutable", lambda p: Path(p).resolve() in held), \
          mock.patch.object(hostdenial, "set_immutable",
-                           lambda p: bool(wanted.add(Path(p).resolve()) or True)):
-        yield
+                           lambda p: bool(held.add(Path(p).resolve()) or True)), \
+         mock.patch.object(hostdenial, "clear_immutable",
+                           lambda p: bool(held.discard(Path(p).resolve()) or True)):
+        yield held
 
 
 def _issue(id_):
@@ -626,6 +627,181 @@ class TestALiveInstallIsLeftRemovable(unittest.TestCase):
         with locked():
             self.assertEqual(denial.apply_one(prefix / "lib" / "node").state,
                              denial.SELF_ENFORCING)
+
+
+class TestTheReadBackDoesNotTrustPath(unittest.TestCase):
+    """What decides whether a control is reported as in place must not come from `PATH`. This
+    command now runs unprivileged by design, so `PATH` belongs to whoever ran it — and a program
+    earlier in it that prints a flags field containing `i` would make an unlocked directory read
+    back as locked."""
+
+    def test_the_tools_are_looked_for_at_absolute_paths_only(self):
+        for name, candidates in hostdenial._ATTR_TOOLS.items():
+            with self.subTest(tool=name):
+                self.assertTrue(candidates, f"{name} must have somewhere to be found")
+                for candidate in candidates:
+                    self.assertTrue(candidate.startswith("/"),
+                                    f"{candidate} would be resolved through PATH")
+
+    def test_a_tool_that_is_not_there_is_never_looked_for_on_path(self):
+        """Asserting only the return value cannot see this: on a host without the tool, a bare
+        name fails too, so both answer False and the mutation hides. What has to hold is that
+        nothing is executed at all — that is what keeps `PATH` out of the decision."""
+        # A directory that EXISTS: the write paths check the path first, so a made-up one bails
+        # before it would ever look for a tool, and the assertion passes without testing anything.
+        target = Path(tempfile.mkdtemp(prefix="harden-notool-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(target, ignore_errors=True))
+        with mock.patch.object(hostdenial, "_attr_tool", return_value=None), \
+             mock.patch.object(hostdenial.sys, "platform", "linux"), \
+             mock.patch.object(hostdenial.subprocess, "run") as ran:
+            self.assertFalse(hostdenial.immutable(target))
+            self.assertFalse(hostdenial.set_immutable(target))
+            self.assertFalse(hostdenial.clear_immutable(target))
+        ran.assert_not_called()
+
+    def test_the_source_names_no_bare_tool(self):
+        """A regression here would be one word, and it would be invisible in a diff review."""
+        source = Path(hostdenial.__file__).read_text(encoding="utf-8")
+        for bare in ('["lsattr"', '["chattr"', "'lsattr'", "'chattr'"):
+            self.assertNotIn(bare, source)
+
+
+class TestNothingIsSealedInDuringTheUpgrade(unittest.TestCase):
+    """The owner cannot be changed while the flag is set, so raising a control briefly opens the
+    location. Anything that arrives in that gap must not be locked in — that would put content at
+    the exact location this exists to keep empty, out of the operator's reach."""
+
+    def setUp(self):
+        self.d = Path(tempfile.mkdtemp(prefix="harden-window-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.d, ignore_errors=True))
+
+    def test_content_arriving_in_the_gap_is_not_locked_in(self):
+        target = self.d / "held"
+        target.mkdir()
+        held = {target.resolve()}
+
+        def arrives(path, *_a, **_k):
+            (Path(path) / "payload.js").write_text("x")
+
+        with mock.patch.object(hostdenial, "immutable",
+                               lambda p: Path(p).resolve() in held), \
+             mock.patch.object(hostdenial, "clear_immutable",
+                               lambda p: held.discard(Path(p).resolve()) or True), \
+             mock.patch.object(hostdenial, "set_immutable",
+                               lambda p: bool(held.add(Path(p).resolve()) or True)), \
+             mock.patch.object(os, "geteuid", lambda: 0), \
+             mock.patch.dict(os.environ, {"SUDO_UID": str(os.getuid())}), \
+             mock.patch.object(denial.os, "chown", arrives):
+            out = denial.apply_one(target)
+
+        self.assertEqual(out.state, denial.OCCUPIED)
+        self.assertNotIn(target.resolve(), held, "it must not end up locked around that content")
+
+
+class TestTakingAControlBack(unittest.TestCase):
+    def setUp(self):
+        self.d = Path(tempfile.mkdtemp(prefix="harden-back-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.d, ignore_errors=True))
+
+    def _dir(self, name: str) -> Path:
+        target = self.d / name
+        target.mkdir()
+        return target
+
+    def test_a_control_this_tool_placed_is_removed(self):
+        target = self._dir("denied")
+        with locked(target):
+            out = denial.remove_one(target)
+        self.assertEqual(out.state, denial.REMOVED)
+        self.assertFalse(target.exists())
+
+    def test_a_locked_directory_holding_content_is_left_alone(self):
+        """The danger in this verb is the obvious implementation: one that unlocks whatever it is
+        pointed at is a way to open a location on request, wearing a helpful name."""
+        target = self._dir("theirs")
+        (target / "keep.txt").write_text("x")
+        with locked(target) as held:
+            out = denial.remove_one(target)
+            self.assertIn(target.resolve(), held, "it is never even unlocked")
+        self.assertEqual(out.state, denial.NOTHING_TO_REMOVE)
+        self.assertTrue((target / "keep.txt").exists())
+
+    def test_content_arriving_before_the_removal_stops_it(self):
+        """The race guard: emptiness is established, then the lock comes off, and only then is it
+        removed. Something arriving in between must put the lock back, not lose the content."""
+        target = self._dir("racy")
+        with locked(target) as held:
+            def arrives(p):
+                held.discard(Path(p).resolve())
+                (Path(p) / "late.txt").write_text("x")
+                return True
+            with mock.patch.object(hostdenial, "clear_immutable", arrives):
+                out = denial.remove_one(target)
+            self.assertIn(target.resolve(), held, "it is locked again")
+        self.assertEqual(out.state, denial.OCCUPIED)
+        self.assertTrue((target / "late.txt").exists())
+
+    def test_a_location_holding_nothing_of_ours_is_not_touched(self):
+        target = self.d / "plain"
+        target.mkdir()
+        out = denial.remove_one(target)
+        self.assertEqual(out.state, denial.NOTHING_TO_REMOVE)
+        self.assertTrue(target.exists())
+
+    def test_one_root_holds_needs_privilege_to_take_back(self):
+        target = self.d / "roots"
+        target.mkdir()
+        with mock.patch.object(hostdenial, "held_by", return_value=hostdenial.ROOT_HELD), \
+             mock.patch.object(hostdenial, "privileged", return_value=False):
+            out = denial.remove_one(target)
+        self.assertEqual(out.state, denial.NEEDS_ROOT)
+        self.assertTrue(target.exists())
+
+    def test_a_removal_that_did_not_happen_is_never_reported_as_done(self):
+        target = self._dir("stubborn")
+        with locked(target), mock.patch.object(denial.os, "rmdir", lambda p: None):
+            out = denial.remove_one(target)
+        self.assertEqual(out.state, denial.UNKNOWN)
+
+    def test_taking_back_does_not_wait_for_capture(self):
+        """Applying a control waits for a live process to be captured, because a denied write
+        kills it. This opens a location rather than closing one."""
+        removed = []
+        code, text = harden.take_back(
+            supported=lambda: True, folders=lambda: [Path("/x")],
+            remove=lambda p: removed.append(p) or denial.PathOutcome(p, denial.REMOVED, "gone"))
+        self.assertEqual(code, 0)
+        self.assertTrue(removed)
+
+
+class TestEveryWayPrivilegeIsRaised(unittest.TestCase):
+    """Recognising only `sudo` fixed the grading for one tool and left the same defect under the
+    next: the effective uid is root under all of them."""
+
+    def _as_root(self, env):
+        with mock.patch.object(os, "geteuid", lambda: 0):
+            return operator.resolve(env)
+
+    def test_each_escalation_resolves_to_the_invoker(self):
+        me = pwd.getpwuid(os.getuid())
+        for var, value in (("SUDO_UID", str(me.pw_uid)), ("SUDO_USER", me.pw_name),
+                           ("DOAS_USER", me.pw_name), ("PKEXEC_UID", str(me.pw_uid))):
+            with self.subTest(var=var):
+                who = self._as_root({"HOME": "/var/root", var: value})
+                self.assertIsNotNone(who, f"{var} names the invoker")
+                self.assertEqual(who.uid, me.pw_uid)
+
+    def test_root_with_no_marker_is_refused_not_guessed(self):
+        """Answering this from `HOME` is what produced the defect in the first place."""
+        self.assertIsNone(self._as_root({"HOME": "/var/root"}))
+
+    def test_an_account_that_does_not_resolve_is_refused(self):
+        self.assertIsNone(self._as_root({"HOME": "/var/root", "SUDO_USER": "no-such-account"}))
+
+    def test_without_escalation_the_environment_answers(self):
+        with mock.patch.object(os, "geteuid", lambda: os.getuid()):
+            who = operator.resolve({"HOME": "/Users/x", "USER": "x"})
+        self.assertEqual(who.home, Path("/Users/x"))
 
 
 if __name__ == "__main__":
