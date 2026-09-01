@@ -172,7 +172,10 @@ def _host_artifacts() -> tuple[list[str], list[tuple[str, Path, str]], list[Path
     # that the location EXISTS AT ALL. Nothing ordinary creates one — an `npm install` in $HOME
     # makes `node_modules` with no dot — so an empty one is still something that was put there.
     for location in _global_folders():
-        if hostdenial.held_by(location) is not None:
+        # Named grades, not "anything holds it": the question here is whether the lock is THIS
+        # TOOL'S OWN WORK, and one under a third account is not — it keeps the grade it had before
+        # that state existed rather than being credited on the strength of its shape alone.
+        if hostdenial.held_by(location) in (hostdenial.ROOT_HELD, hostdenial.SELF_HELD):
             controlled.append(location)
             continue
         if _present_dir(location):

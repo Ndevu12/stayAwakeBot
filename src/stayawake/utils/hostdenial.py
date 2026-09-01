@@ -78,6 +78,7 @@ def immutable(path: Path) -> bool:
 
 ROOT_HELD = "root"
 SELF_HELD = "self"
+OTHER_HELD = "other"
 
 
 def held_by(path: Path) -> str | None:
@@ -90,6 +91,13 @@ def held_by(path: Path) -> str | None:
 
     Both are worth setting. An unguarded write to either throws and takes the writing process with
     it; only the second can be undone by whatever it was set against.
+
+    `other` is the same lock under a third account, and it used to answer None — "nothing holds
+    this" over a directory that plainly does. The caller then tried to write and got an EPERM the
+    flag had guaranteed, which it reported as "could not be written": a lock this cannot verify or
+    clear, described to the operator as an absent control and an unexplained failure. It is also
+    the answer whenever the account cannot be resolved correctly, which is the case that keeps a
+    real control visible rather than reading as gone.
     """
     try:
         st = path.lstat()
@@ -103,7 +111,7 @@ def held_by(path: Path) -> str | None:
         return ROOT_HELD
     if st.st_uid == operator.acting_uid():
         return SELF_HELD
-    return None
+    return OTHER_HELD
 
 
 def holds(path: Path) -> bool:

@@ -29,7 +29,11 @@ reader, not the mechanism or the weakness it closed.
 - **`saw harden --take-back` no longer reports a run as complete over a location it left open**,
   and says which locations to look at first.
 - **`saw harden` recognises the operator whichever way privilege was raised**, and when it cannot
-  establish who that is it says so instead of assuming.
+  establish who that is it says so instead of assuming. A control it cannot attribute to itself is
+  reported as a lock held by another account rather than as an absent one, and neither command
+  will open or remove it.
+- **The lock never goes back on over something that arrived while it was off** — on every path out,
+  including the two where the run was already failing for another reason and said nothing about it.
 
 ### Changed
 - **`saw harden` no longer requires root.** Run as yourself it acts where it can, and names

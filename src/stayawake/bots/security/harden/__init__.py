@@ -6,15 +6,16 @@ from stayawake.bots.security.hygiene.host_artifacts import _global_folders
 from stayawake.bots.security.hygiene.models import PROCESSES_NOT_READABLE_ID
 from stayawake.bots.security.hygiene.process import check_live_processes
 from stayawake.utils import hostdenial
-from .denial import (ENFORCING, IN_A_LIVE_INSTALL, LEFT_OPEN_OVER_CONTENT, NEEDS_ROOT,
-                     NOT_HERE_YET, LOCKED_OVER_CONTENT, NOTHING_TO_REMOVE,
+from .denial import (ENFORCING, HELD_BY_ANOTHER, IN_A_LIVE_INSTALL, LEFT_OPEN_OVER_CONTENT,
+                     NEEDS_ROOT, NOT_HERE_YET, LOCKED_OVER_CONTENT, NOTHING_TO_REMOVE,
                      NOT_WHERE_IT_WAS_NAMED, OCCUPIED, REMOVED, SELF_ENFORCING, UNKNOWN,
                      PathOutcome, apply_one, remove_one)
 
 __all__ = ["run", "apply_one", "PathOutcome", "ENFORCING", "SELF_ENFORCING",
            "NEEDS_ROOT", "IN_A_LIVE_INSTALL", "NOT_HERE_YET", "REMOVED",
            "NOTHING_TO_REMOVE", "LOCKED_OVER_CONTENT", "LEFT_OPEN_OVER_CONTENT",
-           "NOT_WHERE_IT_WAS_NAMED", "UNKNOWN", "OCCUPIED", "remove_one", "take_back"]
+           "HELD_BY_ANOTHER", "NOT_WHERE_IT_WAS_NAMED", "UNKNOWN", "OCCUPIED",
+           "remove_one", "take_back"]
 
 
 _LIVE = "live-obfuscated-process"

@@ -19,6 +19,7 @@ REMOVED = "removed"
 NOTHING_TO_REMOVE = "nothing-to-remove"
 LOCKED_OVER_CONTENT = "locked-over-content"
 LEFT_OPEN_OVER_CONTENT = "left-open-over-content"
+HELD_BY_ANOTHER = "held-by-another-account"
 NOT_WHERE_IT_WAS_NAMED = "not-where-it-was-named"
 UNKNOWN = "unknown"
 OCCUPIED = "occupied"
@@ -118,6 +119,11 @@ def _graded(path: Path) -> PathOutcome | None:
         if hostdenial.privileged():
             return _take_ownership(path)
         return PathOutcome(path, SELF_ENFORCING, _SELF_DETAIL)
+    if held == hostdenial.OTHER_HELD:
+        return PathOutcome(path, HELD_BY_ANOTHER,
+                           "a locked, empty directory here belongs to another account on this "
+                           "machine — this run can neither verify it nor clear it, so it was left "
+                           "as it stood")
     return None
 
 
@@ -126,6 +132,10 @@ def _take_ownership(path: Path) -> PathOutcome:
 
     The flag has to come off to change the owner and go back on afterwards, so this is only worth
     doing with the privilege to finish it — a half-done upgrade leaves the location open.
+
+    Every exit that puts the flag back asks first whether the location is still empty. That is one
+    rule with three exits and it was written at one of them, so a run that lost the race AND failed
+    sealed the arrival in and reported a reason that never mentioned it.
     """
     try:
         owner_before = path.lstat().st_uid
@@ -136,8 +146,7 @@ def _take_ownership(path: Path) -> PathOutcome:
     try:
         os.chown(path, 0, 0, follow_symlinks=False)
     except (OSError, NotImplementedError):
-        hostdenial.set_immutable(path)
-        return _unknown(path, "could not be raised to root")
+        return _lock_back_over_nothing(path, owner_before, "could not be raised to root")
     # The owner cannot be changed while the flag is set, so the location is briefly open. Anything
     # that arrives in that gap must NOT be sealed in: locking it would put content beyond the
     # operator's reach at the exact location this exists to keep empty. Reporting that as
@@ -145,9 +154,25 @@ def _take_ownership(path: Path) -> PathOutcome:
     # arrived file unremovable without sudo, at a location every later run then skipped.
     if not hostdenial.empty_dir(path):
         return _hand_back(path, owner_before)
-    if not hostdenial.set_immutable(path) or not hostdenial.holds(path):
+    if not hostdenial.set_immutable(path):
         return _unknown(path, "could not be verified")
+    if not hostdenial.holds(path):
+        return _lock_back_over_nothing(path, owner_before, "could not be verified")
     return PathOutcome(path, ENFORCING, _ROOT_DETAIL)
+
+
+def _lock_back_over_nothing(path: Path, owner: int, failure: str) -> PathOutcome:
+    """Leave the flag on only while the location is still empty; hand it back if it is not.
+
+    The read-back that decides this runs after the window, so it also catches an arrival between
+    the check above and the write — the flag can be on by the time this is asked, and it comes off
+    again rather than staying closed over content.
+    """
+    if hostdenial.empty_dir(path):
+        hostdenial.set_immutable(path)
+        return _unknown(path, failure)
+    hostdenial.clear_immutable(path)
+    return _hand_back(path, owner)
 
 
 def _hand_back(path: Path, owner: int) -> PathOutcome:
@@ -158,18 +183,36 @@ def _hand_back(path: Path, owner: int) -> PathOutcome:
     that arrived from a directory they own — and MEASURED, that is the state the earlier version
     reported as "not changed". `0o700` rather than what was there before: the location is known to
     be holding something now, and nobody else needs to read it.
+
+    Which of the two things it then says is READ BACK, never assumed from whether the calls threw:
+    this is also reached after a failed raise to root, where the owner never changed, and asserting
+    "it is root's now" there told the operator to fetch sudo for a directory already their own.
     """
     try:
         os.chmod(path, 0o700, follow_symlinks=False)
         os.chown(path, owner, -1, follow_symlinks=False)
     except (OSError, NotImplementedError):
+        pass
+    opening = "something arrived while the lock was off; the lock was NOT put back, so nothing is "
+    if _reachable_by(path, owner):
         return PathOutcome(path, LEFT_OPEN_OVER_CONTENT,
-                           "something arrived while the lock was off; the lock was NOT put back, "
-                           "so nothing is sealed in, but the directory is root's — read what is in "
-                           "it with sudo before anything else")
+                           opening + "sealed in and you can read and remove what is in it")
     return PathOutcome(path, LEFT_OPEN_OVER_CONTENT,
-                       "something arrived while the lock was off; it has been left unlocked and "
-                       "yours, so you can read and remove what is in it")
+                       opening + "sealed in, but the directory is not yours — read what is in it "
+                       "with sudo before anything else")
+
+
+def _reachable_by(path: Path, owner: int) -> bool:
+    """Whether `owner` can now open the directory and remove what is in it.
+
+    Asked of the filesystem rather than of `os.access`, which answers for the EFFECTIVE uid — and
+    every caller here is running as root, where it says yes to everything.
+    """
+    try:
+        st = path.stat()
+    except OSError:
+        return False
+    return st.st_uid == owner and bool(st.st_mode & stat.S_IWUSR)
 
 
 def _parent_is_here(path: Path) -> bool:
@@ -287,6 +330,12 @@ def remove_one(path: Path) -> PathOutcome:
                                "locked, and holding something — this command did not put that "
                                "there and will not open it; look at it before anything else")
         return PathOutcome(path, NOTHING_TO_REMOVE, "no control of this tool's here")
+    if held == hostdenial.OTHER_HELD:
+        # Before this grade existed the answer here was None, which reached the refusal above only
+        # because the directory is immutable. Reaching the removal instead would unlock and delete
+        # another account's lock — the "unlock what I am pointed at" verb this must never be.
+        return PathOutcome(path, HELD_BY_ANOTHER,
+                           "this lock is another account's, not this tool's to take back")
     if held == hostdenial.ROOT_HELD and not hostdenial.privileged():
         return PathOutcome(path, NEEDS_ROOT,
                            "root holds this one — run again with sudo to take it back")

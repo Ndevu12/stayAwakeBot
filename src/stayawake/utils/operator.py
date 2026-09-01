@@ -77,13 +77,20 @@ def _raised(env) -> bool:
 
 
 def _account_named_by_uid(env):
+    """The account a uid marker names, when one of them names a real account.
+
+    `str.isdigit` is true for characters `int` refuses — `'²'` among them — and the guard below
+    caught only `KeyError`, so an environment holding one took `ValueError` out through `resolve`
+    and `acting_uid` into every caller that asks who holds a control.
+    """
     for var in _ESCALATION_UIDS:
         uid = env.get(var)
-        if uid and uid.isdigit():
-            try:
-                return pwd.getpwuid(int(uid))
-            except KeyError:
-                continue
+        if not uid:
+            continue
+        try:
+            return pwd.getpwuid(int(uid))
+        except (ValueError, KeyError, OverflowError):
+            continue
     return None
 
 

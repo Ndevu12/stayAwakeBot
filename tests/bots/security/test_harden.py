@@ -938,5 +938,195 @@ class TestAPlantedEscalationMarkerDecidesNothing(unittest.TestCase):
         self.assertEqual(who.uid, self.me.pw_uid)
 
 
+class TestTheFlagNeverGoesBackOverContent(unittest.TestCase):
+    """One rule with three exits, written at one of them. Two of the three put the flag back
+    without asking whether the location was still empty, and both reported a reason that says
+    nothing about content — so a run that lost the race AND failed sealed the arrival in and
+    called it "could not be raised to root"."""
+
+    def setUp(self):
+        self.d = Path(tempfile.mkdtemp(prefix="harden-relock-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.d, ignore_errors=True))
+
+    def _raised_upgrade(self, target, *, chown=None, on_set=None):
+        held = {target.resolve()}
+
+        def sets(p):
+            if on_set is not None:
+                on_set(Path(p))
+            held.add(Path(p).resolve())
+            return True
+
+        with mock.patch.object(hostdenial, "immutable",
+                               lambda p: Path(p).resolve() in held), \
+             mock.patch.object(hostdenial, "clear_immutable",
+                               lambda p: held.discard(Path(p).resolve()) or True), \
+             mock.patch.object(hostdenial, "set_immutable", sets), \
+             mock.patch.object(os, "geteuid", lambda: 0), \
+             mock.patch.dict(os.environ, {"SUDO_UID": str(os.getuid())}), \
+             mock.patch.object(denial.os, "chown", chown or (lambda *a, **k: None)):
+            return denial.apply_one(target), held
+
+    def _control(self, name="held"):
+        target = self.d / name
+        target.mkdir()
+        os.chmod(target, 0o555)
+        return target
+
+    def test_a_failed_raise_over_an_arrival_does_not_seal_it_in(self):
+        target = self._control()
+
+        def arrives_then_fails(path, *_a, **_k):
+            os.chmod(path, 0o755)
+            (Path(path) / "payload.js").write_text("x")
+            os.chmod(path, 0o555)
+            raise PermissionError("chown refused")
+
+        out, held = self._raised_upgrade(target, chown=arrives_then_fails)
+        self.assertEqual(out.state, denial.LEFT_OPEN_OVER_CONTENT)
+        self.assertNotIn(target.resolve(), held, "it must not end up locked around that content")
+        self.assertIn("NOT put back", out.detail)
+
+    def test_a_failed_raise_over_an_empty_location_still_puts_the_flag_back(self):
+        """The other direction: nothing arrived, so the location must not be left open."""
+        target = self._control()
+
+        def fails(path, *_a, **_k):
+            raise PermissionError("chown refused")
+
+        out, held = self._raised_upgrade(target, chown=fails)
+        self.assertEqual(out.state, denial.UNKNOWN)
+        self.assertIn("could not be raised", out.detail)
+        self.assertIn(target.resolve(), held, "an empty location keeps its lock")
+
+    def test_an_arrival_after_the_check_is_unlocked_again(self):
+        """The read-back is what decides it, so a write landing between the emptiness check and
+        the re-lock is caught too — the flag comes off again rather than staying closed over it."""
+        target = self._control()
+
+        def lands(p):
+            os.chmod(p, 0o755)
+            (p / "late.js").write_text("x")
+            os.chmod(p, 0o555)
+
+        out, held = self._raised_upgrade(target, on_set=lands)
+        self.assertEqual(out.state, denial.LEFT_OPEN_OVER_CONTENT)
+        self.assertNotIn(target.resolve(), held, "it must not be left locked around that content")
+
+    def test_what_it_says_about_the_owner_is_read_back(self):
+        """This branch is also reached after a raise that never changed the owner, where saying
+        "it is root's now" sent the operator for sudo over a directory already theirs."""
+        target = self._control()
+
+        def arrives_then_fails(path, *_a, **_k):
+            os.chmod(path, 0o755)
+            (Path(path) / "payload.js").write_text("x")
+            raise PermissionError("chown refused")
+
+        out, _ = self._raised_upgrade(target, chown=arrives_then_fails)
+        self.assertEqual(target.stat().st_uid, os.getuid())
+        self.assertIn("you can read and remove", out.detail)
+        self.assertNotIn("sudo", out.detail)
+
+
+class TestALockUnderAThirdAccount(unittest.TestCase):
+    """An immutable empty directory owned by neither root nor this account used to answer
+    "nothing holds this" — over a directory that plainly does. The run then tried to write, got
+    the EPERM the flag guarantees, and reported it as "could not be written"."""
+
+    def setUp(self):
+        self.d = Path(tempfile.mkdtemp(prefix="harden-third-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.d, ignore_errors=True))
+        self.target = self.d / "denied"
+        self.target.mkdir()
+
+    @contextlib.contextmanager
+    def _only_the_global_folders(self):
+        """Ask `_host_artifacts` about this fixture and nothing else.
+
+        Its other probes read the real machine — one of them walks `$HOME` — so left alone these
+        take eight seconds each and answer about the host that happens to be running them.
+        """
+        with mock.patch.object(host_artifacts, "_global_folders", lambda: [self.target]), \
+             mock.patch.object(host_artifacts, "_host_user_tag", lambda: None), \
+             mock.patch.object(host_artifacts, "_sideloaded_python_dir", lambda unread: None), \
+             mock.patch.object(host_artifacts, "_staged_secret_scanner",
+                               lambda dirs, unread: None):
+            yield
+
+    @contextlib.contextmanager
+    def _under_another_account(self):
+        """Graded against a uid that is not the directory's owner — which is also what a wrong
+        operator resolution produces, and there the lock is really the operator's own."""
+        with locked(self.target), \
+             mock.patch.object(operator, "acting_uid", lambda env=None: os.getuid() + 1000):
+            yield
+
+    def test_it_is_a_lock_not_an_absence(self):
+        with self._under_another_account():
+            self.assertEqual(hostdenial.held_by(self.target), hostdenial.OTHER_HELD)
+
+    def test_applying_names_it_instead_of_failing_to_write(self):
+        with self._under_another_account(), \
+             mock.patch.object(denial.os, "chmod") as chmod:
+            out = denial.apply_one(self.target)
+        chmod.assert_not_called()
+        self.assertEqual(out.state, denial.HELD_BY_ANOTHER)
+        self.assertIn("another account", out.detail)
+
+    def test_the_run_does_not_claim_the_control_is_in_place(self):
+        out = denial.PathOutcome(Path("/x"), denial.HELD_BY_ANOTHER, "another account's")
+        code, text = harden.run(supported=lambda: True, live=lambda: [],
+                                folders=lambda: [Path("/x")], apply=lambda p: out)
+        self.assertEqual(code, 3)
+        self.assertIn("held-by-another-account", text)
+
+    def test_taking_back_refuses_it(self):
+        """Before this grade existed the answer was None, which reached the refusal only because
+        the directory is immutable. Reaching the removal would unlock and delete another
+        account's lock — the "unlock what I am pointed at" verb this must never be."""
+        with self._under_another_account():
+            out = denial.remove_one(self.target)
+            self.assertEqual(hostdenial.held_by(self.target), hostdenial.OTHER_HELD,
+                             "it is never even unlocked")
+        self.assertEqual(out.state, denial.HELD_BY_ANOTHER)
+        self.assertTrue(self.target.exists())
+
+    def test_it_is_not_a_settled_take_back(self):
+        out = denial.PathOutcome(Path("/x"), denial.HELD_BY_ANOTHER, "another account's")
+        code, _ = harden.take_back(supported=lambda: True, folders=lambda: [Path("/x")],
+                                   remove=lambda p: out)
+        self.assertNotEqual(code, 0)
+
+    def test_the_audit_does_not_credit_it_as_this_tools_own_work(self):
+        """No downgrade: the probe grades a lock it can neither verify nor clear exactly as it did
+        before this state existed. Asked of `_host_artifacts`, not of the whole audit — the audit
+        walks this machine, which is slow and answers about the host rather than the fixture."""
+        with self._under_another_account(), self._only_the_global_folders():
+            _strong, weak, _unread, controlled = host_artifacts._host_artifacts()
+        self.assertNotIn(self.target, controlled, "it is not this tool's own work")
+        self.assertIn(self.target, [path for _d, path, _k in weak],
+                      "so it keeps the grade it had before this state existed")
+
+    def test_a_lock_this_tool_does_hold_is_still_credited(self):
+        with locked(self.target), self._only_the_global_folders():
+            _strong, weak, _unread, controlled = host_artifacts._host_artifacts()
+        self.assertIn(self.target, controlled)
+        self.assertNotIn(self.target, [path for _d, path, _k in weak])
+
+
+class TestAMarkerThatIsNotANumber(unittest.TestCase):
+    def test_a_digit_int_refuses_does_not_escape_as_an_exception(self):
+        """`str.isdigit` is true for characters `int` refuses. The guard caught only `KeyError`,
+        so `ValueError` came out through `resolve` and `acting_uid` into every caller that asks
+        who holds a control."""
+        with mock.patch.object(os, "geteuid", lambda: 0):
+            self.assertIsNone(operator.resolve({"HOME": "/var/root", "SUDO_UID": "\u00b2"}))
+
+    def test_a_marker_that_is_not_a_number_never_names_an_account(self):
+        with mock.patch.object(os, "geteuid", lambda: 0):
+            self.assertIsNone(operator.resolve({"HOME": "/var/root", "SUDO_UID": "root"}))
+
+
 if __name__ == "__main__":
     unittest.main()
