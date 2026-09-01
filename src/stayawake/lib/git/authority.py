@@ -137,7 +137,7 @@ def may_rewrite(slug: str, token: str | None) -> Authority:
     if permissions.get("push") is True:
         return Authority(False, "push_without_admin",
                          "the credential can push but does not own the repository and has no "
-                         "admin — that is not authority to rewrite history",
+                         "admin — that is not authority to amend its history",
                          login=login, owner=owner_login)
     return Authority(False, "no_admin_permission",
                      "the credential neither owns the repository nor holds admin on it",

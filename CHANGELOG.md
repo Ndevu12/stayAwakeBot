@@ -13,6 +13,12 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Changed
+- **`saw fix` now points at `saw fix amend` for a commit it cannot change.** Its review note sent
+  operators to an external tool for the job `saw fix amend` does, and said `saw fix` "never
+  rewrites history" — it does not change past commits, which is what it meant and what it now
+  says. The note is shorter, and still states that the commit stays in any clone, fork or tag.
+
 ### Added
 - **`saw fix amend` checks that the payload is actually gone before it moves anything.** Every
   other check it makes asks what changed; this one asks whether anything reported is still
