@@ -17,7 +17,6 @@ from stayawake.bots.security.dependencies import Advisory
 from stayawake.bots.security.matchers.installed_package_audit import InstalledPackageAuditMatcher
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.scanner import scan_target
-from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.targets.base import ScanOptions, Target
 
 _REAL_SIGS = load_signatures()

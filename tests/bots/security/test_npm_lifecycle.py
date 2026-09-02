@@ -115,10 +115,38 @@ class TestAnAgentRunUnattendedFromAnInstallHook(unittest.TestCase):
                     "python detect.py --yolo-version v8",
                     "python detect.py --yolov8",
                     "./train --yolo_weights w.pt",
-                    "node build.js --no-yolo"):
+                    "node build.js --no-yolo",
+                    "sass src/button--yolo.scss dist/"):     # a BEM modifier, not a flag
             with self.subTest(cmd=cmd):
                 r = _scan_pkg({"postinstall": cmd})
                 self.assertNotIn("npm-lifecycle-agent-yolo", {f.signature_id for f in r.findings})
+
+    def test_a_longer_flag_sharing_the_prefix_does_not_drive_an_infected_verdict(self):
+        """The boundary IS the false-positive control on the signature that drives INFECTED, and it
+        had no pin: deleting both lookarounds left this whole module green, because every other test
+        for it was a positive match."""
+        for cmd in ("agentctl --dangerously-skip-permissions-off",
+                    "agentctl --trust-all-tools-except-bash",
+                    "agentctl --safe-mode=--trust-all-toolsX",
+                    # A double hyphen inside a NAME, which BEM-style modifiers make ordinary in a
+                    # JS project. Only the leading guard stops this one.
+                    "node build.js --in src/setup--trust-all-tools.js",
+                    "node build.js --in themes/dark--dangerously-skip-permissions.css"):
+            with self.subTest(cmd=cmd):
+                r = _scan_pkg({"postinstall": cmd})
+                self.assertNotIn("npm-lifecycle-agent-approval-disabled",
+                                 {f.signature_id for f in r.findings})
+                self.assertNotEqual(r.verdict, INFECTED)
+
+    def test_every_script_a_bare_install_runs_is_read(self):
+        """Read from the installed runner, not from documentation: npm's own `install.js` runs
+        `prepublish`, and arborist's `reify.js` runs the three dependency events whenever the tree
+        changes. Four of the ten were unread, so renaming the hook bypassed every signature here."""
+        for key in ("prepublish", "predependencies", "dependencies", "postdependencies"):
+            with self.subTest(key=key):
+                r = _scan_pkg({key: "npx claude --dangerously-skip-permissions"})
+                self.assertIn("npm-lifecycle-agent-approval-disabled",
+                              {f.signature_id for f in r.findings})
 
     def test_it_is_scoped_to_install_time_keys(self):
         """A developer's own `npm run agent` is not delivered content and does not run on install."""

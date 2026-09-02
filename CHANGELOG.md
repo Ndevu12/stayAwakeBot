@@ -19,6 +19,11 @@ reader, not the mechanism or the weakness it closed.
   reconnaissance and exfiltration tool using your own credentials — on every `npm install`. `saw`
   now reports it, in your own manifest and in an installed dependency's. A flag that only asks for
   an unattended run, without disabling approval, is reported for review rather than as an infection.
+
+### Fixed
+- **Four of the scripts a bare `npm install` runs were never read**, so naming an install hook
+  `prepublish`, `predependencies`, `dependencies` or `postdependencies` put it past every
+  lifecycle-hook check on a project's own manifest. All ten are read now.
 - **`saw scan --history` reads what a repository still stores**, not only what is checked out. A
   file cleaned from your working tree is still there on an earlier commit, another branch or a tag,
   and one command puts it back. It is reported as coverage and never changes the verdict, because
