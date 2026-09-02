@@ -25,12 +25,16 @@ reader, not the mechanism or the weakness it closed.
   than when a pull request is merged, and names the directory the copies were written to. The
   reference page says the same.
 
+### Fixed
+- **`saw audit` no longer withholds the credential-rotation all-clear because macOS protects one of
+  its own directories.** Only a location inside an installed application counts against the
+  verdict; a directory swept up while looking for applications, that turns out not to be one, is
+  reported as something the run did not read and nothing more.
 
 ### Fixed
 - **`saw audit` says how many locations it could not read, before listing them.** A long path used
   to push the count — and the other locations — out of the report, leaving neither. Each path is
   shortened in the middle for the same reason, and a location reached twice is named once.
-
 
 ### Added
 - **`saw harden --take-back` removes the controls the command placed.** It removes only those, and

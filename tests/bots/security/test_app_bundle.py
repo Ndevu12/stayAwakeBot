@@ -101,7 +101,7 @@ class _Host:
         return self._run(lambda: app_bundle.check_app_bundles(verify=verify))
 
     def roots(self):
-        return self._run(lambda: [root for root, _depth in app_bundle.app_bundle_js_roots()])
+        return self._run(lambda: [r.path for r in app_bundle.app_bundle_js_roots()])
 
 
 def _appended(body_lines: list[str], pad: str = _PAD) -> str:
@@ -566,6 +566,36 @@ class TestWhatTheWalkCouldNotReachIsReportedToo(unittest.TestCase):
             ids = [i.id for i in host.check()]
         finally:
             os.chmod(host.base, 0o755)
+        self.assertIn(APP_BUNDLE_MODULE_UNREADABLE_ID, ids)
+
+    def test_a_protected_directory_the_glob_swept_up_does_not_gate_rotation(self):
+        """MEASURED on an ordinary macOS host: the `*` glob over the data roots sweeps in nine
+        directories the OS protects — `com.apple.TCC`, `FaceTime`, `Knowledge` — and not one is an
+        application. Gating on them withheld the rotation all-clear on every Mac, which is a
+        verdict firing on an ordinary host."""
+        host = _Host("Some.app/Contents/Resources/app", data=True)
+        protected = host.base / "com.apple.Something"
+        protected.mkdir()
+        os.chmod(protected, 0o000)
+        try:
+            issues = host.check()
+        finally:
+            os.chmod(protected, 0o755)
+        ids = {i.id for i in issues}
+        self.assertNotIn(APP_BUNDLE_MODULE_UNREADABLE_ID, ids)
+        self.assertFalse(ids & ROTATION_UNSAFE_IDS)
+        self.assertIn("app-bundle-partly-examined", ids, "it is reported, not silent")
+
+    def test_a_bundle_still_gates_even_with_nothing_read_in_it(self):
+        """The other direction, and why the rule is not simply "did we read anything here": a
+        bundle IS an application, so a directory closed inside one is a hole where this was
+        looking, whether or not it got to any module."""
+        host = self._planted()
+        os.chmod(host.module_dir, 0o000)
+        try:
+            ids = {i.id for i in host.check()}
+        finally:
+            os.chmod(host.module_dir, 0o755)
         self.assertIn(APP_BUNDLE_MODULE_UNREADABLE_ID, ids)
 
     def test_it_names_them_so_they_can_be_cleared(self):
