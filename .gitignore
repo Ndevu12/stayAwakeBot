@@ -230,3 +230,8 @@ src/*.egg-info/
 
 # Runtime output — the sentinel keeps status in ONE GitHub issue, never files (#1149).
 reports/
+
+# The skills are shared and stay shared; everything else a session writes here does not. A working
+# note was swept into a commit by `git add -A`, which is what this narrows.
+.claude/*
+!.claude/skills/
