@@ -2,150 +2,150 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://saw-docs.ndevuspace.com/latest/</loc>
-         <lastmod>2026-09-01</lastmod>
+         <lastmod>2026-09-02</lastmod>
     </url>
     <url>
          <loc>https://saw-docs.ndevuspace.com/latest/explanation/credential-hygiene/</loc>
-         <lastmod>2026-09-01</lastmod>
+         <lastmod>2026-09-02</lastmod>
     </url>
     <url>
          <loc>https://saw-docs.ndevuspace.com/latest/explanation/fail-closed/</loc>
-         <lastmod>2026-09-01</lastmod>
+         <lastmod>2026-09-02</lastmod>
     </url>
     <url>
          <loc>https://saw-docs.ndevuspace.com/latest/explanation/safety-envelope/</loc>
-         <lastmod>2026-09-01</lastmod>
+         <lastmod>2026-09-02</lastmod>
     </url>
     <url>
          <loc>https://saw-docs.ndevuspace.com/latest/explanation/trust-model/</loc>
-         <lastmod>2026-09-01</lastmod>
+         <lastmod>2026-09-02</lastmod>
     </url>
     <url>
          <loc>https://saw-docs.ndevuspace.com/latest/explanation/verdicts/</loc>
-         <lastmod>2026-09-01</lastmod>
+         <lastmod>2026-09-02</lastmod>
     </url>
     <url>
          <loc>https://saw-docs.ndevuspace.com/latest/how-to/audit-a-machine/</loc>
-         <lastmod>2026-09-01</lastmod>
+         <lastmod>2026-09-02</lastmod>
     </url>
     <url>
          <loc>https://saw-docs.ndevuspace.com/latest/how-to/fix-findings/</loc>
-         <lastmod>2026-09-01</lastmod>
+         <lastmod>2026-09-02</lastmod>
     </url>
     <url>
          <loc>https://saw-docs.ndevuspace.com/latest/how-to/gate-ci/</loc>
-         <lastmod>2026-09-01</lastmod>
+         <lastmod>2026-09-02</lastmod>
     </url>
     <url>
          <loc>https://saw-docs.ndevuspace.com/latest/how-to/harden-a-repo/</loc>
-         <lastmod>2026-09-01</lastmod>
+         <lastmod>2026-09-02</lastmod>
     </url>
     <url>
          <loc>https://saw-docs.ndevuspace.com/latest/how-to/harden-this-machine/</loc>
-         <lastmod>2026-09-01</lastmod>
+         <lastmod>2026-09-02</lastmod>
     </url>
     <url>
          <loc>https://saw-docs.ndevuspace.com/latest/how-to/scan-local/</loc>
-         <lastmod>2026-09-01</lastmod>
+         <lastmod>2026-09-02</lastmod>
     </url>
     <url>
          <loc>https://saw-docs.ndevuspace.com/latest/how-to/scan-on-clone/</loc>
-         <lastmod>2026-09-01</lastmod>
+         <lastmod>2026-09-02</lastmod>
     </url>
     <url>
          <loc>https://saw-docs.ndevuspace.com/latest/how-to/scan-remote/</loc>
-         <lastmod>2026-09-01</lastmod>
+         <lastmod>2026-09-02</lastmod>
     </url>
     <url>
          <loc>https://saw-docs.ndevuspace.com/latest/reference/advisory-db/</loc>
-         <lastmod>2026-09-01</lastmod>
+         <lastmod>2026-09-02</lastmod>
     </url>
     <url>
          <loc>https://saw-docs.ndevuspace.com/latest/reference/configuration/</loc>
-         <lastmod>2026-09-01</lastmod>
+         <lastmod>2026-09-02</lastmod>
     </url>
     <url>
          <loc>https://saw-docs.ndevuspace.com/latest/reference/cli/</loc>
-         <lastmod>2026-09-01</lastmod>
+         <lastmod>2026-09-02</lastmod>
     </url>
     <url>
          <loc>https://saw-docs.ndevuspace.com/latest/reference/cli/amend/</loc>
-         <lastmod>2026-09-01</lastmod>
+         <lastmod>2026-09-02</lastmod>
     </url>
     <url>
          <loc>https://saw-docs.ndevuspace.com/latest/reference/cli/audit/</loc>
-         <lastmod>2026-09-01</lastmod>
+         <lastmod>2026-09-02</lastmod>
     </url>
     <url>
          <loc>https://saw-docs.ndevuspace.com/latest/reference/cli/auth/</loc>
-         <lastmod>2026-09-01</lastmod>
+         <lastmod>2026-09-02</lastmod>
     </url>
     <url>
          <loc>https://saw-docs.ndevuspace.com/latest/reference/cli/completion/</loc>
-         <lastmod>2026-09-01</lastmod>
+         <lastmod>2026-09-02</lastmod>
     </url>
     <url>
          <loc>https://saw-docs.ndevuspace.com/latest/reference/cli/credentials/</loc>
-         <lastmod>2026-09-01</lastmod>
+         <lastmod>2026-09-02</lastmod>
     </url>
     <url>
          <loc>https://saw-docs.ndevuspace.com/latest/reference/cli/db/</loc>
-         <lastmod>2026-09-01</lastmod>
+         <lastmod>2026-09-02</lastmod>
     </url>
     <url>
          <loc>https://saw-docs.ndevuspace.com/latest/reference/cli/discard/</loc>
-         <lastmod>2026-09-01</lastmod>
+         <lastmod>2026-09-02</lastmod>
     </url>
     <url>
          <loc>https://saw-docs.ndevuspace.com/latest/reference/cli/doctor/</loc>
-         <lastmod>2026-09-01</lastmod>
+         <lastmod>2026-09-02</lastmod>
     </url>
     <url>
          <loc>https://saw-docs.ndevuspace.com/latest/reference/cli/fix/</loc>
-         <lastmod>2026-09-01</lastmod>
+         <lastmod>2026-09-02</lastmod>
     </url>
     <url>
          <loc>https://saw-docs.ndevuspace.com/latest/reference/cli/guard/</loc>
-         <lastmod>2026-09-01</lastmod>
+         <lastmod>2026-09-02</lastmod>
     </url>
     <url>
          <loc>https://saw-docs.ndevuspace.com/latest/reference/cli/harden/</loc>
-         <lastmod>2026-09-01</lastmod>
+         <lastmod>2026-09-02</lastmod>
     </url>
     <url>
          <loc>https://saw-docs.ndevuspace.com/latest/reference/cli/hook/</loc>
-         <lastmod>2026-09-01</lastmod>
+         <lastmod>2026-09-02</lastmod>
     </url>
     <url>
          <loc>https://saw-docs.ndevuspace.com/latest/reference/cli/intro/</loc>
-         <lastmod>2026-09-01</lastmod>
+         <lastmod>2026-09-02</lastmod>
     </url>
     <url>
          <loc>https://saw-docs.ndevuspace.com/latest/reference/cli/migrating/</loc>
-         <lastmod>2026-09-01</lastmod>
+         <lastmod>2026-09-02</lastmod>
     </url>
     <url>
          <loc>https://saw-docs.ndevuspace.com/latest/reference/cli/remote/</loc>
-         <lastmod>2026-09-01</lastmod>
+         <lastmod>2026-09-02</lastmod>
     </url>
     <url>
          <loc>https://saw-docs.ndevuspace.com/latest/reference/cli/scan/</loc>
-         <lastmod>2026-09-01</lastmod>
+         <lastmod>2026-09-02</lastmod>
     </url>
     <url>
          <loc>https://saw-docs.ndevuspace.com/latest/reference/cli/search/</loc>
-         <lastmod>2026-09-01</lastmod>
+         <lastmod>2026-09-02</lastmod>
     </url>
     <url>
          <loc>https://saw-docs.ndevuspace.com/latest/reference/cli/sinks/</loc>
-         <lastmod>2026-09-01</lastmod>
+         <lastmod>2026-09-02</lastmod>
     </url>
     <url>
          <loc>https://saw-docs.ndevuspace.com/latest/tutorial/first-scan/</loc>
-         <lastmod>2026-09-01</lastmod>
+         <lastmod>2026-09-02</lastmod>
     </url>
     <url>
          <loc>https://saw-docs.ndevuspace.com/latest/tutorial/gate-a-repo/</loc>
-         <lastmod>2026-09-01</lastmod>
+         <lastmod>2026-09-02</lastmod>
     </url>
 </urlset>

@@ -1769,6 +1769,7 @@
 write is unknown, never success. The result does not claim that one control protects anything else.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw harden
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>sudo saw harden
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>saw harden --take-back
 </code></pre></div>
 <p>Root is not required. Run it as yourself and it acts where it can; anything it did not take is
 named in the result, and left exactly as it stood.</p>
@@ -1778,6 +1779,7 @@ distinguishes a control root holds from one you hold, and tells you which you ha
 If it could not examine what is running on this machine, it refuses as well. Neither depends on
 whether you gave it root.</p>
 <p>Anything already in use is left unchanged.</p>
+<p><code>--take-back</code> removes the controls this command placed, and reports anything it did not remove.</p>
 <p>See <a href="../../../how-to/audit-a-machine/">audit a machine</a> for the read-only view of the same host.</p>
 
 
