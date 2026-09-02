@@ -28,7 +28,8 @@ def _code_only(text: str) -> str:
     return flow._scrub_comments_and_strings(text, scrub_strings=False)
 
 
-def analyze_file(text: str, ext: str = "", constructs_only: bool = False) -> ObfuscationVerdict:
+def analyze_file(text: str, ext: str = "", constructs_only: bool = False,
+                 framework_members_excused: bool = False) -> ObfuscationVerdict:
     """Line-AGNOSTIC, baseline-free obfuscation verdict for a whole hand-authored
     source/config file (G4). Run on the RAW concatenated content so a payload that is
     SPLIT/WRAPPED across many <2000-char lines — which defeats the formatting-keyed
@@ -66,7 +67,8 @@ def analyze_file(text: str, ext: str = "", constructs_only: bool = False) -> Obf
         return ObfuscationVerdict(True, "charcode/byte numeric-array literal (string shuffler)")
     # Search the raw body AND the newline-flattened form so an exec sink wrapped
     # across line breaks (`sfL['constructor']\n(decoded)`) is still seen.
-    if _has_exec_sink_beyond_decoding(code) or _has_exec_sink_beyond_decoding(flat):
+    if (_has_exec_sink_beyond_decoding(code, framework_members_excused)
+            or _has_exec_sink_beyond_decoding(flat, framework_members_excused)):
         return ObfuscationVerdict(True, "dynamic-exec sink (eval/Function/constructor/vm-runner)")
     # Decode→exec dropper — the ONE decode→exec-flow detector (see taint/): a baked encoded payload
     # variable-indirected form, leading arg) OR through a shell `-c` argument (`spawn('sh',['-c',d])`

@@ -46,7 +46,7 @@ class ObfuscationMatcher(Matcher):
             if hit:
                 findings.append(self._emit(source_sig, rel, f"loader fingerprint on raw content: {hit}"))
                 continue
-            verdict = analyze_file(text, _ext(rel))
+            verdict = analyze_file(text, _ext(rel), framework_members_excused=True)
             if verdict:
                 findings.append(self._emit(source_sig, rel, verdict.reason))
         return findings
