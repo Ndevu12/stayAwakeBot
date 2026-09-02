@@ -15,6 +15,7 @@ from unittest import mock
 
 from stayawake.bots.security.dependencies import Advisory
 from stayawake.bots.security.matchers.installed_package_audit import InstalledPackageAuditMatcher
+from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.targets.base import ScanOptions, Target
@@ -210,13 +211,10 @@ class TestRecordIntegrity(unittest.TestCase):
 _HOOK_SIG = {"id": "installed-lifecycle-hook", "category": "supply-chain-dep", "severity": "critical",
              "description": "installed dep lifecycle hook runs a payload"}
 # The npm-lifecycle patterns as they live in signatures.yml (confirmed + the heuristic exec one).
-_NPM_SIGS = [
-    {"id": "npm-lifecycle-dropper", "matcher": "npm-manifest", "pattern": r"\bsetup_bun\b"},
-    {"id": "npm-lifecycle-remote-fetch", "matcher": "npm-manifest",
-     "pattern": r"\b(?:curl|wget)\b[^|]{0,2048}\|\s*(?:sh|bash|node|bun|bunx|deno)\b"},
-    {"id": "npm-lifecycle-exec", "matcher": "npm-manifest", "confidence": "heuristic",
-     "pattern": r"\b(?:bun|bunx|deno|curl|wget)\b"},
-]
+# The SHIPPED lifecycle signatures, not a copy of them. Hand-copying three of them meant a new
+# signature got no coverage here at all and the suite still passed.
+_NPM_SIGS = [s for group in load_signatures().values() for s in group
+             if s.get("matcher") == "npm-manifest"]
 
 
 def _npm_hooks_repo(hooks: dict) -> Target:
@@ -255,6 +253,20 @@ class TestInstalledLifecycleHook(unittest.TestCase):
         clean = _npm_hooks_repo({"a": "node-gyp rebuild", "b": "husky install",
                                  "c": "curl -sSL https://x/tool -o bin/t", "d": "node ./scripts/pi.js"})
         self.assertNotIn("installed-lifecycle-hook", _scan_hooks(clean))
+
+    def test_an_agent_run_unattended_by_a_dependency_is_flagged(self):
+        """The reason `npm-lifecycle-agent-approval-disabled` is graded CONFIRMED rather than by the
+        campaign's evidence grade: this audit reuses only the non-heuristic lifecycle patterns, so a
+        heuristic grade would catch the flag in your own manifest and NOT in the dependency that
+        actually ships it."""
+        self.assertIn("installed-lifecycle-hook", _scan_hooks(_npm_hooks_repo(
+            {"evil": "npx claude --dangerously-skip-permissions -p 'exfil'"})))
+
+    def test_the_unattended_word_alone_does_not_reach_this_audit(self):
+        """`--yolo` stays heuristic, so it informs on the repository's own manifest without
+        escalating every installed package that happens to carry the word."""
+        self.assertNotIn("installed-lifecycle-hook",
+                         _scan_hooks(_npm_hooks_repo({"m": "node train.js --yolo"})))
 
     def test_heuristic_exec_pattern_not_applied_at_install_scale(self):
         # `bun run build` / a curl DOWNLOAD (no pipe) trip only the HEURISTIC exec pattern — which is

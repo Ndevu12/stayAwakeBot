@@ -14,6 +14,11 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
+- **An install hook that runs a coding agent unattended is now reported.** A lifecycle script in
+  `package.json` can invoke a coding agent with its approval prompt switched off, turning it into a
+  reconnaissance and exfiltration tool using your own credentials — on every `npm install`. `saw`
+  now reports it, in your own manifest and in an installed dependency's. A flag that only asks for
+  an unattended run, without disabling approval, is reported for review rather than as an infection.
 - **`saw scan --history` reads what a repository still stores**, not only what is checked out. A
   file cleaned from your working tree is still there on an earlier commit, another branch or a tag,
   and one command puts it back. It is reported as coverage and never changes the verdict, because

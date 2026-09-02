@@ -358,6 +358,23 @@ signatures:
     description: "npm install-time lifecycle hook invokes Bun/Deno or a remote fetch (review)"
     remediation: manual
 
+  - id: npm-lifecycle-agent-approval-disabled
+    category: npm-lifecycle
+    severity: critical
+    matcher: npm-manifest
+    pattern: '(?<![\w-])--(?:dangerously-skip-permissions|trust-all-tools)(?![\w-])'
+    description: "npm install-time lifecycle hook runs a coding agent with its approval prompt switched off"
+    remediation: manual
+
+  - id: npm-lifecycle-agent-yolo
+    category: npm-lifecycle
+    severity: high
+    matcher: npm-manifest
+    confidence: heuristic
+    pattern: '(?<![\w-])--yolo(?![\w-])'
+    description: "npm install-time lifecycle hook passes an agent's unattended-run flag (review)"
+    remediation: manual
+
   # ── Malicious upstream dependency (package.json + lockfiles, T1195.001) ───────────
   - id: malicious-dependency
     category: supply-chain-dep
