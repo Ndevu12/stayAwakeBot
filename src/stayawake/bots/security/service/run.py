@@ -127,10 +127,6 @@ def _scan_one_target(repo, display: str, opts, sigs, allowlist, workers: int,
     try:
         result = _scan_one_target_inner(repo, display, opts, sigs, allowlist, workers,
                                         progress_on, settings)
-        if getattr(opts, "history", False):
-            note = scanner.history_residue_note(repo, opts, sigs, allowlist)
-            if note:
-                result.notes.append(note)
         return result
     except Exception as exc:  # never let one target crash the CLI — fail CLOSED (mirrors scan_target)
         return ScanResult(target=display, source="local",
@@ -184,8 +180,12 @@ def _scan_one_target_inner(repo, display: str, opts, sigs, allowlist, workers: i
         sys.stderr.write(text)
     if worker_error is not None:
         return ScanResult(target=display, source="local", error=f"scan worker failed: {worker_error}")
-    return scanner.finalize(display, "local", merged, order, read_errors, coverage_notes,
-                            opts, repo, allowlist, all_sigs)
+    result = scanner.finalize(display, "local", merged, order, read_errors, coverage_notes,
+                              opts, repo, allowlist, all_sigs)
+    # The other local path — one small target, and every target of a fleet scan — goes through
+    # `workers.scan_local`, which attaches this itself. This branch is the one it does not reach.
+    scanner.attach_history_note(result, repo, opts, sigs, allowlist)
+    return result
 
 
 def scan(config_path: str | None = None, *, remote: bool = False,

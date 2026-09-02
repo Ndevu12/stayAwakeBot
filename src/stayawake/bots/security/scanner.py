@@ -167,6 +167,19 @@ def _cleanup_residue(root: Path) -> Finding | None:
 _HISTORY_ROUNDS = 20
 
 
+def attach_history_note(result, root, opts, signatures, allowlist) -> None:
+    """Add what history still stores to a completed scan of one local target, if it was asked for.
+
+    Every local scan lands here, so `--history` cannot be wired into one path and silently do
+    nothing on the other: it was live for a single repository and a no-op for a fleet.
+    """
+    if not getattr(opts, "history", False):
+        return
+    note = history_residue_note(root, opts, signatures, allowlist)
+    if note:
+        result.notes.append(note)
+
+
 def history_residue_note(root, opts, signatures, allowlist) -> str | None:
     """What the repository still STORES that a scan of the working tree cannot see.
 
@@ -178,24 +191,47 @@ def history_residue_note(root, opts, signatures, allowlist) -> str | None:
     run carries a thousand versions and a payload carries one or two. MEASURED here: 1 round covers
     74% of paths completely, 20 covers 98.6%.
     """
-    from stayawake.bots.security.targets.history import HistoryTarget, versions_by_path
     try:
-        versions, complete = versions_by_path(root)
-    except OSError:
-        return None
+        return _history_residue_note(root, opts, signatures, allowlist)
+    except Exception as exc:
+        # Total by contract. This runs after the tree scan, and a raise here reached a caller that
+        # discarded the whole ScanResult — turning a real INFECTED verdict into "could not scan".
+        return (f"History could not be read ({type(exc).__name__}), so whether this repository "
+                "still stores a payload is UNKNOWN, not no.")
+
+
+def _history_residue_note(root, opts, signatures, allowlist) -> str | None:
+    from stayawake.bots.security.targets.history import HistoryTarget, versions_by_path
+    versions, complete = versions_by_path(root)
     if not versions:
-        return None
-    hits, scanned = [], 0
+        # `stdout` degrades a failed git command to an empty string, so "no objects" and "git could
+        # not answer" arrive identically. Saying nothing here is the silence this whole note exists
+        # to end — a repository with a broken ref would read as one with no history.
+        return ("History could not be read: nothing was returned for this repository, so whether "
+                "it still stores a payload is UNKNOWN, not no.")
+    # A `path_glob` rule is decided against the ONE name git emits for a blob, and whoever
+    # committed it picks that name: filing the same bytes under an allowlisted path suppresses the
+    # stored payload. Signature-wide rules carry the same operator intent and cannot be aimed.
+    unaimable = [r for r in (allowlist or []) if isinstance(r, dict) and not r.get("path_glob")]
+    hits, scanned, unread = [], 0, set()
     for index in range(_HISTORY_ROUNDS):
         target = HistoryTarget(root, str(root), opts, versions, index)
         if not len(target):
             break
         scanned += len(target)
-        result = scan_target(target, signatures, allowlist)
+        result = scan_target(target, signatures, unaimable)
         hits += [f for f in result.findings if f.confidence == CONFIRMED]
+        unread |= set(target.read_errors)
     beyond = sum(max(len(v) - _HISTORY_ROUNDS, 0) for v in versions.values())
     cut = (f" {beyond} further version(s) of {sum(1 for v in versions.values() if len(v) > _HISTORY_ROUNDS)}"
            f" path(s) were not read." if beyond else "")
+    if not complete:
+        cut += " The walk hit its object budget, so what was enumerated is not all of it."
+    if unread:
+        # By PATH, not by failed attempt: every version is read once per matcher, so counting
+        # attempts inflated this fivefold and drove the number reported as read negative.
+        scanned -= len(unread)
+        cut += f" {len(unread)} stored version(s) could not be read at all."
     if not hits:
         return (f"History was read: no confirmed payload in {scanned} stored version(s) across "
                 f"{len(versions)} path(s).{cut}")

@@ -90,14 +90,21 @@ def reachable_blobs(repo: str | Path, *, limit: int = 200_000) -> tuple[list[tup
     the tag's own name where a path goes, and `--filter=object:type=blob` does not drop it either.
     No deduplication — `rev-list --objects` emits each object once, measured 0 repeats in 20400.
     """
-    blob_shas = {line.split()[0] for line in
-                 stdout(repo, ["cat-file", "--batch-check", "--batch-all-objects", "--unordered"]
-                        ).splitlines()
+    listing = run(repo, ["cat-file", "--batch-check", "--batch-all-objects", "--unordered"])
+    if listing is None or listing.returncode != 0:
+        return [], False
+    # git EXITS 0 having skipped an object it cannot unpack, naming it on stderr only. The sha then
+    # fails the type test below and leaves the walk silently, so the caller must not be told this
+    # was a complete read.
+    complete = not listing.stderr.strip()
+    blob_shas = {line.split()[0] for line in listing.stdout.splitlines()
                  if len(line.split()) >= 2 and line.split()[1] == "blob"}
-    out = stdout(repo, ["rev-list", "--objects", "--all"])
+    walk = run(repo, ["rev-list", "--objects", "--all"])
+    if walk is None or walk.returncode != 0:
+        return [], False
+    out = walk.stdout
     seen: dict[str, str] = {}
-    complete = True
-    for line in out.splitlines():
+    for line in out.split("\n"):        # not splitlines: it breaks on \r and \x0b too, truncating a path
         sha, _, path = line.partition(" ")
         if sha not in blob_shas:
             continue          # a commit, a tree, or a tag object emitted under the tag's own name

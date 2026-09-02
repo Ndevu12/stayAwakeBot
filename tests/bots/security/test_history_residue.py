@@ -16,7 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from support.gitrepo import GitSandbox                                   # noqa: E402
 from stayawake.bots.security import scanner                             # noqa: E402
-from stayawake.bots.security.models import CLEAN, CONFIRMED             # noqa: E402
+from stayawake.bots.security.models import (CLEAN, CONFIRMED,           # noqa: E402
+                                             ScanReport, ScanResult)
 from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions          # noqa: E402
 from stayawake.bots.security.targets.history import (HistoryTarget,               # noqa: E402
                                                      versions_by_path)
@@ -144,25 +145,187 @@ class TestManyStoredVersionsOfOnePath(GitSandbox):
         self.assertNotIn("still STORE a confirmed payload", note)
 
 
-class TestItAnswersTheSameWayTheTreeScanDoes(GitSandbox):
-    def test_a_directory_the_tree_scan_skips_is_skipped_here_too(self):
-        """A project that once committed `node_modules` carries thousands of vendored files the
-        tree side deliberately never reads. Reading their stored versions would answer differently
-        about the same repository."""
+class TestAnExcludedNameIsNotABlindSpot(GitSandbox):
+    def _sigs(self):
+        from stayawake.bots.security.signatures import load_signatures
+        return load_signatures()
+
+    def test_a_payload_also_filed_under_an_excluded_name_is_still_found(self):
+        """This once excluded `node_modules/` and peers, to answer the same way the tree scan does.
+        That is unsound here: `rev-list --objects` emits a blob ONCE, under one of its names, so
+        excluding by that name drops content that also sits at a scanned path — and whoever
+        committed it chooses which name git emits. Noise is the cheaper mistake."""
         repo = self.new_repo()
-        self.write(repo, "node_modules/left-pad/index.js", "module.exports = 1;\n")
-        self.write(repo, "dist/bundle.js", "built\n")
+        self.write(repo, "src/loader.js", _payload())
+        self.write(repo, "node_modules/x/index.js", _payload())      # same bytes, one blob
         self.write(repo, "app.js", "hello\n")
-        self.commit(repo, "committed a vendored tree")
-        import shutil
-        shutil.rmtree(repo / "node_modules")
-        shutil.rmtree(repo / "dist")
-        self.commit(repo, "stop shipping the vendored tree")
-        opts = ScanOptions()
+        self.commit(repo, "payload, also filed under an excluded name")
+        (repo / "src" / "loader.js").unlink()
+        (repo / "node_modules" / "x" / "index.js").unlink()
+        self.commit(repo, "removed from the tree")
+        note = scanner.history_residue_note(repo, ScanOptions(history=True), self._sigs(), [])
+        self.assertIn("still STORE a confirmed payload", note)
+
+
+class TestAnOversizedStoredVersionIsBoundedButStillScanned(GitSandbox):
+    def _sigs(self):
+        from stayawake.bots.security.signatures import load_signatures
+        return load_signatures()
+
+    def _repo_with_a_big_stored_blob(self, filler: bytes):
+        repo = self.new_repo()
+        (repo / "vendor.js").write_bytes(_payload().encode() + filler + _payload().encode())
+        self.write(repo, "keep.txt", "ok\n")
+        self.git(repo, "add", "-A")
+        self.commit(repo, "an oversized version lands")
+        (repo / "vendor.js").unlink()
+        self.git(repo, "add", "-A")
+        self.commit(repo, "removal commit")
+        return repo
+
+    def test_it_is_read_at_both_ends_rather_than_skipped(self):
+        """Refusing it outright read the payload as empty while still counting it as scanned. The
+        tree side reads an oversized file at both ends; so does this."""
+        repo = self._repo_with_a_big_stored_blob(b"\n// filler\n" * 300_000)
+        note = scanner.history_residue_note(repo, ScanOptions(history=True), self._sigs(), [])
+        self.assertIn("vendor.js", note)
+
+    def test_the_whole_version_is_never_held_in_memory(self):
+        """A size test after the read cannot bound it — the read is what costs. The tree side stats
+        before opening; a stored version has nothing to stat, so the cap moves into the read."""
+        repo = self._repo_with_a_big_stored_blob(b"\n// filler\n" * 300_000)
         versions, _ = versions_by_path(repo)
-        history = sorted(HistoryTarget(repo, str(repo), opts, versions).iter_files())
-        tree = sorted(LocalRepoTarget(repo, str(repo), opts).iter_files())
-        self.assertEqual(history, tree, "the two axes disagreed about the same repository")
+        target = HistoryTarget(repo, str(repo), ScanOptions(), versions)
+        stored = len(self.git(repo, "cat-file", "blob", target.sha_for("vendor.js")))
+        held = len(target.read_text("vendor.js") or "")
+        self.assertGreater(stored, ScanOptions().max_file_bytes, "the fixture must be oversized")
+        self.assertLessEqual(held, ScanOptions().max_file_bytes + 1024,
+                             "the whole stored version was materialised")
+
+
+class TestTheReportCannotBeAimedByWhoeverCommitted(GitSandbox):
+    def _sigs(self):
+        from stayawake.bots.security.signatures import load_signatures
+        return load_signatures()
+
+    def _same_bytes_under_two_names(self, second: str):
+        repo = self.new_repo()
+        self.write(repo, "vendor/evil.js", _payload())
+        self.write(repo, second, _payload())          # same bytes, so ONE blob with two names
+        self.write(repo, "keep.txt", "ok\n")
+        self.git(repo, "add", "-A")
+        self.commit(repo, "payload under two names")
+        (repo / "vendor" / "evil.js").unlink()
+        (repo / second).unlink()
+        self.git(repo, "add", "-A")
+        self.commit(repo, "removal commit")
+        return repo
+
+    def test_a_path_rule_cannot_suppress_a_stored_payload(self):
+        """`rev-list --objects` emits a blob under ONE of its names and whoever committed it picks
+        which. Filing the same bytes under an allowlisted path made the stored payload vanish from
+        the report — the same argument that keeps `exclude_dirs` off this side."""
+        rule = [{"signature": "loader-fromcharcode-127", "path_glob": "tests/**"}]
+        note = scanner.history_residue_note(self._same_bytes_under_two_names("tests/fixture.js"),
+                                            ScanOptions(history=True), self._sigs(), rule)
+        self.assertIn("still STORE a confirmed payload", note)
+
+    def test_a_signature_wide_rule_is_still_honoured(self):
+        """It carries the same operator intent and there is no name to aim, so it stays."""
+        rule = [{"signature": "loader-fromcharcode-127"}]
+        note = scanner.history_residue_note(self._same_bytes_under_two_names("tests/fixture.js"),
+                                            ScanOptions(history=True), self._sigs(), rule)
+        self.assertNotIn("still STORE a confirmed payload", note)
+
+    def test_a_path_cannot_repaint_the_terminal(self):
+        """A path is committer-chosen text and reaches the notes block, which was the only value on
+        that surface not wrapped. Unwrapped, an erase-display sequence blanked the verdict table and
+        left a forged all-clear in its place."""
+        from stayawake.bots.security.sinks.render import render_terminal
+        hostile = "a\x1b[2Jb\x1b[32mall targets clean\x1b[0m.js"
+        note = "1 path(s) still STORE a confirmed payload: " + hostile
+        payload = ScanReport("t", [ScanResult("acme/widget", "local", notes=[note])]).to_payload()
+        out = render_terminal(payload, detail=True)
+        self.assertIn("Coverage notes", out, "the note really did render")
+        self.assertNotIn("\x1b", out, "an escape sequence reached the terminal raw")
+
+    def test_a_path_holding_a_vertical_tab_is_not_truncated(self):
+        """`splitlines()` breaks on \\x0b, \\x0c and U+2028 as well as \\n, so a path holding one
+        was reported under its first segment only."""
+        from stayawake.lib.git.query import reachable_blobs
+        repo = self.new_repo()
+        (repo / "c\x0bpayload.js").write_bytes(b"x\n")
+        self.git(repo, "add", "-A")
+        self.commit(repo, "a path with a vertical tab")
+        self.assertIn("c\x0bpayload.js", {path for _s, path in reachable_blobs(repo)[0]})
+
+
+class TestItSaysSoWhenItCouldNotRead(GitSandbox):
+    def _sigs(self):
+        from stayawake.bots.security.signatures import load_signatures
+        return load_signatures()
+
+    def test_a_repository_git_cannot_enumerate_is_unknown_not_clean(self):
+        """`stdout` degrades a failed git command to an empty string, so "no objects" and "git
+        could not answer" arrived identically and the run said nothing at all."""
+        repo = self.new_repo()
+        self.write(repo, "app.js", "hello\n")
+        self.commit(repo, "first")
+        (repo / ".git" / "refs" / "heads" / "broken").write_text("0" * 40 + "\n")
+        note = scanner.history_residue_note(repo, ScanOptions(history=True), self._sigs(), [])
+        self.assertIsNotNone(note, "silence is the failure this note exists to end")
+        self.assertIn("UNKNOWN", note)
+
+    def test_a_version_that_could_not_be_read_is_not_counted_as_read(self):
+        """`read_errors` were collected on the target and then dropped, so an unreadable stored
+        object was counted in the number the note reports as examined."""
+        repo = self.new_repo()
+        self.write(repo, "a.js", "// one\n")
+        self.commit(repo, "one")
+        from stayawake.bots.security.targets.history import HistoryTarget
+        with mock.patch.object(HistoryTarget, "_cat_file", side_effect=OSError("boom")):
+            note = scanner.history_residue_note(repo, ScanOptions(history=True), self._sigs(), [])
+        self.assertIn("1 stored version(s) could not be read", note)
+        self.assertNotIn("-", note.split("payload in")[1][:12],
+                         "one version read five times is one unreadable version, not five")
+
+    def test_a_truncated_walk_is_not_reported_as_a_completed_read(self):
+        repo = self.new_repo()
+        for n in range(4):
+            self.write(repo, f"f{n}.js", f"// {n}\n")
+            self.commit(repo, f"c{n}")
+        from stayawake.bots.security.targets import history as hist
+        real = hist.versions_by_path
+        with mock.patch.object(hist, "versions_by_path",
+                               lambda root, limit=200_000: (real(root)[0], False)):
+            note = scanner.history_residue_note(repo, ScanOptions(history=True), self._sigs(), [])
+        self.assertIn("object budget", note)
+
+
+class TestEveryLocalTargetGetsIt(GitSandbox):
+    def test_a_fleet_scan_reads_history_too(self):
+        """It was wired into the single-repository path only, so `--history` over more than one
+        repository was a silent no-op: the run reported it had read history and had not."""
+        from stayawake.bots.security.service import workers
+        from stayawake.bots.security.signatures import load_signatures
+        repo = self.new_repo()
+        self.write(repo, "loader.js", _payload())
+        self.commit(repo, "payload lands")
+        (repo / "loader.js").unlink()
+        self.commit(repo, "removal commit")
+        job = workers.LocalScanJob(str(repo), str(repo), ScanOptions(history=True),
+                                   load_signatures(), [])
+        self.assertTrue(any("still STORE a confirmed payload" in n
+                            for n in workers.scan_local(job).result.notes))
+
+    def test_without_the_flag_it_stays_silent(self):
+        repo = self.new_repo()
+        self.write(repo, "a.js", "// x\n")
+        self.commit(repo, "one")
+        from stayawake.bots.security.service import workers
+        from stayawake.bots.security.signatures import load_signatures
+        job = workers.LocalScanJob(str(repo), str(repo), ScanOptions(), load_signatures(), [])
+        self.assertFalse([n for n in workers.scan_local(job).result.notes if "History" in n])
 
 
 class TestARemoteTargetIsRefusedRatherThanHalfAnswered(unittest.TestCase):

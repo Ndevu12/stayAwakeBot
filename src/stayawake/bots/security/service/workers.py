@@ -7,7 +7,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass, field
 
 from stayawake.bots.security.models import Finding, ScanResult
-from stayawake.bots.security.scanner import run_matchers, scan_target
+from stayawake.bots.security.scanner import attach_history_note, run_matchers, scan_target
 from stayawake.bots.security.targets import LocalRepoTarget, RemoteRepoTarget
 
 
@@ -44,6 +44,7 @@ def scan_local(job: LocalScanJob) -> WorkerScan:
     with redirect_stdout(buf), redirect_stderr(buf):
         with LocalRepoTarget(job.root, job.display, job.opts) as target:
             result = scan_target(target, job.signatures, job.allowlist)
+        attach_history_note(result, job.root, job.opts, job.signatures, job.allowlist)
     return WorkerScan(result, buf.getvalue())
 
 

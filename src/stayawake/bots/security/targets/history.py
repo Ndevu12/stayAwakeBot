@@ -10,7 +10,9 @@ from typing import Iterator
 
 from stayawake.lib.git.query import reachable_blobs
 
-from .base import Target
+from .base import _MAX_INTERIOR_SCAN_BYTES, Target
+
+_CHUNK = 1 << 20
 
 
 def versions_by_path(root, limit: int = 200_000) -> tuple[dict[str, list[str]], bool]:
@@ -20,16 +22,6 @@ def versions_by_path(root, limit: int = 200_000) -> tuple[dict[str, list[str]], 
     for sha, path in blobs:
         grouped[path].append(sha)
     return dict(grouped), complete
-
-
-def _excluded(path: str, exclude_dirs) -> bool:
-    """Whether the tree scan would have skipped this path.
-
-    The walk drops these directories, so reading their stored versions would answer differently
-    about the same repository — and a project that once committed `node_modules` carries thousands
-    of vendored files that the tree side deliberately never reads.
-    """
-    return any(part in exclude_dirs for part in Path(path).parts[:-1])
 
 
 class HistoryTarget(Target):
@@ -43,6 +35,11 @@ class HistoryTarget(Target):
     The version is chosen by the round instead. Rounds map to PATH coverage: one covers 74% of this
     repository's paths completely, twenty covers 98.6%, and the remainder is files CI rewrites on
     every run.
+
+    `exclude_dirs` is deliberately NOT applied. `rev-list --objects` emits a blob once, under one of
+    its names, so excluding by that name drops content that also lives at a scanned path — and
+    whoever committed it chooses which name git emits. Reading a vendored tree is noise; not reading
+    a payload because it is also filed under `node_modules/` is a blind spot someone can aim.
     """
 
     source = "history"
@@ -50,7 +47,7 @@ class HistoryTarget(Target):
     def __init__(self, root, display: str, opts, versions: dict[str, list[str]], index: int = 0):
         super().__init__(root, display, opts)
         self._sha_by_path = {path: shas[index] for path, shas in versions.items()
-                             if index < len(shas) and not _excluded(path, opts.exclude_dirs)}
+                             if index < len(shas)}
 
     def __len__(self) -> int:
         return len(self._sha_by_path)
@@ -62,31 +59,78 @@ class HistoryTarget(Target):
         return self._sha_by_path.get(rel)
 
     def read_bytes(self, rel: str, limit: int | None = None) -> bytes | None:
-        sha = self._sha_by_path.get(rel)
-        if sha is None:
-            return None
-        try:
-            out = subprocess.run(["git", "-C", str(Path(self.root)), "cat-file", "blob", sha],
-                                 capture_output=True, timeout=30)
-        except (OSError, subprocess.SubprocessError) as exc:
-            self.read_errors.append(f"{rel} ({type(exc).__name__})")
-            return None
-        if out.returncode != 0:
-            self.read_errors.append(f"{rel} (unreadable object)")
-            return None
-        data = out.stdout
-        if limit is None and len(data) > self.opts.max_file_bytes:
-            return None
-        return data[:limit] if limit else data
+        data, more = self._stream(rel, limit if limit else self.opts.max_file_bytes)
+        if data is None or limit:
+            return data
+        return None if more else data          # oversized: a policy skip, exactly as the tree side
 
     # Three readers reach the filesystem on the base class, and the content tier — the one carrying
     # every confirmed signature — uses `read_source_windows`, not `read_bytes`. Overriding one of
     # the three scanned nothing and reported clean.
     def read_text(self, rel: str) -> str | None:
         data = self.read_bytes(rel)
+        if data is None:
+            data = self._head_tail(rel)        # oversized, so the tree side's head+tail, not a skip
         return None if data is None else data.decode("utf-8", "replace")
 
     def read_source_windows(self, rel: str) -> Iterator[tuple[int, str]]:
         text = self.read_text(rel)
         if text:
             yield 0, text
+
+    def _cat_file(self, sha: str):
+        return subprocess.Popen(["git", "-C", str(Path(self.root)), "cat-file", "blob", sha],
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+
+    def _stream(self, rel: str, cap: int) -> tuple[bytes | None, bool]:
+        """At most `cap` bytes of a stored version, and whether there were more.
+
+        Streamed and capped rather than captured whole: a size test after the read cannot bound it,
+        because the read itself is what costs. The tree side stats before opening; a stored version
+        has nothing to stat, so the cap moves into the read.
+        """
+        sha = self._sha_by_path.get(rel)
+        if sha is None:
+            return None, False
+        try:
+            proc = self._cat_file(sha)
+            with proc:
+                data = proc.stdout.read(cap) or b""
+                more = bool(proc.stdout.read(1))
+                if more:
+                    proc.kill()
+            if proc.returncode not in (0, -9) or (not data and not more):
+                self.read_errors.append(rel)
+                return None, False
+        except (OSError, subprocess.SubprocessError):
+            self.read_errors.append(rel)
+            return None, False
+        return data, more
+
+    def _head_tail(self, rel: str) -> bytes | None:
+        """The two ends of an oversized version, as the tree side reads an oversized file.
+
+        Consumed in chunks and thrown away in the middle, so memory stays at the two ends however
+        large the blob is; past the interior-scan ceiling the rest is not even drained.
+        """
+        half = max(1, self.opts.max_file_bytes // 2)
+        sha = self._sha_by_path.get(rel)
+        if sha is None:
+            return None
+        head, tail, total = b"", b"", 0
+        try:
+            proc = self._cat_file(sha)
+            with proc:
+                while total < _MAX_INTERIOR_SCAN_BYTES:
+                    chunk = proc.stdout.read(_CHUNK)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if len(head) < half:
+                        head += chunk[:half - len(head)]
+                    tail = (tail + chunk)[-half:]
+                proc.kill()
+        except (OSError, subprocess.SubprocessError):
+            self.read_errors.append(rel)
+            return None
+        return head if total <= half else head + tail
