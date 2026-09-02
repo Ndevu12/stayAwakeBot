@@ -20,6 +20,12 @@ reader, not the mechanism or the weakness it closed.
   nothing stored there runs on clone or on build. It says how many stored versions it read, and how
   many it did not.
 
+### Changed
+- **`saw fix` now states what it leaves behind.** Its page says plainly that cleaning the working
+  tree does not remove the payload from the repository's earlier commits, that clones and forks
+  keep their own copy, and that clearing it needs a history rewrite and the hosting provider's
+  collection.
+
 
 ### Changed
 - **`saw fix` no longer leaves behind the packages it could not account for.** They were the only
