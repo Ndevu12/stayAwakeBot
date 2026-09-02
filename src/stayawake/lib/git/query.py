@@ -84,30 +84,28 @@ def commit_count(repo: str | Path, ref: str = "HEAD") -> int | None:
 
 def reachable_blobs(repo: str | Path, *, limit: int = 200_000) -> tuple[list[tuple[str, str]], bool]:
     """Every distinct blob reachable from ANY ref, as (sha, one path it is known by), and whether
-    the walk was complete.
+    the walk completed.
 
-    One `rev-list --objects --all` covers branches and tags together, which is what makes the branch
-    axis and the tag axis one question rather than two. It also does the deduplication: the same
-    content on many branches is one object and git emits it once — MEASURED, 0 repeats across 20400
-    objects — so this does not re-do it, and a reader should not add a check that reads like a
-    safety property when git already holds it.
-
-    The type is ASKED of git, not inferred from having a name. An annotated tag object is emitted
-    with the tag's own name where a path goes — `e7f5a49 v1` — so "it has a name" answers "blob"
-    wrongly, and `--filter=object:type=blob` does not drop it either. `--batch-all-objects` says what
-    each object is, which is the only answer that does not depend on how it was reached.
-
-    A path is kept only to name the object for a reader — the same content can be reachable under
-    several names, and which one is reported carries no meaning.
+    The type is asked of git, not inferred from having a name: an annotated tag is emitted under
+    the tag's own name where a path goes, and `--filter=object:type=blob` does not drop it either.
+    No deduplication — `rev-list --objects` emits each object once, measured 0 repeats in 20400.
     """
-    blob_shas = {line.split()[0] for line in
-                 stdout(repo, ["cat-file", "--batch-check", "--batch-all-objects", "--unordered"]
-                        ).splitlines()
+    listing = run(repo, ["cat-file", "--batch-check", "--batch-all-objects", "--unordered"])
+    if listing is None or listing.returncode != 0:
+        return [], False
+    # git EXITS 0 having skipped an object it cannot unpack, naming it on stderr only. The sha then
+    # fails the type test below and leaves the walk silently, so the caller must not be told this
+    # was a complete read. Both commands can do it, and only one was being read.
+    complete = not listing.stderr.strip()
+    blob_shas = {line.split()[0] for line in listing.stdout.splitlines()
                  if len(line.split()) >= 2 and line.split()[1] == "blob"}
-    out = stdout(repo, ["rev-list", "--objects", "--all"])
+    walk = run(repo, ["rev-list", "--objects", "--all"])
+    if walk is None or walk.returncode != 0:
+        return [], False
+    complete = complete and not walk.stderr.strip()
+    out = walk.stdout
     seen: dict[str, str] = {}
-    complete = True
-    for line in out.splitlines():
+    for line in out.split("\n"):        # not splitlines: it breaks on \r and \x0b too, truncating a path
         sha, _, path = line.partition(" ")
         if sha not in blob_shas:
             continue          # a commit, a tree, or a tag object emitted under the tag's own name

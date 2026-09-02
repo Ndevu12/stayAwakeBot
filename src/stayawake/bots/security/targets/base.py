@@ -28,6 +28,10 @@ _SOURCE_WINDOW_OVERLAP = 65_536
 
 _MAX_INTERIOR_SCAN_BYTES = 64_000_000
 
+# Between a head and a tail, so no pattern can match across the join and report a
+# signature that is nowhere in the file.
+TRUNCATION_MARKER = b"\n/*\xe2\x80\xa6stayawake-truncated\xe2\x80\xa6*/\n"
+
 
 def _ext(rel: str) -> str:
     i = rel.rfind(".")
@@ -44,6 +48,7 @@ class ScanOptions:
     dependency_advisories: bool = True
     external_audit: bool = False
     deep: bool = False
+    history: bool = False        # also read what the repository still stores on other refs
 
 
 class Target:
@@ -132,7 +137,7 @@ class Target:
                 except OSError:
                     fh.seek(0)
                 tail = fh.read(half)
-            return head + b"\n/*\xe2\x80\xa6stayawake-truncated\xe2\x80\xa6*/\n" + tail
+            return head + TRUNCATION_MARKER + tail
         except OSError as exc:
             self._note_unreadable(p.name, p, exc)   # unreadable oversized file — a gap (unless a symlink)
             return b""
