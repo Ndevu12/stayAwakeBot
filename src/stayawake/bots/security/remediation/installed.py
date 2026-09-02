@@ -186,8 +186,15 @@ class Report:
     removed_packages: int = 0
     removed_lockfiles: list[Path] = field(default_factory=list)
     removed_builds: list[str] = field(default_factory=list)
+    copies: Path | None = None
 
     def note(self) -> str:
+        """What this did to the tree the operator is standing in, and where the copies went.
+
+        These removals happen in the live checkout when the finding is confirmed, and they do not
+        wait for a pull request or depend on one being merged. Saying only what was removed left a
+        reader of `--pr` expecting a branch to review and nothing else.
+        """
         bits = []
         if self.removed_packages:
             bits.append(f"removed {self.removed_packages} installed package(s)")
@@ -197,17 +204,22 @@ class Report:
             bits.append("removed the lockfile")
         if self.removed_builds:
             bits.append("removed " + ", ".join(self.removed_builds))
-        return "; ".join(bits)
+        if not bits:
+            return ""
+        done = "; ".join(bits) + " — from your working tree now, not only on the branch"
+        return f"{done}; copies in {self.copies}" if self.copies else done
 
 
-def build_output_dirs(root: Path, exclude_dirs) -> list[Path]:
-    """Project-local generated trees under `root`."""
-    names = set(_BUILD_OUTPUTS) | set(ScanOptions().exclude_dirs)
-    if exclude_dirs:
-        names |= set(exclude_dirs)
-    names -= _NOT_A_BUILD
+def build_output_dirs(root: Path) -> list[Path]:
+    """The NAMED generated trees under `root`, and nothing else.
+
+    Never the caller's `exclude_dirs`. That setting is documented as directories never TRAVERSED,
+    and users put vendored code, fixtures and test corpora there; unioning it into the delete set
+    destroyed them. The default scan excludes were unioned in too and contributed nothing —
+    `.next`, `build` and `dist` are already named below, and `_NOT_A_BUILD` subtracts the rest.
+    """
     found = []
-    for name in sorted(names):
+    for name in sorted(_BUILD_OUTPUTS - _NOT_A_BUILD):
         path = root / name
         if _is_real_directory(path) and is_safe_write_target(path, root):
             found.append(path)
@@ -221,7 +233,7 @@ def _relative_to(path: Path, root: Path) -> Path | None:
         return None
 
 
-def remove_rebuildable(root: Path, *, exclude_dirs=None, remove_lockfiles: bool = True,
+def remove_rebuildable(root: Path, *, remove_lockfiles: bool = True,
                        lockfile_root: Path | None = None) -> Report:
     """Remove this repository's installed tree, lockfile, and generated outputs. Bounded to `root`."""
     report = Report()
@@ -246,6 +258,7 @@ def remove_rebuildable(root: Path, *, exclude_dirs=None, remove_lockfiles: bool 
             if not is_safe_write_target(candidate, root):
                 raise OSError(f"quarantine is not inside {root}")
             quarantine = candidate
+            report.copies = _relative_to(candidate, root) or candidate
         return quarantine
 
     copies: list[Path] = []
@@ -270,6 +283,13 @@ def remove_rebuildable(root: Path, *, exclude_dirs=None, remove_lockfiles: bool 
         leftover = root / INSTALLED_DIR
         if not plan.preserve and _is_real_directory(leftover) and is_safe_write_target(leftover, root):
             shutil.rmtree(leftover)
+        # Inside the guard, and copied out first — as the package path above does. It ran even when
+        # the plan had already concluded that nothing proves what the tree should contain, and it
+        # was the one removal on this path that created no quarantine at all.
+        for build in build_output_dirs(root):
+            shutil.copytree(build, _evidence() / build.name, symlinks=True, dirs_exist_ok=True)
+            shutil.rmtree(build)
+            report.removed_builds.append(build.name)
 
     seen: set[Path] = set()
     for lockfile in copies:
@@ -286,7 +306,4 @@ def remove_rebuildable(root: Path, *, exclude_dirs=None, remove_lockfiles: bool 
             live.unlink()
             seen.add(live.resolve())
 
-    for build in build_output_dirs(root, exclude_dirs):
-        shutil.rmtree(build)
-        report.removed_builds.append(build.name)
     return report

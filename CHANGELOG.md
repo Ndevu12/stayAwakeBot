@@ -14,6 +14,19 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Fixed
+- **`saw fix` no longer deletes directories you excluded from scanning.** `exclude_dirs` says what
+  is read, and nothing now infers from it that a directory may be removed — vendored code, fixtures
+  and test corpora were being destroyed, with no copy kept.
+- **Generated outputs are removed only when the lockfile accounts for the installed tree**, and are
+  copied into the quarantine directory first, as everything else on that path already was.
+
+### Changed
+- **`saw fix` says that its removals happen in your working tree**, when the run happens rather
+  than when a pull request is merged, and names the directory the copies were written to. The
+  reference page says the same.
+
+
+### Fixed
 - **`saw audit` says how many locations it could not read, before listing them.** A long path used
   to push the count — and the other locations — out of the report, leaving neither. Each path is
   shortened in the middle for the same reason, and a location reached twice is named once.

@@ -219,7 +219,6 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
                 try:
                     report = installed.remove_rebuildable(
                         repo,
-                        exclude_dirs=getattr(opts, "exclude_dirs", None),
                         remove_lockfiles=not installed.lockfile_stays(),
                         lockfile_root=wt)
                     tree_note = report.note()
