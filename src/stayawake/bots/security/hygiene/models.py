@@ -98,18 +98,13 @@ BLOCKED_ID = "check-blocked"
 BLOCKED_SURFACE_ID = "surface-check-blocked"
 SURFACE_NOT_IMPLEMENTED_ID = "persistence-surface-not-implemented"
 PROCESSES_NOT_READABLE_ID = "process-arguments-not-readable"
-# Both halves are required — a module that looks modified AND a scan that did not settle it — so
-# this is not a bare "the engine failed" alarm.
-SCAN_BLOCKED_ID = "app-bundle-scan-blocked"
-# The tier below the one above: whether that scan runs at all. MEASURED zero across 22477 modules
-# under 44 roots on an ordinary host, which is why it gates rather than staying an `info` note.
-MODULE_UNREADABLE_ID = "app-bundle-module-unreadable"
-# The same claim on the host-artifact surface; its own id because the two are reported separately.
-ARTIFACT_SCAN_BLOCKED_ID = "host-artifact-scan-blocked"
+APP_BUNDLE_SCAN_BLOCKED_ID = "app-bundle-scan-blocked"
+APP_BUNDLE_MODULE_UNREADABLE_ID = "app-bundle-module-unreadable"
+HOST_ARTIFACT_SCAN_BLOCKED_ID = "host-artifact-scan-blocked"
 UNVERIFIED_PERSISTENCE_IDS = {SURFACE_UNREADABLE_ID, SURFACE_ABSENT_ID, BLOCKED_SURFACE_ID,
                               SURFACE_NOT_IMPLEMENTED_ID, PROCESSES_NOT_READABLE_ID,
-                              SCAN_BLOCKED_ID, MODULE_UNREADABLE_ID,
-                              ARTIFACT_SCAN_BLOCKED_ID}
+                              APP_BUNDLE_SCAN_BLOCKED_ID, APP_BUNDLE_MODULE_UNREADABLE_ID,
+                              HOST_ARTIFACT_SCAN_BLOCKED_ID}
 
 
 def could_not_read(paths) -> HygieneIssue:

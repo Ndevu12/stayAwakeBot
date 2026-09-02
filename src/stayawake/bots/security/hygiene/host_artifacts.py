@@ -15,7 +15,7 @@ from pathlib import Path
 from stayawake.utils import hostdenial
 from stayawake.utils.pathsafe import canonical_id, grade
 
-from .models import (ARTIFACT_SCAN_BLOCKED_ID, HygieneIssue, _WIPER_NOTE,
+from .models import (HOST_ARTIFACT_SCAN_BLOCKED_ID, HygieneIssue, _WIPER_NOTE,
                      could_not_read)
 
 #
@@ -353,8 +353,6 @@ def check_host_artifacts(verify: bool = False) -> list[HygieneIssue]:
         if graded is not None:
             return graded + extra
         if failure is not None:
-            # `graded is None` means both "nothing scannable here" and "the scan blew up", and
-            # conflated the second printed the fallback that says to run `--verify`.
             extra = [_scan_blocked_issue(weak[0][1], failure)] + extra
     return [HygieneIssue(
         id="host-drop-artifact-weak",
@@ -369,9 +367,13 @@ def check_host_artifacts(verify: bool = False) -> list[HygieneIssue]:
 
 
 def _scan_blocked_issue(path: Path, failure: str) -> HygieneIssue:
-    """The content scan `--verify` promised and did not deliver, on this surface."""
+    """The content scan `--verify` promised and did not deliver, on this surface.
+
+    `_scan_or_reason` answers None for both "nothing scannable here" and "the scan blew up";
+    conflated, the second printed the fallback whose own advice is to run `--verify`.
+    """
     return HygieneIssue(
-        id=ARTIFACT_SCAN_BLOCKED_ID,
+        id=HOST_ARTIFACT_SCAN_BLOCKED_ID,
         severity="unknown",
         title="The content scan asked for did not run",
         detail=f"`--verify` was asked for and the scan of {path} did not run ({failure}), so its "
@@ -394,7 +396,10 @@ def _verify_weak_artifact(item: tuple[str, Path]) -> list[HygieneIssue] | None:
     """Content-scan one lone weak artifact and grade honestly. Returns None when the artifact
     is not a scannable directory (e.g. a lone `get-pip.py` file) so the caller falls back to the
     honest 'verify it yourself' info. The scanner import is LOCAL so the default audit (no
-    `--verify`) never pulls the scan engine in."""
+    `--verify`) never pulls the scan engine in.
+
+    Only `scanned_clean` clears a directory: two of the other verdicts return before the scanner
+    runs at all, so none of them may be worded as a scan that found nothing."""
     desc, path = item
     if grade(path) == "unverified":
         return [could_not_read([path])]
@@ -429,7 +434,6 @@ def _verify_weak_artifact(item: tuple[str, Path]) -> list[HygieneIssue] | None:
     elif v.too_large:
         outcome = "It is too large to scan automatically, so its contents were not checked."
     elif v.partial and v.unread:
-        # One of the two states behind this returns before the scanner runs at all.
         outcome = (f"It was not fully scanned: {'; '.join(v.unread)}. Its contents were not "
                    f"cleared. {_NOT_CLEARED}")
     elif v.partial:

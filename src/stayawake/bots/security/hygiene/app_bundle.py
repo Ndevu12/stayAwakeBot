@@ -13,7 +13,7 @@ from pathlib import Path
 
 from stayawake.utils.pathsafe import canonical_id
 
-from .models import HygieneIssue, MODULE_UNREADABLE_ID, SCAN_BLOCKED_ID, _WIPER_NOTE
+from .models import HygieneIssue, APP_BUNDLE_MODULE_UNREADABLE_ID, APP_BUNDLE_SCAN_BLOCKED_ID, _WIPER_NOTE
 
 _JS_SUFFIXES = (".js", ".mjs", ".cjs")
 
@@ -339,7 +339,7 @@ def _unreadable_note(count: int) -> HygieneIssue | None:
     if not count:
         return None
     return HygieneIssue(
-        id=MODULE_UNREADABLE_ID,
+        id=APP_BUNDLE_MODULE_UNREADABLE_ID,
         severity="unknown",
         title="An application module could not be read",
         detail=f"{count} module(s) an installed application loads could not be read at all, so "
@@ -358,7 +358,7 @@ def _unscanned_note(reasons: list[str]) -> HygieneIssue | None:
     if not reasons:
         return None
     return HygieneIssue(
-        id=SCAN_BLOCKED_ID,
+        id=APP_BUNDLE_SCAN_BLOCKED_ID,
         severity="unknown",
         title="A module that looks modified was not cleared",
         detail="`--verify` was asked for and the scan did not clear these modules: "

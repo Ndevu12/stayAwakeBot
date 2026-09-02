@@ -19,9 +19,9 @@ from unittest import mock
 
 from stayawake.bots.security.hygiene import app_bundle, audit_checks, host_artifacts, render
 from stayawake.bots.security.hygiene.models import (ACTIVE_PERSISTENCE_IDS,
-                                                    ARTIFACT_SCAN_BLOCKED_ID,
-                                                    MODULE_UNREADABLE_ID, ROTATION_UNSAFE_IDS,
-                                                    ROTATION_UNSAFE_UNKNOWN, SCAN_BLOCKED_ID,
+                                                    HOST_ARTIFACT_SCAN_BLOCKED_ID,
+                                                    APP_BUNDLE_MODULE_UNREADABLE_ID, ROTATION_UNSAFE_IDS,
+                                                    ROTATION_UNSAFE_UNKNOWN, APP_BUNDLE_SCAN_BLOCKED_ID,
                                                     rotation_safety)
 
 
@@ -294,7 +294,7 @@ class TestAScanThatCouldNotRunIsNotAScanThatFoundNothing(unittest.TestCase):
     def test_an_engine_that_will_not_run_leaves_the_hole_as_its_own_item(self):
         issues = self._blocked_by(RuntimeError("signature store unreadable"))
         self.assertEqual([i.id for i in issues],
-                         ["app-bundle-appended-module", SCAN_BLOCKED_ID])
+                         ["app-bundle-appended-module", APP_BUNDLE_SCAN_BLOCKED_ID])
         self.assertEqual(issues[0].severity, "info")
         self.assertEqual(issues[1].severity, "unknown")
         self.assertIn("signature store unreadable", issues[1].detail)
@@ -302,7 +302,7 @@ class TestAScanThatCouldNotRunIsNotAScanThatFoundNothing(unittest.TestCase):
     def test_an_engine_that_will_not_import_is_reported_the_same_way(self):
         with mock.patch.dict(sys.modules, {"stayawake.bots.security.verify": None}):
             ids = [i.id for i in self._planted().check(verify=True)]
-        self.assertIn(SCAN_BLOCKED_ID, ids)
+        self.assertIn(APP_BUNDLE_SCAN_BLOCKED_ID, ids)
 
     def test_it_never_tells_the_operator_to_run_what_they_just_ran(self):
         for issue in self._blocked_by(RuntimeError("boom")):
@@ -319,9 +319,9 @@ class TestAScanThatCouldNotRunIsNotAScanThatFoundNothing(unittest.TestCase):
     def test_it_withholds_the_rotation_all_clear(self):
         # Rotating while a live foothold sits in an application bundle is the reported wiper
         # trigger, and a scan that did not run cannot say there is none.
-        self.assertIn(SCAN_BLOCKED_ID, ROTATION_UNSAFE_IDS)
-        self.assertEqual(rotation_safety({SCAN_BLOCKED_ID}), ROTATION_UNSAFE_UNKNOWN)
-        self.assertNotIn(SCAN_BLOCKED_ID, ACTIVE_PERSISTENCE_IDS,
+        self.assertIn(APP_BUNDLE_SCAN_BLOCKED_ID, ROTATION_UNSAFE_IDS)
+        self.assertEqual(rotation_safety({APP_BUNDLE_SCAN_BLOCKED_ID}), ROTATION_UNSAFE_UNKNOWN)
+        self.assertNotIn(APP_BUNDLE_SCAN_BLOCKED_ID, ACTIVE_PERSISTENCE_IDS,
                          "not confirmed persistence — it is a hole, and must not outrank one")
         ids = {i.id for i in self._blocked_by(RuntimeError("boom"))}
         self.assertEqual(rotation_safety(ids), ROTATION_UNSAFE_UNKNOWN)
@@ -334,9 +334,9 @@ class TestAScanThatCouldNotRunIsNotAScanThatFoundNothing(unittest.TestCase):
         with self._engine(_raising(RuntimeError("boom"))):
             issues = host.check(verify=True)
         ids = [i.id for i in issues]
-        self.assertEqual(ids.count(SCAN_BLOCKED_ID), 1)
+        self.assertEqual(ids.count(APP_BUNDLE_SCAN_BLOCKED_ID), 1)
         self.assertEqual(ids.count("app-bundle-appended-module"), 2)
-        hole = next(i for i in issues if i.id == SCAN_BLOCKED_ID)
+        hole = next(i for i in issues if i.id == APP_BUNDLE_SCAN_BLOCKED_ID)
         self.assertEqual(hole.detail.count("RuntimeError: boom"), 1)
 
     def test_causes_that_differ_are_all_named(self):
@@ -349,7 +349,7 @@ class TestAScanThatCouldNotRunIsNotAScanThatFoundNothing(unittest.TestCase):
 
         with self._engine(engine):
             issues = host.check(verify=True)
-        hole = next(i for i in issues if i.id == SCAN_BLOCKED_ID)
+        hole = next(i for i in issues if i.id == APP_BUNDLE_SCAN_BLOCKED_ID)
         self.assertIn("first cause", hole.detail)
         self.assertIn("second cause", hole.detail)
 
@@ -374,18 +374,18 @@ class TestAScanThatCouldNotRunIsNotAScanThatFoundNothing(unittest.TestCase):
                 with self._engine(lambda _d, v=verdict: v):
                     issues = self._planted().check(verify=True)
                 ids = [i.id for i in issues]
-                self.assertIn(SCAN_BLOCKED_ID, ids, f"{label} is not a clean scan")
+                self.assertIn(APP_BUNDLE_SCAN_BLOCKED_ID, ids, f"{label} is not a clean scan")
                 shape = next(i for i in issues if i.id == "app-bundle-appended-module")
                 self.assertNotIn("no confirmed markers", shape.detail)
                 self.assertEqual(rotation_safety(set(ids)), ROTATION_UNSAFE_UNKNOWN)
-                hole = next(i for i in issues if i.id == SCAN_BLOCKED_ID)
+                hole = next(i for i in issues if i.id == APP_BUNDLE_SCAN_BLOCKED_ID)
                 self.assertNotIn("modules: .", hole.detail,
                                  "a hole with a blank reason tells the operator nothing")
 
     def test_the_reason_the_scan_gave_reaches_the_operator(self):
         with self._engine(lambda _d: _Verdict(partial=True, unread=["archives are not opened"])):
             issues = self._planted().check(verify=True)
-        hole = next(i for i in issues if i.id == SCAN_BLOCKED_ID)
+        hole = next(i for i in issues if i.id == APP_BUNDLE_SCAN_BLOCKED_ID)
         self.assertIn("archives are not opened", hole.detail)
 
     def test_a_marker_wins_over_an_incomplete_scan(self):
@@ -483,16 +483,16 @@ class TestAModuleThatCouldNotBeReadIsNotAModuleThatHeldNothing(unittest.TestCase
             os.chmod(hidden, 0o644)
         ids = [i.id for i in issues]
         self.assertIn("app-bundle-appended-module", ids)
-        self.assertIn(MODULE_UNREADABLE_ID, ids)
+        self.assertIn(APP_BUNDLE_MODULE_UNREADABLE_ID, ids)
 
     def test_it_withholds_the_rotation_all_clear(self):
-        self.assertIn(MODULE_UNREADABLE_ID, ROTATION_UNSAFE_IDS)
-        self.assertEqual(rotation_safety({MODULE_UNREADABLE_ID}), ROTATION_UNSAFE_UNKNOWN)
+        self.assertIn(APP_BUNDLE_MODULE_UNREADABLE_ID, ROTATION_UNSAFE_IDS)
+        self.assertEqual(rotation_safety({APP_BUNDLE_MODULE_UNREADABLE_ID}), ROTATION_UNSAFE_UNKNOWN)
         host = _Host()
         hidden = host.write(_appended([_confirmed_payload()]), name="hidden.js")
         os.chmod(hidden, 0o000)
         try:
-            note = next(i for i in host.check() if i.id == MODULE_UNREADABLE_ID)
+            note = next(i for i in host.check() if i.id == APP_BUNDLE_MODULE_UNREADABLE_ID)
         finally:
             os.chmod(hidden, 0o644)
         self.assertEqual(note.severity, "unknown",
@@ -550,14 +550,14 @@ class TestTheSiblingSurfaceAnswersTheSameWay(unittest.TestCase):
                                _raising(RuntimeError("engine gone"))):
             issues = host_artifacts.check_host_artifacts(verify=True)
         ids = {i.id for i in issues}
-        self.assertIn(ARTIFACT_SCAN_BLOCKED_ID, ids)
+        self.assertIn(HOST_ARTIFACT_SCAN_BLOCKED_ID, ids)
         self.assertEqual(rotation_safety(ids), ROTATION_UNSAFE_UNKNOWN)
 
     def test_an_artifact_that_is_not_a_scannable_directory_still_falls_back(self):
         with self._only_this_artifact(), \
              mock.patch.object(host_artifacts, "_verify_weak_artifact", lambda item: None):
             ids = {i.id for i in host_artifacts.check_host_artifacts(verify=True)}
-        self.assertNotIn(ARTIFACT_SCAN_BLOCKED_ID, ids)
+        self.assertNotIn(HOST_ARTIFACT_SCAN_BLOCKED_ID, ids)
         self.assertIn("host-drop-artifact-weak", ids)
 
     def test_it_never_claims_a_scan_of_the_rest(self):
