@@ -36,9 +36,5 @@ Everyone taking part is covered by the [Code of Conduct](CODE_OF_CONDUCT.md).
 A finding in a repository that `saw` scanned is a report for the owner of **that** repository, not
 for this one — unless you believe the finding itself is wrong, which is a false positive.
 
-While a false positive is open, you can suppress that one signature on that one path with your
-own config — see [configuration](docs/reference/configuration.md). The allowlist is yours and
-must name a signature, so it never silences whatever lands on that path next.
-
 This is a small project. Issues get read; there is no support SLA, and no commercial-support
 channel beyond the [commercial licence](COMMERCIAL-LICENSE.md) contact, **saw@ndevuspace.com**.
