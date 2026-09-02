@@ -21,10 +21,8 @@ from stayawake.utils import hostdenial, operator
 def locked(*paths: Path):
     """Make `paths` read back as immutable, without needing the OS to allow it.
 
-    `chattr +i` needs a capability an ordinary CI account does not have, and the filesystems those
-    runners use often cannot carry the flag at all — so a fixture that sets it for real tests the
-    grading logic on one platform and nothing on the other. The flag is the OS's business and is
-    covered separately, where it can actually be set.
+    `chattr +i` needs a capability CI does not have, and those filesystems often cannot carry the
+    flag at all. The flag itself is covered separately, where it can be set.
     """
     held = {Path(p).resolve() for p in paths}
     with mock.patch.object(hostdenial, "immutable", lambda p: Path(p).resolve() in held), \
@@ -326,9 +324,8 @@ class TestApplyOne(unittest.TestCase):
         self.assertEqual(victim.stat().st_mode & 0o777, 0o644)
 
     def test_does_not_freeze_a_directory_that_gained_children(self):
-        """It reported OCCUPIED — "already had something in it, so it was not changed" — but the
-        mode had been set to `0o555` by then, which denies the write to the OWNER as well, so the
-        operator could not remove the file they were being told to go and look at."""
+        """`0o555` denies the write to the OWNER too, so "it was not changed" left the operator
+        unable to remove the file they were being told to look at."""
         target = self.d / "empty"
         target.mkdir()
         (target / "payload").write_text("x")
@@ -350,9 +347,6 @@ class TestApplyOne(unittest.TestCase):
         self.assertTrue((target / "payload").exists())
 
     def test_a_location_it_could_not_finish_is_left_usable(self):
-        """Everything after the `chmod` changes the location, so everything after it has to be
-        able to undo it. A bail-out used to leave a `0o555` directory the operator could not write
-        into and `--take-back` could not see."""
         target = self.d / "fresh"
         with locked(), mock.patch.object(hostdenial, "holds", return_value=False), \
              mock.patch.object(hostdenial, "set_immutable", return_value=False):
@@ -693,9 +687,8 @@ class TestNothingIsSealedInDuringTheUpgrade(unittest.TestCase):
     def _upgrade_raced(self, target: Path):
         """Run the privileged upgrade with something writing into the window it opens.
 
-        The window opens where the flag comes off, so that is where the write goes. `chown` is a
-        no-op rather than the hook: the real one is what the tool has to survive, and a mock that
-        also moves modes around would satisfy the assertions below by itself.
+        `chown` is a no-op rather than the hook: a mock that also moved modes would satisfy the
+        assertions below by itself.
         """
         held = {target.resolve()}
 
@@ -729,17 +722,12 @@ class TestNothingIsSealedInDuringTheUpgrade(unittest.TestCase):
         self.assertNotIn(target.resolve(), held, "it must not end up locked around that content")
 
     def test_the_gap_is_never_reported_as_a_location_that_was_not_changed(self):
-        """This asserted OCCUPIED — "already had something in it, so it was not changed" — while
-        the lock had just been taken off and the owner set to root. Two false statements about a
-        location a payload had just written to, on the run that was meant to strengthen it."""
         out, _ = self._upgrade_raced(self._control())
         self.assertNotEqual(out.state, denial.OCCUPIED)
         self.assertNotIn("not changed", out.detail)
         self.assertIn("arrived while the lock was off", out.detail)
 
     def test_the_location_is_handed_back_so_the_operator_can_clear_it(self):
-        """`0o555` denies the write to the owner too, so leaving it meant the file that arrived
-        could not be deleted from a directory the operator owns."""
         target = self._control()
         self._upgrade_raced(target)
         self.assertEqual(target.stat().st_mode & 0o777, 0o700)
@@ -755,8 +743,6 @@ class TestNothingIsSealedInDuringTheUpgrade(unittest.TestCase):
         self.assertIn("left reachable", text)
 
     def test_every_note_that_applies_is_printed(self):
-        """A chain of `elif`s dropped whichever note came second, and a location left open over
-        content and one that needs root can both be in the same run."""
         left_open = denial.PathOutcome(Path("/open"), denial.LEFT_OPEN_OVER_CONTENT, "x")
         needs_root = denial.PathOutcome(Path("/theirs"), denial.NEEDS_ROOT, "y")
         _, text = harden.run(supported=lambda: True, live=lambda: [],
@@ -795,9 +781,6 @@ class TestTakingAControlBack(unittest.TestCase):
         self.assertTrue((target / "keep.txt").exists())
 
     def test_a_location_locked_over_content_is_not_a_settled_run(self):
-        """It used to read as "nothing of ours here" and count toward success, so a run reported
-        the machine as back to normal while an immutable directory holding someone else's content
-        sat at a resolution path and the operator's own removal of it failed."""
         target = self._dir("hostile")
         (target / "evil.js").write_text("x")
         with locked(target):
@@ -806,9 +789,6 @@ class TestTakingAControlBack(unittest.TestCase):
         self.assertIn("locked-over-content", text)
 
     def test_content_arriving_while_the_lock_is_off_is_left_reachable(self):
-        """This pinned the opposite and was wrong. Locking it back seals the content in — the
-        exact thing the sibling that RAISES a control refuses for the same window. Content put
-        beyond the operator's reach at this location is worse than a location left open."""
         target = self._dir("racy")
         with locked(target) as held:
             def arrives(p):
@@ -822,8 +802,6 @@ class TestTakingAControlBack(unittest.TestCase):
         self.assertTrue((target / "late.txt").exists())
 
     def test_a_location_left_open_over_content_is_not_a_settled_run(self):
-        """Left open is not taken back. It reads like a location with nothing of ours in it, and
-        counting it that way says the machine is back to normal over a file nobody has read."""
         target = self._dir("racy")
         with locked(target) as held:
             def arrives(p):
@@ -930,8 +908,6 @@ class TestAPlantedEscalationMarkerDecidesNothing(unittest.TestCase):
             self.assertNotEqual(operator.resolve().uid, 0)
 
     def test_a_control_that_is_in_place_stays_visible(self):
-        """It read as absent, and `saw harden` could never put it back: the location is immutable,
-        so the write it falls through to fails for the rest of the host's life."""
         target = self.d / "denied"
         target.mkdir()
         with locked(target):
@@ -940,15 +916,10 @@ class TestAPlantedEscalationMarkerDecidesNothing(unittest.TestCase):
                 self.assertEqual(hostdenial.held_by(target), hostdenial.SELF_HELD)
 
     def test_running_as_another_account_grades_against_that_account(self):
-        """`sudo -u <account>` sets the same markers and leaves the effective uid that account's.
-        No attacker needed: it graded against the invoker rather than who it was running as."""
         with mock.patch.dict(os.environ, {"SUDO_UID": "1", "SUDO_USER": "daemon"}):
             self.assertEqual(operator.acting_uid(), os.geteuid())
 
     def test_markers_that_disagree_are_refused(self):
-        """`sudo` and `doas` write the uid and the name from one decision. Two that name different
-        accounts is evidence the environment was not built by one, and the first digit-valued
-        variable used to win without the rest ever being read."""
         with mock.patch.object(os, "geteuid", lambda: 0):
             self.assertIsNone(operator.resolve({"HOME": "/var/root", "SUDO_UID": "0",
                                                 "SUDO_USER": self.me.pw_name}))
@@ -1010,7 +981,6 @@ class TestTheFlagNeverGoesBackOverContent(unittest.TestCase):
         self.assertIn("NOT put back", out.detail)
 
     def test_a_failed_raise_over_an_empty_location_still_puts_the_flag_back(self):
-        """The other direction: nothing arrived, so the location must not be left open."""
         target = self._control()
 
         def fails(path, *_a, **_k):
@@ -1022,8 +992,6 @@ class TestTheFlagNeverGoesBackOverContent(unittest.TestCase):
         self.assertIn(target.resolve(), held, "an empty location keeps its lock")
 
     def test_an_arrival_after_the_check_is_unlocked_again(self):
-        """The read-back is what decides it, so a write landing between the emptiness check and
-        the re-lock is caught too — the flag comes off again rather than staying closed over it."""
         target = self._control()
 
         def lands(p):
@@ -1036,8 +1004,6 @@ class TestTheFlagNeverGoesBackOverContent(unittest.TestCase):
         self.assertNotIn(target.resolve(), held, "it must not be left locked around that content")
 
     def test_what_it_says_about_the_owner_is_read_back(self):
-        """This branch is also reached after a raise that never changed the owner, where saying
-        "it is root's now" sent the operator for sudo over a directory already theirs."""
         target = self._control()
 
         def arrives_then_fails(path, *_a, **_k):
@@ -1066,8 +1032,7 @@ class TestALockUnderAThirdAccount(unittest.TestCase):
     def _only_the_global_folders(self):
         """Ask `_host_artifacts` about this fixture and nothing else.
 
-        Its other probes read the real machine — one of them walks `$HOME` — so left alone these
-        take eight seconds each and answer about the host that happens to be running them.
+        Its other probes read the real machine — one walks `$HOME` — at eight seconds a test.
         """
         with mock.patch.object(host_artifacts, "_global_folders", lambda: [self.target]), \
              mock.patch.object(host_artifacts, "_host_user_tag", lambda: None), \
@@ -1104,9 +1069,6 @@ class TestALockUnderAThirdAccount(unittest.TestCase):
         self.assertIn("held-by-another-account", text)
 
     def test_taking_back_refuses_it(self):
-        """Before this grade existed the answer was None, which reached the refusal only because
-        the directory is immutable. Reaching the removal would unlock and delete another
-        account's lock — the "unlock what I am pointed at" verb this must never be."""
         with self._under_another_account():
             out = denial.remove_one(self.target)
             self.assertEqual(hostdenial.held_by(self.target), hostdenial.OTHER_HELD,
@@ -1121,9 +1083,6 @@ class TestALockUnderAThirdAccount(unittest.TestCase):
         self.assertNotEqual(code, 0)
 
     def test_the_audit_does_not_credit_it_as_this_tools_own_work(self):
-        """No downgrade: the probe grades a lock it can neither verify nor clear exactly as it did
-        before this state existed. Asked of `_host_artifacts`, not of the whole audit — the audit
-        walks this machine, which is slow and answers about the host rather than the fixture."""
         with self._under_another_account(), self._only_the_global_folders():
             _strong, weak, _unread, controlled = host_artifacts._host_artifacts()
         self.assertNotIn(self.target, controlled, "it is not this tool's own work")
@@ -1139,9 +1098,6 @@ class TestALockUnderAThirdAccount(unittest.TestCase):
 
 class TestAMarkerThatIsNotANumber(unittest.TestCase):
     def test_a_digit_int_refuses_does_not_escape_as_an_exception(self):
-        """`str.isdigit` is true for characters `int` refuses. The guard caught only `KeyError`,
-        so `ValueError` came out through `resolve` and `acting_uid` into every caller that asks
-        who holds a control."""
         with mock.patch.object(os, "geteuid", lambda: 0):
             self.assertIsNone(operator.resolve({"HOME": "/var/root", "SUDO_UID": "\u00b2"}))
 
@@ -1184,12 +1140,9 @@ class TestTheFlagIsOnlyEverSetOverNothing(unittest.TestCase):
         self.assertNotIn(target.resolve(), held, "the flag comes straight off again")
 
     def test_taking_back_does_not_seal_in_when_the_removal_fails(self):
-        """`remove_one`'s failure exit put the flag back with no second question, so ANY rmdir
-        failure re-locked — then the next run told the operator the lock was not this command's.
-
-        The arrival has to land in the gap between the emptiness check and the `rmdir` to reach
-        that exit; planting it at the unlock returns at the earlier branch and leaves this code
-        untouched, which is how the first version of this test passed against the defect."""
+        """The arrival has to land between the emptiness check and the `rmdir` to reach that exit.
+        Planting it at the unlock returns at an earlier branch and leaves this code untouched,
+        which is how the first version of this test passed against the defect."""
         target = self.d / "stubborn"
         target.mkdir()
         held = self._held(target)
@@ -1211,8 +1164,6 @@ class TestTheFlagIsOnlyEverSetOverNothing(unittest.TestCase):
         self.assertTrue((target / "payload.js").exists())
 
     def test_a_flag_that_will_not_come_off_is_said_so_not_said_open(self):
-        """`_hand_back` asserted "the lock was NOT put back" without reading it. The owner half of
-        that sentence was read back a round ago; the lock half was not."""
         target = self.d / "stuck"
         target.mkdir()
         (target / "payload.js").write_text("x")

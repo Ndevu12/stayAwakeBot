@@ -120,9 +120,8 @@ def _graded(path: Path) -> PathOutcome | None:
             return _take_ownership(path)
         return PathOutcome(path, SELF_ENFORCING, _SELF_DETAIL)
     if held == hostdenial.OTHER_HELD:
-        # Root CAN clear this flag — `chflags(2)` says the owner or the super-user — so refusing
-        # while privileged both asserted a limit that was not read and made the raise-to-root path
-        # unreachable for every lock not owned by the resolved account.
+        # `chflags(2)`: the owner OR the super-user clears it. Refusing at root asserted a limit
+        # nothing read, and left the raise-to-root path unreachable for any lock not ours.
         if hostdenial.privileged():
             return _take_ownership(path)
         return PathOutcome(path, HELD_BY_ANOTHER,
@@ -134,12 +133,9 @@ def _graded(path: Path) -> PathOutcome | None:
 def _take_ownership(path: Path) -> PathOutcome:
     """Raise a denial the operator holds to one root holds.
 
-    The flag has to come off to change the owner and go back on afterwards, so this is only worth
-    doing with the privilege to finish it — a half-done upgrade leaves the location open.
-
-    Every exit that puts the flag back asks first whether the location is still empty. That is one
-    rule with three exits and it was written at one of them, so a run that lost the race AND failed
-    sealed the arrival in and reported a reason that never mentioned it.
+    The flag comes off to change the owner, so the location is briefly open. Every exit that puts
+    it back goes through `_sealed_over_nothing`; the version that re-locked directly at two of them
+    sealed in whatever arrived and reported a reason that never mentioned it.
     """
     try:
         owner_before = path.lstat().st_uid
@@ -151,11 +147,6 @@ def _take_ownership(path: Path) -> PathOutcome:
         os.chown(path, 0, 0, follow_symlinks=False)
     except (OSError, NotImplementedError):
         return _lock_back_over_nothing(path, owner_before, "could not be raised to root")
-    # The owner cannot be changed while the flag is set, so the location is briefly open. Anything
-    # that arrives in that gap must NOT be sealed in: locking it would put content beyond the
-    # operator's reach at the exact location this exists to keep empty. Reporting that as
-    # "not changed" was false twice over — the lock is off and the owner is now root — and left the
-    # arrived file unremovable without sudo, at a location every later run then skipped.
     if not _sealed_over_nothing(path):
         return _hand_back(path, owner_before)
     if not hostdenial.holds(path):
@@ -171,16 +162,11 @@ def _lock_back_over_nothing(path: Path, owner: int, failure: str) -> PathOutcome
 
 
 def _sealed_over_nothing(path: Path) -> bool:
-    """Put the flag on, and answer whether it closed over an empty location.
+    """Set the flag, and answer whether it closed over an empty location.
 
-    THE one place this file sets the flag. Asking `empty_dir` and then setting it is two syscalls
-    with the gap between them that the whole problem lives in — the earlier version asked first and
-    never looked again, which is check-then-act written directly underneath a docstring about not
-    doing that. The answer comes from a read-back AFTER the write, and a flag that closed over
-    something that arrived comes straight off again.
-
-    False means the location is open. It does not say why, because both reasons — the flag was
-    refused, or it caught an arrival — leave it open and the caller has to say so either way.
+    THE one place this file sets it. Asking `empty_dir` first and not looking again is two syscalls
+    with the race between them, so the answer is a read-back AFTER the write. False means open, and
+    does not say why: both reasons leave it open and the caller has to say so either way.
     """
     if not hostdenial.empty_dir(path):
         return False
@@ -193,22 +179,12 @@ def _sealed_over_nothing(path: Path) -> bool:
 
 
 def _hand_back(path: Path, owner: int, failure: str | None = None) -> PathOutcome:
-    """Undo what this run changed at `path`, and report the state that is actually there.
+    """Undo what this run changed at `path`, and report the state read back afterwards.
 
-    Both halves of the control come off, not just the flag. `0o555` denies the write to the owner
-    as well, so handing the directory back without it leaves the operator unable to delete what
-    arrived from a directory they own — and MEASURED, that is the state the earlier version
-    reported as "not changed", at two separate exits. `0o700` rather than what was there before:
-    the location either holds something now or this run could not finish with it, and in neither
-    case does anybody else need to read it.
-
-    EVERY sentence below is read back rather than inferred from whether a call threw. This is
-    reached after a failed raise to root, where the owner never changed and asserting "it is root's
-    now" sent the operator for sudo over a directory already theirs; and after a re-lock that may
-    or may not have taken, which the earlier version stated without looking.
-
-    `failure` is for the caller that got here because its own step failed rather than because
-    something arrived — the location still has to be handed back, but the reason is theirs.
+    `0o555` denies the write to the OWNER too, so leaving it left the operator unable to remove
+    what they were being told to look at. Every sentence below is read back: this is also reached
+    after a raise that never changed the owner, where asserting "it is root's now" sent them for
+    sudo over a directory already theirs. `failure` is the caller's own reason for being here.
     """
     try:
         os.chmod(path, 0o700, follow_symlinks=False)
@@ -220,7 +196,6 @@ def _hand_back(path: Path, owner: int, failure: str | None = None) -> PathOutcom
     if failure is not None and empty:
         return _unknown(path, failure)
     if locked:
-        # It could not be taken off. Say that, rather than the sentence about it being left open.
         return PathOutcome(path, LOCKED_OVER_CONTENT,
                            "something is in it and the lock could not be taken off — look at it "
                            "before anything else")
@@ -236,9 +211,8 @@ def _hand_back(path: Path, owner: int, failure: str | None = None) -> PathOutcom
 def _reachable_by(path: Path, owner: int) -> bool:
     """Whether `owner` can now open the directory and remove what is in it.
 
-    Asked of the filesystem rather than of `os.access`, which answers for the EFFECTIVE uid — and
-    every caller here is running as root, where it says yes to everything. `lstat`, so a link
-    swapped in at the last moment answers for itself rather than for whatever it points at.
+    Not `os.access`: it answers for the EFFECTIVE uid, and every caller here is root, where it says
+    yes to everything. `lstat`, so a link swapped in at the last moment answers for itself.
     """
     try:
         st = path.lstat()
@@ -317,9 +291,7 @@ def apply_one(path: Path) -> PathOutcome:
             return PathOutcome(path, NEEDS_ROOT,
                                "this location is not yours to write to — run again with sudo")
         return _unknown(path, "could not be created")
-    # Everything from here changes the location, so everything from here has to be able to undo it.
-    # `0o555` denies the write to the OWNER too: bailing out after it and reporting the location as
-    # untouched left the operator unable to remove whatever they were being told to go and look at.
+    # Everything past here changes the location, so every exit past here hands it back.
     owner_before = _owner_of(path)
     try:
         os.chmod(path, 0o555, follow_symlinks=False)
@@ -342,10 +314,8 @@ def apply_one(path: Path) -> PathOutcome:
 def _reached_where_it_was_named(path: Path) -> bool:
     """Whether every step to `path` stays where the caller said.
 
-    The same check the creating side makes, for the same reason: a link anyone could have planted
-    on the way redirects what follows. Creating through one puts a denial somewhere unintended;
-    REMOVING through one unlocks and deletes somewhere unintended, which is the worse half, and it
-    had no check at all.
+    The check the creating side makes, for the worse half: removing through a planted link unlocks
+    and deletes somewhere unintended. This side had none.
     """
     for ancestor in reversed(path.parents):
         if not _trusted_ancestor(ancestor):
@@ -374,9 +344,7 @@ def remove_one(path: Path) -> PathOutcome:
                                "there and will not open it; look at it before anything else")
         return PathOutcome(path, NOTHING_TO_REMOVE, "no control of this tool's here")
     if held == hostdenial.OTHER_HELD:
-        # Before this grade existed the answer here was None, which reached the refusal above only
-        # because the directory is immutable. Reaching the removal instead would unlock and delete
-        # another account's lock — the "unlock what I am pointed at" verb this must never be.
+        # Without this the removal below would unlock and delete another account's lock.
         return PathOutcome(path, HELD_BY_ANOTHER,
                            "this lock is another account's; this command takes back only what it "
                            "placed, so it was left as it stood")
@@ -386,19 +354,14 @@ def remove_one(path: Path) -> PathOutcome:
     if not hostdenial.clear_immutable(path):
         return _unknown(path, "the lock could not be taken off")
     if not hostdenial.empty_dir(path):
-        # Something arrived while the lock was off. Locking it back would seal it in, which is
-        # what the sibling that raises a control refuses to do for the same window — content at
-        # this location put beyond the operator's reach is worse than a location left open.
         return PathOutcome(path, LEFT_OPEN_OVER_CONTENT,
                            "something arrived while the lock was off; it has been left unlocked "
                            "so you can read and remove what is in it")
     try:
         os.rmdir(path)
     except OSError:
-        # The same rule as the side that raises a control: the flag goes back only over a location
-        # that is still empty. Any failure reached here, not only a non-empty one, and putting the
-        # flag back unconditionally sealed in whatever had arrived — then told the operator on the
-        # next run that the lock was not this command's doing.
+        # Any failure reaches here, not only a non-empty one, so the flag goes back only over an
+        # empty location — putting it back unconditionally sealed in whatever had arrived.
         if _sealed_over_nothing(path):
             return _unknown(path, "could not be removed")
         if hostdenial.empty_dir(path):

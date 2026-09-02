@@ -21,11 +21,9 @@ _ATTR_TOOL_ABSOLUTE_PATHS = {
 def _attr_tool(name: str) -> str | None:
     """Where `name` is, or None when it is not anywhere this will look.
 
-    Never through `PATH`. What these tools report decides whether a control is called in place, and
-    this command runs unprivileged by design — so `PATH` belongs to whoever ran it, and a program
-    earlier in it that prints a flags field containing `i` would make an unlocked directory read
-    back as locked. None means absent, which is a different answer from "not locked" and is never
-    success.
+    Never through `PATH`: this runs unprivileged, so a program earlier in it that prints a flags
+    field containing `i` would make an unlocked directory read back as locked. None is not
+    "not locked" and never reaches success.
     """
     for candidate in _ATTR_TOOL_ABSOLUTE_PATHS[name]:
         if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
@@ -92,12 +90,9 @@ def held_by(path: Path) -> str | None:
     Both are worth setting. An unguarded write to either throws and takes the writing process with
     it; only the second can be undone by whatever it was set against.
 
-    `other` is the same lock under a third account, and it used to answer None — "nothing holds
-    this" over a directory that plainly does. The caller then tried to write and got an EPERM the
-    flag had guaranteed, which it reported as "could not be written": a lock this cannot verify or
-    clear, described to the operator as an absent control and an unexplained failure. It is also
-    the answer whenever the account cannot be resolved correctly, which is the case that keeps a
-    real control visible rather than reading as gone.
+    `other` is the same lock under a third account — answering None there sent the caller into a
+    write that the flag guarantees will fail. It is also what a mis-resolved account produces, so a
+    real control stays visible instead of reading as absent.
     """
     try:
         st = path.lstat()
@@ -118,8 +113,7 @@ def holds(path: Path) -> bool:
     """True only when a read-back shows a root-owned immutable empty directory.
 
     The strict form, for the one caller that must not accept a lock the operator can clear: the
-    read-back after a control is raised to root. `held_by` answers the wider question and is what
-    the probes ask; this one says "root's, and nothing weaker".
+    read-back after a control is raised to root.
     """
     return held_by(path) == ROOT_HELD
 

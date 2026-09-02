@@ -62,15 +62,11 @@ _ESCALATION_NAMES = ("SUDO_USER", "DOAS_USER")
 def _raised(env) -> bool:
     """Whether this process is running as root on somebody else's behalf.
 
-    Only the kernel answers this. An escalation marker in the environment is a CLAIM, not a fact:
-    each one is an ordinary variable any unprivileged process can export, and this used to read
-    their mere presence as proof — so one line in a shell rc, the surface this worm family writes
-    to, made the tool grade every location against an account it was not running as, and a control
-    that was in place read as absent for good. The markers name the invoker below; they never
-    decide that there was one.
-
-    It also answers the honest case: `sudo -u <account>` sets the same markers while leaving the
-    effective uid that account's, and there the account IS who this acts for.
+    Only the kernel answers it. An escalation marker is an ordinary variable any process can
+    export, and reading its presence as proof let one line in a shell rc pick the account every
+    location is graded against. `sudo -u <account>` sets the same markers without raising to root,
+    and there that account IS who this acts for. The markers name the invoker; never that there is
+    one.
     """
     geteuid = getattr(os, "geteuid", None)
     return geteuid is not None and geteuid() == 0
@@ -79,9 +75,8 @@ def _raised(env) -> bool:
 def _account_named_by_uid(env):
     """The account a uid marker names, when one of them names a real account.
 
-    `str.isdigit` is true for characters `int` refuses — `'²'` among them — and the guard below
-    caught only `KeyError`, so an environment holding one took `ValueError` out through `resolve`
-    and `acting_uid` into every caller that asks who holds a control.
+    `str.isdigit` is true for characters `int` refuses (`'²'`), and catching only `KeyError` took
+    that `ValueError` out through `acting_uid` into every caller.
     """
     for var in _ESCALATION_UIDS:
         uid = env.get(var)
@@ -109,11 +104,9 @@ def _account_named_by_name(env):
 def _from_escalation(env) -> Operator | None:
     """The invoking account, when every marker present agrees on which one it is.
 
-    `sudo` and `doas` write the uid and the name from one decision, so two markers naming
-    different accounts is evidence the environment was not built by an escalation tool. Taking the
-    first digit-valued one and never reading the rest let whichever half an attacker controlled
-    win silently; a disagreement is refused instead, which reaches the caller as "cannot be
-    established" — the answer this module already fails to.
+    `sudo` and `doas` write the uid and the name from one decision, so two that disagree are
+    evidence the environment was not built by one. Refused rather than resolved to whichever was
+    read first.
     """
     by_uid = _account_named_by_uid(env)
     by_name = _account_named_by_name(env)

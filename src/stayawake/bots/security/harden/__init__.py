@@ -65,10 +65,8 @@ def take_back(*, folders=_global_folders, remove=remove_one,
     if not supported():
         return 2, _NOT_HERE
     outcomes = [remove(p) for p in folders()]
-    # A location holding content is NOT settled, whether it is still locked or was left open. It
-    # reads like "nothing of ours here", and counting it that way reported a machine as back to
-    # normal while an immutable directory holding someone else's content sat at a resolution path
-    # and the operator's own removal of it failed.
+    # A location holding content is NOT settled, locked or open: counting it that way reported a
+    # machine as back to normal over content nobody had read.
     settled = {REMOVED, NOTHING_TO_REMOVE}
     done = bool(outcomes) and all(o.state in settled for o in outcomes)
     lines = [_TOOK_BACK if done else _NOT_ALL_BACK, ""]
@@ -101,9 +99,7 @@ def run(*, live=check_live_processes, folders=_global_folders,
     applied = bool(outcomes) and all(o.state in took for o in outcomes)
     headline = _CLAIM if applied else _NOT_EVERYWHERE
     lines = [headline, ""]
-    # Every note that applies, not the first one that matches: a location left open over content
-    # and a location that needs root can both be in one run, and a chain silently dropped whichever
-    # came second.
+    # Every note that applies, not the first: a chain silently dropped whichever came second.
     states = {o.state for o in outcomes}
     for note, fires in ((_SOME_ARE_YOURS, applied and SELF_ENFORCING in states),
                         (_LEFT_OPEN_NOTE, LEFT_OPEN_OVER_CONTENT in states),
