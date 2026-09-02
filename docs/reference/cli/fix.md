@@ -11,18 +11,13 @@ in this repository (the lockfile is kept on CI). A merge finding that is still l
 tree is restored there; the merge commit is left in history. `--pr` pushes and opens or updates one
 rolling PR per repository. Bare `saw fix` only ever prepares a cleanup branch.
 
-**Those removals happen in your working tree, when the run happens.** They are not staged on the
-branch and they do not wait for a pull request — the files are gone from the checkout you are
-standing in whether the pull request is merged, closed, or never opened. `node_modules` is not
-tracked by git, so it cannot be cleaned through a pull request at all; acting on it means acting on
-the working tree, and that is deliberate.
+**Those removals happen in your working tree, as the run happens.** They are not staged on the
+branch and they do not wait for a pull request: the files are gone from the checkout you are
+standing in whether the pull request is merged, closed, or never opened.
 
-Nothing is deleted before it is copied. The installed tree, the lockfile and the generated outputs
-are written to `.malware-quarantine/` in the repository first, and the run names the directory it
-used. Generated outputs are removed only when the lockfile accounts for the installed tree — if
-nothing proves what the tree should contain, they are left alone. Directories listed under
-`exclude_dirs` are never removed: that setting controls what is **read**, and nothing infers from
-it that a directory may be deleted.
+Nothing is removed before it is copied. The installed tree, the lockfile and any generated output
+directories are written to `.malware-quarantine/` first, and the run names the directory it used so
+you can put them back. Directories you listed under `exclude_dirs` are never removed.
 
 [`saw fix amend`](amend.md) is a different act: it amends the infected commits and force-updates
 the branches that carried them. Read that page before you run it.

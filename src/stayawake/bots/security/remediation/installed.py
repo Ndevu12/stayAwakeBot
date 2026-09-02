@@ -49,10 +49,8 @@ class RemovalPlan:
     def project_is_declared(self) -> bool:
         """Whether anything states what this project should contain.
 
-        Weaker than `safe_to_remove`, deliberately. That one also needs an installed package proven
-        derivable, which is the right test for deleting the installed tree and the wrong one for a
-        generated output: a repository with a lockfile and no installed tree still rebuilds its own
-        `dist`, and gating on the stronger test stopped that.
+        Weaker than `safe_to_remove` on purpose: a project with a lockfile and nothing installed
+        still rebuilds its own `dist`.
         """
         return bool(self.lockfiles)
 
@@ -200,12 +198,7 @@ class Report:
     copies: Path | None = None
 
     def note(self) -> str:
-        """What this did to the tree the operator is standing in, and where the copies went.
-
-        These removals happen in the live checkout when the finding is confirmed, and they do not
-        wait for a pull request or depend on one being merged. Saying only what was removed left a
-        reader of `--pr` expecting a branch to review and nothing else.
-        """
+        """What this did to the live checkout, and where the copies went."""
         bits = []
         if self.removed_packages:
             bits.append(f"removed {self.removed_packages} installed package(s)")
@@ -224,10 +217,8 @@ class Report:
 def build_output_dirs(root: Path) -> list[Path]:
     """The NAMED generated trees under `root`, and nothing else.
 
-    Never the caller's `exclude_dirs`. That setting is documented as directories never TRAVERSED,
-    and users put vendored code, fixtures and test corpora there; unioning it into the delete set
-    destroyed them. The default scan excludes were unioned in too and contributed nothing —
-    `.next`, `build` and `dist` are already named below, and `_NOT_A_BUILD` subtracts the rest.
+    Never the caller's `exclude_dirs`: that setting says what is never TRAVERSED, and users put
+    vendored code, fixtures and test corpora there.
     """
     found = []
     for name in sorted(_BUILD_OUTPUTS - _NOT_A_BUILD):
@@ -296,9 +287,6 @@ def remove_rebuildable(root: Path, *, remove_lockfiles: bool = True,
             shutil.rmtree(leftover)
 
     if plan.project_is_declared:
-        # Gated and copied out first — as the package path above is. It used to run with no gate at
-        # all, so it deleted when the plan had already said nothing states what the tree should
-        # contain, and it was the one removal here that created no quarantine.
         for build in build_output_dirs(root):
             shutil.copytree(build, _evidence() / build.name, symlinks=True, dirs_exist_ok=True)
             shutil.rmtree(build)
