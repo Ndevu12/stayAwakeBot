@@ -35,7 +35,7 @@ class Operator:
     @property
     def raised(self) -> bool:
         """Whether privilege was raised to run this — i.e. `HOME` may not be the operator's."""
-        return self.via == "sudo"
+        return self.via == "raised"
 
 
 def resolve(env=None) -> Operator | None:
@@ -45,10 +45,8 @@ def resolve(env=None) -> Operator | None:
     and acting on root's home while reporting success is the failure this exists to prevent.
     """
     env = os.environ if env is None else env
-    raised = env.get("SUDO_UID") or env.get("SUDO_USER")
-    if raised:
-        record = _from_sudo(env)
-        return record
+    if _raised(env):
+        return _from_escalation(env)
     home = env.get("HOME")
     if not home:
         return None
@@ -57,24 +55,68 @@ def resolve(env=None) -> Operator | None:
                     home=Path(home), via="environment")
 
 
-def _from_sudo(env) -> Operator | None:
-    uid = env.get("SUDO_UID")
-    if uid and uid.isdigit():
+_ESCALATION_UIDS = ("SUDO_UID", "PKEXEC_UID")
+_ESCALATION_NAMES = ("SUDO_USER", "DOAS_USER")
+
+
+def _raised(env) -> bool:
+    """Whether this process is running as root on somebody else's behalf.
+
+    Only the kernel answers it. An escalation marker is an ordinary variable any process can
+    export, and reading its presence as proof let one line in a shell rc pick the account every
+    location is graded against. `sudo -u <account>` sets the same markers without raising to root,
+    and there that account IS who this acts for. The markers name the invoker; never that there is
+    one.
+    """
+    geteuid = getattr(os, "geteuid", None)
+    return geteuid is not None and geteuid() == 0
+
+
+def _account_named_by_uid(env):
+    """The account a uid marker names, when one of them names a real account.
+
+    `str.isdigit` is true for characters `int` refuses (`'²'`), and catching only `KeyError` took
+    that `ValueError` out through `acting_uid` into every caller.
+    """
+    for var in _ESCALATION_UIDS:
+        uid = env.get(var)
+        if not uid:
+            continue
         try:
-            record = pwd.getpwuid(int(uid))
-        except KeyError:
-            record = None
-        if record is not None:
-            return Operator(name=record.pw_name, uid=record.pw_uid,
-                            home=Path(record.pw_dir), via="sudo")
-    name = env.get("SUDO_USER")
-    if name:
-        try:
-            record = pwd.getpwnam(name)
-        except KeyError:
-            return None
-        return Operator(name=record.pw_name, home=Path(record.pw_dir), via="sudo")
+            return pwd.getpwuid(int(uid))
+        except (ValueError, KeyError, OverflowError):
+            continue
     return None
+
+
+def _account_named_by_name(env):
+    for var in _ESCALATION_NAMES:
+        name = env.get(var)
+        if not name:
+            continue
+        try:
+            return pwd.getpwnam(name)
+        except KeyError:
+            continue
+    return None
+
+
+def _from_escalation(env) -> Operator | None:
+    """The invoking account, when every marker present agrees on which one it is.
+
+    `sudo` and `doas` write the uid and the name from one decision, so two that disagree are
+    evidence the environment was not built by one. Refused rather than resolved to whichever was
+    read first.
+    """
+    by_uid = _account_named_by_uid(env)
+    by_name = _account_named_by_name(env)
+    if by_uid is not None and by_name is not None and by_uid.pw_uid != by_name.pw_uid:
+        return None
+    record = by_uid or by_name
+    if record is None:
+        return None
+    return Operator(name=record.pw_name, uid=record.pw_uid,
+                    home=Path(record.pw_dir), via="raised")
 
 
 def acting_uid(env=None) -> int:

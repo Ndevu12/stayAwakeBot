@@ -50,25 +50,19 @@ class Skipped:
     reason: str
 
 
-# The value each finding asks for. A finding absent from here is reported and not written:
-# `vscode-autoapprove-all` is the case that matters — its own remediation offers a choice between
-# an allowlist and `false`, so there is nothing here that is the correct value.
-_VALUES = (
+_CORRECTIONS = (
     Correction("vscode-autotasks-default", "task.allowAutomaticTasks", '"off"'),
     Correction("vscode-autotasks-on", "task.allowAutomaticTasks", '"off"'),
     Correction("vscode-workspace-trust-off", "security.workspace.trust.enabled", "true"),
     Correction("vscode-untrusted-files-open",
                "security.workspace.trust.untrustedFiles", '"prompt"'),
 )
-_BY_ID = {c.issue_id: c for c in _VALUES}
+_CORRECTION_BY_ID = {c.issue_id: c for c in _CORRECTIONS}
 
 _AUTOAPPROVE = "chat.tools.terminal.autoApprove"
 _RISKY_ID = "vscode-autoapprove-risky"
 
-# Known, and deliberately not written. Naming them here rather than letting them fall through the
-# same path as an unrelated finding: an exclusion that is only the absence of an entry is
-# indistinguishable from an oversight, and cannot be tested.
-_REPORTED_ONLY = {
+_WHY_NOT_WRITTEN = {
     "vscode-autoapprove-all":
         "its own remediation offers a choice between an allowlist and turning it off, so there is "
         "no single correct value to write",
@@ -89,10 +83,10 @@ def plan(text: str, issue_ids) -> tuple[str, list[Planned], list[Skipped]]:
             planned += done
             skipped += missed
             continue
-        if issue_id in _REPORTED_ONLY:
-            skipped.append(Skipped(issue_id, _REPORTED_ONLY[issue_id]))
+        if issue_id in _WHY_NOT_WRITTEN:
+            skipped.append(Skipped(issue_id, _WHY_NOT_WRITTEN[issue_id]))
             continue
-        correction = _BY_ID.get(issue_id)
+        correction = _CORRECTION_BY_ID.get(issue_id)
         if correction is None:
             continue
         if jsonc.value_at(text, correction.key) == correction.value:
@@ -132,12 +126,12 @@ def _plan_entries(text: str) -> tuple[str, list[Planned], list[Skipped]]:
 
 def answerable(issue_ids) -> set[str]:
     """The findings this knows a correct value for. Everything else stays reported."""
-    return {i for i in issue_ids if i in _BY_ID or i == _RISKY_ID}
+    return {i for i in issue_ids if i in _CORRECTION_BY_ID or i == _RISKY_ID}
 
 
 def reported_only(issue_ids) -> set[str]:
     """Findings this could reach and deliberately does not write."""
-    return {i for i in issue_ids if i in _REPORTED_ONLY}
+    return {i for i in issue_ids if i in _WHY_NOT_WRITTEN}
 
 
 def diff(before: str, after: str, path: Path) -> str:

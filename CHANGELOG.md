@@ -13,6 +13,36 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Added
+- **`saw harden --take-back` removes the controls the command placed.** It removes only those, and
+  reports anything it did not remove. A location holding anything is left as it stands.
+
+### Fixed
+- **`saw harden` reports a control as in place only on evidence it cannot be fed.** Neither what it
+  reads to decide that nor which account it decides it for is influenced by the environment of
+  whoever runs it, so a control that is in place stays visible and one that is not is never
+  reported as though it were.
+- **Raising a control to root no longer risks closing over something that arrived while it was
+  briefly open.** If anything has, the location is handed back to you — unlocked, yours, and
+  writable so you can clear it — and the run names it and does not pass, instead of reporting the
+  location as untouched.
+- **`saw harden --take-back` no longer reports a run as complete over a location it left open**,
+  and says which locations to look at first.
+- **`saw harden` recognises the operator whichever way privilege was raised**, and when it cannot
+  establish who that is it says so instead of assuming. A control it cannot attribute to itself is
+  reported as a lock held by another account rather than as an absent one, and neither command
+  will open or remove it.
+- **The lock never goes back on over something that arrived while it was off.** Every path that
+  sets it, in both commands, now confirms afterwards that it closed over an empty location — asking
+  first and not looking again is what let an arrival through — and takes it straight off again if
+  it did not.
+- **A location this command changed and could not finish with is handed back to you.** It used to
+  be left read-only, so the file you were being told to go and look at could not be removed from a
+  directory you own, and `--take-back` could not see what had been left behind.
+- **Run again with `sudo` and a control held by another account on the machine is taken over**
+  rather than refused with a reason that was not true of a privileged run. Without `sudo` it is
+  named, and says so. `--take-back` still leaves it alone: it removes only what it placed.
+
 ### Changed
 - **`saw harden` no longer requires root.** Run as yourself it acts where it can, and names
   anything it did not take rather than stopping. Run again with `sudo` to act on the rest and to

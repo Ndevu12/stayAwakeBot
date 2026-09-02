@@ -6,11 +6,16 @@ from stayawake.bots.security.hygiene.host_artifacts import _global_folders
 from stayawake.bots.security.hygiene.models import PROCESSES_NOT_READABLE_ID
 from stayawake.bots.security.hygiene.process import check_live_processes
 from stayawake.utils import hostdenial
-from .denial import (ENFORCING, IN_A_LIVE_INSTALL, NEEDS_ROOT, NOT_HERE_YET, OCCUPIED,
-                     SELF_ENFORCING, UNKNOWN, PathOutcome, apply_one)
+from .denial import (ENFORCING, HELD_BY_ANOTHER, IN_A_LIVE_INSTALL, LEFT_OPEN_OVER_CONTENT,
+                     NEEDS_ROOT, NOT_HERE_YET, LOCKED_OVER_CONTENT, NOTHING_TO_REMOVE,
+                     NOT_WHERE_IT_WAS_NAMED, OCCUPIED, REMOVED, SELF_ENFORCING, UNKNOWN,
+                     PathOutcome, apply_one, remove_one)
 
 __all__ = ["run", "apply_one", "PathOutcome", "ENFORCING", "SELF_ENFORCING",
-           "NEEDS_ROOT", "IN_A_LIVE_INSTALL", "NOT_HERE_YET", "UNKNOWN", "OCCUPIED"]
+           "NEEDS_ROOT", "IN_A_LIVE_INSTALL", "NOT_HERE_YET", "REMOVED",
+           "NOTHING_TO_REMOVE", "LOCKED_OVER_CONTENT", "LEFT_OPEN_OVER_CONTENT",
+           "HELD_BY_ANOTHER", "NOT_WHERE_IT_WAS_NAMED", "UNKNOWN", "OCCUPIED",
+           "remove_one", "take_back"]
 
 
 _LIVE = "live-obfuscated-process"
@@ -35,21 +40,55 @@ _NEEDS_ROOT_NOTE = (
     "One or more locations are not yours to write to. Run again with sudo to take those as well."
 )
 _NOT_EVERYWHERE = (
-    "This control is NOT in place. Any location below that it did not take was left exactly as it "
-    "stood — this command removes nothing — so inspect each one yourself and do NOT rotate any "
-    "credential until you have."
+    "This control is NOT in place. This command deletes nothing, and every location below says "
+    "what was done to it — inspect each one yourself and do NOT rotate any credential until you "
+    "have."
+)
+_LEFT_OPEN_NOTE = (
+    "Something is sitting in a location that is meant to stay empty. It has been left reachable "
+    "rather than locked over, so you can read it — do that before anything else."
 )
 
 
+_TOOK_BACK = "Every control this tool placed here has been taken back."
+_NOT_ALL_BACK = ("Not every control was taken back. This command deletes nothing, and every "
+                 "location below says what was done to it.")
+
+
+def take_back(*, folders=_global_folders, remove=remove_one,
+              supported=hostdenial.platform_supported) -> tuple[int, str]:
+    """Remove the denials this tool placed. Removed only after a read-back says the path is gone.
+
+    No capture gate here: this opens a location rather than closing one, so it cannot crash a
+    process that a payload is holding open — which is the reason applying one waits for capture.
+
+    A location holding content is never settled, locked or open: counting it as one reported a
+    machine as back to normal over content nobody had read.
+    """
+    if not supported():
+        return 2, _NOT_HERE
+    outcomes = [remove(p) for p in folders()]
+    settled = {REMOVED, NOTHING_TO_REMOVE}
+    done = bool(outcomes) and all(o.state in settled for o in outcomes)
+    lines = [_TOOK_BACK if done else _NOT_ALL_BACK, ""]
+    if any(o.state == LEFT_OPEN_OVER_CONTENT for o in outcomes):
+        lines.extend([_LEFT_OPEN_NOTE, ""])
+    for o in outcomes:
+        lines.append(f"  {o.state}: {o.path} — {o.detail}")
+    return (0, "\n".join(lines).rstrip()) if done else (3, "\n".join(lines).rstrip())
+
+
 def run(*, live=check_live_processes, folders=_global_folders,
-        apply=apply_one, privileged=hostdenial.privileged,
-        supported=hostdenial.platform_supported) -> tuple[int, str]:
+        apply=apply_one, supported=hostdenial.platform_supported) -> tuple[int, str]:
     """Apply the denial at every global-resolution entry. Enforcing only after read-back.
 
     Root is asked of the PATH rather than of the command. Most of these locations belong to the
     operator, so requiring privilege for the whole run withheld a control they could have had from
     every person unwilling to give a security tool root — while the locations that need it are
     named, not silently skipped.
+
+    Every note that applies is printed, not the first that matches: a chain dropped whichever came
+    second, and a run can hold both.
     """
     if not supported():
         return 2, _NOT_HERE
@@ -64,10 +103,12 @@ def run(*, live=check_live_processes, folders=_global_folders,
     applied = bool(outcomes) and all(o.state in took for o in outcomes)
     headline = _CLAIM if applied else _NOT_EVERYWHERE
     lines = [headline, ""]
-    if applied and any(o.state == SELF_ENFORCING for o in outcomes):
-        lines = [headline, "", _SOME_ARE_YOURS, ""]
-    elif any(o.state == NEEDS_ROOT for o in outcomes):
-        lines = [headline, "", _NEEDS_ROOT_NOTE, ""]
+    states = {o.state for o in outcomes}
+    for note, fires in ((_SOME_ARE_YOURS, applied and SELF_ENFORCING in states),
+                        (_LEFT_OPEN_NOTE, LEFT_OPEN_OVER_CONTENT in states),
+                        (_NEEDS_ROOT_NOTE, NEEDS_ROOT in states)):
+        if fires:
+            lines.extend([note, ""])
     for o in outcomes:
         lines.append(f"  {o.state}: {o.path} — {o.detail}")
     body = "\n".join(lines).rstrip()

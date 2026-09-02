@@ -12,6 +12,24 @@ from stayawake.utils import operator
 
 _UF_IMMUTABLE = getattr(stat, "UF_IMMUTABLE", 0x00000002)
 
+_ATTR_TOOL_ABSOLUTE_PATHS = {
+    "lsattr": ("/usr/bin/lsattr", "/bin/lsattr", "/usr/sbin/lsattr"),
+    "chattr": ("/usr/bin/chattr", "/bin/chattr", "/usr/sbin/chattr"),
+}
+
+
+def _attr_tool(name: str) -> str | None:
+    """Where `name` is, or None when it is not anywhere this will look.
+
+    Never through `PATH`: this runs unprivileged, so a program earlier in it that prints a flags
+    field containing `i` would make an unlocked directory read back as locked. None is not
+    "not locked" and never reaches success.
+    """
+    for candidate in _ATTR_TOOL_ABSOLUTE_PATHS[name]:
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
 
 def privileged() -> bool:
     geteuid = getattr(os, "geteuid", None)
@@ -39,8 +57,11 @@ def immutable(path: Path) -> bool:
         except (OSError, AttributeError):
             return False
     if sys.platform == "linux":
+        tool = _attr_tool("lsattr")
+        if tool is None:
+            return False
         try:
-            r = subprocess.run(["lsattr", "-d", "--", str(path)],
+            r = subprocess.run([tool, "-d", "--", str(path)],
                                capture_output=True, text=True, timeout=5)
         except (OSError, subprocess.SubprocessError):
             return False
@@ -55,6 +76,7 @@ def immutable(path: Path) -> bool:
 
 ROOT_HELD = "root"
 SELF_HELD = "self"
+OTHER_HELD = "other"
 
 
 def held_by(path: Path) -> str | None:
@@ -67,6 +89,10 @@ def held_by(path: Path) -> str | None:
 
     Both are worth setting. An unguarded write to either throws and takes the writing process with
     it; only the second can be undone by whatever it was set against.
+
+    `other` is the same lock under a third account — answering None there sent the caller into a
+    write that the flag guarantees will fail. It is also what a mis-resolved account produces, so a
+    real control stays visible instead of reading as absent.
     """
     try:
         st = path.lstat()
@@ -80,15 +106,14 @@ def held_by(path: Path) -> str | None:
         return ROOT_HELD
     if st.st_uid == operator.acting_uid():
         return SELF_HELD
-    return None
+    return OTHER_HELD
 
 
 def holds(path: Path) -> bool:
     """True only when a read-back shows a root-owned immutable empty directory.
 
-    The strict form, kept for callers that must not treat a lock the operator can clear as
-    equivalent — the host-artifact probe is one, since a self-held denial is still a location a
-    payload can open up again.
+    The strict form, for the one caller that must not accept a lock the operator can clear: the
+    read-back after a control is raised to root.
     """
     return held_by(path) == ROOT_HELD
 
@@ -126,8 +151,11 @@ def clear_immutable(path: Path) -> bool:
         except (OSError, NotImplementedError):
             return False
     if sys.platform == "linux":
+        tool = _attr_tool("chattr")
+        if tool is None:
+            return False
         try:
-            r = subprocess.run(["chattr", "-i", "--", str(path)],
+            r = subprocess.run([tool, "-i", "--", str(path)],
                                capture_output=True, text=True, timeout=5)
         except (OSError, subprocess.SubprocessError):
             return False
@@ -150,8 +178,11 @@ def set_immutable(path: Path) -> bool:
         except (OSError, NotImplementedError):
             return False
     if sys.platform == "linux":
+        tool = _attr_tool("chattr")
+        if tool is None:
+            return False
         try:
-            r = subprocess.run(["chattr", "+i", "--", str(path)],
+            r = subprocess.run([tool, "+i", "--", str(path)],
                                capture_output=True, text=True, timeout=5)
         except (OSError, subprocess.SubprocessError):
             return False

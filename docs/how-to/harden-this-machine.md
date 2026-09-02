@@ -24,7 +24,13 @@ A write counts as in place only after it is read back. An unverifiable write is 
 success. Anything already in use is left unchanged — clear it, then run again. If a running process
 still holds code that is not on disk, the command refuses until that process is captured.
 
-To remove a control it placed: `chflags nouchg <path>` on macOS or `chattr -i <path>` on Linux,
-then `rmdir <path>`, as its owner.
+To remove the controls it placed:
+
+```bash
+saw harden --take-back
+```
+
+It removes only what it placed, and reports anything it did not. Add `sudo` for the ones root
+holds.
 
 It does not claim that one control protects anything else.

@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 import contextlib
+import pwd
 from unittest import mock
 
 from stayawake.bots.security import harden
@@ -20,18 +21,16 @@ from stayawake.utils import hostdenial, operator
 def locked(*paths: Path):
     """Make `paths` read back as immutable, without needing the OS to allow it.
 
-    `chattr +i` needs a capability an ordinary CI account does not have, and the filesystems those
-    runners use often cannot carry the flag at all — so a fixture that sets it for real tests the
-    grading logic on one platform and nothing on the other. The flag is the OS's business and is
-    covered separately, where it can actually be set.
+    `chattr +i` needs a capability CI does not have, and those filesystems often cannot carry the
+    flag at all. The flag itself is covered separately, where it can be set.
     """
-    wanted = {Path(p).resolve() for p in paths}
-    real = hostdenial.immutable
-    with mock.patch.object(hostdenial, "immutable",
-                           lambda p: Path(p).resolve() in wanted or real(p)), \
+    held = {Path(p).resolve() for p in paths}
+    with mock.patch.object(hostdenial, "immutable", lambda p: Path(p).resolve() in held), \
          mock.patch.object(hostdenial, "set_immutable",
-                           lambda p: bool(wanted.add(Path(p).resolve()) or True)):
-        yield
+                           lambda p: bool(held.add(Path(p).resolve()) or True)), \
+         mock.patch.object(hostdenial, "clear_immutable",
+                           lambda p: bool(held.discard(Path(p).resolve()) or True)):
+        yield held
 
 
 def _issue(id_):
@@ -40,7 +39,7 @@ def _issue(id_):
 
 class TestRunContract(unittest.TestCase):
     def test_not_implemented_is_not_success(self):
-        code, text = harden.run(supported=lambda: False, privileged=lambda: True, live=lambda: [])
+        code, text = harden.run(supported=lambda: False, live=lambda: [])
         self.assertEqual(code, 2)
         self.assertIn("not implemented", text.lower())
 
@@ -50,7 +49,7 @@ class TestRunContract(unittest.TestCase):
         tool root — and the locations that need it are named rather than skipped in silence."""
         mine, theirs = Path("/mine"), Path("/theirs")
         code, text = harden.run(
-            supported=lambda: True, privileged=lambda: False, live=lambda: [],
+            supported=lambda: True, live=lambda: [],
             folders=lambda: [mine, theirs],
             apply=lambda p: denial.PathOutcome(p, denial.SELF_ENFORCING, "in place")
             if p == mine else denial.PathOutcome(p, denial.NEEDS_ROOT, "not yours to write to"))
@@ -60,17 +59,15 @@ class TestRunContract(unittest.TestCase):
         self.assertNotEqual(code, 0, "a location it could not take is not a complete result")
 
     def test_live_loader_is_refused(self):
-        code, text = harden.run(supported=lambda: True, privileged=lambda: True,
-                                live=lambda: [_issue("live-obfuscated-process")],
-                                folders=lambda: [], apply=lambda p: None)
+        code, text = harden.run(supported=lambda: True, folders=lambda: [], apply=lambda p: None,
+                                live=lambda: [_issue("live-obfuscated-process")])
         self.assertEqual(code, 1)
         self.assertIn("capture", text.lower())
         self.assertNotIn("enforcing", text)
 
     def test_unreadable_processes_are_refused(self):
-        code, text = harden.run(supported=lambda: True, privileged=lambda: True,
-                                live=lambda: [_issue(PROCESSES_NOT_READABLE_ID)],
-                                folders=lambda: [], apply=lambda p: None)
+        code, text = harden.run(supported=lambda: True, folders=lambda: [], apply=lambda p: None,
+                                live=lambda: [_issue(PROCESSES_NOT_READABLE_ID)])
         self.assertEqual(code, 1)
         self.assertIn("could not be examined", text.lower())
 
@@ -80,8 +77,7 @@ class TestRunContract(unittest.TestCase):
         apply = mock.Mock()
         with mock.patch.object(process, "_snapshot", return_value=Snapshot()):
             code, text = harden.run(
-                supported=lambda: True, privileged=lambda: True,
-                live=process.check_live_processes,
+                supported=lambda: True, live=process.check_live_processes,
                 folders=lambda: [Path("/denial")], apply=apply)
         self.assertEqual(code, 1)
         self.assertIn("could not be examined", text.lower())
@@ -94,8 +90,7 @@ class TestRunContract(unittest.TestCase):
         snap = Snapshot(processes=[Process(pid=1, argv_unreadable=True)], unreadable=1)
         with mock.patch.object(process, "_snapshot", return_value=snap):
             code, _ = harden.run(
-                supported=lambda: True, privileged=lambda: True,
-                live=process.check_live_processes,
+                supported=lambda: True, live=process.check_live_processes,
                 folders=lambda: [p],
                 apply=lambda path: denial.PathOutcome(path, denial.ENFORCING, "in place"))
         self.assertEqual(code, 0)
@@ -103,7 +98,7 @@ class TestRunContract(unittest.TestCase):
     def test_a_run_that_denied_nothing_does_not_claim_it_did(self):
         p = Path("/usr/local/lib/node")
         code, text = harden.run(
-            supported=lambda: True, privileged=lambda: True, live=lambda: [],
+            supported=lambda: True, live=lambda: [],
             folders=lambda: [p],
             apply=lambda path: denial.PathOutcome(path, denial.OCCUPIED,
                                                   "already had something in it, so it was not changed"))
@@ -121,7 +116,7 @@ class TestRunContract(unittest.TestCase):
             return denial.PathOutcome(path, denial.OCCUPIED,
                                       "already had something in it, so it was not changed")
         code, text = harden.run(
-            supported=lambda: True, privileged=lambda: True, live=lambda: [],
+            supported=lambda: True, live=lambda: [],
             folders=lambda: [a, b], apply=apply)
         self.assertEqual(code, 3)
         self.assertNotIn("is denied", text)
@@ -130,7 +125,7 @@ class TestRunContract(unittest.TestCase):
     def test_enforcing_only_when_every_target_reads_back(self):
         p = Path("/denial")
         code, text = harden.run(
-            supported=lambda: True, privileged=lambda: True, live=lambda: [],
+            supported=lambda: True, live=lambda: [],
             folders=lambda: [p],
             apply=lambda path: denial.PathOutcome(path, denial.ENFORCING, "in place"))
         self.assertEqual(code, 0)
@@ -141,7 +136,7 @@ class TestRunContract(unittest.TestCase):
     def test_a_write_that_is_not_read_back_is_unknown_never_success(self):
         p = Path("/denial")
         code, text = harden.run(
-            supported=lambda: True, privileged=lambda: True, live=lambda: [],
+            supported=lambda: True, live=lambda: [],
             folders=lambda: [p],
             apply=lambda path: denial.PathOutcome(path, denial.UNKNOWN, "could not be verified"))
         self.assertEqual(code, 3)
@@ -151,7 +146,7 @@ class TestRunContract(unittest.TestCase):
     def test_occupied_is_not_success_and_names_that_it_was_not_changed(self):
         p = Path("/denial")
         code, text = harden.run(
-            supported=lambda: True, privileged=lambda: True, live=lambda: [],
+            supported=lambda: True, live=lambda: [],
             folders=lambda: [p],
             apply=lambda path: denial.PathOutcome(path, denial.OCCUPIED,
                                                   "already had something in it, so it was not changed"))
@@ -166,13 +161,13 @@ class TestRunContract(unittest.TestCase):
             return denial.PathOutcome(path, denial.OCCUPIED,
                                       "already had something in it, so it was not changed")
         code, _ = harden.run(
-            supported=lambda: True, privileged=lambda: True, live=lambda: [],
+            supported=lambda: True, live=lambda: [],
             folders=lambda: [a, b], apply=apply)
         self.assertEqual(code, 3)
 
     def test_no_targets_is_not_success(self):
         code, _ = harden.run(
-            supported=lambda: True, privileged=lambda: True, live=lambda: [],
+            supported=lambda: True, live=lambda: [],
             folders=lambda: [], apply=lambda p: None)
         self.assertEqual(code, 3)
 
@@ -183,7 +178,7 @@ class TestRunContract(unittest.TestCase):
             seen.append(path)
             return denial.PathOutcome(path, denial.ENFORCING, "in place")
         code, _ = harden.run(
-            supported=lambda: True, privileged=lambda: True, live=lambda: [],
+            supported=lambda: True, live=lambda: [],
             folders=lambda: paths, apply=apply)
         self.assertEqual(code, 0)
         self.assertEqual(seen, paths)
@@ -195,8 +190,7 @@ class TestRunContract(unittest.TestCase):
     def test_other_live_findings_do_not_refuse(self):
         p = Path("/denial")
         code, _ = harden.run(
-            supported=lambda: True, privileged=lambda: True,
-            live=lambda: [_issue("some-other-hygiene")],
+            supported=lambda: True, live=lambda: [_issue("some-other-hygiene")],
             folders=lambda: [p],
             apply=lambda path: denial.PathOutcome(path, denial.ENFORCING, "in place"))
         self.assertEqual(code, 0)
@@ -204,8 +198,7 @@ class TestRunContract(unittest.TestCase):
     def test_capture_refuses_before_any_write(self):
         apply = mock.Mock()
         code, _ = harden.run(
-            supported=lambda: True, privileged=lambda: True,
-            live=lambda: [_issue("live-obfuscated-process")],
+            supported=lambda: True, live=lambda: [_issue("live-obfuscated-process")],
             folders=lambda: [Path("/denial")], apply=apply)
         self.assertEqual(code, 1)
         apply.assert_not_called()
@@ -214,7 +207,7 @@ class TestRunContract(unittest.TestCase):
         """The inverse of what this used to pin: the run no longer stops before trying."""
         apply = mock.Mock(return_value=denial.PathOutcome(Path("/denial"),
                                                           denial.SELF_ENFORCING, "in place"))
-        harden.run(supported=lambda: True, privileged=lambda: False, live=lambda: [],
+        harden.run(supported=lambda: True, live=lambda: [],
                    folders=lambda: [Path("/denial")], apply=apply)
         apply.assert_called_once()
 
@@ -223,15 +216,14 @@ class TestRunContract(unittest.TestCase):
         stage, and a denied write kills the process that holds it."""
         apply = mock.Mock()
         code, _ = harden.run(
-            supported=lambda: True, privileged=lambda: False,
-            live=lambda: [_issue("live-obfuscated-process")],
+            supported=lambda: True, live=lambda: [_issue("live-obfuscated-process")],
             folders=lambda: [Path("/denial")], apply=apply)
         self.assertEqual(code, 1)
         apply.assert_not_called()
 
     def test_a_self_held_result_is_never_reported_as_root_held(self):
         code, text = harden.run(
-            supported=lambda: True, privileged=lambda: False, live=lambda: [],
+            supported=lambda: True, live=lambda: [],
             folders=lambda: [Path("/mine")],
             apply=lambda p: denial.PathOutcome(p, denial.SELF_ENFORCING, "in place"))
         self.assertIn("enforcing-as-you", text)
@@ -332,18 +324,36 @@ class TestApplyOne(unittest.TestCase):
         self.assertEqual(victim.stat().st_mode & 0o777, 0o644)
 
     def test_does_not_freeze_a_directory_that_gained_children(self):
+        """`0o555` denies the write to the OWNER too, so "it was not changed" left the operator
+        unable to remove the file they were being told to look at."""
         target = self.d / "empty"
         target.mkdir()
         (target / "payload").write_text("x")
+        seen = []
+
+        def empty_until_the_write(_p):
+            seen.append(None)
+            return len(seen) == 1          # the arrival lands in the window, as it really would
+
         with mock.patch.object(hostdenial, "holds", return_value=False), \
-             mock.patch.object(hostdenial, "empty_dir", side_effect=[True, False]), \
+             mock.patch.object(hostdenial, "empty_dir", empty_until_the_write), \
              mock.patch("stayawake.bots.security.harden.denial.os.chmod"), \
              mock.patch("stayawake.bots.security.harden.denial.os.chown"), \
              mock.patch.object(hostdenial, "set_immutable") as setter:
             out = denial.apply_one(target)
         setter.assert_not_called()
-        self.assertEqual(out.state, denial.OCCUPIED)
+        self.assertEqual(out.state, denial.LEFT_OPEN_OVER_CONTENT)
+        self.assertNotIn("not changed", out.detail)
         self.assertTrue((target / "payload").exists())
+
+    def test_a_location_it_could_not_finish_is_left_usable(self):
+        target = self.d / "fresh"
+        with locked(), mock.patch.object(hostdenial, "holds", return_value=False), \
+             mock.patch.object(hostdenial, "set_immutable", return_value=False):
+            out = denial.apply_one(target)
+        self.assertEqual(out.state, denial.UNKNOWN)
+        self.assertTrue(os.access(target, os.W_OK | os.X_OK),
+                        "the operator can still open and clear what this run created")
 
     def test_a_linked_parent_is_not_created_through(self):
         victim = self.d / "victim"
@@ -627,6 +637,581 @@ class TestALiveInstallIsLeftRemovable(unittest.TestCase):
             self.assertEqual(denial.apply_one(prefix / "lib" / "node").state,
                              denial.SELF_ENFORCING)
 
+
+class TestTheReadBackDoesNotTrustPath(unittest.TestCase):
+    """What decides whether a control is reported as in place must not come from `PATH`. This
+    command now runs unprivileged by design, so `PATH` belongs to whoever ran it — and a program
+    earlier in it that prints a flags field containing `i` would make an unlocked directory read
+    back as locked."""
+
+    def test_the_tools_are_looked_for_at_absolute_paths_only(self):
+        for name, candidates in hostdenial._ATTR_TOOL_ABSOLUTE_PATHS.items():
+            with self.subTest(tool=name):
+                self.assertTrue(candidates, f"{name} must have somewhere to be found")
+                for candidate in candidates:
+                    self.assertTrue(candidate.startswith("/"),
+                                    f"{candidate} would be resolved through PATH")
+
+    def test_a_tool_that_is_not_there_is_never_looked_for_on_path(self):
+        """Asserting only the return value cannot see this: on a host without the tool, a bare
+        name fails too, so both answer False and the mutation hides. What has to hold is that
+        nothing is executed at all — that is what keeps `PATH` out of the decision.
+
+        The fixture has to EXIST: the write paths check it first, so a made-up one bails before it
+        would look for a tool and the assertions pass without testing anything."""
+        target = Path(tempfile.mkdtemp(prefix="harden-notool-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(target, ignore_errors=True))
+        with mock.patch.object(hostdenial, "_attr_tool", return_value=None), \
+             mock.patch.object(hostdenial.sys, "platform", "linux"), \
+             mock.patch.object(hostdenial.subprocess, "run") as ran:
+            self.assertFalse(hostdenial.immutable(target))
+            self.assertFalse(hostdenial.set_immutable(target))
+            self.assertFalse(hostdenial.clear_immutable(target))
+        ran.assert_not_called()
+
+    def test_the_source_names_no_bare_tool(self):
+        """A regression here would be one word, and it would be invisible in a diff review."""
+        source = Path(hostdenial.__file__).read_text(encoding="utf-8")
+        for bare in ('["lsattr"', '["chattr"', "'lsattr'", "'chattr'"):
+            self.assertNotIn(bare, source)
+
+
+class TestNothingIsSealedInDuringTheUpgrade(unittest.TestCase):
+    """The owner cannot be changed while the flag is set, so raising a control briefly opens the
+    location. Anything that arrives in that gap must not be locked in — that would put content at
+    the exact location this exists to keep empty, out of the operator's reach."""
+
+    def setUp(self):
+        self.d = Path(tempfile.mkdtemp(prefix="harden-window-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.d, ignore_errors=True))
+
+    def _upgrade_raced(self, target: Path):
+        """Run the privileged upgrade with something writing into the window it opens.
+
+        `chown` is a no-op rather than the hook: a mock that also moved modes would satisfy the
+        assertions below by itself.
+        """
+        held = {target.resolve()}
+
+        def unlocks_and_loses_the_race(p):
+            held.discard(Path(p).resolve())
+            os.chmod(p, 0o755)
+            (Path(p) / "payload.js").write_text("x")
+            os.chmod(p, 0o555)
+            return True
+
+        with mock.patch.object(hostdenial, "immutable",
+                               lambda p: Path(p).resolve() in held), \
+             mock.patch.object(hostdenial, "clear_immutable", unlocks_and_loses_the_race), \
+             mock.patch.object(hostdenial, "set_immutable",
+                               lambda p: bool(held.add(Path(p).resolve()) or True)), \
+             mock.patch.object(os, "geteuid", lambda: 0), \
+             mock.patch.dict(os.environ, {"SUDO_UID": str(os.getuid())}), \
+             mock.patch.object(denial.os, "chown", lambda *a, **k: None):
+            return denial.apply_one(target), held
+
+    def _control(self, name: str = "held") -> Path:
+        target = self.d / name
+        target.mkdir()
+        os.chmod(target, 0o555)
+        return target
+
+    def test_content_arriving_in_the_gap_is_not_locked_in(self):
+        target = self._control()
+        out, held = self._upgrade_raced(target)
+        self.assertEqual(out.state, denial.LEFT_OPEN_OVER_CONTENT)
+        self.assertNotIn(target.resolve(), held, "it must not end up locked around that content")
+
+    def test_the_gap_is_never_reported_as_a_location_that_was_not_changed(self):
+        out, _ = self._upgrade_raced(self._control())
+        self.assertNotEqual(out.state, denial.OCCUPIED)
+        self.assertNotIn("not changed", out.detail)
+        self.assertIn("arrived while the lock was off", out.detail)
+
+    def test_the_location_is_handed_back_so_the_operator_can_clear_it(self):
+        target = self._control()
+        self._upgrade_raced(target)
+        self.assertEqual(target.stat().st_mode & 0o777, 0o700)
+        self.assertTrue(os.access(target, os.W_OK | os.X_OK),
+                        "the operator must be able to remove what arrived")
+
+    def test_the_run_says_so_and_does_not_pass(self):
+        out, _ = self._upgrade_raced(self._control())
+        code, text = harden.run(supported=lambda: True, live=lambda: [],
+                                folders=lambda: [out.path], apply=lambda p: out)
+        self.assertEqual(code, 3)
+        self.assertIn("left-open-over-content", text)
+        self.assertIn("left reachable", text)
+
+    def test_every_note_that_applies_is_printed(self):
+        left_open = denial.PathOutcome(Path("/open"), denial.LEFT_OPEN_OVER_CONTENT, "x")
+        needs_root = denial.PathOutcome(Path("/theirs"), denial.NEEDS_ROOT, "y")
+        _, text = harden.run(supported=lambda: True, live=lambda: [],
+                             folders=lambda: [Path("/open"), Path("/theirs")],
+                             apply=lambda p: left_open if p == Path("/open") else needs_root)
+        self.assertIn("left reachable", text)
+        self.assertIn("Run again with sudo to take those as well", text)
+
+
+class TestTakingAControlBack(unittest.TestCase):
+    def setUp(self):
+        self.d = Path(tempfile.mkdtemp(prefix="harden-back-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.d, ignore_errors=True))
+
+    def _dir(self, name: str) -> Path:
+        target = self.d / name
+        target.mkdir()
+        return target
+
+    def test_a_control_this_tool_placed_is_removed(self):
+        target = self._dir("denied")
+        with locked(target):
+            out = denial.remove_one(target)
+        self.assertEqual(out.state, denial.REMOVED)
+        self.assertFalse(target.exists())
+
+    def test_a_locked_directory_holding_content_is_never_opened(self):
+        """The danger in this verb is the obvious implementation: one that unlocks whatever it is
+        pointed at is a way to open a location on request, wearing a helpful name."""
+        target = self._dir("theirs")
+        (target / "keep.txt").write_text("x")
+        with locked(target) as held:
+            out = denial.remove_one(target)
+            self.assertIn(target.resolve(), held, "it is never even unlocked")
+        self.assertEqual(out.state, denial.LOCKED_OVER_CONTENT)
+        self.assertTrue((target / "keep.txt").exists())
+
+    def test_a_location_locked_over_content_is_not_a_settled_run(self):
+        target = self._dir("hostile")
+        (target / "evil.js").write_text("x")
+        with locked(target):
+            code, text = harden.take_back(supported=lambda: True, folders=lambda: [target])
+        self.assertNotEqual(code, 0)
+        self.assertIn("locked-over-content", text)
+
+    def test_content_arriving_while_the_lock_is_off_is_left_reachable(self):
+        target = self._dir("racy")
+        with locked(target) as held:
+            def arrives(p):
+                held.discard(Path(p).resolve())
+                (Path(p) / "late.txt").write_text("x")
+                return True
+            with mock.patch.object(hostdenial, "clear_immutable", arrives):
+                out = denial.remove_one(target)
+            self.assertNotIn(target.resolve(), held, "it must NOT be locked around that content")
+        self.assertEqual(out.state, denial.LEFT_OPEN_OVER_CONTENT)
+        self.assertTrue((target / "late.txt").exists())
+
+    def test_a_location_left_open_over_content_is_not_a_settled_run(self):
+        target = self._dir("racy")
+        with locked(target) as held:
+            def arrives(p):
+                held.discard(Path(p).resolve())
+                (Path(p) / "late.txt").write_text("x")
+                return True
+            with mock.patch.object(hostdenial, "clear_immutable", arrives):
+                code, text = harden.take_back(supported=lambda: True, folders=lambda: [target])
+        self.assertNotEqual(code, 0)
+        self.assertIn("left-open-over-content", text)
+        self.assertIn("left reachable", text)
+
+    def test_a_link_on_the_way_redirects_nothing(self):
+        """Creating through a planted link puts a control somewhere unintended. Removing through
+        one unlocks and deletes somewhere unintended, and this side had no check at all."""
+        elsewhere = self.d / "elsewhere"
+        (elsewhere / "node").mkdir(parents=True)
+        prefix = self.d / "prefix"
+        prefix.mkdir()
+        (prefix / "lib").symlink_to(elsewhere)
+
+        with locked(prefix / "lib" / "node"):
+            out = denial.remove_one(prefix / "lib" / "node")
+
+        self.assertEqual(out.state, denial.NOT_WHERE_IT_WAS_NAMED)
+        self.assertTrue((elsewhere / "node").exists(), "the real directory is untouched")
+
+    def test_a_location_holding_nothing_of_ours_is_not_touched(self):
+        target = self.d / "plain"
+        target.mkdir()
+        out = denial.remove_one(target)
+        self.assertEqual(out.state, denial.NOTHING_TO_REMOVE)
+        self.assertTrue(target.exists())
+
+    def test_one_root_holds_needs_privilege_to_take_back(self):
+        target = self.d / "roots"
+        target.mkdir()
+        with mock.patch.object(hostdenial, "held_by", return_value=hostdenial.ROOT_HELD), \
+             mock.patch.object(hostdenial, "privileged", return_value=False):
+            out = denial.remove_one(target)
+        self.assertEqual(out.state, denial.NEEDS_ROOT)
+        self.assertTrue(target.exists())
+
+    def test_a_removal_that_did_not_happen_is_never_reported_as_done(self):
+        target = self._dir("stubborn")
+        with locked(target), mock.patch.object(denial.os, "rmdir", lambda p: None):
+            out = denial.remove_one(target)
+        self.assertEqual(out.state, denial.UNKNOWN)
+
+    def test_taking_back_does_not_wait_for_capture(self):
+        """Applying a control waits for a live process to be captured, because a denied write
+        kills it. This opens a location rather than closing one."""
+        removed = []
+        code, text = harden.take_back(
+            supported=lambda: True, folders=lambda: [Path("/x")],
+            remove=lambda p: removed.append(p) or denial.PathOutcome(p, denial.REMOVED, "gone"))
+        self.assertEqual(code, 0)
+        self.assertTrue(removed)
+
+
+class TestEveryWayPrivilegeIsRaised(unittest.TestCase):
+    """Recognising only `sudo` fixed the grading for one tool and left the same defect under the
+    next: the effective uid is root under all of them."""
+
+    def _as_root(self, env):
+        with mock.patch.object(os, "geteuid", lambda: 0):
+            return operator.resolve(env)
+
+    def test_each_escalation_resolves_to_the_invoker(self):
+        me = pwd.getpwuid(os.getuid())
+        for var, value in (("SUDO_UID", str(me.pw_uid)), ("SUDO_USER", me.pw_name),
+                           ("DOAS_USER", me.pw_name), ("PKEXEC_UID", str(me.pw_uid))):
+            with self.subTest(var=var):
+                who = self._as_root({"HOME": "/var/root", var: value})
+                self.assertIsNotNone(who, f"{var} names the invoker")
+                self.assertEqual(who.uid, me.pw_uid)
+
+    def test_root_with_no_marker_is_refused_not_guessed(self):
+        """Answering this from `HOME` is what produced the defect in the first place."""
+        self.assertIsNone(self._as_root({"HOME": "/var/root"}))
+
+    def test_an_account_that_does_not_resolve_is_refused(self):
+        self.assertIsNone(self._as_root({"HOME": "/var/root", "SUDO_USER": "no-such-account"}))
+
+    def test_without_escalation_the_environment_answers(self):
+        with mock.patch.object(os, "geteuid", lambda: os.getuid()):
+            who = operator.resolve({"HOME": "/Users/x", "USER": "x"})
+        self.assertEqual(who.home, Path("/Users/x"))
+
+
+class TestAPlantedEscalationMarkerDecidesNothing(unittest.TestCase):
+    """An escalation marker is an ordinary environment variable any unprivileged process can
+    export. Reading its presence as proof that privilege was raised let one line in a shell rc —
+    the surface this worm family writes to — pick the account every location is graded against."""
+
+    def setUp(self):
+        self.d = Path(tempfile.mkdtemp(prefix="harden-operator-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.d, ignore_errors=True))
+        self.me = pwd.getpwuid(os.getuid())
+
+    def test_a_marker_on_a_process_that_is_not_root_names_nobody(self):
+        with mock.patch.dict(os.environ, {"SUDO_UID": "0"}):
+            self.assertEqual(operator.acting_uid(), os.geteuid())
+            self.assertNotEqual(operator.resolve().uid, 0)
+
+    def test_a_control_that_is_in_place_stays_visible(self):
+        target = self.d / "denied"
+        target.mkdir()
+        with locked(target):
+            self.assertEqual(hostdenial.held_by(target), hostdenial.SELF_HELD)
+            with mock.patch.dict(os.environ, {"SUDO_UID": "0"}):
+                self.assertEqual(hostdenial.held_by(target), hostdenial.SELF_HELD)
+
+    def test_running_as_another_account_grades_against_that_account(self):
+        with mock.patch.dict(os.environ, {"SUDO_UID": "1", "SUDO_USER": "daemon"}):
+            self.assertEqual(operator.acting_uid(), os.geteuid())
+
+    def test_markers_that_disagree_are_refused(self):
+        with mock.patch.object(os, "geteuid", lambda: 0):
+            self.assertIsNone(operator.resolve({"HOME": "/var/root", "SUDO_UID": "0",
+                                                "SUDO_USER": self.me.pw_name}))
+
+    def test_markers_that_agree_still_name_the_invoker(self):
+        with mock.patch.object(os, "geteuid", lambda: 0):
+            who = operator.resolve({"HOME": "/var/root", "SUDO_UID": str(self.me.pw_uid),
+                                    "SUDO_USER": self.me.pw_name})
+        self.assertEqual(who.uid, self.me.pw_uid)
+
+
+class TestTheFlagNeverGoesBackOverContent(unittest.TestCase):
+    """One rule with three exits, written at one of them. Two of the three put the flag back
+    without asking whether the location was still empty, and both reported a reason that says
+    nothing about content — so a run that lost the race AND failed sealed the arrival in and
+    called it "could not be raised to root"."""
+
+    def setUp(self):
+        self.d = Path(tempfile.mkdtemp(prefix="harden-relock-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.d, ignore_errors=True))
+
+    def _raised_upgrade(self, target, *, chown=None, on_set=None):
+        held = {target.resolve()}
+
+        def sets(p):
+            if on_set is not None:
+                on_set(Path(p))
+            held.add(Path(p).resolve())
+            return True
+
+        with mock.patch.object(hostdenial, "immutable",
+                               lambda p: Path(p).resolve() in held), \
+             mock.patch.object(hostdenial, "clear_immutable",
+                               lambda p: held.discard(Path(p).resolve()) or True), \
+             mock.patch.object(hostdenial, "set_immutable", sets), \
+             mock.patch.object(os, "geteuid", lambda: 0), \
+             mock.patch.dict(os.environ, {"SUDO_UID": str(os.getuid())}), \
+             mock.patch.object(denial.os, "chown", chown or (lambda *a, **k: None)):
+            return denial.apply_one(target), held
+
+    def _control(self, name="held"):
+        target = self.d / name
+        target.mkdir()
+        os.chmod(target, 0o555)
+        return target
+
+    def test_a_failed_raise_over_an_arrival_does_not_seal_it_in(self):
+        target = self._control()
+
+        def arrives_then_fails(path, *_a, **_k):
+            os.chmod(path, 0o755)
+            (Path(path) / "payload.js").write_text("x")
+            os.chmod(path, 0o555)
+            raise PermissionError("chown refused")
+
+        out, held = self._raised_upgrade(target, chown=arrives_then_fails)
+        self.assertEqual(out.state, denial.LEFT_OPEN_OVER_CONTENT)
+        self.assertNotIn(target.resolve(), held, "it must not end up locked around that content")
+        self.assertIn("NOT put back", out.detail)
+
+    def test_a_failed_raise_over_an_empty_location_still_puts_the_flag_back(self):
+        target = self._control()
+
+        def fails(path, *_a, **_k):
+            raise PermissionError("chown refused")
+
+        out, held = self._raised_upgrade(target, chown=fails)
+        self.assertEqual(out.state, denial.UNKNOWN)
+        self.assertIn("could not be raised", out.detail)
+        self.assertIn(target.resolve(), held, "an empty location keeps its lock")
+
+    def test_an_arrival_after_the_check_is_unlocked_again(self):
+        target = self._control()
+
+        def lands(p):
+            os.chmod(p, 0o755)
+            (p / "late.js").write_text("x")
+            os.chmod(p, 0o555)
+
+        out, held = self._raised_upgrade(target, on_set=lands)
+        self.assertEqual(out.state, denial.LEFT_OPEN_OVER_CONTENT)
+        self.assertNotIn(target.resolve(), held, "it must not be left locked around that content")
+
+    def test_what_it_says_about_the_owner_is_read_back(self):
+        target = self._control()
+
+        def arrives_then_fails(path, *_a, **_k):
+            os.chmod(path, 0o755)
+            (Path(path) / "payload.js").write_text("x")
+            raise PermissionError("chown refused")
+
+        out, _ = self._raised_upgrade(target, chown=arrives_then_fails)
+        self.assertEqual(target.stat().st_uid, os.getuid())
+        self.assertIn("you can read and remove", out.detail)
+        self.assertNotIn("sudo", out.detail)
+
+
+class TestALockUnderAThirdAccount(unittest.TestCase):
+    """An immutable empty directory owned by neither root nor this account used to answer
+    "nothing holds this" — over a directory that plainly does. The run then tried to write, got
+    the EPERM the flag guarantees, and reported it as "could not be written"."""
+
+    def setUp(self):
+        self.d = Path(tempfile.mkdtemp(prefix="harden-third-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.d, ignore_errors=True))
+        self.target = self.d / "denied"
+        self.target.mkdir()
+
+    @contextlib.contextmanager
+    def _only_the_global_folders(self):
+        """Ask `_host_artifacts` about this fixture and nothing else.
+
+        Its other probes read the real machine — one walks `$HOME` — at eight seconds a test.
+        """
+        with mock.patch.object(host_artifacts, "_global_folders", lambda: [self.target]), \
+             mock.patch.object(host_artifacts, "_host_user_tag", lambda: None), \
+             mock.patch.object(host_artifacts, "_sideloaded_python_dir", lambda unread: None), \
+             mock.patch.object(host_artifacts, "_staged_secret_scanner",
+                               lambda dirs, unread: None):
+            yield
+
+    @contextlib.contextmanager
+    def _under_another_account(self):
+        """Graded against a uid that is not the directory's owner — which is also what a wrong
+        operator resolution produces, and there the lock is really the operator's own."""
+        with locked(self.target), \
+             mock.patch.object(operator, "acting_uid", lambda env=None: os.getuid() + 1000):
+            yield
+
+    def test_it_is_a_lock_not_an_absence(self):
+        with self._under_another_account():
+            self.assertEqual(hostdenial.held_by(self.target), hostdenial.OTHER_HELD)
+
+    def test_applying_names_it_instead_of_failing_to_write(self):
+        with self._under_another_account(), \
+             mock.patch.object(denial.os, "chmod") as chmod:
+            out = denial.apply_one(self.target)
+        chmod.assert_not_called()
+        self.assertEqual(out.state, denial.HELD_BY_ANOTHER)
+        self.assertIn("another account", out.detail)
+
+    def test_the_run_does_not_claim_the_control_is_in_place(self):
+        out = denial.PathOutcome(Path("/x"), denial.HELD_BY_ANOTHER, "another account's")
+        code, text = harden.run(supported=lambda: True, live=lambda: [],
+                                folders=lambda: [Path("/x")], apply=lambda p: out)
+        self.assertEqual(code, 3)
+        self.assertIn("held-by-another-account", text)
+
+    def test_taking_back_refuses_it(self):
+        with self._under_another_account():
+            out = denial.remove_one(self.target)
+            self.assertEqual(hostdenial.held_by(self.target), hostdenial.OTHER_HELD,
+                             "it is never even unlocked")
+        self.assertEqual(out.state, denial.HELD_BY_ANOTHER)
+        self.assertTrue(self.target.exists())
+
+    def test_it_is_not_a_settled_take_back(self):
+        out = denial.PathOutcome(Path("/x"), denial.HELD_BY_ANOTHER, "another account's")
+        code, _ = harden.take_back(supported=lambda: True, folders=lambda: [Path("/x")],
+                                   remove=lambda p: out)
+        self.assertNotEqual(code, 0)
+
+    def test_the_audit_does_not_credit_it_as_this_tools_own_work(self):
+        with self._under_another_account(), self._only_the_global_folders():
+            _strong, weak, _unread, controlled = host_artifacts._host_artifacts()
+        self.assertNotIn(self.target, controlled, "it is not this tool's own work")
+        self.assertIn(self.target, [path for _d, path, _k in weak],
+                      "so it keeps the grade it had before this state existed")
+
+    def test_a_lock_this_tool_does_hold_is_still_credited(self):
+        with locked(self.target), self._only_the_global_folders():
+            _strong, weak, _unread, controlled = host_artifacts._host_artifacts()
+        self.assertIn(self.target, controlled)
+        self.assertNotIn(self.target, [path for _d, path, _k in weak])
+
+
+class TestAMarkerThatIsNotANumber(unittest.TestCase):
+    def test_a_digit_int_refuses_does_not_escape_as_an_exception(self):
+        with mock.patch.object(os, "geteuid", lambda: 0):
+            self.assertIsNone(operator.resolve({"HOME": "/var/root", "SUDO_UID": "\u00b2"}))
+
+    def test_a_marker_that_is_not_a_number_never_names_an_account(self):
+        with mock.patch.object(os, "geteuid", lambda: 0):
+            self.assertIsNone(operator.resolve({"HOME": "/var/root", "SUDO_UID": "root"}))
+
+
+class TestTheFlagIsOnlyEverSetOverNothing(unittest.TestCase):
+    """One rule, and the round before this found it written at one of three exits. It is one
+    function now, and the answer comes from a read-back AFTER the write — asking `empty_dir` and
+    then setting the flag is two syscalls with the gap the whole problem lives in between them."""
+
+    def setUp(self):
+        self.d = Path(tempfile.mkdtemp(prefix="harden-seal-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.d, ignore_errors=True))
+
+    def _held(self, target):
+        return {target.resolve()}
+
+    def test_an_arrival_between_the_check_and_the_write_is_not_sealed_in(self):
+        target = self.d / "racy"
+        target.mkdir()
+        held = self._held(target)
+        landed = []
+
+        def sets_and_loses_the_race(p):
+            held.add(Path(p).resolve())
+            if not landed:
+                landed.append(None)
+                (Path(p) / "payload.js").write_text("x")
+            return True
+
+        with mock.patch.object(hostdenial, "immutable",
+                               lambda p: Path(p).resolve() in held), \
+             mock.patch.object(hostdenial, "clear_immutable",
+                               lambda p: held.discard(Path(p).resolve()) or True), \
+             mock.patch.object(hostdenial, "set_immutable", sets_and_loses_the_race):
+            self.assertFalse(denial._sealed_over_nothing(target))
+        self.assertNotIn(target.resolve(), held, "the flag comes straight off again")
+
+    def test_taking_back_does_not_seal_in_when_the_removal_fails(self):
+        """The arrival has to land between the emptiness check and the `rmdir` to reach that exit.
+        Planting it at the unlock returns at an earlier branch and leaves this code untouched,
+        which is how the first version of this test passed against the defect."""
+        target = self.d / "stubborn"
+        target.mkdir()
+        held = self._held(target)
+
+        def arrives_then_refuses(p):
+            (Path(p) / "payload.js").write_text("x")
+            raise OSError("not empty")
+
+        with mock.patch.object(hostdenial, "immutable",
+                               lambda p: Path(p).resolve() in held), \
+             mock.patch.object(hostdenial, "clear_immutable",
+                               lambda p: held.discard(Path(p).resolve()) or True), \
+             mock.patch.object(hostdenial, "set_immutable",
+                               lambda p: bool(held.add(Path(p).resolve()) or True)), \
+             mock.patch.object(denial.os, "rmdir", arrives_then_refuses):
+            out = denial.remove_one(target)
+        self.assertNotIn(target.resolve(), held, "it must not be locked around that content")
+        self.assertEqual(out.state, denial.LEFT_OPEN_OVER_CONTENT)
+        self.assertTrue((target / "payload.js").exists())
+
+    def test_a_flag_that_will_not_come_off_is_said_so_not_said_open(self):
+        target = self.d / "stuck"
+        target.mkdir()
+        (target / "payload.js").write_text("x")
+        with mock.patch.object(hostdenial, "immutable", return_value=True), \
+             mock.patch.object(hostdenial, "clear_immutable", return_value=False):
+            out = denial._hand_back(target, os.getuid())
+        self.assertEqual(out.state, denial.LOCKED_OVER_CONTENT)
+        self.assertNotIn("NOT put back", out.detail)
+
+
+class TestALockUnderAThirdAccountAtRoot(unittest.TestCase):
+    """`chflags(2)`: the flag may be set or unset by the owner OR the super-user. Refusing while
+    privileged asserted a limit that was never read, and made the raise-to-root path unreachable
+    for every lock not owned by the account this happened to resolve."""
+
+    def setUp(self):
+        self.d = Path(tempfile.mkdtemp(prefix="harden-third-root-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.d, ignore_errors=True))
+        self.target = self.d / "denied"
+        self.target.mkdir()
+
+    @contextlib.contextmanager
+    def _third_account(self, *, privileged):
+        with locked(self.target), \
+             mock.patch.object(operator, "acting_uid", lambda env=None: os.getuid() + 1000), \
+             mock.patch.object(hostdenial, "privileged", return_value=privileged):
+            yield
+
+    def test_unprivileged_it_names_the_way_forward(self):
+        with self._third_account(privileged=False):
+            out = denial.apply_one(self.target)
+        self.assertEqual(out.state, denial.HELD_BY_ANOTHER)
+        self.assertIn("sudo", out.detail, "every other refusal says how to get past it")
+
+    def test_as_root_it_takes_it_over_rather_than_refusing(self):
+        with self._third_account(privileged=True), \
+             mock.patch.object(denial.os, "chown", lambda *a, **k: None), \
+             mock.patch.object(hostdenial, "holds", return_value=True):
+            out = denial.apply_one(self.target)
+        self.assertEqual(out.state, denial.ENFORCING)
+
+    def test_taking_back_still_refuses_it_and_says_why_truthfully(self):
+        with self._third_account(privileged=True):
+            out = denial.remove_one(self.target)
+        self.assertEqual(out.state, denial.HELD_BY_ANOTHER)
+        self.assertIn("only what it placed", out.detail)
+        self.assertNotIn("cannot", out.detail.lower())
 
 if __name__ == "__main__":
     unittest.main()

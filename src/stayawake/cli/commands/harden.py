@@ -18,13 +18,16 @@ def register(sub) -> None:
             "an unverifiable write is unknown, never success. It does not claim that one "
             "control protects anything else."),
         examples=[
-            ("saw harden", "create the denials, then read them back"),
-            ("sudo saw harden", "the same, with the privilege it needs"),
+            ("saw harden", "create the controls, then read them back"),
+            ("sudo saw harden", "the same, reaching what needs privilege"),
+            ("saw harden --take-back", "remove the controls it placed"),
         ])
+    p.add_argument("--take-back", action="store_true",
+                   help="remove the controls this command placed, and nothing else")
     p.set_defaults(func=run)
 
 
-def run(_a: argparse.Namespace) -> int:
-    code, text = harden.run()
+def run(a: argparse.Namespace) -> int:
+    code, text = harden.take_back() if a.take_back else harden.run()
     print(text)
     return code
