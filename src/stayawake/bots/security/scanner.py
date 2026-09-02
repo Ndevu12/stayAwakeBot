@@ -164,6 +164,88 @@ def _cleanup_residue(root: Path) -> Finding | None:
     )
 
 
+_HISTORY_ROUNDS = 20
+
+
+def attach_history_note(result, root, opts, signatures, allowlist) -> None:
+    """Add what history still stores to a completed scan of one local target, if it was asked for.
+
+    Every local scan lands here, so `--history` cannot be wired into one path and silently do
+    nothing on the other: it was live for a single repository and a no-op for a fleet.
+    """
+    if not getattr(opts, "history", False):
+        return
+    note = history_residue_note(root, opts, signatures, allowlist)
+    if note:
+        result.notes.append(note)
+
+
+def history_residue_note(root, opts, signatures, allowlist) -> str | None:
+    """What the repository still STORES that a scan of the working tree cannot see.
+
+    Coverage, never a finding: nothing here runs on clone or on build, and gating on it would turn
+    every correctly remediated repository red and cost the exit code its meaning. CONFIRMED only —
+    a heuristic shape in a five-year-old commit is a line the operator dismisses every scan.
+
+    Bounded by ROUNDS, one stored version of each path per round, because a path CI rewrites every
+    run carries a thousand versions and a payload carries one or two. MEASURED here: 1 round covers
+    74% of paths completely, 20 covers 98.6%.
+    """
+    try:
+        return _history_residue_note(root, opts, signatures, allowlist)
+    except Exception as exc:
+        # Total by contract. This runs after the tree scan, and a raise here reached a caller that
+        # discarded the whole ScanResult — turning a real INFECTED verdict into "could not scan".
+        return (f"History could not be read ({type(exc).__name__}), so whether this repository "
+                "still stores a payload is UNKNOWN, not no.")
+
+
+def _history_residue_note(root, opts, signatures, allowlist) -> str | None:
+    from stayawake.bots.security.targets.history import HistoryTarget, versions_by_path
+    versions, complete = versions_by_path(root)
+    if not versions:
+        # A failed git command degrades to an empty result, so "git could not answer" and "there is
+        # genuinely nothing here" arrive identically; `complete` is what separates them. Silence is
+        # what this note exists to end, but a fresh repository has honestly nothing to report.
+        if complete:
+            return "History was read: this repository stores no earlier version of any path."
+        return ("History could not be read: nothing was returned for this repository, so whether "
+                "it still stores a payload is UNKNOWN, not no.")
+    # A `path_glob` rule is decided against the ONE name git emits for a blob, and whoever
+    # committed it picks that name: filing the same bytes under an allowlisted path suppresses the
+    # stored payload. Signature-wide rules carry the same operator intent and cannot be aimed.
+    unaimable = [r for r in (allowlist or []) if isinstance(r, dict) and not r.get("path_glob")]
+    hits, scanned, unread = [], 0, set()
+    for index in range(_HISTORY_ROUNDS):
+        target = HistoryTarget(root, str(root), opts, versions, index)
+        if not len(target):
+            break
+        scanned += len(target)
+        result = scan_target(target, signatures, unaimable)
+        hits += [f for f in result.findings if f.confidence == CONFIRMED]
+        unread |= set(target.read_errors)
+    beyond = sum(max(len(v) - _HISTORY_ROUNDS, 0) for v in versions.values())
+    cut = (f" {beyond} further version(s) of {sum(1 for v in versions.values() if len(v) > _HISTORY_ROUNDS)}"
+           f" path(s) were not read." if beyond else "")
+    if not complete:
+        cut += " The walk hit its object budget, so what was enumerated is not all of it."
+    if unread:
+        # By PATH, not by failed attempt: every version is read once per matcher, so counting
+        # attempts inflated this fivefold and drove the number reported as read negative.
+        scanned -= len(unread)
+        cut += f" {len(unread)} stored version(s) could not be read at all."
+    if not hits:
+        return (f"History was read: no confirmed payload in {scanned} stored version(s) across "
+                f"{len(versions)} path(s).{cut}")
+    paths = sorted({f.path for f in hits})
+    more = len(paths) - 5
+    return (f"{len(paths)} path(s) still STORE a confirmed payload reachable from a ref, though "
+            f"not in the working tree: {'; '.join(paths[:5])}"
+            f"{f'; and {more} more' if more > 0 else ''}. Removing these needs a history rewrite "
+            f"and the hosting provider's collection — a fix that cleans the tree does not reach "
+            f"them.{cut}")
+
+
 def _history_scope_note(root) -> str | None:
     """What a scan of the working tree did NOT look at.
 

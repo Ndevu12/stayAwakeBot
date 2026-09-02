@@ -31,6 +31,7 @@ saw scan [TARGETS...] [-r] [--user U] [--org O] [-c FILE] [-p PATH] [-j N]
 | `--no-advisories` | Omit the dependency CVE section. Advisories never change the verdict, so this only quiets the output. |
 | `-x`, `--external` | **Opt-in; the only flag that leaves the offline sandbox.** Also runs *installed* external auditors (`osv-scanner`, …) and folds their vulnerabilities into the advisory tier — such a tool may send your dependency list to its own servers. Absent tools are skipped; the verdict never changes. |
 | `--deep` | **Opt-in, npm only:** also examine the contents of installed npm packages. Reading every dependency file adds roughly 10–60s on a large `node_modules`; the run stays offline and deterministic. |
+| `--history` | Also read what the repository still **stores** — other branches, tags, and earlier commits. A file cleaned from your folder is still there and one command away (`git show`, `git clone --branch`). Reported as coverage; it never changes the verdict, because nothing stored there runs on clone or on build. Slow: it reads every stored version, not the current one. |
 | `--require-db` | Fail the run when the [advisory database](../advisory-db.md) is absent or fails its integrity check, instead of continuing without it — for CI that must not lose advisory coverage silently. |
 
 ```bash

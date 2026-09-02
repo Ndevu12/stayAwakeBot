@@ -16,6 +16,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from support.gitrepo import GitSandbox                       # noqa: E402
 from stayawake.lib.git import query                          # noqa: E402
+from stayawake.bots.security.targets import ScanOptions      # noqa: E402
+from stayawake.bots.security.targets.history import (        # noqa: E402
+    HistoryTarget, versions_by_path as _v)
+
+
+def _versions(repo):
+    return _v(repo)[0]
 
 
 class TestEveryRefIsReached(GitSandbox):
@@ -92,6 +99,36 @@ class TestEveryRefIsReached(GitSandbox):
         blobs, complete = query.reachable_blobs(repo, limit=3)
         self.assertFalse(complete)
         self.assertEqual(len(blobs), 3)
+
+    def test_a_name_git_truncated_still_gets_its_content_read(self):
+        """`rev-list --objects` does not quote, and git emits a path containing a newline cut at
+        that newline — `we\\nird.js` arrives as `we`, and the real name is not in the output to
+        recover. So the name is unreliable by construction and content must not be gated on it."""
+        repo = self._repo_with_history()
+        (repo / "we\nird.js").write_bytes(b"payload\n")
+        self.git(repo, "add", "-A")
+        self.commit(repo, "a path with a newline in it")
+        names = self._paths(repo)
+        self.assertIn("we", names, "git truncated it, and that is what there is to work with")
+        target = HistoryTarget(repo, str(repo), ScanOptions(), _versions(repo))
+        self.assertEqual(target.read_bytes("we"), b"payload\n",
+                         "an extension-less name must still be read, or the truncation hides it")
+
+    def test_an_object_git_cannot_unpack_is_not_reported_as_a_complete_read(self):
+        """`cat-file --batch-check --batch-all-objects` EXITS 0 having skipped a corrupt object,
+        naming it on stderr only. It then fails the type test and leaves the walk silently, so the
+        caller was told a partial enumeration was complete."""
+        repo = self._repo_with_history()
+        self.write(repo, "second.txt", "another blob\n")
+        self.commit(repo, "second")
+        sha = self.git(repo, "rev-parse", "HEAD:second.txt").strip()
+        loose = repo / ".git" / "objects" / sha[:2] / sha[2:]
+        if not loose.exists():
+            self.skipTest("object was packed; this case needs a loose object to corrupt")
+        loose.chmod(0o644)                       # git writes loose objects read-only
+        loose.write_bytes(b"not a git object")
+        _blobs, complete = query.reachable_blobs(repo)
+        self.assertFalse(complete, "a partial enumeration was reported as a complete read")
 
     def test_a_repository_with_nothing_in_it_answers_empty(self):
         blobs, complete = query.reachable_blobs(self.new_repo("bare"))

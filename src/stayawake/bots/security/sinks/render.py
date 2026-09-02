@@ -19,6 +19,10 @@ from stayawake.bots.security.redaction import redact, render_redacted
 from stayawake.utils.render import MARKER, SEVERITY, STATUS, paint, rule
 from stayawake.utils import textsafe
 
+# A note is tool-authored text that may QUOTE committer-chosen paths, so it is longer
+# than a single field but still never printed raw.
+_NOTE_LIMIT = 2000
+
 _SEV_COLOR = {s: SEVERITY[s] for s in ("critical", "high", "medium")}
 
 
@@ -171,7 +175,8 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False,
         out += ["", "residue = nothing here executes, but this is not what the project would carry."]
     notes = _coverage_notes(payload)
     if notes:
-        out += ["", "Coverage notes (not gating):"] + [f"  {MARKER['info']} {n}" for n in notes]
+        out += ["", "Coverage notes (not gating):"] + [
+            f"  {MARKER['info']} {textsafe.plain(n, limit=_NOTE_LIMIT)}" for n in notes]
     # nothing is infected — the exact moment a user might read "clean" and rotate a token, which can
     # arm a rotation-wiper daemon. Terminal-only, never gates; the authoritative host verdict is
     # `saw audit` (which now withholds its all-clear until the persistence surface is verified).

@@ -11,6 +11,7 @@ Remediation lives in `saw fix`, never here.
 from __future__ import annotations
 
 import argparse
+import sys
 
 from stayawake.bots.security import service
 from stayawake.cli.argtypes import add_jobs_arg
@@ -63,6 +64,10 @@ def register(sub) -> None:
                         "dependency source file, so a large node_modules adds 10–60s; FP-safe (confirmed "
                         "fingerprints only, never the heuristics that flag minified code). Without it, "
                         "the scan notes what it skipped.")
+    p.add_argument("--history", action="store_true",
+                   help="also read what the repository still stores on other branches, tags and "
+                        "earlier commits. Reported as coverage; never changes the verdict, "
+                        "because nothing stored there runs on clone or on build.")
     p.add_argument("--require-db", action="store_true", dest="require_db",
                    help="fail (exit 2) if the advisory DB is absent or fails its integrity check, "
                         "instead of falling back to the inline malware seed — for CI gates that must "
@@ -90,6 +95,13 @@ def register(sub) -> None:
 def run(a: argparse.Namespace) -> int:
     positionals = [*a.paths, *a.extra_paths]
     remote = a.remote or bool(a.user) or bool(a.org)
+    if a.history and remote:
+        # A remote target is a shallow clone, so its history is truncated by construction. Reading
+        # it would answer about the part that was fetched while reading as an answer about the
+        # repository — refused rather than half-answered.
+        print("error: --history reads a full local repository; a remote target is fetched shallow, "
+              "so its history is not there to read. Clone it and scan the clone.", file=sys.stderr)
+        return 2
     return service.scan(a.config, remote=remote,
                         paths=None if remote else (positionals or None),
                         slugs=(positionals or None) if remote else None,
@@ -97,4 +109,4 @@ def run(a: argparse.Namespace) -> int:
                         json_out=a.json, sarif_path=a.sarif, reports_dir=a.reports_dir,
                         alert=a.alert, no_stream=a.no_stream, pager=a.pager,
                         no_advisories=a.no_advisories, external_audit=a.external_audit,
-                        deep=a.deep, require_db=a.require_db, jobs=a.jobs)
+                        deep=a.deep, history=a.history, require_db=a.require_db, jobs=a.jobs)
