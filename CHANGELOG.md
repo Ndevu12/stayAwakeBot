@@ -13,356 +13,95 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
-### Added
-- **An install hook that runs a coding agent unattended is now reported.** A lifecycle script in
-  `package.json` can invoke a coding agent with its approval prompt switched off, turning it into a
-  reconnaissance and exfiltration tool using your own credentials — on every `npm install`. `saw`
-  now reports it, in your own manifest and in an installed dependency's. A flag that only asks for
-  an unattended run, without disabling approval, is reported for review rather than as an infection.
-
-### Fixed
-- **Four of the scripts a bare `npm install` runs were never read**, so naming an install hook
-  `prepublish`, `predependencies`, `dependencies` or `postdependencies` put it past every
-  lifecycle-hook check on a project's own manifest. All ten are read now.
-- **`saw scan --history` reads what a repository still stores**, not only what is checked out. A
-  file cleaned from your working tree is still there on an earlier commit, another branch or a tag,
-  and one command puts it back. It is reported as coverage and never changes the verdict, because
-  nothing stored there runs on clone or on build. It says how many stored versions it read, and how
-  many it did not.
-
-### Changed
-- **`saw fix` now states what it leaves behind.** Its page says plainly that cleaning the working
-  tree does not remove the payload from the repository's earlier commits, that clones and forks
-  keep their own copy, and that clearing it needs a history rewrite and the hosting provider's
-  collection.
-
-
-### Changed
-- **`saw fix` no longer leaves behind the packages it could not account for.** They were the only
-  ones surviving a confirmed removal, and `npm install` does not remove them, so a rebuild carried
-  them through. Each is copied into the quarantine directory and the copy is checked before the
-  original is taken, and the run says how many there were.
-
-
-### Fixed
-- **A filename can no longer be made to look like something `saw` said.** A path chosen by whoever
-  wrote it could reproduce a report line — including the advice line inside the rotation-safety
-  block — well enough to read as the tool's own words. Those lines now sit where only the tool puts
-  them, and the path is still shown exactly as it is on disk.
-
-
-### Fixed
-- **`saw fix` no longer deletes directories you excluded from scanning.** `exclude_dirs` says what
-  is read, and nothing now infers from it that a directory may be removed — vendored code, fixtures
-  and test corpora were being destroyed, with no copy kept.
-- **Generated outputs are removed only when the lockfile accounts for the installed tree**, and are
-  copied into the quarantine directory first, as everything else on that path already was.
-
-### Changed
-- **`saw fix` says that its removals happen in your working tree**, when the run happens rather
-  than when a pull request is merged, and names the directory the copies were written to. The
-  reference page says the same.
-
-### Fixed
-- **`saw audit` no longer withholds the credential-rotation all-clear because macOS protects one of
-  its own directories.** Only a location inside an installed application counts against the
-  verdict; a directory swept up while looking for applications, that turns out not to be one, is
-  reported as something the run did not read and nothing more.
-
-### Fixed
-- **`saw audit` says how many locations it could not read, before listing them.** A long path used
-  to push the count — and the other locations — out of the report, leaving neither. Each path is
-  shortened in the middle for the same reason, and a location reached twice is named once.
+## [0.8.0] - 2026-09-02
 
 ### Added
-- **`saw harden --take-back` removes the controls the command placed.** It removes only those, and
-  reports anything it did not remove. A location holding anything is left as it stands.
+- **An install hook that runs a coding agent unattended is now reported** — in your own manifest
+  and in an installed dependency's. A flag that only asks for an unattended run, without disabling
+  approval, is reported for review rather than as an infection.
+- **`saw scan --history` reads what the repository still stores** — earlier commits, other
+  branches, tags — and reports it as coverage without changing the verdict. It says how many
+  stored versions it read, and how many it did not.
+- **`saw harden --take-back` removes the controls the command placed.** It removes only those,
+  reports anything it did not remove, and leaves a location holding anything as it stands.
+
+### Changed
+- **`saw harden` no longer requires root.** Run as yourself it acts where it can and names what it
+  did not take; run again with `sudo` to act on the rest, to strengthen what you already hold, and
+  to take over a control held by another account on the machine. The result tells you which
+  controls root holds and which you hold, and a control it cannot attribute is reported as held by
+  another account, never as absent.
+- **`saw harden` reports a control as in place only on evidence it confirmed itself.** A location
+  it cannot confirm, or could not finish with, is handed back to you — named, writable, and
+  counted against the run rather than reported as done.
+- **`saw fix` quarantines before it removes.** Packages it could not account for, and generated
+  outputs, are copied into the quarantine directory and the copy checked before the original is
+  taken; the run says how many there were and names the directory. Removals happen in your working
+  tree when the run happens, and the reference page says the same.
+- **`saw fix` states what it leaves behind** — cleaning the working tree does not remove the
+  payload from the repository's earlier commits, and clones and forks keep their own copy — and
+  its review note now points at `saw fix amend` for a commit it cannot change.
+- **`saw fix amend` clears every infected commit in one run, and changes only the reported
+  paths.** It confirms the payload is actually gone before any branch moves — a repository that
+  fails that check is left exactly as it was — and it stops, changing nothing, when a confirmed
+  commit is out of its reach or a later commit still carries the payload. History keeps its shape:
+  a merge stays a merge, every commit keeps its own author, and commits before the oldest cleared
+  one keep their identity.
+- **A scan says that it looked at the working tree only**, and names what it did not look at —
+  earlier commits, other branches and tags. This is a coverage note; the verdict is unchanged.
+- **A task set to run when a folder opens is no longer critical on that alone.** It is reported
+  for review, and reaches critical only when the task also hides itself. Nothing stops being
+  reported; the grade changes.
+- **Guidance after a suspected wipe no longer promises that missing data is recoverable**, and
+  says what to do when neutralization cannot be confirmed: image first, and rotate credentials
+  anyway. Imaging comes before any write, including `saw fix`.
+- **The issue `saw` opens automatically now points at remediation that exists** — `saw fix --pr` —
+  and says plainly that the issue closing means the repository scans clean, not that a machine
+  which ran the code is clean.
 
 ### Fixed
-- **`saw harden` reports a control as in place only on evidence it cannot be fed.** Neither what it
-  reads to decide that nor which account it decides it for is influenced by the environment of
-  whoever runs it, so a control that is in place stays visible and one that is not is never
-  reported as though it were.
-- **Raising a control to root no longer risks closing over something that arrived while it was
-  briefly open.** If anything has, the location is handed back to you — unlocked, yours, and
-  writable so you can clear it — and the run names it and does not pass, instead of reporting the
-  location as untouched.
-- **`saw harden --take-back` no longer reports a run as complete over a location it left open**,
-  and says which locations to look at first.
-- **`saw harden` recognises the operator whichever way privilege was raised**, and when it cannot
-  establish who that is it says so instead of assuming. A control it cannot attribute to itself is
-  reported as a lock held by another account rather than as an absent one, and neither command
-  will open or remove it.
-- **The lock never goes back on over something that arrived while it was off.** Every path that
-  sets it, in both commands, now confirms afterwards that it closed over an empty location — asking
-  first and not looking again is what let an arrival through — and takes it straight off again if
-  it did not.
-- **A location this command changed and could not finish with is handed back to you.** It used to
-  be left read-only, so the file you were being told to go and look at could not be removed from a
-  directory you own, and `--take-back` could not see what had been left behind.
-- **Run again with `sudo` and a control held by another account on the machine is taken over**
-  rather than refused with a reason that was not true of a privileged run. Without `sudo` it is
-  named, and says so. `--take-back` still leaves it alone: it removes only what it placed.
-
-### Fixed
+- **Four of the ten scripts a bare `npm install` runs were never read.** All ten are read now.
+- **A filename can no longer be made to look like something `saw` said.** Report lines sit where
+  only the tool puts them, and the path is still shown exactly as it is on disk.
+- **`saw fix` no longer deletes directories you excluded from scanning** — vendored code, fixtures
+  and test corpora were being destroyed, with no copy kept. Generated outputs are removed only
+  when the lockfile accounts for the installed tree.
+- **`saw fix` no longer reports a working tree as clean while a merge finding is still live in
+  it.** Files that still carry the payload are restored on the review branch; the merge commit
+  stays, and `saw fix` still never rewrites history.
+- **`saw fix --pr` publishes the cleanup branch; it does not overwrite a remote ref.** A branch
+  that is not fast-forwardable is refused. `saw fix amend` is the act that force-updates.
+- **`saw audit` names everything it could not read, and never reports it as clean.** An unreadable
+  module, directory or location — including inside an installed application — is named and counted,
+  holds the credential-rotation all-clear until you have cleared it, and a bound the audit hit is
+  always reported. A run that examined nothing ends UNKNOWN rather than clean, and a crafted entry
+  in an application's own directory can no longer stall the run.
 - **`saw audit --verify` never reports a scan that did not clear a module as one that found
-  nothing.** Only a scan that read the whole directory and found no markers clears it. A scan that
-  could not start, could not finish, or could not read everything now says so and says why, names
-  the modules it did not settle, and withholds the credential-rotation all-clear until it can. It
-  used to report the weaker finding instead — whose own advice is to run `--verify`.
-- **A module that was scanned and came back clean now says so** — and says what that does and does
-  not settle — rather than repeating the advice to run the scan that had just cleared it.
-- **Anything the audit could not read inside an installed application is named.** A module, a
-  directory it could not list, or a location it could not enumerate at all used to produce nothing
-  whatever — no finding, no count, no mention, indistinguishable from having looked and found
-  nothing. Each is now named so you can go and clear it, and each withholds the credential-rotation
-  all-clear until you have. Locking a file and locking the directory holding it are answered the
-  same way, so neither is a way past the check.
-- **A bound the audit hit is always reported**, including when it fell exactly on the last module
-  of a directory, where it used to be reported as nothing.
-- **A pipe or device named like an application module no longer stops the audit.** Reading one had
-  no timeout, so anything able to write into an application's own directory could hang the run.
-- **The same fixes on the host-artifact surface.** `--verify` there also reported a scan that blew
-  up as the advice to run `--verify`, and described a directory it had not scanned as one where a
-  content scan found nothing.
-
-### Changed
-- **`saw harden` no longer requires root.** Run as yourself it acts where it can, and names
-  anything it did not take rather than stopping. Run again with `sudo` to act on the rest and to
-  strengthen what is already in place; the result distinguishes a control root holds from one you
-  hold and tells you which you have. Anything already in use is still left unchanged, and it still
-  refuses while a running process holds code that is not on disk.
-
-### Fixed
-- **`saw audit` no longer reports the controls `saw harden` placed as a finding.** A location that
-  holds a control is credited as one; a finding elsewhere reads as being outside it. An empty
-  directory in one of these locations is no longer described as something it is not.
+  nothing.** Only a full read with no markers clears it; anything less says so, says why, and
+  names what it did not settle. A module that came back clean now says so — and what that does and
+  does not settle. The same holds on the host-artifact surface.
+- **`saw audit` no longer withholds the credential-rotation all-clear because macOS protects one
+  of its own directories.** Only a location inside an installed application counts against the
+  verdict.
+- **`saw audit` no longer reports the controls `saw harden` placed as a finding**, and a host
+  whose controls are in place is no longer described as unprotected on a `sudo` re-run. A leftover
+  location after `saw harden` still holds rotation until it has been inspected.
 - **`saw harden` acts only where it was told to.** A location named relative to where the command
-  happened to be run is refused rather than acted on, so it cannot reach a directory outside the
-  machine-level scope it states. It creates the location it was aimed at and nothing above it, so
-  a location named for something the machine does not have no longer gets built out for it — that
-  location is named in the result instead.
-- **A location that something else depends on is left able to be removed.** Acting there would have
-  stopped an installed toolchain being uninstalled or upgraded, with an error naming nothing.
-- **Running again with `sudo` now strengthens what you already hold.** It reported such a host as
-  not protected, and advised against rotating credentials, while the controls were in place.
-
-### Changed
-- **`saw fix` now points at `saw fix amend` for a commit it cannot change.** Its review note sent
-  operators to an external tool for the job `saw fix amend` does, and said `saw fix` "never
-  rewrites history" — it does not change past commits, which is what it meant and what it now
-  says. The note is shorter, and still states that the commit stays in any clone, fork or tag.
-
-### Added
-- **`saw fix amend` checks that the payload is actually gone before it moves anything.** Every
-  other check it makes asks what changed; this one asks whether anything reported is still
-  there. A result that still reaches a reported commit, or that still holds the reported content,
-  stops the run — and because the check happens before any branch moves, a repository that fails
-  it is left exactly as it was.
-
-### Changed
-- **`saw fix amend` clears every infected commit in one run.** It used to stop when more than one
-  commit carried the payload, which left the repository infected after a run that had already
-  established it could act. The stretch of history rewritten is decided by the oldest of them, so
-  clearing several is the same rewrite as clearing one, and commits before that keep their
-  identity. The shape of the history is unchanged: a merge stays a merge with its parents in
-  their original order, its recorded content intact, and each commit keeps its own author.
-
-  It stops without changing anything when a confirmed commit is on no branch it can reach, and
-  when a later commit edited one of the reported files and that file still carries the payload
-  there — replacing it would either miss the payload or discard that commit's work, so the run
-  reports it instead. A commit is no longer required to be a merge to be replaced.
-
-### Fixed
-- **`saw fix amend` takes the payload and leaves the rest of the commit alone.** It used to
-  rebuild the commit from its parents, which discarded everything else that commit contributed —
-  a conflict resolution, an edit made while the merge was open, a file it deleted — so it refused
-  in the cases that actually occur, including a merge that resolved a conflict and carried the
-  payload. The replacement is now the commit's own content with only the reported paths put back,
-  and those are the only paths that change.
-
-  A correction is confirmed to have taken effect before the replacement is used, so a path that
-  could not be matched is reported rather than counted as removed. File modes are kept, so an
-  executable stays executable and a symlink stays a symlink. The message and the author are
-  reproduced exactly, and a commit recording something a replacement cannot carry is refused
-  rather than altered. If the reported content was already there before this commit, replacing
-  this one does not remove it and the run says so.
-
-### Changed
-- **`saw fix amend` has its own reference page, with the caution first.** It states what the
-  command needs before it will act, what it stops for, and what it leaves for a person to
-  finish.
-
-### Added
-- **`saw fix amend` replaces past commits that still carry the payload and force-updates
-  each branch they sat on.** That force-update is the fix. It does not open a pull request
-  and it does not take `--branch`. The replaced commit keeps its original message. Tags and
-  notes are not moved. If a remote branch cannot be read, nothing is force-updated. If the
-  remote does not move, local branches are left as they stood. The previous objects remain
-  until collected. Bare `saw fix` still only cleans the tip.
-
-  It refuses before anything moves when the credential may not rewrite that repository, when the
-  remote branches cannot be refreshed, when the repository is set to sign commits and no signature
-  can be made, when the replacement would drop content the finding does not cover, or when the
-  previous commits cannot be captured first. A protected branch is never force-updated: the
-  amended history is published beside it under its own name and a person opens the pull request,
-  and a protection rule that cannot be read is treated the same way. A replacement that changes
-  commits it should not have is put back rather than pushed, and a branch that is moved and cannot
-  be put back is reported as exactly that. There is no account-wide form: each repository is
-  named, and a named path that does not exist is an error rather than a wider sweep.
-
-  Signed history stays signed. Whether the replacement and the replayed commits are signed
-  follows the commits being replaced, not only this clone's settings, so history signed elsewhere
-  — by a merge made on the web, or on a machine that is not this one — is not quietly replaced
-  with unsigned commits. A repository that needs a signature and cannot produce one refuses.
-
-  A clone that does not have everything its remote branch has is refused rather than
-  force-updated, so commits that exist only on the remote are not deleted unseen. Forks are
-  counted rather than assumed. A run that examined no repository is not reported as success.
-
-### Fixed
-- **`saw fix --pr` publishes the cleanup branch; it does not overwrite a remote ref.** A
-  branch that is not fast-forwardable is refused, not force-updated. `saw fix amend` is the
-  act that force-updates.
-- **`saw fix` no longer reports a working tree as clean when a merge finding is still live in it.**
-  Files that still carry the payload are restored on the review branch. The merge commit stays;
-  `saw fix` still never rewrites history. If it cannot tell whether those files still carry it,
-  it does not treat the tree as clean.
-
-### Changed
-- **Operator documentation describes the verdict, not process status.**
-
-### Added
-- **`saw harden` creates host denials and only reports them as in place after a read-back.**
-  It never touches a project's dependency tree. An unverifiable write is unknown, never success.
-  A path that already has something in it is left unchanged. If a running process still holds
-  code that is not on disk, it refuses until that process is captured. A denial that is in
-  place is not reported as a drop artifact. It does not claim that one control protects
-  anything else.
-
-### Fixed
-- **`saw harden` applies a control only at the location it named, and only when it can confirm that
-  is where the control went.** Anything it cannot confirm is left as it was and reported, never
-  counted as applied. The report does not say the control is in place when it is not.
-- **A run that examined nothing on this machine is refused rather than applied.**
-- **A leftover location after `saw harden` does not make credential rotation safe.** An audit still
-  holds rotation until that location has been inspected.
-- **A location a check could not read is no longer reported as a clean result.** Those checks
-  used to return the same empty answer they return on a clean host. They now say the location
-  could not be read, and the run is UNKNOWN rather than clean.
-
-### Added
-- **On a confirmed infection, `saw fix` also removes this repository's installed tree, generated
-  build outputs, and lockfile.** On CI the lockfile stays. The host is not touched. A scan that
-  did not finish does not change the tree.
-
-### Added
-- **A start-up item that runs something its name cannot account for is now reported.** The name and
-  the path were both already read and never compared. Neither is suspicious alone — the
-  contradiction between them is, and it is the shape an item takes when it borrows a familiar name
-  to look routine.
-
-### Fixed
-- **Two host indicators that one command leaves behind no longer read as a live implant.** They are
-  still reported, and credential rotation is still held — what changes is the claim: something staged
-  here, rather than something is running here, which is what the advice to isolate and rebuild
-  depends on.
-
-### Fixed
-- **A task set to run when a folder opens is no longer critical on that alone.** Running on open is
-  what the setting is for, and ordinary project configuration uses it. It is now reported as
-  something to review, and reaches critical only when the task also hides itself — legitimate
-  auto-run tasks are common, ones that keep their own execution off the screen are not. Nothing
-  stops being reported; the grade changes.
-
-### Fixed
-- **On a platform `saw` does not yet cover, checks no longer report that they found nothing.** Most
-  of the start-up surface has no Windows implementation, so those checks returned nothing — the same
-  answer they give on a clean machine — and a Windows run came back clean at exit `0` over a surface
-  nothing had examined. Those checks now say the platform is not covered, the run says so once, and
-  it treats credential rotation as unsafe until you have looked yourself.
-
-### Added
-- **`saw audit` now examines the code that running processes were handed.** A loader passed to an
-  interpreter as an argument never touches the disk, so every check that reads files was looking in
-  the wrong place — and that is the shape a real incident took. An audit now reports one when it
-  finds it, holds credential rotation, and tells you to capture the process before you end it. It
-  also says how many processes it was not permitted to read, and says so outright where the system
-  will not hand arguments over at all, so a quiet result is not read as covering the whole machine.
-  It reports; it never stops or ends anything.
-
-- **A scan can now say `residue`.** A cleanup that backed a file up and then left it unchanged was
-  reported as either clean or infected, and both were wrong: nothing new executes there, but the
-  file is not what the project would carry. `residue` is the weakest verdict, so it can never mask
-  a suspicious or infected one, and it does not fire the CI gate — a scan that finds only residue
-  still exits `0`, and says so rather than reporting a clean bill of health. A cleanup that finished
-  leaves the tree clean, as before.
-
-- **`saw audit` now reads the JavaScript an installed application loads.** That code belongs to the
-  application, not to a dependency — no manifest lists it and no lockfile covers it, so
-  reinstalling dependencies never reached it, and it is where a cleanup can be undone from. A
-  module it flags
-  is reported so you can check it against the publisher's copy; `saw audit --verify` looks harder at
-  one, and a confirmed result there is treated as an active foothold that holds credential rotation.
-  Applications are found by their layout rather than by a list of names, a tree reachable under two
-  paths is read once, and what the walk did not reach is reported rather than counted as clean.
-
-### Changed
-- **A check your machine would not let finish is no longer reported as a check that found
-  nothing.** A missing tool or an unreadable path used to produce silence, and silence read as a
-  clean result. Those checks are now listed under **Not checked**, naming what stopped each one,
-  and whatever they did manage to establish is kept. One of them no longer ends the audit — the
-  rest still run.
-- **`saw audit` exit codes now cover a check that did not finish.** One that reads the start-up
-  surface exits `3`, because the surface was not established and rotation is not safe; any other
-  exits `2`, the existing meaning of a run that could not complete. Neither can leave the run at
-  `0`.
-
-### Fixed
-- **An unreadable file inside a start-up directory is no longer reported as a clean directory.** The
-  audit certified that it could list those directories without certifying the records inside them,
-  so a file it could not read produced no finding at all and a host could report "persistence
-  surface enumerated and clean" at exit `0` over a start-up item nobody had read. Every record is
-  now certified alongside its directory, including ones reached through a symlink and ones a
-  directory deeper.
-- **A global git configuration that git itself cannot read is no longer treated as no configuration
-  at all.** A configuration file inside a directory the audit may not inspect was reported as
-  absent, so a host with an entry that runs a command on every git operation could exit `0`.
-
-- **A scan now says that it looked at the working tree only**, and names what it did not look at —
-  earlier commits, other branches and tags. Any of them is one command away from being on disk
-  (`git checkout <rev>`, `git clone --branch <tag>`), and a fix is a forward commit on one branch, so
-  a file cleaned there may still be served from a tag. This is a coverage note: it reports what was
-  not examined and does not change the verdict or the exit code.
-- **`saw fix` documentation states what a fix does and does not remove** — it cleans the tree with a
-  forward commit and never rewrites history, so clearing what remains in history is a separate
-  decision, with what that involves spelled out.
-
-### Fixed
-- **Guidance after a suspected wipe no longer promises that missing data is recoverable.** Whether
-  anything survives depends on which wipe variant ran, and a host-side audit cannot tell — so the
-  incident runbook and the wiped-home finding now state that as a condition rather than asserting
-  it. Both still tell you to image first, because imaging is what preserves the case where recovery
-  is possible, and the step now names `saw fix` among the writes to hold off until then.
-- **The runbook now says what to do when neutralization cannot be confirmed** — image first and
-  rotate anyway, rather than leaving the credentials live: the trigger stays armed for as long as
-  they are valid, and a wipe against an imaged host costs nothing.
-- **The issue `saw` opens automatically now points at remediation that exists.** It previously told
-  the reader to run a cleanup script that this project has never shipped. It now points at
-  `saw fix --pr`, and says plainly that the issue closing means the repository scans clean — not
-  that a machine which ran the code is clean.
-- **`saw audit` no longer reports active host persistence over a single ordinary file.** Where a
-  temporary directory is reachable under more than one name — which is normal on macOS — one file
-  could be counted twice and treated as corroborating itself, producing the isolate-and-rebuild
-  runbook and exit `3`.
-
-### Changed
-- **The same kind of artifact in more than one place is now described as staging rather than as a
-  live implant.** Rotation stays gated and the exit code is unchanged; what changes is what you are
-  told to do — inspect the locations, and rebuild only if a scan or your own inspection finds
-  payload code.
-- **`saw audit --verify` content-scans every corroborated location**, not only the first, and a scan
-  that finds nothing — or fails — can no longer lower a finding.
+  was run is refused, nothing is created above the location it was aimed at, and a location
+  something else depends on is left able to be removed.
+- **Two host indicators that one command leaves behind no longer read as a live implant.** They
+  are still reported and credential rotation is still held — the claim is now that something was
+  staged here, not that something is running here.
+- **`saw audit` no longer reports active host persistence over a single ordinary file** that is
+  reachable under more than one name, which is normal on macOS.
+- **On a platform `saw` does not yet cover, checks say so** instead of reporting that they found
+  nothing. A Windows run no longer comes back clean over a surface nothing had examined, and
+  treats credential rotation as unsafe until you have looked yourself.
+- **An unreadable file inside a start-up directory is no longer reported as a clean directory.**
+  Every record is certified alongside its directory, including ones reached through a symlink and
+  ones a directory deeper.
+- **A global git configuration that git itself cannot read is no longer treated as no
+  configuration at all.**
 
 ## [0.7.0] - 2026-08-25
 
@@ -1029,7 +768,8 @@ _No user-facing changes were recorded for this release._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel (supply-chain worm
 detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.6.3...v0.7.0
 [0.6.3]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.6.1...v0.6.2
