@@ -592,6 +592,54 @@ class TestWhatTheWalkCouldNotReachIsReportedToo(unittest.TestCase):
         self.assertIn("app-bundle-partly-examined", ids)
         self.assertNotIn("app-bundle-appended-module", ids, "the walk really did stop short")
 
+class TestTheNamedLocationsSurviveTheReport(unittest.TestCase):
+    """Naming the locations is what makes the gate clearable, so the naming has to survive the
+    renderer. It caps a field and cuts the tail, which is where the count used to sit."""
+
+    def _note(self, *paths):
+        return app_bundle._unreadable_note([Path(p) for p in paths])
+
+    def test_the_count_is_not_the_first_thing_cut(self):
+        long = ["/" + "d" * 1000 + f"/deep{i}.js" for i in range(4)]
+        text = render([self._note(*long, "/Users/x/left-behind.js")], width=88)
+        self.assertIn("5 of them", text)
+
+    def test_one_deep_tree_cannot_evict_the_other_locations(self):
+        """Four long paths and one genuine one, all under the cap: the genuine one was gone from
+        the rendered report, so the operator had neither the names nor the number."""
+        long = ["/" + "d" * 1000 + f"/deep{i}.js" for i in range(4)]
+        text = render([self._note(*long, "/Users/x/left-behind.js")], width=88)
+        self.assertIn("left-behind.js", text)
+
+    def test_a_location_enumerated_twice_is_named_once(self):
+        """The base lists genuinely overlap on Windows — `APPDATA` and `LOCALAPPDATA` are both a
+        bundle base and a data base — so one unreadable location was named and counted twice."""
+        both = "/Users/x/Library/Application Support"
+        detail = self._note(both, both).detail
+        self.assertEqual(detail.count("Application Support"), 1)
+
+    def test_a_base_whose_listing_raises_is_recorded_once(self):
+        """It was appended inside the per-pattern loop, so one base could be named up to sixteen
+        times — four wildcard depths by four bundle leaves. `Path.glob` swallows the error on this
+        interpreter rather than raising, so the shape is pinned with a stub."""
+        base = Path(tempfile.mkdtemp())
+        with mock.patch.object(app_bundle, "_bundle_bases", return_value=[base]), \
+             mock.patch.object(app_bundle, "_packaged_bases", return_value=[]), \
+             mock.patch.object(app_bundle, "_data_bases", return_value=[]), \
+             mock.patch.object(app_bundle, "_exists_but_cannot_be_listed", return_value=False), \
+             mock.patch.object(Path, "glob", side_effect=PermissionError("nope")):
+            unlistable = []
+            app_bundle.app_bundle_js_roots(unlistable)
+        self.assertEqual(unlistable, [base])
+
+    def test_the_count_matches_what_is_named(self):
+        for n, expect in ((1, None), (2, "2 of them"), (11, "11 of them")):
+            with self.subTest(n=n):
+                detail = self._note(*[f"/p/{i}.js" for i in range(n)]).detail
+                if expect:
+                    self.assertIn(expect, detail)
+                self.assertEqual(detail.count("/p/"), min(n, 10))
+
 class TestTheSiblingSurfaceAnswersTheSameWay(unittest.TestCase):
     """The host-artifact probe is the other `verify_dir` consumer and had the same defect: it threw
     away the reason a scan failed, so `--verify` over a broken engine printed the fallback whose
