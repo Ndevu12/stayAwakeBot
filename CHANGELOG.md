@@ -13,6 +13,12 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Fixed
+- **`saw audit` says how many locations it could not read, before listing them.** A long path used
+  to push the count — and the other locations — out of the report, leaving neither. Each path is
+  shortened in the middle for the same reason, and a location reached twice is named once.
+
+
 ### Added
 - **`saw harden --take-back` removes the controls the command placed.** It removes only those, and
   reports anything it did not remove. A location holding anything is left as it stands.

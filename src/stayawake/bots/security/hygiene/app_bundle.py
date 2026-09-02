@@ -127,7 +127,7 @@ def app_bundle_js_roots(unlistable: list[Path] | None = None) -> list[tuple[Path
                 matches = sorted(base.glob(pattern))
             except OSError:
                 unlistable.append(base)
-                continue
+                break
             for match in matches:
                 try:
                     if not match.is_dir():
@@ -400,10 +400,33 @@ def _unreadable_note(locations: list[Path]) -> HygieneIssue | None:
     )
 
 
+_LONGEST_SHOWN = 160
+
+
 def _named(locations: list[Path], most: int = 10) -> str:
-    shown = "; ".join(str(p) for p in locations[:most])
-    beyond = len(locations) - most
-    return f"{shown}; and {beyond} more" if beyond > 0 else shown
+    """The locations, deduplicated, with how many there were said FIRST.
+
+    The renderer caps a field and cuts the tail, so a count placed after the list is the first
+    thing lost — and long paths evicted the other locations with it, leaving the operator neither
+    the names nor the number. Each path is elided in the middle for the same reason: one deep tree
+    must not spend the whole field.
+
+    Deduplicated because the base lists genuinely overlap on Windows (`APPDATA` and `LOCALAPPDATA`
+    are enumerated as both a bundle base and a data base), so one unreadable location was named
+    twice and counted twice. The sibling list-of-paths finding does the same.
+    """
+    unique = list(dict.fromkeys(str(p) for p in locations))
+    shown = "; ".join(_elided(p) for p in unique[:most])
+    if len(unique) <= most:
+        return f"{len(unique)} of them — {shown}" if len(unique) > 1 else shown
+    return f"{len(unique)} of them, the first {most} being — {shown}"
+
+
+def _elided(path: str) -> str:
+    if len(path) <= _LONGEST_SHOWN:
+        return path
+    keep = (_LONGEST_SHOWN - 3) // 2
+    return f"{path[:keep]}...{path[-keep:]}"
 
 
 def _unscanned_note(reasons: list[str]) -> HygieneIssue | None:
