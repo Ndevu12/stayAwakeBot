@@ -125,8 +125,13 @@ def _scan_one_target(repo, display: str, opts, sigs, allowlist, workers: int,
     matchers (each once), then MERGE raw findings through `scanner.finalize` — byte-identical to a
     sequential scan. Below the floor / 1 worker, scan sequentially (no pool overhead)."""
     try:
-        return _scan_one_target_inner(repo, display, opts, sigs, allowlist, workers,
-                                      progress_on, settings)
+        result = _scan_one_target_inner(repo, display, opts, sigs, allowlist, workers,
+                                        progress_on, settings)
+        if getattr(opts, "history", False):
+            note = scanner.history_residue_note(repo, opts, sigs, allowlist)
+            if note:
+                result.notes.append(note)
+        return result
     except Exception as exc:  # never let one target crash the CLI — fail CLOSED (mirrors scan_target)
         return ScanResult(target=display, source="local",
                           error=f"scan worker failed: {type(exc).__name__}: {exc}")
@@ -190,7 +195,8 @@ def scan(config_path: str | None = None, *, remote: bool = False,
          reports_dir: str | Path | None = None, alert: bool = False,
          no_stream: bool = False, pager: bool = False,
          no_advisories: bool = False, external_audit: bool = False,
-         deep: bool = False, require_db: bool = False, jobs: int | None = None) -> int:
+         deep: bool = False, history: bool = False, require_db: bool = False,
+         jobs: int | None = None) -> int:
     """Scan targets (READ-ONLY) and deliver the result through sinks. Scope is LOCAL by
     default — explicit `paths`, the configured local globs, or the current repo. With
     remote=True (`saw scan --remote`) it scans GitHub repos resolved by the ladder:
@@ -205,7 +211,8 @@ def scan(config_path: str | None = None, *, remote: bool = False,
     if cfg is None:                    # a named config that is not there — the resolver said so
         return 2
     settings = cfg.get("settings", {})
-    opts = _options(settings, no_advisories=no_advisories, external_audit=external_audit, deep=deep)
+    opts = _options(settings, no_advisories=no_advisories, external_audit=external_audit,
+                    deep=deep, history=history)
     sigs = load_signatures(settings.get("signatures_path"))
     allowlist = cfg.get("allowlist") or []
     # Fail CLOSED on a config we can't apply: an `allowlist` that isn't a list of mappings would

@@ -40,7 +40,8 @@ def _as_bool(value, default: bool) -> bool:
 
 
 def _options(settings: dict, *, no_advisories: bool = False,
-             external_audit: bool = False, deep: bool = False) -> ScanOptions:
+             external_audit: bool = False, deep: bool = False,
+             history: bool = False) -> ScanOptions:
     base = ScanOptions()
     exclude = set(settings.get("exclude_dirs", base.exclude_dirs))
     scan_build_outputs = _as_bool(settings.get("scan_build_outputs"), base.scan_build_outputs)
@@ -53,6 +54,7 @@ def _options(settings: dict, *, no_advisories: bool = False,
         scan_build_outputs=scan_build_outputs,
         # `--deep` (or config `deep: true`): content-scan installed dependency CODE with the confirmed
         deep=deep or _as_bool(settings.get("deep"), base.deep),
+        history=history or _as_bool(settings.get("history"), base.history),
         # The offline CVE-advisory tier is ON by default; `--no-advisories` or config
         # `dependency_advisories: false` turns the section off.
         dependency_advisories=(not no_advisories) and _as_bool(

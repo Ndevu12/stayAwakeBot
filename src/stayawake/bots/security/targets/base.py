@@ -44,6 +44,7 @@ class ScanOptions:
     dependency_advisories: bool = True
     external_audit: bool = False
     deep: bool = False
+    history: bool = False        # also read what the repository still stores on other refs
 
 
 class Target:

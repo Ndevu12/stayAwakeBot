@@ -13,6 +13,14 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Added
+- **`saw scan --history` reads what a repository still stores**, not only what is checked out. A
+  file cleaned from your working tree is still there on an earlier commit, another branch or a tag,
+  and one command puts it back. It is reported as coverage and never changes the verdict, because
+  nothing stored there runs on clone or on build. It says how many stored versions it read, and how
+  many it did not.
+
+
 ### Changed
 - **`saw fix` no longer leaves behind the packages it could not account for.** They were the only
   ones surviving a confirmed removal, and `npm install` does not remove them, so a rebuild carried

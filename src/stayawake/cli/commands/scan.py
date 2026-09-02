@@ -63,6 +63,10 @@ def register(sub) -> None:
                         "dependency source file, so a large node_modules adds 10–60s; FP-safe (confirmed "
                         "fingerprints only, never the heuristics that flag minified code). Without it, "
                         "the scan notes what it skipped.")
+    p.add_argument("--history", action="store_true",
+                   help="also read what the repository still stores on other branches, tags and "
+                        "earlier commits. Reported as coverage; never changes the verdict, "
+                        "because nothing stored there runs on clone or on build.")
     p.add_argument("--require-db", action="store_true", dest="require_db",
                    help="fail (exit 2) if the advisory DB is absent or fails its integrity check, "
                         "instead of falling back to the inline malware seed — for CI gates that must "
@@ -97,4 +101,4 @@ def run(a: argparse.Namespace) -> int:
                         json_out=a.json, sarif_path=a.sarif, reports_dir=a.reports_dir,
                         alert=a.alert, no_stream=a.no_stream, pager=a.pager,
                         no_advisories=a.no_advisories, external_audit=a.external_audit,
-                        deep=a.deep, require_db=a.require_db, jobs=a.jobs)
+                        deep=a.deep, history=a.history, require_db=a.require_db, jobs=a.jobs)

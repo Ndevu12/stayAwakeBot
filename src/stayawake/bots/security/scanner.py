@@ -164,6 +164,50 @@ def _cleanup_residue(root: Path) -> Finding | None:
     )
 
 
+_HISTORY_ROUNDS = 20
+
+
+def history_residue_note(root, opts, signatures, allowlist) -> str | None:
+    """What the repository still STORES that a scan of the working tree cannot see.
+
+    Coverage, never a finding: nothing here runs on clone or on build, and gating on it would turn
+    every correctly remediated repository red and cost the exit code its meaning. CONFIRMED only —
+    a heuristic shape in a five-year-old commit is a line the operator dismisses every scan.
+
+    Bounded by ROUNDS, one stored version of each path per round, because a path CI rewrites every
+    run carries a thousand versions and a payload carries one or two. MEASURED here: 1 round covers
+    74% of paths completely, 20 covers 98.6%.
+    """
+    from stayawake.bots.security.targets.history import HistoryTarget, versions_by_path
+    try:
+        versions, complete = versions_by_path(root)
+    except OSError:
+        return None
+    if not versions:
+        return None
+    hits, scanned = [], 0
+    for index in range(_HISTORY_ROUNDS):
+        target = HistoryTarget(root, str(root), opts, versions, index)
+        if not len(target):
+            break
+        scanned += len(target)
+        result = scan_target(target, signatures, allowlist)
+        hits += [f for f in result.findings if f.confidence == CONFIRMED]
+    beyond = sum(max(len(v) - _HISTORY_ROUNDS, 0) for v in versions.values())
+    cut = (f" {beyond} further version(s) of {sum(1 for v in versions.values() if len(v) > _HISTORY_ROUNDS)}"
+           f" path(s) were not read." if beyond else "")
+    if not hits:
+        return (f"History was read: no confirmed payload in {scanned} stored version(s) across "
+                f"{len(versions)} path(s).{cut}")
+    paths = sorted({f.path for f in hits})
+    more = len(paths) - 5
+    return (f"{len(paths)} path(s) still STORE a confirmed payload reachable from a ref, though "
+            f"not in the working tree: {'; '.join(paths[:5])}"
+            f"{f'; and {more} more' if more > 0 else ''}. Removing these needs a history rewrite "
+            f"and the hosting provider's collection — a fix that cleans the tree does not reach "
+            f"them.{cut}")
+
+
 def _history_scope_note(root) -> str | None:
     """What a scan of the working tree did NOT look at.
 
