@@ -1793,7 +1793,7 @@ mean</a>.</p>
 </tr>
 <tr>
 <td><code>--verify</code></td>
-<td><strong>Opt-in:</strong> content-scan a suspicious directory the audit flagged outside a repository (for example a <code>~/.node_modules</code>) and report what it found — worm markers, scanned clean, or an honest "too large / unreadable, verify it yourself". It examines that one directory and never changes how <code>saw scan</code> behaves.</td>
+<td><strong>Opt-in:</strong> content-scan a suspicious directory the audit flagged outside a repository (for example a <code>~/.node_modules</code>) and report what it found — worm markers, scanned clean, an honest "too large / unreadable, verify it yourself", or that the scan did not clear it and why. Only a scan that read the whole directory and found no markers clears it; anything less is never reported as one that found nothing, and it withholds the rotation all-clear. It examines that one directory and never changes how <code>saw scan</code> behaves.</td>
 </tr>
 </tbody>
 </table>
