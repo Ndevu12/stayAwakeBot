@@ -14,6 +14,13 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Fixed
+- **A filename can no longer be made to look like something `saw` said.** A path chosen by whoever
+  wrote it could reproduce a report line — including the advice line inside the rotation-safety
+  block — well enough to read as the tool's own words. Those lines now sit where only the tool puts
+  them, and the path is still shown exactly as it is on disk.
+
+
+### Fixed
 - **`saw fix` no longer deletes directories you excluded from scanning.** `exclude_dirs` says what
   is read, and nothing now infers from it that a directory may be removed — vendored code, fixtures
   and test corpora were being destroyed, with no copy kept.
