@@ -22,6 +22,16 @@ def versions_by_path(root, limit: int = 200_000) -> tuple[dict[str, list[str]], 
     return dict(grouped), complete
 
 
+def _excluded(path: str, exclude_dirs) -> bool:
+    """Whether the tree scan would have skipped this path.
+
+    The walk drops these directories, so reading their stored versions would answer differently
+    about the same repository — and a project that once committed `node_modules` carries thousands
+    of vendored files that the tree side deliberately never reads.
+    """
+    return any(part in exclude_dirs for part in Path(path).parts[:-1])
+
+
 class HistoryTarget(Target):
     """One stored version of each path — round `index`, counting from 0.
 
@@ -40,7 +50,7 @@ class HistoryTarget(Target):
     def __init__(self, root, display: str, opts, versions: dict[str, list[str]], index: int = 0):
         super().__init__(root, display, opts)
         self._sha_by_path = {path: shas[index] for path, shas in versions.items()
-                             if index < len(shas)}
+                             if index < len(shas) and not _excluded(path, opts.exclude_dirs)}
 
     def __len__(self) -> int:
         return len(self._sha_by_path)

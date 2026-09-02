@@ -11,6 +11,7 @@ Remediation lives in `saw fix`, never here.
 from __future__ import annotations
 
 import argparse
+import sys
 
 from stayawake.bots.security import service
 from stayawake.cli.argtypes import add_jobs_arg
@@ -94,6 +95,13 @@ def register(sub) -> None:
 def run(a: argparse.Namespace) -> int:
     positionals = [*a.paths, *a.extra_paths]
     remote = a.remote or bool(a.user) or bool(a.org)
+    if a.history and remote:
+        # A remote target is a shallow clone, so its history is truncated by construction. Reading
+        # it would answer about the part that was fetched while reading as an answer about the
+        # repository — refused rather than half-answered.
+        print("error: --history reads a full local repository; a remote target is fetched shallow, "
+              "so its history is not there to read. Clone it and scan the clone.", file=sys.stderr)
+        return 2
     return service.scan(a.config, remote=remote,
                         paths=None if remote else (positionals or None),
                         slugs=(positionals or None) if remote else None,
