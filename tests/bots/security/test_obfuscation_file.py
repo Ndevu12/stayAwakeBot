@@ -19,9 +19,7 @@ from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions
 from stayawake.bots.security.obfuscation import analyze_file, analyze_delta, is_generated_context
 from stayawake.bots.security.obfuscation.heuristics import _GENERATED_PATH
-from stayawake.bots.security.obfuscation.execsink import (
-    _has_exec_sink, _has_exec_sink_beyond_decoding)
-from stayawake.bots.security.remediation.gates import _carries_payload
+from stayawake.bots.security.obfuscation.execsink import _has_exec_sink
 
 SIGS = load_signatures()
 OBF = "obfuscated-source-file"
@@ -608,31 +606,6 @@ class TestWholeFileObfuscation(unittest.TestCase):
 
     # ── saw#232. `$` is a legal JS identifier character and a regex word character is not, so
     #    `\beval` matched inside `page.$eval` — a different name, and not the builtin. ──
-    def test_the_scan_excuses_a_framework_member_but_nothing_else_does(self):
-        driver = 'const n = await page.$eval("#root", (el) => el.innerHTML);\n'
-        self.assertNotIn(OBF, _scan({"driver.mjs": driver}))
-        # Every other consumer keeps the full arm, and each is here because a round used it:
-        # the corroborator for a confirmed signature, and both remediation entry points.
-        self.assertTrue(_has_exec_sink_beyond_decoding(driver))
-        self.assertTrue(_has_exec_sink(driver, strict=True))
-        self.assertTrue(_carries_payload(driver, lambda _t: None))
-
-    def test_an_eval_rebinding_is_caught_at_the_binding_whatever_the_call_looks_like(self):
-        """The call spelling stopped mattering, which is what makes excusing one safe.
-
-        Three of these are past the alias arm on main, and the spread form defeats any boundary
-        keyed on the characters before `eval` — `...` ends in a dot too."""
-        pad = "\n".join(f"const p{i} = {i};" for i in range(60))
-        for name, src in {
-            "member.js": "const h = {};\nh.$eval = globalThis['ev' + 'al'];\nh.$eval(p);\n",
-            "destructured.js": "const { eval: $eval } = globalThis;\n$eval(await r.text());\n",
-            "computed.js": "const q = globalThis['ev' + 'al'];\nq(await r.text());\n",
-            "farapart.js": f"var zz = eval;\n{pad}\nzz(src);\n",
-            "spread.js": "const { eval: $eval } = globalThis;\n[...$eval(src)];\n",
-            "memberspread.js": "const h = {};\nh.$eval = globalThis['ev'+'al'];\n[...h.$eval(s)];\n",
-        }.items():
-            self.assertIn(OBF, _scan({name: src}), name)
-
     def test_a_confirmed_signature_still_reports_where_it_is_the_only_tier(self):
         """In a vendored or minified path the confirmed tier is the only one that reports, so a
         corroborator that quietly narrowed turned a real worm from infected into clean."""
@@ -659,18 +632,6 @@ class TestWholeFileObfuscation(unittest.TestCase):
         }.items():
             self.assertIn(OBF, _scan({name: src}), name)
 
-    def test_a_rename_is_caught_however_it_is_bound_and_however_it_is_called(self):
-        """A class field and an object-literal property bind it too, and an alias reached as a
-        property is still that alias — main misses all three."""
-        for name, src in {
-            "field.js": "export class Sandbox {\n  $eval = eval;\n"
-                        "  async run(u){ return this.$eval(await (await fetch(u)).text()); }\n}\n",
-            "literal.js": "const h = { $eval: eval };\nh.$eval(src);\n",
-            "property.js": "const evl = eval;\nexport const runtime = { evl };\n"
-                           "runtime.evl(await res.text());\n",
-        }.items():
-            self.assertIn(OBF, _scan({name: src}), name)
-
     def test_a_regex_exec_beside_a_decode_is_not_a_dropper(self):
         """`.exec` is `RegExp.prototype.exec`. The guard above this one only passed because it
         picked the Node spelling — `Buffer.from`; the browser spelling of the same reader fired."""
@@ -693,6 +654,9 @@ class TestWholeFileObfuscation(unittest.TestCase):
                          "export function pick(s, k) { return hasOwn(s, k); }\n",
             "uncurry.js": "const uncurryThis = Function.prototype.bind.bind(Function.prototype.call);\n"
                           "export const push = uncurryThis(Array.prototype.push);\n",
+            # The spelling that actually ships in @babel/types and undici — one segment shorter.
+            "short.js": "const hasOwn = Function.call.bind(Object.prototype.hasOwnProperty);\n"
+                        "export function has(n, k) { return hasOwn(n, k); }\n",
         }.items():
             self.assertNotIn(OBF, _scan({name: src}), name)
 

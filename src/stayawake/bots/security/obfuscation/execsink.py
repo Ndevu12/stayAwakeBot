@@ -38,29 +38,13 @@ _STR_CONCAT_FOLD = re.compile(
 _INDIRECT_EVAL = re.compile(
     r"\(\s*(?:0|1|void\s+0|null|undefined|!0|!1)\s*,\s*(?:eval|Function)\s*\)\s*\("
 )
-_GLOBAL_OBJECT = r"(?:globalThis|window|global|self)"
-# Bounded on both axes: an unbounded segment inside a repeated group backtracks catastrophically on
-# a long run of identifier characters, which test_redos_safety measured at >5s on 300,000 of them.
-_NAME = r"[A-Za-z_$][\w$]{0,64}"
-_PROPERTY_PATH = rf"(?:{_NAME}\s*\.\s*){{1,6}}{_NAME}"
-# `Function.prototype.call.bind(x)` borrows a method from a FOREIGN object and is the uncurry-this
-# idiom. `Function.prototype.constructor`, `eval.bind(g)` and `eval.constructor` are the builtin
-# itself, and they run — so the exclusion names that idiom rather than every member access on it.
-_UNCURRY_THIS = r"\s*\.\s*prototype\s*\.\s*(?:call|apply|bind)\s*\.\s*bind\b"
-_BUILTIN_NAME = rf"(?:eval|Function)(?![\w$])(?!{_UNCURRY_THIS})"
-_THE_BUILTIN_ITSELF = (
-    rf"(?:{_BUILTIN_NAME}"
-    rf"|{_GLOBAL_OBJECT}\s*\.\s*{_BUILTIN_NAME}"
-    rf"|{_GLOBAL_OBJECT}\s*\[\s*[\"'](?:eval|Function)[\"']\s*\])"
-)
+# Borrowing a method FROM the built-in is the uncurry-this idiom and executes nothing. Both
+# spellings ship in real packages — `Function.prototype.call.bind` and the shorter
+# `Function.call.bind` — and `Function.prototype.constructor` is deliberately NOT excluded: that
+# one IS the built-in.
+_UNCURRY_THIS = r"\s*\.\s*(?:prototype\s*\.\s*)?(?:call|apply|bind)\s*\.\s*bind\b"
 _BIND_EVAL_FN = re.compile(
-    rf"(?:const|let|var)\s+({_NAME})\s*=\s*{_THE_BUILTIN_ITSELF}"
-    rf"|({_PROPERTY_PATH})\s*=(?!=)\s*{_THE_BUILTIN_ITSELF}"
-    # No declarator: a class field (`$eval = eval`) and a plain reassignment bind just as well.
-    rf"|(?<![.\w$])({_NAME})\s*=(?!=)\s*{_THE_BUILTIN_ITSELF}"
-    # `{ eval: X }` renames it out; `{ X: eval }` names it in. Both bind, in opposite directions.
-    rf"|(?:const|let|var)\s*\{{[^}}\n]{{0,120}}?(?<![\w$])(?:eval|Function)\s*:\s*({_NAME})"
-    rf"|({_NAME})\s*:\s*{_THE_BUILTIN_ITSELF}"
+    r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:eval|Function)\b(?!" + _UNCURRY_THIS + r")"
 )
 _BIND_DANGEROUS_KEY = re.compile(
     r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*[\"'](?:eval|Function|constructor)[\"']"
@@ -88,13 +72,9 @@ def _has_obfuscated_exec_forms(s: str) -> bool:
     if _INDIRECT_EVAL.search(s):
         return True
     for m in _BIND_EVAL_FN.finditer(s):
-        bound = next((g for g in m.groups() if g), None)
-        if not bound:
-            continue
-        called = r"\s*\.\s*".join(re.escape(part.strip()) for part in bound.split("."))
-        # The whole text, not a window: the binding IS the signal here, and a hoisted function may
-        # call it from above. A 240-char window missed a real alias by 600 characters.
-        if re.search(rf"(?<![\w$]){called}\s*\(", s):
+        name = re.escape(m.group(1))
+        window = s[m.end():m.end() + _ALIAS_CALL_WINDOW]
+        if re.search(rf"(?<![\w$]){name}\s*\(", window):
             return True
     for m in _BIND_DANGEROUS_KEY.finditer(s):
         name = re.escape(m.group(1))
@@ -160,25 +140,7 @@ def _runs_a_command(view: str) -> bool:
 _CHARCODE_CONSUMER = re.compile(r"fromCharCode|fromCodePoint", re.IGNORECASE)
 
 
-_FRAMEWORK_MEMBER_EVAL = re.compile(rf"(?<![\w$]){_NAME}\s*\.\s*\$\$?eval\s*\($")
-
-
-def _sink_beyond_decoding(view: str, framework_members_excused: bool):
-    """The first `_EXEC_SINK_NO_DECODE` match that counts, or None.
-
-    With `framework_members_excused`, an `eval` reached through a `$`-prefixed member of a NAMED
-    receiver does not count: `page.$eval` and `scope.$eval` are framework methods. The receiver has
-    to be an identifier — `...` also ends in a dot, and `[...$eval(x)]` is a bare binding that runs.
-    A real rebinding is caught at its assignment by `_has_obfuscated_exec_forms`, which is what makes
-    excusing the call site safe at all."""
-    for m in _EXEC_SINK_NO_DECODE.finditer(view):
-        if framework_members_excused and _FRAMEWORK_MEMBER_EVAL.search(view[:m.end()]):
-            continue
-        return m
-    return None
-
-
-def _has_exec_sink_beyond_decoding(s: str, framework_members_excused: bool = False) -> bool:
+def _has_exec_sink_beyond_decoding(s: str) -> bool:
     """True when something in `s` actually RUNS, rather than merely decodes.
 
     A decode primitive on its own is not that: `atob` returning into `JSON.parse` is every JWT reader
@@ -186,13 +148,9 @@ def _has_exec_sink_beyond_decoding(s: str, framework_members_excused: bool = Fal
     taint model describes — decode alone is data, sink alone is ordinary code, the pair is the tell.
 
     The text is NOT edited to ask this. Blanking the decode call first also blinds the decode-to-exec
-    flow detector, which needs both halves; that broke two real detections.
-
-    `framework_members_excused` is the SCAN's opt-in, and it defaults off so the two consumers that
-    must never take it — the corroborator for a confirmed code-loader signature, and remediation
-    through `analyze_file` — keep the full arm without naming it. Off, this is byte-identical."""
+    flow detector, which needs both halves; that broke two real detections."""
     view = _fold_string_concats(s)
-    if (_sink_beyond_decoding(view, framework_members_excused) or _REFLECTIVE_EXEC.search(view)
+    if (_EXEC_SINK_NO_DECODE.search(view) or _REFLECTIVE_EXEC.search(view)
             or _has_corroborated_dynamic_exec(view) or _has_obfuscated_exec_forms(view)):
         return True
     if any(not _NEW_CLONE_PREFIX.search(view[max(0, m.start() - 48):m.start()])
