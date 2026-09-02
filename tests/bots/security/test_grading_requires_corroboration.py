@@ -85,8 +85,10 @@ class TestAnAbortedScanNeverEscapes(unittest.TestCase):
         weak = [("a", Path(tempfile.mkdtemp()), host_artifacts.KIND_GLOBAL_FOLDER)]
         with mock.patch.object(host_artifacts, "_host_artifacts", return_value=([], weak, [], [])), \
              mock.patch.object(host_artifacts, "_verify_weak_artifact", boom):
-            self.assertEqual([i.id for i in host_artifacts.check_host_artifacts(verify=True)],
-                             ["host-drop-artifact-weak"])
+            ids = [i.id for i in host_artifacts.check_host_artifacts(verify=True)]
+        self.assertIn("host-drop-artifact-weak", ids, "the finding is never lost")
+        self.assertIn("host-artifact-scan-blocked", ids,
+                      "and the scan that did not run is its own item, not silence")
 
 
 class TestCorroborationSeparatesIndicatorsByWhatMadeThem(unittest.TestCase):

@@ -398,10 +398,16 @@ class TestAScanThatCouldNotRunIsNotAScanThatFoundNothing(unittest.TestCase):
         """Fields AND the derived reads on top of them — comparing only fields let the stand-in
         ship without `has_markers`, which the other consumer of this verdict asks for first."""
         from stayawake.bots.security.verify import DirVerdict
+
+        def derived(cls):
+            return {n for n, v in vars(cls).items() if isinstance(v, property)}
+
         self.assertEqual({f.name for f in dataclasses.fields(_Verdict)},
                          {f.name for f in dataclasses.fields(DirVerdict)})
-        self.assertEqual({n for n in dir(_Verdict) if not n.startswith("_")},
-                         {n for n in dir(DirVerdict) if not n.startswith("_")})
+        # The reads on top of the fields, which is where `has_markers` went missing. NOT `dir()`:
+        # a field given a default here to keep the fixtures short becomes a class attribute and
+        # shows up as a difference that means nothing.
+        self.assertEqual(derived(_Verdict), derived(DirVerdict))
 
     def test_not_asking_for_the_scan_is_unchanged(self):
         issues = self._planted().check()
