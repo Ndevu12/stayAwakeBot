@@ -75,7 +75,8 @@ class HeuristicMatcher(Matcher):
         #     a future glob widening can't leak a non-authored ext into analyze_file).
         if _ext(rel) in _AUTHORED_OBFUSCATABLE_EXTS:
             try:
-                verdict = analyze_file(text, _ext(rel))
+                verdict = analyze_file(text, _ext(rel),
+                                       framework_members_excused=True)
             except Exception as exc:  # fail-SAFE: skip this one file, never abort the repo sweep
                 print(f"saw: obfuscation analysis skipped for {rel}: {type(exc).__name__}: {exc}",
                       file=sys.stderr)

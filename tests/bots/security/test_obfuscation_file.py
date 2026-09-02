@@ -19,7 +19,9 @@ from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions
 from stayawake.bots.security.obfuscation import analyze_file, analyze_delta, is_generated_context
 from stayawake.bots.security.obfuscation.heuristics import _GENERATED_PATH
-from stayawake.bots.security.obfuscation.execsink import _has_exec_sink
+from stayawake.bots.security.obfuscation.execsink import (
+    _has_exec_sink, _has_exec_sink_beyond_decoding)
+from stayawake.bots.security.remediation.gates import _carries_payload
 
 SIGS = load_signatures()
 OBF = "obfuscated-source-file"
@@ -603,6 +605,66 @@ class TestWholeFileObfuscation(unittest.TestCase):
         ):
             self.assertTrue(_has_exec_sink(code, strict=True), f"gate must refuse: {code}")
             self.assertFalse(_has_exec_sink(code, strict=False), f"scan must be clean: {code}")
+
+    # ── saw#232. `$` is a legal JS identifier character and a regex word character is not, so
+    #    `\beval` matched inside `page.$eval` — a different name, and not the builtin. ──
+    def test_the_scan_excuses_a_framework_member_but_nothing_else_does(self):
+        driver = 'const n = await page.$eval("#root", (el) => el.innerHTML);\n'
+        self.assertNotIn(OBF, _scan({"driver.mjs": driver}))
+        # Every other consumer keeps the full arm, and each is here because a round used it:
+        # the corroborator for a confirmed signature, and both remediation entry points.
+        self.assertTrue(_has_exec_sink_beyond_decoding(driver))
+        self.assertTrue(_has_exec_sink(driver, strict=True))
+        self.assertTrue(_carries_payload(driver, lambda _t: None))
+
+    def test_an_eval_rebinding_is_caught_at_the_binding_whatever_the_call_looks_like(self):
+        """The call spelling stopped mattering, which is what makes excusing one safe.
+
+        Three of these are past the alias arm on main, and the spread form defeats any boundary
+        keyed on the characters before `eval` — `...` ends in a dot too."""
+        pad = "\n".join(f"const p{i} = {i};" for i in range(60))
+        for name, src in {
+            "member.js": "const h = {};\nh.$eval = globalThis['ev' + 'al'];\nh.$eval(p);\n",
+            "destructured.js": "const { eval: $eval } = globalThis;\n$eval(await r.text());\n",
+            "computed.js": "const q = globalThis['ev' + 'al'];\nq(await r.text());\n",
+            "farapart.js": f"var zz = eval;\n{pad}\nzz(src);\n",
+            "spread.js": "const { eval: $eval } = globalThis;\n[...$eval(src)];\n",
+            "memberspread.js": "const h = {};\nh.$eval = globalThis['ev'+'al'];\n[...h.$eval(s)];\n",
+        }.items():
+            self.assertIn(OBF, _scan({name: src}), name)
+
+    def test_a_confirmed_signature_still_reports_where_it_is_the_only_tier(self):
+        """In a vendored or minified path the confirmed tier is the only one that reports, so a
+        corroborator that quietly narrowed turned a real worm from infected into clean."""
+        worm = ("const parts = data.split(String.fromCharCode(127));\n"
+                "const { eval: $eval } = globalThis;\n[...$eval(parts[1])];\n")
+        for rel in ("loader.js", "vendor/left-pad/index.js", "assets/app.min.js"):
+            self.assertIn("loader-fromcharcode-127", _scan({rel: worm}), rel)
+
+    def test_a_regex_exec_beside_a_decode_is_not_a_dropper(self):
+        """`.exec` is `RegExp.prototype.exec`. The guard above this one only passed because it
+        picked the Node spelling — `Buffer.from`; the browser spelling of the same reader fired."""
+        for name, src in {
+            "jwt.js": "const p = atob(tok.split('.')[1]);\n"
+                      "const claims = /\"exp\":(\\d+)/.exec(p);\n",
+            "keypad.js": "const ch = String.fromCharCode(e.which);\n"
+                         "export const ok = /^[\\w]$/.exec(ch) ? ch : '';\n",
+        }.items():
+            self.assertNotIn(OBF, _scan({name: src}), name)
+        # …while a real decode fed to a runner still is one.
+        self.assertIn(OBF, _scan(
+            {"drop.js": "const {execSync} = require('child_process');\nexecSync(atob(blob));\n"}))
+
+    def test_uncurry_this_is_not_an_eval_alias(self):
+        """`Function.prototype.call.bind(...)` binds `hasOwnProperty`, not `Function`. The alias
+        arm required the right-hand side only to START with the token."""
+        for name, src in {
+            "object.js": "const hasOwn = Function.prototype.call.bind(Object.prototype.hasOwnProperty);\n"
+                         "export function pick(s, k) { return hasOwn(s, k); }\n",
+            "uncurry.js": "const uncurryThis = Function.prototype.bind.bind(Function.prototype.call);\n"
+                          "export const push = uncurryThis(Array.prototype.push);\n",
+        }.items():
+            self.assertNotIn(OBF, _scan({name: src}), name)
 
     # ── #1207 residual (after #1206; orthogonal to #1208/#1266): split-token via
     #    concat-fold, indirect comma-call, light alias / runtime-key — heuristic. ──
