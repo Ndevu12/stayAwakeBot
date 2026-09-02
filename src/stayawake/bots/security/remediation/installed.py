@@ -45,6 +45,17 @@ class RemovalPlan:
     def safe_to_remove(self) -> bool:
         return self.reason is None and bool(self.derivable)
 
+    @property
+    def project_is_declared(self) -> bool:
+        """Whether anything states what this project should contain.
+
+        Weaker than `safe_to_remove`, deliberately. That one also needs an installed package proven
+        derivable, which is the right test for deleting the installed tree and the wrong one for a
+        generated output: a repository with a lockfile and no installed tree still rebuilds its own
+        `dist`, and gating on the stronger test stopped that.
+        """
+        return bool(self.lockfiles)
+
 
 def installed_packages(root: Path) -> list[InstalledPackage]:
     """Packages present under the installed tree."""
@@ -283,9 +294,11 @@ def remove_rebuildable(root: Path, *, remove_lockfiles: bool = True,
         leftover = root / INSTALLED_DIR
         if not plan.preserve and _is_real_directory(leftover) and is_safe_write_target(leftover, root):
             shutil.rmtree(leftover)
-        # Inside the guard, and copied out first — as the package path above does. It ran even when
-        # the plan had already concluded that nothing proves what the tree should contain, and it
-        # was the one removal on this path that created no quarantine at all.
+
+    if plan.project_is_declared:
+        # Gated and copied out first — as the package path above is. It used to run with no gate at
+        # all, so it deleted when the plan had already said nothing states what the tree should
+        # contain, and it was the one removal here that created no quarantine.
         for build in build_output_dirs(root):
             shutil.copytree(build, _evidence() / build.name, symlinks=True, dirs_exist_ok=True)
             shutil.rmtree(build)

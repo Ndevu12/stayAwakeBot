@@ -592,6 +592,18 @@ class TestTheProjectTreeIsRemovedOnTheRepo(unittest.TestCase):
         self.assertEqual(report.removed_builds, [])
         self.assertTrue((repo.root / "dist" / "app.js").is_file())
 
+    def test_a_declared_project_with_no_installed_tree_still_clears_its_outputs(self):
+        """The first gate for this used `safe_to_remove`, which also requires an installed package
+        proven derivable — so a repository with a lockfile and nothing installed stopped clearing
+        its own `dist`. That is the right test for deleting the installed tree and the wrong one
+        for a generated output."""
+        repo = _Repo()
+        (repo.root / "dist").mkdir()
+        (repo.root / "dist" / "app.js").write_text("built", encoding="utf-8")
+        report = installed.remove_rebuildable(repo.root)
+        self.assertEqual(report.removed_builds, ["dist"])
+        self.assertFalse((repo.root / "dist").exists())
+
     def test_a_generated_output_is_copied_out_before_it_is_removed(self):
         """Copy it out, then delete — the rule the package path already follows, and the one
         removal here that followed neither."""
