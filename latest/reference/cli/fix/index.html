@@ -1775,7 +1775,9 @@ branch and they do not wait for a pull request: the files are gone from the chec
 standing in whether the pull request is merged, closed, or never opened.</p>
 <p>Nothing is removed before it is copied. The installed tree, the lockfile and any generated output
 directories are written to <code>.malware-quarantine/</code> first, and the run names the directory it used so
-you can put them back. Directories you listed under <code>exclude_dirs</code> are never removed.</p>
+you can put them back. That includes packages the lockfile does not account for — a locally linked
+or hand-patched one among them — which are copied out and then removed with the rest, because a
+reinstall would not clear them. Directories you listed under <code>exclude_dirs</code> are never removed.</p>
 <p><a href="../amend/"><code>saw fix amend</code></a> is a different act: it amends the infected commits and force-updates
 the branches that carried them. Read that page before you run it.</p>
 <p>See <a href="../../../explanation/safety-envelope/">the safety envelope</a> for what <code>fix</code> will and will not touch.</p>
