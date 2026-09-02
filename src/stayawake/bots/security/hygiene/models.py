@@ -98,8 +98,13 @@ BLOCKED_ID = "check-blocked"
 BLOCKED_SURFACE_ID = "surface-check-blocked"
 SURFACE_NOT_IMPLEMENTED_ID = "persistence-surface-not-implemented"
 PROCESSES_NOT_READABLE_ID = "process-arguments-not-readable"
+APP_BUNDLE_SCAN_BLOCKED_ID = "app-bundle-scan-blocked"
+APP_BUNDLE_MODULE_UNREADABLE_ID = "app-bundle-module-unreadable"
+HOST_ARTIFACT_SCAN_BLOCKED_ID = "host-artifact-scan-blocked"
 UNVERIFIED_PERSISTENCE_IDS = {SURFACE_UNREADABLE_ID, SURFACE_ABSENT_ID, BLOCKED_SURFACE_ID,
-                              SURFACE_NOT_IMPLEMENTED_ID, PROCESSES_NOT_READABLE_ID}
+                              SURFACE_NOT_IMPLEMENTED_ID, PROCESSES_NOT_READABLE_ID,
+                              APP_BUNDLE_SCAN_BLOCKED_ID, APP_BUNDLE_MODULE_UNREADABLE_ID,
+                              HOST_ARTIFACT_SCAN_BLOCKED_ID}
 
 
 def could_not_read(paths) -> HygieneIssue:

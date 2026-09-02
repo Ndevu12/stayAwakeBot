@@ -43,6 +43,28 @@ reader, not the mechanism or the weakness it closed.
   rather than refused with a reason that was not true of a privileged run. Without `sudo` it is
   named, and says so. `--take-back` still leaves it alone: it removes only what it placed.
 
+### Fixed
+- **`saw audit --verify` never reports a scan that did not clear a module as one that found
+  nothing.** Only a scan that read the whole directory and found no markers clears it. A scan that
+  could not start, could not finish, or could not read everything now says so and says why, names
+  the modules it did not settle, and withholds the credential-rotation all-clear until it can. It
+  used to report the weaker finding instead — whose own advice is to run `--verify`.
+- **A module that was scanned and came back clean now says so** — and says what that does and does
+  not settle — rather than repeating the advice to run the scan that had just cleared it.
+- **Anything the audit could not read inside an installed application is named.** A module, a
+  directory it could not list, or a location it could not enumerate at all used to produce nothing
+  whatever — no finding, no count, no mention, indistinguishable from having looked and found
+  nothing. Each is now named so you can go and clear it, and each withholds the credential-rotation
+  all-clear until you have. Locking a file and locking the directory holding it are answered the
+  same way, so neither is a way past the check.
+- **A bound the audit hit is always reported**, including when it fell exactly on the last module
+  of a directory, where it used to be reported as nothing.
+- **A pipe or device named like an application module no longer stops the audit.** Reading one had
+  no timeout, so anything able to write into an application's own directory could hang the run.
+- **The same fixes on the host-artifact surface.** `--verify` there also reported a scan that blew
+  up as the advice to run `--verify`, and described a directory it had not scanned as one where a
+  content scan found nothing.
+
 ### Changed
 - **`saw harden` no longer requires root.** Run as yourself it acts where it can, and names
   anything it did not take rather than stopping. Run again with `sudo` to act on the rest and to
