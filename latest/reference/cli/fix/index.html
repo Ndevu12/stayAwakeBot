@@ -1778,6 +1778,12 @@ directories are written to <code>.malware-quarantine/</code> first, and the run 
 you can put them back. That includes packages the lockfile does not account for — a locally linked
 or hand-patched one among them — which are copied out and then removed with the rest, because a
 reinstall would not clear them. Directories you listed under <code>exclude_dirs</code> are never removed.</p>
+<p><code>fix</code> cleans your working tree and records that as a new commit. What the repository already
+stored stays stored: the payload is still there in the earlier commit, and one <code>git show</code> puts it
+back on disk. Anyone who cloned or forked the repository still has it too, and nothing you do to
+your own copy reaches theirs. Clearing it needs a history rewrite and the hosting provider's
+collection — deliberate work, not something <code>fix</code> decides for you. Run
+<a href="../scan/"><code>saw scan --history</code></a> to see what is still stored.</p>
 <p><a href="../amend/"><code>saw fix amend</code></a> is a different act: it amends the infected commits and force-updates
 the branches that carried them. Read that page before you run it.</p>
 <p>See <a href="../../../explanation/safety-envelope/">the safety envelope</a> for what <code>fix</code> will and will not touch.</p>
