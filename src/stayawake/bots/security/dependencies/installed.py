@@ -15,7 +15,14 @@ from typing import Iterator
 from stayawake.bots.security.dependencies.resolvers.pypi import normalize_pypi_name
 
 
-NPM_LIFECYCLE_KEYS = ("preinstall", "install", "postinstall", "prepare", "preprepare", "postprepare")
+# Every script a bare `npm install` / `npm ci` runs on the project itself, read from the installed
+# runner rather than from documentation: npm 10.9.3 `lib/commands/install.js` (through `postprepare`)
+# and `@npmcli/arborist/lib/arborist/reify.js` (the three dependency events, whenever the tree
+# changes). Six of these ten were covered, so naming a hook `dependencies` bypassed every lifecycle
+# signature on the root manifest — the delivered-content carrier they exist for.
+NPM_LIFECYCLE_KEYS = ("preinstall", "install", "postinstall", "prepublish",
+                      "preprepare", "prepare", "postprepare",
+                      "predependencies", "dependencies", "postdependencies")
 
 
 @dataclass
