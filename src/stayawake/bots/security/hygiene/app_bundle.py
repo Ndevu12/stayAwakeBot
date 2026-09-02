@@ -75,7 +75,7 @@ def _data_bases() -> list[Path]:
     return [home / ".config"]
 
 
-def _note_unreadable(sink: list):
+def _note_unreadable(sink: list, root: Path):
     """`os.walk`'s default swallows a directory it cannot enumerate and yields nothing for it.
 
     Everything under such a directory disappears with no finding and no count — so an unreadable
@@ -83,7 +83,7 @@ def _note_unreadable(sink: list):
     can chmod the directory holding it.
     """
     def cannot_list(error):
-        sink.append(Path(getattr(error, "filename", None) or "?"))
+        sink.append(Path(getattr(error, "filename", None) or root))
     return cannot_list
 
 
@@ -311,7 +311,7 @@ def check_app_bundles(verify: bool = False) -> list[HygieneIssue]:
     for root, max_depth in app_bundle_js_roots(unreachable):
         examined = 0
         for dirpath, dirnames, filenames in os.walk(root, followlinks=True,
-                                                    onerror=_note_unreadable(unreachable)):
+                                                    onerror=_note_unreadable(unreachable, root)):
             here = canonical_id(Path(dirpath))            # followlinks=True can revisit and loop
             if here in walked:
                 dirnames[:] = []
