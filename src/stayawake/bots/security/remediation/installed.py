@@ -137,17 +137,27 @@ def plan_removal(root: Path, declared: set[tuple[str, str]], lockfiles: list[Pat
 
 
 def apply_removal(plan: RemovalPlan, quarantine: Path) -> tuple[int, int]:
-    """Preserve first, then remove. Returns (preserved, removed)."""
+    """Preserve first, then remove — including what the lockfile could not account for.
+
+    An unaccounted package is the most suspicious thing in a confirmed-infected tree, and
+    `npm install` does not prune extraneous packages, so leaving it in place carried it through the
+    rebuild the operator is told to do. It is removed only after its copy is READ BACK: that copy is
+    the only one there is, and the whole reason it is taken is that nobody can say what this is.
+    """
     if not plan.safe_to_remove:
         return 0, 0
     preserved = 0
+    copied: list[InstalledPackage] = []
     for package in plan.preserve:
         destination = quarantine / package.path.relative_to(plan.root)
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(package.path, destination, symlinks=True, dirs_exist_ok=True)
+        if not _every_file_arrived(package.path, destination):
+            raise OSError(f"the copy of {package.path} is incomplete, so nothing was removed")
+        copied.append(package)
         preserved += 1
     removed = 0
-    for package in sorted(plan.derivable, key=lambda p: len(p.path.parts), reverse=True):
+    for package in sorted(plan.derivable + copied, key=lambda p: len(p.path.parts), reverse=True):
         if not package.path.exists():
             continue
         if not is_safe_write_target(package.path, plan.root):
@@ -155,6 +165,24 @@ def apply_removal(plan: RemovalPlan, quarantine: Path) -> tuple[int, int]:
         shutil.rmtree(package.path, ignore_errors=False)
         removed += 1
     return preserved, removed
+
+
+def _every_file_arrived(source: Path, destination: Path) -> bool:
+    """Whether the copy holds every regular file the original does.
+
+    `copytree` can copy part of a tree and report the failures at the end, so "it did not raise" is
+    a weaker claim than the delete below needs. Symlinks are skipped: they are copied as links, and
+    a dangling one would read as missing.
+    """
+    try:
+        for path in source.rglob("*"):
+            if path.is_symlink() or not path.is_file():
+                continue
+            if not (destination / path.relative_to(source)).exists():
+                return False
+    except OSError:
+        return False
+    return True
 
 
 def next_quarantine(root: Path, base: Path) -> Path:
@@ -203,7 +231,7 @@ class Report:
         if self.removed_packages:
             bits.append(f"removed {self.removed_packages} installed package(s)")
         if self.preserved_packages:
-            bits.append(f"kept {self.preserved_packages}")
+            bits.append(f"{self.preserved_packages} of them unaccounted for")
         if self.removed_lockfiles:
             bits.append("removed the lockfile")
         if self.removed_builds:

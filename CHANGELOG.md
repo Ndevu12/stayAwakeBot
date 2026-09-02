@@ -13,6 +13,13 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Changed
+- **`saw fix` no longer leaves behind the packages it could not account for.** They were the only
+  ones surviving a confirmed removal, and `npm install` does not remove them, so a rebuild carried
+  them through. Each is copied into the quarantine directory and the copy is checked before the
+  original is taken, and the run says how many there were.
+
+
 ### Fixed
 - **A filename can no longer be made to look like something `saw` said.** A path chosen by whoever
   wrote it could reproduce a report line — including the advice line inside the rotation-safety
