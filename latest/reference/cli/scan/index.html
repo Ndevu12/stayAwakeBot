@@ -1840,6 +1840,10 @@ stderr. <code>scan</code> never changes a file.</p>
 <td><strong>Opt-in, npm only:</strong> also examine the contents of installed npm packages. Reading every dependency file adds roughly 10–60s on a large <code>node_modules</code>; the run stays offline and deterministic.</td>
 </tr>
 <tr>
+<td><code>--history</code></td>
+<td>Also read what the repository still <strong>stores</strong> — other branches, tags, and earlier commits. A file cleaned from your folder is still there and one command away (<code>git show</code>, <code>git clone --branch</code>). Reported as coverage; it never changes the verdict, because nothing stored there runs on clone or on build. Slow: it reads every stored version, not the current one.</td>
+</tr>
+<tr>
 <td><code>--require-db</code></td>
 <td>Fail the run when the <a href="../../advisory-db/">advisory database</a> is absent or fails its integrity check, instead of continuing without it — for CI that must not lose advisory coverage silently.</td>
 </tr>
