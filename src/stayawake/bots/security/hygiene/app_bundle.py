@@ -10,6 +10,7 @@ import stat
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NamedTuple
 
 from stayawake.utils.pathsafe import canonical_id
 
@@ -105,20 +106,33 @@ def _exists_but_cannot_be_listed(base: Path) -> bool:
     return False
 
 
-def app_bundle_js_roots(unlistable: list[Path] | None = None) -> list[tuple[Path, int | None]]:
-    """(tree, depth bound) for every installed application's own JavaScript, deduplicated by
+class JsRoot(NamedTuple):
+    """One tree to read, and what is known about it.
+
+    `is_a_bundle` is carried rather than inferred from the depth bound. The bound happens to be
+    unset for bundles today, and reading "this is an application" out of "this has no depth limit"
+    is the derived-proxy shape: right until someone gives a bundle a bound.
+    """
+    path: Path
+    max_depth: int | None
+    is_a_bundle: bool
+
+
+def app_bundle_js_roots(unlistable: list[Path] | None = None) -> list[JsRoot]:
+    """(tree, depth bound, whether it is a bundle) for every installed application's own
+    JavaScript, deduplicated by
     filesystem identity — `/Applications/Applications` is a symlink to `/Applications` on macOS,
     which yields each bundle twice, and `Contents/Resources` matches `Contents/resources` on a
     case-insensitive volume. A bundle tree is read whole; a data directory is read to a depth."""
     unlistable = [] if unlistable is None else unlistable
     patterns = [f"{depth}{leaf}" for depth in _BUNDLE_WILDCARD_DEPTHS for leaf in _BUNDLE_LEAVES]
-    candidates: list[tuple[Path, list[str], int | None]] = [
-        (base, patterns, None) for base in _bundle_bases()]
-    candidates += [(base, list(globs), None) for base, globs in _packaged_bases()]
-    candidates += [(base, ["*"], _MAX_DATA_DIRECTORY_DEPTH) for base in _data_bases()]
-    roots: list[tuple[Path, int | None]] = []
+    candidates: list[tuple[Path, list[str], int | None, bool]] = [
+        (base, patterns, None, True) for base in _bundle_bases()]
+    candidates += [(base, list(globs), None, True) for base, globs in _packaged_bases()]
+    candidates += [(base, ["*"], _MAX_DATA_DIRECTORY_DEPTH, False) for base in _data_bases()]
+    roots: list[JsRoot] = []
     seen: set = set()
-    for base, globs, depth in candidates:
+    for base, globs, depth, bundle in candidates:
         if _exists_but_cannot_be_listed(base):
             unlistable.append(base)
             continue
@@ -135,9 +149,9 @@ def app_bundle_js_roots(unlistable: list[Path] | None = None) -> list[tuple[Path
                 except OSError:
                     continue
                 ident = canonical_id(match)
-                if ident not in seen and not any(_within(match, r) for r, _d in roots):
+                if ident not in seen and not any(_within(match, r.path) for r in roots):
                     seen.add(ident)
-                    roots.append((match, depth))
+                    roots.append(JsRoot(match, depth, bundle))
     return roots
 
 
@@ -305,13 +319,17 @@ def check_app_bundles(verify: bool = False) -> list[HygieneIssue]:
     issues: list[HygieneIssue] = []
     unbounded = truncated = 0
     unreadable: list[Path] = []
-    unreachable: list[Path] = []
+    never_entered: list[Path] = []
     unscanned: list[str] = []
     walked: set = set()
-    for root, max_depth in app_bundle_js_roots(unreachable):
+    # A BASE that will not open is a different signal from a directory swept up by the glob
+    # inside one: the bases are a small fixed set this chose, and none was unreadable on the
+    # host where the glob produced nine. It gates.
+    for root, max_depth, is_a_bundle in app_bundle_js_roots(unreadable):
         examined = 0
+        blocked: list[Path] = []
         for dirpath, dirnames, filenames in os.walk(root, followlinks=True,
-                                                    onerror=_note_unreadable(unreachable, root)):
+                                                    onerror=_note_unreadable(blocked, root)):
             here = canonical_id(Path(dirpath))            # followlinks=True can revisit and loop
             if here in walked:
                 dirnames[:] = []
@@ -346,8 +364,14 @@ def check_app_bundles(verify: bool = False) -> list[HygieneIssue]:
                 # break never runs — measured, one truncation in five on a real application tree.
                 truncated = truncated or 1
                 break                      # this tree only — the next application still gets read
-    notes = [_unexamined_note(unbounded, truncated),
-             _unreadable_note(unreadable + unreachable), _unscanned_note(unscanned)]
+        # A bundle IS an application, so anything closed inside one is a hole where this was
+        # looking. A data root is whatever the `*` glob swept up — MEASURED on an ordinary macOS
+        # host, 9 of those are directories the OS protects (`com.apple.TCC`, `FaceTime`,
+        # `Knowledge`) and not one is an application, so gating on them withheld the rotation
+        # all-clear on every Mac. There, only a tree whose JavaScript this actually read counts.
+        (unreadable if is_a_bundle or examined else never_entered).extend(blocked)
+    notes = [_unexamined_note(unbounded, truncated, never_entered),
+             _unreadable_note(unreadable), _unscanned_note(unscanned)]
     return issues + [n for n in notes if n]
 
 
@@ -358,13 +382,15 @@ def _depth(root: Path, directory: Path) -> int:
         return 0
 
 
-def _unexamined_note(unbounded: int, truncated: int) -> HygieneIssue | None:
+def _unexamined_note(unbounded: int, truncated: int, never_entered: list[Path]) -> HygieneIssue | None:
     """What the walk did NOT read. A bound that is not reported reads as coverage of what it cut."""
     parts: list[str] = []
     if truncated:
         parts.append(f"{truncated} tree(s) hold more modules than one audit reads")
     if unbounded:
         parts.append(f"{unbounded} do not end within the lookback")
+    if never_entered:
+        parts.append(f"{len(never_entered)} could not be opened")
     if not parts:
         return None
     return HygieneIssue(
