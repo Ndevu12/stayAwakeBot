@@ -1770,6 +1770,17 @@ confirmed infection it also removes the installed tree, generated build outputs,
 in this repository (the lockfile is kept on CI). A merge finding that is still live in the working
 tree is restored there; the merge commit is left in history. <code>--pr</code> pushes and opens or updates one
 rolling PR per repository. Bare <code>saw fix</code> only ever prepares a cleanup branch.</p>
+<p><strong>Those removals happen in your working tree, when the run happens.</strong> They are not staged on the
+branch and they do not wait for a pull request — the files are gone from the checkout you are
+standing in whether the pull request is merged, closed, or never opened. <code>node_modules</code> is not
+tracked by git, so it cannot be cleaned through a pull request at all; acting on it means acting on
+the working tree, and that is deliberate.</p>
+<p>Nothing is deleted before it is copied. The installed tree, the lockfile and the generated outputs
+are written to <code>.malware-quarantine/</code> in the repository first, and the run names the directory it
+used. Generated outputs are removed only when the lockfile accounts for the installed tree — if
+nothing proves what the tree should contain, they are left alone. Directories listed under
+<code>exclude_dirs</code> are never removed: that setting controls what is <strong>read</strong>, and nothing infers from
+it that a directory may be deleted.</p>
 <p><a href="../amend/"><code>saw fix amend</code></a> is a different act: it amends the infected commits and force-updates
 the branches that carried them. Read that page before you run it.</p>
 <p>See <a href="../../../explanation/safety-envelope/">the safety envelope</a> for what <code>fix</code> will and will not touch.</p>
