@@ -463,17 +463,33 @@ class TestEachRunKeepsItsOwnEvidence(unittest.TestCase):
 
 
 class TestPreservationHappensBeforeRemoval(unittest.TestCase):
-    def test_the_kept_copy_exists_before_anything_is_deleted(self):
+    def test_the_copy_exists_before_anything_is_deleted(self):
+        """An unaccounted package used to be copied and LEFT, so the packages surviving a confirmed
+        removal were exactly the ones nobody could account for — and `npm install` does not prune
+        them, so the rebuild carried them through. It is taken too, once its copy is read back."""
         repo = _Repo()
         derivable = repo.install("left-pad", "1.0.0")
-        kept = repo.install("mystery", "9.9.9")
+        unaccounted = repo.install("mystery", "9.9.9")
         quarantine = repo.root / "q"
         plan = installed.plan_removal(repo.root, {("left-pad", "1.0.0")}, [repo.lock])
         preserved, removed = installed.apply_removal(plan, quarantine)
-        self.assertEqual((preserved, removed), (1, 1))
+        self.assertEqual((preserved, removed), (1, 2))
         self.assertTrue((quarantine / installed.INSTALLED_DIR / "mystery" / "package.json").is_file())
-        self.assertTrue(kept.is_dir(), "the original of a preserved package was removed")
+        self.assertFalse(unaccounted.exists(), "nothing unaccounted for survives the removal")
         self.assertFalse(derivable.exists())
+
+    def test_an_incomplete_copy_removes_nothing(self):
+        """`copytree` can copy part of a tree and report the failures at the end, so "it did not
+        raise" is weaker than the delete needs: the copy is the only one there is."""
+        repo = _Repo()
+        derivable = repo.install("left-pad", "1.0.0")
+        unaccounted = repo.install("mystery", "9.9.9")
+        plan = installed.plan_removal(repo.root, {("left-pad", "1.0.0")}, [repo.lock])
+        with mock.patch.object(installed.shutil, "copytree", lambda *a, **k: None):
+            with self.assertRaises(OSError):
+                installed.apply_removal(plan, repo.root / "q")
+        self.assertTrue(derivable.is_dir(), "a package was removed after an incomplete copy")
+        self.assertTrue(unaccounted.is_dir())
 
     def test_a_failed_preservation_removes_nothing(self):
         # The copy being preserved is the only one there is, so a partial preserve must not be
@@ -627,6 +643,16 @@ class TestTheProjectTreeIsRemovedOnTheRepo(unittest.TestCase):
         self.assertIn("working tree", note)
         self.assertIn(QUARANTINE_DIR, note)
         self.assertEqual(installed.Report().note(), "", "a run that did nothing claims nothing")
+
+    def test_the_note_does_not_call_a_removed_package_kept(self):
+        """It said "kept N" of the unaccounted packages, which was true when they were left in
+        place and is the opposite of true now that they are taken."""
+        repo = _Repo()
+        repo.install("left-pad", "1.0.0")
+        repo.install("mystery", "9.9.9")
+        note = installed.remove_rebuildable(repo.root).note()
+        self.assertNotIn("kept", note)
+        self.assertIn("unaccounted for", note)
 
     def test_a_tree_outside_the_repository_is_not_touched(self):
         repo = _Repo()

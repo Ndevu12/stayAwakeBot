@@ -17,7 +17,9 @@ standing in whether the pull request is merged, closed, or never opened.
 
 Nothing is removed before it is copied. The installed tree, the lockfile and any generated output
 directories are written to `.malware-quarantine/` first, and the run names the directory it used so
-you can put them back. Directories you listed under `exclude_dirs` are never removed.
+you can put them back. That includes packages the lockfile does not account for — a locally linked
+or hand-patched one among them — which are copied out and then removed with the rest, because a
+reinstall would not clear them. Directories you listed under `exclude_dirs` are never removed.
 
 [`saw fix amend`](amend.md) is a different act: it amends the infected commits and force-updates
 the branches that carried them. Read that page before you run it.
