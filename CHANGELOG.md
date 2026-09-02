@@ -35,15 +35,6 @@ reader, not the mechanism or the weakness it closed.
 
 
 ### Fixed
-- **Browser-automation code is no longer reported as suspicious.** A driver that scripts a headless
-  browser was read as carrying a dynamic-execution sink, so it recurred on every scan.
-- **A decoder sitting beside an ordinary regular-expression match is no longer read as a dropper.**
-  A browser-side token reader does exactly that and was reported on every scan.
-- **A common utility idiom is no longer read as a disguised call to `eval`.**
-- **Code that renames a dangerous built-in is now caught wherever it is called from**, not only
-  where the rename and the call sit close together.
-
-### Fixed
 - **A filename can no longer be made to look like something `saw` said.** A path chosen by whoever
   wrote it could reproduce a report line — including the advice line inside the rotation-safety
   block — well enough to read as the tool's own words. Those lines now sit where only the tool puts
