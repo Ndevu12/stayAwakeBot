@@ -204,9 +204,11 @@ def _history_residue_note(root, opts, signatures, allowlist) -> str | None:
     from stayawake.bots.security.targets.history import HistoryTarget, versions_by_path
     versions, complete = versions_by_path(root)
     if not versions:
-        # `stdout` degrades a failed git command to an empty string, so "no objects" and "git could
-        # not answer" arrive identically. Saying nothing here is the silence this whole note exists
-        # to end — a repository with a broken ref would read as one with no history.
+        # A failed git command degrades to an empty result, so "git could not answer" and "there is
+        # genuinely nothing here" arrive identically; `complete` is what separates them. Silence is
+        # what this note exists to end, but a fresh repository has honestly nothing to report.
+        if complete:
+            return "History was read: this repository stores no earlier version of any path."
         return ("History could not be read: nothing was returned for this repository, so whether "
                 "it still stores a payload is UNKNOWN, not no.")
     # A `path_glob` rule is decided against the ONE name git emits for a blob, and whoever

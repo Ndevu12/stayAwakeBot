@@ -7,7 +7,9 @@ remediated repository red and cost the exit code its meaning.
 """
 from __future__ import annotations
 
+import pathlib
 import sys
+import tempfile
 import unittest
 from unittest import mock
 from pathlib import Path
@@ -258,6 +260,112 @@ class TestTheReportCannotBeAimedByWhoeverCommitted(GitSandbox):
         self.git(repo, "add", "-A")
         self.commit(repo, "a path with a vertical tab")
         self.assertIn("c\x0bpayload.js", {path for _s, path in reachable_blobs(repo)[0]})
+
+
+class TestAnOversizedVersionIsReadTheWayTheTreeSideReadsOne(GitSandbox):
+    def _sigs(self):
+        from stayawake.bots.security.signatures import load_signatures
+        return load_signatures()
+
+    def _stored(self, body: bytes):
+        repo = self.new_repo()
+        (repo / "big.js").write_bytes(body)
+        self.write(repo, "keep.txt", "ok\n")
+        self.git(repo, "add", "-A")
+        self.commit(repo, "an oversized version")
+        return repo
+
+    def test_the_join_cannot_fabricate_a_signature(self):
+        """Head and tail are megabytes apart in the stored object. Spliced with no separator, a
+        pattern matched ACROSS the join and reported a confirmed payload that is nowhere in the
+        blob — the tree scan of the same bytes is silent. That marker is why the tree side has one."""
+        half = ScanOptions().max_file_bytes // 2
+        opener, closer = b"global['_V", b"']=1;"
+        head = b"\n" * (half - len(opener)) + opener        # ends exactly AT the head boundary
+        tail = closer + b"\n" * (half - len(closer))        # starts exactly AT the tail boundary
+        repo = self._stored(head + b"z" * half + tail)
+        note = scanner.history_residue_note(repo, ScanOptions(history=True), self._sigs(), [])
+        self.assertNotIn("still STORE a confirmed payload", note)
+
+    def test_the_tail_really_is_the_end_of_the_version(self):
+        """A payload is usually APPENDED. Stopping the stream at a ceiling made the tail a middle
+        slice of a large version, so its end was never examined and the note still said clean.
+        Driven through a stand-in stream rather than a 70 MB fixture."""
+        import io
+        from stayawake.bots.security.targets.history import HistoryTarget
+        repo = self._stored(b"x\n")
+        versions, _ = versions_by_path(repo)
+        target = HistoryTarget(repo, "t", ScanOptions(), versions)
+        half = ScanOptions().max_file_bytes // 2
+        body = b"H" * half + b"M" * (200 * 1024 * 1024) + b"THE-REAL-END"
+
+        class _Stream:
+            returncode = 0
+            stdout = io.BytesIO(body)
+
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def kill(self): pass
+
+        with mock.patch.object(HistoryTarget, "_cat_file", return_value=_Stream()):
+            out = target._head_tail(list(versions)[0])
+        self.assertTrue(out.endswith(b"THE-REAL-END"), "the tail was a middle slice, not the end")
+        self.assertLessEqual(len(out), ScanOptions().max_file_bytes + 64, "and it stayed bounded")
+
+    def test_an_appended_payload_at_the_very_end_is_found(self):
+        repo = self._stored(b"// filler\n" * 400_000 + _payload().encode())
+        note = scanner.history_residue_note(repo, ScanOptions(history=True), self._sigs(), [])
+        self.assertIn("big.js", note)
+
+
+class TestAnOrdinaryRepositoryIsNotAlarmed(GitSandbox):
+    def _sigs(self):
+        from stayawake.bots.security.signatures import load_signatures
+        return load_signatures()
+
+    def test_an_empty_file_is_not_an_unreadable_version(self):
+        """A zero-byte blob is a legitimate `.gitkeep` / `py.typed` / empty `__init__.py`, and 5 of
+        10 repositories on this host store one. Reading emptiness as failure printed a gap that was
+        not there, and subtracted it from the count of versions examined."""
+        repo = self.new_repo()
+        (repo / ".gitkeep").write_bytes(b"")
+        self.write(repo, "a.js", "// x\n")
+        self.git(repo, "add", "-A")
+        self.commit(repo, "an empty file, as every repository has")
+        note = scanner.history_residue_note(repo, ScanOptions(history=True), self._sigs(), [])
+        self.assertNotIn("could not be read", note)
+
+    def test_a_repository_with_no_commits_is_empty_not_unknown(self):
+        """`complete` separates "git could not answer" from "there is genuinely nothing here"; the
+        two were collapsed in the alarming direction, so a fresh repository raised a false gap."""
+        note = scanner.history_residue_note(self.new_repo("fresh"), ScanOptions(history=True),
+                                            self._sigs(), [])
+        self.assertNotIn("UNKNOWN", note)
+        self.assertIn("stores no earlier version", note)
+
+
+class TestBothHalvesOfTheWalkAreBelieved(unittest.TestCase):
+    def test_anything_the_walk_reports_makes_the_read_incomplete(self):
+        """Two commands enumerate history and only one had its stderr read. I could not make
+        `rev-list` exit 0 WITH stderr on this git, so this pins the contract rather than a
+        reproduction: whatever either command complains about, the read is not called complete."""
+        import subprocess as _sp
+        from stayawake.lib.git import query as q
+        real = q.run
+
+        def noisy(repo, args):
+            res = real(repo, args)
+            if res is not None and args[0] == "rev-list":
+                return _sp.CompletedProcess(args, 0, res.stdout, "warning: something was skipped\n")
+            return res
+
+        with mock.patch.object(q, "run", noisy), tempfile.TemporaryDirectory() as d:
+            _sp.run(["git", "init", "-q", d], check=True)
+            pathlib.Path(d, "a.js").write_text("// x\n")
+            _sp.run(["git", "-C", d, "add", "-A"], check=True)
+            _sp.run(["git", "-C", d, "-c", "user.email=a@b", "-c", "user.name=a",
+                     "commit", "-qm", "x"], check=True, capture_output=True)
+            self.assertFalse(q.reachable_blobs(d)[1])
 
 
 class TestItSaysSoWhenItCouldNotRead(GitSandbox):

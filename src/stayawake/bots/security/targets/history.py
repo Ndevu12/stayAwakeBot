@@ -10,7 +10,7 @@ from typing import Iterator
 
 from stayawake.lib.git.query import reachable_blobs
 
-from .base import _MAX_INTERIOR_SCAN_BYTES, Target
+from .base import TRUNCATION_MARKER, Target
 
 _CHUNK = 1 << 20
 
@@ -71,7 +71,9 @@ class HistoryTarget(Target):
         data = self.read_bytes(rel)
         if data is None:
             data = self._head_tail(rel)        # oversized, so the tree side's head+tail, not a skip
-        return None if data is None else data.decode("utf-8", "replace")
+        if data is None:
+            return None
+        return data.replace(b"\x00", b"").decode("utf-8", "replace")   # as the tree side decodes
 
     def read_source_windows(self, rel: str) -> Iterator[tuple[int, str]]:
         text = self.read_text(rel)
@@ -99,7 +101,7 @@ class HistoryTarget(Target):
                 more = bool(proc.stdout.read(1))
                 if more:
                     proc.kill()
-            if proc.returncode not in (0, -9) or (not data and not more):
+            if proc.returncode not in (0, -9):
                 self.read_errors.append(rel)
                 return None, False
         except (OSError, subprocess.SubprocessError):
@@ -111,7 +113,8 @@ class HistoryTarget(Target):
         """The two ends of an oversized version, as the tree side reads an oversized file.
 
         Consumed in chunks and thrown away in the middle, so memory stays at the two ends however
-        large the blob is; past the interior-scan ceiling the rest is not even drained.
+        large the blob is. Drained to the end rather than stopped at a ceiling: a payload is usually
+        APPENDED, and stopping early makes the "tail" a middle slice that silently misses it.
         """
         half = max(1, self.opts.max_file_bytes // 2)
         sha = self._sha_by_path.get(rel)
@@ -121,7 +124,7 @@ class HistoryTarget(Target):
         try:
             proc = self._cat_file(sha)
             with proc:
-                while total < _MAX_INTERIOR_SCAN_BYTES:
+                while True:
                     chunk = proc.stdout.read(_CHUNK)
                     if not chunk:
                         break
@@ -129,8 +132,7 @@ class HistoryTarget(Target):
                     if len(head) < half:
                         head += chunk[:half - len(head)]
                     tail = (tail + chunk)[-half:]
-                proc.kill()
         except (OSError, subprocess.SubprocessError):
             self.read_errors.append(rel)
             return None
-        return head if total <= half else head + tail
+        return head if total <= half else head + TRUNCATION_MARKER + tail

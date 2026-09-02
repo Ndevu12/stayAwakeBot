@@ -95,13 +95,14 @@ def reachable_blobs(repo: str | Path, *, limit: int = 200_000) -> tuple[list[tup
         return [], False
     # git EXITS 0 having skipped an object it cannot unpack, naming it on stderr only. The sha then
     # fails the type test below and leaves the walk silently, so the caller must not be told this
-    # was a complete read.
+    # was a complete read. Both commands can do it, and only one was being read.
     complete = not listing.stderr.strip()
     blob_shas = {line.split()[0] for line in listing.stdout.splitlines()
                  if len(line.split()) >= 2 and line.split()[1] == "blob"}
     walk = run(repo, ["rev-list", "--objects", "--all"])
     if walk is None or walk.returncode != 0:
         return [], False
+    complete = complete and not walk.stderr.strip()
     out = walk.stdout
     seen: dict[str, str] = {}
     for line in out.split("\n"):        # not splitlines: it breaks on \r and \x0b too, truncating a path
