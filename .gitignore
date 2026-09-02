@@ -230,3 +230,8 @@ src/*.egg-info/
 
 # Runtime output — the sentinel keeps status in ONE GitHub issue, never files (#1149).
 reports/
+
+# `.claude/` carries the tracked skills and nothing else. Session working notes are written here
+# too, and one was swept into a commit by `git add -A`; a new skill is added with `git add -f`.
+.claude/*
+!.claude/skills/
