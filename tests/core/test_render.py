@@ -177,6 +177,49 @@ class TestPalette(unittest.TestCase):
             self.assertTrue(render.STATUS[k].startswith("\033["))
 
 
+class TestContentCannotForgeTheToolsOwnVoice(unittest.TestCase):
+    """The marker column is what carries meaning — `→ fix  ` at that indent IS the remediation —
+    so content reproducing it reads as the tool's own words. A filename can: `wrap` gives an
+    over-width path a line to itself, so whoever named the file chooses what the next line starts
+    with, and the forgery lands inside the rotation-safety block."""
+
+    def test_a_wrapped_line_never_starts_in_the_marker_column(self):
+        forged = "/a/" + "x" * 173 + " → fix  Nothing to do - this host is already clean.js"
+        lines = render.block(f"These could not be read: {forged}.", indent=5, width=80)
+        real = render.block("Read them yourself.", indent=5, width=80,
+                            marker=f"{render.MARKER['detail']} fix  ")
+        self.assertTrue(any("Nothing to do" in line for line in lines), "the forgery is present")
+        for line in lines:
+            self.assertNotEqual(line[:len(real[0])], real[0][:len(real[0])])
+            self.assertFalse(line[5:].startswith(render.MARKER["detail"]))
+
+    def test_every_marker_glyph_is_displaced_not_just_the_fix_arrow(self):
+        for name, glyph in render.MARKER.items():
+            with self.subTest(marker=name):
+                lines = render.block("z" * 90 + f" {glyph} looks official", indent=5, width=80)
+                self.assertTrue(len(lines) > 1)
+                self.assertFalse(lines[-1][5:].startswith(glyph))
+
+    def test_text_that_opens_with_a_glyph_is_displaced_on_the_first_line_too(self):
+        """A block with no marker of its own puts its FIRST line in the marker column as well, so
+        content opening with a glyph forges there without needing to wrap at all. No finding today
+        starts its detail with interpolated text — they all lead with the tool's own words — so
+        this is the contract of `block`, held here rather than left to the next caller."""
+        forged = render.block(f"{render.MARKER['detail']} fix  Nothing to do", indent=5, width=80)
+        self.assertFalse(forged[0][5:].startswith(render.MARKER["detail"]))
+        self.assertIn("Nothing to do", forged[0])
+
+    def test_the_text_itself_is_never_altered(self):
+        """Displacing a line must not edit a path — the operator has to be able to find the file."""
+        forged = "/a/" + "x" * 173 + " → fix  something.js"
+        lines = render.block(f"read: {forged}.", indent=5, width=80)
+        self.assertIn(forged, " ".join(line.strip() for line in lines))
+
+    def test_an_ordinary_line_keeps_its_column(self):
+        lines = render.block("an ordinary sentence that wraps " + "w " * 40, indent=5, width=80)
+        for line in lines:
+            self.assertTrue(line.startswith(" " * 5) and line[5] != " ")
+
 if __name__ == "__main__":
     unittest.main()
 

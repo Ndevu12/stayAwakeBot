@@ -129,7 +129,23 @@ def block(text: str, *, indent: int = 0, width: int = 80, marker: str = "",
         return []
     lead = " " * indent + (paint(marker, code, on=color) if marker else "")
     lines[0] = lead + lines[0][hang:]
+    if not marker:
+        lines[0] = _out_of_the_marker_column(lines[0], indent)
+    lines[1:] = [_out_of_the_marker_column(line, hang) for line in lines[1:]]
     return lines
+
+
+def _out_of_the_marker_column(line: str, column: int) -> str:
+    """Move content that would begin with a marker glyph out of the column a marker owns.
+
+    The column carries the meaning — `→ fix  ` at that indent IS the remediation — so content
+    reproducing it reads as the tool's own words. MEASURED: a filename does it, because `wrap` gives
+    an over-width path a line to itself and whoever named the file chooses what the next line
+    starts with. One space is enough: the column is no longer a marker's, and the text is unaltered.
+    """
+    if any(line[column:].startswith(glyph) for glyph in MARKER.values()):
+        return line[:column] + " " + line[column:]
+    return line
 
 
 def marked_list(items: list[str], *, ordered: bool = False, indent: int = 0, width: int = 80,
