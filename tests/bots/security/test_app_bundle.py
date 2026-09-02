@@ -510,8 +510,15 @@ class TestAModuleThatCouldNotBeReadIsNotAModuleThatHeldNothing(unittest.TestCase
     def test_anything_that_is_not_a_regular_file_is_not_read(self):
         d = Path(tempfile.mkdtemp())
         (d / "adir.js").mkdir()
+        os.mkfifo(d / "pipe.js")
+        (d / "dangling.js").symlink_to(d / "nothing-here")
         self.assertEqual(app_bundle._tail_lines(d / "adir.js")[1], app_bundle.UNREADABLE)
-        self.assertEqual(app_bundle._tail_lines(d / "gone.js")[1], app_bundle.UNREADABLE)
+        self.assertEqual(app_bundle._tail_lines(d / "pipe.js")[1], app_bundle.UNREADABLE)
+        # Nothing behind a dangling link to read, which is the rule the engine states for the same
+        # case — and an Electron cache tree churns `.js` under an audit, so grading the churn as a
+        # hole would raise the rotation gate on it.
+        self.assertEqual(app_bundle._tail_lines(d / "dangling.js")[1], app_bundle.READ)
+        self.assertEqual(app_bundle._tail_lines(d / "gone.js")[1], app_bundle.READ)
 
     def test_a_pipe_named_like_a_module_does_not_stop_the_audit(self):
         """In a subprocess: if the guard regresses, this fails on the timeout instead of hanging."""
@@ -529,6 +536,61 @@ class TestAModuleThatCouldNotBeReadIsNotAModuleThatHeldNothing(unittest.TestCase
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertIn("done", done.stdout)
 
+
+class TestWhatTheWalkCouldNotReachIsReportedToo(unittest.TestCase):
+    """A counter for files the reader could not read, over a walk that dropped whole subtrees in
+    silence: an unreadable FILE failed closed while its unreadable PARENT failed open, and anything
+    able to write a module can chmod the directory holding it."""
+
+    def _planted(self):
+        host = _Host()
+        host.write(_appended([_confirmed_payload()]), name="payload.js")
+        return host
+
+    def test_locking_the_directory_is_no_longer_the_way_past_it(self):
+        host = self._planted()
+        os.chmod(host.module_dir, 0o000)
+        try:
+            ids = [i.id for i in host.check()]
+        finally:
+            os.chmod(host.module_dir, 0o755)
+        self.assertIn(APP_BUNDLE_MODULE_UNREADABLE_ID, ids,
+                      "locking the parent must fail closed, as locking the file does")
+
+    def test_a_base_that_will_not_open_is_not_an_empty_surface(self):
+        """`Path.glob` reports a base it cannot list as one holding nothing, so a single chmod took
+        every application under it out of the surface with nothing said."""
+        host = self._planted()
+        os.chmod(host.base, 0o000)
+        try:
+            ids = [i.id for i in host.check()]
+        finally:
+            os.chmod(host.base, 0o755)
+        self.assertIn(APP_BUNDLE_MODULE_UNREADABLE_ID, ids)
+
+    def test_it_names_them_so_they_can_be_cleared(self):
+        """A count alone raises a gate with no way to act on it, which is alarm fatigue against a
+        gate whose whole purpose is to be believed. The sibling unknown-tier finding names them."""
+        host = self._planted()
+        hidden = host.write(_appended([_confirmed_payload()]), name="hidden.js")
+        os.chmod(hidden, 0o000)
+        try:
+            note = next(i for i in host.check() if i.id == APP_BUNDLE_MODULE_UNREADABLE_ID)
+        finally:
+            os.chmod(hidden, 0o644)
+        self.assertIn(str(hidden), note.detail)
+
+    def test_a_bound_reached_on_the_last_module_of_a_directory_is_still_reported(self):
+        """The inner break never runs there, so one truncation in five was reported as nothing."""
+        host = _Host()
+        for n in range(3):
+            host.write(_CLEAN, name=f"m{n}.js")
+        host.write(_appended([_confirmed_payload()]),
+                   where=host.module_dir / "deeper", name="payload.js")
+        with mock.patch.object(app_bundle, "_MAX_FILES_PER_ROOT", 3):
+            ids = [i.id for i in host.check()]
+        self.assertIn("app-bundle-partly-examined", ids)
+        self.assertNotIn("app-bundle-appended-module", ids, "the walk really did stop short")
 
 class TestTheSiblingSurfaceAnswersTheSameWay(unittest.TestCase):
     """The host-artifact probe is the other `verify_dir` consumer and had the same defect: it threw

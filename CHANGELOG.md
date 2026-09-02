@@ -51,9 +51,14 @@ reader, not the mechanism or the weakness it closed.
   used to report the weaker finding instead — whose own advice is to run `--verify`.
 - **A module that was scanned and came back clean now says so** — and says what that does and does
   not settle — rather than repeating the advice to run the scan that had just cleared it.
-- **A module the host will not let `saw audit` read is reported.** It used to produce nothing at
-  all: no finding, no count, no mention, indistinguishable from a module that was read and held
-  nothing. It now names how many, and withholds the credential-rotation all-clear.
+- **Anything the audit could not read inside an installed application is named.** A module, a
+  directory it could not list, or a location it could not enumerate at all used to produce nothing
+  whatever — no finding, no count, no mention, indistinguishable from having looked and found
+  nothing. Each is now named so you can go and clear it, and each withholds the credential-rotation
+  all-clear until you have. Locking a file and locking the directory holding it are answered the
+  same way, so neither is a way past the check.
+- **A bound the audit hit is always reported**, including when it fell exactly on the last module
+  of a directory, where it used to be reported as nothing.
 - **A pipe or device named like an application module no longer stops the audit.** Reading one had
   no timeout, so anything able to write into an application's own directory could hang the run.
 - **The same fixes on the host-artifact surface.** `--verify` there also reported a scan that blew

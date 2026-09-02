@@ -75,11 +75,42 @@ def _data_bases() -> list[Path]:
     return [home / ".config"]
 
 
-def app_bundle_js_roots() -> list[tuple[Path, int | None]]:
+def _note_unreadable(sink: list):
+    """`os.walk`'s default swallows a directory it cannot enumerate and yields nothing for it.
+
+    Everything under such a directory disappears with no finding and no count — so an unreadable
+    FILE failed closed while its unreadable PARENT failed open, and anything able to write a module
+    can chmod the directory holding it.
+    """
+    def cannot_list(error):
+        sink.append(Path(getattr(error, "filename", None) or "?"))
+    return cannot_list
+
+
+def _exists_but_cannot_be_listed(base: Path) -> bool:
+    """A base that is not there is not a hole; one that is there and will not open is.
+
+    `Path.glob` reports the second as the first — it returns no matches rather than raising — so a
+    single `chmod` on a base takes every application under it out of the surface silently.
+    """
+    try:
+        with os.scandir(base) as entries:
+            next(entries, None)
+    except FileNotFoundError:
+        return False
+    except NotADirectoryError:
+        return False
+    except OSError:
+        return True
+    return False
+
+
+def app_bundle_js_roots(unlistable: list[Path] | None = None) -> list[tuple[Path, int | None]]:
     """(tree, depth bound) for every installed application's own JavaScript, deduplicated by
     filesystem identity — `/Applications/Applications` is a symlink to `/Applications` on macOS,
     which yields each bundle twice, and `Contents/Resources` matches `Contents/resources` on a
     case-insensitive volume. A bundle tree is read whole; a data directory is read to a depth."""
+    unlistable = [] if unlistable is None else unlistable
     patterns = [f"{depth}{leaf}" for depth in _BUNDLE_WILDCARD_DEPTHS for leaf in _BUNDLE_LEAVES]
     candidates: list[tuple[Path, list[str], int | None]] = [
         (base, patterns, None) for base in _bundle_bases()]
@@ -88,10 +119,14 @@ def app_bundle_js_roots() -> list[tuple[Path, int | None]]:
     roots: list[tuple[Path, int | None]] = []
     seen: set = set()
     for base, globs, depth in candidates:
+        if _exists_but_cannot_be_listed(base):
+            unlistable.append(base)
+            continue
         for pattern in globs:
             try:
                 matches = sorted(base.glob(pattern))
             except OSError:
+                unlistable.append(base)
                 continue
             for match in matches:
                 try:
@@ -142,9 +177,15 @@ def _tail_lines(path: Path) -> tuple[list[bytes], str]:
     """
     wanted = _TRAILING_LINES_MAX
     try:
-        if not stat.S_ISREG(os.stat(path).st_mode):
-            return [], UNREADABLE
+        regular = stat.S_ISREG(os.stat(path).st_mode)
+    except FileNotFoundError:
+        # A dangling link, or a file that went between the walk and this — nothing behind it to
+        # read, which is the rule `verify.py` states for the same case. Electron cache trees churn
+        # `.js` while an audit runs, and grading that as a hole would raise the gate on the churn.
+        return [], READ
     except OSError:
+        return [], UNREADABLE
+    if not regular:
         return [], UNREADABLE
     try:
         with path.open("rb") as handle:
@@ -262,12 +303,15 @@ def check_app_bundles(verify: bool = False) -> list[HygieneIssue]:
     A scan that could not run is the same two-findings shape: something found and a look that did
     not happen are different claims, and the report groups them differently."""
     issues: list[HygieneIssue] = []
-    unbounded = truncated = unreadable = 0
+    unbounded = truncated = 0
+    unreadable: list[Path] = []
+    unreachable: list[Path] = []
     unscanned: list[str] = []
     walked: set = set()
-    for root, max_depth in app_bundle_js_roots():
+    for root, max_depth in app_bundle_js_roots(unreachable):
         examined = 0
-        for dirpath, dirnames, filenames in os.walk(root, followlinks=True):
+        for dirpath, dirnames, filenames in os.walk(root, followlinks=True,
+                                                    onerror=_note_unreadable(unreachable)):
             here = canonical_id(Path(dirpath))            # followlinks=True can revisit and loop
             if here in walked:
                 dirnames[:] = []
@@ -285,7 +329,7 @@ def check_app_bundles(verify: bool = False) -> list[HygieneIssue]:
                 module = Path(dirpath) / name
                 lines, how = _tail_lines(module)
                 if how == UNREADABLE:
-                    unreadable += 1
+                    unreadable.append(module)
                     continue
                 if how == TOO_FAR_BACK:
                     unbounded += 1
@@ -298,9 +342,12 @@ def check_app_bundles(verify: bool = False) -> list[HygieneIssue]:
                     unscanned.append(scan.stopped_by)
                 issues.append(_finding(module, *shape, scan))
             if examined >= _MAX_FILES_PER_ROOT:
+                # The cap can also be reached by the LAST module in a directory, where the inner
+                # break never runs — measured, one truncation in five on a real application tree.
+                truncated = truncated or 1
                 break                      # this tree only — the next application still gets read
-    notes = [_unexamined_note(unbounded, truncated), _unreadable_note(unreadable),
-             _unscanned_note(unscanned)]
+    notes = [_unexamined_note(unbounded, truncated),
+             _unreadable_note(unreadable + unreachable), _unscanned_note(unscanned)]
     return issues + [n for n in notes if n]
 
 
@@ -329,24 +376,34 @@ def _unexamined_note(unbounded: int, truncated: int) -> HygieneIssue | None:
     )
 
 
-def _unreadable_note(count: int) -> HygieneIssue | None:
-    """Modules the host would not let this read at all.
+def _unreadable_note(locations: list[Path]) -> HygieneIssue | None:
+    """What the host would not let this read, named.
 
     Its own grade: the note above counts bounds THIS TOOL chose, and a location the host refused is
     a hole. MEASURED before gating rotation on it — 22477 modules under 44 roots on an ordinary
     host, none unreadable and none anything but a regular file.
+
+    It NAMES them, as the sibling unknown-tier finding does. A count alone raises a gate the
+    operator has no way to clear, which is an alarm-fatigue primitive against a gate whose whole
+    purpose is to be believed.
     """
-    if not count:
+    if not locations:
         return None
     return HygieneIssue(
         id=APP_BUNDLE_MODULE_UNREADABLE_ID,
         severity="unknown",
-        title="An application module could not be read",
-        detail=f"{count} module(s) an installed application loads could not be read at all, so "
-               "nothing about them was established. They are UNKNOWN, not clean.",
-        remediation="Read them yourself, or reinstall the applications. Do not rotate credentials "
-                    f"yet: {_WIPER_NOTE}.",
+        title="Part of an application could not be read",
+        detail="These could not be read, so nothing about what they hold was established, and they "
+               "are UNKNOWN rather than clean: " + _named(locations) + ".",
+        remediation="Read them yourself, or reinstall the applications they belong to. Do not "
+                    f"rotate credentials yet: {_WIPER_NOTE}.",
     )
+
+
+def _named(locations: list[Path], most: int = 10) -> str:
+    shown = "; ".join(str(p) for p in locations[:most])
+    beyond = len(locations) - most
+    return f"{shown}; and {beyond} more" if beyond > 0 else shown
 
 
 def _unscanned_note(reasons: list[str]) -> HygieneIssue | None:
