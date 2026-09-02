@@ -35,10 +35,8 @@ def _raising(exc):
 class _Verdict:
     """A stand-in for the engine's `DirVerdict`, field for field.
 
-    A `mock.Mock(markers=[])` answers `.markers` and nothing else, so it stubs away the very fields
-    the verdict uses to say it could not finish — every "clean scan" test drove a stub that could
-    not represent an unclean one. The engine is not importable without its dependencies, hence a
-    local mirror; `test_the_stand_in_still_matches_the_engine` holds it to the real shape.
+    A `mock.Mock(markers=[])` answers that one attribute and stubs away the fields the verdict uses
+    to say it could not finish. The engine needs its dependencies to import, hence a local mirror.
     """
 
     path: str = "/x"
@@ -56,9 +54,7 @@ class _Verdict:
 
 
 def _engine_loads() -> bool:
-    """Whether the content-scan engine is importable here. The confirmed-marker path needs it, and
-    without this the test asserting that path failed on any host missing one of its dependencies —
-    which is a hole in the run, not a finding, and now says so instead of reading as a defect."""
+    """Whether the content-scan engine is importable here — a hole in the run, not a finding."""
     try:
         from stayawake.bots.security.verify import verify_dir      # noqa: F401
         return True
@@ -228,9 +224,6 @@ class TestTheConcealmentIsWhatIsGraded(unittest.TestCase):
         self.assertEqual(host.check(), [])
 
     def test_a_file_that_cannot_be_read_is_reported_rather_than_crashing(self):
-        """The contract this has always held is that the run survives. It expressed that as "no
-        findings at all", which also made the SILENCE the spec: a module carrying the payload and
-        a benign one were both reported as nothing, and neither was counted anywhere."""
         host = _Host()
         target = host.write(_appended(["z" * 200]))
         os.chmod(target, 0o000)
@@ -299,9 +292,6 @@ class TestAScanThatCouldNotRunIsNotAScanThatFoundNothing(unittest.TestCase):
             return self._planted().check(verify=True)
 
     def test_an_engine_that_will_not_run_leaves_the_hole_as_its_own_item(self):
-        """Two findings, not one hedged: the module keeps its `info` grade for what was observed,
-        and the look that did not happen is a separate `unknown`. The report groups them
-        differently, and one item that is both reads as neither."""
         issues = self._blocked_by(RuntimeError("signature store unreadable"))
         self.assertEqual([i.id for i in issues],
                          ["app-bundle-appended-module", SCAN_BLOCKED_ID])
@@ -310,7 +300,6 @@ class TestAScanThatCouldNotRunIsNotAScanThatFoundNothing(unittest.TestCase):
         self.assertIn("signature store unreadable", issues[1].detail)
 
     def test_an_engine_that_will_not_import_is_reported_the_same_way(self):
-        """The failure this actually shipped with: the import itself is what went wrong."""
         with mock.patch.dict(sys.modules, {"stayawake.bots.security.verify": None}):
             ids = [i.id for i in self._planted().check(verify=True)]
         self.assertIn(SCAN_BLOCKED_ID, ids)
@@ -323,8 +312,6 @@ class TestAScanThatCouldNotRunIsNotAScanThatFoundNothing(unittest.TestCase):
         self.assertIn("did not complete", detail)
 
     def test_the_run_is_never_reported_as_having_found_nothing(self):
-        """`unknown` items are surfaced as the ABSENCE of a look, not as findings, so a lone
-        `unknown` headlines as "no findings". Something WAS found here."""
         text = render(self._blocked_by(RuntimeError("boom")), width=90)
         self.assertNotIn("no findings", text)
         self.assertIn("looks modified", text)
@@ -340,9 +327,8 @@ class TestAScanThatCouldNotRunIsNotAScanThatFoundNothing(unittest.TestCase):
         self.assertEqual(rotation_safety(ids), ROTATION_UNSAFE_UNKNOWN)
 
     def test_one_item_for_the_run_however_many_modules(self):
-        """The modules are named above, one line each; the cause is the same for all of them and
-        is stated once. Counting the item alone did not pin this — the reason was listed once per
-        module inside a single item, which is the same noise one layer down."""
+        """Counting the item alone did not pin this: the reason was listed once per module inside
+        a single item, which is the same noise one layer down."""
         host = self._planted()
         host.write(_appended([_confirmed_payload()]), name="other.js")
         with self._engine(_raising(RuntimeError("boom"))):
@@ -368,9 +354,6 @@ class TestAScanThatCouldNotRunIsNotAScanThatFoundNothing(unittest.TestCase):
         self.assertIn("second cause", hole.detail)
 
     def test_a_scan_that_ran_and_found_nothing_says_so(self):
-        """The other direction: not every unconfirmed module becomes UNKNOWN. A scan that ran
-        clean leaves the shape finding at `info` and the rotation verdict untouched — and it now
-        reports the negative result the operator paid for instead of advising the same flag."""
         with self._engine(lambda _d: _Verdict(scanned_clean=True)):
             issues = self._planted().check(verify=True)
         self.assertEqual([i.id for i in issues], ["app-bundle-appended-module"])
@@ -378,10 +361,6 @@ class TestAScanThatCouldNotRunIsNotAScanThatFoundNothing(unittest.TestCase):
         self.assertFalse({i.id for i in issues} & ROTATION_UNSAFE_IDS)
 
     def test_only_a_clean_scan_clears_a_module(self):
-        """`verify_dir` almost never raises — it reports a tree it could not fully read IN the
-        verdict, and its own docstring says the caller must not render that as clean. Reading
-        `.markers` alone turned every one of those into "scanned, found nothing", including the
-        two that return before the scanner runs at all."""
         cases = {
             "too large": _Verdict(too_large=True),
             "a pipe or device present": _Verdict(partial=True,
@@ -410,8 +389,6 @@ class TestAScanThatCouldNotRunIsNotAScanThatFoundNothing(unittest.TestCase):
         self.assertIn("archives are not opened", hole.detail)
 
     def test_a_marker_wins_over_an_incomplete_scan(self):
-        """Markers PROMOTE a verdict and never lower one — a confirmed hit in a tree that was only
-        partly read is still a confirmed hit."""
         with self._engine(lambda _d: _Verdict(markers=["loader-decoder-fn"], partial=True)):
             ids = [i.id for i in self._planted().check(verify=True)]
         self.assertEqual(ids, ["app-bundle-payload"])
@@ -509,8 +486,6 @@ class TestAModuleThatCouldNotBeReadIsNotAModuleThatHeldNothing(unittest.TestCase
         self.assertIn(MODULE_UNREADABLE_ID, ids)
 
     def test_it_withholds_the_rotation_all_clear(self):
-        """MEASURED before gating this: 22477 modules under 44 enumerated roots on an ordinary
-        host, none unreadable and none anything but a regular file."""
         self.assertIn(MODULE_UNREADABLE_ID, ROTATION_UNSAFE_IDS)
         self.assertEqual(rotation_safety({MODULE_UNREADABLE_ID}), ROTATION_UNSAFE_UNKNOWN)
         host = _Host()
@@ -524,22 +499,16 @@ class TestAModuleThatCouldNotBeReadIsNotAModuleThatHeldNothing(unittest.TestCase
                          "a hole, not a finding — the report groups the two differently")
 
     def test_the_bounds_this_tool_chooses_are_not_the_same_claim(self):
-        """`app-bundle-partly-examined` counts limits WE set, so it stays an `info` note and does
-        not gate rotation. A location the host refused is a different claim."""
         self.assertNotIn("app-bundle-partly-examined", ROTATION_UNSAFE_IDS)
 
     def test_anything_that_is_not_a_regular_file_is_not_read(self):
-        """Asked of the read itself. Through the walk a directory never reaches here — it is
-        descended into — but the guard is what stops the read from being attempted at all."""
         d = Path(tempfile.mkdtemp())
         (d / "adir.js").mkdir()
         self.assertEqual(app_bundle._tail_lines(d / "adir.js")[1], app_bundle.UNREADABLE)
         self.assertEqual(app_bundle._tail_lines(d / "gone.js")[1], app_bundle.UNREADABLE)
 
     def test_a_pipe_named_like_a_module_does_not_stop_the_audit(self):
-        """`open()` on a FIFO blocks until something writes to it, with no timeout, so anything
-        able to append to a bundle module could also stop the audit by creating one beside it. Run
-        in a subprocess: if the guard regresses, this fails on the timeout instead of hanging."""
+        """In a subprocess: if the guard regresses, this fails on the timeout instead of hanging."""
         host = _Host()
         host.write(_appended([_confirmed_payload()]))
         os.mkfifo(host.module_dir / "zz.js")
@@ -585,7 +554,6 @@ class TestTheSiblingSurfaceAnswersTheSameWay(unittest.TestCase):
         self.assertEqual(rotation_safety(ids), ROTATION_UNSAFE_UNKNOWN)
 
     def test_an_artifact_that_is_not_a_scannable_directory_still_falls_back(self):
-        """The other meaning of the same `None`: nothing failed, there was just nothing to scan."""
         with self._only_this_artifact(), \
              mock.patch.object(host_artifacts, "_verify_weak_artifact", lambda item: None):
             ids = {i.id for i in host_artifacts.check_host_artifacts(verify=True)}
@@ -593,8 +561,6 @@ class TestTheSiblingSurfaceAnswersTheSameWay(unittest.TestCase):
         self.assertIn("host-drop-artifact-weak", ids)
 
     def test_it_never_claims_a_scan_of_the_rest(self):
-        """One of the two states behind `partial` returns before the scanner runs at all, so
-        "a content scan of the rest found no worm markers" described a scan that never happened."""
         stub = types.ModuleType("stayawake.bots.security.verify")
         stub.verify_dir = lambda _p: _Verdict(
             partial=True, unread=["a device or pipe must not be opened"])

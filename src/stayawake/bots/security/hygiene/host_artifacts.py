@@ -353,9 +353,8 @@ def check_host_artifacts(verify: bool = False) -> list[HygieneIssue]:
         if graded is not None:
             return graded + extra
         if failure is not None:
-            # `graded is None` means two different things — "not a scannable directory, fall back
-            # to the honest advice" and "the scan blew up". Conflated, a failed scan printed the
-            # fallback, which tells the operator to run `--verify`: the command they just ran.
+            # `graded is None` means both "nothing scannable here" and "the scan blew up", and
+            # conflated the second printed the fallback that says to run `--verify`.
             extra = [_scan_blocked_issue(weak[0][1], failure)] + extra
     return [HygieneIssue(
         id="host-drop-artifact-weak",
@@ -430,9 +429,7 @@ def _verify_weak_artifact(item: tuple[str, Path]) -> list[HygieneIssue] | None:
     elif v.too_large:
         outcome = "It is too large to scan automatically, so its contents were not checked."
     elif v.partial and v.unread:
-        # No claim that anything WAS scanned: one of the two states behind this returns before the
-        # scanner runs at all, and asserting a clean scan of "the rest" there is a scan that never
-        # happened being reported as a negative result.
+        # One of the two states behind this returns before the scanner runs at all.
         outcome = (f"It was not fully scanned: {'; '.join(v.unread)}. Its contents were not "
                    f"cleared. {_NOT_CLEARED}")
     elif v.partial:

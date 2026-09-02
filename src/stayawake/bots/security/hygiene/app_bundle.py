@@ -136,15 +136,9 @@ UNREADABLE = "unreadable"
 def _tail_lines(path: Path) -> tuple[list[bytes], str]:
     """(the file's last `_TRAILING_LINES_MAX` lines, what happened while reading them).
 
-    Three answers, and an unreadable file used to give the same one as a file that was read and
-    held nothing: `([], True)`. It then fell through the shape check with no finding, no count and
-    no mention anywhere in the report — the tier below the content scan, deciding whether that scan
-    happens at all, saying nothing when it could not decide.
-
-    A file that is not a regular file is not read either. `open()` on a FIFO blocks until something
-    writes to it, with no timeout, so anything able to append to a bundle module can also stop the
-    audit by creating one named `*.js` beside it. The engine guards exactly this before its own
-    read; this side did not.
+    Three answers: an unreadable file used to give the same one as a file read and found empty, so
+    it reached no finding, no count and no mention. `open()` on a FIFO blocks with no timeout, so
+    anything able to append to a module can stop the audit with one named `*.js` beside it.
     """
     wanted = _TRAILING_LINES_MAX
     try:
@@ -196,10 +190,8 @@ def _appended_line(lines: list[bytes]) -> tuple[int, int] | None:
 class _MarkerScan:
     """What a content scan of one module's directory established — including whether it happened.
 
-    Three states, and an empty marker list used to be all of them: nobody asked, it ran and found
-    nothing, and it could not run. That is the collapse `outcome.py` exists to prevent, one level
-    further down — the engine import is local and can fail on its own, and every failure was
-    answered with the list a clean scan returns.
+    An empty marker list used to mean all three of nobody asked, ran clean, and could not run —
+    the collapse `outcome.py` exists to prevent, one level further down.
     """
 
     markers: tuple[str, ...] = ()
@@ -222,9 +214,8 @@ def _scan_markers(directory: Path) -> _MarkerScan:
     """CONFIRMED markers in one module's own directory. The engine import is LOCAL, and the scan is
     opt-in because it is slow — see `saw#218` for the measurement.
 
-    `KeyboardInterrupt` is deliberately not caught, as in `run_probe`: this runs once per module,
-    so swallowing it here costs one interrupt per file to stop an audit, and the run that carried
-    on would report scans nobody performed.
+    `KeyboardInterrupt` is not caught, as in `run_probe`: this runs once per module, so swallowing
+    it costs one interrupt per file to stop an audit.
     """
     try:
         from stayawake.bots.security.verify import verify_dir
@@ -237,13 +228,8 @@ def _from_verdict(verdict) -> _MarkerScan:
     """The scan's own account of itself, not just its marker list.
 
     `verify_dir` almost never raises — it reports a tree it could not fully read in the verdict,
-    and its docstring says the caller must NOT render that as clean. Reading `.markers` alone made
-    every one of those "scanned, found nothing", including the two that return before the scanner
-    runs at all: a directory too large to scan, and one holding a pipe or device the scan must not
-    open. `scanned_clean` is the only field that means it looked and there was nothing.
-
-    The sibling consumer in `host_artifacts` reads all of these already; this asks the same
-    questions rather than a narrower one.
+    and `scanned_clean` is the only field meaning it looked and found nothing. Two of the others
+    return before the scanner runs at all. The sibling in `host_artifacts` reads them all.
     """
     if verdict.markers:
         return _MarkerScan(markers=tuple(verdict.markers), asked=True)
@@ -256,8 +242,7 @@ def _why_not_cleared(verdict) -> str:
     if verdict.too_large:
         return "it is too large to scan automatically"
     if verdict.partial and verdict.unread:
-        # Not "not everything was read": one of the two states behind this returns before the
-        # scanner runs at all, so asserting a partial scan would overstate what happened.
+        # One of the two states behind this returns before the scanner runs at all.
         return "it was not fully scanned (" + "; ".join(verdict.unread) + ")"
     if verdict.partial:
         return "part of it could not be read"
@@ -274,9 +259,8 @@ def check_app_bundles(verify: bool = False) -> list[HygieneIssue]:
     the module's own directory, and CONFIRMED markers corroborate it into an active foothold — two
     findings rather than one with a hedge, so the rotation gate follows evidence, not shape.
 
-    A scan that could not run is the same two-findings shape: the module keeps its `info` grade for
-    what was observed, and the hole is its own item — something found and a look that did not
-    happen are different claims, and the report groups them differently."""
+    A scan that could not run is the same two-findings shape: something found and a look that did
+    not happen are different claims, and the report groups them differently."""
     issues: list[HygieneIssue] = []
     unbounded = truncated = unreadable = 0
     unscanned: list[str] = []
@@ -348,10 +332,9 @@ def _unexamined_note(unbounded: int, truncated: int) -> HygieneIssue | None:
 def _unreadable_note(count: int) -> HygieneIssue | None:
     """Modules the host would not let this read at all.
 
-    Its own grade, not folded into the note above: the two counted there are bounds THIS TOOL
-    chose, and a location the host refused is a hole, which is the one that withholds the rotation
-    all-clear. MEASURED before gating it — 22477 modules under 44 enumerated roots on an ordinary
-    macOS host, none of them unreadable and none of them anything but a regular file.
+    Its own grade: the note above counts bounds THIS TOOL chose, and a location the host refused is
+    a hole. MEASURED before gating rotation on it — 22477 modules under 44 roots on an ordinary
+    host, none unreadable and none anything but a regular file.
     """
     if not count:
         return None
@@ -369,9 +352,8 @@ def _unreadable_note(count: int) -> HygieneIssue | None:
 def _unscanned_note(reasons: list[str]) -> HygieneIssue | None:
     """The corroboration `--verify` promised and did not deliver.
 
-    One item for the run rather than one per module: the modules are already named above, and the
-    cause is the same for all of them. It carries the rotation gate, because a scan that did not
-    run cannot say there is no live foothold — and rotating over one is the reported wiper trigger.
+    One item for the run: the modules are named above and the cause is shared. It carries the
+    rotation gate, because a scan that did not run cannot say there is no live foothold.
     """
     if not reasons:
         return None
@@ -411,19 +393,12 @@ def _finding(module: Path, pad: int, body: int, scan: _MarkerScan) -> HygieneIss
 def _corroboration(scan: _MarkerScan) -> str:
     """What the content scan contributed, said accurately.
 
-    One sentence used to cover all three states, and it read "`saw audit --verify` looks harder at
-    it" — which is advice to run what the operator had just run, over a scan that failed, and a
-    result withheld from one that succeeded.
-
-    Keep each branch to one short sentence by hand: the word-budget test reads string literals out
-    of the `HygieneIssue(...)` call, so it cannot see these and will not stop them growing.
+    Keep each branch to one short sentence by hand: the word-budget test reads literals out of the
+    `HygieneIssue(...)` call, so it cannot see these and will not stop them growing.
     """
     if scan.blocked:
         return "The scan that would clear it did not complete."
     if scan.ran:
-        # Hedged, because the field behind it is CONFIRMED-only: the engine drops its weaker tiers
-        # before answering, so "clean" here is narrower than an operator reads it. The sibling
-        # consumer attaches the same caution to the same field, and the first version of this
-        # dropped it.
+        # Hedged: the field behind it is CONFIRMED-only, so "clean" is narrower than it reads.
         return "A scan of its directory found no confirmed markers, which does not clear it."
     return "`saw audit --verify` looks harder at it."
