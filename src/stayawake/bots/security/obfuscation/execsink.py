@@ -43,15 +43,24 @@ _GLOBAL_OBJECT = r"(?:globalThis|window|global|self)"
 # a long run of identifier characters, which test_redos_safety measured at >5s on 300,000 of them.
 _NAME = r"[A-Za-z_$][\w$]{0,64}"
 _PROPERTY_PATH = rf"(?:{_NAME}\s*\.\s*){{1,6}}{_NAME}"
+# `Function.prototype.call.bind(x)` borrows a method from a FOREIGN object and is the uncurry-this
+# idiom. `Function.prototype.constructor`, `eval.bind(g)` and `eval.constructor` are the builtin
+# itself, and they run — so the exclusion names that idiom rather than every member access on it.
+_UNCURRY_THIS = r"\s*\.\s*prototype\s*\.\s*(?:call|apply|bind)\s*\.\s*bind\b"
+_BUILTIN_NAME = rf"(?:eval|Function)(?![\w$])(?!{_UNCURRY_THIS})"
 _THE_BUILTIN_ITSELF = (
-    r"(?:(?:eval|Function)(?![\w$])(?!\s*[.\[])"
-    rf"|{_GLOBAL_OBJECT}\s*\.\s*(?:eval|Function)(?![\w$])(?!\s*[.\[])"
+    rf"(?:{_BUILTIN_NAME}"
+    rf"|{_GLOBAL_OBJECT}\s*\.\s*{_BUILTIN_NAME}"
     rf"|{_GLOBAL_OBJECT}\s*\[\s*[\"'](?:eval|Function)[\"']\s*\])"
 )
 _BIND_EVAL_FN = re.compile(
     rf"(?:const|let|var)\s+({_NAME})\s*=\s*{_THE_BUILTIN_ITSELF}"
     rf"|({_PROPERTY_PATH})\s*=(?!=)\s*{_THE_BUILTIN_ITSELF}"
+    # No declarator: a class field (`$eval = eval`) and a plain reassignment bind just as well.
+    rf"|(?<![.\w$])({_NAME})\s*=(?!=)\s*{_THE_BUILTIN_ITSELF}"
+    # `{ eval: X }` renames it out; `{ X: eval }` names it in. Both bind, in opposite directions.
     rf"|(?:const|let|var)\s*\{{[^}}\n]{{0,120}}?(?<![\w$])(?:eval|Function)\s*:\s*({_NAME})"
+    rf"|({_NAME})\s*:\s*{_THE_BUILTIN_ITSELF}"
 )
 _BIND_DANGEROUS_KEY = re.compile(
     r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*[\"'](?:eval|Function|constructor)[\"']"
@@ -79,15 +88,13 @@ def _has_obfuscated_exec_forms(s: str) -> bool:
     if _INDIRECT_EVAL.search(s):
         return True
     for m in _BIND_EVAL_FN.finditer(s):
-        bound = m.group(1) or m.group(2) or m.group(3)
+        bound = next((g for g in m.groups() if g), None)
         if not bound:
             continue
         called = r"\s*\.\s*".join(re.escape(part.strip()) for part in bound.split("."))
         # The whole text, not a window: the binding IS the signal here, and a hoisted function may
         # call it from above. A 240-char window missed a real alias by 600 characters.
-        # A leading dot is only someone else's property when an identifier precedes it; in `...name`
-        # it is the spread operator, and the name is still the binding made above.
-        if re.search(rf"(?<![\w$])(?<![\w$)\]]\.){called}\s*\(", s):
+        if re.search(rf"(?<![\w$]){called}\s*\(", s):
             return True
     for m in _BIND_DANGEROUS_KEY.finditer(s):
         name = re.escape(m.group(1))
@@ -133,11 +140,22 @@ _EXEC_SINK_NO_DECODE = re.compile(
 )
 
 _COMMAND_RUNNER = re.compile(
-    r"\b(?:" + "|".join(sorted(CP_RUNNERS - {"exec"})) + r")\s*\("
-    # `.exec(` is RegExp.prototype.exec — a JWT reader pairs it with `atob` and is not a dropper.
-    # A child_process receiver still carries the module name, which the last arm matches.
-    r"|(?<![.\w$])exec\s*\("
-    r"|\b(?:" + "|".join(sorted(CP_MODULES)) + r")\b")
+    r"\b(?:" + "|".join(sorted(CP_RUNNERS)) + r")\s*\(|\b(?:" + "|".join(sorted(CP_MODULES)) + r")\b")
+
+# What a token reader has before `.exec(`. Excluding every DOTTED receiver instead also excluded
+# `cp.exec(atob(p))`, and a dropper that conceals the module name behind a decode leaves no literal
+# for the module arm to catch — so the more obfuscated it was, the better it evaded.
+_REGEXP_RECEIVER = re.compile(
+    r"(?:/[^/\n]{1,200}/[gimsuyd]{0,7}|\bRegExp\s*\([^)\n]{0,200}\))\s*\.\s*$")
+
+
+def _runs_a_command(view: str) -> bool:
+    """True when `view` holds a command runner that is not `RegExp.prototype.exec`."""
+    for m in _COMMAND_RUNNER.finditer(view):
+        if m.group(0).lstrip().startswith("exec") and _REGEXP_RECEIVER.search(view[:m.start()]):
+            continue
+        return True
+    return False
 
 _CHARCODE_CONSUMER = re.compile(r"fromCharCode|fromCodePoint", re.IGNORECASE)
 
@@ -180,7 +198,7 @@ def _has_exec_sink_beyond_decoding(s: str, framework_members_excused: bool = Fal
     if any(not _NEW_CLONE_PREFIX.search(view[max(0, m.start() - 48):m.start()])
            for m in _CONSTRUCTOR_EXEC.finditer(view)):
         return True
-    return bool(_DECODE_PRIMITIVE.search(view) and _COMMAND_RUNNER.search(view))
+    return bool(_DECODE_PRIMITIVE.search(view) and _runs_a_command(view))
 
 
 def _is_charcode_shuffler(s: str) -> bool:

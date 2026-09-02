@@ -641,6 +641,36 @@ class TestWholeFileObfuscation(unittest.TestCase):
         for rel in ("loader.js", "vendor/left-pad/index.js", "assets/app.min.js"):
             self.assertIn("loader-fromcharcode-127", _scan({rel: worm}), rel)
 
+    def test_the_exclusions_name_an_idiom_not_a_whole_category(self):
+        """Both narrowings first excluded a category and lost real detections with it.
+
+        `Function.prototype.call.bind(x)` borrows a FOREIGN method; `Function.prototype.constructor`
+        and `eval.bind(g)` are the built-in and they run. A regular-expression receiver is what a
+        token reader has before `.exec(`; `cp.exec(...)` is a command, and a dropper that hides the
+        module name behind a decode leaves no literal for the module arm to find."""
+        for name, src in {
+            "ctor.js": "const Ctor = Function.prototype.constructor;\n"
+                       "export async function boot(u){ return Ctor(await (await fetch(u)).text())(); }\n",
+            "bind.js": "const e = eval.bind(globalThis);\ne(await res.text());\n",
+            "evalctor.js": "const F = eval.constructor;\nF('return 2+3')();\n",
+            "concealed.js": "const M = atob('Y2hpbGRfcHJvY2Vzcw==');\n"
+                            "const cp = require(M);\ncp.exec(atob(P));\n",
+            "optional.js": "const cp = require(M);\ncp?.exec(atob(P));\n",
+        }.items():
+            self.assertIn(OBF, _scan({name: src}), name)
+
+    def test_a_rename_is_caught_however_it_is_bound_and_however_it_is_called(self):
+        """A class field and an object-literal property bind it too, and an alias reached as a
+        property is still that alias — main misses all three."""
+        for name, src in {
+            "field.js": "export class Sandbox {\n  $eval = eval;\n"
+                        "  async run(u){ return this.$eval(await (await fetch(u)).text()); }\n}\n",
+            "literal.js": "const h = { $eval: eval };\nh.$eval(src);\n",
+            "property.js": "const evl = eval;\nexport const runtime = { evl };\n"
+                           "runtime.evl(await res.text());\n",
+        }.items():
+            self.assertIn(OBF, _scan({name: src}), name)
+
     def test_a_regex_exec_beside_a_decode_is_not_a_dropper(self):
         """`.exec` is `RegExp.prototype.exec`. The guard above this one only passed because it
         picked the Node spelling — `Buffer.from`; the browser spelling of the same reader fired."""
