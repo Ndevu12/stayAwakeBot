@@ -9,6 +9,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from stayawake.bots.security.models import QUARANTINE_DIR
 from stayawake.bots.security.remediation import installed
 
 
@@ -563,10 +564,69 @@ class TestTheProjectTreeIsRemovedOnTheRepo(unittest.TestCase):
         (repo.root / ".next" / "cache").write_text("x", encoding="utf-8")
         (repo.root / ".venv").mkdir()
         (repo.root / ".venv" / "pyvenv.cfg").write_text("x", encoding="utf-8")
-        installed.remove_rebuildable(repo.root, exclude_dirs={".git", "node_modules", "dist", ".venv"})
+        installed.remove_rebuildable(repo.root)
         self.assertFalse((repo.root / "dist").exists())
         self.assertFalse((repo.root / ".next").exists())
         self.assertTrue((repo.root / ".venv").is_dir())
+
+    def test_a_directory_the_user_excluded_from_scanning_is_never_removed(self):
+        """`exclude_dirs` is documented as directories never TRAVERSED. It was unioned into the
+        delete set, so vendored code, fixtures and test corpora were destroyed — with no copy,
+        because this path made no quarantine at all."""
+        repo = _Repo()
+        repo.install("left-pad", "1.0.0")
+        for name in ("vendor", "fixtures", "testdata"):
+            (repo.root / name).mkdir()
+            (repo.root / name / "hand-written.txt").write_text("mine", encoding="utf-8")
+        installed.remove_rebuildable(repo.root)
+        for name in ("vendor", "fixtures", "testdata"):
+            self.assertTrue((repo.root / name / "hand-written.txt").is_file(), name)
+
+    def test_generated_outputs_are_kept_when_nothing_proves_the_tree(self):
+        """The removal sat outside the guard, so it ran after the plan had already concluded that
+        no lockfile means nothing proves what the tree should contain."""
+        repo = _Repo(lockfile=False)
+        (repo.root / "dist").mkdir()
+        (repo.root / "dist" / "app.js").write_text("x", encoding="utf-8")
+        report = installed.remove_rebuildable(repo.root)
+        self.assertEqual(report.removed_builds, [])
+        self.assertTrue((repo.root / "dist" / "app.js").is_file())
+
+    def test_a_declared_project_with_no_installed_tree_still_clears_its_outputs(self):
+        """The first gate for this used `safe_to_remove`, which also requires an installed package
+        proven derivable — so a repository with a lockfile and nothing installed stopped clearing
+        its own `dist`. That is the right test for deleting the installed tree and the wrong one
+        for a generated output."""
+        repo = _Repo()
+        (repo.root / "dist").mkdir()
+        (repo.root / "dist" / "app.js").write_text("built", encoding="utf-8")
+        report = installed.remove_rebuildable(repo.root)
+        self.assertEqual(report.removed_builds, ["dist"])
+        self.assertFalse((repo.root / "dist").exists())
+
+    def test_a_generated_output_is_copied_out_before_it_is_removed(self):
+        """Copy it out, then delete — the rule the package path already follows, and the one
+        removal here that followed neither."""
+        repo = _Repo()
+        repo.install("left-pad", "1.0.0")
+        (repo.root / "dist").mkdir()
+        (repo.root / "dist" / "app.js").write_text("built", encoding="utf-8")
+        report = installed.remove_rebuildable(repo.root)
+        self.assertIn("dist", report.removed_builds)
+        self.assertFalse((repo.root / "dist").exists())
+        saved = list((repo.root / QUARANTINE_DIR).rglob("dist/app.js"))
+        self.assertTrue(saved, "the content is gone with no copy")
+        self.assertEqual(saved[0].read_text(encoding="utf-8"), "built")
+
+    def test_the_note_says_the_working_tree_changed_and_where_the_copies_are(self):
+        """A reader of `--pr` may take it as "prepare a branch for review". The removals happen in
+        the checkout they are standing in, and do not wait for the pull request."""
+        repo = _Repo()
+        repo.install("left-pad", "1.0.0")
+        note = installed.remove_rebuildable(repo.root).note()
+        self.assertIn("working tree", note)
+        self.assertIn(QUARANTINE_DIR, note)
+        self.assertEqual(installed.Report().note(), "", "a run that did nothing claims nothing")
 
     def test_a_tree_outside_the_repository_is_not_touched(self):
         repo = _Repo()
