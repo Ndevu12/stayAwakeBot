@@ -265,6 +265,9 @@ def apply_one(path: Path) -> PathOutcome:
     Privilege is asked of the PATH, not of the command: most locations a payload stages into are
     the operator's own, and refusing to act on any of them until the whole run is root turns a
     control most people could have into one most people will not run.
+
+    Everything past the `chmod` changes the location, so every exit past it hands the location back
+    rather than leaving it read-only and owned by somebody the operator is not.
     """
     already = _graded(path)
     if already is not None:
@@ -291,7 +294,6 @@ def apply_one(path: Path) -> PathOutcome:
             return PathOutcome(path, NEEDS_ROOT,
                                "this location is not yours to write to — run again with sudo")
         return _unknown(path, "could not be created")
-    # Everything past here changes the location, so every exit past here hands it back.
     owner_before = _owner_of(path)
     try:
         os.chmod(path, 0o555, follow_symlinks=False)

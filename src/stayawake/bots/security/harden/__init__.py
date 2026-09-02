@@ -61,12 +61,13 @@ def take_back(*, folders=_global_folders, remove=remove_one,
 
     No capture gate here: this opens a location rather than closing one, so it cannot crash a
     process that a payload is holding open — which is the reason applying one waits for capture.
+
+    A location holding content is never settled, locked or open: counting it as one reported a
+    machine as back to normal over content nobody had read.
     """
     if not supported():
         return 2, _NOT_HERE
     outcomes = [remove(p) for p in folders()]
-    # A location holding content is NOT settled, locked or open: counting it that way reported a
-    # machine as back to normal over content nobody had read.
     settled = {REMOVED, NOTHING_TO_REMOVE}
     done = bool(outcomes) and all(o.state in settled for o in outcomes)
     lines = [_TOOK_BACK if done else _NOT_ALL_BACK, ""]
@@ -85,6 +86,9 @@ def run(*, live=check_live_processes, folders=_global_folders,
     operator, so requiring privilege for the whole run withheld a control they could have had from
     every person unwilling to give a security tool root — while the locations that need it are
     named, not silently skipped.
+
+    Every note that applies is printed, not the first that matches: a chain dropped whichever came
+    second, and a run can hold both.
     """
     if not supported():
         return 2, _NOT_HERE
@@ -99,7 +103,6 @@ def run(*, live=check_live_processes, folders=_global_folders,
     applied = bool(outcomes) and all(o.state in took for o in outcomes)
     headline = _CLAIM if applied else _NOT_EVERYWHERE
     lines = [headline, ""]
-    # Every note that applies, not the first: a chain silently dropped whichever came second.
     states = {o.state for o in outcomes}
     for note, fires in ((_SOME_ARE_YOURS, applied and SELF_ENFORCING in states),
                         (_LEFT_OPEN_NOTE, LEFT_OPEN_OVER_CONTENT in states),

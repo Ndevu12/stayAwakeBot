@@ -655,9 +655,10 @@ class TestTheReadBackDoesNotTrustPath(unittest.TestCase):
     def test_a_tool_that_is_not_there_is_never_looked_for_on_path(self):
         """Asserting only the return value cannot see this: on a host without the tool, a bare
         name fails too, so both answer False and the mutation hides. What has to hold is that
-        nothing is executed at all — that is what keeps `PATH` out of the decision."""
-        # A directory that EXISTS: the write paths check the path first, so a made-up one bails
-        # before it would ever look for a tool, and the assertion passes without testing anything.
+        nothing is executed at all — that is what keeps `PATH` out of the decision.
+
+        The fixture has to EXIST: the write paths check it first, so a made-up one bails before it
+        would look for a tool and the assertions pass without testing anything."""
         target = Path(tempfile.mkdtemp(prefix="harden-notool-"))
         self.addCleanup(lambda: __import__("shutil").rmtree(target, ignore_errors=True))
         with mock.patch.object(hostdenial, "_attr_tool", return_value=None), \
