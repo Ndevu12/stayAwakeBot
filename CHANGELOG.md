@@ -13,6 +13,9 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Added
+- **A renamed call to a dangerous built-in is reported however the rename is spelled.**
+
 ### Fixed
 - **Browser-automation code is no longer reported as suspicious.** A driver that scripts a
   headless browser was read as carrying a dynamic-execution sink, so it recurred on every scan
