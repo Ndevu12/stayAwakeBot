@@ -15,7 +15,7 @@ from stayawake.bots.security.taint.model import CP_RUNNERS, CP_MODULES
 
 _NUM_ARRAY = re.compile(r"\[\s*(?:0x[0-9a-fA-F]+|\d{1,3})\s*(?:,\s*(?:0x[0-9a-fA-F]+|\d{1,3})\s*){7,}\]")
 _EXEC_SINK = re.compile(
-    r"\beval\s*\(|new\s+Function\s*\(|\bFunction\s*\(\s*[\"']|\batob\s*\(|"
+    r"(?<![\w$])eval\s*\(|new\s+Function\s*\(|\bFunction\s*\(\s*[\"']|\batob\s*\(|"
     r"String\s*[.\[]\s*[\"']?fromCharCode|global\s*\[\s*['\"]!['\"]\s*\]\s*=|"
     r"\brunInThisContext\s*\(|\brunInNewContext\s*\(|"
     r"\bvm\s*\.\s*runInContext\s*\(|"
@@ -38,8 +38,9 @@ _STR_CONCAT_FOLD = re.compile(
 _INDIRECT_EVAL = re.compile(
     r"\(\s*(?:0|1|void\s+0|null|undefined|!0|!1)\s*,\s*(?:eval|Function)\s*\)\s*\("
 )
+_UNCURRY_THIS = r"\s*\.\s*(?:prototype\s*\.\s*)?(?:call|apply|bind)\s*\.\s*bind\b"
 _BIND_EVAL_FN = re.compile(
-    r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:eval|Function)\b"
+    r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:eval|Function)\b(?!" + _UNCURRY_THIS + r")"
 )
 _BIND_DANGEROUS_KEY = re.compile(
     r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*[\"'](?:eval|Function|constructor)[\"']"
@@ -117,6 +118,23 @@ _EXEC_SINK_NO_DECODE = re.compile(
 _COMMAND_RUNNER = re.compile(
     r"\b(?:" + "|".join(sorted(CP_RUNNERS)) + r")\s*\(|\b(?:" + "|".join(sorted(CP_MODULES)) + r")\b")
 
+_REGEXP_RECEIVER = re.compile(
+    r"(?:/[^/\n]{1,200}/[gimsuyd]{0,7}|\bRegExp\s*\([^)\n]{0,200}\))\s*\.\s*$")
+_BARE_EXEC_CALL = re.compile(r"^exec\s*\($")
+
+
+_RECEIVER_LOOKBACK = 224
+
+
+def _runs_a_command(view: str) -> bool:
+    """Return True if `view` calls a child_process runner."""
+    for m in _COMMAND_RUNNER.finditer(view):
+        if _BARE_EXEC_CALL.match(m.group(0)) and _REGEXP_RECEIVER.search(
+                view[max(0, m.start() - _RECEIVER_LOOKBACK):m.start()]):
+            continue
+        return True
+    return False
+
 _CHARCODE_CONSUMER = re.compile(r"fromCharCode|fromCodePoint", re.IGNORECASE)
 
 
@@ -136,7 +154,7 @@ def _has_exec_sink_beyond_decoding(s: str) -> bool:
     if any(not _NEW_CLONE_PREFIX.search(view[max(0, m.start() - 48):m.start()])
            for m in _CONSTRUCTOR_EXEC.finditer(view)):
         return True
-    return bool(_DECODE_PRIMITIVE.search(view) and _COMMAND_RUNNER.search(view))
+    return bool(_DECODE_PRIMITIVE.search(view) and _runs_a_command(view))
 
 
 def _is_charcode_shuffler(s: str) -> bool:

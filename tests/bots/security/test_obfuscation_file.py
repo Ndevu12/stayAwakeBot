@@ -604,6 +604,79 @@ class TestWholeFileObfuscation(unittest.TestCase):
             self.assertTrue(_has_exec_sink(code, strict=True), f"gate must refuse: {code}")
             self.assertFalse(_has_exec_sink(code, strict=False), f"scan must be clean: {code}")
 
+    # ── saw#232 ──
+    def test_a_dollar_prefixed_member_named_eval_is_not_the_builtin(self):
+        """A `$eval` member call is not reported by the scan or refused by the gate."""
+        for name, src in {
+            "playwright.mjs": 'const n = await page.$eval("#root", (el) => el.innerHTML.length);\n',
+            "playwright2.mjs": 'const ids = await page.$$eval("li", (els) => els.map((e) => e.id));\n',
+            "puppeteer.js": "const v = await page.$eval('#search', el => el.value);\n",
+            "angular.js": "const out = $scope.$eval(expr);\n",
+            "angular2.js": "scope.$eval(attrs.ngInit);\n",
+        }.items():
+            self.assertNotIn(OBF, _scan({name: src}), name)
+            self.assertFalse(_has_exec_sink(src, strict=True), f"gate must not refuse: {name}")
+
+    def test_the_builtin_is_still_caught_whichever_way_it_is_reached(self):
+        """Every spelling that reaches the built-in is reported and refused."""
+        for name, src in {
+            "bare.js": "eval(userInput);\n",
+            "keyword.js": "function f(s) { return eval(s); }\n",
+            "window.js": "window.eval(payload);\n",
+            "globalThis.js": "globalThis.eval(src);\n",
+            "global.js": "global.eval(s);\n",
+            "indirect.js": "(0, eval)(src);\n",
+            "computed.js": "x['eval'](src);\n",
+            "alias.js": "const $eval = eval;\n$eval(payload);\n",
+            "ctor.js": "a.constructor.constructor('return this')();\n",
+        }.items():
+            self.assertIn(OBF, _scan({name: src}), name)
+            self.assertTrue(_has_exec_sink(src, strict=True), f"gate must refuse: {name}")
+
+    def test_a_confirmed_signature_still_reports_where_it_is_the_only_tier(self):
+        """A confirmed loader signature still reports in vendored and minified paths."""
+        worm = ("const parts = data.split(String.fromCharCode(127));\n"
+                "const stage2 = eval(parts[1]);\n")
+        for rel in ("loader.js", "vendor/left-pad/index.js", "assets/app.min.js"):
+            self.assertIn("loader-fromcharcode-127", _scan({rel: worm}), rel)
+
+    def test_a_token_reader_is_not_a_dropper(self):
+        """A token reader is clean; a real dropper still reports."""
+        for name, src in {
+            "jwt.js": "const p = atob(tok.split('.')[1]);\n"
+                      "const claims = /\"exp\":(\\d+)/.exec(p);\n",
+            "keypad.js": "const ch = String.fromCharCode(e.which);\n"
+                         "export const ok = /^[\\w]$/.exec(ch) ? ch : '';\n",
+            "ctor.js": "const p = atob(b);\nconst m = RegExp('x').exec(p);\n",
+        }.items():
+            self.assertNotIn(OBF, _scan({name: src}), name)
+        for name, src in {
+            "drop.js": "const {execSync} = require('child_process');\nexecSync(atob(blob));\n",
+            "bare.js": "exec(atob(blob));\n",
+            "concealed.js": "const cp = require(atob('Y2hpbGRfcHJvY2Vzcw=='));\ncp.exec(atob(P));\n",
+            "sync.js": "const p = atob(b);\nrx.execSync(p);\n",
+        }.items():
+            self.assertIn(OBF, _scan({name: src}), name)
+
+    def test_a_common_helper_idiom_is_not_an_alias(self):
+        """Both spellings of the helper are clean; reaching the built-in still reports."""
+        for name, src in {
+            "object.js": "const hasOwn = Function.prototype.call.bind(Object.prototype.hasOwnProperty);\n"
+                         "export function pick(s, k) { return hasOwn(s, k); }\n",
+            "uncurry.js": "const u = Function.prototype.bind.bind(Function.prototype.call);\n"
+                          "export const push = u(Array.prototype.push);\n",
+            "short.js": "const hasOwn = Function.call.bind(Object.prototype.hasOwnProperty);\n"
+                        "export function has(n, k) { return hasOwn(n, k); }\n",
+        }.items():
+            self.assertNotIn(OBF, _scan({name: src}), name)
+        for name, src in {
+            "ctor.js": "const C = Function.prototype.constructor;\nC('return 1')();\n",
+            "bind.js": "const e = eval.bind(globalThis);\ne(payload);\n",
+            "evalctor.js": "const F = eval.constructor;\nF('return 2')();\n",
+            "fbind.js": "const F = Function.bind(null);\nF('return 9')();\n",
+        }.items():
+            self.assertIn(OBF, _scan({name: src}), name)
+
     # ── #1207 residual (after #1206; orthogonal to #1208/#1266): split-token via
     #    concat-fold, indirect comma-call, light alias / runtime-key — heuristic. ──
     def test_split_token_exec_flagged(self):
