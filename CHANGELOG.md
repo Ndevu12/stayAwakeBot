@@ -13,6 +13,15 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Fixed
+- **Browser-automation code is no longer reported as suspicious.** A driver that scripts a
+  headless browser was read as carrying a dynamic-execution sink, so it recurred on every scan
+  and, on a cleanup, sent a file that needed no review to one.
+- **A browser-side token reader is no longer reported as suspicious.** It was reported on every
+  scan.
+- **A common helper idiom is no longer reported as suspicious.** Both spellings of it are now
+  recognised.
+
 ## [0.8.0] - 2026-09-02
 
 ### Added
