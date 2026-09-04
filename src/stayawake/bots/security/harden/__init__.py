@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from stayawake.bots.security.hygiene.host_artifacts import _global_folders
 from stayawake.bots.security.hygiene.models import PROCESSES_NOT_READABLE_ID
+from stayawake.bots.security.hygiene.outcome import BLOCKED, run_probe
 from stayawake.bots.security.hygiene.process import check_live_processes
-from stayawake.utils import hostdenial
+from stayawake.utils import hostdenial, textsafe
 from .denial import (ENFORCING, HELD_BY_ANOTHER, IN_A_LIVE_INSTALL, LEFT_OPEN_OVER_CONTENT,
                      NEEDS_ROOT, NOT_HERE_YET, LOCKED_OVER_CONTENT, NOTHING_TO_REMOVE,
                      NOT_WHERE_IT_WAS_NAMED, OCCUPIED, REMOVED, SELF_ENFORCING, UNKNOWN,
@@ -27,6 +28,11 @@ _REFUSED_LIVE = (
 _REFUSED_UNREAD = (
     "Running processes could not be examined, so this control was not applied."
 )
+_REFUSED_BLOCKED = (
+    "Running processes could not be examined, so this control was not applied. "
+    "The check stopped on: {reason}"
+)
+_CAPTURE_EXCERPT = 300
 _NOT_HERE = "This control is not implemented on this platform."
 _CLAIM = (
     "The observed staging path is denied. A payload that guards the write and uses "
@@ -92,11 +98,16 @@ def run(*, live=check_live_processes, folders=_global_folders,
     """
     if not supported():
         return 2, _NOT_HERE
-    issues = list(live())
+    outcome = run_probe("running processes", live)
+    if outcome.state == BLOCKED:
+        return 1, _REFUSED_BLOCKED.format(reason=textsafe.plain(outcome.reason or "", limit=200))
+    issues = list(outcome.issues)
     if any(i.id == PROCESSES_NOT_READABLE_ID for i in issues):
         return 1, _REFUSED_UNREAD
-    if any(i.id == _LIVE for i in issues):
-        return 1, _REFUSED_LIVE
+    holding = [i for i in issues if i.id == _LIVE]
+    if holding:
+        named = [f"  {textsafe.plain(i.detail, limit=_CAPTURE_EXCERPT)}" for i in holding]
+        return 1, "\n".join([_REFUSED_LIVE, ""] + named)
 
     outcomes = [apply(p) for p in folders()]
     took = {ENFORCING, SELF_ENFORCING}

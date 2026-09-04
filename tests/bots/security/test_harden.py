@@ -65,6 +65,34 @@ class TestRunContract(unittest.TestCase):
         self.assertIn("capture", text.lower())
         self.assertNotIn("enforcing", text)
 
+    def test_a_probe_that_raises_does_not_take_the_command_down(self):
+        def boom():
+            raise OSError("kernel refused the process table")
+        code, text = harden.run(supported=lambda: True, folders=lambda: [], apply=lambda p: None,
+                                live=boom)
+        self.assertEqual(code, 1)
+        self.assertIn("could not be examined", text.lower())
+        self.assertIn("OSError", text)
+
+    def test_the_refusal_names_what_to_capture(self):
+        held = HygieneIssue(id="live-obfuscated-process", severity="warning", title="t",
+                            detail="pid 84645 (node) is executing dynamic-exec sink.",
+                            remediation="x")
+        code, text = harden.run(supported=lambda: True, folders=lambda: [], apply=lambda p: None,
+                                live=lambda: [held])
+        self.assertEqual(code, 1)
+        self.assertIn("pid 84645", text)
+
+    def test_a_named_process_cannot_control_the_terminal(self):
+        held = HygieneIssue(id="live-obfuscated-process", severity="warning", title="t",
+                            detail="pid 1 (node) \x1b[2K\r##[error]saw: all clear",
+                            remediation="x")
+        _code, text = harden.run(supported=lambda: True, folders=lambda: [], apply=lambda p: None,
+                                 live=lambda: [held])
+        self.assertNotIn("\x1b", text)
+        self.assertNotIn("\r", text)
+        self.assertNotIn("##[", text)
+
     def test_unreadable_processes_are_refused(self):
         code, text = harden.run(supported=lambda: True, folders=lambda: [], apply=lambda p: None,
                                 live=lambda: [_issue(PROCESSES_NOT_READABLE_ID)])
