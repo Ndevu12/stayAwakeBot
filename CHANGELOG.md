@@ -17,6 +17,9 @@ reader, not the mechanism or the weakness it closed.
 - **A renamed call to a dangerous built-in is reported however the rename is spelled.**
 
 ### Fixed
+- **A running process is now the first thing `saw audit` reads.** Everything else it examines stays
+  where it is; a process does not. It was read after the slower checks, so something that ran only
+  briefly could be gone by the time the audit looked at it.
 - **`saw harden` names the running process it is waiting for you to capture.** It refused with only
   the fact that something was holding code that is not on disk, so finding out what left you
   searching the process table by hand. It now names it, and what it names cannot rewrite the report

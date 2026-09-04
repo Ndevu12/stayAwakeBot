@@ -109,6 +109,14 @@ def held_by(path: Path) -> str | None:
     return OTHER_HELD
 
 
+def held_by_us(path: Path) -> bool:
+    """True when the denial at `path` is this tool's own work, at either grade.
+
+    A control under a third account is not ours, and is graded as it was before that state existed.
+    """
+    return held_by(path) in (ROOT_HELD, SELF_HELD)
+
+
 def holds(path: Path) -> bool:
     """True only when a read-back shows a root-owned immutable empty directory.
 

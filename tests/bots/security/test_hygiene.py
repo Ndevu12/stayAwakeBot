@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import stat
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,6 +11,7 @@ from unittest import mock
 
 from stayawake.bots.security.guard import GateProbe  # noqa: E402
 from stayawake.bots.security import hygiene
+from stayawake.utils import hostdenial
 
 
 class TestCredentials(unittest.TestCase):
@@ -469,6 +471,59 @@ class TestHostArtifacts(unittest.TestCase):
              mock.patch.object(hygiene, "check_host_artifacts", return_value=[sentinel]):
             ids = [i.id for i in hygiene.audit()]
         self.assertIn("host-drop-artifacts", ids)
+
+
+class TestVolatileEvidenceIsReadFirst(unittest.TestCase):
+    """The process table can leave mid-run; every other probe reads something that stays put."""
+
+    def test_running_processes_is_the_first_probe(self):
+        labels = [label for label, _check in hygiene.audit_checks(None, None, "main")]
+        self.assertEqual(labels[0], "running processes")
+
+    def test_every_probe_still_runs_exactly_once(self):
+        labels = [label for label, _check in hygiene.audit_checks(None, None, "main")]
+        self.assertEqual(len(labels), len(set(labels)))
+        self.assertIn("branch protection", labels)
+
+
+class TestControlsAreNotFlagged(unittest.TestCase):
+    """`saw audit` never reports a location `saw harden` controls as a finding."""
+
+    def setUp(self):
+        self.base = Path(tempfile.mkdtemp())
+        self.location = self.base / ".node_modules"
+        self.location.mkdir()
+        self.addCleanup(self._release)
+
+    def _release(self):
+        try:
+            os.chflags(self.location, 0)
+            os.chmod(self.location, 0o700)
+        except (OSError, AttributeError):
+            pass
+
+    def _lock(self):
+        os.chmod(self.location, 0o555)
+        try:
+            os.chflags(self.location, stat.UF_IMMUTABLE)
+        except (OSError, AttributeError):
+            self.skipTest("no user-settable immutable flag on this platform")
+        if not hostdenial.held_by_us(self.location):
+            self.skipTest("the immutable flag did not take on this filesystem")
+
+    def _findings_naming_it(self):
+        with mock.patch.object(hygiene.host_artifacts, "_global_folders", lambda: [self.location]):
+            issues = hygiene.host_artifacts.check_host_artifacts()
+        return [i for i in issues if str(self.location) in f"{i.title} {i.detail}"]
+
+    def test_a_control_is_credited_not_flagged(self):
+        self._lock()
+        self.assertEqual(self._findings_naming_it(), [])
+
+    def test_the_same_location_holding_a_tree_is_still_flagged(self):
+        (self.location / "index.js").write_text("x", encoding="utf-8")
+        self.assertIsNone(hostdenial.held_by(self.location))
+        self.assertTrue(self._findings_naming_it())
 
 
 class TestVerifyArtifactsOptIn(unittest.TestCase):
