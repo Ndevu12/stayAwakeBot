@@ -17,6 +17,13 @@ reader, not the mechanism or the weakness it closed.
 - **A renamed call to a dangerous built-in is reported however the rename is spelled.**
 
 ### Fixed
+- **`saw harden` names the running process it is waiting for you to capture.** It refused with only
+  the fact that something was holding code that is not on disk, so finding out what left you
+  searching the process table by hand. It now names it, and what it names cannot rewrite the report
+  it appears in.
+- **`saw harden` no longer ends with no output when it cannot examine running processes.** Whatever
+  stopped that check, the command now says so and says the control was not applied, rather than
+  stopping the whole run over one answer it could not get.
 - **Browser-automation code is no longer reported as suspicious.** A driver that scripts a
   headless browser was read as carrying a dynamic-execution sink, so it recurred on every scan
   and, on a cleanup, sent a file that needed no review to one.
