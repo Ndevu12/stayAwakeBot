@@ -580,6 +580,11 @@ class TestInvocationResolver(unittest.TestCase):
         self.assertEqual([grade.shell_code_args(a) for a in grade._command_argvs(entry)],
                          [(), ("/tmp/.stage",)])
 
+    def test_an_entry_with_no_command_line_offers_none(self):
+        entry = AutorunEntry(location="launch-agent", path="/x/a.plist", argv=[], shell_lines=[],
+                             body="<plist><string>/bin/sh</string><string>/tmp/.stage</string>")
+        self.assertEqual(grade._command_argvs(entry), [])
+
     def test_a_shell_accepts_its_options_clustered(self):
         # `bash -lc CMD` is one flag group, not an unknown option. Unrecognised, the code string
         # became `payload_path` — shell code read as a path to open, the guess this design refuses.
