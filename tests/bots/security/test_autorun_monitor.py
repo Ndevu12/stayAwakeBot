@@ -63,6 +63,125 @@ class TestSurfaceParse(_Surface):
         self.assertIn("run-at-load", e.persistence)
         self.assertIn("poll-interval=60s", e.persistence)
 
+    def test_a_damaged_launch_agent_is_still_read_for_what_it_runs(self):
+        good = _agent(ProgramArguments=["/tmp/.x/evil", "-q"], RunAtLoad=True, StartInterval=60).decode()
+        code = _agent(ProgramArguments=["/bin/sh", "-c", "cd /tmp/.x; /tmp/.x/run"], RunAtLoad=True,
+                      StartInterval=60).decode()
+        for name, raw in {
+            "truncated": good.rsplit("</plist>", 1)[0].encode(),
+            "unclosed dict": good.replace("</dict>", "", 1).encode(),
+            "leading junk": b"junk\x01 " + good.encode(),
+            "leading newline": b"\n" + good.encode(),
+            "utf-16 with trailing text": code.encode("utf-16") + "\ngarbage\n".encode("utf-16-le"),
+            "utf-32 with trailing text": code.encode("utf-32") + "\ngarbage\n".encode("utf-32-le"),
+            "utf-16 mark on utf-8 text": b"\xff\xfe" + code.encode() + b"x",
+            "declaration": good.replace('version="1.0"', 'version="1.0" x', 1).encode(),
+            "trailing text": good.encode() + b"\n<<<<<<< HEAD\n",
+            "control char": good.replace("-q", "-\x01q").encode(),
+            "comment before the array": good.replace("<array>", "<!-- argv --><array>", 1).encode() + b"x",
+            "comment inside the array": good.replace("</string>", "</string><!-- k -->", 1).encode() + b"x",
+            "wide whitespace": good.replace("<array>", "\n" + " " * 70 + "<array>", 1).encode() + b"x",
+            "string attribute": code.replace("<string>cd", '<string xml:space="preserve">cd').encode() + b"x",
+            "cdata": code.replace("<string>cd /tmp/.x; /tmp/.x/run</string>",
+                                  "<string><![CDATA[cd /tmp/.x; /tmp/.x/run]]></string>").encode() + b"x",
+            "long argument": code.replace("cd /tmp/.x;", "cd /tmp/.x; " + "true; " * 800).encode() + b"x",
+            "many arguments": code.replace("<string>-c</string>",
+                                           "<string>-x</string>" * 70 + "<string>-c</string>").encode() + b"x",
+            "decoy after the root": code.encode() + b"<dict><key>ProgramArguments</key><array>"
+                                                    b"<string>/usr/bin/true</string></array></dict>",
+            "decoy in a second plist": code.encode() + b'<plist version="1.0"><dict><key>ProgramArguments'
+                                                       b"</key><array><string>/usr/bin/true</string></array>"
+                                                       b"</dict></plist>",
+        }.items():
+            (self.d / "x.plist").write_bytes(raw)
+            (e,) = surface.enumerate_entries()[0]
+            self.assertIn(e.argv[0], ("/tmp/.x/evil", "/bin/sh"), name)
+            self.assertIn("/tmp/.x/", " ".join(e.argv), name)
+            self.assertEqual(len(e.argv), 2 if e.argv[0] == "/tmp/.x/evil" else len(e.argv), name)
+            self.assertEqual(e.shell_lines, [" ".join(e.argv)], name)
+            self.assertIn("run-at-load", e.persistence, name)
+            self.assertIn("poll-interval=60s", e.persistence, name)
+            self.assertTrue(grade.content_signal(e).hit, name)
+
+    def test_a_damaged_launch_agent_reads_its_triggers_as_an_intact_one_does(self):
+        for name, plist in {
+            "empty keep-alive": dict(ProgramArguments=["/tmp/p"], KeepAlive={}),
+            "keep-alive on exit": dict(ProgramArguments=["/tmp/p"], KeepAlive={"SuccessfulExit": False}),
+            "fractional interval": dict(ProgramArguments=["/tmp/p"], StartInterval=3600.0),
+            "whole interval": dict(ProgramArguments=["/tmp/p"], StartInterval=60),
+            "run at load off": dict(ProgramArguments=["/tmp/p"], RunAtLoad=False),
+            "empty watch list": dict(ProgramArguments=["/tmp/p"], WatchPaths=[]),
+            "calendar": dict(ProgramArguments=["/tmp/p"], StartCalendarInterval={"Hour": 3}),
+        }.items():
+            (self.d / "i.plist").write_bytes(_agent(**plist))
+            (intact,) = surface.enumerate_entries()[0]
+            (self.d / "i.plist").write_bytes(b"\n" + _agent(**plist))
+            (damaged,) = surface.enumerate_entries()[0]
+            self.assertEqual(damaged.argv, intact.argv, name)
+            self.assertEqual(damaged.persistence, intact.persistence, name)
+
+    def test_a_damaged_launch_agent_too_large_to_read_is_treated_as_before(self):
+        big = _agent(ProgramArguments=["/bin/sh", "-c", "cd /tmp/.x; /tmp/.x/run"], Blob="A" * (1 << 20))
+        (self.d / "big.plist").write_bytes(b"\n" + big)
+        (e,) = surface.enumerate_entries()[0]
+        self.assertEqual(e.argv, [])
+        self.assertEqual(e.shell_lines, [e.body])
+        self.assertTrue(grade.content_signal(e).hit)
+
+    def test_a_damaged_launch_agent_reads_a_program_as_written(self):
+        good = _agent(Program="/tmp/.x/a&b", KeepAlive=True).decode()
+        (self.d / "p.plist").write_bytes(good.rsplit("</plist>", 1)[0].encode())
+        (e,) = surface.enumerate_entries()[0]
+        self.assertEqual(e.argv, ["/tmp/.x/a&b"])
+        self.assertIn("keep-alive", e.persistence)
+
+    def test_a_damaged_launch_agent_is_judged_by_what_it_runs_not_by_its_text(self):
+        for name, plist in {
+            "pipe": dict(ProgramArguments=["/usr/bin/myd"], Comment="log | /tmp/app.sock"),
+            "backtick": dict(ProgramArguments=["/usr/bin/myd"], StandardOutPath="`/tmp/myd.log"),
+        }.items():
+            raw = _agent(**plist).decode().rsplit("</plist>", 1)[0].encode()
+            (self.d / "b.plist").write_bytes(raw)
+            (e,) = surface.enumerate_entries()[0]
+            self.assertNotIn(e.body, e.shell_lines, name)
+            self.assertFalse(grade.content_signal(e).hit, name)
+
+    def test_a_launch_agent_that_cannot_be_read_whole_names_no_command_and_is_still_scanned(self):
+        code = _agent(ProgramArguments=["/bin/sh", "-c", "cd /tmp/.x; /tmp/.x/run"], RunAtLoad=True).decode()
+        for name, raw in {
+            "unescaped <": code.replace("/tmp/.x/run<", "/tmp/.x/run </dev/null<").encode() + b"x",
+            "array cut short": code.split("</array>", 1)[0].encode(),
+            "nested value": code.replace("<string>-c</string>", "<dict></dict>", 1).encode() + b"x",
+            "key in the array": code.replace("<string>cd /tmp/.x; /tmp/.x/run</string>",
+                                             "<key>cd /tmp/.x; /tmp/.x/run</key>").encode() + b"x",
+            "comment in a value": code.replace("cd /tmp/.x;", "cd /tmp/.x <!-- k -->;").encode() + b"x",
+            "second array cut short": code.rsplit("</dict>", 1)[0].encode()
+                                      + b"<key>ProgramArguments</key><array><string>/usr/bin/true</string>",
+            "arguments as one string": code.replace("<key>ProgramArguments</key>",
+                                                    "<key>ProgramArguments</key><string>x</string>", 1)
+                                           .encode() + b"x",
+            "entity": code.replace("<plist", '<!DOCTYPE plist [<!ENTITY p "/tmp/.x/run">]><plist', 1)
+                          .replace("/tmp/.x/run</string>", "&p;</string>").encode() + b"x",
+            "openstep": b'{ Label = "a"; ProgramArguments = ( "/bin/sh", "-c", "cd /tmp/.x; /tmp/.x/run" ); }',
+            "no command": _agent(Label="x", Comment="a || /tmp/x").decode().rsplit("</plist>", 1)[0].encode(),
+        }.items():
+            (self.d / "u.plist").write_bytes(raw)
+            (e,) = surface.enumerate_entries()[0]
+            self.assertEqual(e.argv, [], name)
+            self.assertEqual(e.shell_lines, [e.body], name)
+            if name != "entity":
+                self.assertTrue(grade.content_signal(e).hit, name)
+
+    def test_an_intact_launch_agent_naming_no_command_is_judged_the_same_way(self):
+        for name, plist in {
+            "pipe": dict(Label="x", Comment="log | /tmp/app.sock"),
+            "backtick": dict(Label="x", StandardOutPath="`/tmp/myd.log"),
+        }.items():
+            (self.d / "c.plist").write_bytes(_agent(**plist))
+            (e,) = surface.enumerate_entries()[0]
+            self.assertNotIn(e.body, e.shell_lines, name)
+            self.assertFalse(grade.content_signal(e).hit, name)
+
     def test_parses_systemd_execstart(self):
         (self.d / "w.service").write_text("[Service]\nExecStart=-/usr/bin/foo --bar\n[Install]\nWantedBy=default.target\n")
         (e,) = surface.enumerate_entries()[0]
@@ -127,6 +246,11 @@ class TestFusionGrading(_Surface):
         issues = self._run(signed=True)
         self.assertIn(models.HygieneIssue, {type(i) for i in issues})
         self.assertIn("autorun-unattributed-foothold", self.ids(issues))
+
+    def test_a_damaged_launch_agent_is_graded_like_an_intact_one(self):
+        raw = _agent(ProgramArguments=["/tmp/agent"], RunAtLoad=True).decode()
+        (self.d / "t.plist").write_bytes(raw.rsplit("</plist>", 1)[0].encode())
+        self.assertIn("autorun-unattributed-foothold", self.ids(self._run()))
 
     def test_untrusted_path_with_persistence_is_a_foothold(self):
         self.write("t.plist", ProgramArguments=["/tmp/agent"], RunAtLoad=True)

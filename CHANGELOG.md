@@ -34,6 +34,9 @@ reader, not the mechanism or the weakness it closed.
   scan.
 - **A common helper idiom is no longer reported as suspicious.** Both spellings of it are now
   recognised.
+- **A damaged launch agent is now judged by what it runs.** One that macOS would still load was
+  reported as running nothing, and one that runs nothing untoward could be reported from the text
+  around its command.
 
 ## [0.8.0] - 2026-09-02
 
