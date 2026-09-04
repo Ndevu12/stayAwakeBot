@@ -617,6 +617,78 @@ class TestWholeFileObfuscation(unittest.TestCase):
             self.assertNotIn(OBF, _scan({name: src}), name)
             self.assertFalse(_has_exec_sink(src, strict=True), f"gate must not refuse: {name}")
 
+    def test_a_name_inside_a_longer_name_is_not_the_builtin(self):
+        for name, src in {
+            "decoder.js": "const out = $atob(token);\nexecSync(cmd);\n",
+            "ctor.ts": "const F = $Function('return 1');\nrunner.execSync(x);\n",
+            "vm.js": "const r = _runInThisContext(code);\n",
+            "reflect.js": "$Reflect.apply(eval, null, [x]);\n",
+        }.items():
+            self.assertNotIn(OBF, _scan({name: src}), name)
+
+    def test_the_builtin_is_caught_wherever_code_runs(self):
+        for name, src in {
+            "member.js": "window.eval(payload);\n",
+            "indirect.js": "(0, eval)(payload);\n",
+            "key.js": "globalThis['eval'](payload);\n",
+            "ctor.js": "new Function('return ' + payload)();\n",
+            "template.js": "const t = `${eval(payload)}`;\n",
+            "division.js": "const n = a / eval(payload) / 2;\n",
+            "after-pattern.js": "const re = /x/g; eval(payload);\n",
+            "line-break.js": "const re = /x\neval(payload)\nconst n = c / d;\n",
+            "postfix.js": "var i = 0; var h = i++ / 2; eval(payload) / 1;\n",
+            "keyword-property.js": "var h = cfg.in / 2; eval(payload) / 1;\n",
+            "keyword-name.js": "var of = 4; var h = of / 2; new Function(payload)() / 1;\n",
+            "template-division.js": "var s = `${n++ / 2}%`; eval(payload) / 1;\n",
+            "carriage-return.js": "var h = i++ / 2\r eval(payload) / 1\r",
+            "jsx.jsx": "const v = <tr><td></td><td>{eval(code) / 1}</td></tr>;\n",
+            "byte-order-mark.js": "\ufeffeval(atob(p));\n",
+            "zero-width.js": "\u200beval(payload);\n",
+            "carried.js": "execSync('node -e \"eval(atob(process.env.P))\"');\n",
+            "runner-after-division.js": "var h = i++ / 2; atob(s); require('child_process').exec(cmd) / 1;\n",
+            "suffixed-string.js": "var myString = String; myString.fromCharCode(...c);\n"
+                                  "require('child_process').exec(cmd);\n",
+            "suffixed-global.js": "var myglobal = global; myglobal['!'] = 1;\n",
+            "upper.js": "EVAL(payload);\n",
+        }.items():
+            self.assertIn(OBF, _scan({name: src}), name)
+
+    def test_a_renamed_builtin_is_caught_however_far_away_it_is_called(self):
+        far = "\n".join(f"function f{i}(a) {{ return a + {i}; }}" for i in range(40))
+        for name, src in {
+            "ctor.js": f"var $Function = Function;\n{far}\n"
+                       "module.exports = $Function('C,a', 'return new C(' + a + ')');\n",
+            "eval.js": f"const run = eval\n{far}\nrun(await (await fetch(u)).text());\n",
+            "exported.js": "var run = eval;\nexports.run = run;\nexports.run(payload);\n",
+            "guarded.js": f"var evaluate = eval;\n{far}\nif (evaluate(payload)) {{ done(); }}\n",
+            "callback.js": f"var evaluate = eval;\n{far}\nevaluate(payload, function () {{ done(); }});\n",
+        }.items():
+            self.assertIn(OBF, _scan({name: src}), name)
+        for name, src in {
+            "borrowed.js": f"var bind = Function.prototype.bind;\n{far}\n"
+                           "export const s = (f, q) => f.bind(null, q);\n",
+            "continued.js": f"var fnToString = Function\n  .prototype.toString;\n{far}\n"
+                            "export const src = fnToString(Object);\n",
+            "minified.js": f"!function(){{var e=eval;module.exports=typeof e}}();{far}\n"
+                           "!function(e){{e(1)}}(function(x){{return x}});\n",
+            "shadowed.js": f"const F = Function;\n{far}\nfunction g(F) {{ return F(2); }}\n",
+            "property.js": f"var run = Function;\nvar n = run.prototype;\n{far}\n"
+                           "function loader(n) { return n.run(42); }\n",
+            "declaration.js": f"var evaluate = eval;\nexports.hasEval = typeof evaluate === 'function';\n{far}\n"
+                              "function evaluate(node) { return node.value; }\n",
+            "declared.ts": f"var evaluate = eval;\nexport const hasEval = typeof evaluate === 'function';\n{far}\n"
+                           "declare module 'expr' {{ export function evaluate(src: string): unknown; }}\n",
+            "method.js": f"var evaluate = eval;\nexports.hasEval = typeof evaluate === 'function';\n{far}\n"
+                         "class Printer {{ evaluate(node) {{ return node.value; }} }}\n",
+            "private-method.js": f"var evaluate = eval;\n{far}\n"
+                                 "class P {{ #evaluate(n) {{ return n; }} run(n) {{ return this.#evaluate(n); }} }}\n",
+            "comment-continued.js": f"var fnToString = Function\n  // native\n  .prototype.toString;\n{far}\n"
+                                    "export const src = fnToString(Object);\n",
+            "blank-continued.js": f"var fnToString = Function\n\n  .prototype.toString;\n{far}\n"
+                                  "export const src = fnToString(Object);\n",
+        }.items():
+            self.assertNotIn(OBF, _scan({name: src}), name)
+
     def test_the_builtin_is_still_caught_whichever_way_it_is_reached(self):
         """Every spelling that reaches the built-in is reported and refused."""
         for name, src in {

@@ -8,6 +8,7 @@ stronger forms. Depends on `taint`; `taint` never depends on this module.
 from __future__ import annotations
 
 import re
+import unicodedata
 
 from stayawake.bots.security.taint.flow import _has_corroborated_dynamic_exec
 from stayawake.bots.security.taint.model import CP_RUNNERS, CP_MODULES
@@ -54,6 +55,36 @@ _BIND_DANGEROUS_KEY = re.compile(
     r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*[\"'](?:eval|Function|constructor)[\"']"
 )
 _ALIAS_CALL_WINDOW = 240
+_BARE_BINDING_END = re.compile(r"[ \t]*(?:;|$|\r?\n(?!\s*[.\[]))")
+_FAR_ALIAS_MIN_NAME = 3
+_NOT_A_DECLARATION = r"(?<![\w$.#])(?<!function\s)"
+_NOT_A_METHOD_BODY = r"(?![^()\n]{0,200}\)\s*\{)"
+_SINK_NAME = re.compile(
+    r"eval|Function|atob|runInThisContext|runInNewContext|vm|require|Reflect|"
+    + "|".join(sorted(CP_RUNNERS | CP_MODULES, key=len, reverse=True)),
+    re.IGNORECASE,
+)
+_NAME_MARKS = frozenset({"Mn", "Mc", "Pc"})
+
+
+def _continues_a_name(ch: str) -> bool:
+    """Return True if `ch` can be part of a JavaScript identifier."""
+    return ch.isalnum() or ch in "_$" or unicodedata.category(ch) in _NAME_MARKS
+
+
+def _sink_calls(pattern: re.Pattern, view: str):
+    """Yield the matches of `pattern` in `view` whose sink name is a whole identifier."""
+    for m in pattern.finditer(view):
+        name = _SINK_NAME.search(m.group(0))
+        if name is None:
+            yield m
+            continue
+        start, end = m.start() + name.start(), m.start() + name.end()
+        if start and _continues_a_name(view[start - 1]):
+            continue
+        if end < len(view) and _continues_a_name(view[end]):
+            continue
+        yield m
 
 
 def _fold_string_concats(s: str, max_passes: int = 24) -> str:
@@ -76,9 +107,13 @@ def _has_obfuscated_exec_forms(s: str) -> bool:
     if _INDIRECT_EVAL.search(s):
         return True
     for m in _BIND_EVAL_FN.finditer(s):
-        name = re.escape(next(g for g in m.groups() if g))
-        window = s[m.end():m.end() + _ALIAS_CALL_WINDOW]
-        if re.search(rf"(?<![\w$]){name}\s*\(", window):
+        alias = next(g for g in m.groups() if g)
+        name = re.escape(alias)
+        far = (m.group(1) and len(alias) >= _FAR_ALIAS_MIN_NAME
+               and _BARE_BINDING_END.match(s, m.end()))
+        if re.search(rf"(?<![\w$]){name}\s*\(", s[m.end():m.end() + _ALIAS_CALL_WINDOW]):
+            return True
+        if far and re.search(rf"{_NOT_A_DECLARATION}{name}\s*\({_NOT_A_METHOD_BODY}", s[m.end():]):
             return True
     for m in _BIND_DANGEROUS_KEY.finditer(s):
         name = re.escape(m.group(1))
@@ -107,7 +142,7 @@ def _has_exec_sink(s: str, strict: bool = False) -> bool:
     FP-prone for a scan finding but safe as a gate. In both, deferring on a benign shape is a
     safe false-positive, whereas trusting it could pass an RCE hidden in kept code."""
     view = _fold_string_concats(s)
-    if (_EXEC_SINK.search(view) or _REFLECTIVE_EXEC.search(view)
+    if (any(_sink_calls(_EXEC_SINK, view)) or _REFLECTIVE_EXEC.search(view)
             or _has_corroborated_dynamic_exec(view, strict=strict) or _has_obfuscated_exec_forms(view)):
         return True
     return any(
@@ -136,7 +171,7 @@ _RECEIVER_LOOKBACK = 224
 
 def _runs_a_command(view: str) -> bool:
     """Return True if `view` calls a child_process runner."""
-    for m in _COMMAND_RUNNER.finditer(view):
+    for m in _sink_calls(_COMMAND_RUNNER, view):
         if _BARE_EXEC_CALL.match(m.group(0)) and _REGEXP_RECEIVER.search(
                 view[max(0, m.start() - _RECEIVER_LOOKBACK):m.start()]):
             continue
@@ -156,13 +191,13 @@ def _has_exec_sink_beyond_decoding(s: str) -> bool:
     The text is NOT edited to ask this. Blanking the decode call first also blinds the decode-to-exec
     flow detector, which needs both halves; that broke two real detections."""
     view = _fold_string_concats(s)
-    if (_EXEC_SINK_NO_DECODE.search(view) or _REFLECTIVE_EXEC.search(view)
+    if (any(_sink_calls(_EXEC_SINK_NO_DECODE, view)) or _REFLECTIVE_EXEC.search(view)
             or _has_corroborated_dynamic_exec(view) or _has_obfuscated_exec_forms(view)):
         return True
     if any(not _NEW_CLONE_PREFIX.search(view[max(0, m.start() - 48):m.start()])
            for m in _CONSTRUCTOR_EXEC.finditer(view)):
         return True
-    return bool(_DECODE_PRIMITIVE.search(view) and _runs_a_command(view))
+    return bool(any(_sink_calls(_DECODE_PRIMITIVE, view)) and _runs_a_command(view))
 
 
 def _is_charcode_shuffler(s: str) -> bool:
