@@ -640,6 +640,59 @@ class TestWholeFileObfuscation(unittest.TestCase):
         for rel in ("loader.js", "vendor/left-pad/index.js", "assets/app.min.js"):
             self.assertIn("loader-fromcharcode-127", _scan({rel: worm}), rel)
 
+    def test_a_renamed_builtin_is_caught_at_the_rename(self):
+        """A rename bound from the global is reported however the rename is spelled."""
+        for name, src in {
+            "destructured.js": "const { eval: run } = globalThis;\nrun(await r.text());\n",
+            "computed.js": "const run = globalThis['ev' + 'al'];\nrun(await r.text());\n",
+            "member.js": "const run = globalThis.eval;\nrun(payload);\n",
+            "function.js": "const F = globalThis.Function;\nF('return 1')();\n",
+            "global.js": "let { Function: F } = globalThis;\nF('return 2')();\n",
+            "argument.js": "install(globalThis);\nconst { eval: x } = globalThis;\nx(src);\n",
+            "named-self.js": "const self = eval;\nself(await (await fetch(u)).text());\n",
+            "named-global.js": "const global = eval;\nglobal(payload);\n",
+            "named-window.js": "var window = Function;\nwindow(payload)();\n",
+        }.items():
+            self.assertIn(OBF, _scan({name: src}), name)
+
+    def test_a_rename_is_only_a_rename_when_it_is_bound_from_the_global(self):
+        """Ordinary code that only resembles a rename stays clean."""
+        far = "\n".join(f"function f{i}(a) {{ return a + {i}; }}" for i in range(60))
+        for name, src in {
+            "visitors.js": "const { eval: visitEval } = visitors;\nvisitEval(node);\n",
+            "typed.ts": "export function debounce(fn: Function, ms: number) {\n"
+                        "  return (...a: unknown[]) => setTimeout(() => fn(...a), ms);\n}\n",
+            "bind.js": f"var bind = Function.prototype.bind;\n{far}\n"
+                       "export function s(flush, q) {{ setTimeout(flush.bind(null, q), 0); }}\n",
+            "uncurry.js": "const hasOwn = Function.call.bind(Object.prototype.hasOwnProperty);\n"
+                          "export function has(n, k) { return hasOwn(n, k); }\n",
+            "tokens.js": "const { Function: FUNC, Ident: IDENT, host = globalThis } = TokenType;\n"
+                         "export const ok = css.split(' ').filter((t) => FUNC(t) || IDENT(t));\n",
+            "repl.js": "const { eval: originalEval } = server; const root = globalThis;\n"
+                       "originalEval(code);\n",
+            "node.js": "function Node(rules) {\n  var self = this;\n  var evalRule = self.eval;\n"
+                       "  this.render = function (c) { return rules.map(function (r) { return evalRule(r, c); }); };\n}\n"
+                       "Node.prototype.eval = function (rule, c) { return rule; };\n",
+            "umd.js": "(function () {\n  var global = this;\n  var F = global.Function;\n"
+                      "  return F('return 1')();\n})();\n",
+            "jsdom.js": "const dom = new JSDOM('');\nconst window = dom.window;\n"
+                        "const e = window.eval;\nexport const r = e('1+1');\n",
+            "destructured-window.js": "const { window } = new JSDOM('');\nconst nativeEval = window.eval;\n"
+                                      "window.eval = (s) => { seen.push(s); return nativeEval(s); };\n",
+            "wrapped.ts": "export function instrument(\n  window: Window,\n  seen: string[],\n) {\n"
+                          "  const nativeEval = window.eval;\n"
+                          "  window.eval = (s) => { seen.push(s); return nativeEval(s); };\n}\n",
+            "ns.js": "const { eval: x } = globalThis.ns;\nx(src);\n",
+            "proc.js": "const { eval: x } = global.process;\nx(src);\n",
+            "named-import.js": "import { global } from './env';\nconst F = global.Function;\n"
+                               "export const g = F('return 1')();\n",
+            "namespace-import.js": "import * as window from './w';\nconst e = window.eval;\n"
+                                   "export const r = e(s);\n",
+            "bare-arrow.js": "const f = global => { const F = global.Function; return F('x')(); };\n",
+            "catch.js": "try { run(); } catch (window) { const e = window.eval; e(s); }\n",
+        }.items():
+            self.assertNotIn(OBF, _scan({name: src}), name)
+
     def test_a_token_reader_is_not_a_dropper(self):
         """A token reader is clean; a real dropper still reports."""
         for name, src in {
