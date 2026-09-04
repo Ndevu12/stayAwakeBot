@@ -205,16 +205,9 @@ def _host_artifacts() -> tuple[list[str], list[tuple[str, Path, str]], list[Path
 
 
 
-def _global_folders() -> list[Path]:
-    """Node's GLOBAL_FOLDERS, resolved on ANY platform — every path the runtime loads a global
-    module from.
-
-    The two home-relative entries are the same everywhere. `$PREFIX` is Node's install prefix: read
-    from the environment when set, and otherwise the platform's documented defaults, because a
-    POSIX-only list would leave the equivalent Windows locations uncovered — the same partial
-    coverage this probe exists to remove. `/usr/local` and `%APPDATA%` are user-writable on ordinary
-    installs, so the prefix entry is reachable without administrator rights."""
-    home = Path.home()
+def _npm_prefix_roots() -> list[Path]:
+    """Node's install prefixes on this host, in resolution order: those the environment declares,
+    then the platform's documented defaults."""
     declared: list[Path] = []
     for var in ("PREFIX", "NODE_PREFIX", "npm_config_prefix"):
         named = _usable_prefix(os.environ.get(var))
@@ -227,6 +220,19 @@ def _global_folders() -> list[Path]:
                 roots += [Path(os.environ[var]) / "npm", Path(os.environ[var]) / "nodejs"]
     else:
         roots += [Path("/usr/local"), Path("/usr"), Path("/opt/homebrew"), Path("/opt/local")]
+    return declared + roots
+
+
+def _global_folders() -> list[Path]:
+    """Node's GLOBAL_FOLDERS, resolved on ANY platform — every path the runtime loads a global
+    module from.
+
+    The two home-relative entries are the same everywhere. `$PREFIX` is Node's install prefix: read
+    from the environment when set, and otherwise the platform's documented defaults, because a
+    POSIX-only list would leave the equivalent Windows locations uncovered — the same partial
+    coverage this probe exists to remove. `/usr/local` and `%APPDATA%` are user-writable on ordinary
+    installs, so the prefix entry is reachable without administrator rights."""
+    home = Path.home()
     # The two home entries are targeted whether or not they exist — absent is the state a payload
     # creates them from. A PREFIX entry is different: if the prefix root is not on this machine,
     # nothing is installed there, so it is not a path the runtime resolves through and there is
@@ -235,7 +241,7 @@ def _global_folders() -> list[Path]:
     # Present or not: this answers where the runtime looks, and what a control may CREATE is that
     # control's decision. Filtering here starved the probe of locations it enumerates for coverage.
     folders = [home / ".node_modules", home / ".node_libraries"]
-    folders += [root / "lib" / "node" for root in declared + roots]
+    folders += [root / "lib" / "node" for root in _npm_prefix_roots()]
     return _distinct_dirs(folders)
 
 
