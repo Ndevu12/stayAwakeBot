@@ -115,6 +115,9 @@ def audit_checks(slug: str | None = None, token: str | None = None, branch: str 
     and `token` are supplied, the branch-protection gate on `branch` is included. `verify_artifacts`
     (the `--verify` opt-in) lets the host-artifact probe content-scan a lone weak dir."""
     return [
+        # First, before the slow disk probes: a process is the only evidence here that can leave
+        # mid-run. Read last, it took 30s to reach on a dev Mac and a 60s process was already gone.
+        ("running processes", check_live_processes),
         ("cached credentials", check_credentials),
         ("VS Code settings", check_vscode),
         ("self-hosted runner", check_runner_persistence),
@@ -126,7 +129,6 @@ def audit_checks(slug: str | None = None, token: str | None = None, branch: str 
         ("shell startup files", check_shell_profile),
         ("git exec config", check_git_config_execution),
         ("autorun surface", check_autorun),                             # novel-foothold monitor
-        ("running processes", check_live_processes),
         ("branch protection", lambda: check_branch_protection(slug, token, branch)),
     ]
 

@@ -473,6 +473,19 @@ class TestHostArtifacts(unittest.TestCase):
         self.assertIn("host-drop-artifacts", ids)
 
 
+class TestVolatileEvidenceIsReadFirst(unittest.TestCase):
+    """The process table can leave mid-run; every other probe reads something that stays put."""
+
+    def test_running_processes_is_the_first_probe(self):
+        labels = [label for label, _check in hygiene.audit_checks(None, None, "main")]
+        self.assertEqual(labels[0], "running processes")
+
+    def test_every_probe_still_runs_exactly_once(self):
+        labels = [label for label, _check in hygiene.audit_checks(None, None, "main")]
+        self.assertEqual(len(labels), len(set(labels)))
+        self.assertIn("branch protection", labels)
+
+
 class TestControlsAreNotFlagged(unittest.TestCase):
     """`saw audit` never reports a location `saw harden` controls as a finding."""
 
