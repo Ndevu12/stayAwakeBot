@@ -39,8 +39,16 @@ _INDIRECT_EVAL = re.compile(
     r"\(\s*(?:0|1|void\s+0|null|undefined|!0|!1)\s*,\s*(?:eval|Function)\s*\)\s*\("
 )
 _UNCURRY_THIS = r"\s*\.\s*(?:prototype\s*\.\s*)?(?:call|apply|bind)\s*\.\s*bind\b"
+_GLOBAL_OBJECT = r"(?:globalThis)"
+_THE_BUILTIN = (
+    rf"(?:(?:{_GLOBAL_OBJECT}\s*\.\s*)?(?:eval|Function)\b(?!{_UNCURRY_THIS})"
+    rf"|{_GLOBAL_OBJECT}\s*\[\s*[\"'](?:eval|Function)[\"']\s*\])"
+)
+_NAME = r"[A-Za-z_$][\w$]{0,64}"
 _BIND_EVAL_FN = re.compile(
-    r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:eval|Function)\b(?!" + _UNCURRY_THIS + r")"
+    rf"(?:const|let|var)\s+({_NAME})\s*=\s*{_THE_BUILTIN}"
+    rf"|(?:const|let|var)\s*\{{[^{{}}\n]{{0,120}}?(?<![\w$])(?:eval|Function)\s*:\s*({_NAME})"
+    rf"[^{{}}\n]{{0,120}}?\}}\s*=\s*{_GLOBAL_OBJECT}\b(?!\s*[.\[])"
 )
 _BIND_DANGEROUS_KEY = re.compile(
     r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*[\"'](?:eval|Function|constructor)[\"']"
@@ -68,7 +76,7 @@ def _has_obfuscated_exec_forms(s: str) -> bool:
     if _INDIRECT_EVAL.search(s):
         return True
     for m in _BIND_EVAL_FN.finditer(s):
-        name = re.escape(m.group(1))
+        name = re.escape(next(g for g in m.groups() if g))
         window = s[m.end():m.end() + _ALIAS_CALL_WINDOW]
         if re.search(rf"(?<![\w$]){name}\s*\(", window):
             return True

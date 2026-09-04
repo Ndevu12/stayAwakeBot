@@ -13,6 +13,9 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Added
+- **A renamed call to a dangerous built-in is reported however the rename is spelled.**
+
 ### Fixed
 - **`saw harden` names the running process it is waiting for you to capture.** It refused with only
   the fact that something was holding code that is not on disk, so finding out what left you
