@@ -226,16 +226,11 @@ def _program_name(arg: str) -> str:
 
 
 def _command_argvs(entry) -> list[list[str]]:
-    """Every command line the entry executes, as argv. `entry.argv` is only the FIRST — a unit's
-    second `ExecStart=`, its `ExecStartPre/Post=`, `ExecReload=` or `ExecCondition=` each run their
-    own, and a payload hides in one just as well (five such forms went silent when only argv was
-    read). A parser with no command line to give falls back to the raw body; splitting that is 66ms
-    per entry for nothing, and the body is already matched as a part in its own right."""
+    """Return every command line the entry executes, as argv, `entry.argv` first."""
     argv = list(entry.argv or [])
-    lines = [] if entry.argv_is_exact else [_split_command(ln) for ln in entry.shell_lines
-                                            if ln != entry.body]
+    lines = [] if entry.argv_is_exact else [_split_command(ln) for ln in entry.shell_lines]
     seen, out = set(), []
-    for candidate in ([argv] + lines if argv else lines or [_split_command(entry.body)]):
+    for candidate in ([argv] + lines if argv else lines):
         key = tuple(candidate)
         if candidate and key not in seen:
             seen.add(key)
