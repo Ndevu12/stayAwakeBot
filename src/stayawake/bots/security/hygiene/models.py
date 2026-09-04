@@ -44,8 +44,7 @@ class HygieneIssue:
 # rotation (MITRE T1485). So the reflexive "rotate everything now" reaction is exactly
 # what turns containment into data loss — isolate and neutralize persistence FIRST.
 
-_WIPER_NOTE = ("rotating can trigger a reported wiper (gh-token-monitor.service) that deletes your "
-               "home directory")
+_WIPER_NOTE = "rotating can trigger a reported wiper that deletes your home directory"
 
 ACTIVE_PERSISTENCE_IDS = {"self-hosted-runner-persistence", "os-service-persistence",
                           "host-drop-artifacts",
@@ -158,6 +157,16 @@ def response_order(issue_id: str) -> int:
     return len(TIER_IDS)
 
 
+def display_rank(issue_id: str, severity: str) -> str:
+    """The rank a finding is SHOWN at, which is not always the severity it carries.
+
+    Active host persistence is graded `warning` like every other act-now finding, so a live
+    foothold rendered identically to an editor setting. It is shown as `critical` instead. Reads
+    the same set the banner and the rotation verdict read, so the three cannot disagree.
+    """
+    return "critical" if severity == "warning" and issue_id in ACTIVE_PERSISTENCE_IDS else severity
+
+
 def incident_response_sequence() -> list[str]:
     """The canonical order for responding to a suspected worm compromise. Rotation is
     ALWAYS the last step: rotating while persistence is live can trigger the reported
@@ -165,20 +174,17 @@ def incident_response_sequence() -> list[str]:
     # Steps only — no "1./2." prefixes: the renderer owns the numbering (core.render.marked_list),
     # so this stays pure data (and a non-terminal consumer can renumber/reformat it freely).
     return [
-        "Isolate the host from the network before doing anything else.",
-        # BEFORE the rebuild step, which destroys what a plain delete left recoverable. Whether any
+        "Isolate the host from the network first.",
+        # Before the rebuild, which destroys what a plain delete left recoverable. Whether any
         # survives is a property of the PAYLOAD this host-side path never saw — so it is not asserted.
-        "If files are missing, image the disk before rebuilding, running `saw fix`, or otherwise "
-        "using this host — every write can overwrite recoverable content. How much is recoverable "
-        "depends on the wipe variant; `saw scan` names it when the payload is still in a repository.",
-        "Take self-hosted CI runners offline and rebuild affected hosts from known-clean "
-        "images (watch for a runner named SHA1HULUD).",
-        "Neutralize per-host persistence: rogue OS services (e.g. gh-token-monitor.service), "
-        "planted CI workflows, and editor/AI-agent auto-run hooks (.vscode/, .claude/).",
+        "If files are missing, image the disk before rebuilding or running any fix — every write "
+        "can overwrite content, and how much is recoverable depends on the wipe variant.",
+        "Take self-hosted CI runners offline and rebuild affected hosts from known-clean images.",
+        "Neutralize per-host persistence: unexpected services, planted CI workflows, and editor "
+        "or agent auto-run hooks.",
         f"ONLY THEN rotate credentials, in order: npm → GitHub PATs → cloud keys → SSH keys. "
-        f"Rotating earlier is dangerous: {_WIPER_NOTE}. If the previous step could not be "
-        "confirmed, image first and rotate anyway — the trigger stays armed for as long as the "
-        "credentials are valid, and a wipe against an imaged host costs nothing.",
+        f"Rotating earlier is dangerous: {_WIPER_NOTE}. If the step above could not be confirmed, "
+        "image first and rotate anyway.",
     ]
 
 
@@ -198,11 +204,10 @@ def credential_exposure_note() -> list[str]:
     exposure, not a confirmed compromise. Keeps the rotate-carefully caveat (a rotation-triggered
     home-directory wiper can't be fully excluded) WITHOUT the alarmist isolate-and-rebuild runbook."""
     return [
-        "Move the exposed credential to a safer store (see the fix on each item below).",
-        "No active host persistence was detected here — this is credential EXPOSURE, not a confirmed "
-        "compromise, so host isolation / rebuild isn't warranted on this evidence alone.",
-        "Detection is best-effort, though: if you have any OTHER reason to suspect this host, isolate "
-        "it first regardless.",
-        "Precaution: don't make a bulk credential rotation your first move — a rotation-triggered "
-        "home-directory wiper (not found here, but not fully excludable) is the reason.",
+        "Move the exposed credential to a safer store — see the fix on each item below.",
+        "No active host persistence was found, so this is exposure rather than a confirmed "
+        "compromise; isolating or rebuilding is not warranted on this alone.",
+        "Detection is best-effort: if you suspect this host for any other reason, isolate it first.",
+        "Do not make a bulk credential rotation your first move — a rotation-triggered wiper cannot be fully "
+        "excluded.",
     ]

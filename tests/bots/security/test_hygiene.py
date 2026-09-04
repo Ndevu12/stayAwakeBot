@@ -112,14 +112,16 @@ class TestCredentials(unittest.TestCase):
                 self.assertEqual(hygiene.credentials._git_credentials_file_with_github(), cred)
 
     def test_plaintext_remediation_is_wiper_safe(self):
-        # The rotation advice must sequence rotation LAST and name the wiper tripwire —
-        # never the old unconditional "rotate the exposed token on GitHub" (#1088).
+        # The rotation advice must sequence rotation LAST and state the destructive risk — never the
+        # old unconditional "rotate the exposed token on GitHub" (#1088). It states the RISK, not the
+        # reported product name: naming one variant dates the advice and reads as the only shape.
         with mock.patch.object(hygiene.credentials, "_detect_cached_credential", return_value=None), \
              mock.patch.object(hygiene.credentials, "_git_credentials_file_with_github",
                                return_value=Path("/home/u/.git-credentials")):
             issues = hygiene.check_credentials()
         rem = next(i.remediation for i in issues if i.id == "git-credentials-plaintext")
-        self.assertIn("gh-token-monitor.service", rem)          # names the wiper tripwire
+        self.assertIn("wiper", rem)                             # states the destructive risk
+        self.assertIn("home directory", rem)                    # and what it costs
         self.assertIn("Rotate the token LAST", rem)             # rotation is sequenced last
         self.assertNotIn("rotate the exposed token on GitHub", rem)  # old unsafe wording gone
 
@@ -774,8 +776,10 @@ class TestSSHAuthorizedKeys(unittest.TestCase):
         issue = next(i for i in issues if i.id == "ssh-authorized-keys-forced-command")
         self.assertEqual(issue.severity, "warning")
         self.assertIn("ssh-authorized-keys-forced-command", hygiene.INCIDENT_TRIGGER_IDS)
-        # remediation is wiper-safe (neutralize before rotate)
-        self.assertIn("gh-token-monitor.service", issue.remediation)
+        # remediation is wiper-safe: states the destructive risk and neutralize-before-rotate,
+        # without naming one reported variant
+        self.assertIn("wiper", issue.remediation)
+        self.assertIn("neutralize", issue.remediation.lower())
 
     def test_benign_restricted_key_is_info_not_warning(self):
         # A forced command with NO fetch/decode/scratch shape (rsync/borg/git-shell) → info review.
@@ -1266,7 +1270,7 @@ class TestAuditRender(unittest.TestCase):
         joined = " ".join(hygiene.incident_response_sequence()).lower()
         self.assertLess(joined.index("isolate"), joined.index("rotate"))
         self.assertLess(joined.index("neutralize"), joined.index("rotate"))
-        self.assertIn("gh-token-monitor.service", joined)
+        self.assertIn("wiper", joined)
 
 
 class TestScanScopeHonesty(unittest.TestCase):
