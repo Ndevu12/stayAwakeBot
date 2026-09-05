@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import os
-import shlex
 import shutil
 import sys
 import threading
@@ -22,14 +21,15 @@ from stayawake.utils.render import LINK, SEVERITY, paint
 from stayawake.utils.streaming import status as spin_status, stream_enabled
 from stayawake.utils.terminal import supports_color
 from stayawake.lib import git as gitutil
+from stayawake.bots.security import hookscript
 from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.config import resolve_config
 from stayawake.bots.security.service.config import _options
 
-_MARKER = "stayawake-scan-on-clone"
-_HOOKS = ("post-checkout", "post-merge", "post-rewrite")
+_MARKER = hookscript.MARKER
+_HOOKS = hookscript.HOOKS
 _NULL_REV = "0" * 40
 _BRAND = "StayAwakeBot"
 _AVOID = ("install its dependencies (`npm install` / `pip install` / `yarn` / `pnpm`), open it in "
@@ -57,19 +57,9 @@ def _cmd(text: str, stream) -> str:
 
 # ── paths (XDG, mirroring dependencies.db / lib.github_app) ─────────────────────────────
 
-def template_dir() -> Path:
-    """saw's managed git template dir — `$XDG_CONFIG_HOME/saw/git-template` (config/state, not
-    cache). `git init`/`clone` copies its `hooks/` into every new repo's `.git/hooks`."""
-    return Path(env.xdg_config_home()) / "saw" / "git-template"
-
-
-def _hooks_dir() -> Path:
-    return template_dir() / "hooks"
-
-
-def _cache_path() -> Path:
-    """Per-repo last-scanned-SHA cache, so a repeated pull to the same rev isn't rescanned."""
-    return Path(env.xdg_cache_home()) / "saw" / "hook-scan-cache.json"
+template_dir = hookscript.template_dir
+_hooks_dir = hookscript.hooks_dir
+_cache_path = hookscript.cache_path
 
 
 def _saw_executable() -> str:
@@ -80,25 +70,8 @@ def _saw_executable() -> str:
 
 # ── install / uninstall / status ────────────────────────────────────────────────────────
 
-def _hook_script(event: str, saw: str, config: str | None) -> str:
-    """A tiny POSIX-sh hook. It calls `saw hook run`, then chains to any preserved foreign hook
-    (`<event>.local`), and ALWAYS exits 0 — a scan may warn, but must never break clone/checkout."""
-    cfg = f" --config {shlex.quote(config)}" if config else ""
-    return (
-        "#!/bin/sh\n"
-        f"# {_MARKER} ({event}) — installed by `saw hook install` (#1195). Must never fail git.\n"
-        f'{shlex.quote(saw)} hook run{cfg} {event} "$@" </dev/null || true\n'
-        f'_local="$(dirname "$0")/{event}.local"\n'
-        '[ -x "$_local" ] && "$_local" "$@" || true\n'
-        "exit 0\n"
-    )
-
-
-def _is_ours(path: Path) -> bool:
-    try:
-        return _MARKER in path.read_text(errors="replace")
-    except OSError:
-        return False
+_hook_script = hookscript.render
+_is_ours = hookscript.is_ours
 
 
 def _write_hooks(hooks_dir: Path, saw: str, config: str | None) -> None:
@@ -126,9 +99,7 @@ def _write_hooks(hooks_dir: Path, saw: str, config: str | None) -> None:
         os.chmod(dest, 0o755)
 
 
-def _global_template_dir() -> str | None:
-    val = gitutil.stdout(None, ["config", "--global", "--get", "init.templateDir"]).strip()
-    return val or None
+_global_template_dir = hookscript.global_template_dir
 
 
 def _global_hookspath() -> str | None:
@@ -259,7 +230,7 @@ def _load_cache() -> dict:
 def _remember(root: Path, sha: str) -> None:
     """Record the scanned SHA (best-effort — a cache write must never break the hook)."""
     try:
-        cache = _load_cache()
+        cache = {r: s for r, s in _load_cache().items() if os.path.isdir(r)}
         cache[os.path.realpath(root)] = sha
         path = _cache_path()
         path.parent.mkdir(parents=True, exist_ok=True)

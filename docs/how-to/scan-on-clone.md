@@ -21,6 +21,11 @@ The hook warns and points at [`saw fix`](fix-findings.md). It modifies nothing a
 git command. It is scanned against *your* allowlist, never the cloned repository's own config — see
 [trust model](../explanation/trust-model.md).
 
+**What you are installing.** A directory whose contents git runs, unprompted, in every repository
+you clone or create from then on. That is what makes scan-on-clone work, and it is also a place a
+foothold could be planted, so [`saw audit`](audit-a-machine.md) enumerates it along with the
+repositories it has seeded and reports a hook saw did not install or one that has been changed.
+
 **Limits worth knowing.** It applies to repositories cloned or created *after* you install it, which
 is how git's template mechanism works — scan the ones you already have with `saw scan ~/dev`. A
 global `core.hooksPath` overrides it, and `install`/`status` warn when one is set. `git reset --hard`

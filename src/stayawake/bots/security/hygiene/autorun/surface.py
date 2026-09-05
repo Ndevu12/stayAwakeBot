@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import codecs
+import os
 import plistlib
 import re
 from dataclasses import dataclass, field
@@ -12,6 +13,7 @@ from pathlib import Path
 
 from stayawake.utils import pathsafe
 from stayawake.utils.pathsafe import grade
+from stayawake.bots.security import hookscript
 from .. import os_service
 
 
@@ -312,6 +314,50 @@ def _parse_systemd_unit(path: Path) -> AutorunEntry | None:
                         argv_is_exact=False)
 
 
+# ── git hooks run from a template or a seeded repository ────────────────────────────────
+
+def git_hook_dirs() -> list[Path]:
+    """Return every hooks directory git runs on this account through saw's template mechanism."""
+    return hookscript.hook_dirs()
+
+
+def _executable_files(d: Path, unread: list) -> list[Path]:
+    out: list[Path] = []
+    state = grade(d)
+    if state == "absent":
+        return out
+    if state == "unverified":
+        unread.append(d)
+        return out
+    try:
+        entries = sorted(d.iterdir())
+    except OSError:
+        unread.append(d)
+        return out
+    for p in entries:
+        state = grade(p)
+        if state == "unverified":
+            unread.append(p)
+        elif state == "ok" and pathsafe.is_regular_file(p) and os.access(p, os.X_OK):
+            out.append(p)
+    return out
+
+
+def _parse_git_hook(path: Path) -> AutorunEntry | None:
+    text = pathsafe.read_regular_text(path)
+    if text is None:
+        return None
+    argv = hookscript.saw_command(text) or [str(path)]
+    body = text
+    for sibling in hookscript.sourced_siblings(text, path):
+        sourced = pathsafe.read_regular_text(sibling)
+        if sourced is not None:
+            body += "\n" + sourced[:hookscript._MAX_SIBLING]
+    return AutorunEntry(location=hookscript.LOCATION, path=path, argv=argv, body=body,
+                        shell_lines=[ln for ln in body.splitlines() if ln.strip()],
+                        persistence=[f"git-event:{path.name}"])
+
+
 def enumerate_entries() -> tuple[list[AutorunEntry], list[Path]]:
     """Every autorun entry on the catastrophic persistence surface (launch agents + systemd user
     units/timers), parsed. Dispatch is by FILE EXTENSION across the user-owned persistence dirs
@@ -328,4 +374,9 @@ def enumerate_entries() -> tuple[list[AutorunEntry], list[Path]]:
         e = _parse_systemd_unit(p)
         if e is not None:
             entries.append(e)
+    for d in git_hook_dirs():
+        for p in _executable_files(d, unread):
+            e = _parse_git_hook(p)
+            if e is not None:
+                entries.append(e)
     return entries, unread
