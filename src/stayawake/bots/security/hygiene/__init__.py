@@ -10,7 +10,7 @@ import subprocess          # noqa: F401  re-exported so tests can patch hygiene.
 from pathlib import Path   # noqa: F401  re-exported so tests can patch hygiene.Path.home globally
 from typing import Callable
 
-from .models import (HygieneIssue, INCIDENT_TRIGGER_IDS, ACTIVE_PERSISTENCE_IDS,
+from .models import (HygieneIssue, display_rank, INCIDENT_TRIGGER_IDS, ACTIVE_PERSISTENCE_IDS,
                      BLOCKED_ID, BLOCKED_SURFACE_ID,
                      CREDENTIAL_EXPOSURE_IDS, UNVERIFIED_PERSISTENCE_IDS, ROTATION_UNSAFE_IDS,
                      SURFACE_UNREADABLE_ID, SURFACE_ABSENT_ID,
@@ -116,7 +116,7 @@ def audit_checks(slug: str | None = None, token: str | None = None, branch: str 
     (the `--verify` opt-in) lets the host-artifact probe content-scan a lone weak dir."""
     return [
         # First, before the slow disk probes: a process is the only evidence here that can leave
-        # mid-run. Read last, it took 30s to reach on a dev Mac and a 60s process was already gone.
+        # mid-run. Measured last: 30s to reach, 0.1s to run — a 60s process was already gone.
         ("running processes", check_live_processes),
         ("cached credentials", check_credentials),
         ("VS Code settings", check_vscode),
@@ -335,11 +335,13 @@ def render(issues: list[HygieneIssue], *, color: bool = False, width: int = 80) 
     def worst_first(items):
         return sorted(items, key=lambda i: (response_order(i.id), i.title))
 
-    warnings = worst_first(i for i in issues if i.severity == "warning")
+    ranked = {id(i): display_rank(i.id, i.severity) for i in issues}
+    criticals = worst_first(i for i in issues if ranked[id(i)] == "critical")
+    warnings = worst_first(i for i in issues if ranked[id(i)] == "warning")
     reviews = worst_first(i for i in issues if i.severity == "info")
     unrun = _blocked_block(issues, color=color, width=width)
 
-    if not (warnings or reviews):
+    if not (criticals or warnings or reviews):
         ids = {i.id for i in issues}
         if SURFACE_ABSENT_ID in ids:
             # This one leads even when a check was also blocked: it is the destroyed-home reading,
@@ -358,11 +360,13 @@ def render(issues: list[HygieneIssue], *, color: bool = False, width: int = 80) 
                          + _scope_note(issues, color=color, width=width)).rstrip()
 
     counts = []
+    if criticals:
+        counts.append(f"{len(criticals)} critical")
     if warnings:
         counts.append(f"{len(warnings)} warning{'' if len(warnings) == 1 else 's'}")
     if reviews:
         counts.append(f"{len(reviews)} to review")
-    n = len(warnings) + len(reviews)
+    n = len(criticals) + len(warnings) + len(reviews)
     lines = [f"Local security hygiene — {n} finding{'' if n == 1 else 's'}: " + ", ".join(counts), ""]
     lines += rotation + [""]
 
@@ -371,8 +375,9 @@ def render(issues: list[HygieneIssue], *, color: bool = False, width: int = 80) 
         lines += banner + [""]
     lines += unrun
 
-    show_headers = bool(warnings) and bool(reviews)
+    show_headers = sum(map(bool, (criticals, warnings, reviews))) > 1
     for gtitle, gsub, gsev, items in (
+            ("CRITICAL", "act on this first", "critical", criticals),
             ("WARNINGS", "act on these", "warning", warnings),
             ("TO REVIEW", "weaker signals to verify / hygiene", "info", reviews)):
         if not items:
@@ -381,8 +386,8 @@ def render(issues: list[HygieneIssue], *, color: bool = False, width: int = 80) 
             lines.append(paint(gtitle, SEVERITY[gsev], on=color) +
                          paint(f"  {MARKER['meta']} {gsub}", SEVERITY["info"], on=color))
         for i in items:
-            code = SEVERITY.get(i.severity)
-            icon = _icon(i.severity)
+            code = SEVERITY.get(ranked[id(i)], SEVERITY.get(i.severity))
+            icon = _icon(ranked[id(i)])
             # Encoded here, not at construction: a filename from a world-writable directory is
             # attacker-chosen, and an escape sequence has zero display width — it corrupts `block`'s
             # wrap arithmetic AND executes on the terminal. `command` stays verbatim by design (#86);

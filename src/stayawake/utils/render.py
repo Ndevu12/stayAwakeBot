@@ -27,6 +27,7 @@ SEVERITY: dict[str, str] = {
 MARKER: dict[str, str] = {
     # by severity — what the check actually established
     "ok": "✓",          # an established POSITIVE: installed, already guarded, scanned clean
+    "critical": "⚠",    # act now, ahead of everything else — same width as `warning` deliberately
     "warning": "⚠",     # act now
     "info": "•",        # a scoped negative ("none found HERE") or a nudge — never an all-clear
     "unknown": "?",     # the check could not be run or completed — not "fine", not "act now"

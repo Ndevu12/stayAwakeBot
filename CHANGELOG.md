@@ -16,6 +16,14 @@ reader, not the mechanism or the weakness it closed.
 ### Added
 - **A renamed call to a dangerous built-in is reported however the rename is spelled.**
 
+### Changed
+- **`saw audit` separates a live foothold from the rest.** A running process holding code that is
+  not on disk now leads the report under its own heading, instead of sitting in one list beside an
+  editor setting. Nothing else about the finding changes.
+- **`saw audit` says less.** The response steps and the repeated rotation warning are shorter, and
+  the guidance no longer names one reported variant's service or runner as though it were the only
+  shape to look for.
+
 ### Fixed
 - **A running process is now the first thing `saw audit` reads.** Everything else it examines stays
   where it is; a process does not. It was read after the slower checks, so something that ran only
