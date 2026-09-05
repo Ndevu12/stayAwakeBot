@@ -14,9 +14,16 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
+- **`saw audit` enumerates the git hooks that run on your account through a template.** The
+  directory `saw hook install` creates, any template directory you configured, and the hooks of the
+  repositories saw has seeded are examined like every other start-up location: a hook saw did not
+  install is reported when it appears or changes, one that fetches and runs code is reported at
+  once, and a hook saw installed that has since been changed is reported at once. An unreadable
+  hooks directory withholds the all-clear.
 - **A renamed call to a dangerous built-in is reported however the rename is spelled.**
 
 ### Fixed
+- **The scan-on-clone cache no longer grows with repositories that were deleted.**
 - **A running process is now the first thing `saw audit` reads.** Everything else it examines stays
   where it is; a process does not. It was read after the slower checks, so something that ran only
   briefly could be gone by the time the audit looked at it.

@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from stayawake.utils import pathsafe
+from ... import hookscript
 from ..models import HygieneIssue, POSIX_SHELLS, _WIPER_NOTE
 from .. import mechanism
 from ...taint import analyzer
@@ -575,6 +576,13 @@ def content_signal(entry, *, read_referenced: bool = False) -> ContentSignal:
              for line in _shell_context_text(entry, referenced)):
         reasons.append("runs code from a world-writable scratch directory")
         hit = True
+    if entry.location == hookscript.LOCATION and not hookscript.is_pristine(entry.body):
+        if hookscript.claims_ours(entry.body):
+            reasons.append("claims to be a hook saw installed but has been modified")
+            hit = True
+        elif hookscript.in_managed_dir(entry.path):
+            reasons.append("sits in the directory saw manages and is not a hook saw installed")
+            hit = True
     if analyzer.detect_dropper(text):
         reasons.append("decode→execute dropper")
         hit = True

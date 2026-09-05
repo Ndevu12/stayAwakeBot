@@ -8,6 +8,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from stayawake.bots.security import hookscript
+
 _PROBE_TIMEOUT = 5
 
 _TRUSTED_PREFIXES = (
@@ -107,6 +109,8 @@ def attribute(entry) -> Attribution:
     if not exec_path:                       # a config that references no executable — nothing to run
         return Attribution(exec_class="unknown")
     exec_class = _classify_path(exec_path)
+    if entry.location == hookscript.LOCATION and hookscript.is_pristine(entry.body):
+        return Attribution(exec_class=exec_class, owner=None if exec_class == "untrusted" else "saw")
     owner = _homebrew_owner(entry.path, exec_path) or _package_owner(exec_path)
     signed = _codesigned(exec_path)
     return Attribution(exec_class=exec_class, owner=owner, signed=signed)

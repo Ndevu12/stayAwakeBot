@@ -14,15 +14,17 @@ from stayawake.utils.pathsafe import grade
 from .models import (HygieneIssue, SURFACE_NOT_IMPLEMENTED_ID, _WIPER_NOTE,
                      persistence_surface_is_enumerable)
 from . import os_service, runner, mechanism
+from .autorun import surface as autorun_surface
 
 _ANCHOR_LABEL = "shell startup file"
 
 
 _AGENT_LABEL = "launch-agent / service dir"
 _RUNNER_LABEL = "self-hosted-runner dir"
+_HOOKS_LABEL = "git hooks dir"
 _RUNNER_MARKER = ".runner"
 
-_DIRECTORIES_HOLDING_RECORDS = frozenset({_AGENT_LABEL, _ANCHOR_LABEL})
+_DIRECTORIES_HOLDING_RECORDS = frozenset({_AGENT_LABEL, _ANCHOR_LABEL, _HOOKS_LABEL})
 
 
 _RECORD_SUBDIRECTORY_DEPTH = 1
@@ -59,6 +61,7 @@ def _must_verify_locations() -> list[tuple[str, Path]]:
     ssh = home / ".ssh"
     locs += [("SSH authorized_keys", ssh / name) for name in mechanism._SSH_AUTHKEYS]
     locs += [(_ANCHOR_LABEL, p) for p in mechanism.shell_rc_locations()]
+    locs += [(_HOOKS_LABEL, d) for d in autorun_surface.git_hook_dirs()]
     # The runner install dir is not expanded — hundreds of files, of which one is the record.
     locs += [(_RUNNER_LABEL, d / _RUNNER_MARKER) for d in runner.user_runner_dirs()]
     expanded: list[tuple[str, Path]] = []
