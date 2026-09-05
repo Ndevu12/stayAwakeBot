@@ -20,6 +20,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from unittest import mock
 
 from stayawake import cli
+from stayawake.utils import exitcodes
 
 
 class TestParserIntegrity(unittest.TestCase):
@@ -155,7 +156,13 @@ class TestACommandThatCannotCompleteFailsClosed(unittest.TestCase):
     def test_it_never_exits_zero(self):
         code, _out, _err = self._run(OSError("the kernel refused the process table"))
         self.assertNotEqual(code, 0, "a crashed run must never read as clean")
-        self.assertEqual(code, 2)
+        self.assertEqual(code, exitcodes.DID_NOT_RUN)
+
+    def test_it_is_distinguishable_from_a_run_that_answered_in_part(self):
+        code, _out, _err = self._run(RuntimeError("boom"))
+        self.assertNotEqual(code, exitcodes.INCOMPLETE,
+                            "a command that printed nothing must not read like one that "
+                            "printed a partial report")
 
     def test_it_says_so_on_stderr_not_in_the_report(self):
         _code, out, err = self._run(RuntimeError("engine exploded"))

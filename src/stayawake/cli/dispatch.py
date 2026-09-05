@@ -13,11 +13,8 @@ from stayawake.cli import commands
 from stayawake.cli._banner import render_welcome
 from stayawake.cli._meta import __version__
 from stayawake.cli.helptext import CommandHelpFormatter, examples_block
-from stayawake.utils import textsafe
+from stayawake.utils import exitcodes, textsafe
 from stayawake.utils.terminal import color_level
-
-# A run that could not complete, the documented meaning of 2 — never 0, and never a verdict.
-_DID_NOT_COMPLETE = 2
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -57,10 +54,10 @@ def main(argv: list[str] | None = None) -> int:
         # is dropped entirely when piped / CI / NO_COLOR, so scripted output stays clean text.
         # The full help still lives at `saw -h`, which argparse handled before we reach here.
         print(render_welcome(color_level(sys.stdout), __version__), end="")
-        return 0
+        return exitcodes.CLEAN
     try:
         return args.func(args)
     except Exception as exc:                      # noqa: BLE001 — the last line before a traceback
         print(f"saw {args.command}: the command did not complete. "
               f"{textsafe.plain(f'{type(exc).__name__}: {exc}', limit=300)}", file=sys.stderr)
-        return _DID_NOT_COMPLETE
+        return exitcodes.DID_NOT_RUN

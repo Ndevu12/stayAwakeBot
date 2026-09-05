@@ -15,6 +15,7 @@ import sys
 from stayawake.bots.security import remediator
 from stayawake.cli.argtypes import add_jobs_arg
 from stayawake.cli.helptext import add_command
+from stayawake.utils import exitcodes
 
 
 def register(sub) -> None:
@@ -76,14 +77,14 @@ def run(a: argparse.Namespace) -> int:
     if positionals[:1] == ["amend"]:
         if a.pr:
             print("saw fix amend does not open a pull request", file=sys.stderr)
-            return 2
+            return exitcodes.INCOMPLETE
         if a.branch:
             print("saw fix amend does not take --branch", file=sys.stderr)
-            return 2
+            return exitcodes.INCOMPLETE
         if a.user or a.org:
             print("saw fix amend does not take --user or --org; name each repository with "
                   "--remote owner/name", file=sys.stderr)
-            return 2
+            return exitcodes.INCOMPLETE
         rest = positionals[1:] or None
         return remediator.amend(a.config, paths=None if a.remote else rest,
                                 remote=a.remote,

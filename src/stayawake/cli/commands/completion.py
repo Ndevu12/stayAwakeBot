@@ -6,6 +6,7 @@ import argparse
 
 from stayawake.cli._meta import VERBS
 from stayawake.cli.helptext import add_command
+from stayawake.utils import exitcodes
 
 
 def register(sub) -> None:
@@ -53,4 +54,4 @@ def run(a: argparse.Namespace) -> int:
         for binary in ("saw", "stayawake"):
             for v in VERBS:
                 print(f"complete -c {binary} -n '__fish_use_subcommand' -a {v}")
-    return 0
+    return exitcodes.CLEAN

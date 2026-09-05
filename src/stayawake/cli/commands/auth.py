@@ -13,6 +13,7 @@ from stayawake.utils import env
 from stayawake.utils.render import LINK, SEVERITY, block, paint, term_width
 from stayawake.utils.streaming import Streamer, status, stream_enabled
 from stayawake.utils.terminal import supports_color
+from stayawake.utils import exitcodes
 
 
 def register(sub) -> None:
@@ -124,9 +125,7 @@ def _auth_root(a: argparse.Namespace) -> int:
     if not getattr(a, "auth_cmd", None):
         return _status(a)
     print("usage: saw auth status | saw auth app register | saw auth app show", flush=True)
-    return 2
-
-
+    return exitcodes.INCOMPLETE
 def _app_readiness_block(color: bool, width: int) -> list[str]:
     """Rendered App config vs mint-readiness section (blank-line separated, wrapped, coloured).
     Signing is BUILT IN (no crypto extra), so once the App is configured the only remaining step is
@@ -196,8 +195,7 @@ def _status(a: argparse.Namespace) -> int:
         lines.append(_cmd("saw auth app register", color))
         lines += _app_readiness_block(color, width)
         prog.line("\n".join(lines).rstrip())
-        return 0
-
+        return exitcodes.CLEAN
     who = sess.actor or sess.source or "?"
     mark = paint("✓", SEVERITY["ok"], on=color) if sess.live else paint("✗", SEVERITY["warning"], on=color)
     lines = [f"{mark} credential: {sess.source} as {who}"
@@ -240,11 +238,10 @@ def _app_show(a: argparse.Namespace) -> int:
         lines += block("saw auth app register", indent=2, width=width, marker="→ ",
                        code=SEVERITY["info"], color=color)
         prog.line("\n".join(lines).rstrip())
-        return 1
+        return exitcodes.FINDINGS
     if not cfg:
         prog.line(paint("✓ App configured via environment (GH_APP_*)", SEVERITY["ok"], on=color))
-        return 0
-
+        return exitcodes.CLEAN
     from stayawake.lib.github_app_manifest import install_url, settings_url
     slug = cfg.get("slug")
     lines = [paint(f"✓ local App config: {github_app.config_path()}", SEVERITY["ok"], on=color)]
@@ -262,9 +259,7 @@ def _app_show(a: argparse.Namespace) -> int:
                    "account' in App settings first:", indent=2, width=width)
     lines.append(_cmd(settings_url(slug, app_id=cfg.get("app_id")), color, indent=2))
     prog.line("\n".join(lines).rstrip())
-    return 0
-
-
+    return exitcodes.CLEAN
 def _already_registered(prog: Streamer, color: bool, width: int, a: argparse.Namespace) -> int | None:
     """If a StayAwakeBot App is ALREADY configured locally, don't create a duplicate — GitHub App
     names are globally unique, so a fresh manifest run mints a NEW App with a suffixed name every
@@ -313,9 +308,7 @@ def _already_registered(prog: Streamer, color: bool, width: int, a: argparse.Nam
     lines += block("replace it now with a brand-new App:", indent=2, width=width, marker="• ")
     lines.append(_cmd("saw auth app register --replace", color))
     prog.line("\n".join(lines).rstrip())
-    return 0
-
-
+    return exitcodes.CLEAN
 def _app_register(a: argparse.Namespace) -> int:
     from stayawake.lib import github_app_manifest as manifest
     prog, color, width = _ui(a)
@@ -333,11 +326,10 @@ def _app_register(a: argparse.Namespace) -> int:
             )
     except github_app.GithubAppError as e:
         prog.line(paint(f"✗ {e}", SEVERITY["warning"], on=color))
-        return 2
+        return exitcodes.INCOMPLETE
     except Exception as e:  # noqa: BLE001
         prog.line(paint(f"✗ registration failed: {e}", SEVERITY["warning"], on=color))
-        return 2
-
+        return exitcodes.INCOMPLETE
     slug = payload.get("slug")
     lines = [paint(f"✓ registered App id={payload.get('id')} slug={slug}", SEVERITY["ok"], on=color)]
     lines += block(f"credentials saved to {github_app.config_path()} (mode 0600)",

@@ -12,6 +12,7 @@ import sys
 
 from stayawake.cli.helptext import add_command
 from stayawake.utils.streaming import Streamer, status, stream_enabled
+from stayawake.utils import exitcodes
 
 
 def register(sub) -> None:
@@ -84,11 +85,10 @@ def run_update(a: argparse.Namespace) -> int:
         manifest = db.write_manifest(a.cache_dir, results)
     except ValueError as e:                      # unsupported ecosystem — user error, not a crash
         print(f"saw db update: {e}", file=sys.stderr)
-        return 2
+        return exitcodes.INCOMPLETE
     except Exception as e:                        # noqa: BLE001 — network/parse failure → report, exit 1
         print(f"saw db update failed: {type(e).__name__}: {e}", file=sys.stderr)
-        return 1
-
+        return exitcodes.FINDINGS
     mal = sum(r["malicious"] for r in results)
     vuln = sum(r["vulnerabilities"] for r in results)
     lines = ["Advisory database updated.",
@@ -99,9 +99,7 @@ def run_update(a: argparse.Namespace) -> int:
              "`--no-advisories` to hide, `--external` to also run installed auditors)",
              f"cache: {db.default_cache_dir() if not a.cache_dir else a.cache_dir}"]
     Streamer(enabled=stream_enabled(sys.stdout, force_off=a.no_stream)).line("\n".join(lines))
-    return 0
-
-
+    return exitcodes.CLEAN
 def run_status(a: argparse.Namespace) -> int:
     from stayawake.bots.security.dependencies import db
 
@@ -109,8 +107,7 @@ def run_status(a: argparse.Namespace) -> int:
     if not s["present"]:
         print(f"Advisory DB: not found at {s['cache_dir']}\n"
               "  run `saw db update` — scans fall back to the inline malware seed until then.")
-        return 1
-
+        return exitcodes.FINDINGS
     age = s["age_days"]
     schema_ok = s.get("schema_compatible", True)
     # Distinguish a benign version skew from tampering: an older-format cache is not "FAILED".

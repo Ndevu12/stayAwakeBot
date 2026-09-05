@@ -9,6 +9,7 @@ import argparse
 import json
 
 from stayawake.cli.helptext import add_command
+from stayawake.utils import exitcodes
 
 _INDEX = [
     ("saw scan", "hunt supply-chain worms (read-only); local by default, --remote for GitHub",
@@ -65,12 +66,12 @@ def run(a: argparse.Namespace) -> int:
 
     if a.json:
         print(json.dumps([{"command": c, "summary": s} for _, c, s in scored], indent=2))
-        return 0
+        return exitcodes.CLEAN
     if not scored:
         # No match is a normal empty result, not a gate failure — keep exit 0 so it
         # never looks like the `1` the security commands return when --fail trips.
         print(f"No commands match {' '.join(a.text)!r}. Try `saw -h` for the full list.")
-        return 0
+        return exitcodes.CLEAN
     for _, cmd, summary in scored:
         print(cmd if a.quiet else f"{cmd:<16}{summary}")
-    return 0
+    return exitcodes.CLEAN

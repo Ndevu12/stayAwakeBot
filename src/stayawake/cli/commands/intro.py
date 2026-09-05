@@ -14,6 +14,7 @@ from stayawake.cli._banner import render_intro
 from stayawake.cli._meta import __version__
 from stayawake.cli.helptext import add_command
 from stayawake.utils.terminal import color_level
+from stayawake.utils import exitcodes
 
 
 def register(sub) -> None:
@@ -34,4 +35,4 @@ def register(sub) -> None:
 
 def run(a: argparse.Namespace) -> int:
     print(render_intro(color_level(sys.stdout), __version__), end="")
-    return 0
+    return exitcodes.CLEAN
