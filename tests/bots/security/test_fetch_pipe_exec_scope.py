@@ -178,6 +178,38 @@ class TestReferencedScriptIsJudgedByHowItIsRun(unittest.TestCase):
             self.assertTrue(self._hit(name, content, argv),
                             f"silent foothold: {name} via {argv}")
 
+    def test_a_program_payload_that_hands_a_scratch_path_to_a_shell_is_seen(self):
+        for name, content, argv in [
+            ("run.py", 'import os\nos.system("/tmp/.x/agent")\n', ["/usr/bin/python3", "{P}"]),
+            ("run.py", 'subprocess.run(["sh", "/tmp/.x/agent"])\n', ["/usr/bin/python3", "{P}"]),
+            ("run.js", "require('child_process').execSync(`nohup /tmp/.x/agent &`)\n", ["/usr/bin/node", "{P}"]),
+            ("run.py", 'os.execv("/bin/sh", ["sh", "-c", "/tmp/.x/agent"])\n', ["/usr/bin/python3", "{P}"]),
+            ("run.py", 'subprocess.Popen(args=["sh", "/tmp/.x/agent"])\n', ["/usr/bin/python3", "{P}"]),
+            ("run.js", "spawn('sh', ['-c', '/tmp/.x/agent'])\n", ["/usr/bin/node", "{P}"]),
+            ("run.scpt", 'do shell script "/tmp/.x/agent"\n', ["/usr/bin/osascript", "{P}"]),
+        ]:
+            self.assertTrue(self._hit(name, content, argv), f"silent foothold: {name} via {argv}")
+        for name, content, argv in [
+            ("run.py", 'LOG = os.environ.get("LOG") or "/tmp/app.log"\nsubprocess.run(["ls", "/tmp/app"])\n',
+             ["/usr/bin/python3", "{P}"]),
+            ("run.js", "const f = process.argv[2] || '/tmp/out.json'\nexecSync('git status')\n",
+             ["/usr/bin/node", "{P}"]),
+        ]:
+            self.assertFalse(self._hit(name, content, argv), f"false foothold: {name} via {argv}")
+
+    def test_the_first_line_says_what_runs_a_file(self):
+        for text, program, shell in [
+            ("#!/bin/sh\n", "sh", True), ("#!/usr/bin/env -S bash -e\n", "bash", True),
+            ("#!/bin/ash\n", "ash", True), ("#!/opt/tools/ASH\n", "ash", True),
+            ("#! /bin/sh\n", "sh", True), ("#!/bin/busybox sh\n", "busybox", True),
+            ("echo hi\n", None, True), ("#!/usr/bin/env node\n", "node", False),
+            ("#!/usr/bin/env -S node --no-warnings\n", "node", False),
+            ("﻿#!/usr/bin/env python3\n", "python3", False), ("#!/usr/bin/python3.12\r\n", "python3", False),
+            ("#!/usr/bin/env -u X ruby\n", "ruby", False), ("#!/usr/bin/env FOO=1 pwsh\n", "pwsh", False),
+        ]:
+            self.assertEqual(grade.shebang_program(text), program, text)
+            self.assertEqual(grade.runs_as_shell_text(text), shell, text)
+
     def test_ordinary_shell_maintenance_of_tmp_stays_clean(self):
         for name, content in [
             ("m.sh", "#!/bin/sh\nT=$(mktemp /tmp/app.XXXX)\n"),
@@ -474,6 +506,10 @@ class TestInvocationResolver(unittest.TestCase):
         # `${…}` is one word; splitting there fabricated a position in half of all real shell.
         self.assertEqual(grade.shell_command_lines("echo ${TMPDIR:-/tmp}/x"),
                          ["echo ${TMPDIR:-/tmp}/x"])
+
+    def test_a_command_continued_across_lines_is_read_as_the_shell_joins_it(self):
+        self.assertEqual(grade.shell_command_lines("nohup \\\n/tmp/.x/stage &\n"), ["nohup /tmp/.x/stage"])
+        self.assertTrue(grade.content_signal(_entry(["/bin/sh", "-c", "nohup \\\n  /tmp/.x/p &"])).hit)
 
     def test_a_bound_and_an_unknown_delimiter_both_fail_closed(self):
         # Every limit here is attacker-reachable, so none may lose the payload. Nesting past the

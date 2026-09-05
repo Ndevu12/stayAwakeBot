@@ -186,6 +186,7 @@ class TestCoverageProbe(unittest.TestCase):
         labels = {lbl for lbl, _ in coverage._must_verify_locations()}
         self.assertIn("launch-agent / service dir", labels)
         self.assertIn("self-hosted-runner dir", labels)
+        self.assertIn("git hooks dir", labels)
         self.assertTrue(any("SSH" in l for l in labels))
         self.assertTrue(any("shell" in l for l in labels))
 

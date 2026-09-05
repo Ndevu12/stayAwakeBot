@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import codecs
+import os
 import plistlib
 import re
 from dataclasses import dataclass, field
@@ -12,6 +13,7 @@ from pathlib import Path
 
 from stayawake.utils import pathsafe
 from stayawake.utils.pathsafe import grade
+from stayawake.bots.security import hookscript
 from .. import os_service
 
 
@@ -26,6 +28,9 @@ class AutorunEntry:
     shell_lines: list[str] = field(default_factory=list)
     argv_is_exact: bool = True
     persistence: list[str] = field(default_factory=list)
+    script: str = ""
+    shared: str = ""
+    notes: str = ""
 
     @property
     def exec_path(self) -> str | None:
@@ -36,8 +41,12 @@ class AutorunEntry:
         return str(self.path)
 
     def digest(self) -> str:
-        """Content fingerprint — a changed body re-surfaces the entry even if its path is 'known'."""
-        return sha256(self.body.encode("utf-8", "replace")).hexdigest()
+        """Content fingerprint — a changed body, shared text or notes re-surfaces the entry even if
+        its path is 'known'."""
+        content = self.body
+        for part in (self.shared, self.notes):
+            content += "\n" + part if part else ""
+        return sha256(content.encode("utf-8", "replace")).hexdigest()
 
     def shape_text(self) -> str:
         """The text the content-shape detectors run over: the referenced command line joined with the
@@ -312,6 +321,158 @@ def _parse_systemd_unit(path: Path) -> AutorunEntry | None:
                         argv_is_exact=False)
 
 
+# ── git hooks run from a template or a seeded repository ────────────────────────────────
+
+def git_hook_dirs(unread: list | None = None) -> list[Path]:
+    """Return every hooks directory git runs on this account through saw's template mechanism."""
+    return hookscript.hook_dirs(unread)
+
+
+def _executable_files(d: Path, unread: list) -> list[Path]:
+    out: list[Path] = []
+    state = grade(d)
+    if state == "absent":
+        return out
+    if state == "unverified":
+        unread.append(d)
+        return out
+    try:
+        entries = sorted(d.iterdir())
+    except OSError:
+        unread.append(d)
+        return out
+    for p in entries:
+        state = grade(p)
+        if state == "unverified":
+            unread.append(p)
+        elif (state == "ok" and pathsafe.is_regular_file(p) and os.access(p, os.X_OK)
+              and hookscript.runs_as_hook(p.name)):
+            out.append(p)
+    return out
+
+
+@dataclass
+class _Support:
+    """What the support files of a hooks directory contribute to its entries: code text, the shell
+    command lines of the shell among it, the programs among it with the names the shell runs, and
+    the digest-only text."""
+    code: str = ""
+    shell_lines: list[str] = field(default_factory=list)
+    programs: list[tuple[Path, str]] = field(default_factory=list)
+    run_by_shell: set[str] = field(default_factory=set)
+    run_directly: set[str] = field(default_factory=set)
+    notes: str = ""
+
+    def lines_for(self, own_lines: list[str]) -> list[str]:
+        """Return `own_lines` plus the support's shell lines, plus the lexed programs that `own_lines`
+        or the support's shell run as shell."""
+        from .grade import shell_command_lines, spawned_shell_lines, runs_as_shell_text
+        by_shell, directly = _shell_run_names(own_lines)
+        by_shell |= self.run_by_shell
+        directly |= self.run_directly
+        lines = list(own_lines) + self.shell_lines
+        for p, text in self.programs:
+            if p.name in by_shell or (p.name in directly and runs_as_shell_text(text)):
+                lines += shell_command_lines(text)
+            else:
+                lines += spawned_shell_lines(text)
+        return lines
+
+
+def _shell_run_names(lines: list[str]) -> tuple[set[str], set[str]]:
+    """Return the file names the shell command `lines` run through a POSIX shell or source, and the
+    names they execute directly."""
+    from .grade import _split_command, resolve_invocation
+    by_shell: set[str] = set()
+    directly: set[str] = set()
+    for line in lines:
+        argv = _split_command(line)
+        if len(argv) > 1 and argv[0] in (".", "source"):
+            by_shell.add(os.path.basename(argv[1]))
+            continue
+        run = resolve_invocation(argv)
+        if not run.payload_path:
+            continue
+        if run.is_posix_shell:
+            by_shell.add(os.path.basename(run.payload_path))
+        elif run.payload_path == run.interpreter:
+            directly.add(os.path.basename(run.payload_path))
+    return by_shell, directly
+
+
+def _support_text(hooks: Path, unread: list) -> _Support:
+    """Return the support files under `hooks` as a `_Support`, marking what could not be read whole
+    as unread."""
+    from .grade import shell_command_lines, runs_as_shell_text, MAX_SHELL_SCRIPT
+    code: list[str] = []
+    shell_lines: list[str] = []
+    programs: list[tuple[Path, str]] = []
+    notes: list[str] = []
+    total = digest_total = 0
+    files = hookscript.support_files(hooks, unread)
+    if len(files) > hookscript.MAX_SUPPORT_FILES:
+        unread.append(hooks)
+        return _Support()
+    exec_bit_meaningful = hookscript.honours_exec_bit(hooks)
+    for p in files:
+        kind = hookscript.support_kind(p, exec_bit_meaningful, runs_as_shell_text)
+        try:
+            size = p.stat().st_size
+        except OSError:
+            unread.append(p)
+            continue
+        if kind in ("binary", "notes"):
+            digest_total += size
+            digest = hookscript.digest_file(p) if digest_total <= hookscript.MAX_DIGEST_TOTAL else None
+            head = hookscript.read_head(p) if kind == "binary" else b""
+            if digest is None or head is None:
+                unread.append(p)
+                continue
+            prefix = head.split(b"\x00", 1)[0].decode("utf-8", "replace")
+            if prefix.strip():
+                code.append(prefix)
+                shell_lines += shell_command_lines(prefix)
+            notes.append(digest)
+            continue
+        total += size
+        if size > hookscript.MAX_SUPPORT_FILE or total > hookscript.MAX_SUPPORT_TOTAL:
+            unread.append(p)
+            continue
+        text = pathsafe.read_regular_text(p)
+        if text is None:
+            unread.append(p)
+            continue
+        code.append(text)
+        if kind == "program":
+            programs.append((p, text))
+        elif kind == "shell" and len(text) > MAX_SHELL_SCRIPT:
+            unread.append(p)
+        elif kind == "shell":
+            shell_lines += shell_command_lines(text)
+    by_shell, directly = _shell_run_names(shell_lines)
+    return _Support("\n".join(code), shell_lines, programs, by_shell, directly, "\n".join(notes))
+
+
+def _parse_git_hook(path: Path, support: _Support, unread: list) -> AutorunEntry | None:
+    from .grade import shell_command_lines, spawned_shell_lines, runs_as_shell_text, MAX_SHELL_SCRIPT
+    text = pathsafe.read_regular_text(path)
+    if text is None:
+        unread.append(path)
+        return None
+    shell = runs_as_shell_text(text)
+    bound = MAX_SHELL_SCRIPT if shell else hookscript.MAX_SUPPORT_FILE
+    if len(text) > bound:
+        unread.append(path)
+    argv = hookscript.saw_command(text) or [str(path)]
+    if len(text) > bound:
+        own_lines = []
+    else:
+        own_lines = shell_command_lines(text) if shell else spawned_shell_lines(text)
+    return AutorunEntry(location=hookscript.LOCATION, path=path, argv=argv, body=text,
+                        shell_lines=support.lines_for(own_lines), script=text, shared=support.code,
+                        notes=support.notes, persistence=[f"git-event:{path.name}"])
+
+
 def enumerate_entries() -> tuple[list[AutorunEntry], list[Path]]:
     """Every autorun entry on the catastrophic persistence surface (launch agents + systemd user
     units/timers), parsed. Dispatch is by FILE EXTENSION across the user-owned persistence dirs
@@ -328,4 +489,11 @@ def enumerate_entries() -> tuple[list[AutorunEntry], list[Path]]:
         e = _parse_systemd_unit(p)
         if e is not None:
             entries.append(e)
+    for d in git_hook_dirs(unread):
+        hooks = _executable_files(d, unread)
+        support = _support_text(d, unread) if hooks else _Support()
+        for p in hooks:
+            e = _parse_git_hook(p, support, unread)
+            if e is not None:
+                entries.append(e)
     return entries, unread
