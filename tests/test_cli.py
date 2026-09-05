@@ -132,6 +132,60 @@ class TestScanRouting(unittest.TestCase):
                 cli.main(["scan", flag])
 
 
+class TestACommandThatCannotCompleteFailsClosed(unittest.TestCase):
+    """An unexpected error ends the command as a run that could not complete, never as a verdict."""
+
+    def _run(self, boom):
+        err, out = io.StringIO(), io.StringIO()
+        with mock.patch.object(cli.dispatch, "build_parser", self._parser_raising(boom)), \
+             redirect_stderr(err), redirect_stdout(out):
+            code = cli.dispatch.main(["scan"])
+        return code, out.getvalue(), err.getvalue()
+
+    @staticmethod
+    def _parser_raising(boom):
+        def build():
+            p = argparse.ArgumentParser()
+            sub = p.add_subparsers(dest="command")
+            s = sub.add_parser("scan")
+            s.set_defaults(func=lambda _a: (_ for _ in ()).throw(boom))
+            return p
+        return build
+
+    def test_it_never_exits_zero(self):
+        code, _out, _err = self._run(OSError("the kernel refused the process table"))
+        self.assertNotEqual(code, 0, "a crashed run must never read as clean")
+        self.assertEqual(code, 2)
+
+    def test_it_says_so_on_stderr_not_in_the_report(self):
+        _code, out, err = self._run(RuntimeError("engine exploded"))
+        self.assertIn("did not complete", err)
+        self.assertIn("RuntimeError", err)
+        self.assertEqual(out, "", "a failure must not pollute the report on stdout")
+
+    def test_a_repository_cannot_control_the_terminal_through_it(self):
+        _code, _out, err = self._run(OSError("\x1b[2K\r##[error]saw: 0 infected"))
+        self.assertNotIn("\x1b", err)
+        self.assertNotIn("##[", err)
+
+    def test_an_interrupt_is_not_swallowed(self):
+        with mock.patch.object(cli.dispatch, "build_parser",
+                               self._parser_raising(KeyboardInterrupt())), \
+             redirect_stderr(io.StringIO()):
+            with self.assertRaises(KeyboardInterrupt):
+                cli.dispatch.main(["scan"])
+
+    def test_an_ordinary_verdict_still_passes_through(self):
+        def build():
+            p = argparse.ArgumentParser()
+            sub = p.add_subparsers(dest="command")
+            s = sub.add_parser("scan")
+            s.set_defaults(func=lambda _a: 1)
+            return p
+        with mock.patch.object(cli.dispatch, "build_parser", build):
+            self.assertEqual(cli.dispatch.main(["scan"]), 1)
+
+
 class TestSecNamespace(unittest.TestCase):
     @mock.patch("stayawake.bots.security.service.scan", return_value=0)
     def test_leading_sec_token_is_stripped(self, m):

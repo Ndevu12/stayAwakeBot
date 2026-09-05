@@ -13,6 +13,11 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Fixed
+- **A command that hits an unexpected error says so, instead of ending in a stack trace.** It names
+  what stopped it and ends as a run that could not complete — never as a clean result, so a gate
+  reading the exit code cannot mistake a failed run for a passed one.
+
 ### Added
 - **A renamed call to a dangerous built-in is reported however the rename is spelled.**
 
