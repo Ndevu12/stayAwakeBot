@@ -11,6 +11,7 @@ from stayawake.lib import auth
 from stayawake.utils.render import term_width
 from stayawake.utils.streaming import Streamer, status, stream_enabled
 from stayawake.utils.terminal import supports_color
+from stayawake.utils import exitcodes
 
 
 def register(sub) -> None:
@@ -62,11 +63,11 @@ def run(a: argparse.Namespace) -> int:
     # weaker hygiene warnings keep their opt-in gate (-f → 1). 3 is additive: every `rc==0`/`rc!=0`
     # consumer fails safe, and it is distinct from infected(1)/error(2).
     if {i.id for i in issues} & hygiene.ROTATION_UNSAFE_IDS:
-        return 3
+        return exitcodes.ROTATION_UNSAFE
     # A probe whose own discriminator failed did not answer, and an unanswered probe is the
     # documented meaning of 2 — "a run that could not complete". It is checked AFTER 3 because a
     # blocked probe is a gap in what the run covered, while 3 is a hazard in what it found.
     if any(o.state == hygiene.BLOCKED for o in outcomes):
-        return 2
+        return exitcodes.INCOMPLETE
     warnings = [i for i in issues if i.severity == "warning"]
     return 1 if (a.fail and warnings) else 0

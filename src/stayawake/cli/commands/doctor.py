@@ -10,6 +10,7 @@ from stayawake.cli._meta import __version__
 from stayawake.cli.helptext import add_command
 from stayawake.core.identity import Intent, require, resolve_session
 from stayawake.lib import github_app
+from stayawake.utils import exitcodes
 
 
 def register(sub) -> None:
@@ -53,8 +54,7 @@ def run(a: argparse.Namespace) -> int:
             "health_scripts_installed": bool(health),
             "version": __version__,
         }, indent=2))
-        return 0
-
+        return exitcodes.CLEAN
     def mark(ok: bool) -> str:
         return "✓" if ok else "✗"
 
@@ -89,4 +89,4 @@ def run(a: argparse.Namespace) -> int:
         print("\n".join(problems) if problems else "ok")
     else:
         print("\n".join(lines))
-    return 0
+    return exitcodes.CLEAN

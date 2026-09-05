@@ -16,6 +16,7 @@ import sys
 from stayawake.bots.security import service
 from stayawake.cli.argtypes import add_jobs_arg
 from stayawake.cli.helptext import add_command
+from stayawake.utils import exitcodes
 
 
 def register(sub) -> None:
@@ -101,7 +102,7 @@ def run(a: argparse.Namespace) -> int:
         # repository — refused rather than half-answered.
         print("error: --history reads a full local repository; a remote target is fetched shallow, "
               "so its history is not there to read. Clone it and scan the clone.", file=sys.stderr)
-        return 2
+        return exitcodes.INCOMPLETE
     return service.scan(a.config, remote=remote,
                         paths=None if remote else (positionals or None),
                         slugs=(positionals or None) if remote else None,
