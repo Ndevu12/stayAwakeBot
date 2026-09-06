@@ -13,6 +13,13 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Fixed
+- **Ordinary code that matches text next to reading base64 is no longer reported as a running
+  payload.** A bundled library that holds its pattern in a variable — which is what a minifier
+  produces — was read as running a command, and next to an ordinary base64 decode that was enough
+  to report a live foothold on the host, withhold the credential-rotation all-clear, and print the
+  incident runbook. It was reported on every run of a host serving edge functions locally.
+
 ### Added
 - **`saw audit` now examines the packages installed with `npm install -g`.** They sit outside every
   repository and, on most installs, outside your home directory, so a repository scan never walked
