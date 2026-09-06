@@ -109,7 +109,7 @@ def attribute(entry) -> Attribution:
     if not exec_path:                       # a config that references no executable — nothing to run
         return Attribution(exec_class="unknown")
     exec_class = _classify_path(exec_path)
-    if entry.location == hookscript.LOCATION and hookscript.is_pristine(entry.script):
+    if entry.location == hookscript.LOCATION and hookscript.is_installed(entry.script):
         return Attribution(exec_class=exec_class, owner="saw")
     owner = _homebrew_owner(entry.path, exec_path) or _package_owner(exec_path)
     signed = _codesigned(exec_path)

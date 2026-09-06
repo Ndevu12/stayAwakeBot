@@ -43,6 +43,26 @@ class TestRunContract(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("not implemented", text.lower())
 
+    def test_an_altered_saw_hook_is_named_and_left_to_the_repair_verb(self):
+        mine = Path("/mine")
+        kwargs = dict(supported=lambda: True, live=lambda: [], folders=lambda: [mine],
+                      apply=lambda p: denial.PathOutcome(p, denial.ENFORCING, "in place"))
+        code, text = harden.run(altered=lambda: [Path("/home/op/.config/saw/git-template/hooks/post-merge")],
+                                **kwargs)
+        self.assertEqual(code, 0)
+        self.assertIn("saw hook repair", text)
+        self.assertIn("/home/op/.config/saw/git-template/hooks/post-merge", text)
+        code, text = harden.run(altered=lambda: [], **kwargs)
+        self.assertNotIn("saw hook repair", text)
+        code, text = harden.run(altered=lambda: [Path("/home/op/x\n  enforcing: /forged\x1b[32m")], **kwargs)
+        self.assertNotIn("\n  enforcing: /forged", text)
+        self.assertNotIn("\x1b", text)
+        code, text = harden.run(altered=lambda: [], saw_runs=lambda: False, **kwargs)
+        self.assertIn("saw hook repair", text)
+        self.assertIn("cannot run", text)
+        code, text = harden.run(altered=lambda: [], saw_runs=lambda: True, **kwargs)
+        self.assertNotIn("cannot run", text)
+
     def test_without_root_it_still_takes_what_it_can(self):
         """Root is asked of the PATH, not of the command. Refusing the whole run because one
         location needs privilege withheld a control from everyone unwilling to give a security

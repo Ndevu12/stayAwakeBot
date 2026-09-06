@@ -534,6 +534,9 @@ def _referenced_text(entry) -> str:
     return data[:_MAX_REFERENCED].decode("utf-8", "replace")
 
 FOOTHOLD_ID = "autorun-unattributed-foothold"
+_SAW_HOOK_ALTERED = "claims to be a hook saw installed but has been modified"
+_SAW_HOOK_FOREIGN = "sits in the directory saw manages and is not a hook saw installed"
+_SAW_HOOK_REASONS = frozenset({_SAW_HOOK_ALTERED, _SAW_HOOK_FOREIGN})
 REVIEW_ID = "autorun-new-unattributed"
 
 
@@ -582,10 +585,10 @@ def content_signal(entry, *, read_referenced: bool = False) -> ContentSignal:
         hit = True
     if entry.location == hookscript.LOCATION and not hookscript.is_pristine(entry.script):
         if hookscript.claims_ours(entry.script):
-            reasons.append("claims to be a hook saw installed but has been modified")
+            reasons.append(_SAW_HOOK_ALTERED)
             hit = True
         elif hookscript.in_managed_dir(entry.path):
-            reasons.append("sits in the directory saw manages and is not a hook saw installed")
+            reasons.append(_SAW_HOOK_FOREIGN)
             hit = True
     if analyzer.detect_dropper(text):
         reasons.append("decode→execute dropper")
@@ -689,7 +692,8 @@ def grade(entry, attrib, novel: str, shape: ContentSignal, correlated: bool) -> 
             title="Unattributed autorun foothold (re-runs after the package is gone)",
             detail=detail,
             remediation="Verify you installed it; if not, treat the host as possibly compromised — "
-                        f"disable/remove the entry, and {_WIPER_NOTE} (neutralize before rotating).")
+                        f"disable/remove the entry, and {_WIPER_NOTE} (neutralize before rotating).",
+            command="saw hook repair" if any(r in _SAW_HOOK_REASONS for r in why) else None)
 
     # REVIEW (→ info): something NEW and unattributed appeared since your last audit, without a decisive
     # bad shape. Requires trusted-baseline novelty, so a known benign-but-unattributed entry (e.g. your

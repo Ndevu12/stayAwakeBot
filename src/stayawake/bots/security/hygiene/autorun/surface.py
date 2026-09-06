@@ -455,10 +455,11 @@ def _support_text(hooks: Path, unread: list) -> _Support:
 
 def _parse_git_hook(path: Path, support: _Support, unread: list) -> AutorunEntry | None:
     from .grade import shell_command_lines, spawned_shell_lines, runs_as_shell_text, MAX_SHELL_SCRIPT
-    text = pathsafe.read_regular_text(path)
-    if text is None:
+    raw = pathsafe.read_regular_bytes(path)
+    if raw is None:
         unread.append(path)
         return None
+    text = raw.decode("utf-8", "replace")
     shell = runs_as_shell_text(text)
     bound = MAX_SHELL_SCRIPT if shell else hookscript.MAX_SUPPORT_FILE
     if len(text) > bound:

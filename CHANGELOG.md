@@ -21,6 +21,20 @@ reader, not the mechanism or the weakness it closed.
   incident runbook. It was reported on every run of a host serving edge functions locally.
 
 ### Added
+- **`saw hook repair` puts back the hooks saw installs.** When `saw audit` reports a hook saw
+  installed that has since been changed, or something foreign in the directory saw manages, this
+  puts every hook saw installs back, in the template directories and in every repository saw has
+  seeded, and moves aside what it found in the way. Nothing is deleted: what is moved aside is kept
+  with a record of where it came from. A hook counts as back only after it is read back as written.
+  A hook of saw's that has been made to name another saw or config is put back as well. The audit
+  names the command on that finding, `saw hook status` says when it is needed, and `saw harden`
+  names what it found without touching it.
+
+### Fixed
+- **`saw hook install` no longer runs a stranger's hook from saw's own directory.** A hook found in
+  the directory saw manages that saw did not install was kept and run after saw's; it is now moved
+  aside and named. `saw hook uninstall` no longer puts such a hook back under a hook's name.
+
 - **`saw audit` now examines the packages installed with `npm install -g`.** They sit outside every
   repository and, on most installs, outside your home directory, so a repository scan never walked
   them and a wipe of the home directory did not remove them. The locations are worked out the way
