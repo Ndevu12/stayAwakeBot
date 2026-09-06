@@ -57,15 +57,23 @@ def _declared_prefixes() -> list[Path]:
 
 def _managed_prefixes() -> list[Path]:
     """Prefixes a Node version manager owns — one per installed version, so a payload does not
-    become invisible by living under the version that is not current."""
+    become invisible by living under the version that is not current.
+
+    Both the location the environment names and the default one are read: pointing the variable
+    elsewhere does not remove what is already installed at the default.
+    """
     home = Path.home()
     out: list[Path] = []
     for var, parts in _MANAGED_PREFIXES:
-        base = Path(os.environ[var]) if os.environ.get(var) else home / parts[0]
-        try:
-            out += sorted(p for p in base.glob(str(Path(*parts[1:]))) if p.is_dir())
-        except OSError:
-            continue
+        bases = [home / parts[0]]
+        named = os.environ.get(var)
+        if named:
+            bases.append(Path(named))
+        for base in bases:
+            try:
+                out += sorted(p for p in base.glob(str(Path(*parts[1:]))) if p.is_dir())
+            except OSError:
+                continue
     return out
 
 

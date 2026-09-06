@@ -29,8 +29,12 @@ class TestEveryLayoutIsReached(unittest.TestCase):
                 pass
 
     def _roots(self, env=None):
+        # The runner has its own Node installed, so the version-manager variables are cleared:
+        # without that, this reads the runner's tree instead of the fixture.
+        cleared = {k: "" for k in ("NVM_DIR", "VOLTA_HOME", "FNM_DIR", "npm_config_prefix",
+                                   "NPM_CONFIG_USERCONFIG", "PREFIX", "NODE_PREFIX")}
         with mock.patch.object(global_prefix.Path, "home", return_value=self.home), \
-             mock.patch.dict(os.environ, env or {}, clear=False), \
+             mock.patch.dict(os.environ, {**cleared, **(env or {})}, clear=False), \
              mock.patch.object(global_prefix, "_npm_prefix_roots", lambda: []):
             return [str(p) for p in global_prefix.global_module_roots()]
 
