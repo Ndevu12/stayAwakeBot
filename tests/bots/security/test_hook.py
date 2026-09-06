@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import os
 import subprocess
 import sys
@@ -282,6 +283,21 @@ class TestRunEventScope(_Isolated):
         with mock.patch.object(hook, "scan_target") as m:       # same tree → cache hit, no rescan
             self.assertEqual(hook.run_event("post-checkout", [hook._NULL_REV, head, "1"]), 0)
             m.assert_not_called()
+
+    def test_a_template_dir_spelled_with_a_tilde_is_written_where_git_reads_it(self):
+        subprocess.run(["git", "config", "--global", "init.templateDir", "~/.git-template"], check=True)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(hook.install(), 0)
+        self.assertTrue((self.home / ".git-template" / "hooks" / "post-checkout").is_file())
+        self.assertFalse((Path.cwd() / "~").exists())
+
+    def test_the_cache_forgets_a_repository_that_is_gone(self):
+        repo = _repo({"app.js": "export const x = 1;\n"})
+        gone = self.home / "gone"
+        hook._cache_path().parent.mkdir(parents=True, exist_ok=True)
+        hook._cache_path().write_text(json.dumps({str(gone): "0ld", os.path.realpath(repo): "stale"}))
+        hook._remember(repo, "fresh")
+        self.assertEqual(hook._load_cache(), {os.path.realpath(repo): "fresh"})
 
 
 class TestHookScript(unittest.TestCase):

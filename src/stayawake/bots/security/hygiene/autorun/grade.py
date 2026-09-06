@@ -2,6 +2,7 @@
 """Autorun GRADING — fuse novelty + provenance + content-shape + correlation into one verdict."""
 from __future__ import annotations
 
+import functools
 import os
 import re
 import shlex
@@ -10,6 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from stayawake.utils import pathsafe
+from ... import hookscript
 from ..models import HygieneIssue, POSIX_SHELLS, _WIPER_NOTE
 from .. import mechanism
 from ...taint import analyzer
@@ -243,7 +245,7 @@ _HEREDOC_START = re.compile(
 _ARITHMETIC = re.compile(r"\$?\(\(")
 _OPENS_A_COMMAND = frozenset({"do", "then", "else", "elif", "eval", "{", "(", "!", "time", "trap"})
 _CASE_OPENS = re.compile(r"(?:^|\s)case\s[^;&|]{0,256}\sin$")
-_MAX_SCRIPT = 64 * 1024
+MAX_SHELL_SCRIPT = 64 * 1024
 _MAX_SUBSTITUTION_DEPTH = 8
 
 
@@ -255,7 +257,8 @@ def shell_command_lines(script: str, _depth: int = 0) -> list[str]:
     quote state. 
     A `case` label is skipped for the same reason, and `while true; do <payload>` is NOT skipped."""
     out: list[str] = []
-    text, i, n = script[:_MAX_SCRIPT], 0, len(script[:_MAX_SCRIPT])
+    text = script[:MAX_SHELL_SCRIPT].replace("\\\n", "")
+    i, n = 0, len(text)
     start, depth, quote, pending_heredocs = 0, 0, "", []
     in_case = in_pattern = False
     while i < n:
@@ -510,8 +513,10 @@ def _shell_context_text(entry, referenced: str) -> list[str]:
         for code in seen_code:
             line = line.replace(code, " ")
         parts.append(line)
-    if referenced and _runs_as_shell(entry, referenced):
+    if referenced and entry.location != hookscript.LOCATION and _runs_as_shell(entry, referenced):
         parts.append(referenced)
+    elif referenced and entry.location != hookscript.LOCATION:
+        parts += spawned_shell_lines(referenced)
     return parts
 
 
@@ -558,9 +563,10 @@ def content_signal(entry, *, read_referenced: bool = False) -> ContentSignal:
     referenced = _referenced_text(entry) if read_referenced else ""
     if referenced:
         text += "\n" + referenced
+    lines = _shell_context_text(entry, referenced)
     reasons: list[str] = []
     hit = False
-    if mechanism._FETCH_PIPE_EXEC.search(text):
+    if mechanism._FETCH_PIPE_EXEC.search(text + "\n" + "\n".join(lines)):
         reasons.append("fetch/decode-to-shell command")
         hit = True
     payload = _payload_path(entry)
@@ -571,20 +577,43 @@ def content_signal(entry, *, read_referenced: bool = False) -> ContentSignal:
     if masquerade:
         reasons.append(masquerade)
         hit = True
-    elif any(mechanism._SCRATCH_EXEC.search(line)
-             for line in _shell_context_text(entry, referenced)):
+    elif any(mechanism._SCRATCH_EXEC.search(line) for line in lines):
         reasons.append("runs code from a world-writable scratch directory")
         hit = True
+    if entry.location == hookscript.LOCATION and not hookscript.is_pristine(entry.script):
+        if hookscript.claims_ours(entry.script):
+            reasons.append("claims to be a hook saw installed but has been modified")
+            hit = True
+        elif hookscript.in_managed_dir(entry.path):
+            reasons.append("sits in the directory saw manages and is not a hook saw installed")
+            hit = True
     if analyzer.detect_dropper(text):
         reasons.append("decode→execute dropper")
         hit = True
     if detect_destructive(text) is not None:
         reasons.append("dead-man self-destruct ($HOME wipe on an auth/token condition)")
         hit = True
+    for reason in _shared_reasons(entry.shared) if entry.shared else ():
+        if reason not in reasons:
+            reasons.append(reason)
+        hit = True
     secs = _poll_seconds(entry.persistence)
     if secs is not None and 0 < secs <= 300:
         reasons.append(f"short poll interval ({secs}s)")
     return ContentSignal(hit=hit, reasons=reasons)
+
+
+@functools.lru_cache(maxsize=16)
+def _shared_reasons(text: str) -> tuple[str, ...]:
+    """Return the decisive reasons the raw content-shape engines find in `text`, once per text."""
+    reasons = []
+    if mechanism._FETCH_PIPE_EXEC.search(text):
+        reasons.append("fetch/decode-to-shell command")
+    if analyzer.detect_dropper(text):
+        reasons.append("decode→execute dropper")
+    if detect_destructive(text) is not None:
+        reasons.append("dead-man self-destruct ($HOME wipe on an auth/token condition)")
+    return tuple(reasons)
 
 
 def _poll_seconds(persistence) -> int | None:
@@ -675,3 +704,59 @@ def grade(entry, attrib, novel: str, shape: ContentSignal, correlated: bool) -> 
                    "a novel foothold would appear; confirm you installed it.",
             remediation="If you set this up, it's fine. If not, inspect and remove it.")
     return None
+
+
+_NON_SHELL_INTERPRETERS = (_INTERPRETERS - frozenset(POSIX_SHELLS)) | frozenset({
+    "pwsh", "powershell", "tclsh", "wish", "expect", "awk", "gawk", "mawk", "nawk", "lua", "luajit",
+    "rscript", "groovy", "java", "swift", "elixir", "escript", "julia", "raku", "guile", "racket",
+    "gjs", "qjs", "uv", "uvx", "pipx", "pypy", "pypy3", "ipython", "jython", "micropython", "npx",
+    "pnpm", "pnpx", "yarn", "bunx", "zx", "nu", "nushell", "xonsh", "elvish", "ion", "dotnet",
+    "cargo", "go", "kotlin", "kscript", "scala", "clojure", "bb", "lua5", "jruby", "hy", "coffee",
+    "runghc", "runhaskell", "stack", "nim", "crystal", "erl"})
+
+
+def shebang_program(text: str) -> str | None:
+    """Return the comparable name of the program a `#!` line hands the file to, or None without one."""
+    first = text.lstrip(_LEADING_NOISE).split("\n", 1)[0]
+    if not first.startswith("#!"):
+        return None
+    tokens = _split_command(first[2:].strip())
+    if tokens and _program_name(tokens[0]) == "env":
+        tokens = tokens[1:]
+        while tokens and tokens[0].startswith("-"):
+            skip = 2 if tokens[0] in _WRAPPER_VALUE_OPTS["env"] - {"-S", "--split-string"} else 1
+            tokens = tokens[skip:]
+        while tokens and "=" in tokens[0]:
+            tokens = tokens[1:]
+    return _program_name(tokens[0]) if tokens else None
+
+
+def runs_as_shell_text(text: str) -> bool:
+    """Return True unless the file's `#!` line names an interpreter known not to be a shell."""
+    return shebang_program(text) not in _NON_SHELL_INTERPRETERS
+
+
+_STRING_LIST = r"[\[(]\s{0,16}(?:['\"](?:\\.|[^'\"\\\n]){0,1024}['\"]\s{0,16},?\s{0,16}){1,64}[\])]"
+_SPAWN_STRING = re.compile(
+    r"(?:\b(?:system|popen|exec|execv|execve|execvp|execvpe|execl|execlp|execSync|execFile|"
+    r"execFileSync|spawn|spawnSync|run|call|check_call|check_output|Popen|getoutput|"
+    r"getstatusoutput|shell_exec|passthru|proc_open)\s{0,16}\(\s{0,16}(?:\w{1,32}\s{0,16}=\s{0,16})?"
+    r"|\bdo\s{1,8}shell\s{1,8}script\s{1,8})"
+    r"(?:(?P<q>['\"`])(?P<s>(?:\\.|(?!(?P=q))[^\\]){0,4096})(?P=q)"
+    rf"(?:\s{{0,16}},\s{{0,16}}(?:\w{{1,32}}\s{{0,16}}=\s{{0,16}})?(?P<l2>{_STRING_LIST}))?"
+    rf"|(?P<l>{_STRING_LIST}))")
+_QUOTED_ITEM = re.compile(r"['\"]((?:\\.|[^'\"\\\n]){0,1024})['\"]")
+
+
+def spawned_shell_lines(text: str) -> list[str]:
+    """Return the shell command lines of every command string a program's text hands to a shell or
+    a process spawner, including the code a spawned shell is given inline."""
+    out: list[str] = []
+    for m in _SPAWN_STRING.finditer(text[:MAX_SHELL_SCRIPT]):
+        words = [m.group("s")] if m.group("s") is not None else []
+        words += _QUOTED_ITEM.findall(m.group("l2") or m.group("l") or "")
+        command = " ".join(words)
+        out += shell_command_lines(command)
+        for code in shell_code_args(_split_command(command)):
+            out += shell_command_lines(code)
+    return out
