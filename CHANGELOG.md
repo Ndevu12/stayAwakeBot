@@ -13,6 +13,14 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Added
+- **`saw audit` now examines the packages installed with `npm install -g`.** They sit outside every
+  repository and, on most installs, outside your home directory, so a repository scan never walked
+  them and a wipe of the home directory did not remove them. The locations are worked out the way
+  npm itself documents, including the ones a Node version manager owns — every version installed,
+  not only the current one — and a package there is reported for what it carries, never for not
+  appearing in a lockfile, since no lockfile governs that tree.
+
 ### Fixed
 - **A command that hits an unexpected error says so, instead of ending in a stack trace.** It names
   what stopped it and never reports a clean result, so a gate reading the outcome cannot mistake a

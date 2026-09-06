@@ -28,6 +28,7 @@ from .runner import check_runner_persistence, services_predicate
 from .os_service import check_persistence
 from .coverage import check_persistence_coverage
 from .autorun import check_autorun
+from .global_prefix import check_global_install_tree
 from .host_artifacts import check_host_artifacts
 from .process import check_live_processes, live_process_scope_note
 from .app_bundle import check_app_bundles
@@ -63,7 +64,9 @@ _SURFACE_PROBES = frozenset({
     "running processes",
 })
 
-_NON_SURFACE_PROBES = frozenset({"cached credentials", "branch protection"})
+# The global install tree is not the persistence surface, so a blocked read of it says nothing
+# about whether that surface was enumerated.
+_NON_SURFACE_PROBES = frozenset({"cached credentials", "branch protection", "global install tree"})
 
 _POSIX_ONLY_PROBES = frozenset({
     "self-hosted runner", "OS-service persistence", "SSH authorized_keys",
@@ -125,6 +128,7 @@ def audit_checks(slug: str | None = None, token: str | None = None, branch: str 
         ("persistence surface coverage", check_persistence_coverage),   # enumeration honesty
         ("host drop-files", lambda: check_host_artifacts(verify=verify_artifacts)),
         ("application bundles", lambda: check_app_bundles(verify=verify_artifacts)),
+        ("global install tree", check_global_install_tree),
         ("SSH authorized_keys", check_ssh_authorized_keys),
         ("shell startup files", check_shell_profile),
         ("git exec config", check_git_config_execution),
