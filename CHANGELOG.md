@@ -13,6 +13,14 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Added
+- **`saw scan` takes a directory or a single file, whether or not it is a repository.** A path you
+  name is scanned as given — a folder nobody put under git, or one file you just edited — so
+  checking a single script no longer means scanning a whole project. Naming a folder that holds
+  repositories still sweeps those, and a path that names nothing on disk — or holds nothing that
+  can be read — still stops the run rather than reporting it clean. A scan of something that is not a repository says so: the checks that
+  read a project's history did not run.
+
 ### Fixed
 - **Ordinary code that matches text next to reading base64 is no longer reported as a running
   payload.** A bundled library that holds its pattern in a variable — which is what a minifier

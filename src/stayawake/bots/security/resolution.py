@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+from dataclasses import dataclass
 import re
 import shutil
 import subprocess
@@ -44,9 +45,9 @@ def discover_local_repos(patterns: list[str], opts: ScanOptions) -> list[Path]:
     seen: set[str] = set()
     for pat in patterns or []:
         root = Path(os.path.expanduser(pat).split("*", 1)[0] or "/")
-        if not root.exists():
+        if not os.path.lexists(root):
             root = root.parent
-        if not root.exists():
+        if not os.path.lexists(root):
             continue
         for dirpath, dirnames, _ in os.walk(root):
             if (Path(dirpath) / ".git").exists():
@@ -58,6 +59,103 @@ def discover_local_repos(patterns: list[str], opts: ScanOptions) -> list[Path]:
                 continue
             dirnames[:] = [d for d in dirnames if d not in opts.exclude_dirs]
     return repos
+
+
+REPOSITORY, DIRECTORY, ONE_FILE = "repository", "directory", "file"
+
+
+@dataclass(frozen=True)
+class LocalTarget:
+    """One thing to scan, and the scope that answers about it.
+
+    Which matchers may run, what the verdict is about, and what went unlooked-at are answered here.
+    A scope held as loose booleans is one every caller can forget to apply, and each of them did.
+    """
+
+    root: Path
+    include_only: tuple[str, ...] | None
+    kind: str
+
+    @property
+    def is_repo(self) -> bool:
+        return self.kind == REPOSITORY
+
+    @property
+    def names_one_file(self) -> bool:
+        return self.kind == ONE_FILE
+
+    @property
+    def label(self) -> Path:
+        """What the verdict is about — and what `--alert` titles an issue with."""
+        if self.names_one_file and self.include_only:
+            return self.root / self.include_only[0]
+        return self.root
+
+    @property
+    def key(self) -> str:
+        return f"{self.root}|{self.include_only or ''}"
+
+    def skipped(self) -> tuple[str, ...]:
+        """What this scope does not look at, in the operator's words — computed from the scope
+        rather than written out beside each branch that happens to remember."""
+        if self.names_one_file:
+            return ("what its history still stores",
+                    "whether an installed package matches what was published",
+                    "what a previous cleanup left behind",
+                    "an audit against an external advisory service")
+        if not self.is_repo:
+            return ("what a commit introduced", "what earlier versions still hold")
+        return ()
+
+
+def _one_file(named: Path) -> "LocalTarget":
+    """One named file, rooted where its directory would have been scanned from.
+
+    Keeping the root and using the path relative to it is what lets a finding's path, the allowlist
+    globs, the report label and a SARIF uri stay what a scan of that directory would produce —
+    re-rooting at the file's own parent flattens the path and silently changes all four.
+    """
+    here = named.parent.resolve()
+    root = enclosing_repo_root(here)
+    if not (root / ".git").exists():
+        root = here
+    rel = (here / named.name).relative_to(root)
+    return LocalTarget(root, (str(rel),), ONE_FILE)
+
+
+def resolve_local_targets(patterns: list[str], opts: ScanOptions) -> list[LocalTarget]:
+    """What the given patterns name, in order, deduped.
+
+    A pattern that finds repositories resolves to those, so a sweep keeps working. A named path
+    that finds none, and exists, is scanned as itself — a directory nobody put under git, or one
+    file. A pattern that names nothing resolves to nothing, and the caller fails closed on that.
+    """
+    out: list[LocalTarget] = []
+    seen: set[str] = set()
+    for pat in patterns or []:
+        found = discover_local_repos([pat], opts)
+        candidates: list[LocalTarget] = [LocalTarget(r, None, REPOSITORY) for r in found]
+        if not candidates:
+            named = Path(os.path.expanduser(pat))
+            if named.is_symlink():
+                # Both: the link is an entry a redirect check must see, and where it points is
+                # what the operator wants read. Answering only one loses a confirmed finding or
+                # the contents.
+                candidates = [_one_file(named)]
+                if named.is_dir():
+                    resolved = named.resolve()
+                    candidates.append(LocalTarget(
+                        resolved, None,
+                        REPOSITORY if (resolved / ".git").exists() else DIRECTORY))
+            elif named.is_dir():
+                candidates = [LocalTarget(named.resolve(), None, DIRECTORY)]
+            elif named.is_file():
+                candidates = [_one_file(named)]
+        for c in candidates:
+            if c.key not in seen:
+                seen.add(c.key)
+                out.append(c)
+    return out
 
 
 def remote_scope(cfg: dict, users, orgs, slugs) -> str:

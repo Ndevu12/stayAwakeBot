@@ -15,6 +15,7 @@ from contextlib import redirect_stderr, redirect_stdout
 
 from stayawake.utils import pager
 from stayawake.bots.security import service
+from stayawake.bots.security.resolution import LocalTarget
 from stayawake.bots.security.service import workers as scan_workers
 from stayawake.bots.security.service.workers import WorkerScan
 from stayawake.bots.security.models import Finding, ScanReport, ScanResult, Severity
@@ -126,7 +127,8 @@ class TestDetailSuppression(unittest.TestCase):
 class TestLargeFleetPointer(unittest.TestCase):
     def test_writes_temp_report_and_points_at_it(self):
         repos = [Path(f"/x/r{i}") for i in range(service.run.LARGE_FLEET + 5)]
-        with mock.patch.object(service.run, "discover_local_repos", return_value=repos), \
+        with mock.patch.object(service.run, "resolve_local_targets",
+                               return_value=[LocalTarget(r, None, True) for r in repos]), \
              mock.patch.object(scan_workers, "scan_local",
                                return_value=WorkerScan(ScanResult("r", "local"))), \
              redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err:
@@ -136,7 +138,8 @@ class TestLargeFleetPointer(unittest.TestCase):
 
     def test_large_fleet_moves_detail_off_terminal(self):
         repos = [Path(f"/x/r{i}") for i in range(service.run.LARGE_FLEET + 5)]
-        with mock.patch.object(service.run, "discover_local_repos", return_value=repos), \
+        with mock.patch.object(service.run, "resolve_local_targets",
+                               return_value=[LocalTarget(r, None, True) for r in repos]), \
              mock.patch.object(scan_workers, "scan_local",
                                return_value=WorkerScan(_infected("o/bad"))), \
              redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()) as err:
@@ -147,7 +150,8 @@ class TestLargeFleetPointer(unittest.TestCase):
 
     def test_small_fleet_writes_no_pointer(self):
         repos = [Path("/x/r0")]
-        with mock.patch.object(service.run, "discover_local_repos", return_value=repos), \
+        with mock.patch.object(service.run, "resolve_local_targets",
+                               return_value=[LocalTarget(r, None, True) for r in repos]), \
              mock.patch.object(scan_workers, "scan_local",
                                return_value=WorkerScan(ScanResult("r", "local"))), \
              redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err:
@@ -169,7 +173,8 @@ def _remote_scan(results, **kw):
 
 def _local_scan(result, **kw):
     """Drive service.scan down the LOCAL path with one mocked repo. Returns (rc, stdout, stderr)."""
-    with mock.patch.object(service.run, "discover_local_repos", return_value=[Path("/x/r0")]), \
+    with mock.patch.object(service.run, "resolve_local_targets",
+                              return_value=[LocalTarget(Path("/x/r0"), None, True)]), \
          mock.patch.object(scan_workers, "scan_local", return_value=WorkerScan(result)), \
          redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()) as err:
         rc = service.scan(None, no_stream=True, jobs=1, **kw)

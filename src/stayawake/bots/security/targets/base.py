@@ -69,7 +69,7 @@ class Target:
         return self.root
 
     def iter_files(self) -> Iterator[str]:
-        if self.include_only is not None:       #a pre-discovered file-chunk — no re-walk
+        if self.include_only is not None:       # a pre-discovered file-chunk — no re-walk
             yield from self.include_only
             return
         if self._walk_cache is None:            # walk once, memoize (byte-identical replay after)

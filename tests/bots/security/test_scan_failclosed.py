@@ -71,11 +71,26 @@ class TestScanFailClosed(unittest.TestCase):
             (Path(d) / "readme.md").write_text("ok\n")
             self.assertEqual(_scan("allowlist:\n", d), 0)      # clean repo -> 0, not 2
 
-    def test_explicit_target_with_no_repo_fails_closed(self):
-        # An explicit target that resolves to NO git repo scanned NOTHING — never read as clean.
-        with tempfile.TemporaryDirectory() as d:
-            (Path(d) / ".gitignore").write_text("temp_auto_push.bat\n")   # malware present, but no .git
-            self.assertEqual(_scan("allowlist: []\n", d), 2)
+    def test_a_named_target_with_nothing_readable_fails_closed(self):
+        # The property this has always pinned: a target that was READ AS NOTHING never reads clean.
+        # A named path holding no readable file carries no verdict (#1535).
+        with tempfile.TemporaryDirectory() as cfgd, tempfile.TemporaryDirectory() as d:
+            cfg = os.path.join(cfgd, "c.yml")            # the config lives OUTSIDE the target, or
+            Path(cfg).write_text("allowlist: []\n")      # the target is not empty
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                rc = service.scan(cfg, paths=[d], no_stream=True)
+            self.assertEqual(rc, 2)
+
+    def test_a_payload_outside_a_repository_is_now_found_not_refused(self):
+        # It used to refuse the whole run for having no `.git`, so this payload went unreported.
+        # Reading it is strictly better, and 1 keeps the property that it never reads as clean.
+        with tempfile.TemporaryDirectory() as cfgd, tempfile.TemporaryDirectory() as d:
+            (Path(d) / ".gitignore").write_text("temp_auto_push.bat\n")
+            cfg = os.path.join(cfgd, "c.yml")
+            Path(cfg).write_text("allowlist: []\n")
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                rc = service.scan(cfg, paths=[d], no_stream=True)
+            self.assertEqual(rc, 1)
 
     @unittest.skipIf(getattr(os, "geteuid", lambda: 1)() == 0, "root can read mode-000 files")
     def test_unreadable_file_fails_closed(self):

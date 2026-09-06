@@ -125,6 +125,13 @@ class SymlinkMatcher(Matcher):
             return []
         exclude = getattr(target.opts, "exclude_dirs", set())
         findings: list[Finding] = []
+        if getattr(target, "names_one_file", False):
+            for rel in (target.include_only or ()):
+                entry = target.root / rel
+                f = _classify(entry, target.root, root, redirect_sig, escape_sig, entry.is_dir())
+                if f is not None:
+                    findings.append(f)
+            return findings
         for dirpath, dirnames, filenames in os.walk(target.root):   # followlinks=False (default)
             # Classify DIRECTORY entries BEFORE pruning for descent, so a write-redirect symlink whose
             # NAME is an excluded dir (`dist -> ~/.ssh`, `node_modules -> ~/.ssh`) is still caught —
