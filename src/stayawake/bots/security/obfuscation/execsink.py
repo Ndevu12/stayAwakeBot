@@ -165,16 +165,92 @@ _REGEXP_RECEIVER = re.compile(
     r"(?:/[^/\n]{1,200}/[gimsuyd]{0,7}|\bRegExp\s*\([^)\n]{0,200}\))\s*\.\s*$")
 _BARE_EXEC_CALL = re.compile(r"^exec\s*\($")
 
+_IDENT_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_$")
+
+
+def _named_receiver(before: str) -> str | None:
+    """The identifier in `<name> .` at the very end of `before`, or None.
+
+    Read backwards rather than matched: the equivalent pattern is quadratic on a long identifier
+    run, which the ReDoS guard rejects.
+    """
+    i = len(before) - 1
+    while i >= 0 and before[i].isspace():
+        i -= 1
+    if i < 0 or before[i] != ".":
+        return None
+    i -= 1
+    while i >= 0 and before[i].isspace():
+        i -= 1
+    end = i + 1
+    while i >= 0 and before[i] in _IDENT_CHARS:
+        i -= 1
+    name = before[i + 1:end]
+    return name if name and not name[0].isdigit() else None
+
+
+_ASSIGNED_A_REGEXP = re.compile(r"(?:/(?![/*])|new\s{1,8}RegExp\b|RegExp\s{0,8}\()")
+_NOT_AN_ASSIGNMENT = frozenset("=!<>+-*/%&|^")
+
+
+def _assignments(view: str) -> dict[str, list[tuple[int, bool]]]:
+    """Every `name = value` in `view`: name -> [(position, the value is a regular expression)].
+
+    Built in one pass and read by position, because asking per call site is quadratic in the number
+    of call sites — 4000 of them took 17s where this takes 0.1s.
+    """
+    out: dict[str, list[tuple[int, bool]]] = {}
+    i = view.find("=")
+    while i != -1:
+        nxt, prev = view[i + 1:i + 2], view[i - 1:i]
+        if nxt != "=" and prev not in _NOT_AN_ASSIGNMENT:
+            j = i - 1
+            while j >= 0 and view[j].isspace():
+                j -= 1
+            end = j + 1
+            while j >= 0 and view[j] in _IDENT_CHARS:
+                j -= 1
+            name = view[j + 1:end]
+            if name and not name[0].isdigit():
+                v = i + 1
+                while v < len(view) and view[v].isspace():
+                    v += 1
+                out.setdefault(name, []).append(
+                    (i, bool(_ASSIGNED_A_REGEXP.match(view, v))))
+        i = view.find("=", i + 1)
+    return out
+
+
+def _bound_to_a_regexp(assignments: dict[str, list[tuple[int, bool]]], name: str, before: int) -> bool:
+    """Whether the LAST assignment to `name` before `before` gives it a regular expression.
+
+    The last one, not any one: a decoy assignment elsewhere would otherwise switch this off.
+    """
+    latest = None
+    for pos, is_regexp in assignments.get(name, ()):
+        if pos >= before:
+            break
+        latest = is_regexp
+    return bool(latest)
+
 
 _RECEIVER_LOOKBACK = 224
 
 
 def _runs_a_command(view: str) -> bool:
     """Return True if `view` calls a child_process runner."""
+    assignments: dict[str, list[tuple[int, bool]]] | None = None
     for m in _sink_calls(_COMMAND_RUNNER, view):
-        if _BARE_EXEC_CALL.match(m.group(0)) and _REGEXP_RECEIVER.search(
-                view[max(0, m.start() - _RECEIVER_LOOKBACK):m.start()]):
-            continue
+        if _BARE_EXEC_CALL.match(m.group(0)):
+            before = view[max(0, m.start() - _RECEIVER_LOOKBACK):m.start()]
+            if _REGEXP_RECEIVER.search(before):
+                continue
+            named = _named_receiver(before)
+            if named is not None:
+                if assignments is None:
+                    assignments = _assignments(view)
+                if _bound_to_a_regexp(assignments, named, m.start()):
+                    continue
         return True
     return False
 

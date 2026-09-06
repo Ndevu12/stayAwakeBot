@@ -535,6 +535,25 @@ class TestWholeFileObfuscation(unittest.TestCase):
         self.assertTrue(analyze_file("require('node:child_process').spawn(atob(cmd));\n", ".js"))
         self.assertTrue(analyze_file("require('shelljs').exec(atob(cmd));\n", ".js"))
 
+    def test_a_regex_held_in_a_variable_is_still_a_regex(self):
+        # A minifier hoists the pattern into a binding, so the receiver is a NAME, not the literal.
+        # Reported on a real host: a bundled JWT library decoding base64 next to `re.exec(...)`.
+        self.assertFalse(analyze_file(
+            "var dt=/^(\\d+) ?(seconds?|m)$/i;\n"
+            "function f(e){let t=dt.exec(e);return t}\n"
+            "function g(e){let t=atob(e);return new Uint8Array(t.length)}\n", ".js"))
+
+    def test_a_command_runner_in_a_variable_still_runs(self):
+        self.assertTrue(analyze_file(
+            "const cp=require('child_process');\ncp.exec(atob(cmd));\n", ".js"))
+
+    def test_a_decoy_regex_after_the_call_does_not_switch_the_check_off(self):
+        # The binding that counts is the last one BEFORE the call, not any one in the file: a regex
+        # assigned afterwards is a decoy, and reading it would disable the check for one token.
+        # The receiver is the only signal here — a named module would fire on its own name.
+        self.assertTrue(analyze_file(
+            "let x = mod;\nx.exec(atob(cmd));\nx = /./;\n", ".js"))
+
     def test_require_receiver_non_command_exec_decode_clean(self):
         # FP-hunt: `.exec` on a NON-command module fed a decode is benign — RegExp.exec on decoded
         # text, or a sqlite `.exec` of a base64-packed migration. The module gate (child_process /
