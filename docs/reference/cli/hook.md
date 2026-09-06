@@ -24,6 +24,11 @@ saw hook status
 | `status` | Whether it is active, the template directory, and the scan cache. |
 | `-c`, `--config FILE` | Operator config whose allowlist clones are scanned against, baked into the hook. The hook never reads a cloned repository's own config. |
 
+`install` creates a directory whose contents git runs, unprompted, in every repository cloned or
+created afterwards. [`saw audit`](audit.md) enumerates that directory, any template directory you
+configured yourself, and the hooks of the repositories it has seeded, and reports a hook that was
+not installed by saw, or one that was installed by saw and has since been changed.
+
 A pull or switch scans only what changed, so it is near-instant, and each scan runs under a
 wall-clock budget (`SAW_HOOK_TIMEOUT`, default 60s) so a huge clone can never hang git; a scan that
 times out reports the tree as unverified, never clean. `git reset --hard` fires no git hook, so scan
