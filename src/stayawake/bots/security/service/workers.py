@@ -56,7 +56,8 @@ def notes_for(scope: LocalTarget, pruned: set[str]) -> list[str]:
     Composed once: the sequential path and the parallel one each used to assemble their own list,
     and the parallel one was missing a rule every time a rule was added.
     """
-    return [n for n in (scope.unlooked_at(), scope.destination_note(),
+    return [n for n in (scope.unlooked_at(), scope.where_paths_are_from(),
+                        scope.destination_note(),
                         None if scope.is_repo else pruning_note(pruned)) if n]
 
 
@@ -80,8 +81,16 @@ _ANSWERS_ABOUT_ONE_FILE = frozenset({"symlink", "dependency-audit"})
 _ASKS_GIT_ABOUT_THE_TREE = frozenset({"git-history"})
 
 
+# The link entry is judged by its own metadata; every other matcher would open `root / rel`, which
+# follows the link and reads the very bytes the scope says it is leaving alone.
+_JUDGES_THE_ENTRY_WITHOUT_READING_IT = frozenset({"symlink"})
+
+
 def matchers_for_target(signatures: dict, scope: LocalTarget) -> dict:
     """The signatures whose matchers may run over a target of this shape."""
+    if scope.unread_destination:
+        return {k: v for k, v in signatures.items()
+                if k in _JUDGES_THE_ENTRY_WITHOUT_READING_IT}
     if scope.names_one_file:
         return {k: v for k, v in signatures.items()
                 if k in REGISTRY and (REGISTRY[k].partitionable or k in _ANSWERS_ABOUT_ONE_FILE)}
@@ -114,7 +123,7 @@ def scan_local(job: LocalScanJob) -> WorkerScan:
                 for rel in target.iter_files())
             result = scan_target(target, matchers_for_target(job.signatures, scope), job.allowlist)
             pruned = set(target.pruned_dirs)
-        if nothing_to_read:
+        if nothing_to_read and not result.findings:
             result.error = NOTHING_TO_READ
         else:
             if scope.is_repo and not scope.names_one_file:

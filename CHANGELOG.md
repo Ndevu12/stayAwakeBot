@@ -21,7 +21,9 @@ reader, not the mechanism or the weakness it closed.
   that holds repositories still sweeps those, and a path that names nothing on disk — or holds
   nothing that can be read — still stops the run rather than reporting it clean. A scan narrower
   than a repository says what it therefore did not look at, and names any folder its own walk
-  skipped.
+  skipped. A link you name that points into a credential store — SSH keys, cloud credentials, a
+  shell startup file — is reported, but nothing behind it is read: naming a path inside your own
+  project should not put what is in your home directory into a report or an issue.
 
 ### Fixed
 - **Ordinary code that matches text next to reading base64 is no longer reported as a running

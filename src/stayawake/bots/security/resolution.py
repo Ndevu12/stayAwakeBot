@@ -82,6 +82,7 @@ class LocalTarget:
     kind: str
     within: str | None = None
     unread_destination: str | None = None
+    rooted_at_a_repository: bool = False
 
     def __post_init__(self) -> None:
         if self.kind not in _KINDS:
@@ -96,6 +97,11 @@ class LocalTarget:
         return self.kind == ONE_FILE
 
     @property
+    def paths_are_project_relative(self) -> bool:
+        """Whether a finding's path here is the one the project around it would use."""
+        return self.is_repo or self.within is not None or self.rooted_at_a_repository
+
+    @property
     def scan_root(self) -> Path:
         """Where a walk over the whole target starts."""
         return self.root / self.within if self.within else self.root
@@ -108,8 +114,10 @@ class LocalTarget:
         return self.scan_root
 
     @property
-    def key(self) -> str:
-        return f"{self.root}|{self.include_only or ''}|{self.within or ''}"
+    def key(self) -> tuple:
+        """What makes this target the same target as another. A `|`-joined string let a directory
+        named `a||` collide with a different path and be dropped before any scan."""
+        return (self.root, self.include_only, self.within)
 
     def skipped(self) -> tuple[str, ...]:
         """What this scope does not look at, in the operator's words — computed from the scope
@@ -122,6 +130,15 @@ class LocalTarget:
         if not self.is_repo:
             return ("what a commit introduced", "what earlier versions still hold")
         return ()
+
+    def where_paths_are_from(self) -> str | None:
+        """What is not evaluated because there is no project to measure paths from."""
+        if self.paths_are_project_relative:
+            return None
+        return ("Nothing here is under git, so a file's path is measured from the path you named. "
+                "Checks that key on where a file sits in a project — a workflow under "
+                "`.github/workflows`, for one — apply only as far as that reaches. Name the folder "
+                "the project starts at to give them the whole path.")
 
     def unlooked_at(self) -> str | None:
         """The disclosure this scope owes the operator, or None when it looked at everything."""
@@ -158,7 +175,8 @@ def _one_file(named: Path) -> "LocalTarget":
     if not (root / ".git").exists():
         root = here
     rel = (here / named.name).relative_to(root)
-    return LocalTarget(root, (str(rel),), ONE_FILE)
+    return LocalTarget(root, (str(rel),), ONE_FILE,
+                       rooted_at_a_repository=(root / ".git").exists())
 
 
 def _a_directory(named: Path) -> "LocalTarget":
@@ -196,6 +214,11 @@ def resolve_local_targets(patterns: list[str], opts: ScanOptions) -> list[LocalT
     seen: set[str] = set()
     for pat in patterns or []:
         named = Path(os.path.expanduser(pat))
+        # Discovery promotes a path that is not there to its parent, so `<repo>/typo` came back as
+        # the whole of `<repo>` under the repository's own name. A literal path that names nothing
+        # resolves to nothing; only a `*` pattern is allowed not to exist as written.
+        if "*" not in pat and not os.path.lexists(named):
+            continue
         # The link ENTRY, always and first: a redirect check has to see the link itself, and the
         # walk that discovers repositories follows it, so anything under it hides the entry.
         candidates: list[LocalTarget] = [_one_file(named)] if named.is_symlink() else []

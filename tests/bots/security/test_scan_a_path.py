@@ -27,6 +27,17 @@ def _report_of(target: Path) -> str:
     return out.getvalue()
 
 
+def _stderr_of(target: Path) -> str:
+    """What a scan of `target` writes to stderr."""
+    from stayawake.bots.security import service
+    cfgd = Path(tempfile.mkdtemp())
+    (cfgd / "c.yml").write_text("allowlist: []\n", encoding="utf-8")
+    err = io.StringIO()
+    with redirect_stdout(io.StringIO()), redirect_stderr(err):
+        service.scan(str(cfgd / "c.yml"), paths=[str(target)], no_stream=True)
+    return err.getvalue()
+
+
 def _signatures_reported(target: Path, about: str) -> set[str]:
     """The signature ids a scan of `target` reports about a path containing `about`."""
     from stayawake.bots.security import service
@@ -86,6 +97,41 @@ class TestWhatAPathResolvesTo(unittest.TestCase):
 
     def test_a_path_that_names_nothing_resolves_to_nothing(self):
         self.assertEqual(resolve_local_targets([str(self.d / "absent")], ScanOptions()), [])
+
+    def test_a_typo_inside_a_repository_is_not_answered_by_that_repository(self):
+        # Discovery promotes a path that is not there to its parent, so `<repo>/typo` came back as
+        # the whole of `<repo>` — reported under the repository's name, and a clean verdict there
+        # reads as "the path I named is clean". This fixture needs the `.git`: without one the
+        # promotion finds nothing and the test passes while the hole is open.
+        import subprocess
+        subprocess.run(["git", "init", "-q", str(self.d)], check=True)
+        self.assertEqual(resolve_local_targets([str(self.d / "typo")], ScanOptions()), [])
+
+    def test_a_typo_above_a_fleet_is_not_answered_by_the_fleet(self):
+        import subprocess
+        for name in ("one", "two"):
+            subprocess.run(["git", "init", "-q", str(self.d / name)], check=True)
+        self.assertEqual(resolve_local_targets([str(self.d / "typo")], ScanOptions()), [])
+
+    def test_a_glob_still_resolves_to_what_it_matches(self):
+        # The guard above must not eat a pattern, which never exists as written.
+        import subprocess
+        for name in ("one", "two"):
+            subprocess.run(["git", "init", "-q", str(self.d / name)], check=True)
+        found = resolve_local_targets([str(self.d) + "/*"], ScanOptions())
+        self.assertEqual({t.root.name for t in found}, {"one", "two"})
+
+    def test_two_paths_that_differ_only_by_a_pipe_are_two_targets(self):
+        # `key` was a `|`-joined string, so a directory named `a||` collided with a different path
+        # and the second was dropped before any scan — no error, no note. The repository matters:
+        # it is what puts `a||` in `within`, which is the field the split moves across.
+        import subprocess
+        subprocess.run(["git", "init", "-q", str(self.d / "x")], check=True)
+        (self.d / "x" / "a||").mkdir(parents=True)
+        (self.d / "x||a").mkdir(parents=True)
+        found = resolve_local_targets([str(self.d / "x" / "a||"), str(self.d / "x||a")],
+                                      ScanOptions())
+        self.assertEqual(len(found), 2, f"a target was dropped: {[str(t.label) for t in found]}")
 
     def test_a_sweep_still_finds_the_repositories_under_it(self):
         (self.d / "one").mkdir()
@@ -475,6 +521,16 @@ class TestALinkIntoACredentialStoreIsNotFollowed(unittest.TestCase):
     def test_the_link_itself_is_still_judged(self):
         self.assertIn("symlink-write-redirect", _signatures_reported(self.link, "dist"))
 
+    def test_the_destination_file_is_never_opened(self):
+        # Measured on the file's atime, because every other assertion passed while the bytes were
+        # being read: suppressing the resolved DIRECTORY left the link entry itself reading through.
+        key = self.keys / "id_ed25519"
+        link = self.proj / "creds"
+        os.symlink(str(key), str(link))
+        before = key.stat().st_atime_ns
+        _report_of(link)
+        self.assertEqual(key.stat().st_atime_ns, before, "the destination was opened")
+
     def test_an_ordinary_destination_is_still_read_through(self):
         other = self.base / "work"
         other.mkdir()
@@ -483,6 +539,63 @@ class TestALinkIntoACredentialStoreIsNotFollowed(unittest.TestCase):
         os.symlink(str(other), str(link))
         self.assertTrue(_signatures_reported(link, "bad.js"),
                         "a benign link stopped being read through")
+
+
+class TestWherePathsAreMeasuredFrom(unittest.TestCase):
+    """Outside a repository there is no project root, so a file's path is whatever the named path
+    makes it — and a signature anchored on where a file sits stops matching when you narrow. Saw
+    cannot recover the path, so it says so instead of letting the loss be silent."""
+
+    def _plain_tree_with_a_workflow(self) -> Path:
+        d = Path(tempfile.mkdtemp())                  # deliberately NOT a repository
+        wf = d / ".github" / "workflows"
+        wf.mkdir(parents=True)
+        (wf / "ci.yml").write_text(
+            "jobs:\n  b:\n    runs-on: [self-hosted, SHA1HULUD]\n    steps: []\n",
+            encoding="utf-8")
+        return d
+
+    def test_the_loss_is_disclosed_when_there_is_no_project_to_measure_from(self):
+        d = self._plain_tree_with_a_workflow()
+        self.assertIn("measured from the path you named", _report_of(d / ".github" / "workflows"))
+
+    def test_a_repository_scan_does_not_carry_that_note(self):
+        import subprocess
+        d = self._plain_tree_with_a_workflow()
+        subprocess.run(["git", "init", "-q", str(d)], check=True)
+        for named in (d, d / ".github" / "workflows", d / ".github" / "workflows" / "ci.yml"):
+            self.assertNotIn("measured from the path you named", _report_of(named))
+
+    def test_a_file_named_inside_a_repository_does_not_carry_it_either(self):
+        import subprocess
+        d = self._plain_tree_with_a_workflow()
+        subprocess.run(["git", "init", "-q", str(d)], check=True)
+        scope = resolve_local_targets([str(d / ".github" / "workflows" / "ci.yml")],
+                                      ScanOptions())[0]
+        self.assertTrue(scope.paths_are_project_relative)
+        self.assertIsNone(scope.where_paths_are_from())
+
+
+class TestATargetThatCarriesAVerdictIsNotAlsoRefused(unittest.TestCase):
+    """`iter_files` never lists a symlink-to-a-directory, but the symlink matcher judges one — so a
+    target reported a finding AND an error saying it carried no verdict."""
+
+    def test_a_finding_and_a_refusal_are_not_reported_together(self):
+        r = Path(tempfile.mkdtemp())
+        pkg = r / "pkg"
+        pkg.mkdir()
+        away = Path(tempfile.mkdtemp()) / "elsewhere"
+        away.mkdir(parents=True)
+        os.symlink(str(away), str(pkg / "vend"))
+        # stderr too: the terminal sink hides the error behind an INFECTED panel, so a
+        # stdout-only assertion passed while the contradiction was still being emitted.
+        everything = _report_of(pkg) + _stderr_of(pkg)
+        self.assertIn("symlink-escapes-repo", everything)
+        self.assertNotIn("carries no verdict", everything)
+
+    def test_a_target_that_really_read_nothing_still_fails_closed(self):
+        empty = Path(tempfile.mkdtemp())
+        self.assertIn("could be read", _report_of(empty) + _stderr_of(empty))
 
 
 class TestWhatTheWalkSkippedByName(unittest.TestCase):

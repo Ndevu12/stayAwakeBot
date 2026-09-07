@@ -189,7 +189,7 @@ def _scan_one_target_inner(scope, display: str, opts, sigs, allowlist, workers: 
                               opts, scope.scan_root, allowlist, all_sigs, scope.is_repo)
     # The other local path — one small target, and every target of a fleet scan — goes through
     # `workers.scan_local`, which attaches this itself. This branch is the one it does not reach.
-    if not scope.is_repo and not files:
+    if not scope.is_repo and not files and not result.findings:
         result.error = scan_workers.NOTHING_TO_READ
     else:
         if scope.is_repo:
