@@ -13,6 +13,8 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-07
+
 ### Added
 - **`saw scan` takes a directory or a single file, whether or not it is a repository.** A path you
   name is scanned as given — a folder nobody put under git, or one file you just edited — so
@@ -22,6 +24,30 @@ reader, not the mechanism or the weakness it closed.
   nothing that can be read — still stops the run rather than reporting it clean. A scan narrower
   than a repository says what it therefore did not look at, and names any folder its own walk
   skipped.
+- **`saw hook repair` puts back the hooks saw installs.** When `saw audit` reports a hook saw
+  installed that has since been changed, or something foreign in the directory saw manages, this
+  puts every hook saw installs back, in the template directories and in every repository saw has
+  seeded, and moves aside what it found in the way. Nothing is deleted: what is moved aside is kept
+  with a record of where it came from. A hook counts as back only after it is read back as written.
+  A hook of saw's that has been made to name another saw or config is put back as well. The audit
+  names the command on that finding, `saw hook status` says when it is needed, and `saw harden`
+  names what it found without touching it.
+- **`saw audit` now examines the packages installed with `npm install -g`.** They sit outside every
+- **`saw audit` enumerates the git hooks that run on your account through a template.** The
+  directory `saw hook install` creates, any template directory you configured, and the hooks of the
+  repositories saw has seeded are examined like every other start-up location: a hook saw did not
+  install is reported when it appears or changes, one that fetches and runs code is reported at
+  once, and a hook saw installed that has since been changed is reported at once. An unreadable
+  hooks directory withholds the all-clear.
+- **A renamed call to a dangerous built-in is reported however the rename is spelled.**
+
+### Changed
+- **`saw audit` separates a live foothold from the rest.** A running process holding code that is
+  not on disk now leads the report under its own heading, instead of sitting in one list beside an
+  editor setting. Nothing else about the finding changes.
+- **`saw audit` says less.** The response steps and the repeated rotation warning are shorter, and
+  the guidance no longer names one reported variant's service or runner as though it were the only
+  shape to look for.
 
 ### Fixed
 - **A symlink into a credential store is graded without being read.** A file symlinked from a
@@ -43,53 +69,18 @@ reader, not the mechanism or the weakness it closed.
   produces — was read as running a command, and next to an ordinary base64 decode that was enough
   to report a live foothold on the host, withhold the credential-rotation all-clear, and print the
   incident runbook. It was reported on every run of a host serving edge functions locally.
-
-### Added
-- **`saw hook repair` puts back the hooks saw installs.** When `saw audit` reports a hook saw
-  installed that has since been changed, or something foreign in the directory saw manages, this
-  puts every hook saw installs back, in the template directories and in every repository saw has
-  seeded, and moves aside what it found in the way. Nothing is deleted: what is moved aside is kept
-  with a record of where it came from. A hook counts as back only after it is read back as written.
-  A hook of saw's that has been made to name another saw or config is put back as well. The audit
-  names the command on that finding, `saw hook status` says when it is needed, and `saw harden`
-  names what it found without touching it.
-
-### Fixed
 - **`saw hook install` no longer runs a stranger's hook from saw's own directory.** A hook found in
   the directory saw manages that saw did not install was kept and run after saw's; it is now moved
   aside and named. `saw hook uninstall` no longer puts such a hook back under a hook's name.
-
-- **`saw audit` now examines the packages installed with `npm install -g`.** They sit outside every
   repository and, on most installs, outside your home directory, so a repository scan never walked
   them and a wipe of the home directory did not remove them. The locations are worked out the way
   npm itself documents, including the ones a Node version manager owns — every version installed,
   not only the current one — and a package there is reported for what it carries, never for not
   appearing in a lockfile, since no lockfile governs that tree.
-
-### Fixed
 - **A command that hits an unexpected error says so, instead of ending in a stack trace.** It names
   what stopped it and never reports a clean result, so a gate reading the outcome cannot mistake a
   failed run for a passed one. A command that stopped before producing any result is also
   distinguishable from one that answered in part.
-
-### Added
-- **`saw audit` enumerates the git hooks that run on your account through a template.** The
-  directory `saw hook install` creates, any template directory you configured, and the hooks of the
-  repositories saw has seeded are examined like every other start-up location: a hook saw did not
-  install is reported when it appears or changes, one that fetches and runs code is reported at
-  once, and a hook saw installed that has since been changed is reported at once. An unreadable
-  hooks directory withholds the all-clear.
-- **A renamed call to a dangerous built-in is reported however the rename is spelled.**
-
-### Changed
-- **`saw audit` separates a live foothold from the rest.** A running process holding code that is
-  not on disk now leads the report under its own heading, instead of sitting in one list beside an
-  editor setting. Nothing else about the finding changes.
-- **`saw audit` says less.** The response steps and the repeated rotation warning are shorter, and
-  the guidance no longer names one reported variant's service or runner as though it were the only
-  shape to look for.
-
-### Fixed
 - **The scan-on-clone cache no longer grows with repositories that were deleted.**
 - **`saw hook install` writes into an existing template directory spelled with `~`.** It was
   written under a literal `~` folder in the current directory, where git never looked.
@@ -872,7 +863,8 @@ _No user-facing changes were recorded for this release._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel (supply-chain worm
 detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.6.3...v0.7.0
 [0.6.3]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.6.2...v0.6.3
