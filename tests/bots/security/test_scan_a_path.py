@@ -663,6 +663,20 @@ class TestAWriteSinkIsNeverReadThrough(unittest.TestCase):
         self.assertNotIn("TOPSECRET", report)
         self.assertNotIn("TAILSECRET", report)
 
+    def test_the_interior_of_a_large_destination_is_not_read_either(self):
+        # A third opener: a source file between 2MB and 64MB is read in overlapping windows, which
+        # is the only path that reaches the MIDDLE of a file. The needle sits at 1.5MB so it can
+        # come from nowhere else.
+        big = self.base / "home" / ".ssh" / "id_rsa_big.js"
+        big.write_text("x" * 1_500_000 + '\nconst _$_ab12 = "KEYNEEDLE";\n' + "y" * 1_600_000,
+                       encoding="utf-8")
+        os.symlink(str(big), str(self.proj / "windowed.js"))
+        # Asserted on what was FOUND, not on the secret's text: the evidence preview is truncated,
+        # so a test looking for the whole needle passed while the bytes were being read.
+        found = _signatures_reported(self.proj, "windowed.js")
+        self.assertEqual(found, {"symlink-write-redirect"},
+                         f"the destination's interior was read: {sorted(found)}")
+
     def test_an_ordinary_link_inside_the_tree_is_still_read(self):
         other = self.base / "shared"
         other.mkdir()
@@ -722,6 +736,65 @@ class TestATargetThatReadNothingSaysWhy(unittest.TestCase):
         d = Path(tempfile.mkdtemp())
         os.mkfifo(d / "app.js")
         self.assertIn("carries no verdict", _report_of(d) + _stderr_of(d))
+
+
+class TestEachTargetOwnsItsCoverageNotes(unittest.TestCase):
+    """With more than one target the notes were flattened into one deduped block, so a note about
+    one named path lost the only thing that made it readable — which path."""
+
+    def _two_repos_and_a_folder(self):
+        import subprocess
+        base = Path(tempfile.mkdtemp())
+        keys = base / "vhome" / ".ssh"
+        keys.mkdir(parents=True)
+        (keys / "id_rsa").write_text("k\n", encoding="utf-8")
+        targets = []
+        for name in ("repoA", "repoB"):
+            r = base / name
+            subprocess.run(["git", "init", "-q", str(r)], check=True)
+            (r / "a.js").write_text("export const ok = 1;\n", encoding="utf-8")
+            os.symlink(str(keys / "id_rsa"), str(r / "secrets.js"))
+            targets.append(r)
+        loose = base / "loose"
+        loose.mkdir()
+        (loose / "b.js").write_text("export const ok = 2;\n", encoding="utf-8")
+        targets.append(loose)
+        return targets
+
+    def _notes(self, targets):
+        from stayawake.bots.security import service
+        cfgd = Path(tempfile.mkdtemp())
+        (cfgd / "c.yml").write_text("allowlist: []\n", encoding="utf-8")
+        out = io.StringIO()
+        with redirect_stdout(out), redirect_stderr(io.StringIO()):
+            service.scan(str(cfgd / "c.yml"), paths=[str(t) for t in targets], no_stream=True)
+        return [l.strip() for l in out.getvalue().splitlines() if l.strip().startswith("•")
+                and "·" not in l]
+
+    def test_a_note_two_targets_owe_is_shown_for_each_of_them(self):
+        targets = self._two_repos_and_a_folder()
+        notes = self._notes(targets)
+        for repo in targets[:2]:
+            self.assertTrue(any(str(repo) in n and "link into SSH" in n for n in notes),
+                            f"{repo.name} does not own its note: {notes}")
+
+    def test_a_note_about_one_target_names_that_target(self):
+        targets = self._two_repos_and_a_folder()
+        notes = self._notes(targets)
+        not_a_repo = [n for n in notes if "not a repository" in n]
+        self.assertTrue(not_a_repo, "the note vanished")
+        for n in not_a_repo:
+            self.assertIn(str(targets[2]), n, "the note does not say which target it is about")
+
+    def test_a_single_target_is_not_prefixed_with_its_own_name(self):
+        targets = self._two_repos_and_a_folder()
+        notes = self._notes([targets[2]])
+        self.assertTrue(notes)
+        for n in notes:
+            # The note TEXT carries em-dashes of its own, so the property is "does not name the
+            # target", not "has no dash" — the first version of this test asserted the latter.
+            self.assertNotIn(str(targets[2]), n,
+                             f"a lone target's note was needlessly attributed: {n}")
 
 
 if __name__ == "__main__":

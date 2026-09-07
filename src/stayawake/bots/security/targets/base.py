@@ -104,6 +104,18 @@ class Target:
             pass                                  # can't tell (e.g. EACCES on 3.11) → be conservative
         self.read_errors.append(f"{name}: {type(exc).__name__}")   # genuine gap → fail CLOSED
 
+    def _open_read(self, p: Path):
+        """The only place this class opens a file. Returns None when the path must not be read.
+
+        Three call sites each opened their own handle and each had to remember the write-sink rule;
+        the third one did not, and the credential bytes reached the report. A new reader that
+        forgets cannot exist if there is nothing else to call. `tests/.../test_one_opener.py` holds
+        that to one.
+        """
+        if p.is_symlink() and self._redirects_into_a_sink(p):
+            return None
+        return p.open("rb")
+
     def _redirects_into_a_sink(self, p: Path) -> bool:
         """Whether `p` is a link into a write-sink, recorded as a coverage note the first time.
 
@@ -135,10 +147,8 @@ class Target:
         except OSError:
             return None                           # can't stat (vanished / race) — treat as absent
         if _stat.S_ISLNK(st.st_mode):
-            if self._redirects_into_a_sink(p):
-                return None
             try:
-                st = p.stat()
+                st = p.stat()                     # the size/kind checks below are about the target
             except OSError:
                 return None                       # dangling — benign skip, the matcher grades it
         if not _stat.S_ISREG(st.st_mode):
@@ -147,7 +157,10 @@ class Target:
         if limit is None and st.st_size > self.opts.max_file_bytes:
             return None                           # policy skip (too large) — a benign skip
         try:
-            with p.open("rb") as fh:
+            fh = self._open_read(p)
+            if fh is None:
+                return None
+            with fh:
                 return fh.read(limit) if limit else fh.read()
         except OSError as exc:
             # Present but unreadable — a scan GAP, not a benign skip. Record it (fail closed).
@@ -171,10 +184,11 @@ class Target:
     def _head_tail(self, p: Path, half: int) -> bytes:
         """Read a bounded head+tail of an oversized file (payload is usually
         appended, so the tail matters) instead of skipping it wholesale."""
-        if p.is_symlink() and self._redirects_into_a_sink(p):
-            return b""
         try:
-            with p.open("rb") as fh:
+            fh = self._open_read(p)
+            if fh is None:
+                return b""
+            with fh:
                 head = fh.read(half)
                 try:
                     fh.seek(-half, os.SEEK_END)
@@ -280,7 +294,10 @@ class Target:
         nl_before = 0
         pos = 0
         try:
-            with p.open("rb") as fh:
+            fh = self._open_read(p)
+            if fh is None:
+                return
+            with fh:
                 while pos < size:
                     fh.seek(pos)
                     raw = fh.read(window)
