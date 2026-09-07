@@ -16,10 +16,12 @@ reader, not the mechanism or the weakness it closed.
 ### Added
 - **`saw scan` takes a directory or a single file, whether or not it is a repository.** A path you
   name is scanned as given — a folder nobody put under git, or one file you just edited — so
-  checking a single script no longer means scanning a whole project. Naming a folder that holds
-  repositories still sweeps those, and a path that names nothing on disk — or holds nothing that
-  can be read — still stops the run rather than reporting it clean. A scan of something that is not a repository says so: the checks that
-  read a project's history did not run.
+  checking a single script no longer means scanning a whole project. What a named folder or file
+  reports is what a scan of the project around it would report about that path. Naming a folder
+  that holds repositories still sweeps those, and a path that names nothing on disk — or holds
+  nothing that can be read — still stops the run rather than reporting it clean. A scan narrower
+  than a repository says what it therefore did not look at, and names any folder its own walk
+  skipped.
 
 ### Fixed
 - **Ordinary code that matches text next to reading base64 is no longer reported as a running

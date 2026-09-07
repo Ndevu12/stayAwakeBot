@@ -31,13 +31,15 @@ def register(sub) -> None:
         examples=[
             ("saw scan", "report to the terminal, writes nothing"),
             ("saw scan ./svc-a ./svc-b", "specific local paths"),
+            ("saw scan src/app/loader.js", "one directory, or one file"),
             ("saw scan --org UB-TechDEV -j 8", "a whole org, 8 repos at once"),
             ("saw scan --deep", "content-scan installed dependency code"),
             ("saw scan; echo $?", "CI gate: the exit code IS the verdict"),
         ])
     p.add_argument("paths", nargs="*", metavar="TARGETS",
-                   help="local repo/dir paths — or, with --remote, owner/repo slugs. "
-                        "Omit to scan configured targets or the current repo.")
+                   help="local paths — a repository, a directory or a single file; or, with "
+                        "--remote, owner/repo slugs. Omit to scan configured targets or the "
+                        "current repo.")
     p.add_argument("-p", "--path", action="append", default=[], dest="extra_paths",
                    metavar="PATH", help="additional target (repeatable)")
     p.add_argument("-c", "--config", default=None,

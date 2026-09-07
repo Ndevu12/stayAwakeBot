@@ -55,18 +55,26 @@ class Target:
     source = "local"
 
     def __init__(self, root: str | Path, display: str, opts: ScanOptions,
-                 include_only: tuple[str, ...] | None = None):
+                 include_only: tuple[str, ...] | None = None, within: str | None = None):
         self.root = Path(root)
         self.display = display
         self.opts = opts
         self.include_only = include_only
+        self.within = within
         self._walk_cache: list[str] | None = None
         self.read_errors: list[str] = []
         self.coverage_notes: list[str] = []
+        self.pruned_dirs: set[str] = set()
 
     @property
     def repo_root(self) -> Path:
         return self.root
+
+    @property
+    def scan_root(self) -> Path:
+        """Where a walk over this target starts. `root` is what paths are relative TO; a target
+        confined to one directory of a repository keeps the root and moves only this."""
+        return self.root / self.within if self.within else self.root
 
     def iter_files(self) -> Iterator[str]:
         if self.include_only is not None:       # a pre-discovered file-chunk — no re-walk
@@ -74,7 +82,8 @@ class Target:
             return
         if self._walk_cache is None:            # walk once, memoize (byte-identical replay after)
             cache: list[str] = []
-            for dirpath, dirnames, filenames in os.walk(self.root):
+            for dirpath, dirnames, filenames in os.walk(self.scan_root):
+                self.pruned_dirs.update(d for d in dirnames if d in self.opts.exclude_dirs)
                 dirnames[:] = [d for d in dirnames if d not in self.opts.exclude_dirs]
                 for fn in filenames:
                     cache.append(str((Path(dirpath) / fn).relative_to(self.root)))

@@ -62,19 +62,28 @@ def discover_local_repos(patterns: list[str], opts: ScanOptions) -> list[Path]:
 
 
 REPOSITORY, DIRECTORY, ONE_FILE = "repository", "directory", "file"
+_KINDS = frozenset({REPOSITORY, DIRECTORY, ONE_FILE})
 
 
 @dataclass(frozen=True)
 class LocalTarget:
     """One thing to scan, and the scope that answers about it.
 
-    Which matchers may run, what the verdict is about, and what went unlooked-at are answered here.
-    A scope held as loose booleans is one every caller can forget to apply, and each of them did.
+    Which matchers may run, what the verdict is about, where a whole-target walk starts and what
+    went unlooked-at are answered here. A scope held as loose booleans is one every caller can
+    forget to apply, and each of them did.
+
+    `root` is what every path is relative to; `within` is the part of it that is read.
     """
 
     root: Path
     include_only: tuple[str, ...] | None
     kind: str
+    within: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.kind not in _KINDS:
+            raise ValueError(f"kind must be one of {sorted(_KINDS)}, got {self.kind!r}")
 
     @property
     def is_repo(self) -> bool:
@@ -85,15 +94,20 @@ class LocalTarget:
         return self.kind == ONE_FILE
 
     @property
+    def scan_root(self) -> Path:
+        """Where a walk over the whole target starts."""
+        return self.root / self.within if self.within else self.root
+
+    @property
     def label(self) -> Path:
         """What the verdict is about — and what `--alert` titles an issue with."""
         if self.names_one_file and self.include_only:
             return self.root / self.include_only[0]
-        return self.root
+        return self.scan_root
 
     @property
     def key(self) -> str:
-        return f"{self.root}|{self.include_only or ''}"
+        return f"{self.root}|{self.include_only or ''}|{self.within or ''}"
 
     def skipped(self) -> tuple[str, ...]:
         """What this scope does not look at, in the operator's words — computed from the scope
@@ -106,6 +120,21 @@ class LocalTarget:
         if not self.is_repo:
             return ("what a commit introduced", "what earlier versions still hold")
         return ()
+
+    def unlooked_at(self) -> str | None:
+        """The disclosure this scope owes the operator, or None when it looked at everything."""
+        skipped = self.skipped()
+        if not skipped:
+            return None
+        what = "; ".join(skipped)
+        if self.names_one_file:
+            return (f"Only the file you named was read, so these did not run: {what}. "
+                    "Scan the directory it sits in for those.")
+        if self.within:
+            return (f"Only the directory you named was read, so these did not run: {what}. "
+                    "Scan the repository it sits in for those.")
+        return ("This target is not a repository, so the checks that read a project's history did "
+                f"not run: {what}.")
 
 
 def _one_file(named: Path) -> "LocalTarget":
@@ -123,6 +152,22 @@ def _one_file(named: Path) -> "LocalTarget":
     return LocalTarget(root, (str(rel),), ONE_FILE)
 
 
+def _a_directory(named: Path) -> "LocalTarget":
+    """One named directory, rooted the same way a named file is.
+
+    A directory inside a repository is read from the repository root and confined to itself, for
+    the reason `_one_file` keeps its root: re-rooting at the directory drops every path-anchored
+    signature (`.github/workflows/…`) and points a SARIF uri at a path the repository has not got.
+    """
+    here = named.resolve()
+    if (here / ".git").exists():
+        return LocalTarget(here, None, REPOSITORY)
+    root = enclosing_repo_root(here)
+    if not (root / ".git").exists() or root == here:
+        return LocalTarget(here, None, DIRECTORY)
+    return LocalTarget(root, None, DIRECTORY, str(here.relative_to(root)))
+
+
 def resolve_local_targets(patterns: list[str], opts: ScanOptions) -> list[LocalTarget]:
     """What the given patterns name, in order, deduped.
 
@@ -133,24 +178,19 @@ def resolve_local_targets(patterns: list[str], opts: ScanOptions) -> list[LocalT
     out: list[LocalTarget] = []
     seen: set[str] = set()
     for pat in patterns or []:
+        named = Path(os.path.expanduser(pat))
+        # The link ENTRY, always and first: a redirect check has to see the link itself, and the
+        # walk that discovers repositories follows it, so anything under it hides the entry.
+        candidates: list[LocalTarget] = [_one_file(named)] if named.is_symlink() else []
         found = discover_local_repos([pat], opts)
-        candidates: list[LocalTarget] = [LocalTarget(r, None, REPOSITORY) for r in found]
-        if not candidates:
-            named = Path(os.path.expanduser(pat))
-            if named.is_symlink():
-                # Both: the link is an entry a redirect check must see, and where it points is
-                # what the operator wants read. Answering only one loses a confirmed finding or
-                # the contents.
-                candidates = [_one_file(named)]
-                if named.is_dir():
-                    resolved = named.resolve()
-                    candidates.append(LocalTarget(
-                        resolved, None,
-                        REPOSITORY if (resolved / ".git").exists() else DIRECTORY))
-            elif named.is_dir():
-                candidates = [LocalTarget(named.resolve(), None, DIRECTORY)]
-            elif named.is_file():
-                candidates = [_one_file(named)]
+        if found:
+            candidates += [LocalTarget(r, None, REPOSITORY) for r in found]
+        elif named.is_dir():
+            candidates.append(_a_directory(named))
+        elif candidates:
+            pass                                  # a dangling link: the entry is all there is
+        elif named.is_file():
+            candidates = [_one_file(named)]
         for c in candidates:
             if c.key not in seen:
                 seen.add(c.key)

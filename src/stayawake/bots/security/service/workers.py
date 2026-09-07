@@ -10,6 +10,7 @@ from stayawake.bots.security.models import Finding, ScanResult
 from stayawake.bots.security.scanner import attach_history_note, run_matchers, scan_target
 from stayawake.bots.security.targets import LocalRepoTarget, RemoteRepoTarget
 from stayawake.bots.security.matchers import REGISTRY
+from stayawake.bots.security.resolution import LocalTarget
 
 
 @dataclass
@@ -22,16 +23,16 @@ class WorkerScan:
 
 @dataclass
 class LocalScanJob:
-    """Picklable descriptor for scanning one on-disk repo."""
-    root: str
+    """Picklable descriptor for scanning one on-disk target: the scope, and how to report it.
+
+    The scope travels whole. Carried as loose fields beside it, each consumer re-derived what to
+    run and what to disclose, and they disagreed.
+    """
+    scope: LocalTarget
     display: str
     opts: object
     signatures: dict
     allowlist: list = field(default_factory=list)
-    include_only: tuple[str, ...] | None = None
-    is_repo: bool = True
-    names_one_file: bool = False
-    skipped: tuple[str, ...] = ()
 
 
 @dataclass
@@ -49,25 +50,16 @@ NOTHING_TO_READ = (
     "readable file is a gap, not a clean result"
 )
 
-def what_went_unlooked_at(scope) -> str | None:
-    """The disclosure for a resolved scope, for the branch that has the target rather than a job."""
-    return _phrase(scope.skipped(), scope.names_one_file)
+def pruning_note(pruned: set[str]) -> str | None:
+    """What a named directory's own walk skipped by name.
 
-
-def _phrase(skipped, names_one_file: bool) -> str | None:
-    if not skipped:
+    Inside a repository these are the standard exclusions and the scan says so elsewhere; when the
+    operator named the directory itself, a `dist` under a `dist` is dropped in silence otherwise.
+    """
+    if not pruned:
         return None
-    what = "; ".join(skipped)
-    if names_one_file:
-        return (f"Only the file you named was read, so these did not run: {what}. "
-                "Scan the directory it sits in for those.")
-    return ("This target is not a repository, so the checks that read a project's history did not "
-            f"run: {what}.")
-
-
-def _what_went_unlooked_at(job: LocalScanJob) -> str | None:
-    """The disclosure for this scope, or None when it looked at everything."""
-    return _phrase(job.skipped, job.names_one_file)
+    return (f"Directories named {', '.join(sorted(pruned))} under this one were not walked "
+            "(the standard exclusions), so nothing inside them was read.")
 
 
 
@@ -78,39 +70,47 @@ _ANSWERS_ABOUT_ONE_FILE = frozenset({"symlink", "dependency-audit"})
 _ASKS_GIT_ABOUT_THE_TREE = frozenset({"git-history"})
 
 
-def matchers_for_target(signatures: dict, *, is_repo: bool, names_one_file: bool) -> dict:
+def matchers_for_target(signatures: dict, scope: LocalTarget) -> dict:
     """The signatures whose matchers may run over a target of this shape."""
-    if names_one_file:
+    if scope.names_one_file:
         return {k: v for k, v in signatures.items()
                 if k in REGISTRY and (REGISTRY[k].partitionable or k in _ANSWERS_ABOUT_ONE_FILE)}
-    if not is_repo:
+    if not scope.is_repo:
         return {k: v for k, v in signatures.items() if k not in _ASKS_GIT_ABOUT_THE_TREE}
     return signatures
 
 
-def _matchers_for(job: LocalScanJob) -> dict:
-    return matchers_for_target(job.signatures, is_repo=job.is_repo,
-                               names_one_file=job.names_one_file)
+def read_as(scope: LocalTarget, display: str, opts, *,
+            include_only: tuple[str, ...] | None) -> LocalRepoTarget:
+    """The reader a scope is scanned through — the one place a scope becomes a Target.
+
+    `include_only` is passed explicitly because a within-target chunk overrides it: None there
+    means the full walk, not the scope's own file list.
+    """
+    target = LocalRepoTarget(str(scope.root), display, opts,
+                             include_only=include_only, within=scope.within)
+    target.is_repo = scope.is_repo
+    target.names_one_file = scope.names_one_file
+    return target
 
 
 def scan_local(job: LocalScanJob) -> WorkerScan:
+    scope = job.scope
     buf = io.StringIO()
     with redirect_stdout(buf), redirect_stderr(buf):
-        with LocalRepoTarget(job.root, job.display, job.opts,
-                             include_only=job.include_only) as target:
-            target.names_one_file = job.names_one_file
-            target.is_repo = job.is_repo
-            nothing_to_read = not job.is_repo and not any(
+        with read_as(scope, job.display, job.opts, include_only=scope.include_only) as target:
+            nothing_to_read = not scope.is_repo and not any(
                 (target.root / rel).exists() or (target.root / rel).is_symlink()
                 for rel in target.iter_files())
-            result = scan_target(target, _matchers_for(job), job.allowlist)
+            result = scan_target(target, matchers_for_target(job.signatures, scope), job.allowlist)
+            pruned = set(target.pruned_dirs)
         if nothing_to_read:
             result.error = NOTHING_TO_READ
-        if job.is_repo and not job.names_one_file:
-            attach_history_note(result, job.root, job.opts, job.signatures, job.allowlist)
-        note = _what_went_unlooked_at(job)
-        if note and not nothing_to_read:
-            result.notes.append(note)
+        if scope.is_repo and not scope.names_one_file:
+            attach_history_note(result, str(scope.root), job.opts, job.signatures, job.allowlist)
+        for note in (scope.unlooked_at(), None if scope.is_repo else pruning_note(pruned)):
+            if note and not nothing_to_read:
+                result.notes.append(note)
     return WorkerScan(result, buf.getvalue())
 
 
@@ -152,7 +152,7 @@ class MatcherJob:
     """A unit of within-target work: run `matcher_names` over the target. `include` None = the FULL
     target (whole-target matchers); a tuple of relpaths = just that file-chunk (partitionable
     matchers). Picklable (spawn)."""
-    root: str
+    scope: LocalTarget
     display: str
     opts: object
     matcher_names: tuple[str, ...]
@@ -164,7 +164,7 @@ class MatcherJob:
 def collect_partial(job: MatcherJob) -> RawPartial:
     buf = io.StringIO()
     with redirect_stdout(buf), redirect_stderr(buf):
-        target = LocalRepoTarget(job.root, job.display, job.opts, include_only=job.include)
+        target = read_as(job.scope, job.display, job.opts, include_only=job.include)
         by_matcher = run_matchers(target, list(job.matcher_names), job.signatures, job.all_sigs)
     return RawPartial(by_matcher, list(target.read_errors), list(target.coverage_notes),
                       buf.getvalue())

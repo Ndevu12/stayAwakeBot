@@ -17,6 +17,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from support.gitrepo import GitSandbox                                   # noqa: E402
+from stayawake.bots.security.resolution import LocalTarget, REPOSITORY
 from stayawake.bots.security import scanner                             # noqa: E402
 from stayawake.bots.security.models import (CLEAN, CONFIRMED,           # noqa: E402
                                              ScanReport, ScanResult)
@@ -421,8 +422,8 @@ class TestEveryLocalTargetGetsIt(GitSandbox):
         self.commit(repo, "payload lands")
         (repo / "loader.js").unlink()
         self.commit(repo, "removal commit")
-        job = workers.LocalScanJob(str(repo), str(repo), ScanOptions(history=True),
-                                   load_signatures(), [])
+        job = workers.LocalScanJob(LocalTarget(repo, None, REPOSITORY), str(repo),
+                                   ScanOptions(history=True), load_signatures(), [])
         self.assertTrue(any("still STORE a confirmed payload" in n
                             for n in workers.scan_local(job).result.notes))
 
@@ -432,7 +433,8 @@ class TestEveryLocalTargetGetsIt(GitSandbox):
         self.commit(repo, "one")
         from stayawake.bots.security.service import workers
         from stayawake.bots.security.signatures import load_signatures
-        job = workers.LocalScanJob(str(repo), str(repo), ScanOptions(), load_signatures(), [])
+        job = workers.LocalScanJob(LocalTarget(repo, None, REPOSITORY), str(repo),
+                                   ScanOptions(), load_signatures(), [])
         self.assertFalse([n for n in workers.scan_local(job).result.notes if "History" in n])
 
 

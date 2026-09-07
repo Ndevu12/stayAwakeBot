@@ -16,6 +16,30 @@ from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.targets import ScanOptions
 
 
+def _report_of(target: Path) -> str:
+    """The terminal report a scan of `target` prints."""
+    from stayawake.bots.security import service
+    cfgd = Path(tempfile.mkdtemp())
+    (cfgd / "c.yml").write_text("allowlist: []\n", encoding="utf-8")
+    out = io.StringIO()
+    with redirect_stdout(out), redirect_stderr(io.StringIO()):
+        service.scan(str(cfgd / "c.yml"), paths=[str(target)], no_stream=True)
+    return out.getvalue()
+
+
+def _signatures_reported(target: Path, about: str) -> set[str]:
+    """The signature ids a scan of `target` reports about a path containing `about`."""
+    from stayawake.bots.security import service
+    cfgd = Path(tempfile.mkdtemp())
+    (cfgd / "c.yml").write_text("allowlist: []\n", encoding="utf-8")
+    out = io.StringIO()
+    with redirect_stdout(out), redirect_stderr(io.StringIO()):
+        service.scan(str(cfgd / "c.yml"), paths=[str(target)], no_stream=True)
+    return {line.split("]")[1].split()[0]
+            for line in out.getvalue().splitlines()
+            if "  • [" in line and about in line}
+
+
 class TestWhatAPathResolvesTo(unittest.TestCase):
     def setUp(self):
         self.d = Path(tempfile.mkdtemp())
@@ -44,6 +68,22 @@ class TestWhatAPathResolvesTo(unittest.TestCase):
         self.assertTrue(t.is_repo)
         self.assertIsNone(t.include_only)
 
+    def test_a_scope_cannot_be_built_with_a_kind_nobody_defined(self):
+        # A scope built positionally used to accept `True` in this slot and degrade to "not a
+        # repository" — dropping a matcher, in silence.
+        with self.assertRaises(ValueError):
+            resolution.LocalTarget(self.d, None, True)
+
+    def test_a_directory_inside_a_repository_is_read_from_the_repository_root(self):
+        import subprocess
+        subprocess.run(["git", "init", "-q", str(self.d)], check=True)
+        (self.d / "src").mkdir()
+        t = self._one(self.d / "src")
+        self.assertEqual(t.root, self.d.resolve())
+        self.assertEqual(t.within, "src")
+        self.assertEqual(t.scan_root, self.d.resolve() / "src")
+        self.assertFalse(t.is_repo)
+
     def test_a_path_that_names_nothing_resolves_to_nothing(self):
         self.assertEqual(resolve_local_targets([str(self.d / "absent")], ScanOptions()), [])
 
@@ -68,10 +108,8 @@ class TestWhatANonRepositoryScanSays(unittest.TestCase):
         kind = (resolution.ONE_FILE if names_one_file
                 else resolution.REPOSITORY if is_repo else resolution.DIRECTORY)
         scope = resolution.LocalTarget(Path(self.d), include_only, kind)
-        job = workers.LocalScanJob(str(self.d), "t", ScanOptions(), load_signatures(), [],
-                                   include_only, scope.is_repo, scope.names_one_file,
-                                   scope.skipped())
-        return workers.scan_local(job).result
+        return workers.scan_local(
+            workers.LocalScanJob(scope, "t", ScanOptions(), load_signatures(), [])).result
 
     def test_it_says_the_history_checks_did_not_run(self):
         notes = " ".join(self._scan(is_repo=False).notes)
@@ -97,10 +135,6 @@ class TestWhatANonRepositoryScanSays(unittest.TestCase):
                            if not f.path.endswith("a.js")]
         self.assertEqual(named_elsewhere, [],
                          f"a sibling reached the verdict: {[f.path for f in named_elsewhere]}")
-
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 class TestWhatARefusalSays(unittest.TestCase):
@@ -181,21 +215,10 @@ class TestNamingAFileLosesNoDetection(unittest.TestCase):
     every detection the re-rooting silently dropped still passed.
     """
 
-    def _sigs_for(self, target: Path, of_file: str) -> set[str]:
-        from stayawake.bots.security import service
-        cfgd = Path(tempfile.mkdtemp())
-        (cfgd / "c.yml").write_text("allowlist: []\n", encoding="utf-8")
-        out = io.StringIO()
-        with redirect_stdout(out), redirect_stderr(io.StringIO()):
-            service.scan(str(cfgd / "c.yml"), paths=[str(target)], no_stream=True)
-        return {line.split("]")[1].split()[0]
-                for line in out.getvalue().splitlines()
-                if "  • [" in line and of_file in line}
-
     def _case(self, build) -> tuple[set[str], set[str]]:
         d = Path(tempfile.mkdtemp())
         rel = build(d)
-        return self._sigs_for(d, rel), self._sigs_for(d / rel, rel)
+        return _signatures_reported(d, rel), _signatures_reported(d / rel, rel)
 
     def _assert_no_loss(self, build, what: str):
         by_dir, by_file = self._case(build)
@@ -320,3 +343,126 @@ class TestTheKnownLossIsDisclosed(unittest.TestCase):
                     tail.append(nxt)
                 return " ".join(tail)
         return ""
+
+
+class TestNamingADirectoryLosesNoDetection(unittest.TestCase):
+    """Scanning a directory finds what scanning the repository around it finds ABOUT THAT
+    DIRECTORY. The same oracle as naming a file, for the shape that got the fix second: a
+    directory rooted at itself flattens every path-anchored signature away.
+    """
+
+    def _repo_with_a_workflow(self) -> Path:
+        import subprocess
+        d = Path(tempfile.mkdtemp())
+        subprocess.run(["git", "init", "-q", str(d)], check=True)
+        wf = d / ".github" / "workflows"
+        wf.mkdir(parents=True)
+        (wf / "ci.yml").write_text(
+            "jobs:\n  b:\n    runs-on: [self-hosted, SHA1HULUD]\n    steps: []\n",
+            encoding="utf-8")
+        return d
+
+    def test_a_directory_between_the_repository_and_the_file_keeps_the_path(self):
+        d = self._repo_with_a_workflow()
+        by_repo = _signatures_reported(d, "ci.yml")
+        self.assertTrue(by_repo, "the fixture is not detected at all — it proves nothing")
+        for named in (d / ".github", d / ".github" / "workflows"):
+            lost = by_repo - _signatures_reported(named, "ci.yml")
+            self.assertEqual(lost, set(), f"naming {named.name} lost: {sorted(lost)}")
+
+    def test_the_reported_path_is_the_one_the_repository_would_report(self):
+        d = self._repo_with_a_workflow()
+        report = _report_of(d / ".github")
+        self.assertIn(".github/workflows/ci.yml", report)
+
+    def test_a_named_directory_does_not_answer_for_its_siblings(self):
+        import subprocess
+        d = Path(tempfile.mkdtemp())
+        subprocess.run(["git", "init", "-q", str(d)], check=True)
+        (d / "src").mkdir()
+        (d / "src" / "ok.js").write_text("export const ok = 1;\n", encoding="utf-8")
+        (d / "other").mkdir()
+        (d / "other" / "bad.js").write_text("var _$_ab12 = 1;\n", encoding="utf-8")
+        self.assertTrue(_signatures_reported(d, "bad.js"), "the sibling payload is not detected")
+        self.assertEqual(_signatures_reported(d / "src", "bad.js"), set(),
+                         "a sibling outside the named directory reached its verdict")
+
+    def test_it_says_which_project_level_checks_did_not_run(self):
+        d = self._repo_with_a_workflow()
+        report = _report_of(d / ".github")
+        self.assertIn("Only the directory you named was read", report)
+        self.assertNotIn("not a repository", report)   # it IS in one — the premise has to be true
+
+
+class TestALinkIsAlwaysAnEntry(unittest.TestCase):
+    """A symlink is a thing a redirect check must judge, whatever lives under it. Discovery walks
+    THROUGH the link, so a git-managed target (a Doom/LazyVim config is one) used to make the
+    resolver answer about the repository it found and never mention the link at all.
+
+    The sink sits outside the link's own directory because only an ESCAPING link is a redirect.
+    """
+
+    def setUp(self):
+        import subprocess
+        self.subprocess = subprocess
+        self.base = Path(tempfile.mkdtemp())
+        self.proj = self.base / "proj"
+        self.proj.mkdir()
+        self.sink = self.base / "home" / ".emacs.d"
+        self.sink.mkdir(parents=True)
+        self.link = self.proj / "dist"
+
+    def _resolved(self):
+        os.symlink(str(self.sink), str(self.link))
+        return resolve_local_targets([str(self.link)], ScanOptions())
+
+    def test_a_link_onto_a_repository_reports_the_link_and_the_repository(self):
+        self.subprocess.run(["git", "init", "-q", str(self.sink)], check=True)
+        found = self._resolved()
+        self.assertEqual([t.kind for t in found], [resolution.ONE_FILE, resolution.REPOSITORY])
+        self.assertEqual(found[0].label.name, "dist")
+        self.assertEqual(found[0].label.parent, Path(os.path.realpath(self.proj)))
+
+    def test_a_link_onto_a_tree_of_repositories_still_reports_the_link(self):
+        self.subprocess.run(["git", "init", "-q", str(self.sink / "cfg")], check=True)
+        kinds = [t.kind for t in self._resolved()]
+        self.assertEqual(kinds[0], resolution.ONE_FILE, f"the link entry was dropped: {kinds}")
+
+    def test_the_write_redirect_survives_a_repository_under_the_link(self):
+        # The end-to-end loss: `dist -> a git-managed ~/.emacs.d` scanned CLEAN, because the
+        # repository found through the link replaced the link as the thing being answered about.
+        self.subprocess.run(["git", "init", "-q", str(self.sink)], check=True)
+        os.symlink(str(self.sink), str(self.link))
+        self.assertIn("symlink-write-redirect", _signatures_reported(self.link, "dist"))
+
+    def test_the_same_link_without_the_repository_is_reported_the_same_way(self):
+        # The control: without the `.git` this always worked, so a difference between the two is
+        # the defect and not the fixture.
+        os.symlink(str(self.sink), str(self.link))
+        self.assertIn("symlink-write-redirect", _signatures_reported(self.link, "dist"))
+
+
+class TestWhatTheWalkSkippedByName(unittest.TestCase):
+    """Naming `dist` scans it — and says which of its children the standard exclusions dropped,
+    instead of reporting a hollow clean."""
+
+    def test_an_excluded_child_of_a_named_directory_is_disclosed(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "dist" / "node_modules").mkdir(parents=True)
+        (d / "dist" / "keep.js").write_text("export const ok = 1;\n", encoding="utf-8")
+        (d / "dist" / "node_modules" / "x.js").write_text("var _$_ab12 = 1;\n", encoding="utf-8")
+        report = _report_of(d / "dist")
+        self.assertIn("node_modules", report)
+        self.assertIn("were not walked", report)
+
+    def test_a_repository_scan_does_not_carry_that_note(self):
+        import subprocess
+        d = Path(tempfile.mkdtemp())
+        subprocess.run(["git", "init", "-q", str(d)], check=True)
+        (d / "node_modules").mkdir()
+        (d / "a.js").write_text("export const ok = 1;\n", encoding="utf-8")
+        self.assertNotIn("were not walked", _report_of(d))
+
+
+if __name__ == "__main__":
+    unittest.main()

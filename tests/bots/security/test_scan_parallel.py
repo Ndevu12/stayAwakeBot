@@ -16,6 +16,7 @@ from unittest import mock
 
 from stayawake.bots.security import service
 from stayawake.bots.security.service import workers as scan_workers
+from stayawake.bots.security.resolution import LocalTarget, REPOSITORY
 from stayawake.bots.security.service.workers import WorkerScan, LocalScanJob
 from stayawake.bots.security.models import ScanResult
 
@@ -95,7 +96,8 @@ class TestWorkerOutputDiscipline(unittest.TestCase):
         with mock.patch.object(scan_workers, "scan_target", side_effect=noisy), \
              redirect_stderr(real_err), redirect_stdout(io.StringIO()):
             ws = scan_workers.scan_local(
-                LocalScanJob(root=d, display="t", opts=_opts(), signatures={}, allowlist=[]))
+                LocalScanJob(scope=LocalTarget(Path(d), None, REPOSITORY), display="t",
+                             opts=_opts(), signatures={}, allowlist=[]))
         # The stray output is captured on the result, NOT written to the real streams (which would
         # corrupt the parent's live progress board).
         self.assertIn("STRAY-STDOUT-LINE", ws.diagnostics)
