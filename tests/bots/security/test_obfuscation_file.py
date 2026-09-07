@@ -554,6 +554,103 @@ class TestWholeFileObfuscation(unittest.TestCase):
         self.assertTrue(analyze_file(
             "let x = mod;\nx.exec(atob(cmd));\nx = /./;\n", ".js"))
 
+    def test_ordinary_code_that_decodes_and_matches_a_pattern_is_clean(self):
+        for name, src in {
+            "minified": "let t=atob(e);for(var n,r=[];null!==(n=e.exec(t));)r.push(n);\n",
+            "header parser": "const raw = atob(s);\n"
+                             "while ((matches = regExp.exec(str)) !== null) { out.push(matches); }\n",
+            "token reader": "const raw = atob(s);\nconst DURATION = /^(\\d+)(s|m|h)$/;\n"
+                            "const m = DURATION.exec(text);\n",
+            "decode later in the file": "const m = re.exec(text);\nconst raw = atob(s);\n",
+            "decode bound after the call": "let x = re;\nx.exec(t);\nx = atob(s);\n",
+            "pattern matched against decoded text": "const RE = /\"exp\":(\\d+)/;\n"
+                                                   "const m = RE.exec(atob(p));\n",
+            "decode far later in one statement": "let x = re;\nvar r = x.exec(t) && "
+                                                + "p(1) && " * 40 + "atob(s);\n",
+        }.items():
+            self.assertFalse(analyze_file(src, ".js"), name)
+
+    def test_a_decoded_command_is_reported_however_the_runner_is_reached(self):
+        for name, src in {
+            "decoded in place": "let x = mod;\nx.exec(atob(cmd));\n",
+            "decoded first": "const c = atob(b);\nexec(c);\n",
+            "module concealed": "const cp = require(atob('Y2hpbGRfcHJvY2Vzcw=='));\n"
+                                "const c = atob(P);\ncp.exec(c);\n",
+            "module named": "const raw = atob(b);\n"
+                            "const cp = require('child_process');\ncp.exec(raw);\n",
+        }.items():
+            self.assertTrue(analyze_file(src, ".js"), name)
+
+    def test_a_receiver_that_came_from_a_command_module_still_runs(self):
+        for name, src in {
+            "a wrapper module, decoded in the argument":
+                "const cp = require('./runner');\n"
+                "cp.exec(atob('ZWNobyBoaQ=='), (e, o) => process.stdout.write(o));\n",
+            "a package that runs commands":
+                "const cp = require('cross-spawn');\nconst c = atob(P);\ncp.exec(c);\n",
+            "the module name is built at run time":
+                "const M = ['child', 'process'].join('_');\nlet cp = require(M);\n"
+                "const c = atob(P);\nif (!cp) cp = require('os');\ncp.exec(c, cb);\n",
+            "something stands before the require":
+                "const cp = global.__cp || require(M);\nconst c = atob(P);\ncp.exec(c);\n",
+            "the require is parenthesised":
+                "const cp = (require(M));\nconst c = atob(P);\ncp.exec(c);\n",
+            "the require is one arm of a conditional":
+                "const cp = process.env.X ? null : require(M);\nconst c = atob(P);\ncp.exec(c);\n",
+            "the runner is grafted onto another module":
+                "const cp = require('os');\n"
+                "cp.exec = require(Buffer.from('Y2hpbGRfcHJvY2Vzcw==','base64').toString()).exec;\n"
+                "const c = atob(P);\ncp.exec(c);\n",
+            "the receiver is a field of an object literal":
+                "const mods = { cp: require(M) };\nconst c = atob(P);\nmods.cp.exec(c);\n",
+            "the receiver is an alias of the binding":
+                "const a = require(M);\nconst b = a;\nconst c = atob(P);\nb.exec(c);\n",
+            "the alias is one of several declarators":
+                "var m = require(M), cp = m, q = 1;\nconst c = atob(P);\ncp.exec(c);\n",
+            "the require is read back off an object":
+                "global.__cp = require(M);\nconst cp = global.__cp;\n"
+                "const c = atob(P);\ncp.exec(c);\n",
+            "the module is loaded on first use":
+                "let cp;\ncp ||= require(M);\nconst c = atob(P);\ncp.exec(c);\n",
+            "the require stands below the call":
+                "const b = atob(s);\nfunction run(c) { cp.exec(c, cb); }\n"
+                "var cp = require(M);\nrun('id');\n",
+            "a decoy property is written onto the receiver":
+                "const b = atob(s);\nconst cp = require(M);\ncp.rx = /^ok$/;\ncp.exec('id', cb);\n",
+        }.items():
+            self.assertTrue(analyze_file(src, ".js"), name)
+
+    def test_a_receiver_that_came_from_an_ordinary_module_is_clean(self):
+        for name, src in {
+            "a pattern from a local module": "const re = require('./patterns').DURATION;\n"
+                                             "const raw = atob(s);\nconst m = re.exec(text);\n",
+            "a pattern from a package": "const emailRe = require('email-regex')();\n"
+                                        "const raw = atob(token);\nif (emailRe.exec(raw)) ok();\n",
+            "a decoded migration": "const db = require('better-sqlite3')(f);\n"
+                                   "const sql = atob(MIGRATION);\ndb.exec(sql);\n",
+            "a decoded template": "const parser = require('./parser');\n"
+                                  "const src = atob(tpl);\nparser.exec(src);\n",
+            "a route pattern": "const pathRe = require('path-to-regexp').pathToRegexp('/a/:b');\n"
+                               "const raw = atob(s);\nconst m = pathRe.exec(raw);\n",
+            "a formatter wrapped the require": "const cp = require(\n  './patterns'\n);\n"
+                                               "const raw = atob(s);\nconst m = cp.exec(text);\n",
+            "a pattern reset before matching decoded text":
+                'const RE = /"sub":"([^"]+)"/g;\nRE.lastIndex = 0;\n'
+                "const m = RE.exec(atob(payload));\n",
+        }.items():
+            self.assertFalse(analyze_file(src, ".js"), name)
+
+    def test_a_short_name_a_minifier_chose_is_not_a_command_module(self):
+        for name, src in {
+            "a variable named after a package":
+                "var zx=atob(s),qq=zx.length;for(var i=0;i<qq;i++)o.push(zx[i]);\n",
+            "another one": "var execa=atob(s);return execa.split(',');\n",
+            "a dependency list": "const deps=['zx','execa'];\nconst raw=atob(manifest);\n",
+            "a package name held in a string": "const NAME='cross-spawn';\n"
+                                               "const raw=atob(s);\nlog(NAME,raw);\n",
+        }.items():
+            self.assertFalse(analyze_file(src, ".js", constructs_only=True), name)
+
     def test_require_receiver_non_command_exec_decode_clean(self):
         # FP-hunt: `.exec` on a NON-command module fed a decode is benign — RegExp.exec on decoded
         # text, or a sqlite `.exec` of a base64-packed migration. The module gate (child_process /

@@ -34,6 +34,10 @@ CP_RUNNERS = frozenset({
     "exec", "execSync", "execFile", "execFileSync", "spawn", "spawnSync", "fork",
 })
 CP_MODULES = frozenset({"child_process", "node:child_process", "shelljs"})
+CP_WRAPPER_PACKAGES = frozenset({
+    "cross-spawn", "execa", "child-process-promise", "child-process-ext", "zx",
+})
+COMMAND_RUNNING_MODULES = CP_MODULES | CP_WRAPPER_PACKAGES
 
 SHELL_INTERPRETERS = frozenset({
     "sh", "bash", "zsh", "dash", "ash", "ksh", "fish",       # POSIX shells

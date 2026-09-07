@@ -11,7 +11,8 @@ import re
 import unicodedata
 
 from stayawake.bots.security.taint.flow import _has_corroborated_dynamic_exec
-from stayawake.bots.security.taint.model import CP_RUNNERS, CP_MODULES
+from stayawake.bots.security.taint.model import (
+    CP_RUNNERS, CP_MODULES, COMMAND_RUNNING_MODULES)
 
 
 _NUM_ARRAY = re.compile(r"\[\s*(?:0x[0-9a-fA-F]+|\d{1,3})\s*(?:,\s*(?:0x[0-9a-fA-F]+|\d{1,3})\s*){7,}\]")
@@ -190,21 +191,78 @@ def _named_receiver(before: str) -> str | None:
 
 
 _ASSIGNED_A_REGEXP = re.compile(r"(?:/(?![/*])|new\s{1,8}RegExp\b|RegExp\s{0,8}\()")
-_NOT_AN_ASSIGNMENT = frozenset("=!<>+-*/%&|^")
+_LOADS_A_MODULE = re.compile(r"(?:await\s{1,8})?(?:require|import)\s{0,8}\(\s{0,8}")
+_LITERAL_SPECIFIER = re.compile(r"(['\"])([^'\"\n]{0,200})\1\s{0,8}\)")
+NO_MODULE, CP_MODULE, OTHER_MODULE, UNNAMED_MODULE = "", "cp", "other", "?"
+_RUNNER_PROVENANCE = frozenset({CP_MODULE, UNNAMED_MODULE})
 
 
-def _assignments(view: str) -> dict[str, list[tuple[int, bool]]]:
-    """Every `name = value` in `view`: name -> [(position, the value is a regular expression)].
+def _module_loaded(value: str) -> str:
+    """Which module a value loads.
 
-    Built in one pass and read by position, because asking per call site is quadratic in the number
-    of call sites — 4000 of them took 17s where this takes 0.1s.
+    Takes the text of an assigned value. Returns `CP_MODULE` when the specifier names a module
+    that runs commands, `OTHER_MODULE` when it names any other, `UNNAMED_MODULE` when the
+    specifier is not a plain literal, and `NO_MODULE` when nothing is loaded.
     """
-    out: dict[str, list[tuple[int, bool]]] = {}
+    m = _LOADS_A_MODULE.search(value)
+    if m is None:
+        return NO_MODULE
+    named = _LITERAL_SPECIFIER.match(value, m.end())
+    if named is None:
+        return UNNAMED_MODULE
+    return CP_MODULE if named.group(2) in COMMAND_RUNNING_MODULES else OTHER_MODULE
+
+
+_NOT_AN_ASSIGNMENT = frozenset("=!<>+-*/%&|^")
+_LAZY_ASSIGNMENT = frozenset("|&?")
+
+
+_STATEMENT_WINDOW = 200
+
+
+def _statement_at(view: str, start: int) -> str:
+    """The rest of one statement.
+
+    Takes `view` and the offset to read from. Returns at most `_STATEMENT_WINDOW` characters, cut
+    at the first `;` or line break that no bracket is open at.
+    """
+    window = view[start:start + _STATEMENT_WINDOW]
+    depth = 0
+    for i, ch in enumerate(window):
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        elif ch in ";\n" and depth <= 0:
+            return window[:i]
+    return window
+
+
+def _decodes_its_argument(view: str, start: int) -> bool:
+    """Whether a call decodes inside its own argument list.
+
+    Takes `view` and `start`, the offset just past the opening parenthesis. Returns True when a
+    decode primitive appears before the statement ends.
+    """
+    return bool(_DECODE_PRIMITIVE.search(_statement_at(view, start)))
+
+
+def _assignments(view: str) -> tuple[dict[str, list[tuple[int, int]]],
+                                     dict[str, list[tuple[int, int]]]]:
+    """Every `name = value` in `view`, and every `owner.name = value`.
+
+    Takes the comment-stripped file text. Returns two tables, name -> [(offset of the `=`, offset
+    of the value)] in the order they appear: what each name was given, and what was written onto
+    each object.
+    """
+    out: dict[str, list[tuple[int, int]]] = {}
+    owners: dict[str, list[tuple[int, int]]] = {}
     i = view.find("=")
     while i != -1:
         nxt, prev = view[i + 1:i + 2], view[i - 1:i]
-        if nxt != "=" and prev not in _NOT_AN_ASSIGNMENT:
-            j = i - 1
+        lazy = prev in _LAZY_ASSIGNMENT and view[i - 2:i - 1] == prev
+        if nxt != "=" and (lazy or prev not in _NOT_AN_ASSIGNMENT):
+            j = i - 3 if lazy else i - 1
             while j >= 0 and view[j].isspace():
                 j -= 1
             end = j + 1
@@ -215,31 +273,96 @@ def _assignments(view: str) -> dict[str, list[tuple[int, bool]]]:
                 v = i + 1
                 while v < len(view) and view[v].isspace():
                     v += 1
-                out.setdefault(name, []).append(
-                    (i, bool(_ASSIGNED_A_REGEXP.match(view, v))))
+                out.setdefault(name, []).append((i, v))
+                if j >= 0 and view[j] == ".":
+                    k = j - 1
+                    while k >= 0 and view[k] in _IDENT_CHARS:
+                        k -= 1
+                    owner = view[k + 1:j]
+                    if owner and not owner[0].isdigit():
+                        owners.setdefault(owner, []).append((i, v))
         i = view.find("=", i + 1)
+    return out, owners
+
+
+def _last_value(view: str, assignments: dict[str, list[tuple[int, int]]], name: str,
+                before: int) -> str | None:
+    """The value the last assignment to `name` before offset `before` gives it.
+
+    Takes the comment-stripped file text, the assignment table, the receiver name and the call's
+    offset. Returns one statement of text, or None when the name is never assigned earlier.
+    """
+    latest = None
+    for pos, value in assignments.get(name, ()):
+        if pos >= before:
+            break
+        latest = value
+    return None if latest is None else _statement_at(view, latest)
+
+
+def _properties(view: str) -> dict[str, list[tuple[int, int]]]:
+    """Every `name: value` in `view` whose value loads a command-running module.
+
+    Takes the comment-stripped file text. Returns name -> [(offset of the `:`, offset of the
+    value)], so a receiver taken from an object literal can be answered.
+    """
+    out: dict[str, list[tuple[int, int]]] = {}
+    i = view.find(":")
+    while i != -1:
+        v = i + 1
+        while v < len(view) and view[v].isspace():
+            v += 1
+        if _module_loaded(_statement_at(view, v)) in _RUNNER_PROVENANCE:
+            j = i - 1
+            while j >= 0 and view[j].isspace():
+                j -= 1
+            end = j + 1
+            while j >= 0 and view[j] in _IDENT_CHARS:
+                j -= 1
+            name = view[j + 1:end]
+            if name and not name[0].isdigit():
+                out.setdefault(name, []).append((i, v))
+        i = view.find(":", i + 1)
     return out
 
 
-def _bound_to_a_regexp(assignments: dict[str, list[tuple[int, bool]]], name: str, before: int) -> bool:
-    """Whether the LAST assignment to `name` before `before` gives it a regular expression.
+_BARE_ALIAS = re.compile(r"^(?:[A-Za-z_$][\w$]{0,64}\s{0,8}\.\s{0,8}){0,8}([A-Za-z_$][\w$]{0,64})\s{0,8}(?:,|$)")
+_ALIAS_NAMES = 64
 
-    The last one, not any one: a decoy assignment elsewhere would otherwise switch this off.
+
+def _ever_loads_a_runner_module(view: str, tables, name: str) -> bool:
+    """Whether any binding of `name` anywhere in `view` loads a command-running module.
+
+    Takes the comment-stripped file text, the tables of bindings and the receiver name. Returns
+    True when one of them, or one of the names they alias, names such a module or hides the name
+    it loads. At most `_ALIAS_NAMES` names are followed, each one once.
     """
-    latest = None
-    for pos, is_regexp in assignments.get(name, ()):
-        if pos >= before:
-            break
-        latest = is_regexp
-    return bool(latest)
+    seen, pending = {name}, [name]
+    while pending:
+        current = pending.pop()
+        for table in tables:
+            for _, value in table.get(current, ()):
+                statement = _statement_at(view, value).strip()
+                if _module_loaded(statement) in _RUNNER_PROVENANCE:
+                    return True
+                alias = _BARE_ALIAS.match(statement)
+                if (alias is not None and alias.group(1) not in seen
+                        and len(seen) < _ALIAS_NAMES):
+                    seen.add(alias.group(1))
+                    pending.append(alias.group(1))
+    return False
 
 
 _RECEIVER_LOOKBACK = 224
 
 
 def _runs_a_command(view: str) -> bool:
-    """Return True if `view` calls a child_process runner."""
-    assignments: dict[str, list[tuple[int, bool]]] | None = None
+    """Whether a child_process runner is called.
+
+    Takes `view`, the file text with comments removed. Returns True at the first call that counts.
+    """
+    assignments: dict[str, list[tuple[int, int]]] | None = None
+    tables: tuple[dict[str, list[tuple[int, int]]], ...] = ()
     for m in _sink_calls(_COMMAND_RUNNER, view):
         if _BARE_EXEC_CALL.match(m.group(0)):
             before = view[max(0, m.start() - _RECEIVER_LOOKBACK):m.start()]
@@ -248,11 +371,17 @@ def _runs_a_command(view: str) -> bool:
             named = _named_receiver(before)
             if named is not None:
                 if assignments is None:
-                    assignments = _assignments(view)
-                if _bound_to_a_regexp(assignments, named, m.start()):
+                    assignments, owners = _assignments(view)
+                    tables = (assignments, owners, _properties(view))
+                bound = _last_value(view, assignments, named, m.start())
+                if bound is not None and _ASSIGNED_A_REGEXP.match(bound):
+                    continue
+                if not (_ever_loads_a_runner_module(view, tables, named)
+                        or _decodes_its_argument(view, m.end())):
                     continue
         return True
     return False
+
 
 _CHARCODE_CONSUMER = re.compile(r"fromCharCode|fromCodePoint", re.IGNORECASE)
 
