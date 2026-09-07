@@ -228,6 +228,10 @@ class TestGitHooks(_Surface):
         exec_bit = mock.patch("stayawake.bots.security.hookscript.honours_exec_bit", return_value=True)
         exec_bit.start()
         self.addCleanup(exec_bit.stop)
+        self.installed = ("/home/op/.local/bin/saw", None)
+        recorded = mock.patch("stayawake.bots.security.hookscript.installed", side_effect=lambda: self.installed)
+        recorded.start()
+        self.addCleanup(recorded.stop)
 
     def _hook(self, name: str, text: str, executable: bool = True) -> Path:
         p = self.hooks / name
@@ -251,16 +255,32 @@ class TestGitHooks(_Surface):
         self.assertEqual(unread, [])
 
     def test_a_hook_saw_installed_runs_the_saw_it_names(self):
+        self.installed = ("/opt/my saw$dir/saw", "/home/op/c f.yml")
         self._hook("post-merge", hookscript.render("post-merge", "/opt/my saw$dir/saw", "/home/op/c f.yml"))
         (e,) = surface.enumerate_entries()[0]
         self.assertEqual(e.argv, ["/opt/my saw$dir/saw", "hook", "run", "--config", "/home/op/c f.yml",
                                   "post-merge"])
 
     def test_the_hooks_saw_installs_are_quiet(self):
+        self.installed = ("/opt/my saw$dir/saw", "/home/op/c f.yml")
         for event in hookscript.HOOKS:
             self._hook(event, hookscript.render(event, "/opt/my saw$dir/saw", "/home/op/c f.yml"))
         self.assertEqual(self._run(), [])
         self.assertEqual(self._run(), [])
+
+    def test_the_audit_reads_a_hook_byte_for_byte(self):
+        text = hookscript.render("post-merge", "/home/op/.local/bin/saw", None).replace("\n", "\r\n")
+        self._hook("post-merge", text)
+        issues = self._run()
+        self.assertIn("autorun-unattributed-foothold", self.ids(issues))
+        self.assertTrue(any("has been modified" in i.detail for i in issues), issues)
+
+    def test_a_hook_naming_another_saw_is_reported_like_any_other_change(self):
+        for event in hookscript.HOOKS:
+            self._hook(event, hookscript.render(event, "/home/op/.local/bin/saw", None))
+        self.assertEqual(self._run(), [])
+        self._hook("post-merge", hookscript.render("post-merge", "/home/op/bin/evil/saw", None))
+        self.assertEqual(self.ids(self._run()), {"autorun-new-unattributed"})
 
     def test_installing_the_hooks_after_an_audit_is_not_news(self):
         self.write("ok.plist", ProgramArguments=["/usr/bin/true"], RunAtLoad=True)
@@ -284,11 +304,18 @@ class TestGitHooks(_Surface):
             self.assertIn("autorun-unattributed-foothold", self.ids(issues), name)
             told = "scratch" if name == "call redirected" else "has been modified"
             self.assertTrue(any(told in i.detail for i in issues), name)
+            self.assertEqual([i.command for i in issues if i.id == "autorun-unattributed-foothold"],
+                             [None if name == "call redirected" else "saw hook repair"], name)
+        (self.hooks / "post-checkout").unlink()
+        self._hook("post-checkout", "#!/bin/sh\n/tmp/.x/stage\n")
+        issues = self._run()
+        self.assertEqual([i.command for i in issues if i.id == "autorun-unattributed-foothold"], [None])
 
     def test_a_hook_saw_installed_from_a_tool_cache_is_still_saw(self):
         for saw in ("/home/op/.cache/uv/archive-v0/XkQ2mZ9pL1/bin/saw",
                     "/home/op/.local/pipx/.cache/8f3b2a1c9d0e4f56/bin/saw",
                     "/home/op/.cache/pypoetry/virtualenvs/proj-Ab3dEf-py3.12/bin/saw"):
+            self.installed = (saw, None)
             for event in hookscript.HOOKS:
                 (self.hooks / event).unlink(missing_ok=True)
                 self._hook(event, hookscript.render(event, saw, None))
@@ -690,17 +717,17 @@ class TestHookScript(unittest.TestCase):
         cache.write_text(json.dumps({str(repo): "abc", "relative/path": "def",
                                      str(home / "deleted-long-ago"): "0ld"}))
         asked = []
-        real = hookscript.gitutil.stdout
+        real = hookscript.gitutil.run
 
-        def counting(cwd, argv):
+        def counting(cwd, argv, **kwargs):
             asked.append(cwd)
-            return real(cwd, argv)
+            return real(cwd, argv, **kwargs)
 
         with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(home / ".config"),
                                           "XDG_CACHE_HOME": str(home / ".cache")}), \
              mock.patch("stayawake.bots.security.hookscript.global_template_dir",
                         return_value=str(home / "operator-template")), \
-             mock.patch.object(hookscript.gitutil, "stdout", side_effect=counting):
+             mock.patch.object(hookscript.gitutil, "run", side_effect=counting):
             dirs = hookscript.hook_dirs()
         self.assertEqual(dirs, [home / ".config" / "saw" / "git-template" / "hooks",
                                 home / "operator-template" / "hooks",
@@ -794,16 +821,22 @@ class TestHookScript(unittest.TestCase):
             dirs = hookscript.hook_dirs()
         self.assertEqual(dirs, [home / ".config" / "saw" / "git-template" / "hooks", shared])
 
-    def test_the_directory_saw_manages_is_no_longer_only_its_own_once_adopted_as_the_hooks_path(self):
+    def test_the_directory_saw_manages_stays_its_own_whatever_the_hooks_path_says(self):
         home = Path(tempfile.mkdtemp(prefix="hookdirs-"))
         self.addCleanup(lambda: __import__("shutil").rmtree(home, ignore_errors=True))
         with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(home / ".config")}):
             own = hookscript.hooks_dir() / "pre-commit"
-            with mock.patch("stayawake.bots.security.hookscript.global_hooks_path", return_value=None):
-                self.assertTrue(hookscript.in_managed_dir(own))
-            with mock.patch("stayawake.bots.security.hookscript.global_hooks_path",
-                            return_value=str(hookscript.hooks_dir())):
-                self.assertFalse(hookscript.in_managed_dir(own))
+            for adopted in (None, str(hookscript.hooks_dir())):
+                with mock.patch("stayawake.bots.security.hookscript.global_hooks_path", return_value=adopted):
+                    self.assertTrue(hookscript.in_managed_dir(own), adopted)
+            self.assertFalse(hookscript.in_managed_dir(home / "elsewhere" / "pre-commit"))
+
+    def test_a_hook_naming_a_saw_other_than_the_recorded_one_is_not_saws(self):
+        text = hookscript.render("post-merge", "/home/op/bin/evil/saw", None)
+        self.assertTrue(hookscript.is_pristine(text))
+        self.assertFalse(hookscript.is_installed(text, ("/home/op/.local/bin/saw", None)))
+        self.assertTrue(hookscript.is_installed(text, ("/home/op/bin/evil/saw", None)))
+        self.assertFalse(hookscript.is_installed(text, ("/home/op/bin/evil/saw", "/home/op/c.yml")))
 
 
 class TestProvenance(unittest.TestCase):

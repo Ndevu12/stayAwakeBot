@@ -59,6 +59,19 @@ def register(sub) -> None:
         ])
     un.set_defaults(func=run_uninstall)
 
+    rp = add_command(
+        hsub, "repair",
+        help="put back the hooks saw installs, wherever git runs them",
+        description="Put back every hook saw installs — in the template directories and in every "
+                    "repository saw has seeded — and move aside whatever was found in its place, or "
+                    "anything that is not saw's inside the directory saw manages. Nothing is deleted: "
+                    "what is moved aside is kept, with a record of where it came from, for you to "
+                    "examine. A hook counts as back only after it is read back as written.",
+        examples=[
+            ("saw hook repair", "after `saw audit` reports an altered saw hook"),
+        ])
+    rp.set_defaults(func=run_repair)
+
     stt = add_command(
         hsub, "status",
         help="show whether scan-on-clone is installed",
@@ -74,6 +87,11 @@ def register(sub) -> None:
     rn.add_argument("event")
     rn.add_argument("args", nargs=argparse.REMAINDER)
     rn.set_defaults(func=run_run)
+
+
+def run_repair(a: argparse.Namespace) -> int:
+    from stayawake.bots.security import hook
+    return hook.repair()
 
 
 def run_install(a: argparse.Namespace) -> int:

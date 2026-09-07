@@ -2,6 +2,7 @@
 """Host-level acting — create denials on this machine. Never touches a project's tree."""
 from __future__ import annotations
 
+from stayawake.bots.security import hookscript
 from stayawake.bots.security.hygiene.host_artifacts import _global_folders
 from stayawake.bots.security.hygiene.models import PROCESSES_NOT_READABLE_ID
 from stayawake.bots.security.hygiene.outcome import BLOCKED, run_probe
@@ -54,6 +55,14 @@ _LEFT_OPEN_NOTE = (
     "Something is sitting in a location that is meant to stay empty. It has been left reachable "
     "rather than locked over, so you can read it — do that before anything else."
 )
+_DEAD_SAW_NOTE = (
+    "The saw that saw's git hooks call is gone or cannot run, so clones are not scanned. "
+    "`saw hook repair` points the hooks at this saw."
+)
+_ALTERED_HOOKS_NOTE = (
+    "Where saw's git hooks run, something is not what saw installed. This command does not touch "
+    "hooks; `saw hook repair` puts them back and keeps what it moves aside:"
+)
 
 
 _TOOK_BACK = "Every control this tool placed here has been taken back."
@@ -85,7 +94,8 @@ def take_back(*, folders=_global_folders, remove=remove_one,
 
 
 def run(*, live=check_live_processes, folders=_global_folders,
-        apply=apply_one, supported=hostdenial.platform_supported) -> tuple[int, str]:
+        apply=apply_one, supported=hostdenial.platform_supported,
+        altered=hookscript.altered_hooks, saw_runs=hookscript.recorded_saw_runs) -> tuple[int, str]:
     """Apply the denial at every global-resolution entry. Enforcing only after read-back.
 
     Root is asked of the PATH rather than of the command. Most of these locations belong to the
@@ -122,5 +132,10 @@ def run(*, live=check_live_processes, folders=_global_folders,
             lines.extend([note, ""])
     for o in outcomes:
         lines.append(f"  {o.state}: {o.path} — {o.detail}")
+    hooks = altered()
+    if hooks:
+        lines.extend(["", _ALTERED_HOOKS_NOTE] + [f"  {textsafe.plain(str(p), limit=4096)}" for p in hooks])
+    if not saw_runs():
+        lines.extend(["", _DEAD_SAW_NOTE])
     body = "\n".join(lines).rstrip()
     return (0, body) if applied else (3, body)

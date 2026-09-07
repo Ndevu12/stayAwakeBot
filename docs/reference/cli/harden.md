@@ -26,6 +26,9 @@ whether you gave it root.
 
 Anything already in use is left unchanged.
 
+When something where saw's git hooks run is not what saw installed, the result says so and
+names it. This command does not touch hooks; [`saw hook repair`](hook.md) puts them back.
+
 `--take-back` removes the controls this command placed, and reports anything it did not remove.
 
 See [audit a machine](../../how-to/audit-a-machine.md) for the read-only view of the same host.
