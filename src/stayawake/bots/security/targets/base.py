@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterator
 
+from stayawake.bots.security.write_sinks import sink_label
+
 
 CODE_EXTS = {
     ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".mts", ".cts",
@@ -102,12 +104,43 @@ class Target:
             pass                                  # can't tell (e.g. EACCES on 3.11) → be conservative
         self.read_errors.append(f"{name}: {type(exc).__name__}")   # genuine gap → fail CLOSED
 
+    def _redirects_into_a_sink(self, p: Path) -> bool:
+        """Whether `p` is a link into a write-sink, recorded as a coverage note the first time.
+
+        os.walk never descends a DIRECTORY link, but a FILE link was opened and its bytes reached a
+        finding's evidence — so a scan of a repository holding `keys.js -> ~/.ssh/id_rsa` put key
+        material into the report, the SARIF and a `-d` bundle. The link is still graded by the
+        symlink matcher, so refusing the read costs no detection.
+        """
+        try:
+            label = sink_label(os.readlink(p), p.resolve())
+        except (OSError, RuntimeError):
+            return False
+        if label is None:
+            return False
+        try:
+            rel = p.relative_to(self.root)
+        except ValueError:
+            rel = p
+        note = (f"`{rel}` is a link into {label}; it was graded as a link and its destination was "
+                "not read.")
+        if note not in self.coverage_notes:
+            self.coverage_notes.append(note)
+        return True
+
     def read_bytes(self, rel: str, limit: int | None = None) -> bytes | None:
         p = self.root / rel
         try:
-            st = p.stat()
+            st = os.lstat(p)
         except OSError:
             return None                           # can't stat (vanished / race) — treat as absent
+        if _stat.S_ISLNK(st.st_mode):
+            if self._redirects_into_a_sink(p):
+                return None
+            try:
+                st = p.stat()
+            except OSError:
+                return None                       # dangling — benign skip, the matcher grades it
         if not _stat.S_ISREG(st.st_mode):
             return None                           # FIFO/socket/device → benign skip: a blocking open()
             #                                       would HANG the scan forever, and there's no static
@@ -138,6 +171,8 @@ class Target:
     def _head_tail(self, p: Path, half: int) -> bytes:
         """Read a bounded head+tail of an oversized file (payload is usually
         appended, so the tail matters) instead of skipping it wholesale."""
+        if p.is_symlink() and self._redirects_into_a_sink(p):
+            return b""
         try:
             with p.open("rb") as fh:
                 head = fh.read(half)

@@ -620,5 +620,109 @@ class TestWhatTheWalkSkippedByName(unittest.TestCase):
         self.assertNotIn("were not walked", _report_of(d))
 
 
+class TestAWriteSinkIsNeverReadThrough(unittest.TestCase):
+    """A link into a credential store is graded, never opened — wherever the walk reaches it, not
+    only when the operator named the link itself. Measured on the destination's atime, because the
+    report said "not read through" for an hour while the bytes were being read."""
+
+    def setUp(self):
+        self.base = Path(tempfile.mkdtemp())
+        self.proj = self.base / "proj"
+        self.proj.mkdir()
+        keys = self.base / "home" / ".ssh"
+        keys.mkdir(parents=True)
+        self.key = keys / "id_rsa"
+        self.key.write_text("ssh-rsa AAAATOPSECRETKEYMATERIAL\nvar _$_dead = 1;\n",
+                            encoding="utf-8")
+        os.symlink(str(self.key), str(self.proj / "keys.js"))
+
+    def test_naming_the_directory_does_not_open_the_destination(self):
+        before = self.key.stat().st_atime_ns
+        _report_of(self.proj)
+        self.assertEqual(self.key.stat().st_atime_ns, before, "the destination was opened")
+
+    def test_no_bytes_from_the_destination_reach_the_report(self):
+        report = _report_of(self.proj)
+        self.assertNotIn("TOPSECRET", report)
+        self.assertNotIn("KEYMATERIAL", report)
+
+    def test_the_link_is_still_graded(self):
+        self.assertIn("symlink-write-redirect", _signatures_reported(self.proj, "keys.js"))
+
+    def test_the_skipped_read_is_disclosed(self):
+        self.assertIn("its destination was not read", _report_of(self.proj))
+
+    def test_an_oversized_destination_is_not_read_either(self):
+        # `read_text` sends a large SOURCE file straight to the head+tail reader, which never
+        # touches `read_bytes` — so guarding one opener left the other open.
+        big = self.base / "home" / ".ssh" / "id_big"
+        big.write_text("ssh-rsa AAAATOPSECRETKEYMATERIAL\n" + ("x" * 3_000_000) + "\nTAILSECRET\n",
+                       encoding="utf-8")
+        os.symlink(str(big), str(self.proj / "big.js"))
+        report = _report_of(self.proj)
+        self.assertNotIn("TOPSECRET", report)
+        self.assertNotIn("TAILSECRET", report)
+
+    def test_an_ordinary_link_inside_the_tree_is_still_read(self):
+        other = self.base / "shared"
+        other.mkdir()
+        payload = other / "lib.js"
+        payload.write_text("var _$_ab12 = 1;\n", encoding="utf-8")
+        os.symlink(str(payload), str(self.proj / "aliased.js"))
+        self.assertTrue(_signatures_reported(self.proj, "aliased.js"),
+                        "an ordinary aliased file stopped being read")
+
+
+class TestAPatternThatMatchesNothingNamesNothing(unittest.TestCase):
+    """Discovery walks from a pattern's literal prefix and falls back to the PARENT when that
+    prefix is absent, so a stale glob was answered by whatever sat beside it — and exited 0."""
+
+    def setUp(self):
+        import subprocess
+        self.d = Path(tempfile.mkdtemp())
+        for name in ("svc-a", "other"):
+            subprocess.run(["git", "init", "-q", str(self.d / name)], check=True)
+        (self.d / "other" / "bad.js").write_text("var _$_ab12 = 1;\n", encoding="utf-8")
+
+    def _names(self, pattern):
+        return sorted(t.label.name for t in resolve_local_targets([pattern], ScanOptions()))
+
+    def test_a_stale_glob_resolves_to_nothing(self):
+        self.assertEqual(self._names(str(self.d / "svc-renamed*")), [])
+
+    def test_a_glob_that_matches_still_discovers(self):
+        self.assertEqual(self._names(str(self.d / "*")), ["other", "svc-a"])
+
+    def test_a_hidden_repository_is_still_discovered(self):
+        # The walk is what finds it; a `*` alone would not match a leading dot.
+        import subprocess
+        subprocess.run(["git", "init", "-q", str(self.d / ".hidden")], check=True)
+        self.assertIn(".hidden", self._names(str(self.d / "*")))
+
+    def test_a_real_file_whose_name_holds_a_star_is_that_file(self):
+        named = self.d / "star*name.js"
+        named.write_text("var _$_ab12 = 1;\n", encoding="utf-8")
+        self.assertEqual(self._names(str(named)), ["star*name.js"])
+
+
+class TestATargetThatReadNothingSaysWhy(unittest.TestCase):
+    """The disclosure was attached only where something was read, so the target that skipped
+    EVERYTHING was the one that explained nothing."""
+
+    def test_a_directory_whose_whole_content_was_pruned_explains_itself(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "dist").mkdir()
+        (d / "dist" / "bundle.js").write_text("var _$_ab12 = 1;\n", encoding="utf-8")
+        report = _report_of(d) + _stderr_of(d)
+        self.assertIn("carries no verdict", report)
+        self.assertIn("were not walked", report)
+
+    def test_a_directory_of_only_pipes_does_not_read_clean(self):
+        # A FIFO `exists()`, so the emptiness test counted it as content and nothing was opened.
+        d = Path(tempfile.mkdtemp())
+        os.mkfifo(d / "app.js")
+        self.assertIn("carries no verdict", _report_of(d) + _stderr_of(d))
+
+
 if __name__ == "__main__":
     unittest.main()

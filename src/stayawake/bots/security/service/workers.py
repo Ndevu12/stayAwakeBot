@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import io
+import os
+import stat as _stat
 from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass, field
 
@@ -46,9 +48,22 @@ class RemoteScanJob:
 
 
 NOTHING_TO_READ = (
-    "nothing here could be read, so this target carries no verdict — a named path that holds no "
-    "readable file is a gap, not a clean result"
+    "nothing here could be read, so this target carries no verdict — a gap, not a clean result. "
+    "The coverage notes say what was skipped and why"
 )
+
+def _holds_content(p) -> bool:
+    """Whether an entry is something a scan can read or grade.
+
+    A FIFO or a device `exists()`, so a directory holding only those read as CLEAN while nothing
+    had been opened. A symlink counts: the matcher grades it without reading it.
+    """
+    try:
+        st = os.lstat(p)
+    except OSError:
+        return False
+    return _stat.S_ISREG(st.st_mode) or _stat.S_ISLNK(st.st_mode)
+
 
 def notes_for(scope: LocalTarget, pruned: set[str]) -> list[str]:
     """Every disclosure a scope owes the operator, for both scan paths.
@@ -81,16 +96,13 @@ _ANSWERS_ABOUT_ONE_FILE = frozenset({"symlink", "dependency-audit"})
 _ASKS_GIT_ABOUT_THE_TREE = frozenset({"git-history"})
 
 
-# The link entry is judged by its own metadata; every other matcher would open `root / rel`, which
-# follows the link and reads the very bytes the scope says it is leaving alone.
-_JUDGES_THE_ENTRY_WITHOUT_READING_IT = frozenset({"symlink"})
-
-
 def matchers_for_target(signatures: dict, scope: LocalTarget) -> dict:
-    """The signatures whose matchers may run over a target of this shape."""
-    if scope.unread_destination:
-        return {k: v for k, v in signatures.items()
-                if k in _JUDGES_THE_ENTRY_WITHOUT_READING_IT}
+    """The signatures whose matchers may run over a target of this shape.
+
+    A link into a write-sink is not special-cased here: `Target` refuses to open one, so a matcher
+    that tries reads nothing. Two authorities for one decision is what this scope object exists to
+    stop.
+    """
     if scope.names_one_file:
         return {k: v for k, v in signatures.items()
                 if k in REGISTRY and (REGISTRY[k].partitionable or k in _ANSWERS_ABOUT_ONE_FILE)}
@@ -119,17 +131,16 @@ def scan_local(job: LocalScanJob) -> WorkerScan:
     with redirect_stdout(buf), redirect_stderr(buf):
         with read_as(scope, job.display, job.opts, include_only=scope.include_only) as target:
             nothing_to_read = not scope.is_repo and not any(
-                (target.root / rel).exists() or (target.root / rel).is_symlink()
-                for rel in target.iter_files())
+                _holds_content(target.root / rel) for rel in target.iter_files())
             result = scan_target(target, matchers_for_target(job.signatures, scope), job.allowlist)
             pruned = set(target.pruned_dirs)
         if nothing_to_read and not result.findings:
             result.error = NOTHING_TO_READ
-        else:
-            if scope.is_repo and not scope.names_one_file:
-                attach_history_note(result, str(scope.root), job.opts, job.signatures,
-                                    job.allowlist)
-            result.notes.extend(notes_for(scope, pruned))
+        elif scope.is_repo and not scope.names_one_file:
+            attach_history_note(result, str(scope.root), job.opts, job.signatures, job.allowlist)
+        # Attached either way: a target where EVERYTHING was skipped is the one that owes the
+        # operator the reason, and it was the one branch that dropped it.
+        result.notes.extend(notes_for(scope, pruned))
     return WorkerScan(result, buf.getvalue())
 
 

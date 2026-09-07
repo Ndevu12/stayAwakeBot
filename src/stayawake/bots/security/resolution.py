@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import glob
 import os
 from dataclasses import dataclass, replace
 import re
@@ -11,7 +12,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from stayawake.bots.security.matchers.symlink import sink_label
+from stayawake.bots.security.write_sinks import sink_label
 from stayawake.lib import auth
 from stayawake.lib import git as gitutil
 from stayawake.lib.adapters import github_api
@@ -214,10 +215,11 @@ def resolve_local_targets(patterns: list[str], opts: ScanOptions) -> list[LocalT
     seen: set[str] = set()
     for pat in patterns or []:
         named = Path(os.path.expanduser(pat))
-        # Discovery promotes a path that is not there to its parent, so `<repo>/typo` came back as
-        # the whole of `<repo>` under the repository's own name. A literal path that names nothing
-        # resolves to nothing; only a `*` pattern is allowed not to exist as written.
-        if "*" not in pat and not os.path.lexists(named):
+        # Discovery promotes a path that is not there to its PARENT and walks that, so a typo or a
+        # stale glob came back as whatever sat beside it — reported under those repositories' own
+        # names, and `clean` there reads as "the path I named is clean". A pattern still discovers
+        # through the walk; it just has to match something first.
+        if not os.path.lexists(named) and not glob.glob(str(named)):
             continue
         # The link ENTRY, always and first: a redirect check has to see the link itself, and the
         # walk that discovers repositories follows it, so anything under it hides the entry.
@@ -231,7 +233,9 @@ def resolve_local_targets(patterns: list[str], opts: ScanOptions) -> list[LocalT
                 seen.add(out_key.key)
                 out.append(out_key)
             continue
-        found = discover_local_repos([pat], opts)
+        # A file holds no repositories, and discovery treats a `*` in its NAME as a pattern — so a
+        # real file called `star*name.js` was answered by the repositories beside it.
+        found = [] if named.is_file() else discover_local_repos([pat], opts)
         if found:
             candidates += [LocalTarget(r, None, REPOSITORY) for r in found]
         elif named.is_dir():

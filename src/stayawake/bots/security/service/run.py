@@ -191,10 +191,9 @@ def _scan_one_target_inner(scope, display: str, opts, sigs, allowlist, workers: 
     # `workers.scan_local`, which attaches this itself. This branch is the one it does not reach.
     if not scope.is_repo and not files and not result.findings:
         result.error = scan_workers.NOTHING_TO_READ
-    else:
-        if scope.is_repo:
-            scanner.attach_history_note(result, str(scope.root), opts, sigs, allowlist)
-        result.notes.extend(scan_workers.notes_for(scope, set(reader.pruned_dirs)))
+    elif scope.is_repo:
+        scanner.attach_history_note(result, str(scope.root), opts, sigs, allowlist)
+    result.notes.extend(scan_workers.notes_for(scope, set(reader.pruned_dirs)))
     return result
 
 
@@ -287,8 +286,9 @@ def scan(config_path: str | None = None, *, remote: bool = False,
         # read as a clean pass. (A bare run has no explicit target, so it keeps its current-repo
         # fallback above and is unaffected.)
         if (paths or cfg_local) and not repos:
-            print("error: the requested target(s) named nothing on disk — nothing was "
-                  "scanned; failing closed (not reporting 'clean').", file=sys.stderr)
+            print("error: the requested target(s) named nothing this user can see on disk — a "
+                  "path that is not there, or one under a directory this user cannot read. "
+                  "Nothing was scanned; failing closed (not reporting 'clean').", file=sys.stderr)
             return 2
         if progress_on and repos:
             prog.line(f"Found {len(repos)} repositor{'y' if len(repos) == 1 else 'ies'} to scan.")
