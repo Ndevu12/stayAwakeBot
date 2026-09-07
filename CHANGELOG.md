@@ -32,6 +32,12 @@ reader, not the mechanism or the weakness it closed.
 - **A path or pattern that names nothing no longer reports on whatever sits beside it.** A typo or
   a stale glob (`svc-renamed*`) was answered by the repositories around it, reported under *their*
   names — so a clean result read as "the path I named is clean". Naming nothing now stops the run.
+- **A library that matches text with a pattern handed to it is no longer reported as running a
+  command.** `axios` was reported this way in every build it ships, so a project that vendors it,
+  and a host running a service built on it, saw a suspicious verdict on ordinary code. Across
+  85,649 files of ordinary dependencies this withdraws 102 such reports and adds none. A file that
+  turns decoded data into a running command is still reported, including where the module that
+  runs it is loaded under a name assembled at run time.
 - **Ordinary code that matches text next to reading base64 is no longer reported as a running
   payload.** A bundled library that holds its pattern in a variable — which is what a minifier
   produces — was read as running a command, and next to an ordinary base64 decode that was enough

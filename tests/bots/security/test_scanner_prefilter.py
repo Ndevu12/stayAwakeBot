@@ -102,7 +102,7 @@ def _fuzz_dropper_inputs(count: int, seed: int):
         [f"{d}(" for d in model.DECODE_CALLS]
         + [f"String.{c}(" for c in model.CHARCODE_DECODES]     # non-anchor decode class (the trap)
         + [f"{s}(" for s in (model.CODE_EVAL_SINKS | model.MODULE_SINKS | model.CP_RUNNERS)]
-        + [f"require('{m}')" for m in model.CP_MODULES]
+        + [f"require('{m}')" for m in model.COMMAND_RUNNING_MODULES]
         + [f"'{sh}'" for sh in model.SHELL_INTERPRETERS]
         + [f"'{fl}'" for fl in model.SHELL_CODE_FLAGS]
         + blobs
