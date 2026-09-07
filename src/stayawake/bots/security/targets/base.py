@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterator
 
+from stayawake.bots.security.write_sinks import sink_label
+
 
 CODE_EXTS = {
     ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".mts", ".cts",
@@ -55,26 +57,35 @@ class Target:
     source = "local"
 
     def __init__(self, root: str | Path, display: str, opts: ScanOptions,
-                 include_only: tuple[str, ...] | None = None):
+                 include_only: tuple[str, ...] | None = None, within: str | None = None):
         self.root = Path(root)
         self.display = display
         self.opts = opts
         self.include_only = include_only
+        self.within = within
         self._walk_cache: list[str] | None = None
         self.read_errors: list[str] = []
         self.coverage_notes: list[str] = []
+        self.pruned_dirs: set[str] = set()
 
     @property
     def repo_root(self) -> Path:
         return self.root
 
+    @property
+    def scan_root(self) -> Path:
+        """Where a walk over this target starts. `root` is what paths are relative TO; a target
+        confined to one directory of a repository keeps the root and moves only this."""
+        return self.root / self.within if self.within else self.root
+
     def iter_files(self) -> Iterator[str]:
-        if self.include_only is not None:       #a pre-discovered file-chunk — no re-walk
+        if self.include_only is not None:       # a pre-discovered file-chunk — no re-walk
             yield from self.include_only
             return
         if self._walk_cache is None:            # walk once, memoize (byte-identical replay after)
             cache: list[str] = []
-            for dirpath, dirnames, filenames in os.walk(self.root):
+            for dirpath, dirnames, filenames in os.walk(self.scan_root):
+                self.pruned_dirs.update(d for d in dirnames if d in self.opts.exclude_dirs)
                 dirnames[:] = [d for d in dirnames if d not in self.opts.exclude_dirs]
                 for fn in filenames:
                     cache.append(str((Path(dirpath) / fn).relative_to(self.root)))
@@ -93,19 +104,63 @@ class Target:
             pass                                  # can't tell (e.g. EACCES on 3.11) → be conservative
         self.read_errors.append(f"{name}: {type(exc).__name__}")   # genuine gap → fail CLOSED
 
+    def _open_read(self, p: Path):
+        """The only place this class opens a file. Returns None when the path must not be read.
+
+        Three call sites each opened their own handle and each had to remember the write-sink rule;
+        the third one did not, and the credential bytes reached the report. A new reader that
+        forgets cannot exist if there is nothing else to call. `tests/.../test_one_opener.py` holds
+        that to one.
+        """
+        if p.is_symlink() and self._redirects_into_a_sink(p):
+            return None
+        return p.open("rb")
+
+    def _redirects_into_a_sink(self, p: Path) -> bool:
+        """Whether `p` is a link into a write-sink, recorded as a coverage note the first time.
+
+        os.walk never descends a DIRECTORY link, but a FILE link was opened and its bytes reached a
+        finding's evidence — so a scan of a repository holding `keys.js -> ~/.ssh/id_rsa` put key
+        material into the report, the SARIF and a `-d` bundle. The link is still graded by the
+        symlink matcher, so refusing the read costs no detection.
+        """
+        try:
+            label = sink_label(os.readlink(p), p.resolve())
+        except (OSError, RuntimeError):
+            return False
+        if label is None:
+            return False
+        try:
+            rel = p.relative_to(self.root)
+        except ValueError:
+            rel = p
+        note = (f"`{rel}` is a link into {label}; it was graded as a link and its destination was "
+                "not read.")
+        if note not in self.coverage_notes:
+            self.coverage_notes.append(note)
+        return True
+
     def read_bytes(self, rel: str, limit: int | None = None) -> bytes | None:
         p = self.root / rel
         try:
-            st = p.stat()
+            st = os.lstat(p)
         except OSError:
             return None                           # can't stat (vanished / race) — treat as absent
+        if _stat.S_ISLNK(st.st_mode):
+            try:
+                st = p.stat()                     # the size/kind checks below are about the target
+            except OSError:
+                return None                       # dangling — benign skip, the matcher grades it
         if not _stat.S_ISREG(st.st_mode):
             return None                           # FIFO/socket/device → benign skip: a blocking open()
             #                                       would HANG the scan forever, and there's no static
         if limit is None and st.st_size > self.opts.max_file_bytes:
             return None                           # policy skip (too large) — a benign skip
         try:
-            with p.open("rb") as fh:
+            fh = self._open_read(p)
+            if fh is None:
+                return None
+            with fh:
                 return fh.read(limit) if limit else fh.read()
         except OSError as exc:
             # Present but unreadable — a scan GAP, not a benign skip. Record it (fail closed).
@@ -130,7 +185,10 @@ class Target:
         """Read a bounded head+tail of an oversized file (payload is usually
         appended, so the tail matters) instead of skipping it wholesale."""
         try:
-            with p.open("rb") as fh:
+            fh = self._open_read(p)
+            if fh is None:
+                return b""
+            with fh:
                 head = fh.read(half)
                 try:
                     fh.seek(-half, os.SEEK_END)
@@ -236,7 +294,10 @@ class Target:
         nl_before = 0
         pos = 0
         try:
-            with p.open("rb") as fh:
+            fh = self._open_read(p)
+            if fh is None:
+                return
+            with fh:
                 while pos < size:
                     fh.seek(pos)
                     raw = fh.read(window)

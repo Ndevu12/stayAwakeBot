@@ -26,19 +26,19 @@ from stayawake.bots.security import scanner
 from stayawake.bots.security.matchers import REGISTRY
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.models import ScanResult, ScanReport
-from stayawake.bots.security.targets import LocalRepoTarget
 from stayawake.bots.security.sinks import (
     Sink, TerminalSink, JsonSink, SarifSink, FileSink, IssueSink, SlackSink)
 # Target resolution lives in one shared module (resolution.py); imported under the names scan's
 # body already uses (the `_`-prefixed ones stay for compat).
 from stayawake.bots.security.resolution import (
-    REMOTE_EMPTY_HINT, discover_local_repos, invalid_slugs,
+    REMOTE_EMPTY_HINT, resolve_local_targets, invalid_slugs,
     enclosing_repo_root as _enclosing_repo_root, remote_scope as _remote_scope,
     resolve_remote as _resolve_remote)
 from stayawake.bots.security.service import workers as scan_workers
 from stayawake.bots.security.service.config import (
     _read_config, _options, _as_bool, _require_db_or_error, jobs_setting as _jobs_setting)
 from stayawake.bots.security.service.report import _status_tag, _print_report_pointer
+from stayawake.utils import exitcodes
 
 
 REPORTS_DIR = Path("reports/security")
@@ -118,14 +118,14 @@ def _balanced_chunks(root, files: list[str], nchunks: int) -> list[list[str]]:
     return [b for b in buckets if b]              # drop any empty bucket
 
 
-def _scan_one_target(repo, display: str, opts, sigs, allowlist, workers: int,
+def _scan_one_target(scope, display: str, opts, sigs, allowlist, workers: int,
                      progress_on: bool, settings: dict) -> ScanResult:
     """Scan ONE local target. Above the file-count floor and with >1 worker, split its files into
     size-balanced chunks scanned in parallel (partitionable matchers) alongside the whole-target
     matchers (each once), then MERGE raw findings through `scanner.finalize` — byte-identical to a
     sequential scan. Below the floor / 1 worker, scan sequentially (no pool overhead)."""
     try:
-        result = _scan_one_target_inner(repo, display, opts, sigs, allowlist, workers,
+        result = _scan_one_target_inner(scope, display, opts, sigs, allowlist, workers,
                                         progress_on, settings)
         return result
     except Exception as exc:  # never let one target crash the CLI — fail CLOSED (mirrors scan_target)
@@ -133,26 +133,31 @@ def _scan_one_target(repo, display: str, opts, sigs, allowlist, workers: int,
                           error=f"scan worker failed: {type(exc).__name__}: {exc}")
 
 
-def _scan_one_target_inner(repo, display: str, opts, sigs, allowlist, workers: int,
+def _scan_one_target_inner(scope, display: str, opts, sigs, allowlist, workers: int,
                            progress_on: bool, settings: dict) -> ScanResult:
-    files = list(LocalRepoTarget(repo, display, opts).iter_files())
+    reader = scan_workers.read_as(scope, display, opts, include_only=scope.include_only)
+    files = list(reader.iter_files())
     min_files = int(settings.get("parallel_min_files", WITHIN_TARGET_MIN_FILES) or 0)
-    if workers <= 1 or len(files) < min_files:
+    if workers <= 1 or len(files) < min_files or scope.names_one_file:
         worker_scan = scan_workers.scan_local(
-            scan_workers.LocalScanJob(str(repo), display, opts, sigs, allowlist))
+            scan_workers.LocalScanJob(scope, display, opts, sigs, allowlist))
         if worker_scan.diagnostics:
             sys.stderr.write(worker_scan.diagnostics)
         return worker_scan.result
 
+    # One authority for what may run over this target: this branch used to read `sigs` directly,
+    # so every scoping rule applied to the sequential path only, and a `-j 4` run answered about
+    # the enclosing repository where `-j 1` did not.
+    scoped = scan_workers.matchers_for_target(sigs, scope)
     all_sigs = [s for group in sigs.values() for s in group]
-    order = list(sigs.keys())
+    order = list(scoped.keys())
     part_names = tuple(n for n in order if n in REGISTRY and REGISTRY[n].partitionable)
     whole_names = [n for n in order if n in REGISTRY and not REGISTRY[n].partitionable]
     nchunks = max(1, min(workers * _CHUNKS_PER_WORKER, -(-len(files) // _MIN_CHUNK_FILES)))
-    chunks = _balanced_chunks(repo, files, nchunks)
-    jobs = [scan_workers.MatcherJob(str(repo), display, opts, part_names, tuple(chunk), sigs, all_sigs)
+    chunks = _balanced_chunks(scope.root, files, nchunks)
+    jobs = [scan_workers.MatcherJob(scope, display, opts, part_names, tuple(chunk), scoped, all_sigs)
             for chunk in chunks]
-    jobs += [scan_workers.MatcherJob(str(repo), display, opts, (name,), None, sigs, all_sigs)
+    jobs += [scan_workers.MatcherJob(scope, display, opts, (name,), None, scoped, all_sigs)
              for name in whole_names]
 
     with status(f"Scanning {display} — {len(files)} files across {workers} workers…",
@@ -181,10 +186,14 @@ def _scan_one_target_inner(repo, display: str, opts, sigs, allowlist, workers: i
     if worker_error is not None:
         return ScanResult(target=display, source="local", error=f"scan worker failed: {worker_error}")
     result = scanner.finalize(display, "local", merged, order, read_errors, coverage_notes,
-                              opts, repo, allowlist, all_sigs)
+                              opts, scope.scan_root, allowlist, all_sigs, scope.is_repo)
     # The other local path — one small target, and every target of a fleet scan — goes through
     # `workers.scan_local`, which attaches this itself. This branch is the one it does not reach.
-    scanner.attach_history_note(result, repo, opts, sigs, allowlist)
+    if not scope.is_repo and not files and not result.findings:
+        result.error = scan_workers.NOTHING_TO_READ
+    elif scope.is_repo:
+        scanner.attach_history_note(result, str(scope.root), opts, sigs, allowlist)
+    result.notes.extend(scan_workers.notes_for(scope, set(reader.pruned_dirs)))
     return result
 
 
@@ -259,33 +268,40 @@ def scan(config_path: str | None = None, *, remote: bool = False,
             local_patterns = list(paths)
         elif cfg_local:                            # configured local globs
             local_patterns = list(cfg_local)
-        else:                                      # bare run → scan the current repo
-            local_patterns = [str(_enclosing_repo_root())]
-            print(f"No targets configured; scanning current repository: {local_patterns[0]}",
-                  file=sys.stderr)
+        else:                                      # bare run → the repository being stood in
+            here = _enclosing_repo_root()
+            if not (here / ".git").exists():
+                print(f"error: {here} is not a repository and none is above it, so a bare run has "
+                      "nothing to scan. Name what to scan — `saw scan <path>` takes a directory or "
+                      "a file.", file=sys.stderr)
+                return exitcodes.INCOMPLETE
+            local_patterns = [str(here)]
+            print(f"No targets configured; scanning current repository: {here}", file=sys.stderr)
         # Discovery (the FS walk) is itself slow and silent — cover it with a spinner.
-        with status("Discovering repositories…", enabled=progress_on):
-            repos = discover_local_repos(local_patterns, opts)
+        with status("Discovering targets…", enabled=progress_on):
+            found = resolve_local_targets(local_patterns, opts)
+        repos = [t.root for t in found]
         # Fail CLOSED when EXPLICIT targets (ad-hoc paths or configured globs) resolve to zero
         # repositories — a stale glob or a checkout with no `.git` scanned NOTHING, which must not
         # read as a clean pass. (A bare run has no explicit target, so it keeps its current-repo
         # fallback above and is unaffected.)
         if (paths or cfg_local) and not repos:
-            print("error: the requested target(s) resolved to 0 repositories — nothing was "
-                  "scanned; failing closed (not reporting 'clean').", file=sys.stderr)
+            print("error: the requested target(s) named nothing this user can see on disk — a "
+                  "path that is not there, or one under a directory this user cannot read. "
+                  "Nothing was scanned; failing closed (not reporting 'clean').", file=sys.stderr)
             return 2
         if progress_on and repos:
             prog.line(f"Found {len(repos)} repositor{'y' if len(repos) == 1 else 'ies'} to scan.")
         if len(repos) == 1:
             home = os.path.expanduser("~")
-            display = str(repos[0]).replace(home, "~")
-            results = [_scan_one_target(repos[0], display, opts, sigs, allowlist,
+            display = str(found[0].label).replace(home, "~")
+            results = [_scan_one_target(found[0], display, opts, sigs, allowlist,
                                         _file_workers(jobs_pref), progress_on, settings)]
         elif repos:
             home = os.path.expanduser("~")
-            labels = [str(repo).replace(home, "~") for repo in repos]
-            jobs_batch = [scan_workers.LocalScanJob(str(repo), labels[i], opts, sigs, allowlist)
-                          for i, repo in enumerate(repos)]
+            labels = [str(t.label).replace(home, "~") for t in found]
+            jobs_batch = [scan_workers.LocalScanJob(t, labels[i], opts, sigs, allowlist)
+                          for i, t in enumerate(found)]
             results = _scan_targets(jobs_batch, labels, ["local"] * len(repos),
                                     scan_workers.scan_local,
                                     workers=_resolve_workers(jobs_pref, len(repos)),
@@ -333,8 +349,10 @@ def scan(config_path: str | None = None, *, remote: bool = False,
     if report.any_infected:
         return 1
     if report.any_error:
-        errored = [r.target for r in results if r.error]
+        errored = [r for r in results if r.error]
         print(f"error: {len(errored)} target(s) could not be scanned — failing closed (not "
-              f"reporting 'clean'): {', '.join(textsafe.plain(e) for e in errored)}", file=sys.stderr)
+              f"reporting 'clean'):", file=sys.stderr)
+        for r in errored:
+            print(f"  {textsafe.plain(r.target)} — {textsafe.plain(r.error)}", file=sys.stderr)
         return 2
     return 0

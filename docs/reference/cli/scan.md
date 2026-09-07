@@ -16,7 +16,7 @@ saw scan [TARGETS...] [-r] [--user U] [--org O] [-c FILE] [-p PATH] [-j N]
 
 | Option | Description |
 | --- | --- |
-| `TARGETS...` | Local repo/dir paths — or `owner/repo` slugs under `--remote`. Omit to scan configured targets, else the current repository. |
+| `TARGETS...` | Local paths — a repository, a directory, or a single file — or `owner/repo` slugs under `--remote`. Omit to scan configured targets, else the current repository. |
 | `-p`, `--path PATH` | Another target (repeatable). |
 | `-c`, `--config FILE` | Config file (default: `config/security.yml` when present). |
 | `-r`, `--remote` | Scan GitHub repositories instead of local paths. See [Remote targeting](remote.md). |

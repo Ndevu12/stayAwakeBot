@@ -30,7 +30,7 @@ class TestTargetResolution(unittest.TestCase):
             cap["remote_kw"] = kw   # users/orgs/slugs selectors (the #1075 ladder inputs)
             return [], None, None   # mirror _resolve_remote's (slugs, token, source) 3-tuple
 
-        with mock.patch.object(svc.run, "discover_local_repos", side_effect=fake_discover), \
+        with mock.patch.object(svc.run, "resolve_local_targets", side_effect=fake_discover), \
              mock.patch.object(svc.run, "_resolve_remote", side_effect=fake_remote):
             out = Path(tempfile.mkdtemp())
             svc.scan(reports_dir=str(out), **scan_kwargs)

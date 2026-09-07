@@ -70,7 +70,7 @@ def run_matchers(target, matcher_names: list[str],
 def finalize(display: str, source: str, by_matcher: dict[str, list[Finding]],
              matcher_order: list[str], read_errors: list[str], coverage_notes: list[str],
              opts, root, allowlist: list[dict[str, Any]] | None,
-             all_sigs: list[dict[str, Any]]) -> ScanResult:
+             all_sigs: list[dict[str, Any]], is_repo: bool = True) -> ScanResult:
     """Turn raw per-matcher findings into a finished ScanResult. This is the SINGLE post-processing
     path shared by a sequential scan and a merged parallel scan — so a `-j` run is byte-identical to
     `-j 1`. Findings are consumed in `matcher_order` (the signatures' matcher order), preserving the
@@ -116,9 +116,10 @@ def finalize(display: str, source: str, by_matcher: dict[str, list[Finding]],
         finding = _cleanup_residue(Path(root))
         if finding is not None:
             result.findings.append(finding)
-        note = _history_scope_note(root)
-        if note:
-            result.notes.append(note)
+        if is_repo:
+            note = _history_scope_note(root)
+            if note:
+                result.notes.append(note)
     return result
 
 
@@ -284,11 +285,14 @@ def scan_target(target, signatures_by_matcher: dict[str, list[dict[str, Any]]],
     order = list(signatures_by_matcher.keys())
     try:
         by_matcher = run_matchers(target, order, signatures_by_matcher, all_sigs)
+        # A named file has no tree to answer about: `root` is only the directory it sits in, and
+        # every root-keyed step below it would report on what the operator did not name.
+        root = None if getattr(target, "names_one_file", False) else getattr(target, "scan_root", None)
         return finalize(target.display, target.source, by_matcher, order,
                         getattr(target, "read_errors", None) or [],
                         getattr(target, "coverage_notes", None) or [],
-                        getattr(target, "opts", None), getattr(target, "root", None),
-                        allowlist, all_sigs)
+                        getattr(target, "opts", None), root,
+                        allowlist, all_sigs, getattr(target, "is_repo", True))
     except Exception as exc:  # never let one bad repo abort the whole sweep
         return ScanResult(target=target.display, source=target.source,
                           error=f"{type(exc).__name__}: {exc}")

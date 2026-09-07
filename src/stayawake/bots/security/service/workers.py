@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import io
+import os
+import stat as _stat
 from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass, field
 
 from stayawake.bots.security.models import Finding, ScanResult
 from stayawake.bots.security.scanner import attach_history_note, run_matchers, scan_target
 from stayawake.bots.security.targets import LocalRepoTarget, RemoteRepoTarget
+from stayawake.bots.security.matchers import REGISTRY
+from stayawake.bots.security.resolution import LocalTarget
 
 
 @dataclass
@@ -21,8 +25,12 @@ class WorkerScan:
 
 @dataclass
 class LocalScanJob:
-    """Picklable descriptor for scanning one on-disk repo."""
-    root: str
+    """Picklable descriptor for scanning one on-disk target: the scope, and how to report it.
+
+    The scope travels whole. Carried as loose fields beside it, each consumer re-derived what to
+    run and what to disclose, and they disagreed.
+    """
+    scope: LocalTarget
     display: str
     opts: object
     signatures: dict
@@ -39,12 +47,100 @@ class RemoteScanJob:
     allowlist: list = field(default_factory=list)
 
 
+NOTHING_TO_READ = (
+    "nothing here could be read, so this target carries no verdict — a gap, not a clean result. "
+    "The coverage notes say what was skipped and why"
+)
+
+def _holds_content(p) -> bool:
+    """Whether an entry is something a scan can read or grade.
+
+    A FIFO or a device `exists()`, so a directory holding only those read as CLEAN while nothing
+    had been opened. A symlink counts: the matcher grades it without reading it.
+    """
+    try:
+        st = os.lstat(p)
+    except OSError:
+        return False
+    return _stat.S_ISREG(st.st_mode) or _stat.S_ISLNK(st.st_mode)
+
+
+def notes_for(scope: LocalTarget, pruned: set[str]) -> list[str]:
+    """Every disclosure a scope owes the operator, for both scan paths.
+
+    Composed once: the sequential path and the parallel one each used to assemble their own list,
+    and the parallel one was missing a rule every time a rule was added.
+    """
+    return [n for n in (scope.unlooked_at(), scope.where_paths_are_from(),
+                        scope.destination_note(),
+                        None if scope.is_repo else pruning_note(pruned)) if n]
+
+
+def pruning_note(pruned: set[str]) -> str | None:
+    """What a named directory's own walk skipped by name.
+
+    Inside a repository these are the standard exclusions and the scan says so elsewhere; when the
+    operator named the directory itself, a `dist` under a `dist` is dropped in silence otherwise.
+    """
+    if not pruned:
+        return None
+    return (f"Directories named {', '.join(sorted(pruned))} under this one were not walked "
+            "(the standard exclusions), so nothing inside them was read.")
+
+
+
+# Not partitionable, but it judges a file ENTRY, so it answers about a named file — and dropping it
+# would lose a write-redirect link that IS the named path.
+_ANSWERS_ABOUT_ONE_FILE = frozenset({"symlink", "dependency-audit"})
+
+_ASKS_GIT_ABOUT_THE_TREE = frozenset({"git-history"})
+
+
+def matchers_for_target(signatures: dict, scope: LocalTarget) -> dict:
+    """The signatures whose matchers may run over a target of this shape.
+
+    A link into a write-sink is not special-cased here: `Target` refuses to open one, so a matcher
+    that tries reads nothing. Two authorities for one decision is what this scope object exists to
+    stop.
+    """
+    if scope.names_one_file:
+        return {k: v for k, v in signatures.items()
+                if k in REGISTRY and (REGISTRY[k].partitionable or k in _ANSWERS_ABOUT_ONE_FILE)}
+    if not scope.is_repo:
+        return {k: v for k, v in signatures.items() if k not in _ASKS_GIT_ABOUT_THE_TREE}
+    return signatures
+
+
+def read_as(scope: LocalTarget, display: str, opts, *,
+            include_only: tuple[str, ...] | None) -> LocalRepoTarget:
+    """The reader a scope is scanned through — the one place a scope becomes a Target.
+
+    `include_only` is passed explicitly because a within-target chunk overrides it: None there
+    means the full walk, not the scope's own file list.
+    """
+    target = LocalRepoTarget(str(scope.root), display, opts,
+                             include_only=include_only, within=scope.within)
+    target.is_repo = scope.is_repo
+    target.names_one_file = scope.names_one_file
+    return target
+
+
 def scan_local(job: LocalScanJob) -> WorkerScan:
+    scope = job.scope
     buf = io.StringIO()
     with redirect_stdout(buf), redirect_stderr(buf):
-        with LocalRepoTarget(job.root, job.display, job.opts) as target:
-            result = scan_target(target, job.signatures, job.allowlist)
-        attach_history_note(result, job.root, job.opts, job.signatures, job.allowlist)
+        with read_as(scope, job.display, job.opts, include_only=scope.include_only) as target:
+            nothing_to_read = not scope.is_repo and not any(
+                _holds_content(target.root / rel) for rel in target.iter_files())
+            result = scan_target(target, matchers_for_target(job.signatures, scope), job.allowlist)
+            pruned = set(target.pruned_dirs)
+        if nothing_to_read and not result.findings:
+            result.error = NOTHING_TO_READ
+        elif scope.is_repo and not scope.names_one_file:
+            attach_history_note(result, str(scope.root), job.opts, job.signatures, job.allowlist)
+        # Attached either way: a target where EVERYTHING was skipped is the one that owes the
+        # operator the reason, and it was the one branch that dropped it.
+        result.notes.extend(notes_for(scope, pruned))
     return WorkerScan(result, buf.getvalue())
 
 
@@ -86,7 +182,7 @@ class MatcherJob:
     """A unit of within-target work: run `matcher_names` over the target. `include` None = the FULL
     target (whole-target matchers); a tuple of relpaths = just that file-chunk (partitionable
     matchers). Picklable (spawn)."""
-    root: str
+    scope: LocalTarget
     display: str
     opts: object
     matcher_names: tuple[str, ...]
@@ -98,7 +194,7 @@ class MatcherJob:
 def collect_partial(job: MatcherJob) -> RawPartial:
     buf = io.StringIO()
     with redirect_stdout(buf), redirect_stderr(buf):
-        target = LocalRepoTarget(job.root, job.display, job.opts, include_only=job.include)
+        target = read_as(job.scope, job.display, job.opts, include_only=job.include)
         by_matcher = run_matchers(target, list(job.matcher_names), job.signatures, job.all_sigs)
     return RawPartial(by_matcher, list(target.read_errors), list(target.coverage_notes),
                       buf.getvalue())

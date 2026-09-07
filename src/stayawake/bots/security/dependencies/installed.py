@@ -126,7 +126,7 @@ class NpmInstalledTree(InstalledTree):
     ecosystem = "npm"
 
     def read(self, target) -> Iterator[InstalledPackage]:
-        root = target.root / "node_modules"
+        root = target.scan_root / "node_modules"
         if not root.is_dir():
             return
         yield from self._walk(root, target.root, 0)
@@ -235,7 +235,7 @@ class PythonInstalledTree(InstalledTree):
     def _site_packages(self, target) -> Iterator[Path]:
         exclude = getattr(target.opts, "exclude_dirs", set())
         seen: set[str] = set()
-        for sp in self._find_site_packages(target.root, exclude):
+        for sp in self._find_site_packages(target.scan_root, exclude):
             try:
                 key = str(sp.resolve())
             except OSError:

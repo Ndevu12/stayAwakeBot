@@ -13,7 +13,25 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Added
+- **`saw scan` takes a directory or a single file, whether or not it is a repository.** A path you
+  name is scanned as given — a folder nobody put under git, or one file you just edited — so
+  checking a single script no longer means scanning a whole project. What a named folder or file
+  reports is what a scan of the project around it would report about that path. Naming a folder
+  that holds repositories still sweeps those, and a path that names nothing on disk — or holds
+  nothing that can be read — still stops the run rather than reporting it clean. A scan narrower
+  than a repository says what it therefore did not look at, and names any folder its own walk
+  skipped.
+
 ### Fixed
+- **A symlink into a credential store is graded without being read.** A file symlinked from a
+  scanned tree into SSH keys, cloud credentials or a shell startup file had its contents read, and
+  a preview of them could land in the report, the JSON, the SARIF and a saved report bundle — so
+  scanning a project could put key material somewhere it was never meant to go. The link is still
+  reported, at the same severity; only the destination is left alone, and the scan says it did.
+- **A path or pattern that names nothing no longer reports on whatever sits beside it.** A typo or
+  a stale glob (`svc-renamed*`) was answered by the repositories around it, reported under *their*
+  names — so a clean result read as "the path I named is clean". Naming nothing now stops the run.
 - **Ordinary code that matches text next to reading base64 is no longer reported as a running
   payload.** A bundled library that holds its pattern in a variable — which is what a minifier
   produces — was read as running a command, and next to an ordinary base64 decode that was enough

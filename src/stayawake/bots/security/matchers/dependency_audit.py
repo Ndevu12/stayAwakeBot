@@ -44,7 +44,7 @@ class DependencyAuditMatcher(Matcher):
                                 seen_vuln.add(vkey)
                                 findings.append(_emit_advisory(vuln, dep))
                                 emitted.add((vuln.osv_id or "", dep.purl.coordinate))
-        if external_on:
+        if external_on and not getattr(target, "names_one_file", False):
             findings.extend(_external_findings(target, signatures, emitted))
         return findings
 

@@ -211,12 +211,33 @@ def _local_loader_paths(payload: dict[str, Any]) -> list[str]:
 
 
 def _coverage_notes(payload: dict[str, Any]) -> list[str]:
-    """Unique, order-preserving coverage notes across all results (e.g. 'node_modules not deep-scanned',) — the same note repeats per repo, so dedup to one line."""
-    seen: dict[str, None] = {}
-    for r in payload.get("results", []):
-        for n in r.get("notes", []):
-            seen.setdefault(n, None)
-    return list(seen)
+    """Coverage notes, named by the target that owes them when they are not true of every target.
+
+    Notes used to be one flat deduped block. That was right when the only note was about
+    node_modules and every repository carried it; a note about one named path lost the one thing
+    that made it readable — which path. A note every target carries still needs no name.
+    """
+    results = list(payload.get("results", []))
+    if not results:
+        return []
+    per_target = [(r.get("target") or "", list(dict.fromkeys(r.get("notes") or [])))
+                  for r in results]
+    common = set(per_target[0][1])
+    for _, notes in per_target[1:]:
+        common &= set(notes)
+    out: list[str] = []
+    seen: set[str] = set()
+    for target, notes in per_target:
+        for note in notes:
+            if note in common:
+                if note not in seen:
+                    seen.add(note)
+                    out.append(note)
+            elif len(results) > 1:
+                out.append(f"{target} — {note}")
+            else:
+                out.append(note)
+    return out
 
 
 _LOC_LIMIT = 300          # textsafe's own default; named here because `_loc` budgets against it
