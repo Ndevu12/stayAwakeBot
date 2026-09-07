@@ -58,7 +58,7 @@ _WRITE_SINKS: list[tuple[re.Pattern[str], str]] = [
 ]
 
 
-def _sink_label(raw_target: str, resolved: Path) -> str | None:
+def sink_label(raw_target: str, resolved: Path) -> str | None:
     """The sink label if the (escaping) symlink target names a sensitive write-sink, else None. Matches
     the raw link text AND the canonical path, so both a relative ``../../.ssh/authorized_keys`` and an
     absolute ``/home/u/.ssh/id_ed25519`` hit."""
@@ -102,7 +102,7 @@ def _classify(p: Path, repo_root: Path, resolved_root: Path,
     except ValueError:
         rel = str(p)
     if redirect_sig is not None:
-        label = _sink_label(raw, resolved)
+        label = sink_label(raw, resolved)
         if label is not None:                 # escaping → a sensitive write-sink → CONFIRMED critical
             return _finding(redirect_sig, rel, f"symlink → {raw} redirects a write into {label}")
     if escape_sig is not None and is_dir:      # escaping directory → non-sink → scan-evasion HEURISTIC

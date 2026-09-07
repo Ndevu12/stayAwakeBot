@@ -191,12 +191,10 @@ def _scan_one_target_inner(scope, display: str, opts, sigs, allowlist, workers: 
     # `workers.scan_local`, which attaches this itself. This branch is the one it does not reach.
     if not scope.is_repo and not files:
         result.error = scan_workers.NOTHING_TO_READ
-    elif scope.is_repo:
-        scanner.attach_history_note(result, str(scope.root), opts, sigs, allowlist)
     else:
-        for note in (scope.unlooked_at(), scan_workers.pruning_note(set(reader.pruned_dirs))):
-            if note:
-                result.notes.append(note)
+        if scope.is_repo:
+            scanner.attach_history_note(result, str(scope.root), opts, sigs, allowlist)
+        result.notes.extend(scan_workers.notes_for(scope, set(reader.pruned_dirs)))
     return result
 
 

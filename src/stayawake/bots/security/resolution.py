@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import contextlib
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import re
 import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 
+from stayawake.bots.security.matchers.symlink import sink_label
 from stayawake.lib import auth
 from stayawake.lib import git as gitutil
 from stayawake.lib.adapters import github_api
@@ -80,6 +81,7 @@ class LocalTarget:
     include_only: tuple[str, ...] | None
     kind: str
     within: str | None = None
+    unread_destination: str | None = None
 
     def __post_init__(self) -> None:
         if self.kind not in _KINDS:
@@ -136,6 +138,13 @@ class LocalTarget:
         return ("This target is not a repository, so the checks that read a project's history did "
                 f"not run: {what}.")
 
+    def destination_note(self) -> str | None:
+        """Why what is behind this link went unread."""
+        if not self.unread_destination:
+            return None
+        return (f"This is a link into {self.unread_destination}, which was not read through. "
+                "Name that path directly to scan what is behind it.")
+
 
 def _one_file(named: Path) -> "LocalTarget":
     """One named file, rooted where its directory would have been scanned from.
@@ -168,6 +177,14 @@ def _a_directory(named: Path) -> "LocalTarget":
     return LocalTarget(root, None, DIRECTORY, str(here.relative_to(root)))
 
 
+def _sensitive_destination(named: Path) -> str | None:
+    """The write-sink a link lands in, by the detector's own table, or None."""
+    try:
+        return sink_label(os.readlink(named), named.resolve())
+    except (OSError, RuntimeError):
+        return None
+
+
 def resolve_local_targets(patterns: list[str], opts: ScanOptions) -> list[LocalTarget]:
     """What the given patterns name, in order, deduped.
 
@@ -182,6 +199,15 @@ def resolve_local_targets(patterns: list[str], opts: ScanOptions) -> list[LocalT
         # The link ENTRY, always and first: a redirect check has to see the link itself, and the
         # walk that discovers repositories follows it, so anything under it hides the entry.
         candidates: list[LocalTarget] = [_one_file(named)] if named.is_symlink() else []
+        if candidates and (into := _sensitive_destination(named)):
+            # Resolving the link is ours, not the operator's: reading through one that lands in a
+            # credential store puts those paths in the report, the SARIF and an --alert issue body.
+            # The link is still judged; what is behind it is left alone, and said so.
+            out_key = replace(candidates[0], unread_destination=into)
+            if out_key.key not in seen:
+                seen.add(out_key.key)
+                out.append(out_key)
+            continue
         found = discover_local_repos([pat], opts)
         if found:
             candidates += [LocalTarget(r, None, REPOSITORY) for r in found]

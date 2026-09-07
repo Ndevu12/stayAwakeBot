@@ -408,24 +408,26 @@ class TestALinkIsAlwaysAnEntry(unittest.TestCase):
         self.base = Path(tempfile.mkdtemp())
         self.proj = self.base / "proj"
         self.proj.mkdir()
-        self.sink = self.base / "home" / ".emacs.d"
+        self.sink = self.base / "home" / ".emacs.d"       # a write-sink the detector knows
         self.sink.mkdir(parents=True)
+        self.elsewhere = self.base / "home" / "projects" / "app"   # an ordinary destination
+        self.elsewhere.mkdir(parents=True)
         self.link = self.proj / "dist"
 
-    def _resolved(self):
-        os.symlink(str(self.sink), str(self.link))
+    def _resolve(self, destination):
+        os.symlink(str(destination), str(self.link))
         return resolve_local_targets([str(self.link)], ScanOptions())
 
     def test_a_link_onto_a_repository_reports_the_link_and_the_repository(self):
-        self.subprocess.run(["git", "init", "-q", str(self.sink)], check=True)
-        found = self._resolved()
+        self.subprocess.run(["git", "init", "-q", str(self.elsewhere)], check=True)
+        found = self._resolve(self.elsewhere)
         self.assertEqual([t.kind for t in found], [resolution.ONE_FILE, resolution.REPOSITORY])
         self.assertEqual(found[0].label.name, "dist")
         self.assertEqual(found[0].label.parent, Path(os.path.realpath(self.proj)))
 
     def test_a_link_onto_a_tree_of_repositories_still_reports_the_link(self):
-        self.subprocess.run(["git", "init", "-q", str(self.sink / "cfg")], check=True)
-        kinds = [t.kind for t in self._resolved()]
+        self.subprocess.run(["git", "init", "-q", str(self.elsewhere / "cfg")], check=True)
+        kinds = [t.kind for t in self._resolve(self.elsewhere)]
         self.assertEqual(kinds[0], resolution.ONE_FILE, f"the link entry was dropped: {kinds}")
 
     def test_the_write_redirect_survives_a_repository_under_the_link(self):
@@ -440,6 +442,47 @@ class TestALinkIsAlwaysAnEntry(unittest.TestCase):
         # the defect and not the fixture.
         os.symlink(str(self.sink), str(self.link))
         self.assertIn("symlink-write-redirect", _signatures_reported(self.link, "dist"))
+
+
+class TestALinkIntoACredentialStoreIsNotFollowed(unittest.TestCase):
+    """Resolving a link is the tool's decision, not the operator's. Reading through one that lands
+    in a credential store puts those paths in the report, the SARIF and an `--alert` issue body —
+    so the link is judged and what is behind it is left alone, and said so."""
+
+    def setUp(self):
+        self.base = Path(tempfile.mkdtemp())
+        self.proj = self.base / "proj"
+        self.proj.mkdir()
+        self.keys = self.base / "home" / ".ssh"
+        self.keys.mkdir(parents=True)
+        (self.keys / "id_ed25519").write_text("PRIVATE KEY\n", encoding="utf-8")
+        self.link = self.proj / "dist"
+        os.symlink(str(self.keys), str(self.link))
+
+    def test_what_is_behind_it_is_not_read(self):
+        found = resolve_local_targets([str(self.link)], ScanOptions())
+        self.assertEqual([t.kind for t in found], [resolution.ONE_FILE])
+        self.assertTrue(found[0].unread_destination)
+
+    def test_nothing_from_behind_it_reaches_the_report(self):
+        # The link's own destination IS the finding's evidence — that is the detection. What must
+        # never appear is what enumerating the store would have produced.
+        self.assertNotIn("id_ed25519", _report_of(self.link))
+
+    def test_it_says_so_rather_than_skipping_in_silence(self):
+        self.assertIn("was not read through", _report_of(self.link))
+
+    def test_the_link_itself_is_still_judged(self):
+        self.assertIn("symlink-write-redirect", _signatures_reported(self.link, "dist"))
+
+    def test_an_ordinary_destination_is_still_read_through(self):
+        other = self.base / "work"
+        other.mkdir()
+        (other / "bad.js").write_text("var _$_ab12 = 1;\n", encoding="utf-8")
+        link = self.proj / "current"
+        os.symlink(str(other), str(link))
+        self.assertTrue(_signatures_reported(link, "bad.js"),
+                        "a benign link stopped being read through")
 
 
 class TestWhatTheWalkSkippedByName(unittest.TestCase):

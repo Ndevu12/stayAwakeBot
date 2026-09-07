@@ -50,6 +50,16 @@ NOTHING_TO_READ = (
     "readable file is a gap, not a clean result"
 )
 
+def notes_for(scope: LocalTarget, pruned: set[str]) -> list[str]:
+    """Every disclosure a scope owes the operator, for both scan paths.
+
+    Composed once: the sequential path and the parallel one each used to assemble their own list,
+    and the parallel one was missing a rule every time a rule was added.
+    """
+    return [n for n in (scope.unlooked_at(), scope.destination_note(),
+                        None if scope.is_repo else pruning_note(pruned)) if n]
+
+
 def pruning_note(pruned: set[str]) -> str | None:
     """What a named directory's own walk skipped by name.
 
@@ -106,11 +116,11 @@ def scan_local(job: LocalScanJob) -> WorkerScan:
             pruned = set(target.pruned_dirs)
         if nothing_to_read:
             result.error = NOTHING_TO_READ
-        if scope.is_repo and not scope.names_one_file:
-            attach_history_note(result, str(scope.root), job.opts, job.signatures, job.allowlist)
-        for note in (scope.unlooked_at(), None if scope.is_repo else pruning_note(pruned)):
-            if note and not nothing_to_read:
-                result.notes.append(note)
+        else:
+            if scope.is_repo and not scope.names_one_file:
+                attach_history_note(result, str(scope.root), job.opts, job.signatures,
+                                    job.allowlist)
+            result.notes.extend(notes_for(scope, pruned))
     return WorkerScan(result, buf.getvalue())
 
 
