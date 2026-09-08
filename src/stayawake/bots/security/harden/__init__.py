@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 
-from stayawake.bots.security import hookscript
+from stayawake.bots.security import hook, hookscript
 from stayawake.bots.security.hygiene.host_artifacts import _global_folders
 from stayawake.bots.security.hygiene.models import PROCESSES_NOT_READABLE_ID
 from stayawake.bots.security.hygiene.outcome import BLOCKED, run_probe
@@ -51,6 +51,8 @@ _DEAD_SAW_NOTE = (
     "`saw hook repair` points the hooks at this saw."
 )
 _ALTERED_HOOKS_NOTE = "Run `saw hook repair`."
+_HOOKS_ON = "New clones and pulls on this machine will be scanned."
+_HOOKS_OFF = "Run `saw hook install`."
 
 
 _TOOK_BACK = "Every control this tool placed here has been taken back."
@@ -92,11 +94,9 @@ def _every_reachable_one(outcomes) -> bool:
     return bool(reachable) and all(o.state in _HELD for o in reachable)
 
 
-def _headline(outcomes, unresolved: bool) -> str:
+def _headline(outcomes, unresolved: bool, hooks_ok: bool) -> str:
     """The one line that says where this machine stands."""
-    if unresolved:
-        return _NOT_EVERYWHERE
-    if not _every_reachable_one(outcomes):
+    if unresolved or not hooks_ok or not _every_reachable_one(outcomes):
         return _NOT_EVERYWHERE
     if any(o.state == SELF_ENFORCING for o in outcomes):
         return _CLAIM_AS_YOU
@@ -125,7 +125,7 @@ def _what_to_do(outcomes) -> list[str]:
 def run(*, live=check_live_processes, folders=_global_folders,
         apply=apply_one, supported=hostdenial.platform_supported,
         altered=hookscript.altered_hooks, saw_runs=hookscript.recorded_saw_runs,
-        stop=end_live_code) -> tuple[int, str]:
+        stop=end_live_code, settle_hooks=hook.settle_hooks) -> tuple[int, str]:
     """Apply the denial at every global-resolution entry. Enforcing only after read-back.
 
     Root is asked of the PATH rather than of the command. Most of these locations belong to the
@@ -154,8 +154,15 @@ def run(*, live=check_live_processes, folders=_global_folders,
             ending_failed = textsafe.plain(f"{type(exc).__name__}: {exc}", limit=200)
 
     outcomes = [apply(p) for p in folders()]
+    # Putting the hooks in place is part of hardening a machine, and doing it twice changes
+    # nothing: one already in place reads as such and is not rewritten.
+    try:
+        hooks = settle_hooks()
+    except Exception:                         # never let it take the command down
+        hooks = None
     unresolved = ending_failed is not None or (ending is not None and not ending.finished)
-    lines = [_headline(outcomes, unresolved), ""]
+    hooks_ok = hooks is not None and hooks.settled
+    lines = [_headline(outcomes, unresolved, hooks_ok), ""]
     if ending_failed is not None:
         lines.extend([_STILL_LIVE, ""])
     elif ending is not None:
@@ -166,6 +173,10 @@ def run(*, live=check_live_processes, folders=_global_folders,
             lines.append(_STILL_SPAWNING)
         lines.append("")
     lines.extend(_what_to_do(outcomes))
+    if hooks_ok and hooks.changed:
+        lines.append(_HOOKS_ON)
+    elif not hooks_ok:
+        lines.append(_HOOKS_OFF)
     if altered():
         lines.extend(["", _ALTERED_HOOKS_NOTE])
     if not saw_runs():
@@ -173,4 +184,6 @@ def run(*, live=check_live_processes, folders=_global_folders,
     body = "\n".join(lines).rstrip()
     if unresolved:
         return 1, body
-    return (0, body) if _every_reachable_one(outcomes) else (3, body)
+    if not _every_reachable_one(outcomes) or not hooks_ok:
+        return 3, body
+    return 0, body

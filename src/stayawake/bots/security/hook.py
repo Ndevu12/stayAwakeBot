@@ -12,7 +12,7 @@ import shutil
 import sys
 import tempfile
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from stayawake.utils import env
@@ -228,19 +228,41 @@ def _print_actions(actions: list[Action], stream) -> None:
 _global_template_dir = hookscript.global_template_dir
 
 
-def install(config_path: str | None = None) -> int:
-    """Install the scan-on-clone hooks globally. If the operator already has an `init.templateDir`,
-    chain our hooks INTO it (we can't set two); otherwise point `init.templateDir` at ours."""
+@dataclass
+class Settling:
+    """What settling the hooks did, for a caller that reports it in its own words."""
+    actions: list = field(default_factory=list)
+    target: str | None = None
+    problem: str | None = None
+    code: int = 0
+
+    @property
+    def settled(self) -> bool:
+        return not self.problem and all(a.state in _SETTLED for a in self.actions)
+
+    @property
+    def changed(self) -> bool:
+        """Whether anything on the machine is different for having run this."""
+        return any(a.state != IN_PLACE for a in self.actions)
+
+
+def settle_hooks(config_path: str | None = None) -> Settling:
+    """Put the scan-on-clone hooks in place and say what that did.
+
+    Doing this twice changes nothing the second time: a hook already in place reads as such and is
+    not rewritten. Chains into an existing `init.templateDir` rather than replacing it, because git
+    holds only one.
+    """
     saw = _saw_executable()
     config = os.path.abspath(config_path) if config_path else None
     if config and resolve_config(config_path) is None:
-        return 2
+        return Settling(problem="the named config could not be read", code=2)
 
     existing = _global_template_dir()
     if existing and not os.path.isabs(existing):
-        print(f"error: git's init.templateDir is relative ({textsafe.plain(existing, limit=4096)}); "
-              "make it absolute, then install.", file=sys.stderr)
-        return 2
+        return Settling(code=2, problem=(
+            f"git's init.templateDir is relative ({textsafe.plain(existing, limit=4096)}); "
+            "make it absolute, then install."))
     try:
         if existing and not _same_path(existing, template_dir()):
             actions = _settle(Path(existing) / "hooks", saw, config, own=False)
@@ -250,20 +272,29 @@ def install(config_path: str | None = None) -> int:
             actions = _settle(_hooks_dir(), saw, config, own=True)
             if not gitutil.run_ok(None, ["config", "--global", "init.templateDir",
                                          str(template_dir())]):
-                print("error: could not set git's global init.templateDir.", file=sys.stderr)
-                return 2
+                return Settling(code=2, problem="could not set git's global init.templateDir.")
             target = str(template_dir())
     except HookError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 2
+        return Settling(code=2, problem=str(exc))
     except OSError as exc:
-        print(f"error: {textsafe.plain(str(exc))}", file=sys.stderr)
-        return 3
+        return Settling(code=3, problem=textsafe.plain(str(exc)))
     if not hookscript.declare(saw, config, Path(target) / "hooks"):
-        actions.append(Action(UNVERIFIED, hookscript.declaration_path(), "the record of what was installed could not be written"))
+        actions.append(Action(UNVERIFIED, hookscript.declaration_path(),
+                              "the record of what was installed could not be written"))
+    return Settling(actions=actions, target=target)
+
+
+def install(config_path: str | None = None) -> int:
+    """Install the scan-on-clone hooks globally and report what happened."""
+    done = settle_hooks(config_path)
+    if done.problem is not None:
+        print(f"error: {done.problem}", file=sys.stderr)
+        return done.code
+    config = os.path.abspath(config_path) if config_path else None
+    actions, target = done.actions, done.target
 
     out = sys.stdout
-    settled = all(a.state in _SETTLED for a in actions)
+    settled = done.settled
     if settled:
         print(_paint("✓ scan-on-clone installed", "ok", out)
               + " — future `git clone` / `git pull` will be scanned automatically.")
