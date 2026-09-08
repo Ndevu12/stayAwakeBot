@@ -26,8 +26,6 @@ _INTERPRETERS = frozenset({
     "sh", "bash", "zsh", "dash", "ksh", "osascript", "tsx", "ts-node"})
 
 
-#: The option that tells each interpreter to take its program from standard input. Read among the
-#: interpreter's OWN options: the same letter means something else after a module name.
 _STDIN_FLAGS = {
     **{shell: frozenset({"-s"}) for shell in POSIX_SHELLS},
     "python": frozenset({"-"}), "python2": frozenset({"-"}), "python3": frozenset({"-"}),

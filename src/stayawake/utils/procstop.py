@@ -13,7 +13,6 @@ from stayawake.utils import elevate
 from stayawake.utils.procsnap import (GONE, NOT_OURS, RUNNING, UNSUPPORTED, Identity, identify,
                                       ps_signature)
 
-#: What acting on a process did.
 SIGNALLED = "signalled"           # the signal was delivered to the process we meant
 ALREADY_GONE = "already-gone"     # it was not executing by the time we reached it
 RECYCLED = "recycled"             # the pid is now a different process — refused, never signalled

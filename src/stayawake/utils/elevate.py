@@ -9,7 +9,6 @@ import subprocess
 _SUDO_PATHS = ("/usr/bin/sudo", "/bin/sudo")
 _TIMEOUT = 120
 
-#: What asking for privilege did.
 NOT_AVAILABLE = "not-available"     # no trustworthy sudo on this machine
 CANNOT_ASK = "cannot-ask"           # it needs a password and there is nobody to ask
 DECLINED = "declined"               # asked, and not granted
