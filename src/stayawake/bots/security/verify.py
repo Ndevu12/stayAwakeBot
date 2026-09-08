@@ -189,6 +189,9 @@ def verify_dir(path: str | Path, *, max_files: int = DEFAULT_MAX_FILES,
     markers = sorted({f.signature_id for f in result.findings if f.confidence == CONFIRMED})
     if markers:                    # a CONFIRMED hit wins regardless of coverage
         return DirVerdict(path=str(root), files=count, markers=markers)
+    if _UNREAD_DIR in unread:      # the survey already named this shortfall — keep its wording,
+        return DirVerdict(path=str(root), files=count, partial=True, unread=unread,
+                          error=result.error)     # and carry the scan's text rather than lose it
     if result.error:               # a read gap → we did NOT fully see the tree; must not claim "clean"
         return DirVerdict(path=str(root), files=count, error=result.error)
     if not complete:               # walked, but something in it went UNREAD (see `unread`)

@@ -14,6 +14,10 @@ from stayawake.bots.security.resolution import resolve_local_targets
 from stayawake.bots.security.service import workers
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.targets import ScanOptions
+from stayawake.utils import exitcodes
+
+_NEEDS_POSIX_NONROOT = (os.name == "posix"
+                        and not (hasattr(os, "geteuid") and os.geteuid() == 0))
 
 
 def _report_of(target: Path) -> str:
@@ -795,6 +799,156 @@ class TestEachTargetOwnsItsCoverageNotes(unittest.TestCase):
             # target", not "has no dash" — the first version of this test asserted the latter.
             self.assertNotIn(str(targets[2]), n,
                              f"a lone target's note was needlessly attributed: {n}")
+
+
+@unittest.skipUnless(_NEEDS_POSIX_NONROOT,
+                     "chmod-based unreadable tests need a non-root POSIX host")
+class TestAFolderThatCouldNotBeReadIsNotClean(unittest.TestCase):
+    """An unreadable FILE has always been recorded and fails the target closed. A directory was
+    skipped in silence, so a target could report clean with a whole subtree unread — the one thing
+    the scanner must never do."""
+
+    def setUp(self):
+        import subprocess
+        self.d = Path(tempfile.mkdtemp())
+        subprocess.run(["git", "init", "-q", str(self.d)], check=True)
+        (self.d / "ok.js").write_text("export const ok = 1;\n", encoding="utf-8")
+        self.shut = self.d / "src"
+        self.shut.mkdir()
+        (self.shut / "bad.js").write_text("var _$_ab12 = 1;\n", encoding="utf-8")
+        os.chmod(self.shut, 0o000)
+        self.addCleanup(os.chmod, self.shut, 0o755)
+
+    def test_it_does_not_report_clean(self):
+        # Asserted on the target's own status row and the fail-closed line, not on the word
+        # "clean" — that word appears in the host note and in the refusal itself.
+        report = _report_of(self.d)
+        self.assertIn("ERROR", report)
+        self.assertIn("failing closed", _stderr_of(self.d))
+
+    def test_it_names_the_folder_it_could_not_read(self):
+        self.assertIn("src/", _report_of(self.d) + _stderr_of(self.d))
+
+    def test_a_readable_tree_is_unaffected(self):
+        os.chmod(self.shut, 0o755)
+        # The payload inside is found, and nothing claims a folder went unread.
+        self.assertIn("bad.js", _report_of(self.d))
+        self.assertNotIn("src/: PermissionError", _report_of(self.d))
+
+
+@unittest.skipUnless(_NEEDS_POSIX_NONROOT,
+                     "chmod-based unreadable tests need a non-root POSIX host")
+class TestDiscoveryDoesNotDropWhatItCannotEnter(unittest.TestCase):
+    """Naming an unreadable repository directly stopped the run. Reaching the same one through a
+    pattern left it out without a word, and the run could end clean."""
+
+    def setUp(self):
+        import subprocess
+        self.base = Path(tempfile.mkdtemp())
+        for name in ("repo-open", "repo-shut"):
+            r = self.base / name
+            subprocess.run(["git", "init", "-q", str(r)], check=True)
+            (r / "a.js").write_text("export const ok = 1;\n", encoding="utf-8")
+        self.shut = self.base / "repo-shut"
+        os.chmod(self.shut, 0o000)
+        self.addCleanup(os.chmod, self.shut, 0o755)
+
+    def test_a_pattern_answers_the_same_way_as_naming_it(self):
+        direct = _report_of(self.shut) + _stderr_of(self.shut)
+        pattern = _report_of(Path(str(self.base) + "/repo-*"))
+        pattern += _stderr_of(Path(str(self.base) + "/repo-*"))
+        self.assertIn("repo-shut", direct)
+        self.assertIn("repo-shut", pattern,
+                      "the pattern dropped a repository it matched but could not read")
+
+
+class TestAScopeThatCannotBeSureDoesNotSayClean(unittest.TestCase):
+    """A check that keys on where a file sits is measured from the scan's root. With no project
+    above the named path, that root is the named path — and a coverage note beside `clean` does not
+    reach a gate. The exit code has to carry it."""
+
+    def _rc(self, target: Path) -> int:
+        from stayawake.bots.security import service
+        cfgd = Path(tempfile.mkdtemp())
+        (cfgd / "c.yml").write_text("allowlist: []\n", encoding="utf-8")
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            return service.scan(str(cfgd / "c.yml"), paths=[str(target)], no_stream=True)
+
+    def _tree(self, under_git: bool) -> Path:
+        import subprocess
+        d = Path(tempfile.mkdtemp())
+        if under_git:
+            subprocess.run(["git", "init", "-q", str(d)], check=True)
+        wf = d / ".github" / "workflows"
+        wf.mkdir(parents=True)
+        (wf / "ci.yml").write_text(
+            "jobs:\n  b:\n    runs-on: [self-hosted, SHA1HULUD]\n    steps: []\n",
+            encoding="utf-8")
+        return d
+
+    def test_narrowing_past_an_anchor_outside_a_repository_is_incomplete(self):
+        d = self._tree(under_git=False)
+        for named in (d / ".github", d / ".github" / "workflows",
+                      d / ".github" / "workflows" / "ci.yml"):
+            self.assertEqual(self._rc(named), exitcodes.INCOMPLETE,
+                             f"{named.name} reported a verdict it could not be sure of")
+
+    def test_the_folder_the_project_starts_at_still_answers(self):
+        # The control: the same tree named at its root finds the payload, so the fixture is live
+        # and the exit code above is not just "everything is incomplete now".
+        self.assertEqual(self._rc(self._tree(under_git=False)), exitcodes.FINDINGS)
+
+    def test_inside_a_repository_nothing_changes(self):
+        d = self._tree(under_git=True)
+        for named in (d, d / ".github", d / ".github" / "workflows",
+                      d / ".github" / "workflows" / "ci.yml"):
+            self.assertEqual(self._rc(named), exitcodes.FINDINGS,
+                             f"{named.name} lost the finding or the certainty")
+
+    def test_a_clean_folder_inside_a_repository_is_still_clean(self):
+        # The infected fixture above cannot see this: a confirmed finding outranks an incomplete
+        # scan in the exit code, so `1` comes back either way. Only a CLEAN narrowed scope shows
+        # whether certainty was lost.
+        import subprocess
+        d = Path(tempfile.mkdtemp())
+        subprocess.run(["git", "init", "-q", str(d)], check=True)
+        wf = d / ".github" / "workflows"
+        wf.mkdir(parents=True)
+        (wf / "ci.yml").write_text("jobs:\n  build:\n    steps: []\n", encoding="utf-8")
+        for named in (wf, wf / "ci.yml"):
+            self.assertEqual(self._rc(named), exitcodes.CLEAN,
+                             f"{named.name} stopped being able to report clean")
+
+    def test_an_ordinary_folder_is_still_clean(self):
+        # No anchor name anywhere in its path, so nothing was cut and `clean` is honest.
+        d = Path(tempfile.mkdtemp()) / "scripts"
+        d.mkdir(parents=True)
+        (d / "a.js").write_text("export const ok = 1;\n", encoding="utf-8")
+        self.assertEqual(self._rc(d), exitcodes.CLEAN)
+        self.assertEqual(self._rc(d / "a.js"), exitcodes.CLEAN)
+
+
+class TestAnUnexaminablePathDoesNotCrashTheRun(unittest.TestCase):
+    """`Path.exists()` on a path inside an unreadable directory RAISES on Linux and returns False on
+    macOS. The unguarded check crashed the whole scan on one platform and passed every local run on
+    the other, so this test forces the raising behaviour rather than relying on the host."""
+
+    def test_resolution_survives_a_probe_that_raises(self):
+        from unittest import mock
+        d = Path(tempfile.mkdtemp())
+        (d / "somewhere").mkdir()
+        real = Path.exists
+
+        def raising(self, *a, **k):
+            if self.name == ".git":
+                raise PermissionError(13, "Permission denied", str(self))
+            return real(self, *a, **k)
+
+        with mock.patch.object(Path, "exists", raising):
+            found = resolve_local_targets([str(d / "somewhere")], ScanOptions())
+        # It answers about the path rather than raising; not being able to see a `.git` means it is
+        # not treated as a repository.
+        self.assertEqual([t.kind for t in found], [resolution.DIRECTORY])
 
 
 if __name__ == "__main__":

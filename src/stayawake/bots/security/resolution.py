@@ -28,31 +28,64 @@ REMOTE_EMPTY_HINT = (
 _SLUG_RE = re.compile(r"^[^/\s]+/[^/\s]+$")
 
 
+def _holds_git(p: Path) -> bool:
+    """Whether `p` contains a `.git`, False when that cannot be determined.
+
+    `Path.exists()` raises on a path inside an unreadable directory on Linux and returns False on
+    macOS, so an unguarded check crashed the whole run on one platform and not the other.
+    """
+    try:
+        return (p / ".git").exists()
+    except OSError:
+        return False
+
+
+def _shape_of(named: Path) -> tuple[bool, bool, bool]:
+    """(is_symlink, is_dir, is_file) for `named`, all False when the path cannot be examined."""
+    try:
+        return named.is_symlink(), named.is_dir(), named.is_file()
+    except OSError:
+        return False, False, False
+
+
 def enclosing_repo_root(start: Path | None = None) -> Path:
     """Nearest ancestor of `start` (default: CWD) that contains a .git, else `start`.
     Lets a bare invocation default to 'act on the repo I'm standing in', even from a
     subdirectory."""
     start = (start or Path.cwd()).resolve()
     for d in (start, *start.parents):
-        if (d / ".git").exists():
+        if _holds_git(d):
             return d
     return start
 
 
-def discover_local_repos(patterns: list[str], opts: ScanOptions) -> list[Path]:
+def discover_local_repos(patterns: list[str], opts: ScanOptions,
+                        *, unreadable: list[Path] | None = None) -> list[Path]:
     """Every git repository under the given path/glob `patterns` (deduped, deterministic order).
     Descends until it hits a `.git` (that dir is a repo — it is not descended further), pruning
-    `opts.exclude_dirs` so a huge `node_modules` never dominates the walk."""
+    `opts.exclude_dirs` so a huge `node_modules` never dominates the walk.
+
+    Directories the walk cannot enter are appended to `unreadable`, because one it skips may be the
+    repository the pattern was written for — dropping it silently answers `clean` about a target
+    nobody looked at.
+    """
     repos: list[Path] = []
     seen: set[str] = set()
+
+    def _unwalkable(err: OSError) -> None:
+        if unreadable is not None:
+            where = getattr(err, "filename", None)
+            if where:
+                unreadable.append(Path(where))
+
     for pat in patterns or []:
         root = Path(os.path.expanduser(pat).split("*", 1)[0] or "/")
         if not os.path.lexists(root):
             root = root.parent
         if not os.path.lexists(root):
             continue
-        for dirpath, dirnames, _ in os.walk(root):
-            if (Path(dirpath) / ".git").exists():
+        for dirpath, dirnames, _ in os.walk(root, onerror=_unwalkable):
+            if _holds_git(Path(dirpath)):
                 rp = Path(dirpath).resolve()
                 if str(rp) not in seen:
                     seen.add(str(rp))
@@ -173,11 +206,10 @@ def _one_file(named: Path) -> "LocalTarget":
     """
     here = named.parent.resolve()
     root = enclosing_repo_root(here)
-    if not (root / ".git").exists():
+    if not _holds_git(root):
         root = here
     rel = (here / named.name).relative_to(root)
-    return LocalTarget(root, (str(rel),), ONE_FILE,
-                       rooted_at_a_repository=(root / ".git").exists())
+    return LocalTarget(root, (str(rel),), ONE_FILE, rooted_at_a_repository=_holds_git(root))
 
 
 def _a_directory(named: Path) -> "LocalTarget":
@@ -188,10 +220,10 @@ def _a_directory(named: Path) -> "LocalTarget":
     signature (`.github/workflows/…`) and points a SARIF uri at a path the repository has not got.
     """
     here = named.resolve()
-    if (here / ".git").exists():
+    if _holds_git(here):
         return LocalTarget(here, None, REPOSITORY)
     root = enclosing_repo_root(here)
-    if not (root / ".git").exists() or root == here:
+    if not _holds_git(root) or root == here:
         return LocalTarget(here, None, DIRECTORY)
     return LocalTarget(root, None, DIRECTORY, str(here.relative_to(root)))
 
@@ -223,7 +255,8 @@ def resolve_local_targets(patterns: list[str], opts: ScanOptions) -> list[LocalT
             continue
         # The link ENTRY, always and first: a redirect check has to see the link itself, and the
         # walk that discovers repositories follows it, so anything under it hides the entry.
-        candidates: list[LocalTarget] = [_one_file(named)] if named.is_symlink() else []
+        is_link, is_dir, is_file = _shape_of(named)
+        candidates: list[LocalTarget] = [_one_file(named)] if is_link else []
         if candidates and (into := _sensitive_destination(named)):
             # Resolving the link is ours, not the operator's: reading through one that lands in a
             # credential store puts those paths in the report, the SARIF and an --alert issue body.
@@ -235,14 +268,18 @@ def resolve_local_targets(patterns: list[str], opts: ScanOptions) -> list[LocalT
             continue
         # A file holds no repositories, and discovery treats a `*` in its NAME as a pattern — so a
         # real file called `star*name.js` was answered by the repositories beside it.
-        found = [] if named.is_file() else discover_local_repos([pat], opts)
+        blocked: list[Path] = []
+        found = [] if is_file else discover_local_repos([pat], opts, unreadable=blocked)
+        # A directory discovery could not enter becomes a target of its own, so it reaches the
+        # operator through the same fail-closed path as one they named directly.
+        candidates += [LocalTarget(b, None, DIRECTORY) for b in blocked]
         if found:
             candidates += [LocalTarget(r, None, REPOSITORY) for r in found]
-        elif named.is_dir():
+        elif is_dir:
             candidates.append(_a_directory(named))
         elif candidates:
             pass                                  # a dangling link: the entry is all there is
-        elif named.is_file():
+        elif is_file:
             candidates = [_one_file(named)]
         for c in candidates:
             if c.key not in seen:

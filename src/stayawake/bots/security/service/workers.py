@@ -65,6 +65,40 @@ def _holds_content(p) -> bool:
     return _stat.S_ISREG(st.st_mode) or _stat.S_ISLNK(st.st_mode)
 
 
+# The workflow matcher anchors on this pair in code rather than in the signature data, so it is
+# named here; everything else is read from whatever signatures are loaded.
+_ANCHORS_IN_CODE = frozenset({".github", "workflows"})
+
+
+def anchored_segments(signatures: dict) -> frozenset[str]:
+    """Directory names a signature's path anchor keys on."""
+    out = set(_ANCHORS_IN_CODE)
+    for group in signatures.values():
+        for sig in group or []:
+            for glob in (sig.get("file_globs") or []):
+                parts = glob.split("/")
+                out.update(p for p in parts[:-1] if p and "*" not in p)
+    return frozenset(out)
+
+
+def unsure_reason(scope: LocalTarget, signatures: dict) -> str | None:
+    """Why this scope cannot assert `clean`, or None when it can.
+
+    A check that keys on where a file sits is measured from the scan's root. With no project above
+    the named path, that root is the named path — and if the path it sits in still carries one of
+    those directory names, the anchor was cut and those checks could not be evaluated. A note
+    beside `clean` does not carry that; the exit code has to.
+    """
+    if scope.paths_are_project_relative:
+        return None
+    cut = sorted(anchored_segments(signatures) & set(scope.scan_root.parts))
+    if not cut:
+        return None
+    return (f"this path sits inside `{'`, `'.join(cut)}` and nothing above it is a repository, so "
+            "the checks that key on where a file sits in a project could not be evaluated here — "
+            "scan the folder the project starts at to get them")
+
+
 def notes_for(scope: LocalTarget, pruned: set[str]) -> list[str]:
     """Every disclosure a scope owes the operator, for both scan paths.
 
@@ -134,10 +168,14 @@ def scan_local(job: LocalScanJob) -> WorkerScan:
                 _holds_content(target.root / rel) for rel in target.iter_files())
             result = scan_target(target, matchers_for_target(job.signatures, scope), job.allowlist)
             pruned = set(target.pruned_dirs)
+        if scope.is_repo and not scope.names_one_file:
+            attach_history_note(result, str(scope.root), job.opts, job.signatures, job.allowlist)
+        # Two independent reasons a target carries no verdict. Chained onto the history branch they
+        # silently replaced it, which is how the note went missing for every repository scan.
         if nothing_to_read and not result.findings:
             result.error = NOTHING_TO_READ
-        elif scope.is_repo and not scope.names_one_file:
-            attach_history_note(result, str(scope.root), job.opts, job.signatures, job.allowlist)
+        elif not result.error:
+            result.error = unsure_reason(scope, job.signatures)
         # Attached either way: a target where EVERYTHING was skipped is the one that owes the
         # operator the reason, and it was the one branch that dropped it.
         result.notes.extend(notes_for(scope, pruned))

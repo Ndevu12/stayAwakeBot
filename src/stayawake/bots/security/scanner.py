@@ -99,7 +99,7 @@ def finalize(display: str, source: str, by_matcher: dict[str, list[Finding]],
     if read_errors and not result.error:
         unique = sorted(set(read_errors))
         shown = ", ".join(unique[:5]) + (" …" if len(unique) > 5 else "")
-        result.error = f"{len(unique)} file(s) unreadable: {shown}"
+        result.error = f"{len(unique)} path(s) unreadable: {shown}"
     result.notes.extend(coverage_notes or [])
     # points — so a payload in a non-entry node_modules file reads clean. Say so, so `clean` isn't
     # silently hollow, and point at the opt-in that does look. Coverage note, never gating.

@@ -127,7 +127,7 @@ class TestReadErrorMessageDeterminism(unittest.TestCase):
         r_seq = scanner.finalize("t", "local", {}, [], seq_order, [], None, None, [], [])
         r_par = scanner.finalize("t", "local", {}, [], par_order, [], None, None, [], [])
         self.assertEqual(r_seq.error, r_par.error)               # order/dup-independent
-        self.assertIn("3 file(s) unreadable", r_seq.error)       # DISTINCT-file count, not attempts
+        self.assertIn("3 path(s) unreadable", r_seq.error)       # DISTINCT-path count, not attempts
         self.assertLess(r_seq.error.index("a.js"), r_seq.error.index("b.js"))  # sorted sample
 
 
