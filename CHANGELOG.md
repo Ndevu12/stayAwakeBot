@@ -13,6 +13,11 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Changed
+- **`saw fix` no longer tells you to get a hardware-backed SSH key.** It could not put that control
+  in place, could not check whether you already had it, and said it on every run regardless. What
+  it can act on it still says.
+
 ### Added
 - **`saw harden` puts the scan-on-clone hooks in place as part of hardening.** You no longer have
   to remember `saw hook install` separately. Running it again changes nothing and says nothing — a

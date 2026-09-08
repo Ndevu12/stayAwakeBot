@@ -254,8 +254,8 @@ def _keychain_finding(store: KeychainStore) -> HygieneIssue:
 
     if served is True:
         remediation = ("Do not delete it — that logs you out. Harden in place: short-lived and "
-                       "least-scope, or a hardware-backed SSH key. To retire HTTPS, set up SSH "
-                       "first, verify it works, then remove.")
+                       "least-scope. To retire HTTPS, set up SSH first, verify it works, then "
+                       "remove.")
         command = None
     else:
         reset = ""
