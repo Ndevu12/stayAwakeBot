@@ -21,6 +21,11 @@ reader, not the mechanism or the weakness it closed.
   them.
 - **A lockfile `fix` did not recognise no longer survives a confirmed infection.** `bun` and `deno`
   projects kept theirs.
+- **A cleanup that did not finish says so, in one line, and says what to do.** Where a confirmed
+  fix could not remove something, the run reported the part that succeeded and said nothing about
+  the rest, so an incomplete cleanup read as a finished one. It now names what is still there —
+  `run again with sudo` where that is what it needs, and nothing about sudo where the path is
+  simply not the repository's to write to. A run that did finish says nothing at all.
 - **`fix` does not reach outside the repository it is cleaning.** Anything linked to a location
   outside it keeps what it points at, and directories listed under `exclude_dirs` are untouched.
 

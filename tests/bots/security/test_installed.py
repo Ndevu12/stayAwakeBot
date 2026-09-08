@@ -969,6 +969,77 @@ class TestAConfirmedInfectionLeavesNoDerivedState(unittest.TestCase):
         self.assertEqual(report.note(), "")
 
 
+class TestARemovalThatDidNotHappenSaysSo(unittest.TestCase):
+    """A confirmed removal that did not remove must never read as a finished cleanup."""
+
+    def _infected(self):
+        repo = _Repo()
+        repo.install("evil", "9.9.9")
+        return repo
+
+    def test_a_removal_the_guard_refuses_is_named(self):
+        repo = self._infected()
+        with mock.patch.object(installed, "is_safe_write_target", return_value=False):
+            report = installed.remove_confirmed(repo.root, remove_lockfiles=False)
+        self.assertTrue((repo.root / installed.INSTALLED_DIR).is_dir())
+        self.assertEqual(report.removed_trees, 0)
+        self.assertIn("not removed", report.note())
+        self.assertIn("not this repository's", report.note())
+        self.assertNotIn("sudo", report.note(), "sudo cannot lift a safety refusal")
+
+    def test_a_directory_that_cannot_be_read_is_named(self):
+        if os.geteuid() == 0:
+            self.skipTest("root reads a directory whatever its mode says")
+        repo = self._infected()
+        buried = repo.root / "locked"
+        (buried / installed.INSTALLED_DIR / "evil").mkdir(parents=True)
+        buried.chmod(0o000)
+        try:
+            report = installed.remove_confirmed(repo.root, remove_lockfiles=False)
+        finally:
+            buried.chmod(0o755)
+        self.assertTrue((buried / installed.INSTALLED_DIR).is_dir())
+        self.assertIn("still there", report.note())
+        self.assertIn("sudo", report.note())
+
+    def test_a_build_output_that_survived_is_named(self):
+        repo = self._infected()
+        (repo.root / "dist").mkdir()
+        (repo.root / "dist" / "app.js").write_text("built\n", encoding="utf-8")
+        real = installed.remove_derived
+
+        def refuse_the_build(path, root):
+            return False if path.name == "dist" else real(path, root)
+
+        with mock.patch.object(installed, "remove_derived", side_effect=refuse_the_build):
+            report = installed.remove_confirmed(repo.root, remove_lockfiles=False)
+        self.assertTrue((repo.root / "dist").is_dir())
+        self.assertIn("dist", report.survived_note())
+        self.assertIn("sudo", report.survived_note())
+
+    def test_a_removal_that_finished_claims_nothing_survived(self):
+        repo = self._infected()
+        report = installed.remove_confirmed(repo.root, remove_lockfiles=False)
+        self.assertFalse((repo.root / installed.INSTALLED_DIR).exists())
+        self.assertEqual(report.survived_note(), "")
+        self.assertNotIn("sudo", report.note())
+
+    def test_the_line_stays_one_line_however_many_survive(self):
+        repo = self._infected()
+        for extra in ("dist", "build", "out"):
+            (repo.root / extra).mkdir()
+        with mock.patch.object(installed, "remove_derived", return_value=False):
+            note = installed.remove_confirmed(repo.root, remove_lockfiles=False).survived_note()
+        self.assertEqual(note.count("\n"), 0, "the operator asked for an action, not a report")
+        self.assertLess(len(note), 120, note)
+        self.assertIn("more", note, "the names are summarised, not all listed")
+
+    def test_a_path_that_cannot_be_stat_ed_counts_as_still_there(self):
+        # An answer nobody can give is not an answer that it is gone.
+        with mock.patch.object(installed.Path, "exists", side_effect=OSError("boom")):
+            self.assertTrue(installed._still_there(Path("/nowhere")))
+
+
 class TestConfidenceChoosesTheRemoval(unittest.TestCase):
     """Which removal runs is the finding's confidence, decided in one place."""
 
