@@ -24,6 +24,12 @@ reader, not the mechanism or the weakness it closed.
   processes only, once for all of them, and only where there is a terminal to answer on. It does
   not require privilege to run, and it never takes `sudo` from your `PATH`: on a machine that may
   already be compromised, that would hand root to the thing being removed.
+- **`saw harden` says where you stand in one line, and names no paths.** It printed a line per
+  location with its own explanation, under a headline that said the control was not in place
+  whenever any location was skipped — including directories that are simply not on the machine, so
+  a run that protected everything it could still read as a failure. It now judges only the
+  locations it could act on, says the one thing you can do about the rest, and prints no file or
+  folder path at all.
 - **What `saw harden` cannot do no longer costs you what it can.** A process needing a password
   nobody is there to answer, or one belonging to another user, used to stop the command before it
   placed any control at all. Everything it can do now happens, what it could not do is named, and

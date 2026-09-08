@@ -2,6 +2,8 @@
 """Host-level acting — create denials on this machine. Never touches a project's tree."""
 from __future__ import annotations
 
+from collections import Counter
+
 from stayawake.bots.security import hookscript
 from stayawake.bots.security.hygiene.host_artifacts import _global_folders
 from stayawake.bots.security.hygiene.models import PROCESSES_NOT_READABLE_ID
@@ -24,7 +26,7 @@ __all__ = ["run", "apply_one", "PathOutcome", "ENFORCING", "SELF_ENFORCING",
 _LIVE = "live-obfuscated-process"
 
 _ENDED_LIVE = "Code that is not on disk was running here. It was captured and ended."
-_STILL_LIVE = "Code that is not on disk is still running here, so the control was not applied."
+_STILL_LIVE = "Code that is not on disk is still running here."
 _NOT_OURS_LIVE = "Run again where a password can be answered, or as root."
 _STILL_SPAWNING = "They are being started again. Run again once the machine is off the network."
 _REFUSED_UNREAD = (
@@ -36,33 +38,25 @@ _REFUSED_BLOCKED = (
 )
 _CAPTURE_EXCERPT = 300
 _NOT_HERE = "This control is not implemented on this platform."
-_CLAIM = (
-    "The observed staging path is denied. A payload that guards the write and uses "
-    "the runtime's built-in transport is unaffected."
+_CLAIM = "The staging paths a dropped payload uses are denied on this machine."
+_CLAIM_AS_YOU = (
+    "The staging paths a dropped payload uses are denied — by you, not by root, so anything "
+    "running as you can lift them. Run again with sudo to make that stick."
 )
-_SOME_ARE_YOURS = (
-    "Some of these are held by you rather than by root. An unguarded write to one still fails, "
-    "but code running as you can take the lock off first. Run again with sudo to raise them."
-)
-_NEEDS_ROOT_NOTE = (
-    "One or more locations are not yours to write to. Run again with sudo to take those as well."
-)
-_NOT_EVERYWHERE = (
-    "This control is NOT in place. This command deletes nothing, and every location below says "
-    "what was done to it — inspect each one yourself and do NOT rotate any credential until you "
-    "have."
-)
+_NEEDS_ROOT_NOTE = "Some locations need privilege this run did not have. Run again with sudo."
+_NOT_EVERYWHERE = "The staging paths are not all denied on this machine."
+_STUCK_ONE = "One location could not be taken, and privilege is not the reason — the system may hold it."
+_STUCK_MANY = "{count} locations could not be taken, and privilege is not the reason — the system may hold them."
 _LEFT_OPEN_NOTE = (
-    "Something is sitting in a location that is meant to stay empty. It has been left reachable "
-    "rather than locked over, so you can read it — do that before anything else."
+    "Something is sitting where nothing should be. It was left readable rather than locked over. "
+    "Run `saw audit` to see it."
 )
 _DEAD_SAW_NOTE = (
     "The saw that saw's git hooks call is gone or cannot run, so clones are not scanned. "
     "`saw hook repair` points the hooks at this saw."
 )
 _ALTERED_HOOKS_NOTE = (
-    "Where saw's git hooks run, something is not what saw installed. This command does not touch "
-    "hooks; `saw hook repair` puts them back and keeps what it moves aside:"
+    "saw's git hooks are not what saw installed. `saw hook repair` puts them back."
 )
 
 
@@ -92,6 +86,50 @@ def take_back(*, folders=_global_folders, remove=remove_one,
     for o in outcomes:
         lines.append(f"  {o.state}: {o.path} — {o.detail}")
     return (0, "\n".join(lines).rstrip()) if done else (3, "\n".join(lines).rstrip())
+
+
+#: A location that is protected. `LOCKED_OVER_CONTENT` counts: the control is on.
+_HELD = frozenset({ENFORCING, SELF_ENFORCING, LOCKED_OVER_CONTENT})
+
+#: A location with nothing to protect, or deliberately left alone. Neither is a failure, and
+#: counting them as one is what made a run that protected four of six say it had protected none.
+_NOT_A_FAILURE = frozenset({NOT_HERE_YET, IN_A_LIVE_INSTALL})
+
+
+def _every_reachable_one(outcomes) -> bool:
+    """Whether every location that could be protected is."""
+    reachable = [o for o in outcomes if o.state not in _NOT_A_FAILURE]
+    return bool(reachable) and all(o.state in _HELD for o in reachable)
+
+
+def _headline(outcomes, unresolved: bool) -> str:
+    """The one line that says where this machine stands."""
+    if unresolved:
+        return _NOT_EVERYWHERE
+    if not _every_reachable_one(outcomes):
+        return _NOT_EVERYWHERE
+    if any(o.state == SELF_ENFORCING for o in outcomes):
+        return _CLAIM_AS_YOU
+    return _CLAIM
+
+
+def _what_to_do(outcomes) -> list[str]:
+    """The lines an operator can act on, and nothing else.
+
+    No path is printed. Six of them, each with its own explanation, is what an operator was given
+    for a result they could not act on any of.
+    """
+    counted = Counter(o.state for o in outcomes)
+    out: list[str] = []
+    if counted[NEEDS_ROOT]:
+        out.append(_NEEDS_ROOT_NOTE)
+    if counted[LEFT_OPEN_OVER_CONTENT]:
+        out.append(_LEFT_OPEN_NOTE)
+    stuck = sum(counted[state] for state in
+                (OCCUPIED, HELD_BY_ANOTHER, NOT_WHERE_IT_WAS_NAMED, UNKNOWN))
+    if stuck:
+        out.append(_STUCK_ONE if stuck == 1 else _STUCK_MANY.format(count=stuck))
+    return out
 
 
 def _ending_line(ending) -> str:
@@ -152,11 +190,8 @@ def run(*, live=check_live_processes, folders=_global_folders,
             ending_failed = textsafe.plain(f"{type(exc).__name__}: {exc}", limit=200)
 
     outcomes = [apply(p) for p in folders()]
-    took = {ENFORCING, SELF_ENFORCING}
-    applied = bool(outcomes) and all(o.state in took for o in outcomes)
     unresolved = ending_failed is not None or (ending is not None and not ending.finished)
-    headline = _NOT_EVERYWHERE if unresolved or not applied else _CLAIM
-    lines = [headline, ""]
+    lines = [_headline(outcomes, unresolved), ""]
     if ending_failed is not None:
         lines.extend([_STILL_LIVE, f"  the attempt stopped on: {ending_failed}", ""])
     elif ending is not None:
@@ -166,20 +201,12 @@ def run(*, live=check_live_processes, folders=_global_folders,
         if not ending.quiet:
             lines.append(_STILL_SPAWNING)
         lines.extend([_ending_line(ending), ""])
-    states = {o.state for o in outcomes}
-    for note, fires in ((_SOME_ARE_YOURS, applied and SELF_ENFORCING in states),
-                        (_LEFT_OPEN_NOTE, LEFT_OPEN_OVER_CONTENT in states),
-                        (_NEEDS_ROOT_NOTE, NEEDS_ROOT in states)):
-        if fires:
-            lines.extend([note, ""])
-    for o in outcomes:
-        lines.append(f"  {o.state}: {o.path} — {o.detail}")
-    hooks = altered()
-    if hooks:
-        lines.extend(["", _ALTERED_HOOKS_NOTE] + [f"  {textsafe.plain(str(p), limit=4096)}" for p in hooks])
+    lines.extend(_what_to_do(outcomes))
+    if altered():
+        lines.extend(["", _ALTERED_HOOKS_NOTE])
     if not saw_runs():
         lines.extend(["", _DEAD_SAW_NOTE])
     body = "\n".join(lines).rstrip()
     if unresolved:
         return 1, body
-    return (0, body) if applied else (3, body)
+    return (0, body) if _every_reachable_one(outcomes) else (3, body)
