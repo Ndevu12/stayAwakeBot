@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
-"""Freeze a process, end it, and prove it ended — by identity, never by pid alone.
+"""Freeze a process, end it, and prove it ended.
 
-Every signal here is guarded by the identity the caller read earlier. A pid is a reusable handle:
-between reading the process table and acting on it the process can exit and a stranger can inherit
-the number, so signalling on a pid alone eventually kills something innocent. Nothing in this module
-sends a signal without first confirming the process still has the start time it had.
+TRAP: every signal here is guarded by the caller's earlier identity. A pid is a reusable handle.
 """
 from __future__ import annotations
 
@@ -32,10 +29,8 @@ _POLL_SECONDS = 0.02
 def _still(known: Identity) -> tuple[str, Identity | None]:
     """Whether that pid is still the process `known` describes.
 
-    macOS reports a start time in whole seconds, so a pid and a start time alone can be shared by
-    two processes started in the same second. The uid is compared as well; the ppid deliberately is
-    not, because a process whose parent exits is reparented and would then be refused — which would
-    leave an implant running.
+    TRAP: the uid is compared as well as the start time, which some platforms report only to the
+    second. The ppid is not — a reparented process would then be refused, and left running.
     """
     pid = known.pid
     who, state = identify(pid)
@@ -71,31 +66,29 @@ def _send(known: Identity, sig: int) -> str:
 def freeze(known: Identity) -> str:
     """Stop the process running, without ending it.
 
-    SIGSTOP cannot be caught, blocked or ignored, so a handler cannot use its last moment to wipe,
-    re-exec or spawn a replacement. A frozen process also cannot fork, which is what makes a
-    population of them shrink instead of racing the caller.
+    TRAP: SIGSTOP, because it cannot be caught and a frozen process cannot fork.
     """
     return _send(known, signal.SIGSTOP)
 
 
 def resume(known: Identity) -> str:
-    """Let a frozen process run again — for a caller that froze something and then decided not to
-    end it. Without this, a bailed-out run leaves the machine holding stopped processes."""
+    """Let a frozen process run again."""
     return _send(known, signal.SIGCONT)
 
 
 def end(known: Identity) -> str:
-    """End the process. SIGKILL, never SIGTERM: a terminate handler is code the implant chose."""
+    """End the process.
+
+    TRAP: SIGKILL, never SIGTERM — a terminate handler is code the target chose.
+    """
     return _send(known, signal.SIGKILL)
 
 
 def has_ended(known: Identity, *, settle: float = _SETTLE_SECONDS,
               sleep=time.sleep, clock=time.monotonic) -> bool:
-    """Whether that process is no longer executing. Polled, because SIGKILL is not instantaneous.
+    """Whether that process is no longer executing. Polled: SIGKILL is not instantaneous.
 
-    `os.kill(pid, 0)` is the wrong instrument and this is why: a killed process whose parent has not
-    reaped it still answers that check, so a caller using it reports a dead implant as alive. The
-    identity read answers ESRCH for the same process, and a zombie executes nothing.
+    TRAP: not `os.kill(pid, 0)` — that answers True for a killed process its parent has not reaped.
     """
     deadline = clock() + settle
     while True:
@@ -118,12 +111,10 @@ def _kill_binary() -> str | None:
 
 def end_as_root(pids: list[int], *, signatures: dict[int, str],
                 run_as_root=elevate.run_as_root, signature=ps_signature) -> tuple[str, list[int]]:
-    """End processes that are only endable as root, asking for privilege once for all of them.
+    """End processes that are only endable as root, asking once for all of them.
 
-    The signature each pid had is re-read first and compared: a pid this user cannot read can still
-    be recycled, and asking root to kill a stale one is the same mistake with worse consequences.
-    Frozen first for the same reason as everywhere else — a spawner that is asked to die politely
-    forks before it goes.
+    TRAP: each signature is re-read and compared first. A pid this user cannot read can still be
+    recycled, and asking root to kill a stale one is worse than doing it unprivileged.
     """
     still = [pid for pid in pids if signature(pid) == signatures.get(pid)]
     if not still:

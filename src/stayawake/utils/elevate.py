@@ -1,14 +1,5 @@
 #!/usr/bin/env python3
-"""Ask for privilege for one action, rather than requiring it for a whole command.
-
-`saw harden` deliberately does not run as root: requiring it is an adoption cost and a trust cost.
-The consequence used to be that anything needing privilege was reported and left running. This asks
-for privilege at the point it is needed and for that action alone.
-
-The binary is taken from an absolute path and checked before use. On the host this runs on, an
-implant that can put a `sudo` earlier in `PATH` would otherwise be handed root by the very command
-sent to remove it.
-"""
+"""Ask for privilege for one action, rather than requiring it for a whole command."""
 from __future__ import annotations
 
 import os
@@ -29,8 +20,7 @@ GRANTED = "granted"                 # the command ran as root
 def trusted_sudo() -> str | None:
     """An absolute `sudo` owned by root that no one else can write to, or None.
 
-    Resolved by path and never through `PATH`: this runs on a machine that is already assumed
-    compromised, and a `sudo` the attacker controls turns a containment command into an escalation.
+    TRAP: never resolved through `PATH`. This runs on a machine assumed to be compromised.
     """
     for candidate in _SUDO_PATHS:
         try:
@@ -56,11 +46,9 @@ def can_ask(*, isatty=None) -> bool:
 
 def run_as_root(argv: list[str], *, sudo=trusted_sudo, ask=can_ask,
                 run=subprocess.run) -> tuple[str, str]:
-    """Run `argv` as root, asking only if asking is possible. Returns (outcome, detail).
+    """Run `argv` as root, asking only where asking is possible. Returns `(outcome, detail)`.
 
-    Tried without a prompt first, so a machine where privilege is already granted is never
-    interrupted. `argv` is a list and never a string: a pid interpolated into a shell line is a
-    command injection waiting for an attacker-chosen process name.
+    TRAP: `argv` is a list, never a string — it carries attacker-chosen values.
     """
     binary = sudo()
     if binary is None:

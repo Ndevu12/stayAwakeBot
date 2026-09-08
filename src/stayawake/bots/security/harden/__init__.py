@@ -95,8 +95,7 @@ def take_back(*, folders=_global_folders, remove=remove_one,
 
 
 def _ending_line(ending) -> str:
-    """One line for a whole population. What this replaced printed one line per process, and a
-    measured run produced 135 of them."""
+    """One line describing `ending`, whatever the number of processes."""
     if ending.matched == 0:
         return "  it had already exited before this command reached it"
     bits = [f"  {ending.ended} of {ending.matched} ended"]
@@ -147,8 +146,7 @@ def run(*, live=check_live_processes, folders=_global_folders,
     # this command did, and the controls it declined are the ones that stop the next re-infection.
     ending = None
     if [i for i in issues if i.id == _LIVE]:
-        # This one signals real processes, so a raise inside it is the difference between a report
-        # and a traceback. Guarded here rather than by `run_probe`, which returns issues.
+        # TRAP: this one signals real processes; a raise here must not reach the caller.
         try:
             ending = stop()
         except Exception as exc:                  # never let it take the command down

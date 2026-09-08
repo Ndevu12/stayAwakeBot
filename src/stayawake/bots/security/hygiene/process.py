@@ -21,7 +21,7 @@ _PIDS_SHOWN = 8
 
 
 def _fingerprint(code: str) -> str:
-    """A short hash of the payload, so two runs can be compared without printing any of it."""
+    """A short hash of `code`, or an empty string when there is none."""
     if not code:
         return ""
     return f", fingerprint {hashlib.sha256(code.encode('utf-8', 'replace')).hexdigest()[:12]}"
@@ -48,11 +48,7 @@ def _snapshot():
 
 
 def program_is_gone(pid: int) -> bool:
-    """Whether a process is running something that is no longer a file on this disk.
-
-    Imported at the call rather than at the top, for the same reason the snapshot is: an audit that
-    never reaches a process should not pay for the reader.
-    """
+    """Whether `pid` is running something that is no longer a file on this disk."""
     from stayawake.utils.procsnap import program_is_gone as ask
     return ask(pid)
 
@@ -65,11 +61,9 @@ def live_process_scope_note() -> str:
 
 
 def live_code_processes(snapshot=None) -> list[tuple[object, str, str]]:
-    """Every running process holding code an interpreter was handed and the engine calls obfuscated,
-    as `(process, code, reason)`.
+    """Every running process executing code with no file behind it, as `(process, code, reason)`.
 
-    One authority. The reporter below and anything that ACTS on these must agree about which
-    processes qualify, and they can only be made to agree by asking the same function.
+    The single authority: the report below and anything that acts on these ask the same function.
     """
     snap = snapshot if snapshot is not None else _snapshot()
     found: list[tuple[object, str, str]] = []
@@ -88,9 +82,6 @@ def live_code_processes(snapshot=None) -> list[tuple[object, str, str]]:
                 graded = (code, verdict.reason)
                 break              # one per process; the rest of its argv is the same code
         if graded is None:
-            # Code on the command line is one way to run without a file, not the only one. A
-            # program that is no longer on disk, or an interpreter handed its program on standard
-            # input, is running something nothing here can read — which is not a reason to leave it.
             if invocation.reads_stdin:
                 graded = ("", "a program handed to it on standard input")
             elif program_is_gone(process.pid):
@@ -122,8 +113,7 @@ def check_live_processes() -> list[HygieneIssue]:
     holding = live_code_processes(snapshot)
     if not holding:
         return []
-    # ONE finding, however many processes. A worm that spawns produces a wall of near-identical
-    # lines — 135 of them in one measured run — and a wall nobody can read is not a report.
+    # One finding, however many processes.
     first, code, reason = holding[0]
     pids = sorted(p.pid for p, _c, _r in holding)
     where = ", ".join(str(pid) for pid in pids[:_PIDS_SHOWN])
@@ -131,9 +121,8 @@ def check_live_processes() -> list[HygieneIssue]:
         where += f", and {len(pids) - _PIDS_SHOWN} more"
     count = ("A running process is executing code that is not on disk" if len(pids) == 1 else
              f"{len(pids)} running processes are executing code that is not on disk")
-    # The payload itself is NOT printed. It carries the campaign's own markers and the address it
-    # talks to, and this line reaches the terminal, the JSON, the SARIF and any saved report. It is
-    # written to the capture file, which is where an operator can hand it to someone.
+    # TRAP: the payload is never put in `detail`. This reaches the terminal, the JSON, the SARIF
+    # and every saved report; the code goes to the capture file instead.
     return [HygieneIssue(
         id="live-obfuscated-process",
         severity="warning",

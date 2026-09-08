@@ -26,9 +26,8 @@ _INTERPRETERS = frozenset({
     "sh", "bash", "zsh", "dash", "ksh", "osascript", "tsx", "ts-node"})
 
 
-#: The option that tells each interpreter to take its program from standard input. Read here, among
-#: the interpreter's OWN options, because the same letter means something else after a module name:
-#: `python -m unittest discover -s tests` passes `-s` to unittest, not to Python.
+#: The option that tells each interpreter to take its program from standard input. Read among the
+#: interpreter's OWN options: the same letter means something else after a module name.
 _STDIN_FLAGS = {
     **{shell: frozenset({"-s"}) for shell in POSIX_SHELLS},
     "python": frozenset({"-"}), "python2": frozenset({"-"}), "python3": frozenset({"-"}),
@@ -664,9 +663,10 @@ def _systemd_seconds(dur: str) -> int | None:
 
 
 def correlate(entries, attributed: dict[str, bool]) -> set[str]:
-    """Keys of UNATTRIBUTED entries whose referenced executable is shared by ≥2 entries — the
-    multi-foothold campaign shape (a worm planting several re-run points at one payload). `attributed`
-    maps entry-key → whether provenance attributed it."""
+    """Keys of unattributed entries whose referenced executable is shared by two or more entries.
+
+    `attributed` maps an entry key to whether provenance attributed it.
+    """
     execs = Counter()
     for e in entries:
         if e.exec_path and not attributed.get(e.key(), False):

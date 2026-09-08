@@ -1,15 +1,5 @@
 #!/usr/bin/env python3
-"""End code that is running and never touched the disk.
-
-Ordering is the whole design, because the measured case is not one process but a population that
-grows while you work on it: 135 in a single snapshot, spread across 1577 pids. Against a spawner a
-one-shot pass loses a race it cannot win, so this freezes first and ends afterwards.
-
-Freezing is what makes the population shrink. A frozen process cannot fork, so each pass can only
-reduce the set that is still able to spawn, and a pass that adds nothing new means nothing left is
-spawning. A run that never reaches that point has found something outside the set it can see —
-which is a finding, not a failure.
-"""
+"""End code that is running and never touched the disk."""
 from __future__ import annotations
 
 import json
@@ -29,7 +19,7 @@ _ANCESTOR_LIMIT = 64
 
 @dataclass
 class Ending:
-    """What a pass did. `still_holding` is the only field that answers "is it over"."""
+    """What one pass did."""
     matched: int = 0
     frozen: int = 0
     ended: int = 0
@@ -44,14 +34,7 @@ class Ending:
 
     @property
     def finished(self) -> bool:
-        """Every process that held live code is no longer executing, and none came back.
-
-        A process we were refused permission to signal is not finished with: it is still running
-        the same code, and the only thing that changed is that this run cannot reach it. A pass that
-        never reached a quiet round has not finished either — something it cannot see is starting
-        them again. Nothing having matched at all IS finished: an implant that exited on its own
-        between one look and the next leaves nothing to end.
-        """
+        """True when nothing that held live code is executing and nothing is left unreachable."""
         return (self.quiet and not self.survived and not self.refused
                 and not self.frozen_left and self.still_holding == 0)
 
@@ -62,10 +45,10 @@ def capture_path() -> Path:
 
 
 def _protected() -> set[int]:
-    """This process, everything that started it, and init.
+    """This process, every ancestor of it, and init — none of which may be signalled.
 
-    Freezing our own shell hangs the terminal the operator is watching, and ending our own ancestor
-    ends the run. Neither can be undone from inside the run that did it.
+    TRAP: read through `parent_map`, which needs no permission. An ancestor walk built on `identify`
+    stops at the first process it cannot read, and everything above that stops being protected.
     """
     safe = {1, os.getpid()}
     parents = parent_map()
@@ -80,10 +63,9 @@ def _protected() -> set[int]:
 
 
 def _capture(held: dict[int, tuple], where: Path, now=None) -> str | None:
-    """Write one record of what was running, before any of it is ended.
+    """Write one record of what was running to `where`, and return its path.
 
-    One representative payload, not one file per process: they are the same code, and writing 135
-    copies is what makes a pass slow enough to lose the race it is in.
+    One record for the whole set, carrying a single representative payload.
     """
     if not held:
         return None
@@ -108,8 +90,10 @@ def _capture(held: dict[int, tuple], where: Path, now=None) -> str | None:
 
 
 def _deepest_first(held: dict[int, tuple]) -> list[int]:
-    """Children before parents. End a parent first and its children are reparented to init, which
-    leaves them running and harder to attribute than they were a moment earlier."""
+    """The pids in the order they must be ended: children before parents.
+
+    TRAP: ending a parent first reparents its children to init, leaving them running.
+    """
     def depth(pid: int) -> int:
         steps, seen, cur = 0, set(), pid
         while cur in held and cur not in seen:
@@ -126,7 +110,11 @@ def end_live_code(*, find=live_code_processes, freeze=procstop.freeze, end=procs
                   ended=procstop.has_ended, capture=_capture, where=None,
                   protected=_protected, elevated=procstop.end_as_root,
                   rounds: int = _MAX_ROUNDS) -> Ending:
-    """Freeze everything holding live code until nothing new appears, then end it."""
+    """Freeze everything holding live code until a pass finds nothing new, then end it.
+
+    TRAP: the freeze comes first because a frozen process cannot fork. Ending them one at a time
+    against something that spawns does not terminate.
+    """
     keep_out = protected()
     held: dict[int, tuple] = {}
     held_done: set[int] = set()
@@ -154,14 +142,10 @@ def end_live_code(*, find=live_code_processes, freeze=procstop.freeze, end=procs
                 else:
                     keep_out.add(process.pid)      # gone or recycled — not ours to end
 
-        # Every process that held live code, however this run could or could not reach it. Counted
-        # once, here, before anything moves between the buckets below.
+        # Counted before anything moves between the fields below.
         out.matched = len(held) + len(needs_root) + len(refused)
         out.frozen = len(held)
 
-        # Privilege is asked for at the point it is needed, for those processes only. Reporting
-        # them and walking away is what left another user's implant running on a machine the
-        # operator does own.
         if needs_root:
             out.asked_for = sorted(needs_root)
             out.asking, ended_as_root = elevated(out.asked_for, signatures=needs_root)
@@ -179,14 +163,9 @@ def end_live_code(*, find=live_code_processes, freeze=procstop.freeze, end=procs
             else:
                 out.survived.append(pid)
     finally:
-        # Left frozen on purpose. Anything in here was graded as running code that is not on disk,
-        # and a frozen one is contained: it executes nothing and it cannot spawn. Resuming it —
-        # which this did on any bail-out, and on every process it failed to end — handed a live
-        # implant back its execution. What stays frozen is reported, with how to release it.
+        # TRAP: never resumed. A frozen one executes nothing; releasing it gives it back.
         out.frozen_left = sorted(pid for pid in held if pid not in held_done)
 
-    # Asked of the machine, not of the bookkeeping: whatever holds live code once the pass is over
-    # holds it, whether this run froze it, was refused it, never saw it, or declined to touch it.
-    # Subtracting the protected ones put a live holder in no field at all and still said finished.
+    # Asked of the machine, not of the bookkeeping. Subtracting any of them hides a live one.
     out.still_holding = len(find())
     return out

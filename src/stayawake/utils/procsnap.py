@@ -20,21 +20,18 @@ _PROC_PIDPATHINFO_MAXSIZE = 4096
 _ESRCH = 3
 _EPERM = 1
 
-#: What an identity read found. A pid alone is not an identity: pids are recycled, so a caller that
-#: signals on a pid it read a moment ago can hit a stranger.
+#: What an identity read found.
 RUNNING, GONE, NOT_OURS, UNSUPPORTED = "running", "gone", "not-ours", "unsupported"
 
-#: macOS `p_stat`. A ZOMBIE has been killed and not yet reaped by its parent: it executes nothing,
-#: and a caller asking "did it die" must count it dead.
+#: macOS `p_stat`. A zombie has been killed and not yet reaped; it executes nothing.
 _SZOMB = 5
 
 
 @dataclass(frozen=True)
 class Identity:
-    """Who a process is, in the only terms that survive a pid being reused.
+    """Who a process is, in terms that survive a pid being reused.
 
-    `start_time` is the discriminator. Two processes can share a pid over a machine's life; they
-    cannot share a pid and a start time, so a signal guarded by both cannot land on a stranger.
+    TRAP: a pid alone is not an identity. Compare `start_time` and `uid` before acting on one.
     """
     pid: int
     ppid: int
@@ -47,8 +44,7 @@ class Identity:
 
 
 class _BsdInfo(ctypes.Structure):
-    """`struct proc_bsdinfo` from `sys/proc_info.h`. Read whole and length-checked, so a layout
-    that ever changes under us fails the read instead of yielding a plausible wrong number."""
+    """`struct proc_bsdinfo` from `sys/proc_info.h`, read whole and length-checked."""
     _fields_ = [
         ("pbi_flags", ctypes.c_uint32), ("pbi_status", ctypes.c_uint32),
         ("pbi_xstatus", ctypes.c_uint32), ("pbi_pid", ctypes.c_uint32),
@@ -162,12 +158,10 @@ def _argmax() -> int:
 
 
 def _identity_darwin(pid: int) -> tuple["Identity | None", str]:
-    """Read one process's identity through libproc.
+    """One process's identity through libproc, as `(Identity | None, state)`.
 
-    The errno is the answer, not a detail: ESRCH means the process is not executing — which covers a
-    ZOMBIE, whose bsdinfo is already gone while `kill(pid, 0)` still reports it alive. EPERM means it
-    is running and belongs to someone else, which is also the boundary where signalling it fails, so
-    a caller never has to guess which of the two it hit.
+    TRAP: the errno is the answer. ESRCH means not executing, which covers a zombie; EPERM means
+    running and not ours. `kill(pid, 0)` cannot tell those apart.
     """
     try:
         libc = ctypes.CDLL("libproc.dylib", use_errno=True)
@@ -191,10 +185,9 @@ def _identity_darwin(pid: int) -> tuple["Identity | None", str]:
 
 
 def _identity_linux(pid: int) -> tuple["Identity | None", str]:
-    """Read one process's identity from `/proc`.
+    """One process's identity from `/proc`, as `(Identity | None, state)`.
 
-    `stat` is parsed from the LAST `)` because a program name may contain spaces and brackets, which
-    is what breaks every split-on-whitespace reading of this file.
+    TRAP: parsed from the LAST `)` — a program name may itself contain spaces and brackets.
     """
     try:
         raw = Path(f"/proc/{pid}/stat").read_text()
@@ -264,11 +257,9 @@ def program_path(pid: int) -> str | None:
 
 
 def program_is_gone(pid: int) -> bool:
-    """Whether a process is executing something that is no longer a file on this disk.
+    """Whether `pid` is executing something that is no longer a file on this disk.
 
-    A program deleted after it started, or executed straight out of memory, leaves a running process
-    with nothing behind it to scan. Measured on a working machine: 0 of 571 readable processes.
-    Unreadable is not missing — a path this user cannot see answers False, never True.
+    TRAP: unreadable is not missing. A path this user cannot see answers False, never True.
     """
     where = program_path(pid)
     if where is None:
@@ -282,12 +273,9 @@ def program_is_gone(pid: int) -> bool:
 
 
 def ps_signature(pid: int) -> str | None:
-    """A stable discriminator for ANY process, including one this user may not read.
+    """A stable discriminator for any process, readable or not, or None.
 
-    `identify` answers NOT_OURS for another user's process, so a caller that needs privilege to
-    signal one has no way to tell, a moment later, that the pid still means the same thing. `ps`
-    reports a start time for every process without needing any, and the string is compared to
-    itself rather than parsed — no locale, no date format to get wrong.
+    Compared to itself rather than parsed, so no date format or locale is involved.
     """
     if sys.platform.startswith("linux"):
         try:
@@ -307,13 +295,7 @@ def ps_signature(pid: int) -> str | None:
 
 
 def parent_map() -> dict[int, int]:
-    """Every pid's parent, including processes this user may not otherwise read.
-
-    `identify` needs permission and answers NOT_OURS for a root-owned process. An ancestor walk
-    built on it therefore stops at the first one it cannot read — and on a default macOS terminal
-    that is a uid-0 `login` sitting between the shell and the terminal application, so everything
-    above it silently stops being recognised as an ancestor.
-    """
+    """Every pid's parent, including processes this user may not otherwise read."""
     if sys.platform.startswith("linux"):
         out: dict[int, int] = {}
         try:
