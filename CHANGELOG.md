@@ -50,6 +50,11 @@ reader, not the mechanism or the weakness it closed.
   shape to look for.
 
 ### Fixed
+- **A scan that cannot be sure says so in the exit code, not only in a note.** When a path is
+  named outside any repository and sits inside a folder the checks key on — `.github`, for one —
+  those checks cannot be evaluated from there. That used to be a line of prose beside a `clean`
+  result at exit 0, which a CI gate does not read. It is now reported as an incomplete scan. Naming
+  the folder the project starts at, or anything inside a repository, is unaffected.
 - **A folder the scan could not read no longer passes as clean.** If a directory inside a target
   could not be opened, it was skipped and nothing said so — the run could finish clean, at exit 0,
   with a whole subtree unread. An unreadable file has always been reported that way; a directory is
