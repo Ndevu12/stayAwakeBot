@@ -7,6 +7,7 @@ from stayawake.bots.security.hygiene.host_artifacts import _global_folders
 from stayawake.bots.security.hygiene.models import PROCESSES_NOT_READABLE_ID
 from stayawake.bots.security.hygiene.outcome import BLOCKED, run_probe
 from stayawake.bots.security.hygiene.process import check_live_processes
+from .live import end_live_code
 from stayawake.utils import hostdenial, textsafe
 from .denial import (ENFORCING, HELD_BY_ANOTHER, IN_A_LIVE_INSTALL, LEFT_OPEN_OVER_CONTENT,
                      NEEDS_ROOT, NOT_HERE_YET, LOCKED_OVER_CONTENT, NOTHING_TO_REMOVE,
@@ -22,9 +23,22 @@ __all__ = ["run", "apply_one", "PathOutcome", "ENFORCING", "SELF_ENFORCING",
 
 _LIVE = "live-obfuscated-process"
 
-_REFUSED_LIVE = (
-    "A running process still holds code that is not on disk. "
-    "Capture it before applying this control."
+_ENDED_LIVE = (
+    "Code that never touched the disk was running here. It was captured, frozen so it could not "
+    "spawn, and ended."
+)
+_STILL_LIVE = (
+    "Code that never touched the disk is running here and this command could not end all of it, "
+    "so the control was NOT applied — placing it over a live implant claims a machine that is "
+    "still someone else's."
+)
+_NOT_OURS_LIVE = (
+    "Some of it belongs to another user, so it is out of this command's reach. Run again as that "
+    "user, or as root."
+)
+_STILL_SPAWNING = (
+    "Something outside what this command can see is starting them again. Ending them cannot "
+    "finish while that source is running."
 )
 _REFUSED_UNREAD = (
     "Running processes could not be examined, so this control was not applied."
@@ -93,9 +107,30 @@ def take_back(*, folders=_global_folders, remove=remove_one,
     return (0, "\n".join(lines).rstrip()) if done else (3, "\n".join(lines).rstrip())
 
 
+def _ending_line(ending) -> str:
+    """One line for a whole population. What this replaced printed one line per process, and a
+    measured run produced 135 of them."""
+    bits = [f"  {ending.ended} of {ending.matched} ended"]
+    if ending.survived:
+        bits.append(f"{len(ending.survived)} still running ({_pids(ending.survived)})")
+    if ending.refused:
+        bits.append(f"{len(ending.refused)} not ours ({_pids(ending.refused)})")
+    if ending.still_holding:
+        bits.append(f"{ending.still_holding} holding live code now")
+    if ending.captured:
+        bits.append(f"captured to {textsafe.plain(ending.captured, limit=4096)}")
+    return ", ".join(bits)
+
+
+def _pids(pids: list[int], shown: int = 8) -> str:
+    head = ", ".join(str(p) for p in pids[:shown])
+    return head if len(pids) <= shown else f"{head}, and {len(pids) - shown} more"
+
+
 def run(*, live=check_live_processes, folders=_global_folders,
         apply=apply_one, supported=hostdenial.platform_supported,
-        altered=hookscript.altered_hooks, saw_runs=hookscript.recorded_saw_runs) -> tuple[int, str]:
+        altered=hookscript.altered_hooks, saw_runs=hookscript.recorded_saw_runs,
+        stop=end_live_code) -> tuple[int, str]:
     """Apply the denial at every global-resolution entry. Enforcing only after read-back.
 
     Root is asked of the PATH rather than of the command. Most of these locations belong to the
@@ -114,16 +149,27 @@ def run(*, live=check_live_processes, folders=_global_folders,
     issues = list(outcome.issues)
     if any(i.id == PROCESSES_NOT_READABLE_ID for i in issues):
         return 1, _REFUSED_UNREAD
-    holding = [i for i in issues if i.id == _LIVE]
-    if holding:
-        named = [f"  {textsafe.plain(i.detail, limit=_CAPTURE_EXCERPT)}" for i in holding]
-        return 1, "\n".join([_REFUSED_LIVE, ""] + named)
+    # Standing down here is what a compromised host used to get: the worse the machine, the less
+    # this command did, and the controls it declined are the ones that stop the next re-infection.
+    ending = None
+    if [i for i in issues if i.id == _LIVE]:
+        ending = stop()
+        if not ending.finished:
+            lines = [_STILL_LIVE, ""]
+            if ending.refused:
+                lines += [_NOT_OURS_LIVE, ""]
+            if not ending.quiet:
+                lines += [_STILL_SPAWNING, ""]
+            lines.append(_ending_line(ending))
+            return 1, "\n".join(lines)
 
     outcomes = [apply(p) for p in folders()]
     took = {ENFORCING, SELF_ENFORCING}
     applied = bool(outcomes) and all(o.state in took for o in outcomes)
     headline = _CLAIM if applied else _NOT_EVERYWHERE
     lines = [headline, ""]
+    if ending is not None:
+        lines.extend([_ENDED_LIVE, _ending_line(ending), ""])
     states = {o.state for o in outcomes}
     for note, fires in ((_SOME_ARE_YOURS, applied and SELF_ENFORCING in states),
                         (_LEFT_OPEN_NOTE, LEFT_OPEN_OVER_CONTENT in states),

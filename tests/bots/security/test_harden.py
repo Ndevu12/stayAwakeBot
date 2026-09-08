@@ -11,6 +11,7 @@ import pwd
 from unittest import mock
 
 from stayawake.bots.security import harden
+from stayawake.bots.security.harden import live
 from stayawake.bots.security.harden import denial
 from stayawake.bots.security.hygiene import host_artifacts
 from stayawake.bots.security.hygiene.models import HygieneIssue, PROCESSES_NOT_READABLE_ID
@@ -78,12 +79,50 @@ class TestRunContract(unittest.TestCase):
         self.assertIn("sudo", text)
         self.assertNotEqual(code, 0, "a location it could not take is not a complete result")
 
-    def test_live_loader_is_refused(self):
-        code, text = harden.run(supported=lambda: True, folders=lambda: [], apply=lambda p: None,
-                                live=lambda: [_issue("live-obfuscated-process")])
+    def test_live_code_is_ended_and_then_the_control_is_applied(self):
+        # This used to refuse, which meant the more compromised the host, the less this command
+        # did — and the control it declined to place is the one that stops re-infection.
+        ended = live.Ending(matched=3, frozen=3, ended=3, quiet=True, still_holding=0)
+        mine = Path("/mine")
+        code, text = harden.run(supported=lambda: True, folders=lambda: [mine],
+                                apply=lambda p: denial.PathOutcome(p, denial.ENFORCING, "held"),
+                                live=lambda: [_issue("live-obfuscated-process")],
+                                stop=lambda: ended)
+        self.assertEqual(code, 0)
+        self.assertIn("3 of 3 ended", text)
+        self.assertIn("enforcing", text)
+
+    def test_the_control_is_withheld_while_any_of_it_is_still_running(self):
+        alive = live.Ending(matched=4, frozen=4, ended=3, survived=[91], quiet=True,
+                            still_holding=1)
+        apply = mock.Mock()
+        code, text = harden.run(supported=lambda: True, folders=lambda: [Path("/mine")],
+                                apply=apply, live=lambda: [_issue("live-obfuscated-process")],
+                                stop=lambda: alive)
         self.assertEqual(code, 1)
-        self.assertIn("capture", text.lower())
-        self.assertNotIn("enforcing", text)
+        self.assertIn("NOT applied", text)
+        self.assertIn("91", text)
+        apply.assert_not_called()
+
+    def test_a_source_it_cannot_see_is_named_rather_than_implied(self):
+        spawning = live.Ending(matched=9, frozen=9, ended=9, quiet=False, still_holding=2)
+        code, text = harden.run(supported=lambda: True, folders=lambda: [Path("/mine")],
+                                apply=lambda p: None,
+                                live=lambda: [_issue("live-obfuscated-process")],
+                                stop=lambda: spawning)
+        self.assertEqual(code, 1)
+        self.assertIn("starting them again", text)
+
+    def test_what_belongs_to_another_user_is_named_as_out_of_reach(self):
+        theirs = live.Ending(matched=2, frozen=0, ended=0, refused=[404], quiet=True,
+                             still_holding=2)
+        code, text = harden.run(supported=lambda: True, folders=lambda: [Path("/mine")],
+                                apply=lambda p: None,
+                                live=lambda: [_issue("live-obfuscated-process")],
+                                stop=lambda: theirs)
+        self.assertEqual(code, 1)
+        self.assertIn("another user", text)
+        self.assertIn("404", text)
 
     def test_a_probe_that_raises_does_not_take_the_command_down(self):
         def boom():
@@ -94,21 +133,26 @@ class TestRunContract(unittest.TestCase):
         self.assertIn("could not be examined", text.lower())
         self.assertIn("OSError", text)
 
-    def test_the_refusal_names_what_to_capture(self):
-        held = HygieneIssue(id="live-obfuscated-process", severity="warning", title="t",
-                            detail="pid 84645 (node) is executing dynamic-exec sink.",
-                            remediation="x")
-        code, text = harden.run(supported=lambda: True, folders=lambda: [], apply=lambda p: None,
-                                live=lambda: [held])
-        self.assertEqual(code, 1)
-        self.assertIn("pid 84645", text)
+    def test_what_was_ended_is_one_line_however_many_there_were(self):
+        # A measured run produced 135 near-identical 300-character lines. A wall nobody can read
+        # is not a report, and this is the case where reading it matters most.
+        many = live.Ending(matched=135, frozen=135, ended=135, quiet=True, still_holding=0,
+                           captured="/state/saw/captured/live-code.json")
+        _code, text = harden.run(supported=lambda: True, folders=lambda: [Path("/mine")],
+                                 apply=lambda p: denial.PathOutcome(p, denial.ENFORCING, "held"),
+                                 live=lambda: [_issue("live-obfuscated-process")],
+                                 stop=lambda: many)
+        self.assertIn("135 of 135 ended", text)
+        self.assertIn("captured to", text)
+        self.assertLess(len(text.splitlines()), 15, "the report grew with the population again")
 
-    def test_a_named_process_cannot_control_the_terminal(self):
-        held = HygieneIssue(id="live-obfuscated-process", severity="warning", title="t",
-                            detail="pid 1 (node) \x1b[2K\r##[error]saw: all clear",
-                            remediation="x")
+    def test_a_captured_path_cannot_control_the_terminal(self):
+        hostile = live.Ending(matched=1, frozen=1, ended=0, survived=[7], quiet=True,
+                              still_holding=1,
+                              captured="/tmp/\x1b[2K\r##[error]saw: all clear")
         _code, text = harden.run(supported=lambda: True, folders=lambda: [], apply=lambda p: None,
-                                 live=lambda: [held])
+                                 live=lambda: [_issue("live-obfuscated-process")],
+                                 stop=lambda: hostile)
         self.assertNotIn("\x1b", text)
         self.assertNotIn("\r", text)
         self.assertNotIn("##[", text)

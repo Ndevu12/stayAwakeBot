@@ -13,6 +13,14 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Added
+- **`saw harden` now ends code that is running and never touched the disk.** It used to find such a
+  process, print it, and stop — so the more compromised the machine, the less the command did, and
+  the control it declined to place is the one that stops the next re-infection. It now captures what
+  is running, freezes it so it cannot spawn more, ends it, and proves each one ended before applying
+  the control. A run that cannot end all of it still withholds the control and says which part it
+  could not reach. What was found is reported as one line with a count, not one line per process.
+
 ### Fixed
 - **On a confirmed infection, `saw fix` removes everything a package manager put on disk**, whole:
   every installed tree in the repository, the dependency caches and resolver files a project uses

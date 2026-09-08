@@ -15,6 +15,9 @@ from .models import HygieneIssue, PROCESSES_NOT_READABLE_ID, _WIPER_NOTE
 _EXCERPT_CHARS = 240
 
 
+_PIDS_SHOWN = 8
+
+
 def _excerpt(code: str) -> str:
     """Enough of the argument to recognise and keep, bounded. It is attacker-chosen text; the render
     site encodes every field it prints, which is why it is carried rather than summarised away."""
@@ -42,6 +45,29 @@ def live_process_scope_note() -> str:
     return _snapshot().scope_note()
 
 
+def live_code_processes(snapshot=None) -> list[tuple[object, str, str]]:
+    """Every running process holding code an interpreter was handed and the engine calls obfuscated,
+    as `(process, code, reason)`.
+
+    One authority. The reporter below and anything that ACTS on these must agree about which
+    processes qualify, and they can only be made to agree by asking the same function.
+    """
+    snap = snapshot if snapshot is not None else _snapshot()
+    found: list[tuple[object, str, str]] = []
+    if not snap.supported or not snap.processes:
+        return found
+    for process in snap.processes:
+        if process.argv_unreadable or not process.argv:
+            continue
+        invocation = resolve_invocation(process.argv)
+        for code in invocation.code_args:
+            verdict = _obfuscation_verdict(code)
+            if verdict.obfuscated:
+                found.append((process, code, verdict.reason))
+                break              # one per process; the rest of its argv is the same code
+    return found
+
+
 def check_live_processes() -> list[HygieneIssue]:
     """Grade the code each running process was handed.
 
@@ -61,24 +87,24 @@ def check_live_processes() -> list[HygieneIssue]:
             remediation="Inspect what is running yourself, and rotate credentials LAST — "
                         f"{_WIPER_NOTE}.",
         )]
-    issues: list[HygieneIssue] = []
-    for process in snapshot.processes:
-        if process.argv_unreadable or not process.argv:
-            continue
-        invocation = resolve_invocation(process.argv)
-        for code in invocation.code_args:
-            verdict = _obfuscation_verdict(code)
-            if not verdict.obfuscated:
-                continue
-            issues.append(HygieneIssue(
-                id="live-obfuscated-process",
-                severity="warning",
-                title="A running process was handed obfuscated code",
-                detail=f"pid {process.pid} ({invocation.interpreter or process.program}) is "
-                       f"executing {verdict.reason}. It is in the process, not on disk: "
-                       f"{_excerpt(code)}",
-                remediation="Capture it before anything ends it, and rotate credentials LAST — "
-                            f"{_WIPER_NOTE}.",
-            ))
-            break                      # one finding per process; the rest of its argv is the same
-    return issues
+    holding = live_code_processes(snapshot)
+    if not holding:
+        return []
+    # ONE finding, however many processes. A worm that spawns produces a wall of near-identical
+    # lines — 135 of them in one measured run — and a wall nobody can read is not a report.
+    first, code, reason = holding[0]
+    pids = sorted(p.pid for p, _c, _r in holding)
+    where = ", ".join(str(pid) for pid in pids[:_PIDS_SHOWN])
+    if len(pids) > _PIDS_SHOWN:
+        where += f", and {len(pids) - _PIDS_SHOWN} more"
+    count = ("A running process was handed obfuscated code" if len(pids) == 1 else
+             f"{len(pids)} running processes were handed obfuscated code")
+    return [HygieneIssue(
+        id="live-obfuscated-process",
+        severity="warning",
+        title=count,
+        detail=f"pid {where} ({resolve_invocation(first.argv).interpreter or first.program}) "
+               f"executing {reason}. It is in the process, not on disk: {_excerpt(code)}",
+        remediation="Capture it before anything ends it, and rotate credentials LAST — "
+                    f"{_WIPER_NOTE}.",
+    )]

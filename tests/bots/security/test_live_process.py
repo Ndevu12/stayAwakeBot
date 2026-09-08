@@ -125,6 +125,38 @@ class TestTheCapturedArgumentIsBounded(unittest.TestCase):
         self.assertIn("[…]", detail)
 
 
+class TestAPopulationIsOneFinding(unittest.TestCase):
+    """A measured run on an infected host produced 135 near-identical 300-character lines. A wall
+    nobody can read is not a report, and this is the case where reading it matters most."""
+
+    def test_many_processes_yield_one_finding_that_counts_them(self):
+        payload = _loader()
+        many = [Process(pid=pid, argv=("node", "-e", payload)) for pid in range(100, 235)]
+        issues = _check(_snapshot(*many))
+        self.assertEqual(len(issues), 1)
+        self.assertIn("135", issues[0].title)
+
+    def test_it_names_the_first_pids_and_says_how_many_more(self):
+        payload = _loader()
+        issues = _check(_snapshot(*[Process(pid=pid, argv=("node", "-e", payload))
+                                    for pid in range(10, 30)]))
+        self.assertIn("pid 10", issues[0].detail)
+        self.assertIn("more", issues[0].detail)
+
+    def test_one_process_still_reads_as_one(self):
+        issues = _check(_snapshot(Process(pid=5, argv=("node", "-e", _loader()))))
+        self.assertEqual(len(issues), 1)
+        self.assertNotIn("more", issues[0].detail)
+
+    def test_the_finding_and_the_ender_agree_about_which_processes_qualify(self):
+        # Two consumers deciding this separately is how they end up disagreeing about what is
+        # running; both ask live_code_processes.
+        payload = _loader()
+        snap = _snapshot(Process(pid=5, argv=("node", "-e", payload)),
+                         Process(pid=6, argv=("node", "app.js")))
+        self.assertEqual([p.pid for p, _c, _r in process.live_code_processes(snap)], [5])
+
+
 if __name__ == "__main__":
     unittest.main()
 
