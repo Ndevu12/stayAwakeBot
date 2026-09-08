@@ -16,6 +16,9 @@ from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.targets import ScanOptions
 from stayawake.utils import exitcodes
 
+_NEEDS_POSIX_NONROOT = (os.name == "posix"
+                        and not (hasattr(os, "geteuid") and os.geteuid() == 0))
+
 
 def _report_of(target: Path) -> str:
     """The terminal report a scan of `target` prints."""
@@ -798,6 +801,8 @@ class TestEachTargetOwnsItsCoverageNotes(unittest.TestCase):
                              f"a lone target's note was needlessly attributed: {n}")
 
 
+@unittest.skipUnless(_NEEDS_POSIX_NONROOT,
+                     "chmod-based unreadable tests need a non-root POSIX host")
 class TestAFolderThatCouldNotBeReadIsNotClean(unittest.TestCase):
     """An unreadable FILE has always been recorded and fails the target closed. A directory was
     skipped in silence, so a target could report clean with a whole subtree unread — the one thing
@@ -831,6 +836,8 @@ class TestAFolderThatCouldNotBeReadIsNotClean(unittest.TestCase):
         self.assertNotIn("src/: PermissionError", _report_of(self.d))
 
 
+@unittest.skipUnless(_NEEDS_POSIX_NONROOT,
+                     "chmod-based unreadable tests need a non-root POSIX host")
 class TestDiscoveryDoesNotDropWhatItCannotEnter(unittest.TestCase):
     """Naming an unreadable repository directly stopped the run. Reaching the same one through a
     pattern left it out without a word, and the run could end clean."""
@@ -919,6 +926,29 @@ class TestAScopeThatCannotBeSureDoesNotSayClean(unittest.TestCase):
         (d / "a.js").write_text("export const ok = 1;\n", encoding="utf-8")
         self.assertEqual(self._rc(d), exitcodes.CLEAN)
         self.assertEqual(self._rc(d / "a.js"), exitcodes.CLEAN)
+
+
+class TestAnUnexaminablePathDoesNotCrashTheRun(unittest.TestCase):
+    """`Path.exists()` on a path inside an unreadable directory RAISES on Linux and returns False on
+    macOS. The unguarded check crashed the whole scan on one platform and passed every local run on
+    the other, so this test forces the raising behaviour rather than relying on the host."""
+
+    def test_resolution_survives_a_probe_that_raises(self):
+        from unittest import mock
+        d = Path(tempfile.mkdtemp())
+        (d / "somewhere").mkdir()
+        real = Path.exists
+
+        def raising(self, *a, **k):
+            if self.name == ".git":
+                raise PermissionError(13, "Permission denied", str(self))
+            return real(self, *a, **k)
+
+        with mock.patch.object(Path, "exists", raising):
+            found = resolve_local_targets([str(d / "somewhere")], ScanOptions())
+        # It answers about the path rather than raising; not being able to see a `.git` means it is
+        # not treated as a repository.
+        self.assertEqual([t.kind for t in found], [resolution.DIRECTORY])
 
 
 if __name__ == "__main__":
