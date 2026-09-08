@@ -304,7 +304,6 @@ class Report:
     removed_trees: int = 0
     not_removed: list[Path] = field(default_factory=list)
     unreadable: list[Path] = field(default_factory=list)
-    refused: list[Path] = field(default_factory=list)
     installed_tree_kept: str | None = None
     installed_entries_kept: int = 0
 
@@ -331,19 +330,13 @@ class Report:
         return f"{done}. {kept}" if kept else done
 
     def survived_note(self) -> str:
-        """What a removal was asked to take and did not, and the one thing to do about it.
+        """What a removal was asked to take and did not.
 
-        Returns a single line naming what is still there, or an empty string when everything the
-        run reached was removed.
+        Returns one line naming what is still there, or an empty string when everything the run
+        reached was removed.
         """
-        needs_root = sorted({str(p.name) for p in self.not_removed + self.unreadable}
-                            - {str(p.name) for p in self.refused})
-        refused = sorted({str(p.name) for p in self.refused})
-        if needs_root:
-            return f"{_named(needs_root)} still there — run again with sudo"
-        if refused:
-            return f"{_named(refused)} not removed — not this repository's to write to"
-        return ""
+        names = sorted({str(p.name) for p in self.not_removed + self.unreadable})
+        return f"still there: {_named(names)}" if names else ""
 
     def kept_note(self) -> str:
         """What is still installed, and why it was left there.
@@ -480,8 +473,6 @@ def remove_confirmed(root: Path, *, remove_lockfiles: bool = True,
             report.removed_trees += 1
         elif _still_there(path):
             report.not_removed.append(path)
-            if not is_safe_write_target(path, root):
-                report.refused.append(path)
     report.unreadable.extend(unreadable)
 
     for build in build_output_dirs(root):
@@ -489,8 +480,6 @@ def remove_confirmed(root: Path, *, remove_lockfiles: bool = True,
             report.removed_builds.append(build.name)
         elif _still_there(build):
             report.not_removed.append(build)
-            if not is_safe_write_target(build, root):
-                report.refused.append(build)
 
     if remove_lockfiles:
         proof = lockfile_root if lockfile_root is not None else root
