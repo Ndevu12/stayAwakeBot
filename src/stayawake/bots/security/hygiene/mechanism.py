@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
-"""Mechanism-based persistence & backdoor sinks (wave-agnostic): ~/.ssh/authorized_keys, shell startup
-files, and exec-on-every-git-command git config. Matches the MECHANISM (not a campaign's named IoC),
-so a renamed variant — or a GhostApproval/SymJacking write-redirect into a user config file — is still
-caught."""
+"""Persistence and backdoor sinks in user-owned configuration: the SSH authorized-keys file, shell
+startup files, and git configuration that runs a command."""
 from __future__ import annotations
 
 import os
@@ -14,12 +12,8 @@ from pathlib import Path
 from .models import HygieneIssue, POSIX_SHELLS, SCRATCH_ROOTS, _WIPER_NOTE
 
 #
-# Where a worm — or a GhostApproval/SymJacking write-redirect that lands a payload in a
-# user-owned config file — plants persistence that OUTLIVES the repo and any one campaign's
-# named IoCs. The probes above match reported names (SHA1HULUD, gh-token-monitor); these match
-# the MECHANISM, so a renamed variant is still caught. User-owned files carry legitimate content,
-# so grading is signal-strength based (unambiguous backdoor shape → warning; review-worthy anomaly
-# → info) rather than assert-malware. All read-only; absent paths/tools degrade to nothing.
+# User-owned files carry legitimate content, so grading is by signal strength rather than an
+# assertion of malware. All read-only; an absent path or tool degrades to nothing.
 
 _FETCH = r"(?:curl|wget)"
 _POSIX_SHELL = rf"(?:{'|'.join(POSIX_SHELLS)})"

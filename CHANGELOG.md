@@ -13,7 +13,37 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Added
+- **`saw harden` now ends code that is running and never touched the disk.** It used to find such a
+  process, print it, and stop — so the more compromised the machine, the less the command did, and
+  the control it declined to place is the one that stops the next re-infection. It now captures what
+  is running, freezes it so it cannot spawn more, ends it, and proves each one ended before applying
+  the control. A run that cannot end all of it still withholds the control and says which part it
+  could not reach. What was found is reported as one line with a count, not one line per process.
+  Where ending something needs privilege the command does not have, it asks for it — for those
+  processes only, once for all of them, and only where there is a terminal to answer on. It does
+  not require privilege to run, and it never takes `sudo` from your `PATH`: on a machine that may
+  already be compromised, that would hand root to the thing being removed.
+- **`saw harden` tells you where you stand and what to do, and nothing else.** It printed a line
+  per location with its own explanation, under a headline that said the control was not in place
+  whenever any location was skipped — including directories that are simply not on the machine, so
+  a run that protected everything it could still read as a failure. It now judges only the
+  locations it could act on. No path, no process id, no internal state name and no count of what
+  was attempted reaches you: one line for where the machine stands, and one for the thing you can
+  do about it.
+- **What `saw harden` cannot do no longer costs you what it can.** A process needing a password
+  nobody is there to answer, or one belonging to another user, used to stop the command before it
+  placed any control at all. Everything it can do now happens, what it could not do is named, and
+  the run still fails so nothing reads as finished.
+- **Code on the command line is no longer the only shape it recognises.** A program that is no
+  longer a file on this disk, and an interpreter handed its program on standard input, are both
+  code running with nothing behind it to scan — and neither is a reason to leave it running.
+
 ### Fixed
+- **The payload is no longer printed.** A finding about running code used to carry the code itself,
+  which means what it identifies itself by and the address it talks to went to the terminal, the
+  JSON, the SARIF and every saved report. The finding now carries a short fingerprint instead, and
+  the code goes to the capture file, where you can hand it to someone deliberately.
 - **On a confirmed infection, `saw fix` removes everything a package manager put on disk**, whole:
   every installed tree in the repository, the dependency caches and resolver files a project uses
   instead of one, the lockfiles, and the generated output directories. Whichever package manager

@@ -8,11 +8,23 @@ READ-ONLY. An audit audits and reports; nothing here may signal, stop or end a p
 pins that. Acting on one is a separate command's job, and it is gated on capture."""
 from __future__ import annotations
 
+import hashlib
+
 from .autorun.grade import resolve_invocation
 from .models import HygieneIssue, PROCESSES_NOT_READABLE_ID, _WIPER_NOTE
 
 
 _EXCERPT_CHARS = 240
+
+
+_PIDS_SHOWN = 8
+
+
+def _fingerprint(code: str) -> str:
+    """A short hash of `code`, or an empty string when there is none."""
+    if not code:
+        return ""
+    return f", fingerprint {hashlib.sha256(code.encode('utf-8', 'replace')).hexdigest()[:12]}"
 
 
 def _excerpt(code: str) -> str:
@@ -35,11 +47,48 @@ def _snapshot():
     return snapshot()
 
 
+def program_is_gone(pid: int) -> bool:
+    """Whether `pid` is running something that is no longer a file on this disk."""
+    from stayawake.utils.procsnap import program_is_gone as ask
+    return ask(pid)
+
+
 def live_process_scope_note() -> str:
     """What the process table did not yield — other users' processes, or a platform whose arguments
     cannot be read at all. Disclosure, never a finding: a machine always runs processes this user
     may not read, and gating on that would withhold every verdict on every unprivileged run."""
     return _snapshot().scope_note()
+
+
+def live_code_processes(snapshot=None) -> list[tuple[object, str, str]]:
+    """Every running process executing code with no file behind it, as `(process, code, reason)`.
+
+    The single authority: the report below and anything that acts on these ask the same function.
+    """
+    snap = snapshot if snapshot is not None else _snapshot()
+    found: list[tuple[object, str, str]] = []
+    if not snap.supported or not snap.processes:
+        return found
+    for process in snap.processes:
+        if process.argv_unreadable or not process.argv:
+            continue
+        if process.identity is not None and process.identity.zombie:
+            continue          # killed and awaiting its parent — it executes nothing
+        invocation = resolve_invocation(process.argv)
+        graded = None
+        for code in invocation.code_args:
+            verdict = _obfuscation_verdict(code)
+            if verdict.obfuscated:
+                graded = (code, verdict.reason)
+                break              # one per process; the rest of its argv is the same code
+        if graded is None:
+            if invocation.reads_stdin:
+                graded = ("", "a program handed to it on standard input")
+            elif program_is_gone(process.pid):
+                graded = ("", "a program that is no longer on this disk")
+        if graded is not None:
+            found.append((process, graded[0], graded[1]))
+    return found
 
 
 def check_live_processes() -> list[HygieneIssue]:
@@ -61,24 +110,24 @@ def check_live_processes() -> list[HygieneIssue]:
             remediation="Inspect what is running yourself, and rotate credentials LAST — "
                         f"{_WIPER_NOTE}.",
         )]
-    issues: list[HygieneIssue] = []
-    for process in snapshot.processes:
-        if process.argv_unreadable or not process.argv:
-            continue
-        invocation = resolve_invocation(process.argv)
-        for code in invocation.code_args:
-            verdict = _obfuscation_verdict(code)
-            if not verdict.obfuscated:
-                continue
-            issues.append(HygieneIssue(
-                id="live-obfuscated-process",
-                severity="warning",
-                title="A running process was handed obfuscated code",
-                detail=f"pid {process.pid} ({invocation.interpreter or process.program}) is "
-                       f"executing {verdict.reason}. It is in the process, not on disk: "
-                       f"{_excerpt(code)}",
-                remediation="Capture it before anything ends it, and rotate credentials LAST — "
-                            f"{_WIPER_NOTE}.",
-            ))
-            break                      # one finding per process; the rest of its argv is the same
-    return issues
+    holding = live_code_processes(snapshot)
+    if not holding:
+        return []
+    # One finding, however many processes.
+    first, code, reason = holding[0]
+    pids = sorted(p.pid for p, _c, _r in holding)
+    where = ", ".join(str(pid) for pid in pids[:_PIDS_SHOWN])
+    if len(pids) > _PIDS_SHOWN:
+        where += f", and {len(pids) - _PIDS_SHOWN} more"
+    count = ("A running process is executing code that is not on disk" if len(pids) == 1 else
+             f"{len(pids)} running processes are executing code that is not on disk")
+    # TRAP: the payload is never put in `detail`. This reaches the terminal, the JSON, the SARIF
+    # and every saved report; the code goes to the capture file instead.
+    return [HygieneIssue(
+        id="live-obfuscated-process",
+        severity="warning",
+        title=count,
+        detail=f"pid {where} ({resolve_invocation(first.argv).interpreter or first.program}): "
+               f"{reason}{_fingerprint(code)}.",
+        remediation=f"Rotate credentials LAST — {_WIPER_NOTE}.",
+    )]

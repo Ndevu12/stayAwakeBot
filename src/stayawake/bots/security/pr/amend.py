@@ -135,11 +135,10 @@ def _collect_remote_heads(repo: Path, slug: str, names: list[str],
 
 def _destination(slug: str, branch: str, token: str | None,
                  sha12: str) -> tuple[str, Reason | None]:
-    """Where this branch's amended history goes.
+    """Where this branch's amended history goes, as `(branch, reason)`.
 
-    A protected branch — or one whose rule could not be read — is never force-updated: the
-    maintainer drew that boundary and an unreadable rule is not permission. The amended history is
-    published beside it under its own name, which overwrites nothing, and a person opens the PR.
+    TRAP: a protected branch, or one whose rule could not be read, is never force-updated. An
+    unreadable rule is not permission.
     """
     protection = authority.ref_protection(slug, branch, token)
     if protection.protected is False:

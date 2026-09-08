@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import os
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -13,6 +14,48 @@ _KERN_ARGMAX = 8
 _KERN_PROCARGS2 = 49
 _ARGMAX_FALLBACK = 256 * 1024
 _PS_TIMEOUT = 10
+
+_PROC_PIDTBSDINFO = 3
+_PROC_PIDPATHINFO_MAXSIZE = 4096
+_ESRCH = 3
+_EPERM = 1
+
+RUNNING, GONE, NOT_OURS, UNSUPPORTED = "running", "gone", "not-ours", "unsupported"
+
+_SZOMB = 5
+
+
+@dataclass(frozen=True)
+class Identity:
+    """Who a process is, in terms that survive a pid being reused.
+
+    TRAP: a pid alone is not an identity. Compare `start_time` and `uid` before acting on one.
+    """
+    pid: int
+    ppid: int
+    uid: int
+    start_time: int
+    zombie: bool = False
+
+    def is_same(self, other: "Identity | None") -> bool:
+        return other is not None and (self.pid, self.start_time) == (other.pid, other.start_time)
+
+
+class _BsdInfo(ctypes.Structure):
+    """`struct proc_bsdinfo` from `sys/proc_info.h`, read whole and length-checked."""
+    _fields_ = [
+        ("pbi_flags", ctypes.c_uint32), ("pbi_status", ctypes.c_uint32),
+        ("pbi_xstatus", ctypes.c_uint32), ("pbi_pid", ctypes.c_uint32),
+        ("pbi_ppid", ctypes.c_uint32), ("pbi_uid", ctypes.c_uint32),
+        ("pbi_gid", ctypes.c_uint32), ("pbi_ruid", ctypes.c_uint32),
+        ("pbi_rgid", ctypes.c_uint32), ("pbi_svuid", ctypes.c_uint32),
+        ("pbi_svgid", ctypes.c_uint32), ("rfu_1", ctypes.c_uint32),
+        ("pbi_comm", ctypes.c_char * 16), ("pbi_name", ctypes.c_char * 32),
+        ("pbi_nfiles", ctypes.c_uint32), ("pbi_pgid", ctypes.c_uint32),
+        ("pbi_pjobc", ctypes.c_uint32), ("e_tdev", ctypes.c_uint32),
+        ("e_tpgid", ctypes.c_uint32), ("pbi_nice", ctypes.c_int32),
+        ("pbi_start_tvsec", ctypes.c_uint64), ("pbi_start_tvusec", ctypes.c_uint64),
+    ]
 
 
 @dataclass(frozen=True)
@@ -25,6 +68,7 @@ class Process:
     pid: int
     argv: tuple[str, ...] = ()
     argv_unreadable: bool = False
+    identity: "Identity | None" = None
 
     @property
     def program(self) -> str | None:
@@ -111,6 +155,73 @@ def _argmax() -> int:
     return _ARGMAX_FALLBACK
 
 
+def _identity_darwin(pid: int) -> tuple["Identity | None", str]:
+    """One process's identity through libproc, as `(Identity | None, state)`.
+
+    TRAP: the errno is the answer. ESRCH means not executing, which covers a zombie; EPERM means
+    running and not ours. `kill(pid, 0)` cannot tell those apart.
+    """
+    try:
+        libc = ctypes.CDLL("libproc.dylib", use_errno=True)
+    except OSError:
+        return None, UNSUPPORTED
+    info = _BsdInfo()
+    ctypes.set_errno(0)
+    read = libc.proc_pidinfo(ctypes.c_int(pid), ctypes.c_int(_PROC_PIDTBSDINFO),
+                             ctypes.c_uint64(0), ctypes.byref(info),
+                             ctypes.c_int(ctypes.sizeof(info)))
+    if read == ctypes.sizeof(info):
+        return Identity(pid=pid, ppid=int(info.pbi_ppid), uid=int(info.pbi_uid),
+                        start_time=int(info.pbi_start_tvsec),
+                        zombie=int(info.pbi_status) == _SZOMB), RUNNING
+    err = ctypes.get_errno()
+    if err == _EPERM:
+        return None, NOT_OURS
+    if err == _ESRCH:
+        return None, GONE
+    return None, GONE
+
+
+def _identity_linux(pid: int) -> tuple["Identity | None", str]:
+    """One process's identity from `/proc`, as `(Identity | None, state)`.
+
+    TRAP: parsed from the LAST `)` — a program name may itself contain spaces and brackets.
+    """
+    try:
+        raw = Path(f"/proc/{pid}/stat").read_text()
+        status = Path(f"/proc/{pid}/status").read_text()
+    except FileNotFoundError:
+        return None, GONE
+    except PermissionError:
+        return None, NOT_OURS
+    except OSError:
+        return None, GONE
+    try:
+        fields = raw[raw.rindex(")") + 2:].split()
+        state, ppid, start = fields[0], int(fields[1]), int(fields[19])
+    except (ValueError, IndexError):
+        return None, GONE
+    uid = -1
+    for line in status.splitlines():
+        if line.startswith("Uid:"):
+            try:
+                uid = int(line.split()[1])
+            except (ValueError, IndexError):
+                uid = -1
+            break
+    return Identity(pid=pid, ppid=ppid, uid=uid, start_time=start,
+                    zombie=state == "Z"), RUNNING
+
+
+def identify(pid: int) -> tuple["Identity | None", str]:
+    """This process's identity and what the read found: RUNNING, GONE, NOT_OURS or UNSUPPORTED."""
+    if sys.platform == "darwin":
+        return _identity_darwin(pid)
+    if sys.platform.startswith("linux"):
+        return _identity_linux(pid)
+    return None, UNSUPPORTED
+
+
 def _live_pids() -> list[int]:
     """Just the pid list — the one thing `ps` is safe for, because a pid has no quoting to lose."""
     if sys.platform.startswith("linux"):
@@ -124,6 +235,89 @@ def _live_pids() -> list[int]:
     except (OSError, subprocess.SubprocessError):
         return []
     return sorted(int(tok) for tok in out.split() if tok.isdigit())
+
+
+def program_path(pid: int) -> str | None:
+    """The file a process is executing, or None when it cannot be read."""
+    if sys.platform.startswith("linux"):
+        try:
+            return os.readlink(f"/proc/{pid}/exe")
+        except OSError:
+            return None
+    try:
+        libc = ctypes.CDLL("libproc.dylib", use_errno=True)
+    except OSError:
+        return None
+    buf = ctypes.create_string_buffer(_PROC_PIDPATHINFO_MAXSIZE)
+    if libc.proc_pidpath(ctypes.c_int(pid), buf, ctypes.c_uint32(len(buf))) <= 0:
+        return None
+    return buf.value.decode("utf-8", "replace") or None
+
+
+def program_is_gone(pid: int) -> bool:
+    """Whether `pid` is executing something that is no longer a file on this disk.
+
+    TRAP: unreadable is not missing. A path this user cannot see answers False, never True.
+    """
+    where = program_path(pid)
+    if where is None:
+        return False
+    if where.startswith("/memfd:") or where.endswith(" (deleted)"):
+        return True
+    try:
+        return not os.path.exists(where)
+    except OSError:
+        return False
+
+
+def ps_signature(pid: int) -> str | None:
+    """A stable discriminator for any process, readable or not, or None.
+
+    Compared to itself rather than parsed, so no date format or locale is involved.
+    """
+    if sys.platform.startswith("linux"):
+        try:
+            raw = Path(f"/proc/{pid}/stat").read_text()
+            fields = raw[raw.rindex(")") + 2:].split()
+            return f"{fields[1]}|{fields[19]}"
+        except (OSError, ValueError, IndexError):
+            return None
+    try:
+        out = subprocess.run(["ps", "-o", "ppid=,uid=,lstart=", "-p", str(pid)],
+                             capture_output=True, text=True, timeout=_PS_TIMEOUT,
+                             env={"LC_ALL": "C", "PATH": "/usr/bin:/bin"})
+    except (OSError, subprocess.SubprocessError):
+        return None
+    line = " ".join(out.stdout.split())
+    return line or None
+
+
+def parent_map() -> dict[int, int]:
+    """Every pid's parent, including processes this user may not otherwise read."""
+    if sys.platform.startswith("linux"):
+        out: dict[int, int] = {}
+        try:
+            pids = [int(d.name) for d in Path("/proc").iterdir() if d.name.isdigit()]
+        except OSError:
+            return out
+        for pid in pids:
+            try:
+                raw = Path(f"/proc/{pid}/stat").read_text()
+                out[pid] = int(raw[raw.rindex(")") + 2:].split()[1])
+            except (OSError, ValueError, IndexError):
+                continue
+        return out
+    try:
+        text = subprocess.run(["ps", "-axo", "pid=,ppid="], capture_output=True, text=True,
+                              timeout=_PS_TIMEOUT).stdout
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    pairs: dict[int, int] = {}
+    for line in text.splitlines():
+        bits = line.split()
+        if len(bits) == 2 and bits[0].isdigit() and bits[1].isdigit():
+            pairs[int(bits[0])] = int(bits[1])
+    return pairs
 
 
 def snapshot() -> Snapshot:
@@ -143,9 +337,10 @@ def snapshot() -> Snapshot:
     snap = Snapshot()
     for pid in _live_pids():
         argv = read(pid)
+        who, _state = identify(pid)
         if argv is None:
             snap.unreadable += 1
-            snap.processes.append(Process(pid=pid, argv_unreadable=True))
+            snap.processes.append(Process(pid=pid, argv_unreadable=True, identity=who))
         else:
-            snap.processes.append(Process(pid=pid, argv=argv))
+            snap.processes.append(Process(pid=pid, argv=argv, identity=who))
     return snap

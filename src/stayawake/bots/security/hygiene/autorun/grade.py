@@ -26,6 +26,15 @@ _INTERPRETERS = frozenset({
     "sh", "bash", "zsh", "dash", "ksh", "osascript", "tsx", "ts-node"})
 
 
+_STDIN_FLAGS = {
+    **{shell: frozenset({"-s"}) for shell in POSIX_SHELLS},
+    "python": frozenset({"-"}), "python2": frozenset({"-"}), "python3": frozenset({"-"}),
+    "node": frozenset({"-"}), "nodejs": frozenset({"-"}), "deno": frozenset({"-"}),
+    "bun": frozenset({"-"}), "ruby": frozenset({"-"}), "perl": frozenset({"-"}),
+    "php": frozenset({"-r-"}),
+}
+
+
 _CODE_FLAGS = {
     **{shell: frozenset({"-c"}) for shell in POSIX_SHELLS},
     "python": frozenset({"-c"}), "python2": frozenset({"-c"}), "python3": frozenset({"-c"}),
@@ -77,6 +86,7 @@ class Invocation:
     is_posix_shell: bool = False
     payload_path: str | None = None
     code_args: tuple[str, ...] = ()
+    reads_stdin: bool = False
 
 
 def shell_code_args(argv) -> tuple[str, ...]:
@@ -153,8 +163,11 @@ def resolve_invocation(argv) -> Invocation:
         return Invocation(interpreter=interp, payload_path=interp)
     code_flags = _CODE_FLAGS.get(base, frozenset())
     module_flags = _MODULE_FLAGS.get(base, frozenset())
-    code, path = [], None
+    stdin_flags = _STDIN_FLAGS.get(base, frozenset())
+    code, path, from_stdin = [], None, False
     for n, arg in enumerate(rest):
+        if arg in stdin_flags:
+            from_stdin = True
         if arg in code_flags or (base in POSIX_SHELLS and _SHELL_C_FLAG.fullmatch(arg)):
             if n + 1 < len(rest):
                 code.append(rest[n + 1])
@@ -167,7 +180,7 @@ def resolve_invocation(argv) -> Invocation:
     # No script argument means there is no file this runs: the code is inline, or it names a module.
     # Reporting the interpreter would send the reader 133 KB of `/bin/sh` to content-scan.
     return Invocation(interpreter=interp, is_posix_shell=base in POSIX_SHELLS,
-                      payload_path=path, code_args=tuple(code))
+                      payload_path=path, code_args=tuple(code), reads_stdin=from_stdin)
 
 
 def _program_index(argv: list[str]) -> int:
@@ -648,9 +661,10 @@ def _systemd_seconds(dur: str) -> int | None:
 
 
 def correlate(entries, attributed: dict[str, bool]) -> set[str]:
-    """Keys of UNATTRIBUTED entries whose referenced executable is shared by ≥2 entries — the
-    multi-foothold campaign shape (a worm planting several re-run points at one payload). `attributed`
-    maps entry-key → whether provenance attributed it."""
+    """Keys of unattributed entries whose referenced executable is shared by two or more entries.
+
+    `attributed` maps an entry key to whether provenance attributed it.
+    """
     execs = Counter()
     for e in entries:
         if e.exec_path and not attributed.get(e.key(), False):

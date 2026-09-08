@@ -2,11 +2,14 @@
 """Host-level acting — create denials on this machine. Never touches a project's tree."""
 from __future__ import annotations
 
+from collections import Counter
+
 from stayawake.bots.security import hookscript
 from stayawake.bots.security.hygiene.host_artifacts import _global_folders
 from stayawake.bots.security.hygiene.models import PROCESSES_NOT_READABLE_ID
 from stayawake.bots.security.hygiene.outcome import BLOCKED, run_probe
 from stayawake.bots.security.hygiene.process import check_live_processes
+from .live import end_live_code
 from stayawake.utils import hostdenial, textsafe
 from .denial import (ENFORCING, HELD_BY_ANOTHER, IN_A_LIVE_INSTALL, LEFT_OPEN_OVER_CONTENT,
                      NEEDS_ROOT, NOT_HERE_YET, LOCKED_OVER_CONTENT, NOTHING_TO_REMOVE,
@@ -22,10 +25,10 @@ __all__ = ["run", "apply_one", "PathOutcome", "ENFORCING", "SELF_ENFORCING",
 
 _LIVE = "live-obfuscated-process"
 
-_REFUSED_LIVE = (
-    "A running process still holds code that is not on disk. "
-    "Capture it before applying this control."
-)
+_ENDED_LIVE = "Code was running here with no file behind it. It has been stopped."
+_STILL_LIVE = "Code is running here with no file behind it, and not all of it could be stopped."
+_NOT_OURS_LIVE = "Run again with sudo."
+_STILL_SPAWNING = "It is starting again by itself. Take this machine off the network."
 _REFUSED_UNREAD = (
     "Running processes could not be examined, so this control was not applied."
 )
@@ -35,34 +38,19 @@ _REFUSED_BLOCKED = (
 )
 _CAPTURE_EXCERPT = 300
 _NOT_HERE = "This control is not implemented on this platform."
-_CLAIM = (
-    "The observed staging path is denied. A payload that guards the write and uses "
-    "the runtime's built-in transport is unaffected."
-)
-_SOME_ARE_YOURS = (
-    "Some of these are held by you rather than by root. An unguarded write to one still fails, "
-    "but code running as you can take the lock off first. Run again with sudo to raise them."
-)
-_NEEDS_ROOT_NOTE = (
-    "One or more locations are not yours to write to. Run again with sudo to take those as well."
-)
-_NOT_EVERYWHERE = (
-    "This control is NOT in place. This command deletes nothing, and every location below says "
-    "what was done to it — inspect each one yourself and do NOT rotate any credential until you "
-    "have."
-)
-_LEFT_OPEN_NOTE = (
-    "Something is sitting in a location that is meant to stay empty. It has been left reachable "
-    "rather than locked over, so you can read it — do that before anything else."
-)
+_CLAIM = "This machine is protected."
+_CLAIM_AS_YOU = ("This machine is protected, but you can undo it yourself. "
+                 "Run again with sudo to make it stick.")
+_NEEDS_ROOT_NOTE = "Run again with sudo."
+_NOT_EVERYWHERE = "This machine is not fully protected."
+_STUCK_ONE = "This is as far as this machine allows."
+_STUCK_MANY = "This is as far as this machine allows."
+_LEFT_OPEN_NOTE = "Something is here that should not be. Run `saw audit`."
 _DEAD_SAW_NOTE = (
     "The saw that saw's git hooks call is gone or cannot run, so clones are not scanned. "
     "`saw hook repair` points the hooks at this saw."
 )
-_ALTERED_HOOKS_NOTE = (
-    "Where saw's git hooks run, something is not what saw installed. This command does not touch "
-    "hooks; `saw hook repair` puts them back and keeps what it moves aside:"
-)
+_ALTERED_HOOKS_NOTE = "Run `saw hook repair`."
 
 
 _TOOK_BACK = "Every control this tool placed here has been taken back."
@@ -93,9 +81,51 @@ def take_back(*, folders=_global_folders, remove=remove_one,
     return (0, "\n".join(lines).rstrip()) if done else (3, "\n".join(lines).rstrip())
 
 
+_HELD = frozenset({ENFORCING, SELF_ENFORCING, LOCKED_OVER_CONTENT})
+
+_NOT_A_FAILURE = frozenset({NOT_HERE_YET, IN_A_LIVE_INSTALL})
+
+
+def _every_reachable_one(outcomes) -> bool:
+    """Whether every location that could be protected is."""
+    reachable = [o for o in outcomes if o.state not in _NOT_A_FAILURE]
+    return bool(reachable) and all(o.state in _HELD for o in reachable)
+
+
+def _headline(outcomes, unresolved: bool) -> str:
+    """The one line that says where this machine stands."""
+    if unresolved:
+        return _NOT_EVERYWHERE
+    if not _every_reachable_one(outcomes):
+        return _NOT_EVERYWHERE
+    if any(o.state == SELF_ENFORCING for o in outcomes):
+        return _CLAIM_AS_YOU
+    return _CLAIM
+
+
+def _what_to_do(outcomes) -> list[str]:
+    """The lines an operator can act on, and nothing else.
+
+    No path is printed. Six of them, each with its own explanation, is what an operator was given
+    for a result they could not act on any of.
+    """
+    counted = Counter(o.state for o in outcomes)
+    out: list[str] = []
+    if counted[NEEDS_ROOT]:
+        out.append(_NEEDS_ROOT_NOTE)
+    if counted[LEFT_OPEN_OVER_CONTENT]:
+        out.append(_LEFT_OPEN_NOTE)
+    stuck = sum(counted[state] for state in
+                (OCCUPIED, HELD_BY_ANOTHER, NOT_WHERE_IT_WAS_NAMED, UNKNOWN))
+    if stuck:
+        out.append(_STUCK_ONE if stuck == 1 else _STUCK_MANY.format(count=stuck))
+    return out
+
+
 def run(*, live=check_live_processes, folders=_global_folders,
         apply=apply_one, supported=hostdenial.platform_supported,
-        altered=hookscript.altered_hooks, saw_runs=hookscript.recorded_saw_runs) -> tuple[int, str]:
+        altered=hookscript.altered_hooks, saw_runs=hookscript.recorded_saw_runs,
+        stop=end_live_code) -> tuple[int, str]:
     """Apply the denial at every global-resolution entry. Enforcing only after read-back.
 
     Root is asked of the PATH rather than of the command. Most of these locations belong to the
@@ -114,28 +144,33 @@ def run(*, live=check_live_processes, folders=_global_folders,
     issues = list(outcome.issues)
     if any(i.id == PROCESSES_NOT_READABLE_ID for i in issues):
         return 1, _REFUSED_UNREAD
-    holding = [i for i in issues if i.id == _LIVE]
-    if holding:
-        named = [f"  {textsafe.plain(i.detail, limit=_CAPTURE_EXCERPT)}" for i in holding]
-        return 1, "\n".join([_REFUSED_LIVE, ""] + named)
+    # TRAP: what could not be done never stops what could. A part that needs a password nobody can
+    # answer must not cost the operator every control this run was able to place.
+    ending, ending_failed = None, None
+    if [i for i in issues if i.id == _LIVE]:
+        try:
+            ending = stop()
+        except Exception as exc:                  # never let it take the command down
+            ending_failed = textsafe.plain(f"{type(exc).__name__}: {exc}", limit=200)
 
     outcomes = [apply(p) for p in folders()]
-    took = {ENFORCING, SELF_ENFORCING}
-    applied = bool(outcomes) and all(o.state in took for o in outcomes)
-    headline = _CLAIM if applied else _NOT_EVERYWHERE
-    lines = [headline, ""]
-    states = {o.state for o in outcomes}
-    for note, fires in ((_SOME_ARE_YOURS, applied and SELF_ENFORCING in states),
-                        (_LEFT_OPEN_NOTE, LEFT_OPEN_OVER_CONTENT in states),
-                        (_NEEDS_ROOT_NOTE, NEEDS_ROOT in states)):
-        if fires:
-            lines.extend([note, ""])
-    for o in outcomes:
-        lines.append(f"  {o.state}: {o.path} — {o.detail}")
-    hooks = altered()
-    if hooks:
-        lines.extend(["", _ALTERED_HOOKS_NOTE] + [f"  {textsafe.plain(str(p), limit=4096)}" for p in hooks])
+    unresolved = ending_failed is not None or (ending is not None and not ending.finished)
+    lines = [_headline(outcomes, unresolved), ""]
+    if ending_failed is not None:
+        lines.extend([_STILL_LIVE, ""])
+    elif ending is not None:
+        lines.append(_STILL_LIVE if unresolved else _ENDED_LIVE)
+        if ending.refused:
+            lines.append(_NOT_OURS_LIVE)
+        if not ending.quiet:
+            lines.append(_STILL_SPAWNING)
+        lines.append("")
+    lines.extend(_what_to_do(outcomes))
+    if altered():
+        lines.extend(["", _ALTERED_HOOKS_NOTE])
     if not saw_runs():
         lines.extend(["", _DEAD_SAW_NOTE])
     body = "\n".join(lines).rstrip()
-    return (0, body) if applied else (3, body)
+    if unresolved:
+        return 1, body
+    return (0, body) if _every_reachable_one(outcomes) else (3, body)

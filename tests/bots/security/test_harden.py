@@ -11,6 +11,7 @@ import pwd
 from unittest import mock
 
 from stayawake.bots.security import harden
+from stayawake.bots.security.harden import live
 from stayawake.bots.security.harden import denial
 from stayawake.bots.security.hygiene import host_artifacts
 from stayawake.bots.security.hygiene.models import HygieneIssue, PROCESSES_NOT_READABLE_ID
@@ -51,7 +52,8 @@ class TestRunContract(unittest.TestCase):
                                 **kwargs)
         self.assertEqual(code, 0)
         self.assertIn("saw hook repair", text)
-        self.assertIn("/home/op/.config/saw/git-template/hooks/post-merge", text)
+        self.assertIn("saw hook repair", text)
+        self.assertNotIn("/home/op", text, "a path was printed")
         code, text = harden.run(altered=lambda: [], **kwargs)
         self.assertNotIn("saw hook repair", text)
         code, text = harden.run(altered=lambda: [Path("/home/op/x\n  enforcing: /forged\x1b[32m")], **kwargs)
@@ -73,17 +75,86 @@ class TestRunContract(unittest.TestCase):
             folders=lambda: [mine, theirs],
             apply=lambda p: denial.PathOutcome(p, denial.SELF_ENFORCING, "in place")
             if p == mine else denial.PathOutcome(p, denial.NEEDS_ROOT, "not yours to write to"))
-        self.assertIn("enforcing-as-you: /mine", text)
-        self.assertIn("needs-root: /theirs", text)
+        # Both facts point at the same action, so the run states the action once rather than
+        # explaining each location — which is what made the report unreadable.
+        self.assertIn("Run again with sudo", text)
         self.assertIn("sudo", text)
         self.assertNotEqual(code, 0, "a location it could not take is not a complete result")
 
-    def test_live_loader_is_refused(self):
-        code, text = harden.run(supported=lambda: True, folders=lambda: [], apply=lambda p: None,
-                                live=lambda: [_issue("live-obfuscated-process")])
+    def test_live_code_is_ended_and_then_the_control_is_applied(self):
+        # This used to refuse, which meant the more compromised the host, the less this command
+        # did — and the control it declined to place is the one that stops re-infection.
+        ended = live.Ending(matched=3, frozen=3, ended=3, quiet=True, still_holding=0)
+        mine = Path("/mine")
+        code, text = harden.run(supported=lambda: True, folders=lambda: [mine],
+                                apply=lambda p: denial.PathOutcome(p, denial.ENFORCING, "held"),
+                                live=lambda: [_issue("live-obfuscated-process")],
+                                stop=lambda: ended)
+        self.assertEqual(code, 0)
+        self.assertIn("It has been stopped", text)
+        self.assertIn("This machine is protected", text)
+
+    def test_what_it_could_not_end_does_not_cost_the_controls_it_could_place(self):
+        # Withholding here was the same inversion as refusing to act at all: the worse the machine,
+        # the less the command did, and these controls are what stops the next re-infection.
+        alive = live.Ending(matched=4, frozen=4, ended=3, survived=[91], quiet=True,
+                            still_holding=1)
+        apply = mock.Mock(return_value=denial.PathOutcome(Path("/mine"), denial.ENFORCING, "held"))
+        code, text = harden.run(supported=lambda: True, folders=lambda: [Path("/mine")],
+                                apply=apply, live=lambda: [_issue("live-obfuscated-process")],
+                                stop=lambda: alive)
+        apply.assert_called_once()
+        self.assertEqual(code, 1, "an unresolved process must still fail the run")
+        self.assertIn("not all of it could be stopped", text)
+        self.assertIn("not all of it could be stopped", text)
+
+    def test_a_source_it_cannot_see_is_named_rather_than_implied(self):
+        spawning = live.Ending(matched=9, frozen=9, ended=9, quiet=False, still_holding=2)
+        code, text = harden.run(supported=lambda: True, folders=lambda: [Path("/mine")],
+                                apply=lambda p: denial.PathOutcome(p, denial.ENFORCING, "held"),
+                                live=lambda: [_issue("live-obfuscated-process")],
+                                stop=lambda: spawning)
         self.assertEqual(code, 1)
-        self.assertIn("capture", text.lower())
-        self.assertNotIn("enforcing", text)
+        self.assertIn("starting again by itself", text)
+
+    def test_privilege_it_could_not_get_is_named_as_an_ask_that_failed(self):
+        # It no longer reports another user's process and walks away: it asks, for those processes
+        # only, and says so when the answer does not come.
+        theirs = live.Ending(matched=2, frozen=0, ended=0, refused=[404], asked_for=[404],
+                             asking="cannot-ask", quiet=True, still_holding=2)
+        code, text = harden.run(supported=lambda: True, folders=lambda: [Path("/mine")],
+                                apply=lambda p: denial.PathOutcome(p, denial.ENFORCING, "held"),
+                                live=lambda: [_issue("live-obfuscated-process")],
+                                stop=lambda: theirs)
+        self.assertEqual(code, 1)
+        self.assertIn("Run again with sudo", text)
+        self.assertIn("Run again with sudo", text)
+        self.assertIn("Run again with sudo", text)
+
+    def test_privilege_nobody_can_grant_costs_only_what_needed_it(self):
+        # The whole point: a part that needs a password nobody can answer must not cost the
+        # operator every control this run was able to place.
+        theirs = live.Ending(matched=3, frozen=2, ended=2, refused=[404], asked_for=[404],
+                             asking="cannot-ask", quiet=True, still_holding=1)
+        placed = []
+        code, text = harden.run(
+            supported=lambda: True, folders=lambda: [Path("/one"), Path("/two")],
+            apply=lambda p: placed.append(p) or denial.PathOutcome(p, denial.ENFORCING, "held"),
+            live=lambda: [_issue("live-obfuscated-process")], stop=lambda: theirs)
+        self.assertEqual(placed, [Path("/one"), Path("/two")], "it skipped the controls it could place")
+        self.assertEqual(code, 1, "the part it could not do must still fail the run")
+        self.assertIn("not all of it could be stopped", text)
+
+    def test_privilege_that_was_granted_ends_it_and_the_control_goes_on(self):
+        granted = live.Ending(matched=2, frozen=1, ended=2, asked_for=[404], asking="granted",
+                              quiet=True, still_holding=0)
+        code, text = harden.run(supported=lambda: True, folders=lambda: [Path("/mine")],
+                                apply=lambda p: denial.PathOutcome(p, denial.ENFORCING, "held"),
+                                live=lambda: [_issue("live-obfuscated-process")],
+                                stop=lambda: granted)
+        self.assertEqual(code, 0)
+        self.assertIn("It has been stopped", text)
+        self.assertIn("It has been stopped", text)
 
     def test_a_probe_that_raises_does_not_take_the_command_down(self):
         def boom():
@@ -94,21 +165,26 @@ class TestRunContract(unittest.TestCase):
         self.assertIn("could not be examined", text.lower())
         self.assertIn("OSError", text)
 
-    def test_the_refusal_names_what_to_capture(self):
-        held = HygieneIssue(id="live-obfuscated-process", severity="warning", title="t",
-                            detail="pid 84645 (node) is executing dynamic-exec sink.",
-                            remediation="x")
-        code, text = harden.run(supported=lambda: True, folders=lambda: [], apply=lambda p: None,
-                                live=lambda: [held])
-        self.assertEqual(code, 1)
-        self.assertIn("pid 84645", text)
+    def test_what_was_ended_is_one_line_however_many_there_were(self):
+        # A measured run produced 135 near-identical 300-character lines. A wall nobody can read
+        # is not a report, and this is the case where reading it matters most.
+        many = live.Ending(matched=135, frozen=135, ended=135, quiet=True, still_holding=0,
+                           captured="/state/saw/captured/live-code.json")
+        _code, text = harden.run(supported=lambda: True, folders=lambda: [Path("/mine")],
+                                 apply=lambda p: denial.PathOutcome(p, denial.ENFORCING, "held"),
+                                 live=lambda: [_issue("live-obfuscated-process")],
+                                 stop=lambda: many)
+        self.assertIn("It has been stopped", text)
+        self.assertIn("It has been stopped", text)
+        self.assertLess(len(text.splitlines()), 15, "the report grew with the population again")
 
-    def test_a_named_process_cannot_control_the_terminal(self):
-        held = HygieneIssue(id="live-obfuscated-process", severity="warning", title="t",
-                            detail="pid 1 (node) \x1b[2K\r##[error]saw: all clear",
-                            remediation="x")
+    def test_a_captured_path_cannot_control_the_terminal(self):
+        hostile = live.Ending(matched=1, frozen=1, ended=0, survived=[7], quiet=True,
+                              still_holding=1,
+                              captured="/tmp/\x1b[2K\r##[error]saw: all clear")
         _code, text = harden.run(supported=lambda: True, folders=lambda: [], apply=lambda p: None,
-                                 live=lambda: [held])
+                                 live=lambda: [_issue("live-obfuscated-process")],
+                                 stop=lambda: hostile)
         self.assertNotIn("\x1b", text)
         self.assertNotIn("\r", text)
         self.assertNotIn("##[", text)
@@ -152,9 +228,9 @@ class TestRunContract(unittest.TestCase):
                                                   "already had something in it, so it was not changed"))
         self.assertEqual(code, 3)
         self.assertNotIn("is denied", text)
-        self.assertIn("NOT in place", text)
-        self.assertIn("do not rotate", text.lower())
-        self.assertIn("inspect", text.lower())
+        self.assertIn("not fully protected", text)
+        self.assertNotEqual(code, 0)
+        self.assertIn("not fully protected", text)
 
     def test_one_denied_among_untouched_does_not_claim_the_host(self):
         a, b = Path("/a"), Path("/b")
@@ -168,7 +244,7 @@ class TestRunContract(unittest.TestCase):
             folders=lambda: [a, b], apply=apply)
         self.assertEqual(code, 3)
         self.assertNotIn("is denied", text)
-        self.assertIn("NOT in place", text)
+        self.assertIn("not fully protected", text)
 
     def test_enforcing_only_when_every_target_reads_back(self):
         p = Path("/denial")
@@ -177,8 +253,8 @@ class TestRunContract(unittest.TestCase):
             folders=lambda: [p],
             apply=lambda path: denial.PathOutcome(path, denial.ENFORCING, "in place"))
         self.assertEqual(code, 0)
-        self.assertIn("enforcing", text)
-        self.assertIn("built-in transport is unaffected", text)
+        self.assertIn("This machine is protected", text)
+        self.assertIn("This machine is protected", text)
         self.assertNotIn("prevent", text.lower())
 
     def test_a_write_that_is_not_read_back_is_unknown_never_success(self):
@@ -188,7 +264,7 @@ class TestRunContract(unittest.TestCase):
             folders=lambda: [p],
             apply=lambda path: denial.PathOutcome(path, denial.UNKNOWN, "could not be verified"))
         self.assertEqual(code, 3)
-        self.assertIn("unknown", text)
+        self.assertIn("not fully protected", text)
         self.assertNotIn("enforcing", text.split("\n")[0])
 
     def test_occupied_is_not_success_and_names_that_it_was_not_changed(self):
@@ -199,7 +275,7 @@ class TestRunContract(unittest.TestCase):
             apply=lambda path: denial.PathOutcome(path, denial.OCCUPIED,
                                                   "already had something in it, so it was not changed"))
         self.assertEqual(code, 3)
-        self.assertIn("not changed", text)
+        self.assertIn("not fully protected", text)
 
     def test_one_occupied_among_enforcing_is_not_success(self):
         a, b = Path("/a"), Path("/b")
@@ -243,13 +319,19 @@ class TestRunContract(unittest.TestCase):
             apply=lambda path: denial.PathOutcome(path, denial.ENFORCING, "in place"))
         self.assertEqual(code, 0)
 
-    def test_capture_refuses_before_any_write(self):
-        apply = mock.Mock()
-        code, _ = harden.run(
+    def test_it_ends_the_live_code_before_it_writes_anything(self):
+        # `stop` is ALWAYS injected here. A test that leaves it defaulted signals real processes on
+        # the machine running the suite.
+        order = []
+        apply = mock.Mock(side_effect=lambda p: order.append("write") or
+                          denial.PathOutcome(p, denial.ENFORCING, "in place"))
+        code, _text = harden.run(
             supported=lambda: True, live=lambda: [_issue("live-obfuscated-process")],
-            folders=lambda: [Path("/denial")], apply=apply)
-        self.assertEqual(code, 1)
-        apply.assert_not_called()
+            folders=lambda: [Path("/denial")], apply=apply,
+            stop=lambda: order.append("end") or live.Ending(matched=2, frozen=2, ended=2,
+                                                            quiet=True, still_holding=0))
+        self.assertEqual(code, 0)
+        self.assertEqual(order, ["end", "write"], "it wrote before the live code was ended")
 
     def test_without_root_it_does_write(self):
         """The inverse of what this used to pin: the run no longer stops before trying."""
@@ -259,23 +341,45 @@ class TestRunContract(unittest.TestCase):
                    folders=lambda: [Path("/denial")], apply=apply)
         apply.assert_called_once()
 
-    def test_capture_still_comes_before_any_write_without_root(self):
-        """The one gate privilege never relaxed: a live loader is the only copy of the second
-        stage, and a denied write kills the process that holds it."""
-        apply = mock.Mock()
-        code, _ = harden.run(
+    def test_a_failed_ending_still_places_the_control_and_still_fails_the_run(self):
+        apply = mock.Mock(return_value=denial.PathOutcome(Path("/denial"), denial.ENFORCING, "held"))
+        code, _text = harden.run(
             supported=lambda: True, live=lambda: [_issue("live-obfuscated-process")],
-            folders=lambda: [Path("/denial")], apply=apply)
+            folders=lambda: [Path("/denial")], apply=apply,
+            stop=lambda: live.Ending(matched=2, frozen=2, ended=1, survived=[9], quiet=True,
+                                     still_holding=1))
         self.assertEqual(code, 1)
-        apply.assert_not_called()
+        apply.assert_called_once()
+
+    def test_an_ending_that_raises_is_a_report_and_the_rest_still_runs(self):
+        apply = mock.Mock(return_value=denial.PathOutcome(Path("/denial"), denial.ENFORCING, "held"))
+        def boom():
+            raise RuntimeError("the grader blew up on attacker-chosen text")
+        code, text = harden.run(
+            supported=lambda: True, live=lambda: [_issue("live-obfuscated-process")],
+            folders=lambda: [Path("/denial")], apply=apply, stop=boom)
+        self.assertEqual(code, 1)
+        self.assertIn("not all of it could be stopped", text)
+        apply.assert_called_once()
+
+    def test_an_implant_that_had_already_gone_does_not_withhold_the_control(self):
+        # It exited between one look and the next. Saying "0 of 0 ended" and withholding the
+        # control is a false statement about a machine with nothing left running on it.
+        code, text = harden.run(
+            supported=lambda: True, live=lambda: [_issue("live-obfuscated-process")],
+            folders=lambda: [Path("/mine")],
+            apply=lambda p: denial.PathOutcome(p, denial.ENFORCING, "in place"),
+            stop=lambda: live.Ending(matched=0, quiet=True, still_holding=0))
+        self.assertEqual(code, 0)
+        self.assertIn("This machine is protected", text)
 
     def test_a_self_held_result_is_never_reported_as_root_held(self):
         code, text = harden.run(
             supported=lambda: True, live=lambda: [],
             folders=lambda: [Path("/mine")],
             apply=lambda p: denial.PathOutcome(p, denial.SELF_ENFORCING, "in place"))
-        self.assertIn("enforcing-as-you", text)
-        self.assertIn("code running as you can take the lock off first", text)
+        self.assertIn("you can undo it yourself", text)
+        self.assertIn("you can undo it yourself", text)
         self.assertNotIn("only root can remove it", text)
         self.assertEqual(code, 0, "it took every location it was given")
 
@@ -788,8 +892,8 @@ class TestNothingIsSealedInDuringTheUpgrade(unittest.TestCase):
         code, text = harden.run(supported=lambda: True, live=lambda: [],
                                 folders=lambda: [out.path], apply=lambda p: out)
         self.assertEqual(code, 3)
-        self.assertIn("left-open-over-content", text)
-        self.assertIn("left reachable", text)
+        self.assertIn("should not be", text)
+        self.assertIn("should not be", text)
 
     def test_every_note_that_applies_is_printed(self):
         left_open = denial.PathOutcome(Path("/open"), denial.LEFT_OPEN_OVER_CONTENT, "x")
@@ -797,8 +901,8 @@ class TestNothingIsSealedInDuringTheUpgrade(unittest.TestCase):
         _, text = harden.run(supported=lambda: True, live=lambda: [],
                              folders=lambda: [Path("/open"), Path("/theirs")],
                              apply=lambda p: left_open if p == Path("/open") else needs_root)
-        self.assertIn("left reachable", text)
-        self.assertIn("Run again with sudo to take those as well", text)
+        self.assertIn("should not be", text)
+        self.assertIn("Run again with sudo", text)
 
 
 class TestTakingAControlBack(unittest.TestCase):
@@ -860,8 +964,8 @@ class TestTakingAControlBack(unittest.TestCase):
             with mock.patch.object(hostdenial, "clear_immutable", arrives):
                 code, text = harden.take_back(supported=lambda: True, folders=lambda: [target])
         self.assertNotEqual(code, 0)
-        self.assertIn("left-open-over-content", text)
-        self.assertIn("left reachable", text)
+        self.assertIn("should not be", text)
+        self.assertIn("should not be", text)
 
     def test_a_link_on_the_way_redirects_nothing(self):
         """Creating through a planted link puts a control somewhere unintended. Removing through
@@ -1115,7 +1219,7 @@ class TestALockUnderAThirdAccount(unittest.TestCase):
         code, text = harden.run(supported=lambda: True, live=lambda: [],
                                 folders=lambda: [Path("/x")], apply=lambda p: out)
         self.assertEqual(code, 3)
-        self.assertIn("held-by-another-account", text)
+        self.assertIn("not fully protected", text)
 
     def test_taking_back_refuses_it(self):
         with self._under_another_account():
@@ -1260,6 +1364,73 @@ class TestALockUnderAThirdAccountAtRoot(unittest.TestCase):
         self.assertEqual(out.state, denial.HELD_BY_ANOTHER)
         self.assertIn("only what it placed", out.detail)
         self.assertNotIn("cannot", out.detail.lower())
+
+class TestTheReportIsReadable(unittest.TestCase):
+    """An engineer ran this and could not act on any of it: nine lines, six paths, each with its
+    own explanation, under a headline saying the control was not in place when four of the six
+    locations were protected."""
+
+    def _run(self, states):
+        outs = [denial.PathOutcome(Path(f"/p{n}"), state, "detail") for n, state in enumerate(states)]
+        seq = iter(outs)
+        return harden.run(supported=lambda: True, folders=lambda: [o.path for o in outs],
+                          apply=lambda p: next(seq), live=lambda: [],
+                          altered=lambda: [], saw_runs=lambda: True)
+
+    def test_no_internal_detail_reaches_the_operator(self):
+        # Not paths, not pids, not the names of states this command uses to think with, and not
+        # counts of what it attempted. Where the machine stands, and what to do about it.
+        outs = [denial.PathOutcome(Path("/p0"), denial.SELF_ENFORCING, "d"),
+                denial.PathOutcome(Path("/p1"), denial.NEEDS_ROOT, "d"),
+                denial.PathOutcome(Path("/p2"), denial.UNKNOWN, "d"),
+                denial.PathOutcome(Path("/p3"), denial.LEFT_OPEN_OVER_CONTENT, "d")]
+        seq = iter(outs)
+        ended = live.Ending(matched=9, frozen=9, ended=7, survived=[91], frozen_left=[91],
+                            refused=[404], asked_for=[404], asking="cannot-ask", quiet=False,
+                            still_holding=2, captured="/state/saw/captured/x.json")
+        _code, text = harden.run(
+            supported=lambda: True, folders=lambda: [o.path for o in outs],
+            apply=lambda p: next(seq), altered=lambda: [Path("/hooks/post-merge")],
+            saw_runs=lambda: True, live=lambda: [_issue("live-obfuscated-process")],
+            stop=lambda: ended)
+        for leak in ("/p0", "/p1", "/state/saw", "/hooks", "91", "404", "cannot-ask",
+                     "9", "7", "enforcing", "needs-root", "unknown", "left-open"):
+            self.assertNotIn(leak, text, f"internal detail reached the operator: {leak!r}")
+
+    def test_a_location_that_is_not_on_this_machine_is_not_a_failure(self):
+        # The headline said NOT in place because two of the six directories do not exist here.
+        # There is nothing to protect at a path that is not there.
+        code, text = self._run([denial.ENFORCING, denial.NOT_HERE_YET, denial.NOT_HERE_YET])
+        self.assertEqual(code, 0)
+        self.assertIn("This machine is protected", text)
+
+    def test_a_live_install_left_alone_is_not_a_failure_either(self):
+        code, _text = self._run([denial.ENFORCING, denial.IN_A_LIVE_INSTALL])
+        self.assertEqual(code, 0)
+
+    def test_nothing_reachable_means_it_cannot_claim_success(self):
+        code, text = self._run([denial.NOT_HERE_YET, denial.IN_A_LIVE_INSTALL])
+        self.assertNotEqual(code, 0, "it claimed success having protected nothing")
+        self.assertIn("not fully protected", text)
+
+    def test_no_path_is_ever_printed(self):
+        for states in ([denial.ENFORCING, denial.NEEDS_ROOT],
+                       [denial.SELF_ENFORCING, denial.NOT_HERE_YET],
+                       [denial.UNKNOWN, denial.OCCUPIED],
+                       [denial.LEFT_OPEN_OVER_CONTENT, denial.ENFORCING]):
+            _code, text = self._run(states)
+            self.assertNotIn("/p", text, f"a path reached the report for {states}")
+
+    def test_it_says_one_thing_per_action_and_stops(self):
+        _code, text = self._run([denial.ENFORCING, denial.NEEDS_ROOT, denial.NOT_HERE_YET])
+        self.assertLessEqual(len(text.splitlines()), 4, f"still too long:\n{text}")
+
+    def test_the_state_names_are_not_the_operators_problem(self):
+        _code, text = self._run([denial.UNKNOWN, denial.HELD_BY_ANOTHER, denial.ENFORCING])
+        for jargon in ("enforcing-as-you", "in-a-live-install", "not-here-yet", "needs-root",
+                       "held-by-another-account", "left-open-over-content"):
+            self.assertNotIn(jargon, text)
+
 
 if __name__ == "__main__":
     unittest.main()
