@@ -46,6 +46,17 @@ reader, not the mechanism or the weakness it closed.
   code running with nothing behind it to scan — and neither is a reason to leave it running.
 
 ### Fixed
+- **A scan now reads the installed packages of every project, not only those laid out flat.** Where
+  an installer puts the real packages in a store and leaves links behind — which is what `pnpm` does
+  by default, and `bun` and `deno` on request — a scan read none of them, so nothing that keys on an
+  installed package applied: not the known-malware check, not ghost packages, not lifecycle hooks,
+  not the entry-point loader check. The installed tree of a workspace, and any tree the project
+  never declared, were not read either. On one real project this is 615 packages where none were
+  read before.
+- **A package on disk that no lockfile accounts for is now named when it is known to be malicious.**
+  It was reported only as a package the lockfile does not explain, at a lower grade, unless an
+  advisory database had been downloaded first — so on a fresh install the check that names known
+  malware never answered. A package dropped by an install script is exactly that case.
 - **The payload is no longer printed.** A finding about running code used to carry the code itself,
   which means what it identifies itself by and the address it talks to went to the terminal, the
   JSON, the SARIF and every saved report. The finding now carries a short fingerprint instead, and
