@@ -59,6 +59,8 @@ def live_code_processes(snapshot=None) -> list[tuple[object, str, str]]:
     for process in snap.processes:
         if process.argv_unreadable or not process.argv:
             continue
+        if process.identity is not None and process.identity.zombie:
+            continue          # killed and awaiting its parent — it executes nothing
         invocation = resolve_invocation(process.argv)
         for code in invocation.code_args:
             verdict = _obfuscation_verdict(code)

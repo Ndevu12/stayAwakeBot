@@ -149,7 +149,9 @@ class TestAgainstARealSpawner(unittest.TestCase):
             found = []
             for pid in self._descendants(parent.pid, snapshot()) | {parent.pid}:
                 who, _state = identify(pid)
-                if who is not None:
+                # A zombie is killed and waiting for its parent to reap it. It executes nothing,
+                # and counting one as "it came back" contradicts what `has_ended` decides.
+                if who is not None and not who.zombie:
                     found.append((Process(pid=pid, argv=("node", "-e", "p"), identity=who),
                                   "p", "dynamic-exec sink"))
             return found

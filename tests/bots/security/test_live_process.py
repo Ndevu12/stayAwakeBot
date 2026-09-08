@@ -148,6 +148,15 @@ class TestAPopulationIsOneFinding(unittest.TestCase):
         self.assertEqual(len(issues), 1)
         self.assertNotIn("more", issues[0].detail)
 
+    def test_a_zombie_is_not_holding_anything(self):
+        # Killed and waiting to be reaped. On Linux its argv is still readable, so without this it
+        # counts as live code and a finished pass reads as "it came back".
+        from stayawake.utils.procsnap import Identity
+        dead = Process(pid=9, argv=("node", "-e", _loader()),
+                       identity=Identity(pid=9, ppid=1, uid=501, start_time=1, zombie=True))
+        self.assertEqual(process.live_code_processes(_snapshot(dead)), [])
+        self.assertEqual(_check(_snapshot(dead)), [])
+
     def test_the_finding_and_the_ender_agree_about_which_processes_qualify(self):
         # Two consumers deciding this separately is how they end up disagreeing about what is
         # running; both ask live_code_processes.
