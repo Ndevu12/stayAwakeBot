@@ -438,8 +438,8 @@ class TestOnlyALockfileMayProveAnything(unittest.TestCase):
 class TestNothingUnaccountedSurvivesTheTree(unittest.TestCase):
     """A confirmed removal clears the installed tree, and says so only about what it could not."""
 
-    def _pnpm(self, repo, name="left-pad", version="1.0.0"):
-        held = repo.root / installed.INSTALLED_DIR / installed.PACKAGE_STORE
+    def _stored(self, repo, name="left-pad", version="1.0.0"):
+        held = repo.root / installed.INSTALLED_DIR / ".store"
         real = held / f"{name}@{version}" / installed.INSTALLED_DIR / name
         real.mkdir(parents=True)
         (real / "package.json").write_text(json.dumps({"name": name, "version": version}),
@@ -450,7 +450,7 @@ class TestNothingUnaccountedSurvivesTheTree(unittest.TestCase):
 
     def test_a_store_of_links_is_removed_like_any_other_tree(self):
         repo = _Repo()
-        self._pnpm(repo)
+        self._stored(repo)
         report = installed.remove_rebuildable(repo.root, remove_lockfiles=False)
         self.assertFalse((repo.root / installed.INSTALLED_DIR).exists())
         self.assertEqual(report.removed_packages, 1)
@@ -870,6 +870,40 @@ class TestAConfirmedInfectionLeavesNoDerivedState(unittest.TestCase):
         report = installed.remove_confirmed(repo.root, remove_lockfiles=False)
         self.assertFalse(buried.parent.exists())
         self.assertEqual(report.removed_trees, 1)
+
+    def test_a_resolver_that_needs_no_installed_tree_loses_its_cache(self):
+        repo = self._repo()
+        cache = repo.root / ".yarn" / "cache"
+        cache.mkdir(parents=True)
+        (cache / "left-pad-npm-1.0.0.zip").write_bytes(b"PK\x03\x04")
+        (repo.root / ".yarn" / "unplugged").mkdir()
+        (repo.root / ".pnp.cjs").write_text("module.exports = {};\n", encoding="utf-8")
+        installed.remove_confirmed(repo.root, remove_lockfiles=False)
+        self.assertFalse(cache.exists())
+        self.assertFalse((repo.root / ".yarn" / "unplugged").exists())
+        self.assertFalse((repo.root / ".pnp.cjs").exists())
+
+    def test_a_tool_directory_keeps_what_the_project_committed(self):
+        repo = self._repo()
+        (repo.root / ".yarn" / "cache").mkdir(parents=True)
+        for kept in ("patches", "plugins", "releases"):
+            held = repo.root / ".yarn" / kept
+            held.mkdir()
+            (held / "keep.txt").write_text("committed\n", encoding="utf-8")
+        installed.remove_confirmed(repo.root, remove_lockfiles=False)
+        for kept in ("patches", "plugins", "releases"):
+            self.assertTrue((repo.root / ".yarn" / kept / "keep.txt").is_file(),
+                            f"a project's committed .yarn/{kept} was removed")
+
+    def test_every_lockfile_the_ecosystem_writes_is_removed(self):
+        for name in ("package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml",
+                     "bun.lock", "bun.lockb", "deno.lock"):
+            with self.subTest(lockfile=name):
+                repo = _Repo(lockfile=False)
+                lock = repo.root / name
+                lock.write_bytes(b"{}")
+                installed.remove_confirmed(repo.root, remove_lockfiles=True)
+                self.assertFalse(lock.exists(), f"{name} survived a confirmed removal")
 
     def test_a_build_output_goes_with_whatever_it_bundled(self):
         repo = self._repo()
