@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -67,7 +68,7 @@ def _prepare_fix_against(scans, spy, extra=()):
                           side_effect=lambda *a, **k: scans.pop(0) if scans else idle),
         mock.patch.object(pr.remediation, "plan", return_value=[]),
         mock.patch.object(pr.remediation, "apply", return_value=[]),
-        mock.patch.object(pr.fix.installed, "remove_rebuildable", spy),
+        mock.patch.object(pr.fix.installed, "remove_installed", spy),
         *extra,
     ]
     with contextlib.ExitStack() as stack:
@@ -434,6 +435,116 @@ class TestOnlyALockfileMayProveAnything(unittest.TestCase):
         self.assertNotIn(("victim", "4.2.0"), declared)
 
 
+class TestNothingUnaccountedSurvivesTheTree(unittest.TestCase):
+    """A confirmed removal clears the installed tree, and says so only about what it could not."""
+
+    def _pnpm(self, repo, name="left-pad", version="1.0.0"):
+        held = repo.root / installed.INSTALLED_DIR / installed.PACKAGE_STORE
+        real = held / f"{name}@{version}" / installed.INSTALLED_DIR / name
+        real.mkdir(parents=True)
+        (real / "package.json").write_text(json.dumps({"name": name, "version": version}),
+                                           encoding="utf-8")
+        (real / "index.js").write_text("module.exports = 1;\n", encoding="utf-8")
+        (repo.root / installed.INSTALLED_DIR / name).symlink_to(real)
+        return real
+
+    def test_a_store_of_links_is_removed_like_any_other_tree(self):
+        repo = _Repo()
+        self._pnpm(repo)
+        report = installed.remove_rebuildable(repo.root, remove_lockfiles=False)
+        self.assertFalse((repo.root / installed.INSTALLED_DIR).exists())
+        self.assertEqual(report.removed_packages, 1)
+        self.assertEqual(report.kept_note(), "")
+
+    def test_a_dot_directory_and_a_loose_file_do_not_survive(self):
+        repo = _Repo()
+        repo.install("left-pad", "1.0.0")
+        repo.install("mystery", "9.9.9")
+        shims = repo.root / installed.INSTALLED_DIR / ".bin"
+        shims.mkdir()
+        (shims / "worm").write_text("#!/bin/sh\n", encoding="utf-8")
+        loose = repo.root / installed.INSTALLED_DIR / "loose.js"
+        loose.write_text("module.exports = 1;\n", encoding="utf-8")
+        installed.remove_rebuildable(repo.root, remove_lockfiles=False)
+        self.assertFalse((repo.root / installed.INSTALLED_DIR).exists())
+
+    def test_what_is_swept_is_copied_before_it_is_removed(self):
+        repo = _Repo()
+        repo.install("left-pad", "1.0.0")
+        loose = repo.root / installed.INSTALLED_DIR / "loose.js"
+        loose.write_text("module.exports = 42;\n", encoding="utf-8")
+        installed.remove_rebuildable(repo.root, remove_lockfiles=False)
+        saved = list((repo.root / QUARANTINE_DIR).rglob("loose.js"))
+        self.assertEqual(len(saved), 1, "a swept file was removed without a copy")
+        self.assertEqual(saved[0].read_text(encoding="utf-8"), "module.exports = 42;\n")
+
+    def test_a_link_out_of_the_repository_loses_the_link_and_keeps_its_target(self):
+        repo = _Repo()
+        repo.install("left-pad", "1.0.0")
+        outside = Path(tempfile.mkdtemp()) / "elsewhere"
+        outside.mkdir()
+        (outside / "package.json").write_text(json.dumps({"name": "linked", "version": "1.0.0"}),
+                                              encoding="utf-8")
+        (repo.root / installed.INSTALLED_DIR / "linked").symlink_to(outside)
+        installed.remove_rebuildable(repo.root, remove_lockfiles=False)
+        self.assertFalse((repo.root / installed.INSTALLED_DIR).exists())
+        self.assertTrue(outside.is_dir(), "a link's target was removed")
+
+    def test_a_tree_that_is_itself_a_link_is_left_and_named(self):
+        repo = _Repo()
+        store = Path(tempfile.mkdtemp()) / "store"
+        (store / "left-pad").mkdir(parents=True)
+        (store / "left-pad" / "package.json").write_text(
+            json.dumps({"name": "left-pad", "version": "1.0.0"}), encoding="utf-8")
+        (repo.root / installed.INSTALLED_DIR).symlink_to(store)
+        report = installed.remove_rebuildable(repo.root, remove_lockfiles=False)
+        self.assertTrue((store / "left-pad").is_dir(), "a link's target was removed")
+        self.assertIn("left in place", report.note())
+
+    def test_an_incomplete_sweep_copy_removes_nothing(self):
+        repo = _Repo()
+        repo.install("left-pad", "1.0.0")
+        shims = repo.root / installed.INSTALLED_DIR / ".bin"
+        shims.mkdir()
+        (shims / "worm").write_text("#!/bin/sh\n", encoding="utf-8")
+        with mock.patch.object(installed, "_every_file_arrived", return_value=False):
+            with self.assertRaises(OSError):
+                installed.remove_rebuildable(repo.root, remove_lockfiles=False)
+        self.assertTrue((shims / "worm").is_file(), "a stray was removed without a whole copy")
+
+    def test_a_tree_that_cannot_be_read_is_named_as_kept(self):
+        if os.geteuid() == 0:
+            self.skipTest("root reads a directory whatever its mode says")
+        repo = _Repo(lockfile=False)
+        repo.install("left-pad", "1.0.0")
+        tree = repo.root / installed.INSTALLED_DIR
+        tree.chmod(0o000)
+        try:
+            report = installed.remove_rebuildable(repo.root, remove_lockfiles=False)
+        finally:
+            tree.chmod(0o755)
+        self.assertIn("could not be read", report.note())
+
+    def test_a_tree_nothing_proves_derivable_is_named_as_kept(self):
+        repo = _Repo(lockfile=False)
+        repo.install("left-pad", "1.0.0")
+        report = installed.remove_rebuildable(repo.root, remove_lockfiles=False)
+        self.assertEqual(report.removed_packages, 0)
+        self.assertIn("no lockfile declares", report.note())
+
+    def test_a_tree_that_was_cleared_does_not_claim_anything_was_kept(self):
+        repo = _Repo()
+        repo.install("left-pad", "1.0.0")
+        report = installed.remove_rebuildable(repo.root, remove_lockfiles=False)
+        self.assertEqual(report.removed_packages, 1)
+        self.assertEqual(report.kept_note(), "")
+
+    def test_a_repository_with_nothing_installed_says_nothing(self):
+        repo = _Repo()
+        report = installed.remove_rebuildable(repo.root, remove_lockfiles=False)
+        self.assertEqual(report.kept_note(), "")
+
+
 class TestRemovalIsDeepestFirst(unittest.TestCase):
     def test_a_nested_derivable_package_does_not_abort_the_run(self):
         # Removing the parent first takes the child with it, and the walk then deletes a path that
@@ -704,6 +815,145 @@ class TestTheProjectTreeIsRemovedOnTheRepo(unittest.TestCase):
         self.assertTrue(package.is_dir())
         self.assertTrue(repo.lock.is_file())
         self.assertEqual(list(host.iterdir()), [marker])
+
+
+class TestAConfirmedInfectionLeavesNoDerivedState(unittest.TestCase):
+    """A confirmed infection deletes what can be rebuilt, and copies none of it."""
+
+    def _repo(self):
+        repo = _Repo()
+        (repo.root / "package.json").write_text(json.dumps(
+            {"name": "app", "version": "1.0.0", "workspaces": ["packages/*"]}), encoding="utf-8")
+        return repo
+
+    def test_a_store_of_links_and_what_sits_beside_it_all_go(self):
+        repo = self._repo()
+        nm = repo.root / installed.INSTALLED_DIR
+        real = nm / ".pnpm" / "left-pad@1.0.0" / installed.INSTALLED_DIR / "left-pad"
+        real.mkdir(parents=True)
+        (real / "package.json").write_text(json.dumps({"name": "left-pad", "version": "1.0.0"}),
+                                           encoding="utf-8")
+        (nm / "left-pad").symlink_to(real)
+        (nm / ".bin").mkdir()
+        (nm / ".bin" / "worm").write_text("#!/bin/sh\n", encoding="utf-8")
+        (nm / "loose.js").write_text("module.exports = 1;\n", encoding="utf-8")
+        report = installed.remove_confirmed(repo.root, remove_lockfiles=False)
+        self.assertFalse(nm.exists())
+        self.assertEqual(report.removed_trees, 1)
+
+    def test_a_workspace_keeps_none_of_its_own(self):
+        repo = self._repo()
+        repo.install("left-pad", "1.0.0")
+        ws = repo.root / "packages" / "app"
+        (ws / installed.INSTALLED_DIR / "evil-dep").mkdir(parents=True)
+        (ws / "package.json").write_text(json.dumps({"name": "w"}), encoding="utf-8")
+        report = installed.remove_confirmed(repo.root, remove_lockfiles=False)
+        self.assertFalse((ws / installed.INSTALLED_DIR).exists())
+        self.assertEqual(report.removed_trees, 2)
+
+    def test_a_tree_under_a_checkout_nested_in_this_one_goes_too(self):
+        # Whatever installed it can install it again; what runs on the next require is what counts.
+        repo = self._repo()
+        repo.install("left-pad", "1.0.0")
+        other = repo.root / "packages" / "vendored"
+        (other / ".git").mkdir(parents=True)
+        (other / "package.json").write_text(json.dumps({"name": "other"}), encoding="utf-8")
+        (other / installed.INSTALLED_DIR / "keep-me").mkdir(parents=True)
+        installed.remove_confirmed(repo.root, remove_lockfiles=False)
+        self.assertFalse((other / installed.INSTALLED_DIR).exists())
+        self.assertTrue((other / ".git").is_dir(), "another checkout's git directory was removed")
+
+    def test_a_tree_the_manifest_never_mentions_goes_too(self):
+        repo = self._repo()
+        buried = repo.root / "tools" / "scripts" / installed.INSTALLED_DIR / "evil-dep"
+        buried.mkdir(parents=True)
+        report = installed.remove_confirmed(repo.root, remove_lockfiles=False)
+        self.assertFalse(buried.parent.exists())
+        self.assertEqual(report.removed_trees, 1)
+
+    def test_a_build_output_goes_with_whatever_it_bundled(self):
+        repo = self._repo()
+        repo.install("left-pad", "1.0.0")
+        bundled = repo.root / ".next" / "standalone" / installed.INSTALLED_DIR / "evil-dep"
+        bundled.mkdir(parents=True)
+        (bundled / "index.js").write_text("module.exports = 1;\n", encoding="utf-8")
+        report = installed.remove_confirmed(repo.root, remove_lockfiles=False)
+        self.assertFalse((repo.root / ".next").exists())
+        self.assertIn(".next", report.removed_builds)
+
+    def test_nothing_is_copied_anywhere(self):
+        repo = self._repo()
+        repo.install("left-pad", "1.0.0")
+        report = installed.remove_confirmed(repo.root, remove_lockfiles=True)
+        self.assertFalse((repo.root / QUARANTINE_DIR).exists(),
+                         "a confirmed removal kept a copy of the payload")
+        self.assertIsNone(report.copies)
+
+    def test_a_package_linked_out_of_the_repository_keeps_its_target(self):
+        repo = self._repo()
+        repo.install("left-pad", "1.0.0")
+        outside = Path(tempfile.mkdtemp()) / "elsewhere"
+        outside.mkdir()
+        (outside / "package.json").write_text(json.dumps({"name": "linked"}), encoding="utf-8")
+        (repo.root / installed.INSTALLED_DIR / "linked").symlink_to(outside)
+        installed.remove_confirmed(repo.root, remove_lockfiles=False)
+        self.assertFalse((repo.root / installed.INSTALLED_DIR).exists())
+        self.assertTrue(outside.is_dir(), "a link's target was removed")
+
+    def test_a_tree_that_is_itself_a_link_out_keeps_what_it_points_at(self):
+        repo = self._repo()
+        store = Path(tempfile.mkdtemp()) / "store"
+        (store / "left-pad").mkdir(parents=True)
+        (store / "left-pad" / "index.js").write_text("module.exports = 1;\n", encoding="utf-8")
+        (repo.root / installed.INSTALLED_DIR).symlink_to(store)
+        report = installed.remove_confirmed(repo.root, remove_lockfiles=False)
+        self.assertFalse((repo.root / installed.INSTALLED_DIR).is_symlink())
+        self.assertTrue((store / "left-pad" / "index.js").is_file(),
+                        "a link's target was removed")
+        self.assertEqual(report.removed_trees, 1)
+
+    def test_a_tree_the_write_guard_refuses_is_left_alone(self):
+        repo = self._repo()
+        repo.install("left-pad", "1.0.0")
+        with mock.patch.object(installed, "is_safe_write_target", return_value=False):
+            report = installed.remove_confirmed(repo.root, remove_lockfiles=True)
+        self.assertTrue((repo.root / installed.INSTALLED_DIR).is_dir())
+        self.assertEqual(report.removed_trees, 0)
+
+    def test_the_lockfile_goes_and_ci_keeps_it(self):
+        repo = self._repo()
+        repo.install("left-pad", "1.0.0")
+        installed.remove_confirmed(repo.root, remove_lockfiles=False)
+        self.assertTrue(repo.lock.is_file())
+        installed.remove_confirmed(repo.root, remove_lockfiles=True)
+        self.assertFalse(repo.lock.exists())
+
+    def test_a_repository_with_nothing_derived_removes_nothing(self):
+        repo = self._repo()
+        report = installed.remove_confirmed(repo.root, remove_lockfiles=False)
+        self.assertEqual(report.removed_trees, 0)
+        self.assertEqual(report.note(), "")
+
+
+class TestConfidenceChoosesTheRemoval(unittest.TestCase):
+    """Which removal runs is the finding's confidence, decided in one place."""
+
+    def test_a_confirmed_infection_takes_the_whole_tree_and_keeps_no_copy(self):
+        repo = _Repo()
+        repo.install("left-pad", "1.0.0")
+        repo.install("mystery", "9.9.9")
+        report = installed.remove_installed(repo.root, confirmed=True, remove_lockfiles=False)
+        self.assertFalse((repo.root / installed.INSTALLED_DIR).exists())
+        self.assertEqual(report.preserved_packages, 0)
+        self.assertFalse((repo.root / QUARANTINE_DIR).exists())
+
+    def test_anything_less_keeps_what_no_lockfile_accounts_for(self):
+        repo = _Repo()
+        repo.install("left-pad", "1.0.0")
+        repo.install("mystery", "9.9.9")
+        report = installed.remove_installed(repo.root, confirmed=False, remove_lockfiles=False)
+        self.assertEqual(report.preserved_packages, 1)
+        self.assertIsNotNone(report.copies)
 
 
 class TestConfirmedFixReachesTheRemover(unittest.TestCase):

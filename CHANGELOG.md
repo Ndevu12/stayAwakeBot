@@ -13,6 +13,13 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Fixed
+- **On a confirmed infection, `saw fix` removes every installed tree in the repository, whole**,
+  along with the lockfiles and the generated output directories. Reinstall and rebuild to restore
+  them; whatever installed them can install them again.
+- **`fix` does not reach outside the repository it is cleaning.** Anything linked to a location
+  outside it keeps what it points at, and directories listed under `exclude_dirs` are untouched.
+
 ## [0.9.0] - 2026-09-07
 
 ### Added
@@ -72,13 +79,11 @@ reader, not the mechanism or the weakness it closed.
   command.** `axios` was reported this way in every build it ships, so a project that vendors it,
   and a host running a service built on it, saw a suspicious verdict on ordinary code. Across
   85,649 files of ordinary dependencies this withdraws 102 such reports and adds none. A file that
-  turns decoded data into a running command is still reported, including where the module that
-  runs it is loaded under a name assembled at run time.
+  turns decoded data into a running command is still reported.
 - **Ordinary code that matches text next to reading base64 is no longer reported as a running
-  payload.** A bundled library that holds its pattern in a variable — which is what a minifier
-  produces — was read as running a command, and next to an ordinary base64 decode that was enough
-  to report a live foothold on the host, withhold the credential-rotation all-clear, and print the
-  incident runbook. It was reported on every run of a host serving edge functions locally.
+  payload.** A bundled library was reported this way on every run of a host serving edge functions
+  locally, and that was enough to report a live foothold on the host, withhold the
+  credential-rotation all-clear, and print the incident runbook.
 - **`saw hook install` no longer runs a stranger's hook from saw's own directory.** A hook found in
   the directory saw manages that saw did not install was kept and run after saw's; it is now moved
   aside and named. `saw hook uninstall` no longer puts such a hook back under a hook's name.

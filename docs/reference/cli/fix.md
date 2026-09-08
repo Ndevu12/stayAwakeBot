@@ -15,11 +15,13 @@ rolling PR per repository. Bare `saw fix` only ever prepares a cleanup branch.
 branch and they do not wait for a pull request: the files are gone from the checkout you are
 standing in whether the pull request is merged, closed, or never opened.
 
-Nothing is removed before it is copied. The installed tree, the lockfile and any generated output
-directories are written to `.malware-quarantine/` first, and the run names the directory it used so
-you can put them back. That includes packages the lockfile does not account for — a locally linked
-or hand-patched one among them — which are copied out and then removed with the rest, because a
-reinstall would not clear them. Directories you listed under `exclude_dirs` are never removed.
+**On a confirmed infection every installed tree in the repository is removed, whole**, together
+with the lockfiles and the generated output directories. Nothing inside those directories is kept.
+Reinstall and rebuild to restore them; whatever installed them can install them again.
+
+**What is not this repository's, it does not take.** Anything linked to a location outside the
+repository loses the link, and what it points at is left alone. Directories you listed under
+`exclude_dirs` are never removed.
 
 `fix` cleans your working tree and records that as a new commit. What the repository already
 stored stays stored: the payload is still there in the earlier commit, and one `git show` puts it
