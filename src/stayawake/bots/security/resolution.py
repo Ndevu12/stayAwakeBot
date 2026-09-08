@@ -39,19 +39,32 @@ def enclosing_repo_root(start: Path | None = None) -> Path:
     return start
 
 
-def discover_local_repos(patterns: list[str], opts: ScanOptions) -> list[Path]:
+def discover_local_repos(patterns: list[str], opts: ScanOptions,
+                        *, unreadable: list[Path] | None = None) -> list[Path]:
     """Every git repository under the given path/glob `patterns` (deduped, deterministic order).
     Descends until it hits a `.git` (that dir is a repo — it is not descended further), pruning
-    `opts.exclude_dirs` so a huge `node_modules` never dominates the walk."""
+    `opts.exclude_dirs` so a huge `node_modules` never dominates the walk.
+
+    Directories the walk cannot enter are appended to `unreadable`, because one it skips may be the
+    repository the pattern was written for — dropping it silently answers `clean` about a target
+    nobody looked at.
+    """
     repos: list[Path] = []
     seen: set[str] = set()
+
+    def _unwalkable(err: OSError) -> None:
+        if unreadable is not None:
+            where = getattr(err, "filename", None)
+            if where:
+                unreadable.append(Path(where))
+
     for pat in patterns or []:
         root = Path(os.path.expanduser(pat).split("*", 1)[0] or "/")
         if not os.path.lexists(root):
             root = root.parent
         if not os.path.lexists(root):
             continue
-        for dirpath, dirnames, _ in os.walk(root):
+        for dirpath, dirnames, _ in os.walk(root, onerror=_unwalkable):
             if (Path(dirpath) / ".git").exists():
                 rp = Path(dirpath).resolve()
                 if str(rp) not in seen:
@@ -235,7 +248,11 @@ def resolve_local_targets(patterns: list[str], opts: ScanOptions) -> list[LocalT
             continue
         # A file holds no repositories, and discovery treats a `*` in its NAME as a pattern — so a
         # real file called `star*name.js` was answered by the repositories beside it.
-        found = [] if named.is_file() else discover_local_repos([pat], opts)
+        blocked: list[Path] = []
+        found = [] if named.is_file() else discover_local_repos([pat], opts, unreadable=blocked)
+        # A directory discovery could not enter becomes a target of its own, so it reaches the
+        # operator through the same fail-closed path as one they named directly.
+        candidates += [LocalTarget(b, None, DIRECTORY) for b in blocked]
         if found:
             candidates += [LocalTarget(r, None, REPOSITORY) for r in found]
         elif named.is_dir():

@@ -50,6 +50,11 @@ reader, not the mechanism or the weakness it closed.
   shape to look for.
 
 ### Fixed
+- **A folder the scan could not read no longer passes as clean.** If a directory inside a target
+  could not be opened, it was skipped and nothing said so — the run could finish clean, at exit 0,
+  with a whole subtree unread. An unreadable file has always been reported that way; a directory is
+  now too, and the result names it. The same folder reached through a pattern rather than named
+  directly was dropped in silence as well; both now answer the same way.
 - **A symlink into a credential store is graded without being read.** A file symlinked from a
   scanned tree into SSH keys, cloud credentials or a shell startup file had its contents read, and
   a preview of them could land in the report, the JSON, the SARIF and a saved report bundle — so

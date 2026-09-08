@@ -797,5 +797,62 @@ class TestEachTargetOwnsItsCoverageNotes(unittest.TestCase):
                              f"a lone target's note was needlessly attributed: {n}")
 
 
+class TestAFolderThatCouldNotBeReadIsNotClean(unittest.TestCase):
+    """An unreadable FILE has always been recorded and fails the target closed. A directory was
+    skipped in silence, so a target could report clean with a whole subtree unread — the one thing
+    the scanner must never do."""
+
+    def setUp(self):
+        import subprocess
+        self.d = Path(tempfile.mkdtemp())
+        subprocess.run(["git", "init", "-q", str(self.d)], check=True)
+        (self.d / "ok.js").write_text("export const ok = 1;\n", encoding="utf-8")
+        self.shut = self.d / "src"
+        self.shut.mkdir()
+        (self.shut / "bad.js").write_text("var _$_ab12 = 1;\n", encoding="utf-8")
+        os.chmod(self.shut, 0o000)
+        self.addCleanup(os.chmod, self.shut, 0o755)
+
+    def test_it_does_not_report_clean(self):
+        # Asserted on the target's own status row and the fail-closed line, not on the word
+        # "clean" — that word appears in the host note and in the refusal itself.
+        report = _report_of(self.d)
+        self.assertIn("ERROR", report)
+        self.assertIn("failing closed", _stderr_of(self.d))
+
+    def test_it_names_the_folder_it_could_not_read(self):
+        self.assertIn("src/", _report_of(self.d) + _stderr_of(self.d))
+
+    def test_a_readable_tree_is_unaffected(self):
+        os.chmod(self.shut, 0o755)
+        # The payload inside is found, and nothing claims a folder went unread.
+        self.assertIn("bad.js", _report_of(self.d))
+        self.assertNotIn("src/: PermissionError", _report_of(self.d))
+
+
+class TestDiscoveryDoesNotDropWhatItCannotEnter(unittest.TestCase):
+    """Naming an unreadable repository directly stopped the run. Reaching the same one through a
+    pattern left it out without a word, and the run could end clean."""
+
+    def setUp(self):
+        import subprocess
+        self.base = Path(tempfile.mkdtemp())
+        for name in ("repo-open", "repo-shut"):
+            r = self.base / name
+            subprocess.run(["git", "init", "-q", str(r)], check=True)
+            (r / "a.js").write_text("export const ok = 1;\n", encoding="utf-8")
+        self.shut = self.base / "repo-shut"
+        os.chmod(self.shut, 0o000)
+        self.addCleanup(os.chmod, self.shut, 0o755)
+
+    def test_a_pattern_answers_the_same_way_as_naming_it(self):
+        direct = _report_of(self.shut) + _stderr_of(self.shut)
+        pattern = _report_of(Path(str(self.base) + "/repo-*"))
+        pattern += _stderr_of(Path(str(self.base) + "/repo-*"))
+        self.assertIn("repo-shut", direct)
+        self.assertIn("repo-shut", pattern,
+                      "the pattern dropped a repository it matched but could not read")
+
+
 if __name__ == "__main__":
     unittest.main()

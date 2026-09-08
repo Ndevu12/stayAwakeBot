@@ -84,13 +84,26 @@ class Target:
             return
         if self._walk_cache is None:            # walk once, memoize (byte-identical replay after)
             cache: list[str] = []
-            for dirpath, dirnames, filenames in os.walk(self.scan_root):
+            for dirpath, dirnames, filenames in os.walk(self.scan_root, onerror=self._note_unwalkable):
                 self.pruned_dirs.update(d for d in dirnames if d in self.opts.exclude_dirs)
                 dirnames[:] = [d for d in dirnames if d not in self.opts.exclude_dirs]
                 for fn in filenames:
                     cache.append(str((Path(dirpath) / fn).relative_to(self.root)))
             self._walk_cache = cache
         yield from self._walk_cache
+
+    def _note_unwalkable(self, err: OSError) -> None:
+        """A directory the walk could not enter is a scan GAP, and fails the target closed.
+
+        An unreadable FILE has always been recorded. A directory was skipped in silence, so a
+        target could report clean with a whole subtree unread.
+        """
+        where = getattr(err, "filename", None) or "?"
+        try:
+            where = str(Path(where).relative_to(self.root))
+        except (ValueError, TypeError):
+            where = str(where)
+        self.read_errors.append(f"{where}/: {type(err).__name__}")
 
     def _note_unreadable(self, name: str, p: Path, exc: OSError) -> None:
         """A file present but unreadable is a scan GAP → recorded so the run fails CLOSED — EXCEPT a
