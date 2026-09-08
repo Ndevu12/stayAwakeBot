@@ -24,8 +24,15 @@ _SETTLE_SECONDS = 2.0
 _POLL_SECONDS = 0.02
 
 
-def _still(pid: int, start_time: int) -> tuple[str, Identity | None]:
-    """Whether `pid` is still the process that had `start_time`."""
+def _still(known: Identity) -> tuple[str, Identity | None]:
+    """Whether that pid is still the process `known` describes.
+
+    macOS reports a start time in whole seconds, so a pid and a start time alone can be shared by
+    two processes started in the same second. The uid is compared as well; the ppid deliberately is
+    not, because a process whose parent exits is reparented and would then be refused — which would
+    leave an implant running.
+    """
+    pid = known.pid
     who, state = identify(pid)
     if state == NOT_OURS:
         return REFUSED, None
@@ -33,18 +40,18 @@ def _still(pid: int, start_time: int) -> tuple[str, Identity | None]:
         return ALREADY_GONE, None
     if who.zombie:
         return ALREADY_GONE, who          # killed, awaiting reap — it executes nothing
-    if who.start_time != start_time:
+    if (who.start_time, who.uid) != (known.start_time, known.uid):
         return RECYCLED, who
     return RUNNING, who
 
 
-def _send(pid: int, start_time: int, sig: int) -> str:
-    """Deliver `sig` to the process that had `start_time`, or say why not."""
-    verdict, _who = _still(pid, start_time)
+def _send(known: Identity, sig: int) -> str:
+    """Deliver `sig` to the process `known` describes, or say why not."""
+    verdict, _who = _still(known)
     if verdict != RUNNING:
         return verdict
     try:
-        os.kill(pid, sig)
+        os.kill(known.pid, sig)
     except ProcessLookupError:
         return ALREADY_GONE
     except PermissionError:
@@ -54,28 +61,28 @@ def _send(pid: int, start_time: int, sig: int) -> str:
     return SIGNALLED
 
 
-def freeze(pid: int, start_time: int) -> str:
+def freeze(known: Identity) -> str:
     """Stop the process running, without ending it.
 
     SIGSTOP cannot be caught, blocked or ignored, so a handler cannot use its last moment to wipe,
     re-exec or spawn a replacement. A frozen process also cannot fork, which is what makes a
     population of them shrink instead of racing the caller.
     """
-    return _send(pid, start_time, signal.SIGSTOP)
+    return _send(known, signal.SIGSTOP)
 
 
-def resume(pid: int, start_time: int) -> str:
+def resume(known: Identity) -> str:
     """Let a frozen process run again — for a caller that froze something and then decided not to
     end it. Without this, a bailed-out run leaves the machine holding stopped processes."""
-    return _send(pid, start_time, signal.SIGCONT)
+    return _send(known, signal.SIGCONT)
 
 
-def end(pid: int, start_time: int) -> str:
+def end(known: Identity) -> str:
     """End the process. SIGKILL, never SIGTERM: a terminate handler is code the implant chose."""
-    return _send(pid, start_time, signal.SIGKILL)
+    return _send(known, signal.SIGKILL)
 
 
-def has_ended(pid: int, start_time: int, *, settle: float = _SETTLE_SECONDS,
+def has_ended(known: Identity, *, settle: float = _SETTLE_SECONDS,
               sleep=time.sleep, clock=time.monotonic) -> bool:
     """Whether that process is no longer executing. Polled, because SIGKILL is not instantaneous.
 
@@ -85,7 +92,7 @@ def has_ended(pid: int, start_time: int, *, settle: float = _SETTLE_SECONDS,
     """
     deadline = clock() + settle
     while True:
-        verdict, _who = _still(pid, start_time)
+        verdict, _who = _still(known)
         if verdict in (ALREADY_GONE, RECYCLED):
             return True
         if verdict == REFUSED:

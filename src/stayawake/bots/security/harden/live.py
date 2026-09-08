@@ -19,11 +19,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from stayawake.utils import env, procstop
-from stayawake.utils.procsnap import identify
+from stayawake.utils.procsnap import parent_map
 from stayawake.bots.security.hygiene.process import live_code_processes
 
 _MAX_ROUNDS = 12
 _CAPTURE_KEEP = 20_000
+_ANCESTOR_LIMIT = 64
 
 
 @dataclass
@@ -42,10 +43,13 @@ class Ending:
     def finished(self) -> bool:
         """Every process that held live code is no longer executing, and none came back.
 
-        A process we were refused permission to signal is not finished with. It is still running
-        the same code; the only thing that changed is that this run cannot reach it.
+        A process we were refused permission to signal is not finished with: it is still running
+        the same code, and the only thing that changed is that this run cannot reach it. A pass that
+        never reached a quiet round has not finished either — something it cannot see is starting
+        them again. Nothing having matched at all IS finished: an implant that exited on its own
+        between one look and the next leaves nothing to end.
         """
-        return (self.matched > 0 and not self.survived and not self.refused
+        return (self.quiet and not self.survived and not self.refused
                 and self.still_holding == 0)
 
 
@@ -61,12 +65,14 @@ def _protected() -> set[int]:
     ends the run. Neither can be undone from inside the run that did it.
     """
     safe = {1, os.getpid()}
-    who, _state = identify(os.getpid())
-    seen = 0
-    while who is not None and who.ppid > 1 and seen < 64:
-        safe.add(who.ppid)
-        who, _state = identify(who.ppid)
-        seen += 1
+    parents = parent_map()
+    cur, seen = os.getpid(), 0
+    while seen < _ANCESTOR_LIMIT:
+        parent = parents.get(cur)
+        if parent is None or parent in safe:
+            break
+        safe.add(parent)
+        cur, seen = parent, seen + 1
     return safe
 
 
@@ -114,45 +120,57 @@ def _deepest_first(held: dict[int, tuple]) -> list[int]:
 
 
 def end_live_code(*, find=live_code_processes, freeze=procstop.freeze, end=procstop.end,
-                  ended=procstop.has_ended, capture=_capture, where=None,
+                  ended=procstop.has_ended, resume=procstop.resume, capture=_capture, where=None,
                   protected=_protected, rounds: int = _MAX_ROUNDS) -> Ending:
     """Freeze everything holding live code until nothing new appears, then end it."""
     keep_out = protected()
-    ours_by_design = set(keep_out)        # this run and its ancestors — never counted against it
     held: dict[int, tuple] = {}
+    held_done: set[int] = set()
     refused: list[int] = []
     out = Ending()
 
-    for _round in range(rounds):
-        fresh = [(p, code) for p, code, _reason in find()
-                 if p.identity is not None and p.pid not in held and p.pid not in keep_out]
-        if not fresh:
-            out.quiet = True
-            break
-        for process, code in fresh:
-            verdict = freeze(process.pid, process.identity.start_time)
-            if verdict == procstop.SIGNALLED:
-                held[process.pid] = (process.identity, code)
-            elif verdict == procstop.REFUSED:
-                refused.append(process.pid)
-                keep_out.add(process.pid)          # asking again every round answers the same way
+    try:
+        for _round in range(rounds):
+            fresh = [(p, code) for p, code, _reason in find()
+                     if p.identity is not None and p.pid not in held and p.pid not in keep_out]
+            if not fresh:
+                out.quiet = True
+                break
+            for process, code in fresh:
+                verdict = freeze(process.identity)
+                if verdict == procstop.SIGNALLED:
+                    held[process.pid] = (process.identity, code)
+                elif verdict == procstop.REFUSED:
+                    refused.append(process.pid)
+                    keep_out.add(process.pid)      # asking again every round answers the same way
+                else:
+                    keep_out.add(process.pid)      # gone or recycled — not ours to end
+
+        out.matched = len(held) + len(refused)
+        out.frozen = len(held)
+        out.refused = sorted(set(refused))
+        out.captured = capture(held, where or capture_path())
+
+        for pid in _deepest_first(held):
+            identity, _code = held[pid]
+            end(identity)
+            if ended(identity):
+                out.ended += 1
+                held_done.add(pid)
             else:
-                keep_out.add(process.pid)          # gone or recycled — not ours to end
+                out.survived.append(pid)
+    finally:
+        # A frozen process that is never ended and never resumed is stopped for good. It cannot be
+        # restarted by the operator, it holds its files and locks, and `ps` shows it as ordinary
+        # unless you read the state column. Anything raising here — the grader on attacker-chosen
+        # text, the capture, or a Ctrl-C during a pass that takes seconds — used to leave exactly
+        # that behind.
+        for pid, (identity, _code) in held.items():
+            if pid not in held_done:
+                resume(identity)
 
-    out.matched = len(held) + len(refused)
-    out.frozen = len(held)
-    out.refused = sorted(set(refused))
-    out.captured = capture(held, where or capture_path())
-
-    for pid in _deepest_first(held):
-        identity, _code = held[pid]
-        end(pid, identity.start_time)
-        if ended(pid, identity.start_time):
-            out.ended += 1
-        else:
-            out.survived.append(pid)
-
-    # Asked of the machine, not of the bookkeeping: whatever is holding live code once the pass is
-    # over is what is holding live code, whether this run froze it, was refused it, or never saw it.
-    out.still_holding = len([p for p, _c, _r in find() if p.pid not in ours_by_design])
+    # Asked of the machine, not of the bookkeeping: whatever holds live code once the pass is over
+    # holds it, whether this run froze it, was refused it, never saw it, or declined to touch it.
+    # Subtracting the protected ones put a live holder in no field at all and still said finished.
+    out.still_holding = len(find())
     return out

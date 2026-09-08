@@ -287,13 +287,19 @@ class TestRunContract(unittest.TestCase):
             apply=lambda path: denial.PathOutcome(path, denial.ENFORCING, "in place"))
         self.assertEqual(code, 0)
 
-    def test_capture_refuses_before_any_write(self):
-        apply = mock.Mock()
-        code, _ = harden.run(
+    def test_it_ends_the_live_code_before_it_writes_anything(self):
+        # `stop` is ALWAYS injected here. A test that leaves it defaulted signals real processes on
+        # the machine running the suite.
+        order = []
+        apply = mock.Mock(side_effect=lambda p: order.append("write") or
+                          denial.PathOutcome(p, denial.ENFORCING, "in place"))
+        code, _text = harden.run(
             supported=lambda: True, live=lambda: [_issue("live-obfuscated-process")],
-            folders=lambda: [Path("/denial")], apply=apply)
-        self.assertEqual(code, 1)
-        apply.assert_not_called()
+            folders=lambda: [Path("/denial")], apply=apply,
+            stop=lambda: order.append("end") or live.Ending(matched=2, frozen=2, ended=2,
+                                                            quiet=True, still_holding=0))
+        self.assertEqual(code, 0)
+        self.assertEqual(order, ["end", "write"], "it wrote before the live code was ended")
 
     def test_without_root_it_does_write(self):
         """The inverse of what this used to pin: the run no longer stops before trying."""
@@ -303,15 +309,39 @@ class TestRunContract(unittest.TestCase):
                    folders=lambda: [Path("/denial")], apply=apply)
         apply.assert_called_once()
 
-    def test_capture_still_comes_before_any_write_without_root(self):
-        """The one gate privilege never relaxed: a live loader is the only copy of the second
-        stage, and a denied write kills the process that holds it."""
+    def test_a_failed_ending_still_stops_before_any_write(self):
+        """The gate that survives: the control is never placed over an implant that is still
+        running, because doing so claims a machine that is still someone else's."""
         apply = mock.Mock()
-        code, _ = harden.run(
+        code, _text = harden.run(
             supported=lambda: True, live=lambda: [_issue("live-obfuscated-process")],
-            folders=lambda: [Path("/denial")], apply=apply)
+            folders=lambda: [Path("/denial")], apply=apply,
+            stop=lambda: live.Ending(matched=2, frozen=2, ended=1, survived=[9], quiet=True,
+                                     still_holding=1))
         self.assertEqual(code, 1)
         apply.assert_not_called()
+
+    def test_an_ending_that_raises_is_a_report_not_a_traceback(self):
+        apply = mock.Mock()
+        def boom():
+            raise RuntimeError("the grader blew up on attacker-chosen text")
+        code, text = harden.run(
+            supported=lambda: True, live=lambda: [_issue("live-obfuscated-process")],
+            folders=lambda: [Path("/denial")], apply=apply, stop=boom)
+        self.assertEqual(code, 1)
+        self.assertIn("RuntimeError", text)
+        apply.assert_not_called()
+
+    def test_an_implant_that_had_already_gone_does_not_withhold_the_control(self):
+        # It exited between one look and the next. Saying "0 of 0 ended" and withholding the
+        # control is a false statement about a machine with nothing left running on it.
+        code, text = harden.run(
+            supported=lambda: True, live=lambda: [_issue("live-obfuscated-process")],
+            folders=lambda: [Path("/mine")],
+            apply=lambda p: denial.PathOutcome(p, denial.ENFORCING, "in place"),
+            stop=lambda: live.Ending(matched=0, quiet=True, still_holding=0))
+        self.assertEqual(code, 0)
+        self.assertIn("already exited", text)
 
     def test_a_self_held_result_is_never_reported_as_root_held(self):
         code, text = harden.run(

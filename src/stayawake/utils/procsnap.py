@@ -244,6 +244,40 @@ def _live_pids() -> list[int]:
     return sorted(int(tok) for tok in out.split() if tok.isdigit())
 
 
+def parent_map() -> dict[int, int]:
+    """Every pid's parent, including processes this user may not otherwise read.
+
+    `identify` needs permission and answers NOT_OURS for a root-owned process. An ancestor walk
+    built on it therefore stops at the first one it cannot read — and on a default macOS terminal
+    that is a uid-0 `login` sitting between the shell and the terminal application, so everything
+    above it silently stops being recognised as an ancestor.
+    """
+    if sys.platform.startswith("linux"):
+        out: dict[int, int] = {}
+        try:
+            pids = [int(d.name) for d in Path("/proc").iterdir() if d.name.isdigit()]
+        except OSError:
+            return out
+        for pid in pids:
+            try:
+                raw = Path(f"/proc/{pid}/stat").read_text()
+                out[pid] = int(raw[raw.rindex(")") + 2:].split()[1])
+            except (OSError, ValueError, IndexError):
+                continue
+        return out
+    try:
+        text = subprocess.run(["ps", "-axo", "pid=,ppid="], capture_output=True, text=True,
+                              timeout=_PS_TIMEOUT).stdout
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    pairs: dict[int, int] = {}
+    for line in text.splitlines():
+        bits = line.split()
+        if len(bits) == 2 and bits[0].isdigit() and bits[1].isdigit():
+            pairs[int(bits[0])] = int(bits[1])
+    return pairs
+
+
 def snapshot() -> Snapshot:
     """Every running process this user can enumerate, with the kernel's argv where readable.
 
