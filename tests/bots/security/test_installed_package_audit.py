@@ -451,5 +451,71 @@ class TestDeepSweep(unittest.TestCase):
         self.assertNotIn("node_modules/p/linked.js", got)          # symlink excluded
 
 
+class TestTheReaderAsksTheSharedLayout(unittest.TestCase):
+    """The reader must not keep a second idea of where packages live."""
+
+    def _read(self, root):
+        from stayawake.bots.security.dependencies.installed import NpmInstalledTree
+        return sorted(p.name for p in NpmInstalledTree().read(Target(root, str(root),
+                                                                    ScanOptions())))
+
+    def _pkg(self, at: Path, name: str):
+        at.mkdir(parents=True, exist_ok=True)
+        (at / "package.json").write_text(json.dumps({"name": name, "version": "1.0.0"}),
+                                         encoding="utf-8")
+
+    def test_a_package_in_a_workspace_tree_is_read(self):
+        root = Path(tempfile.mkdtemp())
+        self._pkg(root / "node_modules" / "left-pad", "left-pad")
+        self._pkg(root / "packages" / "app" / "node_modules" / "evil-dep", "evil-dep")
+        self.assertEqual(self._read(root), ["evil-dep", "left-pad"])
+
+    def test_a_package_held_in_a_store_is_read(self):
+        root = Path(tempfile.mkdtemp())
+        real = root / "node_modules" / ".pnpm" / "left-pad@1.0.0" / "node_modules" / "left-pad"
+        self._pkg(real, "left-pad")
+        (root / "node_modules" / "left-pad").symlink_to(real)
+        self.assertEqual(self._read(root), ["left-pad"])
+
+
+class TestKnownMalwareOnDiskIsNamed(unittest.TestCase):
+    """The tier exists for a package present on disk that no lockfile accounts for."""
+
+    def _seeded(self):
+        for sigs in load_signatures().values():
+            for sig in sigs:
+                for entry in sig.get("known_bad", []) or []:
+                    if isinstance(entry, str) and "@" in entry:
+                        return entry.rsplit("@", 1)
+        self.skipTest("no inline seed to test with")
+
+    def _repo(self, in_lockfile: bool):
+        name, version = self._seeded()
+        root = Path(tempfile.mkdtemp())
+        (root / "package.json").write_text(json.dumps({"name": "app", "version": "1.0.0"}),
+                                           encoding="utf-8")
+        declared = {f"node_modules/{name}": {"version": version}} if in_lockfile else {}
+        (root / "package-lock.json").write_text(
+            json.dumps({"lockfileVersion": 3, "packages": declared}), encoding="utf-8")
+        pkg = root / "node_modules" / name
+        pkg.mkdir(parents=True)
+        (pkg / "package.json").write_text(json.dumps({"name": name, "version": version}),
+                                          encoding="utf-8")
+        return root, name
+
+    def test_a_seeded_release_on_disk_is_named_without_an_advisory_cache(self):
+        root, name = self._repo(in_lockfile=False)
+        result = scan_target(Target(root, str(root), ScanOptions()), load_signatures())
+        named = [f for f in result.findings if name in (f.evidence or "")]
+        self.assertTrue(named, "a known-bad release on disk was not named as malware")
+        self.assertEqual(result.verdict, "infected")
+
+    def test_the_same_release_is_named_when_the_lockfile_declares_it_too(self):
+        root, name = self._repo(in_lockfile=True)
+        result = scan_target(Target(root, str(root), ScanOptions()), load_signatures())
+        self.assertEqual(result.verdict, "infected")
+        self.assertTrue([f for f in result.findings if name in (f.evidence or "")])
+
+
 if __name__ == "__main__":
     unittest.main()

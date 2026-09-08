@@ -9,17 +9,17 @@ from pathlib import Path
 
 from stayawake.utils import env
 from stayawake.utils.pathsafe import is_safe_write_target
+from stayawake.bots.security.dependencies import layout
 from stayawake.bots.security.dependencies.resolvers.npm import NpmResolver
 from stayawake.bots.security.models import QUARANTINE_DIR
 from stayawake.bots.security.remediation.changes import quarantine_path
 from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions
 
-INSTALLED_DIR = "node_modules"
+INSTALLED_DIR = layout.INSTALLED_DIR
 _LOCKFILES = frozenset({
     "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml",
     "bun.lock", "bun.lockb", "deno.lock",
 })
-_DERIVED_TREES = frozenset({INSTALLED_DIR})
 _DERIVED_FILES = frozenset({".pnp.cjs", ".pnp.loader.mjs", ".pnp.data.json"})
 _ONLY_THESE_INSIDE = {".yarn": frozenset({"cache", "unplugged", "install-state.gz"})}
 _BUILD_OUTPUTS = frozenset({"dist", "build", "out", ".next"})
@@ -377,28 +377,20 @@ def derived_paths(root: Path, unreadable: list[Path]) -> list[Path]:
     """Everything under `root` that a package manager wrote rather than a person.
 
     Takes the repository root and a list to record directories it could not read. Returns each
-    installed tree, dependency cache and resolver file, deepest first, without descending into one
-    already found and without following a link out.
+    installed tree, dependency cache and resolver file, deepest first. Which directories are
+    installed trees is `dependencies.layout`'s answer, so a removal clears what a scan reads.
     """
-    found: list[Path] = []
-    stack = [root]
-    while stack:
-        here = stack.pop()
-        try:
-            entries = list(here.iterdir())
-        except OSError:
-            unreadable.append(here)
-            continue
-        for entry in entries:
-            if entry.name in _DERIVED_TREES or entry.name in _DERIVED_FILES:
-                found.append(entry)
-            elif entry.name in _ONLY_THESE_INSIDE and _is_real_directory(entry):
-                found += [entry / held
-                          for held in sorted(_ONLY_THESE_INSIDE[entry.name])
-                          if (entry / held).exists()]
-            elif entry.name not in _NOT_WALKED and _is_real_directory(entry):
-                stack.append(entry)
-    return sorted(found, key=lambda p: len(p.parts), reverse=True)
+    trees = layout.installed_trees(root, unreadable)
+    found: list[Path] = list(trees)
+    for holder in {root, *(tree.parent for tree in trees)}:
+        for name in sorted(_DERIVED_FILES):
+            if (holder / name).exists():
+                found.append(holder / name)
+        for tool, held in _ONLY_THESE_INSIDE.items():
+            for name in sorted(held):
+                if (holder / tool / name).exists():
+                    found.append(holder / tool / name)
+    return sorted(set(found), key=lambda p: len(p.parts), reverse=True)
 
 
 def remove_derived(path: Path, root: Path) -> bool:
