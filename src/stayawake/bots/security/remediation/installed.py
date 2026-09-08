@@ -283,6 +283,15 @@ def lockfile_stays() -> bool:
         (env.GITHUB_ACTIONS, env.GITLAB_CI, env.CIRCLECI, env.BUILDKITE, env.RUNNER_OS))
 
 
+def _named(names: list[str], most: int = 3) -> str:
+    """A few names, and how many more there are.
+
+    Takes the names and how many to show. Returns them joined, with a count when some are left out.
+    """
+    shown = ", ".join(names[:most])
+    return shown if len(names) <= most else f"{shown} +{len(names) - most} more"
+
+
 @dataclass
 class Report:
     """What this run did to one repository tree."""
@@ -293,6 +302,9 @@ class Report:
     copies: Path | None = None
     removed_strays: int = 0
     removed_trees: int = 0
+    not_removed: list[Path] = field(default_factory=list)
+    unreadable: list[Path] = field(default_factory=list)
+    refused: list[Path] = field(default_factory=list)
     installed_tree_kept: str | None = None
     installed_entries_kept: int = 0
 
@@ -311,12 +323,27 @@ class Report:
             bits.append("removed the lockfile")
         if self.removed_builds:
             bits.append("removed " + ", ".join(self.removed_builds))
-        kept = self.kept_note()
+        kept = "; ".join(n for n in (self.kept_note(), self.survived_note()) if n)
         if not bits:
             return kept
         done = "; ".join(bits) + " — from your working tree now, not only on the branch"
         done = f"{done}; copies in {self.copies}" if self.copies else done
         return f"{done}. {kept}" if kept else done
+
+    def survived_note(self) -> str:
+        """What a removal was asked to take and did not, and the one thing to do about it.
+
+        Returns a single line naming what is still there, or an empty string when everything the
+        run reached was removed.
+        """
+        needs_root = sorted({str(p.name) for p in self.not_removed + self.unreadable}
+                            - {str(p.name) for p in self.refused})
+        refused = sorted({str(p.name) for p in self.refused})
+        if needs_root:
+            return f"{_named(needs_root)} still there — run again with sudo"
+        if refused:
+            return f"{_named(refused)} not removed — not this repository's to write to"
+        return ""
 
     def kept_note(self) -> str:
         """What is still installed, and why it was left there.
@@ -353,18 +380,21 @@ def _relative_to(path: Path, root: Path) -> Path | None:
         return None
 
 
-def derived_paths(root: Path) -> list[Path]:
+def derived_paths(root: Path, unreadable: list[Path]) -> list[Path]:
     """Everything under `root` that a package manager wrote rather than a person.
 
-    Takes the repository root. Returns each installed tree, dependency cache and resolver file,
-    deepest first, without descending into one already found and without following a link out.
+    Takes the repository root and a list to record directories it could not read. Returns each
+    installed tree, dependency cache and resolver file, deepest first, without descending into one
+    already found and without following a link out.
     """
     found: list[Path] = []
     stack = [root]
     while stack:
+        here = stack.pop()
         try:
-            entries = list(stack.pop().iterdir())
+            entries = list(here.iterdir())
         except OSError:
+            unreadable.append(here)
             continue
         for entry in entries:
             if entry.name in _DERIVED_TREES or entry.name in _DERIVED_FILES:
@@ -417,6 +447,18 @@ def remove_installed(root: Path, *, confirmed: bool, remove_lockfiles: bool = Tr
                               lockfile_root=lockfile_root)
 
 
+def _still_there(path: Path) -> bool:
+    """Whether `path` is on disk after a removal was attempted.
+
+    Takes the path. Returns True when it is still there, and when that cannot be determined — an
+    answer nobody can give is not an answer that it is gone.
+    """
+    try:
+        return path.exists() or path.is_symlink()
+    except OSError:
+        return True
+
+
 def remove_confirmed(root: Path, *, remove_lockfiles: bool = True,
                      lockfile_root: Path | None = None) -> Report:
     """Delete what a confirmed infection leaves behind. Bounded to `root`.
@@ -432,13 +474,23 @@ def remove_confirmed(root: Path, *, remove_lockfiles: bool = True,
     except OSError:
         return report
 
-    for path in derived_paths(root):
+    unreadable: list[Path] = []
+    for path in derived_paths(root, unreadable):
         if remove_derived(path, root):
             report.removed_trees += 1
+        elif _still_there(path):
+            report.not_removed.append(path)
+            if not is_safe_write_target(path, root):
+                report.refused.append(path)
+    report.unreadable.extend(unreadable)
 
     for build in build_output_dirs(root):
         if remove_derived(build, root):
             report.removed_builds.append(build.name)
+        elif _still_there(build):
+            report.not_removed.append(build)
+            if not is_safe_write_target(build, root):
+                report.refused.append(build)
 
     if remove_lockfiles:
         proof = lockfile_root if lockfile_root is not None else root
