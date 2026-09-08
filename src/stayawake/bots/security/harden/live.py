@@ -37,6 +37,7 @@ class Ending:
     refused: list[int] = field(default_factory=list)
     asked_for: list[int] = field(default_factory=list)
     asking: str = ""
+    frozen_left: list[int] = field(default_factory=list)
     quiet: bool = False
     still_holding: int = 0
     captured: str | None = None
@@ -52,7 +53,7 @@ class Ending:
         between one look and the next leaves nothing to end.
         """
         return (self.quiet and not self.survived and not self.refused
-                and self.still_holding == 0)
+                and not self.frozen_left and self.still_holding == 0)
 
 
 def capture_path() -> Path:
@@ -122,7 +123,7 @@ def _deepest_first(held: dict[int, tuple]) -> list[int]:
 
 
 def end_live_code(*, find=live_code_processes, freeze=procstop.freeze, end=procstop.end,
-                  ended=procstop.has_ended, resume=procstop.resume, capture=_capture, where=None,
+                  ended=procstop.has_ended, capture=_capture, where=None,
                   protected=_protected, elevated=procstop.end_as_root,
                   rounds: int = _MAX_ROUNDS) -> Ending:
     """Freeze everything holding live code until nothing new appears, then end it."""
@@ -178,14 +179,11 @@ def end_live_code(*, find=live_code_processes, freeze=procstop.freeze, end=procs
             else:
                 out.survived.append(pid)
     finally:
-        # A frozen process that is never ended and never resumed is stopped for good. It cannot be
-        # restarted by the operator, it holds its files and locks, and `ps` shows it as ordinary
-        # unless you read the state column. Anything raising here — the grader on attacker-chosen
-        # text, the capture, or a Ctrl-C during a pass that takes seconds — used to leave exactly
-        # that behind.
-        for pid, (identity, _code) in held.items():
-            if pid not in held_done:
-                resume(identity)
+        # Left frozen on purpose. Anything in here was graded as running code that is not on disk,
+        # and a frozen one is contained: it executes nothing and it cannot spawn. Resuming it —
+        # which this did on any bail-out, and on every process it failed to end — handed a live
+        # implant back its execution. What stays frozen is reported, with how to release it.
+        out.frozen_left = sorted(pid for pid in held if pid not in held_done)
 
     # Asked of the machine, not of the bookkeeping: whatever holds live code once the pass is over
     # holds it, whether this run froze it, was refused it, never saw it, or declined to touch it.

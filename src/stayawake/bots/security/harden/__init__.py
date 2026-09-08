@@ -23,23 +23,10 @@ __all__ = ["run", "apply_one", "PathOutcome", "ENFORCING", "SELF_ENFORCING",
 
 _LIVE = "live-obfuscated-process"
 
-_ENDED_LIVE = (
-    "Code that never touched the disk was running here. It was captured, frozen so it could not "
-    "spawn, and ended."
-)
-_STILL_LIVE = (
-    "Code that never touched the disk is running here and this command could not end all of it, "
-    "so the control was NOT applied — placing it over a live implant claims a machine that is "
-    "still someone else's."
-)
-_NOT_OURS_LIVE = (
-    "Some of it needs privilege this run was not given. It asked, for those processes only, and "
-    "did not get it — run again where the password can be answered, or as root."
-)
-_STILL_SPAWNING = (
-    "Something outside what this command can see is starting them again. Ending them cannot "
-    "finish while that source is running."
-)
+_ENDED_LIVE = "Code that is not on disk was running here. It was captured and ended."
+_STILL_LIVE = "Code that is not on disk is still running here, so the control was not applied."
+_NOT_OURS_LIVE = "Run again where a password can be answered, or as root."
+_STILL_SPAWNING = "They are being started again. Run again once the machine is off the network."
 _REFUSED_UNREAD = (
     "Running processes could not be examined, so this control was not applied."
 )
@@ -114,13 +101,16 @@ def _ending_line(ending) -> str:
         return "  it had already exited before this command reached it"
     bits = [f"  {ending.ended} of {ending.matched} ended"]
     if ending.survived:
-        bits.append(f"{len(ending.survived)} still running ({_pids(ending.survived)})")
+        bits.append(f"{len(ending.survived)} did not end ({_pids(ending.survived)})")
     if ending.asked_for:
         bits.append(f"{len(ending.asked_for)} needed privilege ({ending.asking or 'not asked'})")
     if ending.refused:
         bits.append(f"{len(ending.refused)} still not ended ({_pids(ending.refused)})")
+    if ending.frozen_left:
+        bits.append(f"{len(ending.frozen_left)} stopped and contained ({_pids(ending.frozen_left)})"
+                    " — release with kill -CONT if one of them is yours")
     if ending.still_holding:
-        bits.append(f"{ending.still_holding} holding live code now")
+        bits.append(f"{ending.still_holding} still running")
     if ending.captured:
         bits.append(f"captured to {textsafe.plain(ending.captured, limit=4096)}")
     return ", ".join(bits)

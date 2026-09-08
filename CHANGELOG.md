@@ -24,8 +24,15 @@ reader, not the mechanism or the weakness it closed.
   processes only, once for all of them, and only where there is a terminal to answer on. It does
   not require privilege to run, and it never takes `sudo` from your `PATH`: on a machine that may
   already be compromised, that would hand root to the thing being removed.
+- **Code on the command line is no longer the only shape it recognises.** A program that is no
+  longer a file on this disk, and an interpreter handed its program on standard input, are both
+  code running with nothing behind it to scan — and neither is a reason to leave it running.
 
 ### Fixed
+- **The payload is no longer printed.** A finding about running code used to carry the code itself,
+  which means what it identifies itself by and the address it talks to went to the terminal, the
+  JSON, the SARIF and every saved report. The finding now carries a short fingerprint instead, and
+  the code goes to the capture file, where you can hand it to someone deliberately.
 - **On a confirmed infection, `saw fix` removes everything a package manager put on disk**, whole:
   every installed tree in the repository, the dependency caches and resolver files a project uses
   instead of one, the lockfiles, and the generated output directories. Whichever package manager

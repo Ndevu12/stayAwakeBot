@@ -100,7 +100,8 @@ class TestRunContract(unittest.TestCase):
                                 apply=apply, live=lambda: [_issue("live-obfuscated-process")],
                                 stop=lambda: alive)
         self.assertEqual(code, 1)
-        self.assertIn("NOT applied", text)
+        self.assertIn("not applied", text)
+        self.assertIn("did not end", text)
         self.assertIn("91", text)
         apply.assert_not_called()
 
@@ -111,7 +112,7 @@ class TestRunContract(unittest.TestCase):
                                 live=lambda: [_issue("live-obfuscated-process")],
                                 stop=lambda: spawning)
         self.assertEqual(code, 1)
-        self.assertIn("starting them again", text)
+        self.assertIn("being started again", text)
 
     def test_privilege_it_could_not_get_is_named_as_an_ask_that_failed(self):
         # It no longer reports another user's process and walks away: it asks, for those processes
@@ -123,7 +124,7 @@ class TestRunContract(unittest.TestCase):
                                 live=lambda: [_issue("live-obfuscated-process")],
                                 stop=lambda: theirs)
         self.assertEqual(code, 1)
-        self.assertIn("needs privilege", text)
+        self.assertIn("needed privilege", text)
         self.assertIn("cannot-ask", text)
         self.assertIn("404", text)
 

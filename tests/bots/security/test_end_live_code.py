@@ -234,9 +234,9 @@ class TestItNeverSaysFinishedWhileSomethingHoldsIt(unittest.TestCase):
         self.assertTrue(out.finished, "nothing was left running and it said otherwise")
 
 
-class TestNothingIsLeftFrozen(unittest.TestCase):
-    """A frozen process that is never ended and never resumed is stopped for good: the operator
-    cannot restart it, it holds its files, and `ps` looks ordinary unless you read the state."""
+class TestWhatItFreezesStaysContained(unittest.TestCase):
+    """A frozen process executes nothing and cannot spawn. Releasing one because the pass ended
+    early, or because the kill failed, hands a live implant back its execution."""
 
     def _spawn(self):
         from stayawake.utils.procsnap import identify
@@ -261,7 +261,7 @@ class TestNothingIsLeftFrozen(unittest.TestCase):
                               capture_output=True, text=True).stdout.strip()
 
     @unittest.skipUnless(os.name == "posix", "needs POSIX signals")
-    def test_a_grader_that_raises_mid_pass_leaves_nothing_stopped(self):
+    def test_a_grader_that_raises_mid_pass_leaves_it_contained(self):
         proc, who = self._spawn()
         rounds = iter([[(Process(pid=proc.pid, argv=("node", "-e", "p"), identity=who), "p", "s")]])
 
@@ -274,10 +274,13 @@ class TestNothingIsLeftFrozen(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             live.end_live_code(find=find, capture=lambda held, where: None,
                                protected=lambda: {1})
-        self.assertNotEqual(self._state(proc.pid), "T", "it was left stopped for good")
+        # Left frozen ON PURPOSE: it was graded as running code that is not on disk, and a frozen
+        # one executes nothing and cannot spawn. Resuming it handed a live implant back its
+        # execution, which is what this used to do.
+        self.assertEqual(self._state(proc.pid), "T", "it was resumed after being contained")
 
     @unittest.skipUnless(os.name == "posix", "needs POSIX signals")
-    def test_an_interrupt_mid_pass_leaves_nothing_stopped(self):
+    def test_an_interrupt_mid_pass_leaves_it_contained(self):
         proc, who = self._spawn()
         held = [(Process(pid=proc.pid, argv=("node", "-e", "p"), identity=who), "p", "s")]
 
@@ -287,7 +290,22 @@ class TestNothingIsLeftFrozen(unittest.TestCase):
         with self.assertRaises(KeyboardInterrupt):
             live.end_live_code(find=lambda: held, capture=capture, protected=lambda: {1},
                                rounds=1)
-        self.assertNotEqual(self._state(proc.pid), "T", "Ctrl-C left it stopped for good")
+        self.assertEqual(self._state(proc.pid), "T", "Ctrl-C released a contained implant")
+
+    def test_what_stays_frozen_is_reported_and_blocks_finished(self):
+        out = live.end_live_code(find=lambda: [_held(70)] if not_yet() else [],
+                                 freeze=lambda who: procstop.SIGNALLED,
+                                 end=lambda who: procstop.SIGNALLED,
+                                 ended=lambda who: False,          # the kill did not take
+                                 capture=lambda held, where: None, protected=lambda: {1})
+        self.assertEqual(out.frozen_left, [70])
+        self.assertFalse(out.finished, "it finished with a contained process left over")
+
+
+def not_yet():
+    """True the first time only — a spawner that appears once."""
+    not_yet.calls = getattr(not_yet, "calls", 0) + 1
+    return not_yet.calls == 1
 
 
 if __name__ == "__main__":

@@ -8,6 +8,8 @@ READ-ONLY. An audit audits and reports; nothing here may signal, stop or end a p
 pins that. Acting on one is a separate command's job, and it is gated on capture."""
 from __future__ import annotations
 
+import hashlib
+
 from .autorun.grade import resolve_invocation
 from .models import HygieneIssue, PROCESSES_NOT_READABLE_ID, _WIPER_NOTE
 
@@ -16,6 +18,13 @@ _EXCERPT_CHARS = 240
 
 
 _PIDS_SHOWN = 8
+
+
+def _fingerprint(code: str) -> str:
+    """A short hash of the payload, so two runs can be compared without printing any of it."""
+    if not code:
+        return ""
+    return f", fingerprint {hashlib.sha256(code.encode('utf-8', 'replace')).hexdigest()[:12]}"
 
 
 def _excerpt(code: str) -> str:
@@ -36,6 +45,16 @@ def _obfuscation_verdict(code: str):
 def _snapshot():
     from stayawake.utils.procsnap import snapshot
     return snapshot()
+
+
+def program_is_gone(pid: int) -> bool:
+    """Whether a process is running something that is no longer a file on this disk.
+
+    Imported at the call rather than at the top, for the same reason the snapshot is: an audit that
+    never reaches a process should not pay for the reader.
+    """
+    from stayawake.utils.procsnap import program_is_gone as ask
+    return ask(pid)
 
 
 def live_process_scope_note() -> str:
@@ -62,11 +81,22 @@ def live_code_processes(snapshot=None) -> list[tuple[object, str, str]]:
         if process.identity is not None and process.identity.zombie:
             continue          # killed and awaiting its parent — it executes nothing
         invocation = resolve_invocation(process.argv)
+        graded = None
         for code in invocation.code_args:
             verdict = _obfuscation_verdict(code)
             if verdict.obfuscated:
-                found.append((process, code, verdict.reason))
+                graded = (code, verdict.reason)
                 break              # one per process; the rest of its argv is the same code
+        if graded is None:
+            # Code on the command line is one way to run without a file, not the only one. A
+            # program that is no longer on disk, or an interpreter handed its program on standard
+            # input, is running something nothing here can read — which is not a reason to leave it.
+            if invocation.reads_stdin:
+                graded = ("", "a program handed to it on standard input")
+            elif program_is_gone(process.pid):
+                graded = ("", "a program that is no longer on this disk")
+        if graded is not None:
+            found.append((process, graded[0], graded[1]))
     return found
 
 
@@ -99,14 +129,16 @@ def check_live_processes() -> list[HygieneIssue]:
     where = ", ".join(str(pid) for pid in pids[:_PIDS_SHOWN])
     if len(pids) > _PIDS_SHOWN:
         where += f", and {len(pids) - _PIDS_SHOWN} more"
-    count = ("A running process was handed obfuscated code" if len(pids) == 1 else
-             f"{len(pids)} running processes were handed obfuscated code")
+    count = ("A running process is executing code that is not on disk" if len(pids) == 1 else
+             f"{len(pids)} running processes are executing code that is not on disk")
+    # The payload itself is NOT printed. It carries the campaign's own markers and the address it
+    # talks to, and this line reaches the terminal, the JSON, the SARIF and any saved report. It is
+    # written to the capture file, which is where an operator can hand it to someone.
     return [HygieneIssue(
         id="live-obfuscated-process",
         severity="warning",
         title=count,
-        detail=f"pid {where} ({resolve_invocation(first.argv).interpreter or first.program}) "
-               f"executing {reason}. It is in the process, not on disk: {_excerpt(code)}",
-        remediation="Capture it before anything ends it, and rotate credentials LAST — "
-                    f"{_WIPER_NOTE}.",
+        detail=f"pid {where} ({resolve_invocation(first.argv).interpreter or first.program}): "
+               f"{reason}{_fingerprint(code)}.",
+        remediation=f"Rotate credentials LAST — {_WIPER_NOTE}.",
     )]

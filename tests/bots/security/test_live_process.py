@@ -112,17 +112,21 @@ class TestItNeverReadsRefusalAsClean(unittest.TestCase):
             self.assertEqual(process.live_process_scope_note(), "")
 
 
-class TestTheCapturedArgumentIsBounded(unittest.TestCase):
-    def test_a_short_argument_is_carried_whole(self):
+class TestTheFindingStaysShortWhateverTheArgument(unittest.TestCase):
+    """This used to carry the argument itself, bounded to 300 characters. Bounding it was the wrong
+    answer to the wrong question: the payload names the campaign and the address it talks to, and
+    the detail line reaches the terminal, the JSON, the SARIF and any saved report."""
+
+    def test_a_short_argument_is_not_carried_either(self):
         payload = _loader()
         issues = _check(_snapshot(Process(pid=8, argv=("node", "-e", payload))))
-        self.assertIn(payload, issues[0].detail)
+        self.assertNotIn(payload, issues[0].detail)
 
-    def test_a_long_one_is_cut_and_says_so(self):
+    def test_a_long_one_does_not_grow_the_line(self):
         payload = _loader() + ";" + "x" * 4000
         detail = _check(_snapshot(Process(pid=9, argv=("node", "-e", payload))))[0].detail
-        self.assertLess(len(detail), 500)
-        self.assertIn("[…]", detail)
+        self.assertLess(len(detail), 200)
+        self.assertNotIn("x" * 50, detail)
 
 
 class TestAPopulationIsOneFinding(unittest.TestCase):
@@ -164,6 +168,58 @@ class TestAPopulationIsOneFinding(unittest.TestCase):
         snap = _snapshot(Process(pid=5, argv=("node", "-e", payload)),
                          Process(pid=6, argv=("node", "app.js")))
         self.assertEqual([p.pid for p, _c, _r in process.live_code_processes(snap)], [5])
+
+
+class TestTheOtherWaysOfRunningWithoutAFile(unittest.TestCase):
+    """Code on the command line is one way to run without a file, not the only one. The campaign on
+    the maintainer's machines uses that one; a pipe instead of a flag is the same implant."""
+
+    def test_an_interpreter_reading_its_program_from_stdin_is_seen(self):
+        fed = Process(pid=40, argv=("node", "-"))
+        found = process.live_code_processes(_snapshot(fed))
+        self.assertEqual([p.pid for p, _c, _r in found], [40])
+        self.assertIn("standard input", found[0][2])
+
+    def test_a_module_flag_is_not_mistaken_for_one(self):
+        # `python -m unittest discover -s tests` passes `-s` to unittest, not to python.
+        ordinary = Process(pid=41, argv=("python3", "-m", "unittest", "discover", "-s", "tests"))
+        self.assertEqual(process.live_code_processes(_snapshot(ordinary)), [])
+
+    def test_an_ordinary_script_is_not_one(self):
+        self.assertEqual(process.live_code_processes(_snapshot(
+            Process(pid=42, argv=("node", "app.js")))), [])
+
+    def test_a_program_that_is_no_longer_on_disk_is_seen(self):
+        from unittest import mock
+        gone = Process(pid=43, argv=("some-daemon",))
+        with mock.patch.object(process, "program_is_gone", return_value=True):
+            found = process.live_code_processes(_snapshot(gone))
+        self.assertEqual([p.pid for p, _c, _r in found], [43])
+        self.assertIn("no longer on this disk", found[0][2])
+
+    def test_a_program_it_cannot_read_is_never_called_missing(self):
+        # Unreadable is not missing. Answering "missing" for a path this user cannot see would
+        # grade every one of another user's processes as an implant.
+        from stayawake.utils.procsnap import program_is_gone
+        self.assertFalse(program_is_gone(1))
+
+
+class TestItDoesNotPrintThePayload(unittest.TestCase):
+    """The detail line reaches the terminal, the JSON, the SARIF and any saved report. The payload
+    carries the campaign's own marker and the address it talks to."""
+
+    def test_the_code_itself_never_reaches_the_finding(self):
+        marker = "A8-CAMPAIGN-MARKER"
+        payload = f"global['_V']='{marker}';var _$_ab12=1;const x=eval(atob('c2xlZXA='));"
+        issues = _check(_snapshot(Process(pid=50, argv=("node", "-e", payload))))
+        self.assertEqual(len(issues), 1)
+        self.assertNotIn(marker, issues[0].detail)
+        self.assertNotIn("eval(atob", issues[0].detail)
+
+    def test_it_carries_a_fingerprint_so_two_runs_can_be_compared(self):
+        payload = "var _$_ab12=1;const x=eval(atob('c2xlZXA='));"
+        issues = _check(_snapshot(Process(pid=51, argv=("node", "-e", payload))))
+        self.assertIn("fingerprint", issues[0].detail)
 
 
 if __name__ == "__main__":
