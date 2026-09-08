@@ -14,9 +14,13 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Fixed
-- **On a confirmed infection, `saw fix` removes every installed tree in the repository, whole**,
-  along with the lockfiles and the generated output directories. Reinstall and rebuild to restore
-  them; whatever installed them can install them again.
+- **On a confirmed infection, `saw fix` removes everything a package manager put on disk**, whole:
+  every installed tree in the repository, the dependency caches and resolver files a project uses
+  instead of one, the lockfiles, and the generated output directories. Whichever package manager
+  the project uses, and however many of them, the same holds. Reinstall and rebuild to restore
+  them.
+- **A lockfile `fix` did not recognise no longer survives a confirmed infection.** `bun` and `deno`
+  projects kept theirs.
 - **`fix` does not reach outside the repository it is cleaning.** Anything linked to a location
   outside it keeps what it points at, and directories listed under `exclude_dirs` are untouched.
 

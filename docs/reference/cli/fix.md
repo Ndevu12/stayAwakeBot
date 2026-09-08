@@ -15,9 +15,14 @@ rolling PR per repository. Bare `saw fix` only ever prepares a cleanup branch.
 branch and they do not wait for a pull request: the files are gone from the checkout you are
 standing in whether the pull request is merged, closed, or never opened.
 
-**On a confirmed infection every installed tree in the repository is removed, whole**, together
-with the lockfiles and the generated output directories. Nothing inside those directories is kept.
-Reinstall and rebuild to restore them; whatever installed them can install them again.
+**On a confirmed infection everything a package manager put on disk is removed, whole** — every
+installed tree in the repository, the dependency caches and resolver files a project uses instead
+of one, the lockfiles, and the generated output directories. Whichever package manager the project
+uses, and however many, the same holds. Nothing inside any of them is kept. Reinstall and rebuild
+to restore them; whatever installed them can install them again.
+
+What a project *commits* alongside those is not touched: a package manager's own directory keeps
+its patches, plugins and pinned releases, and only what the resolver writes there is removed.
 
 **What is not this repository's, it does not take.** Anything linked to a location outside the
 repository loses the link, and what it points at is left alone. Directories you listed under

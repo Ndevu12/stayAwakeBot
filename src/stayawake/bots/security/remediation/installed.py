@@ -15,8 +15,13 @@ from stayawake.bots.security.remediation.changes import quarantine_path
 from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions
 
 INSTALLED_DIR = "node_modules"
-PACKAGE_STORE = ".pnpm"
-_LOCKFILES = frozenset({"package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml"})
+_LOCKFILES = frozenset({
+    "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml",
+    "bun.lock", "bun.lockb", "deno.lock",
+})
+_DERIVED_TREES = frozenset({INSTALLED_DIR})
+_DERIVED_FILES = frozenset({".pnp.cjs", ".pnp.loader.mjs", ".pnp.data.json"})
+_ONLY_THESE_INSIDE = {".yarn": frozenset({"cache", "unplugged", "install-state.gz"})}
 _BUILD_OUTPUTS = frozenset({"dist", "build", "out", ".next"})
 _NOT_A_BUILD = frozenset({".git", INSTALLED_DIR, QUARANTINE_DIR, ".venv"})
 _NOT_WALKED = frozenset({".git", QUARANTINE_DIR})
@@ -72,11 +77,10 @@ def _packages_under(tree: Path) -> list[InstalledPackage]:
     except OSError:
         return found
     for entry in entries:
-        if entry.name == PACKAGE_STORE and _is_real_directory(entry):
-            for held in _scoped_children(entry):
-                found += _packages_under(held / INSTALLED_DIR)
-            continue
         if entry.name.startswith("."):
+            if _is_real_directory(entry):
+                for held in _scoped_children(entry):
+                    found += _packages_under(held / INSTALLED_DIR)
             continue
         scoped = _scoped_children(entry) if entry.name.startswith("@") else [entry]
         for package in scoped:
@@ -349,11 +353,11 @@ def _relative_to(path: Path, root: Path) -> Path | None:
         return None
 
 
-def installed_trees(root: Path) -> list[Path]:
-    """Every installed tree under `root`.
+def derived_paths(root: Path) -> list[Path]:
+    """Everything under `root` that a package manager wrote rather than a person.
 
-    Takes the repository root. Returns each directory a package manager installs into, deepest
-    first, without descending into one already found and without following a link out.
+    Takes the repository root. Returns each installed tree, dependency cache and resolver file,
+    deepest first, without descending into one already found and without following a link out.
     """
     found: list[Path] = []
     stack = [root]
@@ -363,31 +367,38 @@ def installed_trees(root: Path) -> list[Path]:
         except OSError:
             continue
         for entry in entries:
-            if entry.name == INSTALLED_DIR:
+            if entry.name in _DERIVED_TREES or entry.name in _DERIVED_FILES:
                 found.append(entry)
+            elif entry.name in _ONLY_THESE_INSIDE and _is_real_directory(entry):
+                found += [entry / held
+                          for held in sorted(_ONLY_THESE_INSIDE[entry.name])
+                          if (entry / held).exists()]
             elif entry.name not in _NOT_WALKED and _is_real_directory(entry):
                 stack.append(entry)
     return sorted(found, key=lambda p: len(p.parts), reverse=True)
 
 
 def remove_derived(path: Path, root: Path) -> bool:
-    """Delete one tree of derived state.
+    """Delete one piece of derived state.
 
-    Takes the directory and the repository root it must stay inside. Returns whether it was there
-    and is now gone. A directory that is a link loses the link, and a link inside one is removed as
-    a link, so what either points at is left alone.
+    Takes the path and the repository root it must stay inside. Returns whether it was there and is
+    now gone. A link loses the link, and a link inside a directory is removed as a link, so what
+    either points at is left alone.
     """
     try:
         if path.is_symlink():
             path.unlink()
             return not path.is_symlink()
-        if not path.is_dir():
+        if not path.exists():
             return False
     except OSError:
         return False
     if not is_safe_write_target(path, root):
         return False
-    shutil.rmtree(path)
+    if path.is_dir():
+        shutil.rmtree(path)
+    else:
+        path.unlink()
     return not path.exists()
 
 
@@ -421,8 +432,8 @@ def remove_confirmed(root: Path, *, remove_lockfiles: bool = True,
     except OSError:
         return report
 
-    for tree in installed_trees(root):
-        if remove_derived(tree, root):
+    for path in derived_paths(root):
+        if remove_derived(path, root):
             report.removed_trees += 1
 
     for build in build_output_dirs(root):
