@@ -23,7 +23,7 @@ class InstalledPackageAuditMatcher(Matcher):
 
     def scan(self, target, signatures, all_signatures=None):
         by_id = {s["id"]: s for s in signatures}
-        store = self._store_factory(signatures)
+        store = self._store_factory(all_signatures or signatures)
         tamper_sig = by_id.get("tampered-installed-package")
         hook_sig = by_id.get("installed-lifecycle-hook")
         entry_sig = by_id.get("installed-entry-loader")

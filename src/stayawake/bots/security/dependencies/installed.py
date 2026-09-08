@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
 
+from stayawake.bots.security.dependencies import layout
 from stayawake.bots.security.dependencies.resolvers.pypi import normalize_pypi_name
 
 
@@ -126,35 +127,16 @@ class NpmInstalledTree(InstalledTree):
     ecosystem = "npm"
 
     def read(self, target) -> Iterator[InstalledPackage]:
-        root = target.scan_root / "node_modules"
-        if not root.is_dir():
-            return
-        yield from self._walk(root, target.root, 0)
-
-    def _walk(self, nm_dir: Path, repo_root: Path, depth: int) -> Iterator[InstalledPackage]:
-        if depth > self._MAX_DEPTH:
-            return
-        try:
-            entries = sorted(os.scandir(nm_dir), key=lambda e: e.name)
-        except OSError:
-            return
-        for e in entries:
-            if e.name in (".bin", ".cache") or e.name.startswith("."):
-                continue
-            if not e.is_dir(follow_symlinks=False):       # skip symlinked (workspace-linked) packages
-                continue
-            if e.name.startswith("@"):                     # a scope dir holds the real package dirs
-                try:
-                    scoped = sorted(os.scandir(e.path), key=lambda x: x.name)
-                except OSError:
+        seen: set[str] = set()
+        for tree in layout.installed_trees(target.scan_root):
+            for pkg_dir in layout.package_dirs(tree):
+                key = str(pkg_dir)
+                if key in seen:
                     continue
-                for s in scoped:
-                    if s.is_dir(follow_symlinks=False):
-                        yield from self._pkg(s.path, repo_root, depth)
-                continue
-            yield from self._pkg(e.path, repo_root, depth)
+                seen.add(key)
+                yield from self._pkg(str(pkg_dir), target.root)
 
-    def _pkg(self, pkg_dir: str, repo_root: Path, depth: int) -> Iterator[InstalledPackage]:
+    def _pkg(self, pkg_dir: str, repo_root: Path) -> Iterator[InstalledPackage]:
         manifest = os.path.join(pkg_dir, "package.json")
         data = _read_manifest(manifest)
         if data and isinstance(data.get("name"), str):
@@ -166,9 +148,6 @@ class NpmInstalledTree(InstalledTree):
                                    version if isinstance(version, str) else None,
                                    str(Path(manifest).relative_to(repo_root)), hooks,
                                    _npm_entry_files(data, pkg_dir, repo_root))
-        nested = Path(pkg_dir) / "node_modules"
-        if nested.is_dir():
-            yield from self._walk(nested, repo_root, depth + 1)
 
     def source_files(self, target, pkg: "InstalledPackage",
                      truncated: list | None = None) -> Iterator[str]:
