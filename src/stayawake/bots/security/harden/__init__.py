@@ -52,6 +52,7 @@ _DEAD_SAW_NOTE = (
 )
 _ALTERED_HOOKS_NOTE = "Run `saw hook repair`."
 _HOOKS_ON = "New clones and pulls on this machine will be scanned."
+_HOOKS_REPAIRED = "A hook on this machine had been changed. It has been put back."
 _HOOKS_OFF = "Run `saw hook install`."
 
 
@@ -173,7 +174,9 @@ def run(*, live=check_live_processes, folders=_global_folders,
             lines.append(_STILL_SPAWNING)
         lines.append("")
     lines.extend(_what_to_do(outcomes))
-    if hooks_ok and hooks.changed:
+    if hooks_ok and hooks.repaired:
+        lines.append(_HOOKS_REPAIRED)
+    elif hooks_ok and hooks.changed:
         lines.append(_HOOKS_ON)
     elif not hooks_ok:
         lines.append(_HOOKS_OFF)

@@ -17,7 +17,9 @@ reader, not the mechanism or the weakness it closed.
 - **`saw harden` puts the scan-on-clone hooks in place as part of hardening.** You no longer have
   to remember `saw hook install` separately. Running it again changes nothing and says nothing — a
   hook already in place is left exactly as it is — and if the hooks could not be put in place, the
-  run says the machine is not fully protected rather than passing quietly.
+  run says the machine is not fully protected rather than passing quietly. A hook that has been
+  changed under you is still put back, and the run says so — leaving an unchanged hook alone is not
+  the same as leaving a changed one alone.
 - **`saw harden` now ends code that is running and never touched the disk.** It used to find such a
   process, print it, and stop — so the more compromised the machine, the less the command did, and
   the control it declined to place is the one that stops the next re-infection. It now captures what

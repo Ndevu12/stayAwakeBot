@@ -245,6 +245,15 @@ class Settling:
         """Whether anything on the machine is different for having run this."""
         return any(a.state != IN_PLACE for a in self.actions)
 
+    @property
+    def repaired(self) -> bool:
+        """Whether something that was not saw's hook was found in place of one, and moved aside.
+
+        Distinct from a first install: this one means a hook was changed under the operator, which
+        is a thing that happened to their machine rather than a thing this command set up.
+        """
+        return any(a.state in (QUARANTINED, PRESERVED, RESTORED, REPAIRED) for a in self.actions)
+
 
 def settle_hooks(config_path: str | None = None) -> Settling:
     """Put the scan-on-clone hooks in place and say what that did.

