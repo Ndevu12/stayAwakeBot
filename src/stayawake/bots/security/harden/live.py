@@ -10,7 +10,7 @@ from pathlib import Path
 
 from stayawake.utils import elevate, env, procstop
 from stayawake.utils.procsnap import parent_map, ps_signature
-from stayawake.bots.security.hygiene.process import live_code_processes
+from stayawake.bots.security.livecode import live_code_processes
 
 _MAX_ROUNDS = 12
 _CAPTURE_KEEP = 20_000

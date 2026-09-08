@@ -19,6 +19,7 @@ from pathlib import Path
 
 from stayawake.bots.security.hygiene import mechanism
 from stayawake.bots.security.hygiene.mechanism import _FETCH_PIPE_EXEC, _SCRATCH_EXEC
+from stayawake.utils.invocation import resolve_invocation
 from stayawake.bots.security.hygiene.autorun import grade, surface
 from stayawake.bots.security.hygiene.autorun.surface import AutorunEntry
 
@@ -349,7 +350,7 @@ class TestInvocationResolver(unittest.TestCase):
     while a multi-line `sh -c` script went silent."""
 
     def _inv(self, argv):
-        return grade.resolve_invocation(argv)
+        return resolve_invocation(argv)
 
     def test_wrappers_resolve_to_the_real_interpreter(self):
         inv = self._inv(["/usr/bin/env", "A=1", "bash", "-c", "/tmp/.x/agent"])
@@ -540,7 +541,7 @@ class TestInvocationResolver(unittest.TestCase):
         # `node`, losing the payload's path — so its CONTENT was never read. Naming a dropper after an
         # interpreter bought it LESS analysis than naming it anything else.
         for argv in (["/tmp/.x/node.evil.js"], ["/tmp/.x/python.stage2.py"], ["/tmp/.x/sh.backdoor"]):
-            self.assertEqual(grade.resolve_invocation(argv).payload_path, argv[0], argv)
+            self.assertEqual(resolve_invocation(argv).payload_path, argv[0], argv)
         # …while a real version or executable suffix still strips
         self.assertEqual(grade._program_name("/usr/bin/python3.12.1"), "python3")
         self.assertEqual(grade._program_name("/opt/n/node.exe"), "node")

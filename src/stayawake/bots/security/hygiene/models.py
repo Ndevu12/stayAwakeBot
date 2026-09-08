@@ -6,7 +6,6 @@ Leaf module (no dependency on the check submodules) so every check imports it wi
 from __future__ import annotations
 
 
-POSIX_SHELLS = ("sh", "bash", "zsh", "dash", "ksh")
 SCRATCH_ROOTS = ("/tmp", "/var/tmp", "/private/tmp", "/dev/shm")
 
 import sys
