@@ -983,9 +983,8 @@ class TestARemovalThatDidNotHappenSaysSo(unittest.TestCase):
             report = installed.remove_confirmed(repo.root, remove_lockfiles=False)
         self.assertTrue((repo.root / installed.INSTALLED_DIR).is_dir())
         self.assertEqual(report.removed_trees, 0)
-        self.assertIn("not removed", report.note())
-        self.assertIn("not this repository's", report.note())
-        self.assertNotIn("sudo", report.note(), "sudo cannot lift a safety refusal")
+        self.assertIn("still there: node_modules", report.note())
+        self.assertNotIn("sudo", report.note(), "a report of state carries no advice")
 
     def test_a_directory_that_cannot_be_read_is_named(self):
         if os.geteuid() == 0:
@@ -999,8 +998,7 @@ class TestARemovalThatDidNotHappenSaysSo(unittest.TestCase):
         finally:
             buried.chmod(0o755)
         self.assertTrue((buried / installed.INSTALLED_DIR).is_dir())
-        self.assertIn("still there", report.note())
-        self.assertIn("sudo", report.note())
+        self.assertIn("still there: locked", report.note())
 
     def test_a_build_output_that_survived_is_named(self):
         repo = self._infected()
@@ -1015,14 +1013,13 @@ class TestARemovalThatDidNotHappenSaysSo(unittest.TestCase):
             report = installed.remove_confirmed(repo.root, remove_lockfiles=False)
         self.assertTrue((repo.root / "dist").is_dir())
         self.assertIn("dist", report.survived_note())
-        self.assertIn("sudo", report.survived_note())
 
     def test_a_removal_that_finished_claims_nothing_survived(self):
         repo = self._infected()
         report = installed.remove_confirmed(repo.root, remove_lockfiles=False)
         self.assertFalse((repo.root / installed.INSTALLED_DIR).exists())
         self.assertEqual(report.survived_note(), "")
-        self.assertNotIn("sudo", report.note())
+        self.assertNotIn("still there", report.note())
 
     def test_the_line_stays_one_line_however_many_survive(self):
         repo = self._infected()
