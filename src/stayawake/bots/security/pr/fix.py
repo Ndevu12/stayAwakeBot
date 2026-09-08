@@ -217,8 +217,9 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
         if not scan.error:
             if _blocking(findings):
                 try:
-                    report = installed.remove_rebuildable(
+                    report = installed.remove_installed(
                         repo,
+                        confirmed=bool(_blocking(findings)),
                         remove_lockfiles=not installed.lockfile_stays(),
                         lockfile_root=wt)
                     tree_note = report.note()

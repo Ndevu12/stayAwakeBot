@@ -15,9 +15,11 @@ from stayawake.bots.security.remediation.changes import quarantine_path
 from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions
 
 INSTALLED_DIR = "node_modules"
+PACKAGE_STORE = ".pnpm"
 _LOCKFILES = frozenset({"package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml"})
 _BUILD_OUTPUTS = frozenset({"dist", "build", "out", ".next"})
 _NOT_A_BUILD = frozenset({".git", INSTALLED_DIR, QUARANTINE_DIR, ".venv"})
+_NOT_WALKED = frozenset({".git", QUARANTINE_DIR})
 
 
 @dataclass(frozen=True)
@@ -70,6 +72,10 @@ def _packages_under(tree: Path) -> list[InstalledPackage]:
     except OSError:
         return found
     for entry in entries:
+        if entry.name == PACKAGE_STORE and _is_real_directory(entry):
+            for held in _scoped_children(entry):
+                found += _packages_under(held / INSTALLED_DIR)
+            continue
         if entry.name.startswith("."):
             continue
         scoped = _scoped_children(entry) if entry.name.startswith("@") else [entry]
@@ -119,7 +125,7 @@ def plan_removal(root: Path, declared: set[tuple[str, str]], lockfiles: list[Pat
     """Split the installed tree by what `declared` proves. Does not write."""
     plan = RemovalPlan(root=root, lockfiles=lockfiles)
     if not lockfiles:
-        plan.reason = "no lockfile, so nothing proves what the tree should contain"
+        plan.reason = "no lockfile declares what the tree should contain"
         return plan
     if not declared:
         plan.reason = "the lockfile declares nothing, so it cannot reconstruct the tree"
@@ -185,6 +191,63 @@ def _every_file_arrived(source: Path, destination: Path) -> bool:
     return True
 
 
+def _sweep_unaccounted(root: Path, quarantine: Path) -> int:
+    """Copy out and remove whatever is still under the installed tree.
+
+    Takes the repository root and this run's quarantine directory. Returns how many entries were
+    removed. Nothing is deleted before its copy is read back.
+    """
+    tree = root / INSTALLED_DIR
+    if not _is_real_directory(tree):
+        return 0
+    removed = 0
+    try:
+        entries = sorted(tree.iterdir())
+    except OSError:
+        return 0
+    for entry in entries:
+        destination = quarantine / entry.relative_to(root)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if entry.is_symlink():
+            if not destination.is_symlink() and not destination.exists():
+                destination.symlink_to(entry.readlink())
+            entry.unlink()
+            removed += 1
+            continue
+        if entry.is_dir():
+            shutil.copytree(entry, destination, symlinks=True, dirs_exist_ok=True)
+            if not _every_file_arrived(entry, destination):
+                raise OSError(f"the copy of {entry} is incomplete, so nothing was removed")
+            if not is_safe_write_target(entry, root):
+                continue
+            shutil.rmtree(entry)
+            removed += 1
+            continue
+        shutil.copy2(entry, destination)
+        if not destination.is_file():
+            raise OSError(f"the copy of {entry} is incomplete, so nothing was removed")
+        if not is_safe_write_target(entry, root):
+            continue
+        entry.unlink()
+        removed += 1
+    return removed
+
+
+def _installed_remnants(root: Path) -> tuple[int, bool]:
+    """What is still under the installed tree, and whether it could be listed.
+
+    Takes the repository root. Returns the number of entries still there and whether the tree could
+    be read at all; an unreadable tree counts as holding something.
+    """
+    tree = root / INSTALLED_DIR
+    try:
+        if not tree.is_dir():
+            return 0, True
+        return sum(1 for _ in tree.iterdir()), True
+    except OSError:
+        return 1, False
+
+
 def next_quarantine(root: Path, base: Path) -> Path:
     """A new subdirectory under `base` for this run."""
     for index in range(1, 1000):
@@ -224,22 +287,45 @@ class Report:
     removed_lockfiles: list[Path] = field(default_factory=list)
     removed_builds: list[str] = field(default_factory=list)
     copies: Path | None = None
+    removed_strays: int = 0
+    removed_trees: int = 0
+    installed_tree_kept: str | None = None
+    installed_entries_kept: int = 0
 
     def note(self) -> str:
-        """What this did to the live checkout, and where the copies went."""
+        """What this did to the live checkout, what it left alone, and where the copies went."""
         bits = []
+        if self.removed_trees:
+            bits.append(f"removed {self.removed_trees} installed tree(s)")
         if self.removed_packages:
             bits.append(f"removed {self.removed_packages} installed package(s)")
         if self.preserved_packages:
             bits.append(f"{self.preserved_packages} of them unaccounted for")
+        if self.removed_strays:
+            bits.append(f"removed {self.removed_strays} more entr(y/ies) nothing accounted for")
         if self.removed_lockfiles:
             bits.append("removed the lockfile")
         if self.removed_builds:
             bits.append("removed " + ", ".join(self.removed_builds))
+        kept = self.kept_note()
         if not bits:
-            return ""
+            return kept
         done = "; ".join(bits) + " — from your working tree now, not only on the branch"
-        return f"{done}; copies in {self.copies}" if self.copies else done
+        done = f"{done}; copies in {self.copies}" if self.copies else done
+        return f"{done}. {kept}" if kept else done
+
+    def kept_note(self) -> str:
+        """What is still installed, and why it was left there.
+
+        Returns the sentence naming the tree that was not removed, or an empty string when there
+        was nothing to leave.
+        """
+        if self.installed_tree_kept is None:
+            return ""
+        what = (f"{self.installed_entries_kept} entr(y/ies) under {INSTALLED_DIR}"
+                if self.installed_entries_kept else f"the {INSTALLED_DIR} directory")
+        return (f"{what} left in place — {self.installed_tree_kept}. "
+                f"Reinstalling does not clear it; remove it yourself before you rebuild")
 
 
 def build_output_dirs(root: Path) -> list[Path]:
@@ -263,9 +349,124 @@ def _relative_to(path: Path, root: Path) -> Path | None:
         return None
 
 
+def installed_trees(root: Path) -> list[Path]:
+    """Every installed tree under `root`.
+
+    Takes the repository root. Returns each directory a package manager installs into, deepest
+    first, without descending into one already found and without following a link out.
+    """
+    found: list[Path] = []
+    stack = [root]
+    while stack:
+        try:
+            entries = list(stack.pop().iterdir())
+        except OSError:
+            continue
+        for entry in entries:
+            if entry.name == INSTALLED_DIR:
+                found.append(entry)
+            elif entry.name not in _NOT_WALKED and _is_real_directory(entry):
+                stack.append(entry)
+    return sorted(found, key=lambda p: len(p.parts), reverse=True)
+
+
+def remove_derived(path: Path, root: Path) -> bool:
+    """Delete one tree of derived state.
+
+    Takes the directory and the repository root it must stay inside. Returns whether it was there
+    and is now gone. A directory that is a link loses the link, and a link inside one is removed as
+    a link, so what either points at is left alone.
+    """
+    try:
+        if path.is_symlink():
+            path.unlink()
+            return not path.is_symlink()
+        if not path.is_dir():
+            return False
+    except OSError:
+        return False
+    if not is_safe_write_target(path, root):
+        return False
+    shutil.rmtree(path)
+    return not path.exists()
+
+
+def remove_installed(root: Path, *, confirmed: bool, remove_lockfiles: bool = True,
+                     lockfile_root: Path | None = None) -> Report:
+    """Remove what a finding of this confidence allows. Bounded to `root`.
+
+    Takes the repository root, whether its infection is confirmed, whether the lockfile goes, and
+    the tree the lockfiles are read from. Returns what was removed. A confirmed infection loses
+    every reproducible directory whole; anything less keeps what no lockfile can account for.
+    """
+    if confirmed:
+        return remove_confirmed(root, remove_lockfiles=remove_lockfiles,
+                                lockfile_root=lockfile_root)
+    return remove_rebuildable(root, remove_lockfiles=remove_lockfiles,
+                              lockfile_root=lockfile_root)
+
+
+def remove_confirmed(root: Path, *, remove_lockfiles: bool = True,
+                     lockfile_root: Path | None = None) -> Report:
+    """Delete what a confirmed infection leaves behind. Bounded to `root`.
+
+    Takes the repository root, whether the lockfile goes, and the tree the lockfiles are read from.
+    Returns what was removed. Nothing here is copied first: an installed tree, a lockfile and a
+    build output are all reproducible, and a copy of an infected one is the payload kept on disk.
+    """
+    report = Report()
+    try:
+        if not root.is_dir():
+            return report
+    except OSError:
+        return report
+
+    for tree in installed_trees(root):
+        if remove_derived(tree, root):
+            report.removed_trees += 1
+
+    for build in build_output_dirs(root):
+        if remove_derived(build, root):
+            report.removed_builds.append(build.name)
+
+    if remove_lockfiles:
+        proof = lockfile_root if lockfile_root is not None else root
+        for lockfile in lockfiles_under(proof):
+            for live in {lockfile, root / (_relative_to(lockfile, proof) or lockfile.name)}:
+                if not live.is_file() or live.is_symlink():
+                    continue
+                if not is_safe_write_target(live, root if live != lockfile else proof):
+                    continue
+                live.unlink()
+                report.removed_lockfiles.append(live)
+    return report
+
+
+def lockfiles_under(root: Path) -> list[Path]:
+    """The lockfiles this repository carries.
+
+    Takes the repository root. Returns each lockfile a write may reach, without reading what any
+    of them declares.
+    """
+    target = LocalRepoTarget(root, str(root), ScanOptions())
+    found: list[Path] = []
+    for name in target.iter_files():
+        path = root / name
+        if path.name not in _LOCKFILES or path.is_symlink() or not path.is_file():
+            continue
+        if not is_safe_write_target(path, root) or path in found:
+            continue
+        found.append(path)
+    return found
+
+
 def remove_rebuildable(root: Path, *, remove_lockfiles: bool = True,
                        lockfile_root: Path | None = None) -> Report:
-    """Remove this repository's installed tree, lockfile, and generated outputs. Bounded to `root`."""
+    """Remove this repository's installed tree, lockfile, and generated outputs. Bounded to `root`.
+
+    Kept for a repository that is not confirmed infected, where what the lockfile cannot account
+    for is preserved rather than deleted. A confirmed infection goes through `remove_confirmed`.
+    """
     report = Report()
     try:
         if not root.is_dir():
@@ -310,9 +511,16 @@ def remove_rebuildable(root: Path, *, remove_lockfiles: bool = True,
         preserved, removed = apply_removal(plan, _evidence())
         report.preserved_packages = preserved
         report.removed_packages = removed
+        report.removed_strays = _sweep_unaccounted(root, _evidence())
         leftover = root / INSTALLED_DIR
-        if not plan.preserve and _is_real_directory(leftover) and is_safe_write_target(leftover, root):
+        if _is_real_directory(leftover) and is_safe_write_target(leftover, root):
             shutil.rmtree(leftover)
+    kept, readable = _installed_remnants(root)
+    if kept:
+        report.installed_entries_kept = kept
+        report.installed_tree_kept = (
+            "it could not be read" if not readable
+            else plan.reason or "it is not this repository's to remove")
 
     if plan.project_is_declared:
         for build in build_output_dirs(root):
