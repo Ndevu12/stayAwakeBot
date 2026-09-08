@@ -24,6 +24,10 @@ _EPERM = 1
 RUNNING, GONE, NOT_OURS, UNSUPPORTED = "running", "gone", "not-ours", "unsupported"
 
 #: macOS `p_stat`. A zombie has been killed and not yet reaped; it executes nothing.
+#:
+#: TRAP: this is never reached on macOS. libproc answers ESRCH for a zombie before the struct is
+#: read, so `Identity.zombie` is set only by the Linux reader. Both platforms still refuse to treat
+#: one as running — macOS through GONE, Linux through this flag.
 _SZOMB = 5
 
 

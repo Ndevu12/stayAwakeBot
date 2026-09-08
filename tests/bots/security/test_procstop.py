@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import signal
 import subprocess
+import sys
 import time
 import unittest
 
@@ -130,6 +131,46 @@ class TestItSaysWhatItCouldNotDo(unittest.TestCase):
         self.assertEqual(procstop.end(absent), procstop.ALREADY_GONE)
         self.assertTrue(procstop.has_ended(absent, settle=0.05))
 
+
+
+class TestAZombieIsNeverRunningOnEitherPlatform(unittest.TestCase):
+    """The two platforms disagree about how a zombie appears, and a Linux-only CI failure is how
+    that was found. Each is checked on the platform it applies to rather than assumed."""
+
+    @unittest.skipUnless(sys.platform == "darwin", "libproc behaviour")
+    def test_macos_answers_gone_rather_than_flagging_it(self):
+        proc = subprocess.Popen(["/bin/sleep", "30"])
+        self.addCleanup(self._reap, proc)
+        who, _state = identify(proc.pid)
+        if who is None:
+            self.skipTest("the child never became readable")
+        os.kill(proc.pid, signal.SIGKILL)
+        time.sleep(0.4)
+        after, state = identify(proc.pid)
+        self.assertIsNone(after, "libproc returned a struct for a zombie")
+        self.assertEqual(state, "gone")
+        self.assertTrue(procstop.has_ended(who))
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "/proc behaviour")
+    def test_linux_reads_it_and_flags_it(self):
+        proc = subprocess.Popen(["/bin/sleep", "30"])
+        self.addCleanup(self._reap, proc)
+        who, _state = identify(proc.pid)
+        if who is None:
+            self.skipTest("the child never became readable")
+        os.kill(proc.pid, signal.SIGKILL)
+        time.sleep(0.4)
+        after, state = identify(proc.pid)
+        self.assertIsNotNone(after, "/proc lost the entry before it was reaped")
+        self.assertTrue(after.zombie, "a zombie was not flagged as one")
+        self.assertTrue(procstop.has_ended(who))
+
+    def _reap(self, proc):
+        try:
+            os.kill(proc.pid, signal.SIGKILL)
+            proc.wait(timeout=5)
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
