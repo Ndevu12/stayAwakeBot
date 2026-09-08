@@ -382,7 +382,8 @@ class _Support:
 def _shell_run_names(lines: list[str]) -> tuple[set[str], set[str]]:
     """Return the file names the shell command `lines` run through a POSIX shell or source, and the
     names they execute directly."""
-    from .grade import _split_command, resolve_invocation
+    from stayawake.utils.invocation import resolve_invocation
+    from .grade import _split_command
     by_shell: set[str] = set()
     directly: set[str] = set()
     for line in lines:

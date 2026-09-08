@@ -6,6 +6,7 @@ from __future__ import annotations
 import unittest
 from unittest import mock
 
+from stayawake.bots.security import livecode
 from stayawake.bots.security.hygiene import audit_checks, process
 from stayawake.bots.security.hygiene.models import ROTATION_UNSAFE_IDS
 from stayawake.bots.security.obfuscation.entry import analyze_file
@@ -75,8 +76,8 @@ class TestItGradesTheCodeAndNotTheCommandLine(unittest.TestCase):
     def test_the_code_argument_comes_from_the_shared_authority(self):
         # Re-deriving which argument is code is how two consumers end up disagreeing; this pins that
         # the probe asks the same resolver the start-up checks ask.
-        with mock.patch.object(process, "resolve_invocation",
-                               wraps=process.resolve_invocation) as resolver:
+        with mock.patch.object(livecode, "resolve_invocation",
+                               wraps=livecode.resolve_invocation) as resolver:
             _check(_snapshot(Process(pid=4, argv=("sh", "-c", "echo hi"))))
         resolver.assert_called_once_with(("sh", "-c", "echo hi"))
 
@@ -91,7 +92,7 @@ class TestItNeverReadsRefusalAsClean(unittest.TestCase):
         # Refused and "runs no arguments" are the same empty list to a caller that only checks
         # truthiness. The refusal is asked about first, so a grade is never formed from a non-answer.
         refused = Process(pid=6, argv=("sh", "-c", _loader()), argv_unreadable=True)
-        with mock.patch.object(process, "resolve_invocation") as resolver:
+        with mock.patch.object(livecode, "resolve_invocation") as resolver:
             self.assertEqual(_check(_snapshot(refused)), [])
         resolver.assert_not_called()
 
@@ -158,7 +159,7 @@ class TestAPopulationIsOneFinding(unittest.TestCase):
         from stayawake.utils.procsnap import Identity
         dead = Process(pid=9, argv=("node", "-e", _loader()),
                        identity=Identity(pid=9, ppid=1, uid=501, start_time=1, zombie=True))
-        self.assertEqual(process.live_code_processes(_snapshot(dead)), [])
+        self.assertEqual(livecode.live_code_processes(_snapshot(dead)), [])
         self.assertEqual(_check(_snapshot(dead)), [])
 
     def test_the_finding_and_the_ender_agree_about_which_processes_qualify(self):
@@ -167,7 +168,7 @@ class TestAPopulationIsOneFinding(unittest.TestCase):
         payload = _loader()
         snap = _snapshot(Process(pid=5, argv=("node", "-e", payload)),
                          Process(pid=6, argv=("node", "app.js")))
-        self.assertEqual([p.pid for p, _c, _r in process.live_code_processes(snap)], [5])
+        self.assertEqual([p.pid for p, _c, _r in livecode.live_code_processes(snap)], [5])
 
 
 class TestTheOtherWaysOfRunningWithoutAFile(unittest.TestCase):
@@ -176,24 +177,24 @@ class TestTheOtherWaysOfRunningWithoutAFile(unittest.TestCase):
 
     def test_an_interpreter_reading_its_program_from_stdin_is_seen(self):
         fed = Process(pid=40, argv=("node", "-"))
-        found = process.live_code_processes(_snapshot(fed))
+        found = livecode.live_code_processes(_snapshot(fed))
         self.assertEqual([p.pid for p, _c, _r in found], [40])
         self.assertIn("standard input", found[0][2])
 
     def test_a_module_flag_is_not_mistaken_for_one(self):
         # `python -m unittest discover -s tests` passes `-s` to unittest, not to python.
         ordinary = Process(pid=41, argv=("python3", "-m", "unittest", "discover", "-s", "tests"))
-        self.assertEqual(process.live_code_processes(_snapshot(ordinary)), [])
+        self.assertEqual(livecode.live_code_processes(_snapshot(ordinary)), [])
 
     def test_an_ordinary_script_is_not_one(self):
-        self.assertEqual(process.live_code_processes(_snapshot(
+        self.assertEqual(livecode.live_code_processes(_snapshot(
             Process(pid=42, argv=("node", "app.js")))), [])
 
     def test_a_program_that_is_no_longer_on_disk_is_seen(self):
         from unittest import mock
         gone = Process(pid=43, argv=("some-daemon",))
-        with mock.patch.object(process, "program_is_gone", return_value=True):
-            found = process.live_code_processes(_snapshot(gone))
+        with mock.patch.object(livecode, "program_is_gone", return_value=True):
+            found = livecode.live_code_processes(_snapshot(gone))
         self.assertEqual([p.pid for p, _c, _r in found], [43])
         self.assertIn("no longer on this disk", found[0][2])
 
@@ -238,6 +239,7 @@ class TestAnAuditOnlyReports(unittest.TestCase):
         root = pathlib.Path(__file__).resolve().parents[3] / "src/stayawake"
         return [(p, p.read_text(encoding="utf-8"))
                 for p in [*(root / "bots/security/hygiene").rglob("*.py"),
+                          root / "bots/security/livecode.py",
                           root / "utils/procsnap.py"]]
 
     def test_nothing_in_the_audit_path_can_signal_a_process(self):

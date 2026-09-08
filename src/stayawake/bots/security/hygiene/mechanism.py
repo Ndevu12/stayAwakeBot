@@ -9,7 +9,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .models import HygieneIssue, POSIX_SHELLS, SCRATCH_ROOTS, _WIPER_NOTE
+from stayawake.utils.invocation import POSIX_SHELLS
+from .models import HygieneIssue, SCRATCH_ROOTS, _WIPER_NOTE
 
 #
 # User-owned files carry legitimate content, so grading is by signal strength rather than an
