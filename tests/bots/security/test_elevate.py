@@ -92,5 +92,24 @@ class TestItAsksOnlyWhenThereIsSomebodyToAsk(unittest.TestCase):
         self.assertIn("9; rm -rf /", seen[0], "the argument was split or interpolated")
 
 
+class TestItAsksWhereverSudoCouldPrompt(unittest.TestCase):
+    """sudo prompts on /dev/tty. Testing stdin or stderr instead answers no whenever output is
+    redirected, so a run that could have asked would give up with the implant still running."""
+
+    def test_a_redirected_run_with_a_terminal_can_still_ask(self):
+        self.assertTrue(elevate.can_ask(terminal=lambda: True))
+
+    def test_no_controlling_terminal_cannot_ask(self):
+        def none():
+            raise OSError(6, "Device not configured")
+        self.assertFalse(elevate.can_ask(terminal=none))
+
+    def test_it_asks_the_terminal_and_not_the_streams(self):
+        source = Path(elevate.__file__).read_text()
+        self.assertIn("/dev/tty", source)
+        self.assertNotIn("stdin.isatty", source)
+        self.assertNotIn("stderr.isatty", source)
+
+
 if __name__ == "__main__":
     unittest.main()

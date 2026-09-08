@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import stat
 import subprocess
-import sys
 
 _SUDO_PATHS = ("/usr/bin/sudo", "/bin/sudo")
 _TIMEOUT = 120
@@ -35,13 +34,23 @@ def trusted_sudo() -> str | None:
     return None
 
 
-def can_ask(*, isatty=None) -> bool:
-    """Whether there is somebody present to answer a password prompt."""
-    check = isatty or (lambda: sys.stdin.isatty() and sys.stderr.isatty())
+def can_ask(*, terminal=None) -> bool:
+    """Whether there is a terminal a password can be asked on.
+
+    TRAP: asked of `/dev/tty`, which is where sudo prompts — not of stdin or stderr. Testing those
+    answers no whenever output is redirected, and a run that could have asked gives up instead.
+    """
+    if terminal is not None:
+        try:
+            return bool(terminal())
+        except OSError:
+            return False
     try:
-        return bool(check())
-    except (OSError, ValueError):
+        handle = os.open("/dev/tty", os.O_RDWR)
+    except OSError:
         return False
+    os.close(handle)
+    return True
 
 
 def run_as_root(argv: list[str], *, sudo=trusted_sudo, ask=can_ask,
