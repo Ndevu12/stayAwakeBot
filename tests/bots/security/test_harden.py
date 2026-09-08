@@ -113,16 +113,30 @@ class TestRunContract(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("starting them again", text)
 
-    def test_what_belongs_to_another_user_is_named_as_out_of_reach(self):
-        theirs = live.Ending(matched=2, frozen=0, ended=0, refused=[404], quiet=True,
-                             still_holding=2)
+    def test_privilege_it_could_not_get_is_named_as_an_ask_that_failed(self):
+        # It no longer reports another user's process and walks away: it asks, for those processes
+        # only, and says so when the answer does not come.
+        theirs = live.Ending(matched=2, frozen=0, ended=0, refused=[404], asked_for=[404],
+                             asking="cannot-ask", quiet=True, still_holding=2)
         code, text = harden.run(supported=lambda: True, folders=lambda: [Path("/mine")],
                                 apply=lambda p: None,
                                 live=lambda: [_issue("live-obfuscated-process")],
                                 stop=lambda: theirs)
         self.assertEqual(code, 1)
-        self.assertIn("another user", text)
+        self.assertIn("needs privilege", text)
+        self.assertIn("cannot-ask", text)
         self.assertIn("404", text)
+
+    def test_privilege_that_was_granted_ends_it_and_the_control_goes_on(self):
+        granted = live.Ending(matched=2, frozen=1, ended=2, asked_for=[404], asking="granted",
+                              quiet=True, still_holding=0)
+        code, text = harden.run(supported=lambda: True, folders=lambda: [Path("/mine")],
+                                apply=lambda p: denial.PathOutcome(p, denial.ENFORCING, "held"),
+                                live=lambda: [_issue("live-obfuscated-process")],
+                                stop=lambda: granted)
+        self.assertEqual(code, 0)
+        self.assertIn("2 of 2 ended", text)
+        self.assertIn("granted", text)
 
     def test_a_probe_that_raises_does_not_take_the_command_down(self):
         def boom():

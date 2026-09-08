@@ -12,13 +12,18 @@ import os
 import signal
 import time
 
-from stayawake.utils.procsnap import GONE, NOT_OURS, RUNNING, UNSUPPORTED, Identity, identify
+from stayawake.utils import elevate
+from stayawake.utils.procsnap import (GONE, NOT_OURS, RUNNING, UNSUPPORTED, Identity, identify,
+                                      ps_signature)
 
 #: What acting on a process did.
 SIGNALLED = "signalled"           # the signal was delivered to the process we meant
 ALREADY_GONE = "already-gone"     # it was not executing by the time we reached it
 RECYCLED = "recycled"             # the pid is now a different process — refused, never signalled
 REFUSED = "refused"               # it is running and not ours; we may not signal it
+NEEDS_PRIVILEGE = "needs-privilege"   # ours to end only as root — ask, do not give up on it
+
+_KILL_PATHS = ("/bin/kill", "/usr/bin/kill")
 
 _SETTLE_SECONDS = 2.0
 _POLL_SECONDS = 0.02
@@ -35,7 +40,7 @@ def _still(known: Identity) -> tuple[str, Identity | None]:
     pid = known.pid
     who, state = identify(pid)
     if state == NOT_OURS:
-        return REFUSED, None
+        return NEEDS_PRIVILEGE, None
     if state in (GONE, UNSUPPORTED) or who is None:
         return ALREADY_GONE, None
     if who.zombie:
@@ -55,7 +60,9 @@ def _send(known: Identity, sig: int) -> str:
     except ProcessLookupError:
         return ALREADY_GONE
     except PermissionError:
-        return REFUSED
+        # Not the end of it. This is the one case worth asking about, and saying "refused" here is
+        # what left another user's implant running on a machine the operator does own.
+        return NEEDS_PRIVILEGE
     except OSError:
         return REFUSED
     return SIGNALLED
@@ -95,8 +102,39 @@ def has_ended(known: Identity, *, settle: float = _SETTLE_SECONDS,
         verdict, _who = _still(known)
         if verdict in (ALREADY_GONE, RECYCLED):
             return True
-        if verdict == REFUSED:
+        if verdict in (REFUSED, NEEDS_PRIVILEGE):
             return False
         if clock() >= deadline:
             return False
         sleep(_POLL_SECONDS)
+
+
+def _kill_binary() -> str | None:
+    for candidate in _KILL_PATHS:
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
+
+def end_as_root(pids: list[int], *, signatures: dict[int, str],
+                run_as_root=elevate.run_as_root, signature=ps_signature) -> tuple[str, list[int]]:
+    """End processes that are only endable as root, asking for privilege once for all of them.
+
+    The signature each pid had is re-read first and compared: a pid this user cannot read can still
+    be recycled, and asking root to kill a stale one is the same mistake with worse consequences.
+    Frozen first for the same reason as everywhere else — a spawner that is asked to die politely
+    forks before it goes.
+    """
+    still = [pid for pid in pids if signature(pid) == signatures.get(pid)]
+    if not still:
+        return elevate.GRANTED, []
+    binary = _kill_binary()
+    if binary is None:
+        return elevate.NOT_AVAILABLE, []
+    named = [str(pid) for pid in still]
+    outcome, _detail = run_as_root([binary, "-STOP", *named])
+    if outcome != elevate.GRANTED:
+        return outcome, []
+    run_as_root([binary, "-KILL", *named])
+    ended = [pid for pid in still if signature(pid) is None]
+    return elevate.GRANTED, ended

@@ -20,6 +20,10 @@ reader, not the mechanism or the weakness it closed.
   is running, freezes it so it cannot spawn more, ends it, and proves each one ended before applying
   the control. A run that cannot end all of it still withholds the control and says which part it
   could not reach. What was found is reported as one line with a count, not one line per process.
+  Where ending something needs privilege the command does not have, it asks for it — for those
+  processes only, once for all of them, and only where there is a terminal to answer on. It does
+  not require privilege to run, and it never takes `sudo` from your `PATH`: on a machine that may
+  already be compromised, that would hand root to the thing being removed.
 
 ### Fixed
 - **On a confirmed infection, `saw fix` removes everything a package manager put on disk**, whole:

@@ -18,8 +18,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from stayawake.utils import env, procstop
-from stayawake.utils.procsnap import parent_map
+from stayawake.utils import elevate, env, procstop
+from stayawake.utils.procsnap import parent_map, ps_signature
 from stayawake.bots.security.hygiene.process import live_code_processes
 
 _MAX_ROUNDS = 12
@@ -35,6 +35,8 @@ class Ending:
     ended: int = 0
     survived: list[int] = field(default_factory=list)
     refused: list[int] = field(default_factory=list)
+    asked_for: list[int] = field(default_factory=list)
+    asking: str = ""
     quiet: bool = False
     still_holding: int = 0
     captured: str | None = None
@@ -121,11 +123,13 @@ def _deepest_first(held: dict[int, tuple]) -> list[int]:
 
 def end_live_code(*, find=live_code_processes, freeze=procstop.freeze, end=procstop.end,
                   ended=procstop.has_ended, resume=procstop.resume, capture=_capture, where=None,
-                  protected=_protected, rounds: int = _MAX_ROUNDS) -> Ending:
+                  protected=_protected, elevated=procstop.end_as_root,
+                  rounds: int = _MAX_ROUNDS) -> Ending:
     """Freeze everything holding live code until nothing new appears, then end it."""
     keep_out = protected()
     held: dict[int, tuple] = {}
     held_done: set[int] = set()
+    needs_root: dict[int, str | None] = {}
     refused: list[int] = []
     out = Ending()
 
@@ -140,14 +144,28 @@ def end_live_code(*, find=live_code_processes, freeze=procstop.freeze, end=procs
                 verdict = freeze(process.identity)
                 if verdict == procstop.SIGNALLED:
                     held[process.pid] = (process.identity, code)
+                elif verdict == procstop.NEEDS_PRIVILEGE:
+                    needs_root[process.pid] = ps_signature(process.pid)
+                    keep_out.add(process.pid)      # asking again every round answers the same way
                 elif verdict == procstop.REFUSED:
                     refused.append(process.pid)
-                    keep_out.add(process.pid)      # asking again every round answers the same way
+                    keep_out.add(process.pid)
                 else:
                     keep_out.add(process.pid)      # gone or recycled — not ours to end
 
-        out.matched = len(held) + len(refused)
+        # Every process that held live code, however this run could or could not reach it. Counted
+        # once, here, before anything moves between the buckets below.
+        out.matched = len(held) + len(needs_root) + len(refused)
         out.frozen = len(held)
+
+        # Privilege is asked for at the point it is needed, for those processes only. Reporting
+        # them and walking away is what left another user's implant running on a machine the
+        # operator does own.
+        if needs_root:
+            out.asked_for = sorted(needs_root)
+            out.asking, ended_as_root = elevated(out.asked_for, signatures=needs_root)
+            out.ended += len(ended_as_root)
+            refused.extend(pid for pid in out.asked_for if pid not in set(ended_as_root))
         out.refused = sorted(set(refused))
         out.captured = capture(held, where or capture_path())
 

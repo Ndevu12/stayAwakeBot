@@ -244,6 +244,31 @@ def _live_pids() -> list[int]:
     return sorted(int(tok) for tok in out.split() if tok.isdigit())
 
 
+def ps_signature(pid: int) -> str | None:
+    """A stable discriminator for ANY process, including one this user may not read.
+
+    `identify` answers NOT_OURS for another user's process, so a caller that needs privilege to
+    signal one has no way to tell, a moment later, that the pid still means the same thing. `ps`
+    reports a start time for every process without needing any, and the string is compared to
+    itself rather than parsed — no locale, no date format to get wrong.
+    """
+    if sys.platform.startswith("linux"):
+        try:
+            raw = Path(f"/proc/{pid}/stat").read_text()
+            fields = raw[raw.rindex(")") + 2:].split()
+            return f"{fields[1]}|{fields[19]}"
+        except (OSError, ValueError, IndexError):
+            return None
+    try:
+        out = subprocess.run(["ps", "-o", "ppid=,uid=,lstart=", "-p", str(pid)],
+                             capture_output=True, text=True, timeout=_PS_TIMEOUT,
+                             env={"LC_ALL": "C", "PATH": "/usr/bin:/bin"})
+    except (OSError, subprocess.SubprocessError):
+        return None
+    line = " ".join(out.stdout.split())
+    return line or None
+
+
 def parent_map() -> dict[int, int]:
     """Every pid's parent, including processes this user may not otherwise read.
 

@@ -33,8 +33,8 @@ _STILL_LIVE = (
     "still someone else's."
 )
 _NOT_OURS_LIVE = (
-    "Some of it belongs to another user, so it is out of this command's reach. Run again as that "
-    "user, or as root."
+    "Some of it needs privilege this run was not given. It asked, for those processes only, and "
+    "did not get it — run again where the password can be answered, or as root."
 )
 _STILL_SPAWNING = (
     "Something outside what this command can see is starting them again. Ending them cannot "
@@ -115,8 +115,10 @@ def _ending_line(ending) -> str:
     bits = [f"  {ending.ended} of {ending.matched} ended"]
     if ending.survived:
         bits.append(f"{len(ending.survived)} still running ({_pids(ending.survived)})")
+    if ending.asked_for:
+        bits.append(f"{len(ending.asked_for)} needed privilege ({ending.asking or 'not asked'})")
     if ending.refused:
-        bits.append(f"{len(ending.refused)} not ours ({_pids(ending.refused)})")
+        bits.append(f"{len(ending.refused)} still not ended ({_pids(ending.refused)})")
     if ending.still_holding:
         bits.append(f"{ending.still_holding} holding live code now")
     if ending.captured:
