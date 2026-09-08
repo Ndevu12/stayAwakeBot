@@ -142,32 +142,30 @@ def run(*, live=check_live_processes, folders=_global_folders,
     issues = list(outcome.issues)
     if any(i.id == PROCESSES_NOT_READABLE_ID for i in issues):
         return 1, _REFUSED_UNREAD
-    # Standing down here is what a compromised host used to get: the worse the machine, the less
-    # this command did, and the controls it declined are the ones that stop the next re-infection.
-    ending = None
+    # TRAP: what could not be done never stops what could. A part that needs a password nobody can
+    # answer must not cost the operator every control this run was able to place.
+    ending, ending_failed = None, None
     if [i for i in issues if i.id == _LIVE]:
-        # TRAP: this one signals real processes; a raise here must not reach the caller.
         try:
             ending = stop()
         except Exception as exc:                  # never let it take the command down
-            return 1, (f"{_STILL_LIVE}\n\n  the attempt stopped on: "
-                       f"{textsafe.plain(f'{type(exc).__name__}: {exc}', limit=200)}")
-        if not ending.finished:
-            lines = [_STILL_LIVE, ""]
-            if ending.refused:
-                lines += [_NOT_OURS_LIVE, ""]
-            if not ending.quiet:
-                lines += [_STILL_SPAWNING, ""]
-            lines.append(_ending_line(ending))
-            return 1, "\n".join(lines)
+            ending_failed = textsafe.plain(f"{type(exc).__name__}: {exc}", limit=200)
 
     outcomes = [apply(p) for p in folders()]
     took = {ENFORCING, SELF_ENFORCING}
     applied = bool(outcomes) and all(o.state in took for o in outcomes)
-    headline = _CLAIM if applied else _NOT_EVERYWHERE
+    unresolved = ending_failed is not None or (ending is not None and not ending.finished)
+    headline = _NOT_EVERYWHERE if unresolved or not applied else _CLAIM
     lines = [headline, ""]
-    if ending is not None:
-        lines.extend([_ENDED_LIVE, _ending_line(ending), ""])
+    if ending_failed is not None:
+        lines.extend([_STILL_LIVE, f"  the attempt stopped on: {ending_failed}", ""])
+    elif ending is not None:
+        lines.append(_STILL_LIVE if unresolved else _ENDED_LIVE)
+        if ending.refused:
+            lines.append(_NOT_OURS_LIVE)
+        if not ending.quiet:
+            lines.append(_STILL_SPAWNING)
+        lines.extend([_ending_line(ending), ""])
     states = {o.state for o in outcomes}
     for note, fires in ((_SOME_ARE_YOURS, applied and SELF_ENFORCING in states),
                         (_LEFT_OPEN_NOTE, LEFT_OPEN_OVER_CONTENT in states),
@@ -182,4 +180,6 @@ def run(*, live=check_live_processes, folders=_global_folders,
     if not saw_runs():
         lines.extend(["", _DEAD_SAW_NOTE])
     body = "\n".join(lines).rstrip()
+    if unresolved:
+        return 1, body
     return (0, body) if applied else (3, body)

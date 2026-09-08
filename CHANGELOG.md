@@ -24,6 +24,10 @@ reader, not the mechanism or the weakness it closed.
   processes only, once for all of them, and only where there is a terminal to answer on. It does
   not require privilege to run, and it never takes `sudo` from your `PATH`: on a machine that may
   already be compromised, that would hand root to the thing being removed.
+- **What `saw harden` cannot do no longer costs you what it can.** A process needing a password
+  nobody is there to answer, or one belonging to another user, used to stop the command before it
+  placed any control at all. Everything it can do now happens, what it could not do is named, and
+  the run still fails so nothing reads as finished.
 - **Code on the command line is no longer the only shape it recognises.** A program that is no
   longer a file on this disk, and an interpreter handed its program on standard input, are both
   code running with nothing behind it to scan — and neither is a reason to leave it running.

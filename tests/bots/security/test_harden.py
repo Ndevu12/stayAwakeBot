@@ -92,23 +92,25 @@ class TestRunContract(unittest.TestCase):
         self.assertIn("3 of 3 ended", text)
         self.assertIn("enforcing", text)
 
-    def test_the_control_is_withheld_while_any_of_it_is_still_running(self):
+    def test_what_it_could_not_end_does_not_cost_the_controls_it_could_place(self):
+        # Withholding here was the same inversion as refusing to act at all: the worse the machine,
+        # the less the command did, and these controls are what stops the next re-infection.
         alive = live.Ending(matched=4, frozen=4, ended=3, survived=[91], quiet=True,
                             still_holding=1)
-        apply = mock.Mock()
+        apply = mock.Mock(return_value=denial.PathOutcome(Path("/mine"), denial.ENFORCING, "held"))
         code, text = harden.run(supported=lambda: True, folders=lambda: [Path("/mine")],
                                 apply=apply, live=lambda: [_issue("live-obfuscated-process")],
                                 stop=lambda: alive)
-        self.assertEqual(code, 1)
-        self.assertIn("not applied", text)
+        apply.assert_called_once()
+        self.assertEqual(code, 1, "an unresolved process must still fail the run")
         self.assertIn("did not end", text)
         self.assertIn("91", text)
-        apply.assert_not_called()
+        self.assertIn("enforcing", text)
 
     def test_a_source_it_cannot_see_is_named_rather_than_implied(self):
         spawning = live.Ending(matched=9, frozen=9, ended=9, quiet=False, still_holding=2)
         code, text = harden.run(supported=lambda: True, folders=lambda: [Path("/mine")],
-                                apply=lambda p: None,
+                                apply=lambda p: denial.PathOutcome(p, denial.ENFORCING, "held"),
                                 live=lambda: [_issue("live-obfuscated-process")],
                                 stop=lambda: spawning)
         self.assertEqual(code, 1)
@@ -120,13 +122,28 @@ class TestRunContract(unittest.TestCase):
         theirs = live.Ending(matched=2, frozen=0, ended=0, refused=[404], asked_for=[404],
                              asking="cannot-ask", quiet=True, still_holding=2)
         code, text = harden.run(supported=lambda: True, folders=lambda: [Path("/mine")],
-                                apply=lambda p: None,
+                                apply=lambda p: denial.PathOutcome(p, denial.ENFORCING, "held"),
                                 live=lambda: [_issue("live-obfuscated-process")],
                                 stop=lambda: theirs)
         self.assertEqual(code, 1)
         self.assertIn("needed privilege", text)
         self.assertIn("cannot-ask", text)
         self.assertIn("404", text)
+
+    def test_privilege_nobody_can_grant_costs_only_what_needed_it(self):
+        # The whole point: a part that needs a password nobody can answer must not cost the
+        # operator every control this run was able to place.
+        theirs = live.Ending(matched=3, frozen=2, ended=2, refused=[404], asked_for=[404],
+                             asking="cannot-ask", quiet=True, still_holding=1)
+        placed = []
+        code, text = harden.run(
+            supported=lambda: True, folders=lambda: [Path("/one"), Path("/two")],
+            apply=lambda p: placed.append(p) or denial.PathOutcome(p, denial.ENFORCING, "held"),
+            live=lambda: [_issue("live-obfuscated-process")], stop=lambda: theirs)
+        self.assertEqual(placed, [Path("/one"), Path("/two")], "it skipped the controls it could place")
+        self.assertEqual(code, 1, "the part it could not do must still fail the run")
+        self.assertIn("2 of 3 ended", text)
+        self.assertIn("enforcing", text)
 
     def test_privilege_that_was_granted_ends_it_and_the_control_goes_on(self):
         granted = live.Ending(matched=2, frozen=1, ended=2, asked_for=[404], asking="granted",
@@ -324,20 +341,18 @@ class TestRunContract(unittest.TestCase):
                    folders=lambda: [Path("/denial")], apply=apply)
         apply.assert_called_once()
 
-    def test_a_failed_ending_still_stops_before_any_write(self):
-        """The gate that survives: the control is never placed over an implant that is still
-        running, because doing so claims a machine that is still someone else's."""
-        apply = mock.Mock()
+    def test_a_failed_ending_still_places_the_control_and_still_fails_the_run(self):
+        apply = mock.Mock(return_value=denial.PathOutcome(Path("/denial"), denial.ENFORCING, "held"))
         code, _text = harden.run(
             supported=lambda: True, live=lambda: [_issue("live-obfuscated-process")],
             folders=lambda: [Path("/denial")], apply=apply,
             stop=lambda: live.Ending(matched=2, frozen=2, ended=1, survived=[9], quiet=True,
                                      still_holding=1))
         self.assertEqual(code, 1)
-        apply.assert_not_called()
+        apply.assert_called_once()
 
-    def test_an_ending_that_raises_is_a_report_not_a_traceback(self):
-        apply = mock.Mock()
+    def test_an_ending_that_raises_is_a_report_and_the_rest_still_runs(self):
+        apply = mock.Mock(return_value=denial.PathOutcome(Path("/denial"), denial.ENFORCING, "held"))
         def boom():
             raise RuntimeError("the grader blew up on attacker-chosen text")
         code, text = harden.run(
@@ -345,7 +360,7 @@ class TestRunContract(unittest.TestCase):
             folders=lambda: [Path("/denial")], apply=apply, stop=boom)
         self.assertEqual(code, 1)
         self.assertIn("RuntimeError", text)
-        apply.assert_not_called()
+        apply.assert_called_once()
 
     def test_an_implant_that_had_already_gone_does_not_withhold_the_control(self):
         # It exited between one look and the next. Saying "0 of 0 ended" and withholding the
