@@ -13,6 +13,11 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Fixed
+- **A start-up item this tool placed is still reported when what it runs sits somewhere anyone can
+  write.** Recognising its own work stopped one finding too many: a world-writable location is
+  where a foothold puts its program, and this tool's name on the file says nothing about that.
+
 ### Added
 - **`saw audit` checks what a coding agent on this machine may run without asking.** Claude Code,
   the Cursor agent and Codex keep their own standing approvals, and none of them were looked at.

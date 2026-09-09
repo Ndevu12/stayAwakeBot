@@ -90,6 +90,28 @@ class TestSawDoesNotAskYouToConfirmItsOwnWork(unittest.TestCase):
         self.assertEqual(attrib.owner, "saw")
         self.assertTrue(attrib.attributed)
 
+    def test_its_own_item_running_from_a_scratch_path_stays_reported(self):
+        """Placing an item does not make what the item runs safe. A world-writable path is where a
+        foothold puts its program, and this tool's own name on the file changes nothing about that."""
+        home = pathlib.Path(tempfile.mkdtemp())
+        scratch = "/private/tmp/scratch/venv/bin/python"
+        argv = [scratch, "-E", "-P", "-m", "stayawake"]
+        with mock.patch.object(schedule.sys, "platform", "darwin"), \
+                mock.patch.object(pathlib.Path, "home", return_value=home):
+            item = schedule.item_path()
+            item.parent.mkdir(parents=True, exist_ok=True)
+            item.write_text(schedule.content(argv), encoding="utf-8")
+            record = home / "rec.json"
+            schedule.declare(argv, record)
+            with mock.patch.object(schedule, "record_path", return_value=record):
+                self.assertTrue(schedule.is_ours(item), "it is this tool's own file")
+                entry = mock.Mock(exec_path=scratch, path=item, location="launch-agent",
+                                  script=None)
+                with mock.patch.object(provenance.hookscript, "LOCATION", "git-hooks"):
+                    attrib = provenance.attribute(entry)
+        self.assertNotEqual(attrib.owner, "saw")
+        self.assertFalse(attrib.attributed)
+
     def test_and_an_item_it_did_not_write_stays_unattributed(self):
         with _OnAMachineWithSawsItem(self, "darwin") as m:
             m.item.write_text("<plist>someone else's</plist>", encoding="utf-8")

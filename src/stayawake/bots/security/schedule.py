@@ -159,7 +159,9 @@ def verdict(path: Path | None = None, saw: list[str] | None = None,
 def is_ours(path: Path | None = None) -> bool:
     """Whether `path` is the item this tool placed on this machine, unchanged.
 
-    TRAP: the content at the one place this writes, never the name.
+    TRAP: the content at the one place this writes, never the name. Whether the program it names
+    can be trusted is a separate question, and the caller asks it: this tool placing an item does
+    not make what the item runs safe.
     """
     where = Path(path) if path is not None else item_path()
     try:
