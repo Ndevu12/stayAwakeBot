@@ -25,10 +25,15 @@ from stayawake.utils import atomicwrite, env
 
 @dataclass(frozen=True)
 class Planned:
-    """A correction with the exact edit it would make, before anything is written."""
+    """A correction with the exact edit it would make, before anything is written.
+
+    `path` is where the value lives in the parsed settings, key by key. A dotted string cannot say
+    that: these keys contain dots themselves.
+    """
 
     issue_id: str
     edit: jsonc.Edit
+    path: tuple[str, ...] = ()
 
     def described(self) -> str:
         if self.edit.adds:
@@ -56,14 +61,10 @@ class Skipped:
 _CORRECTION_BY_ID = {issue_id: setting for issue_id, setting in editor.SETTING_FOR.items()
                      if setting.correct is not None}
 
-_A_DECISION_NOT_A_DEFAULT = (
-    "its answer is a decision about how this machine is used, so there is no single correct "
-    "value to write"
-)
+_TURNS_OFF_ENTRIES = {issue_id for issue_id, setting in editor.SETTING_FOR.items()
+                      if setting.turns_off_entries}
 
-_WHY_NOT_WRITTEN = {issue_id: _A_DECISION_NOT_A_DEFAULT
-                    for issue_id, setting in editor.SETTING_FOR.items()
-                    if setting.correct is None}
+_WHY_NOT_WRITTEN: dict[str, str] = {}
 
 
 def plan(text: str, issue_ids) -> tuple[str, list[Planned], list[Skipped]]:
@@ -75,6 +76,11 @@ def plan(text: str, issue_ids) -> tuple[str, list[Planned], list[Skipped]]:
     planned: list[Planned] = []
     skipped: list[Skipped] = []
     for issue_id in sorted(issue_ids):
+        if issue_id in _TURNS_OFF_ENTRIES:
+            text, done, missed = _turn_off_dangerous(text, issue_id)
+            planned += done
+            skipped += missed
+            continue
         if issue_id in _WHY_NOT_WRITTEN:
             skipped.append(Skipped(issue_id, A_DECISION, _WHY_NOT_WRITTEN[issue_id]))
             continue
@@ -91,13 +97,50 @@ def plan(text: str, issue_ids) -> tuple[str, list[Planned], list[Skipped]]:
                                    "without guessing"))
             continue
         text, edit = result
-        planned.append(Planned(issue_id, edit))
+        planned.append(Planned(issue_id, edit, (setting.key,)))
+    return text, planned, skipped
+
+
+def _turn_off_dangerous(text: str, issue_id: str) -> tuple[str, list[Planned], list[Skipped]]:
+    """Turn off every auto-approved command the check names, one entry at a time.
+
+    The check is asked which entries those are rather than the finding's sentence being read back
+    — the sentence is a rendering of the answer, not the answer. Nothing is removed and nothing is
+    added: an entry already there is set to false, so an undo can put it back exactly.
+    """
+    key = editor.AUTO_APPROVE.key
+    planned: list[Planned] = []
+    skipped: list[Skipped] = []
+    if editor.blanket_autoapprove(text):
+        result = jsonc.set_value(text, key, "false")
+        if result is None:
+            return text, [], [Skipped(issue_id, CANNOT_WRITE,
+                                      f'"{key}" is not somewhere this can write to without guessing')]
+        text, edit = result
+        return text, [Planned(issue_id, edit, (key,))], []
+    named = editor.catchall_autoapprove_entries(text) + editor.risky_autoapprove_entries(text)
+    if not named:
+        return text, [], [Skipped(issue_id, ALREADY,
+                                  "no auto-approved command was named when it was read")]
+    for entry in named:
+        result = jsonc.set_member(text, key, entry, "false")
+        if result is not None:
+            text, edit = result
+            planned.append(Planned(issue_id, edit, (key, entry)))
+            continue
+        nested = jsonc.set_member(text, entry, "approve", "false")
+        if nested is None:
+            skipped.append(Skipped(issue_id, CANNOT_WRITE,
+                                   f'"{entry}" is not somewhere this can write to without guessing'))
+            continue
+        text, edit = nested
+        planned.append(Planned(issue_id, edit, (key, entry, "approve")))
     return text, planned, skipped
 
 
 def answerable(issue_ids) -> set[str]:
-    """The findings this knows a correct value for. Everything else stays reported."""
-    return {i for i in issue_ids if i in _CORRECTION_BY_ID}
+    """The findings this can act on. Everything else stays reported."""
+    return {i for i in issue_ids if i in _CORRECTION_BY_ID or i in _TURNS_OFF_ENTRIES}
 
 
 def reported_only(issue_ids) -> set[str]:
@@ -203,17 +246,24 @@ def _lands_where_it_was_aimed(before: str, after: str, planned: list[Planned]) -
         return False
     if not isinstance(was, dict) or not isinstance(now, dict):
         return False
-    aimed = {}
+    heads = set()
     for step in planned:
+        if not step.path:
+            return False
         try:
-            aimed[step.edit.key] = json.loads(step.edit.value)
+            wanted = json.loads(step.edit.value)
         except ValueError:
             return False
-    for key, value in aimed.items():
-        if now.get(key) != value:
+        holder = now
+        for name in step.path[:-1]:
+            if not isinstance(holder, dict) or name not in holder:
+                return False
+            holder = holder[name]
+        if not isinstance(holder, dict) or holder.get(step.path[-1]) != wanted:
             return False
+        heads.add(step.path[0])
     moved = {k for k in set(was) | set(now) if was.get(k) != now.get(k)}
-    return moved == set(aimed)
+    return moved == heads
 
 
 def _read(path: Path) -> str:
@@ -280,8 +330,8 @@ def settle(find=editors.installed, write=None, record: Path | None = None,
                                               "the corrected settings could not be written"))
             continue
         keys = ", ".join(p.edit.key for p in planned)
-        if not remember([{"path": str(editor_here.settings), "key": p.edit.key, "was": p.edit.was}
-                         for p in planned], record):
+        if not remember([{"path": str(editor_here.settings), "key": p.edit.key,
+                          "at": list(p.path), "was": p.edit.was} for p in planned], record):
             out.outcomes.append(EditorOutcome(editor_here.name, editor_here.settings, NOT_RECORDED,
                                               keys))
             continue
@@ -308,6 +358,23 @@ class TakingBack:
         return not self.failed and not self.kept and not self.unreadable_record
 
 
+def _put_back(text: str, at: list[str], was: str) -> str | None:
+    """`text` with the value at `at` set back to `was`, or None when that cannot be done exactly.
+
+    The same walk the write used. A member of a table is not reachable by the key of the table,
+    so the path is what the record keeps rather than a name with dots in it.
+    """
+    if len(at) == 1:
+        result = jsonc.set_value(text, at[0], was)
+    elif len(at) == 2:
+        result = jsonc.set_member(text, at[0], at[1], was)
+    elif len(at) == 3:
+        result = jsonc.set_member(text, at[1], at[2], was)
+    else:
+        return None
+    return None if result is None else result[0]
+
+
 def take_back(record: Path | None = None, write=None) -> TakingBack:
     """Put back every editor setting saw changed that had a value before it.
 
@@ -329,6 +396,8 @@ def take_back(record: Path | None = None, write=None) -> TakingBack:
         path, key, was = entry.get("path"), entry.get("key"), entry.get("was")
         if not isinstance(path, str) or not isinstance(key, str):
             continue
+        at = entry.get("at")
+        at = [str(name) for name in at] if isinstance(at, list) and at else [key]
         if was is None:
             # Kept in the record as well as reported: the key is still in the file, so a later run
             # must be able to say so rather than find nothing and report a clean undo.
@@ -336,13 +405,13 @@ def take_back(record: Path | None = None, write=None) -> TakingBack:
             left.append(entry)
             continue
         try:
-            text = Path(path).read_text(encoding="utf-8")
-        except OSError:
+            text = _read(Path(path))
+        except (OSError, ValueError):
             out.failed.append(f"{path}: {key}")
             left.append(entry)
             continue
-        result = jsonc.set_value(text, key, was)
-        if result is None or not write(Path(path), result[0], mode=_mode_of(Path(path))):
+        result = _put_back(text, at, was)
+        if result is None or not write(Path(path), result, mode=_mode_of(Path(path))):
             out.failed.append(f"{path}: {key}")
             left.append(entry)
             continue

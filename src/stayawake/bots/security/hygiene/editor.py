@@ -22,20 +22,21 @@ _DOCS = ("https://github.com/Ndevu12/stayAwakeBot/blob/main/docs/how-to/audit-a-
 
 @dataclass(frozen=True)
 class Setting:
-    """One editor setting this tool grades, and the value that answers it.
+    """One editor setting this tool grades, and how it is answered.
 
-    `correct` is None when the answer is a decision about how a machine is used rather than a
-    default, which is what keeps it reported instead of written.
+    `correct` is the one literal that answers it. `turns_off_entries` marks the other shape: a
+    table of commands, answered by turning the dangerous ones off rather than by one value.
     """
 
     key: str
     correct: str | None
+    turns_off_entries: bool = False
 
 
 _AUTOTASKS = Setting("task.allowAutomaticTasks", '"off"')
 _TRUST_ENABLED = Setting("security.workspace.trust.enabled", "true")
 _UNTRUSTED_FILES = Setting("security.workspace.trust.untrustedFiles", '"prompt"')
-AUTO_APPROVE = Setting("chat.tools.terminal.autoApprove", None)
+AUTO_APPROVE = Setting("chat.tools.terminal.autoApprove", None, turns_off_entries=True)
 
 SETTING_FOR = {
     "editor-autotasks-default": _AUTOTASKS,
@@ -104,6 +105,26 @@ def _autoapprove_approves_everything(text: str) -> bool:
         if m.group(1)[1:-1] in _CATCHALL_REGEX_BODIES:      # strip the surrounding /…/
             return True
     return False
+
+
+def catchall_autoapprove_entries(text: str) -> list[str]:
+    """The regex keys under `autoApprove` that match every command line, approved.
+
+    Named rather than counted, so the caller turns off the entries the check actually found.
+    """
+    block = _autoapprove_block(text)
+    if block is None:
+        return []
+    found: list[str] = []
+    for m in re.finditer(r'"(/[^"]*/)"\s*:\s*(?:true\b|\{[^{}]*"approve"\s*:\s*true)', block):
+        if m.group(1)[1:-1] in _CATCHALL_REGEX_BODIES and m.group(1) not in found:
+            found.append(m.group(1))
+    return found
+
+
+def blanket_autoapprove(text: str) -> bool:
+    """Whether `autoApprove` is the single value `true` — approve every terminal command."""
+    return _autoapprove_is_blanket_true(text)
 
 
 def risky_autoapprove_entries(text: str) -> list[str]:

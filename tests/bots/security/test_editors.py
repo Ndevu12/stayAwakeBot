@@ -14,6 +14,7 @@ from unittest import mock
 
 from stayawake.bots.security.harden import settings as editorsettings
 from stayawake.bots.security.hygiene import editor, editors
+from stayawake.bots.security.jsonc import load_jsonc
 from stayawake.utils import appdirs, atomicwrite
 
 
@@ -175,16 +176,51 @@ class TestCorrectingWritesOnlyWhatItKnows(unittest.TestCase):
         for path in (a, b):
             self.assertIn('"task.allowAutomaticTasks": "off"', path.read_text())
 
-    def test_a_setting_that_is_a_decision_is_never_offered_for_writing(self):
-        # Auto-approval governs whether a proposal becomes an action; what belongs there depends on
-        # how the machine is used, so writing a value would be deciding for the operator.
+    def test_a_dangerous_auto_approval_is_turned_off(self):
         body = '{"task.allowAutomaticTasks": "off", "chat.tools.terminal.autoApprove": {"npx": true}}'
         path = _editor_at(self.base, "Code", body)
-        ids = {i.id for i in editor.check_editors(find=lambda: editors.installed([self.base]))}
-        self.assertIn("editor-autoapprove-risky", ids)
-        self.assertEqual(editorsettings.answerable(ids), set())
+        out = self._settle()
+        self.assertEqual([o.state for o in out.outcomes], [editorsettings.CORRECTED])
+        self.assertEqual(load_jsonc(path.read_text())["chat.tools.terminal.autoApprove"],
+                         {"npx": False})
+
+    def test_and_the_commands_that_are_not_dangerous_are_left_alone(self):
+        # Turning the whole table off is not what was asked for, and it costs a prompt on every
+        # command the operator deliberately allowed.
+        body = ('{"chat.tools.terminal.autoApprove": {"npx": true, "ls": true, '
+                '"git status": true}}')
+        path = _editor_at(self.base, "Code", body)
         self._settle()
-        self.assertIn('"npx": true', path.read_text())
+        table = load_jsonc(path.read_text())["chat.tools.terminal.autoApprove"]
+        self.assertEqual(table, {"npx": False, "ls": True, "git status": True})
+
+    def test_approving_every_command_is_turned_off_outright(self):
+        path = _editor_at(self.base, "Code", '{"chat.tools.terminal.autoApprove": true}')
+        self._settle()
+        self.assertIs(load_jsonc(path.read_text())["chat.tools.terminal.autoApprove"], False)
+
+    def test_a_catch_all_pattern_counts_as_approving_everything(self):
+        path = _editor_at(self.base, "Code",
+                          '{"chat.tools.terminal.autoApprove": {"/.*/": true, "ls": true}}')
+        self._settle()
+        self.assertEqual(load_jsonc(path.read_text())["chat.tools.terminal.autoApprove"],
+                         {"/.*/": False, "ls": True})
+
+    def test_the_object_form_of_an_entry_is_turned_off_too(self):
+        path = _editor_at(self.base, "Code",
+                          '{"chat.tools.terminal.autoApprove": {"rm": {"approve": true}}}')
+        self._settle()
+        self.assertEqual(load_jsonc(path.read_text())["chat.tools.terminal.autoApprove"],
+                         {"rm": {"approve": False}})
+
+    def test_what_was_turned_off_can_be_put_back(self):
+        path = _editor_at(self.base, "Code", '{"chat.tools.terminal.autoApprove": {"npx": true}}')
+        found = editors.installed([self.base])
+        editorsettings.settle(find=lambda: found, record=self.record)
+        out = editorsettings.take_back(record=self.record)
+        self.assertTrue(out.restored)
+        self.assertEqual(load_jsonc(path.read_text())["chat.tools.terminal.autoApprove"],
+                         {"npx": True})
 
     def test_and_that_setting_still_reaches_the_operator_as_a_finding(self):
         body = '{"task.allowAutomaticTasks": "off", "chat.tools.terminal.autoApprove": {"npx": true}}'

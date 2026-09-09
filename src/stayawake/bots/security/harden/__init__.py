@@ -65,7 +65,7 @@ _WATCH_ON = "This machine will also keep checking itself for code running with n
 _WATCH_REPAIRED = "The check this machine runs by itself had been changed. It has been put back."
 _WATCH_OFF = "This machine will not keep checking itself. Run `saw watch`."
 _WATCH_LEFT = "This machine is still checking itself, and that was not taken back."
-_EDITORS_FIXED = "An editor here could run a folder's code when you open it. That is now off."
+_EDITORS_FIXED = ("An editor here could run code without asking you. That is now off.")
 _EDITORS_STUCK = "An editor on this machine still opens folders that can run code. Run `saw audit`."
 _EDITORS_KEPT = "An editor setting was left as it is. Run `saw audit`."
 
