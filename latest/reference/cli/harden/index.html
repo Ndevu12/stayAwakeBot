@@ -1811,6 +1811,9 @@ itself.</p>
 everything", a pattern that matches every command, and each risky command named in the audit are
 set to off. Commands you allowed that are not dangerous are left exactly as they are, so what you
 chose deliberately keeps working.</p>
+<p>It does the same for the coding agents on this machine. Claude Code, the Cursor agent and Codex
+each keep a list of what they may run without asking; a risky entry is taken out, and an agent whose
+approval step is off is made to ask again. What you allowed that is not risky stays as it is.</p>
 <p><code>--take-back</code> restores what had a value before; a setting saw added is left in place and named.</p>
 <p>Root is not required. Run it as yourself and it acts where it can; anything it did not take is
 named in the result, and left exactly as it stood.</p>
