@@ -58,7 +58,7 @@ _PREDICATES: dict[str, Callable[[], str | None]] = {
 }
 
 _SURFACE_PROBES = frozenset({
-    "VS Code settings", "self-hosted runner", "OS-service persistence",
+    "editor settings", "self-hosted runner", "OS-service persistence",
     "persistence surface coverage", "host drop-files", "SSH authorized_keys",
     "shell startup files", "git exec config", "autorun surface", "application bundles",
     "running processes",

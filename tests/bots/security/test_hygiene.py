@@ -739,7 +739,7 @@ class TestVSCode(unittest.TestCase):
         issues = hygiene.check_editors(p)
         self.assertEqual([i.id for i in issues], ["persistence-surface-unverified"])
         self.assertEqual(issues[0].severity, "unknown")
-        outcome = hygiene.run_probe("VS Code settings", lambda: hygiene.check_editors(p),
+        outcome = hygiene.run_probe("editor settings", lambda: hygiene.check_editors(p),
                                     certifies_surface=True)
         self.assertEqual(outcome.state, hygiene.UNKNOWN)
 
