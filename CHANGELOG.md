@@ -13,10 +13,7 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
-### Changed
-- **`saw fix` no longer tells you to get a hardware-backed SSH key.** It could not put that control
-  in place, could not check whether you already had it, and said it on every run regardless. What
-  it can act on it still says.
+## [0.10.0] - 2026-09-09
 
 ### Added
 - **`saw watch` keeps this machine checking itself, on macOS and Linux.** It makes a pass over
@@ -25,6 +22,10 @@ reader, not the mechanism or the weakness it closed.
   pass can say something has come back rather than repeating the same alarm. `saw watch stop` stops
   it, and leaves anything that is not saw's own alone. `saw harden` puts it in place too, and
   `saw harden --take-back` removes it.
+- **Running code is now also checked against the corpus the tool already ships, not only
+  judged by its shape.** Code a running process was handed is compared with what the tool
+  has already identified, and a match is graded as identified rather than as suspected. What
+  was reported before is still reported.
 - **`saw harden` puts the scan-on-clone hooks in place as part of hardening.** You no longer have
   to remember `saw hook install` separately. Running it again changes nothing and says nothing — a
   hook already in place is left exactly as it is — and if the hooks could not be put in place, the
@@ -55,6 +56,11 @@ reader, not the mechanism or the weakness it closed.
 - **Code on the command line is no longer the only shape it recognises.** A program that is no
   longer a file on this disk, and an interpreter handed its program on standard input, are both
   code running with nothing behind it to scan — and neither is a reason to leave it running.
+
+### Changed
+- **`saw fix` no longer tells you to get a hardware-backed SSH key.** It could not put that control
+  in place, could not check whether you already had it, and said it on every run regardless. What
+  it can act on it still says.
 
 ### Fixed
 - **A scan now reads the installed packages of every project, not only those laid out flat.** Where
@@ -944,7 +950,8 @@ _No user-facing changes were recorded for this release._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel (supply-chain worm
 detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.6.3...v0.7.0
