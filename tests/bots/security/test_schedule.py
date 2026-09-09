@@ -6,8 +6,10 @@ Everything here is about keeping it that way."""
 from __future__ import annotations
 
 import pathlib
+import subprocess
 import sys
 import tempfile
+import types
 import unittest
 from unittest import mock
 
@@ -22,28 +24,36 @@ def _rec():
     return pathlib.Path(tempfile.mkdtemp()) / "record.json"
 
 
+def _never(*args, **kwargs):
+    """Fail the test rather than reach this machine's own service manager."""
+    raise AssertionError(f"a test reached the real service manager: {args[0] if args else kwargs}")
+
+
+_NO_MANAGER = mock.patch.object(
+    schedule, "subprocess",
+    types.SimpleNamespace(run=_never, SubprocessError=subprocess.SubprocessError))
+
+_ITEM_BEFORE = False
+
+
 def setUpModule():
-    """Remember whether this machine already had a login item, before any test runs."""
-    from stayawake.bots.security import schedule
+    """Cut this module off from the machine's own service manager and login item."""
     global _ITEM_BEFORE
     _ITEM_BEFORE = schedule.item_path().exists()
+    _NO_MANAGER.start()
 
 
 def tearDownModule():
-    """Nothing here may place one on the machine running the suite.
+    """Nothing here may place a login item, or register a job, on the machine running the suite.
 
-    The static guard cannot see through a `**kwargs` spread, and that blind spot is exactly how a
-    login item reached a developer machine twice. This asks the filesystem instead, so no call
-    shape can slip past it.
+    Two canaries because they see different things. A registration is not a file, so the filesystem
+    check below is blind to it; a `**kwargs` spread is not visible to the static guard either.
     """
-    from stayawake.bots.security import schedule
+    _NO_MANAGER.stop()
     if schedule.item_path().exists() and not _ITEM_BEFORE:
         where = schedule.item_path()
         where.unlink(missing_ok=True)
         raise AssertionError(f"a test in this module placed {where.name} on this machine")
-
-
-_ITEM_BEFORE = False
 
 
 class TestItIsTheSameFileEveryTime(unittest.TestCase):
@@ -51,10 +61,14 @@ class TestItIsTheSameFileEveryTime(unittest.TestCase):
         self.assertEqual(schedule.content(SAW), schedule.content(SAW))
 
     def test_it_runs_the_verb_and_keeps_it_running(self):
-        text = schedule.content(SAW)
-        self.assertIn("<string>run</string>", text)
-        self.assertIn("<key>KeepAlive</key>", text)
-        self.assertIn("<key>RunAtLoad</key>", text)
+        for platform, expected in (
+                ("darwin", ("<string>run</string>", "<key>KeepAlive</key>", "<key>RunAtLoad</key>")),
+                ("linux", ("watch run", "Restart=always", "WantedBy=default.target"))):
+            with self.subTest(platform=platform), \
+                    mock.patch.object(schedule.sys, "platform", platform):
+                text = schedule.content(SAW)
+                for marker in expected:
+                    self.assertIn(marker, text)
 
     def test_it_carries_nothing_an_operator_or_anyone_else_configures(self):
         # No config path, no signature path, no interval to point somewhere: the only thing in it
@@ -69,18 +83,20 @@ class TestItKnowsItsOwnWork(unittest.TestCase):
         return pathlib.Path(tempfile.mkdtemp()) / "item.plist"
 
     def test_placing_then_placing_again_changes_nothing(self):
-        p = self._tmp()
-        self.assertEqual(schedule.settle(p, SAW, record=_rec()).state, schedule.PLACED)
-        again = schedule.settle(p, SAW, record=_rec())
+        p, rec = self._tmp(), _rec()
+        first = schedule.settle(p, SAW, record=rec, activate=lambda w: True, running=lambda: True)
+        self.assertEqual(first.state, schedule.PLACED)
+        again = schedule.settle(p, SAW, record=rec, activate=lambda w: True, running=lambda: True)
         self.assertEqual(again.state, schedule.IN_PLACE)
         self.assertFalse(again.changed)
 
     def test_one_changed_underneath_you_is_put_back_and_reads_differently(self):
-        p = self._tmp()
-        schedule.settle(p, SAW, record=_rec())
-        p.write_text(schedule.content(SAW).replace("<true/>", "<false/>", 1))
+        p, rec = self._tmp(), _rec()
+        schedule.settle(p, SAW, record=rec, activate=lambda w: True, running=lambda: True)
+        p.write_text(schedule.content(SAW) + "\nExecStartPost=/tmp/theirs\n")
         self.assertEqual(schedule.verdict(p, SAW), schedule.ALTERED)
-        put_back = schedule.settle(p, SAW, record=_rec())
+        put_back = schedule.settle(p, SAW, record=rec, activate=lambda w: True,
+                                   running=lambda: True)
         self.assertEqual(put_back.state, schedule.REPLACED)
         self.assertEqual(schedule.verdict(p, SAW), schedule.PRISTINE)
 
@@ -106,19 +122,23 @@ class TestItTakesBackOnlyItsOwn(unittest.TestCase):
         return pathlib.Path(tempfile.mkdtemp()) / "item.plist"
 
     def test_its_own_is_removed(self):
-        p = self._tmp()
-        schedule.settle(p, SAW, record=_rec())
-        self.assertEqual(schedule.take_back(p, SAW, record=_rec()), schedule.REMOVED)
+        p, rec = self._tmp(), _rec()
+        schedule.settle(p, SAW, record=rec, activate=lambda w: True, running=lambda: True)
+        self.assertEqual(
+            schedule.take_back(p, SAW, record=rec, deactivate=lambda w: None), schedule.REMOVED)
         self.assertFalse(p.exists())
 
     def test_something_else_at_that_name_is_left_where_it_is(self):
         p = self._tmp()
         p.write_text("someone else's login item")
-        self.assertEqual(schedule.take_back(p, SAW, record=_rec()), schedule.ALTERED)
+        self.assertEqual(
+            schedule.take_back(p, SAW, record=_rec(), deactivate=lambda w: None), schedule.ALTERED)
         self.assertTrue(p.exists())
 
     def test_nothing_there_is_not_an_error(self):
-        self.assertEqual(schedule.take_back(self._tmp(), SAW, record=_rec()), schedule.NOTHING_TO_REMOVE)
+        self.assertEqual(
+            schedule.take_back(self._tmp(), SAW, record=_rec(), deactivate=lambda w: None),
+            schedule.NOTHING_TO_REMOVE)
 
 
 class TestBothPlatformsAreCoveredNotJustThisOne(unittest.TestCase):
@@ -150,7 +170,7 @@ class TestBothPlatformsAreCoveredNotJustThisOne(unittest.TestCase):
             with self.subTest(platform=platform), self._on(platform):
                 seen.clear()
                 p = pathlib.Path(tempfile.mkdtemp()) / schedule.item_path().name
-                out = schedule.settle(p, SAW, record=_rec(),
+                out = schedule.settle(p, SAW, record=_rec(), running=lambda: False,
                                       activate=lambda w: schedule._activate(w, run=run, binary="/x"))
                 self.assertTrue(out.active)
                 self.assertTrue(any(expected in " ".join(a) for a in seen))
@@ -160,7 +180,8 @@ class TestBothPlatformsAreCoveredNotJustThisOne(unittest.TestCase):
         # is lost. Reporting it as failed would tell the operator to redo something that is done.
         with self._on("linux"):
             p = pathlib.Path(tempfile.mkdtemp()) / "saw-watch.service"
-            out = schedule.settle(p, SAW, record=_rec(), activate=lambda w: False)
+            out = schedule.settle(p, SAW, record=_rec(), activate=lambda w: False,
+                                  running=lambda: False)
             # inside the platform, because what "pristine" means is what THIS platform writes
             self.assertEqual(schedule.verdict(p, SAW), schedule.PRISTINE)
         self.assertTrue(out.settled)
@@ -169,17 +190,43 @@ class TestBothPlatformsAreCoveredNotJustThisOne(unittest.TestCase):
     def test_the_service_manager_is_never_found_through_PATH(self):
         # On a machine that may already be compromised, a service manager found by PATH is one an
         # attacker can supply.
-        for candidates in schedule._ACTIVATORS.values():
+        for candidates in schedule._SERVICE_MANAGERS_BY_ABSOLUTE_PATH.values():
             for c in candidates:
                 with self.subTest(candidate=c):
                     self.assertTrue(c.startswith("/"))
+
+
+class TestItsOwnRecordIsReachableWithNothingPassed(unittest.TestCase):
+    """Every other test hands `record` a path of its own, so the default was never once executed
+    and shipped raising NameError, swallowed by the caller's `except Exception`."""
+
+    def test_the_default_record_path_resolves(self):
+        self.assertTrue(str(schedule.record_path()).endswith("watch-install.json"))
+
+    def test_and_the_verdict_that_reads_it_does_not_raise(self):
+        d = pathlib.Path(tempfile.mkdtemp())
+        self.assertEqual(schedule.verdict(d / "absent"), schedule.ABSENT)
+
+
+class TestAnArgvIsNotACommandLine(unittest.TestCase):
+    """A string spreads to one character per argument. The item still looks well-formed, names a
+    program that cannot exist, and the machine quietly stops checking itself."""
+
+    def test_a_string_is_refused_rather_than_spread(self):
+        with self.assertRaises(TypeError):
+            schedule.content("/usr/local/bin/saw watch run")
+
+    def test_and_the_argv_it_writes_survives_intact(self):
+        with mock.patch.object(schedule.sys, "platform", "linux"):
+            self.assertIn("ExecStart=" + " ".join(SAW) + " watch run", schedule.content(SAW))
 
 
 class TestAPlatformWithoutOneSaysSo(unittest.TestCase):
     def test_it_does_not_report_a_machine_as_scheduled(self):
         # Windows, today.
         with mock.patch.object(schedule, "supported", return_value=False):
-            out = schedule.settle(self_path := pathlib.Path(tempfile.mkdtemp()) / "x.plist", SAW, record=_rec())
+            out = schedule.settle(self_path := pathlib.Path(tempfile.mkdtemp()) / "x.plist", SAW,
+                                  record=_rec(), activate=lambda w: True, running=lambda: True)
         self.assertFalse(out.settled)
         self.assertIsNotNone(out.problem)
         self.assertFalse(self_path.exists())
@@ -267,24 +314,59 @@ class TestItNeverNamesSomethingFoundOnPath(unittest.TestCase):
 
 
 class TestNoTestReachesTheRealLoginItem(unittest.TestCase):
-    """`settle` and `take_back` default to this machine's own login item. A test that leaves the
-    path defaulted places one on the machine running the suite — which has happened here."""
+    """`settle` and `take_back` default to this machine's own login item AND its service manager.
+    A call that leaves either defaulted acts on the machine running the suite, which has happened
+    here: `record=` was named, `activate=` was not, and launchd registered a real job."""
 
-    def test_every_call_names_the_path_it_acts_on(self):
+    REQUIRED = {"settle": ("record", "activate", "running"),
+                "take_back": ("record", "deactivate")}
+
+    REQUIRED_INDIRECT = {"schedule_it": ("settle",), "unschedule_it": ("remove",)}
+
+    def test_every_call_names_what_it_acts_on(self):
         import ast
         unguarded = []
         for f in ("test_schedule.py", "test_watch.py"):
             source = (pathlib.Path(__file__).parent / f).read_text()
             for node in ast.walk(ast.parse(source)):
-                if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
                         and node.func.attr in ("settle", "take_back", "declare", "recorded")
                         and getattr(node.func.value, "id", "") == "schedule"):
-                    given = {k.arg for k in node.keywords}
-                    if not node.args:
-                        unguarded.append((f, node.lineno, node.func.attr, "path"))
-                    elif node.func.attr in ("settle", "take_back") and "record" not in given:
-                        unguarded.append((f, node.lineno, node.func.attr, "record"))
+                    continue
+                given = {k.arg for k in node.keywords}
+                if not node.args:
+                    unguarded.append((f, node.lineno, node.func.attr, "path"))
+                    continue
+                for name in self.REQUIRED.get(node.func.attr, ()):
+                    if name not in given:
+                        unguarded.append((f, node.lineno, node.func.attr, name))
         self.assertEqual(unguarded, [], f"these would act on this machine: {unguarded}")
+
+    def test_and_every_call_that_reaches_them_through_the_verb(self):
+        import ast
+        unguarded = []
+        for f in ("test_schedule.py", "test_watch.py"):
+            source = (pathlib.Path(__file__).parent / f).read_text()
+            for node in ast.walk(ast.parse(source)):
+                if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                        and node.func.attr in self.REQUIRED_INDIRECT
+                        and getattr(node.func.value, "id", "") == "watch"):
+                    continue
+                given = {k.arg for k in node.keywords}
+                for name in self.REQUIRED_INDIRECT[node.func.attr]:
+                    if name not in given:
+                        unguarded.append((f, node.lineno, node.func.attr, name))
+        self.assertEqual(unguarded, [], f"these would act on this machine: {unguarded}")
+
+    def test_the_guard_covers_every_collaborator_that_leaves_this_module(self):
+        import inspect
+        for verb, required in self.REQUIRED.items():
+            reaching = {name for name, param in
+                        inspect.signature(getattr(schedule, verb)).parameters.items()
+                        if callable(param.default) or name == "record"}
+            with self.subTest(verb=verb):
+                self.assertEqual(reaching - {"write"}, set(required),
+                                 f"{verb} grew a collaborator the guard does not require")
 
 
 if __name__ == "__main__":

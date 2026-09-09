@@ -1,12 +1,8 @@
 #!/usr/bin/env python3
 """Ask this machine to keep making the pass by itself.
 
-Places a login item that runs saw's own internal pass, kept alive by the system: it starts at
-login and is started again if it stops, so a machine nobody is looking at is never left unwatched.
-
-It carries NO configuration. What it runs and how often are fixed in the file this module writes, so
-there is nothing in it for anyone to point somewhere else; the only two states are "exactly what saw
-wrote" and "not that".
+Places a login item on macOS or a user service on Linux, kept alive by the system. It carries no
+configuration, so the only two states are exactly what saw wrote and not that.
 """
 from __future__ import annotations
 
@@ -18,7 +14,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-
+from stayawake.utils import env
 
 
 LABEL = "com.ndevu.saw.watch"
@@ -80,17 +76,19 @@ def item_path() -> Path:
 def program() -> list[str]:
     """How the item names saw, as argv.
 
-    TRAP: nothing here may be resolved at run time from state outside the item. The service manager
-    keeps whatever this names running for as long as the machine is up, so anything an attacker can
-    supply becomes their own restart mechanism. `sys.executable` is absolute; `-E` refuses the
-    environment and `-P` refuses the working directory, which are the two remaining ways a module
-    of that name could be handed to it.
+    TRAP: every element must be fixed here. `-E` and `-P` are load-bearing, not tidiness.
     """
     return [sys.executable, "-E", "-P", "-m", "stayawake"]
 
 
 def content(saw: list[str] | None = None) -> str:
-    """The exact text saw writes on this platform. Deterministic: same machine, same bytes."""
+    """The exact text saw writes on this platform. Deterministic: same machine, same bytes.
+
+    TRAP: `saw` is an argv, never a command line. A string here spreads to one character per
+    argument, and the item it writes names a program that does not exist.
+    """
+    if isinstance(saw, (str, bytes)):
+        raise TypeError("saw is an argv list, not a command line")
     argv = list(saw) if saw else program()
     if _linux():
         return _unit(argv)
@@ -151,18 +149,14 @@ def verdict(path: Path | None = None, saw: list[str] | None = None,
         return ABSENT
     except OSError:
         return UNREADABLE
-    # TRAP: identity is what the placing run RECORDED, not what this interpreter would write today.
-    # Re-deriving it makes saw disown its own item after an ordinary upgrade, refuse to remove it,
-    # and cry tamper — which teaches the operator to read a real tamper as noise.
+    # TRAP: identity is what the placing run recorded, never what this interpreter writes today.
     for candidate in ([saw] if saw else [recorded(record), program()]):
         if candidate and text == content(candidate):
             return PRISTINE
     return ALTERED
 
 
-# Resolved absolutely, never through PATH: this runs on a machine that may already be compromised,
-# and a service manager found by PATH is one an attacker can supply.
-_ACTIVATORS = {
+_SERVICE_MANAGERS_BY_ABSOLUTE_PATH = {
     "linux": ("/usr/bin/systemctl", "/bin/systemctl"),
     "darwin": ("/bin/launchctl", "/usr/bin/launchctl"),
 }
@@ -170,18 +164,18 @@ _ACTIVATORS = {
 
 def _activator() -> str | None:
     """The service manager's own binary, or None when there is no trustworthy one."""
-    for candidate in _ACTIVATORS.get("linux" if _linux() else "darwin", ()):
+    for candidate in _SERVICE_MANAGERS_BY_ABSOLUTE_PATH.get("linux" if _linux() else "darwin", ()):
         if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
             return candidate
     return None
 
 
-def _activate(where: Path, run=subprocess.run, binary=None) -> bool:
+def _activate(where: Path, run=None, binary=None) -> bool:
     """Start it now rather than at the next login. Returns whether that was done.
 
-    Best effort: the item is already written and takes effect at the next login either way, so a
-    service manager that will not answer costs promptness, never the control.
+    Best effort: the item is written either way, so a refusal costs promptness, not the control.
     """
+    run = run or subprocess.run
     binary = binary or _activator()
     if binary is None:
         return False
@@ -199,13 +193,12 @@ def _activate(where: Path, run=subprocess.run, binary=None) -> bool:
     return True
 
 
-def _running(run=subprocess.run, binary=None) -> bool:
+def _running(run=None, binary=None) -> bool:
     """Whether the service manager currently holds the job.
 
-    TRAP: asked of the manager, never inferred from the file. One `launchctl bootout` — or one
-    `systemctl --user stop` — silences the pass without touching a byte, and a check that reads only
-    the file then reports a machine as watched forever.
+    TRAP: asked of the manager. The file says nothing about whether the job is loaded.
     """
+    run = run or subprocess.run
     binary = binary or _activator()
     if binary is None:
         return False
@@ -217,8 +210,9 @@ def _running(run=subprocess.run, binary=None) -> bool:
         return False
 
 
-def _deactivate(where: Path, run=subprocess.run, binary=None) -> None:
+def _deactivate(where: Path, run=None, binary=None) -> None:
     """Stop it now rather than leaving it running until the next login. Best effort."""
+    run = run or subprocess.run
     binary = binary or _activator()
     if binary is None:
         return
@@ -249,8 +243,7 @@ class Scheduling:
 def _write(where: Path, text: str) -> bool:
     """Write `text` to `where` atomically, and read it back. True only when the read-back matches.
 
-    TRAP: the staging file is made by mkstemp in the destination's own directory, so its name cannot
-    be predicted and pointed elsewhere before the write lands.
+    TRAP: the staging name must stay unpredictable, and the read-back compares what was written.
     """
     try:
         where.parent.mkdir(parents=True, exist_ok=True)
@@ -273,12 +266,7 @@ def _write(where: Path, text: str) -> bool:
 
 def settle(path: Path | None = None, saw: list[str] | None = None, write=_write,
            activate=_activate, running=_running, record: Path | None = None) -> Scheduling:
-    """Put the login item in place, and say what that did.
-
-    Doing it twice changes nothing the second time. One that has been changed under the operator is
-    put back, and that reads differently from a first placement — a login item edited underneath you
-    is a thing that happened TO this machine.
-    """
+    """Put the item in place and say what that did: placed, in place, replaced, or a problem."""
     if not supported():
         return Scheduling(problem="not implemented on this platform")
     where = path or item_path()
@@ -300,11 +288,7 @@ def settle(path: Path | None = None, saw: list[str] | None = None, write=_write,
 
 def take_back(path: Path | None = None, saw: list[str] | None = None,
               deactivate=_deactivate, record: Path | None = None) -> str:
-    """Remove the login item saw placed, and nothing else.
-
-    Removes only a file that is exactly what saw wrote. Anything else is left where it is: this
-    command takes back its own work, and deleting someone else's is not that.
-    """
+    """Remove the item saw placed and nothing else. Returns what was done to it."""
     where = path or item_path()
     was = verdict(where, saw, record)
     if was == ABSENT:

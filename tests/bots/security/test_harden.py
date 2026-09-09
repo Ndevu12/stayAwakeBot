@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import tempfile
+import types
 import unittest
 from pathlib import Path
 import contextlib
 import pwd
 from unittest import mock
 
-from stayawake.bots.security import harden, hook
+from stayawake.bots.security import harden, hook, schedule
 from stayawake.bots.security.harden import live
 from stayawake.bots.security.harden import denial
 from stayawake.bots.security.hygiene import host_artifacts
@@ -44,28 +46,36 @@ def _hooks_already_there():
         state = hook.IN_PLACE
     return hook.Settling(actions=[_InPlace()], target="/template")
 
+def _never(*args, **kwargs):
+    """Fail the test rather than reach this machine's own service manager."""
+    raise AssertionError(f"a test reached the real service manager: {args[0] if args else kwargs}")
+
+
+_NO_MANAGER = mock.patch.object(
+    schedule, "subprocess",
+    types.SimpleNamespace(run=_never, SubprocessError=subprocess.SubprocessError))
+
+_ITEM_BEFORE = False
+
+
 def setUpModule():
-    """Remember whether this machine already had a login item, before any test runs."""
-    from stayawake.bots.security import schedule
+    """Cut this module off from the machine's own service manager and login item."""
     global _ITEM_BEFORE
     _ITEM_BEFORE = schedule.item_path().exists()
+    _NO_MANAGER.start()
 
 
 def tearDownModule():
-    """Nothing here may place one on the machine running the suite.
+    """Nothing here may place a login item, or register a job, on the machine running the suite.
 
-    The static guard cannot see through a `**kwargs` spread, and that blind spot is exactly how a
-    login item reached a developer machine twice. This asks the filesystem instead, so no call
-    shape can slip past it.
+    Two canaries because they see different things. A registration is not a file, so the filesystem
+    check below is blind to it; a `**kwargs` spread is not visible to the static guard either.
     """
-    from stayawake.bots.security import schedule
+    _NO_MANAGER.stop()
     if schedule.item_path().exists() and not _ITEM_BEFORE:
         where = schedule.item_path()
         where.unlink(missing_ok=True)
         raise AssertionError(f"a test in this module placed {where.name} on this machine")
-
-
-_ITEM_BEFORE = False
 
 
 class TestRunContract(unittest.TestCase):

@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 """One unattended pass: end the code this machine has identified, and remember the rest.
 
-Narrower than `saw harden` on purpose. Harden runs with an operator present, so it ends everything
-it grades and may ask for privilege to do it. This runs with nobody watching, so it ends only what
-the signature corpus identified, never asks for a password, and writes what it saw to the record
-instead of raising an alarm about a shape it could not name.
+Narrower than `saw harden` on purpose: it ends only what the corpus identified and never asks for
+privilege. What it declines is left for harden, which runs with an operator present.
 """
 from __future__ import annotations
 
@@ -35,11 +33,7 @@ _NOT_OURS = "Something else is there under that name. It has been left alone."
 
 
 def _never_asks(pids, *, signatures):
-    """Refuse privilege rather than seek it. Returns the refusal and nothing ended.
-
-    Nobody is present to answer a password prompt, and a prompt nobody answers is a run that hangs
-    where a scheduled one must not. What this declines is left for a foreground `saw harden`.
-    """
+    """Refuse privilege rather than seek it. Returns the refusal and nothing ended."""
     return elevate.CANNOT_ASK, []
 
 
@@ -56,8 +50,6 @@ def watch_once(*, find=live_code_processes, stop=end_live_code, load=liveledger.
 
     ended_keys = set()
     if ending is not None and ending.ended:
-        # Ended by identity, recorded by content: the ender counts processes, the record counts the
-        # code they were running, and one payload is usually several processes.
         ended_keys = {fingerprint(item.code) for item in identified}
     save(liveledger.record(before, seen, ended_keys=ended_keys, now=now))
 
@@ -87,10 +79,9 @@ def keep_going(*, once=watch_once, sleep=time.sleep, between=BETWEEN_PASSES, pas
                report=print) -> int:
     """Keep making the pass until stopped. Returns the code of the last pass that ran.
 
-    Takes an optional bound on how many passes to make, used by the tests; unbounded otherwise.
+    Takes an optional bound on how many passes to make; unbounded otherwise.
 
-    TRAP: one bad pass must never end the watch. A machine stops being watched exactly when
-    something goes wrong on it, so a raising pass is slept through rather than let out.
+    TRAP: one bad pass must never end the watch.
     """
     code = exitcodes.CLEAN
     made = 0
@@ -99,7 +90,7 @@ def keep_going(*, once=watch_once, sleep=time.sleep, between=BETWEEN_PASSES, pas
             code, text = once()
             if code != exitcodes.CLEAN:
                 report(text)
-        except Exception:                    # never let one pass end the watch
+        except Exception:
             code = exitcodes.INCOMPLETE
         made += 1
         if passes is None or made < passes:

@@ -23,13 +23,8 @@ __all__ = ["run", "apply_one", "PathOutcome", "ENFORCING", "SELF_ENFORCING",
            "remove_one", "take_back"]
 
 
-# Which collaborators of `run` reach this machine, and which only read it. A test asserts this
-# covers every one of them, so a new collaborator cannot be added without being classified — that
-# is how a login item was written to a real machine by the suite once.
 TOUCHES_THIS_MACHINE = frozenset({"live", "apply", "stop", "settle_hooks", "schedule_pass"})
 ONLY_READS = frozenset({"folders", "supported", "altered", "saw_runs"})
-# `take_back`'s own collaborators. `remove` only reaches what `folders` names, so naming the folders
-# bounds it; `unschedule` takes no path and always reaches this machine's own item.
 TAKE_BACK_TOUCHES = frozenset({"folders", "unschedule"})
 
 
@@ -88,8 +83,7 @@ def take_back(*, folders=_global_folders, remove=remove_one,
     """
     if not supported():
         return 2, _NOT_HERE
-    # TRAP: this returns a STATE, it does not raise. Ignoring it reported "every control has been
-    # taken back" over a login item still on disk and still loaded.
+    # TRAP: this returns a STATE, it does not raise.
     try:
         left_running = unschedule() not in (schedule.REMOVED, schedule.NOTHING_TO_REMOVE)
     except Exception:
@@ -170,8 +164,6 @@ def run(*, live=check_live_processes, folders=_global_folders,
     issues = list(outcome.issues)
     if any(i.id == PROCESSES_NOT_READABLE_ID for i in issues):
         return 1, _REFUSED_UNREAD
-    # TRAP: what could not be done never stops what could. A part that needs a password nobody can
-    # answer must not cost the operator every control this run was able to place.
     ending, ending_failed = None, None
     if [i for i in issues if i.id == _LIVE]:
         try:
@@ -186,8 +178,6 @@ def run(*, live=check_live_processes, folders=_global_folders,
         hooks = settle_hooks()
     except Exception:                         # never let it take the command down
         hooks = None
-    # Hardening a machine includes asking it to keep checking itself. `saw watch` owns that
-    # arrangement; this places it too, the way it places the scan-on-clone hooks.
     try:
         scheduled = schedule_pass()
     except Exception:

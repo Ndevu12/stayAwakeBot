@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 """Which running processes are executing code that never touched the disk.
 
-A loader passed as an interpreter argument leaves nothing to scan: the files are clean and the only
-copy is the process. `utils/procsnap` reads the kernel's argv; this decides what it means.
+`utils/procsnap` reads the kernel's argv; this decides what it means.
 
-Detection only. Nothing here signals, stops or ends a process, and nothing here builds a report —
-`hygiene/process.py` renders the finding, `harden/live.py` acts on it, and both ask this module so
-the two cannot disagree about what is running.
+Detection only: `hygiene/process.py` renders the finding and `harden/live.py` acts on it, and both
+ask this module so the two cannot disagree about what is running.
 """
 from __future__ import annotations
 
@@ -22,9 +20,7 @@ _IDENTIFIES = None
 class LiveCode:
     """One running process holding code with no file behind it.
 
-    `confirmed` is True when the code matched the confirmed tier of the signature corpus; it is the
-    same word the scan side uses, and it is what separates code we have identified from code whose
-    shape is merely suspicious."""
+    `confirmed` carries the same meaning here as on the scan side."""
     process: object
     code: str
     reason: str
@@ -38,9 +34,9 @@ class LiveCode:
 def _known_loader(code: str) -> bool:
     """Whether the signature corpus identifies `code` as a loader.
 
-    Asks the corpus's own authority rather than re-deriving it: that authority restricts to the
-    loader category, drops the heuristic tier, holds each signature to the corroboration its own
-    entry declares, and searches the newline-flattened text as well.
+    TRAP: asked of the corpus's own authority. Reading the entries here instead grades text the
+    corpus would not, and this answer ends processes.
+
     Imported locally so an audit that finds no candidate never pays to load the corpus."""
     global _IDENTIFIES
     if _IDENTIFIES is None:
@@ -53,16 +49,16 @@ def _known_loader(code: str) -> bool:
 def fingerprint(code: str) -> str:
     """A short stable identifier for a code argument, or an empty string when there is none.
 
-    The payload itself is never carried into a report or a record; this is what stands in for it."""
+    Stands in for the payload, which is never carried into a report or a record."""
     if not code:
         return ""
     return hashlib.sha256(code.encode("utf-8", "replace")).hexdigest()[:12]
 
 
 def _obfuscation_verdict(code: str):
-    """The scan side's own judgement, imported locally so a default audit that finds no candidate
-    never pays for the engine. `constructs_only` is the calibrated tier for a single argument: an
-    argv is one dense line by construction, so the density heuristic below it would be all noise."""
+    """The scan side's own judgement of `code`, on the tier calibrated for a single argument.
+
+    Imported locally so an audit that finds no candidate never pays for the engine."""
     from stayawake.bots.security.obfuscation.entry import analyze_file
     return analyze_file(code, constructs_only=True)
 
@@ -82,7 +78,7 @@ def program_is_gone(pid: int) -> bool:
 def live_code_processes(snap=None) -> list[LiveCode]:
     """Every running process executing code with no file behind it.
 
-    The single authority: the report and anything that acts on these ask the same function.
+    The single authority: the report and anything that acts on these ask this function.
     """
     snap = snap if snap is not None else snapshot()
     found: list[LiveCode] = []
