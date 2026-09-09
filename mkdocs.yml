@@ -130,6 +130,7 @@ nav:
           - reference/cli/discard.md
           - reference/cli/audit.md
           - reference/cli/harden.md
+          - reference/cli/watch.md
           - reference/cli/guard.md
           - reference/cli/hook.md
           - reference/cli/auth.md
