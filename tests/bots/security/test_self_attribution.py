@@ -131,6 +131,10 @@ class TestOneLocationIsNotSeveral(unittest.TestCase):
                                  _issue("host-drop-artifacts-staging")], width=100)
         self.assertIn("more than one place", report)
 
+    def test_the_split_tier_is_still_in_the_gating_set(self):
+        from stayawake.bots.security.hygiene.models import ROTATION_UNSAFE_IDS
+        self.assertLessEqual(LEFT_OUTSIDE_A_CONTROL_IDS, ROTATION_UNSAFE_IDS)
+
     def test_both_still_gate_credential_rotation(self):
         for issue_id in ("host-drop-artifact-outside-a-control", "host-drop-artifacts-staging"):
             with self.subTest(issue_id=issue_id):
@@ -161,11 +165,14 @@ class TestALocationThatHoldsNothingStagedNothing(unittest.TestCase):
                 mock.patch.object(host_artifacts.hostdenial, "held_by_us", return_value=False):
             return host_artifacts.check_host_artifacts()
 
-    def test_two_empty_locations_do_not_corroborate_each_other(self):
-        def empty(home, tmp):
+    def test_an_empty_cache_does_not_corroborate_anything(self):
+        # A cache under a temp directory is what the usual CI images and the Lambda Node runtimes
+        # set up, so it existing says nothing. A global resolution path is the other case: its own
+        # comment says nothing ordinary creates one, and that reasoning still holds.
+        def empty_caches(home, tmp):
+            (tmp / ".npm").mkdir()
             (home / ".node_modules").mkdir()
-            (home / ".node_libraries").mkdir()
-        issues = self._report(empty)
+        issues = self._report(empty_caches)
         self.assertEqual([i.severity for i in issues], ["info"])
         self.assertNotEqual(rotation_safety({i.id for i in issues}),
                             hygiene.ROTATION_UNSAFE_STAGING)

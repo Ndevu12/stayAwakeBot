@@ -108,6 +108,7 @@ class TestCorroborationSeparatesIndicatorsByWhatMadeThem(unittest.TestCase):
         for kind in kinds:
             d = Path(tempfile.mkdtemp()) / "indicator"
             d.mkdir()
+            (d / "staged").write_text("x")
             out.append((str(d), d, kind))
         return out
 

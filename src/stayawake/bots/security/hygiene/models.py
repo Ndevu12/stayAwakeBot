@@ -120,7 +120,8 @@ def could_not_read(paths) -> HygieneIssue:
                     f"{_WIPER_NOTE}.",
     )
 
-ROTATION_UNSAFE_IDS = ACTIVE_PERSISTENCE_IDS | UNVERIFIED_PERSISTENCE_IDS | UNCONFIRMED_STAGING_IDS
+ROTATION_UNSAFE_IDS = (ACTIVE_PERSISTENCE_IDS | UNVERIFIED_PERSISTENCE_IDS
+                       | UNCONFIRMED_STAGING_IDS | LEFT_OUTSIDE_A_CONTROL_IDS)
 
 # `host-artifact-scanned-clean` retired: a clean content scan no longer renders a calmer
 # finding, so the artifact keeps this grade whether or not `--verify` ran.

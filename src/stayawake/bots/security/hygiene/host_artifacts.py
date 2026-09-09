@@ -40,13 +40,19 @@ _TOOL_OWN_BOOKKEEPING = {
 def _holds_something_staged(path: Path, kind: str) -> bool:
     """Whether anything is staged at `path`, ignoring the entries its own tool writes.
 
-    TRAP: unreadable answers True. What cannot be read is not known to be empty.
+    Asked only of a kind an ordinary tool creates empty. `NPM_CONFIG_CACHE` under a temp directory
+    is what the usual CI images and the Lambda Node runtimes set, so the cache existing says
+    nothing; a global resolution path is different, and its own comment above says why.
+
+    TRAP: anything this cannot examine answers True. What was not looked into is not known to be
+    empty, and the probe only lists what is present, so the real question is always answerable.
     """
+    if kind not in _TOOL_OWN_BOOKKEEPING:
+        return True
     try:
         if not path.is_dir():
-            return path.exists()
-        return any(child.name not in _TOOL_OWN_BOOKKEEPING.get(kind, ())
-                   for child in path.iterdir())
+            return True
+        return any(child.name not in _TOOL_OWN_BOOKKEEPING[kind] for child in path.iterdir())
     except OSError:
         return True
 
@@ -380,7 +386,7 @@ def check_host_artifacts(verify: bool = False) -> list[HygieneIssue]:
         id="host-drop-artifact-weak",
         severity="info",
         title="Something unusual is on this host (weak indicator)",
-        detail="Ordinary tooling creates these too, so on its own this is not evidence of malware.",
+        detail="Ordinary tooling creates these too — Node's GLOBAL_FOLDERS, a pip bootstrap.",
         remediation="Run `saw audit --verify`.",
     )] + extra
 
@@ -448,7 +454,7 @@ def _verify_weak_artifact(item: tuple[str, Path]) -> list[HygieneIssue] | None:
     elif v.too_large:
         outcome = "Too large to scan."
     elif v.partial and v.unread:
-        outcome = f"Not fully scanned. {_NOT_CLEARED}"
+        outcome = f"It was not fully scanned: {'; '.join(v.unread)}. {_NOT_CLEARED}"
     elif v.partial:
         outcome = "Part of it was unreadable."
     else:
