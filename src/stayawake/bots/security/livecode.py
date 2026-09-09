@@ -10,6 +10,7 @@ the two cannot disagree about what is running.
 """
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 
 from stayawake.utils.invocation import resolve_invocation
@@ -47,6 +48,15 @@ def _known_loader(code: str) -> bool:
         from stayawake.bots.security.signatures import load_signatures
         _IDENTIFIES = build_corroborated_loader_check(load_signatures()["content"])
     return _IDENTIFIES(code) is not None
+
+
+def fingerprint(code: str) -> str:
+    """A short stable identifier for a code argument, or an empty string when there is none.
+
+    The payload itself is never carried into a report or a record; this is what stands in for it."""
+    if not code:
+        return ""
+    return hashlib.sha256(code.encode("utf-8", "replace")).hexdigest()[:12]
 
 
 def _obfuscation_verdict(code: str):

@@ -7,9 +7,7 @@ READ-ONLY. An audit audits and reports; nothing here may signal, stop or end a p
 pins that. Acting on one is a separate command's job, and it is gated on capture."""
 from __future__ import annotations
 
-import hashlib
-
-from stayawake.bots.security.livecode import live_code_processes, snapshot as _snapshot
+from stayawake.bots.security.livecode import fingerprint, live_code_processes, snapshot as _snapshot
 from stayawake.utils.invocation import resolve_invocation
 from .models import HygieneIssue, PROCESSES_NOT_READABLE_ID, _WIPER_NOTE
 
@@ -21,10 +19,9 @@ _PIDS_SHOWN = 8
 
 
 def _fingerprint(code: str) -> str:
-    """A short hash of `code`, or an empty string when there is none."""
-    if not code:
-        return ""
-    return f", fingerprint {hashlib.sha256(code.encode('utf-8', 'replace')).hexdigest()[:12]}"
+    """The report's phrasing of `code`'s identifier, or an empty string when there is none."""
+    short = fingerprint(code)
+    return f", fingerprint {short}" if short else ""
 
 
 def _excerpt(code: str) -> str:
