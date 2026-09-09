@@ -15,14 +15,18 @@ import unittest
 from unittest import mock
 
 from stayawake.bots.security.harden import live
+from stayawake.bots.security.livecode import LiveCode
 from stayawake.utils import procstop
 from stayawake.utils.procsnap import Identity, Process
 
 
 def _held(pid, ppid=1, start=1000):
-    return (Process(pid=pid, argv=("node", "-e", "payload"),
-                    identity=Identity(pid=pid, ppid=ppid, uid=501, start_time=start)),
-            "payload", "dynamic-exec sink")
+    """What the detector hands the ender — the real type, not a stand-in for it.
+
+    A raw tuple here would let the ender's compatibility with the detector's result go untested."""
+    return LiveCode(Process(pid=pid, argv=("node", "-e", "payload"),
+                            identity=Identity(pid=pid, ppid=ppid, uid=501, start_time=start)),
+                    "payload", "dynamic-exec sink", False)
 
 
 class TestItOutlastsASpawner(unittest.TestCase):

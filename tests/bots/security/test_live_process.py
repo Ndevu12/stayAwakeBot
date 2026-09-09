@@ -179,7 +179,7 @@ class TestTheOtherWaysOfRunningWithoutAFile(unittest.TestCase):
         fed = Process(pid=40, argv=("node", "-"))
         found = livecode.live_code_processes(_snapshot(fed))
         self.assertEqual([p.pid for p, _c, _r in found], [40])
-        self.assertIn("standard input", found[0][2])
+        self.assertIn("standard input", found[0].reason)
 
     def test_a_module_flag_is_not_mistaken_for_one(self):
         # `python -m unittest discover -s tests` passes `-s` to unittest, not to python.
@@ -196,7 +196,7 @@ class TestTheOtherWaysOfRunningWithoutAFile(unittest.TestCase):
         with mock.patch.object(livecode, "program_is_gone", return_value=True):
             found = livecode.live_code_processes(_snapshot(gone))
         self.assertEqual([p.pid for p, _c, _r in found], [43])
-        self.assertIn("no longer on this disk", found[0][2])
+        self.assertIn("no longer on this disk", found[0].reason)
 
     def test_a_program_it_cannot_read_is_never_called_missing(self):
         # Unreadable is not missing. Answering "missing" for a path this user cannot see would
@@ -225,6 +225,90 @@ class TestItDoesNotPrintThePayload(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestItAsksTheCorpusItAlreadyShips(unittest.TestCase):
+    """The obfuscation engine judges shape. The signature corpus holds code that has already been
+    identified, and a process holding that is a different grade of answer from one whose shape is
+    merely suspicious."""
+
+    @staticmethod
+    def _identified() -> str:
+        """Code carrying a confirmed marker, assembled from split tokens so this file holds no
+        contiguous indicator."""
+        return "glo" + "bal['_V']='0';var t=1;"
+
+    def test_the_shape_engine_alone_does_not_see_it(self):
+        # The control. Without it, the arm below could be passing on the shape engine's answer and
+        # this whole class would prove nothing.
+        self.assertFalse(analyze_file(self._identified(), constructs_only=True).obfuscated)
+
+    def test_code_the_corpus_has_identified_is_found_and_marked_confirmed(self):
+        found = livecode.live_code_processes(
+            _snapshot(Process(pid=60, argv=("node", "-e", self._identified()))))
+        self.assertEqual([lc.process.pid for lc in found], [60])
+        self.assertTrue(found[0].confirmed)
+
+    def test_a_shape_hit_is_found_but_is_not_confirmed(self):
+        found = livecode.live_code_processes(
+            _snapshot(Process(pid=61, argv=("node", "-e", _loader()))))
+        self.assertEqual([lc.process.pid for lc in found], [61])
+        self.assertFalse(found[0].confirmed,
+                         "a shape heuristic must not be graded as identified code")
+
+    def test_ordinary_code_is_neither(self):
+        self.assertEqual(livecode.live_code_processes(
+            _snapshot(Process(pid=62, argv=("node", "-e", "console.log(1+1)")))), [])
+
+    def test_an_uncorroborated_hit_is_not_identified(self):
+        # The corpus gates this fingerprint on a corroborator precisely because benign code writes
+        # DEL this way. Asking the patterns directly, without the gate, accuses that code.
+        charcode = "from" + "CharCode"
+        self.assertFalse(livecode._known_loader(f"const DEL=String.{charcode}(127);const ctl=[DEL];"))
+
+    def test_the_same_fingerprint_with_its_corroborator_is_identified(self):
+        # The control for the pin above: without this, that test could pass because the arm is
+        # broken rather than because the gate works.
+        charcode, run = "from" + "CharCode", "ev" + "al"
+        self.assertTrue(livecode._known_loader(
+            f"const DEL=String.{charcode}(127);{run}(payload.split(DEL)[1]);"))
+
+    def test_a_later_fingerprint_still_answers_when_an_earlier_one_lacks_its_corroborator(self):
+        # A gate that stopped at the first match would drop code carrying BOTH an uncorroborated
+        # fingerprint and a corroborated-by-nothing one — which is the shape the captured samples take.
+        charcode = "from" + "CharCode"
+        code = f"glo" + f"bal['_V']='0';const DEL=String.{charcode}(127);"
+        self.assertTrue(livecode._known_loader(code))
+
+    def test_a_newline_does_not_defeat_it(self):
+        code = "glo" + "bal['_V']='0';var t=1;"
+        self.assertTrue(livecode._known_loader(code[:3] + "\n" + code[3:]))
+
+    def test_a_corroborator_is_judged_on_the_flattened_text_too(self):
+        # Wrapping the sink across a line break leaves the fingerprint matching while its
+        # corroborator, read on the raw text alone, does not hold.
+        charcode, run = "from" + "CharCode", "ev" + "al"
+        wrapped = f"var D=String.{charcode}(127);{run[:2]}\n{run[2:]}(cfg[D]);"
+        from stayawake.bots.security.obfuscation.execsink import _has_exec_sink_beyond_decoding
+        self.assertFalse(_has_exec_sink_beyond_decoding(wrapped),
+                         "control: the raw text must NOT corroborate, or this pins nothing")
+        self.assertTrue(livecode._known_loader(wrapped))
+
+    def test_a_heuristic_fingerprint_is_never_graded_as_identified(self):
+        # The tier restriction is the whole difference between "the corpus identified this" and
+        # "something is shaped like it". The acting path is this builder's only consumer, so
+        # nothing else in the suite can pin it.
+        heuristic = "console.error('failed to run client" + "Code: ' + err)"
+        self.assertFalse(livecode._known_loader(heuristic))
+
+    def test_a_command_line_that_merely_mentions_an_indicator_is_not_identified(self):
+        # An analyst hunting the indicator, and this repo's own prevention library, both put these
+        # strings on a command line. Neither is running the thing they name.
+        for benign in ("grep -ri sha1" + "hulud /Users/me/dev",
+                       "RE='Block" + "chain Explorer|Tech" + "Mono'; echo $RE",
+                       "open('branch_" + "structure.json').read()"):
+            with self.subTest(benign=benign[:32]):
+                self.assertFalse(livecode._known_loader(benign))
 
 
 class TestAnAuditOnlyReports(unittest.TestCase):

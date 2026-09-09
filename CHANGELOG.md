@@ -19,6 +19,10 @@ reader, not the mechanism or the weakness it closed.
   it can act on it still says.
 
 ### Added
+- **Running code is now also checked against the corpus the tool already ships, not only
+  judged by its shape.** Code a running process was handed is compared with what the tool
+  has already identified, and a match is graded as identified rather than as suspected. What
+  was reported before is still reported.
 - **`saw harden` puts the scan-on-clone hooks in place as part of hardening.** You no longer have
   to remember `saw hook install` separately. Running it again changes nothing and says nothing — a
   hook already in place is left exactly as it is — and if the hooks could not be put in place, the
