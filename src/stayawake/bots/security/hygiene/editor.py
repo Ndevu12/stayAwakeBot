@@ -153,18 +153,16 @@ def grade_settings(text: str, name: str, path: Path) -> list[HygieneIssue]:
             id="editor-autotasks-default",
             severity="info",
             title=f"{name} automatic tasks are not explicitly disabled",
-            detail=f'{path} does not set "task.allowAutomaticTasks", so a folder can auto-run '
-                   "tasks when opened.",
-            remediation='Set "task.allowAutomaticTasks": "off".', reference=_DOCS,
+            detail="A folder can auto-run tasks when it is opened.",
+            remediation="Run `saw harden`.", reference=_DOCS,
         ))
     elif auto.group(1) != "off":
         issues.append(HygieneIssue(
             id="editor-autotasks-on",
             severity="warning",
             title=f"{name} automatic tasks are enabled",
-            detail=f'{path} sets "task.allowAutomaticTasks": "{auto.group(1)}" — folder-open '
-                   "tasks can run on open without confirmation.",
-            remediation='Set "task.allowAutomaticTasks": "off".', reference=_DOCS,
+            detail="Folder-open tasks run without confirmation.",
+            remediation="Run `saw harden`.", reference=_DOCS,
         ))
 
     if re.search(r'"security\.workspace\.trust\.enabled"\s*:\s*false', text):
@@ -172,8 +170,8 @@ def grade_settings(text: str, name: str, path: Path) -> list[HygieneIssue]:
             id="editor-workspace-trust-off",
             severity="warning",
             title=f"{name} Workspace Trust is disabled",
-            detail=f"{path} disables Workspace Trust, so untrusted folders run code freely.",
-            remediation='Set "security.workspace.trust.enabled": true.', reference=_DOCS,
+            detail="Untrusted folders run code freely.",
+            remediation="Run `saw harden`.", reference=_DOCS,
         ))
 
     if re.search(r'"security\.workspace\.trust\.untrustedFiles"\s*:\s*"open"', text):
@@ -181,9 +179,8 @@ def grade_settings(text: str, name: str, path: Path) -> list[HygieneIssue]:
             id="editor-untrusted-files-open",
             severity="warning",
             title=f"{name} opens untrusted files without prompting",
-            detail=f'{path} sets "security.workspace.trust.untrustedFiles": "open", so untrusted '
-                   "files open without the trust prompt.",
-            remediation='Set it to "prompt" (the default).', reference=_DOCS,
+            detail="Untrusted files open without the trust prompt.",
+            remediation="Run `saw harden`.", reference=_DOCS,
         ))
 
     if _autoapprove_approves_everything(text):
@@ -191,11 +188,8 @@ def grade_settings(text: str, name: str, path: Path) -> list[HygieneIssue]:
             id="editor-autoapprove-all",
             severity="warning",
             title=f"{name} auto-approves ALL terminal commands for chat/agent tools",
-            detail=f'{path} auto-approves EVERY terminal command via '
-                   '"chat.tools.terminal.autoApprove", so anything an AI agent proposes runs '
-                   "unprompted.",
-            remediation='Replace the blanket/catch-all with an explicit allowlist object of safe '
-                        "commands (or set it to false); never auto-approve everything.",
+            detail="Anything an AI agent proposes runs unprompted.",
+            remediation="Run `saw harden`.",
         ))
     else:
         risky = risky_autoapprove_entries(text)
@@ -204,9 +198,8 @@ def grade_settings(text: str, name: str, path: Path) -> list[HygieneIssue]:
                 id="editor-autoapprove-risky",
                 severity="warning",
                 title=f"{name} auto-approves risky terminal commands for chat/agent tools",
-                detail=f'{path} auto-approves {", ".join(risky)} via '
-                       '"chat.tools.terminal.autoApprove", so an AI agent runs them unprompted.',
-                remediation='Remove those entries, or set them to false.', reference=_DOCS,
+                detail=f"An AI agent runs {', '.join(risky)} unprompted.",
+                remediation="Run `saw harden`.", reference=_DOCS,
             ))
     return issues
 
@@ -239,8 +232,7 @@ def check_editors(settings_path: Path | None = None, find=editors.installed) -> 
             id=EDITORS_NOT_EXAMINED_ID,
             severity="unknown",
             title="An editor on this machine was not examined",
-            detail=f"{', '.join(found.not_modelled)} is installed here. Its settings are not "
-                   "modelled, so no result covers it.",
+            detail="An editor here is not modelled, so no result covers it.",
             remediation="Check its auto-run and trust settings yourself.", reference=_DOCS,
         ))
     return issues

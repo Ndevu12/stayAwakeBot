@@ -83,7 +83,7 @@ class TestAnArchiveIsNeverReportedAsScannedClean(ArchiveVerifyCase):
                     tf.addfile(entry, io.BytesIO(payload))
                 issues = host_artifacts._verify_weak_artifact(("a node module tree", d))
                 self.assertEqual(["host-drop-artifact-weak"], [i.id for i in issues])
-                self.assertIn("does not clear it", " ".join(i.detail for i in issues))
+                self.assertIn("can be the harmful part", " ".join(i.detail for i in issues))
 
 
 class TestTheReportNamesArchivesAsUnread(ArchiveVerifyCase):

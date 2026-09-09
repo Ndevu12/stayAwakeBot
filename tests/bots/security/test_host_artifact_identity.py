@@ -92,6 +92,7 @@ class Grading(unittest.TestCase):
 
     def test_one_artifact_under_two_names_cannot_corroborate_itself(self):
         (self.real / ".npm").mkdir()
+        (self.real / ".npm" / "staged.tgz").write_text("x")
         ids, _ = self._run([self.real, self.alias])
         self.assertNotIn("host-drop-artifacts", ids)
         self.assertNotIn("host-drop-artifacts-staging", ids)
@@ -100,6 +101,7 @@ class Grading(unittest.TestCase):
 
     def test_two_distinct_kinds_still_warn_and_gate(self):
         (self.real / ".npm").mkdir()
+        (self.real / ".npm" / "staged.tgz").write_text("x")
         (self.real / "get-pip.py").write_text("#")
         ids, _ = self._run([self.real])
         self.assertEqual(ids, {"host-drop-artifacts"})
@@ -108,7 +110,9 @@ class Grading(unittest.TestCase):
 
     def test_same_kind_in_two_real_directories_keeps_the_gate_without_claiming_persistence(self):
         (self.real / ".npm").mkdir()
+        (self.real / ".npm" / "staged.tgz").write_text("x")
         (self.other / ".npm").mkdir()
+        (self.other / ".npm" / "staged.tgz").write_text("x")
         ids, _ = self._run([self.real, self.other])
         self.assertEqual(ids, {"host-drop-artifacts-staging"})
         # The GATE is the no-downgrade invariant (exit 3 reads the id set). The verdict STRING is
@@ -122,6 +126,7 @@ class Grading(unittest.TestCase):
         # a second name at it, and the corroboration disappears while both paths still resolve.
         # Aliasing a ROOT is a system fact; aliasing an ARTIFACT is somebody's deliberate act.
         (self.real / ".npm").mkdir()
+        (self.real / ".npm" / "staged.tgz").write_text("x")
         (self.other / ".npm").symlink_to(self.real / ".npm")
         ids, _ = self._run([self.real, self.other])
         self.assertEqual(ids, {"host-drop-artifacts-staging"})
@@ -129,6 +134,7 @@ class Grading(unittest.TestCase):
 
     def test_the_lone_indicator_is_unchanged(self):
         (self.real / ".npm").mkdir()
+        (self.real / ".npm" / "staged.tgz").write_text("x")
         ids, _ = self._run([self.real])
         self.assertEqual(ids, {"host-drop-artifact-weak"})
 
@@ -141,7 +147,9 @@ class VerifyEscalatesOnly(unittest.TestCase):
         self.b = self.root / "b"; self.b.mkdir()
         self.home = self.root / "home"; self.home.mkdir()
         (self.a / ".npm").mkdir()
+        (self.a / ".npm" / "staged.tgz").write_text("x")
         (self.b / ".npm").mkdir()
+        (self.b / ".npm" / "staged.tgz").write_text("x")
 
     def _run(self, scan):
         patches = [

@@ -13,6 +13,27 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Changed
+- **Findings no longer print the file or folder they found.** A report gets read over a shoulder,
+  pasted into a ticket and attached to a mail, and every location in it is a map. Each one now says
+  what is wrong and what to run.
+
+### Fixed
+- **`saw audit` no longer asks you to confirm the start-up item `saw` itself installed.** A machine
+  running `saw watch` reported it every run as a new entry that could not be attributed, which is
+  the finding you most need to trust. It is recognised by what it contains, not by its name, so an
+  entry at that name this tool did not write is still reported — and so is one that has been
+  changed since.
+- **A location that holds nothing is no longer graded as a warning.** Two empty directories used
+  to corroborate each other into a warning that withheld the credential-rotation all-clear, and an
+  npm cache under a temp directory counted even when it held only npm's own files — the layout the
+  usual CI images and Lambda set up. They are still listed to review; what actually holds something
+  is graded exactly as before.
+- **A single location left outside a control is no longer described as several.** The run headline
+  said an artifact was in more than one place when one was found, and told you to compare locations
+  it had never named. The two now read as what they are. Either still withholds the
+  rotation all-clear.
+
 ### Added
 - **`saw audit` covers every editor of the VS Code family on this machine, not only VS Code.**
   Cursor, Windsurf, VSCodium and other forks are checked the same way, and each finding names the

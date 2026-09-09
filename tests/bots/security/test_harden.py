@@ -742,8 +742,8 @@ class TestAControlDoesNotMakeTheHostReadSafer(unittest.TestCase):
         self.assertTrue(ids & ROTATION_UNSAFE_IDS, ids)
         self.assertNotEqual(rotation_safety(ids), "safe")
         self.assertEqual([i.severity for i in after], ["warning"])
-        self.assertIn(str(self.left), after[0].detail)
-        self.assertIn("do not rotate", after[0].remediation.lower())
+        self.assertNotIn(str(self.left), after[0].detail)
+        self.assertIn("not rotate", after[0].remediation.lower())
 
     def test_a_fully_controlled_host_reports_nothing(self):
         self.assertEqual(self._grade([self.covered], holding={self.covered}), [])
