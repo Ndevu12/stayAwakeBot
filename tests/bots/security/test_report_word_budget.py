@@ -30,16 +30,11 @@ _HYGIENE = pathlib.Path(__file__).resolve().parents[3] / "src/stayawake/bots/sec
 # render shows. That over-counts toward FLAGGING, which is the safe direction for a budget.
 KNOWN_LONG = {
     "cached-github-keychain": (64, 88),
-    "host-drop-artifact-weak": (99, 31),
     "persistence-surface-not-established": (37, 44),
-    "grade.py:555": (45, 20),
     "self-hosted-runner-persistence": (35, 24),
     "os-service-persistence": (35, 21),
     "autorun-baseline-tampered": (39, 10),
-    "grade.py:568": (36, 13),
     "ssh-authorized-keys-forced-command": (27, 22),
-    "host-artifact-content-infected": (26, 22),
-    "host-drop-artifacts": (17, 28),
     "git-config-fetch-exec": (21, 22),
 }
 
@@ -135,7 +130,7 @@ class TestEveryFindingFitsTheBudget(unittest.TestCase):
 
     def test_a_new_finding_must_meet_the_budget(self):
         # Guards the guard: the exception list is closed, so an id added later is held to the rule.
-        self.assertEqual(len(KNOWN_LONG), 12, "KNOWN_LONG changed — it may shrink, never grow")
+        self.assertEqual(len(KNOWN_LONG), 7, "KNOWN_LONG changed — it may shrink, never grow")
 
 
 class TestTheSafetyWarningIsAtEveryDecisionPoint(unittest.TestCase):

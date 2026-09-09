@@ -288,21 +288,17 @@ def _corroborated_issue(found: list[str], *, active: bool) -> HygieneIssue:
         return HygieneIssue(
             id="host-drop-artifacts",
             severity="warning",
-            title="Host filesystem artifacts consistent with a supply-chain payload",
-            detail="Found: " + "; ".join(found) + ". These are ingress-tooling / data-staging "
-                   "drop-files (T1105/T1074) this wave leaves on a developer host.",
-            remediation="Do NOT rotate credentials first — treat as possible LIVE compromise. "
-                        "Isolate the host, neutralize any persistence, rebuild from a known-clean "
-                        f"image, and rotate credentials LAST — {_WIPER_NOTE}.",
+            title="Files this wave leaves on a developer host are on this machine",
+            detail=f"{len(found)} of them. Treat as a possible live compromise.",
+            remediation="Isolate this machine, run `saw harden`, and rotate credentials LAST — "
+                        f"{_WIPER_NOTE}.",
         )
     return HygieneIssue(
         id="host-drop-artifacts-staging",
         severity="warning",
-        title="The same staging artifact in more than one location on this host",
-        detail="Found: " + "; ".join(found) + ". One kind of staging drop-file (T1105/T1074) in "
-               "more than one real directory. Ordinary tooling puts it in one place, not several.",
-        remediation="Inspect each location before trusting it, and do NOT rotate any credential "
-                    "yet — see the note above.",
+        title="The same staging artifact is in more than one place on this host",
+        detail=f"{len(found)} places. Ordinary tooling puts one there, not several.",
+        remediation="Run `saw audit --verify`, and do NOT rotate any credential yet.",
     )
 
 
@@ -315,11 +311,9 @@ def _outside_a_control_issue(found: list[str]) -> HygieneIssue:
     return HygieneIssue(
         id="host-drop-artifact-outside-a-control",
         severity="warning",
-        title="A global resolution path on this host was left outside a control that covers another",
-        detail="Found: " + "; ".join(found) + ". A control covers another path on this host; "
-               "this one was left as it stood.",
-        remediation="Inspect it before trusting it, and do NOT rotate any credential yet — "
-                    f"{_WIPER_NOTE}.",
+        title="A global resolution path here is not covered by a control",
+        detail="A control covers another on this machine; this one was left as it stood.",
+        remediation="Run `saw harden`, and do NOT rotate any credential yet.",
     )
 
 
@@ -385,12 +379,9 @@ def check_host_artifacts(verify: bool = False) -> list[HygieneIssue]:
     return [HygieneIssue(
         id="host-drop-artifact-weak",
         severity="info",
-        title="Unusual file/dir on this host (weak supply-chain indicator)",
-        detail="Found: " + "; ".join(found) + ". A weak, single indicator: ordinary tooling creates "
-               "these too (Node's GLOBAL_FOLDERS, a pip bootstrap), so on its own this is not "
-               "evidence of malware.",
-        remediation="Check whether it is yours (inspect the contents). If not, isolate the host and "
-                    f"rotate credentials LAST: {_WIPER_NOTE}. `saw audit --verify` content-scans it.",
+        title="Something unusual is on this host (weak indicator)",
+        detail="Ordinary tooling creates these too, so on its own this is not evidence of malware.",
+        remediation="Run `saw audit --verify`.",
     )] + extra
 
 
@@ -404,10 +395,8 @@ def _scan_blocked_issue(path: Path, failure: str) -> HygieneIssue:
         id=HOST_ARTIFACT_SCAN_BLOCKED_ID,
         severity="unknown",
         title="The content scan asked for did not run",
-        detail=f"`--verify` was asked for and the scan of {path} did not run ({failure}), so its "
-               "contents are UNKNOWN, not clean.",
-        remediation="Resolve what stopped it and re-run, or inspect it by hand. Do not rotate "
-                    f"credentials yet: {_WIPER_NOTE}.",
+        detail=f"The scan did not run ({failure}), so the contents are UNKNOWN, not clean.",
+        remediation="Resolve what stopped it and re-run. Do not rotate credentials yet.",
     )
 
 
@@ -444,36 +433,31 @@ def _verify_weak_artifact(item: tuple[str, Path]) -> list[HygieneIssue] | None:
             id="host-artifact-content-infected",
             severity="warning",
             title="Content scan found worm markers inside a host artifact",
-            detail=f"Scanned {path} ({v.files} files) and found CONFIRMED malware markers: "
-                   f"{', '.join(v.markers)}. This is no longer a weak indicator: there is worm "
-                   "code on this host.",
-            remediation="Treat as a LIVE compromise. Isolate the host, neutralize any persistence, "
-                        "rebuild from a known-clean image, and rotate credentials LAST — "
-                        f"{_WIPER_NOTE}.",
+            detail=f"{len(v.markers)} confirmed marker(s) in {v.files} files. There is worm code "
+                   "on this host.",
+            remediation="Treat as a LIVE compromise. Isolate this machine and rotate credentials "
+                        f"LAST — {_WIPER_NOTE}.",
         )]
     # Markers may only PROMOTE this finding, never lower it. Measured on a real incident'''s staged
     # tree: 488 files fully read, no archives, nothing to find — the loader lived only in argv.
     # Short sentences, plain words: the previous single sentence nested parentheses, said "not read"
     # twice, and ended on the reassuring half so the warning read as an all-clear.
-    _NOT_CLEARED = ("That does not clear it: the harmful part can be the program that used these "
-                    "files, not the files themselves.")
+    _NOT_CLEARED = "The program that used them can be the harmful part."
     if v.scanned_clean:
-        outcome = f"A content scan found no worm markers. {_NOT_CLEARED}"
+        outcome = f"A scan found no markers. {_NOT_CLEARED}"
     elif v.too_large:
-        outcome = "It is too large to scan automatically, so its contents were not checked."
+        outcome = "Too large to scan."
     elif v.partial and v.unread:
-        outcome = (f"It was not fully scanned: {'; '.join(v.unread)}. Its contents were not "
-                   f"cleared. {_NOT_CLEARED}")
+        outcome = f"Not fully scanned. {_NOT_CLEARED}"
     elif v.partial:
-        outcome = "Part of it could not be read, so its contents were not fully checked."
+        outcome = "Part of it was unreadable."
     else:
-        outcome = f"It could not be fully scanned ({v.error}), so its contents were not checked."
+        outcome = "It could not be scanned."
     return [HygieneIssue(
         id="host-drop-artifact-weak",
         severity="info",
-        title="Unusual file/dir on this host (weak supply-chain indicator)",
-        detail=f"Found: {desc}. A weak, single indicator: ordinary tooling creates these too, so on "
-               f"its own this is not evidence of malware. {outcome}",
-        remediation="Check whether you created it (inspect its contents, and recall the install). "
-                    f"If it is NOT yours, isolate the host and rotate credentials LAST: {_WIPER_NOTE}.",
+        title="Something unusual is on this host (weak indicator)",
+        detail=f"Ordinary tooling creates these. {outcome}",
+        remediation="Confirm you created it. If not, isolate this machine and rotate "
+                    "credentials LAST.",
     )]

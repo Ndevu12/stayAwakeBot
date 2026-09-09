@@ -376,7 +376,7 @@ class TestHostArtifacts(unittest.TestCase):
             f = hygiene.check_host_artifacts()[0]
         self.assertEqual(f.severity, "info")
         self.assertNotIn("payload", (f.title + " " + f.detail).lower())   # no "payload-created" accusation
-        self.assertIn("weak", f.detail.lower())                            # honest about the confidence
+        self.assertIn("weak", f"{f.title} {f.detail}".lower())             # honest about the confidence
 
     def test_strong_ioc_is_warning(self):
         with mock.patch.object(hygiene.host_artifacts, "_host_artifacts",
@@ -426,13 +426,21 @@ class TestHostArtifacts(unittest.TestCase):
             __import__("shutil").rmtree(d, ignore_errors=True)
 
     def test_remediation_is_rotate_last(self):
-        for probe in (([], [("~/.node_modules", Path("~/.node_modules"), hygiene.host_artifacts.KIND_GLOBAL_FOLDER)], [], []), (["host$user archive"], [], [], [])):
-            with mock.patch.object(hygiene.host_artifacts, "_host_artifacts", return_value=probe):
-                rem = hygiene.check_host_artifacts()[0].remediation.lower()
-            # Rotation is sequenced last / after isolation (warning says "LAST"; info "BEFORE
-            # rotating") — and the rotation ACTION comes after "isolate", not before it.
-            self.assertTrue("rotate credentials last" in rem or "before rotating" in rem)
-            self.assertLess(rem.index("isolate"), rem.rindex("rotat"))
+        with mock.patch.object(hygiene.host_artifacts, "_host_artifacts",
+                               return_value=(["host$user archive"], [], [], [])):
+            issue = hygiene.check_host_artifacts()[0]
+        rem = issue.remediation.lower()
+        self.assertEqual(issue.severity, "warning")
+        self.assertIn("rotate credentials last", rem)
+        self.assertLess(rem.index("isolate"), rem.rindex("rotat"))
+
+    def test_a_weak_indicator_leaves_the_sequencing_to_the_run_verdict(self):
+        from stayawake.bots.security.hygiene.models import rotation_safety
+        with mock.patch.object(hygiene.host_artifacts, "_host_artifacts",
+                               return_value=([], [("~/.node_modules", Path("~/.node_modules"), hygiene.host_artifacts.KIND_GLOBAL_FOLDER)], [], [])):
+            issue = hygiene.check_host_artifacts()[0]
+        self.assertEqual(issue.severity, "info")
+        self.assertNotEqual(rotation_safety({issue.id}), hygiene.ROTATION_UNSAFE_STAGING)
 
     def test_warning_triggers_incident_runbook_but_info_does_not(self):
         warn = hygiene.HygieneIssue("host-drop-artifacts", "warning", "T", "D", "F")
@@ -517,19 +525,18 @@ class TestControlsAreNotFlagged(unittest.TestCase):
         if not hostdenial.held_by_us(self.location):
             self.skipTest("the immutable flag did not take on this filesystem")
 
-    def _findings_naming_it(self):
+    def _findings_about_it(self):
         with mock.patch.object(hygiene.host_artifacts, "_global_folders", lambda: [self.location]):
-            issues = hygiene.host_artifacts.check_host_artifacts()
-        return [i for i in issues if str(self.location) in f"{i.title} {i.detail}"]
+            return hygiene.host_artifacts.check_host_artifacts()
 
     def test_a_control_is_credited_not_flagged(self):
         self._lock()
-        self.assertEqual(self._findings_naming_it(), [])
+        self.assertEqual(self._findings_about_it(), [])
 
     def test_the_same_location_holding_a_tree_is_still_flagged(self):
         (self.location / "index.js").write_text("x", encoding="utf-8")
         self.assertIsNone(hostdenial.held_by(self.location))
-        self.assertTrue(self._findings_naming_it())
+        self.assertTrue(self._findings_about_it())
 
 
 class TestVerifyArtifactsOptIn(unittest.TestCase):
@@ -560,7 +567,8 @@ class TestVerifyArtifactsOptIn(unittest.TestCase):
             issues = hygiene.check_host_artifacts(verify=True)
         self.assertEqual([(i.id, i.severity) for i in issues],
                          [("host-artifact-content-infected", "warning")])
-        self.assertIn("loader-fromcharcode-127", issues[0].detail)
+        self.assertNotIn("loader-fromcharcode-127", issues[0].detail)
+        self.assertIn("1 confirmed marker", issues[0].detail)
 
     def test_markers_found_triggers_incident_runbook(self):
         # host-artifact-content-infected is ACTIVE persistence → the rotate-LAST runbook leads.
@@ -578,8 +586,8 @@ class TestVerifyArtifactsOptIn(unittest.TestCase):
         # The artifact keeps the grade it had BEFORE we looked inside.
         self.assertEqual([(i.id, i.severity) for i in issues],
                          [("host-drop-artifact-weak", "info")])
-        self.assertIn("no worm markers", issues[0].detail.lower())
-        self.assertIn("does not clear it", issues[0].detail.lower())
+        self.assertIn("no markers", issues[0].detail.lower())
+        self.assertIn("can be the harmful part", issues[0].detail.lower())
         self.assertNotIn("low concern", issues[0].remediation.lower())
 
     def test_too_large_stays_honest_never_claims_clean(self):
@@ -612,7 +620,7 @@ class TestVerifyArtifactsOptIn(unittest.TestCase):
             issues = hygiene.check_host_artifacts(verify=True)
         self.assertEqual([i.id for i in issues], ["host-drop-artifact-weak"])
         self.assertNotIn("no confirmed malware markers", issues[0].detail.lower())
-        self.assertIn("could not be read", issues[0].detail.lower())
+        self.assertIn("unreadable", issues[0].detail.lower())
 
     def test_a_lone_weak_file_is_not_scanned(self):
         # get-pip.py is a FILE, not a dir → can't content-scan → honest info; verify_dir not called.

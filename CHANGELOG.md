@@ -13,6 +13,11 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Changed
+- **Findings no longer print the file or folder they found.** A report gets read over a shoulder,
+  pasted into a ticket and attached to a mail, and every location in it is a map. Each one now says
+  what is wrong and what to run.
+
 ### Fixed
 - **`saw audit` no longer asks you to confirm the start-up item `saw` itself installed.** A machine
   running `saw watch` reported it every run as a new entry that could not be attributed, which is

@@ -526,14 +526,14 @@ def correlate(entries, attributed: dict[str, bool]) -> set[str]:
             and os.path.normpath(os.path.expanduser(e.exec_path)) in shared}
 
 
-def _where(entry, attrib) -> str:
-    run = f"runs {entry.exec_path}" if entry.exec_path else "references no executable"
+def _shape_of(entry, attrib) -> str:
+    """What the entry does, in the words an operator acts on. Never where it is."""
     tags = list(entry.persistence)
     if attrib.signed is False:
         tags.append("unsigned")
     if attrib.exec_class == "untrusted":
-        tags.append("scratch/cache path")
-    return f"{entry.path.name} ({run}" + (f"; {', '.join(tags)}" if tags else "") + ")"
+        tags.append("runs from a scratch path")
+    return ", ".join(tags) if tags else "no distinguishing shape"
 
 
 def grade(entry, attrib, novel: str, shape: ContentSignal, correlated: bool) -> HygieneIssue | None:
@@ -547,17 +547,15 @@ def grade(entry, attrib, novel: str, shape: ContentSignal, correlated: bool) -> 
         why = list(shape.reasons)
         if correlated:
             why.append("shared payload across multiple autorun entries")
-        detail = (f"An autorun entry re-executes code that is not attributable to a package, app, or "
-                  f"signed binary — {_where(entry, attrib)}. " + (
-                      "It " + "; ".join(why) + ". " if why else "")
-                  + "A novel worm variant plants a foothold in a known location like this; being new "
-                  "and unattributed is the signal, not a signature match.")
+        detail = (f"An autorun entry re-executes code no package, app or signed binary accounts "
+                  f"for — {_shape_of(entry, attrib)}."
+                  + (" It " + "; ".join(why) + "." if why else ""))
         return HygieneIssue(
             id=FOOTHOLD_ID, severity="warning",
             title="Unattributed autorun foothold (re-runs after the package is gone)",
             detail=detail,
-            remediation="Verify you installed it; if not, treat the host as possibly compromised — "
-                        f"disable/remove the entry, and {_WIPER_NOTE} (neutralize before rotating).",
+            remediation="Confirm you installed it. If not, run `saw harden` and rotate credentials "
+                        f"LAST — {_WIPER_NOTE}.",
             command="saw hook repair" if any(r in _SAW_HOOK_REASONS for r in why) else None)
 
     # REVIEW (→ info): something NEW and unattributed appeared since your last audit, without a decisive
@@ -568,10 +566,9 @@ def grade(entry, attrib, novel: str, shape: ContentSignal, correlated: bool) -> 
         return HygieneIssue(
             id=REVIEW_ID, severity="info",
             title="New unattributed autorun entry since your last audit",
-            detail=f"An autorun entry {verb} that is not attributable to a package/app/signed binary — "
-                   f"{_where(entry, attrib)}. New in itself is not proof of malware, but this is where "
-                   "a novel foothold would appear; confirm you installed it.",
-            remediation="If you set this up, it's fine. If not, inspect and remove it.")
+            detail=f"An autorun entry {verb} that no package, app or signed binary accounts for — "
+                   f"{_shape_of(entry, attrib)}.",
+            remediation="Confirm you set it up. If not, run `saw harden`.")
     return None
 
 
