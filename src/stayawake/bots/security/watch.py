@@ -8,11 +8,15 @@ instead of raising an alarm about a shape it could not name.
 """
 from __future__ import annotations
 
-from stayawake.bots.security import liveledger
+import time
+
+from stayawake.bots.security import liveledger, schedule
 from stayawake.bots.security.harden.live import end_live_code
 from stayawake.bots.security.livecode import fingerprint, live_code_processes
 from stayawake.utils import elevate, exitcodes
 
+
+BETWEEN_PASSES = 30
 
 _ENDED = "Code running on this machine was stopped."
 _RETURNED = "It has been stopped here before and is running again. Take this machine off the network."
@@ -20,6 +24,14 @@ _LEFT = "Something running here could not be stopped. Run `saw harden`."
 _UNNAMED = "Something is running that this machine cannot identify."
 _QUIET = "Nothing on this machine is running code it should not."
 _NOT_READ = "Running processes could not be examined, so nothing here covers one."
+_SCHEDULED = "This machine will keep checking itself from now on."
+_AT_LOGIN = "This machine will keep checking itself from your next login."
+_ALREADY = "This machine was already checking itself."
+_PUT_BACK = "The check this machine runs by itself had been changed. It has been put back."
+_NOT_SCHEDULED = "This machine could not be asked to keep checking itself."
+_UNSCHEDULED = "This machine will no longer check itself."
+_WAS_NOT = "This machine was not checking itself."
+_NOT_OURS = "Something else is there under that name. It has been left alone."
 
 
 def _never_asks(pids, *, signatures):
@@ -69,3 +81,49 @@ def watch_once(*, find=live_code_processes, stop=end_live_code, load=liveledger.
     if identified:
         return exitcodes.FINDINGS, "\n".join(lines)
     return exitcodes.CLEAN, "\n".join(lines)
+
+
+def keep_going(*, once=watch_once, sleep=time.sleep, between=BETWEEN_PASSES, passes=None,
+               report=print) -> int:
+    """Keep making the pass until stopped. Returns the code of the last pass that ran.
+
+    Takes an optional bound on how many passes to make, used by the tests; unbounded otherwise.
+
+    TRAP: one bad pass must never end the watch. A machine stops being watched exactly when
+    something goes wrong on it, so a raising pass is slept through rather than let out.
+    """
+    code = exitcodes.CLEAN
+    made = 0
+    while passes is None or made < passes:
+        try:
+            code, text = once()
+            if code != exitcodes.CLEAN:
+                report(text)
+        except Exception:                    # never let one pass end the watch
+            code = exitcodes.INCOMPLETE
+        made += 1
+        if passes is None or made < passes:
+            sleep(between)
+    return code
+
+
+def schedule_it(*, settle=schedule.settle) -> tuple[int, str]:
+    """Ask this machine to keep making the pass. Returns the exit code and one line."""
+    out = settle()
+    if out.problem:
+        return exitcodes.INCOMPLETE, _NOT_SCHEDULED
+    if out.state == schedule.REPLACED:
+        return exitcodes.CLEAN, _PUT_BACK
+    if not out.changed:
+        return exitcodes.CLEAN, _ALREADY
+    return exitcodes.CLEAN, _SCHEDULED if out.active else _AT_LOGIN
+
+
+def unschedule_it(*, remove=schedule.take_back) -> tuple[int, str]:
+    """Stop this machine making the pass. Removes only what saw placed."""
+    state = remove()
+    if state == schedule.REMOVED:
+        return exitcodes.CLEAN, _UNSCHEDULED
+    if state == schedule.NOTHING_TO_REMOVE:
+        return exitcodes.CLEAN, _WAS_NOT
+    return exitcodes.INCOMPLETE, _NOT_OURS

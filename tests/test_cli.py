@@ -40,23 +40,30 @@ class TestParserIntegrity(unittest.TestCase):
         for verb in cli.VERBS:
             self.assertIn(verb, names)
 
-    def _walk(self, parser=None, path="saw"):
-        """Every parser in the tree, deduplicated (aliases share one parser object)."""
+    def _walk(self, parser=None, path="saw", offered=True):
+        """Every parser in the tree, deduplicated (aliases share one parser object).
+
+        Yields `(path, parser, offered)`. A subcommand argparse does not list — one added with no
+        help, or with SUPPRESS — is not offered to anyone: it is an entry something saw installed
+        calls, not a command a person types."""
         parser = parser or cli.build_parser()
-        yield path, parser
+        yield path, parser, offered
         for action in parser._actions:
             if isinstance(action, argparse._SubParsersAction):
+                listed = {c.metavar or c.dest for c in action._choices_actions
+                          if c.help is not argparse.SUPPRESS}
                 seen = set()
                 for name, child in action._name_parser_map.items():
                     if id(child) not in seen:
                         seen.add(id(child))
-                        yield from self._walk(child, f"{path} {name}")
+                        yield from self._walk(child, f"{path} {name}", name in listed)
 
     def test_every_command_help_states_purpose_and_shows_examples(self):
-        # clig.dev: `-h` must say what the command is FOR and show how it is invoked. `hook run`
-        # is exempt — it is the entry the installed git hook calls, not a command anyone types.
-        for path, parser in self._walk():
-            if path == "saw hook run":
+        # clig.dev: `-h` must say what the command is FOR and show how it is invoked. Asked of what
+        # a person is OFFERED: a subcommand argparse never lists is an entry something saw installed
+        # calls. Naming those individually is how the next one gets forgotten.
+        for path, parser, offered in self._walk():
+            if not offered:
                 continue
             with self.subTest(command=path):
                 self.assertTrue(parser.description, f"{path}: no description")
@@ -66,7 +73,7 @@ class TestParserIntegrity(unittest.TestCase):
     def test_example_lines_fit_an_80_column_terminal(self):
         # The examples are printed verbatim (they carry aligned comments), so nothing else
         # protects them from wrapping into an unreadable mess on a default-width terminal.
-        for path, parser in self._walk():
+        for path, parser, _offered in self._walk():
             for line in (parser.epilog or "").splitlines():
                 with self.subTest(command=path, line=line):
                     self.assertLessEqual(len(line), 79)

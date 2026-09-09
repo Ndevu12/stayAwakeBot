@@ -14,6 +14,10 @@ sudo saw harden
 saw harden --take-back
 ```
 
+It also asks this machine to keep checking itself, by putting [`saw watch`](watch.md) in place — the
+same arrangement that command makes, made here as part of hardening. `--take-back` removes it with
+the rest.
+
 Root is not required. Run it as yourself and it acts where it can; anything it did not take is
 named in the result, and left exactly as it stood.
 

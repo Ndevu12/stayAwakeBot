@@ -19,14 +19,12 @@ reader, not the mechanism or the weakness it closed.
   it can act on it still says.
 
 ### Added
-- **`saw watch` makes one unattended pass over what is running.** It ends only code the tool
-  has identified, never asks for a password, and keeps a record of what it saw so a later pass
-  can say that something has come back rather than repeating the same alarm. What it will not
-  end is left for `saw harden`, which runs with you present.
-- **Running code is now also checked against the corpus the tool already ships, not only
-  judged by its shape.** Code a running process was handed is compared with what the tool
-  has already identified, and a match is graded as identified rather than as suspected. What
-  was reported before is still reported.
+- **`saw watch` keeps this machine checking itself, on macOS and Linux.** It makes a pass over
+  what is running from login onward, started again if it stops, and ends code the tool has identified. It never asks for
+  a password; what it will not end is left for `saw harden`. It keeps a record of what it saw, so a
+  pass can say something has come back rather than repeating the same alarm. `saw watch stop` stops
+  it, and leaves anything that is not saw's own alone. `saw harden` puts it in place too, and
+  `saw harden --take-back` removes it.
 - **`saw harden` puts the scan-on-clone hooks in place as part of hardening.** You no longer have
   to remember `saw hook install` separately. Running it again changes nothing and says nothing — a
   hook already in place is left exactly as it is — and if the hooks could not be put in place, the
