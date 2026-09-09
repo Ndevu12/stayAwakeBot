@@ -68,8 +68,6 @@ def check_live_processes() -> list[HygieneIssue]:
         where += f", and {len(pids) - _PIDS_SHOWN} more"
     count = ("A running process is executing code that is not on disk" if len(pids) == 1 else
              f"{len(pids)} running processes are executing code that is not on disk")
-    # TRAP: the payload is never put in `detail`. This reaches the terminal, the JSON, the SARIF
-    # and every saved report; the code goes to the capture file instead.
     return [HygieneIssue(
         id="live-obfuscated-process",
         severity="warning",

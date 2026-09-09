@@ -49,12 +49,7 @@ def _hooks_already_there():
     return hook.Settling(actions=[_InPlace()], target="/template")
 
 class ReachedTheRealMachine(BaseException):
-    """Raised when a test reaches this machine itself.
-
-    TRAP: not an `Exception`. Both callers guard their collaborators with `except Exception` so one
-    bad part never takes the command down, and that swallows an ordinary assertion — the canary
-    then prevents the damage while the test still passes.
-    """
+    """Raised when a test reaches this machine itself."""
 
 
 def _never(*args, **kwargs):

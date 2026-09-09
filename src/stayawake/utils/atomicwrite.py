@@ -8,12 +8,7 @@ from pathlib import Path
 
 
 def replace(where: Path, text: str, *, mode: int = 0o600) -> bool:
-    """Write `text` to `where` atomically. True only when a read-back returns what was written.
-
-    TRAP: a symlinked destination is refused, the staging name is unpredictable, and the read-back
-    compares against what was written rather than against a re-derived expectation. Newlines are
-    written exactly as given, so correcting one setting never rewrites every line of the file.
-    """
+    """Write `text` to `where` atomically. True only when a read-back returns what was written."""
     try:
         if where.is_symlink():
             return False

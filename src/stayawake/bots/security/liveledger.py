@@ -3,8 +3,6 @@
 
 A ledger of code fingerprints: when each was first and last seen, how often, whether the corpus
 identified it, and whether it was ended.
-
-TRAP: nothing here is load-bearing for safety, and the payload is never written to it.
 """
 from __future__ import annotations
 

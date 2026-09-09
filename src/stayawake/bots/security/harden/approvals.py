@@ -103,11 +103,7 @@ def _remember(entries: list[dict], path: Path) -> bool:
 
 
 def _without(text: str, rule: str) -> str | None:
-    """`text` with the standing rule `rule` gone from its list, or None when it is not there once.
-
-    TRAP: the separator goes with the entry, and which side it is on depends on where the entry
-    sits. Taking the last one out without the comma before it leaves a list that will not parse.
-    """
+    """`text` with the standing rule `rule` gone from its list, or None when it is not there once."""
     quoted = re.escape(json.dumps(rule))
     for shape in (r",\s*" + quoted, quoted + r"\s*,\s*", r"\s*" + quoted):
         pattern = re.compile(shape)

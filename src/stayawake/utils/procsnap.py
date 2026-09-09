@@ -27,10 +27,7 @@ _SZOMB = 5
 
 @dataclass(frozen=True)
 class Identity:
-    """Who a process is, in terms that survive a pid being reused.
-
-    TRAP: a pid alone is not an identity. Compare `start_time` and `uid` before acting on one.
-    """
+    """Who a process is, in terms that survive a pid being reused."""
     pid: int
     ppid: int
     uid: int
@@ -156,11 +153,7 @@ def _argmax() -> int:
 
 
 def _identity_darwin(pid: int) -> tuple["Identity | None", str]:
-    """One process's identity through libproc, as `(Identity | None, state)`.
-
-    TRAP: the errno is the answer. ESRCH means not executing, which covers a zombie; EPERM means
-    running and not ours. `kill(pid, 0)` cannot tell those apart.
-    """
+    """One process's identity through libproc, as `(Identity | None, state)`."""
     try:
         libc = ctypes.CDLL("libproc.dylib", use_errno=True)
     except OSError:
@@ -183,10 +176,7 @@ def _identity_darwin(pid: int) -> tuple["Identity | None", str]:
 
 
 def _identity_linux(pid: int) -> tuple["Identity | None", str]:
-    """One process's identity from `/proc`, as `(Identity | None, state)`.
-
-    TRAP: parsed from the LAST `)` — a program name may itself contain spaces and brackets.
-    """
+    """One process's identity from `/proc`, as `(Identity | None, state)`."""
     try:
         raw = Path(f"/proc/{pid}/stat").read_text()
         status = Path(f"/proc/{pid}/status").read_text()
@@ -255,10 +245,7 @@ def program_path(pid: int) -> str | None:
 
 
 def program_is_gone(pid: int) -> bool:
-    """Whether `pid` is executing something that is no longer a file on this disk.
-
-    TRAP: unreadable is not missing. A path this user cannot see answers False, never True.
-    """
+    """Whether `pid` is executing something that is no longer a file on this disk."""
     where = program_path(pid)
     if where is None:
         return False

@@ -16,11 +16,7 @@ _LEADING_ENV = re.compile(r"^\w+=[^\s]*$")
 
 
 def invoked_by(rule: str) -> str | None:
-    """The command a standing approval rule actually lets an agent run, or None.
-
-    TRAP: the command, not a substring of the rule. `Bash(git status:*)` contains `sh`, and
-    matching that way turns an ordinary allowlist into a page of warnings.
-    """
+    """The command a standing approval rule actually lets an agent run, or None."""
     inner = _INSIDE_A_TOOL.match(rule)
     payload = inner.group(1) if inner else rule
     if ":" in payload and not inner:

@@ -33,10 +33,6 @@ class LiveCode:
 
 def _known_loader(code: str) -> bool:
     """Whether the signature corpus identifies `code` as a loader.
-
-    TRAP: asked of the corpus's own authority. Reading the entries here instead grades text the
-    corpus would not, and this answer ends processes.
-
     Imported locally so an audit that finds no candidate never pays to load the corpus."""
     global _IDENTIFIES
     if _IDENTIFIES is None:

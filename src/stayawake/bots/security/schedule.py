@@ -74,19 +74,12 @@ def item_path() -> Path:
 
 
 def program() -> list[str]:
-    """How the item names saw, as argv.
-
-    TRAP: every element must be fixed here. `-E` and `-P` are load-bearing, not tidiness.
-    """
+    """How the item names saw, as argv."""
     return [sys.executable, "-E", "-P", "-m", "stayawake"]
 
 
 def content(saw: list[str] | None = None) -> str:
-    """The exact text saw writes on this platform. Deterministic: same machine, same bytes.
-
-    TRAP: `saw` is an argv, never a command line. A string here spreads to one character per
-    argument, and the item it writes names a program that does not exist.
-    """
+    """The exact text saw writes on this platform. Deterministic: same machine, same bytes."""
     if isinstance(saw, (str, bytes)):
         raise TypeError("saw is an argv list, not a command line")
     argv = list(saw) if saw else program()
@@ -149,7 +142,6 @@ def verdict(path: Path | None = None, saw: list[str] | None = None,
         return ABSENT
     except OSError:
         return UNREADABLE
-    # TRAP: identity is what the placing run recorded, never what this interpreter writes today.
     for candidate in ([saw] if saw else [recorded(record), program()]):
         if candidate and text == content(candidate):
             return PRISTINE
@@ -157,12 +149,7 @@ def verdict(path: Path | None = None, saw: list[str] | None = None,
 
 
 def is_ours(path: Path | None = None) -> bool:
-    """Whether `path` is the item this tool placed on this machine, unchanged.
-
-    TRAP: the content at the one place this writes, never the name. Whether the program it names
-    can be trusted is a separate question, and the caller asks it: this tool placing an item does
-    not make what the item runs safe.
-    """
+    """Whether `path` is the item this tool placed on this machine, unchanged."""
     where = Path(path) if path is not None else item_path()
     try:
         if where != item_path():
@@ -210,10 +197,7 @@ def _activate(where: Path, run=None, binary=None) -> bool:
 
 
 def _running(run=None, binary=None) -> bool:
-    """Whether the service manager currently holds the job.
-
-    TRAP: asked of the manager. The file says nothing about whether the job is loaded.
-    """
+    """Whether the service manager currently holds the job."""
     run = run or subprocess.run
     binary = binary or _activator()
     if binary is None:
@@ -257,10 +241,7 @@ class Scheduling:
 
 
 def _write(where: Path, text: str) -> bool:
-    """Write `text` to `where` atomically, and read it back. True only when the read-back matches.
-
-    TRAP: the staging name must stay unpredictable, and the read-back compares what was written.
-    """
+    """Write `text` to `where` atomically, and read it back. True only when the read-back matches."""
     try:
         where.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=str(where.parent), prefix=".saw-", suffix=where.suffix)

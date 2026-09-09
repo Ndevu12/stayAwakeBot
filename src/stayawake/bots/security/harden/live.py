@@ -45,11 +45,7 @@ def capture_path() -> Path:
 
 
 def _protected() -> set[int]:
-    """This process, every ancestor of it, and init — none of which may be signalled.
-
-    TRAP: read through `parent_map`, which needs no permission. An ancestor walk built on `identify`
-    stops at the first process it cannot read, and everything above that stops being protected.
-    """
+    """This process, every ancestor of it, and init — none of which may be signalled."""
     safe = {1, os.getpid()}
     parents = parent_map()
     cur, seen = os.getpid(), 0
@@ -90,10 +86,7 @@ def _capture(held: dict[int, tuple], where: Path, now=None) -> str | None:
 
 
 def _deepest_first(held: dict[int, tuple]) -> list[int]:
-    """The pids in the order they must be ended: children before parents.
-
-    TRAP: ending a parent first reparents its children to init, leaving them running.
-    """
+    """The pids in the order they must be ended: children before parents."""
     def depth(pid: int) -> int:
         steps, seen, cur = 0, set(), pid
         while cur in held and cur not in seen:
@@ -110,11 +103,7 @@ def end_live_code(*, find=live_code_processes, freeze=procstop.freeze, end=procs
                   ended=procstop.has_ended, capture=_capture, where=None,
                   protected=_protected, elevated=procstop.end_as_root,
                   rounds: int = _MAX_ROUNDS) -> Ending:
-    """Freeze everything holding live code until a pass finds nothing new, then end it.
-
-    TRAP: the freeze comes first because a frozen process cannot fork. Ending them one at a time
-    against something that spawns does not terminate.
-    """
+    """Freeze everything holding live code until a pass finds nothing new, then end it."""
     keep_out = protected()
     held: dict[int, tuple] = {}
     held_done: set[int] = set()
@@ -163,7 +152,6 @@ def end_live_code(*, find=live_code_processes, freeze=procstop.freeze, end=procs
             else:
                 out.survived.append(pid)
     finally:
-        # TRAP: never resumed. A frozen one executes nothing; releasing it gives it back.
         out.frozen_left = sorted(pid for pid in held if pid not in held_done)
 
     # Asked of the machine, not of the bookkeeping. Subtracting any of them hides a live one.

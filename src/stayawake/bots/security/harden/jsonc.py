@@ -31,10 +31,6 @@ def code_only(text: str) -> str:
     """`text` with every comment blanked out, character for character.
 
     Positions still line up, so a search runs on this and the slice comes from the original.
-
-    TRAP: a settings file is JSONC, and a comment is not code. A regex over raw text edits the
-    key inside someone's commented-out note — changing nothing the editor reads while reporting a
-    correction, and inverting what they wrote.
     """
     out = list(text)
     index, size, in_string, escaped = 0, len(text), False, False
@@ -108,10 +104,6 @@ def _append_key(text: str, key: str, value: str) -> tuple[str, Edit] | None:
 
     Only when that object is unambiguous: the file has to open with `{` and close with the last
     `}` in it. Anything else is a shape this does not understand well enough to write into.
-
-    TRAP: where the object ENDS and where its last member ends are read from the comment-blanked
-    text, and the separating comma goes after the member — never after a trailing comment, which
-    swallows it and leaves the file unparseable.
     """
     masked = code_only(text)
     body = masked.rstrip()

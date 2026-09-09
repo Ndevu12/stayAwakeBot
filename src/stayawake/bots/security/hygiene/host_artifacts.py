@@ -43,9 +43,6 @@ def _holds_something_staged(path: Path, kind: str) -> bool:
     Asked only of a kind an ordinary tool creates empty. `NPM_CONFIG_CACHE` under a temp directory
     is what the usual CI images and the Lambda Node runtimes set, so the cache existing says
     nothing; a global resolution path is different, and its own comment above says why.
-
-    TRAP: anything this cannot examine answers True. What was not looked into is not known to be
-    empty, and the probe only lists what is present, so the real question is always answerable.
     """
     if kind not in _TOOL_OWN_BOOKKEEPING:
         return True
