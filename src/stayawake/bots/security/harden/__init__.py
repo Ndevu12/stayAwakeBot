@@ -11,6 +11,7 @@ from stayawake.bots.security.hygiene.outcome import BLOCKED, run_probe
 from stayawake.bots.security.hygiene.process import check_live_processes
 from .live import end_live_code
 from . import settings as editorsettings
+from . import approvals as agentapprovals
 from stayawake.utils import hostdenial, textsafe
 from .denial import (ENFORCING, HELD_BY_ANOTHER, IN_A_LIVE_INSTALL, LEFT_OPEN_OVER_CONTENT,
                      NEEDS_ROOT, NOT_HERE_YET, LOCKED_OVER_CONTENT, NOTHING_TO_REMOVE,
@@ -25,9 +26,10 @@ __all__ = ["run", "apply_one", "PathOutcome", "ENFORCING", "SELF_ENFORCING",
 
 
 TOUCHES_THIS_MACHINE = frozenset({"live", "apply", "stop", "settle_hooks", "schedule_pass",
-                                  "editor_pass"})
+                                  "editor_pass", "agent_pass"})
 ONLY_READS = frozenset({"folders", "supported", "altered", "saw_runs"})
-TAKE_BACK_TOUCHES = frozenset({"folders", "unschedule", "restore_editors"})
+TAKE_BACK_TOUCHES = frozenset({"folders", "unschedule", "restore_editors",
+                               "restore_agents"})
 
 
 _LIVE = "live-obfuscated-process"
@@ -68,6 +70,8 @@ _WATCH_LEFT = "This machine is still checking itself, and that was not taken bac
 _EDITORS_FIXED = ("An editor here could run code without asking you. That is now off.")
 _EDITORS_STUCK = "An editor on this machine still opens folders that can run code. Run `saw audit`."
 _EDITORS_KEPT = "An editor setting was left as it is. Run `saw audit`."
+_AGENTS_FIXED = "An AI agent here could run commands without asking. That is now off."
+_AGENTS_STUCK = "An AI agent here still runs commands without asking. Run `saw audit`."
 
 
 _TOOK_BACK = "Every control this tool placed here has been taken back."
@@ -78,7 +82,8 @@ _NOT_ALL_BACK = ("Not every control was taken back. This command deletes nothing
 def take_back(*, folders=_global_folders, remove=remove_one,
               supported=hostdenial.platform_supported,
               unschedule=schedule.take_back,
-              restore_editors=editorsettings.take_back) -> tuple[int, str]:
+              restore_editors=editorsettings.take_back,
+              restore_agents=agentapprovals.take_back) -> tuple[int, str]:
     """Remove the denials this tool placed. Removed only after a read-back says the path is gone.
 
     No capture gate here: this opens a location rather than closing one, so it cannot crash a
@@ -98,15 +103,22 @@ def take_back(*, folders=_global_folders, remove=remove_one,
         editors_back = restore_editors()
     except Exception:
         editors_back = None
+    try:
+        agents_back = restore_agents()
+    except Exception:
+        agents_back = None
     outcomes = [remove(p) for p in folders()]
     settled = {REMOVED, NOTHING_TO_REMOVE}
     done = bool(outcomes) and all(o.state in settled for o in outcomes)
     done = done and not left_running and editors_back is not None and editors_back.done
+    done = done and agents_back is not None and agents_back.done
     lines = [_TOOK_BACK if done else _NOT_ALL_BACK, ""]
     if left_running:
         lines.extend([_WATCH_LEFT, ""])
     if editors_back is None or not editors_back.done:
         lines.extend([_EDITORS_STUCK, ""])
+    if agents_back is None or not agents_back.done:
+        lines.extend([_AGENTS_STUCK, ""])
     elif editors_back.kept:
         lines.extend([_EDITORS_KEPT, ""])
     if any(o.state == LEFT_OPEN_OVER_CONTENT for o in outcomes):
@@ -164,7 +176,8 @@ def run(*, live=check_live_processes, folders=_global_folders,
         altered=hookscript.altered_hooks, saw_runs=hookscript.recorded_saw_runs,
         stop=end_live_code, settle_hooks=hook.settle_hooks,
         schedule_pass=schedule.settle,
-        editor_pass=editorsettings.settle) -> tuple[int, str]:
+        editor_pass=editorsettings.settle,
+        agent_pass=agentapprovals.settle) -> tuple[int, str]:
     """Apply the denial at every global-resolution entry. Enforcing only after read-back.
 
     Root is asked of the PATH rather than of the command. Most of these locations belong to the
@@ -205,10 +218,15 @@ def run(*, live=check_live_processes, folders=_global_folders,
         editors_settled = editor_pass()
     except Exception:
         editors_settled = None
+    try:
+        agents_settled = agent_pass()
+    except Exception:
+        agents_settled = None
     unresolved = ending_failed is not None or (ending is not None and not ending.finished)
     hooks_ok = hooks is not None and hooks.settled
     editors_ok = editors_settled is not None and editors_settled.settled
-    lines = [_headline(outcomes, unresolved, hooks_ok, editors_ok), ""]
+    agents_ok = agents_settled is not None and agents_settled.settled
+    lines = [_headline(outcomes, unresolved, hooks_ok, editors_ok and agents_ok), ""]
     if ending_failed is not None:
         lines.extend([_STILL_LIVE, ""])
     elif ending is not None:
@@ -236,6 +254,10 @@ def run(*, live=check_live_processes, folders=_global_folders,
         lines.append(_EDITORS_FIXED)
     if not editors_ok:
         lines.append(_EDITORS_STUCK)
+    if agents_settled is not None and agents_settled.changed:
+        lines.append(_AGENTS_FIXED)
+    if not agents_ok:
+        lines.append(_AGENTS_STUCK)
     if altered():
         lines.extend(["", _ALTERED_HOOKS_NOTE])
     if not saw_runs():
@@ -243,6 +265,6 @@ def run(*, live=check_live_processes, folders=_global_folders,
     body = "\n".join(lines).rstrip()
     if unresolved:
         return 1, body
-    if not _every_reachable_one(outcomes) or not hooks_ok or not editors_ok:
+    if not _every_reachable_one(outcomes) or not hooks_ok or not editors_ok or not agents_ok:
         return 3, body
     return 0, body
