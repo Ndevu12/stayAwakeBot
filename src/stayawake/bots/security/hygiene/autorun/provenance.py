@@ -8,7 +8,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from stayawake.bots.security import hookscript
+from stayawake.bots.security import hookscript, schedule
 
 _PROBE_TIMEOUT = 5
 
@@ -110,6 +110,8 @@ def attribute(entry) -> Attribution:
         return Attribution(exec_class="unknown")
     exec_class = _classify_path(exec_path)
     if entry.location == hookscript.LOCATION and hookscript.is_installed(entry.script):
+        return Attribution(exec_class=exec_class, owner="saw")
+    if schedule.is_ours(entry.path):
         return Attribution(exec_class=exec_class, owner="saw")
     owner = _homebrew_owner(entry.path, exec_path) or _package_owner(exec_path)
     signed = _codesigned(exec_path)

@@ -58,8 +58,11 @@ ACTIVE_PERSISTENCE_IDS = {"self-hosted-runner-persistence", "os-service-persiste
                           "git-fsmonitor-command", "git-hookspath-unsafe", "git-config-fetch-exec",
                           "autorun-unattributed-foothold"}
 
-UNCONFIRMED_STAGING_IDS = {"host-drop-artifacts-staging",
-                           "host-drop-artifact-outside-a-control"}
+UNCONFIRMED_STAGING_IDS = {"host-drop-artifacts-staging"}
+
+# One location, left where it stood. Not the same claim as the one above, and saying it with those
+# words told an operator to compare locations that were never found.
+LEFT_OUTSIDE_A_CONTROL_IDS = {"host-drop-artifact-outside-a-control"}
 
 CREDENTIAL_EXPOSURE_IDS = {"git-credentials-plaintext"}
 
@@ -68,10 +71,12 @@ INCIDENT_TRIGGER_IDS = ACTIVE_PERSISTENCE_IDS | CREDENTIAL_EXPOSURE_IDS
 TIER_ACTIVE_PERSISTENCE = "active-persistence"
 TIER_CREDENTIAL_EXPOSURE = "credential-exposure"
 TIER_UNCONFIRMED_STAGING = "unconfirmed-staging"
+TIER_LEFT_OUTSIDE_A_CONTROL = "left-outside-a-control"
 TIER_IDS: tuple[tuple[str, set[str]], ...] = (
     (TIER_ACTIVE_PERSISTENCE, ACTIVE_PERSISTENCE_IDS),
     (TIER_CREDENTIAL_EXPOSURE, CREDENTIAL_EXPOSURE_IDS),
     (TIER_UNCONFIRMED_STAGING, UNCONFIRMED_STAGING_IDS),
+    (TIER_LEFT_OUTSIDE_A_CONTROL, LEFT_OUTSIDE_A_CONTROL_IDS),
 )
 
 
@@ -135,7 +140,7 @@ def rotation_safety(issue_ids: set[str]) -> str:
     (a live wiper), then an unverified surface (couldn't look), else safe. See ROTATION_* above."""
     if issue_ids & ACTIVE_PERSISTENCE_IDS:
         return ROTATION_UNSAFE_PERSISTENCE
-    if issue_ids & UNCONFIRMED_STAGING_IDS:
+    if issue_ids & (UNCONFIRMED_STAGING_IDS | LEFT_OUTSIDE_A_CONTROL_IDS):
         return ROTATION_UNSAFE_STAGING
     if issue_ids & UNVERIFIED_PERSISTENCE_IDS:
         return ROTATION_UNSAFE_UNKNOWN
@@ -193,6 +198,17 @@ def unconfirmed_staging_note() -> list[str]:
     return [
         "Inspect each location before trusting it — ordinary tooling puts one there, not several.",
         "`saw audit --verify` content-scans them for payload code.",
+        f"Do NOT rotate credentials yet: {_WIPER_NOTE}.",
+        "Rebuild the host only if a scan or your own inspection finds payload code.",
+    ]
+
+
+def left_outside_a_control_note() -> list[str]:
+    """One global resolution path a control did not cover: the same rotation gate as the tier above,
+    a different claim. Says what to do with the one location, and keeps rotation last."""
+    return [
+        "Inspect it before trusting it.",
+        "`saw audit --verify` content-scans it for payload code.",
         f"Do NOT rotate credentials yet: {_WIPER_NOTE}.",
         "Rebuild the host only if a scan or your own inspection finds payload code.",
     ]

@@ -18,6 +18,7 @@ from .models import (HygieneIssue, display_rank, INCIDENT_TRIGGER_IDS, ACTIVE_PE
                      ROTATION_UNSAFE_PERSISTENCE, ROTATION_UNSAFE_UNKNOWN,
                      ROTATION_UNSAFE_STAGING,
                      TIER_UNCONFIRMED_STAGING, unconfirmed_staging_note,
+                     TIER_LEFT_OUTSIDE_A_CONTROL, left_outside_a_control_note,
                      TIER_ACTIVE_PERSISTENCE, TIER_CREDENTIAL_EXPOSURE, incident_tier,
                      persistence_surface_is_enumerable, response_order, rotation_safety,
                      incident_response_sequence, credential_exposure_note)
@@ -175,6 +176,9 @@ def _banner(issue_ids: set[str], *, color: bool, width: int) -> list[str]:
     elif tier == TIER_UNCONFIRMED_STAGING:
         head = "⚠️  The same staging artifact in more than one place — not evidence of a live implant:"
         steps, ordered = unconfirmed_staging_note(), False
+    elif tier == TIER_LEFT_OUTSIDE_A_CONTROL:
+        head = "⚠️  A global resolution path was left outside a control — not evidence of a live implant:"
+        steps, ordered = left_outside_a_control_note(), False
     else:
         return []
     return ([paint(head, SEVERITY["warning"], on=color)] +
@@ -196,9 +200,13 @@ def _rotation_verdict(issues: list[HygieneIssue], *, color: bool, width: int) ->
         return [paint(f"{MARKER['ok']} Rotation safety: persistence surface enumerated and clean "
                       "— rotating credentials is safe.", SEVERITY["ok"], on=color)]
     if verdict == ROTATION_UNSAFE_STAGING:
-        lines = [paint(f"{MARKER['warning']}  Rotation safety: UNSAFE — a staging artifact is in more "
-                       "than one place; inspect it before rotating any credential (note below).",
-                       SEVERITY["warning"], on=color)]
+        # The reason phrase is read from the tier, not restated here: two findings share this
+        # verdict and they are not the same claim about the host.
+        what = ("a global resolution path was left outside a control"
+                if incident_tier({i.id for i in issues}) == TIER_LEFT_OUTSIDE_A_CONTROL
+                else "a staging artifact is in more than one place")
+        lines = [paint(f"{MARKER['warning']}  Rotation safety: UNSAFE — {what}; inspect it before "
+                       "rotating any credential (note below).", SEVERITY["warning"], on=color)]
     elif verdict == ROTATION_UNSAFE_PERSISTENCE:
         lines = [paint(f"{MARKER['warning']}  Rotation safety: UNSAFE — active host persistence "
                        "detected; do NOT rotate any credential yet (runbook below).",
