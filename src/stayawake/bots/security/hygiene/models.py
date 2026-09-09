@@ -60,8 +60,6 @@ ACTIVE_PERSISTENCE_IDS = {"self-hosted-runner-persistence", "os-service-persiste
 
 UNCONFIRMED_STAGING_IDS = {"host-drop-artifacts-staging"}
 
-# One location, left where it stood. Not the same claim as the one above, and saying it with those
-# words told an operator to compare locations that were never found.
 LEFT_OUTSIDE_A_CONTROL_IDS = {"host-drop-artifact-outside-a-control"}
 
 CREDENTIAL_EXPOSURE_IDS = {"git-credentials-plaintext"}

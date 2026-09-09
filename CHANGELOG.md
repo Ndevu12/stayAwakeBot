@@ -19,6 +19,11 @@ reader, not the mechanism or the weakness it closed.
   the finding you most need to trust. It is recognised by what it contains, not by its name, so an
   entry at that name this tool did not write is still reported — and so is one that has been
   changed since.
+- **A location that holds nothing is no longer graded as a warning.** Two empty directories used
+  to corroborate each other into a warning that withheld the credential-rotation all-clear, and an
+  npm cache under a temp directory counted even when it held only npm's own files — the layout the
+  usual CI images and Lambda set up. They are still listed to review; what actually holds something
+  is graded exactly as before.
 - **A single location left outside a control is no longer described as several.** The run headline
   said an artifact was in more than one place when one was found, and told you to compare locations
   it had never named. The two now read as what they are. Either still withholds the

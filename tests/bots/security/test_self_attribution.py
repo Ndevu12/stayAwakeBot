@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""What the report says about this tool's own work, and about one location versus several.
+"""What the report says about this tool's own work, about one location versus several, and about
+a location that holds nothing.
 
-Both were reported from a real host: saw asked the operator to confirm the login item saw itself
-had just installed, and the run's headline said an artifact was in more than one place when one
-was found."""
+All three were reported from a real host: saw asked the operator to confirm the login item saw
+itself had just installed, the headline said an artifact was in more than one place when one was
+found, and two empty directories were graded as a warning that withheld the rotation all-clear."""
 from __future__ import annotations
 
 import pathlib
@@ -12,6 +13,7 @@ import unittest
 from unittest import mock
 
 from stayawake.bots.security import hygiene, schedule
+from stayawake.bots.security.hygiene import host_artifacts
 from stayawake.bots.security.hygiene.autorun import provenance
 from stayawake.bots.security.hygiene.models import (HygieneIssue, LEFT_OUTSIDE_A_CONTROL_IDS,
                                                     TIER_LEFT_OUTSIDE_A_CONTROL,
@@ -145,6 +147,57 @@ class TestOneLocationIsNotSeveral(unittest.TestCase):
         # ahead of a live foothold.
         self.assertGreater(response_order("host-drop-artifact-outside-a-control"),
                            response_order("host-drop-artifacts-staging"))
+
+
+class TestALocationThatHoldsNothingStagedNothing(unittest.TestCase):
+    """Two empty directories corroborated each other into a warning that called credential rotation
+    unsafe. `$TMPDIR/.npm` is the same shape: AWS Lambda and the usual CI runners set
+    `NPM_CONFIG_CACHE` there because the image cannot write elsewhere."""
+
+    def _report(self, make):
+        home = pathlib.Path(tempfile.mkdtemp())
+        tmp = pathlib.Path(tempfile.mkdtemp())
+        make(home, tmp)
+        with mock.patch.object(pathlib.Path, "home", return_value=home), \
+                mock.patch.object(host_artifacts, "_npm_prefix_roots", return_value=[]), \
+                mock.patch.object(host_artifacts, "_distinct_dirs",
+                                  side_effect=lambda ps: list(dict.fromkeys(ps))), \
+                mock.patch.object(host_artifacts.tempfile, "gettempdir", return_value=str(tmp)), \
+                mock.patch.object(host_artifacts.hostdenial, "held_by_us", return_value=False):
+            return host_artifacts.check_host_artifacts()
+
+    def test_two_empty_locations_do_not_corroborate_each_other(self):
+        def empty(home, tmp):
+            (home / ".node_modules").mkdir()
+            (home / ".node_libraries").mkdir()
+        issues = self._report(empty)
+        self.assertEqual([i.severity for i in issues], ["info"])
+        self.assertNotEqual(rotation_safety({i.id for i in issues}),
+                            hygiene.ROTATION_UNSAFE_STAGING)
+
+    def test_a_cache_holding_only_its_own_tools_entries_is_that_tool_working(self):
+        def working(home, tmp):
+            (tmp / ".npm" / "_cacache").mkdir(parents=True)
+            (tmp / ".npm" / "_logs").mkdir()
+        issues = self._report(working)
+        self.assertEqual([i.severity for i in issues], ["info"])
+
+    def test_but_something_actually_staged_is_still_a_warning(self):
+        def staged(home, tmp):
+            (home / ".node_modules" / "evil").mkdir(parents=True)
+            (home / ".node_libraries" / "payload.js").parent.mkdir(parents=True, exist_ok=True)
+            (home / ".node_libraries" / "payload.js").write_text("x")
+        issues = self._report(staged)
+        self.assertEqual([i.id for i in issues], ["host-drop-artifacts-staging"])
+        self.assertEqual(rotation_safety({i.id for i in issues}), hygiene.ROTATION_UNSAFE_STAGING)
+
+    def test_an_empty_one_left_outside_a_control_is_not_a_warning_either(self):
+        def one_empty(home, tmp):
+            (home / ".node_modules").mkdir()
+        with mock.patch.object(host_artifacts.hostdenial, "held_by_us",
+                               side_effect=lambda p: p.name == ".node_libraries"):
+            issues = self._report(one_empty)
+        self.assertNotIn("host-drop-artifact-outside-a-control", [i.id for i in issues])
 
 
 if __name__ == "__main__":

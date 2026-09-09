@@ -32,6 +32,32 @@ _TOOLCHAIN_THAT_LEAVES_EACH_KIND = {KIND_GLOBAL_FOLDER: "node", KIND_NPM_CACHE: 
                                     KIND_PIP_BOOTSTRAP: "python"}
 
 
+_TOOL_OWN_BOOKKEEPING = {
+    KIND_NPM_CACHE: ("_cacache", "_logs", "_npx", "_locks", "_update-notifier-last-checked"),
+}
+
+
+def _holds_something_staged(path: Path, kind: str) -> bool:
+    """Whether anything is actually staged at `path`.
+
+    A location that exists but holds nothing staged nothing, and a cache holding only the entries
+    its own tool writes is that tool doing its job. Either is reported; neither corroborates a
+    second one into a warning that withholds the rotation all-clear.
+    """
+    try:
+        if not path.is_dir():
+            return path.exists()
+        return any(child.name not in _TOOL_OWN_BOOKKEEPING.get(kind, ())
+                   for child in path.iterdir())
+    except OSError:
+        return True
+
+
+def _staged(weak: list[tuple]) -> list[tuple]:
+    """The indicators that hold something, which are the ones evidence can be built from."""
+    return [item for item in weak if _holds_something_staged(item[1], item[2])]
+
+
 def _toolchains_represented(weak: list[tuple[str, Path, str]]) -> set[str]:
     """How many separate acts these indicators are evidence of. One command leaves a resolution path
     and a cache together, so both are one act; a second toolchain is a second act."""
@@ -338,18 +364,19 @@ def check_host_artifacts(verify: bool = False) -> list[HygieneIssue]:
     extra = [could_not_read(dict.fromkeys(unread))] if unread else []
     if not found:
         return extra
-    corroborated = bool(strong) or len(weak) >= 2
+    staged = _staged(weak)
+    corroborated = bool(strong) or len(staged) >= 2
 
     if corroborated:
-        active = bool(strong) or len(_toolchains_represented(weak)) >= 2
+        active = bool(strong) or len(_toolchains_represented(staged)) >= 2
         issue = _corroborated_issue(found, active=active)
         if verify:
             issue = _escalate_with_scan(issue, weak)
         return [issue] + extra
-    if controlled:
-        issue = _outside_a_control_issue(found)
+    if controlled and staged:
+        issue = _outside_a_control_issue([desc for desc, _p, _k in staged])
         if verify:
-            issue = _escalate_with_scan(issue, weak)
+            issue = _escalate_with_scan(issue, staged)
         return [issue] + extra
     if verify:
         graded, failure = _scan_or_reason(weak[0][:2])

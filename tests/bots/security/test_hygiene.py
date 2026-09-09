@@ -385,9 +385,15 @@ class TestHostArtifacts(unittest.TestCase):
         self.assertEqual([(i.id, i.severity) for i in issues], [("host-drop-artifacts", "warning")])
 
     def test_two_weak_indicators_corroborate_to_warning(self):
+        # Each has to HOLD something. Two locations that exist and are empty staged nothing, and
+        # grading them as a warning withheld the rotation all-clear on an ordinary machine.
+        d = Path(tempfile.mkdtemp())
+        (d / "modules" / "evil").mkdir(parents=True)
+        (d / "cache" / "staged.tgz").parent.mkdir(parents=True, exist_ok=True)
+        (d / "cache" / "staged.tgz").write_text("x")
         with mock.patch.object(hygiene.host_artifacts, "_host_artifacts",
-                               return_value=([], [("~/.node_modules", Path("~/.node_modules"), hygiene.host_artifacts.KIND_GLOBAL_FOLDER),
-                                                  ("/tmp/.npm", Path("/tmp/.npm"), hygiene.host_artifacts.KIND_NPM_CACHE)], [], [])):
+                               return_value=([], [(str(d / "modules"), d / "modules", hygiene.host_artifacts.KIND_GLOBAL_FOLDER),
+                                                  (str(d / "cache"), d / "cache", hygiene.host_artifacts.KIND_NPM_CACHE)], [], [])):
             issues = hygiene.check_host_artifacts()
         self.assertEqual([i.severity for i in issues], ["warning"])
 
