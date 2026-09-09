@@ -19,6 +19,10 @@ reader, not the mechanism or the weakness it closed.
   it can act on it still says.
 
 ### Added
+- **`saw watch` makes one unattended pass over what is running.** It ends only code the tool
+  has identified, never asks for a password, and keeps a record of what it saw so a later pass
+  can say that something has come back rather than repeating the same alarm. What it will not
+  end is left for `saw harden`, which runs with you present.
 - **Running code is now also checked against the corpus the tool already ships, not only
   judged by its shape.** Code a running process was handed is compared with what the tool
   has already identified, and a match is graded as identified rather than as suspected. What
