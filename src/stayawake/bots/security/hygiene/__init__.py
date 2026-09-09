@@ -200,8 +200,6 @@ def _rotation_verdict(issues: list[HygieneIssue], *, color: bool, width: int) ->
         return [paint(f"{MARKER['ok']} Rotation safety: persistence surface enumerated and clean "
                       "— rotating credentials is safe.", SEVERITY["ok"], on=color)]
     if verdict == ROTATION_UNSAFE_STAGING:
-        # The reason phrase is read from the tier, not restated here: two findings share this
-        # verdict and they are not the same claim about the host.
         what = ("a global resolution path was left outside a control"
                 if incident_tier({i.id for i in issues}) == TIER_LEFT_OUTSIDE_A_CONTROL
                 else "a staging artifact is in more than one place")

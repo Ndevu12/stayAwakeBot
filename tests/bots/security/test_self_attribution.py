@@ -61,7 +61,6 @@ class TestSawDoesNotAskYouToConfirmItsOwnWork(unittest.TestCase):
                 self.assertTrue(schedule.is_ours(m.item))
 
     def test_the_attribution_is_the_content_not_the_name(self):
-        # A name is something anyone can write. Attributing by it hands a foothold the disguise.
         for platform in ("darwin", "linux"):
             with self.subTest(platform=platform), _OnAMachineWithSawsItem(self, platform) as m:
                 m.item.write_text(schedule.content(SAW) + "\nExecStartPost=/tmp/theirs\n",
@@ -83,7 +82,6 @@ class TestSawDoesNotAskYouToConfirmItsOwnWork(unittest.TestCase):
             self.assertFalse(schedule.is_ours(m.item))
 
     def test_the_autorun_probe_asks_that_question(self):
-        # The hooks already self-attribute this way; the login item is the same question.
         with _OnAMachineWithSawsItem(self, "darwin") as m:
             entry = mock.Mock(exec_path=SAW[0], path=m.item, location="launch-agent",
                               script=None)
@@ -134,7 +132,6 @@ class TestOneLocationIsNotSeveral(unittest.TestCase):
         self.assertIn("more than one place", report)
 
     def test_both_still_gate_credential_rotation(self):
-        # Splitting the wording must not split the gate: either finding withholds the all-clear.
         for issue_id in ("host-drop-artifact-outside-a-control", "host-drop-artifacts-staging"):
             with self.subTest(issue_id=issue_id):
                 self.assertNotEqual(rotation_safety({issue_id}), hygiene.ROTATION_SAFE)
@@ -143,8 +140,6 @@ class TestOneLocationIsNotSeveral(unittest.TestCase):
                 self.assertIn("Do NOT rotate credentials yet", report)
 
     def test_the_new_tier_takes_its_place_in_the_response_order(self):
-        # One table drives the banner, the ordering and the tier. A tier missing from it would sort
-        # ahead of a live foothold.
         self.assertGreater(response_order("host-drop-artifact-outside-a-control"),
                            response_order("host-drop-artifacts-staging"))
 

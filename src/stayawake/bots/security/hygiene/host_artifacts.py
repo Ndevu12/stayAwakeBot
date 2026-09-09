@@ -38,11 +38,9 @@ _TOOL_OWN_BOOKKEEPING = {
 
 
 def _holds_something_staged(path: Path, kind: str) -> bool:
-    """Whether anything is actually staged at `path`.
+    """Whether anything is staged at `path`, ignoring the entries its own tool writes.
 
-    A location that exists but holds nothing staged nothing, and a cache holding only the entries
-    its own tool writes is that tool doing its job. Either is reported; neither corroborates a
-    second one into a warning that withholds the rotation all-clear.
+    TRAP: unreadable answers True. What cannot be read is not known to be empty.
     """
     try:
         if not path.is_dir():
@@ -54,7 +52,7 @@ def _holds_something_staged(path: Path, kind: str) -> bool:
 
 
 def _staged(weak: list[tuple]) -> list[tuple]:
-    """The indicators that hold something, which are the ones evidence can be built from."""
+    """The indicators that hold something."""
     return [item for item in weak if _holds_something_staged(item[1], item[2])]
 
 

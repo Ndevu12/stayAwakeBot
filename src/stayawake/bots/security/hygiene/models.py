@@ -202,8 +202,7 @@ def unconfirmed_staging_note() -> list[str]:
 
 
 def left_outside_a_control_note() -> list[str]:
-    """One global resolution path a control did not cover: the same rotation gate as the tier above,
-    a different claim. Says what to do with the one location, and keeps rotation last."""
+    """What to do about one location a control did not cover. Keeps rotation last."""
     return [
         "Inspect it before trusting it.",
         "`saw audit --verify` content-scans it for payload code.",

@@ -385,8 +385,6 @@ class TestHostArtifacts(unittest.TestCase):
         self.assertEqual([(i.id, i.severity) for i in issues], [("host-drop-artifacts", "warning")])
 
     def test_two_weak_indicators_corroborate_to_warning(self):
-        # Each has to HOLD something. Two locations that exist and are empty staged nothing, and
-        # grading them as a warning withheld the rotation all-clear on an ordinary machine.
         d = Path(tempfile.mkdtemp())
         (d / "modules" / "evil").mkdir(parents=True)
         (d / "cache" / "staged.tgz").parent.mkdir(parents=True, exist_ok=True)

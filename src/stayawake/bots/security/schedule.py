@@ -159,9 +159,7 @@ def verdict(path: Path | None = None, saw: list[str] | None = None,
 def is_ours(path: Path | None = None) -> bool:
     """Whether `path` is the item this tool placed on this machine, unchanged.
 
-    TRAP: identity is the CONTENT at the one place this writes, never the name. A name is
-    something anyone can write, so attributing by it hands a foothold the disguise; an item at
-    that name which this tool did not write stays unattributed, which is the point.
+    TRAP: the content at the one place this writes, never the name.
     """
     where = Path(path) if path is not None else item_path()
     try:
