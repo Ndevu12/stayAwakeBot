@@ -1801,6 +1801,9 @@ write is unknown, never success. The result does not claim that one control prot
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>sudo saw harden
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>saw harden --take-back
 </code></pre></div>
+<p>It also asks this machine to keep checking itself, by putting <a href="../watch/"><code>saw watch</code></a> in place — the
+same arrangement that command makes, made here as part of hardening. <code>--take-back</code> removes it with
+the rest.</p>
 <p>Root is not required. Run it as yourself and it acts where it can; anything it did not take is
 named in the result, and left exactly as it stood.</p>
 <p>Run it again with <code>sudo</code> to act on the rest and to strengthen what is already in place. The result

@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="saw watch — one unattended pass that ends running code the tool has identified, and remembers the rest.">
+        <meta name="description" content="saw watch — keep this machine checking itself, ending running code the tool has identified.">
       
       
         <meta name="author" content="Jean Paul Elisa NIYOKWIZERWA">
@@ -77,13 +77,13 @@
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="saw documentation">
   <meta property="og:title" content="saw watch — saw documentation">
-  <meta property="og:description" content="saw watch — one unattended pass that ends running code the tool has identified, and remembers the rest.">
+  <meta property="og:description" content="saw watch — keep this machine checking itself, ending running code the tool has identified.">
   <meta property="og:image" content="https://saw-docs.ndevuspace.com/latest/assets/og-card.png">
   <meta property="og:url" content="https://saw-docs.ndevuspace.com/latest/reference/cli/watch/">
 
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="saw watch — saw documentation">
-  <meta name="twitter:description" content="saw watch — one unattended pass that ends running code the tool has identified, and remembers the rest.">
+  <meta name="twitter:description" content="saw watch — keep this machine checking itself, ending running code the tool has identified.">
   <meta name="twitter:image" content="https://saw-docs.ndevuspace.com/latest/assets/og-card.png">
 
   
@@ -93,7 +93,7 @@
       "@context": "https://schema.org",
       "@type": "TechArticle",
       "headline": "saw watch",
-      "description": "saw watch — one unattended pass that ends running code the tool has identified, and remembers the rest.",
+      "description": "saw watch — keep this machine checking itself, ending running code the tool has identified.",
       "url": "https://saw-docs.ndevuspace.com/latest/reference/cli/watch/",
       "image": "https://saw-docs.ndevuspace.com/latest/assets/og-card.png",
       "inLanguage": "en",
@@ -1183,10 +1183,32 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#when-it-runs-by-itself" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When it runs by itself
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#the-record" class="md-nav__link">
     <span class="md-ellipsis">
       
         The record
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#platforms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Platforms
       
     </span>
   </a>
@@ -1880,10 +1902,32 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#when-it-runs-by-itself" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When it runs by itself
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#the-record" class="md-nav__link">
     <span class="md-ellipsis">
       
         The record
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#platforms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Platforms
       
     </span>
   </a>
@@ -1927,10 +1971,12 @@
 
 
 <h1 id="saw-watch"><code>saw watch</code><a class="headerlink" href="#saw-watch" title="Permanent link">&para;</a></h1>
-<p>Make one pass over what is running on this machine. It ends only code the tool has <strong>identified</strong>,
-never asks for a password, and writes what it saw to its own record so a later pass can tell
-something that has come back from something new.</p>
+<p>Ask this machine to keep checking itself. From then on, and from every login, it makes a pass over
+what is running and ends code the tool has <strong>identified</strong>. It never asks for a password, and it
+writes what it saw to its own record so a later pass can tell something that has come back from
+something new. It keeps checking until you stop it.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw watch
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>saw watch stop
 </code></pre></div>
 <p>It is deliberately narrower than <a href="../harden/"><code>saw harden</code></a>. Harden runs with you present: it ends
 everything it grades, and it can ask for privilege to reach what it otherwise could not. This one is
@@ -1973,6 +2019,22 @@ it will act on what this pass would not.</p>
 </ul>
 <p>It names no paths and no process numbers. If a pass could not finish what it started, it says so
 rather than reporting a clean machine.</p>
+<h2 id="when-it-runs-by-itself">When it runs by itself<a class="headerlink" href="#when-it-runs-by-itself" title="Permanent link">&para;</a></h2>
+<p><a href="../harden/"><code>saw harden</code></a> puts this in place as part of hardening a machine, and <code>saw watch</code> is how
+you ask for it on its own, check it, or change your mind about it.</p>
+<p><code>saw watch</code> asks this machine to keep making the pass — starting with your session, and started
+again if it ever stops, so the machine is not left unwatched. It says whether that is in force now
+or from your next login; where the system will not start it immediately, the arrangement is still
+made and takes effect then. It keeps doing that until <code>saw watch stop</code>.
+Asking twice changes nothing and says so.</p>
+<p>It is asked for by name rather than arranged by <a href="../harden/"><code>saw harden</code></a>, because a process that
+keeps running and ends things is a larger thing to agree to than the controls harden places, and it
+should not arrive as a side effect of something else.</p>
+<p>What it runs is fixed. There is nothing in it to configure, and therefore nothing in it for anyone
+else to point somewhere else; if it is not exactly what <code>saw</code> wrote, running <code>saw watch</code> again puts it
+back and tells you it had been changed. Anything else found under that name is left alone —
+stopping removes saw's own work and nothing else.</p>
+<p>A quiet pass says nothing. Only a pass that found something speaks.</p>
 <h2 id="the-record">The record<a class="headerlink" href="#the-record" title="Permanent link">&para;</a></h2>
 <p>The pass keeps a small record under your state directory of the code it has seen: when each was
 first and last seen, how often, and whether it was ended. That is what lets it say <em>again</em> rather
@@ -1981,6 +2043,10 @@ than repeating the same alarm every pass.</p>
 carry your own secrets and that file outlives the run. Deleting the record costs nothing but the
 history: the next pass still examines every process on its own evidence, so nothing can be hidden
 from this command by editing or removing it.</p>
+<h2 id="platforms">Platforms<a class="headerlink" href="#platforms" title="Permanent link">&para;</a></h2>
+<p>macOS and Linux. On macOS it is a login item; on Linux, a user service. Either way it starts with
+your session and is started again if it stops, and <code>saw watch stop</code> removes it.</p>
+<p>Elsewhere the command says it could not arrange it, rather than reporting a machine as watched.</p>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../harden/"><code>saw harden</code></a> — the same job with you present, and able to ask for privilege</li>
