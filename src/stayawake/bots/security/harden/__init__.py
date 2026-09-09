@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 
-from stayawake.bots.security import hook, hookscript
+from stayawake.bots.security import hook, hookscript, schedule
 from stayawake.bots.security.hygiene.host_artifacts import _global_folders
 from stayawake.bots.security.hygiene.models import PROCESSES_NOT_READABLE_ID
 from stayawake.bots.security.hygiene.outcome import BLOCKED, run_probe
@@ -21,6 +21,11 @@ __all__ = ["run", "apply_one", "PathOutcome", "ENFORCING", "SELF_ENFORCING",
            "NOTHING_TO_REMOVE", "LOCKED_OVER_CONTENT", "LEFT_OPEN_OVER_CONTENT",
            "HELD_BY_ANOTHER", "NOT_WHERE_IT_WAS_NAMED", "UNKNOWN", "OCCUPIED",
            "remove_one", "take_back"]
+
+
+TOUCHES_THIS_MACHINE = frozenset({"live", "apply", "stop", "settle_hooks", "schedule_pass"})
+ONLY_READS = frozenset({"folders", "supported", "altered", "saw_runs"})
+TAKE_BACK_TOUCHES = frozenset({"folders", "unschedule"})
 
 
 _LIVE = "live-obfuscated-process"
@@ -54,6 +59,10 @@ _ALTERED_HOOKS_NOTE = "Run `saw hook repair`."
 _HOOKS_ON = "New clones and pulls on this machine will be scanned."
 _HOOKS_REPAIRED = "A hook on this machine had been changed. It has been put back."
 _HOOKS_OFF = "Run `saw hook install`."
+_WATCH_ON = "This machine will also keep checking itself for code running with no file behind it."
+_WATCH_REPAIRED = "The check this machine runs by itself had been changed. It has been put back."
+_WATCH_OFF = "This machine will not keep checking itself. Run `saw watch`."
+_WATCH_LEFT = "This machine is still checking itself, and that was not taken back."
 
 
 _TOOK_BACK = "Every control this tool placed here has been taken back."
@@ -62,7 +71,8 @@ _NOT_ALL_BACK = ("Not every control was taken back. This command deletes nothing
 
 
 def take_back(*, folders=_global_folders, remove=remove_one,
-              supported=hostdenial.platform_supported) -> tuple[int, str]:
+              supported=hostdenial.platform_supported,
+              unschedule=schedule.take_back) -> tuple[int, str]:
     """Remove the denials this tool placed. Removed only after a read-back says the path is gone.
 
     No capture gate here: this opens a location rather than closing one, so it cannot crash a
@@ -73,10 +83,18 @@ def take_back(*, folders=_global_folders, remove=remove_one,
     """
     if not supported():
         return 2, _NOT_HERE
+    # TRAP: this returns a STATE, it does not raise.
+    try:
+        left_running = unschedule() not in (schedule.REMOVED, schedule.NOTHING_TO_REMOVE)
+    except Exception:
+        left_running = True
     outcomes = [remove(p) for p in folders()]
     settled = {REMOVED, NOTHING_TO_REMOVE}
     done = bool(outcomes) and all(o.state in settled for o in outcomes)
+    done = done and not left_running
     lines = [_TOOK_BACK if done else _NOT_ALL_BACK, ""]
+    if left_running:
+        lines.extend([_WATCH_LEFT, ""])
     if any(o.state == LEFT_OPEN_OVER_CONTENT for o in outcomes):
         lines.extend([_LEFT_OPEN_NOTE, ""])
     for o in outcomes:
@@ -126,7 +144,8 @@ def _what_to_do(outcomes) -> list[str]:
 def run(*, live=check_live_processes, folders=_global_folders,
         apply=apply_one, supported=hostdenial.platform_supported,
         altered=hookscript.altered_hooks, saw_runs=hookscript.recorded_saw_runs,
-        stop=end_live_code, settle_hooks=hook.settle_hooks) -> tuple[int, str]:
+        stop=end_live_code, settle_hooks=hook.settle_hooks,
+        schedule_pass=schedule.settle) -> tuple[int, str]:
     """Apply the denial at every global-resolution entry. Enforcing only after read-back.
 
     Root is asked of the PATH rather than of the command. Most of these locations belong to the
@@ -145,8 +164,6 @@ def run(*, live=check_live_processes, folders=_global_folders,
     issues = list(outcome.issues)
     if any(i.id == PROCESSES_NOT_READABLE_ID for i in issues):
         return 1, _REFUSED_UNREAD
-    # TRAP: what could not be done never stops what could. A part that needs a password nobody can
-    # answer must not cost the operator every control this run was able to place.
     ending, ending_failed = None, None
     if [i for i in issues if i.id == _LIVE]:
         try:
@@ -161,6 +178,10 @@ def run(*, live=check_live_processes, folders=_global_folders,
         hooks = settle_hooks()
     except Exception:                         # never let it take the command down
         hooks = None
+    try:
+        scheduled = schedule_pass()
+    except Exception:
+        scheduled = None
     unresolved = ending_failed is not None or (ending is not None and not ending.finished)
     hooks_ok = hooks is not None and hooks.settled
     lines = [_headline(outcomes, unresolved, hooks_ok), ""]
@@ -180,6 +201,13 @@ def run(*, live=check_live_processes, folders=_global_folders,
         lines.append(_HOOKS_ON)
     elif not hooks_ok:
         lines.append(_HOOKS_OFF)
+    if scheduled is not None and scheduled.settled:
+        if scheduled.state == schedule.REPLACED:
+            lines.append(_WATCH_REPAIRED)
+        elif scheduled.changed:
+            lines.append(_WATCH_ON)
+    elif scheduled is not None and scheduled.problem and schedule.supported():
+        lines.append(_WATCH_OFF)
     if altered():
         lines.extend(["", _ALTERED_HOOKS_NOTE])
     if not saw_runs():

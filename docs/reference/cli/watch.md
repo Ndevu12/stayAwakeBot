@@ -1,15 +1,17 @@
 ---
-description: saw watch — one unattended pass that ends running code the tool has identified, and remembers the rest.
+description: saw watch — keep this machine checking itself, ending running code the tool has identified.
 ---
 
 # `saw watch`
 
-Make one pass over what is running on this machine. It ends only code the tool has **identified**,
-never asks for a password, and writes what it saw to its own record so a later pass can tell
-something that has come back from something new.
+Ask this machine to keep checking itself. From then on, and from every login, it makes a pass over
+what is running and ends code the tool has **identified**. It never asks for a password, and it
+writes what it saw to its own record so a later pass can tell something that has come back from
+something new. It keeps checking until you stop it.
 
 ```text
 saw watch
+saw watch stop
 ```
 
 It is deliberately narrower than [`saw harden`](harden.md). Harden runs with you present: it ends
@@ -42,6 +44,28 @@ One line about where this machine stands:
 It names no paths and no process numbers. If a pass could not finish what it started, it says so
 rather than reporting a clean machine.
 
+## When it runs by itself
+
+[`saw harden`](harden.md) puts this in place as part of hardening a machine, and `saw watch` is how
+you ask for it on its own, check it, or change your mind about it.
+
+`saw watch` asks this machine to keep making the pass — starting with your session, and started
+again if it ever stops, so the machine is not left unwatched. It says whether that is in force now
+or from your next login; where the system will not start it immediately, the arrangement is still
+made and takes effect then. It keeps doing that until `saw watch stop`.
+Asking twice changes nothing and says so.
+
+It is asked for by name rather than arranged by [`saw harden`](harden.md), because a process that
+keeps running and ends things is a larger thing to agree to than the controls harden places, and it
+should not arrive as a side effect of something else.
+
+What it runs is fixed. There is nothing in it to configure, and therefore nothing in it for anyone
+else to point somewhere else; if it is not exactly what `saw` wrote, running `saw watch` again puts it
+back and tells you it had been changed. Anything else found under that name is left alone —
+stopping removes saw's own work and nothing else.
+
+A quiet pass says nothing. Only a pass that found something speaks.
+
 ## The record
 
 The pass keeps a small record under your state directory of the code it has seen: when each was
@@ -52,6 +76,13 @@ The record holds no code — the payload itself is never written to it, because 
 carry your own secrets and that file outlives the run. Deleting the record costs nothing but the
 history: the next pass still examines every process on its own evidence, so nothing can be hidden
 from this command by editing or removing it.
+
+## Platforms
+
+macOS and Linux. On macOS it is a login item; on Linux, a user service. Either way it starts with
+your session and is started again if it stops, and `saw watch stop` removes it.
+
+Elsewhere the command says it could not arrange it, rather than reporting a machine as watched.
 
 ## See also
 

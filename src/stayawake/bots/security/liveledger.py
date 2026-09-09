@@ -2,15 +2,9 @@
 """What this machine has seen running, kept between runs.
 
 A ledger of code fingerprints: when each was first and last seen, how often, whether the corpus
-identified it, and whether it was ended. It exists so a run can tell a thing it has seen before from
-a thing it has not, without re-deriving that from the machine.
+identified it, and whether it was ended.
 
-TRAP: nothing here is load-bearing for safety. An absent, unreadable or edited ledger changes what a
-run SAYS, never what it FINDS — every process is graded on its own evidence regardless, so a ledger
-an attacker can write cannot launder anything past the check.
-
-The payload is never written here. A fingerprint stands in for it, because a code argument can carry
-the operator's own secrets and this file outlives the run.
+TRAP: nothing here is load-bearing for safety, and the payload is never written to it.
 """
 from __future__ import annotations
 
@@ -57,8 +51,7 @@ class Ledger:
 
     @property
     def trusted(self) -> bool:
-        """Whether this run may say anything about what came before. Only a cleanly-loaded record
-        answers True; every other state reports as a first sighting rather than as an absence."""
+        """Whether this run may say anything about what came before."""
         return self.status == LOADED
 
     def returning(self, key: str) -> int:
@@ -99,8 +92,7 @@ def record(ledger: Ledger, seen, ended_keys=(), now=None) -> Ledger:
     """Fold this run's sightings into `ledger` and return the result.
 
     Takes the ledger read at the start of the run, the `LiveCode` results, and the fingerprints that
-    were ended. Returns a new ledger; the oldest entries are dropped past a bound, so a machine that
-    is shown many distinct payloads cannot grow this file without limit.
+    were ended. Returns a new ledger, bounded in size, with the oldest entries dropped first.
     """
     from stayawake.bots.security.livecode import fingerprint
     stamp = (now or datetime.now(timezone.utc)).isoformat(timespec="seconds")
@@ -119,11 +111,7 @@ def record(ledger: Ledger, seen, ended_keys=(), now=None) -> Ledger:
 
 
 def save(ledger: Ledger, path: Path | None = None) -> bool:
-    """Write the record atomically. Returns whether it was written.
-
-    Best effort by design: a run that cannot write its record still did its work, and must not fail
-    over bookkeeping.
-    """
+    """Write the record atomically. Returns whether it was written. Best effort by design."""
     where = path or ledger_path()
     rows = {k: {"first": v.first, "last": v.last, "times": v.times,
                 "identified": v.identified, "ended": v.ended}
@@ -132,7 +120,7 @@ def save(ledger: Ledger, path: Path | None = None) -> bool:
     try:
         where.parent.mkdir(parents=True, exist_ok=True)
         if where.is_symlink():
-            return False        # a predictable name someone else may point elsewhere
+            return False
         fd, tmp = tempfile.mkstemp(dir=str(where.parent), prefix=".live-", suffix=".json")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
