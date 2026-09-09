@@ -13,6 +13,16 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Added
+- **`saw audit` checks what a coding agent on this machine may run without asking.** Claude Code,
+  the Cursor agent and Codex keep their own standing approvals, and none of them were looked at.
+  It reports a risky command an agent may run unprompted, and an agent whose approval step is off
+  altogether. An ordinary allowlist is not reported: the command a rule actually invokes is what
+  counts, so a rule for `git status` is not read as a rule for a shell.
+- **`saw harden` withdraws those approvals.** A risky standing approval is taken out and an
+  approval step that was turned off is put back. What you allowed that is not risky stays exactly
+  as it is, and `--take-back` restores what was withdrawn.
+
 ### Changed
 - **Findings no longer print the file or folder they found.** A report gets read over a shoulder,
   pasted into a ticket and attached to a mail, and every location in it is a map. Each one now says

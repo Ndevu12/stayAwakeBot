@@ -12,7 +12,7 @@ from pathlib import Path
 
 from stayawake.utils.pathsafe import grade
 
-from . import editors
+from . import editors, riskycommands
 from .models import HygieneIssue, could_not_read
 
 
@@ -50,8 +50,7 @@ SETTING_FOR = {
 EDITORS_NOT_EXAMINED_ID = "editors-not-examined"
 
 
-_RISKY_AUTOAPPROVE = ("npx", "npm", "pnpm", "yarn", "node", "ssh", "scp", "curl", "wget",
-                      "bash", "sh", "zsh", "eval", "sed", "awk", "python", "python3", "rm")
+_RISKY_AUTOAPPROVE = riskycommands.ORDER
 
 _CATCHALL_REGEX_BODIES = {"", ".", ".*", ".+", "^", "$", "^$", "^.*$", "^.*", ".*$", "^.+$", "^.+", ".+$"}
 
