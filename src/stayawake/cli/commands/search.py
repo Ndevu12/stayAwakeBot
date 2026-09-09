@@ -19,7 +19,7 @@ _INDEX = [
     ("saw discard", "undo `saw fix`: --branch deletes the auto-clean branch, --pr closes its PR",
      "discard undo revert cleanup delete branch close pr abandon drop remove remote local"),
     ("saw audit", "credential + editor + runner-persistence + branch-protection hygiene audit",
-     "audit hygiene credential token branch protection vscode editor runner self-hosted persistence"),
+     "audit hygiene credential token branch protection vscode cursor windsurf vscodium editor runner self-hosted persistence"),
     ("saw harden", "create host denials; reports in place only after a read-back",
      "harden host deny control"),
     ("saw guard", "install/verify the Strix worm-guard CI gate (setup needs workflow scope)",

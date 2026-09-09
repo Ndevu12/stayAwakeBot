@@ -127,11 +127,22 @@ class TestTheModuleCanBeImported(unittest.TestCase):
         import importlib
         importlib.import_module("stayawake.bots.security.harden.settings")
 
-    def test_it_asks_the_check_which_entries_are_risky(self):
-        """The finding's sentence is a rendering of that answer, not the answer."""
+    def test_what_is_written_is_read_from_the_check_not_restated(self):
+        """One declaration per setting, so the writer cannot drift from the finding."""
         from stayawake.bots.security.harden import settings
         from stayawake.bots.security.hygiene import editor
-        self.assertIs(settings.risky_autoapprove_entries, editor.risky_autoapprove_entries)
+        for issue_id, setting in editor.SETTING_FOR.items():
+            with self.subTest(issue_id=issue_id):
+                self.assertTrue(issue_id in settings.answerable([issue_id]))
+                self.assertTrue(setting.correct is not None or setting.turns_off_entries,
+                                "a setting is answered by one value or by turning entries off")
+
+    def test_the_entries_turned_off_are_the_ones_the_check_named(self):
+        """The finding's sentence is a rendering of that answer, not the answer."""
+        from stayawake.bots.security.hygiene import editor
+        text = '{"chat.tools.terminal.autoApprove": {"npx": true, "ls": true}}'
+        self.assertEqual(editor.risky_autoapprove_entries(text), ["npx"])
+        self.assertEqual(editor.catchall_autoapprove_entries(text), [])
 
 
 if __name__ == "__main__":

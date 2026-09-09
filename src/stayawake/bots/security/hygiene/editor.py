@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
-"""Editor (VS Code) hygiene — folder-open auto-run tasks + Workspace Trust (the auto-run vector)."""
+"""Editor hygiene — folder-open auto-run tasks + Workspace Trust (the auto-run vector).
+
+Every editor of the VS Code family on this machine, not whichever one was found first. They share
+the settings schema, so one set of checks covers them; `editors.py` decides which are here.
+"""
 from __future__ import annotations
 
-import os
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 from stayawake.utils.pathsafe import grade
 
+from . import editors
 from .models import HygieneIssue, could_not_read
 
 
@@ -15,21 +20,34 @@ _DOCS = ("https://github.com/Ndevu12/stayAwakeBot/blob/main/docs/how-to/audit-a-
          "#what-a-clean-audit-does-and-does-not-mean")
 
 
-def _vscode_user_settings() -> tuple[Path | None, bool]:
-    home = Path.home()
-    candidates = [
-        home / "Library/Application Support/Code/User/settings.json",
-        home / ".config/Code/User/settings.json",
-        Path(os.environ.get("APPDATA", home / "AppData/Roaming")) / "Code/User/settings.json",
-    ]
-    for c in candidates:
-        state = grade(c)
-        if state == "absent":
-            continue
-        if state == "unverified":
-            return c, True
-        return c, False
-    return None, False
+@dataclass(frozen=True)
+class Setting:
+    """One editor setting this tool grades, and how it is answered.
+
+    `correct` is the one literal that answers it. `turns_off_entries` marks the other shape: a
+    table of commands, answered by turning the dangerous ones off rather than by one value.
+    """
+
+    key: str
+    correct: str | None
+    turns_off_entries: bool = False
+
+
+_AUTOTASKS = Setting("task.allowAutomaticTasks", '"off"')
+_TRUST_ENABLED = Setting("security.workspace.trust.enabled", "true")
+_UNTRUSTED_FILES = Setting("security.workspace.trust.untrustedFiles", '"prompt"')
+AUTO_APPROVE = Setting("chat.tools.terminal.autoApprove", None, turns_off_entries=True)
+
+SETTING_FOR = {
+    "editor-autotasks-default": _AUTOTASKS,
+    "editor-autotasks-on": _AUTOTASKS,
+    "editor-workspace-trust-off": _TRUST_ENABLED,
+    "editor-untrusted-files-open": _UNTRUSTED_FILES,
+    "editor-autoapprove-all": AUTO_APPROVE,
+    "editor-autoapprove-risky": AUTO_APPROVE,
+}
+
+EDITORS_NOT_EXAMINED_ID = "editors-not-examined"
 
 
 _RISKY_AUTOAPPROVE = ("npx", "npm", "pnpm", "yarn", "node", "ssh", "scp", "curl", "wget",
@@ -89,6 +107,26 @@ def _autoapprove_approves_everything(text: str) -> bool:
     return False
 
 
+def catchall_autoapprove_entries(text: str) -> list[str]:
+    """The regex keys under `autoApprove` that match every command line, approved.
+
+    Named rather than counted, so the caller turns off the entries the check actually found.
+    """
+    block = _autoapprove_block(text)
+    if block is None:
+        return []
+    found: list[str] = []
+    for m in re.finditer(r'"(/[^"]*/)"\s*:\s*(?:true\b|\{[^{}]*"approve"\s*:\s*true)', block):
+        if m.group(1)[1:-1] in _CATCHALL_REGEX_BODIES and m.group(1) not in found:
+            found.append(m.group(1))
+    return found
+
+
+def blanket_autoapprove(text: str) -> bool:
+    """Whether `autoApprove` is the single value `true` — approve every terminal command."""
+    return _autoapprove_is_blanket_true(text)
+
+
 def risky_autoapprove_entries(text: str) -> list[str]:
     """Best-effort: risky command names auto-approved via `chat.tools.terminal.autoApprove`. Flags a
     key CONTAINING a risky name that is approved either directly (`"npx": true`) or via the object form
@@ -106,55 +144,43 @@ def risky_autoapprove_entries(text: str) -> list[str]:
     return found
 
 
-def check_vscode(settings_path: Path | None = None) -> list[HygieneIssue]:
+def grade_settings(text: str, name: str, path: Path) -> list[HygieneIssue]:
+    """Grade one editor's settings text. Returns a finding for each answer it does not hold."""
     issues: list[HygieneIssue] = []
-    if settings_path is not None:
-        path, unread = settings_path, grade(settings_path) == "unverified"
-    else:
-        path, unread = _vscode_user_settings()
-    if unread:
-        return [could_not_read([path])]
-    if path is None:
-        return issues
-    try:
-        text = path.read_text(encoding="utf-8", errors="ignore")
-    except OSError:
-        return [could_not_read([path])]
-
     auto = re.search(r'"task\.allowAutomaticTasks"\s*:\s*"([^"]+)"', text)
     if auto is None:
         issues.append(HygieneIssue(
-            id="vscode-autotasks-default",
+            id="editor-autotasks-default",
             severity="info",
-            title="VS Code automatic tasks not explicitly disabled",
-            detail=f'{path} does not set "task.allowAutomaticTasks", so a folder can auto-run tasks '
-                   "when opened.",
+            title=f"{name} automatic tasks are not explicitly disabled",
+            detail=f'{path} does not set "task.allowAutomaticTasks", so a folder can auto-run '
+                   "tasks when opened.",
             remediation='Set "task.allowAutomaticTasks": "off".', reference=_DOCS,
         ))
     elif auto.group(1) != "off":
         issues.append(HygieneIssue(
-            id="vscode-autotasks-on",
+            id="editor-autotasks-on",
             severity="warning",
-            title="VS Code automatic tasks are enabled",
+            title=f"{name} automatic tasks are enabled",
             detail=f'{path} sets "task.allowAutomaticTasks": "{auto.group(1)}" — folder-open '
                    "tasks can run on open without confirmation.",
-            remediation='Set "task.allowAutomaticTasks": "off".',
+            remediation='Set "task.allowAutomaticTasks": "off".', reference=_DOCS,
         ))
 
     if re.search(r'"security\.workspace\.trust\.enabled"\s*:\s*false', text):
         issues.append(HygieneIssue(
-            id="vscode-workspace-trust-off",
+            id="editor-workspace-trust-off",
             severity="warning",
-            title="VS Code Workspace Trust is disabled",
+            title=f"{name} Workspace Trust is disabled",
             detail=f"{path} disables Workspace Trust, so untrusted folders run code freely.",
             remediation='Set "security.workspace.trust.enabled": true.', reference=_DOCS,
         ))
 
     if re.search(r'"security\.workspace\.trust\.untrustedFiles"\s*:\s*"open"', text):
         issues.append(HygieneIssue(
-            id="vscode-untrusted-files-open",
+            id="editor-untrusted-files-open",
             severity="warning",
-            title="VS Code opens untrusted files without prompting",
+            title=f"{name} opens untrusted files without prompting",
             detail=f'{path} sets "security.workspace.trust.untrustedFiles": "open", so untrusted '
                    "files open without the trust prompt.",
             remediation='Set it to "prompt" (the default).', reference=_DOCS,
@@ -162,9 +188,9 @@ def check_vscode(settings_path: Path | None = None) -> list[HygieneIssue]:
 
     if _autoapprove_approves_everything(text):
         issues.append(HygieneIssue(
-            id="vscode-autoapprove-all",
+            id="editor-autoapprove-all",
             severity="warning",
-            title="VS Code auto-approves ALL terminal commands for chat/agent tools",
+            title=f"{name} auto-approves ALL terminal commands for chat/agent tools",
             detail=f'{path} auto-approves EVERY terminal command via '
                    '"chat.tools.terminal.autoApprove", so anything an AI agent proposes runs '
                    "unprompted.",
@@ -175,11 +201,46 @@ def check_vscode(settings_path: Path | None = None) -> list[HygieneIssue]:
         risky = risky_autoapprove_entries(text)
         if risky:
             issues.append(HygieneIssue(
-                id="vscode-autoapprove-risky",
+                id="editor-autoapprove-risky",
                 severity="warning",
-                title="VS Code auto-approves risky terminal commands for chat/agent tools",
+                title=f"{name} auto-approves risky terminal commands for chat/agent tools",
                 detail=f'{path} auto-approves {", ".join(risky)} via '
                        '"chat.tools.terminal.autoApprove", so an AI agent runs them unprompted.',
                 remediation='Remove those entries, or set them to false.', reference=_DOCS,
             ))
+    return issues
+
+
+def check_editors(settings_path: Path | None = None, find=editors.installed) -> list[HygieneIssue]:
+    """Grade every editor of this family on this machine.
+
+    Takes one settings file to grade instead, which is how a test names what it acts on.
+    """
+    if settings_path is not None:
+        found = editors.Found([editors.Editor("This editor", settings_path)], [], [])
+    else:
+        found = find()
+    issues: list[HygieneIssue] = []
+    unread: list[Path] = list(found.unreadable)
+    for editor in found.editors:
+        if grade(editor.settings) == "unverified":
+            unread.append(editor.settings)
+            continue
+        try:
+            text = editor.settings.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            unread.append(editor.settings)
+            continue
+        issues += grade_settings(text, editor.name, editor.settings)
+    if unread:
+        issues.append(could_not_read(unread))
+    if found.not_modelled:
+        issues.append(HygieneIssue(
+            id=EDITORS_NOT_EXAMINED_ID,
+            severity="unknown",
+            title="An editor on this machine was not examined",
+            detail=f"{', '.join(found.not_modelled)} is installed here. Its settings are not "
+                   "modelled, so no result covers it.",
+            remediation="Check its auto-run and trust settings yourself.", reference=_DOCS,
+        ))
     return issues

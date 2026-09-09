@@ -397,7 +397,7 @@ class TestEverySurfaceProbeReachesTheRotationVerdict(unittest.TestCase):
         def explodes():
             raise OSError("x")
         for label in ("persistence surface coverage", "autorun surface", "OS-service persistence",
-                      "shell startup files", "SSH authorized_keys", "VS Code settings",
+                      "shell startup files", "SSH authorized_keys", "editor settings",
                       "host drop-files"):
             with self.subTest(probe=label):
                 ids = {i.id for i in hygiene.run_check(label, explodes).issues}

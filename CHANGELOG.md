@@ -13,6 +13,19 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Added
+- **`saw audit` covers every editor of the VS Code family on this machine, not only VS Code.**
+  Cursor, Windsurf, VSCodium and other forks are checked the same way, and each finding names the
+  editor it is about. An editor installed here that saw does not understand is named in the result
+  rather than passed over.
+- **`saw harden` corrects the editor settings it used to only report.** The setting that lets a
+  folder run a task when it is opened, and the two Workspace Trust settings, are put right in every
+  editor it covers. `--take-back` puts back what it can and says what it left.
+- **`saw harden` turns off dangerous command auto-approval for chat and agent tools.** A blanket
+  "approve everything", a pattern matching every command, and each risky command the audit names
+  are set to off, so an agent no longer runs them unprompted. Commands you allowed that are not
+  dangerous are left as they are.
+
 ## [0.10.0] - 2026-09-09
 
 ### Added

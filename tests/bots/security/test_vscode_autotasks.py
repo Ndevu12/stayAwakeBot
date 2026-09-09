@@ -3,7 +3,7 @@
 
 VS Code writes `task.allowAutomaticTasks` as the string `"on"`/`"off"` (historically `"auto"`), so
 the old `is True` check silently missed real-world settings. The signal must fire for boolean true
-AND any enabling string (anything but "off"), aligned with hygiene.check_vscode()'s `!= "off"`.
+AND any enabling string (anything but "off"), aligned with hygiene.check_editors()'s `!= "off"`.
 """
 from __future__ import annotations
 

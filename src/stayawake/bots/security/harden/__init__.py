@@ -10,6 +10,7 @@ from stayawake.bots.security.hygiene.models import PROCESSES_NOT_READABLE_ID
 from stayawake.bots.security.hygiene.outcome import BLOCKED, run_probe
 from stayawake.bots.security.hygiene.process import check_live_processes
 from .live import end_live_code
+from . import settings as editorsettings
 from stayawake.utils import hostdenial, textsafe
 from .denial import (ENFORCING, HELD_BY_ANOTHER, IN_A_LIVE_INSTALL, LEFT_OPEN_OVER_CONTENT,
                      NEEDS_ROOT, NOT_HERE_YET, LOCKED_OVER_CONTENT, NOTHING_TO_REMOVE,
@@ -23,9 +24,10 @@ __all__ = ["run", "apply_one", "PathOutcome", "ENFORCING", "SELF_ENFORCING",
            "remove_one", "take_back"]
 
 
-TOUCHES_THIS_MACHINE = frozenset({"live", "apply", "stop", "settle_hooks", "schedule_pass"})
+TOUCHES_THIS_MACHINE = frozenset({"live", "apply", "stop", "settle_hooks", "schedule_pass",
+                                  "editor_pass"})
 ONLY_READS = frozenset({"folders", "supported", "altered", "saw_runs"})
-TAKE_BACK_TOUCHES = frozenset({"folders", "unschedule"})
+TAKE_BACK_TOUCHES = frozenset({"folders", "unschedule", "restore_editors"})
 
 
 _LIVE = "live-obfuscated-process"
@@ -63,6 +65,9 @@ _WATCH_ON = "This machine will also keep checking itself for code running with n
 _WATCH_REPAIRED = "The check this machine runs by itself had been changed. It has been put back."
 _WATCH_OFF = "This machine will not keep checking itself. Run `saw watch`."
 _WATCH_LEFT = "This machine is still checking itself, and that was not taken back."
+_EDITORS_FIXED = ("An editor here could run code without asking you. That is now off.")
+_EDITORS_STUCK = "An editor on this machine still opens folders that can run code. Run `saw audit`."
+_EDITORS_KEPT = "An editor setting was left as it is. Run `saw audit`."
 
 
 _TOOK_BACK = "Every control this tool placed here has been taken back."
@@ -72,7 +77,8 @@ _NOT_ALL_BACK = ("Not every control was taken back. This command deletes nothing
 
 def take_back(*, folders=_global_folders, remove=remove_one,
               supported=hostdenial.platform_supported,
-              unschedule=schedule.take_back) -> tuple[int, str]:
+              unschedule=schedule.take_back,
+              restore_editors=editorsettings.take_back) -> tuple[int, str]:
     """Remove the denials this tool placed. Removed only after a read-back says the path is gone.
 
     No capture gate here: this opens a location rather than closing one, so it cannot crash a
@@ -88,13 +94,21 @@ def take_back(*, folders=_global_folders, remove=remove_one,
         left_running = unschedule() not in (schedule.REMOVED, schedule.NOTHING_TO_REMOVE)
     except Exception:
         left_running = True
+    try:
+        editors_back = restore_editors()
+    except Exception:
+        editors_back = None
     outcomes = [remove(p) for p in folders()]
     settled = {REMOVED, NOTHING_TO_REMOVE}
     done = bool(outcomes) and all(o.state in settled for o in outcomes)
-    done = done and not left_running
+    done = done and not left_running and editors_back is not None and editors_back.done
     lines = [_TOOK_BACK if done else _NOT_ALL_BACK, ""]
     if left_running:
         lines.extend([_WATCH_LEFT, ""])
+    if editors_back is None or not editors_back.done:
+        lines.extend([_EDITORS_STUCK, ""])
+    elif editors_back.kept:
+        lines.extend([_EDITORS_KEPT, ""])
     if any(o.state == LEFT_OPEN_OVER_CONTENT for o in outcomes):
         lines.extend([_LEFT_OPEN_NOTE, ""])
     for o in outcomes:
@@ -113,9 +127,13 @@ def _every_reachable_one(outcomes) -> bool:
     return bool(reachable) and all(o.state in _HELD for o in reachable)
 
 
-def _headline(outcomes, unresolved: bool, hooks_ok: bool) -> str:
-    """The one line that says where this machine stands."""
-    if unresolved or not hooks_ok or not _every_reachable_one(outcomes):
+def _headline(outcomes, unresolved: bool, hooks_ok: bool, editors_ok: bool = True) -> str:
+    """The one line that says where this machine stands.
+
+    TRAP: every control this run places is represented here. An operator reads the verdict, so a
+    part left undone that this line does not know about is a machine reported as protected.
+    """
+    if unresolved or not hooks_ok or not editors_ok or not _every_reachable_one(outcomes):
         return _NOT_EVERYWHERE
     if any(o.state == SELF_ENFORCING for o in outcomes):
         return _CLAIM_AS_YOU
@@ -145,7 +163,8 @@ def run(*, live=check_live_processes, folders=_global_folders,
         apply=apply_one, supported=hostdenial.platform_supported,
         altered=hookscript.altered_hooks, saw_runs=hookscript.recorded_saw_runs,
         stop=end_live_code, settle_hooks=hook.settle_hooks,
-        schedule_pass=schedule.settle) -> tuple[int, str]:
+        schedule_pass=schedule.settle,
+        editor_pass=editorsettings.settle) -> tuple[int, str]:
     """Apply the denial at every global-resolution entry. Enforcing only after read-back.
 
     Root is asked of the PATH rather than of the command. Most of these locations belong to the
@@ -182,9 +201,14 @@ def run(*, live=check_live_processes, folders=_global_folders,
         scheduled = schedule_pass()
     except Exception:
         scheduled = None
+    try:
+        editors_settled = editor_pass()
+    except Exception:
+        editors_settled = None
     unresolved = ending_failed is not None or (ending is not None and not ending.finished)
     hooks_ok = hooks is not None and hooks.settled
-    lines = [_headline(outcomes, unresolved, hooks_ok), ""]
+    editors_ok = editors_settled is not None and editors_settled.settled
+    lines = [_headline(outcomes, unresolved, hooks_ok, editors_ok), ""]
     if ending_failed is not None:
         lines.extend([_STILL_LIVE, ""])
     elif ending is not None:
@@ -208,6 +232,10 @@ def run(*, live=check_live_processes, folders=_global_folders,
             lines.append(_WATCH_ON)
     elif scheduled is not None and scheduled.problem and schedule.supported():
         lines.append(_WATCH_OFF)
+    if editors_settled is not None and editors_settled.changed:
+        lines.append(_EDITORS_FIXED)
+    if not editors_ok:
+        lines.append(_EDITORS_STUCK)
     if altered():
         lines.extend(["", _ALTERED_HOOKS_NOTE])
     if not saw_runs():
@@ -215,6 +243,6 @@ def run(*, live=check_live_processes, folders=_global_folders,
     body = "\n".join(lines).rstrip()
     if unresolved:
         return 1, body
-    if not _every_reachable_one(outcomes) or not hooks_ok:
+    if not _every_reachable_one(outcomes) or not hooks_ok or not editors_ok:
         return 3, body
     return 0, body

@@ -27,6 +27,50 @@ class Edit:
         return self.was is None
 
 
+def code_only(text: str) -> str:
+    """`text` with every comment blanked out, character for character.
+
+    Positions still line up, so a search runs on this and the slice comes from the original.
+
+    TRAP: a settings file is JSONC, and a comment is not code. A regex over raw text edits the
+    key inside someone's commented-out note — changing nothing the editor reads while reporting a
+    correction, and inverting what they wrote.
+    """
+    out = list(text)
+    index, size, in_string, escaped = 0, len(text), False, False
+    while index < size:
+        char = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            index += 1
+            continue
+        if char == '"':
+            in_string = True
+            index += 1
+            continue
+        if char == "/" and index + 1 < size and text[index + 1] == "/":
+            while index < size and text[index] != "\n":
+                out[index] = " "
+                index += 1
+            continue
+        if char == "/" and index + 1 < size and text[index + 1] == "*":
+            while index < size and not (text[index] == "/" and index and text[index - 1] == "*"):
+                if text[index] != "\n":
+                    out[index] = " "
+                index += 1
+            if index < size:
+                out[index] = " "
+                index += 1
+            continue
+        index += 1
+    return "".join(out)
+
+
 def _key_pattern(key: str) -> re.Pattern:
     return re.compile(r'("' + re.escape(key) + r'"\s*:\s*)("[^"]*"|true|false|null|-?[\d.]+)')
 
@@ -37,7 +81,7 @@ def value_at(text: str, key: str) -> str | None:
     A structure is not a value this can speak about: an object has no single literal to compare or
     replace, and pretending otherwise is how an edit lands somewhere it was not aimed.
     """
-    found = _key_pattern(key).search(text)
+    found = _key_pattern(key).search(code_only(text))
     return found.group(2) if found else None
 
 
@@ -47,7 +91,7 @@ def set_value(text: str, key: str, value: str) -> tuple[str, Edit] | None:
     Refuses on more than one match rather than editing the first: a key that appears twice is
     either nested inside another object or duplicated, and neither is a place to guess.
     """
-    matches = list(_key_pattern(key).finditer(text))
+    matches = list(_key_pattern(key).finditer(code_only(text)))
     if len(matches) > 1:
         return None
     if matches:
@@ -64,17 +108,28 @@ def _append_key(text: str, key: str, value: str) -> tuple[str, Edit] | None:
 
     Only when that object is unambiguous: the file has to open with `{` and close with the last
     `}` in it. Anything else is a shape this does not understand well enough to write into.
+
+    TRAP: where the object ENDS and where its last member ends are read from the comment-blanked
+    text, and the separating comma goes after the member — never after a trailing comment, which
+    swallows it and leaves the file unparseable.
     """
-    body = text.rstrip()
+    masked = code_only(text)
+    body = masked.rstrip()
     if not body.startswith("{") or not body.endswith("}"):
         return None
-    inner = body[1:-1]
     entry = f'"{key}": {value}'
-    if not inner.strip():
-        return "{\n  " + entry + "\n}\n", Edit(key, value)
-    separator = "" if inner.rstrip().endswith(",") else ","
-    indent = _indent_of(inner)
-    return (body[:-1].rstrip() + separator + "\n" + indent + entry + "\n}\n",
+    closing = len(body) - 1
+    last_code = len(masked[:closing].rstrip())
+    if last_code <= 0:
+        return None
+    if masked[last_code - 1] == "{":                     # an object with nothing in it yet
+        return text[:last_code] + "\n  " + entry + "\n" + text[closing:], Edit(key, value)
+    separator = "" if masked[last_code - 1] == "," else ","
+    indent = _indent_of(masked[1:closing])
+    tail = text[last_code:closing]
+    if not tail.endswith("\n"):
+        tail += "\n"
+    return (text[:last_code] + separator + tail + indent + entry + "\n" + text[closing:],
             Edit(key, value))
 
 
