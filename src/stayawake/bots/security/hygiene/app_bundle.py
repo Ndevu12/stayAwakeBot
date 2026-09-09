@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
 
+from stayawake.utils import appdirs
 from stayawake.utils.pathsafe import canonical_id
 
 from .models import HygieneIssue, APP_BUNDLE_MODULE_UNREADABLE_ID, APP_BUNDLE_SCAN_BLOCKED_ID, _WIPER_NOTE
@@ -67,13 +68,7 @@ def _packaged_bases() -> list[tuple[Path, tuple[str, ...]]]:
 
 def _data_bases() -> list[Path]:
     """Where an application keeps a per-version copy of its own modules, outside its bundle."""
-    home = Path.home()
-    if sys.platform == "darwin":
-        return [home / "Library" / "Application Support"]
-    if sys.platform.startswith("win"):
-        return [Path(os.environ[var]) for var in ("APPDATA", "LOCALAPPDATA")
-                if os.environ.get(var)]
-    return [home / ".config"]
+    return appdirs.user_data_dirs()
 
 
 def _note_unreadable(sink: list, root: Path):

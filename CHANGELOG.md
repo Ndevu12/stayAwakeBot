@@ -13,6 +13,17 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Added
+- **`saw audit` covers every editor of the VS Code family on this machine, not only VS Code.**
+  Cursor, Windsurf, VSCodium and other forks are checked the same way, and each finding names the
+  editor it is about. An editor installed here that saw does not understand is named in the result
+  rather than passed over.
+- **`saw harden` corrects the editor settings it used to only report.** The setting that lets a
+  folder run a task when it is opened, and the two Workspace Trust settings, are put right in every
+  editor it covers. Whether an AI agent may run a command without asking depends on how you use the
+  machine, so that one stays reported and is never written for you. `--take-back` puts back what it
+  can and says what it left.
+
 ## [0.10.0] - 2026-09-09
 
 ### Added

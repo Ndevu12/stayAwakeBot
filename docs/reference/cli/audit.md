@@ -4,7 +4,7 @@ description: saw audit — check the machine for credential exposure, editor aut
 
 # `saw audit`
 
-Audit the machine: credential exposure, editor settings, the start-up surface, and optionally a
+Audit the machine: credential exposure, editor settings for every editor of the VS Code family installed here, the start-up surface, and optionally a
 repository's branch protection. Every run ends with a **rotation-safety verdict**. See [audit a
 machine](../../how-to/audit-a-machine.md) for what to do with each outcome. Scope: [what a clean
 audit does and does not

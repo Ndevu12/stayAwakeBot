@@ -18,6 +18,14 @@ It also asks this machine to keep checking itself, by putting [`saw watch`](watc
 same arrangement that command makes, made here as part of hardening. `--take-back` removes it with
 the rest.
 
+It corrects the editor settings that let a folder run code when it is opened, in **every** editor of
+the VS Code family on this machine — Cursor, Windsurf, VSCodium and the rest, not only VS Code
+itself. Only settings with one correct answer are written. Whether an AI agent may run a command
+without asking depends on how you use the machine, so that one is reported by
+[`saw audit`](audit.md) and never written for you. `--take-back` restores what had a value before;
+a setting saw added is left in place and named, because putting it back means re-opening the hole
+it closed.
+
 Root is not required. Run it as yourself and it acts where it can; anything it did not take is
 named in the result, and left exactly as it stood.
 

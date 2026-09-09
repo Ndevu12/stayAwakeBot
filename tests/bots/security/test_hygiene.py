@@ -268,7 +268,7 @@ class TestRunnerPersistence(unittest.TestCase):
         # so a probe added there is never silently dropped by a caller that hand-assembles checks.
         sentinel = hygiene.HygieneIssue("self-hosted-runner-persistence", "warning", "T", "D", "F")
         with mock.patch.object(hygiene, "check_credentials", return_value=[]), \
-             mock.patch.object(hygiene, "check_vscode", return_value=[]), \
+             mock.patch.object(hygiene, "check_editors", return_value=[]), \
              mock.patch.object(hygiene, "check_branch_protection", return_value=[]), \
              mock.patch.object(hygiene, "check_persistence", return_value=[]), \
              mock.patch.object(hygiene, "check_runner_persistence", return_value=[sentinel]):
@@ -351,7 +351,7 @@ class TestPersistence(unittest.TestCase):
     def test_audit_composes_persistence(self):
         sentinel = hygiene.HygieneIssue("os-service-persistence", "warning", "T", "D", "F")
         with mock.patch.object(hygiene, "check_credentials", return_value=[]), \
-             mock.patch.object(hygiene, "check_vscode", return_value=[]), \
+             mock.patch.object(hygiene, "check_editors", return_value=[]), \
              mock.patch.object(hygiene, "check_branch_protection", return_value=[]), \
              mock.patch.object(hygiene, "check_runner_persistence", return_value=[]), \
              mock.patch.object(hygiene, "check_persistence", return_value=[sentinel]):
@@ -466,7 +466,7 @@ class TestHostArtifacts(unittest.TestCase):
     def test_audit_composes_host_artifacts(self):
         sentinel = hygiene.HygieneIssue("host-drop-artifacts", "warning", "T", "D", "F")
         with mock.patch.object(hygiene, "check_credentials", return_value=[]), \
-             mock.patch.object(hygiene, "check_vscode", return_value=[]), \
+             mock.patch.object(hygiene, "check_editors", return_value=[]), \
              mock.patch.object(hygiene, "check_runner_persistence", return_value=[]), \
              mock.patch.object(hygiene, "check_persistence", return_value=[]), \
              mock.patch.object(hygiene, "check_branch_protection", return_value=[]), \
@@ -632,41 +632,43 @@ class TestVSCode(unittest.TestCase):
 
     def test_autotasks_on_is_warning(self):
         p = self._settings('{ "task.allowAutomaticTasks": "on" }')
-        ids = [i.id for i in hygiene.check_vscode(p)]
-        self.assertIn("vscode-autotasks-on", ids)
+        ids = [i.id for i in hygiene.check_editors(p)]
+        self.assertIn("editor-autotasks-on", ids)
 
     def test_autotasks_off_is_clean(self):
         p = self._settings('{ "task.allowAutomaticTasks": "off" }')
-        self.assertEqual(hygiene.check_vscode(p), [])
+        self.assertEqual(hygiene.check_editors(p), [])
 
     def test_missing_setting_is_info(self):
         p = self._settings('{ "editor.fontSize": 13 }')
-        issues = hygiene.check_vscode(p)
-        self.assertEqual([i.id for i in issues], ["vscode-autotasks-default"])
+        issues = hygiene.check_editors(p)
+        self.assertEqual([i.id for i in issues], ["editor-autotasks-default"])
         self.assertEqual(issues[0].severity, "info")
 
     def test_workspace_trust_disabled_is_warning(self):
         p = self._settings('{ "task.allowAutomaticTasks": "off", '
                            '"security.workspace.trust.enabled": false }')
-        ids = [i.id for i in hygiene.check_vscode(p)]
-        self.assertIn("vscode-workspace-trust-off", ids)
+        ids = [i.id for i in hygiene.check_editors(p)]
+        self.assertIn("editor-workspace-trust-off", ids)
 
     def test_no_vscode_settings_is_noop(self):
         # No path given → auto-detect; when VS Code isn't installed it returns None.
-        with mock.patch.object(hygiene.editor, "_vscode_user_settings", return_value=(None, False)):
-            self.assertEqual(hygiene.check_vscode(), [])
+        from stayawake.bots.security.hygiene import editors
+        with mock.patch.object(hygiene.editor, "editors") as no_editors:
+            no_editors.installed.return_value = editors.Found([], [], [])
+            self.assertEqual(hygiene.check_editors(find=no_editors.installed), [])
 
     def test_untrusted_files_open_is_warning(self):
         p = self._settings('{ "task.allowAutomaticTasks": "off", '
                            '"security.workspace.trust.untrustedFiles": "open" }')
-        issue = next(i for i in hygiene.check_vscode(p) if i.id == "vscode-untrusted-files-open")
+        issue = next(i for i in hygiene.check_editors(p) if i.id == "editor-untrusted-files-open")
         self.assertEqual(issue.severity, "warning")
 
     def test_risky_autoapprove_entries_flagged(self):
         p = self._settings('{ "task.allowAutomaticTasks": "off", '
                            '"chat.tools.terminal.autoApprove": { "npx": true, "ssh": true, '
                            '"echo": true } }')
-        issue = next(i for i in hygiene.check_vscode(p) if i.id == "vscode-autoapprove-risky")
+        issue = next(i for i in hygiene.check_editors(p) if i.id == "editor-autoapprove-risky")
         self.assertEqual(issue.severity, "warning")
         self.assertIn("npx", issue.detail)
         self.assertIn("ssh", issue.detail)
@@ -676,14 +678,14 @@ class TestVSCode(unittest.TestCase):
         # A risky command explicitly set to false (a deny) must NOT trip the warning.
         p = self._settings('{ "task.allowAutomaticTasks": "off", '
                            '"chat.tools.terminal.autoApprove": { "npx": false } }')
-        self.assertNotIn("vscode-autoapprove-risky", [i.id for i in hygiene.check_vscode(p)])
+        self.assertNotIn("editor-autoapprove-risky", [i.id for i in hygiene.check_editors(p)])
 
     def test_autoapprove_blanket_true_is_flagged(self):
         # The single most dangerous form — approve EVERYTHING — must be caught (a naive object-only
         # probe misses it entirely).
         p = self._settings('{ "task.allowAutomaticTasks": "off", '
                            '"chat.tools.terminal.autoApprove": true }')
-        self.assertIn("vscode-autoapprove-all", [i.id for i in hygiene.check_vscode(p)])
+        self.assertIn("editor-autoapprove-all", [i.id for i in hygiene.check_editors(p)])
 
     def test_autoapprove_nested_object_sibling_does_not_hide_risky_booleans(self):
         # Regression: a non-greedy regex truncates at the first `}`; an object-valued sibling must NOT
@@ -692,14 +694,14 @@ class TestVSCode(unittest.TestCase):
                            '"chat.tools.terminal.autoApprove": { '
                            '"/^git (status|log)/": { "approve": true }, '
                            '"rm": true, "curl": true } }')
-        issue = next(i for i in hygiene.check_vscode(p) if i.id == "vscode-autoapprove-risky")
+        issue = next(i for i in hygiene.check_editors(p) if i.id == "editor-autoapprove-risky")
         self.assertIn("rm", issue.detail)
         self.assertIn("curl", issue.detail)
 
     def test_autoapprove_object_form_approve_true_is_flagged(self):
         p = self._settings('{ "task.allowAutomaticTasks": "off", '
                            '"chat.tools.terminal.autoApprove": { "npx": { "approve": true } } }')
-        issue = next(i for i in hygiene.check_vscode(p) if i.id == "vscode-autoapprove-risky")
+        issue = next(i for i in hygiene.check_editors(p) if i.id == "editor-autoapprove-risky")
         self.assertIn("npx", issue.detail)
 
     def test_autoapprove_catchall_regex_key_is_approve_all(self):
@@ -708,36 +710,36 @@ class TestVSCode(unittest.TestCase):
         for key in ('"/.*/"', '"/^/"', '"//"'):
             p = self._settings('{ "task.allowAutomaticTasks": "off", '
                                '"chat.tools.terminal.autoApprove": { ' + key + ': true } }')
-            self.assertIn("vscode-autoapprove-all", [i.id for i in hygiene.check_vscode(p)],
+            self.assertIn("editor-autoapprove-all", [i.id for i in hygiene.check_editors(p)],
                           f"catch-all key {key} not treated as approve-all")
 
     def test_autoapprove_scoped_regex_is_not_approve_all(self):
         # A SCOPED regex (only git commands) must NOT be mistaken for approve-everything.
         p = self._settings('{ "task.allowAutomaticTasks": "off", '
                            '"chat.tools.terminal.autoApprove": { "/^git /": true } }')
-        self.assertNotIn("vscode-autoapprove-all", [i.id for i in hygiene.check_vscode(p)])
+        self.assertNotIn("editor-autoapprove-all", [i.id for i in hygiene.check_editors(p)])
 
     def test_autoapprove_brace_inside_key_does_not_hide_entries(self):
         # Regression: an unmatched brace inside a quoted key must not unbalance the extractor and hide
         # a real risky approval (string-aware brace matching).
         p = self._settings('{ "task.allowAutomaticTasks": "off", '
                            '"chat.tools.terminal.autoApprove": { "rm {": true, "curl": true } }')
-        issue = next(i for i in hygiene.check_vscode(p) if i.id == "vscode-autoapprove-risky")
+        issue = next(i for i in hygiene.check_editors(p) if i.id == "editor-autoapprove-risky")
         self.assertIn("curl", issue.detail)
 
     def test_no_autoapprove_block_is_clean(self):
         p = self._settings('{ "task.allowAutomaticTasks": "off" }')
-        self.assertNotIn("vscode-autoapprove-risky", [i.id for i in hygiene.check_vscode(p)])
+        self.assertNotIn("editor-autoapprove-risky", [i.id for i in hygiene.check_editors(p)])
 
     @unittest.skipIf(os.getuid() == 0, "root bypasses permission bits")
     def test_unreadable_settings_are_not_clean(self):
         p = self._settings('{ "task.allowAutomaticTasks": "off" }')
         os.chmod(p, 0o000)
         self.addCleanup(lambda: os.chmod(p, 0o644))
-        issues = hygiene.check_vscode(p)
+        issues = hygiene.check_editors(p)
         self.assertEqual([i.id for i in issues], ["persistence-surface-unverified"])
         self.assertEqual(issues[0].severity, "unknown")
-        outcome = hygiene.run_probe("VS Code settings", lambda: hygiene.check_vscode(p),
+        outcome = hygiene.run_probe("VS Code settings", lambda: hygiene.check_editors(p),
                                     certifies_surface=True)
         self.assertEqual(outcome.state, hygiene.UNKNOWN)
 
@@ -1108,7 +1110,7 @@ class TestMechanismPersistenceComposition(unittest.TestCase):
 
     def _only(self, name, sentinel):
         # Mock every OTHER check to [] so audit() yields just the sentinel deterministically.
-        others = {"check_credentials", "check_vscode", "check_branch_protection",
+        others = {"check_credentials", "check_editors", "check_branch_protection",
                   "check_persistence", "check_runner_persistence", "check_host_artifacts",
                   "check_ssh_authorized_keys", "check_shell_profile",
                   "check_git_config_execution"} - {name}
@@ -1263,7 +1265,7 @@ class TestAuditRender(unittest.TestCase):
         self.assertNotIn("no active host persistence", out.lower())
 
     def test_render_omits_incident_sequence_for_non_trigger_issue(self):
-        issue = hygiene.HygieneIssue("vscode-autotasks-on", "warning", "T", "D", "F")
+        issue = hygiene.HygieneIssue("editor-autotasks-on", "warning", "T", "D", "F")
         self.assertNotIn("respond in THIS order", hygiene.render([issue]))
 
     def test_incident_response_sequence_orders_rotation_last(self):
@@ -1358,7 +1360,7 @@ class TestScanScopeHonesty(unittest.TestCase):
         # about this host; telling that operator to "scope your response" under a green host all-clear
         # is false urgency that dilutes the incident channel. A fixture whose severity and incident
         # tier co-vary (e.g. os-service-persistence) cannot catch a severity-based gate — this can.
-        for non_incident_id in ("branch-unprotected", "vscode-workspace-trust-off"):
+        for non_incident_id in ("branch-unprotected", "editor-workspace-trust-off"):
             with self.subTest(id=non_incident_id):
                 out = self._flowed([hygiene.HygieneIssue(non_incident_id, "warning", "T", "D", "F")])
                 self.assertIn("other locations were not examined", out)

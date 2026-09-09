@@ -32,7 +32,7 @@ from .global_prefix import check_global_install_tree
 from .host_artifacts import check_host_artifacts
 from .process import check_live_processes, live_process_scope_note
 from .app_bundle import check_app_bundles
-from .editor import check_vscode
+from .editor import check_editors
 from .mechanism import (check_ssh_authorized_keys, check_shell_profile,
                         check_git_config_execution, git_config_predicate)
 from .remote import check_branch_protection
@@ -45,7 +45,7 @@ __all__ = [
     "check_credentials", "check_runner_persistence", "check_persistence",
     "check_persistence_coverage", "check_autorun", "check_host_artifacts",
     "check_app_bundles",
-    "check_vscode", "check_ssh_authorized_keys", "check_shell_profile", "check_git_config_execution",
+    "check_editors", "check_ssh_authorized_keys", "check_shell_profile", "check_git_config_execution",
     "check_live_processes",
     "check_branch_protection", "audit", "audit_checks", "audit_outcomes", "run_check", "render",
     "CheckOutcome", "CHECKED_CLEAN", "FOUND", "UNKNOWN", "BLOCKED", "NOT_IMPLEMENTED",
@@ -122,7 +122,7 @@ def audit_checks(slug: str | None = None, token: str | None = None, branch: str 
         # mid-run. Measured last: 30s to reach, 0.1s to run — a 60s process was already gone.
         ("running processes", check_live_processes),
         ("cached credentials", check_credentials),
-        ("VS Code settings", check_vscode),
+        ("editor settings", check_editors),
         ("self-hosted runner", check_runner_persistence),
         ("OS-service persistence", check_persistence),
         ("persistence surface coverage", check_persistence_coverage),   # enumeration honesty

@@ -279,7 +279,7 @@ class TestAudit(unittest.TestCase):
     @mock.patch("stayawake.bots.security.hygiene.check_persistence", return_value=[])
     @mock.patch("stayawake.bots.security.hygiene.check_runner_persistence", return_value=[])
     @mock.patch("stayawake.bots.security.hygiene.check_branch_protection", return_value=[])
-    @mock.patch("stayawake.bots.security.hygiene.check_vscode", return_value=[])
+    @mock.patch("stayawake.bots.security.hygiene.check_editors", return_value=[])
     @mock.patch("stayawake.bots.security.hygiene.check_credentials", return_value=[])
     @mock.patch("stayawake.lib.auth.resolve_token", return_value=(None, None))
     def test_clean_audit_returns_zero(self, *_):
@@ -291,7 +291,7 @@ class TestAudit(unittest.TestCase):
     @mock.patch("stayawake.bots.security.hygiene.check_persistence", return_value=[])
     @mock.patch("stayawake.bots.security.hygiene.check_runner_persistence", return_value=[])
     @mock.patch("stayawake.bots.security.hygiene.check_branch_protection", return_value=[])
-    @mock.patch("stayawake.bots.security.hygiene.check_vscode", return_value=[])
+    @mock.patch("stayawake.bots.security.hygiene.check_editors", return_value=[])
     @mock.patch("stayawake.bots.security.hygiene.check_credentials")
     @mock.patch("stayawake.lib.auth.resolve_token", return_value=(None, None))
     def test_fail_flag_gates_on_warning(self, _tok, m_cred, *_):

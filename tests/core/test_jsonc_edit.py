@@ -127,11 +127,23 @@ class TestTheModuleCanBeImported(unittest.TestCase):
         import importlib
         importlib.import_module("stayawake.bots.security.harden.settings")
 
-    def test_it_asks_the_check_which_entries_are_risky(self):
-        """The finding's sentence is a rendering of that answer, not the answer."""
+    def test_what_is_written_is_read_from_the_check_not_restated(self):
+        """One declaration of the correct value, so the writer cannot drift from the finding."""
         from stayawake.bots.security.harden import settings
         from stayawake.bots.security.hygiene import editor
-        self.assertIs(settings.risky_autoapprove_entries, editor.risky_autoapprove_entries)
+        for issue_id, setting in editor.SETTING_FOR.items():
+            with self.subTest(issue_id=issue_id):
+                writes = issue_id in settings.answerable([issue_id])
+                self.assertEqual(writes, setting.correct is not None)
+
+    def test_a_setting_whose_answer_is_a_decision_is_never_written(self):
+        """Auto-approval depends on how a machine is used, so there is no value to write."""
+        from stayawake.bots.security.harden import settings
+        from stayawake.bots.security.hygiene import editor
+        decided = {i for i, s in editor.SETTING_FOR.items() if s.correct is None}
+        self.assertEqual(decided, {"editor-autoapprove-all", "editor-autoapprove-risky"})
+        self.assertEqual(settings.answerable(decided), set())
+        self.assertEqual(settings.reported_only(decided), decided)
 
 
 if __name__ == "__main__":

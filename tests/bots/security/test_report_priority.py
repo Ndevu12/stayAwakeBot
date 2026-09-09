@@ -35,7 +35,7 @@ class TestAHostFindingIsRankedByItsTier(unittest.TestCase):
         self.assertLess(response_order("os-service-persistence"),
                         response_order("git-credentials-plaintext"))
         self.assertLess(response_order("git-credentials-plaintext"),
-                        response_order("vscode-autoapprove-risky"))
+                        response_order("editor-autoapprove-risky"))
 
     def test_it_reads_the_same_table_the_banner_does(self):
         # A second ranking would drift from `incident_tier()`; adding a tier must move both.
@@ -46,16 +46,16 @@ class TestAHostFindingIsRankedByItsTier(unittest.TestCase):
                     self.assertEqual(response_order(issue_id), rank)
 
     def test_the_audit_emits_worst_first(self):
-        report = hygiene.render([_issue("vscode-autoapprove-risky"),
+        report = hygiene.render([_issue("editor-autoapprove-risky"),
                                  _issue("git-credentials-plaintext"),
                                  _issue("os-service-persistence")], color=False, width=100)
         positions = {name: report.index(name) for name in
                      ("os-service-persistence", "git-credentials-plaintext",
-                      "vscode-autoapprove-risky")}
+                      "editor-autoapprove-risky")}
         self.assertLess(positions["os-service-persistence"],
                         positions["git-credentials-plaintext"])
         self.assertLess(positions["git-credentials-plaintext"],
-                        positions["vscode-autoapprove-risky"])
+                        positions["editor-autoapprove-risky"])
 
     def test_ordering_is_deterministic_for_equal_ranks(self):
         # Two findings of the same tier must not swap between runs.
