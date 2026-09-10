@@ -280,8 +280,9 @@ def scan(config_path: str | None = None, *, remote: bool = False,
             local_patterns = [str(here)]
             print(f"No targets configured; scanning current repository: {here}", file=sys.stderr)
         # Discovery (the FS walk) is itself slow and silent — cover it with a spinner.
+        unsearched: list[Path] = []
         with status("Discovering targets…", enabled=progress_on):
-            found = resolve_local_targets(local_patterns, opts)
+            found = resolve_local_targets(local_patterns, opts, unsearched=unsearched)
         repos = [t.root for t in found]
         # Fail CLOSED when EXPLICIT targets (ad-hoc paths or configured globs) resolve to zero
         # repositories — a stale glob or a checkout with no `.git` scanned NOTHING, which must not
@@ -294,6 +295,9 @@ def scan(config_path: str | None = None, *, remote: bool = False,
             return 2
         if progress_on and repos:
             prog.line(f"Found {len(repos)} repositor{'y' if len(repos) == 1 else 'ies'} to scan.")
+        if progress_on and unsearched:
+            prog.line(f"{len(unsearched)} director{'y' if len(unsearched) == 1 else 'ies'} could "
+                      "not be read and were not searched.")
         if len(repos) == 1:
             home = os.path.expanduser("~")
             display = str(found[0].label).replace(home, "~")

@@ -21,7 +21,7 @@ class TestTargetResolution(unittest.TestCase):
     def _capture(self, **scan_kwargs) -> dict:
         cap: dict = {}
 
-        def fake_discover(patterns, opts):
+        def fake_discover(patterns, opts, **kw):
             cap["patterns"] = patterns
             return []
 
