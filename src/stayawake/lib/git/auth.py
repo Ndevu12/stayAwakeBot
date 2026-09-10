@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Credential-safe GitHub HTTPS — keep the token out of argv, URLs, `ps`, and logs."""
+"""Credential-safe GitHub remote access — HTTPS with the token kept out of argv/URLs/logs, and
+SSH as an added reach when HTTPS cannot get to a repository."""
 from __future__ import annotations
 
 import contextlib
@@ -8,6 +9,8 @@ import stat
 import tempfile
 
 _HOST = "github.com"
+_SSH_COMMAND = "ssh -o BatchMode=yes -o ConnectTimeout=15"
+_transport: dict[str, str] = {}
 
 
 @contextlib.contextmanager
@@ -46,3 +49,47 @@ def github_https_auth(token: str | None):
     finally:
         with contextlib.suppress(OSError):
             os.unlink(path)
+
+
+def _ssh_env() -> dict:
+    """A child env for SSH git that never prompts (batch mode, bounded connect)."""
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0", GIT_EDITOR="true")
+    env.setdefault("GIT_SSH_COMMAND", _SSH_COMMAND)
+    return env
+
+
+def _order(slug: str) -> list[str]:
+    """The transports to try for `slug`, the last one that worked first, else HTTPS then SSH."""
+    order = ["https", "ssh"]
+    cached = _transport.get(slug)
+    return [cached] + [k for k in order if k != cached] if cached else order
+
+
+def run_remote_git(slug: str, token: str | None, attempt):
+    """Reach `github.com/<slug>` over HTTPS (token), then SSH on failure, caching the transport
+    that works so the next call tries it first. `attempt(url, env)` runs the op — the caller keeps
+    its own runner, so this decides only the transport. Returns the first result whose `returncode`
+    is 0, else the last (or None)."""
+    last = None
+    for kind in _order(slug):
+        if kind == "ssh":
+            last = attempt(f"git@{_HOST}:{slug}.git", _ssh_env())
+        else:
+            with github_https_auth(token) as (prefix, env):
+                last = attempt(f"{prefix}{slug}.git", env)
+        if last is not None and getattr(last, "returncode", 1) == 0:
+            _transport[slug] = kind
+            return last
+    return last
+
+
+@contextlib.contextmanager
+def github_remote(slug: str, token: str | None):
+    """Yield `(url, env)` for reaching `github.com/<slug>` over the transport that last worked
+    (HTTPS with the token, else SSH), for a caller that builds its own command instead of running
+    one through `run_remote_git`."""
+    if _transport.get(slug) == "ssh":
+        yield f"git@{_HOST}:{slug}.git", _ssh_env()
+        return
+    with github_https_auth(token) as (prefix, env):
+        yield f"{prefix}{slug}.git", env

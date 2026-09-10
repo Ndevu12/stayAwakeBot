@@ -386,12 +386,13 @@ def cloned_repo(slug: str, token: str | None, *, depth: int | None = 50):
     tmp = Path(tempfile.mkdtemp(prefix="sab-clone-"))
     clone = tmp / "repo"
     try:
-        with gitutil.github_https_auth(token) as (prefix, env):
+        def _attempt(url, env):
             cmd = ["git", "clone", "--quiet"]
             if depth is not None:
                 cmd += ["--depth", str(depth)]
-            cmd += [f"{prefix}{slug}.git", str(clone)]
-            r = subprocess.run(cmd, capture_output=True, text=True, check=False, env=env)
-        yield clone if r.returncode == 0 else None
+            cmd += [url, str(clone)]
+            return subprocess.run(cmd, capture_output=True, text=True, check=False, env=env)
+        r = gitutil.run_remote_git(slug, token, _attempt)
+        yield clone if (r is not None and r.returncode == 0) else None
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

@@ -46,8 +46,7 @@ def discard_pr(repo: Path, token: str) -> str:
 def discard_remote_branch(slug: str, token: str) -> str:
     """Delete FIX_BRANCH on a remote repo by slug, with no local clone — `git push --delete`
     straight to the authed URL (git TLS, SSL-immune). Auto-closes any PR from the branch."""
-    with gitutil.github_https_auth(token) as (prefix, env):
-        url = f"{prefix}{slug}.git"
+    with gitutil.github_remote(slug, token) as (url, env):
         if not gitutil.remote_has_branch(url, FIX_BRANCH, env=env):
             return f"{slug}: no '{FIX_BRANCH}' branch — nothing to discard"
         ok = gitutil.delete_remote_branch(url, FIX_BRANCH, env=env)

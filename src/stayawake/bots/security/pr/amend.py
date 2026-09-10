@@ -12,7 +12,7 @@ from stayawake.bots.security.models import CONFIRMED
 from stayawake.bots.security.remediation import footprint
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.targets import LocalRepoTarget
-from stayawake.lib.git.auth import github_https_auth
+from stayawake.lib.git.auth import run_remote_git
 from stayawake.lib.git.run import NETWORK_TIMEOUT, run
 from stayawake.bots.security.pr.outcome import (AmendOutcome, BranchResult, Cause, Reason,
                                                       amended, refused, render_amend_line)
@@ -232,9 +232,9 @@ def _read_remote_head(repo: Path, slug: str, branch: str,
                       token: str | None) -> tuple[bool, str | None]:
     """`(known, sha)`. `known` False means the lookup did not finish. `sha` None when
     `known` is True means the heads ref is absent."""
-    with github_https_auth(token) as (prefix, env):
-        res = run(repo, ["ls-remote", "--heads", f"{prefix}{slug}.git", f"refs/heads/{branch}"],
-                  env=env, timeout=NETWORK_TIMEOUT)
+    res = run_remote_git(slug, token, lambda url, env: run(
+        repo, ["ls-remote", "--heads", url, f"refs/heads/{branch}"], env=env,
+        timeout=NETWORK_TIMEOUT))
     if res is None or res.returncode != 0:
         return False, None
     # `ls-remote <pattern>` tail-matches at `/`, so a ref named `a/refs/heads/main` answers a query
@@ -361,9 +361,8 @@ def _tags_at(repo: Path, slug: str, olds: list[str], token: str | None) -> tuple
     """
     local = [name for sha in olds
              for name in gitutil.stdout(repo, ["tag", "--points-at", sha]).split()]
-    with github_https_auth(token) as (prefix, env_):
-        res = run(repo, ["ls-remote", "--tags", f"{prefix}{slug}.git"],
-                  env=env_, timeout=NETWORK_TIMEOUT)
+    res = run_remote_git(slug, token, lambda url, env: run(
+        repo, ["ls-remote", "--tags", url], env=env, timeout=NETWORK_TIMEOUT))
     if res is None or res.returncode != 0:
         return sorted(set(local)), False
     remote = []

@@ -10,7 +10,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from stayawake.lib.git.auth import github_https_auth
+from stayawake.lib.git.auth import github_https_auth, run_remote_git
 from stayawake.lib.git.run import run, stdout, NETWORK_TIMEOUT
 
 
@@ -153,11 +153,15 @@ def fetch_refs(repo: str | Path, *, token: str | None = None) -> FetchResult:
     own message is scrubbed of the token before it becomes a `reason` anyone may log.
     """
     slug = origin_slug(repo) if token else None
-    with github_https_auth(token) as (prefix, env):
-        target = f"{prefix}{slug}.git" if slug else "origin"
-        res = run(repo, ["fetch", "--prune", "--no-tags", target,
-                         "+refs/heads/*:refs/remotes/origin/*"],
-                  env=env, timeout=NETWORK_TIMEOUT)
+    refspec = "+refs/heads/*:refs/remotes/origin/*"
+    if slug:
+        res = run_remote_git(slug, token, lambda url, env: run(
+            repo, ["fetch", "--prune", "--no-tags", url, refspec], env=env,
+            timeout=NETWORK_TIMEOUT))
+    else:
+        with github_https_auth(token) as (_prefix, env):
+            res = run(repo, ["fetch", "--prune", "--no-tags", "origin", refspec],
+                      env=env, timeout=NETWORK_TIMEOUT)
     if res is None:
         return FetchResult(False, "git fetch could not run, or exceeded the network timeout")
     if res.returncode == 0:
