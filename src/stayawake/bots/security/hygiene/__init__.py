@@ -34,6 +34,7 @@ from .host_artifacts import check_host_artifacts
 from .process import check_live_processes, live_process_scope_note
 from .app_bundle import check_app_bundles
 from .agents import check_agents
+from .watching import check_self_check
 from .editor import check_editors
 from .mechanism import (check_ssh_authorized_keys, check_shell_profile,
                         check_git_config_execution, git_config_predicate)
@@ -47,7 +48,7 @@ __all__ = [
     "check_credentials", "check_runner_persistence", "check_persistence",
     "check_persistence_coverage", "check_autorun", "check_host_artifacts",
     "check_app_bundles",
-    "check_editors", "check_agents", "check_ssh_authorized_keys", "check_shell_profile", "check_git_config_execution",
+    "check_editors", "check_agents", "check_self_check", "check_ssh_authorized_keys", "check_shell_profile", "check_git_config_execution",
     "check_live_processes",
     "check_branch_protection", "audit", "audit_checks", "audit_outcomes", "run_check", "render",
     "CheckOutcome", "CHECKED_CLEAN", "FOUND", "UNKNOWN", "BLOCKED", "NOT_IMPLEMENTED",
@@ -60,7 +61,8 @@ _PREDICATES: dict[str, Callable[[], str | None]] = {
 }
 
 _SURFACE_PROBES = frozenset({
-    "editor settings", "agent permissions", "self-hosted runner", "OS-service persistence",
+    "editor settings", "agent permissions", "self-check", "self-hosted runner",
+    "OS-service persistence",
     "persistence surface coverage", "host drop-files", "SSH authorized_keys",
     "shell startup files", "git exec config", "autorun surface", "application bundles",
     "running processes",
@@ -126,6 +128,7 @@ def audit_checks(slug: str | None = None, token: str | None = None, branch: str 
         ("cached credentials", check_credentials),
         ("editor settings", check_editors),
         ("agent permissions", check_agents),
+        ("self-check", check_self_check),
         ("self-hosted runner", check_runner_persistence),
         ("OS-service persistence", check_persistence),
         ("persistence surface coverage", check_persistence_coverage),   # enumeration honesty
