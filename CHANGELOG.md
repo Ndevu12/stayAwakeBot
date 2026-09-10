@@ -14,6 +14,12 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Fixed
+- **`saw fix` and `saw discard` stop on a path that is not there, instead of acting on everything
+  beside it.** A named path that does not exist falls back to its parent while repositories are
+  discovered, so one typo reached every repository next to the one you meant. `saw fix amend`
+  already refused; all three do now. A glob is unaffected — it may legitimately match nothing.
+
+### Fixed
 - **`saw fix amend <path>` checks the credential before it starts, not one repository at a time.**
   Every other acting command refuses up front on a credential that cannot do the work; the local
   amend path did not, so a dead or under-scoped one was met after the run had begun.
