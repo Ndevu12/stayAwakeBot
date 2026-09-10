@@ -299,7 +299,7 @@ def tracked(repo: str | Path, path: str) -> bool:
 
 
 def file_commits(repo: str | Path, path: str, limit: int = 50,
-                 first_parent: bool = False) -> list[str]:
+                 first_parent: bool = False, all_branches: bool = False) -> list[str]:
     """Commit SHAs that touched `path`, newest first (bounded). The walk that the
     remediator uses to find the most recent committed version that scans clean.
 
@@ -310,10 +310,17 @@ def file_commits(repo: str | Path, path: str, limit: int = 50,
     The recovery source is itself a trust decision (an evil merge can make a "clean-looking"
     blob reachable only through its malicious side), so recovery uses this mode; the default
     keeps the full history walk for callers that want every version.
+
+    `all_branches=True` walks every local branch, not only HEAD, with full history (no
+    TREESAME merge simplification), so a caller that must reach a payload introduced on any
+    branch — including one a later merge took from its other parent — sees every commit that
+    changed the path.
     """
     args = ["log", f"-n{limit}", "--format=%H"]
     if first_parent:
         args.append("--first-parent")
+    if all_branches:
+        args += ["--branches", "--full-history"]
     args += ["--", path]
     out = stdout(repo, args)
     return [ln.strip() for ln in out.splitlines() if ln.strip()]

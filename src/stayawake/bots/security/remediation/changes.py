@@ -17,7 +17,7 @@ _ACTIONS = {
     "remove-foreign-vscode": "vscode",
     "strip-gitignore-markers": "strip-gitignore",
 }
-_GITIGNORE_MARKERS = {"branch_structure.json", "temp_auto_push.bat", "temp_interactive_push.bat"}
+_GITIGNORE_MARKER_PATTERNS = None
 
 _QUARANTINE_COMMENT = "# Malware quarantine / remediation artifacts (kept local, never committed)"
 _QUARANTINE_PATTERNS = (QUARANTINE_DIR + "/",)
@@ -76,9 +76,22 @@ def plan(findings) -> list[Change]:
     return list(changes.values())
 
 
+def _gitignore_marker_patterns():
+    """The git-marker patterns for `.gitignore`, compiled once from the live signature DB."""
+    global _GITIGNORE_MARKER_PATTERNS
+    if _GITIGNORE_MARKER_PATTERNS is None:
+        from stayawake.bots.security import signatures as _sigs
+        from stayawake.bots.security.remediation import footprint
+        flat = [s for group in _sigs.load_signatures().values() for s in group]
+        _GITIGNORE_MARKER_PATTERNS = footprint._marker_patterns(".gitignore", flat)
+    return _GITIGNORE_MARKER_PATTERNS
+
+
 def strip_gitignore_text(text: str) -> str:
-    return "\n".join(l for l in text.splitlines()
-                     if l.strip() not in _GITIGNORE_MARKERS).rstrip("\n") + "\n"
+    """`text` with every worm-marker line the signatures name removed; unchanged if none match."""
+    from stayawake.bots.security.remediation import footprint
+    stripped = footprint.line_marker_strip(text, _gitignore_marker_patterns())
+    return text if stripped is None else stripped
 
 
 def strip_settings_autorun(text: str) -> str:

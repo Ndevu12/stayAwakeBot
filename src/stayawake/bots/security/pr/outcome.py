@@ -72,6 +72,8 @@ class Cause(Enum):
     FORKS_EXIST = "forks-exist"
     FORKS_NOT_ESTABLISHED = "forks-not-established"
     PREVIOUS_OBJECTS_UNCOLLECTED = "previous-objects-uncollected"
+    PAYLOAD_NEEDS_MANUAL_RECOVERY = "payload-needs-manual-recovery"
+    HISTORY_TOO_LARGE_TO_ENUMERATE = "history-too-large-to-enumerate"
 
 
 _NEEDING_NO_ACTION = frozenset({Cause.PREVIOUS_OBJECTS_UNCOLLECTED, Cause.NO_CONFIRMED_PAYLOAD})
@@ -214,6 +216,10 @@ _PHRASE = {
         "whether a tag still points at the replaced commit could not be established",
     Cause.FORKS_NOT_ESTABLISHED: "could not check for forks",
     Cause.PREVIOUS_OBJECTS_UNCOLLECTED: "previous objects remain until collected",
+    Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY:
+        "{detail} confirmed finding(s) here need manual recovery — this verb could not remove them",
+    Cause.HISTORY_TOO_LARGE_TO_ENUMERATE:
+        "a reported file changed too many times to enumerate its history safely — recover it by hand",
 }
 
 _UNNAMED_CAUSE = "the run did not say why"
