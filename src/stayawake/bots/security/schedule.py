@@ -56,6 +56,19 @@ def declare(argv: list[str], path: Path | None = None) -> bool:
     return True
 
 
+def forget(path: Path | None = None) -> None:
+    """Drop the record of what was placed. Best effort: it is bookkeeping, not a control."""
+    try:
+        (path or record_path()).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def was_placed(path: Path | None = None) -> bool:
+    """Whether this tool recorded placing an item on this machine."""
+    return recorded(path) is not None
+
+
 def recorded(path: Path | None = None) -> list[str] | None:
     """The argv saw last placed, or None when there is no readable record."""
     try:
@@ -76,6 +89,15 @@ def item_path() -> Path:
 def program() -> list[str]:
     """How the item names saw, as argv."""
     return [sys.executable, "-E", "-P", "-m", "stayawake"]
+
+
+_CANNOT_SURVIVE = ("/tmp/", "/private/tmp/", "/var/tmp/", "/dev/shm/")
+
+
+def survives_a_restart(argv: list[str] | None = None) -> bool:
+    """Whether the program `argv` names will still be there after a restart."""
+    named = os.path.expanduser((argv or program())[0])
+    return not named.startswith(_CANNOT_SURVIVE)
 
 
 def content(saw: list[str] | None = None) -> str:
@@ -272,6 +294,8 @@ def settle(path: Path | None = None, saw: list[str] | None = None, write=_write,
     if not supported():
         return Scheduling(problem="not implemented on this platform")
     where = path or item_path()
+    if not survives_a_restart(saw):
+        return Scheduling(problem="the running saw would not be there after a restart")
     was = verdict(where, saw, record)
     if was == PRISTINE:
         if running():
@@ -302,4 +326,7 @@ def take_back(path: Path | None = None, saw: list[str] | None = None,
         where.unlink()
     except OSError:
         return UNREADABLE
-    return REMOVED if verdict(where, saw, record) == ABSENT else ALTERED
+    if verdict(where, saw, record) != ABSENT:
+        return ALTERED
+    forget(record)
+    return REMOVED
