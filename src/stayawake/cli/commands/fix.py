@@ -69,6 +69,9 @@ def register(sub) -> None:
                         "want on GitHub.")
     p.add_argument("--no-stream", action="store_true", dest="no_stream",
                    help="disable live progress output (plain, instant lines)")
+    p.add_argument("--remove-foreign", action="store_true", dest="remove_foreign",
+                   help="with `amend`: also remove a confirmed wholly-foreign file from history "
+                        "(a file that is entirely the artifact, with nothing legitimate to keep)")
     p.set_defaults(func=run)
 
 
@@ -89,7 +92,11 @@ def run(a: argparse.Namespace) -> int:
         return remediator.amend(a.config, paths=None if a.remote else rest,
                                 remote=a.remote,
                                 slugs=(rest or None) if a.remote else None,
-                                no_stream=a.no_stream, jobs=a.jobs)
+                                no_stream=a.no_stream, jobs=a.jobs,
+                                remove_foreign=a.remove_foreign)
+    if a.remove_foreign:
+        print("saw fix --remove-foreign is only valid with `amend`", file=sys.stderr)
+        return exitcodes.INCOMPLETE
     remote = a.remote or bool(a.user) or bool(a.org)
     return remediator.fix(a.config, pr=a.pr, remote=remote,
                           paths=None if remote else (positionals or None),
