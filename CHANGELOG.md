@@ -13,14 +13,7 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
-### Changed
-- **The source no longer carries notes describing what each check looks for.** They shipped in the
-  package, and together they read as a map of what the tool does and does not examine.
-
-### Fixed
-- **A start-up item this tool placed is still reported when what it runs sits somewhere anyone can
-  write.** Recognising its own work stopped one finding too many: a world-writable location is
-  where a foothold puts its program, and this tool's name on the file says nothing about that.
+## [0.11.0] - 2026-09-10
 
 ### Added
 - **`saw audit` checks what a coding agent on this machine may run without asking.** Claude Code,
@@ -31,13 +24,29 @@ reader, not the mechanism or the weakness it closed.
 - **`saw harden` withdraws those approvals.** A risky standing approval is taken out and an
   approval step that was turned off is put back. What you allowed that is not risky stays exactly
   as it is, and `--take-back` restores what was withdrawn.
+- **`saw audit` covers every editor of the VS Code family on this machine, not only VS Code.**
+  Cursor, Windsurf, VSCodium and other forks are checked the same way, and each finding names the
+  editor it is about. An editor installed here that saw does not understand is named in the result
+  rather than passed over.
+- **`saw harden` corrects the editor settings it used to only report.** The setting that lets a
+  folder run a task when it is opened, and the two Workspace Trust settings, are put right in every
+  editor it covers. `--take-back` puts back what it can and says what it left.
+- **`saw harden` turns off dangerous command auto-approval for chat and agent tools.** A blanket
+  "approve everything", a pattern matching every command, and each risky command the audit names
+  are set to off, so an agent no longer runs them unprompted. Commands you allowed that are not
+  dangerous are left as they are.
 
 ### Changed
+- **The source no longer carries notes describing what each check looks for.** They shipped in the
+  package, and together they read as a map of what the tool does and does not examine.
 - **Findings no longer print the file or folder they found.** A report gets read over a shoulder,
   pasted into a ticket and attached to a mail, and every location in it is a map. Each one now says
   what is wrong and what to run.
 
 ### Fixed
+- **A start-up item this tool placed is still reported when what it runs sits somewhere anyone can
+  write.** Recognising its own work stopped one finding too many: a world-writable location is
+  where a foothold puts its program, and this tool's name on the file says nothing about that.
 - **`saw audit` no longer asks you to confirm the start-up item `saw` itself installed.** A machine
   running `saw watch` reported it every run as a new entry that could not be attributed, which is
   the finding you most need to trust. It is recognised by what it contains, not by its name, so an
@@ -52,19 +61,6 @@ reader, not the mechanism or the weakness it closed.
   said an artifact was in more than one place when one was found, and told you to compare locations
   it had never named. The two now read as what they are. Either still withholds the
   rotation all-clear.
-
-### Added
-- **`saw audit` covers every editor of the VS Code family on this machine, not only VS Code.**
-  Cursor, Windsurf, VSCodium and other forks are checked the same way, and each finding names the
-  editor it is about. An editor installed here that saw does not understand is named in the result
-  rather than passed over.
-- **`saw harden` corrects the editor settings it used to only report.** The setting that lets a
-  folder run a task when it is opened, and the two Workspace Trust settings, are put right in every
-  editor it covers. `--take-back` puts back what it can and says what it left.
-- **`saw harden` turns off dangerous command auto-approval for chat and agent tools.** A blanket
-  "approve everything", a pattern matching every command, and each risky command the audit names
-  are set to off, so an agent no longer runs them unprompted. Commands you allowed that are not
-  dangerous are left as they are.
 
 ## [0.10.0] - 2026-09-09
 
@@ -1003,7 +999,8 @@ _No user-facing changes were recorded for this release._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel (supply-chain worm
 detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.7.0...v0.8.0
