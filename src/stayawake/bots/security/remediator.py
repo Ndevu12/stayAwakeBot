@@ -101,6 +101,13 @@ def _preflight(token: str | None, intent=None) -> str | None:
     return None if decision.allowed else decision.message
 
 
+def named_but_absent(paths) -> list[str]:
+    """The named paths that are not on disk. A glob is not named: it may legitimately match none."""
+    return sorted(p for p in (paths or [])
+                  if not any(c in p for c in "*?[")
+                  and not Path(p).expanduser().exists())
+
+
 def _local_repos(cfg: dict, opts: ScanOptions, paths) -> list[Path]:
     cfg_local = (cfg.get("targets", {}) or {}).get("local", []) or []
     patterns = list(paths) if paths else (list(cfg_local) or [str(_enclosing_repo_root())])
@@ -184,6 +191,10 @@ def _fix_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *, publish: bo
                jobs=None, branches=None) -> list[FixOutcome]:
     """Fix LOCAL repositories. Default: PREPARE a `security/auto-clean` branch per repo (no
     push, no network). `publish` (`--pr`): also push + open/update a PR (pre-flighted)."""
+    missing = named_but_absent(paths)
+    if missing:
+        prog.line(f"error: no such path: {', '.join(missing)}")
+        return []
     token = source = None
     if publish:
         token, source = auth.resolve_token()
@@ -309,12 +320,7 @@ def amend(config_path: str | None = None, *, paths: list[str] | None = None,
 def _amend_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *,
                  jobs=None) -> list[FixOutcome]:
     from stayawake.core.identity import Intent
-    # A named path that does not exist falls back to its PARENT during discovery, which turns one
-    # typo into every repository beside the intended one. Harmless for a scan; this verb
-    # force-updates branches, so a path it cannot find is an error rather than a wider sweep.
-    missing = sorted(p for p in (paths or [])
-                     if not any(c in p for c in "*?[")
-                     and not Path(p).expanduser().exists())
+    missing = named_but_absent(paths)
     if missing:
         prog.line(f"error: no such path: {', '.join(missing)}")
         return []
@@ -416,6 +422,10 @@ def fix(config_path: str | None = None, *, pr: bool = False, remote: bool = Fals
 # ── saw discard ──────────────────────────────────────────────────────────────────
 
 def _discard_local(cfg, opts, branch: bool, pr: bool, paths, prog: Streamer) -> list[str]:
+    missing = named_but_absent(paths)
+    if missing:
+        prog.line(f"error: no such path: {', '.join(missing)}")
+        return []
     token = source = None
     if pr:
         token, source = auth.resolve_token()
