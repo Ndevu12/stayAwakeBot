@@ -13,13 +13,19 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-09-10
+
+### Added
+- **`saw watch status` says whether this machine is checking itself.** Whether the check is running
+  is asked of the system rather than read from the file, because one command stops it without
+  changing a byte. It also says when the check is in place but will not start until your next
+  login, and when what was checking has been changed.
+
 ### Fixed
 - **`saw fix` and `saw discard` stop on a path that is not there, instead of acting on everything
   beside it.** A named path that does not exist falls back to its parent while repositories are
   discovered, so one typo reached every repository next to the one you meant. `saw fix amend`
   already refused; all three do now. A glob is unaffected — it may legitimately match nothing.
-
-### Fixed
 - **`saw fix amend <path>` checks the credential before it starts, not one repository at a time.**
   Every other acting command refuses up front on a credential that cannot do the work; the local
   amend path did not, so a dead or under-scoped one was met after the run had begun.
@@ -29,7 +35,6 @@ reader, not the mechanism or the weakness it closed.
 - **It no longer says you lack admin when it could not read who you are.** If the login behind the
   credential cannot be read, whether it owns the repository was never established; that now reads
   as unestablished. It still refuses to rewrite.
-
 - **`saw watch` refuses to set up a check that would not survive a restart.** It used to point the
   check at whichever copy of saw was running, including one inside a temporary directory — which
   works until the directory is cleaned up, and then the machine quietly stops checking itself.
@@ -41,12 +46,6 @@ reader, not the mechanism or the weakness it closed.
   target with its own coverage notes, burying the repositories you asked about. They are counted
   and reported in one line instead. A path or pattern that names one still scans it, and still
   fails closed when it cannot be read.
-
-### Added
-- **`saw watch status` says whether this machine is checking itself.** Whether the check is running
-  is asked of the system rather than read from the file, because one command stops it without
-  changing a byte. It also says when the check is in place but will not start until your next
-  login, and when what was checking has been changed.
 
 ## [0.11.0] - 2026-09-10
 
@@ -1032,7 +1031,8 @@ _No user-facing changes were recorded for this release._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel (supply-chain worm
 detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.11.1...HEAD
+[0.11.1]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.8.0...v0.9.0
