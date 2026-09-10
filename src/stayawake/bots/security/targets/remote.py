@@ -24,17 +24,13 @@ class RemoteRepoTarget(Target):
         self._token = token
 
     def clone(self) -> bool:
-        # Token (if any) is supplied via GIT_ASKPASS, never in the URL/argv.
-        try:
-            with gitutil.github_https_auth(self._token) as (prefix, env):
-                r = subprocess.run(
-                    ["git", "clone", "--depth", str(self.opts.remote_clone_depth), "--no-tags",
-                     "--config", "core.hooksPath=/dev/null",
-                     f"{prefix}{self._slug}.git", str(self.root)],
-                    capture_output=True, text=True, timeout=300, env=env, check=False)
-            return r.returncode == 0
-        except (subprocess.SubprocessError, OSError):
-            return False
+        def _attempt(url, env):
+            return subprocess.run(
+                ["git", "clone", "--depth", str(self.opts.remote_clone_depth), "--no-tags",
+                 "--config", "core.hooksPath=/dev/null", url, str(self.root)],
+                capture_output=True, text=True, timeout=300, env=env, check=False)
+        r = gitutil.run_remote_git(self._slug, self._token, _attempt)
+        return r is not None and r.returncode == 0
 
     def cleanup(self) -> None:
         shutil.rmtree(self._tmp, ignore_errors=True)

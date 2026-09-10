@@ -20,6 +20,11 @@ reader, not the mechanism or the weakness it closed.
   force-updates them. Without the flag such a file is still reported as needing you, unchanged.
 
 ### Changed
+- **saw's GitHub operations fall back to SSH when HTTPS cannot reach a repository.** Cloning,
+  `saw fix --remote`, `saw fix amend` and the guard now try HTTPS with your token first and, if
+  that cannot get to the repo (git-over-HTTPS blocked on the network, or the token has no access),
+  use your SSH key instead — so they work where they previously failed. HTTPS with a scoped token
+  is still preferred whenever it works.
 - **`saw fix amend` now removes a confirmed payload that lives in a file, not only one smuggled
   through a past merge.** It rewrites the payload out of every commit that carries it — keeping the
   legitimate edits a file gained after it was infected — and force-updates the branches. When a

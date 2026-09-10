@@ -6,7 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from stayawake.lib.git.auth import github_https_auth
+from stayawake.lib.git.auth import run_remote_git
 from stayawake.lib.git.run import run, run_ok, NETWORK_TIMEOUT
 
 
@@ -24,9 +24,8 @@ def push_branch_result(repo: str | Path, slug: str, branch: str, token: str | No
     Does not overwrite a remote ref. A branch that is not fast-forwardable is a refused
     push, not a force-update.
     """
-    with github_https_auth(token) as (prefix, env):
-        args = ["push", f"{prefix}{slug}.git", f"{branch}:{branch}"]
-        res = run(repo, args, env=env, timeout=NETWORK_TIMEOUT)
+    res = run_remote_git(slug, token, lambda url, env: run(
+        repo, ["push", url, f"{branch}:{branch}"], env=env, timeout=NETWORK_TIMEOUT))
     if res is None:
         return PushResult(False, "git push could not run")
     if res.returncode == 0:
@@ -43,10 +42,9 @@ def force_update_head(repo: str | Path, slug: str, branch: str, token: str | Non
     """
     if not (lease or "").strip():
         return PushResult(False, "remote branch could not be read")
-    with github_https_auth(token) as (prefix, env):
-        args = ["push", f"--force-with-lease=refs/heads/{branch}:{lease}",
-                f"{prefix}{slug}.git", f"{branch}:refs/heads/{branch}"]
-        res = run(repo, args, env=env, timeout=NETWORK_TIMEOUT)
+    res = run_remote_git(slug, token, lambda url, env: run(
+        repo, ["push", f"--force-with-lease=refs/heads/{branch}:{lease}",
+               url, f"{branch}:refs/heads/{branch}"], env=env, timeout=NETWORK_TIMEOUT))
     if res is None:
         return PushResult(False, "git push could not run")
     if res.returncode == 0:
@@ -59,9 +57,8 @@ def publish_head(repo: str | Path, slug: str, branch: str, token: str | None,
     """Create `refs/heads/<dest>` on the remote from local `branch`. Does not overwrite an
     existing ref, so publishing beside a protected branch can destroy nothing."""
     target = dest or branch
-    with github_https_auth(token) as (prefix, env):
-        args = ["push", f"{prefix}{slug}.git", f"{branch}:refs/heads/{target}"]
-        res = run(repo, args, env=env, timeout=NETWORK_TIMEOUT)
+    res = run_remote_git(slug, token, lambda url, env: run(
+        repo, ["push", url, f"{branch}:refs/heads/{target}"], env=env, timeout=NETWORK_TIMEOUT))
     if res is None:
         return PushResult(False, "git push could not run")
     if res.returncode == 0:

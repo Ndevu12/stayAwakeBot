@@ -13,7 +13,7 @@ Submodules:
   write   — mutations (add_worktree, stage_all, commit_fix, push_branch, …)
 """
 from stayawake.lib.git.run import run, run_ok, stdout
-from stayawake.lib.git.auth import github_https_auth
+from stayawake.lib.git.auth import github_https_auth, github_remote, run_remote_git
 from stayawake.lib.git.query import (
     is_git_repo,
     slug_from_url,
@@ -60,7 +60,7 @@ from stayawake.lib.git.write import (
 )
 
 __all__ = [
-    "run", "run_ok", "stdout", "github_https_auth",
+    "run", "run_ok", "stdout", "github_https_auth", "github_remote", "run_remote_git",
     "is_git_repo", "slug_from_url", "origin_slug", "default_branch", "ref_exists",
     "parents", "changed_paths", "path_exists_at", "file_at", "tree_entry", "list_tree", "tracked", "tracked_under",
     "file_commits", "introduced_added_text", "commit_meta", "remote_has_branch", "is_ancestor",
