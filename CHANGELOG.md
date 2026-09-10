@@ -13,6 +13,12 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Added
+- **`saw watch status` says whether this machine is checking itself.** Whether the check is running
+  is asked of the system rather than read from the file, because one command stops it without
+  changing a byte. It also says when the check is in place but will not start until your next
+  login, and when what was checking has been changed.
+
 ## [0.11.0] - 2026-09-10
 
 ### Added

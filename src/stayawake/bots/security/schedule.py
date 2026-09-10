@@ -210,6 +210,11 @@ def _running(run=None, binary=None) -> bool:
         return False
 
 
+def is_running(run=None, binary=None) -> bool:
+    """Whether the service manager currently holds the job."""
+    return _running(run=run, binary=binary)
+
+
 def _deactivate(where: Path, run=None, binary=None) -> None:
     """Stop it now rather than leaving it running until the next login. Best effort."""
     run = run or subprocess.run
