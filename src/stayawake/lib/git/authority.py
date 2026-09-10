@@ -101,12 +101,26 @@ class Protection:
         return self.protected is None
 
 
-def may_rewrite(slug: str, token: str | None) -> Authority:
+def may_rewrite(slug: str, token: str | None, *, identity_fallback: str | None = None) -> Authority:
     """May the identity behind `token` rewrite `owner/name`'s history?
 
     Permitted only when the authenticated login IS the repository owner, or the repository reports
     `permissions.admin` for this credential. `push` is explicitly not enough. Never raises.
+
+    `identity_fallback` — the operator's own session credential — is assessed ONLY when `token`
+    named no login (a GitHub App installation token has no `GET /user`) and nothing else settled the
+    answer; a permitted result from it is then preferred over the undetermined one.
     """
+    result = _assess(slug, token)
+    if result.reason == "identity_unknown" and identity_fallback and identity_fallback != token:
+        via_operator = _assess(slug, identity_fallback)
+        if via_operator.permitted:
+            return via_operator
+    return result
+
+
+def _assess(slug: str, token: str | None) -> Authority:
+    """One credential's authority over `owner/name`, with no fallback — see `may_rewrite`."""
     if not token:
         return Authority(False, "no_credential", "no GitHub credential is available")
     parts = _split_slug(slug)

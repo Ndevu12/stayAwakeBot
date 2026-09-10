@@ -20,6 +20,12 @@ reader, not the mechanism or the weakness it closed.
   force-updates them. Without the flag such a file is still reported as needing you, unchanged.
 
 ### Changed
+- **`saw fix amend` acts with the access the operator actually has.** When the credential is a
+  GitHub App token that cannot name itself, amend establishes your authority to rewrite from your
+  own `gh` session instead of refusing; and it signs the rewritten commits with the signer
+  configured where you run it, rather than requiring that configuration inside the throwaway clone
+  it made. A repository whose history is signed is still never rewritten unsigned — when no
+  signature can be produced the run refuses and moves nothing.
 - **saw's GitHub operations fall back to SSH when HTTPS cannot reach a repository.** Cloning,
   `saw fix --remote`, `saw fix amend` and the guard now try HTTPS with your token first and, if
   that cannot get to the repo (git-over-HTTPS blocked on the network, or the token has no access),

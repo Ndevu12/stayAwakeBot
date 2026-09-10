@@ -23,6 +23,8 @@ _BRANCH = "/repos/acme/widget/branches/main"
 _RULE = "/repos/acme/widget/branches/main/protection"
 _USER = "/user"
 _TOKEN = "ghp_secret_value_never_logged"
+_APP = "app-installation-token-cannot-GET-user"
+_GH = "operator-gh-session-token"
 
 
 def _routes(by_path: dict[str, ApiRead] | None = None):
@@ -32,6 +34,21 @@ def _routes(by_path: dict[str, ApiRead] | None = None):
     def _do_request(path, method="GET", token=None, data=None):
         if path not in paths:
             raise AssertionError(f"unexpected API path: {path}")
+        return paths[path]
+
+    return mock.patch.object(github_api, "_do_request", side_effect=_do_request)
+
+
+def _routes_by_token(by_token: dict[str | None, dict[str, ApiRead]]):
+    """Stub `_do_request`, routing by (token, path) — so one credential can see `/user` while
+    another is forbidden it. A token or path not present fails the test, which is how a test proves
+    a credential was NOT consulted."""
+    def _do_request(path, method="GET", token=None, data=None):
+        paths = by_token.get(token)
+        if paths is None:
+            raise AssertionError(f"unexpected token consulted: {token!r}")
+        if path not in paths:
+            raise AssertionError(f"unexpected API path for {token!r}: {path}")
         return paths[path]
 
     return mock.patch.object(github_api, "_do_request", side_effect=_do_request)
@@ -184,6 +201,67 @@ class TestMayRewrite(unittest.TestCase):
                 got = authority.may_rewrite(slug, _TOKEN)
                 self.assertFalse(got.permitted)
                 self.assertEqual(got.reason, "malformed_slug")
+
+    def test_identity_fallback_settles_ownership_for_an_app_token(self):
+        # The App token cannot GET /user; the operator's own session can, and it owns the repo.
+        with _routes_by_token({
+            _APP: {_REPO: _repo_read(permissions={"admin": False, "push": True}),
+                   _USER: ApiRead(cause="forbidden", status=403)},
+            _GH: {_REPO: _repo_read(permissions={"admin": False, "push": True}),
+                  _USER: _user_read("acme")},
+        }):
+            got = authority.may_rewrite(_SLUG, _APP, identity_fallback=_GH)
+        self.assertTrue(got.permitted)
+        self.assertEqual(got.reason, "owner")
+        self.assertEqual(got.login, "acme")
+
+    def test_identity_fallback_settles_via_admin(self):
+        with _routes_by_token({
+            _APP: {_REPO: _repo_read(owner_login="acme-org",
+                                     permissions={"admin": False, "push": True}),
+                   _USER: ApiRead(cause="forbidden", status=403)},
+            _GH: {_REPO: _repo_read(owner_login="acme-org",
+                                    permissions={"admin": True, "push": True}),
+                  _USER: _user_read("maintainer")},
+        }):
+            got = authority.may_rewrite(_SLUG, _APP, identity_fallback=_GH)
+        self.assertTrue(got.permitted)
+        self.assertEqual(got.reason, "admin")
+
+    def test_identity_fallback_that_is_not_owner_leaves_the_undetermined_refusal(self):
+        # The fallback can only GRANT; when it cannot, the honest answer is still the App token's
+        # undetermined identity — not the fallback identity's conclusive refusal.
+        with _routes_by_token({
+            _APP: {_REPO: _repo_read(permissions={"admin": False, "push": True}),
+                   _USER: ApiRead(cause="forbidden", status=403)},
+            _GH: {_REPO: _repo_read(permissions={"admin": False, "push": True}),
+                  _USER: _user_read("someone-else")},
+        }):
+            got = authority.may_rewrite(_SLUG, _APP, identity_fallback=_GH)
+        self.assertFalse(got.permitted)
+        self.assertEqual(got.reason, "identity_unknown")
+        self.assertFalse(got.conclusive)
+
+    def test_identity_fallback_is_not_consulted_when_the_primary_settled_it(self):
+        # A known login with push-only is a CONCLUSIVE refusal; _GH is unrouted, so reaching it
+        # would raise — proving the fallback is never consulted on a settled answer.
+        with _routes_by_token({
+            _TOKEN: {_REPO: _repo_read(permissions={"admin": False, "push": True}),
+                     _USER: _user_read("someone")},
+        }):
+            got = authority.may_rewrite(_SLUG, _TOKEN, identity_fallback=_GH)
+        self.assertFalse(got.permitted)
+        self.assertEqual(got.reason, "push_without_admin")
+
+    def test_identity_fallback_equal_to_the_token_is_not_reassessed(self):
+        # Guard against re-assessing the same credential (no loop, no redundant call).
+        with _routes_by_token({
+            _APP: {_REPO: _repo_read(permissions={"admin": False, "push": True}),
+                   _USER: ApiRead(cause="forbidden", status=403)},
+        }):
+            got = authority.may_rewrite(_SLUG, _APP, identity_fallback=_APP)
+        self.assertFalse(got.permitted)
+        self.assertEqual(got.reason, "identity_unknown")
 
 
 class TestRefProtection(unittest.TestCase):
