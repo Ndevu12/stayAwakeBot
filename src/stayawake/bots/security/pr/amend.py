@@ -32,17 +32,9 @@ def _full(repo: Path, sha: str) -> str:
 
 def _payload_left(repo: Path, olds, rebuilt, new_tips: dict[str, str],
                   path_checks: dict) -> list[str]:
-    """What the rebuild produced that still reaches the payload. Empty means it did its job.
-
-    Every other check in this path asks what CHANGED. None of them asks whether anything infected
-    REMAINS, and those are different questions — a correction that quietly did nothing changes
-    nothing and passes them all.
-
-    `path_checks` maps each corrected path to its own footprint check, so a marker path is judged
-    by the marker check and a loader path by the loader check. Asked of the rebuilt objects, before
-    any reference moves, so a failure needs nothing put back. Re-scanning the repository instead
-    would be answered by the OLD commits, still reachable through refs this run has not pushed over.
-    """
+    """What the rebuilt objects still leave reaching the payload, checked before any reference
+    moves. Empty means clean. `olds` are the pre-rewrite carrying commits; `path_checks` maps each
+    corrected path to its own footprint check."""
     left = []
     for old in sorted(olds):
         for tip in sorted(set(new_tips.values())):
@@ -98,13 +90,8 @@ def _flat(signatures) -> list:
 
 
 def _content_targets(repo: Path, scan, signatures) -> list[tuple]:
-    """Confirmed file findings this verb can excise: `(finding, carries, corrector, cleaned_head)`.
-
-    One correction per path. A finding is only taken when its excision actually clears the
-    footprint from the file as it stands, so a payload the excision cannot separate is reported for
-    review, not accepted and then failed mid-rewrite. In-place excision reaches every branch, so it
-    takes precedence over a commit-attributed revert on a path both name.
-    """
+    """Confirmed file findings this verb can excise, as `(finding, carries, corrector,
+    cleaned_head)`, one per path and only where the corrector clears the footprint at HEAD."""
     flat = _flat(signatures)
     out = []
     seen: set[str] = set()
@@ -131,13 +118,8 @@ def _content_targets(repo: Path, scan, signatures) -> list[tuple]:
 
 def _unhandled_confirmed(scan, signatures, revert_paths: set[str],
                          cleaned_head: dict[str, str]) -> int:
-    """How many confirmed, non-advisory findings this verb neither attributes to a commit nor
-    excises — so a completed run still leaves work a person must do.
-
-    Judged per finding, not per path: a second confirmed finding on a path already being excised
-    counts as handled only when the excision actually clears ITS footprint too, so a different
-    payload sharing a file is never dismissed on the strength of the one beside it.
-    """
+    """How many confirmed, non-advisory findings this verb neither reverts (a revert path) nor
+    excises (its footprint is gone from the cleaned HEAD of its path)."""
     flat = _flat(signatures)
     count = 0
     for f in scan.findings:
@@ -159,14 +141,8 @@ _MAX_PATH_HISTORY = 100_000
 
 
 def _carrying_commits(repo: Path, path: str, carries) -> list[str] | None:
-    """Every commit on any local branch whose blob at `path` carries the footprint, or None if
-    the path's history is too long to enumerate with certainty.
-
-    Not one introduce point on the current branch: the same payload is often introduced
-    independently on several branches, and each must be reached, as the commit-attributed path
-    already reaches every branch a confirmed commit sits on. A truncated walk could miss the
-    oldest introduce point, so it fails closed rather than reporting a clean it cannot prove.
-    """
+    """Every commit on any local branch whose blob at `path` carries the footprint, or None when
+    the path's history reaches the enumeration bound and cannot be walked with certainty."""
     changed = gitutil.file_commits(repo, path, limit=_MAX_PATH_HISTORY, all_branches=True)
     if len(changed) >= _MAX_PATH_HISTORY:
         return None
@@ -174,9 +150,7 @@ def _carrying_commits(repo: Path, path: str, carries) -> list[str] | None:
 
 
 def _branches_left_carrying(repo: Path, clean: dict, covered: set[str]) -> list[str]:
-    """Local branches whose tip still carries a footprint this run means to excise, yet which are
-    not scheduled to move — a check that trusts no attribution, so a branch missed for any reason
-    stops the run rather than letting it report done."""
+    """Local branches, outside `covered`, whose tip still carries a clean-mode footprint."""
     if not clean:
         return []
     out: set[str] = set()

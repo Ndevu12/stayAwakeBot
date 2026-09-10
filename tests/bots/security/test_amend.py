@@ -1031,12 +1031,7 @@ def _seam_line(clean_prefix: str) -> str:
 
 
 class TestAmendActsOnContentPayload(_AmendFixture):
-    """A confirmed payload in a file — carrying no commit id — is still rewritten out of history.
-
-    The two shapes measured on a real host: a loader appended to a legit config that kept being
-    edited after infection, and worm markers added to a `.gitignore` that gained real rules later.
-    Both must be cleaned at every commit that carries them, with the legitimate edits kept.
-    """
+    """A confirmed payload in a file, carrying no commit id, is rewritten out of history."""
 
     def _act_full(self, scan, pusher=_ok_push):
         with self._remote():

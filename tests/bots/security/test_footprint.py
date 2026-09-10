@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""The one excision authority: what the footprint is, and that a result is proven clean.
-
-The properties pinned here are what "remove the whole footprint" means — every line the signature
-names goes, not a hard-coded slice — and what "fail closed" means — an excision that cannot prove
-the footprint gone returns nothing.
-"""
+"""Pins for the footprint excision authority: full-footprint removal, and fail-closed results."""
 from __future__ import annotations
 
 import re

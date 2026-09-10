@@ -154,10 +154,7 @@ def _not_applied(repo: str | Path, tree: str,
 
 
 def write_blob(repo: str | Path, text: str) -> str | None:
-    """The object id of `text` stored as a blob, or None if it could not be written.
-
-    Bytes verbatim (`--no-filters`), so a clean-line filter cannot alter what is stored.
-    """
+    """The object id of `text` stored as a blob with bytes verbatim, or None on failure."""
     fd, tmp = tempfile.mkstemp(prefix="saw-blob-")
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
@@ -176,26 +173,13 @@ def write_blob(repo: str | Path, text: str) -> str | None:
 def carried_forward(repo: str | Path, commit: str,
                     corrections: dict[str, tuple[str, tuple[str, str] | None]],
                     still_carries=None, clean=None) -> tuple[str | None, str]:
-    """`commit`'s recorded tree with each correction carried into it. Returns `(tree, blocked)`.
+    """`commit`'s recorded tree with each correction carried into it, as `(tree, blocked)`.
 
-    A tree is a snapshot: every commit after the infected one records the payload again at that
-    path, so remapping parents alone leaves the branch tip carrying it.
-
-    Blob identity answers survival in ONE DIRECTION, which `merge/liveness` already states: an
-    identical blob proves the bytes are still there, a different one proves only that the file
-    changed — the payload lines may sit untouched inside it. So an unchanged blob is corrected,
-    and a CHANGED one is checked for content rather than assumed clean. `blocked` names a path a
-    later commit edited that still carries the payload: correcting it would either miss the
-    payload or throw that commit's work away, and neither is this function's call to make.
-
-    `clean` maps a path to `(carries, corrector)`: `carries(text) -> bool` is that finding's own
-    footprint check, and `corrector(text) -> clean_text | None` its excision. Where a commit's own
-    blob at that path carries the footprint, the corrector rewrites it in place and the result is
-    re-checked with `carries`; a path the corrector cannot prove clean is `blocked`. The rewrite
-    must be a pure removal of bytes from the original blob — a version whose bytes are not a
-    subsequence of it (a lossy re-encode of a non-UTF-8 file) is blocked rather than written. A
-    path that carries nothing at this commit is left as it stands.
-    """
+    `corrections` maps a path to `(payload_blob, entry)`: where the commit's blob still equals
+    `payload_blob` it is set to `entry`. `clean` maps a path to `(carries, corrector)`: where the
+    commit's blob carries the footprint it is rewritten by `corrector` and re-checked with
+    `carries`. `blocked` names a path that could not be made clean (then `tree` is None), including
+    a rewrite whose UTF-8 bytes are not a subsequence of the original blob."""
     plan = []
     for path, (payload_blob, entry) in corrections.items():
         current = tree_entry(repo, commit, path)

@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""Signature-driven excision of a confirmed footprint from a file's text.
-
-One authority for what the footprint is and how much of it to remove, so the working-tree fix and
-the history rewrite agree. Every excision is a pure text transform that proves its own result:
-the footprint is gone and no byte was fabricated, or it returns None.
-"""
+"""Signature-driven excision of a confirmed footprint from a file's text."""
 from __future__ import annotations
 
 import re
@@ -19,7 +14,7 @@ GIT_MARKER = "git-marker"
 
 
 def _marker_patterns(path: str, signatures) -> list[re.Pattern]:
-    """The git-marker patterns that cover `path`, compiled once."""
+    """The compiled git-marker patterns that apply to `path`."""
     out = []
     for s in signatures:
         if s.get("category") != GIT_MARKER or not s.get("pattern"):
@@ -34,12 +29,8 @@ def _matches_any(text: str, patterns: list[re.Pattern]) -> bool:
 
 
 def line_marker_strip(text: str, patterns: list[re.Pattern]) -> str | None:
-    """`text` with every line a pattern matches removed, or None when that proves nothing.
-
-    Returns None when no line was removed, when a pattern still matches the result, or when the
-    result is not a subsequence of the input — so the answer is either a proven-clean removal or
-    nothing.
-    """
+    """`text` with every line a pattern matches removed. None if nothing matched, a pattern still
+    matches the result, or the result is not a subsequence of `text`."""
     if not patterns:
         return None
     lines = text.splitlines(keepends=True)
@@ -53,8 +44,8 @@ def line_marker_strip(text: str, patterns: list[re.Pattern]) -> str | None:
 
 
 def carries_footprint(finding, signatures) -> Callable[[str], bool] | None:
-    """`carries(text) -> bool` — whether `text` still holds this finding's footprint — or None
-    when the finding's category has no excision here."""
+    """`carries(text) -> bool` for this finding's footprint, or None when its category is not
+    excised here."""
     category = getattr(finding, "category", None)
     path = getattr(finding, "path", "") or ""
     if category == CODE_LOADER:
@@ -69,8 +60,8 @@ def carries_footprint(finding, signatures) -> Callable[[str], bool] | None:
 
 
 def corrector_for(finding, signatures) -> Callable[[str], "str | None"] | None:
-    """`corrector(text) -> clean_text | None` for this finding, or None when it is not amendable
-    here. Same excision the working-tree fix uses, so both remove the whole footprint."""
+    """`corrector(text) -> clean_text | None` for this finding, or None when its category is not
+    excised here."""
     category = getattr(finding, "category", None)
     path = getattr(finding, "path", "") or ""
     if category == CODE_LOADER:

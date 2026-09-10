@@ -311,10 +311,8 @@ def file_commits(repo: str | Path, path: str, limit: int = 50,
     blob reachable only through its malicious side), so recovery uses this mode; the default
     keeps the full history walk for callers that want every version.
 
-    `all_branches=True` walks every local branch, not only HEAD, with full history (no
-    TREESAME merge simplification), so a caller that must reach a payload introduced on any
-    branch — including one a later merge took from its other parent — sees every commit that
-    changed the path.
+    `all_branches=True` walks every local branch with full history (no merge simplification),
+    not only HEAD.
     """
     args = ["log", f"-n{limit}", "--format=%H"]
     if first_parent:
