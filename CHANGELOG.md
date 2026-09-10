@@ -14,6 +14,16 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Fixed
+- **`saw fix amend <path>` checks the credential before it starts, not one repository at a time.**
+  Every other acting command refuses up front on a credential that cannot do the work; the local
+  amend path did not, so a dead or under-scoped one was met after the run had begun.
+- **A refusal names the identity it used.** It reported an internal code where it can say which
+  login the credential is and which owner was expected — the one detail that tells you whether you
+  are signed in as the wrong account.
+- **It no longer says you lack admin when it could not read who you are.** If the login behind the
+  credential cannot be read, whether it owns the repository was never established; that now reads
+  as unestablished. It still refuses to rewrite.
+
 - **`saw watch` refuses to set up a check that would not survive a restart.** It used to point the
   check at whichever copy of saw was running, including one inside a temporary directory — which
   works until the directory is cleaned up, and then the machine quietly stops checking itself.
@@ -34,7 +44,6 @@ reader, not the mechanism or the weakness it closed.
 
 ## [0.11.0] - 2026-09-10
 
-### Added
 - **`saw audit` checks what a coding agent on this machine may run without asking.** Claude Code,
   the Cursor agent and Codex keep their own standing approvals, and none of them were looked at.
   It reports a risky command an agent may run unprompted, and an agent whose approval step is off
@@ -62,7 +71,6 @@ reader, not the mechanism or the weakness it closed.
   pasted into a ticket and attached to a mail, and every location in it is a map. Each one now says
   what is wrong and what to run.
 
-### Fixed
 - **A start-up item this tool placed is still reported when what it runs sits somewhere anyone can
   write.** Recognising its own work stopped one finding too many: a world-writable location is
   where a foothold puts its program, and this tool's name on the file says nothing about that.

@@ -308,7 +308,7 @@ def amend(config_path: str | None = None, *, paths: list[str] | None = None,
 
 def _amend_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *,
                  jobs=None) -> list[FixOutcome]:
-    token, source = auth.resolve_token()
+    from stayawake.core.identity import Intent
     # A named path that does not exist falls back to its PARENT during discovery, which turns one
     # typo into every repository beside the intended one. Harmless for a scan; this verb
     # force-updates branches, so a path it cannot find is an error rather than a wider sweep.
@@ -317,6 +317,11 @@ def _amend_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *,
                      and not Path(p).expanduser().exists())
     if missing:
         prog.line(f"error: no such path: {', '.join(missing)}")
+        return []
+    token, source = auth.resolve_token()
+    err = _preflight(token, intent=Intent.AMEND_REFS)
+    if err:
+        prog.line(err)
         return []
     repos = _local_repos(cfg, opts, paths)
     if not repos:
