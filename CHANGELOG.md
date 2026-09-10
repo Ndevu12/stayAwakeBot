@@ -13,6 +13,12 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Added
+- **`saw fix amend --remove-foreign` removes a confirmed wholly-foreign file from history.** A file
+  that is entirely the artifact — with nothing legitimate to keep — cannot be surgically cleaned;
+  with this opt-in flag `amend` deletes it from every commit that holds it, across every branch, and
+  force-updates them. Without the flag such a file is still reported as needing you, unchanged.
+
 ### Changed
 - **`saw fix amend` now removes a confirmed payload that lives in a file, not only one smuggled
   through a past merge.** It rewrites the payload out of every commit that carries it — keeping the

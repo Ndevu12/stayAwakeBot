@@ -31,11 +31,13 @@ def _full(repo: Path, sha: str) -> str:
 
 
 def _payload_left(repo: Path, olds, rebuilt, new_tips: dict[str, str],
-                  path_checks: dict) -> list[str]:
+                  path_checks: dict, remove=()) -> list[str]:
     """What the rebuilt objects still leave reaching the payload, checked before any reference
     moves. Empty means clean. `olds` are the pre-rewrite carrying commits; `path_checks` maps each
-    corrected path to its own footprint check."""
+    corrected path to its own footprint check; `remove` maps a path to the foreign blob that must
+    be gone from the tree."""
     left = []
+    remove = remove or {}
     for old in sorted(olds):
         for tip in sorted(set(new_tips.values())):
             if gitutil.is_ancestor(repo, old, tip):
@@ -44,6 +46,10 @@ def _payload_left(repo: Path, olds, rebuilt, new_tips: dict[str, str],
         for path in sorted(path_checks):
             if path_checks[path](gitutil.file_at(repo, sha, path)):
                 left.append(f"{sha[:12]} still carries {path}")
+        for path in sorted(remove):
+            entry = gitutil.tree_entry(repo, sha, path)
+            if entry is not None and entry[1] == remove[path]:
+                left.append(f"{sha[:12]} still holds {path}")
     return left
 
 
@@ -116,10 +122,24 @@ def _content_targets(repo: Path, scan, signatures) -> list[tuple]:
     return out
 
 
+def _foreign_targets(scan, remove_foreign: bool) -> list[str]:
+    """Paths of confirmed wholly-foreign files to remove whole, or [] unless removal was asked."""
+    if not remove_foreign:
+        return []
+    out: list[str] = []
+    for f in scan.findings:
+        if getattr(f, "confidence", None) != CONFIRMED or getattr(f, "advisory_only", False):
+            continue
+        path = footprint.foreign_path(f)
+        if path and path not in out:
+            out.append(path)
+    return out
+
+
 def _unhandled_confirmed(scan, signatures, revert_paths: set[str],
-                         cleaned_head: dict[str, str]) -> int:
-    """How many confirmed, non-advisory findings this verb neither reverts (a revert path) nor
-    excises (its footprint is gone from the cleaned HEAD of its path)."""
+                         cleaned_head: dict[str, str], remove_paths: set[str]) -> int:
+    """How many confirmed, non-advisory findings this verb neither reverts (a revert path),
+    excises (its footprint gone from the cleaned HEAD of its path), nor removes whole."""
     flat = _flat(signatures)
     count = 0
     for f in scan.findings:
@@ -128,7 +148,7 @@ def _unhandled_confirmed(scan, signatures, revert_paths: set[str],
         if getattr(f, "commit_sha", None) and getattr(f, "related_paths", None):
             continue
         path = getattr(f, "path", "") or ""
-        if path in revert_paths:
+        if path in revert_paths or path in remove_paths:
             continue
         carries = footprint.carries_footprint(f, flat)
         if carries is not None and path in cleaned_head and not carries(cleaned_head[path]):
@@ -149,6 +169,23 @@ def _carrying_commits(repo: Path, path: str, carries) -> list[str] | None:
     return [sha for sha in changed if carries(gitutil.file_at(repo, sha, path))]
 
 
+def _foreign_history(repo: Path, path: str, oid: str) -> tuple[list[str], list[str]] | None:
+    """`(commits holding path, commits holding it at exactly blob oid)` across every local branch,
+    or None when the path's history reaches the enumeration bound and cannot be walked."""
+    changed = gitutil.file_commits(repo, path, limit=_MAX_PATH_HISTORY, all_branches=True)
+    if len(changed) >= _MAX_PATH_HISTORY:
+        return None
+    holders, foreign = [], []
+    for sha in changed:
+        entry = gitutil.tree_entry(repo, sha, path)
+        if entry is None:
+            continue
+        holders.append(sha)
+        if entry[1] == oid:
+            foreign.append(sha)
+    return holders, foreign
+
+
 def _branches_left_carrying(repo: Path, clean: dict, covered: set[str]) -> list[str]:
     """Local branches, outside `covered`, whose tip still carries a clean-mode footprint."""
     if not clean:
@@ -160,6 +197,24 @@ def _branches_left_carrying(repo: Path, clean: dict, covered: set[str]) -> list[
             continue
         for path, (carries, _corrector) in clean.items():
             if carries(gitutil.file_at(repo, name, path)):
+                out.add(name)
+                break
+    return sorted(out)
+
+
+def _branches_left_holding(repo: Path, remove: dict, covered: set[str]) -> list[str]:
+    """Local branches, outside `covered`, whose tip still holds the foreign blob of a path
+    scheduled for removal."""
+    if not remove:
+        return []
+    out: set[str] = set()
+    listing = gitutil.stdout(repo, ["for-each-ref", "--format=%(refname:short)", "refs/heads"])
+    for name in (ln.strip() for ln in listing.splitlines() if ln.strip()):
+        if name in covered:
+            continue
+        for path, oid in remove.items():
+            entry = gitutil.tree_entry(repo, name, path)
+            if entry is not None and entry[1] == oid:
                 out.add(name)
                 break
     return sorted(out)
@@ -342,18 +397,20 @@ def _survivors(repo: Path, slug: str, olds: list[str], token: str | None) -> lis
 
 
 def amend_repo(repo: Path, opts, signatures, allowlist, token: str | None = None, *,
-               pusher=None) -> str:
+               pusher=None, remove_foreign: bool = False) -> str:
     """Force-update every branch that still reaches a confirmed past-commit payload.
 
     The local rewrite is a step. The result is the remote refs moving. Returns one operator line.
+    With `remove_foreign`, a confirmed wholly-foreign file is removed from history too.
     """
     display = gitutil.origin_slug(repo) or str(repo).replace(str(Path.home()), "~")
-    outcome = amend_outcome(repo, display, opts, signatures, allowlist, token, pusher=pusher)
+    outcome = amend_outcome(repo, display, opts, signatures, allowlist, token, pusher=pusher,
+                            remove_foreign=remove_foreign)
     return render_amend_line(outcome)
 
 
 def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, *,
-                  pusher=None) -> AmendOutcome:
+                  pusher=None, remove_foreign: bool = False) -> AmendOutcome:
     """The act, as a structure. Prose is rendered from this and never parsed back out of it."""
     if not gitutil.is_git_repo(repo):
         return refused(display, Cause.NOT_A_GIT_REPOSITORY)
@@ -401,25 +458,44 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
         clean_shas.update(carrying)
         cleaned_head[finding.path] = head_clean
 
-    # A path excised in place across every branch is not also reverted at one commit.
-    infected = {sha: tuple(p for p in ps if p not in clean) for sha, ps in infected.items()}
+    remove: dict[str, str] = {}
+    remove_shas: set[str] = set()
+    for path in _foreign_targets(scan, remove_foreign):
+        if path in clean or path in {p for ps in infected.values() for p in ps}:
+            continue
+        entry = gitutil.tree_entry(repo, "HEAD", path)
+        if entry is None:
+            continue
+        hist = _foreign_history(repo, path, entry[1])
+        if hist is None:
+            return refused(display, Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, path)
+        holders, foreign = hist
+        if not foreign or set(holders) != set(foreign):
+            continue
+        remove[path] = entry[1]
+        remove_shas.update(foreign)
+
+    infected = {sha: tuple(p for p in ps if p not in clean and p not in remove)
+                for sha, ps in infected.items()}
     infected = {sha: ps for sha, ps in infected.items() if ps}
     taken = {p for ps in infected.values() for p in ps}
 
-    unhandled = _unhandled_confirmed(scan, signatures, taken, cleaned_head)
-    if not infected and not clean:
+    unhandled = _unhandled_confirmed(scan, signatures, taken, cleaned_head, remove)
+    if not infected and not clean and not remove:
         if unhandled:
             return refused(display, Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY, str(unhandled))
         return refused(display, Cause.NO_CONFIRMED_PAYLOAD)
 
-    all_infected = set(infected) | clean_shas
+    all_infected = set(infected) | clean_shas | remove_shas
     heads = _branches_carrying_any(repo, all_infected)
     if not heads:
         return refused(display, Cause.COMMIT_ON_NO_BRANCH,
                        ", ".join(sorted(s[:12] for s in all_infected)))
-    off_plan = _branches_left_carrying(repo, clean, {n for n, _t, _c in heads})
+    covered = {n for n, _t, _c in heads}
+    off_plan = _branches_left_carrying(repo, clean, covered) + \
+        _branches_left_holding(repo, remove, covered)
     if off_plan:
-        return refused(display, Cause.PAYLOAD_STILL_REACHABLE, ", ".join(off_plan))
+        return refused(display, Cause.PAYLOAD_STILL_REACHABLE, ", ".join(sorted(set(off_plan))))
 
     graph = gitrebuild.ordered_graph(repo, [tip for _n, tip, _c in heads])
     plan = gitrebuild.commits_to_rebuild(graph, all_infected)
@@ -469,14 +545,14 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
         repo, plan, replacements,
         lambda sha, tree, new_parents: gitamend.rewrite_commit(repo, sha, tree, new_parents,
                                                                signing),
-        survives, clean=clean)
+        survives, clean=clean, remove=remove)
     if not rebuilt.ok:
         return refused(display,
                        _CAUSE_PER_REFUSAL_KIND.get(rebuilt.kind, Cause.REPLACEMENT_NOT_WRITTEN),
                        rebuilt.refusal)
 
     new_tips = {tip: rebuilt.tip(tip) for _n, tip, _c in heads}
-    flagged = {p for paths in infected.values() for p in paths} | set(clean)
+    flagged = {p for paths in infected.values() for p in paths} | set(clean) | set(remove)
     for name, tip, _cas in heads:
         beyond = [p for p in gitamend.discarded_delta(repo, tip, new_tips[tip])
                   if p not in flagged]
@@ -484,9 +560,9 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
             return refused(display, Cause.REPLAY_CHANGED_UNRELATED_COMMITS,
                            f"{name}: " + ", ".join(sorted(beyond)[:3]))
 
-    path_checks = {p: survives for p in flagged}
+    path_checks = {p: survives for p in flagged if p not in remove}
     path_checks.update({p: carries for p, (carries, _c) in clean.items()})
-    left = _payload_left(repo, all_infected, rebuilt, new_tips, path_checks)
+    left = _payload_left(repo, all_infected, rebuilt, new_tips, path_checks, remove)
     if left:
         return refused(display, Cause.PAYLOAD_STILL_REACHABLE, "; ".join(left[:3]))
 

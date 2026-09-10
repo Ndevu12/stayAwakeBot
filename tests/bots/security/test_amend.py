@@ -57,6 +57,23 @@ class TestFixAmendCli(unittest.TestCase):
         self.assertFalse(m.call_args.kwargs["remote"])
 
     @mock.patch("stayawake.bots.security.remediator.amend", return_value=0)
+    def test_amend_remove_foreign_routes(self, m):
+        rc = cli.main(["fix", "amend", ".", "--remove-foreign"])
+        self.assertEqual(rc, 0)
+        self.assertTrue(m.call_args.kwargs["remove_foreign"])
+        self.assertEqual(m.call_args.kwargs["paths"], ["."])
+
+    @mock.patch("stayawake.bots.security.remediator.fix", return_value=0)
+    @mock.patch("stayawake.bots.security.remediator.amend", return_value=0)
+    def test_remove_foreign_without_amend_is_refused(self, mamend, mfix):
+        with redirect_stderr(io.StringIO()) as err:
+            rc = cli.main(["fix", "--remove-foreign"])
+        self.assertEqual(rc, 2)
+        mamend.assert_not_called()
+        mfix.assert_not_called()
+        self.assertIn("only valid with", err.getvalue())
+
+    @mock.patch("stayawake.bots.security.remediator.amend", return_value=0)
     def test_amend_remote_routes(self, m):
         rc = cli.main(["fix", "amend", "--remote"])
         self.assertEqual(rc, 0)
@@ -1033,11 +1050,11 @@ def _seam_line(clean_prefix: str) -> str:
 class TestAmendActsOnContentPayload(_AmendFixture):
     """A confirmed payload in a file, carrying no commit id, is rewritten out of history."""
 
-    def _act_full(self, scan, pusher=_ok_push):
+    def _act_full(self, scan, pusher=_ok_push, remove_foreign=False):
         with self._remote():
             with mock.patch("stayawake.bots.security.pr.amend.scan_target", return_value=scan):
                 return amend_outcome(self.d, "acme/app", ScanOptions(), load_signatures(),
-                                     [], "t", pusher=pusher)
+                                     [], "t", pusher=pusher, remove_foreign=remove_foreign)
 
     def test_a_loader_in_an_evolving_file_is_excised_at_every_commit(self):
         clean = "const config = {};\nexport default config;\n"
@@ -1264,3 +1281,91 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         self.assertIn(Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, self._causes(outcome))
         self.assertEqual(before, self._rev(), "nothing moved when it cannot enumerate")
         self.assertEqual(calls, [])
+
+    def _foreign_finding(self, path):
+        return Finding("fake-font-blockchain", "fake-font", Severity.HIGH, path,
+                       "wholly foreign", remediation="quarantine-file", confidence=CONFIRMED)
+
+    def test_a_wholly_foreign_file_is_removed_from_history_with_the_flag(self):
+        p = "src/fonts/BlockchainFont.woff2"
+        self.write(self.d, p, "wOF2\x00camouflage-blob\n")
+        self.commit(self.d, "add the foreign font")
+        self.write(self.d, "app.js", "ok\n")
+        self.commit(self.d, "unrelated work while the font rides along unchanged")
+        self.write(self.d, "app.js", "ok2\n")
+        self.commit(self.d, "more unrelated work")
+        scan = ScanResult(target=str(self.d), source="local",
+                          findings=[self._foreign_finding(p)])
+        outcome = self._act_full(scan, pusher=lambda *a: PushResult(True), remove_foreign=True)
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        tip = self._rev(self.base)
+        reachable = subprocess.run(["git", "-C", str(self.d), "rev-list", tip],
+                                   capture_output=True, text=True).stdout.split()
+        present = [c[:10] for c in reachable
+                   if subprocess.run(["git", "-C", str(self.d), "cat-file", "-e", f"{c}:{p}"],
+                                     capture_output=True).returncode == 0]
+        self.assertEqual([], present, f"foreign file still in history at {present}")
+        self.assertEqual("ok2\n", self._show(f"{self.base}:app.js"), "unrelated work is kept")
+
+    def test_without_the_flag_a_foreign_file_is_left_for_review(self):
+        p = "src/fonts/BlockchainFont.woff2"
+        self.write(self.d, p, "wOF2\x00camouflage-blob\n")
+        self.commit(self.d, "add the foreign font")
+        before = self._rev()
+        scan = ScanResult(target=str(self.d), source="local",
+                          findings=[self._foreign_finding(p)])
+        outcome = self._act_full(scan, pusher=lambda *a: PushResult(True))
+        self.assertFalse(outcome.completed)
+        self.assertIn(Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY, self._causes(outcome))
+        self.assertEqual(before, self._rev(), "nothing removed without the flag")
+        self.assertEqual(0, subprocess.run(
+            ["git", "-C", str(self.d), "cat-file", "-e", f"HEAD:{p}"],
+            capture_output=True).returncode, "the file is still there")
+
+    def test_a_foreign_file_on_a_sibling_branch_is_also_removed(self):
+        p = "src/fonts/BlockchainFont.woff2"
+        self.write(self.d, "seed.txt", "x\n")
+        self.commit(self.d, "seed")
+        at_seed = self._rev()
+        self.write(self.d, p, "wOF2\x00blob\n")
+        self.commit(self.d, "main gets the foreign font")
+        self.git(self.d, "checkout", "-qb", "victim", at_seed)
+        self.write(self.d, p, "wOF2\x00blob\n")
+        self.commit(self.d, "victim gets the foreign font too")
+        self.git(self.d, "checkout", "-q", self.base)
+        scan = ScanResult(target=str(self.d), source="local",
+                          findings=[self._foreign_finding(p)])
+        moved = []
+        outcome = self._act_full(
+            scan, pusher=lambda b, d, l: moved.append(b) or PushResult(True), remove_foreign=True)
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        for ref in (self.base, "victim"):
+            self.assertNotEqual(0, subprocess.run(
+                ["git", "-C", str(self.d), "cat-file", "-e", f"{ref}:{p}"],
+                capture_output=True).returncode, f"foreign file still on {ref}")
+        self.assertIn("victim", moved)
+
+    def test_a_reused_path_is_not_whole_removed_and_keeps_its_legit_version(self):
+        p = "public/fonts/Inter.woff2"
+        self.write(self.d, p, "REAL-INTER-FONT-BYTES\n")
+        self.commit(self.d, "add the real font")
+        self.write(self.d, "app.js", "ok\n")
+        self.commit(self.d, "app work")
+        self.write(self.d, p, "wOF2\x00camouflage-payload\n")
+        self.commit(self.d, "replace the font in place with a payload")
+        before = self._rev()
+        scan = ScanResult(target=str(self.d), source="local",
+                          findings=[self._foreign_finding(p)])
+        calls = []
+        outcome = self._act_full(scan, pusher=lambda *a: calls.append(a) or PushResult(True),
+                                 remove_foreign=True)
+        self.assertFalse(outcome.completed, "a reused path is not whole-removed")
+        self.assertIn(Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY, self._causes(outcome))
+        self.assertEqual(before, self._rev(), "nothing moved")
+        self.assertEqual(calls, [])
+        reachable = subprocess.run(["git", "-C", str(self.d), "rev-list", before],
+                                   capture_output=True, text=True).stdout.split()
+        legit = [c for c in reachable
+                 if subprocess.run(["git", "-C", str(self.d), "show", f"{c}:{p}"],
+                                   capture_output=True, text=True).stdout == "REAL-INTER-FONT-BYTES\n"]
+        self.assertTrue(legit, "the legitimate earlier version of the reused path is preserved")
