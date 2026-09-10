@@ -20,6 +20,11 @@ reader, not the mechanism or the weakness it closed.
 - **`saw audit` says when this machine stopped checking itself.** A machine that was set to check
   itself and is not doing so now reads as one that never was; it says so instead.
 - **Stopping the check no longer leaves a note saying it is still set up.**
+- **Scanning a folder no longer makes a target of every directory the system keeps private.** On a
+  Mac, `saw scan ~` reported dozens of them — mail, messages, browser data — each as a failed
+  target with its own coverage notes, burying the repositories you asked about. They are counted
+  and reported in one line instead. A path or pattern that names one still scans it, and still
+  fails closed when it cannot be read.
 
 ### Added
 - **`saw watch status` says whether this machine is checking itself.** Whether the check is running

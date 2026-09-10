@@ -953,3 +953,45 @@ class TestAnUnexaminablePathDoesNotCrashTheRun(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestASweepDoesNotTurnEveryClosedDoorIntoATarget(unittest.TestCase):
+    """A directory the pattern does not name is reported, not scanned as a target."""
+
+    def setUp(self):
+        import subprocess
+        self.base = Path(tempfile.mkdtemp())
+        subprocess.run(["git", "init", "-q", str(self.base / "proj")], check=True)
+        self.shut = self.base / "Library" / "Messages"
+        self.shut.mkdir(parents=True)
+        (self.shut / "inner").mkdir()
+        os.chmod(self.shut, 0o000)
+        self.addCleanup(os.chmod, self.shut, 0o755)
+
+    def _resolve(self, pattern):
+        unsearched = []
+        found = resolve_local_targets([str(pattern)], ScanOptions(), unsearched=unsearched)
+        return [t.root.name for t in found], [p.name for p in unsearched]
+
+    def test_one_met_on_the_way_through_is_reported_not_scanned(self):
+        targets, unsearched = self._resolve(self.base)
+        self.assertEqual(targets, ["proj"])
+        self.assertEqual(unsearched, ["Messages"])
+
+    def test_naming_it_still_makes_it_a_target(self):
+        targets, unsearched = self._resolve(self.shut)
+        self.assertEqual(targets, ["Messages"])
+        self.assertEqual(unsearched, [])
+
+    def test_and_naming_it_once_names_it_once(self):
+        targets, _ = self._resolve(self.shut)
+        self.assertEqual(len(targets), 1)
+
+    def test_a_pattern_that_matches_it_still_keeps_it(self):
+        targets, unsearched = self._resolve(self.base / "Library" / "Messag*")
+        self.assertEqual(targets, ["Messages"])
+        self.assertEqual(unsearched, [])
+
+    def test_what_was_not_searched_is_never_dropped_in_silence(self):
+        _targets, unsearched = self._resolve(self.base)
+        self.assertTrue(unsearched, "a directory nobody could read must reach the caller")

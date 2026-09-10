@@ -212,6 +212,25 @@ def _one_file(named: Path) -> "LocalTarget":
     return LocalTarget(root, (str(rel),), ONE_FILE, rooted_at_a_repository=_holds_git(root))
 
 
+def _asked_about(pattern: str) -> set[str]:
+    """The resolved paths `pattern` matches."""
+    out = set()
+    for hit in glob.glob(os.path.expanduser(pattern)) or [os.path.expanduser(pattern)]:
+        try:
+            out.add(str(Path(hit).resolve()))
+        except OSError:
+            out.add(hit)
+    return out
+
+
+def _was_asked_about(blocked: Path, asked: set[str]) -> bool:
+    """Whether `blocked` is one of `asked`."""
+    try:
+        return str(blocked.resolve()) in asked
+    except OSError:
+        return str(blocked) in asked
+
+
 def _a_directory(named: Path) -> "LocalTarget":
     """One named directory, rooted the same way a named file is.
 
@@ -236,12 +255,16 @@ def _sensitive_destination(named: Path) -> str | None:
         return None
 
 
-def resolve_local_targets(patterns: list[str], opts: ScanOptions) -> list[LocalTarget]:
+def resolve_local_targets(patterns: list[str], opts: ScanOptions,
+                          *, unsearched: list[Path] | None = None) -> list[LocalTarget]:
     """What the given patterns name, in order, deduped.
 
     A pattern that finds repositories resolves to those, so a sweep keeps working. A named path
     that finds none, and exists, is scanned as itself — a directory nobody put under git, or one
     file. A pattern that names nothing resolves to nothing, and the caller fails closed on that.
+
+    Directories the walk could not enter, other than those the pattern names, are appended to
+    `unsearched`.
     """
     out: list[LocalTarget] = []
     seen: set[str] = set()
@@ -270,11 +293,18 @@ def resolve_local_targets(patterns: list[str], opts: ScanOptions) -> list[LocalT
         # real file called `star*name.js` was answered by the repositories beside it.
         blocked: list[Path] = []
         found = [] if is_file else discover_local_repos([pat], opts, unreadable=blocked)
-        # A directory discovery could not enter becomes a target of its own, so it reaches the
-        # operator through the same fail-closed path as one they named directly.
-        candidates += [LocalTarget(b, None, DIRECTORY) for b in blocked]
+        named_is_blocked = False
+        asked = _asked_about(pat)
+        for b in blocked:
+            if _was_asked_about(b, asked):
+                candidates.append(LocalTarget(b, None, DIRECTORY))
+                named_is_blocked = True
+            elif unsearched is not None:
+                unsearched.append(b)
         if found:
             candidates += [LocalTarget(r, None, REPOSITORY) for r in found]
+        elif named_is_blocked:
+            pass
         elif is_dir:
             candidates.append(_a_directory(named))
         elif candidates:
