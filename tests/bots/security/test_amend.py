@@ -183,8 +183,11 @@ class _AmendFixture(GitSandbox):
         rewrite, whether the refs refreshed, and what each remote branch is at. Every amend goes
         through them, so the harness supplies them rather than letting them be skipped."""
         import stayawake.bots.security.pr.amend as amendmod
+        from stayawake.bots.security import remediator as remediatormod
         at = "stayawake.bots.security.pr.amend."
         with ExitStack() as stack:
+            stack.enter_context(mock.patch.object(remediatormod, "_preflight",
+                                                  return_value=None))
             for target, patch in (
                 ("gitutil.origin_slug", dict(return_value="acme/app")),
                 ("authority.may_rewrite", dict(return_value=mock.Mock(

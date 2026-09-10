@@ -295,7 +295,8 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
 
     permitted = authority.may_rewrite(slug, token)
     if not permitted.permitted:
-        return refused(display, Cause.NOT_PERMITTED_TO_REWRITE, permitted.reason)
+        return refused(display, Cause.NOT_PERMITTED_TO_REWRITE,
+                       permitted.detail or permitted.reason)
     fetched = gitutil.fetch_refs(repo, token=token)
     if not fetched.ok:
         return refused(display, Cause.REMOTE_REFS_UNREADABLE, fetched.reason)

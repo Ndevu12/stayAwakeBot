@@ -58,7 +58,8 @@ class Authority:
     reason ∈ permitted: `owner` · `admin`
             refused, conclusive: `no_credential` · `malformed_slug` · `push_without_admin` ·
                                  `no_admin_permission`
-            refused, undetermined: `permissions_unknown` · `unreadable_repo` · `not_found` ·
+            refused, undetermined: `identity_unknown` · `permissions_unknown` · `unreadable_repo` ·
+                                 `not_found` ·
                                  `unauthorized` · `forbidden` · `rate_limited` · `network_error` ·
                                  `api_error`
     """
@@ -134,13 +135,19 @@ def may_rewrite(slug: str, token: str | None) -> Authority:
     if permissions.get("admin") is True:
         return Authority(True, "admin", "the credential holds admin on the repository",
                          login=login, owner=owner_login)
+    if login is None:
+        return Authority(False, "identity_unknown",
+                         "the login behind this credential could not be read, so whether it owns "
+                         f"{owner_login or 'the repository'} was never established",
+                         login=login, owner=owner_login, conclusive=False)
     if permissions.get("push") is True:
         return Authority(False, "push_without_admin",
                          "the credential can push but does not own the repository and has no "
                          "admin — that is not authority to amend its history",
                          login=login, owner=owner_login)
     return Authority(False, "no_admin_permission",
-                     "the credential neither owns the repository nor holds admin on it",
+                     f"the credential is {login}, which neither owns "
+                     f"{owner_login or 'the repository'} nor holds admin on it",
                      login=login, owner=owner_login)
 
 
