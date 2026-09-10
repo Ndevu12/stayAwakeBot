@@ -2055,6 +2055,7 @@ your session and is started again if it stops, and <code>saw watch stop</code> r
 </ul>
 <p><code>saw watch status</code> says whether this machine is checking itself. Whether it is running is asked
 of the system, not read from the file: one command stops the check without changing a byte.</p>
+<p>It is set up from the copy of saw you run it with, so run it from an installed one. A copy inside a temporary directory is refused: the check would work until that directory is cleaned up. If the check ever stops, <code>saw audit</code> says so.</p>
 
 
 
