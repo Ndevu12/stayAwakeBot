@@ -30,6 +30,11 @@ _NOT_SCHEDULED = "This machine could not be asked to keep checking itself."
 _UNSCHEDULED = "This machine will no longer check itself."
 _WAS_NOT = "This machine was not checking itself."
 _NOT_OURS = "Something else is there under that name. It has been left alone."
+_CHECKING = "This machine is checking itself."
+_FROM_LOGIN = "This machine will check itself from your next login. Run `saw watch` to start it now."
+_NOT_CHECKING = "This machine is not checking itself. Run `saw watch`."
+_WAS_CHANGED = "What checks this machine was changed. Run `saw watch` to put it back."
+_CANNOT_TELL = "Whether this machine checks itself could not be established."
 
 
 def _never_asks(pids, *, signatures):
@@ -106,6 +111,22 @@ def schedule_it(*, settle=schedule.settle) -> tuple[int, str]:
     if not out.changed:
         return exitcodes.CLEAN, _ALREADY
     return exitcodes.CLEAN, _SCHEDULED if out.active else _AT_LOGIN
+
+
+def status_of(*, supported=schedule.supported, verdict=schedule.verdict,
+              running=schedule.is_running) -> tuple[int, str]:
+    """Whether this machine is checking itself. Returns the exit code and one line."""
+    if not supported():
+        return exitcodes.INCOMPLETE, _CANNOT_TELL
+    try:
+        state = verdict()
+    except Exception:
+        return exitcodes.INCOMPLETE, _CANNOT_TELL
+    if state == schedule.ABSENT:
+        return exitcodes.FINDINGS, _NOT_CHECKING
+    if state != schedule.PRISTINE:
+        return exitcodes.FINDINGS, _WAS_CHANGED
+    return (exitcodes.CLEAN, _CHECKING) if running() else (exitcodes.FINDINGS, _FROM_LOGIN)
 
 
 def unschedule_it(*, remove=schedule.take_back) -> tuple[int, str]:

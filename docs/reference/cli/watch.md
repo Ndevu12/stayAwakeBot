@@ -11,6 +11,7 @@ something new. It keeps checking until you stop it.
 
 ```text
 saw watch
+saw watch status
 saw watch stop
 ```
 
@@ -88,3 +89,6 @@ Elsewhere the command says it could not arrange it, rather than reporting a mach
 
 - [`saw harden`](harden.md) — the same job with you present, and able to ask for privilege
 - [`saw audit`](audit.md) — what else this machine looks like
+
+`saw watch status` says whether this machine is checking itself. Whether it is running is asked
+of the system, not read from the file: one command stops the check without changing a byte.

@@ -259,3 +259,46 @@ class TestTheCommandSurfaceIsTwoThings(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestItSaysWhetherThisMachineIsCheckingItself(unittest.TestCase):
+    """`saw watch status`. Whether the job is loaded is asked of the service manager, because one
+    unprivileged command stops it without touching a byte."""
+
+    def _status(self, state, running=True, supported=True):
+        return watch.status_of(supported=lambda: supported, verdict=lambda: state,
+                               running=lambda: running)
+
+    def test_in_place_and_running_is_the_only_clean_answer(self):
+        self.assertEqual(self._status(schedule.PRISTINE, running=True),
+                         (exitcodes.CLEAN, watch._CHECKING))
+
+    def test_in_place_but_not_loaded_says_from_the_next_login(self):
+        code, text = self._status(schedule.PRISTINE, running=False)
+        self.assertNotEqual(code, exitcodes.CLEAN)
+        self.assertIn("next login", text)
+
+    def test_nothing_there_says_it_is_not_checking(self):
+        code, text = self._status(schedule.ABSENT)
+        self.assertEqual((code, text), (exitcodes.FINDINGS, watch._NOT_CHECKING))
+
+    def test_changed_underneath_you_is_not_reported_as_absent(self):
+        for state in (schedule.ALTERED, schedule.UNREADABLE):
+            with self.subTest(state=state):
+                code, text = self._status(state)
+                self.assertEqual((code, text), (exitcodes.FINDINGS, watch._WAS_CHANGED))
+
+    def test_a_platform_without_one_says_it_could_not_tell(self):
+        self.assertEqual(self._status(schedule.PRISTINE, supported=False),
+                         (exitcodes.INCOMPLETE, watch._CANNOT_TELL))
+
+    def test_a_verdict_that_raises_does_not_take_the_command_down(self):
+        def boom():
+            raise OSError("x")
+        code, text = watch.status_of(supported=lambda: True, verdict=boom, running=lambda: True)
+        self.assertEqual((code, text), (exitcodes.INCOMPLETE, watch._CANNOT_TELL))
+
+    def test_it_names_no_location(self):
+        for state in (schedule.PRISTINE, schedule.ABSENT, schedule.ALTERED):
+            with self.subTest(state=state):
+                self.assertNotIn("/", self._status(state, running=False)[1].replace("`", ""))

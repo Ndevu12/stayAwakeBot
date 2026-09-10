@@ -23,6 +23,7 @@ def register(sub) -> None:
             "you present. It keeps checking until you stop it."),
         examples=[
             ("saw watch", "keep checking this machine from now on"),
+            ("saw watch status", "say whether it is checking itself"),
             ("saw watch stop", "stop checking it"),
         ])
     p.set_defaults(func=run)
@@ -36,6 +37,13 @@ def register(sub) -> None:
         examples=[("saw watch stop", "stop checking this machine")])
     stop.set_defaults(func=run_stop)
 
+    status = add_command(
+        wsub, "status",
+        help="say whether this machine is checking itself",
+        description="Say whether this machine is checking itself, and what to run if it is not.",
+        examples=[("saw watch status", "check whether this machine is checking itself")])
+    status.set_defaults(func=run_status)
+
     internal = wsub.add_parser("run")          # the entry the scheduled item calls, not offered
     internal.set_defaults(func=run_internal)
 
@@ -48,6 +56,12 @@ def run(a: argparse.Namespace) -> int:
 
 def run_stop(a: argparse.Namespace) -> int:
     code, text = watch.unschedule_it()
+    print(text)
+    return code
+
+
+def run_status(a: argparse.Namespace) -> int:
+    code, text = watch.status_of()
     print(text)
     return code
 
