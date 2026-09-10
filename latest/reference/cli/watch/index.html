@@ -1976,7 +1976,8 @@ what is running and ends code the tool has <strong>identified</strong>. It never
 writes what it saw to its own record so a later pass can tell something that has come back from
 something new. It keeps checking until you stop it.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw watch
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>saw watch stop
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>saw watch status
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>saw watch stop
 </code></pre></div>
 <p>It is deliberately narrower than <a href="../harden/"><code>saw harden</code></a>. Harden runs with you present: it ends
 everything it grades, and it can ask for privilege to reach what it otherwise could not. This one is
@@ -2052,6 +2053,8 @@ your session and is started again if it stops, and <code>saw watch stop</code> r
 <li><a href="../harden/"><code>saw harden</code></a> — the same job with you present, and able to ask for privilege</li>
 <li><a href="../audit/"><code>saw audit</code></a> — what else this machine looks like</li>
 </ul>
+<p><code>saw watch status</code> says whether this machine is checking itself. Whether it is running is asked
+of the system, not read from the file: one command stops the check without changing a byte.</p>
 
 
 
