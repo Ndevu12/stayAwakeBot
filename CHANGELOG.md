@@ -13,6 +13,14 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Fixed
+- **`saw watch` refuses to set up a check that would not survive a restart.** It used to point the
+  check at whichever copy of saw was running, including one inside a temporary directory — which
+  works until the directory is cleaned up, and then the machine quietly stops checking itself.
+- **`saw audit` says when this machine stopped checking itself.** A machine that was set to check
+  itself and is not doing so now reads as one that never was; it says so instead.
+- **Stopping the check no longer leaves a note saying it is still set up.**
+
 ### Added
 - **`saw watch status` says whether this machine is checking itself.** Whether the check is running
   is asked of the system rather than read from the file, because one command stops it without
