@@ -16,10 +16,7 @@ GRANTED = "granted"                 # the command ran as root
 
 
 def trusted_sudo() -> str | None:
-    """An absolute `sudo` owned by root that no one else can write to, or None.
-
-    TRAP: never resolved through `PATH`. This runs on a machine assumed to be compromised.
-    """
+    """An absolute `sudo` owned by root that no one else can write to, or None."""
     for candidate in _SUDO_PATHS:
         try:
             info = os.stat(candidate)
@@ -34,11 +31,7 @@ def trusted_sudo() -> str | None:
 
 
 def can_ask(*, terminal=None) -> bool:
-    """Whether there is a terminal a password can be asked on.
-
-    TRAP: asked of `/dev/tty`, which is where sudo prompts — not of stdin or stderr. Testing those
-    answers no whenever output is redirected, and a run that could have asked gives up instead.
-    """
+    """Whether there is a terminal a password can be asked on."""
     if terminal is not None:
         try:
             return bool(terminal())
@@ -54,10 +47,7 @@ def can_ask(*, terminal=None) -> bool:
 
 def run_as_root(argv: list[str], *, sudo=trusted_sudo, ask=can_ask,
                 run=subprocess.run) -> tuple[str, str]:
-    """Run `argv` as root, asking only where asking is possible. Returns `(outcome, detail)`.
-
-    TRAP: `argv` is a list, never a string — it carries attacker-chosen values.
-    """
+    """Run `argv` as root, asking only where asking is possible. Returns `(outcome, detail)`."""
     binary = sudo()
     if binary is None:
         return NOT_AVAILABLE, "no trustworthy sudo was found on this machine"

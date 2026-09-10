@@ -111,7 +111,7 @@ def attribute(entry) -> Attribution:
     exec_class = _classify_path(exec_path)
     if entry.location == hookscript.LOCATION and hookscript.is_installed(entry.script):
         return Attribution(exec_class=exec_class, owner="saw")
-    if schedule.is_ours(entry.path):
+    if exec_class != "untrusted" and schedule.is_ours(entry.path):
         return Attribution(exec_class=exec_class, owner="saw")
     owner = _homebrew_owner(entry.path, exec_path) or _package_owner(exec_path)
     signed = _codesigned(exec_path)

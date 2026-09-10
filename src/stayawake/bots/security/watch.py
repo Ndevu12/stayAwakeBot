@@ -80,8 +80,6 @@ def keep_going(*, once=watch_once, sleep=time.sleep, between=BETWEEN_PASSES, pas
     """Keep making the pass until stopped. Returns the code of the last pass that ran.
 
     Takes an optional bound on how many passes to make; unbounded otherwise.
-
-    TRAP: one bad pass must never end the watch.
     """
     code = exitcodes.CLEAN
     made = 0

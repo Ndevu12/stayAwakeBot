@@ -94,7 +94,6 @@ def take_back(*, folders=_global_folders, remove=remove_one,
     """
     if not supported():
         return 2, _NOT_HERE
-    # TRAP: this returns a STATE, it does not raise.
     try:
         left_running = unschedule() not in (schedule.REMOVED, schedule.NOTHING_TO_REMOVE)
     except Exception:
@@ -140,11 +139,7 @@ def _every_reachable_one(outcomes) -> bool:
 
 
 def _headline(outcomes, unresolved: bool, hooks_ok: bool, editors_ok: bool = True) -> str:
-    """The one line that says where this machine stands.
-
-    TRAP: every control this run places is represented here. An operator reads the verdict, so a
-    part left undone that this line does not know about is a machine reported as protected.
-    """
+    """The one line that says where this machine stands."""
     if unresolved or not hooks_ok or not editors_ok or not _every_reachable_one(outcomes):
         return _NOT_EVERYWHERE
     if any(o.state == SELF_ENFORCING for o in outcomes):

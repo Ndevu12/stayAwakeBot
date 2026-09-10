@@ -48,11 +48,7 @@ class Editor:
 
 @dataclass(frozen=True)
 class Found:
-    """What the search reached, and what it could not.
-
-    TRAP: `unreadable` and `not_modelled` are as load-bearing as `editors`. A location that was
-    not examined is reported as such; it never reads as nothing being there.
-    """
+    """What the search reached, and what it could not."""
 
     editors: list[Editor]
     unreadable: list[Path]
@@ -60,11 +56,7 @@ class Found:
 
 
 def _within(inner: Path, outer: Path) -> bool:
-    """Whether `inner` really is inside `outer` once every link on the way is followed.
-
-    TRAP: the check is on the RESOLVED path. A symlinked parent leaves the last component looking
-    ordinary, so a guard that only asks about the file itself is walked straight past.
-    """
+    """Whether `inner` really is inside `outer` once every link on the way is followed."""
     try:
         return inner.resolve().is_relative_to(outer.resolve())
     except OSError:
@@ -72,12 +64,7 @@ def _within(inner: Path, outer: Path) -> bool:
 
 
 def _cannot_tell(user_dir: Path) -> bool:
-    """Whether the answer for `user_dir` is unknown rather than no.
-
-    TRAP: permission is ASKED, not inferred from a failed probe. Inside a directory this user
-    cannot read, a probe raises on Linux but simply answers False on macOS, so a check that waits
-    for an exception reports the editor as absent on one platform and unreadable on the other.
-    """
+    """Whether the answer for `user_dir` is unknown rather than no."""
     try:
         if not user_dir.is_dir():
             return False
@@ -91,9 +78,6 @@ def _settings_of(candidate: Path) -> tuple[Path | None, bool]:
 
     Corroborated: this decides what gets graded and written to, and a bare `User/settings.json` is
     a shape any application may hold. The state the editor writes for itself has to be there too.
-
-    TRAP: every probe is guarded, and a refusal is reported rather than read as absence. Inside a
-    directory this user cannot read, a path probe raises on Linux where it returns False on macOS.
     """
     user_dir = candidate / "User"
     try:

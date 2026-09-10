@@ -46,12 +46,7 @@ ALREADY, CANNOT_WRITE, A_DECISION = "already", "cannot-write", "a-decision"
 
 @dataclass(frozen=True)
 class Skipped:
-    """A finding this will not answer, and why — never silently dropped.
-
-    TRAP: `kind` is the answer and `reason` is its rendering. "Nothing was planned" covers both a
-    setting already correct and one this refused to touch, and reading those as the same thing
-    reports a machine as protected over a control that was never applied.
-    """
+    """A finding this will not answer, and why — never silently dropped."""
 
     issue_id: str
     kind: str
@@ -180,12 +175,7 @@ class Correcting:
 
     @property
     def settled(self) -> bool:
-        """True only when every editor here holds the values this knows are correct.
-
-        TRAP: a correction that landed but could not be written down still LANDED. Counting it as
-        unsettled reports a protected machine as unprotected, which teaches an operator to read
-        that line as noise. What it costs is undo, and `take_back` is where that shows.
-        """
+        """True only when every editor here holds the values this knows are correct."""
         return self.problem is None and not [o for o in self.outcomes if o.state == NOT_WRITTEN]
 
     @property
@@ -215,11 +205,7 @@ def _remember(entries: list[dict], path: Path | None = None) -> bool:
 
 
 def _remembered(path: Path | None = None) -> tuple[list[dict], bool]:
-    """What saw has changed and not yet put back, and whether that answer is trustworthy.
-
-    TRAP: a record that cannot be read is not an empty one. Reading them alike reports every
-    change as put back on exactly the runs where nobody can tell what was changed.
-    """
+    """What saw has changed and not yet put back, and whether that answer is trustworthy."""
     where = path or record_path()
     try:
         data = json.loads(where.read_text(encoding="utf-8"))
@@ -234,12 +220,7 @@ def _remembered(path: Path | None = None) -> tuple[list[dict], bool]:
 
 
 def _lands_where_it_was_aimed(before: str, after: str, planned: list[Planned]) -> bool:
-    """Whether `after` is `before` with exactly the planned settings changed, and nothing else.
-
-    TRAP: asked of the PARSED result, never of the text. Every edit here is a substitution over
-    raw bytes, so an edit can land inside a comment, change nothing an editor reads, and still
-    look like a correction; and text that reads as edited can be a file that no longer parses.
-    """
+    """Whether `after` is `before` with exactly the planned settings changed, and nothing else."""
     try:
         was, now = load_jsonc(before), load_jsonc(after)
     except Exception:
@@ -286,9 +267,6 @@ def settle(find=editors.installed, write=None, record: Path | None = None,
 
     Returns one outcome per editor. A setting whose answer is a decision is never written; it stays
     in the audit for the operator.
-
-    TRAP: the writer is resolved here, not in the signature. A default bound at definition time
-    cannot be substituted, and a seam that cannot be substituted is one a test writes through.
     """
     write = write or atomicwrite.replace
     remember = _remember if remember is None else remember
@@ -380,8 +358,6 @@ def take_back(record: Path | None = None, write=None) -> TakingBack:
 
     A key saw ADDED is kept and reported, never deleted: this module does not remove keys, and a
     setting that is absent is the state the audit reports as a finding.
-
-    TRAP: the writer is resolved here, not in the signature — see `settle`.
     """
     write = write or atomicwrite.replace
     write = write or atomicwrite.replace

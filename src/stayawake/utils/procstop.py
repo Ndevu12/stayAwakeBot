@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""Freeze a process, end it, and prove it ended.
-
-TRAP: every signal here is guarded by the caller's earlier identity. A pid is a reusable handle.
-"""
+"""Freeze a process, end it, and prove it ended."""
 from __future__ import annotations
 
 import os
@@ -26,11 +23,7 @@ _POLL_SECONDS = 0.02
 
 
 def _still(known: Identity) -> tuple[str, Identity | None]:
-    """Whether that pid is still the process `known` describes.
-
-    TRAP: the uid is compared as well as the start time, which some platforms report only to the
-    second. The ppid is not — a reparented process would then be refused, and left running.
-    """
+    """Whether that pid is still the process `known` describes."""
     pid = known.pid
     who, state = identify(pid)
     if state == NOT_OURS:
@@ -63,10 +56,7 @@ def _send(known: Identity, sig: int) -> str:
 
 
 def freeze(known: Identity) -> str:
-    """Stop the process running, without ending it.
-
-    TRAP: SIGSTOP, because it cannot be caught and a frozen process cannot fork.
-    """
+    """Stop the process running, without ending it."""
     return _send(known, signal.SIGSTOP)
 
 
@@ -76,19 +66,13 @@ def resume(known: Identity) -> str:
 
 
 def end(known: Identity) -> str:
-    """End the process.
-
-    TRAP: SIGKILL, never SIGTERM — a terminate handler is code the target chose.
-    """
+    """End the process."""
     return _send(known, signal.SIGKILL)
 
 
 def has_ended(known: Identity, *, settle: float = _SETTLE_SECONDS,
               sleep=time.sleep, clock=time.monotonic) -> bool:
-    """Whether that process is no longer executing. Polled: SIGKILL is not instantaneous.
-
-    TRAP: not `os.kill(pid, 0)` — that answers True for a killed process its parent has not reaped.
-    """
+    """Whether that process is no longer executing. Polled: SIGKILL is not instantaneous."""
     deadline = clock() + settle
     while True:
         verdict, _who = _still(known)
@@ -110,11 +94,7 @@ def _kill_binary() -> str | None:
 
 def end_as_root(pids: list[int], *, signatures: dict[int, str],
                 run_as_root=elevate.run_as_root, signature=ps_signature) -> tuple[str, list[int]]:
-    """End processes that are only endable as root, asking once for all of them.
-
-    TRAP: each signature is re-read and compared first. A pid this user cannot read can still be
-    recycled, and asking root to kill a stale one is worse than doing it unprivileged.
-    """
+    """End processes that are only endable as root, asking once for all of them."""
     still = [pid for pid in pids if signature(pid) == signatures.get(pid)]
     if not still:
         return elevate.GRANTED, []
