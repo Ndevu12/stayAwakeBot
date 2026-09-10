@@ -2,6 +2,8 @@
 """`saw fix amend` force-updates branches that still carry the payload; it does not run on heuristic-only or `--pr`."""
 from __future__ import annotations
 
+import base64
+import hashlib
 import io
 import os
 import shutil
@@ -14,6 +16,7 @@ from contextlib import ExitStack, contextmanager, redirect_stderr
 
 from stayawake import cli
 from stayawake.bots.security.models import CONFIRMED, Finding, ScanResult, Severity
+from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.pr import amend as amendmod
 from stayawake.bots.security.pr.amend import amend_outcome, amend_repo
 from stayawake.bots.security.pr.outcome import (BranchResult, Cause, Reason, amended,
@@ -553,7 +556,7 @@ class TestFixAmendRepo(_AmendFixture):
         calls = []
         with mock.patch("stayawake.bots.security.pr.amend.scan_target", return_value=scan):
             line = self._amend(pusher=lambda *a: calls.append(a) or PushResult(True))
-        self.assertIn("no confirmed payload in past commits to replace", line)
+        self.assertIn("need manual recovery", line)
         self.assertEqual(before, self._rev())
         self.assertEqual(calls, [])
 
@@ -1015,3 +1018,249 @@ class TestAmendGates(_AmendFixture):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+_HIENT = "".join(base64.b64encode(hashlib.sha256(str(i).encode()).digest()).decode()
+                 for i in range(8))
+_LOADER = "var _$_1e42=sfL(0);String.fromCharCode(127);global['!']='x';" + _HIENT
+
+
+def _seam_line(clean_prefix: str) -> str:
+    """A clean file with the loader hidden behind a whitespace concealment seam on its last line."""
+    return clean_prefix.rstrip("\n") + " " * 470 + _LOADER + "\n"
+
+
+class TestAmendActsOnContentPayload(_AmendFixture):
+    """A confirmed payload in a file, carrying no commit id, is rewritten out of history."""
+
+    def _act_full(self, scan, pusher=_ok_push):
+        with self._remote():
+            with mock.patch("stayawake.bots.security.pr.amend.scan_target", return_value=scan):
+                return amend_outcome(self.d, "acme/app", ScanOptions(), load_signatures(),
+                                     [], "t", pusher=pusher)
+
+    def test_a_loader_in_an_evolving_file_is_excised_at_every_commit(self):
+        clean = "const config = {};\nexport default config;\n"
+        self.write(self.d, "postcss.config.mjs", clean)
+        self.commit(self.d, "add config")
+        self.write(self.d, "postcss.config.mjs", _seam_line(clean))
+        self.commit(self.d, "config carries a loader")
+        self.write(self.d, "postcss.config.mjs", "// build config\n" + _seam_line(clean))
+        self.commit(self.d, "edit the config, loader still there")
+        finding = Finding("loader-seed-var", "code-loader", Severity.CRITICAL,
+                          "postcss.config.mjs", "loader", remediation="recover",
+                          confidence=CONFIRMED)
+        scan = ScanResult(target=str(self.d), source="local", findings=[finding])
+        calls = []
+        outcome = self._act_full(scan, pusher=lambda *a: calls.append(a) or PushResult(True))
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        head = self._show("HEAD:postcss.config.mjs")
+        self.assertNotIn("sfL", head)
+        self.assertNotIn("_$_1e42", head)
+        self.assertIn("// build config", head)
+        self.assertIn("export default config;", head)
+        self.assertTrue(calls, "the branch was force-updated")
+
+    def test_gitignore_markers_go_and_legit_rules_added_later_stay(self):
+        self.write(self.d, ".gitignore", "node_modules\n")
+        self.commit(self.d, "gitignore")
+        self.write(self.d, ".gitignore",
+                   "node_modules\ntemp_auto_push.bat\nbranch_structure.json\n")
+        self.commit(self.d, "markers added")
+        self.write(self.d, ".gitignore",
+                   "node_modules\ntemp_auto_push.bat\nbranch_structure.json\ndist/\n")
+        self.commit(self.d, "a real rule added after")
+        finding = Finding("gitignore-autopush-markers", "git-marker", Severity.MEDIUM,
+                          ".gitignore", "markers", remediation="strip-gitignore-markers",
+                          confidence=CONFIRMED)
+        scan = ScanResult(target=str(self.d), source="local", findings=[finding])
+        calls = []
+        outcome = self._act_full(scan, pusher=lambda *a: calls.append(a) or PushResult(True))
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        head = self._show("HEAD:.gitignore")
+        self.assertIn("node_modules", head)
+        self.assertIn("dist/", head)
+        self.assertNotIn("temp_auto_push.bat", head)
+        self.assertNotIn("branch_structure.json", head)
+        self.assertTrue(calls)
+
+    def test_a_confirmed_finding_it_cannot_excise_leaves_review_work(self):
+        self.write(self.d, "postcss.config.mjs", "const config = {};\nexport default config;\n")
+        self.commit(self.d, "add config")
+        self.write(self.d, "postcss.config.mjs", _seam_line("const config = {};\n"
+                                                            "export default config;\n"))
+        self.commit(self.d, "config carries a loader")
+        excisable = Finding("loader-seed-var", "code-loader", Severity.CRITICAL,
+                            "postcss.config.mjs", "loader", remediation="recover",
+                            confidence=CONFIRMED)
+        opaque = Finding("camouflage-blockchain-readme", "camouflage", Severity.HIGH,
+                         "README.md", "camouflage", remediation="manual", confidence=CONFIRMED)
+        scan = ScanResult(target=str(self.d), source="local", findings=[excisable, opaque])
+        outcome = self._act_full(scan)
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertNotIn("sfL", self._show("HEAD:postcss.config.mjs"))
+        self.assertTrue(outcome.needs_review)
+        self.assertIn(Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY, self._causes(outcome))
+
+    def test_the_same_loader_on_a_sibling_branch_is_also_cleaned(self):
+        clean = "const config = {};\nexport default config;\n"
+        self.write(self.d, "postcss.config.mjs", clean)
+        self.commit(self.d, "add config")
+        at_clean = self._rev()
+        self.write(self.d, "postcss.config.mjs", _seam_line(clean))
+        self.commit(self.d, "main carries the loader")
+        self.git(self.d, "checkout", "-qb", "victim", at_clean)
+        self.write(self.d, "postcss.config.mjs", _seam_line(clean))
+        self.commit(self.d, "victim carries the same loader independently")
+        self.git(self.d, "checkout", "-q", self.base)
+        finding = Finding("loader-seed-var", "code-loader", Severity.CRITICAL,
+                          "postcss.config.mjs", "loader", remediation="recover",
+                          confidence=CONFIRMED)
+        scan = ScanResult(target=str(self.d), source="local", findings=[finding])
+        moved = []
+        outcome = self._act_full(
+            scan, pusher=lambda b, d, l: moved.append(b) or PushResult(True))
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertNotIn("sfL", self._show(f"{self.base}:postcss.config.mjs"))
+        self.assertNotIn("sfL", self._show("victim:postcss.config.mjs"))
+        self.assertIn("victim", moved)
+
+    def test_a_non_utf8_byte_beside_the_footprint_blocks_rather_than_corrupts(self):
+        (self.d / ".gitignore").write_bytes(b"node_modules\n")
+        self.git(self.d, "add", ".gitignore")
+        self.commit(self.d, "gitignore")
+        (self.d / ".gitignore").write_bytes(
+            b"node_modules\ncaf\xe9/\ntemp_auto_push.bat\n")
+        self.git(self.d, "add", ".gitignore")
+        self.commit(self.d, "a latin-1 rule beside a worm marker")
+        before = self._rev()
+        finding = Finding("gitignore-autopush-markers", "git-marker", Severity.MEDIUM,
+                          ".gitignore", "markers", remediation="strip-gitignore-markers",
+                          confidence=CONFIRMED)
+        scan = ScanResult(target=str(self.d), source="local", findings=[finding])
+        calls = []
+        outcome = self._act_full(scan, pusher=lambda *a: calls.append(a) or PushResult(True))
+        self.assertFalse(outcome.completed,
+                         "a lossy re-encode of a legit byte must not be written")
+        self.assertEqual(before, self._rev(), "nothing moved")
+        self.assertEqual(calls, [])
+        raw = subprocess.run(["git", "-C", str(self.d), "cat-file", "blob", "HEAD:.gitignore"],
+                             capture_output=True).stdout
+        self.assertIn(b"\xe9", raw, "the legit latin-1 byte is untouched")
+
+    def test_a_second_confirmed_payload_on_the_same_file_is_not_dropped(self):
+        clean = "const config = {};\nexport default config;\n"
+        self.write(self.d, "postcss.config.mjs", clean)
+        self.commit(self.d, "add config")
+        self.write(self.d, "postcss.config.mjs", _seam_line(clean))
+        self.commit(self.d, "config carries a loader")
+        excisable = Finding("loader-seed-var", "code-loader", Severity.CRITICAL,
+                            "postcss.config.mjs", "loader", remediation="recover",
+                            confidence=CONFIRMED)
+        other = Finding("camouflage-blockchain-readme", "camouflage", Severity.HIGH,
+                        "postcss.config.mjs", "camouflage", remediation="manual",
+                        confidence=CONFIRMED)
+        scan = ScanResult(target=str(self.d), source="local", findings=[excisable, other])
+        outcome = self._act_full(scan)
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertNotIn("sfL", self._show("HEAD:postcss.config.mjs"))
+        self.assertIn(Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY, self._causes(outcome))
+        self.assertTrue(outcome.needs_review)
+
+    def test_crlf_endings_on_legit_lines_survive_the_strip(self):
+        (self.d / ".gitignore").write_bytes(b"node_modules\r\n")
+        self.git(self.d, "add", ".gitignore")
+        self.commit(self.d, "gitignore crlf")
+        (self.d / ".gitignore").write_bytes(
+            b"node_modules\r\ntemp_auto_push.bat\r\ndist/\r\n")
+        self.git(self.d, "add", ".gitignore")
+        self.commit(self.d, "markers, crlf")
+        finding = Finding("gitignore-autopush-markers", "git-marker", Severity.MEDIUM,
+                          ".gitignore", "markers", remediation="strip-gitignore-markers",
+                          confidence=CONFIRMED)
+        scan = ScanResult(target=str(self.d), source="local", findings=[finding])
+        outcome = self._act_full(scan, pusher=lambda *a: PushResult(True))
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        raw = subprocess.run(["git", "-C", str(self.d), "cat-file", "blob", "HEAD:.gitignore"],
+                             capture_output=True).stdout
+        self.assertEqual(raw, b"node_modules\r\ndist/\r\n")
+
+    def test_a_path_named_by_both_a_commit_and_content_still_reaches_every_branch(self):
+        clean = "const config = {};\nexport default config;\n"
+        self.write(self.d, "app.mjs", clean)
+        self.commit(self.d, "add app")
+        at_clean = self._rev()
+        self.write(self.d, "app.mjs", _seam_line(clean))
+        self.commit(self.d, "main carries the loader")
+        main_commit = self._rev()
+        self.git(self.d, "checkout", "-qb", "victim", at_clean)
+        self.write(self.d, "app.mjs", _seam_line(clean))
+        self.commit(self.d, "victim carries the same loader independently")
+        self.git(self.d, "checkout", "-q", self.base)
+        evil = Finding("evil-merge-loader", "evil-merge", Severity.CRITICAL, main_commit[:10],
+                       "x", vector="evil-merge", commit_sha=main_commit,
+                       related_paths=("app.mjs",), confidence=CONFIRMED)
+        content = Finding("loader-seed-var", "code-loader", Severity.CRITICAL, "app.mjs",
+                          "loader", remediation="recover", confidence=CONFIRMED)
+        scan = ScanResult(target=str(self.d), source="local", findings=[evil, content])
+        moved = []
+        outcome = self._act_full(
+            scan, pusher=lambda b, d, l: moved.append(b) or PushResult(True))
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertNotIn("sfL", self._show(f"{self.base}:app.mjs"))
+        self.assertNotIn("sfL", self._show("victim:app.mjs"))
+        self.assertIn("victim", moved)
+
+    def test_a_loader_hidden_as_a_merge_second_parent_is_still_reached(self):
+        clean = "const config = {};\nexport default config;\n"
+        payload = _seam_line(clean)
+        p = "postcss.config.mjs"
+        self.write(self.d, p, clean)
+        self.commit(self.d, "add config")
+        at_a = self._rev()
+        self.write(self.d, p, payload)
+        self.commit(self.d, "mainline gets the loader")
+        self.git(self.d, "checkout", "-qb", "side", at_a)
+        self.write(self.d, p, payload)
+        self.commit(self.d, "side introduces the same loader independently")
+        v = self._rev()
+        self.git(self.d, "checkout", "-q", self.base)
+        subprocess.run(["git", "-C", str(self.d), "merge", "--no-ff", "--no-commit", "side"],
+                       capture_output=True, text=True)
+        self.write(self.d, p, payload)
+        self.commit(self.d, "merge side, keeping the mainline copy")
+        self.git(self.d, "branch", "-D", "side")
+        finding = Finding("loader-seed-var", "code-loader", Severity.CRITICAL, p, "loader",
+                          remediation="recover", confidence=CONFIRMED)
+        scan = ScanResult(target=str(self.d), source="local", findings=[finding])
+        outcome = self._act_full(scan, pusher=lambda *a: PushResult(True))
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        tip = self._rev(self.base)
+        reachable = subprocess.run(["git", "-C", str(self.d), "rev-list", tip],
+                                   capture_output=True, text=True).stdout.split()
+        survived = [c[:10] for c in reachable
+                    if "sfL" in subprocess.run(
+                        ["git", "-C", str(self.d), "show", f"{c}:{p}"],
+                        capture_output=True, text=True).stdout]
+        self.assertEqual([], survived, f"loader still reachable at {survived}")
+
+    def test_a_path_history_too_long_to_enumerate_fails_closed(self):
+        clean = "const config = {};\nexport default config;\n"
+        self.write(self.d, "postcss.config.mjs", clean)
+        self.commit(self.d, "add config")
+        self.write(self.d, "postcss.config.mjs", _seam_line(clean))
+        self.commit(self.d, "loader")
+        self.write(self.d, "postcss.config.mjs", "// edit\n" + _seam_line(clean))
+        self.commit(self.d, "edit, loader stays")
+        finding = Finding("loader-seed-var", "code-loader", Severity.CRITICAL,
+                          "postcss.config.mjs", "loader", remediation="recover",
+                          confidence=CONFIRMED)
+        scan = ScanResult(target=str(self.d), source="local", findings=[finding])
+        before = self._rev()
+        calls = []
+        with mock.patch.object(amendmod, "_MAX_PATH_HISTORY", 2):
+            outcome = self._act_full(scan, pusher=lambda *a: calls.append(a) or PushResult(True))
+        self.assertFalse(outcome.completed)
+        self.assertIn(Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, self._causes(outcome))
+        self.assertEqual(before, self._rev(), "nothing moved when it cannot enumerate")
+        self.assertEqual(calls, [])

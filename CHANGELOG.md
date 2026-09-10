@@ -13,6 +13,13 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Changed
+- **`saw fix amend` now removes a confirmed payload that lives in a file, not only one smuggled
+  through a past merge.** It rewrites the payload out of every commit that carries it — keeping the
+  legitimate edits a file gained after it was infected — and force-updates the branches. When a
+  confirmed finding cannot be separated from the file safely, that file is left untouched and the
+  run reports it as still needing you, rather than claiming the repository is clean.
+
 ## [0.11.1] - 2026-09-10
 
 ### Added

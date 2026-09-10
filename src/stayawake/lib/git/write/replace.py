@@ -20,9 +20,14 @@ from pathlib import Path
 
 from stayawake.lib.git.merge.tree import auto_merge
 from stayawake.lib.git.query import file_at, parents, path_exists_at, tree_entry
-from stayawake.lib.git.run import run, run_ok, stdout
+from stayawake.lib.git.run import run, run_ok, stdout, stdout_bytes
 
 _GITLINK = "160000"
+
+
+def _byte_subsequence(sub: bytes, whole: bytes) -> bool:
+    it = iter(whole)
+    return all(b in it for b in sub)
 
 
 @dataclass(frozen=True)
@@ -148,21 +153,33 @@ def _not_applied(repo: str | Path, tree: str,
     return missed
 
 
+def write_blob(repo: str | Path, text: str) -> str | None:
+    """The object id of `text` stored as a blob with bytes verbatim, or None on failure."""
+    fd, tmp = tempfile.mkstemp(prefix="saw-blob-")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
+            handle.write(text)
+        res = run(repo, ["hash-object", "-w", "--no-filters", "--", tmp])
+        if res is None or res.returncode != 0:
+            return None
+        return (res.stdout or "").strip() or None
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
 def carried_forward(repo: str | Path, commit: str,
                     corrections: dict[str, tuple[str, tuple[str, str] | None]],
-                    still_carries=None) -> tuple[str | None, str]:
-    """`commit`'s recorded tree with each correction carried into it. Returns `(tree, blocked)`.
+                    still_carries=None, clean=None) -> tuple[str | None, str]:
+    """`commit`'s recorded tree with each correction carried into it, as `(tree, blocked)`.
 
-    A tree is a snapshot: every commit after the infected one records the payload again at that
-    path, so remapping parents alone leaves the branch tip carrying it.
-
-    Blob identity answers survival in ONE DIRECTION, which `merge/liveness` already states: an
-    identical blob proves the bytes are still there, a different one proves only that the file
-    changed — the payload lines may sit untouched inside it. So an unchanged blob is corrected,
-    and a CHANGED one is checked for content rather than assumed clean. `blocked` names a path a
-    later commit edited that still carries the payload: correcting it would either miss the
-    payload or throw that commit's work away, and neither is this function's call to make.
-    """
+    `corrections` maps a path to `(payload_blob, entry)`: where the commit's blob still equals
+    `payload_blob` it is set to `entry`. `clean` maps a path to `(carries, corrector)`: where the
+    commit's blob carries the footprint it is rewritten by `corrector` and re-checked with
+    `carries`. `blocked` names a path that could not be made clean (then `tree` is None), including
+    a rewrite whose UTF-8 bytes are not a subsequence of the original blob."""
     plan = []
     for path, (payload_blob, entry) in corrections.items():
         current = tree_entry(repo, commit, path)
@@ -172,6 +189,30 @@ def carried_forward(repo: str | Path, commit: str,
             plan.append((path, entry))
         elif still_carries and still_carries(file_at(repo, commit, path)):
             return None, path
+    for path, (carries, corrector) in (clean or {}).items():
+        current = tree_entry(repo, commit, path)
+        if current is None:
+            continue
+        original = stdout_bytes(repo, ["cat-file", "blob", current[1]])
+        if original is None:
+            return None, path
+        try:
+            text = original.decode("utf-8")
+        except UnicodeDecodeError:
+            if carries(original.decode("utf-8", errors="replace")):
+                return None, path
+            continue
+        if not carries(text):
+            continue
+        cleaned = corrector(text)
+        if cleaned is None or carries(cleaned):
+            return None, path
+        if not _byte_subsequence(cleaned.encode("utf-8"), original):
+            return None, path
+        blob = write_blob(repo, cleaned)
+        if blob is None:
+            return None, path
+        plan.append((path, (current[0], blob)))
     if not plan:
         return (stdout(repo, ["rev-parse", f"{commit}^{{tree}}"]).strip() or None), ""
     tree = _write_corrected(repo, commit, plan)

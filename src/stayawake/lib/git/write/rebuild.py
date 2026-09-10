@@ -91,12 +91,13 @@ def commits_to_rebuild(graph: list[tuple[str, list[str]]],
 
 def rebuild_without_payload(repo: str | Path, graph: list[tuple[str, list[str]]],
                             replacements: dict[str, Replacement],
-                            write_commit, still_carries=None) -> Rebuild:
-    """Walk `order` parents-first, replacing each infected commit and carrying its correction
-    into everything after it.
+                            write_commit, still_carries=None, clean=None) -> Rebuild:
+    """Rebuild each infected commit parents-first and carry its correction into every commit
+    after it.
 
-    `write_commit(commit, tree, new_parents) -> (sha, kind, refusal)` writes one commit; it is
-    injected so this layer decides nothing about signing or identity.
+    `write_commit(commit, tree, new_parents) -> (sha, kind, refusal)`, `still_carries`, and `clean`
+    are injected. `clean` maps a path to `(carries, corrector)`, excised in place at each commit
+    whose blob at that path carries the footprint.
     """
     mapping: dict[str, str] = {}
     corrections: dict[str, tuple[str, tuple[str, str] | None]] = {}
@@ -115,8 +116,8 @@ def rebuild_without_payload(repo: str | Path, graph: list[tuple[str, list[str]]]
                     continue
                 corrections[path] = (current[1], entry)
 
-        tree, blocked = (carried_forward(repo, sha, corrections, still_carries)
-                         if corrections else (None, ""))
+        tree, blocked = (carried_forward(repo, sha, corrections, still_carries, clean)
+                         if (corrections or clean) else (None, ""))
         if blocked:
             return _refused("changed-downstream",
                             f"{sha[:12]} changed {blocked} and it still carries the payload — "

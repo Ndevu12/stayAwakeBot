@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from stayawake.bots.security.models import CONFIRMED
+from stayawake.bots.security.remediation import footprint
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.targets import LocalRepoTarget
 from stayawake.lib.git.auth import github_https_auth
@@ -29,31 +30,20 @@ def _full(repo: Path, sha: str) -> str:
     return gitutil.stdout(repo, ["rev-parse", "--verify", f"{sha}^{{commit}}"]).strip()
 
 
-def _payload_left(repo: Path, infected, rebuilt, new_tips: dict[str, str],
-                  still_carries) -> list[str]:
-    """What the rebuild produced that still reaches the payload. Empty means it did its job.
-
-    Every other check in this path asks what CHANGED. None of them asks whether anything infected
-    REMAINS, and those are different questions — a correction that quietly did nothing changes
-    nothing and passes them all.
-
-    Asked of the rebuilt objects, before any reference moves, so a failure needs nothing put back.
-    Re-scanning the repository instead would be answered by the OLD commits, which are still
-    reachable through the remote-tracking refs this run has not pushed over yet.
-    """
+def _payload_left(repo: Path, olds, rebuilt, new_tips: dict[str, str],
+                  path_checks: dict) -> list[str]:
+    """What the rebuilt objects still leave reaching the payload, checked before any reference
+    moves. Empty means clean. `olds` are the pre-rewrite carrying commits; `path_checks` maps each
+    corrected path to its own footprint check."""
     left = []
-    for old in sorted(infected):
+    for old in sorted(olds):
         for tip in sorted(set(new_tips.values())):
             if gitutil.is_ancestor(repo, old, tip):
                 left.append(f"{old[:12]} is still reachable from the rebuilt history")
-    if not still_carries:
-        return left
-    paths = {p for group in infected.values() for p in group}
     for sha in sorted(set(rebuilt.mapping.values())):
-        for path in sorted(paths):
-            carried = still_carries(gitutil.file_at(repo, sha, path))
-            if carried:
-                left.append(f"{sha[:12]} still carries {path} ({carried})")
+        for path in sorted(path_checks):
+            if path_checks[path](gitutil.file_at(repo, sha, path)):
+                left.append(f"{sha[:12]} still carries {path}")
     return left
 
 
@@ -90,6 +80,89 @@ def _confirmed_commits(scan) -> list:
         seen.add(sha)
         found.append(f)
     return found
+
+
+def _flat(signatures) -> list:
+    """The signature list, whether given as the by-matcher map or already flat."""
+    if isinstance(signatures, dict):
+        return [s for group in signatures.values() for s in group]
+    return list(signatures or [])
+
+
+def _content_targets(repo: Path, scan, signatures) -> list[tuple]:
+    """Confirmed file findings this verb can excise, as `(finding, carries, corrector,
+    cleaned_head)`, one per path and only where the corrector clears the footprint at HEAD."""
+    flat = _flat(signatures)
+    out = []
+    seen: set[str] = set()
+    for f in scan.findings:
+        if getattr(f, "confidence", None) != CONFIRMED or getattr(f, "advisory_only", False):
+            continue
+        path = getattr(f, "path", "") or ""
+        if not path or path in seen or getattr(f, "commit_sha", None):
+            continue
+        corrector = footprint.corrector_for(f, flat)
+        carries = footprint.carries_footprint(f, flat)
+        if corrector is None or carries is None:
+            continue
+        head = gitutil.file_at(repo, "HEAD", path)
+        if not carries(head):
+            continue
+        cleaned = corrector(head)
+        if cleaned is None or carries(cleaned):
+            continue
+        seen.add(path)
+        out.append((f, carries, corrector, cleaned))
+    return out
+
+
+def _unhandled_confirmed(scan, signatures, revert_paths: set[str],
+                         cleaned_head: dict[str, str]) -> int:
+    """How many confirmed, non-advisory findings this verb neither reverts (a revert path) nor
+    excises (its footprint is gone from the cleaned HEAD of its path)."""
+    flat = _flat(signatures)
+    count = 0
+    for f in scan.findings:
+        if getattr(f, "confidence", None) != CONFIRMED or getattr(f, "advisory_only", False):
+            continue
+        if getattr(f, "commit_sha", None) and getattr(f, "related_paths", None):
+            continue
+        path = getattr(f, "path", "") or ""
+        if path in revert_paths:
+            continue
+        carries = footprint.carries_footprint(f, flat)
+        if carries is not None and path in cleaned_head and not carries(cleaned_head[path]):
+            continue
+        count += 1
+    return count
+
+
+_MAX_PATH_HISTORY = 100_000
+
+
+def _carrying_commits(repo: Path, path: str, carries) -> list[str] | None:
+    """Every commit on any local branch whose blob at `path` carries the footprint, or None when
+    the path's history reaches the enumeration bound and cannot be walked with certainty."""
+    changed = gitutil.file_commits(repo, path, limit=_MAX_PATH_HISTORY, all_branches=True)
+    if len(changed) >= _MAX_PATH_HISTORY:
+        return None
+    return [sha for sha in changed if carries(gitutil.file_at(repo, sha, path))]
+
+
+def _branches_left_carrying(repo: Path, clean: dict, covered: set[str]) -> list[str]:
+    """Local branches, outside `covered`, whose tip still carries a clean-mode footprint."""
+    if not clean:
+        return []
+    out: set[str] = set()
+    listing = gitutil.stdout(repo, ["for-each-ref", "--format=%(refname:short)", "refs/heads"])
+    for name in (ln.strip() for ln in listing.splitlines() if ln.strip()):
+        if name in covered:
+            continue
+        for path, (carries, _corrector) in clean.items():
+            if carries(gitutil.file_at(repo, name, path)):
+                out.add(name)
+                break
+    return sorted(out)
 
 
 _OID = set("0123456789abcdef")
@@ -305,9 +378,6 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     if scan.error is not None:
         return refused(display, Cause.SCAN_DID_NOT_FINISH)
     commits = _confirmed_commits(scan)
-    if not commits:
-        return refused(display, Cause.NO_CONFIRMED_PAYLOAD)
-
     infected: dict[str, tuple[str, ...]] = {}
     for finding in commits:
         sha = _full(repo, getattr(finding, "commit_sha", None) or "")
@@ -318,14 +388,42 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
             return refused(display, Cause.COMMIT_SHAPE_NOT_MODELLED, sha[:12])
         infected[sha] = tuple(dict.fromkeys(infected.get(sha, ()) + paths))
 
-    heads = _branches_carrying_any(repo, infected)
+    clean: dict[str, tuple] = {}
+    clean_shas: set[str] = set()
+    cleaned_head: dict[str, str] = {}
+    for finding, carries, corrector, head_clean in _content_targets(repo, scan, signatures):
+        carrying = _carrying_commits(repo, finding.path, carries)
+        if carrying is None:
+            return refused(display, Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, finding.path)
+        if not carrying:
+            return refused(display, Cause.CONFIRMED_COMMIT_UNRESOLVED)
+        clean[finding.path] = (carries, corrector)
+        clean_shas.update(carrying)
+        cleaned_head[finding.path] = head_clean
+
+    # A path excised in place across every branch is not also reverted at one commit.
+    infected = {sha: tuple(p for p in ps if p not in clean) for sha, ps in infected.items()}
+    infected = {sha: ps for sha, ps in infected.items() if ps}
+    taken = {p for ps in infected.values() for p in ps}
+
+    unhandled = _unhandled_confirmed(scan, signatures, taken, cleaned_head)
+    if not infected and not clean:
+        if unhandled:
+            return refused(display, Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY, str(unhandled))
+        return refused(display, Cause.NO_CONFIRMED_PAYLOAD)
+
+    all_infected = set(infected) | clean_shas
+    heads = _branches_carrying_any(repo, all_infected)
     if not heads:
         return refused(display, Cause.COMMIT_ON_NO_BRANCH,
-                       ", ".join(sorted(s[:12] for s in infected)))
+                       ", ".join(sorted(s[:12] for s in all_infected)))
+    off_plan = _branches_left_carrying(repo, clean, {n for n, _t, _c in heads})
+    if off_plan:
+        return refused(display, Cause.PAYLOAD_STILL_REACHABLE, ", ".join(off_plan))
 
     graph = gitrebuild.ordered_graph(repo, [tip for _n, tip, _c in heads])
-    plan = gitrebuild.commits_to_rebuild(graph, set(infected))
-    uncovered = sorted(s for s in infected if s not in {sha for sha, _ps in plan})
+    plan = gitrebuild.commits_to_rebuild(graph, all_infected)
+    uncovered = sorted(s for s in all_infected if s not in {sha for sha, _ps in plan})
     if uncovered:
         # A confirmed commit no branch reaches is not amendable here, and counting it as replaced
         # would report commits the run never touched.
@@ -371,14 +469,14 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
         repo, plan, replacements,
         lambda sha, tree, new_parents: gitamend.rewrite_commit(repo, sha, tree, new_parents,
                                                                signing),
-        survives)
+        survives, clean=clean)
     if not rebuilt.ok:
         return refused(display,
                        _CAUSE_PER_REFUSAL_KIND.get(rebuilt.kind, Cause.REPLACEMENT_NOT_WRITTEN),
                        rebuilt.refusal)
 
     new_tips = {tip: rebuilt.tip(tip) for _n, tip, _c in heads}
-    flagged = {p for paths in infected.values() for p in paths}
+    flagged = {p for paths in infected.values() for p in paths} | set(clean)
     for name, tip, _cas in heads:
         beyond = [p for p in gitamend.discarded_delta(repo, tip, new_tips[tip])
                   if p not in flagged]
@@ -386,7 +484,9 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
             return refused(display, Cause.REPLAY_CHANGED_UNRELATED_COMMITS,
                            f"{name}: " + ", ".join(sorted(beyond)[:3]))
 
-    left = _payload_left(repo, infected, rebuilt, new_tips, survives)
+    path_checks = {p: survives for p in flagged}
+    path_checks.update({p: carries for p, (carries, _c) in clean.items()})
+    left = _payload_left(repo, all_infected, rebuilt, new_tips, path_checks)
     if left:
         return refused(display, Cause.PAYLOAD_STILL_REACHABLE, "; ".join(left[:3]))
 
@@ -412,7 +512,9 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
         cause = result.reason.cause if result.reason is not None else None
         if not result.force_updated and cause is not Cause.PUSH_NOT_CONFIRMED:
             failed.append(branch)
-    survivors = _survivors(repo, slug, sorted(infected), token)
+    survivors = _survivors(repo, slug, sorted(all_infected), token)
+    if unhandled:
+        survivors.insert(0, Reason(Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY, str(unhandled)))
     if failed:
         try:
             unrestored = gitamend.restore_branches(repo, heads, moved, failed)
@@ -423,6 +525,6 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
             # same refused restore was silent on this side, and a local branch left on rewritten
             # history is the operator's problem whether or not any push succeeded.
             survivors.insert(0, Reason(Cause.LEFT_PART_WAY, ", ".join(unrestored)))
-    label = (oldest[:12] if len(rebuilt.replaced) == 1
-             else f"{len(rebuilt.replaced)} commits from {oldest[:12]}")
+    touched = len(all_infected)
+    label = (oldest[:12] if touched == 1 else f"{touched} commits from {oldest[:12]}")
     return amended(display, label, tuple(results), tuple(survivors))
