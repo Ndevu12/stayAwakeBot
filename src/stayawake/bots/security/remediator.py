@@ -337,6 +337,10 @@ def _amend_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *,
         return []
     prog.line(f"Amending {len(repos)} repositor{'y' if len(repos) == 1 else 'ies'}…")
 
+    # A local checkout is already the operator's config context; only the identity fallback is
+    # needed (for when a GitHub App token cannot name itself), resolved once for the sweep.
+    ident_fallback = auth._gh_fallback() if source == "github-app" else None
+
     def make_outcome(repo, *, spin):
         display = _disp(repo)
         tok, aerr = auth.act_token(token, source, gitutil.origin_slug(repo))
@@ -344,7 +348,8 @@ def _amend_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *,
             tok = None
         from stayawake.bots.security.pr.amend import amend_outcome
         return _amend_outcome(lambda r=repo, t=tok: amend_outcome(
-            r, display, opts, sigs, allowlist, t, remove_foreign=remove_foreign), display)
+            r, display, opts, sigs, allowlist, t, remove_foreign=remove_foreign,
+            identity_fallback=ident_fallback), display)
 
     labels = [_disp(r) for r in repos]
     return _run_fix_sweep(repos, labels, make_outcome, prog, jobs=jobs, verb="Amending")
@@ -368,6 +373,11 @@ def _amend_remote(cfg, opts, sigs, allowlist, prog: Streamer, *,
     prog.line(f"Sweeping {len(resolved)} GitHub repositor{'y' if len(resolved) == 1 else 'ies'} "
               f"({_remote_scope(cfg, None, None, slugs)})…")
 
+    # The operator's signer (their config context) and identity fallback (their session, for when a
+    # GitHub App token cannot name itself), resolved ONCE for the sweep, not re-spawned per repo.
+    operator_ctx = _enclosing_repo_root()
+    ident_fallback = auth._gh_fallback() if source == "github-app" else None
+
     def make_outcome(slug, *, spin):
         tok, aerr = auth.act_token(token, source, slug)
         if aerr:
@@ -378,7 +388,8 @@ def _amend_remote(cfg, opts, sigs, allowlist, prog: Streamer, *,
                 return FixOutcome(f"{slug}: clone failed (check token access)", needs_review=True)
             from stayawake.bots.security.pr.amend import amend_outcome
             return _amend_outcome(lambda c=clone, t=tok: amend_outcome(
-                c, slug, opts, sigs, allowlist, t, remove_foreign=remove_foreign), slug)
+                c, slug, opts, sigs, allowlist, t, remove_foreign=remove_foreign,
+                identity_fallback=ident_fallback, operator_context=operator_ctx), slug)
 
     return _run_fix_sweep(resolved, list(resolved), make_outcome, prog, jobs=jobs, verb="Amending")
 

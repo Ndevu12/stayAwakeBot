@@ -169,6 +169,20 @@ class TestSignatureFormats(SigningFixture):
         self.assertTrue(status.must_refuse)
         self.assertIn("gpg", status.reason.lower())
 
+    def test_signer_program_is_not_taken_from_an_untrusted_context(self):
+        # With trust_local_programs False the signer program comes from git's own resolution, not
+        # from this context's config.
+        ran = Path(tempfile.mkdtemp(prefix="saw-ran-")) / "ran"
+        program = _script(f"#!/bin/sh\ntouch '{ran}'\ncat > /dev/null\nexit 1\n")
+        repo = _repo(commit__gpgsign="true", gpg__format="openpgp",
+                     user__signingkey="DEADBEEF", gpg__program=str(program))
+        signing_status(repo)  # trusted (default): the context's program is used
+        self.assertTrue(ran.exists(), "a trusted context uses its configured program")
+        ran.unlink()
+        signing_status(repo, trust_local_programs=False)
+        self.assertFalse(ran.exists(),
+                         "an untrusted context's program is not used")
+
     def test_a_signer_that_reports_success_but_signs_nothing_is_a_refusal(self):
         repo = _repo(commit__gpgsign="true", gpg__format="openpgp",
                      user__signingkey="DEADBEEF",

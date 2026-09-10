@@ -396,7 +396,9 @@ def _survivors(repo: Path, slug: str, olds: list[str], token: str | None) -> lis
 
 
 def amend_repo(repo: Path, opts, signatures, allowlist, token: str | None = None, *,
-               pusher=None, remove_foreign: bool = False) -> str:
+               pusher=None, remove_foreign: bool = False,
+               identity_fallback: str | None = None,
+               operator_context: Path | None = None) -> str:
     """Force-update every branch that still reaches a confirmed past-commit payload.
 
     The local rewrite is a step. The result is the remote refs moving. Returns one operator line.
@@ -404,13 +406,21 @@ def amend_repo(repo: Path, opts, signatures, allowlist, token: str | None = None
     """
     display = gitutil.origin_slug(repo) or str(repo).replace(str(Path.home()), "~")
     outcome = amend_outcome(repo, display, opts, signatures, allowlist, token, pusher=pusher,
-                            remove_foreign=remove_foreign)
+                            remove_foreign=remove_foreign, identity_fallback=identity_fallback,
+                            operator_context=operator_context)
     return render_amend_line(outcome)
 
 
 def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, *,
-                  pusher=None, remove_foreign: bool = False) -> AmendOutcome:
-    """The act, as a structure. Prose is rendered from this and never parsed back out of it."""
+                  pusher=None, remove_foreign: bool = False,
+                  identity_fallback: str | None = None,
+                  operator_context: Path | None = None) -> AmendOutcome:
+    """The act, as a structure. Prose is rendered from this and never parsed back out of it.
+
+    `operator_context` is where the operator's own git config lives (signer, identity); it defaults
+    to `repo`. `identity_fallback` is the operator's session credential for the authority gate. Both
+    pass straight through to the gates.
+    """
     if not gitutil.is_git_repo(repo):
         return refused(display, Cause.NOT_A_GIT_REPOSITORY)
     if gitamend.is_dirty(repo):
@@ -422,7 +432,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     if not (token or "").strip() and pusher is None:
         return refused(display, Cause.NO_CREDENTIAL)
 
-    permitted = authority.may_rewrite(slug, token)
+    permitted = authority.may_rewrite(slug, token, identity_fallback=identity_fallback)
     if not permitted.permitted:
         return refused(display, Cause.NOT_PERMITTED_TO_REWRITE,
                        permitted.detail or permitted.reason)
@@ -506,10 +516,13 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
                        ", ".join(s[:12] for s in uncovered))
     oldest = plan[0][0]
 
-    # Asked AFTER the set is known: whether this owes a signature depends on what the commits
-    # being rewritten carry, not only on what this clone's config asks for.
+    # Two sources: whether a signature is owed is read from the commits being replaced (`repo`);
+    # the signer that produces it is read from the operator's own config context. `operator_context`
+    # is not a context saw named, so its program keys are not trusted (see `signing_status`).
     signing = sign.signing_status(
-        repo, history_is_signed=sign.any_signed(repo, [sha for sha, _ps in plan]))
+        operator_context or repo,
+        history_is_signed=sign.any_signed(repo, [sha for sha, _ps in plan]),
+        trust_local_programs=operator_context is None)
     if signing.must_refuse:
         return refused(display, Cause.SIGNING_UNAVAILABLE, signing.reason)
     if sign.committer_identity(repo) is None:

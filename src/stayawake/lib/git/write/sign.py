@@ -56,6 +56,16 @@ _SIGNING_CONFIG_KEYS = (
     "gpg.ssh.allowedsignersfile",
 )
 
+# The subset of the above whose VALUE git runs as a program while signing. `trust_local_programs`
+# governs whether these are honoured from `repo` — see `signing_status`.
+_EXECUTED_PROGRAM_KEYS = (
+    "gpg.program",
+    "gpg.openpgp.program",
+    "gpg.x509.program",
+    "gpg.ssh.program",
+    "gpg.ssh.defaultkeycommand",
+)
+
 # MEASURED on git 2.39.2: `commit-tree` ignores `commit.gpgsign` entirely — a `-c` override alone
 # leaves the replacement commit UNSIGNED. `rebase` honours the config, but the explicit flag is
 # what makes the outcome independent of where the config was read from. Per command: (on, off).
@@ -94,15 +104,21 @@ class SigningStatus:
         return self.required and not self.available
 
 
-def signing_status(repo: str | Path, *, history_is_signed: bool = False) -> SigningStatus:
+def signing_status(repo: str | Path, *, history_is_signed: bool = False,
+                   trust_local_programs: bool = True) -> SigningStatus:
     """Whether `repo` needs to sign AND can prove it, with a reason either way.
 
     `history_is_signed` is the caller's answer to "do the commits I am about to replace carry
     signatures" — pass it and a repository whose config never asked to sign still signs, rather
     than silently stripping what it found. Runs a git subprocess and a real signing attempt, so
     hold the result and pass it around rather than calling this once per commit.
+
+    `trust_local_programs` False drops the config keys whose value git executes as a program
+    (`gpg.program`, `gpg.ssh.program`, …), so the signer program comes from git's own system/global
+    resolution and PATH, not from `repo`. Pass it False when `repo` is a config context the operator
+    did not name.
     """
-    config = _resolved_signing_config(repo)
+    config = _resolved_signing_config(repo, trust_local_programs=trust_local_programs)
     signature_format = config.get("gpg.format") or "openpgp"
     carried = tuple(sorted(config.items()))
     asked = config.get("commit.gpgsign") == "true"
@@ -214,11 +230,14 @@ def sign_flags(status: SigningStatus, command: str) -> tuple[str, ...]:
     return signed if status.available else unsigned
 
 
-def _resolved_signing_config(repo: str | Path) -> dict[str, str]:
+def _resolved_signing_config(repo: str | Path, *, trust_local_programs: bool = True) -> dict[str, str]:
     """Every signing key git would resolve for `repo`. `--list` emits system, global, local and
     worktree scopes in that order, so the last value seen for a key is the one git would use —
     `commit.gpgsign` still goes through `--type=bool`, because reimplementing git's spelling of
-    truth (`yes`, `on`, `1`, a valueless key) is exactly how a config check drifts from git."""
+    truth (`yes`, `on`, `1`, a valueless key) is exactly how a config check drifts from git.
+
+    With `trust_local_programs` False the executable-program keys are not carried out of `repo`; git
+    then resolves the signer program from its own system/global config and PATH."""
     resolved: dict[str, str] = {}
     listing = run(repo, ["config", "--list", "-z"], timeout=PROBE_TIMEOUT)
     if listing is not None and listing.returncode == 0:
@@ -234,6 +253,9 @@ def _resolved_signing_config(repo: str | Path) -> dict[str, str]:
         # git resolves a signing-key path against its own cwd, which `-C` moves to the probe
         # repository. Left relative, a working key would probe as broken — a false refusal.
         resolved["user.signingkey"] = str((Path(repo) / key_path).resolve())
+    if not trust_local_programs:
+        for key in _EXECUTED_PROGRAM_KEYS:
+            resolved.pop(key, None)
     return resolved
 
 

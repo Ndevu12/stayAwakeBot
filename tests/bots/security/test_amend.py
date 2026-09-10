@@ -277,6 +277,32 @@ class TestFixAmendRepo(_AmendFixture):
         self.assertNotIn("fromCharCode", self._show("HEAD:x.js"))
         self.assertTrue(amendmod._capture_path("acme/app", merge[:12]).is_file())
 
+    def test_the_signer_is_read_from_the_operator_context_not_the_clone(self):
+        # A throwaway --remote clone inherits none of the operator's signing config. The signer must
+        # be probed in the operator's own context; only "is this history signed?" reads the clone.
+        self._loader_merge()
+        elsewhere = self.d.parent / "operator-elsewhere"
+        seen: dict[str, Path] = {}
+        real_status, real_signed = amendmod.sign.signing_status, amendmod.sign.any_signed
+
+        def status_spy(repo_arg, *, history_is_signed=False, trust_local_programs=True):
+            seen["signer"] = Path(repo_arg)
+            seen["trust_local_programs"] = trust_local_programs
+            return real_status(repo_arg, history_is_signed=history_is_signed,
+                               trust_local_programs=trust_local_programs)
+
+        def signed_spy(repo_arg, shas):
+            seen["history"] = Path(repo_arg)
+            return real_signed(repo_arg, shas)
+
+        with mock.patch.object(amendmod.sign, "signing_status", side_effect=status_spy), \
+                mock.patch.object(amendmod.sign, "any_signed", side_effect=signed_spy):
+            line = self._amend(operator_context=elsewhere)
+        self.assertIn("force-updated", line)
+        self.assertEqual(seen["signer"], elsewhere)   # signer probed in the operator's context
+        self.assertEqual(seen["history"], self.d)     # "already signed?" read from the clone
+        self.assertFalse(seen["trust_local_programs"])  # an unnamed context cannot choose the signer program
+
     def test_replays_a_later_commit(self):
         self._loader_merge()
         merge = self._rev()
