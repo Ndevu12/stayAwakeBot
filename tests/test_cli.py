@@ -256,6 +256,15 @@ class TestFix(unittest.TestCase):
         self.assertEqual(cli.main(["fix"]), 1)
 
 
+class TestHook(unittest.TestCase):
+    @mock.patch("stayawake.bots.security.hook.run_event", return_value=0)
+    def test_run_passes_no_stream(self, m):
+        cli.main(["hook", "run", "--no-stream", "post-checkout"])
+        self.assertTrue(m.call_args.kwargs["no_stream"])
+        cli.main(["hook", "run", "post-checkout"])
+        self.assertFalse(m.call_args.kwargs["no_stream"])
+
+
 class TestDiscard(unittest.TestCase):
     @mock.patch("stayawake.bots.security.remediator.discard", return_value=0)
     def test_branch_pr_remote_route(self, m):

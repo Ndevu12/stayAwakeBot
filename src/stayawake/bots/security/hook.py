@@ -658,18 +658,20 @@ def _warn_infected(display: str, result) -> None:
           + "\n", file=err)
 
 
-def run_event(event: str, argv: list[str], config_path: str | None = None) -> int:
+def run_event(event: str, argv: list[str], config_path: str | None = None,
+              *, no_stream: bool = False) -> int:
     """Invoked BY the installed git hook. Scan what just landed and warn. Returns 0 clean/skipped,
     1 infected, 2 scan-error/unverified — but the hook wrapper forces exit 0 so git is never broken.
     The ENTIRE body is guarded: a hook must never emit a traceback mid-clone."""
     try:
-        return _run_event(event, argv, config_path)
+        return _run_event(event, argv, config_path, no_stream=no_stream)
     except BaseException as exc:            # noqa: BLE001 — last-resort: never break/confuse git
         print(_paint(f"{_BRAND}: scan-on-clone error — {exc}", "warn", sys.stderr), file=sys.stderr)
         return 2
 
 
-def _run_event(event: str, argv: list[str], config_path: str | None) -> int:
+def _run_event(event: str, argv: list[str], config_path: str | None,
+               *, no_stream: bool = False) -> int:
     if env.hook_disabled():
         return 0
     root = _repo_root()
@@ -688,7 +690,7 @@ def _run_event(event: str, argv: list[str], config_path: str | None) -> int:
     # A live spinner on stderr while we scan, so a `git clone` never LOOKS stuck (the scan can take a
     # moment on a big tree). Transient — it clears before the verdict; a no-op when piped / CI.
     with spin_status(f"{_BRAND}: scanning {display} for supply-chain worms…",
-                     enabled=stream_enabled(err)):
+                     enabled=stream_enabled(err, force_off=no_stream)):
         scanned = _scan_within_budget(root, include, config_path, display)
     if scanned is _TIMED_OUT:
         budget = env.hook_timeout()

@@ -84,6 +84,8 @@ def register(sub) -> None:
 
     rn = hsub.add_parser("run")
     rn.add_argument("-c", "--config", default=None)
+    rn.add_argument("--no-stream", action="store_true", dest="no_stream",
+                    help="disable live progress/typewriter output (plain, instant lines)")
     rn.add_argument("event")
     rn.add_argument("args", nargs=argparse.REMAINDER)
     rn.set_defaults(func=run_run)
@@ -111,4 +113,5 @@ def run_status(a: argparse.Namespace) -> int:
 
 def run_run(a: argparse.Namespace) -> int:
     from stayawake.bots.security import hook
-    return hook.run_event(a.event, list(a.args), config_path=a.config)
+    return hook.run_event(a.event, list(a.args), config_path=a.config,
+                          no_stream=a.no_stream)

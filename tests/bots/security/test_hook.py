@@ -267,6 +267,16 @@ class TestRunEventScope(_Isolated):
         self.assertIn("npm install", out)                    # avoid-list, not just "before running it"
         self.assertIn("saw scan ", out)
 
+    def test_no_stream_turns_the_spinner_off(self):
+        repo = _repo({"app.js": "export const x = 1;\n"})
+        self._in_repo(repo)
+        head = hook.gitutil.stdout(repo, ["rev-parse", "HEAD"]).strip()
+        scanned = mock.Mock(error=None, infected=False, suspicious=False)
+        with mock.patch.object(hook, "stream_enabled", return_value=False) as enabled, \
+             mock.patch.object(hook, "_scan_within_budget", return_value=scanned):
+            hook.run_event("post-checkout", [hook._NULL_REV, head, "1"], no_stream=True)
+        self.assertTrue(enabled.call_args.kwargs.get("force_off"))
+
     def test_kill_switch_skips_everything(self):
         repo = _repo({".gitignore": _INFECTED})
         self._in_repo(repo)
@@ -1225,6 +1235,10 @@ class TestHookScript(unittest.TestCase):
     def test_hook_script_has_no_config_flag_when_none(self):
         s = hook._hook_script("post-merge", "/usr/local/bin/saw", None)
         self.assertNotIn("--config", s)
+
+    def test_generated_hook_does_not_bake_no_stream(self):
+        s = hook._hook_script("post-checkout", "/usr/local/bin/saw", None)
+        self.assertNotIn("--no-stream", s)
 
     def test_remediation_commands_use_a_distinct_colour(self):
         from stayawake.utils.render import LINK, SEVERITY
