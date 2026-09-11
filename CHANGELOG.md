@@ -13,6 +13,8 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+## [0.11.2] - 2026-09-11
+
 ### Added
 - **`saw fix amend --remove-foreign` removes a confirmed wholly-foreign file from history.** A file
   that is entirely the artifact — with nothing legitimate to keep — cannot be surgically cleaned;
@@ -1055,7 +1057,8 @@ _No user-facing changes were recorded for this release._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel (supply-chain worm
 detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.11.1...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.11.2...HEAD
+[0.11.2]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.11.1...v0.11.2
 [0.11.1]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.9.0...v0.10.0
