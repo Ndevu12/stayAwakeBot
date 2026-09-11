@@ -13,13 +13,11 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
-### Added
-- **`saw hook` accepts `--no-stream`.** The clone/pull scan already went quiet when piped or
-  with `STAYAWAKE_NO_STREAM=1`; the flag the other live commands take now does the same.
-
 ### Fixed
 - **`saw discard --branch --remote` removes every auto-clean branch on the repository.** It only
   removed the original name, so a later `saw fix` left the branches it published in place.
+- **`saw hook` takes `--no-stream`.** Every other live command already did; the clone/pull scan
+  had no way to turn live progress off except a pipe or `STAYAWAKE_NO_STREAM=1`.
 
 ## [0.11.2] - 2026-09-11
 
