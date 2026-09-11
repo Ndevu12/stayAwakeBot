@@ -13,6 +13,10 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Fixed
+- **`saw discard --branch --remote` removes every auto-clean branch on the repository.** It only
+  removed the original name, so a later `saw fix` left the branches it published in place.
+
 ## [0.11.2] - 2026-09-11
 
 ### Added

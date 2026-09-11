@@ -215,11 +215,12 @@ def branches_carrying(repo: str | Path, sha: str) -> list[tuple[str, str, str]]:
 
 
 def remote_branches_matching(remote: str, pattern: str, *, repo: str | Path | None = None,
-                             env: dict | None = None) -> list[str]:
-    """Branch names on `remote` matching a glob. Empty when the remote is unreachable."""
+                             env: dict | None = None) -> list[str] | None:
+    """Branch names on `remote` matching a glob. `None` when the remote could not be listed —
+    an empty list means it answered and nothing matched."""
     res = run(repo, ["ls-remote", "--heads", remote, pattern], env=env, timeout=NETWORK_TIMEOUT)
     if res is None or res.returncode != 0:
-        return []
+        return None
     return [ln.split("refs/heads/", 1)[1].strip()
             for ln in res.stdout.splitlines() if "refs/heads/" in ln]
 
