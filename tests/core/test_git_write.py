@@ -195,6 +195,13 @@ class TestBranchAndRemote(unittest.TestCase):
         self.assertTrue(gitutil.remote_has_branch(str(remote), "main"))   # repo=None
         self.assertFalse(gitutil.remote_has_branch(str(remote), "nope"))
 
+    def test_remote_branches_matching_none_when_unreachable(self):
+        work = _init({"a": "1\n"})
+        self.assertIsNone(gitutil.remote_branches_matching("origin", "security/auto-clean*",
+                                                           repo=work))
+        self.assertEqual(gitutil.remote_branches_matching(str(work), "no-such-head*", repo=None),
+                         [])
+
 
 class TestPushBranch(unittest.TestCase):
     def _capture(self, fn):
