@@ -1833,6 +1833,10 @@ command. See <a href="../../../how-to/scan-on-clone/">scan on clone</a>.</p>
 <td><code>-c</code>, <code>--config FILE</code></td>
 <td>Operator config whose allowlist clones are scanned against, baked into the hook. The hook never reads a cloned repository's own config.</td>
 </tr>
+<tr>
+<td><code>--no-stream</code></td>
+<td>Plain instant lines instead of live progress on the clone/pull scan. Same as <code>STAYAWAKE_NO_STREAM=1</code>.</td>
+</tr>
 </tbody>
 </table>
 <p><code>install</code> creates a directory whose contents git runs, unprompted, in every repository cloned or
