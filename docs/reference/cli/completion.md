@@ -5,7 +5,7 @@ description: saw completion — print a shell completion script for bash, zsh or
 # `saw completion`
 
 ```text
-saw completion {bash,zsh,fish}
+saw completion {bash,zsh,fish} [--no-stream]
 ```
 
 ```bash

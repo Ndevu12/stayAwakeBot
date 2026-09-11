@@ -76,6 +76,15 @@ class TestInstallUninstall(_Isolated):
             self.assertTrue(f.exists() and os.access(f, os.X_OK), name)
             self.assertIn(hook._MARKER, f.read_text())
 
+    def test_no_stream_turns_install_progress_off(self):
+        with mock.patch.object(hook, "busy") as spinning, \
+             mock.patch.object(hook, "settle_hooks",
+                               return_value=hook.Settling(problem="stopped", code=2)):
+            spinning.return_value.__enter__ = mock.Mock()
+            spinning.return_value.__exit__ = mock.Mock(return_value=False)
+            hook.install(no_stream=True)
+        self.assertTrue(spinning.call_args.kwargs.get("no_stream"))
+
     def test_status_reflects_install(self):
         hook.install()
         # status just prints + returns 0; assert it detects our hooks as installed.

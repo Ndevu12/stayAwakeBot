@@ -21,6 +21,13 @@ def jobs(value: str) -> int | None:
     return count
 
 
+def add_no_stream_arg(parser: argparse.ArgumentParser, *, help: str | None = None) -> None:
+    """Register the shared `--no-stream` flag — same dest and default help everywhere.
+    A command may pass its own `help` when the wording has to name that command's spinner."""
+    parser.add_argument("--no-stream", action="store_true", dest="no_stream",
+                        help=help or "disable live progress/typewriter output (plain, instant lines)")
+
+
 def add_jobs_arg(parser: argparse.ArgumentParser, *, help: str) -> None:
     """Register the shared `-j/--jobs` flag on a sweep command — SAME type parser, flag names,
     `dest`, and `metavar` everywhere, but each command supplies its OWN `help` text (its wording

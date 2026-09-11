@@ -18,6 +18,9 @@ reader, not the mechanism or the weakness it closed.
   removed the original name, so a later `saw fix` left the branches it published in place.
 - **`saw hook` takes `--no-stream`.** Every other live command already did; the clone/pull scan
   had no way to turn live progress off except a pipe or `STAYAWAKE_NO_STREAM=1`.
+- **`doctor`, `harden`, `watch`, `search`, `intro`, `completion`, `db status`, and `hook`
+  install/status/uninstall/repair stream, and take `--no-stream`.** They printed a finished
+  block and had no way to turn live progress off because they had none.
 
 ## [0.11.2] - 2026-09-11
 

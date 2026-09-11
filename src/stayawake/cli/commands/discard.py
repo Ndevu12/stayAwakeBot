@@ -39,8 +39,6 @@ def register(sub) -> None:
                    help="act on this GitHub user's repos (repeatable; implies --remote)")
     p.add_argument("--org", action="append", default=[], metavar="ORG",
                    help="act on this GitHub org's repos (repeatable; implies --remote)")
-    p.add_argument("--no-stream", action="store_true", dest="no_stream",
-                   help="disable live progress output (plain, instant lines)")
     p.set_defaults(func=run)
 
 
