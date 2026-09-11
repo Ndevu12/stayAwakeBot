@@ -25,6 +25,7 @@ saw hook status
 | `uninstall` | Reverse it, restoring any hook it had to preserve. |
 | `status` | Whether it is active, the template directory, and the scan cache. |
 | `-c`, `--config FILE` | Operator config whose allowlist clones are scanned against, baked into the hook. The hook never reads a cloned repository's own config. |
+| `--no-stream` | Plain instant lines instead of live progress on the clone/pull scan. Same as `STAYAWAKE_NO_STREAM=1`. |
 
 `install` creates a directory whose contents git runs, unprompted, in every repository cloned or
 created afterwards. [`saw audit`](audit.md) enumerates that directory, any template directory you
