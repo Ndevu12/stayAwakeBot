@@ -56,5 +56,5 @@ def run(a: argparse.Namespace) -> int:
             f"complete -c {binary} -n '__fish_use_subcommand' -a {v}"
             for binary in ("saw", "stayawake")
             for v in VERBS)
-    say(text, no_stream=a.no_stream)
+    say(text, no_stream=getattr(a, "no_stream", False))
     return exitcodes.CLEAN

@@ -101,12 +101,13 @@ def run_update(a: argparse.Namespace) -> int:
 def run_status(a: argparse.Namespace) -> int:
     from stayawake.bots.security.dependencies import db
 
-    with busy("reading the advisory cache…", no_stream=a.no_stream):
+    no_stream = getattr(a, "no_stream", False)
+    with busy("reading the advisory cache…", no_stream=no_stream):
         s = db.cache_status(a.cache_dir)
     if not s["present"]:
         say(f"Advisory DB: not found at {s['cache_dir']}\n"
             "  run `saw db update` — scans fall back to the inline malware seed until then.",
-            no_stream=a.no_stream)
+            no_stream=no_stream)
         return exitcodes.FINDINGS
     age = s["age_days"]
     schema_ok = s.get("schema_compatible", True)
@@ -125,7 +126,7 @@ def run_status(a: argparse.Namespace) -> int:
              f"  totals     {s['total_malicious']} malicious · {s['total_vulnerabilities']} vulnerabilities",
              *(f"    {eco:<10} {c['malicious']:>7} malicious · {c['vulnerabilities']:>7} vulnerabilities"
                for eco, c in s["ecosystems"].items())]
-    say("\n".join(lines), no_stream=a.no_stream)
+    say("\n".join(lines), no_stream=no_stream)
 
     rc = 0
     if not schema_ok:

@@ -50,23 +50,26 @@ def register(sub) -> None:
 
 
 def run(a: argparse.Namespace) -> int:
-    with busy("asking this machine to keep checking itself…", no_stream=a.no_stream):
+    no_stream = getattr(a, "no_stream", False)
+    with busy("asking this machine to keep checking itself…", no_stream=no_stream):
         code, text = watch.schedule_it()
-    say(text, no_stream=a.no_stream)
+    say(text, no_stream=no_stream)
     return code
 
 
 def run_stop(a: argparse.Namespace) -> int:
-    with busy("stopping the check…", no_stream=a.no_stream):
+    no_stream = getattr(a, "no_stream", False)
+    with busy("stopping the check…", no_stream=no_stream):
         code, text = watch.unschedule_it()
-    say(text, no_stream=a.no_stream)
+    say(text, no_stream=no_stream)
     return code
 
 
 def run_status(a: argparse.Namespace) -> int:
-    with busy("checking whether this machine is watching itself…", no_stream=a.no_stream):
+    no_stream = getattr(a, "no_stream", False)
+    with busy("checking whether this machine is watching itself…", no_stream=no_stream):
         code, text = watch.status_of()
-    say(text, no_stream=a.no_stream)
+    say(text, no_stream=no_stream)
     return code
 
 

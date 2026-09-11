@@ -34,7 +34,8 @@ def register(sub) -> None:
 
 
 def run(a: argparse.Namespace) -> int:
-    with busy("checking install and credentials…", no_stream=a.no_stream):
+    no_stream = getattr(a, "no_stream", False)
+    with busy("checking install and credentials…", no_stream=no_stream):
         saw_path = shutil.which("saw") or shutil.which("stayawake")
         sess = resolve_session()
         health = shutil.which("stayawake-health-check")
@@ -88,7 +89,7 @@ def run(a: argparse.Namespace) -> int:
     ]
     if a.quiet:
         problems = [ln for ln in lines if ln.startswith("✗")]
-        say("\n".join(problems) if problems else "ok", no_stream=a.no_stream)
+        say("\n".join(problems) if problems else "ok", no_stream=no_stream)
     else:
-        say("\n".join(lines), no_stream=a.no_stream)
+        say("\n".join(lines), no_stream=no_stream)
     return exitcodes.CLEAN

@@ -72,8 +72,8 @@ def run(a: argparse.Namespace) -> int:
         # No match is a normal empty result, not a gate failure — keep exit 0 so it
         # never looks like the `1` the security commands return when --fail trips.
         say(f"No commands match {' '.join(a.text)!r}. Try `saw -h` for the full list.",
-            no_stream=a.no_stream)
+            no_stream=getattr(a, "no_stream", False))
         return exitcodes.CLEAN
     say("\n".join(cmd if a.quiet else f"{cmd:<16}{summary}" for _, cmd, summary in scored),
-        no_stream=a.no_stream)
+        no_stream=getattr(a, "no_stream", False))
     return exitcodes.CLEAN

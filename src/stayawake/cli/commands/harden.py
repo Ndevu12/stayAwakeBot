@@ -30,7 +30,8 @@ def register(sub) -> None:
 
 def run(a: argparse.Namespace) -> int:
     label = "removing host denials…" if a.take_back else "creating host denials…"
-    with busy(label, no_stream=a.no_stream):
+    no_stream = getattr(a, "no_stream", False)
+    with busy(label, no_stream=no_stream):
         code, text = harden.take_back() if a.take_back else harden.run()
-    say(text, no_stream=a.no_stream)
+    say(text, no_stream=no_stream)
     return code

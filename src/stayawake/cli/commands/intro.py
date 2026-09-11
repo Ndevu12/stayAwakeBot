@@ -35,6 +35,6 @@ def register(sub) -> None:
 
 
 def run(a: argparse.Namespace) -> int:
-    Streamer(enabled=stream_enabled(sys.stdout, force_off=a.no_stream)).write(
+    Streamer(enabled=stream_enabled(sys.stdout, force_off=getattr(a, "no_stream", False))).write(
         render_intro(color_level(sys.stdout), __version__))
     return exitcodes.CLEAN

@@ -318,7 +318,7 @@ def settle_hooks(config_path: str | None = None) -> Settling:
 
 def install(config_path: str | None = None, *, no_stream: bool = False) -> int:
     """Install the scan-on-clone hooks globally and report what happened."""
-        with busy("installing scan-on-clone…", no_stream=no_stream):
+    with busy("installing scan-on-clone…", no_stream=no_stream):
         done = settle_hooks(config_path)
     if done.problem is not None:
         print(f"error: {done.problem}", file=sys.stderr)
