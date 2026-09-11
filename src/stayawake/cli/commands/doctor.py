@@ -11,6 +11,7 @@ from stayawake.cli.helptext import add_command
 from stayawake.core.identity import Intent, require, resolve_session
 from stayawake.lib import github_app
 from stayawake.utils import exitcodes
+from stayawake.utils.streaming import busy, say
 
 
 def register(sub) -> None:
@@ -33,11 +34,13 @@ def register(sub) -> None:
 
 
 def run(a: argparse.Namespace) -> int:
-    saw_path = shutil.which("saw") or shutil.which("stayawake")
-    sess = resolve_session()
-    health = shutil.which("stayawake-health-check")
-    guard = require(Intent.OPEN_GUARD_PR, session=sess)
-    fix = require(Intent.OPEN_FIX_PR, session=sess)
+    no_stream = getattr(a, "no_stream", False)
+    with busy("checking install and credentials…", no_stream=no_stream):
+        saw_path = shutil.which("saw") or shutil.which("stayawake")
+        sess = resolve_session()
+        health = shutil.which("stayawake-health-check")
+        guard = require(Intent.OPEN_GUARD_PR, session=sess)
+        fix = require(Intent.OPEN_FIX_PR, session=sess)
 
     if a.json:
         print(json.dumps({
@@ -86,7 +89,7 @@ def run(a: argparse.Namespace) -> int:
     ]
     if a.quiet:
         problems = [ln for ln in lines if ln.startswith("✗")]
-        print("\n".join(problems) if problems else "ok")
+        say("\n".join(problems) if problems else "ok", no_stream=no_stream)
     else:
-        print("\n".join(lines))
+        say("\n".join(lines), no_stream=no_stream)
     return exitcodes.CLEAN

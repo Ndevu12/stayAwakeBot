@@ -14,7 +14,7 @@ from stayawake.cli.helptext import add_command
 
 def register(sub) -> None:
     p = add_command(
-        sub, "hook", aliases=["hk"],
+        sub, "hook", aliases=["hk"], stream=False,
         help="scan-on-clone: auto-scan repos as they are cloned/pulled",
         description=(
             "Install global git hooks so a fresh clone, a pull, a branch switch or a rebase "
@@ -81,6 +81,7 @@ def register(sub) -> None:
         examples=[
             ("saw hook status", "is it active, and where is its state?"),
         ])
+    stt.set_defaults(func=run_status)
 
     rn = hsub.add_parser("run")
     rn.add_argument("-c", "--config", default=None)
@@ -93,22 +94,22 @@ def register(sub) -> None:
 
 def run_repair(a: argparse.Namespace) -> int:
     from stayawake.bots.security import hook
-    return hook.repair()
+    return hook.repair(no_stream=a.no_stream)
 
 
 def run_install(a: argparse.Namespace) -> int:
     from stayawake.bots.security import hook
-    return hook.install(config_path=a.config)
+    return hook.install(config_path=a.config, no_stream=a.no_stream)
 
 
 def run_uninstall(a: argparse.Namespace) -> int:
     from stayawake.bots.security import hook
-    return hook.uninstall()
+    return hook.uninstall(no_stream=a.no_stream)
 
 
 def run_status(a: argparse.Namespace) -> int:
     from stayawake.bots.security import hook
-    return hook.status()
+    return hook.status(no_stream=a.no_stream)
 
 
 def run_run(a: argparse.Namespace) -> int:

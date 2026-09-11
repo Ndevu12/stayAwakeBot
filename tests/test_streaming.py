@@ -10,7 +10,7 @@ import unittest
 from unittest import mock
 
 from stayawake.utils import streaming
-from stayawake.utils.streaming import Streamer, status, stream_enabled
+from stayawake.utils.streaming import Streamer, say, status, stream_enabled
 
 
 class TestStreamerDisabled(unittest.TestCase):
@@ -49,6 +49,13 @@ class TestAutoEnable(unittest.TestCase):
 
     def test_stream_enabled_force_off(self):
         self.assertFalse(stream_enabled(io.StringIO(), force_off=True))
+
+    def test_say_force_off_writes_instantly(self):
+        buf = io.StringIO()
+        with mock.patch.object(streaming, "stream_enabled", return_value=False) as enabled:
+            say("hello", no_stream=True, out=buf)
+        self.assertTrue(enabled.call_args.kwargs.get("force_off"))
+        self.assertEqual(buf.getvalue(), "hello\n")
 
     def test_env_disables_even_on_tty(self):
         fake_tty = mock.Mock()

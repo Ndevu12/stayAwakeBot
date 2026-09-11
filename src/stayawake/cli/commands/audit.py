@@ -36,8 +36,6 @@ def register(sub) -> None:
                    help="branch to check protection for (default: main)")
     p.add_argument("-f", "--fail", "--fail-on-issues", action="store_true", dest="fail",
                    help="exit non-zero if any warning-level issue is found")
-    p.add_argument("--no-stream", action="store_true", dest="no_stream",
-                   help="disable the per-check spinner and typewriter output (plain, instant)")
     p.add_argument("--verify", action="store_true", dest="verify_artifacts",
                    help="content-scan what a weak signal points at, to corroborate it. Much "
                         "slower, and bounded (does not touch saw scan)")

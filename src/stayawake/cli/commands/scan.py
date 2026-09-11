@@ -78,8 +78,6 @@ def register(sub) -> None:
     add_jobs_arg(p, help="scan up to N targets concurrently (a multi-repo sweep). Default AUTO: one "
                          "target runs sequentially, several use one worker per CPU core. Pass a number "
                          "to cap it, `-j 1` to force sequential (reproducible / low-load), or `auto`.")
-    p.add_argument("--no-stream", action="store_true", dest="no_stream",
-                   help="disable live progress/typewriter output (plain, instant lines)")
     p.add_argument("--pager", action="store_true", dest="pager",
                    help="page the report through $PAGER (less); off by default — the report "
                         "prints straight through and a big sweep's full detail goes to a file")

@@ -18,7 +18,7 @@ from stayawake.utils import exitcodes
 
 def register(sub) -> None:
     p = add_command(
-        sub, "auth", aliases=["a"],
+        sub, "auth", aliases=["a"], stream=False,
         help="show GitHub credential/capability status; register a StayAwakeBot GitHub App",
         description=(
             "Show your GitHub credential and capability status, and register an "
@@ -47,11 +47,10 @@ def register(sub) -> None:
             ("saw auth status --json", "machine-readable, for a CI gate"),
         ])
     st.add_argument("--json", action="store_true", help="machine-readable output")
-    st.add_argument("--no-stream", action="store_true", help="disable animated output")
     st.set_defaults(func=_status)
 
     ap = add_command(
-        asub, "app",
+        asub, "app", stream=False,
         help="manage the operator-managed StayAwakeBot GitHub App",
         description=(
             "Manage the operator-managed StayAwakeBot GitHub App — the recommended credential "
@@ -86,7 +85,6 @@ def register(sub) -> None:
                      help="register a brand-new App even if one is already configured locally "
                           "(otherwise register is a no-op that points you at installing the existing "
                           "App on more accounts/orgs)")
-    reg.add_argument("--no-stream", action="store_true", help="disable animated output")
     reg.set_defaults(func=_app_register)
 
     show = add_command(
@@ -99,7 +97,6 @@ def register(sub) -> None:
             ("saw auth app show", "which App is configured, and where"),
             ("saw auth app register", "none configured? register one"),
         ])
-    show.add_argument("--no-stream", action="store_true", help="disable animated output")
     show.set_defaults(func=_app_show)
 
     p.set_defaults(func=_auth_root)

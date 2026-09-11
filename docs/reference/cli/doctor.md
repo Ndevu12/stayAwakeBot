@@ -5,7 +5,7 @@ description: saw doctor — self-check the installation, the active GitHub crede
 # `saw doctor`
 
 ```text
-saw doctor [--json] [-q]
+saw doctor [--json] [-q] [--no-stream]
 ```
 
 Confirms `saw` resolves to this installation, reports the active credential and whether it can open

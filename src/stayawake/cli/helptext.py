@@ -32,12 +32,20 @@ def examples_block(examples: Sequence[tuple[str, str]]) -> _Verbatim:
 
 
 def add_command(sub, name: str, *, help: str, description: str,
-                examples: Sequence[tuple[str, str]], **kwargs) -> argparse.ArgumentParser:
+                examples: Sequence[tuple[str, str]], stream: bool = True,
+                **kwargs) -> argparse.ArgumentParser:
     """Add a subparser that states its purpose and shows how it is actually invoked.
 
     `help` is the one-liner in the parent's command list; `description` is the paragraph at the
     top of this command's own `-h`; `examples` become the trailing `examples:` section.
+    Every command that produces a human report takes `--no-stream` (`stream=False` only on a
+    parent that just prints help).
     """
-    return sub.add_parser(name, help=help, description=description,
-                          epilog=examples_block(examples),
-                          formatter_class=CommandHelpFormatter, **kwargs)
+    from stayawake.cli.argtypes import add_no_stream_arg
+
+    p = sub.add_parser(name, help=help, description=description,
+                       epilog=examples_block(examples),
+                       formatter_class=CommandHelpFormatter, **kwargs)
+    if stream:
+        add_no_stream_arg(p)
+    return p

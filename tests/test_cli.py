@@ -264,6 +264,41 @@ class TestHook(unittest.TestCase):
         cli.main(["hook", "run", "post-checkout"])
         self.assertFalse(m.call_args.kwargs["no_stream"])
 
+    @mock.patch("stayawake.bots.security.hook.status", return_value=0)
+    def test_status_routes(self, m):
+        self.assertEqual(cli.main(["hook", "status"]), 0)
+        self.assertTrue(m.called)
+        cli.main(["hook", "status", "--no-stream"])
+        self.assertTrue(m.call_args.kwargs["no_stream"])
+
+    @mock.patch("stayawake.bots.security.hook.install", return_value=0)
+    def test_install_passes_no_stream(self, m):
+        cli.main(["hook", "install", "--no-stream"])
+        self.assertTrue(m.call_args.kwargs["no_stream"])
+
+
+class TestNoStreamIsStandard(unittest.TestCase):
+    def test_every_human_command_accepts_no_stream(self):
+        from stayawake.cli.dispatch import build_parser
+        p = build_parser()
+        for argv in (
+            ["doctor", "--no-stream"],
+            ["harden", "--no-stream"],
+            ["watch", "--no-stream"],
+            ["watch", "stop", "--no-stream"],
+            ["watch", "status", "--no-stream"],
+            ["search", "--no-stream", "pr"],
+            ["intro", "--no-stream"],
+            ["completion", "--no-stream", "bash"],
+            ["db", "status", "--no-stream"],
+            ["hook", "install", "--no-stream"],
+            ["hook", "status", "--no-stream"],
+            ["hook", "uninstall", "--no-stream"],
+            ["hook", "repair", "--no-stream"],
+        ):
+            ns = p.parse_args(argv)
+            self.assertTrue(ns.no_stream, argv)
+
 
 class TestDiscard(unittest.TestCase):
     @mock.patch("stayawake.bots.security.remediator.discard", return_value=0)
