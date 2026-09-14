@@ -180,12 +180,12 @@ def _next_state(entries, base: Baseline, listing: dict,
     return keep, _bounded(fresh, carried)
 
 
-def save_baseline(entries, base: Baseline, listing: dict) -> None:
-    """Snapshot the current surface, and what has gone from it, for the next run's novelty diff
-    (best-effort; a write failure must never break the audit). Skipped on an ephemeral host. Atomic
-    (mkstemp → os.replace)."""
+def save_baseline(entries, base: Baseline, listing: dict) -> bool:
+    """Snapshot the current surface, and what has gone from it, for the next run's novelty diff.
+    Skipped on an ephemeral host. Atomic (mkstemp → os.replace). Returns whether it was written: a
+    failure must not break the audit, but it must not pass unsaid either."""
     if is_ephemeral():
-        return
+        return True
     now = datetime.now(timezone.utc).isoformat()
     keep, gone = _next_state(entries, base, listing, now)
     mapping = {k: {"digest": v.digest, "location": v.location} for k, v in keep.items()}
@@ -208,4 +208,5 @@ def save_baseline(entries, base: Baseline, listing: dict) -> None:
             if os.path.exists(tmp):
                 os.unlink(tmp)
     except OSError:
-        pass
+        return False
+    return True

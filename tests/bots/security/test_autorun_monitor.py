@@ -1099,6 +1099,25 @@ class TestReturnAfterRemoval(_Surface):
         self.assertIn("come back", back[0].detail)
         self.assertNotIn("autorun-new-unattributed", self.ids(issues))
 
+    def test_a_snapshot_that_cannot_be_written_says_so(self):
+        # if the record cannot be rewritten, the removal stays in it and the entry reads as having
+        # come back on every later run. A signal that fires every run is one nobody reads, so the
+        # run says why rather than repeating itself in silence.
+        self._plant()
+        self._run()
+        os.chmod(self.state, 0o500)
+        self.addCleanup(os.chmod, self.state, 0o700)
+        self.assertIn("autorun-baseline-not-saved", self.ids(self._run()))
+
+    def test_a_return_does_not_leave_the_run_saying_rotation_is_safe(self):
+        # rotating while a foothold is live is what arms the reported wiper, so a run that found one
+        # back must not print the plain all-clear. It is not decisive enough for the incident tier
+        # either -- it lands on the rung that asks the operator to confirm first.
+        ids = {i.id for i in self._arc()}
+        self.assertIn("autorun-entry-returned", ids)
+        self.assertEqual(models.rotation_safety(ids), models.ROTATION_SAFE_PENDING_CHECK)
+        self.assertIsNone(models.incident_tier(ids))
+
     def test_a_return_is_reported_once_not_on_every_later_run(self):
         self.assertIn("autorun-entry-returned", self.ids(self._arc()))
         self.assertEqual(self._run(), [])

@@ -5,6 +5,8 @@ from __future__ import annotations
 from stayawake.utils import parallel
 
 from ..models import HygieneIssue, could_not_read
+
+BASELINE_UNSAVED_ID = "autorun-baseline-not-saved"
 from . import surface, provenance, baseline, grade
 
 __all__ = ["check_autorun", "surface", "provenance", "baseline", "grade"]
@@ -49,5 +51,11 @@ def check_autorun(jobs: int | None = None) -> list[HygieneIssue]:
                    "tampered baseline can mean someone tried to launder a foothold into it.",
             remediation="Delete the baseline to re-snapshot from the current (re-graded) surface."))
 
-    baseline.save_baseline(entries, base, listing)      # snapshot for the next run (best-effort)
+    if not baseline.save_baseline(entries, base, listing):
+        issues.append(HygieneIssue(
+            id=BASELINE_UNSAVED_ID, severity="info",
+            title="This audit could not be remembered for the next run",
+            detail="saw could not update its own record of the start-up surface, so what it calls "
+                   "new — or back — will not move on from this run.",
+            remediation="Make saw's state directory writable by the account running the audit."))
     return issues
