@@ -9,6 +9,7 @@ from stayawake.bots.security.models import Finding, Severity
 from stayawake.bots.security.matchers.base import (
     Matcher, globs_ok, FONT_MAGIC, BINARY_MAGIC, build_confirmed_loader_check)
 from stayawake.bots.security.obfuscation import analyze_file, is_generated_context
+from stayawake.bots.security.obfuscation.execsink import _has_exec_sink_beyond_decoding
 from stayawake.bots.security.obfuscation.heuristics import _AUTHORED_OBFUSCATABLE_EXTS
 from stayawake.bots.security.matchers.obfuscation import _ext
 
@@ -21,6 +22,15 @@ _CONCEALMENT_CHARS = re.compile(
     "[\u200b\u2060"                          # zero-width space, word joiner
     "\u202a\u202b\u202c\u202d\u202e"       # bidi embeddings/overrides (LRE RLE PDF LRO RLO)
     "\u2066\u2067\u2068\u2069]")            # bidi isolates (LRI RLI FSI PDI)
+
+
+def _names_a_known_asset(basename: str, sig: dict) -> bool:
+    """Whether `basename` claims a known library asset, per the signature's `masquerade_names`
+    globs. A file already failing its magic check that also wears such a name is a deliberate
+    disguise: a real asset of that name would carry the format's bytes."""
+    from fnmatch import fnmatch
+    low = basename.lower()
+    return any(fnmatch(low, pat.lower()) for pat in sig.get("masquerade_names", ()))
 
 
 class HeuristicMatcher(Matcher):
@@ -40,7 +50,7 @@ class HeuristicMatcher(Matcher):
                     findings.append(f)
             for sig in masquerade:                # fonts + images/wasm/pdf, disjoint globs → ≤1 fires
                 if globs_ok(rel, sig):
-                    f = self._magic_byte_masquerade(target, rel, sig)
+                    f = self._magic_byte_masquerade(target, rel, sig, content_sig)
                     if f:
                         findings.append(f)
             if concealment and globs_ok(rel, concealment):
@@ -106,17 +116,18 @@ class HeuristicMatcher(Matcher):
         return None
 
     @staticmethod
-    def _emit(sig, rel, ev, line=None):
+    def _emit(sig, rel, ev, line=None, *, self_evident=False):
         return Finding(signature_id=sig["id"], category=sig["category"],
                        severity=Severity.parse(sig["severity"]), path=rel,
                        description=sig["description"], remediation=sig.get("remediation", "manual"),
-                       line=line, evidence=ev, vector=sig["category"], composed_evidence=True)
+                       line=line, evidence=ev, vector=sig["category"], composed_evidence=True,
+                       self_evident=self_evident)
 
-    def _magic_byte_masquerade(self, target, rel, sig):
+    def _magic_byte_masquerade(self, target, rel, sig, content_sig):
         """A file whose EXTENSION claims a binary format (font/image/wasm/pdf) but whose head lacks
-        that format's magic bytes AND reads as text/JS → a payload disguised under a benign extension.
-        """
-
+        that format's magic bytes AND reads as text/JS. Takes the target, the path, the signature,
+        and a confirmed-loader content check. Returns the finding, `self_evident` when its own bytes
+        are a loader fingerprint or its name claims a known asset it cannot be; None otherwise."""
         ext = "." + rel.rsplit(".", 1)[-1].lower() if "." in rel else ""
         magic = FONT_MAGIC.get(ext) or BINARY_MAGIC.get(ext)
         raw = target.read_bytes(rel, limit=512)
@@ -124,6 +135,10 @@ class HeuristicMatcher(Matcher):
             return None
         texty = sum(1 for b in raw[:256] if 9 <= b <= 126) > 200
         has_js = any(tok in raw for tok in (b"function", b"var ", b"=>", b"require", b"global"))
-        if texty or has_js:
-            return self._emit(sig, rel, f"{ext} without {magic!r} magic; content is text/JS")
-        return None
+        if not (texty or has_js):
+            return None
+        text = "".join(w for _off, w in target.read_source_windows(rel))
+        named = texty and _names_a_known_asset(rel.rsplit("/", 1)[-1], sig)
+        evident = bool(content_sig(text)) or _has_exec_sink_beyond_decoding(text) or named
+        return self._emit(sig, rel, f"{ext} without {magic!r} magic; content is text/JS",
+                          self_evident=evident)

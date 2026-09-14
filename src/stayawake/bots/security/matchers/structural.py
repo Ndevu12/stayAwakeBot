@@ -12,7 +12,8 @@ import re
 
 from stayawake.bots.security.models import Finding, Severity
 from stayawake.bots.security.matchers.base import (
-    Matcher, load_jsonc, build_confirmed_loader_check, REMOTE_FETCH_INTO_INTERPRETER)
+    Matcher, load_jsonc, build_confirmed_loader_check, executed_font_paths,
+    REMOTE_FETCH_INTO_INTERPRETER)
 
 _CLAUDE_OPEN_EVENTS = {"SessionStart", "SessionEnd", "Notification", "PreCompact"}
 
@@ -60,11 +61,12 @@ class StructuralJsonMatcher(Matcher):
         return findings
 
     @staticmethod
-    def _emit(sig, rel, ev, *, composed=False):
+    def _emit(sig, rel, ev, *, composed=False, executes=()):
         return Finding(signature_id=sig["id"], category=sig["category"],
                        severity=Severity.parse(sig["severity"]), path=rel,
                        description=sig["description"], remediation=sig.get("remediation", "manual"),
-                       evidence=ev, vector=sig["category"], composed_evidence=composed)
+                       evidence=ev, vector=sig["category"], composed_evidence=composed,
+                       executes_paths=tuple(executes))
 
     # ── VS Code tasks (unchanged) ──────────────────────────────────────────────────
     @staticmethod
@@ -88,7 +90,8 @@ class StructuralJsonMatcher(Matcher):
                     out.append(self._emit(by_kind[kind], rel,
                                           f"task '{task.get('label','?')}' runOn=folderOpen"))
             if re.search(r"\.(woff2?|ttf|otf)\b", cmd) and "vscode-task-runs-font" in by_kind:
-                out.append(self._emit(by_kind["vscode-task-runs-font"], rel, cmd[:90]))
+                out.append(self._emit(by_kind["vscode-task-runs-font"], rel, cmd[:90],
+                                      executes=executed_font_paths(cmd)))
         if base == "settings.json" and "vscode-allow-automatic-tasks" in by_kind:
             value = data.get("task.allowAutomaticTasks")
             if value is True or (isinstance(value, str) and value != "off"):

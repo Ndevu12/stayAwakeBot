@@ -11,6 +11,7 @@ from pathlib import Path
 from fnmatch import fnmatch
 from typing import Any
 
+from stayawake.bots.security.matchers.base import norm_scan_path
 from stayawake.bots.security.models import (CONFIRMED, HEURISTIC, RESIDUE, QUARANTINE_DIR,
                                             Finding, ScanResult, Severity)
 from stayawake.bots.security.matchers import REGISTRY
@@ -79,6 +80,8 @@ def finalize(display: str, source: str, by_matcher: dict[str, list[Finding]],
     confidence_of = {s["id"]: (s["confidence"] if s.get("confidence") in (HEURISTIC, RESIDUE)
                                else CONFIRMED)
                      for s in all_sigs}
+    confirmed_when = {s["id"]: s.get("confirmed_when") for s in all_sigs}
+    kept = []
     for name in matcher_order:
         for finding in by_matcher.get(name, []):
             if _allowed(finding, allowlist or []):
@@ -88,8 +91,15 @@ def finalize(display: str, source: str, by_matcher: dict[str, list[Finding]],
                 # sees it — reported separately, never gates the scan.
                 result.advisories.append(finding)
             else:
-                finding.confidence = confidence_of.get(finding.signature_id, CONFIRMED)
-                result.findings.append(finding)
+                kept.append(finding)
+    executed = {p for f in kept for p in f.executes_paths}
+    for finding in kept:
+        conf = confidence_of.get(finding.signature_id, CONFIRMED)
+        if confirmed_when.get(finding.signature_id) == "executed":
+            corroborated = finding.self_evident or norm_scan_path(finding.path) in executed
+            conf = CONFIRMED if corroborated else HEURISTIC
+        finding.confidence = conf
+        result.findings.append(finding)
     # Stable, useful ordering: severity desc, then path.
     result.findings.sort(key=lambda f: (-int(f.severity), f.path))
     result.advisories.sort(key=lambda f: (-int(f.severity), f.path))

@@ -13,6 +13,13 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Changed
+- **A file disguised as a font or image is reported as infected on evidence, not on shape alone.**
+  It is infected when its content reaches a dynamic-execution sink, when its name claims an asset it
+  cannot be, or when something in the scan runs it. A weak text shape under an ordinary name that nothing runs is
+  reported as suspicious rather than infected — the shape a real file can share by coincidence. A
+  genuine asset is left alone.
+
 ## [0.11.3] - 2026-09-14
 
 ### Security
