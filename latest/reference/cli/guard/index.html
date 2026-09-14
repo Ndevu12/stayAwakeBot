@@ -1208,6 +1208,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="saw guard setup">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-the-installed-workflow-contains" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the installed workflow contains
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1866,6 +1883,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="saw guard setup">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-the-installed-workflow-contains" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the installed workflow contains
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1912,8 +1946,19 @@ subcommands sweep repositories exactly like <a href="../scan/"><code>saw scan</c
 <code>--remote</code>/<code>--user</code>/<code>--org</code> for GitHub.</p>
 <h2 id="saw-guard-check"><code>saw guard check</code><a class="headerlink" href="#saw-guard-check" title="Permanent link">&para;</a></h2>
 <p>Read-only. For each repository: is a worm gate present, is the Strix pin a SHA rather than a tag, is
-it behind the latest release, and — for a remote repository — does branch protection actually
-<strong>require</strong> its check. A gate that is not required is decoration.</p>
+it behind the latest release, is it configured so a finding reaches someone and so the scanning job
+holds no write access it does not need, and — for a remote repository — does branch protection
+actually <strong>require</strong> its check. A gate that is not required is decoration.</p>
+<p>A gate reports when it comments, raises an alert, or keeps the evidence. One that does none of those
+still reports through a red <strong>required</strong> check — so <code>check</code> condemns it only once it knows the check
+is not required, or that the gate fails no merge at all, and otherwise says plainly that it could not
+establish the answer. It does the same for a setting the workflow resolves at run time, and for a job
+that grants itself no permissions and so takes whatever the repository hands every workflow: those are
+reported as unknown, never as clean.</p>
+<p>Where a repository references the action more than once, <code>check</code> answers for an occurrence that can
+actually run on a change — its workflow triggers on a pull request or a push, its job waits on no
+other job, and its job is not switched off — and among those it reports the <strong>worst</strong>-configured one,
+so a decorative gate cannot answer for a live one.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw guard check [TARGETS...] [-p PATH] [-c FILE] [-r] [--user U] [--org O]
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>                [--repo OWNER/NAME] [-b BRANCH] [-f] [-j N] [--no-stream]
 </code></pre></div>
@@ -1945,11 +1990,54 @@ it behind the latest release, and — for a remote repository — does branch pr
 </table>
 <h2 id="saw-guard-setup"><code>saw guard setup</code><a class="headerlink" href="#saw-guard-setup" title="Permanent link">&para;</a></h2>
 <p>Install the gate, or surgically bump an existing pin, across the resolved repositories. It resolves
-the latest Strix release to a commit SHA and writes a workflow with two least-privilege jobs — the
-gate itself, and a weekly <code>pin-drift</code> job that runs <a href="#saw-guard-drift"><code>saw guard drift</code></a>. When a
-gate already exists it rewrites only that <code>uses:</code> reference and leaves the rest of the file
-untouched. It is idempotent, fails closed if the SHA cannot be resolved, and <strong>never pushes to a
-default branch</strong>. See <a href="../../../how-to/gate-ci/">gate CI</a>.</p>
+the latest Strix release to a commit SHA and the latest scanner release to a version, then writes the
+workflow described below. When a gate already exists it rewrites only that <code>uses:</code> reference and
+leaves the rest of the file untouched — unless the gate is configured so it cannot report what it
+finds, which is repaired. It is idempotent, fails closed if either release cannot be resolved, and
+<strong>never pushes to a default branch</strong>. See <a href="../../../how-to/gate-ci/">gate CI</a>.</p>
+<h3 id="what-the-installed-workflow-contains">What the installed workflow contains<a class="headerlink" href="#what-the-installed-workflow-contains" title="Permanent link">&para;</a></h3>
+<p>The generated file carries no commentary of its own — this is where it is described. Three jobs,
+each holding only what it needs:</p>
+<table>
+<thead>
+<tr>
+<th>Job</th>
+<th>Runs on</th>
+<th>Permissions</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>worm-guard</code></td>
+<td>every pull request and push to the default branch</td>
+<td><code>contents: read</code>, <code>pull-requests: write</code>, <code>security-events: write</code></td>
+<td>Scans, and reports what it finds: a comment on the pull request, an alert in the Security tab, and the evidence as a run artifact. It <strong>cannot push code to your repository</strong> — it comments and raises alerts, nothing more.</td>
+</tr>
+<tr>
+<td><code>remediate</code></td>
+<td>only once <code>worm-guard</code> has reported an infected verdict</td>
+<td><code>contents: write</code>, <code>pull-requests: write</code></td>
+<td>Opens one rolling <code>security/auto-clean</code> pull request with the payload removed. This is the only job that can push, and on a clean run it never starts.</td>
+</tr>
+<tr>
+<td><code>pin-drift</code></td>
+<td>weekly, and on demand</td>
+<td><code>contents: read</code>, <code>issues: write</code></td>
+<td>Files one self-closing issue when the pinned Strix release falls behind.</td>
+</tr>
+</tbody>
+</table>
+<p>The gate stays <strong>red until the fix pull request is merged</strong>: remediation opens the fix, it does not
+make the check pass.</p>
+<p>Every <code>uses:</code> is pinned to a commit SHA, and the scanner itself is pinned to a released version — a
+pinned action whose first act is an unpinned install would fetch whatever is newest at run time.</p>
+<p><strong>Two settings a workflow file cannot set for you.</strong> Enable <em>Settings → Actions → General → "Allow
+GitHub Actions to create and approve pull requests"</em>, or the fix pull request cannot be opened. And
+add a <code>GH_SECURITY_TOKEN</code> repository secret — a token with repository and pull-request scope — so the
+fix pull request is itself scanned; one opened with the built-in token does not re-trigger the gate.
+Without the secret the gate still detects, reports and remediates; only the re-scan of its own fix is
+lost.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>saw guard setup [TARGETS...] [-p PATH] [-c FILE] [--pr] [-r] [--user U] [--org O]
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>                [--ref SHA|TAG] [-b BRANCH] [--dry-run] [-j N] [--no-stream]
 </code></pre></div>
