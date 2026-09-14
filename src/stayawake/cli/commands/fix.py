@@ -13,7 +13,7 @@ import argparse
 import sys
 
 from stayawake.bots.security import remediator
-from stayawake.cli.argtypes import add_jobs_arg
+from stayawake.cli.argtypes import add_jobs_arg, no_stream_requested
 from stayawake.cli.helptext import add_command
 from stayawake.utils import exitcodes
 
@@ -67,8 +67,6 @@ def register(sub) -> None:
                    help="fix this branch instead of the repository default (repeatable). "
                         "Deleting branches is not something `saw` does — remove any you no longer "
                         "want on GitHub.")
-    p.add_argument("--no-stream", action="store_true", dest="no_stream",
-                   help="disable live progress output (plain, instant lines)")
     p.add_argument("--remove-foreign", action="store_true", dest="remove_foreign",
                    help="with `amend`: also remove a confirmed wholly-foreign file from history "
                         "(a file that is entirely the artifact, with nothing legitimate to keep)")
@@ -92,7 +90,7 @@ def run(a: argparse.Namespace) -> int:
         return remediator.amend(a.config, paths=None if a.remote else rest,
                                 remote=a.remote,
                                 slugs=(rest or None) if a.remote else None,
-                                no_stream=a.no_stream, jobs=a.jobs,
+                                no_stream=no_stream_requested(a), jobs=a.jobs,
                                 remove_foreign=a.remove_foreign)
     if a.remove_foreign:
         print("saw fix --remove-foreign is only valid with `amend`", file=sys.stderr)
@@ -101,5 +99,5 @@ def run(a: argparse.Namespace) -> int:
     return remediator.fix(a.config, pr=a.pr, remote=remote,
                           paths=None if remote else (positionals or None),
                           slugs=(positionals or None) if remote else None,
-                          users=a.user or None, orgs=a.org or None, no_stream=a.no_stream,
+                          users=a.user or None, orgs=a.org or None, no_stream=no_stream_requested(a),
                           jobs=a.jobs, branches=a.branch or None)

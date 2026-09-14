@@ -12,10 +12,10 @@ warns and points at [`saw fix`](fix.md); it never modifies anything and can neve
 command. See [scan on clone](../../how-to/scan-on-clone.md).
 
 ```text
-saw hook install [-c FILE]
-saw hook repair
-saw hook uninstall
-saw hook status
+saw hook install [-c FILE] [--no-stream]
+saw hook repair [--no-stream]
+saw hook uninstall [--no-stream]
+saw hook status [--no-stream]
 ```
 
 | Option / subcommand | Description |

@@ -10,9 +10,9 @@ writes what it saw to its own record so a later pass can tell something that has
 something new. It keeps checking until you stop it.
 
 ```text
-saw watch
-saw watch status
-saw watch stop
+saw watch [--no-stream]
+saw watch status [--no-stream]
+saw watch stop [--no-stream]
 ```
 
 It is deliberately narrower than [`saw harden`](harden.md). Harden runs with you present: it ends

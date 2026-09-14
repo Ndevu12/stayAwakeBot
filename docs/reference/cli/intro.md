@@ -5,7 +5,7 @@ description: saw intro — a short tour of what saw is, its verbs, and why it is
 # `saw intro`
 
 ```text
-saw intro          # or: saw welcome  ·  or just: saw
+saw intro [--no-stream]          # or: saw welcome  ·  or just: saw
 ```
 
 Bare `saw` prints the short welcome; `saw intro` prints the fuller tour. Both run no scan and touch

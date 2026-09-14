@@ -11,13 +11,14 @@ import argparse
 import sys
 
 from stayawake.cli.helptext import add_command
-from stayawake.utils.streaming import Streamer, status, stream_enabled
+from stayawake.utils.streaming import Streamer, busy, say, status, stream_enabled
 from stayawake.utils import exitcodes
+from stayawake.cli.argtypes import no_stream_requested
 
 
 def register(sub) -> None:
     p = add_command(
-        sub, "db",
+        sub, "db", stream=False,
         help="manage the offline advisory database",
         description=(
             "Manage the offline advisory database — the malicious-package and CVE corpus a "
@@ -46,8 +47,6 @@ def register(sub) -> None:
                     help="limit to an ecosystem (repeatable); default: all supported")
     up.add_argument("--cache-dir", default=None,
                     help="advisory cache location (default: ~/.cache/saw/advisories)")
-    up.add_argument("--no-stream", action="store_true", dest="no_stream",
-                    help="disable the per-ecosystem spinner and typewriter output")
     up.set_defaults(func=run_update)
 
     st = add_command(
@@ -75,7 +74,7 @@ def run_update(a: argparse.Namespace) -> int:
     # only pulled in when this command actually runs.
     from stayawake.bots.security.dependencies import db
 
-    progress_on = stream_enabled(sys.stderr, force_off=a.no_stream)
+    progress_on = stream_enabled(sys.stderr, force_off=no_stream_requested(a))
     try:
         ecosystems = db.resolved_ecosystems(a.ecosystems)
         results = []
@@ -98,15 +97,18 @@ def run_update(a: argparse.Namespace) -> int:
              "  (malware gates the verdict; vulnerabilities show as advisories in `saw scan` — "
              "`--no-advisories` to hide, `--external` to also run installed auditors)",
              f"cache: {db.default_cache_dir() if not a.cache_dir else a.cache_dir}"]
-    Streamer(enabled=stream_enabled(sys.stdout, force_off=a.no_stream)).line("\n".join(lines))
+    Streamer(enabled=stream_enabled(sys.stdout, force_off=no_stream_requested(a))).line("\n".join(lines))
     return exitcodes.CLEAN
 def run_status(a: argparse.Namespace) -> int:
     from stayawake.bots.security.dependencies import db
 
-    s = db.cache_status(a.cache_dir)
+    no_stream = no_stream_requested(a)
+    with busy("reading the advisory cache…", no_stream=no_stream):
+        s = db.cache_status(a.cache_dir)
     if not s["present"]:
-        print(f"Advisory DB: not found at {s['cache_dir']}\n"
-              "  run `saw db update` — scans fall back to the inline malware seed until then.")
+        say(f"Advisory DB: not found at {s['cache_dir']}\n"
+            "  run `saw db update` — scans fall back to the inline malware seed until then.",
+            no_stream=no_stream)
         return exitcodes.FINDINGS
     age = s["age_days"]
     schema_ok = s.get("schema_compatible", True)
@@ -125,7 +127,7 @@ def run_status(a: argparse.Namespace) -> int:
              f"  totals     {s['total_malicious']} malicious · {s['total_vulnerabilities']} vulnerabilities",
              *(f"    {eco:<10} {c['malicious']:>7} malicious · {c['vulnerabilities']:>7} vulnerabilities"
                for eco, c in s["ecosystems"].items())]
-    print("\n".join(lines))
+    say("\n".join(lines), no_stream=no_stream)
 
     rc = 0
     if not schema_ok:

@@ -14,7 +14,7 @@ import argparse
 import sys
 
 from stayawake.bots.security import service
-from stayawake.cli.argtypes import add_jobs_arg
+from stayawake.cli.argtypes import add_jobs_arg, no_stream_requested
 from stayawake.cli.helptext import add_command
 from stayawake.utils import exitcodes
 
@@ -78,8 +78,6 @@ def register(sub) -> None:
     add_jobs_arg(p, help="scan up to N targets concurrently (a multi-repo sweep). Default AUTO: one "
                          "target runs sequentially, several use one worker per CPU core. Pass a number "
                          "to cap it, `-j 1` to force sequential (reproducible / low-load), or `auto`.")
-    p.add_argument("--no-stream", action="store_true", dest="no_stream",
-                   help="disable live progress/typewriter output (plain, instant lines)")
     p.add_argument("--pager", action="store_true", dest="pager",
                    help="page the report through $PAGER (less); off by default — the report "
                         "prints straight through and a big sweep's full detail goes to a file")
@@ -110,6 +108,6 @@ def run(a: argparse.Namespace) -> int:
                         slugs=(positionals or None) if remote else None,
                         users=a.user or None, orgs=a.org or None,
                         json_out=a.json, sarif_path=a.sarif, reports_dir=a.reports_dir,
-                        alert=a.alert, no_stream=a.no_stream, pager=a.pager,
+                        alert=a.alert, no_stream=no_stream_requested(a), pager=a.pager,
                         no_advisories=a.no_advisories, external_audit=a.external_audit,
                         deep=a.deep, history=a.history, require_db=a.require_db, jobs=a.jobs)

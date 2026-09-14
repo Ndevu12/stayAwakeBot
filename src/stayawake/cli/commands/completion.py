@@ -7,6 +7,8 @@ import argparse
 from stayawake.cli._meta import VERBS
 from stayawake.cli.helptext import add_command
 from stayawake.utils import exitcodes
+from stayawake.utils.streaming import say
+from stayawake.cli.argtypes import no_stream_requested
 
 
 def register(sub) -> None:
@@ -28,7 +30,7 @@ def register(sub) -> None:
 def run(a: argparse.Namespace) -> int:
     verbs = " ".join(VERBS)
     if a.shell == "bash":
-        print(
+        text = (
             '# saw bash completion — `eval "$(saw completion bash)"` or save to a '
             "completion dir\n"
             "_saw_completion() {\n"
@@ -40,7 +42,7 @@ def run(a: argparse.Namespace) -> int:
             "complete -F _saw_completion saw stayawake"
         )
     elif a.shell == "zsh":
-        print(
+        text = (
             "#compdef saw stayawake\n"
             "# saw zsh completion — save as _saw somewhere on your $fpath\n"
             "_saw() {\n"
@@ -51,7 +53,9 @@ def run(a: argparse.Namespace) -> int:
             '_saw "$@"'
         )
     else:  # fish
-        for binary in ("saw", "stayawake"):
-            for v in VERBS:
-                print(f"complete -c {binary} -n '__fish_use_subcommand' -a {v}")
+        text = "\n".join(
+            f"complete -c {binary} -n '__fish_use_subcommand' -a {v}"
+            for binary in ("saw", "stayawake")
+            for v in VERBS)
+    say(text, no_stream=no_stream_requested(a))
     return exitcodes.CLEAN

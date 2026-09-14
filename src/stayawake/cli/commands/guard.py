@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import argparse
 
-from stayawake.cli.argtypes import add_jobs_arg
+from stayawake.cli.argtypes import add_jobs_arg, no_stream_requested
 from stayawake.cli.helptext import add_command
 
 
 def register(sub) -> None:
     p = add_command(
-        sub, "guard", aliases=["gd"],
+        sub, "guard", aliases=["gd"], stream=False,
         help="install & verify the Strix security-scan CI gate on a repo",
         description=(
             "Install and verify the Strix worm-guard CI gate across repos: `check` grades a "
@@ -66,8 +66,6 @@ def register(sub) -> None:
     add_jobs_arg(ck, help="check up to N repositories concurrently (a multi-repo sweep). Default "
                           "AUTO: one repo runs sequentially, several use one worker per CPU core. "
                           "Pass a number to cap it, `-j 1` to force sequential, or `auto`.")
-    ck.add_argument("--no-stream", action="store_true", dest="no_stream",
-                    help="disable the typewriter output (plain, instant)")
     ck.set_defaults(func=run_check)
 
     st = add_command(
@@ -111,8 +109,6 @@ def register(sub) -> None:
                           "AUTO: one repo runs sequentially, several use one worker per CPU core. "
                           "Each repo works in its own clone/worktree. Pass a number to cap it, "
                           "`-j 1` to force sequential, or `auto`.")
-    st.add_argument("--no-stream", action="store_true", dest="no_stream",
-                    help="disable the typewriter output (plain, instant)")
     st.set_defaults(func=run_setup)
 
     dr = add_command(
@@ -148,8 +144,6 @@ def register(sub) -> None:
     add_jobs_arg(dr, help="check up to N repositories concurrently (a multi-repo sweep). Default "
                           "AUTO: one repo runs sequentially, several use one worker per CPU core. "
                           "Pass a number to cap it, `-j 1` to force sequential, or `auto`.")
-    dr.add_argument("--no-stream", action="store_true", dest="no_stream",
-                    help="disable the typewriter output (plain, instant)")
     dr.set_defaults(func=run_drift)
 
 
@@ -164,7 +158,7 @@ def run_check(a: argparse.Namespace) -> int:
     return guard.check_targets(
         paths=None if remote else (positionals or None),
         slugs=slugs, users=a.user or None, orgs=a.org or None, remote=remote,
-        config_path=a.config, branch=a.branch, fail=a.fail, no_stream=a.no_stream, jobs=a.jobs)
+        config_path=a.config, branch=a.branch, fail=a.fail, no_stream=no_stream_requested(a), jobs=a.jobs)
 
 
 def run_drift(a: argparse.Namespace) -> int:
@@ -178,7 +172,7 @@ def run_drift(a: argparse.Namespace) -> int:
     return guard.drift_targets(
         paths=None if remote else (positionals or None),
         slugs=slugs, users=a.user or None, orgs=a.org or None, remote=remote,
-        config_path=a.config, no_stream=a.no_stream, jobs=a.jobs)
+        config_path=a.config, no_stream=no_stream_requested(a), jobs=a.jobs)
 
 
 def run_setup(a: argparse.Namespace) -> int:
@@ -191,4 +185,4 @@ def run_setup(a: argparse.Namespace) -> int:
         slugs=list(positionals) if remote else None,
         users=a.user or None, orgs=a.org or None, remote=remote,
         config_path=a.config, ref=a.ref, dry_run=a.dry_run, pr=a.pr,
-        branch=a.branch, no_stream=a.no_stream, jobs=a.jobs)
+        branch=a.branch, no_stream=no_stream_requested(a), jobs=a.jobs)

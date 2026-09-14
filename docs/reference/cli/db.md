@@ -8,7 +8,7 @@ Manage the [offline advisory database](../advisory-db.md).
 
 ```text
 saw db update [-e ECO ...] [--cache-dir DIR] [--no-stream]
-saw db status [--cache-dir DIR] [--require-snapshot DIGEST] [--max-age-days N]
+saw db status [--cache-dir DIR] [--require-snapshot DIGEST] [--max-age-days N] [--no-stream]
 ```
 
 | Option | Description |

@@ -9,7 +9,9 @@ from __future__ import annotations
 import argparse
 
 from stayawake.bots.security import watch
-from stayawake.cli.helptext import add_command
+from stayawake.cli.helptext import add_command, declare_streaming
+from stayawake.utils.streaming import busy, say
+from stayawake.cli.argtypes import no_stream_requested
 
 
 def register(sub) -> None:
@@ -45,24 +47,31 @@ def register(sub) -> None:
     status.set_defaults(func=run_status)
 
     internal = wsub.add_parser("run")          # the entry the scheduled item calls, not offered
+    declare_streaming(internal, False)
     internal.set_defaults(func=run_internal)
 
 
 def run(a: argparse.Namespace) -> int:
-    code, text = watch.schedule_it()
-    print(text)
+    no_stream = no_stream_requested(a)
+    with busy("asking this machine to keep checking itself…", no_stream=no_stream):
+        code, text = watch.schedule_it()
+    say(text, no_stream=no_stream)
     return code
 
 
 def run_stop(a: argparse.Namespace) -> int:
-    code, text = watch.unschedule_it()
-    print(text)
+    no_stream = no_stream_requested(a)
+    with busy("stopping the check…", no_stream=no_stream):
+        code, text = watch.unschedule_it()
+    say(text, no_stream=no_stream)
     return code
 
 
 def run_status(a: argparse.Namespace) -> int:
-    code, text = watch.status_of()
-    print(text)
+    no_stream = no_stream_requested(a)
+    with busy("checking whether this machine is watching itself…", no_stream=no_stream):
+        code, text = watch.status_of()
+    say(text, no_stream=no_stream)
     return code
 
 

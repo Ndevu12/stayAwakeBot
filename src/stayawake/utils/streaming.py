@@ -120,3 +120,16 @@ def status(label: str, *, out: TextIO | None = None,
         t.join(timeout=interval * 2)
         out.write("\r\033[K")                          # wipe the spinner line
         out.flush()
+
+
+def say(text: str = "", *, no_stream: bool = False, out: TextIO | None = None) -> None:
+    """Write a finished human report — typewriter on a TTY, instant when piped / --no-stream."""
+    dest = out or sys.stdout
+    Streamer(enabled=stream_enabled(dest, force_off=no_stream), out=dest).write(
+        text if text.endswith("\n") else text + "\n")
+
+
+def busy(label: str, *, no_stream: bool = False, out: TextIO | None = None):
+    """Spinner over a silent compute phase, honoring `--no-stream` the same way `say` does."""
+    dest = out or sys.stderr
+    return status(label, out=dest, enabled=stream_enabled(dest, force_off=no_stream))

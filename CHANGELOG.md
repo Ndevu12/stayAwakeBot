@@ -16,8 +16,14 @@ reader, not the mechanism or the weakness it closed.
 ### Fixed
 - **`saw discard --branch --remote` removes every auto-clean branch on the repository.** It only
   removed the original name, so a later `saw fix` left the branches it published in place.
-- **`saw hook` takes `--no-stream`.** Every other live command already did; the clone/pull scan
-  had no way to turn live progress off except a pipe or `STAYAWAKE_NO_STREAM=1`.
+- **Every command that prints a report now streams, and every one of them takes `--no-stream`.**
+  `doctor`, `harden`, `watch`, `search`, `intro`, `completion`, `db status`, `auth`, and the whole
+  of `saw hook` printed a finished block instead, so there was nothing to turn off except a pipe or
+  `STAYAWAKE_NO_STREAM=1`.
+- **`--no-stream` is honoured wherever you put it.** Given before a subcommand — `saw watch
+  --no-stream status` — it was accepted and then ignored, so output still animated.
+- **`saw hook status` reports instead of printing help.** It had no handler, so it printed the
+  `saw hook` help and still exited as though it had answered.
 
 ## [0.11.2] - 2026-09-11
 

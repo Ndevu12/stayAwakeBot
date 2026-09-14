@@ -21,6 +21,23 @@ def jobs(value: str) -> int | None:
     return count
 
 
+def add_no_stream_arg(parser: argparse.ArgumentParser) -> None:
+    """Register the shared `--no-stream` flag — same flag, dest, help and default everywhere.
+
+    The default is SUPPRESS rather than False so a subcommand that also carries the flag does not
+    overwrite a value its parent already set; read it with `no_stream()`, never off the namespace.
+    """
+    parser.add_argument("--no-stream", action="store_true", dest="no_stream",
+                        default=argparse.SUPPRESS,
+                        help="disable live progress/typewriter output (plain, instant lines)")
+
+
+def no_stream_requested(a: argparse.Namespace) -> bool:
+    """Whether this run was asked for plain, instant output. Takes the parsed namespace, returns
+    False when the flag was given at no level."""
+    return bool(getattr(a, "no_stream", False))
+
+
 def add_jobs_arg(parser: argparse.ArgumentParser, *, help: str) -> None:
     """Register the shared `-j/--jobs` flag on a sweep command — SAME type parser, flag names,
     `dest`, and `metavar` everywhere, but each command supplies its OWN `help` text (its wording

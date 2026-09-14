@@ -9,6 +9,7 @@ Most of `saw` is offline; `auth` is only about the credential used for the netwo
 scanning, `saw fix --pr`, and `saw guard setup --pr`. Bare `saw auth` is `saw auth status`.
 
 ```text
+saw auth [--no-stream]
 saw auth status [--json] [--no-stream]
 saw auth app register [--name NAME] [--no-browser] [--replace] [--no-stream]
 saw auth app show [--no-stream]
