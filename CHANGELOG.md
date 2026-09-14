@@ -32,8 +32,12 @@ reader, not the mechanism or the weakness it closed.
   artifact. It also passed the credential under a name the action does not accept, so a configured
   `GH_SECURITY_TOKEN` was not used. Re-run `saw guard setup` on repositories already gated: it now
   repairs the configuration rather than only bumping the pin.
-- **`saw guard check` reports a gate that cannot report, or that holds more access than it needs.**
-  Such a gate previously graded as healthy.
+- **`saw guard check` grades how a gate is configured, not only which commit it pins.** A gate that
+  discards an input, that holds write access while it merely scans, or that tells nobody what it
+  found, previously graded as healthy. Where a repository references the action more than once, the
+  check answers for one that actually runs on a change, and reports the worst of those rather than
+  the tidiest. What a workflow leaves to be decided when it runs is reported as unknown rather than
+  taken as clean.
 - **The job that scans no longer has write access to your repository.** Remediation runs in a
   separate job that starts only after an infected verdict.
 - **The gate pins the scanner version it installs**, rather than taking whatever is newest when it

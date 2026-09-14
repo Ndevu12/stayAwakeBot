@@ -17,9 +17,17 @@ it behind the latest release, is it configured so a finding reaches someone and 
 holds no write access it does not need, and — for a remote repository — does branch protection
 actually **require** its check. A gate that is not required is decoration.
 
-A gate reports when it comments, raises an alert, keeps the evidence, **or** fails the merge; one
-that does none of those is reported as telling nobody. Where a repository references the action more
-than once, `check` answers for the gate itself.
+A gate reports when it comments, raises an alert, or keeps the evidence. One that does none of those
+still reports through a red **required** check — so `check` condemns it only once it knows the check
+is not required, or that the gate fails no merge at all, and otherwise says plainly that it could not
+establish the answer. It does the same for a setting the workflow resolves at run time, and for a job
+that grants itself no permissions and so takes whatever the repository hands every workflow: those are
+reported as unknown, never as clean.
+
+Where a repository references the action more than once, `check` answers for an occurrence that can
+actually run on a change — its workflow triggers on a pull request or a push, its job waits on no
+other job, and its job is not switched off — and among those it reports the **worst**-configured one,
+so a decorative gate cannot answer for a live one.
 
 ```text
 saw guard check [TARGETS...] [-p PATH] [-c FILE] [-r] [--user U] [--org O]

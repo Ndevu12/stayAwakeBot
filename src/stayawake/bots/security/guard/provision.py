@@ -141,7 +141,8 @@ def render_workflow(pin: Pin, default_branch: str = "main", scanner: str | None 
         "  remediate:\n"
         "    needs: worm-guard\n"
         "    if: ${{ !cancelled() && (needs.worm-guard.outputs.verdict == 'infected'"
-        " || needs.worm-guard.outputs.infected != '0') }}\n"
+        " || (needs.worm-guard.outputs.infected != ''"
+        " && needs.worm-guard.outputs.infected != '0')) }}\n"
         "    runs-on: ubuntu-latest\n"
         "    permissions:\n"
         "      contents: write\n"
@@ -155,6 +156,7 @@ def render_workflow(pin: Pin, default_branch: str = "main", scanner: str | None 
         f"{version_line}"
         "          remediate: pr\n"
         "          github-token: ${{ secrets.GH_SECURITY_TOKEN || github.token }}\n"
+        "          fail-on: never\n"
         "          upload-artifact: true\n"
         "\n"
         "  pin-drift:\n"
@@ -202,7 +204,7 @@ def plan_setup(workflows: dict[str, str], default_branch: str, pin: Pin, *,
                          detail=_GATE_HOW.get(gate.mechanism, gate.mechanism))
     ref = gate.strix
     config = grade_config(ref)
-    if config.degraded and ref.workflow == WORM_GUARD_FILE:
+    if config.needs_rewriting and ref.workflow == WORM_GUARD_FILE:
         return SetupPlan("repair", ref.workflow, render_workflow(pin, default_branch, scanner),
                          old_ref=ref.ref, new_ref=pin.sha, detail=_degraded_detail(config))
     if ref.pin == "sha" and ref.ref.lower() == pin.sha.lower():
@@ -217,7 +219,7 @@ def _degraded_detail(config) -> str:
     """One line naming what is wrong with a gate's configuration, for the setup summary."""
     parts = []
     if config.ignored_inputs:
-        parts.append(f"passes {', '.join(config.ignored_inputs)}, which the action does not take")
+        parts.append(f"passes {', '.join(config.ignored_inputs)}, which the action never receives")
     if config.reports_nothing:
         parts.append("reports a finding nowhere")
     if config.standing_write:
@@ -386,8 +388,11 @@ def render_setup(result: SetupResult, *, color: bool = False) -> str:
                 f" — {plan.path} already runs a worm scan via {plan.detail}. Not installing a "
                 "duplicate. To adopt the SHA-pinned `Ndevu12/strix` gate instead, remove it first.")
     if plan.action == "noop":
-        return (paint("✓ already up to date", ok, on=color) +
-                f" — {plan.path} pins Ndevu12/strix@{_short(plan.new_ref)} (latest). Nothing to do.")
+        head = (paint("✓ already up to date", ok, on=color) +
+                f" — {plan.path} pins Ndevu12/strix@{_short(plan.new_ref)} (latest).")
+        if plan.detail:
+            return head + f"\n  Still worth your attention: the gate {plan.detail}."
+        return head + " Nothing to do."
 
     verb = ("install" if plan.action == "create"
             else "repair" if plan.action == "repair" else "update the pin in")

@@ -25,14 +25,17 @@ _EXACT_TAG = re.compile(r"^v\d+\.\d+\.\d+$")
 @dataclass
 class StrixRef:
     """One `uses: Ndevu12/strix@<ref>` occurrence and what it tells us. `inputs` is the step's
-    `with:` block and `job_permissions` the permissions of the job it sits in — both are how the
-    gate is CONFIGURED, which decides whether a finding reaches anyone."""
+    `with:` block and `job_permissions` the permissions in force for the job it sits in — both are
+    how the gate is CONFIGURED. `guards_changes` is true when this occurrence can actually run on a
+    change to the code: its workflow triggers on a pull request or a push, its job waits on no other
+    job, and its job is not switched off."""
     workflow: str
     job: str
     ref: str
     pin: str
     inputs: dict | None = None
     job_permissions: dict | str | None = None
+    guards_changes: bool = True
 
 
 STRIX_DECLARED_INPUTS = frozenset({
@@ -40,6 +43,10 @@ STRIX_DECLARED_INPUTS = frozenset({
     "github-token", "upload-sarif", "upload-artifact", "pr-comment"})
 
 INPUTS_THAT_REPORT_A_FINDING = ("pr-comment", "upload-sarif", "upload-artifact")
+
+INPUTS_THAT_DECIDE_REPORTING = INPUTS_THAT_REPORT_A_FINDING + ("fail-on",)
+
+_TRIGGERS_ON_A_CHANGE = ("pull_request", "pull_request_target", "push")
 
 
 def _truthy(value) -> bool:
@@ -52,37 +59,51 @@ def _set_at_run_time(value) -> bool:
 
 @dataclass
 class GateConfig:
-    """How a found Strix gate is configured: what it does with the credential it is handed, whether
-    a finding reaches anyone, and how much write access it holds while merely scanning."""
+    """How a found Strix gate is configured: which inputs the action never receives, whether a
+    finding leaves the run, how much write access the scanning job holds, and what the workflow
+    leaves undecided until it runs."""
     ignored_inputs: tuple[str, ...] = ()
     reports_nothing: bool = False
     standing_write: bool = False
+    report_only: bool = False
+    unresolved: tuple[str, ...] = ()
+    write_unstated: bool = False
 
     @property
     def degraded(self) -> bool:
+        return bool(self.ignored_inputs) or self.reports_nothing or self.standing_write
+
+    @property
+    def unknown(self) -> bool:
+        return bool(self.unresolved) or self.write_unstated
+
+    @property
+    def needs_rewriting(self) -> bool:
         return self.reports_nothing or self.standing_write
 
 
 def grade_config(ref: StrixRef) -> GateConfig:
     """Grade a gate's own configuration. Reads only what the workflow states, so it works the same
-    on a local checkout and a remote read. A value the workflow resolves at run time is read as
-    unknown, never as off. Returns the grade; `degraded` is false for a gate with nothing wrong."""
+    on a local checkout and a remote read. Takes one occurrence. Returns the grade, with a value the
+    workflow resolves at run time named in `unresolved` rather than guessed either way."""
     raw = ref.inputs if isinstance(ref.inputs, dict) else {}
     given = {str(k).strip().lower(): v for k, v in raw.items()}
     ignored = tuple(sorted(k for k in given if k not in STRIX_DECLARED_INPUTS))
+    unresolved = tuple(sorted(k for k in INPUTS_THAT_DECIDE_REPORTING
+                              if k in given and _set_at_run_time(given[k])))
     delivers = any(_truthy(given[k]) or _set_at_run_time(given[k])
                    for k in INPUTS_THAT_REPORT_A_FINDING if k in given)
-    gates_the_merge = str(given.get("fail-on", "infected")).strip().lower() != "never"
+    fail_on = given.get("fail-on", "infected")
+    report_only = str(fail_on).strip().lower() == "never"
     perms = ref.job_permissions
     if isinstance(perms, str):
-        write = perms.strip().lower() == "write-all"
+        write, unstated = perms.strip().lower() == "write-all", False
     elif isinstance(perms, dict):
-        write = str(perms.get("contents", "")).strip().lower() == "write"
+        write, unstated = str(perms.get("contents", "")).strip().lower() == "write", False
     else:
-        write = False
-    return GateConfig(ignored_inputs=ignored,
-                      reports_nothing=not (delivers or gates_the_merge),
-                      standing_write=write)
+        write, unstated = False, True
+    return GateConfig(ignored_inputs=ignored, reports_nothing=not delivers, standing_write=write,
+                      report_only=report_only, unresolved=unresolved, write_unstated=unstated)
 
 
 def classify_pin(ref: str) -> str:
@@ -91,6 +112,21 @@ def classify_pin(ref: str) -> str:
     if _EXACT_TAG.match(ref):
         return "tag"
     return "floating"
+
+
+def _triggers_on_a_change(doc: dict) -> bool:
+    on = doc.get("on", doc.get(True))
+    if isinstance(on, str):
+        return on in _TRIGGERS_ON_A_CHANGE
+    if isinstance(on, list):
+        return any(str(e) in _TRIGGERS_ON_A_CHANGE for e in on)
+    if isinstance(on, dict):
+        return any(str(k) in _TRIGGERS_ON_A_CHANGE for k in on)
+    return False
+
+
+def _switched_off(job: dict) -> bool:
+    return str(job.get("if", "")).strip().lower().strip("${} ") == "false"
 
 
 def find_strix_refs(workflows: dict[str, str]) -> list[StrixRef]:
@@ -108,6 +144,7 @@ def find_strix_refs(workflows: dict[str, str]) -> list[StrixRef]:
         jobs = doc.get("jobs")
         if not isinstance(jobs, dict):
             continue
+        on_a_change = _triggers_on_a_change(doc)
         for job_id, job in jobs.items():
             if not isinstance(job, dict):
                 continue
@@ -115,6 +152,7 @@ def find_strix_refs(workflows: dict[str, str]) -> list[StrixRef]:
             if not isinstance(steps, list):
                 continue
             granted = job["permissions"] if "permissions" in job else doc.get("permissions")
+            guards = on_a_change and not job.get("needs") and not _switched_off(job)
             for step in steps:
                 if not isinstance(step, dict):
                     continue
@@ -124,24 +162,29 @@ def find_strix_refs(workflows: dict[str, str]) -> list[StrixRef]:
                     found.append(StrixRef(workflow=path, job=str(ctx), ref=m.group("ref"),
                                           pin=classify_pin(m.group("ref")),
                                           inputs=step.get("with"),
-                                          job_permissions=granted))
+                                          job_permissions=granted,
+                                          guards_changes=guards))
     return found
 
 
 def find_strix(workflows: dict[str, str]) -> StrixRef | None:
-    """The occurrence that answers whether this repository is gated: the canonical gate file first,
-    then the best-configured one. Takes `{path: yaml_text}`. Returns None when there is none."""
+    """The occurrence that answers whether this repository is gated. Takes `{path: yaml_text}`.
+    Prefers an occurrence that can run on a change to the code, and among those reports the
+    worst-configured one, so a decorative gate cannot answer for a live one. Returns None when the
+    repository references the action nowhere."""
     refs = find_strix_refs(workflows)
-    if not refs:
+    live = [r for r in refs if r.guards_changes]
+    candidates = live or refs
+    if not candidates:
         return None
 
-    def rank(item):
+    def worst_first(item):
         index, ref = item
         cfg = grade_config(ref)
-        return (ref.workflow != WORM_GUARD_FILE, cfg.standing_write, cfg.reports_nothing,
-                len(cfg.ignored_inputs), index)
+        return (not cfg.standing_write, not cfg.reports_nothing, not cfg.ignored_inputs,
+                not cfg.unknown, index)
 
-    return min(enumerate(refs), key=rank)[1]
+    return min(enumerate(candidates), key=worst_first)[1]
 
 
 _RUNS_SAW = re.compile(r"(?:^|[\s;&|(])saw\s+(?:scan|audit)\b|\bstayawakebot\b", re.IGNORECASE)
@@ -322,8 +365,12 @@ class GuardStatus:
             return False
         if self.fresh is not None and self.fresh.state == "behind":
             return False
-        if self.config is not None and self.config.degraded:
-            return False
+        cfg = self.config
+        if cfg is not None:
+            if cfg.ignored_inputs or cfg.standing_write:
+                return False
+            if cfg.reports_nothing and (cfg.report_only or self.required is False):
+                return False
         return self.required is not False
 
 
@@ -512,16 +559,34 @@ def render(status: GuardStatus, *, color: bool = False) -> str:
         if cfg.ignored_inputs:
             named = ", ".join(f"`{k}`" for k in cfg.ignored_inputs)
             lines.append("  " + paint("⚠ an input the action does not take", warn, on=color) +
-                         f"  — {named} is dropped, so whatever it passes never arrives. "
-                         "`saw guard setup` rewrites it.")
-        if cfg.reports_nothing:
+                         f"  — {named} is dropped, so whatever it passes never arrives.")
+        if cfg.reports_nothing and cfg.report_only:
             lines.append("  " + paint("⚠ reports nowhere", warn, on=color) +
                          "  — a finding leaves no PR comment, no code-scanning alert and no run "
-                         "artifact, so the verdict ends with the run. `saw guard setup` turns them on.")
+                         "artifact, and the run is not failed either, so the verdict ends with the "
+                         "run. `saw guard setup` turns them on.")
+        elif cfg.reports_nothing and status.required is False:
+            lines.append("  " + paint("⚠ reports nowhere", warn, on=color) +
+                         "  — a finding leaves no PR comment, no code-scanning alert and no run "
+                         "artifact, and the check it fails is not required. `saw guard setup` "
+                         "turns them on.")
+        elif cfg.reports_nothing and status.required is None:
+            lines.append("  " + paint("• nothing leaves the run", dim, on=color) +
+                         "  — a finding would show only as a failed check, and whether that check "
+                         "is required could not be established here.")
         if cfg.standing_write:
             lines.append("  " + paint("⚠ holds write access on every run", warn, on=color) +
                          "  — the scanning job can push to this repository even when nothing is "
                          "found. `saw guard setup` moves that to a job that only runs on a finding.")
+        if cfg.write_unstated:
+            lines.append("  " + paint("• write access unstated", dim, on=color) +
+                         "  — the scanning job grants itself no permissions, so what it may write "
+                         "is whatever this repository hands every workflow by default.")
+        if cfg.unresolved:
+            named = ", ".join(f"`{k}`" for k in cfg.unresolved)
+            lines.append("  " + paint("• decided when the workflow runs", dim, on=color) +
+                         f"  — {named} is set from a value this file does not carry, so whether a "
+                         "finding is delivered cannot be read from it.")
 
     if remote:
         if status.required is True:

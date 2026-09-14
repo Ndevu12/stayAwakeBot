@@ -406,8 +406,13 @@ class TestRenderWorkflow(unittest.TestCase):
                          "${{ steps.scan.outputs.verdict }}")
         self.assertIn("needs.worm-guard.outputs.verdict == 'infected'", fix["if"])
 
-    def test_the_remediation_job_reports_its_own_outcome(self):
-        self.assertNotIn("fail-on", self.doc["jobs"]["remediate"]["steps"][-1]["with"])
+    def test_the_remediation_jobs_colour_tracks_remediation_not_the_verdict(self):
+        """Red on that job means the fix was not produced — the gate job already carries the verdict."""
+        self.assertEqual(self.doc["jobs"]["remediate"]["steps"][-1]["with"]["fail-on"], "never")
+        self.assertNotIn("fail-on", self.doc["jobs"]["worm-guard"]["steps"][-1]["with"])
+
+    def test_an_absent_count_does_not_reach_the_job_that_can_push(self):
+        self.assertIn("needs.worm-guard.outputs.infected != ''", self.doc["jobs"]["remediate"]["if"])
 
     def test_the_credential_is_passed_under_the_name_the_action_declares(self):
         fix = self.doc["jobs"]["remediate"]["steps"][-1]
@@ -888,6 +893,20 @@ jobs:
 SILENT_WF = DEGRADED_WF.replace("          remediate: pr\n",
                                 "          remediate: pr\n          fail-on: never\n")
 
+REPORT_ONLY_WF = """name: Worm guard
+on: { push: { branches: [main] }, pull_request: {} }
+permissions: {}
+jobs:
+  worm-guard:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: Ndevu12/strix@%s
+        with:
+          fail-on: never
+""" % ("c" * 40)
+
 
 class TestGradeConfig(unittest.TestCase):
     """A gate can be present, SHA-pinned and fresh while discarding its credential and reporting
@@ -902,8 +921,54 @@ class TestGradeConfig(unittest.TestCase):
     def test_a_gate_that_neither_delivers_nor_fails_the_merge_reports_nothing(self):
         self.assertTrue(self._graded(SILENT_WF).reports_nothing)
 
-    def test_a_gate_that_fails_the_merge_reports_through_the_check(self):
-        self.assertFalse(self._graded(DEGRADED_WF).reports_nothing)
+    def test_a_gate_whose_required_check_is_the_delivery_is_healthy(self):
+        ref = find_strix({guard.WORM_GUARD_FILE: DEGRADED_WF})
+        cfg = guard_detect.grade_config(ref)
+        self.assertTrue(cfg.reports_nothing)
+        clean = guard_detect.GateConfig(reports_nothing=True)
+        self.assertTrue(GuardStatus(present=True, ref=ref, config=clean, required=True).healthy)
+
+    def test_a_gate_that_delivers_nothing_and_is_not_required_is_not_healthy(self):
+        ref = find_strix({guard.WORM_GUARD_FILE: DEGRADED_WF})
+        clean = guard_detect.GateConfig(reports_nothing=True)
+        self.assertFalse(GuardStatus(present=True, ref=ref, config=clean, required=False).healthy)
+
+    def test_a_gate_that_delivers_nothing_and_fails_no_merge_is_not_healthy(self):
+        ref = find_strix({guard.WORM_GUARD_FILE: REPORT_ONLY_WF})
+        cfg = guard_detect.grade_config(ref)
+        self.assertEqual((cfg.ignored_inputs, cfg.standing_write), ((), False))
+        self.assertTrue(cfg.report_only and cfg.reports_nothing)
+        self.assertFalse(GuardStatus(present=True, ref=ref, config=cfg, required=True).healthy)
+
+    def test_the_same_gate_is_healthy_once_something_carries_the_finding(self):
+        wf = REPORT_ONLY_WF.replace("          fail-on: never\n", "          pr-comment: true\n")
+        ref = find_strix({guard.WORM_GUARD_FILE: wf})
+        cfg = guard_detect.grade_config(ref)
+        self.assertTrue(GuardStatus(present=True, ref=ref, config=cfg, required=True).healthy)
+
+    def test_an_unreadable_fail_on_is_not_read_as_report_only(self):
+        wf = SILENT_WF.replace("fail-on: never", "fail-on: ${{ vars.WANTED }}")
+        cfg = self._graded(wf)
+        self.assertFalse(cfg.report_only)
+        self.assertIn("fail-on", cfg.unresolved)
+
+    def test_a_job_that_grants_itself_nothing_is_unstated_not_proven_safe(self):
+        wf = DEGRADED_WF.replace("permissions: {}\n", "")
+        wf = wf.replace("    permissions:\n      contents: write\n"
+                        "      pull-requests: write\n", "")
+        cfg = self._graded(wf)
+        self.assertFalse(cfg.standing_write)
+        self.assertTrue(cfg.write_unstated)
+        self.assertTrue(cfg.unknown)
+
+    def test_a_configuration_decided_at_run_time_is_reported_as_unknown(self):
+        wf = SILENT_WF.replace("          fail-on: never\n",
+                               "          pr-comment: ${{ vars.X }}\n")
+        ref = find_strix({guard.WORM_GUARD_FILE: wf})
+        cfg = guard_detect.grade_config(ref)
+        self.assertEqual(cfg.unresolved, ("pr-comment",))
+        out = guard.render(GuardStatus(present=True, ref=ref, config=cfg))
+        self.assertIn("decided when the workflow runs", out)
 
     def test_any_one_reporting_input_is_enough(self):
         for key in guard_detect.INPUTS_THAT_REPORT_A_FINDING:
@@ -922,13 +987,14 @@ class TestGradeConfig(unittest.TestCase):
         self.assertEqual(graded.ignored_inputs, ("token",))
         self.assertFalse(graded.reports_nothing)
 
-    def test_an_input_the_action_does_not_take_is_named_but_does_not_degrade_the_gate(self):
-        wf = SILENT_WF.replace("          fail-on: never\n", "")
+    def test_an_input_the_action_does_not_take_condemns_the_gate_but_licenses_no_rewrite(self):
+        wf = SILENT_WF.replace("          fail-on: never\n", "          pr-comment: true\n")
         wf = wf.replace("    permissions:\n      contents: write\n      pull-requests: write",
                         "    permissions:\n      contents: read\n      pull-requests: write")
         graded = self._graded(wf)
         self.assertEqual(graded.ignored_inputs, ("token",))
-        self.assertFalse(graded.degraded)
+        self.assertTrue(graded.degraded)
+        self.assertFalse(graded.needs_rewriting)
 
     def test_a_scanning_job_holding_contents_write_is_reported(self):
         self.assertTrue(self._graded(DEGRADED_WF).standing_write)
@@ -994,11 +1060,32 @@ class TestWhichOccurrenceAnswersForTheRepository(unittest.TestCase):
         self.assertEqual(ref.job, "worm-guard")
         self.assertFalse(guard_detect.grade_config(ref).degraded)
 
-    def test_another_files_usage_does_not_answer_for_the_gate(self):
+    def test_a_degraded_gate_elsewhere_answers_over_a_tidy_one(self):
         ref = find_strix({".github/workflows/ci.yml": DEGRADED_WF,
+                          guard.WORM_GUARD_FILE: self._rendered()})
+        self.assertEqual(ref.workflow, ".github/workflows/ci.yml")
+        self.assertTrue(guard_detect.grade_config(ref).degraded)
+
+    def test_an_occurrence_that_cannot_run_on_a_change_does_not_answer(self):
+        manual = DEGRADED_WF.replace("on: { push: { branches: [main] }, pull_request: {} }",
+                                     "on: { workflow_dispatch: {} }")
+        ref = find_strix({".github/workflows/z-manual.yml": manual,
+                          guard.WORM_GUARD_FILE: self._rendered()})
+        self.assertEqual(ref.workflow, guard.WORM_GUARD_FILE)
+
+    def test_a_switched_off_job_does_not_condemn_a_healthy_live_gate(self):
+        off = DEGRADED_WF.replace("  worm-guard:\n", "  worm-guard:\n    if: false\n")
+        ref = find_strix({".github/workflows/a-disabled.yml": off,
                           guard.WORM_GUARD_FILE: self._rendered()})
         self.assertEqual(ref.workflow, guard.WORM_GUARD_FILE)
         self.assertFalse(guard_detect.grade_config(ref).degraded)
+
+    def test_a_tidy_disabled_job_cannot_shield_a_degraded_gate_in_the_same_file(self):
+        wf = DEGRADED_WF + self._rendered().split("jobs:\n")[1].split("\n\n")[0].replace(
+            "  worm-guard:\n", "  decoy:\n    if: false\n")
+        pin = guard.Pin("d" * 40, "v0.1.5")
+        plan = guard.plan_setup({guard.WORM_GUARD_FILE: wf}, "main", pin, scanner="0.11.2")
+        self.assertEqual(plan.action, "repair")
 
     def test_every_occurrence_is_still_available(self):
         refs = guard_detect.find_strix_refs({guard.WORM_GUARD_FILE: self._rendered()})
