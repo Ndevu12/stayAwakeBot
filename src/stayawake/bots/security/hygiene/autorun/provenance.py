@@ -75,15 +75,16 @@ def _package_owner(exec_path: str) -> str | None:
     return None
 
 
-def _homebrew_owner(entry_path: Path, exec_path: str) -> str | None:
-    """Homebrew's agents are named `homebrew.mxcl.<formula>` and run out of the Cellar/opt — a strong,
-    check-free attribution on macOS."""
-    name = entry_path.name.lower()
-    if name.startswith("homebrew.mxcl."):
-        return name[len("homebrew.mxcl."):].removesuffix(".plist") or "homebrew"
-    p = _norm(exec_path)
-    if "/cellar/" in p.lower() or p.startswith("/opt/homebrew/"):
-        return "homebrew"
+_BREW_CELLARS = ("/opt/homebrew/cellar/", "/usr/local/cellar/", "/home/linuxbrew/.linuxbrew/cellar/")
+
+
+def _homebrew_owner(exec_path: str) -> str | None:
+    """The Homebrew formula whose keg the referenced program resolves into. Takes the referenced
+    path; returns the formula name, or None when it does not resolve into a keg."""
+    resolved = os.path.realpath(_norm(exec_path)).lower()
+    for cellar in _BREW_CELLARS:
+        if resolved.startswith(cellar):
+            return resolved[len(cellar):].split("/", 1)[0] or "homebrew"
     return None
 
 
@@ -113,6 +114,6 @@ def attribute(entry) -> Attribution:
         return Attribution(exec_class=exec_class, owner="saw")
     if exec_class != "untrusted" and schedule.is_ours(entry.path):
         return Attribution(exec_class=exec_class, owner="saw")
-    owner = _homebrew_owner(entry.path, exec_path) or _package_owner(exec_path)
+    owner = _homebrew_owner(exec_path) or _package_owner(exec_path)
     signed = _codesigned(exec_path)
     return Attribution(exec_class=exec_class, owner=owner, signed=signed)

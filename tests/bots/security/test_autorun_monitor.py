@@ -1068,6 +1068,54 @@ class TestBaselineNotLoadBearing(_Surface):
         self.assertIn("autorun-unattributed-foothold", self.ids(self._run()))
 
 
+class TestHomebrewAttribution(_Surface):
+    """What attributes a Homebrew agent is where its program lives, not what the file is called."""
+
+    def _owner(self, exec_path):
+        return provenance._homebrew_owner(exec_path)
+
+    def _graded(self, name, argv):
+        self.write(name, ProgramArguments=[argv], RunAtLoad=False)
+        (entry,) = surface.enumerate_entries()[0]
+        with mock.patch(f"{_ATTR}._package_owner", return_value=None), \
+             mock.patch(f"{_ATTR}._codesigned", return_value=False):
+            attrib = provenance.attribute(entry)
+        return attrib, grade.grade(entry, attrib, baseline.RETURNED, grade.ContentSignal(), False)
+
+    def test_a_name_alone_attributes_nothing(self):
+        keg = self.d.parent / "Cellar" / "realformula" / "1.0" / "bin"
+        keg.mkdir(parents=True)
+        (keg / "prog").write_text("#!/bin/sh\n", encoding="utf-8")
+        self.assertIsNone(self._owner(str(self.d.parent / "notinbrew" / "prog")))
+
+    def test_the_keg_a_program_resolves_into_names_the_formula(self):
+        with mock.patch.object(provenance, "_BREW_CELLARS", (str(self.d.parent).lower() + "/cellar/",)):
+            keg = self.d.parent / "Cellar" / "realformula" / "1.0" / "bin"
+            keg.mkdir(parents=True)
+            prog = keg / "prog"
+            prog.write_text("#!/bin/sh\n", encoding="utf-8")
+            self.assertEqual(self._owner(str(prog)), "realformula")
+            farm = self.d.parent / "opt" / "realformula"
+            farm.parent.mkdir(parents=True, exist_ok=True)
+            farm.symlink_to(keg.parent)
+            self.assertEqual(self._owner(str(farm / "bin" / "prog")), "realformula")
+
+    def test_an_entry_that_only_looks_like_one_is_still_graded(self):
+        payload = self.d.parent / "payload"
+        payload.write_text("#!/bin/sh\n", encoding="utf-8")
+        _attrib, issue = self._graded("homebrew.mxcl.notreal.plist", str(payload))
+        self.assertEqual(issue.id, "autorun-entry-returned")
+
+    def test_a_program_inside_a_keg_is_not_graded(self):
+        with mock.patch.object(provenance, "_BREW_CELLARS", (str(self.d.parent).lower() + "/cellar/",)):
+            keg = self.d.parent / "Cellar" / "realformula" / "1.0" / "bin"
+            keg.mkdir(parents=True)
+            (keg / "prog").write_text("#!/bin/sh\n", encoding="utf-8")
+            attrib, issue = self._graded("homebrew.mxcl.realformula.plist", str(keg / "prog"))
+            self.assertEqual(attrib.owner, "realformula")
+            self.assertIsNone(issue)
+
+
 class TestReturnAfterRemoval(_Surface):
     """Presence needs a benign-population argument before it means anything; a return after an
     operator removed it does not. The two questions are asked, and answered, separately."""
