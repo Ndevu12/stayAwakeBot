@@ -15,6 +15,8 @@ reader, not the mechanism or the weakness it closed.
 
 ### Fixed
 - **`saw fix` removes the file it flagged, not the whole folder it sits in.** A single flagged file in a shared folder no longer takes the folder's other files with it.
+- **`saw fix amend` names the files it removed.** A run that removed a file from your history whole
+  reported only which branches moved, so there was nothing in the output to tell you what had gone.
 
 ## [0.11.3] - 2026-09-14
 

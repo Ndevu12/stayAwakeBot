@@ -15,7 +15,7 @@ from unittest import mock
 from contextlib import ExitStack, contextmanager, redirect_stderr
 
 from stayawake import cli
-from stayawake.bots.security.models import CONFIRMED, Finding, ScanResult, Severity
+from stayawake.bots.security.models import CONFIRMED, HEURISTIC, Finding, ScanResult, Severity
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.pr import amend as amendmod
 from stayawake.bots.security.pr.amend import amend_outcome, amend_repo
@@ -1347,6 +1347,32 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         self.assertEqual(0, subprocess.run(
             ["git", "-C", str(self.d), "cat-file", "-e", f"HEAD:{p}"],
             capture_output=True).returncode, "the file is still there")
+
+    def test_a_heuristic_whole_file_finding_is_never_removed_by_either_route(self):
+        p = "src/fonts/Maybe.woff2"
+        self.write(self.d, p, "wOF2\x00unsure\n")
+        self.commit(self.d, "add a file only a heuristic flags")
+        before = self._rev()
+        finding = Finding("fake-font-blockchain", "fake-font", Severity.HIGH, p,
+                          "wholly foreign", remediation="quarantine-file", confidence=HEURISTIC)
+        scan = ScanResult(target=str(self.d), source="local", findings=[finding])
+        for flag in (False, True):
+            outcome = self._act_full(scan, pusher=lambda *a: PushResult(True), remove_foreign=flag)
+            self.assertFalse(outcome.completed, f"a heuristic finding was acted on (flag={flag})")
+            self.assertEqual(before, self._rev(), f"a ref moved on a heuristic finding (flag={flag})")
+
+    def test_the_operator_is_told_which_paths_were_removed(self):
+        p = "src/fonts/BlockchainFont.woff2"
+        self.write(self.d, p, "wOF2\x00camouflage-blob\n")
+        self.commit(self.d, "add the foreign font")
+        self.write(self.d, "app.js", "ok\n")
+        self.commit(self.d, "unrelated work")
+        scan = ScanResult(target=str(self.d), source="local",
+                          findings=[self._foreign_finding(p)])
+        outcome = self._act_full(scan, pusher=lambda *a: PushResult(True), remove_foreign=True)
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertIn(p, outcome.removed)
+        self.assertIn(p, render_amend_line(outcome))
 
     def test_a_foreign_file_on_a_sibling_branch_is_also_removed(self):
         p = "src/fonts/BlockchainFont.woff2"

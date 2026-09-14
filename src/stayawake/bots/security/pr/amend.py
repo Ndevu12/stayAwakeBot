@@ -615,4 +615,4 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
             survivors.insert(0, Reason(Cause.LEFT_PART_WAY, ", ".join(unrestored)))
     touched = len(all_infected)
     label = (oldest[:12] if touched == 1 else f"{touched} commits from {oldest[:12]}")
-    return amended(display, label, tuple(results), tuple(survivors))
+    return amended(display, label, tuple(results), tuple(survivors), sorted(remove))
