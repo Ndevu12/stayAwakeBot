@@ -13,6 +13,13 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+## [0.11.3] - 2026-09-14
+
+### Security
+- **The container image carries the current operating-system security updates.** They are applied
+  when the image is built, so a base that upstream has not yet rebuilt no longer leaves fixed
+  vulnerabilities in the published image.
+
 ### Added
 - **`saw audit` says when a start-up entry has come back after it was removed.** Something that is
   simply there needs a judgement call before it means anything; something you removed and that is
@@ -1099,7 +1106,8 @@ _No user-facing changes were recorded for this release._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel (supply-chain worm
 detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.11.2...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.11.3...HEAD
+[0.11.3]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.11.2...v0.11.3
 [0.11.2]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.11.1...v0.11.2
 [0.11.1]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.10.0...v0.11.0

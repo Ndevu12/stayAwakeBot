@@ -46,6 +46,13 @@ LABEL org.opencontainers.image.source="https://github.com/Ndevu12/stayAwakeBot" 
       org.opencontainers.image.description="StayAwakeBot — supply-chain worm hunter + uptime sentinel" \
       org.opencontainers.image.licenses="AGPL-3.0-or-later"
 
+# Debian security updates are applied at build time: the digest-pinned base lags upstream rebuilds,
+# and the release gate refuses to publish an image carrying a fixable CRITICAL or HIGH.
+RUN set -eux; \
+    apt-get update; \
+    apt-get upgrade -y; \
+    rm -rf /var/lib/apt/lists/*
+
 # The scanner only ever reads code and never needs root; run as an unprivileged user, and install
 # the wheel into a user-owned virtualenv so pip runs as `sentinel`, never root. pip itself is then
 # dropped — nothing installs at run time — with `test -d` first so a layout change fails loudly.
