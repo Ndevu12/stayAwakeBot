@@ -19,7 +19,7 @@ from ..models import HygieneIssue, _WIPER_NOTE
 from .. import mechanism
 from ...taint import analyzer
 from ...taint.destructive import detect_destructive
-from .baseline import NEW, CHANGED
+from .baseline import NEW, CHANGED, RETURNED
 
 _MAX_REFERENCED = 256 * 1024
 
@@ -402,6 +402,7 @@ _SAW_HOOK_ALTERED = "claims to be a hook saw installed but has been modified"
 _SAW_HOOK_FOREIGN = "sits in the directory saw manages and is not a hook saw installed"
 _SAW_HOOK_REASONS = frozenset({_SAW_HOOK_ALTERED, _SAW_HOOK_FOREIGN})
 REVIEW_ID = "autorun-new-unattributed"
+RETURN_ID = "autorun-entry-returned"
 
 
 @dataclass
@@ -538,7 +539,8 @@ def _shape_of(entry, attrib) -> str:
 
 def grade(entry, attrib, novel: str, shape: ContentSignal, correlated: bool) -> HygieneIssue | None:
     """Fuse the four signals for one entry into a graded HygieneIssue (or None = clean)."""
-    is_new = novel in (NEW, CHANGED)
+    is_new = novel in (NEW, CHANGED, RETURNED)
+    returned = novel == RETURNED
     unattributed = not attrib.attributed
 
     strong = shape.hit or (unattributed and (correlated
@@ -547,6 +549,8 @@ def grade(entry, attrib, novel: str, shape: ContentSignal, correlated: bool) -> 
         why = list(shape.reasons)
         if correlated:
             why.append("shared payload across multiple autorun entries")
+        if returned:
+            why.append("was removed and has come back")
         detail = (f"An autorun entry re-executes code no package, app or signed binary accounts "
                   f"for — {_shape_of(entry, attrib)}."
                   + (" It " + "; ".join(why) + "." if why else ""))
@@ -558,11 +562,20 @@ def grade(entry, attrib, novel: str, shape: ContentSignal, correlated: bool) -> 
                         f"LAST — {_WIPER_NOTE}.",
             command="saw hook repair" if any(r in _SAW_HOOK_REASONS for r in why) else None)
 
+    if unattributed and returned and entry.exec_path:
+        return HygieneIssue(
+            id=RETURN_ID, severity="warning",
+            title="An autorun entry came back after it was removed",
+            detail=f"An autorun entry that was gone has come back — {_shape_of(entry, attrib)}. No "
+                   "package, app or signed binary accounts for it.",
+            remediation="Confirm you put it back. If not, run `saw harden` and rotate credentials "
+                        f"LAST — {_WIPER_NOTE}.")
+
     # REVIEW (→ info): something NEW and unattributed appeared since your last audit, without a decisive
     # bad shape. Requires trusted-baseline novelty, so a known benign-but-unattributed entry (e.g. your
     # own ~/bin tool) does not nag every run, and a first run stays quiet on this tier.
     if unattributed and is_new:
-        verb = "appeared" if novel == NEW else "changed"
+        verb = "changed" if novel == CHANGED else "appeared"
         return HygieneIssue(
             id=REVIEW_ID, severity="info",
             title="New unattributed autorun entry since your last audit",

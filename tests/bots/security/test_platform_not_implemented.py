@@ -5,6 +5,10 @@ and exit 0, over a start-up surface no code in this project enumerates."""
 from __future__ import annotations
 
 import io
+import os
+import shutil
+import tempfile
+import pathlib
 import unittest
 from contextlib import redirect_stdout
 from unittest import mock
@@ -13,6 +17,24 @@ from stayawake.bots.security import hygiene
 from stayawake.bots.security.hygiene.models import (ROTATION_UNSAFE_IDS, SURFACE_NOT_IMPLEMENTED_ID,
                                                     persistence_surface_is_enumerable)
 from stayawake.bots.security.hygiene.outcome import CHECKED_CLEAN, NOT_IMPLEMENTED
+
+
+
+_state_dir = ""
+
+
+def setUpModule():
+    """These tests compose the real audit, which reads and rewrites saw's own cross-run state file.
+    A return is reported once and then cleared, so a suite run would consume the operator's own
+    evidence. Point it at a throwaway."""
+    global _state_dir
+    _state_dir = tempfile.mkdtemp(prefix="platform-state-")
+    os.environ["SAW_AUTORUN_BASELINE"] = str(pathlib.Path(_state_dir) / "autorun-baseline.json")
+
+
+def tearDownModule():
+    os.environ.pop("SAW_AUTORUN_BASELINE", None)
+    shutil.rmtree(_state_dir, ignore_errors=True)
 
 
 class TestAPlatformWithNoImplementationIsNotClean(unittest.TestCase):

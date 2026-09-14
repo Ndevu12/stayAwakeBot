@@ -5,8 +5,10 @@ property: the baseline is NEVER trusted for safety (a tampered/absent baseline c
 foothold), grading is deterministic at any -j, and non-regular files are never opened."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import pathlib
 import plistlib
 import tempfile
 import unittest
@@ -18,6 +20,10 @@ from stayawake.bots.security.hygiene import mechanism, models
 from stayawake.bots.security.hygiene.autorun import surface, provenance, grade, baseline, check_autorun
 
 _ATTR = "stayawake.bots.security.hygiene.autorun.provenance"
+
+
+def _v1_hash(entries: dict) -> str:
+    return hashlib.sha256(json.dumps(entries, sort_keys=True).encode("utf-8")).hexdigest()
 
 
 def _agent(**plist) -> bytes:
@@ -543,6 +549,17 @@ class TestGitHooks(_Surface):
         self.assertEqual(unread, [hidden])
         self.assertIn("persistence-surface-unverified", self.ids(check_autorun()))
 
+    def test_a_hook_that_is_re_created_reads_as_new_not_as_a_return(self):
+        body = "#!/bin/sh\nnpx lint-staged\n"
+        self._hook("pre-commit", body)
+        self.assertEqual(self._run(), [])
+        (self.hooks / "pre-commit").unlink()
+        self._run()
+        self._hook("pre-commit", body)
+        ids = self.ids(self._run())
+        self.assertNotIn("autorun-entry-returned", ids)
+        self.assertIn("autorun-new-unattributed", ids)
+
     def test_a_seeded_repository_that_vanished_from_git_is_reported_by_the_audit(self):
         repo = self.d.parent / "proj"
 
@@ -1049,6 +1066,299 @@ class TestBaselineNotLoadBearing(_Surface):
         self.assertEqual(b.status, "tampered")
         self.assertFalse(b.trusted)                        # → novelty ignored, foothold still graded
         self.assertIn("autorun-unattributed-foothold", self.ids(self._run()))
+
+
+class TestReturnAfterRemoval(_Surface):
+    """Presence needs a benign-population argument before it means anything; a return after an
+    operator removed it does not. The two questions are asked, and answered, separately."""
+
+    def _run(self, owner=None):
+        with mock.patch(f"{_ATTR}._package_owner", return_value=owner), \
+             mock.patch(f"{_ATTR}._homebrew_owner", return_value=None), \
+             mock.patch(f"{_ATTR}._codesigned", return_value=None):
+            return check_autorun()
+
+    def _plant(self):
+        self.write("b.plist", ProgramArguments=["/home/u/bin/gone"], RunAtLoad=False)
+
+    def _arc(self, owner=None):
+        """present -> removed -> back, one run at each step. Returns the last run's issues."""
+        self.write("a.plist", ProgramArguments=["/home/u/bin/keep"], RunAtLoad=False)
+        self._plant()
+        self._run(owner)
+        (self.d / "b.plist").unlink()
+        self._run(owner)
+        self._plant()
+        return self._run(owner)
+
+    def test_an_entry_that_comes_back_is_reported_as_a_return_not_as_a_new_entry(self):
+        issues = self._arc()
+        back = [i for i in issues if i.id == "autorun-entry-returned"]
+        self.assertEqual([i.severity for i in back], ["warning"])
+        self.assertIn("come back", back[0].detail)
+        self.assertNotIn("autorun-new-unattributed", self.ids(issues))
+
+    def test_a_snapshot_that_cannot_be_written_says_so(self):
+        self._plant()
+        self._run()
+        os.chmod(self.state, 0o500)
+        self.addCleanup(os.chmod, self.state, 0o700)
+        self.assertIn("autorun-baseline-not-saved", self.ids(self._run()))
+
+    def test_a_return_does_not_leave_the_run_saying_rotation_is_safe(self):
+        ids = {i.id for i in self._arc()}
+        self.assertIn("autorun-entry-returned", ids)
+        self.assertEqual(models.rotation_safety(ids), models.ROTATION_SAFE_PENDING_CHECK)
+        self.assertIsNone(models.incident_tier(ids))
+
+    def test_a_return_is_reported_once_not_on_every_later_run(self):
+        self.assertIn("autorun-entry-returned", self.ids(self._arc()))
+        self.assertEqual(self._run(), [])
+
+    def test_a_removal_is_recorded_even_when_it_empties_the_surface(self):
+        self._plant()
+        self._run()
+        (self.d / "b.plist").unlink()
+        self.assertEqual(self._run(), [])
+        self._plant()
+        self.assertIn("autorun-entry-returned", self.ids(self._run()))
+
+    def test_a_removal_is_remembered_while_the_entry_stays_gone(self):
+        self._plant()
+        self._run()
+        (self.d / "b.plist").unlink()
+        for _ in range(3):
+            self._run()
+        self._plant()
+        self.assertIn("autorun-entry-returned", self.ids(self._run()))
+
+    def test_a_directory_that_was_not_there_at_all_is_never_read_as_a_removal(self):
+        self._plant()
+        self._run()
+        moved = self.d.parent / "moved-away"
+        self.d.rename(moved)
+        self._run()
+        moved.rename(self.d)
+        self.assertNotIn("autorun-entry-returned", self.ids(self._run()))
+
+    def test_a_directory_this_run_could_not_list_is_never_read_as_a_removal(self):
+        self._plant()
+        self._run()
+        os.chmod(self.d, 0o100)
+        self.addCleanup(os.chmod, self.d, 0o700)
+        self._run()
+        os.chmod(self.d, 0o700)
+        self.assertNotIn("autorun-entry-returned", self.ids(self._run()))
+
+    def test_a_file_that_was_seen_but_could_not_be_read_is_never_read_as_a_removal(self):
+        self._plant()
+        self._run()
+        os.chmod(self.d / "b.plist", 0o000)
+        self.addCleanup(os.chmod, self.d / "b.plist", 0o600)
+        self._run()
+        os.chmod(self.d / "b.plist", 0o600)
+        self.assertNotIn("autorun-entry-returned", self.ids(self._run()))
+
+    def test_an_entry_its_own_package_re_installs_is_not_a_return(self):
+        self.assertEqual(self._arc(owner="com.example.app"), [])
+
+    def test_a_name_squatted_by_a_directory_is_still_a_removal(self):
+        self._plant()
+        self._run()
+        (self.d / "b.plist").unlink()
+        (self.d / "b.plist").mkdir()
+        self._run()
+        (self.d / "b.plist").rmdir()
+        self._plant()
+        self.assertIn("autorun-entry-returned", self.ids(self._run()))
+
+    def test_a_row_no_run_enumerated_cannot_answer_known(self):
+        self._plant()
+        self._run()
+        os.chmod(self.d, 0o100)
+        self.addCleanup(os.chmod, self.d, 0o700)
+        self._run()
+        os.chmod(self.d, 0o700)
+        ids = self.ids(self._run())
+        self.assertNotIn("autorun-entry-returned", ids)
+        self.assertIn("autorun-new-unattributed", ids)
+
+    def test_a_strong_finding_says_the_foothold_came_back(self):
+        self.write("evil.plist", ProgramArguments=["/tmp/agent"], RunAtLoad=True)
+        self._run()
+        (self.d / "evil.plist").unlink()
+        self._run()
+        self.write("evil.plist", ProgramArguments=["/tmp/agent"], RunAtLoad=True)
+        (found,) = [i for i in self._run() if i.id == "autorun-unattributed-foothold"]
+        self.assertIn("was removed and has come back", found.detail)
+
+    def test_the_removal_record_is_covered_by_the_integrity_check(self):
+        self._plant()
+        self._run()
+        (self.d / "b.plist").unlink()
+        self._run()
+        path = baseline.baseline_path()
+        data = json.loads(path.read_text())
+        self.assertEqual(len(data["removed"]), 1)
+        data["removed"] = {}                       # drop the removal without re-stamping the hash
+        path.write_text(json.dumps(data))
+        self.assertEqual(baseline.load_baseline().status, "tampered")
+
+    def test_a_snapshot_in_the_older_format_still_answers_novelty(self):
+        self._plant()
+        self._run()
+        path = baseline.baseline_path()
+        data = json.loads(path.read_text())
+        entries = {k: v["digest"] for k, v in data["entries"].items()}
+        path.write_text(json.dumps({"version": 1, "captured": data["captured"], "entries": entries,
+                                    "self_hash": _v1_hash(entries)}))
+        restored = baseline.load_baseline()
+        self.assertEqual(restored.status, "loaded")
+        self.assertEqual(set(restored.entries), set(entries))
+        self.assertEqual(self._run(), [])
+        self.assertEqual(json.loads(path.read_text())["version"], baseline.VERSION)
+
+    def test_the_removal_record_is_bounded(self):
+        removed = {f"/gone/{i}": f"2026-09-09T00:00:{i % 60:02d}+00:00"
+                   for i in range(baseline.MAX_REMEMBERED + 10)}
+        _keep, gone, _dropped = baseline._next_state([], baseline.Baseline(removed=removed, status="loaded"),
+                                           {}, "2026-09-09T00:01:00+00:00")
+        self.assertEqual(len(gone), baseline.MAX_REMEMBERED)
+
+    def test_a_surface_that_re_creates_its_own_entries_takes_no_carry_forward_budget(self):
+        hooks = {f"/repo{i}/.git/hooks/pre-commit": baseline.Seen("d", hookscript.LOCATION)
+                 for i in range(baseline.MAX_REMEMBERED + 5)}
+        keep, gone, _dropped = baseline._next_state([], baseline.Baseline(entries=hooks, status="loaded"),
+                                          {}, "2026-09-14T00:00:00+00:00")
+        self.assertEqual(keep, {})
+        self.assertEqual(gone, {})
+
+    def test_what_is_carried_forward_is_bounded_too(self):
+        was = baseline.Seen("d", surface.LAUNCH_AGENT)
+        entries = {f"/unlistable/{i}.plist": was for i in range(baseline.MAX_REMEMBERED + 10)}
+        keep, _gone, _dropped = baseline._next_state([], baseline.Baseline(entries=entries, status="loaded"),
+                                           {}, "2026-09-14T00:00:00+00:00")
+        self.assertEqual(len(keep), baseline.MAX_REMEMBERED)
+
+    def test_a_burst_of_removals_cannot_evict_every_earlier_one(self):
+        real = "/Users/op/Library/LaunchAgents/real.plist"
+        base = baseline.Baseline(
+            entries={f"/decoy/{i}.plist": baseline.Seen("d", surface.LAUNCH_AGENT)
+                     for i in range(baseline.MAX_REMEMBERED)},
+            removed={real: "2026-09-01T00:00:00+00:00"}, status="loaded")
+        listing = {pathlib.PurePath("/decoy"): set()}
+        _keep, gone, dropped = baseline._next_state([], base, listing, "2026-09-14T00:00:00+00:00")
+        self.assertIn(real, gone)
+        self.assertEqual(len(gone), baseline.MAX_REMEMBERED)
+        self.assertEqual(dropped, 0)
+
+    def test_what_the_bound_drops_is_counted(self):
+        base = baseline.Baseline(
+            entries={str(self.d / "b.plist"): baseline.Seen("d", surface.LAUNCH_AGENT)},
+            removed={"/gone/1": "2026-09-01T00:00:00+00:00",
+                     "/gone/2": "2026-09-02T00:00:00+00:00"}, status="loaded")
+        with mock.patch.object(baseline, "MAX_REMEMBERED", 2):
+            _keep, gone, dropped = baseline._next_state([], base, {self.d: set()},
+                                                        "2026-09-14T00:00:00+00:00")
+        self.assertEqual(len(gone), 2)
+        self.assertEqual(dropped, 1)
+
+    def test_a_dropped_removal_is_reported(self):
+        self._plant()
+        with mock.patch.object(baseline, "save_baseline", return_value=(True, 3)):
+            issues = self._run()
+        self.assertIn("autorun-removals-dropped", self.ids(issues))
+
+    def test_a_removal_across_the_older_format_is_still_recorded(self):
+        self._plant()
+        self._run()
+        path = baseline.baseline_path()
+        data = json.loads(path.read_text())
+        entries = {k: v["digest"] for k, v in data["entries"].items()}
+        path.write_text(json.dumps({"version": 1, "captured": data["captured"], "entries": entries,
+                                    "self_hash": _v1_hash(entries)}))
+        (self.d / "b.plist").unlink()
+        self._run()
+        self._plant()
+        self.assertIn("autorun-entry-returned", self.ids(self._run()))
+
+    def test_a_run_that_dropped_removals_does_not_claim_rotation_is_safe(self):
+        self.assertEqual(models.rotation_safety({"autorun-removals-dropped"}),
+                         models.ROTATION_SAFE_PENDING_CHECK)
+
+    def test_a_stuffed_removal_record_cannot_push_out_what_this_run_saw(self):
+        squat = {f"/forged/{i}": "2999-01-01T00:00:00+00:00"
+                 for i in range(baseline.MAX_REMEMBERED)}
+        gone_key = str(self.d / "b.plist")
+        base = baseline.Baseline(entries={gone_key: baseline.Seen("d", surface.LAUNCH_AGENT)},
+                                 removed=squat, status="loaded")
+        _keep, gone, _dropped = baseline._next_state([], base, {self.d: set()},
+                                                 "2026-09-09T00:00:00+00:00")
+        self.assertIn(gone_key, gone)
+        self.assertEqual(len(gone), baseline.MAX_REMEMBERED)
+
+    def test_a_name_that_is_there_but_does_not_resolve_is_not_a_removal(self):
+        target = self.d.parent / "dotfiles-agent.plist"
+        target.write_bytes(_agent(ProgramArguments=["/home/u/bin/gone"], RunAtLoad=False))
+        (self.d / "b.plist").symlink_to(target)
+        self._run()
+        target.rename(self.d.parent / "away.plist")
+        self.assertEqual([p.name for p in self.d.iterdir()], ["b.plist"])
+        self._run()
+        (self.d.parent / "away.plist").rename(target)
+        self.assertNotIn("autorun-entry-returned", self.ids(self._run()))
+
+    def test_a_snapshot_routed_to_another_version_fails_its_integrity_check(self):
+        self._plant()
+        self._run()
+        path = baseline.baseline_path()
+        data = json.loads(path.read_text())
+        data["version"] = 1                        # one byte, to route it down the older path
+        path.write_text(json.dumps(data))
+        self.assertEqual(baseline.load_baseline().status, "tampered")
+
+    def test_a_snapshot_naming_a_version_this_release_does_not_write_is_not_trusted(self):
+        self._plant()
+        self._run()
+        path = baseline.baseline_path()
+        data = json.loads(path.read_text())
+        data["version"] = baseline.VERSION + 1
+        data["self_hash"] = baseline._self_hash(data["entries"], data["removed"])
+        path.write_text(json.dumps(data))
+        self.assertEqual(baseline.load_baseline().status, "tampered")
+
+    def test_a_row_that_is_not_text_is_not_trusted_and_does_not_raise(self):
+        self._plant()
+        self._run()
+        path = baseline.baseline_path()
+        data = json.loads(path.read_text())
+        for row in data["entries"].values():
+            row["location"] = []
+        data["self_hash"] = baseline._self_hash(data["entries"], data["removed"])
+        path.write_text(json.dumps(data))
+        self.assertEqual(baseline.load_baseline().status, "corrupt")
+        self._run()                            # and the audit still completes
+
+    def test_a_location_outside_the_surface_vocabulary_is_not_trusted(self):
+        self._plant()
+        self._run()
+        path = baseline.baseline_path()
+        data = json.loads(path.read_text())
+        for row in data["entries"].values():
+            row["location"] = "somewhere-else"
+        data["self_hash"] = baseline._self_hash(data["entries"], data["removed"])
+        path.write_text(json.dumps(data))
+        self.assertEqual(baseline.load_baseline().status, "corrupt")
+
+    def test_an_entry_that_names_no_executable_stays_below_a_warning(self):
+        self.write("b.plist", RunAtLoad=False)
+        self._run()
+        (self.d / "b.plist").unlink()
+        self._run()
+        self.write("b.plist", RunAtLoad=False)
+        ids = self.ids(self._run())
+        self.assertNotIn("autorun-entry-returned", ids)
+        self.assertIn("autorun-new-unattributed", ids)
 
 
 class TestCorrelation(_Surface):

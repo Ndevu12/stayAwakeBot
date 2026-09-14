@@ -16,6 +16,11 @@ from stayawake.utils.pathsafe import grade
 from stayawake.bots.security import hookscript
 from .. import os_service
 
+LAUNCH_AGENT = "launch-agent"
+SYSTEMD_USER = "systemd-user"
+STAYS_REMOVED = frozenset({LAUNCH_AGENT, SYSTEMD_USER})
+LOCATIONS = STAYS_REMOVED | {hookscript.LOCATION}
+
 
 @dataclass
 class AutorunEntry:
@@ -54,7 +59,7 @@ class AutorunEntry:
         return " ".join(self.argv) + "\n" + self.body
 
 
-def _iter_files(dirs, suffixes, unread: list) -> list[Path]:
+def _iter_files(dirs, suffixes, unread: list, listing: dict | None = None) -> list[Path]:
     out: list[Path] = []
     for d in dirs:
         state = grade(d)
@@ -65,9 +70,11 @@ def _iter_files(dirs, suffixes, unread: list) -> list[Path]:
             continue
         try:
             entries = sorted(d.iterdir())
-        except OSError:
+        except (OSError, ValueError):
             unread.append(d)
             continue
+        if listing is not None:
+            listing[d] = {p.name for p in entries}
         for p in entries:
             if not p.name.lower().endswith(suffixes):
                 continue
@@ -265,7 +272,7 @@ def _parse_launch_agent(path: Path) -> AutorunEntry | None:
     if data.get("WatchPaths") or data.get("QueueDirectories"):
         persistence.append("watch-triggered")
     body = _plist_text(raw)
-    return AutorunEntry(location="launch-agent", path=path, argv=argv, body=body,
+    return AutorunEntry(location=LAUNCH_AGENT, path=path, argv=argv, body=body,
                         shell_lines=[" ".join(argv)] if argv else ([] if readable else [body]),
                         persistence=persistence)
 
@@ -316,7 +323,7 @@ def _parse_systemd_unit(path: Path) -> AutorunEntry | None:
             persistence.append(f"timer:{km.group(1)}={km.group(2).strip()[:32]}")
     if re.search(r"^\s*WantedBy\s*=", text, re.MULTILINE):
         persistence.append("enabled")
-    return AutorunEntry(location="systemd-user", path=path, argv=argv, body=text,
+    return AutorunEntry(location=SYSTEMD_USER, path=path, argv=argv, body=text,
                         shell_lines=_systemd_shell_lines(text), persistence=persistence,
                         argv_is_exact=False)
 
@@ -475,19 +482,21 @@ def _parse_git_hook(path: Path, support: _Support, unread: list) -> AutorunEntry
                         notes=support.notes, persistence=[f"git-event:{path.name}"])
 
 
-def enumerate_entries() -> tuple[list[AutorunEntry], list[Path]]:
+def enumerate_entries(listing: dict | None = None) -> tuple[list[AutorunEntry], list[Path]]:
     """Every autorun entry on the catastrophic persistence surface (launch agents + systemd user
     units/timers), parsed. Dispatch is by FILE EXTENSION across the user-owned persistence dirs
     (`.plist` → launch agent, `.service`/`.timer` → systemd) — not by directory name — so it is
-    robust and testable. Order is deterministic (sorted by path within each type)."""
+    robust and testable. Order is deterministic (sorted by path within each type).
+
+    `listing`, when given, is filled with the names each persistence directory held."""
     dirs = os_service.user_persistence_dirs()
     unread: list[Path] = []
     entries: list[AutorunEntry] = []
-    for p in _iter_files(dirs, (".plist",), unread):
+    for p in _iter_files(dirs, (".plist",), unread, listing):
         e = _parse_launch_agent(p)
         if e is not None:
             entries.append(e)
-    for p in _iter_files(dirs, (".service", ".timer"), unread):
+    for p in _iter_files(dirs, (".service", ".timer"), unread, listing):
         e = _parse_systemd_unit(p)
         if e is not None:
             entries.append(e)

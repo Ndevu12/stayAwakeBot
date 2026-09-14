@@ -13,6 +13,13 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Added
+- **`saw audit` says when a start-up entry has come back after it was removed.** Something that is
+  simply there needs a judgement call before it means anything; something you removed and that is
+  there again does not. That is now a finding of its own, separate from the one for an entry that
+  is merely new, and it is reported rather than acted on. The audit says it once, when it comes
+  back — not on every run afterwards.
+
 ### Fixed
 - **`saw discard --branch --remote` removes every auto-clean branch on the repository.** It only
   removed the original name, so a later `saw fix` left the branches it published in place.

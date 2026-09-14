@@ -15,12 +15,33 @@ import argparse
 import io
 import pathlib
 import tomllib
+import os
+import shutil
+import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from unittest import mock
 
 from stayawake import cli
 from stayawake.utils import exitcodes
+
+
+
+_state_dir = ""
+
+
+def setUpModule():
+    """These tests compose the real audit, which reads and rewrites saw's own cross-run state file.
+    A return is reported once and then cleared, so a suite run would consume the operator's own
+    evidence. Point it at a throwaway."""
+    global _state_dir
+    _state_dir = tempfile.mkdtemp(prefix="cli-state-")
+    os.environ["SAW_AUTORUN_BASELINE"] = str(pathlib.Path(_state_dir) / "autorun-baseline.json")
+
+
+def tearDownModule():
+    os.environ.pop("SAW_AUTORUN_BASELINE", None)
+    shutil.rmtree(_state_dir, ignore_errors=True)
 
 
 class TestParserIntegrity(unittest.TestCase):
