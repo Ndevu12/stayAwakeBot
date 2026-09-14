@@ -14,6 +14,9 @@
 #   remediation strategy id (consumed in Phase 3): recover (git restore, code-loader) |
 #               quarantine-file | quarantine-dir | remove-foreign-vscode | strip-gitignore-markers | manual
 #   confidence  verdict weight (OPTIONAL, default `confirmed`): confirmed | heuristic.
+#   confirmed_when (OPTIONAL): `executed` — the match is `confirmed` only when another
+#               finding in the same scan runs its path; otherwise `heuristic`. For a
+#               disguise whose shape alone is not proof (a binary-extension file that is text).
 #               Orthogonal to severity. Only a `confirmed` match drives an INFECTED
 #               verdict; a `heuristic` match (a SHAPE benign code can share — a packed
 #               blob, an oversized line, a review-evading merge) surfaces as SUSPICIOUS
@@ -124,6 +127,8 @@ signatures:
     file_globs: ["*.woff", "*.woff2", "*.ttf", "*.otf"]
     description: "Font file whose bytes are actually JavaScript/text (disguised payload)"
     remediation: quarantine-file
+    confirmed_when: executed
+    masquerade_names: ["fa-*", "fontawesome*", "font-awesome*", "glyphicons*", "materialicons*", "material-icons*", "ionicons*", "themify*", "bootstrap-icons*"]
 
   - id: disguised-binary-file
     category: fake-font
@@ -133,6 +138,8 @@ signatures:
     file_globs: ["*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp", "*.bmp", "*.ico", "*.wasm", "*.pdf"]
     description: "Image/wasm/pdf file whose bytes are actually JavaScript/text (disguised payload)"
     remediation: quarantine-file
+    confirmed_when: executed
+    masquerade_names: ["fa-*", "fontawesome*", "font-awesome*", "glyphicons*", "materialicons*", "material-icons*", "ionicons*", "themify*", "bootstrap-icons*"]
 
   # ── Oversized single line in a config file (obfuscation heuristic) ────────────
   - id: oversized-config-line

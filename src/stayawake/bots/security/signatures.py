@@ -53,5 +53,8 @@ def load_signatures(path: str | Path | None = None) -> dict[str, list[dict[str, 
         if conf is not None and conf not in CONFIDENCE_LEVELS:
             raise ValueError(
                 f"Signature {s['id']}: invalid confidence '{conf}' (use one of {CONFIDENCE_LEVELS})")
+        cw = s.get("confirmed_when")
+        if cw is not None and cw != "executed":
+            raise ValueError(f"Signature {s['id']}: invalid confirmed_when '{cw}' (only 'executed')")
         grouped[s["matcher"]].append(s)
     return dict(grouped)

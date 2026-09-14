@@ -31,6 +31,28 @@ REMOTE_FETCH_INTO_INTERPRETER = re.compile(
     r"\b(?:curl|wget)\b[^|]{0,2048}\|\s*(?:sh|bash|node|bun|bunx|deno)\b", re.IGNORECASE)
 
 
+_SHELL_TOKEN_SPLIT = re.compile(r"[\s'\"()|&;<>]+")
+_FONT_EXT = re.compile(r"\.(?:woff2?|ttf|otf)$", re.IGNORECASE)
+_PATH_PREFIX = re.compile(r"^(?:\./|\$\{workspace(?:Folder|Root)\}/)+")
+
+
+def norm_scan_path(path: str) -> str:
+    """A scan-relative path in one spelling: forward slashes, no leading `./` or `${workspace…}/`."""
+    return _PATH_PREFIX.sub("", str(path).replace("\\", "/"))
+
+
+def executed_font_paths(command: str) -> tuple[str, ...]:
+    """The font/binary paths a shell command runs, normalised. Splits on shell separators first, so
+    it survives a compound command (`(… && node ./x.woff2) || …`) and stays linear on hostile input.
+    Returns () when the command runs no such path."""
+    out = set()
+    for token in _SHELL_TOKEN_SPLIT.split(command):
+        norm = norm_scan_path(token)
+        if norm and _FONT_EXT.search(norm):
+            out.add(norm)
+    return tuple(sorted(out))
+
+
 def evidence(text: str, start: int, end: int, width: int = 80) -> str:
     """A window of the SCANNED FILE around a match — attacker bytes, verbatim.
 
