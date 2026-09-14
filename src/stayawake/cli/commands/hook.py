@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import argparse
 
-from stayawake.cli.helptext import add_command
+from stayawake.cli.helptext import add_command, declare_streaming
+from stayawake.cli.argtypes import add_no_stream_arg, no_stream_requested
 
 
 def register(sub) -> None:
@@ -83,10 +84,10 @@ def register(sub) -> None:
         ])
     stt.set_defaults(func=run_status)
 
-    rn = hsub.add_parser("run")
+    rn = hsub.add_parser("run")                # the entry git's hook calls, not offered in help
+    declare_streaming(rn, True)
     rn.add_argument("-c", "--config", default=None)
-    rn.add_argument("--no-stream", action="store_true", dest="no_stream",
-                    help="disable live progress/typewriter output (plain, instant lines)")
+    add_no_stream_arg(rn)
     rn.add_argument("event")
     rn.add_argument("args", nargs=argparse.REMAINDER)
     rn.set_defaults(func=run_run)
@@ -94,25 +95,25 @@ def register(sub) -> None:
 
 def run_repair(a: argparse.Namespace) -> int:
     from stayawake.bots.security import hook
-    return hook.repair(no_stream=a.no_stream)
+    return hook.repair(no_stream=no_stream_requested(a))
 
 
 def run_install(a: argparse.Namespace) -> int:
     from stayawake.bots.security import hook
-    return hook.install(config_path=a.config, no_stream=a.no_stream)
+    return hook.install(config_path=a.config, no_stream=no_stream_requested(a))
 
 
 def run_uninstall(a: argparse.Namespace) -> int:
     from stayawake.bots.security import hook
-    return hook.uninstall(no_stream=a.no_stream)
+    return hook.uninstall(no_stream=no_stream_requested(a))
 
 
 def run_status(a: argparse.Namespace) -> int:
     from stayawake.bots.security import hook
-    return hook.status(no_stream=a.no_stream)
+    return hook.status(no_stream=no_stream_requested(a))
 
 
 def run_run(a: argparse.Namespace) -> int:
     from stayawake.bots.security import hook
     return hook.run_event(a.event, list(a.args), config_path=a.config,
-                          no_stream=a.no_stream)
+                          no_stream=no_stream_requested(a))

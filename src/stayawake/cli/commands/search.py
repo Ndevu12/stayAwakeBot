@@ -11,6 +11,7 @@ import json
 from stayawake.cli.helptext import add_command
 from stayawake.utils import exitcodes
 from stayawake.utils.streaming import say
+from stayawake.cli.argtypes import no_stream_requested
 
 _INDEX = [
     ("saw scan", "hunt supply-chain worms (read-only); local by default, --remote for GitHub",
@@ -72,8 +73,8 @@ def run(a: argparse.Namespace) -> int:
         # No match is a normal empty result, not a gate failure — keep exit 0 so it
         # never looks like the `1` the security commands return when --fail trips.
         say(f"No commands match {' '.join(a.text)!r}. Try `saw -h` for the full list.",
-            no_stream=getattr(a, "no_stream", False))
+            no_stream=no_stream_requested(a))
         return exitcodes.CLEAN
     say("\n".join(cmd if a.quiet else f"{cmd:<16}{summary}" for _, cmd, summary in scored),
-        no_stream=getattr(a, "no_stream", False))
+        no_stream=no_stream_requested(a))
     return exitcodes.CLEAN

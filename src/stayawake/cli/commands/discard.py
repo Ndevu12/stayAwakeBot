@@ -6,6 +6,7 @@ import argparse
 
 from stayawake.bots.security import remediator
 from stayawake.cli.helptext import add_command
+from stayawake.cli.argtypes import no_stream_requested
 
 
 def register(sub) -> None:
@@ -48,4 +49,4 @@ def run(a: argparse.Namespace) -> int:
     return remediator.discard(a.config, branch=a.branch, pr=a.pr, remote=remote,
                               paths=None if remote else (positionals or None),
                               slugs=(positionals or None) if remote else None,
-                              users=a.user or None, orgs=a.org or None, no_stream=a.no_stream)
+                              users=a.user or None, orgs=a.org or None, no_stream=no_stream_requested(a))

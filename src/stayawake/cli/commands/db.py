@@ -13,6 +13,7 @@ import sys
 from stayawake.cli.helptext import add_command
 from stayawake.utils.streaming import Streamer, busy, say, status, stream_enabled
 from stayawake.utils import exitcodes
+from stayawake.cli.argtypes import no_stream_requested
 
 
 def register(sub) -> None:
@@ -73,7 +74,7 @@ def run_update(a: argparse.Namespace) -> int:
     # only pulled in when this command actually runs.
     from stayawake.bots.security.dependencies import db
 
-    progress_on = stream_enabled(sys.stderr, force_off=a.no_stream)
+    progress_on = stream_enabled(sys.stderr, force_off=no_stream_requested(a))
     try:
         ecosystems = db.resolved_ecosystems(a.ecosystems)
         results = []
@@ -96,12 +97,12 @@ def run_update(a: argparse.Namespace) -> int:
              "  (malware gates the verdict; vulnerabilities show as advisories in `saw scan` — "
              "`--no-advisories` to hide, `--external` to also run installed auditors)",
              f"cache: {db.default_cache_dir() if not a.cache_dir else a.cache_dir}"]
-    Streamer(enabled=stream_enabled(sys.stdout, force_off=a.no_stream)).line("\n".join(lines))
+    Streamer(enabled=stream_enabled(sys.stdout, force_off=no_stream_requested(a))).line("\n".join(lines))
     return exitcodes.CLEAN
 def run_status(a: argparse.Namespace) -> int:
     from stayawake.bots.security.dependencies import db
 
-    no_stream = getattr(a, "no_stream", False)
+    no_stream = no_stream_requested(a)
     with busy("reading the advisory cache…", no_stream=no_stream):
         s = db.cache_status(a.cache_dir)
     if not s["present"]:

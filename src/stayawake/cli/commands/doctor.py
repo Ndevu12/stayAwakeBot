@@ -12,6 +12,7 @@ from stayawake.core.identity import Intent, require, resolve_session
 from stayawake.lib import github_app
 from stayawake.utils import exitcodes
 from stayawake.utils.streaming import busy, say
+from stayawake.cli.argtypes import no_stream_requested
 
 
 def register(sub) -> None:
@@ -34,7 +35,7 @@ def register(sub) -> None:
 
 
 def run(a: argparse.Namespace) -> int:
-    no_stream = getattr(a, "no_stream", False)
+    no_stream = no_stream_requested(a)
     with busy("checking install and credentials…", no_stream=no_stream):
         saw_path = shutil.which("saw") or shutil.which("stayawake")
         sess = resolve_session()

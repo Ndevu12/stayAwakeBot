@@ -278,26 +278,55 @@ class TestHook(unittest.TestCase):
 
 
 class TestNoStreamIsStandard(unittest.TestCase):
-    def test_every_human_command_accepts_no_stream(self):
+    """Derived from the parser tree, never from a list: a command nobody remembered to name is
+    exactly the one a hand-written inventory cannot catch."""
+
+    @staticmethod
+    def _commands():
+        """Every (path, parser) in the tree, walked once per parser so aliases are not re-reported."""
+        from stayawake.cli.dispatch import build_parser
+        found, seen = [], set()
+
+        def walk(parser, path):
+            found.append((path, parser))
+            for action in parser._actions:
+                if isinstance(action, argparse._SubParsersAction):
+                    for name, child in action.choices.items():
+                        if id(child) not in seen:
+                            seen.add(id(child))
+                            walk(child, f"{path} {name}")
+
+        walk(build_parser(), "saw")
+        return found
+
+    def test_every_command_declares_whether_it_streams(self):
+        undeclared = [path for path, p in self._commands()
+                      if p.get_default("func") is not None and not hasattr(p, "saw_streams")]
+        self.assertEqual(undeclared, [], "a runnable command must say whether it renders live "
+                                         "output — build it with add_command, or call "
+                                         "declare_streaming on it")
+
+    def test_a_command_that_streams_takes_no_stream(self):
+        missing = [path for path, p in self._commands()
+                   if getattr(p, "saw_streams", False)
+                   and not any(a.dest == "no_stream" for a in p._actions)]
+        self.assertEqual(missing, [])
+
+    def test_a_command_that_does_not_stream_has_no_flag_to_offer(self):
+        spurious = [path for path, p in self._commands()
+                    if hasattr(p, "saw_streams") and not p.saw_streams
+                    and any(a.dest == "no_stream" for a in p._actions)]
+        self.assertEqual(spurious, [])
+
+    def test_the_flag_survives_being_given_before_a_subcommand(self):
+        """A subcommand carrying the same flag must not reset what its parent already set."""
+        from stayawake.cli.argtypes import no_stream_requested
         from stayawake.cli.dispatch import build_parser
         p = build_parser()
-        for argv in (
-            ["doctor", "--no-stream"],
-            ["harden", "--no-stream"],
-            ["watch", "--no-stream"],
-            ["watch", "stop", "--no-stream"],
-            ["watch", "status", "--no-stream"],
-            ["search", "--no-stream", "pr"],
-            ["intro", "--no-stream"],
-            ["completion", "--no-stream", "bash"],
-            ["db", "status", "--no-stream"],
-            ["hook", "install", "--no-stream"],
-            ["hook", "status", "--no-stream"],
-            ["hook", "uninstall", "--no-stream"],
-            ["hook", "repair", "--no-stream"],
-        ):
-            ns = p.parse_args(argv)
-            self.assertTrue(ns.no_stream, argv)
+        for argv in (["watch", "--no-stream", "status"], ["watch", "status", "--no-stream"],
+                     ["watch", "--no-stream"], ["auth", "--no-stream", "status"]):
+            self.assertTrue(no_stream_requested(p.parse_args(argv)), argv)
+        self.assertFalse(no_stream_requested(p.parse_args(["watch", "status"])))
 
 
 class TestDiscard(unittest.TestCase):

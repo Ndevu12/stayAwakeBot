@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import argparse
 
-from stayawake.cli.argtypes import add_jobs_arg
+from stayawake.cli.argtypes import add_jobs_arg, no_stream_requested
 from stayawake.cli.helptext import add_command
 
 
@@ -158,7 +158,7 @@ def run_check(a: argparse.Namespace) -> int:
     return guard.check_targets(
         paths=None if remote else (positionals or None),
         slugs=slugs, users=a.user or None, orgs=a.org or None, remote=remote,
-        config_path=a.config, branch=a.branch, fail=a.fail, no_stream=a.no_stream, jobs=a.jobs)
+        config_path=a.config, branch=a.branch, fail=a.fail, no_stream=no_stream_requested(a), jobs=a.jobs)
 
 
 def run_drift(a: argparse.Namespace) -> int:
@@ -172,7 +172,7 @@ def run_drift(a: argparse.Namespace) -> int:
     return guard.drift_targets(
         paths=None if remote else (positionals or None),
         slugs=slugs, users=a.user or None, orgs=a.org or None, remote=remote,
-        config_path=a.config, no_stream=a.no_stream, jobs=a.jobs)
+        config_path=a.config, no_stream=no_stream_requested(a), jobs=a.jobs)
 
 
 def run_setup(a: argparse.Namespace) -> int:
@@ -185,4 +185,4 @@ def run_setup(a: argparse.Namespace) -> int:
         slugs=list(positionals) if remote else None,
         users=a.user or None, orgs=a.org or None, remote=remote,
         config_path=a.config, ref=a.ref, dry_run=a.dry_run, pr=a.pr,
-        branch=a.branch, no_stream=a.no_stream, jobs=a.jobs)
+        branch=a.branch, no_stream=no_stream_requested(a), jobs=a.jobs)

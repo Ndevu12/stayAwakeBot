@@ -7,6 +7,7 @@ import argparse
 from stayawake.bots.security import harden
 from stayawake.cli.helptext import add_command
 from stayawake.utils.streaming import busy, say
+from stayawake.cli.argtypes import no_stream_requested
 
 
 def register(sub) -> None:
@@ -30,7 +31,7 @@ def register(sub) -> None:
 
 def run(a: argparse.Namespace) -> int:
     label = "removing host denials…" if a.take_back else "creating host denials…"
-    no_stream = getattr(a, "no_stream", False)
+    no_stream = no_stream_requested(a)
     with busy(label, no_stream=no_stream):
         code, text = harden.take_back() if a.take_back else harden.run()
     say(text, no_stream=no_stream)

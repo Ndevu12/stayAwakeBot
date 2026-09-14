@@ -16,6 +16,7 @@ from stayawake.cli.helptext import add_command
 from stayawake.utils.streaming import Streamer, stream_enabled
 from stayawake.utils.terminal import color_level
 from stayawake.utils import exitcodes
+from stayawake.cli.argtypes import no_stream_requested
 
 
 def register(sub) -> None:
@@ -35,6 +36,6 @@ def register(sub) -> None:
 
 
 def run(a: argparse.Namespace) -> int:
-    Streamer(enabled=stream_enabled(sys.stdout, force_off=getattr(a, "no_stream", False))).write(
+    Streamer(enabled=stream_enabled(sys.stdout, force_off=no_stream_requested(a))).write(
         render_intro(color_level(sys.stdout), __version__))
     return exitcodes.CLEAN

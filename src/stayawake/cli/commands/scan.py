@@ -14,7 +14,7 @@ import argparse
 import sys
 
 from stayawake.bots.security import service
-from stayawake.cli.argtypes import add_jobs_arg
+from stayawake.cli.argtypes import add_jobs_arg, no_stream_requested
 from stayawake.cli.helptext import add_command
 from stayawake.utils import exitcodes
 
@@ -108,6 +108,6 @@ def run(a: argparse.Namespace) -> int:
                         slugs=(positionals or None) if remote else None,
                         users=a.user or None, orgs=a.org or None,
                         json_out=a.json, sarif_path=a.sarif, reports_dir=a.reports_dir,
-                        alert=a.alert, no_stream=a.no_stream, pager=a.pager,
+                        alert=a.alert, no_stream=no_stream_requested(a), pager=a.pager,
                         no_advisories=a.no_advisories, external_audit=a.external_audit,
                         deep=a.deep, history=a.history, require_db=a.require_db, jobs=a.jobs)

@@ -38,14 +38,24 @@ def add_command(sub, name: str, *, help: str, description: str,
 
     `help` is the one-liner in the parent's command list; `description` is the paragraph at the
     top of this command's own `-h`; `examples` become the trailing `examples:` section.
-    Every command that produces a human report takes `--no-stream` (`stream=False` only on a
-    parent that just prints help).
+    Every command that produces a human report takes `--no-stream`. Pass `stream=False` ONLY on a
+    parent whose own handler just prints help — a parent that renders a report (`saw auth`) needs
+    the flag like any other command, and `tests/test_cli.py` derives that check from this tree
+    rather than from a list.
     """
     from stayawake.cli.argtypes import add_no_stream_arg
 
     p = sub.add_parser(name, help=help, description=description,
                        epilog=examples_block(examples),
                        formatter_class=CommandHelpFormatter, **kwargs)
+    declare_streaming(p, stream)
     if stream:
         add_no_stream_arg(p)
     return p
+
+
+def declare_streaming(parser: argparse.ArgumentParser, streams: bool) -> None:
+    """Record whether this command renders live output, so the flag it carries and the intent
+    behind it cannot drift. A parser built by hand rather than through `add_command` declares it
+    here; one that declares nothing fails the check in `tests/test_cli.py`."""
+    parser.saw_streams = streams

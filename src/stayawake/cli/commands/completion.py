@@ -8,6 +8,7 @@ from stayawake.cli._meta import VERBS
 from stayawake.cli.helptext import add_command
 from stayawake.utils import exitcodes
 from stayawake.utils.streaming import say
+from stayawake.cli.argtypes import no_stream_requested
 
 
 def register(sub) -> None:
@@ -56,5 +57,5 @@ def run(a: argparse.Namespace) -> int:
             f"complete -c {binary} -n '__fish_use_subcommand' -a {v}"
             for binary in ("saw", "stayawake")
             for v in VERBS)
-    say(text, no_stream=getattr(a, "no_stream", False))
+    say(text, no_stream=no_stream_requested(a))
     return exitcodes.CLEAN

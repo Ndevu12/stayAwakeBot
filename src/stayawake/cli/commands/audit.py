@@ -12,6 +12,7 @@ from stayawake.utils.render import term_width
 from stayawake.utils.streaming import Streamer, status, stream_enabled
 from stayawake.utils.terminal import supports_color
 from stayawake.utils import exitcodes
+from stayawake.cli.argtypes import no_stream_requested
 
 
 def register(sub) -> None:
@@ -47,7 +48,7 @@ def run(a: argparse.Namespace) -> int:
     if a.repo and not token:
         print(auth.no_credential_hint("auditing branch protection") +
               " Skipping the branch-protection check.\n")
-    progress_on = stream_enabled(sys.stderr, force_off=a.no_stream)
+    progress_on = stream_enabled(sys.stderr, force_off=no_stream_requested(a))
     outcomes: list[hygiene.CheckOutcome] = []
     for label, check in hygiene.audit_checks(a.repo, token, a.branch,
                                              verify_artifacts=a.verify_artifacts):
@@ -55,7 +56,7 @@ def run(a: argparse.Namespace) -> int:
             outcomes.append(hygiene.run_check(label, check))
     issues = [i for o in outcomes for i in o.issues]
     report = hygiene.render(issues, color=supports_color(sys.stdout), width=term_width())
-    Streamer(enabled=stream_enabled(sys.stdout, force_off=a.no_stream)).line(report)
+    Streamer(enabled=stream_enabled(sys.stdout, force_off=no_stream_requested(a))).line(report)
     # persistence surface that could not be verified withholds the all-clear → exit 3 ("rotation
     # unsafe / not verified"), regardless of -f, because rotating into a live wiper is data-loss. The
     # weaker hygiene warnings keep their opt-in gate (-f → 1). 3 is additive: every `rc==0`/`rc!=0`

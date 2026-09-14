@@ -13,7 +13,7 @@ import argparse
 import sys
 
 from stayawake.bots.security import remediator
-from stayawake.cli.argtypes import add_jobs_arg
+from stayawake.cli.argtypes import add_jobs_arg, no_stream_requested
 from stayawake.cli.helptext import add_command
 from stayawake.utils import exitcodes
 
@@ -90,7 +90,7 @@ def run(a: argparse.Namespace) -> int:
         return remediator.amend(a.config, paths=None if a.remote else rest,
                                 remote=a.remote,
                                 slugs=(rest or None) if a.remote else None,
-                                no_stream=a.no_stream, jobs=a.jobs,
+                                no_stream=no_stream_requested(a), jobs=a.jobs,
                                 remove_foreign=a.remove_foreign)
     if a.remove_foreign:
         print("saw fix --remove-foreign is only valid with `amend`", file=sys.stderr)
@@ -99,5 +99,5 @@ def run(a: argparse.Namespace) -> int:
     return remediator.fix(a.config, pr=a.pr, remote=remote,
                           paths=None if remote else (positionals or None),
                           slugs=(positionals or None) if remote else None,
-                          users=a.user or None, orgs=a.org or None, no_stream=a.no_stream,
+                          users=a.user or None, orgs=a.org or None, no_stream=no_stream_requested(a),
                           jobs=a.jobs, branches=a.branch or None)

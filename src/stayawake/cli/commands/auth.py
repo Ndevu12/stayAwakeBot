@@ -14,11 +14,12 @@ from stayawake.utils.render import LINK, SEVERITY, block, paint, term_width
 from stayawake.utils.streaming import Streamer, status, stream_enabled
 from stayawake.utils.terminal import supports_color
 from stayawake.utils import exitcodes
+from stayawake.cli.argtypes import no_stream_requested
 
 
 def register(sub) -> None:
     p = add_command(
-        sub, "auth", aliases=["a"], stream=False,
+        sub, "auth", aliases=["a"],
         help="show GitHub credential/capability status; register a StayAwakeBot GitHub App",
         description=(
             "Show your GitHub credential and capability status, and register an "
@@ -106,7 +107,7 @@ def _ui(a: argparse.Namespace) -> tuple[Streamer, bool, int]:
     """(streamer, colour-on, width) for rendered `saw auth` output — same rendering toolkit as
     `saw audit` (utils.render): a stdout Streamer honoring `--no-stream`, colour gated by the stdout
     TTY (NO_COLOR / CI / pipe → plain), and the live terminal width for wrapping."""
-    prog = Streamer(enabled=stream_enabled(sys.stdout, force_off=getattr(a, "no_stream", False)))
+    prog = Streamer(enabled=stream_enabled(sys.stdout, force_off=no_stream_requested(a)))
     return prog, supports_color(sys.stdout), term_width()
 
 
