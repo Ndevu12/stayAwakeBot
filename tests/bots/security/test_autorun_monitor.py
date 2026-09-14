@@ -1244,6 +1244,17 @@ class TestReturnAfterRemoval(_Surface):
                                            {}, "2026-09-09T00:01:00+00:00")
         self.assertEqual(len(gone), baseline.MAX_REMEMBERED)
 
+    def test_a_surface_that_re_creates_its_own_entries_takes_no_carry_forward_budget(self):
+        # hook directories are not listed, so their removals could never be confirmed anyway. What
+        # the filter still buys is the budget: a developer who clones and deletes many repositories
+        # must not fill the carry-forward with hooks and crowd out a real persistence entry.
+        hooks = {f"/repo{i}/.git/hooks/pre-commit": baseline.Seen("d", hookscript.LOCATION)
+                 for i in range(baseline.MAX_REMEMBERED + 5)}
+        keep, gone = baseline._next_state([], baseline.Baseline(entries=hooks, status="loaded"),
+                                          {}, "2026-09-14T00:00:00+00:00")
+        self.assertEqual(keep, {})
+        self.assertEqual(gone, {})
+
     def test_what_is_carried_forward_is_bounded_too(self):
         # a directory that cannot be listed carries its entries forward rather than calling them
         # removed. Planting and deleting under one must not grow the snapshot without limit.
