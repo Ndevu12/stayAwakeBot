@@ -20,6 +20,12 @@ reader, not the mechanism or the weakness it closed.
   is merely new, and it is reported rather than acted on. The audit says it once, when it comes
   back — not on every run afterwards.
 
+### Changed
+- **`saw audit` decides what accounts for a start-up entry by where its program is installed.** An
+  entry is weighed against the software actually on the machine rather than what it presents itself
+  as. Entries that have sat on your machine for a while may be reported for the first time; confirm
+  the ones you put there.
+
 ### Fixed
 - **`saw discard --branch --remote` removes every auto-clean branch on the repository.** It only
   removed the original name, so a later `saw fix` left the branches it published in place.
