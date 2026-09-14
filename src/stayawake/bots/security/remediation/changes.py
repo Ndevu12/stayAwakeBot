@@ -13,7 +13,6 @@ from stayawake.bots.security.models import CONFIRMED, QUARANTINE_DIR
 
 _ACTIONS = {
     "quarantine-file": "quarantine",
-    "quarantine-dir": "quarantine",
     "remove-foreign-vscode": "vscode",
     "strip-gitignore-markers": "strip-gitignore",
 }
@@ -41,16 +40,6 @@ class Change:
     detail: str = ""
 
 
-def _fonts_dir(rel: str) -> str:
-    """Map a path inside a camouflage fonts dir to that directory."""
-    parts = rel.split("/")
-    if "fonts" in parts:
-        i = len(parts) - 1 - parts[::-1].index("fonts")
-        return "/".join(parts[: i + 1])
-    parent = str(Path(rel).parent)
-    return rel if parent in (".", "") else parent
-
-
 def plan(findings) -> list[Change]:
     """Map findings to a deduped list of changes (pure — no filesystem access)."""
     changes: dict[tuple[str, str], Change] = {}
@@ -59,8 +48,6 @@ def plan(findings) -> list[Change]:
             continue
         action = _ACTIONS[getattr(f, "remediation", "manual")]
         path = f.path
-        if f.remediation == "quarantine-dir":
-            path = _fonts_dir(f.path)
         if not path or Path(path) in (Path("."), Path("..")):
             continue
         if action == "vscode":

@@ -13,6 +13,9 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Fixed
+- **`saw fix` removes the file it flagged, not the whole folder it sits in.** A single flagged file in a shared folder no longer takes the folder's other files with it.
+
 ## [0.11.3] - 2026-09-14
 
 ### Security

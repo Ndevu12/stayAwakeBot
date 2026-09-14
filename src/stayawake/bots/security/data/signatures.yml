@@ -12,7 +12,7 @@
 #               npm-manifest | workflow-yaml | dependency-audit | installed-package-audit | symlink
 #   description human-readable
 #   remediation strategy id (consumed in Phase 3): recover (git restore, code-loader) |
-#               quarantine-file | quarantine-dir | remove-foreign-vscode | strip-gitignore-markers | manual
+#               quarantine-file | remove-foreign-vscode | strip-gitignore-markers | manual
 #   confidence  verdict weight (OPTIONAL, default `confirmed`): confirmed | heuristic.
 #               Orthogonal to severity. Only a `confirmed` match drives an INFECTED
 #               verdict; a `heuristic` match (a SHAPE benign code can share — a packed
@@ -105,7 +105,7 @@ signatures:
     pattern: 'Blockchain Explorer|BlockchainFont|TechMono'
     file_globs: ["**/fonts/README.md", "**/fonts/*.md"]
     description: "Fake 'Blockchain Explorer' fonts README used as camouflage (GlassWorm-family)"
-    remediation: quarantine-dir
+    remediation: quarantine-file
 
   # ── Fake font payload (filename + content cross-check via heuristic) ─────────
   - id: fake-font-fa-solid-400
@@ -114,7 +114,7 @@ signatures:
     matcher: filename
     pattern: 'fa-solid-400.woff2'
     description: "Payload disguised as FontAwesome fa-solid-400.woff2 (not a real FA file)"
-    remediation: quarantine-dir
+    remediation: manual
 
   - id: fake-font-text-woff
     category: fake-font
