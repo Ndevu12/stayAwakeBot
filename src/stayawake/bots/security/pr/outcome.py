@@ -270,7 +270,7 @@ def render_amend_line(outcome: AmendOutcome) -> str:
     line = f"{repository}: {'; '.join(acts)}"
     if outcome.commit:
         line += f" (commit {textsafe.plain(outcome.commit, 40)})"
-    if outcome.removed:
+    if outcome.removed and outcome.completed:
         shown = ", ".join(textsafe.plain(p, 120) for p in outcome.removed[:_REMOVED_SHOWN])
         rest = len(outcome.removed) - _REMOVED_SHOWN
         line += f"; removed {shown}" + (f" and {rest} more" if rest > 0 else "")

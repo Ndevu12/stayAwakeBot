@@ -1361,6 +1361,14 @@ class TestAmendActsOnContentPayload(_AmendFixture):
             self.assertFalse(outcome.completed, f"a heuristic finding was acted on (flag={flag})")
             self.assertEqual(before, self._rev(), f"a ref moved on a heuristic finding (flag={flag})")
 
+    def test_a_partial_run_does_not_claim_a_removal(self):
+        from stayawake.bots.security.pr.outcome import amended, BranchResult, render_amend_line
+        o = amended("acme/app", "abcdef012345",
+                    (BranchResult("main", True), BranchResult("victim", False)),
+                    (), ["src/fonts/x.woff2"])
+        self.assertFalse(o.completed)
+        self.assertNotIn("removed", render_amend_line(o))
+
     def test_the_operator_is_told_which_paths_were_removed(self):
         p = "src/fonts/BlockchainFont.woff2"
         self.write(self.d, p, "wOF2\x00camouflage-blob\n")
