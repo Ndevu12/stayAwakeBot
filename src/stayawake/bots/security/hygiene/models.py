@@ -125,7 +125,8 @@ ROTATION_UNSAFE_IDS = (ACTIVE_PERSISTENCE_IDS | UNVERIFIED_PERSISTENCE_IDS
 
 # `host-artifact-scanned-clean` retired: a clean content scan no longer renders a calmer
 # finding, so the artifact keeps this grade whether or not `--verify` ran.
-VERIFY_BEFORE_ROTATE_IDS = {"host-drop-artifact-weak", "autorun-entry-returned"}
+VERIFY_BEFORE_ROTATE_IDS = {"host-drop-artifact-weak", "autorun-entry-returned",
+                            "autorun-removals-dropped"}
 
 ROTATION_SAFE = "safe"
 ROTATION_UNSAFE_PERSISTENCE = "unsafe-persistence"

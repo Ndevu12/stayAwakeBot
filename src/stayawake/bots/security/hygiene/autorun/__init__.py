@@ -7,6 +7,7 @@ from stayawake.utils import parallel
 from ..models import HygieneIssue, could_not_read
 
 BASELINE_UNSAVED_ID = "autorun-baseline-not-saved"
+REMOVALS_DROPPED_ID = "autorun-removals-dropped"
 from . import surface, provenance, baseline, grade
 
 __all__ = ["check_autorun", "surface", "provenance", "baseline", "grade"]
@@ -51,7 +52,15 @@ def check_autorun(jobs: int | None = None) -> list[HygieneIssue]:
                    "tampered baseline can mean someone tried to launder a foothold into it.",
             remediation="Delete the baseline to re-snapshot from the current (re-graded) surface."))
 
-    if not baseline.save_baseline(entries, base, listing):
+    written, dropped = baseline.save_baseline(entries, base, listing)
+    if dropped:
+        issues.append(HygieneIssue(
+            id=REMOVALS_DROPPED_ID, severity="info",
+            title="saw could not keep every removal it had recorded",
+            detail=f"{dropped} start-up entries removed earlier are no longer tracked, so if one "
+                   "comes back it will read as new rather than as returned.",
+            remediation="Audit again after checking the start-up surface by hand."))
+    if not written:
         issues.append(HygieneIssue(
             id=BASELINE_UNSAVED_ID, severity="info",
             title="This audit could not be remembered for the next run",

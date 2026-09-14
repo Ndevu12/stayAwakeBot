@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import pathlib
 import plistlib
 import tempfile
 import unittest
@@ -1240,7 +1241,7 @@ class TestReturnAfterRemoval(_Surface):
     def test_the_removal_record_is_bounded(self):
         removed = {f"/gone/{i}": f"2026-09-09T00:00:{i % 60:02d}+00:00"
                    for i in range(baseline.MAX_REMEMBERED + 10)}
-        _keep, gone = baseline._next_state([], baseline.Baseline(removed=removed, status="loaded"),
+        _keep, gone, _dropped = baseline._next_state([], baseline.Baseline(removed=removed, status="loaded"),
                                            {}, "2026-09-09T00:01:00+00:00")
         self.assertEqual(len(gone), baseline.MAX_REMEMBERED)
 
@@ -1250,7 +1251,7 @@ class TestReturnAfterRemoval(_Surface):
         # must not fill the carry-forward with hooks and crowd out a real persistence entry.
         hooks = {f"/repo{i}/.git/hooks/pre-commit": baseline.Seen("d", hookscript.LOCATION)
                  for i in range(baseline.MAX_REMEMBERED + 5)}
-        keep, gone = baseline._next_state([], baseline.Baseline(entries=hooks, status="loaded"),
+        keep, gone, _dropped = baseline._next_state([], baseline.Baseline(entries=hooks, status="loaded"),
                                           {}, "2026-09-14T00:00:00+00:00")
         self.assertEqual(keep, {})
         self.assertEqual(gone, {})
@@ -1260,9 +1261,27 @@ class TestReturnAfterRemoval(_Surface):
         # removed. Planting and deleting under one must not grow the snapshot without limit.
         was = baseline.Seen("d", surface.LAUNCH_AGENT)
         entries = {f"/unlistable/{i}.plist": was for i in range(baseline.MAX_REMEMBERED + 10)}
-        keep, _gone = baseline._next_state([], baseline.Baseline(entries=entries, status="loaded"),
+        keep, _gone, _dropped = baseline._next_state([], baseline.Baseline(entries=entries, status="loaded"),
                                            {}, "2026-09-14T00:00:00+00:00")
         self.assertEqual(len(keep), baseline.MAX_REMEMBERED)
+
+    def test_a_burst_of_removals_cannot_evict_every_earlier_one(self):
+        # entries that ARE accounted for produce no finding at all, so a flood of them can be
+        # planted and deleted in silence. Half the bound stays reserved for what earlier runs saw.
+        real = "/Users/op/Library/LaunchAgents/real.plist"
+        base = baseline.Baseline(
+            entries={f"/decoy/{i}.plist": baseline.Seen("d", surface.LAUNCH_AGENT)
+                     for i in range(baseline.MAX_REMEMBERED)},
+            removed={real: "2026-09-01T00:00:00+00:00"}, status="loaded")
+        listing = {pathlib.PurePath("/decoy"): set()}
+        _keep, gone, dropped = baseline._next_state([], base, listing, "2026-09-14T00:00:00+00:00")
+        self.assertIn(real, gone)
+        self.assertEqual(len(gone), baseline.MAX_REMEMBERED)
+        self.assertEqual(dropped, 0)           # it fits inside the reserved share
+
+    def test_a_run_that_dropped_removals_does_not_claim_rotation_is_safe(self):
+        self.assertEqual(models.rotation_safety({"autorun-removals-dropped"}),
+                         models.ROTATION_SAFE_PENDING_CHECK)
 
     def test_a_stuffed_removal_record_cannot_push_out_what_this_run_saw(self):
         # the timestamps are the snapshot's, so an attacker sets them; eviction must not read them.
@@ -1271,7 +1290,8 @@ class TestReturnAfterRemoval(_Surface):
         gone_key = str(self.d / "b.plist")
         base = baseline.Baseline(entries={gone_key: baseline.Seen("d", surface.LAUNCH_AGENT)},
                                  removed=squat, status="loaded")
-        _keep, gone = baseline._next_state([], base, {self.d: set()}, "2026-09-09T00:00:00+00:00")
+        _keep, gone, _dropped = baseline._next_state([], base, {self.d: set()},
+                                                 "2026-09-09T00:00:00+00:00")
         self.assertIn(gone_key, gone)
         self.assertEqual(len(gone), baseline.MAX_REMEMBERED)
 

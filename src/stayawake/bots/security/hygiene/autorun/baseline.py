@@ -158,52 +158,63 @@ def _confirmed_gone(key: str, listing: dict) -> bool:
         return False
 
 
-def _bounded(fresh: dict[str, str], carried: dict[str, str]) -> dict[str, str]:
+def _bounded(fresh: dict[str, str], carried: dict[str, str]) -> tuple[dict[str, str], int]:
     """This run's removals first, then as many earlier ones as the bound allows — so a snapshot
-    stuffed with removals cannot push out what this run actually saw."""
-    out = dict(list(fresh.items())[:MAX_REMEMBERED])
+    stuffed with removals cannot push out what this run actually saw, while a share stays reserved
+    for earlier ones so a burst cannot evict them all. Returns the record and how many earlier
+    removals did not fit: a bound can always be exhausted, so what is dropped has to be sayable
+    rather than silent."""
+    out = dict(list(fresh.items())[:MAX_REMEMBERED // 2])
     for key, when in carried.items():
         if len(out) >= MAX_REMEMBERED:
             break
         out.setdefault(key, when)
-    return out
+    for key, when in fresh.items():
+        if len(out) >= MAX_REMEMBERED:
+            break
+        out.setdefault(key, when)
+    return out, len([k for k in carried if k not in out])
 
 
 def _next_state(entries, base: Baseline, listing: dict,
-                now: str) -> tuple[dict[str, Seen], dict[str, str]]:
-    """The entry map and the removal record to write for the next run.
+                now: str) -> tuple[dict[str, Seen], dict[str, str], int]:
+    """The entry map, the removal record to write for the next run, and how many earlier removals
+    the bound dropped.
 
     Takes this run's entries, the baseline they were graded against, what each directory this run
-    listed whole held, and the timestamp a removal is stamped with. Returns the two maps."""
+    listed whole held, and the timestamp a removal is stamped with."""
     keep = {e.key(): Seen(e.digest(), e.location) for e in entries}
     if not base.trusted:
-        return keep, {}
+        return keep, {}, 0
     fresh: dict[str, str] = {}
     carried_forward = 0
     for key, was in base.entries.items():
         if key in keep:
             continue
         # cloning a repository re-creates its git hooks, and so does `saw hook repair` — only a
-        # surface nothing puts back on its own can answer whether something put this back
-        if was.location not in STAYS_REMOVED:
+        # surface nothing puts back on its own can answer whether something put this back. A row
+        # restored from a version-1 snapshot names no surface, so only the listing can answer.
+        if was.location and was.location not in STAYS_REMOVED:
             continue
         if _confirmed_gone(key, listing):
             fresh[key] = now
-        elif carried_forward < MAX_REMEMBERED:
+        elif was.location and carried_forward < MAX_REMEMBERED:
             keep[key] = Seen(was.digest, was.location, observed=False)
             carried_forward += 1
     carried = {k: t for k, t in base.removed.items() if k not in keep and k not in fresh}
-    return keep, _bounded(fresh, carried)
+    record, dropped = _bounded(fresh, carried)
+    return keep, record, dropped
 
 
-def save_baseline(entries, base: Baseline, listing: dict) -> bool:
+def save_baseline(entries, base: Baseline, listing: dict) -> tuple[bool, int]:
     """Snapshot the current surface, and what has gone from it, for the next run's novelty diff.
     Skipped on an ephemeral host. Atomic (mkstemp → os.replace). Returns whether it was written: a
-    failure must not break the audit, but it must not pass unsaid either."""
+    failure must not break the audit, but it must not pass unsaid either. Returns whether it was
+    written, and how many earlier removals the bound dropped."""
     if is_ephemeral():
-        return True
+        return True, 0
     now = datetime.now(timezone.utc).isoformat()
-    keep, gone = _next_state(entries, base, listing, now)
+    keep, gone, dropped = _next_state(entries, base, listing, now)
     mapping = {k: {"digest": v.digest, "location": v.location, "observed": v.observed}
                for k, v in keep.items()}
     payload = {
@@ -225,5 +236,5 @@ def save_baseline(entries, base: Baseline, listing: dict) -> bool:
             if os.path.exists(tmp):
                 os.unlink(tmp)
     except OSError:
-        return False
-    return True
+        return False, dropped
+    return True, dropped
