@@ -18,12 +18,10 @@ from stayawake.bots.security import resolution
 from stayawake.bots.security.config import resolve_config
 from stayawake.bots.security.targets import ScanOptions
 from stayawake.bots.security.guard.detect import check, render, GuardStatus, latest_strix
-from stayawake.bots.security.guard.provision import setup, render_setup, resolve_pin, SetupResult
+from stayawake.bots.security.guard.provision import (setup, render_setup, resolve_pin,
+                                                     resolve_scanner_version, SetupResult)
 from stayawake.bots.security.guard.pindrift import drift_one, render_drift, DriftOutcome
 
-# ── sweep: resolve targets (local repos / remote slugs) and check each — like saw scan/fix ────────
-# `saw guard check` takes positional TARGETS (local paths, or owner/repo slugs under --remote),
-# Streams per repo; one repo's failure never aborts the run.
 
 def _guard_config(config_path: str | None):
     return resolve_config(config_path)
@@ -81,8 +79,6 @@ def _guard_sweep(items, labels, make_result, render_one, tag_of, dead, prog: Str
             results.append(res)
         return results
 
-    # The board renders each repo's own block as it completes (`describe` → (tag, "", block)); the
-    # bare "" detail keeps the header clean since the block below carries the full result.
     def describe(o):
         tag, _ = tag_of(o)
         return tag, "", _indent(render_one(o.value))
@@ -127,7 +123,7 @@ def _setup_board(o) -> tuple[str, str]:
         return "[preview ]", "dry run"
     if r.wrote is not None or (r.submit is not None and r.submit.kind in ("pr", "fork-pr")):
         return "[done    ]", "opened/written"
-    if r.submit is not None:                       # pushed but the PR itself didn't open (#see tally)
+    if r.submit is not None:
         return "[review  ]", "PR not opened"
     return "[ok      ]", "up to date"
 
@@ -136,7 +132,7 @@ def _safe_check(**kw) -> GuardStatus:
     """One repo's error must never abort the sweep — a failed check becomes an error status."""
     try:
         return check(**kw)
-    except Exception as exc:  # noqa: BLE001 — isolate one repo, keep the sweep going
+    except Exception as exc:
         return GuardStatus(present=False, error=f"check failed — {exc}")
 
 
@@ -171,7 +167,7 @@ def check_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
         prog.line(f"Checking {len(resolved)} GitHub repositor{'y' if len(resolved) == 1 else 'ies'}…")
         items, labels = resolved, list(resolved)
 
-        def make_result(slug, *, spin):        # check has no per-phase spinner; `spin` unused
+        def make_result(slug, *, spin):
             tok, aerr = _act(token, source, slug=slug)
             return GuardStatus(present=False, error=aerr) if aerr \
                 else _safe_check(slug=slug, branch=branch, token=tok, latest=latest)
@@ -186,8 +182,6 @@ def check_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
         items, labels = repos, [_disp(r) for r in repos]
 
         def make_result(repo, *, spin):
-            # A local check reads the working tree; only freshness touches the network (public Strix
-            # release), so the base token is enough — no per-owner installation token needed here.
             return _safe_check(repo=repo, token=token, latest=latest)
 
     statuses = _guard_sweep(
@@ -214,7 +208,7 @@ def _safe_drift(**kw) -> DriftOutcome:
     """One repo's error must never abort the drift sweep — a failure becomes an error outcome."""
     try:
         return drift_one(**kw)
-    except Exception as exc:  # noqa: BLE001 — isolate one repo, keep the sweep going
+    except Exception as exc:
         tgt = kw.get("slug") or str(kw.get("repo") or ".")
         return DriftOutcome(tgt, "error", detail=f"drift check failed — {exc}")
 
@@ -255,7 +249,7 @@ def drift_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
                   f"repositor{'y' if len(resolved) == 1 else 'ies'}…")
         items, labels = resolved, list(resolved)
 
-        def make_result(slug, *, spin):        # drift has no per-phase spinner; `spin` unused
+        def make_result(slug, *, spin):
             tok, aerr = _act(token, source, slug=slug)
             return DriftOutcome(slug, "error", detail=aerr) if aerr \
                 else _safe_drift(slug=slug, token=tok, latest=latest)
@@ -301,7 +295,7 @@ def _safe_setup(repo, **kw) -> SetupResult:
     """One repo's error must never abort the setup sweep — a failure becomes an error result."""
     try:
         return setup(repo, **kw)
-    except Exception as exc:  # noqa: BLE001 — isolate one repo, keep the sweep going
+    except Exception as exc:
         return SetupResult(error=f"setup failed — {exc}")
 
 
@@ -345,6 +339,11 @@ def setup_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
         if pin is None:
             prog.line("couldn't resolve the latest Strix release (offline? pass --ref <sha|tag>)")
             return 2
+        scanner = resolve_scanner_version(token)
+        if scanner is None:
+            prog.line("couldn't resolve the scanner release to pin — the gate would install "
+                      "whatever is newest at run time")
+            return 2
         prog.line(f"Setting up {len(resolved)} GitHub repositor{'y' if len(resolved) == 1 else 'ies'}…")
         items, labels = resolved, list(resolved)
 
@@ -352,20 +351,23 @@ def setup_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
             tok, aerr = _act(token, source, slug=slug)
             if aerr:
                 return SetupResult(error=f"{slug}: {aerr}")
-            # `status` shows a live "cloning…" spinner in the sequential path; off under concurrency
-            # (the board reports in-flight state instead — see fix). a remote repo has no working
-            # tree → always PR; _safe_setup then drives its own phase spinners.
             with spin_status(f"cloning {slug}…", enabled=spin), \
                     resolution.cloned_repo(slug, tok) as clone:
                 if clone is None:
                     return SetupResult(error=f"{slug}: clone failed (check token access)")
-                return _safe_setup(clone, token=tok, pin=pin, dry_run=dry_run, pr=True,
+                return _safe_setup(clone, token=tok, pin=pin, scanner=scanner,
+                                   dry_run=dry_run, pr=True,
                                    branch=branch, spin=spin)
     else:
         token, source = auth.resolve_token() if (pr or not ref) else (None, None)
         pin = resolve_pin(token, ref)
         if pin is None:
             prog.line("couldn't resolve the latest Strix release (offline? pass --ref <sha|tag>)")
+            return 2
+        scanner = resolve_scanner_version(token)
+        if scanner is None:
+            prog.line("couldn't resolve the scanner release to pin — the gate would install "
+                      "whatever is newest at run time")
             return 2
         repos = resolution.discover_local_repos(_local_patterns(cfg, paths), ScanOptions())
         if not repos:
@@ -378,8 +380,8 @@ def setup_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
             tok, aerr = _act(token, source, repo=repo) if pr else (token, None)
             if aerr:
                 return SetupResult(error=f"{_disp(repo)}: {aerr}")
-            return _safe_setup(repo, token=tok, pin=pin, dry_run=dry_run, pr=pr,
-                               branch=branch, spin=spin)
+            return _safe_setup(repo, token=tok, pin=pin, scanner=scanner,
+                               dry_run=dry_run, pr=pr, branch=branch, spin=spin)
 
     results = _guard_sweep(
         items, labels, make_result, lambda r: render_setup(r, color=color), _setup_board,
@@ -410,4 +412,4 @@ def setup_targets(*, paths=None, slugs=None, users=None, orgs=None, remote: bool
     if errored:
         parts.append(f"{errored} errored")
     prog.line(f"\n{n} repositor{'y' if n == 1 else 'ies'}: " + (", ".join(parts) or "nothing to do") + ".")
-    return 1 if (errored or incomplete) else 0        # a pushed-but-unopened PR is a failure, not success
+    return 1 if (errored or incomplete) else 0

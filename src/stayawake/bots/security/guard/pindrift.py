@@ -19,7 +19,6 @@ DRIFT_TITLE = "Worm-guard protection needs attention"
 
 _DEFICIENT = {"no-gate", "no-ci", "behind"}
 _PROTECTED = {"fresh", "floating", "not-strix"}
-# else ("unknown" freshness / "error" reading a remote) → no issue action (never churn on a blip)
 
 
 @dataclass
@@ -55,7 +54,7 @@ def _classify(st: "detect.GuardStatus") -> tuple[str, str]:
                              "supply-chain worm indicators — it is **unprotected**.")
         return "no-gate", ("This repository has no worm-guard gate, so infected merges are not "
                            "blocked — it is **unprotected**.")
-    if st.ref is None:                                   # protected by a local action / `saw` step
+    if st.ref is None:
         return "not-strix", ""
     if st.fresh is None or st.fresh.state == "unknown":
         return "unknown", ""
@@ -64,7 +63,7 @@ def _classify(st: "detect.GuardStatus") -> tuple[str, str]:
                           f"`Ndevu12/strix@{st.ref.ref[:12]}…`, but the latest Strix release is "
                           f"**{_code(st.fresh.latest_tag or 'unknown')}** — it is running an "
                           f"out-of-date detection engine.")
-    return st.fresh.state, ""                            # fresh | floating → protected + current
+    return st.fresh.state, ""
 
 
 def _issue_body(reason: str) -> str:
@@ -113,7 +112,7 @@ def drift_one(*, repo: str | Path | None = None, slug: str | None = None,
         existing = _find_issue(owner, name, token)
         body = _issue_body(reason)
         if existing:
-            github_api.update_issue(owner, name, existing, token, body=body)   # silent refresh
+            github_api.update_issue(owner, name, existing, token, body=body)
             return DriftOutcome(target, state, "refreshed", reason, existing)
         created = github_api.create_issue(owner, name, DRIFT_TITLE, body, token,
                                           labels=[DRIFT_LABEL], quiet=True)
@@ -131,7 +130,7 @@ def drift_one(*, repo: str | Path | None = None, slug: str | None = None,
                 return DriftOutcome(target, state, "closed", issue=existing)
         return DriftOutcome(target, state)
 
-    return DriftOutcome(target, state, detail=reason)      # unknown / error → report only
+    return DriftOutcome(target, state, detail=reason)
 
 
 def render_drift(o: DriftOutcome, *, color: bool = False) -> str:

@@ -131,14 +131,13 @@ on:
     branches: [main]
   pull_request:
 
-# Auto-remediation needs write access:
-#   contents: write       -> push the security/auto-clean fix branch
-#   pull-requests: write  -> open/update the rolling cleanup PR
-# The scan itself only needs read; these are for the remediate step. Drop them
-# both to `read` if you want detection without remediation.
+# The scan only reads. `saw guard setup` writes a second job for remediation,
+# so that write access exists only on a run that already found something —
+# see the CLI reference for the shape it installs.
 permissions:
-  contents: write
+  contents: read
   pull-requests: write
+  security-events: write
 
 jobs:
   strix:
@@ -151,10 +150,8 @@ jobs:
       - uses: Ndevu12/strix@93fe465d7b0266c6010778999b73b591ae082f3e      # v0.1.4
         with:
           version: '0.6.0'      # pin the scanner too; blank tracks latest
-          # On an infected verdict, open ONE rolling `security/auto-clean` PR.
-          # The gate still goes RED until that PR is merged — remediation opens
-          # the fix, it does not make the check pass. Omit for detection only.
-          remediate: pr
+          pr-comment: true      # say what was found, on the PR
+          upload-sarif: true    # and in the Security tab
 ```
 
 ### About the pins
