@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import stat
 import tempfile
 import unittest
@@ -12,6 +13,21 @@ from unittest import mock
 from stayawake.bots.security.guard import GateProbe  # noqa: E402
 from stayawake.bots.security import hygiene
 from stayawake.utils import hostdenial
+
+_state_dir = ""
+
+
+def setUpModule():
+    """`audit()` composes the real `check_autorun`, which reads and rewrites saw's own cross-run
+    state file. Point it at a throwaway so running the suite never edits the developer's own."""
+    global _state_dir
+    _state_dir = tempfile.mkdtemp(prefix="hygiene-state-")
+    os.environ["SAW_AUTORUN_BASELINE"] = str(Path(_state_dir) / "autorun-baseline.json")
+
+
+def tearDownModule():
+    os.environ.pop("SAW_AUTORUN_BASELINE", None)
+    shutil.rmtree(_state_dir, ignore_errors=True)
 
 
 class TestCredentials(unittest.TestCase):

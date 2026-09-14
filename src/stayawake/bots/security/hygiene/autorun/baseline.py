@@ -11,8 +11,11 @@ from hashlib import sha256
 from pathlib import Path
 
 from stayawake.utils import env
+from .surface import LOCATIONS, STAYS_REMOVED
 
-NEW, CHANGED, KNOWN = "new", "changed", "known"
+VERSION = 2
+NEW, CHANGED, KNOWN, RETURNED = "new", "changed", "known", "returned"
+MAX_REMEMBERED = 256
 
 
 def baseline_path() -> Path:
@@ -28,13 +31,27 @@ def is_ephemeral() -> bool:
     return env.is_ci()
 
 
-def _self_hash(entries: dict[str, str]) -> str:
+def _self_hash(entries: dict, removed: dict) -> str:
+    return sha256(json.dumps({"entries": entries, "removed": removed},
+                             sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def _hash_of_version_1(entries: dict[str, str]) -> str:
     return sha256(json.dumps(entries, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+@dataclass(frozen=True)
+class Seen:
+    """What a run recorded about one entry: its content fingerprint, and the surface it sits on.
+    A row restored from a version-1 snapshot has no location and carries the empty string."""
+    digest: str
+    location: str
 
 
 @dataclass
 class Baseline:
-    entries: dict[str, str] = field(default_factory=dict)
+    entries: dict[str, Seen] = field(default_factory=dict)
+    removed: dict[str, str] = field(default_factory=dict)
     status: str = "absent"
 
     @property
@@ -42,6 +59,29 @@ class Baseline:
         """Only a cleanly-loaded baseline contributes novelty. absent/corrupt/tampered → no novelty
         (never an all-clear — the other signals still grade every entry)."""
         return self.status == "loaded"
+
+
+def _records(entries: dict) -> dict[str, Seen] | None:
+    """Return the stored entry map as records, or None if any row is not one. A location outside the
+    surface's own vocabulary makes the whole file untrustworthy rather than one row misfiled."""
+    out: dict[str, Seen] = {}
+    for key, value in entries.items():
+        if not isinstance(value, dict):
+            return None
+        digest, location = value.get("digest"), value.get("location")
+        if not isinstance(digest, str) or location not in LOCATIONS:
+            return None
+        out[str(key)] = Seen(digest, location)
+    return out
+
+
+def _restored_from_version_1(data: dict, entries: dict) -> Baseline:
+    """Load a snapshot written before the removal record existed. Its entries still answer
+    NEW/CHANGED/KNOWN, so a host that cannot rewrite its state file keeps its novelty signal."""
+    normalised = {str(k): str(v) for k, v in entries.items()}
+    if data.get("self_hash") != _hash_of_version_1(normalised):
+        return Baseline(status="tampered")
+    return Baseline(entries={k: Seen(v, "") for k, v in normalised.items()}, status="loaded")
 
 
 def load_baseline() -> Baseline:
@@ -55,40 +95,106 @@ def load_baseline() -> Baseline:
         return Baseline(status="corrupt")
     try:
         data = json.loads(raw)
-    except ValueError:
+    except (ValueError, RecursionError):
         return Baseline(status="corrupt")
-    entries = data.get("entries") if isinstance(data, dict) else None
-    if not isinstance(entries, dict):
+    if not isinstance(data, dict):
         return Baseline(status="corrupt")
-    entries = {str(k): str(v) for k, v in entries.items()}
-    if data.get("self_hash") != _self_hash(entries):        # lazy tamper (or hand-edit) → distrust it
-        return Baseline(entries=entries, status="tampered")
-    return Baseline(entries=entries, status="loaded")
+    entries, removed = data.get("entries"), data.get("removed", {})
+    if not isinstance(entries, dict) or not isinstance(removed, dict):
+        return Baseline(status="corrupt")
+    if data.get("version") == 1:
+        return _restored_from_version_1(data, entries)
+    try:
+        stamp = _self_hash(entries, removed)
+    except (ValueError, RecursionError):
+        return Baseline(status="corrupt")
+    if data.get("version") != VERSION or data.get("self_hash") != stamp:
+        return Baseline(status="tampered")     # lazy tamper, or a hand-edit → distrust the whole file
+    seen = _records(entries)
+    if seen is None or not all(isinstance(v, str) for v in removed.values()):
+        return Baseline(status="corrupt")
+    return Baseline(entries=seen, removed={str(k): v for k, v in removed.items()}, status="loaded")
 
 
 def novelty(entries, baseline: Baseline) -> dict[str, str]:
-    """Per-entry NEW / CHANGED / KNOWN — only when the baseline is trusted; otherwise every entry is
-    KNOWN (novelty contributes nothing, so grading falls entirely to provenance/shape/correlation)."""
+    """Per-entry RETURNED / NEW / CHANGED / KNOWN — only when the baseline is trusted; otherwise every
+    entry is KNOWN (novelty contributes nothing, so grading falls entirely to
+    provenance/shape/correlation)."""
     if not baseline.trusted:
         return {e.key(): KNOWN for e in entries}
     out: dict[str, str] = {}
     for e in entries:
-        prev = baseline.entries.get(e.key())
-        out[e.key()] = NEW if prev is None else (KNOWN if prev == e.digest() else CHANGED)
+        key = e.key()
+        if key in baseline.removed:
+            out[key] = RETURNED
+            continue
+        prev = baseline.entries.get(key)
+        out[key] = NEW if prev is None else (KNOWN if prev.digest == e.digest() else CHANGED)
     return out
 
 
-def save_baseline(entries) -> None:
-    """Snapshot the current surface for the next run's novelty diff (best-effort; a write failure must
-    never break the audit). Skipped on an ephemeral host. Atomic (mkstemp → os.replace)."""
+def _confirmed_gone(key: str, listing: dict) -> bool:
+    """True only when this run listed the holding directory whole and the name was not among what it
+    held. Asked of the listing rather than of the path, so a name that is present but does not
+    resolve — a symlink whose target is away — is never taken for a removal."""
+    path = Path(key)
+    held = listing.get(path.parent)
+    return held is not None and path.name not in held
+
+
+def _bounded(fresh: dict[str, str], carried: dict[str, str]) -> dict[str, str]:
+    """This run's removals first, then as many earlier ones as the bound allows — so a snapshot
+    stuffed with removals cannot push out what this run actually saw."""
+    out = dict(list(fresh.items())[:MAX_REMEMBERED])
+    for key, when in carried.items():
+        if len(out) >= MAX_REMEMBERED:
+            break
+        out.setdefault(key, when)
+    return out
+
+
+def _next_state(entries, base: Baseline, listing: dict,
+                now: str) -> tuple[dict[str, Seen], dict[str, str]]:
+    """The entry map and the removal record to write for the next run.
+
+    Takes this run's entries, the baseline they were graded against, what each directory this run
+    listed whole held, and the timestamp a removal is stamped with. Returns the two maps."""
+    keep = {e.key(): Seen(e.digest(), e.location) for e in entries}
+    if not base.trusted:
+        return keep, {}
+    fresh: dict[str, str] = {}
+    carried_forward = 0
+    for key, was in base.entries.items():
+        if key in keep:
+            continue
+        # cloning a repository re-creates its git hooks, and so does `saw hook repair` — only a
+        # surface nothing puts back on its own can answer whether something put this back
+        if was.location not in STAYS_REMOVED:
+            continue
+        if _confirmed_gone(key, listing):
+            fresh[key] = now
+        elif carried_forward < MAX_REMEMBERED:
+            keep[key] = was
+            carried_forward += 1
+    carried = {k: t for k, t in base.removed.items() if k not in keep and k not in fresh}
+    return keep, _bounded(fresh, carried)
+
+
+def save_baseline(entries, base: Baseline, listing: dict) -> None:
+    """Snapshot the current surface, and what has gone from it, for the next run's novelty diff
+    (best-effort; a write failure must never break the audit). Skipped on an ephemeral host. Atomic
+    (mkstemp → os.replace)."""
     if is_ephemeral():
         return
-    mapping = {e.key(): e.digest() for e in entries}
+    now = datetime.now(timezone.utc).isoformat()
+    keep, gone = _next_state(entries, base, listing, now)
+    mapping = {k: {"digest": v.digest, "location": v.location} for k, v in keep.items()}
     payload = {
-        "version": 1,
-        "captured": datetime.now(timezone.utc).isoformat(),
+        "version": VERSION,
+        "captured": now,
         "entries": mapping,
-        "self_hash": _self_hash(mapping),
+        "removed": gone,
+        "self_hash": _self_hash(mapping, gone),
     }
     try:
         path = baseline_path()
