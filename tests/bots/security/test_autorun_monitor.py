@@ -1309,6 +1309,20 @@ class TestReturnAfterRemoval(_Surface):
         path.write_text(json.dumps(data))
         self.assertEqual(baseline.load_baseline().status, "tampered")
 
+    def test_a_row_that_is_not_text_is_not_trusted_and_does_not_raise(self):
+        # the vocabulary check is a set membership, so a row holding a list or a dict raised out of
+        # the audit entirely rather than being refused.
+        self._plant()
+        self._run()
+        path = baseline.baseline_path()
+        data = json.loads(path.read_text())
+        for row in data["entries"].values():
+            row["location"] = []
+        data["self_hash"] = baseline._self_hash(data["entries"], data["removed"])
+        path.write_text(json.dumps(data))
+        self.assertEqual(baseline.load_baseline().status, "corrupt")
+        self._run()                            # and the audit still completes
+
     def test_a_location_outside_the_surface_vocabulary_is_not_trusted(self):
         self._plant()
         self._run()

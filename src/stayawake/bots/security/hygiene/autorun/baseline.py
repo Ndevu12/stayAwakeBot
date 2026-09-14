@@ -72,7 +72,9 @@ def _records(entries: dict) -> dict[str, Seen] | None:
             return None
         digest, location = value.get("digest"), value.get("location")
         observed = value.get("observed", True)
-        if not isinstance(digest, str) or location not in LOCATIONS or not isinstance(observed, bool):
+        if not isinstance(digest, str) or not isinstance(location, str):
+            return None                        # an unhashable row would raise out of the membership test
+        if location not in LOCATIONS or not isinstance(observed, bool):
             return None
         out[str(key)] = Seen(digest, location, observed)
     return out
