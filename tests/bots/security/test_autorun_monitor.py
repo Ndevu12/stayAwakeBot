@@ -1252,6 +1252,36 @@ class TestReturnAfterRemoval(_Surface):
         self.assertEqual(len(gone), baseline.MAX_REMEMBERED)
         self.assertEqual(dropped, 0)
 
+    def test_what_the_bound_drops_is_counted(self):
+        base = baseline.Baseline(
+            entries={str(self.d / "b.plist"): baseline.Seen("d", surface.LAUNCH_AGENT)},
+            removed={"/gone/1": "2026-09-01T00:00:00+00:00",
+                     "/gone/2": "2026-09-02T00:00:00+00:00"}, status="loaded")
+        with mock.patch.object(baseline, "MAX_REMEMBERED", 2):
+            _keep, gone, dropped = baseline._next_state([], base, {self.d: set()},
+                                                        "2026-09-14T00:00:00+00:00")
+        self.assertEqual(len(gone), 2)
+        self.assertEqual(dropped, 1)
+
+    def test_a_dropped_removal_is_reported(self):
+        self._plant()
+        with mock.patch.object(baseline, "save_baseline", return_value=(True, 3)):
+            issues = self._run()
+        self.assertIn("autorun-removals-dropped", self.ids(issues))
+
+    def test_a_removal_across_the_older_format_is_still_recorded(self):
+        self._plant()
+        self._run()
+        path = baseline.baseline_path()
+        data = json.loads(path.read_text())
+        entries = {k: v["digest"] for k, v in data["entries"].items()}
+        path.write_text(json.dumps({"version": 1, "captured": data["captured"], "entries": entries,
+                                    "self_hash": _v1_hash(entries)}))
+        (self.d / "b.plist").unlink()
+        self._run()
+        self._plant()
+        self.assertIn("autorun-entry-returned", self.ids(self._run()))
+
     def test_a_run_that_dropped_removals_does_not_claim_rotation_is_safe(self):
         self.assertEqual(models.rotation_safety({"autorun-removals-dropped"}),
                          models.ROTATION_SAFE_PENDING_CHECK)
