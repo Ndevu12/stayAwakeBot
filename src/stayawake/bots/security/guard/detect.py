@@ -24,11 +24,65 @@ _EXACT_TAG = re.compile(r"^v\d+\.\d+\.\d+$")
 
 @dataclass
 class StrixRef:
-    """One `uses: Ndevu12/strix@<ref>` occurrence and what it tells us."""
+    """One `uses: Ndevu12/strix@<ref>` occurrence and what it tells us. `inputs` is the step's
+    `with:` block and `job_permissions` the permissions of the job it sits in — both are how the
+    gate is CONFIGURED, which decides whether a finding reaches anyone."""
     workflow: str
     job: str
     ref: str
     pin: str
+    inputs: dict | None = None
+    job_permissions: dict | str | None = None
+
+
+STRIX_DECLARED_INPUTS = frozenset({
+    "version", "config-file", "fail-on", "require-db", "remediate",
+    "github-token", "upload-sarif", "upload-artifact", "pr-comment"})
+
+INPUTS_THAT_REPORT_A_FINDING = ("pr-comment", "upload-sarif", "upload-artifact")
+
+
+def _truthy(value) -> bool:
+    return str(value).strip().lower() in ("true", "1", "yes", "on")
+
+
+def _set_at_run_time(value) -> bool:
+    return "${{" in str(value)
+
+
+@dataclass
+class GateConfig:
+    """How a found Strix gate is configured: what it does with the credential it is handed, whether
+    a finding reaches anyone, and how much write access it holds while merely scanning."""
+    ignored_inputs: tuple[str, ...] = ()
+    reports_nothing: bool = False
+    standing_write: bool = False
+
+    @property
+    def degraded(self) -> bool:
+        return self.reports_nothing or self.standing_write
+
+
+def grade_config(ref: StrixRef) -> GateConfig:
+    """Grade a gate's own configuration. Reads only what the workflow states, so it works the same
+    on a local checkout and a remote read. A value the workflow resolves at run time is read as
+    unknown, never as off. Returns the grade; `degraded` is false for a gate with nothing wrong."""
+    raw = ref.inputs if isinstance(ref.inputs, dict) else {}
+    given = {str(k).strip().lower(): v for k, v in raw.items()}
+    ignored = tuple(sorted(k for k in given if k not in STRIX_DECLARED_INPUTS))
+    delivers = any(_truthy(given[k]) or _set_at_run_time(given[k])
+                   for k in INPUTS_THAT_REPORT_A_FINDING if k in given)
+    gates_the_merge = str(given.get("fail-on", "infected")).strip().lower() != "never"
+    perms = ref.job_permissions
+    if isinstance(perms, str):
+        write = perms.strip().lower() == "write-all"
+    elif isinstance(perms, dict):
+        write = str(perms.get("contents", "")).strip().lower() == "write"
+    else:
+        write = False
+    return GateConfig(ignored_inputs=ignored,
+                      reports_nothing=not (delivers or gates_the_merge),
+                      standing_write=write)
 
 
 def classify_pin(ref: str) -> str:
@@ -39,13 +93,15 @@ def classify_pin(ref: str) -> str:
     return "floating"
 
 
-def find_strix(workflows: dict[str, str]) -> StrixRef | None:
-    """Return the first `uses: Ndevu12/strix@<ref>` across `{path: yaml_text}` (paths sorted), or
-    None. Filename- and job-name-agnostic; malformed YAML files are skipped, not fatal."""
+def find_strix_refs(workflows: dict[str, str]) -> list[StrixRef]:
+    """Every `uses: Ndevu12/strix@<ref>` across `{path: yaml_text}`, in sorted-path then document
+    order. Filename- and job-name-agnostic; malformed YAML files are skipped, not fatal. Returns an
+    empty list when the repository references the action nowhere."""
+    found: list[StrixRef] = []
     for path in sorted(workflows):
         try:
             doc = yaml.safe_load(workflows[path])
-        except yaml.YAMLError:
+        except (yaml.YAMLError, RecursionError):
             continue
         if not isinstance(doc, dict):
             continue
@@ -58,15 +114,34 @@ def find_strix(workflows: dict[str, str]) -> StrixRef | None:
             steps = job.get("steps")
             if not isinstance(steps, list):
                 continue
+            granted = job["permissions"] if "permissions" in job else doc.get("permissions")
             for step in steps:
                 if not isinstance(step, dict):
                     continue
                 m = _STRIX_USES.match(str(step.get("uses", "")).strip())
                 if m:
                     ctx = job.get("name") or job_id
-                    return StrixRef(workflow=path, job=str(ctx), ref=m.group("ref"),
-                                    pin=classify_pin(m.group("ref")))
-    return None
+                    found.append(StrixRef(workflow=path, job=str(ctx), ref=m.group("ref"),
+                                          pin=classify_pin(m.group("ref")),
+                                          inputs=step.get("with"),
+                                          job_permissions=granted))
+    return found
+
+
+def find_strix(workflows: dict[str, str]) -> StrixRef | None:
+    """The occurrence that answers whether this repository is gated: the canonical gate file first,
+    then the best-configured one. Takes `{path: yaml_text}`. Returns None when there is none."""
+    refs = find_strix_refs(workflows)
+    if not refs:
+        return None
+
+    def rank(item):
+        index, ref = item
+        cfg = grade_config(ref)
+        return (ref.workflow != WORM_GUARD_FILE, cfg.standing_write, cfg.reports_nothing,
+                len(cfg.ignored_inputs), index)
+
+    return min(enumerate(refs), key=rank)[1]
 
 
 _RUNS_SAW = re.compile(r"(?:^|[\s;&|(])saw\s+(?:scan|audit)\b|\bstayawakebot\b", re.IGNORECASE)
@@ -235,16 +310,19 @@ class GuardStatus:
     mechanism: str | None = None
     gate_file: str | None = None
     no_ci: bool = False
+    config: "GateConfig | None" = None
 
     @property
     def healthy(self) -> bool:
-        """The gate passes verification: present, SHA-pinned, not stale, and (where we could check)
-        required. Only a Strix gate is *verifiable* — a non-Strix worm gate is protective but its pin
-        /freshness/required-status can't be tracked, so it is not 'healthy' for `-f/--fail` (the render
-        says so plainly). A guard-domain policy, not the CLI's."""
+        """The gate passes verification: present, SHA-pinned, not stale, configured so a finding
+        reaches someone, and (where we could check) required. Only a Strix gate is *verifiable* — a
+        non-Strix worm gate is protective but its pin/freshness/required-status can't be tracked, so
+        it is not 'healthy' for `-f/--fail` (the render says so plainly)."""
         if not self.present or self.ref is None or self.ref.pin != "sha":
             return False
         if self.fresh is not None and self.fresh.state == "behind":
+            return False
+        if self.config is not None and self.config.degraded:
             return False
         return self.required is not False
 
@@ -277,9 +355,9 @@ class RemoteRead:
 def _remote_workflows(owner: str, repo: str, token: str | None) -> RemoteRead:
     r = github_api.read_dir(owner, repo, WORKFLOW_DIR, token)
     if r.cause == "not_found":
-        return RemoteRead({}, cause="not_found")            # no workflows dir → no CI, not an error
+        return RemoteRead({}, cause="not_found")
     if r.cause is not None:
-        return RemoteRead({}, cause=r.cause, retry_after=r.retry_after)   # real read failure
+        return RemoteRead({}, cause=r.cause, retry_after=r.retry_after)
     out: dict[str, str] = {}
     for e in r.value:
         if (isinstance(e, dict) and e.get("type") == "file"
@@ -331,7 +409,7 @@ def probe_remote_gate(slug: str, token: str | None) -> GateProbe:
     owner, _, name = slug.partition("/")
     rr = _remote_workflows(owner, name, token)
     if rr.cause is not None and rr.cause != "not_found":
-        return GateProbe(cause=rr.cause)                    # real read failure — NOT a "no gate" answer
+        return GateProbe(cause=rr.cause)
     return GateProbe(ref=find_strix(rr.workflows))
 
 
@@ -351,7 +429,7 @@ def check(*, repo: str | Path | None = None, slug: str | None = None, branch: st
         owner, _, name = slug.partition("/")
         rr = _remote_workflows(owner, name, token)
         if rr.cause == "not_found":
-            return GuardStatus(present=False, no_ci=True, branch=branch)   # no CI — calm, not an error
+            return GuardStatus(present=False, no_ci=True, branch=branch)
         if rr.cause is not None:
             return GuardStatus(present=False, branch=branch,
                                error=_read_error(slug, rr.cause, rr.retry_after))
@@ -364,7 +442,7 @@ def check(*, repo: str | Path | None = None, slug: str | None = None, branch: st
     gate = find_worm_gate(workflows, read_action=reader)
     if gate is None:
         return GuardStatus(present=False)
-    if gate.mechanism != "strix":                      # guarded, but not by the gradeable Strix action
+    if gate.mechanism != "strix":
         return GuardStatus(present=True, mechanism=gate.mechanism, gate_file=gate.workflow,
                            branch=branch if slug else None)
 
@@ -376,7 +454,7 @@ def check(*, repo: str | Path | None = None, slug: str | None = None, branch: st
         prot = github_api.get_branch_protection(owner, name, branch, token)
         required = _context_required(prot, ref.job)
     return GuardStatus(present=True, ref=ref, fresh=fresh, required=required,
-                       branch=branch if slug else None)
+                       config=grade_config(ref), branch=branch if slug else None)
 
 
 def render(status: GuardStatus, *, color: bool = False) -> str:
@@ -389,14 +467,14 @@ def render(status: GuardStatus, *, color: bool = False) -> str:
     if not status.present:
         if status.error:
             return paint(f"⚠️  {status.error}", warn, on=color)
-        if status.no_ci:                                   # 404 on .github/workflows — the normal state
+        if status.no_ci:
             return paint("• no CI workflows", dim, on=color) + " — nothing to gate here."
         lines.append(paint("✗ No worm gate found", warn, on=color) +
                      " — no workflow runs a worm scan (`Ndevu12/strix`, a local scan action, or `saw`).")
         lines.append(paint("     Run `saw guard setup` to add one.", dim, on=color))
         return "\n".join(lines)
 
-    if status.ref is None:                             # guarded by a NON-Strix mechanism
+    if status.ref is None:
         how = {"local-action": "a local scan action", "saw-run": "a direct `saw` step"}.get(
             status.mechanism, status.mechanism or "another mechanism")
         lines.append(paint("✓ Worm gate found", ok, on=color) +
@@ -429,6 +507,22 @@ def render(status: GuardStatus, *, color: bool = False) -> str:
         else:
             lines.append("  " + paint("• freshness unknown", dim, on=color) + f"  — {f.detail}")
 
+    cfg = status.config
+    if cfg is not None:
+        if cfg.ignored_inputs:
+            named = ", ".join(f"`{k}`" for k in cfg.ignored_inputs)
+            lines.append("  " + paint("⚠ an input the action does not take", warn, on=color) +
+                         f"  — {named} is dropped, so whatever it passes never arrives. "
+                         "`saw guard setup` rewrites it.")
+        if cfg.reports_nothing:
+            lines.append("  " + paint("⚠ reports nowhere", warn, on=color) +
+                         "  — a finding leaves no PR comment, no code-scanning alert and no run "
+                         "artifact, so the verdict ends with the run. `saw guard setup` turns them on.")
+        if cfg.standing_write:
+            lines.append("  " + paint("⚠ holds write access on every run", warn, on=color) +
+                         "  — the scanning job can push to this repository even when nothing is "
+                         "found. `saw guard setup` moves that to a job that only runs on a finding.")
+
     if remote:
         if status.required is True:
             lines.append("  " + paint("✓ required", ok, on=color) +
@@ -436,5 +530,4 @@ def render(status: GuardStatus, *, color: bool = False) -> str:
         elif status.required is False:
             lines.append("  " + paint("⚠ not a required check", warn, on=color) +
                          f"  — {status.branch} protection does NOT require “{r.job}”; an infected PR can still merge")
-        # status.required is None → no token, couldn't check → stay quiet
     return "\n".join(lines)

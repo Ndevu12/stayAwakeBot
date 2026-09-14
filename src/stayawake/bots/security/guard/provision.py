@@ -19,14 +19,9 @@ from stayawake.bots.security.guard.constants import (
     STRIX_OWNER, STRIX_REPO, WORKFLOW_DIR, WORM_GUARD_FILE, SETUP_BRANCH,
     CHECKOUT_ACTION, SETUP_PYTHON_ACTION)
 from stayawake.bots.security.guard.detect import (
-    check, classify_pin, find_strix, find_worm_gate, render,
+    check, classify_pin, find_strix, find_worm_gate, grade_config, render,
     _local_workflows, _ref_workflows, _local_action_reader, _ref_action_reader)
 
-# ── setup: install or update the gate, always PROPOSED (working tree or PR) ───────────────────────
-# `saw guard setup` = check + act. It resolves the pin to write (latest Strix release → SHA, or an
-# explicit --ref), plans the minimal change (create the workflow / surgically bump the pin / no-op),
-# and delivers it for review: writes into the working tree by default, or opens a rolling PR with
-# `--pr`. It NEVER commits to the default branch and never emits a floating pin silently.
 
 _STRIX_USES_LINE = re.compile(
     r"^(?P<pre>[ \t]*(?:-[ \t]+)?uses:[ \t]*)['\"]?Ndevu12/strix@\S+.*$",
@@ -83,36 +78,29 @@ def resolve_pin(token: str | None = None, ref: str | None = None) -> Pin | None:
     return Pin(sha, tag) if sha else None
 
 
-def render_workflow(pin: Pin, default_branch: str = "main") -> str:
-    """The worm-guard workflow `saw guard setup` installs, SHA-pinned. TWO jobs, each least-privilege:
+def resolve_scanner_version(token: str | None = None) -> str | None:
+    """The `stayawakebot` release the gate installs. Without it the action runs `pip install
+    stayawakebot`, so the SHA-pinned step fetches whatever is newest at run time and the pin buys
+    nothing. Returns None when it cannot be resolved — setup then fails closed rather than provision
+    an unpinned scanner, the same posture `resolve_pin` takes for the action SHA."""
+    rel = github_api.latest_release("Ndevu12", "stayAwakeBot", token)
+    tag = rel.get("tag_name") if isinstance(rel, dict) else None
+    if not isinstance(tag, str):
+        return None
+    version = tag.lstrip("vV").strip()
+    return version if re.fullmatch(r"\d+\.\d+\.\d+", version) else None
 
-      • `worm-guard` (on PR/push) — scans, and on an infected verdict runs `saw fix --pr` to open ONE
-        rolling `security/auto-clean` PR. The gate still goes RED until that PR is merged: remediation
-        opens the fix, it does not make the check pass. Needs `contents: write` + `pull-requests: write`.
-      • `pin-drift` (weekly + manual) — files ONE self-closing issue when the pinned Strix release
-        falls behind (`saw guard drift`). Needs only `issues: write`.
 
-    The gate is found by its `uses: Ndevu12/strix@<sha>` reference (not this filename), so re-running
-    `saw guard setup` surgically bumps just the pin and leaves the rest of the file untouched.
+def render_workflow(pin: Pin, default_branch: str = "main", scanner: str | None = None) -> str:
+    """The worm-guard workflow `saw guard setup` installs.
 
-    EVERY `uses:` here is pinned to a commit SHA, not only the Strix one: this file lands in someone
-    else's repository, and its gate job holds `contents: write`, so a repointed tag on any step would
-    run unreviewed code with that access. `constants.ActionPin` holds the third-party pins."""
-    comment = f"  # {pin.tag}" if pin.tag else ""
+    Takes the action pin, the default branch to gate, and the scanner version to pin. Returns the
+    full workflow text: a `worm-guard` job that scans and reports, a `remediate` job reachable only
+    on an infected verdict, and a weekly `pin-drift` job. Described in `docs/reference/cli/guard.md`.
+    """
+    version_line = f"          version: '{scanner}'\n" if scanner else ""
+    scanner_spec = f"stayawakebot=={scanner}" if scanner else "stayawakebot"
     return (
-        "# Strix worm-guard — installed/updated by `saw guard setup`.\n"
-        "# Blocks a merge when Strix finds self-propagating worm indicators, and opens a fix PR for\n"
-        "# an infected verdict. Found by its `uses: Ndevu12/strix@<sha>` reference (not this filename);\n"
-        "# re-run `saw guard setup` to bump the SHA.\n"
-        "#\n"
-        "# Auto-remediation needs write access (the scan itself only reads):\n"
-        "#   contents: write        -> push the security/auto-clean fix branch\n"
-        "#   pull-requests: write   -> open/update the rolling cleanup PR\n"
-        "# To let the token OPEN that PR, enable: Settings -> Actions -> General ->\n"
-        "#   'Allow GitHub Actions to create and approve pull requests'.\n"
-        "# A PR opened with the built-in GITHUB_TOKEN will NOT itself re-trigger this gate; to have the\n"
-        "# fix PR scanned too, set a repo secret GH_SECURITY_TOKEN (a PAT with repo + PR scope) — the\n"
-        "# `token:` below prefers it and falls back to GITHUB_TOKEN when it is absent.\n"
         "name: Worm guard — block infected merges\n"
         "\n"
         "on:\n"
@@ -120,45 +108,70 @@ def render_workflow(pin: Pin, default_branch: str = "main") -> str:
         "  push:\n"
         f"    branches: [{default_branch}]\n"
         "  schedule:\n"
-        "    - cron: '0 7 * * 1'        # Mondays 07:00 UTC — pin-drift check\n"
+        "    - cron: '0 7 * * 1'\n"
         "  workflow_dispatch:\n"
         "\n"
-        "permissions: {}                # least privilege: granted PER JOB below\n"
+        "permissions: {}\n"
         "\n"
         "jobs:\n"
         "  worm-guard:\n"
-        "    if: github.event_name != 'schedule'   # gate on code changes, not the drift schedule\n"
+        "    if: github.event_name != 'schedule'\n"
         "    runs-on: ubuntu-latest\n"
         "    permissions:\n"
-        "      contents: write        # push the security/auto-clean fix branch\n"
-        "      pull-requests: write   # open/update the rolling cleanup PR\n"
+        "      contents: read\n"
+        "      pull-requests: write\n"
+        "      security-events: write\n"
+        "    outputs:\n"
+        "      verdict: ${{ steps.scan.outputs.verdict }}\n"
+        "      infected: ${{ steps.scan.outputs.infected }}\n"
         "    steps:\n"
-        "      - name: Checkout (full history so evil-merge detection sees the whole graph)\n"
-        f"        uses: {CHECKOUT_ACTION.uses()}\n"
+        f"      - uses: {CHECKOUT_ACTION.uses()}\n"
         "        with:\n"
         "          fetch-depth: 0\n"
-        "      - name: Strix worm scan (+ open a fix PR on an infected verdict)\n"
-        f"        uses: Ndevu12/strix@{pin.sha}{comment}\n"
+        "      - id: scan\n"
+        f"        uses: Ndevu12/strix@{pin.sha}\n"
         "        with:\n"
+        f"{version_line}"
+        "          remediate: 'off'\n"
+        "          github-token: ${{ github.token }}\n"
+        "          pr-comment: true\n"
+        "          upload-sarif: true\n"
+        "          upload-artifact: true\n"
+        "\n"
+        "  remediate:\n"
+        "    needs: worm-guard\n"
+        "    if: ${{ !cancelled() && (needs.worm-guard.outputs.verdict == 'infected'"
+        " || needs.worm-guard.outputs.infected != '0') }}\n"
+        "    runs-on: ubuntu-latest\n"
+        "    permissions:\n"
+        "      contents: write\n"
+        "      pull-requests: write\n"
+        "    steps:\n"
+        f"      - uses: {CHECKOUT_ACTION.uses()}\n"
+        "        with:\n"
+        "          fetch-depth: 0\n"
+        f"      - uses: Ndevu12/strix@{pin.sha}\n"
+        "        with:\n"
+        f"{version_line}"
         "          remediate: pr\n"
-        "          token: ${{ secrets.GH_SECURITY_TOKEN || github.token }}\n"
+        "          github-token: ${{ secrets.GH_SECURITY_TOKEN || github.token }}\n"
+        "          upload-artifact: true\n"
         "\n"
         "  pin-drift:\n"
         "    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'\n"
         "    runs-on: ubuntu-latest\n"
         "    permissions:\n"
-        "      contents: read         # read the pinned ref from this workflow file\n"
-        "      issues: write          # open/close the one drift tracking issue\n"
+        "      contents: read\n"
+        "      issues: write\n"
         "    steps:\n"
         f"      - uses: {CHECKOUT_ACTION.uses()}\n"
         f"      - uses: {SETUP_PYTHON_ACTION.uses()}\n"
         "        with:\n"
         "          python-version: '3.x'\n"
-        "      - name: Report if the pinned Strix release is behind\n"
-        "        env:\n"
+        "      - env:\n"
         "          GITHUB_TOKEN: ${{ github.token }}\n"
         "        run: |\n"
-        "          pip install --quiet stayawakebot\n"
+        f"          pip install {scanner_spec}\n"
         "          saw guard drift\n"
     )
 
@@ -174,42 +187,66 @@ _GATE_HOW = {"local-action": "a local scan action", "saw-run": "a direct `saw` s
 
 
 def plan_setup(workflows: dict[str, str], default_branch: str, pin: Pin, *,
-               read_action=None) -> SetupPlan:
+               read_action=None, scanner: str | None = None) -> SetupPlan:
     """Decide the minimal change: bump an existing Strix pin, no-op when already at the resolved SHA,
     leave an existing worm gate installed by ANOTHER mechanism alone ('present'), or create the gate
     when the repo is genuinely unguarded — never clobbering a file already at the create path."""
     gate = find_worm_gate(workflows, read_action=read_action)
     if gate is None:
-        # Unguarded by any mechanism — install. But NEVER clobber a non-gate workflow already sitting
         if WORM_GUARD_FILE in workflows:
             return SetupPlan("conflict", WORM_GUARD_FILE)
-        return SetupPlan("create", WORM_GUARD_FILE, render_workflow(pin, default_branch),
+        return SetupPlan("create", WORM_GUARD_FILE, render_workflow(pin, default_branch, scanner),
                          new_ref=pin.sha)
     if gate.mechanism != "strix":
-        # Already guarded by a local scan action / a direct `saw` step — don't install a duplicate.
         return SetupPlan("present", gate.workflow,
                          detail=_GATE_HOW.get(gate.mechanism, gate.mechanism))
     ref = gate.strix
+    config = grade_config(ref)
+    if config.degraded and ref.workflow == WORM_GUARD_FILE:
+        return SetupPlan("repair", ref.workflow, render_workflow(pin, default_branch, scanner),
+                         old_ref=ref.ref, new_ref=pin.sha, detail=_degraded_detail(config))
     if ref.pin == "sha" and ref.ref.lower() == pin.sha.lower():
-        return SetupPlan("noop", ref.workflow, old_ref=ref.ref, new_ref=pin.sha)
+        return SetupPlan("noop", ref.workflow, old_ref=ref.ref, new_ref=pin.sha,
+                         detail=_degraded_detail(config) if config.degraded else None)
     return SetupPlan("repin", ref.workflow, _repin(workflows[ref.workflow], pin),
-                     old_ref=ref.ref, new_ref=pin.sha)
+                     old_ref=ref.ref, new_ref=pin.sha,
+                     detail=_degraded_detail(config) if config.degraded else None)
+
+
+def _degraded_detail(config) -> str:
+    """One line naming what is wrong with a gate's configuration, for the setup summary."""
+    parts = []
+    if config.ignored_inputs:
+        parts.append(f"passes {', '.join(config.ignored_inputs)}, which the action does not take")
+    if config.reports_nothing:
+        parts.append("reports a finding nowhere")
+    if config.standing_write:
+        parts.append("can write to the repository on every run")
+    return "; ".join(parts)
 
 
 def _setup_pr_body(plan: SetupPlan, base: str) -> str:
     """The install/bump PR body — carries the hardening a PR can't do itself (a change file can't
     set branch protection, CODEOWNERS, or the create-PR repo setting), stated honestly."""
-    verb = "Installs" if plan.action == "create" else "Updates the pin of"
+    verb = ("Installs" if plan.action == "create"
+            else "Rewrites the configuration of" if plan.action == "repair"
+            else "Updates the pin of")
     tag = f" (`{plan.new_ref}`)" if plan.new_ref and len(plan.new_ref) == 40 else ""
     return "\n".join([
         f"{verb} the **Strix worm-guard** CI gate — opened by `saw guard setup`.",
         "",
-        f"- **File:** {textsafe.code(plan.path)}",   # repo-controlled filename → injection-safe
+        f"- **File:** {textsafe.code(plan.path)}",
+        *([f"- **Replaced because** the gate {plan.detail}. Jobs and settings this file carried "
+           "beyond the gate itself are not preserved — review the diff."]
+          if plan.action == "repair" and plan.detail else []),
         f"- **Pin:** `Ndevu12/strix@{plan.new_ref[:12]}…`{tag}",
-        "- **Gate job** (`worm-guard`): scans PRs/pushes and, on an infected verdict, opens ONE rolling "
-        "`security/auto-clean` fix PR (needs `contents: write` + `pull-requests: write`, granted at the "
-        "job level). The gate stays **red until that fix PR is merged** — remediation opens the fix, it "
-        "does not make the check pass.",
+        "- **Gate job** (`worm-guard`): scans PRs/pushes and reports what it finds — a PR comment, a "
+        "code-scanning alert and a run artifact. It **cannot push to this repository** "
+        "(`contents: read`).",
+        "- **Remediation job** (`remediate`): opens ONE rolling `security/auto-clean` fix PR. It is the "
+        "only job that can push, and it is reachable only once the scan has already reported an "
+        "infected verdict — so on a clean run nothing here holds write access. The gate stays **red "
+        "until that fix PR is merged**: remediation opens the fix, it does not make the check pass.",
         "- **Pin-drift job** (`pin-drift`): weekly (+ manual) it files ONE self-closing issue if the "
         "pinned Strix release falls behind (`issues: write` only).",
         "",
@@ -252,20 +289,23 @@ def _setup_pr(repo: Path, plan: SetupPlan, base: str, token: str | None, spin: b
         return SetupResult(plan=plan, slug=slug, error="could not create a worktree for the PR")
     try:
         dest = wt / plan.path
-        if not is_safe_write_target(dest, wt):        # never write the gate through a planted symlink
+        if not is_safe_write_target(dest, wt):
             return SetupResult(plan=plan, slug=slug,
                                error=f"refusing to write {plan.path} — it is a symlink or escapes the worktree")
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(plan.content, encoding="utf-8")
         if not gitutil.stage_all(wt):
             return SetupResult(plan=plan, slug=slug, error="could not stage the workflow change")
-        verb = "install" if plan.action == "create" else "update"
+        verb = ("install" if plan.action == "create"
+                else "repair" if plan.action == "repair" else "update")
         commit = gitutil.commit_fix(
             wt, f"ci(security): {verb} the Strix worm-guard gate\n\n"
                 f"Pin Ndevu12/strix@{plan.new_ref[:12]}. Opened by `saw guard setup`.")
         if not commit.committed:
             return SetupResult(plan=plan, slug=slug, error="could not commit the workflow change")
         title = ("ci(security): install the Strix worm-guard gate" if plan.action == "create"
+                 else "ci(security): the worm gate reports its findings and holds no standing write"
+                 if plan.action == "repair"
                  else "ci(security): update the Strix worm-guard pin")
         with spin_status(f"opening guard PR for {slug}…", enabled=spin):
             res = proposal.submit_change_pr(wt, slug, base, branch=SETUP_BRANCH, title=title,
@@ -277,7 +317,8 @@ def _setup_pr(repo: Path, plan: SetupPlan, base: str, token: str | None, spin: b
 
 def setup(repo: str | Path | None = None, *, token: str | None = None, ref: str | None = None,
           dry_run: bool = False, pr: bool = False, branch: str | None = None,
-          spin: bool = False, pin: "Pin | None" = None) -> SetupResult:
+          spin: bool = False, pin: "Pin | None" = None,
+          scanner: str | None = None) -> SetupResult:
     """Install or update the Strix gate on a LOCAL repo. Default: write the change into the working
     tree for the operator to review + commit + PR. `--pr`: open a rolling PR via the ladder. Either
     way the default branch is only ever proposed to, never pushed. A sweep passes a precomputed `pin`
@@ -288,11 +329,14 @@ def setup(repo: str | Path | None = None, *, token: str | None = None, ref: str 
     if pin is None:
         return SetupResult(error="couldn't resolve the latest Strix release "
                                  "(offline? pass --ref <sha|tag> to pin explicitly)")
+    if scanner is None:
+        scanner = resolve_scanner_version(token)
+    if scanner is None:
+        return SetupResult(error="couldn't resolve the scanner release to pin — not installing "
+                                 "a gate that would take whatever is newest when it runs "
+                                 "(offline?)")
     default_branch = branch or gitutil.default_branch(repo)
     if pr:
-        # `--pr` targets origin's default branch, so plan against WHAT ORIGIN HAS — never a dirty or
-        # UNTRACKED working tree. A worm-guard.yml written by a prior local `setup` (uncommitted) must
-        # not mask that origin lacks the gate, or `--pr` would wrongly no-op and never open the PR.
         gitutil.fetch(repo, "origin", default_branch)
         baseref = (f"origin/{default_branch}" if gitutil.ref_exists(repo, f"origin/{default_branch}")
                    else default_branch)
@@ -301,18 +345,14 @@ def setup(repo: str | Path | None = None, *, token: str | None = None, ref: str 
     else:
         workflows = _local_workflows(repo)
         reader = _local_action_reader(repo)
-    plan = plan_setup(workflows, default_branch, pin, read_action=reader)
+    plan = plan_setup(workflows, default_branch, pin, read_action=reader, scanner=scanner)
     if plan.action == "present":
-        # Already guarded by another mechanism — nothing to install; render explains.
         return SetupResult(plan=plan)
     if plan.action == "conflict":
-        # A file already occupies the install path but isn't a recognizable worm gate — refuse to
         return SetupResult(plan=plan, error=f"a workflow already exists at {plan.path} but isn't a "
                            "recognizable worm gate — not overwriting it. Remove or rename it, then "
                            "re-run `saw guard setup`.")
     if plan.action == "repin" and f"strix@{pin.sha}" not in (plan.content or ""):
-        # find_strix (YAML-aware) saw a gate the line-surgical rewrite couldn't touch (an exotic
-        # `uses:` form). Never claim a bump that changed nothing — tell the operator to edit it.
         return SetupResult(plan=plan, error=f"found a Strix gate in {plan.path} but couldn't "
                            f"surgically rewrite its pin — set `uses: Ndevu12/strix@{pin.sha}` there manually")
     if plan.action == "noop" or dry_run:
@@ -320,7 +360,7 @@ def setup(repo: str | Path | None = None, *, token: str | None = None, ref: str 
     if pr:
         return _setup_pr(repo, plan, default_branch, token, spin)
     dest = repo / plan.path
-    if not is_safe_write_target(dest, repo):          # never write the gate through a planted symlink
+    if not is_safe_write_target(dest, repo):
         return SetupResult(plan=plan,
                            error=f"refusing to write {plan.path} — it is a symlink or escapes the repo")
     try:
@@ -349,16 +389,19 @@ def render_setup(result: SetupResult, *, color: bool = False) -> str:
         return (paint("✓ already up to date", ok, on=color) +
                 f" — {plan.path} pins Ndevu12/strix@{_short(plan.new_ref)} (latest). Nothing to do.")
 
-    verb = "install" if plan.action == "create" else "update the pin in"
+    verb = ("install" if plan.action == "create"
+            else "repair" if plan.action == "repair" else "update the pin in")
     if result.dry_run:
         head = paint(f"— dry run: would {verb} {plan.path}", dim, on=color) + \
             f"  (→ Ndevu12/strix@{_short(plan.new_ref)})"
-        preview = plan.content if plan.action == "create" else _repin_preview(plan)
+        preview = (plan.content if plan.action in ("create", "repair")
+                   else _repin_preview(plan))
         return head + "\n\n" + preview
 
     if result.wrote is not None:
+        why = f"\n  Replaced because the gate {plan.detail}." if plan.detail else ""
         return (paint(f"✓ wrote {plan.path}", ok, on=color) +
-                f"  ({plan.action} · pinned @{_short(plan.new_ref)})\n"
+                f"  ({plan.action} · pinned @{_short(plan.new_ref)})" + why + "\n"
                 "  Review the diff, commit on a branch, and open a PR — do NOT push to the default "
                 "branch.\n  (Or re-run with --pr to open the PR for you.)")
 
@@ -396,7 +439,6 @@ def _render_setup_submit(result: SetupResult, *, color: bool) -> str:
     if res.kind == "fork-not-ready":
         return paint(f"⚠️  {slug}: forked to {res.fork_slug} but it wasn't ready in time — retry later",
                      warn, on=color)
-    # floor: classified push failure + optional patch
     from stayawake.core.identity import push_failure_message
     from stayawake.core.identity.classify import PushFailure
     why = push_failure_message(PushFailure(res.push_reason or "unknown", res.push_detail or ""))

@@ -13,8 +13,13 @@ subcommands sweep repositories exactly like [`saw scan`](scan.md) — local by d
 ## `saw guard check`
 
 Read-only. For each repository: is a worm gate present, is the Strix pin a SHA rather than a tag, is
-it behind the latest release, and — for a remote repository — does branch protection actually
-**require** its check. A gate that is not required is decoration.
+it behind the latest release, is it configured so a finding reaches someone and so the scanning job
+holds no write access it does not need, and — for a remote repository — does branch protection
+actually **require** its check. A gate that is not required is decoration.
+
+A gate reports when it comments, raises an alert, keeps the evidence, **or** fails the merge; one
+that does none of those is reported as telling nobody. Where a repository references the action more
+than once, `check` answers for the gate itself.
 
 ```text
 saw guard check [TARGETS...] [-p PATH] [-c FILE] [-r] [--user U] [--org O]
@@ -31,11 +36,35 @@ saw guard check [TARGETS...] [-p PATH] [-c FILE] [-r] [--user U] [--org O]
 ## `saw guard setup`
 
 Install the gate, or surgically bump an existing pin, across the resolved repositories. It resolves
-the latest Strix release to a commit SHA and writes a workflow with two least-privilege jobs — the
-gate itself, and a weekly `pin-drift` job that runs [`saw guard drift`](#saw-guard-drift). When a
-gate already exists it rewrites only that `uses:` reference and leaves the rest of the file
-untouched. It is idempotent, fails closed if the SHA cannot be resolved, and **never pushes to a
-default branch**. See [gate CI](../../how-to/gate-ci.md).
+the latest Strix release to a commit SHA and the latest scanner release to a version, then writes the
+workflow described below. When a gate already exists it rewrites only that `uses:` reference and
+leaves the rest of the file untouched — unless the gate is configured so it cannot report what it
+finds, which is repaired. It is idempotent, fails closed if either release cannot be resolved, and
+**never pushes to a default branch**. See [gate CI](../../how-to/gate-ci.md).
+
+### What the installed workflow contains
+
+The generated file carries no commentary of its own — this is where it is described. Three jobs,
+each holding only what it needs:
+
+| Job | Runs on | Permissions | What it does |
+| --- | --- | --- | --- |
+| `worm-guard` | every pull request and push to the default branch | `contents: read`, `pull-requests: write`, `security-events: write` | Scans, and reports what it finds: a comment on the pull request, an alert in the Security tab, and the evidence as a run artifact. It **cannot push code to your repository** — it comments and raises alerts, nothing more. |
+| `remediate` | only once `worm-guard` has reported an infected verdict | `contents: write`, `pull-requests: write` | Opens one rolling `security/auto-clean` pull request with the payload removed. This is the only job that can push, and on a clean run it never starts. |
+| `pin-drift` | weekly, and on demand | `contents: read`, `issues: write` | Files one self-closing issue when the pinned Strix release falls behind. |
+
+The gate stays **red until the fix pull request is merged**: remediation opens the fix, it does not
+make the check pass.
+
+Every `uses:` is pinned to a commit SHA, and the scanner itself is pinned to a released version — a
+pinned action whose first act is an unpinned install would fetch whatever is newest at run time.
+
+**Two settings a workflow file cannot set for you.** Enable *Settings → Actions → General → "Allow
+GitHub Actions to create and approve pull requests"*, or the fix pull request cannot be opened. And
+add a `GH_SECURITY_TOKEN` repository secret — a token with repository and pull-request scope — so the
+fix pull request is itself scanned; one opened with the built-in token does not re-trigger the gate.
+Without the secret the gate still detects, reports and remediates; only the re-scan of its own fix is
+lost.
 
 ```text
 saw guard setup [TARGETS...] [-p PATH] [-c FILE] [--pr] [-r] [--user U] [--org O]

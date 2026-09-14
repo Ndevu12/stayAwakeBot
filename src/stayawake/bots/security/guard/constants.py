@@ -24,8 +24,10 @@ class ActionPin:
     tag: str
 
     def uses(self) -> str:
-        """The `uses:` value plus its trailing tag comment, as written into the workflow."""
-        return f"{self.repo}@{self.sha}   # {self.tag}"
+        """The `uses:` value as written into the workflow: the repo at its commit SHA, and nothing
+        else. `tag` records which release that SHA came from for a reader of this file; the
+        generated workflow carries no commentary of its own."""
+        return f"{self.repo}@{self.sha}"
 
 
 CHECKOUT_ACTION = ActionPin("actions/checkout", "9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0", "v7.0.0")

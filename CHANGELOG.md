@@ -27,6 +27,19 @@ reader, not the mechanism or the weakness it closed.
   the ones you put there.
 
 ### Fixed
+- **A gate installed by `saw guard setup` reports what it finds.** It enabled none of the
+  reporting, so a finding reached no pull-request comment, no code-scanning alert and no run
+  artifact. It also passed the credential under a name the action does not accept, so a configured
+  `GH_SECURITY_TOKEN` was not used. Re-run `saw guard setup` on repositories already gated: it now
+  repairs the configuration rather than only bumping the pin.
+- **`saw guard check` reports a gate that cannot report, or that holds more access than it needs.**
+  Such a gate previously graded as healthy.
+- **The job that scans no longer has write access to your repository.** Remediation runs in a
+  separate job that starts only after an infected verdict.
+- **The gate pins the scanner version it installs**, rather than taking whatever is newest when it
+  runs.
+- **The installed workflow no longer carries comments.** What it installs, what each job may touch,
+  and the two repository settings it cannot set for you are in the `saw guard` reference.
 - **`saw discard --branch --remote` removes every auto-clean branch on the repository.** It only
   removed the original name, so a later `saw fix` left the branches it published in place.
 - **Every command that prints a report now streams, and every one of them takes `--no-stream`.**
