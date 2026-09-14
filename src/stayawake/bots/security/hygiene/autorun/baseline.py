@@ -80,7 +80,7 @@ def _records(entries: dict) -> dict[str, Seen] | None:
 
 def _restored_from_version_1(data: dict, entries: dict) -> Baseline:
     """Load a snapshot written before the removal record existed. Its entries still answer
-    NEW/CHANGED/KNOWN, so a host that cannot rewrite its state file keeps its novelty signal."""
+    NEW/CHANGED/KNOWN, so a host that cannot rewrite its state file still tells new from known."""
     normalised = {str(k): str(v) for k, v in entries.items()}
     if data.get("self_hash") != _hash_of_version_1(normalised):
         return Baseline(status="tampered")
