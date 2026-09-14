@@ -550,8 +550,6 @@ class TestGitHooks(_Surface):
         self.assertIn("persistence-surface-unverified", self.ids(check_autorun()))
 
     def test_a_hook_that_is_re_created_reads_as_new_not_as_a_return(self):
-        # cloning a repository puts its hooks back, and so does `saw hook repair`. The return
-        # question is only meaningful on a surface nothing re-creates on its own.
         body = "#!/bin/sh\nnpx lint-staged\n"
         self._hook("pre-commit", body)
         self.assertEqual(self._run(), [])
@@ -1101,9 +1099,6 @@ class TestReturnAfterRemoval(_Surface):
         self.assertNotIn("autorun-new-unattributed", self.ids(issues))
 
     def test_a_snapshot_that_cannot_be_written_says_so(self):
-        # if the record cannot be rewritten, the removal stays in it and the entry reads as having
-        # come back on every later run. A signal that fires every run is one nobody reads, so the
-        # run says why rather than repeating itself in silence.
         self._plant()
         self._run()
         os.chmod(self.state, 0o500)
@@ -1111,9 +1106,6 @@ class TestReturnAfterRemoval(_Surface):
         self.assertIn("autorun-baseline-not-saved", self.ids(self._run()))
 
     def test_a_return_does_not_leave_the_run_saying_rotation_is_safe(self):
-        # rotating while a foothold is live is what arms the reported wiper, so a run that found one
-        # back must not print the plain all-clear. It is not decisive enough for the incident tier
-        # either -- it lands on the rung that asks the operator to confirm first.
         ids = {i.id for i in self._arc()}
         self.assertIn("autorun-entry-returned", ids)
         self.assertEqual(models.rotation_safety(ids), models.ROTATION_SAFE_PENDING_CHECK)
@@ -1141,8 +1133,6 @@ class TestReturnAfterRemoval(_Surface):
         self.assertIn("autorun-entry-returned", self.ids(self._run()))
 
     def test_a_directory_that_was_not_there_at_all_is_never_read_as_a_removal(self):
-        # a home that is not mounted answers "absent" for every path under it at once. Asking the
-        # path alone would read the whole surface as removed, and then as returned.
         self._plant()
         self._run()
         moved = self.d.parent / "moved-away"
@@ -1152,8 +1142,6 @@ class TestReturnAfterRemoval(_Surface):
         self.assertNotIn("autorun-entry-returned", self.ids(self._run()))
 
     def test_a_directory_this_run_could_not_list_is_never_read_as_a_removal(self):
-        # everything under an unreadable directory drops out of the snapshot at once. Taking that for
-        # a removal would report the whole surface as returned the moment the directory comes back.
         self._plant()
         self._run()
         os.chmod(self.d, 0o100)
@@ -1163,8 +1151,6 @@ class TestReturnAfterRemoval(_Surface):
         self.assertNotIn("autorun-entry-returned", self.ids(self._run()))
 
     def test_a_file_that_was_seen_but_could_not_be_read_is_never_read_as_a_removal(self):
-        # the directory listed whole, so only the per-path answer separates "not there" from "there
-        # and unreadable" -- an entry that failed to parse is still on disk.
         self._plant()
         self._run()
         os.chmod(self.d / "b.plist", 0o000)
@@ -1177,8 +1163,6 @@ class TestReturnAfterRemoval(_Surface):
         self.assertEqual(self._arc(owner="com.example.app"), [])
 
     def test_a_name_squatted_by_a_directory_is_still_a_removal(self):
-        # a payload that deletes itself and leaves a directory of the same name would otherwise
-        # freeze its own row: the name is still in the listing, so nothing was seen to go.
         self._plant()
         self._run()
         (self.d / "b.plist").unlink()
@@ -1189,9 +1173,6 @@ class TestReturnAfterRemoval(_Surface):
         self.assertIn("autorun-entry-returned", self.ids(self._run()))
 
     def test_a_row_no_run_enumerated_cannot_answer_known(self):
-        # the carry-forward keeps a row when the surface could not be read, so that a return is not
-        # claimed. It must not also let the entry come back silently — that is quieter than saying
-        # nothing was kept at all, which is what a re-plant would otherwise buy with one chmod.
         self._plant()
         self._run()
         os.chmod(self.d, 0o100)
@@ -1224,7 +1205,6 @@ class TestReturnAfterRemoval(_Surface):
         self.assertEqual(baseline.load_baseline().status, "tampered")
 
     def test_a_snapshot_in_the_older_format_still_answers_novelty(self):
-        # a host that cannot rewrite its state file must not lose the signal it already had.
         self._plant()
         self._run()
         path = baseline.baseline_path()
@@ -1246,9 +1226,6 @@ class TestReturnAfterRemoval(_Surface):
         self.assertEqual(len(gone), baseline.MAX_REMEMBERED)
 
     def test_a_surface_that_re_creates_its_own_entries_takes_no_carry_forward_budget(self):
-        # hook directories are not listed, so their removals could never be confirmed anyway. What
-        # the filter still buys is the budget: a developer who clones and deletes many repositories
-        # must not fill the carry-forward with hooks and crowd out a real persistence entry.
         hooks = {f"/repo{i}/.git/hooks/pre-commit": baseline.Seen("d", hookscript.LOCATION)
                  for i in range(baseline.MAX_REMEMBERED + 5)}
         keep, gone, _dropped = baseline._next_state([], baseline.Baseline(entries=hooks, status="loaded"),
@@ -1257,8 +1234,6 @@ class TestReturnAfterRemoval(_Surface):
         self.assertEqual(gone, {})
 
     def test_what_is_carried_forward_is_bounded_too(self):
-        # a directory that cannot be listed carries its entries forward rather than calling them
-        # removed. Planting and deleting under one must not grow the snapshot without limit.
         was = baseline.Seen("d", surface.LAUNCH_AGENT)
         entries = {f"/unlistable/{i}.plist": was for i in range(baseline.MAX_REMEMBERED + 10)}
         keep, _gone, _dropped = baseline._next_state([], baseline.Baseline(entries=entries, status="loaded"),
@@ -1266,8 +1241,6 @@ class TestReturnAfterRemoval(_Surface):
         self.assertEqual(len(keep), baseline.MAX_REMEMBERED)
 
     def test_a_burst_of_removals_cannot_evict_every_earlier_one(self):
-        # entries that ARE accounted for produce no finding at all, so a flood of them can be
-        # planted and deleted in silence. Half the bound stays reserved for what earlier runs saw.
         real = "/Users/op/Library/LaunchAgents/real.plist"
         base = baseline.Baseline(
             entries={f"/decoy/{i}.plist": baseline.Seen("d", surface.LAUNCH_AGENT)
@@ -1277,14 +1250,13 @@ class TestReturnAfterRemoval(_Surface):
         _keep, gone, dropped = baseline._next_state([], base, listing, "2026-09-14T00:00:00+00:00")
         self.assertIn(real, gone)
         self.assertEqual(len(gone), baseline.MAX_REMEMBERED)
-        self.assertEqual(dropped, 0)           # it fits inside the reserved share
+        self.assertEqual(dropped, 0)
 
     def test_a_run_that_dropped_removals_does_not_claim_rotation_is_safe(self):
         self.assertEqual(models.rotation_safety({"autorun-removals-dropped"}),
                          models.ROTATION_SAFE_PENDING_CHECK)
 
     def test_a_stuffed_removal_record_cannot_push_out_what_this_run_saw(self):
-        # the timestamps are the snapshot's, so an attacker sets them; eviction must not read them.
         squat = {f"/forged/{i}": "2999-01-01T00:00:00+00:00"
                  for i in range(baseline.MAX_REMEMBERED)}
         gone_key = str(self.d / "b.plist")
@@ -1296,8 +1268,6 @@ class TestReturnAfterRemoval(_Surface):
         self.assertEqual(len(gone), baseline.MAX_REMEMBERED)
 
     def test_a_name_that_is_there_but_does_not_resolve_is_not_a_removal(self):
-        # a launch agent or unit symlinked out of a dotfiles checkout: switch the branch, unmount the
-        # volume, and the link dangles while the name is still right there in the directory.
         target = self.d.parent / "dotfiles-agent.plist"
         target.write_bytes(_agent(ProgramArguments=["/home/u/bin/gone"], RunAtLoad=False))
         (self.d / "b.plist").symlink_to(target)
@@ -1318,8 +1288,6 @@ class TestReturnAfterRemoval(_Surface):
         self.assertEqual(baseline.load_baseline().status, "tampered")
 
     def test_a_snapshot_naming_a_version_this_release_does_not_write_is_not_trusted(self):
-        # routing DOWN is caught by the older format's own hash; routing UP carries a hash this
-        # release computes itself, so only naming the version can answer it.
         self._plant()
         self._run()
         path = baseline.baseline_path()
@@ -1330,8 +1298,6 @@ class TestReturnAfterRemoval(_Surface):
         self.assertEqual(baseline.load_baseline().status, "tampered")
 
     def test_a_row_that_is_not_text_is_not_trusted_and_does_not_raise(self):
-        # the vocabulary check is a set membership, so a row holding a list or a dict raised out of
-        # the audit entirely rather than being refused.
         self._plant()
         self._run()
         path = baseline.baseline_path()

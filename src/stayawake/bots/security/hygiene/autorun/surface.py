@@ -488,9 +488,7 @@ def enumerate_entries(listing: dict | None = None) -> tuple[list[AutorunEntry], 
     (`.plist` → launch agent, `.service`/`.timer` → systemd) — not by directory name — so it is
     robust and testable. Order is deterministic (sorted by path within each type).
 
-    `listing` collects, per persistence directory this run listed whole, the names that were in it —
-    so a caller can tell a name that is not there from one it was never able to look for. Git-hook
-    directories are not collected: what re-creates their entries is a clone, or saw itself."""
+    `listing`, when given, is filled with the names each persistence directory held."""
     dirs = os_service.user_persistence_dirs()
     unread: list[Path] = []
     entries: list[AutorunEntry] = []

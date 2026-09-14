@@ -562,10 +562,6 @@ def grade(entry, attrib, novel: str, shape: ContentSignal, correlated: bool) -> 
                         f"LAST — {_WIPER_NOTE}.",
             command="saw hook repair" if any(r in _SAW_HOOK_REASONS for r in why) else None)
 
-    # Deliberately not incident-tier: where attribution is unavailable this cannot separate an
-    # operator's own re-install from a re-plant, and the incident path is for decisive evidence.
-    # An entry that names no executable is unattributable by construction, so it stays on the tier
-    # below rather than reaching a warning on a return alone.
     if unattributed and returned and entry.exec_path:
         return HygieneIssue(
             id=RETURN_ID, severity="warning",

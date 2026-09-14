@@ -42,9 +42,8 @@ def _hash_of_version_1(entries: dict[str, str]) -> str:
 
 @dataclass(frozen=True)
 class Seen:
-    """What a run recorded about one entry: its content fingerprint, the surface it sits on, and
-    whether that run actually enumerated it. A row restored from a version-1 snapshot has no
-    location and carries the empty string."""
+    """What a run recorded about one entry: its content fingerprint, the surface it sits on (empty
+    for a row restored from a version-1 snapshot), and whether that run enumerated it."""
     digest: str
     location: str
     observed: bool = True
@@ -64,8 +63,8 @@ class Baseline:
 
 
 def _records(entries: dict) -> dict[str, Seen] | None:
-    """Return the stored entry map as records, or None if any row is not one. A location outside the
-    surface's own vocabulary makes the whole file untrustworthy rather than one row misfiled."""
+    """Return the stored entry map as records. Takes the map as read from the file; returns None if
+    any row is not a record."""
     out: dict[str, Seen] = {}
     for key, value in entries.items():
         if not isinstance(value, dict):
@@ -73,7 +72,7 @@ def _records(entries: dict) -> dict[str, Seen] | None:
         digest, location = value.get("digest"), value.get("location")
         observed = value.get("observed", True)
         if not isinstance(digest, str) or not isinstance(location, str):
-            return None                        # an unhashable row would raise out of the membership test
+            return None
         if location not in LOCATIONS or not isinstance(observed, bool):
             return None
         out[str(key)] = Seen(digest, location, observed)
@@ -81,8 +80,8 @@ def _records(entries: dict) -> dict[str, Seen] | None:
 
 
 def _restored_from_version_1(data: dict, entries: dict) -> Baseline:
-    """Load a snapshot written before the removal record existed. Its entries still answer
-    NEW/CHANGED/KNOWN, so a host that cannot rewrite its state file still tells new from known."""
+    """Load a snapshot written in the version-1 format. Takes the parsed file and its entry map;
+    returns a Baseline, tampered when the stamp does not match."""
     normalised = {str(k): str(v) for k, v in entries.items()}
     if data.get("self_hash") != _hash_of_version_1(normalised):
         return Baseline(status="tampered")
@@ -114,7 +113,7 @@ def load_baseline() -> Baseline:
     except (ValueError, RecursionError):
         return Baseline(status="corrupt")
     if data.get("version") != VERSION or data.get("self_hash") != stamp:
-        return Baseline(status="tampered")     # lazy tamper, or a hand-edit → distrust the whole file
+        return Baseline(status="tampered")
     seen = _records(entries)
     if seen is None or not all(isinstance(v, str) for v in removed.values()):
         return Baseline(status="corrupt")
@@ -122,9 +121,8 @@ def load_baseline() -> Baseline:
 
 
 def novelty(entries, baseline: Baseline) -> dict[str, str]:
-    """Per-entry RETURNED / NEW / CHANGED / KNOWN — only when the baseline is trusted; otherwise every
-    entry is KNOWN (novelty contributes nothing, so grading falls entirely to
-    provenance/shape/correlation)."""
+    """Grade each entry against the baseline. Takes this run's entries and the baseline; returns a
+    map of entry key to RETURNED / NEW / CHANGED / KNOWN, all KNOWN when the baseline is untrusted."""
     if not baseline.trusted:
         return {e.key(): KNOWN for e in entries}
     out: dict[str, str] = {}
@@ -135,17 +133,15 @@ def novelty(entries, baseline: Baseline) -> dict[str, str]:
             continue
         prev = baseline.entries.get(key)
         if prev is None or not prev.observed:
-            out[key] = NEW                     # a row no run enumerated cannot answer "known"
+            out[key] = NEW
             continue
         out[key] = KNOWN if prev.digest == e.digest() else CHANGED
     return out
 
 
 def _confirmed_gone(key: str, listing: dict) -> bool:
-    """True only when this run listed the holding directory whole and the name is no longer an entry
-    in it. Asked of the listing rather than of the path, so a name that is present but does not
-    resolve — a symlink whose target is away — is never taken for a removal. A name held by a
-    directory is the exception: that can never be an entry, however it got there."""
+    """Whether an entry is known to have gone. Takes its key and what each directory this run listed
+    whole held; returns True only when that listing answers it."""
     path = Path(key)
     held = listing.get(path.parent)
     if held is None:
@@ -159,11 +155,8 @@ def _confirmed_gone(key: str, listing: dict) -> bool:
 
 
 def _bounded(fresh: dict[str, str], carried: dict[str, str]) -> tuple[dict[str, str], int]:
-    """This run's removals first, then as many earlier ones as the bound allows — so a snapshot
-    stuffed with removals cannot push out what this run actually saw, while a share stays reserved
-    for earlier ones so a burst cannot evict them all. Returns the record and how many earlier
-    removals did not fit: a bound can always be exhausted, so what is dropped has to be sayable
-    rather than silent."""
+    """Fit this run's removals and earlier ones into the bound, each with a reserved share. Takes
+    both maps; returns the bounded record and how many earlier removals did not fit."""
     out = dict(list(fresh.items())[:MAX_REMEMBERED // 2])
     for key, when in carried.items():
         if len(out) >= MAX_REMEMBERED:
@@ -178,11 +171,9 @@ def _bounded(fresh: dict[str, str], carried: dict[str, str]) -> tuple[dict[str, 
 
 def _next_state(entries, base: Baseline, listing: dict,
                 now: str) -> tuple[dict[str, Seen], dict[str, str], int]:
-    """The entry map, the removal record to write for the next run, and how many earlier removals
-    the bound dropped.
-
-    Takes this run's entries, the baseline they were graded against, what each directory this run
-    listed whole held, and the timestamp a removal is stamped with."""
+    """Build what the next run reads. Takes this run's entries, the baseline they were graded
+    against, what each directory listed whole held, and the timestamp for a removal; returns the
+    entry map, the removal record, and how many earlier removals did not fit."""
     keep = {e.key(): Seen(e.digest(), e.location) for e in entries}
     if not base.trusted:
         return keep, {}, 0
@@ -191,9 +182,6 @@ def _next_state(entries, base: Baseline, listing: dict,
     for key, was in base.entries.items():
         if key in keep:
             continue
-        # cloning a repository re-creates its git hooks, and so does `saw hook repair` — only a
-        # surface nothing puts back on its own can answer whether something put this back. A row
-        # restored from a version-1 snapshot names no surface, so only the listing can answer.
         if was.location and was.location not in STAYS_REMOVED:
             continue
         if _confirmed_gone(key, listing):
@@ -207,10 +195,9 @@ def _next_state(entries, base: Baseline, listing: dict,
 
 
 def save_baseline(entries, base: Baseline, listing: dict) -> tuple[bool, int]:
-    """Snapshot the current surface, and what has gone from it, for the next run's novelty diff.
-    Skipped on an ephemeral host. Atomic (mkstemp → os.replace). Returns whether it was written: a
-    failure must not break the audit, but it must not pass unsaid either. Returns whether it was
-    written, and how many earlier removals the bound dropped."""
+    """Write the snapshot for the next run. Takes this run's entries, the baseline they were graded
+    against and what each directory listed whole held; returns whether it was written and how many
+    earlier removals did not fit. Skipped on an ephemeral host."""
     if is_ephemeral():
         return True, 0
     now = datetime.now(timezone.utc).isoformat()
