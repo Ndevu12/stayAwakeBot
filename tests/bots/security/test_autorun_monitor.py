@@ -1148,7 +1148,7 @@ class TestReturnAfterRemoval(_Surface):
         self.d.rename(moved)
         self._run()
         moved.rename(self.d)
-        self.assertEqual(self._run(), [])
+        self.assertNotIn("autorun-entry-returned", self.ids(self._run()))
 
     def test_a_directory_this_run_could_not_list_is_never_read_as_a_removal(self):
         # everything under an unreadable directory drops out of the snapshot at once. Taking that for
@@ -1159,7 +1159,7 @@ class TestReturnAfterRemoval(_Surface):
         self.addCleanup(os.chmod, self.d, 0o700)
         self._run()
         os.chmod(self.d, 0o700)
-        self.assertEqual(self._run(), [])
+        self.assertNotIn("autorun-entry-returned", self.ids(self._run()))
 
     def test_a_file_that_was_seen_but_could_not_be_read_is_never_read_as_a_removal(self):
         # the directory listed whole, so only the per-path answer separates "not there" from "there
@@ -1170,10 +1170,36 @@ class TestReturnAfterRemoval(_Surface):
         self.addCleanup(os.chmod, self.d / "b.plist", 0o600)
         self._run()
         os.chmod(self.d / "b.plist", 0o600)
-        self.assertEqual(self._run(), [])
+        self.assertNotIn("autorun-entry-returned", self.ids(self._run()))
 
     def test_an_entry_its_own_package_re_installs_is_not_a_return(self):
         self.assertEqual(self._arc(owner="com.example.app"), [])
+
+    def test_a_name_squatted_by_a_directory_is_still_a_removal(self):
+        # a payload that deletes itself and leaves a directory of the same name would otherwise
+        # freeze its own row: the name is still in the listing, so nothing was seen to go.
+        self._plant()
+        self._run()
+        (self.d / "b.plist").unlink()
+        (self.d / "b.plist").mkdir()
+        self._run()
+        (self.d / "b.plist").rmdir()
+        self._plant()
+        self.assertIn("autorun-entry-returned", self.ids(self._run()))
+
+    def test_a_row_no_run_enumerated_cannot_answer_known(self):
+        # the carry-forward keeps a row when the surface could not be read, so that a return is not
+        # claimed. It must not also let the entry come back silently — that is quieter than saying
+        # nothing was kept at all, which is what a re-plant would otherwise buy with one chmod.
+        self._plant()
+        self._run()
+        os.chmod(self.d, 0o100)
+        self.addCleanup(os.chmod, self.d, 0o700)
+        self._run()
+        os.chmod(self.d, 0o700)
+        ids = self.ids(self._run())
+        self.assertNotIn("autorun-entry-returned", ids)
+        self.assertIn("autorun-new-unattributed", ids)
 
     def test_a_strong_finding_says_the_foothold_came_back(self):
         self.write("evil.plist", ProgramArguments=["/tmp/agent"], RunAtLoad=True)
@@ -1249,7 +1275,7 @@ class TestReturnAfterRemoval(_Surface):
         self.assertEqual([p.name for p in self.d.iterdir()], ["b.plist"])
         self._run()
         (self.d.parent / "away.plist").rename(target)
-        self.assertEqual(self._run(), [])
+        self.assertNotIn("autorun-entry-returned", self.ids(self._run()))
 
     def test_a_snapshot_routed_to_another_version_fails_its_integrity_check(self):
         self._plant()

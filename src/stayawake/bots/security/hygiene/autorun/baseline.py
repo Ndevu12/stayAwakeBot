@@ -42,10 +42,12 @@ def _hash_of_version_1(entries: dict[str, str]) -> str:
 
 @dataclass(frozen=True)
 class Seen:
-    """What a run recorded about one entry: its content fingerprint, and the surface it sits on.
-    A row restored from a version-1 snapshot has no location and carries the empty string."""
+    """What a run recorded about one entry: its content fingerprint, the surface it sits on, and
+    whether that run actually enumerated it. A row restored from a version-1 snapshot has no
+    location and carries the empty string."""
     digest: str
     location: str
+    observed: bool = True
 
 
 @dataclass
@@ -69,9 +71,10 @@ def _records(entries: dict) -> dict[str, Seen] | None:
         if not isinstance(value, dict):
             return None
         digest, location = value.get("digest"), value.get("location")
-        if not isinstance(digest, str) or location not in LOCATIONS:
+        observed = value.get("observed", True)
+        if not isinstance(digest, str) or location not in LOCATIONS or not isinstance(observed, bool):
             return None
-        out[str(key)] = Seen(digest, location)
+        out[str(key)] = Seen(digest, location, observed)
     return out
 
 
@@ -129,17 +132,28 @@ def novelty(entries, baseline: Baseline) -> dict[str, str]:
             out[key] = RETURNED
             continue
         prev = baseline.entries.get(key)
-        out[key] = NEW if prev is None else (KNOWN if prev.digest == e.digest() else CHANGED)
+        if prev is None or not prev.observed:
+            out[key] = NEW                     # a row no run enumerated cannot answer "known"
+            continue
+        out[key] = KNOWN if prev.digest == e.digest() else CHANGED
     return out
 
 
 def _confirmed_gone(key: str, listing: dict) -> bool:
-    """True only when this run listed the holding directory whole and the name was not among what it
-    held. Asked of the listing rather than of the path, so a name that is present but does not
-    resolve — a symlink whose target is away — is never taken for a removal."""
+    """True only when this run listed the holding directory whole and the name is no longer an entry
+    in it. Asked of the listing rather than of the path, so a name that is present but does not
+    resolve — a symlink whose target is away — is never taken for a removal. A name held by a
+    directory is the exception: that can never be an entry, however it got there."""
     path = Path(key)
     held = listing.get(path.parent)
-    return held is not None and path.name not in held
+    if held is None:
+        return False
+    if path.name not in held:
+        return True
+    try:
+        return path.is_dir()
+    except OSError:
+        return False
 
 
 def _bounded(fresh: dict[str, str], carried: dict[str, str]) -> dict[str, str]:
@@ -174,7 +188,7 @@ def _next_state(entries, base: Baseline, listing: dict,
         if _confirmed_gone(key, listing):
             fresh[key] = now
         elif carried_forward < MAX_REMEMBERED:
-            keep[key] = was
+            keep[key] = Seen(was.digest, was.location, observed=False)
             carried_forward += 1
     carried = {k: t for k, t in base.removed.items() if k not in keep and k not in fresh}
     return keep, _bounded(fresh, carried)
@@ -188,7 +202,8 @@ def save_baseline(entries, base: Baseline, listing: dict) -> bool:
         return True
     now = datetime.now(timezone.utc).isoformat()
     keep, gone = _next_state(entries, base, listing, now)
-    mapping = {k: {"digest": v.digest, "location": v.location} for k, v in keep.items()}
+    mapping = {k: {"digest": v.digest, "location": v.location, "observed": v.observed}
+               for k, v in keep.items()}
     payload = {
         "version": VERSION,
         "captured": now,
