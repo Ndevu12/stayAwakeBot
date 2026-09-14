@@ -1797,9 +1797,9 @@
 <p>Create host-level controls on this machine. It never touches a project's dependency tree — that is
 <a href="../fix/"><code>saw fix</code></a>. A write is reported as in place only after it is read back. An unverifiable
 write is unknown, never success. The result does not claim that one control protects anything else.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw harden
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw harden [--no-stream]
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>sudo saw harden
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>saw harden --take-back
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>saw harden --take-back [--no-stream]
 </code></pre></div>
 <p>It also asks this machine to keep checking itself, by putting <a href="../watch/"><code>saw watch</code></a> in place — the
 same arrangement that command makes, made here as part of hardening. <code>--take-back</code> removes it with

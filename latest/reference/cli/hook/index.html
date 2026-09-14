@@ -1800,10 +1800,10 @@ task. It uses git's <code>init.templateDir</code> rather than a global <code>cor
 repositories are untouched, a repository's own hooks still run, and nothing is hijacked. The hook
 warns and points at <a href="../fix/"><code>saw fix</code></a>; it never modifies anything and can never break a git
 command. See <a href="../../../how-to/scan-on-clone/">scan on clone</a>.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw hook install [-c FILE]
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>saw hook repair
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>saw hook uninstall
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>saw hook status
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw hook install [-c FILE] [--no-stream]
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>saw hook repair [--no-stream]
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>saw hook uninstall [--no-stream]
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>saw hook status [--no-stream]
 </code></pre></div>
 <table>
 <thead>

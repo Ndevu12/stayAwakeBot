@@ -1975,9 +1975,9 @@
 what is running and ends code the tool has <strong>identified</strong>. It never asks for a password, and it
 writes what it saw to its own record so a later pass can tell something that has come back from
 something new. It keeps checking until you stop it.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw watch
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>saw watch status
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>saw watch stop
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw watch [--no-stream]
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>saw watch status [--no-stream]
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>saw watch stop [--no-stream]
 </code></pre></div>
 <p>It is deliberately narrower than <a href="../harden/"><code>saw harden</code></a>. Harden runs with you present: it ends
 everything it grades, and it can ask for privilege to reach what it otherwise could not. This one is
