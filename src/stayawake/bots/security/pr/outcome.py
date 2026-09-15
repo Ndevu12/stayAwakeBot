@@ -73,6 +73,7 @@ class Cause(Enum):
     FORKS_NOT_ESTABLISHED = "forks-not-established"
     PREVIOUS_OBJECTS_UNCOLLECTED = "previous-objects-uncollected"
     PAYLOAD_NEEDS_MANUAL_RECOVERY = "payload-needs-manual-recovery"
+    FILE_RESTORED_FROM_A_PARENT = "file-restored-from-a-parent"
     HISTORY_TOO_LARGE_TO_ENUMERATE = "history-too-large-to-enumerate"
 
 
@@ -114,6 +115,7 @@ class AmendOutcome:
     commit: str = ""
     branches: tuple[BranchResult, ...] = ()
     reasons: tuple[Reason, ...] = ()
+    removed: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.completed and not self.branches:
@@ -145,7 +147,7 @@ def refused(repository: str, cause: Cause, detail: str = "",
 
 
 def amended(repository: str, commit: str, branches: Sequence[BranchResult],
-            reasons: Iterable[Reason] = ()) -> AmendOutcome:
+            reasons: Iterable[Reason] = (), removed: Iterable[str] = ()) -> AmendOutcome:
     """The replacement was pushed at the branches that reached the payload.
 
     `completed` follows the pushes rather than the caller's word, so a run that left a branch on
@@ -156,7 +158,8 @@ def amended(repository: str, commit: str, branches: Sequence[BranchResult],
         raise ValueError("an amend that touched no branch is a refusal, not an amend")
     return AmendOutcome(repository=repository,
                         completed=all(b.force_updated for b in acted),
-                        commit=commit, branches=acted, reasons=tuple(reasons))
+                        commit=commit, branches=acted, reasons=tuple(reasons),
+                        removed=tuple(removed))
 
 
 _PHRASE = {
@@ -218,6 +221,8 @@ _PHRASE = {
     Cause.PREVIOUS_OBJECTS_UNCOLLECTED: "previous objects remain until collected",
     Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY:
         "{detail} confirmed finding(s) here need manual recovery — this verb could not remove them",
+    Cause.FILE_RESTORED_FROM_A_PARENT:
+        "{detail} was restored from a parent because the merge dropped it — confirm it should be kept",
     Cause.HISTORY_TOO_LARGE_TO_ENUMERATE:
         "a reported file changed too many times to enumerate its history safely — recover it by hand",
 }
@@ -239,6 +244,9 @@ def _clause(reason: Reason) -> str:
 
 def _quoted(names: Iterable[str]) -> str:
     return ", ".join(f"'{textsafe.plain(name, 60)}'" for name in names)
+
+
+_REMOVED_SHOWN = 5
 
 
 def render_amend_line(outcome: AmendOutcome) -> str:
@@ -265,6 +273,10 @@ def render_amend_line(outcome: AmendOutcome) -> str:
     line = f"{repository}: {'; '.join(acts)}"
     if outcome.commit:
         line += f" (commit {textsafe.plain(outcome.commit, 40)})"
+    if outcome.removed and outcome.completed:
+        shown = ", ".join(textsafe.plain(p, 120) for p in outcome.removed[:_REMOVED_SHOWN])
+        rest = len(outcome.removed) - _REMOVED_SHOWN
+        line += f"; removed {shown}" + (f" and {rest} more" if rest > 0 else "")
     if not outcome.completed:
         clauses.insert(0, _NOT_FULLY_UPDATED)
     return line + (f"; {'; '.join(clauses)}" if clauses else "")

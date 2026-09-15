@@ -77,7 +77,8 @@ class GitHistoryMatcher(Matcher):
                          f"3-way merge; e.g. {paths[:3]} ({why}); "
                          f"{_liveness_note(target.repo_root, sha, paths)}; "
                          f"by {meta.get('author_email','?')}",
-                vector="evil-merge", related_paths=tuple(paths), commit_sha=sha,
+                vector="evil-merge", related_paths=tuple(paths),
+                payload_paths=tuple(loader_paths), commit_sha=sha,
                 confidence=(HEURISTIC if sig.get("confidence") == "heuristic" else CONFIRMED),
                 composed_evidence=True))
         return findings
