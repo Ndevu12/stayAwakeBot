@@ -1312,6 +1312,48 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         return Finding("fake-font-blockchain", "fake-font", Severity.HIGH, path,
                        "wholly foreign", remediation="quarantine-file", confidence=CONFIRMED)
 
+    def test_an_evil_merge_injection_carrying_a_payload_removes_the_whole_injected_set(self):
+        """The malware brought a set of files in one merge (none in either parent), one of them a
+        confirmed payload. The whole set it brought is removed; the user's own files survive."""
+        from stayawake.bots.security.scanner import scan_target
+        from stayawake.bots.security.targets import LocalRepoTarget
+        self.git(self.d, "merge", "--no-commit", "--no-ff", "feature")
+        self.write(self.d, "public/fonts/loader.woff2",
+                   "global['_V']=function(x){return x};require('child_process').exec('id');\n")
+        self.write(self.d, "public/fonts/pad1.woff2", "wOF2\x00\x01\x00\x00genuine-looking-one\n")
+        self.write(self.d, "public/fonts/pad2.woff2", "wOF2\x00\x01\x00\x00genuine-looking-two\n")
+        self.write(self.d, "public/fonts/README.md", "Blockchain Explorer BlockchainFont TechMono\n")
+        self.commit(self.d, "Merge pull request #1 from feature")
+        scan = scan_target(LocalRepoTarget(self.d, str(self.d), ScanOptions()), load_signatures())
+        outcome = self._act_full(scan, pusher=lambda *a: PushResult(True))
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        tip = self._rev(self.base)
+        reachable = subprocess.run(["git", "-C", str(self.d), "rev-list", tip],
+                                   capture_output=True, text=True).stdout.split()
+
+        def in_history(path):
+            return any(subprocess.run(["git", "-C", str(self.d), "cat-file", "-e", f"{c}:{path}"],
+                                      capture_output=True).returncode == 0 for c in reachable)
+
+        for gone in ("public/fonts/loader.woff2", "public/fonts/pad1.woff2",
+                     "public/fonts/pad2.woff2", "public/fonts/README.md"):
+            self.assertFalse(in_history(gone), f"malware-injected {gone} still in history")
+        self.assertEqual("base\n", self._show(f"{self.base}:a.txt"), "the user's file is kept")
+        self.assertEqual("feature\n", self._show(f"{self.base}:b.txt"), "the user's file is kept")
+
+    def test_a_merge_injection_without_a_payload_is_not_removed(self):
+        """The injection is only the malware's delivery when it carries a confirmed payload. A merge
+        that introduced only benign files is reported, never swept — an attacker cannot bundle the
+        maintainer's files with nothing malicious and have them deleted."""
+        from stayawake.bots.security.scanner import scan_target
+        from stayawake.bots.security.targets import LocalRepoTarget
+        from stayawake.bots.security.pr.amend import _confirmed_commits
+        self.git(self.d, "merge", "--no-commit", "--no-ff", "feature")
+        self.write(self.d, "conf.json", '{"ok": true}\n')
+        self.commit(self.d, "Merge pull request #1 from feature")
+        scan = scan_target(LocalRepoTarget(self.d, str(self.d), ScanOptions()), load_signatures())
+        self.assertEqual([], _confirmed_commits(scan), "a payload-free injection must not be swept")
+
     def test_a_wholly_foreign_file_is_removed_from_history_with_the_flag(self):
         p = "src/fonts/BlockchainFont.woff2"
         self.write(self.d, p, "wOF2\x00camouflage-blob\n")

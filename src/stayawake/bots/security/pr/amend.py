@@ -67,21 +67,27 @@ def _branches_carrying_any(repo: Path, infected) -> list[tuple[str, str, str]]:
 
 
 def _confirmed_commits(scan) -> list:
-    """Confirmed findings that name a commit and the paths in it to correct.
+    """Findings that name a commit and every path that commit brought into the repository.
 
-    The shape of the commit no longer decides this — an ordinary commit that introduced the
-    payload is as replaceable as a merge that smuggled it, and the reconstruction picks the clean
-    content from the commit's own shape.
+    A commit is acted on when it is itself confirmed, or when a confirmed payload sits among the
+    paths it introduced — an injection carrying a known payload is the malware's delivery, and the
+    whole of what it brought has no prior life in the repository (it is in neither parent). Every
+    path the finding names is then replaced from the commit's own clean shape.
     """
+    anchor_paths = {getattr(f, "path", "") for f in scan.findings
+                    if getattr(f, "confidence", None) == CONFIRMED
+                    and not getattr(f, "advisory_only", False)
+                    and not getattr(f, "commit_sha", None)}
     found = []
     seen: set[str] = set()
     for f in scan.findings:
-        if getattr(f, "confidence", None) != CONFIRMED:
-            continue
-        if not getattr(f, "related_paths", None):
-            continue
+        related = getattr(f, "related_paths", None)
         sha = getattr(f, "commit_sha", None)
-        if not sha or sha in seen:
+        if not related or not sha or sha in seen:
+            continue
+        confirmed = getattr(f, "confidence", None) == CONFIRMED
+        carries_payload = bool(set(related) & anchor_paths)
+        if not (confirmed or carries_payload):
             continue
         seen.add(sha)
         found.append(f)
