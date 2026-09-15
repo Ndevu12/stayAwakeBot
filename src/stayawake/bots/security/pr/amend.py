@@ -559,6 +559,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
 
     survives = _survives(signatures)
     replacements = {}
+    recovered_paths: set[str] = set()
     for sha, paths in infected.items():
         replacement = gitamend.replacement_commit(repo, sha, paths, signing, survives)
         if not replacement.ok:
@@ -571,6 +572,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
         if beyond:
             return refused(display, Cause.REPLACEMENT_LOSES_MORE_THAN_THE_PAYLOAD,
                            ", ".join(sorted(beyond)[:5]))
+        recovered_paths |= set(replacement.recovered)
         replacements[sha] = replacement
 
     # Objects only — no reference moves until the capture below has been read back.
@@ -622,6 +624,9 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
         if not result.force_updated and cause is not Cause.PUSH_NOT_CONFIRMED:
             failed.append(branch)
     survivors = _survivors(repo, slug, sorted(all_infected), token)
+    if recovered_paths:
+        survivors.insert(0, Reason(Cause.FILE_RESTORED_FROM_A_PARENT,
+                                   ", ".join(sorted(recovered_paths))))
     if unhandled:
         survivors.insert(0, Reason(Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY, str(unhandled)))
     if failed:

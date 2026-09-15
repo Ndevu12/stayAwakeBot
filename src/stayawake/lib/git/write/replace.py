@@ -43,6 +43,8 @@ class Replacement:
     """The replacement commit, once one has been written. `replacement_tree` leaves it empty."""
     reverted: tuple[str, ...] = ()
     removed: tuple[str, ...] = ()
+    recovered: tuple[str, ...] = ()
+    """Paths put back from a parent, not the baseline."""
     plan: tuple[tuple[str, tuple[str, str] | None], ...] = ()
     """What was decided per path — `(path, entry)` to put that entry back, `(path, None)` to
     remove it. The commits AFTER this one inherit it: their trees still hold the payload blob at
@@ -76,17 +78,10 @@ def _baseline(repo: str | Path, ps: list[str]) -> tuple[str | None, frozenset[st
 
 def replacement_tree(repo: str | Path, commit: str, flagged_paths,
                      still_carries=None) -> Replacement:
-    """`commit`'s recorded tree with each flagged path put back to what it should have been.
-
-    A flagged path that exists in the baseline is reverted to it; one absent from every parent
-    was introduced by this commit and is removed. Refuses rather than guessing when git could not
-    merge that path on its own, when the path is a submodule, or when the path came from a parent
-    but has no clean version to restore.
-
-    `still_carries(text) -> reason | None` is the caller's judge of whether restored content is
-    actually clean — injected, so this layer never depends on the security domain. Without it the
-    baseline is merely NOMINATED as clean: when the payload was already in a parent and this
-    commit added more of it, reverting restores a version that still carries it.
+    """`commit`'s recorded tree with each flagged path put back to its clean version, or removed if
+    no parent held it. Takes the repo, the commit, the flagged paths, and an injected `still_carries`
+    that judges restored content. Returns a `Replacement`, or a refusal when there is no clean
+    version to restore.
     """
     flagged = sorted({p for p in flagged_paths if p})
     if not flagged:
@@ -95,6 +90,7 @@ def replacement_tree(repo: str | Path, commit: str, flagged_paths,
     ps = parents(repo, commit)
     baseline, conflicted = _baseline(repo, ps)
     plan: list[tuple[str, tuple[str, str] | None]] = []
+    recovered: list[str] = []
     for path in flagged:
         if path in conflicted:
             return _refused("conflicted",
@@ -104,15 +100,22 @@ def replacement_tree(repo: str | Path, commit: str, flagged_paths,
         if recorded is not None and recorded[0] == _GITLINK:
             return _refused("submodule", f"{path} is a submodule")
         clean = tree_entry(repo, baseline, path) if baseline else None
+        from_parent = None
+        if clean is None and baseline is not None:
+            from_parent = next((p for p in ps if path_exists_at(repo, p, path)), None)
+            clean = tree_entry(repo, from_parent, path) if from_parent is not None else None
         if clean is not None:
             if clean[0] == _GITLINK:
                 return _refused("submodule", f"{path} is a submodule in the clean version")
-            carried = still_carries(file_at(repo, baseline, path)) if still_carries else None
+            source = from_parent if from_parent is not None else baseline
+            carried = still_carries(file_at(repo, source, path)) if still_carries else None
             if carried:
                 return _refused("baseline-carries-payload",
                                 f"the version of {path} this would restore still carries the "
                                 f"payload ({carried}) — it was introduced earlier")
             plan.append((path, clean))
+            if from_parent is not None:
+                recovered.append(path)
             continue
         if any(path_exists_at(repo, p, path) for p in ps):
             return _refused("shape",
@@ -128,7 +131,8 @@ def replacement_tree(repo: str | Path, commit: str, flagged_paths,
                         "the correction did not take effect at " + ", ".join(untouched))
     return Replacement(tree=tree, plan=tuple(plan),
                        reverted=tuple(p for p, entry in plan if entry is not None),
-                       removed=tuple(p for p, entry in plan if entry is None))
+                       removed=tuple(p for p, entry in plan if entry is None),
+                       recovered=tuple(recovered))
 
 
 def _not_applied(repo: str | Path, tree: str,

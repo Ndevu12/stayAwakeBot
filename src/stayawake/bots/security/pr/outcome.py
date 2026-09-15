@@ -73,6 +73,7 @@ class Cause(Enum):
     FORKS_NOT_ESTABLISHED = "forks-not-established"
     PREVIOUS_OBJECTS_UNCOLLECTED = "previous-objects-uncollected"
     PAYLOAD_NEEDS_MANUAL_RECOVERY = "payload-needs-manual-recovery"
+    FILE_RESTORED_FROM_A_PARENT = "file-restored-from-a-parent"
     HISTORY_TOO_LARGE_TO_ENUMERATE = "history-too-large-to-enumerate"
 
 
@@ -220,6 +221,8 @@ _PHRASE = {
     Cause.PREVIOUS_OBJECTS_UNCOLLECTED: "previous objects remain until collected",
     Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY:
         "{detail} confirmed finding(s) here need manual recovery — this verb could not remove them",
+    Cause.FILE_RESTORED_FROM_A_PARENT:
+        "{detail} was restored from a parent because the merge dropped it — confirm it should be kept",
     Cause.HISTORY_TOO_LARGE_TO_ENUMERATE:
         "a reported file changed too many times to enumerate its history safely — recover it by hand",
 }

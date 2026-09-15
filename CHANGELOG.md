@@ -14,18 +14,11 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Fixed
-- **`saw fix amend` removes the files a poisoned merge introduced alongside a payload, not only
-  the payload itself.** When a merge introduced a confirmed payload into a directory it created whole
-  — every file there absent from both branches it merged — those files are removed with the payload,
-  and the removed paths are named in the result. A payload edited into an existing file is removed by
-  restoring that file to its pre-payload content. A file the merge brought in from the branch it
-  merges, one it merely edited, and a new file it added to an existing directory are kept. A file
-  your own history already holds is never deleted — even one a merge re-added carrying a payload;
-  when the payload cannot be lifted cleanly, the run reports that file for you to recover instead of
-  removing it.
+- **`saw fix amend` removes what a poisoned merge brought in, not only the payload, and keeps your
+  own files.** Files the merge added alongside a payload are removed and named in the result; a file
+  your history already holds is never deleted — a poisoned one is restored to its clean version and
+  flagged for review.
 - **`saw fix` removes the file it flagged, not the whole folder it sits in.** A single flagged file in a shared folder no longer takes the folder's other files with it.
-- **`saw fix amend` names the files it removed.** A run that removed a file from your history whole
-  reported only which branches moved, so there was nothing in the output to tell you what had gone.
 
 ## [0.11.3] - 2026-09-14
 

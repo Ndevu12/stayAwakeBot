@@ -1432,10 +1432,10 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         scan = scan_target(LocalRepoTarget(self.d, str(self.d), ScanOptions()), load_signatures())
         self.assertEqual([], _confirmed_commits(scan), "a payload-free injection must not be swept")
 
-    def test_a_poisoned_readd_of_a_parent_file_is_refused_not_deleted(self):
+    def test_a_poisoned_readd_of_a_parent_file_is_restored_clean_and_flagged(self):
         """A merge re-adds a file with a payload; one parent still holds it clean, the other deleted
-        it, so the clean 3-way merge drops it. saw must not delete the parent's file whole — it
-        refuses (manual recovery), the file survives un-rewritten, and nothing is force-pushed."""
+        it, so the clean 3-way merge drops it. saw restores the parent's clean version — the payload
+        goes, the file stays — and flags the path for review without erroring the run."""
         from stayawake.bots.security.scanner import scan_target
         from stayawake.bots.security.targets import LocalRepoTarget
         font = "assets/brand.woff2"
@@ -1455,11 +1455,13 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         scan = scan_target(LocalRepoTarget(self.d, str(self.d), ScanOptions()), load_signatures())
         calls = []
         outcome = self._act_full(scan, pusher=lambda *a: calls.append(a) or PushResult(True))
-        self.assertFalse(outcome.completed, "a parent's file must not be deleted whole")
-        self.assertEqual(calls, [], "nothing may be force-pushed on a refusal")
-        self.assertEqual(poisoned, self._show(f"{self.base}:{font}"),
-                         "the parent's file must survive un-rewritten")
-        self.assertIn(font, render_amend_line(outcome), "the operator must be told which path blocked")
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertEqual(clean, self._show(f"{self.base}:{font}"),
+                         "the file is restored to the parent's clean content")
+        self.assertNotIn("child_process", self._show(f"{self.base}:{font}"))
+        self.assertTrue(outcome.needs_review, "restoring from a parent must be flagged for review")
+        self.assertIn(font, render_amend_line(outcome), "the review names the restored file")
+        self.assertTrue(calls, "the branch was force-updated")
 
     def test_a_wholly_foreign_file_is_removed_from_history_with_the_flag(self):
         p = "src/fonts/BlockchainFont.woff2"
