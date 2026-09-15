@@ -113,7 +113,7 @@ class TestStripAndResidual(unittest.TestCase):
         applied = remediation.apply(repo, [remediation.Change("quarantine", ".", "x")], q)
         self.assertEqual(applied, [])
         self.assertTrue(keep.is_file())
-        finding = type("F", (), {"path": ".", "remediation": "quarantine-dir",
+        finding = type("F", (), {"path": ".", "remediation": "quarantine-file",
                                  "confidence": "confirmed", "description": "x"})()
         self.assertNotIn(".", {c.path for c in remediation.plan([finding])})
 
@@ -282,6 +282,61 @@ class TestPathSafe(unittest.TestCase):
         self.assertFalse(is_safe_write_target(root / ".." / "x", root))  # .. escape
         self.assertTrue(is_safe_write_target(root / "real.json", root))  # benign existing
         self.assertTrue(is_safe_write_target(root / "new.json", root))   # benign new file
+
+
+class TestActionScopeMatchesEvidence(unittest.TestCase):
+    """saw#288 — a removal covers the file the evidence named, never its whole directory."""
+
+    GENUINE_WOFF2 = b"wOF2" + bytes(400)
+    GENUINE_TTF = b"\x00\x01\x00\x00" + bytes(400)
+    GENUINE_LICENSE = "SIL Open Font License 1.1\nCopyright the font authors.\n"
+    CAMOUFLAGE_README = ("# Fonts Directory\n"
+                         "This directory contains custom fonts for the Blockchain Explorer.\n"
+                         "Required: BlockchainFont-Regular, TechMono-Regular.\n")
+    PAYLOAD_WOFF2 = "function f(){ var a = 1; return a }\n"
+
+    def setUp(self):
+        self.repo = Path(tempfile.mkdtemp()) / "repo"
+        self.fonts = self.repo / "public" / "fonts"
+        self.fonts.mkdir(parents=True)
+        self.q = self.repo / ".malware-quarantine"
+        (self.fonts / "README.md").write_text(self.CAMOUFLAGE_README, encoding="utf-8")
+        (self.fonts / "Inter.woff2").write_bytes(self.GENUINE_WOFF2)
+        (self.fonts / "NotoSans.ttf").write_bytes(self.GENUINE_TTF)
+        (self.fonts / "OFL.txt").write_text(self.GENUINE_LICENSE, encoding="utf-8")
+
+    def _findings(self):
+        return scan_target(LocalRepoTarget(self.repo, "t", ScanOptions()), SIGS, []).findings
+
+    def test_camouflage_readme_and_payload_go_but_genuine_fonts_and_the_dir_stay(self):
+        """The flagged README and the JS-carrying woff2 are removed; the genuine third-party
+        fonts beside them, and the fonts directory itself, survive."""
+        (self.fonts / "fa-solid-400.woff2").write_text(self.PAYLOAD_WOFF2, encoding="utf-8")
+        plan = remediation.plan(self._findings())
+        self.assertNotIn("public/fonts", {c.path for c in plan})
+        self.assertEqual({"public/fonts/README.md", "public/fonts/fa-solid-400.woff2"},
+                         {c.path for c in plan})
+        remediation.apply(self.repo, plan, self.q)
+        self.assertFalse((self.fonts / "README.md").exists())
+        self.assertFalse((self.fonts / "fa-solid-400.woff2").exists())
+        self.assertTrue(self.fonts.is_dir())
+        self.assertEqual((self.fonts / "Inter.woff2").read_bytes(), self.GENUINE_WOFF2)
+        self.assertEqual((self.fonts / "NotoSans.ttf").read_bytes(), self.GENUINE_TTF)
+        self.assertEqual((self.fonts / "OFL.txt").read_text(encoding="utf-8"), self.GENUINE_LICENSE)
+
+    def test_a_filename_only_font_is_reported_but_never_auto_removed(self):
+        """A fa-solid-400.woff2 with real font magic trips only the filename signature (its bytes
+        were never read); it stays reported yet fix never deletes it, while the camouflage README —
+        read by content — is removed."""
+        (self.fonts / "fa-solid-400.woff2").write_bytes(self.GENUINE_WOFF2)
+        findings = self._findings()
+        ids = {f.signature_id for f in findings}
+        self.assertIn("fake-font-fa-solid-400", ids)
+        self.assertNotIn("fake-font-text-woff", ids)
+        remediation.apply(self.repo, remediation.plan(findings), self.q)
+        self.assertTrue((self.fonts / "fa-solid-400.woff2").exists())
+        self.assertEqual((self.fonts / "fa-solid-400.woff2").read_bytes(), self.GENUINE_WOFF2)
+        self.assertFalse((self.fonts / "README.md").exists())
 
 
 if __name__ == "__main__":
