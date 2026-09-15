@@ -66,6 +66,22 @@ def _branches_carrying_any(repo: Path, infected) -> list[tuple[str, str, str]]:
     return list(heads.values())
 
 
+def _injection_under_payload(repo: Path, merge_sha: str, related, anchors) -> list[str]:
+    """The paths a promoted merge injection may remove: those absent from EVERY parent (born at the
+    merge, no prior life) and sitting under the directory of a confirmed payload in the same merge.
+    A modified parent file, or a file outside the payload's own tree, is never included."""
+    import posixpath
+    ps = gitutil.parents(repo, merge_sha)
+    dirs = {posixpath.dirname(a) for a in anchors if posixpath.dirname(a)}
+    out = []
+    for path in related:
+        if any(gitutil.path_exists_at(repo, parent, path) for parent in ps):
+            continue
+        if path in anchors or any(path.startswith(d + "/") for d in dirs):
+            out.append(path)
+    return out
+
+
 def _confirmed_commits(scan) -> list:
     """Findings that name a commit and every path that commit brought into the repository.
 
@@ -86,11 +102,11 @@ def _confirmed_commits(scan) -> list:
         if not related or not sha or sha in seen:
             continue
         confirmed = getattr(f, "confidence", None) == CONFIRMED
-        carries_payload = bool(set(related) & anchor_paths)
-        if not (confirmed or carries_payload):
+        anchors = tuple(sorted(set(related) & anchor_paths))
+        if not (confirmed or anchors):
             continue
         seen.add(sha)
-        found.append(f)
+        found.append((f, anchors, not confirmed))
     return found
 
 
@@ -451,11 +467,13 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
         return refused(display, Cause.SCAN_DID_NOT_FINISH)
     commits = _confirmed_commits(scan)
     infected: dict[str, tuple[str, ...]] = {}
-    for finding in commits:
+    for finding, anchors, promoted in commits:
         sha = _full(repo, getattr(finding, "commit_sha", None) or "")
         if not sha:
             return refused(display, Cause.CONFIRMED_COMMIT_UNRESOLVED)
-        paths = tuple(getattr(finding, "related_paths", ()) or ())
+        related = tuple(getattr(finding, "related_paths", ()) or ())
+        paths = (tuple(_injection_under_payload(repo, sha, related, anchors))
+                 if promoted else related)
         if not paths:
             return refused(display, Cause.COMMIT_SHAPE_NOT_MODELLED, sha[:12])
         infected[sha] = tuple(dict.fromkeys(infected.get(sha, ()) + paths))

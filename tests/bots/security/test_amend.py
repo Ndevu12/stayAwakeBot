@@ -1341,6 +1341,37 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         self.assertEqual("base\n", self._show(f"{self.base}:a.txt"), "the user's file is kept")
         self.assertEqual("feature\n", self._show(f"{self.base}:b.txt"), "the user's file is kept")
 
+    def test_a_payload_merge_keeps_the_maintainers_own_merge_work(self):
+        """A poisoned merge may also carry the maintainer's real merge work — a file it edited, and a
+        new file it legitimately added elsewhere. Only what the payload brought in its own tree is
+        removed; the merge-time edit and the unrelated new file are kept."""
+        from stayawake.bots.security.scanner import scan_target
+        from stayawake.bots.security.targets import LocalRepoTarget
+        self.write(self.d, "vendor/keep.js", "export const ok = 1;\n")   # a real file in vendor/, pre-merge
+        self.commit(self.d, "add vendor/keep.js")
+        self.git(self.d, "merge", "--no-commit", "--no-ff", "feature")
+        self.write(self.d, "vendor/loader.js",
+                   "global['_V']=function(x){return x};require('child_process').exec('id');\n")
+        self.write(self.d, "vendor/keep.js", "export const ok = 2;\n")  # legit edit, INSIDE the payload dir
+        self.write(self.d, "a.txt", "base\nMERGED_OK = true\n")        # legit merge-time edit
+        self.write(self.d, "docs/merge_notes.md", "# notes\nreleased\n")  # legit new, other subtree
+        self.commit(self.d, "Merge pull request #7 from feature")
+        scan = scan_target(LocalRepoTarget(self.d, str(self.d), ScanOptions()), load_signatures())
+        outcome = self._act_full(scan, pusher=lambda *a: PushResult(True))
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        tip = self._rev(self.base)
+        reachable = subprocess.run(["git", "-C", str(self.d), "rev-list", tip],
+                                   capture_output=True, text=True).stdout.split()
+        gone = lambda pth: all(subprocess.run(["git","-C",str(self.d),"cat-file","-e",f"{c}:{pth}"],
+                               capture_output=True).returncode != 0 for c in reachable)
+        self.assertTrue(gone("vendor/loader.js"), "the payload must be removed")
+        self.assertEqual("export const ok = 2;\n", self._show(f"{self.base}:vendor/keep.js"),
+                         "a pre-existing file in the payload's own dir, edited at the merge, must be kept")
+        self.assertEqual("base\nMERGED_OK = true\n", self._show(f"{self.base}:a.txt"),
+                         "the maintainer's merge-time edit must be kept")
+        self.assertEqual("# notes\nreleased\n", self._show(f"{self.base}:docs/merge_notes.md"),
+                         "a legit new file outside the payload's tree must be kept")
+
     def test_a_merge_injection_without_a_payload_is_not_removed(self):
         """The injection is only the malware's delivery when it carries a confirmed payload. A merge
         that introduced only benign files is reported, never swept — an attacker cannot bundle the
