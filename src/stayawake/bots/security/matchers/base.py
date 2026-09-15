@@ -50,17 +50,15 @@ def globs_ok(relpath: str, sig: dict[str, Any]) -> bool:
     return any(fnmatch(relpath, g) or fnmatch(base, g) for g in globs)
 
 
-def _loader_check(signatures: list[dict[str, Any]], *, confirmed_only: bool,
-                  corroborated: bool = False):
-    """Compile the CONTENT-loader fingerprints into `check(text) -> signature_id | None`.
-
-    Matches against the text AND its newline-flattened form, so a payload wrapped across lines
-    still hits. Patterns come from the live signature DB so no consumer can drift from it.
-    With `corroborated`, a signature that declares a corroborator only answers when that
-    corroborator holds; a later signature can still answer for the same text."""
+def _content_check(signatures: list[dict[str, Any]], *, confirmed_only: bool,
+                   corroborated: bool = False, categories=frozenset({"code-loader"})):
+    """Compile the content fingerprints into `check(text) -> signature_id | None`. Takes the
+    signatures, `confirmed_only` to drop heuristic tiers, `corroborated` to hold each signature to
+    its declared corroborator, and `categories` to compile (None for every category). Matches the
+    text and its newline-flattened form."""
     pats = [(s["id"], re.compile(s["pattern"], re.IGNORECASE), s.get("corroborate"))
             for s in signatures
-            if s.get("pattern") and s.get("category") == "code-loader"
+            if s.get("pattern") and (categories is None or s.get("category") in categories)
             and not (confirmed_only and s.get("confidence") == HEURISTIC)]
 
     def check(text: str):
@@ -82,20 +80,26 @@ def _loader_check(signatures: list[dict[str, Any]], *, confirmed_only: bool,
 def build_confirmed_loader_check(signatures: list[dict[str, Any]]):
     """CONFIRMED fingerprints only — for matchers whose finding drives a verdict. A heuristic
     shape is one benign code can share, so it must not be laundered into an accusation."""
-    return _loader_check(signatures, confirmed_only=True)
+    return _content_check(signatures, confirmed_only=True)
 
 
 def build_corroborated_loader_check(signatures: list[dict[str, Any]]):
     """CONFIRMED fingerprints, each held to the corroboration its own entry declares — for callers
     judging a fragment where an uncorroborated hit is the documented false-positive class."""
-    return _loader_check(signatures, confirmed_only=True, corroborated=True)
+    return _content_check(signatures, confirmed_only=True, corroborated=True)
 
 
 def build_any_loader_check(signatures: list[dict[str, Any]]):
     """Every tier — for the remediation gate, which asks whether anything loader-shaped SURVIVED
     an excision. A heuristic match must still block a "fixed" claim. Tier grades how confidently
     we accuse, not how carefully we clean."""
-    return _loader_check(signatures, confirmed_only=False)
+    return _content_check(signatures, confirmed_only=False)
+
+
+def build_any_payload_check(signatures: list[dict[str, Any]]):
+    """`check(text) -> signature_id | None` over every confirmed content fingerprint, all
+    categories. Takes the signatures; returns the check."""
+    return _content_check(signatures, confirmed_only=True, categories=None)
 
 
 class Matcher:

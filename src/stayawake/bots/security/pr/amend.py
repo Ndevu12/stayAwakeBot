@@ -17,6 +17,7 @@ from stayawake.lib.git.run import NETWORK_TIMEOUT, run
 from stayawake.bots.security.pr.outcome import (AmendOutcome, BranchResult, Cause, Reason,
                                                       amended, refused, render_amend_line)
 from stayawake.lib.git import authority
+from stayawake.lib.git.merge import detect as mergedetect
 from stayawake.lib.git.write import amend as gitamend
 from stayawake.lib.git.write import rebuild as gitrebuild
 from stayawake.lib.git.write.capture import capture_bundle
@@ -66,25 +67,42 @@ def _branches_carrying_any(repo: Path, infected) -> list[tuple[str, str, str]]:
     return list(heads.values())
 
 
-def _confirmed_commits(scan) -> list:
-    """Confirmed findings that name a commit and the paths in it to correct.
+def _swept_paths(repo: Path, merge_sha: str, related, anchors) -> list[str]:
+    """The paths to remove from `related`: a confirmed-payload path, or a path in a payload's
+    entirely graft-introduced delivery tree. Takes the repo, the merge sha, the merge's introduced
+    paths, and the confirmed-payload paths among them. Returns the subset to remove."""
+    trees = {mergedetect.delivery_subtree(repo, merge_sha, a) for a in anchors}
+    trees.discard(None)
+    out = []
+    for path in related:
+        if path in anchors or any(path == d or path.startswith(d + "/") for d in trees):
+            out.append(path)
+    return out
 
-    The shape of the commit no longer decides this — an ordinary commit that introduced the
-    payload is as replaceable as a merge that smuggled it, and the reconstruction picks the clean
-    content from the commit's own shape.
-    """
+
+def _confirmed_commits(scan) -> list:
+    """Commit-carrying findings to act on, with the confirmed-payload paths in each. Takes the scan.
+    Returns `(finding, anchors)` per commit that is itself confirmed, or that names a confirmed
+    payload among its paths."""
+    external = {getattr(f, "path", "") for f in scan.findings
+                if getattr(f, "confidence", None) == CONFIRMED
+                and not getattr(f, "advisory_only", False)
+                and not getattr(f, "commit_sha", None)}
     found = []
     seen: set[str] = set()
     for f in scan.findings:
-        if getattr(f, "confidence", None) != CONFIRMED:
-            continue
-        if not getattr(f, "related_paths", None):
-            continue
+        related = getattr(f, "related_paths", None)
         sha = getattr(f, "commit_sha", None)
-        if not sha or sha in seen:
+        if not related or not sha or sha in seen:
             continue
+        confirmed = getattr(f, "confidence", None) == CONFIRMED
+        ext = set(related) & external
+        if not (confirmed or ext):
+            continue
+        own = set(getattr(f, "payload_paths", ()) or (related if confirmed else ()))
+        anchors = tuple(sorted((own | ext) & set(related)))
         seen.add(sha)
-        found.append(f)
+        found.append((f, anchors))
     return found
 
 
@@ -340,15 +358,12 @@ _CAUSE_PER_REFUSAL_KIND = {
 
 
 def _survives(signatures) -> object:
-    """Whether content still looks loader-shaped, for judging what a revert would restore.
-
-    Every tier, not only the confirmed one: this asks whether anything survived an excision, and
-    a heuristic match must still block a claim that the payload is gone.
-    """
-    from stayawake.bots.security.matchers.base import build_any_loader_check
+    """`check(text) -> signature_id | None` for whether restored or left content still carries a
+    payload the scanner would flag. Takes the signatures; returns the check."""
+    from stayawake.bots.security.matchers.base import build_any_payload_check
     flat = [s for group in (signatures or {}).values() for s in group] \
         if isinstance(signatures, dict) else list(signatures or [])
-    return build_any_loader_check(flat)
+    return build_any_payload_check(flat)
 
 
 def _tags_at(repo: Path, slug: str, olds: list[str], token: str | None) -> tuple[list[str], bool]:
@@ -445,13 +460,16 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
         return refused(display, Cause.SCAN_DID_NOT_FINISH)
     commits = _confirmed_commits(scan)
     infected: dict[str, tuple[str, ...]] = {}
-    for finding in commits:
+    injected_removed: set[str] = set()
+    for finding, anchors in commits:
         sha = _full(repo, getattr(finding, "commit_sha", None) or "")
         if not sha:
             return refused(display, Cause.CONFIRMED_COMMIT_UNRESOLVED)
-        paths = tuple(getattr(finding, "related_paths", ()) or ())
+        related = tuple(getattr(finding, "related_paths", ()) or ())
+        paths = tuple(_swept_paths(repo, sha, related, anchors))
         if not paths:
             return refused(display, Cause.COMMIT_SHAPE_NOT_MODELLED, sha[:12])
+        injected_removed |= mergedetect.born_at_merge(repo, sha, paths)
         infected[sha] = tuple(dict.fromkeys(infected.get(sha, ()) + paths))
 
     clean: dict[str, tuple] = {}
@@ -538,6 +556,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
 
     survives = _survives(signatures)
     replacements = {}
+    recovered_paths: set[str] = set()
     for sha, paths in infected.items():
         replacement = gitamend.replacement_commit(repo, sha, paths, signing, survives)
         if not replacement.ok:
@@ -550,6 +569,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
         if beyond:
             return refused(display, Cause.REPLACEMENT_LOSES_MORE_THAN_THE_PAYLOAD,
                            ", ".join(sorted(beyond)[:5]))
+        recovered_paths |= set(replacement.recovered)
         replacements[sha] = replacement
 
     # Objects only — no reference moves until the capture below has been read back.
@@ -601,6 +621,9 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
         if not result.force_updated and cause is not Cause.PUSH_NOT_CONFIRMED:
             failed.append(branch)
     survivors = _survivors(repo, slug, sorted(all_infected), token)
+    if recovered_paths:
+        survivors.insert(0, Reason(Cause.FILE_RESTORED_FROM_A_PARENT,
+                                   ", ".join(sorted(recovered_paths))))
     if unhandled:
         survivors.insert(0, Reason(Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY, str(unhandled)))
     if failed:
@@ -615,4 +638,5 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
             survivors.insert(0, Reason(Cause.LEFT_PART_WAY, ", ".join(unrestored)))
     touched = len(all_infected)
     label = (oldest[:12] if touched == 1 else f"{touched} commits from {oldest[:12]}")
-    return amended(display, label, tuple(results), tuple(survivors))
+    return amended(display, label, tuple(results), tuple(survivors),
+                   sorted(set(remove) | injected_removed))

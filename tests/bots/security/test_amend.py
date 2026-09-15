@@ -15,7 +15,7 @@ from unittest import mock
 from contextlib import ExitStack, contextmanager, redirect_stderr
 
 from stayawake import cli
-from stayawake.bots.security.models import CONFIRMED, Finding, ScanResult, Severity
+from stayawake.bots.security.models import CONFIRMED, HEURISTIC, Finding, ScanResult, Severity
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.pr import amend as amendmod
 from stayawake.bots.security.pr.amend import amend_outcome, amend_repo
@@ -1312,6 +1312,210 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         return Finding("fake-font-blockchain", "fake-font", Severity.HIGH, path,
                        "wholly foreign", remediation="quarantine-file", confidence=CONFIRMED)
 
+    def test_an_evil_merge_injection_carrying_a_payload_removes_the_whole_injected_set(self):
+        """The malware brought a set of files in one merge (none in either parent), one of them a
+        confirmed payload. The whole set it brought is removed; the user's own files survive."""
+        from stayawake.bots.security.scanner import scan_target
+        from stayawake.bots.security.targets import LocalRepoTarget
+        self.git(self.d, "merge", "--no-commit", "--no-ff", "feature")
+        self.write(self.d, "public/fonts/loader.woff2",
+                   "global['_V']=function(x){return x};require('child_process').exec('id');\n")
+        self.write(self.d, "public/fonts/pad1.woff2", "wOF2\x00\x01\x00\x00genuine-looking-one\n")
+        self.write(self.d, "public/fonts/pad2.woff2", "wOF2\x00\x01\x00\x00genuine-looking-two\n")
+        self.write(self.d, "public/fonts/README.md", "Blockchain Explorer BlockchainFont TechMono\n")
+        self.commit(self.d, "Merge pull request #1 from feature")
+        scan = scan_target(LocalRepoTarget(self.d, str(self.d), ScanOptions()), load_signatures())
+        outcome = self._act_full(scan, pusher=lambda *a: PushResult(True))
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        tip = self._rev(self.base)
+        reachable = subprocess.run(["git", "-C", str(self.d), "rev-list", tip],
+                                   capture_output=True, text=True).stdout.split()
+
+        def in_history(path):
+            return any(subprocess.run(["git", "-C", str(self.d), "cat-file", "-e", f"{c}:{path}"],
+                                      capture_output=True).returncode == 0 for c in reachable)
+
+        for gone in ("public/fonts/loader.woff2", "public/fonts/pad1.woff2",
+                     "public/fonts/pad2.woff2", "public/fonts/README.md"):
+            self.assertFalse(in_history(gone), f"malware-injected {gone} still in history")
+            self.assertIn(gone, outcome.removed, f"{gone} was removed but not disclosed")
+        self.assertEqual("base\n", self._show(f"{self.base}:a.txt"), "the user's file is kept")
+        self.assertEqual("feature\n", self._show(f"{self.base}:b.txt"), "the user's file is kept")
+
+    def test_a_payload_merge_keeps_the_maintainers_own_merge_work(self):
+        """A poisoned merge may also carry the maintainer's real merge work — a file it edited, and a
+        new file it legitimately added elsewhere. Only what the payload brought in its own tree is
+        removed; the merge-time edit and the unrelated new file are kept."""
+        from stayawake.bots.security.scanner import scan_target
+        from stayawake.bots.security.targets import LocalRepoTarget
+        self.write(self.d, "vendor/keep.js", "export const ok = 1;\n")   # a real file in vendor/, pre-merge
+        self.commit(self.d, "add vendor/keep.js")
+        self.git(self.d, "merge", "--no-commit", "--no-ff", "feature")
+        self.write(self.d, "vendor/loader.js",
+                   "global['_V']=function(x){return x};require('child_process').exec('id');\n")
+        self.write(self.d, "vendor/keep.js", "export const ok = 2;\n")  # legit edit, INSIDE the payload dir
+        self.write(self.d, "a.txt", "base\nMERGED_OK = true\n")        # legit merge-time edit
+        self.write(self.d, "docs/merge_notes.md", "# notes\nreleased\n")  # legit new, other subtree
+        self.commit(self.d, "Merge pull request #7 from feature")
+        scan = scan_target(LocalRepoTarget(self.d, str(self.d), ScanOptions()), load_signatures())
+        outcome = self._act_full(scan, pusher=lambda *a: PushResult(True))
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        tip = self._rev(self.base)
+        reachable = subprocess.run(["git", "-C", str(self.d), "rev-list", tip],
+                                   capture_output=True, text=True).stdout.split()
+        gone = lambda pth: all(subprocess.run(["git","-C",str(self.d),"cat-file","-e",f"{c}:{pth}"],
+                               capture_output=True).returncode != 0 for c in reachable)
+        self.assertTrue(gone("vendor/loader.js"), "the payload must be removed")
+        self.assertEqual("export const ok = 2;\n", self._show(f"{self.base}:vendor/keep.js"),
+                         "a pre-existing file in the payload's own dir, edited at the merge, must be kept")
+        self.assertEqual("base\nMERGED_OK = true\n", self._show(f"{self.base}:a.txt"),
+                         "the maintainer's merge-time edit must be kept")
+        self.assertEqual("# notes\nreleased\n", self._show(f"{self.base}:docs/merge_notes.md"),
+                         "a legit new file outside the payload's tree must be kept")
+
+    def test_a_payload_edited_into_a_file_keeps_a_legit_sibling_it_also_touched(self):
+        """The confirmed evil-merge path: a payload is edited into one file, and the merge also makes
+        a legitimate edit to a different file. The payload's file is cleaned; the legitimately-edited
+        sibling is not reverted."""
+        from stayawake.bots.security.scanner import scan_target
+        from stayawake.bots.security.targets import LocalRepoTarget
+        self.write(self.d, "host.js", "export const a = 1;\n")
+        self.write(self.d, "keep.js", "export const legit = 1;\n")
+        self.commit(self.d, "add host + keep")
+        self.git(self.d, "merge", "--no-commit", "--no-ff", "feature")
+        self.write(self.d, "host.js",
+                   "export const a = 1;\nglobal['_V']=function(x){return x};require('child_process').exec('id');\n")
+        self.write(self.d, "keep.js", "export const legit = 2;\n")   # legit merge-time edit
+        self.commit(self.d, "Merge pull request #9 from feature")
+        scan = scan_target(LocalRepoTarget(self.d, str(self.d), ScanOptions()), load_signatures())
+        outcome = self._act_full(scan, pusher=lambda *a: PushResult(True))
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertEqual("export const legit = 2;\n", self._show(f"{self.base}:keep.js"),
+                         "a legitimately-edited sibling must not be reverted")
+        self.assertNotIn("child_process", self._show(f"{self.base}:host.js"), "the payload must be gone")
+
+    def test_a_payload_dropped_into_an_existing_dir_spares_a_new_sibling_there(self):
+        """A payload dropped into a directory that already holds project files does not make the
+        whole directory the malware's — only the payload is removed; a legitimate new file added to
+        that same directory in the merge is kept (removal is per-path, never by shared directory)."""
+        from stayawake.bots.security.scanner import scan_target
+        from stayawake.bots.security.targets import LocalRepoTarget
+        self.write(self.d, "src/app.js", "export const app = 1;\n")   # src/ pre-exists
+        self.commit(self.d, "add src/app.js")
+        self.git(self.d, "merge", "--no-commit", "--no-ff", "feature")
+        self.write(self.d, "src/loader.js",
+                   "global['_V']=function(x){return x};require('child_process').exec('id');\n")
+        self.write(self.d, "src/newfeature.js", "export const feat = 1;\n")  # legit new, same dir
+        self.commit(self.d, "Merge pull request #11 from feature")
+        scan = scan_target(LocalRepoTarget(self.d, str(self.d), ScanOptions()), load_signatures())
+        outcome = self._act_full(scan, pusher=lambda *a: PushResult(True))
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        tip = self._rev(self.base)
+        reachable = subprocess.run(["git", "-C", str(self.d), "rev-list", tip],
+                                   capture_output=True, text=True).stdout.split()
+        gone = lambda pth: all(subprocess.run(["git","-C",str(self.d),"cat-file","-e",f"{c}:{pth}"],
+                               capture_output=True).returncode != 0 for c in reachable)
+        self.assertTrue(gone("src/loader.js"), "the payload must be removed")
+        self.assertEqual("export const feat = 1;\n", self._show(f"{self.base}:src/newfeature.js"),
+                         "a legit new file in the payload's existing directory must be kept")
+
+    def test_a_merge_injection_without_a_payload_is_not_removed(self):
+        """The injection is only the malware's delivery when it carries a confirmed payload. A merge
+        that introduced only benign files is reported, never swept — an attacker cannot bundle the
+        maintainer's files with nothing malicious and have them deleted."""
+        from stayawake.bots.security.scanner import scan_target
+        from stayawake.bots.security.targets import LocalRepoTarget
+        from stayawake.bots.security.pr.amend import _confirmed_commits
+        self.git(self.d, "merge", "--no-commit", "--no-ff", "feature")
+        self.write(self.d, "conf.json", '{"ok": true}\n')
+        self.commit(self.d, "Merge pull request #1 from feature")
+        scan = scan_target(LocalRepoTarget(self.d, str(self.d), ScanOptions()), load_signatures())
+        self.assertEqual([], _confirmed_commits(scan), "a payload-free injection must not be swept")
+
+    def test_a_poisoned_readd_of_a_parent_file_is_restored_clean_and_flagged(self):
+        """A merge re-adds a file with a payload; one parent still holds it clean, the other deleted
+        it, so the clean 3-way merge drops it. saw restores the parent's clean version — the payload
+        goes, the file stays — and flags the path for review without erroring the run."""
+        from stayawake.bots.security.scanner import scan_target
+        from stayawake.bots.security.targets import LocalRepoTarget
+        font = "assets/brand.woff2"
+        clean = "GENUINE-BRAND-FONT-METADATA-v1\n"
+        poisoned = clean + "global['_V']=function(x){return x};require('child_process').exec('id');\n"
+        self.write(self.d, font, clean)
+        self.commit(self.d, "add the brand font")
+        self.git(self.d, "checkout", "-qb", "delbranch")
+        self.git(self.d, "rm", "-q", font)
+        self.commit(self.d, "delete the brand font on the feature branch")
+        self.git(self.d, "checkout", "-q", self.base)
+        self.write(self.d, "d.txt", "mainline work\n")
+        self.commit(self.d, "mainline work, font kept")
+        self.git(self.d, "merge", "--no-commit", "--no-ff", "delbranch")
+        self.write(self.d, font, poisoned)
+        self.commit(self.d, "Merge pull request #1 from delbranch")
+        scan = scan_target(LocalRepoTarget(self.d, str(self.d), ScanOptions()), load_signatures())
+        calls = []
+        outcome = self._act_full(scan, pusher=lambda *a: calls.append(a) or PushResult(True))
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertEqual(clean, self._show(f"{self.base}:{font}"),
+                         "the file is restored to the parent's clean content")
+        self.assertNotIn("child_process", self._show(f"{self.base}:{font}"))
+        self.assertTrue(outcome.needs_review, "restoring from a parent must be flagged for review")
+        self.assertIn(font, render_amend_line(outcome), "the review names the restored file")
+        self.assertTrue(calls, "the branch was force-updated")
+
+    def test_a_restored_parent_file_with_a_heuristic_token_is_not_false_refused(self):
+        """The parent's clean version holds a benign heuristic token (a `curl` line); only confirmed
+        payloads block a restore, so the file is restored and flagged, not refused."""
+        from stayawake.bots.security.scanner import scan_target
+        from stayawake.bots.security.targets import LocalRepoTarget
+        font = "assets/brand.woff2"
+        clean = "GENUINE-BRAND-FONT\ncurl -fsSL https://example.com/notes -o notes.txt\n"
+        poisoned = clean + "global['_V']=function(x){return x};require('child_process').exec('id');\n"
+        self.write(self.d, font, clean)
+        self.commit(self.d, "add the brand font")
+        self.git(self.d, "checkout", "-qb", "delbranch")
+        self.git(self.d, "rm", "-q", font)
+        self.commit(self.d, "delete the brand font on the feature branch")
+        self.git(self.d, "checkout", "-q", self.base)
+        self.write(self.d, "d.txt", "mainline work\n")
+        self.commit(self.d, "mainline work, font kept")
+        self.git(self.d, "merge", "--no-commit", "--no-ff", "delbranch")
+        self.write(self.d, font, poisoned)
+        self.commit(self.d, "Merge pull request #1 from delbranch")
+        scan = scan_target(LocalRepoTarget(self.d, str(self.d), ScanOptions()), load_signatures())
+        calls = []
+        outcome = self._act_full(scan, pusher=lambda *a: calls.append(a) or PushResult(True))
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertEqual(clean, self._show(f"{self.base}:{font}"),
+                         "the benign curl line must survive the restore")
+        self.assertNotIn("child_process", self._show(f"{self.base}:{font}"))
+
+    def test_a_readd_of_a_file_poisoned_in_the_parent_is_refused_not_completed(self):
+        """The only version to restore — the parent's — still carries a confirmed payload, here a
+        non-code-loader exfil marker. saw cannot produce a clean file, so it refuses for manual
+        recovery instead of completing a run that leaves the payload reachable."""
+        from stayawake.bots.security.scanner import scan_target
+        from stayawake.bots.security.targets import LocalRepoTarget
+        font = "assets/brand.woff2"
+        poisoned = "GENUINE-BRAND-FONT-METADATA-v1\nA Mini Shai-Hulud has Appeared\n"
+        self.write(self.d, font, poisoned)
+        self.commit(self.d, "add the brand font")
+        self.git(self.d, "checkout", "-qb", "delbranch")
+        self.git(self.d, "rm", "-q", font)
+        self.commit(self.d, "delete the brand font on the feature branch")
+        self.git(self.d, "checkout", "-q", self.base)
+        self.write(self.d, "d.txt", "mainline work\n")
+        self.commit(self.d, "mainline work, font kept")
+        self.git(self.d, "merge", "--no-commit", "--no-ff", "delbranch")
+        self.write(self.d, font, poisoned + "// build tweak\n")
+        self.commit(self.d, "Merge pull request #1 from delbranch")
+        scan = scan_target(LocalRepoTarget(self.d, str(self.d), ScanOptions()), load_signatures())
+        calls = []
+        outcome = self._act_full(scan, pusher=lambda *a: calls.append(a) or PushResult(True))
+        self.assertFalse(outcome.completed, "must refuse — the only version to restore is poisoned")
+        self.assertEqual(calls, [], "nothing may be force-pushed when it cannot produce a clean file")
+        self.assertTrue(outcome.needs_review)
+
     def test_a_wholly_foreign_file_is_removed_from_history_with_the_flag(self):
         p = "src/fonts/BlockchainFont.woff2"
         self.write(self.d, p, "wOF2\x00camouflage-blob\n")
@@ -1347,6 +1551,40 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         self.assertEqual(0, subprocess.run(
             ["git", "-C", str(self.d), "cat-file", "-e", f"HEAD:{p}"],
             capture_output=True).returncode, "the file is still there")
+
+    def test_a_heuristic_whole_file_finding_is_never_removed_by_either_route(self):
+        p = "src/fonts/Maybe.woff2"
+        self.write(self.d, p, "wOF2\x00unsure\n")
+        self.commit(self.d, "add a file only a heuristic flags")
+        before = self._rev()
+        finding = Finding("fake-font-blockchain", "fake-font", Severity.HIGH, p,
+                          "wholly foreign", remediation="quarantine-file", confidence=HEURISTIC)
+        scan = ScanResult(target=str(self.d), source="local", findings=[finding])
+        for flag in (False, True):
+            outcome = self._act_full(scan, pusher=lambda *a: PushResult(True), remove_foreign=flag)
+            self.assertFalse(outcome.completed, f"a heuristic finding was acted on (flag={flag})")
+            self.assertEqual(before, self._rev(), f"a ref moved on a heuristic finding (flag={flag})")
+
+    def test_a_partial_run_does_not_claim_a_removal(self):
+        from stayawake.bots.security.pr.outcome import amended, BranchResult, render_amend_line
+        o = amended("acme/app", "abcdef012345",
+                    (BranchResult("main", True), BranchResult("victim", False)),
+                    (), ["src/fonts/x.woff2"])
+        self.assertFalse(o.completed)
+        self.assertNotIn("removed", render_amend_line(o))
+
+    def test_the_operator_is_told_which_paths_were_removed(self):
+        p = "src/fonts/BlockchainFont.woff2"
+        self.write(self.d, p, "wOF2\x00camouflage-blob\n")
+        self.commit(self.d, "add the foreign font")
+        self.write(self.d, "app.js", "ok\n")
+        self.commit(self.d, "unrelated work")
+        scan = ScanResult(target=str(self.d), source="local",
+                          findings=[self._foreign_finding(p)])
+        outcome = self._act_full(scan, pusher=lambda *a: PushResult(True), remove_foreign=True)
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertIn(p, outcome.removed)
+        self.assertIn(p, render_amend_line(outcome))
 
     def test_a_foreign_file_on_a_sibling_branch_is_also_removed(self):
         p = "src/fonts/BlockchainFont.woff2"

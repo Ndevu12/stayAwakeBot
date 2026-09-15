@@ -5,9 +5,40 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from stayawake.lib.git.query import parents, changed_paths, path_exists_at, file_at
+import posixpath
+
+from stayawake.lib.git.query import (parents, changed_paths, path_exists_at, file_at,
+                                    list_tree)
 from stayawake.lib.git.merge.tree import auto_merge, auto_merge_tree
 from stayawake.lib.git.merge.corroborate import corroborated
+
+
+def born_at_merge(repo: str | Path, merge_sha: str, paths) -> set[str]:
+    """The subset of `paths` present in none of the merge's parents. Takes the repo, the merge sha,
+    and paths. Returns the set."""
+    ps = parents(repo, merge_sha)
+    return {p for p in paths if all(not path_exists_at(repo, parent, p) for parent in ps)}
+
+
+def _entirely_born(repo: str | Path, merge_sha: str, directory: str) -> bool:
+    contents = list_tree(repo, "HEAD", directory)
+    if not contents:
+        return False
+    return born_at_merge(repo, merge_sha, contents) == set(contents)
+
+
+def delivery_subtree(repo: str | Path, merge_sha: str, anchor: str) -> str | None:
+    """The highest ancestor directory of `anchor` whose files at HEAD are all born at the merge, or
+    None. Takes the repo, the merge sha, and the anchor path."""
+    d = posixpath.dirname(anchor)
+    if not d or not _entirely_born(repo, merge_sha, d):
+        return None
+    while True:
+        up = posixpath.dirname(d)
+        if up and _entirely_born(repo, merge_sha, up):
+            d = up
+        else:
+            return d
 
 
 def clean_merge_blob(repo: str | Path, merge_sha: str, path: str) -> str | None:

@@ -68,6 +68,7 @@ class Finding:
     vector: str | None = None
     confidence: str = CONFIRMED
     related_paths: tuple[str, ...] = ()
+    payload_paths: tuple[str, ...] = ()
     commit_sha: str | None = None
     # Did saw compose this sentence, or is it bytes from the scanned file? Default False so the
     # report fingerprints unless told otherwise: an opt-in flag was one forgotten call from a leak.

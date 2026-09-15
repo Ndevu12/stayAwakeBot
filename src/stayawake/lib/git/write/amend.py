@@ -102,7 +102,8 @@ def replacement_commit(repo: str | Path, commit: str, flagged_paths,
     if not sha:
         return Replacement(kind=kind, refusal=refusal)
     return Replacement(tree=corrected.tree, sha=sha, plan=corrected.plan,
-                       reverted=corrected.reverted, removed=corrected.removed)
+                       reverted=corrected.reverted, removed=corrected.removed,
+                       recovered=corrected.recovered)
 
 
 def rewrite_commit(repo: str | Path, commit: str, tree: str, new_parents: list[str],
