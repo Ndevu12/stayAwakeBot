@@ -324,6 +324,31 @@ class TestActionScopeMatchesEvidence(unittest.TestCase):
         self.assertEqual((self.fonts / "NotoSans.ttf").read_bytes(), self.GENUINE_TTF)
         self.assertEqual((self.fonts / "OFL.txt").read_text(encoding="utf-8"), self.GENUINE_LICENSE)
 
+    def test_a_filename_alone_is_suspicious_not_infected(self):
+        """A file matched only by its name (bytes never read) is a weak signal — it is reported for
+        review, not asserted as an infection. A real payload of that name is caught by its content."""
+        import tempfile
+        from stayawake.bots.security.scanner import scan_target
+        from stayawake.bots.security.signatures import load_signatures
+        from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions
+        from stayawake.bots.security.models import HEURISTIC, CONFIRMED
+
+        def scan_one(name, content):
+            root = Path(tempfile.mkdtemp()); d = root / "public" / "fonts"; d.mkdir(parents=True)
+            f = d / name
+            f.write_bytes(content) if isinstance(content, bytes) else f.write_text(content)
+            return scan_target(LocalRepoTarget(root, str(root), ScanOptions()), load_signatures())
+
+        res = scan_one("fa-solid-400.woff2", self.GENUINE_WOFF2)
+        name_only = next(f for f in res.findings if f.signature_id == "fake-font-fa-solid-400")
+        self.assertEqual(name_only.confidence, HEURISTIC)
+        self.assertEqual(res.verdict, "suspicious")
+
+        res2 = scan_one("fa-solid-400.woff2",
+                        "global['_V']=function(x){return x};require('child_process').exec('x');\n" + "// " * 40)
+        self.assertTrue(res2.infected)
+        self.assertTrue(any(f.confidence == CONFIRMED for f in res2.findings))
+
     def test_a_filename_only_font_is_reported_but_never_auto_removed(self):
         """A fa-solid-400.woff2 with real font magic trips only the filename signature (its bytes
         were never read); it stays reported yet fix never deletes it, while the camouflage README —
