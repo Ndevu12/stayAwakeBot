@@ -13,7 +13,7 @@ from stayawake.bots.security.remediation import footprint
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.targets import LocalRepoTarget
 from stayawake.lib.git.auth import run_remote_git
-from stayawake.lib.git.run import NETWORK_TIMEOUT, run
+from stayawake.lib.git.run import NETWORK_TIMEOUT, run, stdout_bytes
 from stayawake.bots.security.pr.outcome import (AmendOutcome, BranchResult, Cause, Reason,
                                                       amended, refused, render_amend_line)
 from stayawake.lib.git import authority
@@ -45,7 +45,7 @@ def _payload_left(repo: Path, olds, rebuilt, new_tips: dict[str, str],
                 left.append(f"{old[:12]} is still reachable from the rebuilt history")
     for sha in sorted(set(rebuilt.mapping.values())):
         for path in sorted(path_checks):
-            if path_checks[path](gitutil.file_at(repo, sha, path)):
+            if path_checks[path](sha, path):
                 left.append(f"{sha[:12]} still carries {path}")
         for path in sorted(remove):
             entry = gitutil.tree_entry(repo, sha, path)
@@ -357,13 +357,59 @@ _CAUSE_PER_REFUSAL_KIND = {
 }
 
 
-def _survives(signatures) -> object:
-    """`check(text) -> signature_id | None` for whether restored or left content still carries a
-    payload the scanner would flag. Takes the signatures; returns the check."""
-    from stayawake.bots.security.matchers.base import build_any_payload_check
-    flat = [s for group in (signatures or {}).values() for s in group] \
-        if isinstance(signatures, dict) else list(signatures or [])
-    return build_any_payload_check(flat)
+def _survives(repo, signatures, allowlist, opts) -> object:
+    """`check(treeish, path) -> str | None` for whether a path's content in a tree confirms a payload.
+    Takes the repo, the by-matcher signatures, the allowlist, and the scan options. Returns the check;
+    a truthy result — a signature id, or an unreadable/errored token — means treat the path as unclean."""
+    import os
+    import shutil
+    import tempfile
+    from stayawake.bots.security import scanner as _scanner
+    from stayawake.bots.security.targets.base import Target
+    payload = ({k: v for k, v in signatures.items()
+                if k not in ("git-history", "dependency-audit", "installed-package-audit")}
+               if isinstance(signatures, dict) else signatures)
+    scanned: dict[tuple, str | None] = {}
+
+    def check(treeish, path):
+        entry = gitutil.tree_entry(repo, treeish, path)
+        if entry is None:
+            return None
+        sha = entry[1]
+        if (path, sha) not in scanned:
+            blob = stdout_bytes(repo, ["cat-file", "blob", sha])
+            if blob is None:
+                scanned[(path, sha)] = "read-error"
+            else:
+                tmp = tempfile.mkdtemp(prefix="saw-amend-oracle-")
+                try:
+                    dest = os.path.join(tmp, path)
+                    os.makedirs(os.path.dirname(dest) or tmp, exist_ok=True)
+                    if entry[0] == "120000":
+                        os.symlink(os.fsdecode(blob), dest)
+                    else:
+                        with open(dest, "wb") as handle:
+                            handle.write(blob)
+                    target = Target(tmp, tmp, opts, include_only=(path,))
+                    target.names_one_file = True
+                    target.is_repo = False
+                    result = _scanner.scan_target(target, payload, allowlist)
+                    if result.error is not None:
+                        verdict = "scan-error"
+                    else:
+                        verdict = next(
+                            (getattr(f, "signature_id", "confirmed") for f in result.findings
+                             if getattr(f, "path", "") == path
+                             and getattr(f, "confidence", None) == CONFIRMED
+                             and not getattr(f, "advisory_only", False)), None)
+                except (OSError, ValueError):
+                    verdict = "materialize-error"
+                finally:
+                    shutil.rmtree(tmp, ignore_errors=True)
+                scanned[(path, sha)] = verdict
+        return scanned[(path, sha)]
+
+    return check
 
 
 def _tags_at(repo: Path, slug: str, olds: list[str], token: str | None) -> tuple[list[str], bool]:
@@ -554,7 +600,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     if behind:
         return refused(display, Cause.LOCAL_MISSING_REMOTE_COMMITS, ", ".join(behind))
 
-    survives = _survives(signatures)
+    survives = _survives(repo, signatures, allowlist, opts)
     replacements = {}
     recovered_paths: set[str] = set()
     for sha, paths in infected.items():
@@ -593,7 +639,8 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
                            f"{name}: " + ", ".join(sorted(beyond)[:3]))
 
     path_checks = {p: survives for p in flagged if p not in remove}
-    path_checks.update({p: carries for p, (carries, _c) in clean.items()})
+    path_checks.update({p: (lambda tr, pth, c=carries: c(gitutil.file_at(repo, tr, pth)))
+                        for p, (carries, _c) in clean.items()})
     left = _payload_left(repo, all_infected, rebuilt, new_tips, path_checks, remove)
     if left:
         return refused(display, Cause.PAYLOAD_STILL_REACHABLE, "; ".join(left[:3]))

@@ -469,7 +469,8 @@ class TestTheBaselineIsJudgedNotNominated(unittest.TestCase):
 
         replacement = amend.replacement_commit(
             repo, _rev(repo, "HEAD"), ["x.js"],
-            still_carries=lambda text: "payload" if "PAYLOAD" in text else None)
+            still_carries=lambda treeish, path:
+                "payload" if "PAYLOAD" in (query.file_at(repo, treeish, path) or "") else None)
 
         self.assertTrue(replacement.ok, "the parent here is clean")
 
@@ -478,7 +479,8 @@ class TestTheBaselineIsJudgedNotNominated(unittest.TestCase):
 
         second = amend.replacement_commit(
             repo, _rev(repo, "HEAD"), ["x.js"],
-            still_carries=lambda text: "payload" if "PAYLOAD" in text else None)
+            still_carries=lambda treeish, path:
+                "payload" if "PAYLOAD" in (query.file_at(repo, treeish, path) or "") else None)
 
         self.assertFalse(second.ok)
         self.assertEqual(second.kind, "baseline-carries-payload")
@@ -547,8 +549,9 @@ class TestTheCommitItselfIsReproduced(unittest.TestCase):
         self.assertEqual(replacement.kind, "message-encoding")
 
 
-def _carries(marker: str = "PAYLOAD"):
-    return lambda text: "still carries it" if marker in (text or "") else None
+def _carries(repo, marker: str = "PAYLOAD"):
+    return lambda treeish, path: ("still carries it"
+                                  if marker in (query.file_at(repo, treeish, path) or "") else None)
 
 
 def _rebuild(repo: Path, infected: dict, tips: list[str], still_carries=None):
@@ -693,7 +696,7 @@ class TestAMovedBlobIsNotARemovedPayload(unittest.TestCase):
         repo, infected, head = self._edited_after(
             "export const clean = 1;\nPAYLOAD\nexport const two = 2;\n")
 
-        out, _plan = _rebuild(repo, infected, [head], _carries())
+        out, _plan = _rebuild(repo, infected, [head], _carries(repo))
 
         self.assertFalse(out.ok)
         self.assertEqual(out.kind, "changed-downstream")
@@ -702,7 +705,7 @@ class TestAMovedBlobIsNotARemovedPayload(unittest.TestCase):
     def test_a_later_edit_that_removed_it_is_left_alone(self):
         repo, infected, head = self._edited_after("export const clean = 1;\ncleaned up\n")
 
-        out, _plan = _rebuild(repo, infected, [head], _carries())
+        out, _plan = _rebuild(repo, infected, [head], _carries(repo))
 
         self.assertTrue(out.ok, out.refusal)
         self.assertEqual(_git(repo, "show", f"{out.tip(head)}:util.js"),

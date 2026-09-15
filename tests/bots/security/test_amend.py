@@ -1516,6 +1516,26 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         self.assertEqual(calls, [], "nothing may be force-pushed when it cannot produce a clean file")
         self.assertTrue(outcome.needs_review)
 
+    def test_the_payload_check_recreates_a_symlink_from_its_blob_not_as_text(self):
+        """A write-redirect symlink is a git mode-120000 blob holding the target string. Read back as
+        a regular file it is invisible to the symlink matcher, so the payload check would clear a path
+        that still redirects a write into a sensitive sink. It recreates the symlink and sees the
+        confirmed critical finding; a benign intra-repo link stays clean."""
+        from stayawake.bots.security.pr.amend import _survives
+        poisoned = "tools/postinstall"
+        benign = "tools/alias"
+        os.makedirs(os.path.join(str(self.d), "tools"), exist_ok=True)
+        os.symlink(os.path.join(str(Path.home()), ".ssh", "authorized_keys"),
+                   os.path.join(str(self.d), poisoned))
+        os.symlink("../d.txt", os.path.join(str(self.d), benign))
+        self.write(self.d, "d.txt", "ok\n")
+        self.git(self.d, "add", "-A")
+        self.commit(self.d, "add a redirect symlink and a benign one")
+        head = self._rev()
+        check = _survives(self.d, load_signatures(), [], ScanOptions())
+        self.assertTrue(check(head, poisoned), "a write-redirect symlink must not read as clean")
+        self.assertIsNone(check(head, benign), "an intra-repo symlink is not a payload")
+
     def test_a_wholly_foreign_file_is_removed_from_history_with_the_flag(self):
         p = "src/fonts/BlockchainFont.woff2"
         self.write(self.d, p, "wOF2\x00camouflage-blob\n")
