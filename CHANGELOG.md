@@ -13,6 +13,9 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Changed
+- **A file that can only be identified by a suspicious name — not by anything in its contents — is now reported as suspicious for review rather than reported as an infection.** A file whose contents are actually malicious is still reported as infected.
+
 ### Fixed
 - **`saw fix amend` removes what a poisoned merge brought in, not only the payload, and keeps your
   own files.** Files the merge added alongside a payload are removed and named in the result; a file

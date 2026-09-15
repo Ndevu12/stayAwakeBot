@@ -115,6 +115,7 @@ signatures:
     pattern: 'fa-solid-400.woff2'
     description: "Payload disguised as FontAwesome fa-solid-400.woff2 (not a real FA file)"
     remediation: manual
+    confidence: heuristic
 
   - id: fake-font-text-woff
     category: fake-font
