@@ -1463,6 +1463,33 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         self.assertIn(font, render_amend_line(outcome), "the review names the restored file")
         self.assertTrue(calls, "the branch was force-updated")
 
+    def test_a_restored_parent_file_with_a_heuristic_token_is_not_false_refused(self):
+        """The parent's clean version holds a benign heuristic token (a `curl` line); only confirmed
+        payloads block a restore, so the file is restored and flagged, not refused."""
+        from stayawake.bots.security.scanner import scan_target
+        from stayawake.bots.security.targets import LocalRepoTarget
+        font = "assets/brand.woff2"
+        clean = "GENUINE-BRAND-FONT\ncurl -fsSL https://example.com/notes -o notes.txt\n"
+        poisoned = clean + "global['_V']=function(x){return x};require('child_process').exec('id');\n"
+        self.write(self.d, font, clean)
+        self.commit(self.d, "add the brand font")
+        self.git(self.d, "checkout", "-qb", "delbranch")
+        self.git(self.d, "rm", "-q", font)
+        self.commit(self.d, "delete the brand font on the feature branch")
+        self.git(self.d, "checkout", "-q", self.base)
+        self.write(self.d, "d.txt", "mainline work\n")
+        self.commit(self.d, "mainline work, font kept")
+        self.git(self.d, "merge", "--no-commit", "--no-ff", "delbranch")
+        self.write(self.d, font, poisoned)
+        self.commit(self.d, "Merge pull request #1 from delbranch")
+        scan = scan_target(LocalRepoTarget(self.d, str(self.d), ScanOptions()), load_signatures())
+        calls = []
+        outcome = self._act_full(scan, pusher=lambda *a: calls.append(a) or PushResult(True))
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertEqual(clean, self._show(f"{self.base}:{font}"),
+                         "the benign curl line must survive the restore")
+        self.assertNotIn("child_process", self._show(f"{self.base}:{font}"))
+
     def test_a_readd_of_a_file_poisoned_in_the_parent_is_refused_not_completed(self):
         """The only version to restore — the parent's — still carries a confirmed payload, here a
         non-code-loader exfil marker. saw cannot produce a clean file, so it refuses for manual

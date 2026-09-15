@@ -97,9 +97,9 @@ def build_any_loader_check(signatures: list[dict[str, Any]]):
 
 
 def build_any_payload_check(signatures: list[dict[str, Any]]):
-    """`check(text) -> signature_id | None` over every content fingerprint, all tiers and
+    """`check(text) -> signature_id | None` over every confirmed content fingerprint, all
     categories. Takes the signatures; returns the check."""
-    return _content_check(signatures, confirmed_only=False, categories=None)
+    return _content_check(signatures, confirmed_only=True, categories=None)
 
 
 class Matcher:
