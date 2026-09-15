@@ -13,6 +13,8 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+## [0.11.4] - 2026-09-16
+
 ### Changed
 - **A file that can only be identified by a suspicious name — not by anything in its contents — is now reported as suspicious for review rather than reported as an infection.** A file whose contents are actually malicious is still reported as infected.
 
@@ -1119,7 +1121,8 @@ _No user-facing changes were recorded for this release._
 Initial public release: Health sentinel (uptime monitoring) and Security sentinel (supply-chain worm
 detection, remediation, prevention) under one `stayawake` package.
 
-[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.11.3...HEAD
+[Unreleased]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.11.4...HEAD
+[0.11.4]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.11.3...v0.11.4
 [0.11.3]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.11.2...v0.11.3
 [0.11.2]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.11.1...v0.11.2
 [0.11.1]: https://github.com/Ndevu12/stayAwakeBot/compare/v0.11.0...v0.11.1
