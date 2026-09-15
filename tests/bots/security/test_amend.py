@@ -1463,6 +1463,32 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         self.assertIn(font, render_amend_line(outcome), "the review names the restored file")
         self.assertTrue(calls, "the branch was force-updated")
 
+    def test_a_readd_of_a_file_poisoned_in_the_parent_is_refused_not_completed(self):
+        """The only version to restore — the parent's — still carries a confirmed payload, here a
+        non-code-loader exfil marker. saw cannot produce a clean file, so it refuses for manual
+        recovery instead of completing a run that leaves the payload reachable."""
+        from stayawake.bots.security.scanner import scan_target
+        from stayawake.bots.security.targets import LocalRepoTarget
+        font = "assets/brand.woff2"
+        poisoned = "GENUINE-BRAND-FONT-METADATA-v1\nA Mini Shai-Hulud has Appeared\n"
+        self.write(self.d, font, poisoned)
+        self.commit(self.d, "add the brand font")
+        self.git(self.d, "checkout", "-qb", "delbranch")
+        self.git(self.d, "rm", "-q", font)
+        self.commit(self.d, "delete the brand font on the feature branch")
+        self.git(self.d, "checkout", "-q", self.base)
+        self.write(self.d, "d.txt", "mainline work\n")
+        self.commit(self.d, "mainline work, font kept")
+        self.git(self.d, "merge", "--no-commit", "--no-ff", "delbranch")
+        self.write(self.d, font, poisoned + "// build tweak\n")
+        self.commit(self.d, "Merge pull request #1 from delbranch")
+        scan = scan_target(LocalRepoTarget(self.d, str(self.d), ScanOptions()), load_signatures())
+        calls = []
+        outcome = self._act_full(scan, pusher=lambda *a: calls.append(a) or PushResult(True))
+        self.assertFalse(outcome.completed, "must refuse — the only version to restore is poisoned")
+        self.assertEqual(calls, [], "nothing may be force-pushed when it cannot produce a clean file")
+        self.assertTrue(outcome.needs_review)
+
     def test_a_wholly_foreign_file_is_removed_from_history_with_the_flag(self):
         p = "src/fonts/BlockchainFont.woff2"
         self.write(self.d, p, "wOF2\x00camouflage-blob\n")

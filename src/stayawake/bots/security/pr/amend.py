@@ -358,15 +358,12 @@ _CAUSE_PER_REFUSAL_KIND = {
 
 
 def _survives(signatures) -> object:
-    """Whether content still looks loader-shaped, for judging what a revert would restore.
-
-    Every tier, not only the confirmed one: this asks whether anything survived an excision, and
-    a heuristic match must still block a claim that the payload is gone.
-    """
-    from stayawake.bots.security.matchers.base import build_any_loader_check
+    """`check(text) -> signature_id | None` for whether restored or left content still carries a
+    payload the scanner would flag. Takes the signatures; returns the check."""
+    from stayawake.bots.security.matchers.base import build_any_payload_check
     flat = [s for group in (signatures or {}).values() for s in group] \
         if isinstance(signatures, dict) else list(signatures or [])
-    return build_any_loader_check(flat)
+    return build_any_payload_check(flat)
 
 
 def _tags_at(repo: Path, slug: str, olds: list[str], token: str | None) -> tuple[list[str], bool]:
