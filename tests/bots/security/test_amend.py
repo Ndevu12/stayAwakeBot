@@ -1338,6 +1338,7 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         for gone in ("public/fonts/loader.woff2", "public/fonts/pad1.woff2",
                      "public/fonts/pad2.woff2", "public/fonts/README.md"):
             self.assertFalse(in_history(gone), f"malware-injected {gone} still in history")
+            self.assertIn(gone, outcome.removed, f"{gone} was removed but not disclosed")
         self.assertEqual("base\n", self._show(f"{self.base}:a.txt"), "the user's file is kept")
         self.assertEqual("feature\n", self._show(f"{self.base}:b.txt"), "the user's file is kept")
 
@@ -1371,6 +1372,52 @@ class TestAmendActsOnContentPayload(_AmendFixture):
                          "the maintainer's merge-time edit must be kept")
         self.assertEqual("# notes\nreleased\n", self._show(f"{self.base}:docs/merge_notes.md"),
                          "a legit new file outside the payload's tree must be kept")
+
+    def test_a_payload_edited_into_a_file_keeps_a_legit_sibling_it_also_touched(self):
+        """The confirmed evil-merge path: a payload is edited into one file, and the merge also makes
+        a legitimate edit to a different file. The payload's file is cleaned; the legitimately-edited
+        sibling is not reverted."""
+        from stayawake.bots.security.scanner import scan_target
+        from stayawake.bots.security.targets import LocalRepoTarget
+        self.write(self.d, "host.js", "export const a = 1;\n")
+        self.write(self.d, "keep.js", "export const legit = 1;\n")
+        self.commit(self.d, "add host + keep")
+        self.git(self.d, "merge", "--no-commit", "--no-ff", "feature")
+        self.write(self.d, "host.js",
+                   "export const a = 1;\nglobal['_V']=function(x){return x};require('child_process').exec('id');\n")
+        self.write(self.d, "keep.js", "export const legit = 2;\n")   # legit merge-time edit
+        self.commit(self.d, "Merge pull request #9 from feature")
+        scan = scan_target(LocalRepoTarget(self.d, str(self.d), ScanOptions()), load_signatures())
+        outcome = self._act_full(scan, pusher=lambda *a: PushResult(True))
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertEqual("export const legit = 2;\n", self._show(f"{self.base}:keep.js"),
+                         "a legitimately-edited sibling must not be reverted")
+        self.assertNotIn("child_process", self._show(f"{self.base}:host.js"), "the payload must be gone")
+
+    def test_a_payload_dropped_into_an_existing_dir_spares_a_new_sibling_there(self):
+        """A payload dropped into a directory that already holds project files does not make the
+        whole directory the malware's — only the payload is removed; a legitimate new file added to
+        that same directory in the merge is kept (removal is per-path, never by shared directory)."""
+        from stayawake.bots.security.scanner import scan_target
+        from stayawake.bots.security.targets import LocalRepoTarget
+        self.write(self.d, "src/app.js", "export const app = 1;\n")   # src/ pre-exists
+        self.commit(self.d, "add src/app.js")
+        self.git(self.d, "merge", "--no-commit", "--no-ff", "feature")
+        self.write(self.d, "src/loader.js",
+                   "global['_V']=function(x){return x};require('child_process').exec('id');\n")
+        self.write(self.d, "src/newfeature.js", "export const feat = 1;\n")  # legit new, same dir
+        self.commit(self.d, "Merge pull request #11 from feature")
+        scan = scan_target(LocalRepoTarget(self.d, str(self.d), ScanOptions()), load_signatures())
+        outcome = self._act_full(scan, pusher=lambda *a: PushResult(True))
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        tip = self._rev(self.base)
+        reachable = subprocess.run(["git", "-C", str(self.d), "rev-list", tip],
+                                   capture_output=True, text=True).stdout.split()
+        gone = lambda pth: all(subprocess.run(["git","-C",str(self.d),"cat-file","-e",f"{c}:{pth}"],
+                               capture_output=True).returncode != 0 for c in reachable)
+        self.assertTrue(gone("src/loader.js"), "the payload must be removed")
+        self.assertEqual("export const feat = 1;\n", self._show(f"{self.base}:src/newfeature.js"),
+                         "a legit new file in the payload's existing directory must be kept")
 
     def test_a_merge_injection_without_a_payload_is_not_removed(self):
         """The injection is only the malware's delivery when it carries a confirmed payload. A merge

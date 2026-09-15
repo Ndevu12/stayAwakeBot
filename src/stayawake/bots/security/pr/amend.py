@@ -17,6 +17,7 @@ from stayawake.lib.git.run import NETWORK_TIMEOUT, run
 from stayawake.bots.security.pr.outcome import (AmendOutcome, BranchResult, Cause, Reason,
                                                       amended, refused, render_amend_line)
 from stayawake.lib.git import authority
+from stayawake.lib.git.merge import detect as mergedetect
 from stayawake.lib.git.write import amend as gitamend
 from stayawake.lib.git.write import rebuild as gitrebuild
 from stayawake.lib.git.write.capture import capture_bundle
@@ -66,34 +67,27 @@ def _branches_carrying_any(repo: Path, infected) -> list[tuple[str, str, str]]:
     return list(heads.values())
 
 
-def _injection_under_payload(repo: Path, merge_sha: str, related, anchors) -> list[str]:
-    """The paths a promoted merge injection may remove: those absent from EVERY parent (born at the
-    merge, no prior life) and sitting under the directory of a confirmed payload in the same merge.
-    A modified parent file, or a file outside the payload's own tree, is never included."""
-    import posixpath
-    ps = gitutil.parents(repo, merge_sha)
-    dirs = {posixpath.dirname(a) for a in anchors if posixpath.dirname(a)}
+def _swept_paths(repo: Path, merge_sha: str, related, anchors) -> list[str]:
+    """The paths to remove from `related`: a confirmed-payload path, or a path in a payload's
+    entirely graft-introduced delivery tree. Takes the repo, the merge sha, the merge's introduced
+    paths, and the confirmed-payload paths among them. Returns the subset to remove."""
+    trees = {mergedetect.delivery_subtree(repo, merge_sha, a) for a in anchors}
+    trees.discard(None)
     out = []
     for path in related:
-        if any(gitutil.path_exists_at(repo, parent, path) for parent in ps):
-            continue
-        if path in anchors or any(path.startswith(d + "/") for d in dirs):
+        if path in anchors or any(path == d or path.startswith(d + "/") for d in trees):
             out.append(path)
     return out
 
 
 def _confirmed_commits(scan) -> list:
-    """Findings that name a commit and every path that commit brought into the repository.
-
-    A commit is acted on when it is itself confirmed, or when a confirmed payload sits among the
-    paths it introduced — an injection carrying a known payload is the malware's delivery, and the
-    whole of what it brought has no prior life in the repository (it is in neither parent). Every
-    path the finding names is then replaced from the commit's own clean shape.
-    """
-    anchor_paths = {getattr(f, "path", "") for f in scan.findings
-                    if getattr(f, "confidence", None) == CONFIRMED
-                    and not getattr(f, "advisory_only", False)
-                    and not getattr(f, "commit_sha", None)}
+    """Commit-carrying findings to act on, with the confirmed-payload paths in each. Takes the scan.
+    Returns `(finding, anchors)` per commit that is itself confirmed, or that names a confirmed
+    payload among its paths."""
+    external = {getattr(f, "path", "") for f in scan.findings
+                if getattr(f, "confidence", None) == CONFIRMED
+                and not getattr(f, "advisory_only", False)
+                and not getattr(f, "commit_sha", None)}
     found = []
     seen: set[str] = set()
     for f in scan.findings:
@@ -102,11 +96,13 @@ def _confirmed_commits(scan) -> list:
         if not related or not sha or sha in seen:
             continue
         confirmed = getattr(f, "confidence", None) == CONFIRMED
-        anchors = tuple(sorted(set(related) & anchor_paths))
-        if not (confirmed or anchors):
+        ext = set(related) & external
+        if not (confirmed or ext):
             continue
+        own = set(getattr(f, "payload_paths", ()) or (related if confirmed else ()))
+        anchors = tuple(sorted((own | ext) & set(related)))
         seen.add(sha)
-        found.append((f, anchors, not confirmed))
+        found.append((f, anchors))
     return found
 
 
@@ -467,15 +463,16 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
         return refused(display, Cause.SCAN_DID_NOT_FINISH)
     commits = _confirmed_commits(scan)
     infected: dict[str, tuple[str, ...]] = {}
-    for finding, anchors, promoted in commits:
+    injected_removed: set[str] = set()
+    for finding, anchors in commits:
         sha = _full(repo, getattr(finding, "commit_sha", None) or "")
         if not sha:
             return refused(display, Cause.CONFIRMED_COMMIT_UNRESOLVED)
         related = tuple(getattr(finding, "related_paths", ()) or ())
-        paths = (tuple(_injection_under_payload(repo, sha, related, anchors))
-                 if promoted else related)
+        paths = tuple(_swept_paths(repo, sha, related, anchors))
         if not paths:
             return refused(display, Cause.COMMIT_SHAPE_NOT_MODELLED, sha[:12])
+        injected_removed |= mergedetect.born_at_merge(repo, sha, paths)
         infected[sha] = tuple(dict.fromkeys(infected.get(sha, ()) + paths))
 
     clean: dict[str, tuple] = {}
@@ -639,4 +636,5 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
             survivors.insert(0, Reason(Cause.LEFT_PART_WAY, ", ".join(unrestored)))
     touched = len(all_infected)
     label = (oldest[:12] if touched == 1 else f"{touched} commits from {oldest[:12]}")
-    return amended(display, label, tuple(results), tuple(survivors), sorted(remove))
+    return amended(display, label, tuple(results), tuple(survivors),
+                   sorted(set(remove) | injected_removed))
