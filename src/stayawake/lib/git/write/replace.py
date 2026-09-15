@@ -108,11 +108,9 @@ def replacement_tree(repo: str | Path, commit: str, flagged_paths,
             if clean[0] == _GITLINK:
                 return _refused("submodule", f"{path} is a submodule in the clean version")
             source = from_parent if from_parent is not None else baseline
-            carried = still_carries(file_at(repo, source, path)) if still_carries else None
+            carried = still_carries(source, path) if still_carries else None
             if carried:
-                return _refused("baseline-carries-payload",
-                                f"the version of {path} this would restore still carries the "
-                                f"payload ({carried}) — it was introduced earlier")
+                return _refused("baseline-carries-payload", path)
             plan.append((path, clean))
             if from_parent is not None:
                 recovered.append(path)
@@ -196,7 +194,7 @@ def carried_forward(repo: str | Path, commit: str,
             continue
         if current[1] == payload_blob:
             plan.append((path, entry))
-        elif still_carries and still_carries(file_at(repo, commit, path)):
+        elif still_carries and still_carries(commit, path):
             return None, path
     for path, (carries, corrector) in (clean or {}).items():
         current = tree_entry(repo, commit, path)

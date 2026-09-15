@@ -22,6 +22,9 @@ reader, not the mechanism or the weakness it closed.
   your history already holds is never deleted — a poisoned one is restored to its clean version and
   flagged for review.
 - **`saw fix` removes the file it flagged, not the whole folder it sits in.** A single flagged file in a shared folder no longer takes the folder's other files with it.
+- **`saw fix amend` never restores a version that still carries the payload.** When the only earlier
+  version of a file to fall back on is itself still poisoned, saw refuses that file and flags it for
+  review rather than completing a run that would leave the payload reachable.
 
 ## [0.11.3] - 2026-09-14
 
