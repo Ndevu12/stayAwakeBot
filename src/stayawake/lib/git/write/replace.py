@@ -78,10 +78,10 @@ def replacement_tree(repo: str | Path, commit: str, flagged_paths,
                      still_carries=None) -> Replacement:
     """`commit`'s recorded tree with each flagged path put back to what it should have been.
 
-    A flagged path that exists in the baseline is reverted to it; one that does not was
-    introduced by this commit and is removed. Refuses rather than guessing when git could not
-    merge that path on its own, when the path is a submodule, or when the commit's shape offers
-    no baseline and the path came from a parent.
+    A flagged path that exists in the baseline is reverted to it; one absent from every parent
+    was introduced by this commit and is removed. Refuses rather than guessing when git could not
+    merge that path on its own, when the path is a submodule, or when the path came from a parent
+    but has no clean version to restore.
 
     `still_carries(text) -> reason | None` is the caller's judge of whether restored content is
     actually clean — injected, so this layer never depends on the security domain. Without it the
@@ -114,10 +114,9 @@ def replacement_tree(repo: str | Path, commit: str, flagged_paths,
                                 f"payload ({carried}) — it was introduced earlier")
             plan.append((path, clean))
             continue
-        if baseline is None and any(path_exists_at(repo, p, path) for p in ps):
+        if any(path_exists_at(repo, p, path) for p in ps):
             return _refused("shape",
-                            f"{path} came from a parent and this commit's shape has no clean "
-                            "version to restore")
+                            f"{path} came from a parent and has no clean version to restore")
         plan.append((path, None))
 
     tree = _write_corrected(repo, commit, plan)

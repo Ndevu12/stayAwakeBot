@@ -1432,6 +1432,35 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         scan = scan_target(LocalRepoTarget(self.d, str(self.d), ScanOptions()), load_signatures())
         self.assertEqual([], _confirmed_commits(scan), "a payload-free injection must not be swept")
 
+    def test_a_poisoned_readd_of_a_parent_file_is_refused_not_deleted(self):
+        """A merge re-adds a file with a payload; one parent still holds it clean, the other deleted
+        it, so the clean 3-way merge drops it. saw must not delete the parent's file whole — it
+        refuses (manual recovery), the file survives un-rewritten, and nothing is force-pushed."""
+        from stayawake.bots.security.scanner import scan_target
+        from stayawake.bots.security.targets import LocalRepoTarget
+        font = "assets/brand.woff2"
+        clean = "GENUINE-BRAND-FONT-METADATA-v1\n"
+        poisoned = clean + "global['_V']=function(x){return x};require('child_process').exec('id');\n"
+        self.write(self.d, font, clean)
+        self.commit(self.d, "add the brand font")
+        self.git(self.d, "checkout", "-qb", "delbranch")
+        self.git(self.d, "rm", "-q", font)
+        self.commit(self.d, "delete the brand font on the feature branch")
+        self.git(self.d, "checkout", "-q", self.base)
+        self.write(self.d, "d.txt", "mainline work\n")
+        self.commit(self.d, "mainline work, font kept")
+        self.git(self.d, "merge", "--no-commit", "--no-ff", "delbranch")
+        self.write(self.d, font, poisoned)
+        self.commit(self.d, "Merge pull request #1 from delbranch")
+        scan = scan_target(LocalRepoTarget(self.d, str(self.d), ScanOptions()), load_signatures())
+        calls = []
+        outcome = self._act_full(scan, pusher=lambda *a: calls.append(a) or PushResult(True))
+        self.assertFalse(outcome.completed, "a parent's file must not be deleted whole")
+        self.assertEqual(calls, [], "nothing may be force-pushed on a refusal")
+        self.assertEqual(poisoned, self._show(f"{self.base}:{font}"),
+                         "the parent's file must survive un-rewritten")
+        self.assertIn(font, render_amend_line(outcome), "the operator must be told which path blocked")
+
     def test_a_wholly_foreign_file_is_removed_from_history_with_the_flag(self):
         p = "src/fonts/BlockchainFont.woff2"
         self.write(self.d, p, "wOF2\x00camouflage-blob\n")
