@@ -110,9 +110,7 @@ def replacement_tree(repo: str | Path, commit: str, flagged_paths,
             source = from_parent if from_parent is not None else baseline
             carried = still_carries(source, path) if still_carries else None
             if carried:
-                return _refused("baseline-carries-payload",
-                                f"the version of {path} this would restore still carries the "
-                                f"payload ({carried}) — it was introduced earlier")
+                return _refused("baseline-carries-payload", path)
             plan.append((path, clean))
             if from_parent is not None:
                 recovered.append(path)
