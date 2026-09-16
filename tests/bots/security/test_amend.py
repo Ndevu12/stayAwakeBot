@@ -19,6 +19,7 @@ from stayawake.bots.security.models import CONFIRMED, HEURISTIC, Finding, ScanRe
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.pr import amend as amendmod
 from stayawake.bots.security.pr.amend import amend_outcome, amend_repo
+from stayawake.bots.security.pr.resolve import Decision
 from stayawake.bots.security.pr.outcome import (BranchResult, Cause, Reason, amended,
                                                       render_amend_line)
 from stayawake.bots.security.targets import ScanOptions
@@ -1564,6 +1565,59 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         outcome = self._act_full(scan, pusher=lambda *a: calls.append(a) or PushResult(True))
         self.assertFalse(outcome.completed, "a co-resident payload must prevent a 'clean' excise")
         self.assertEqual(calls, [], "nothing is force-pushed when the excise would not fully clean")
+
+    def _run_with_findings(self, findings, resolver=None):
+        scan = ScanResult(target=str(self.d), source="local", findings=findings)
+        with self._remote():
+            with mock.patch("stayawake.bots.security.pr.amend.scan_target", return_value=scan):
+                return amend_outcome(self.d, "acme/app", ScanOptions(), load_signatures(),
+                                     [], "t", pusher=_ok_push, resolver=resolver)
+
+    def _confirmed_loader_and_suspect(self):
+        self.write(self.d, "cfg.mjs", _seam_line("const c = {};\nexport default c;\n"))
+        self.write(self.d, "suspect.bin", "MZ\x00an unrecognised blob\n")
+        self.commit(self.d, "add config with a loader, and a suspect file")
+        self.write(self.d, "app.js", "ok\n")
+        self.commit(self.d, "later work")
+        return [Finding("loader-seam", "code-loader", Severity.CRITICAL, "cfg.mjs", "loader",
+                        confidence=CONFIRMED),
+                Finding("suspect-file", "fake-font", Severity.HIGH, "suspect.bin", "unrecognised",
+                        confidence=HEURISTIC)]
+
+    def _present(self, spec):
+        return subprocess.run(["git", "-C", str(self.d), "cat-file", "-e", spec],
+                              capture_output=True).returncode == 0
+
+    def test_the_operator_can_remove_an_uncertain_file(self):
+        """A heuristic (uncertain) file the verb would leave alone is put to an injected resolver;
+        when it answers remove, the file is dropped from history alongside the confirmed cleanup."""
+        findings = self._confirmed_loader_and_suspect()
+        asked = []
+
+        def resolver(item):
+            asked.append(item.path)
+            return Decision(remove=(item.path == "suspect.bin"))
+
+        outcome = self._run_with_findings(findings, resolver=resolver)
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertIn("suspect.bin", asked, "the operator is asked about the uncertain file")
+        self.assertNotIn("cfg.mjs", asked, "the confirmed loader is handled without asking")
+        self.assertFalse(self._present(f"{self.base}:suspect.bin"),
+                         "the file the operator removed is gone from the delivered tip")
+
+    def test_an_uncertain_file_the_operator_keeps_is_left_alone(self):
+        findings = self._confirmed_loader_and_suspect()
+        outcome = self._run_with_findings(findings, resolver=lambda item: Decision(remove=False))
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertTrue(self._present(f"{self.base}:suspect.bin"),
+                        "a file the operator kept stays in history")
+
+    def test_an_uncertain_file_is_untouched_without_a_resolver(self):
+        findings = self._confirmed_loader_and_suspect()
+        outcome = self._run_with_findings(findings, resolver=None)
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertTrue(self._present(f"{self.base}:suspect.bin"),
+                        "an uncertain file is untouched when no operator is asked")
 
     def test_the_payload_check_recreates_a_symlink_from_its_blob_not_as_text(self):
         """A write-redirect symlink is a git mode-120000 blob holding the target string. Read back as
