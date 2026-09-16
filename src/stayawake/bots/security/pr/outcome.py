@@ -116,6 +116,9 @@ class AmendOutcome:
     branches: tuple[BranchResult, ...] = ()
     reasons: tuple[Reason, ...] = ()
     removed: tuple[str, ...] = ()
+    recovery: str = ""
+    """Where the pre-rewrite history was captured, when a run left branches on rewritten history it
+    could not put back. Empty otherwise. The one artifact that lets the operator undo the move."""
 
     def __post_init__(self) -> None:
         if self.completed and not self.branches:
@@ -140,18 +143,24 @@ class AmendOutcome:
 
 
 def refused(repository: str, cause: Cause, detail: str = "",
-            subjects: str = "") -> AmendOutcome:
-    """Nothing was force-updated, and this is the one reason why. No ref moved."""
+            subjects: str = "", recovery: str = "") -> AmendOutcome:
+    """Nothing was force-updated, and this is the one reason why. No ref moved.
+
+    `recovery` is set only on a refusal that already moved branches and could not put them back;
+    it names where the pre-rewrite history was captured.
+    """
     return AmendOutcome(repository=repository, completed=False,
-                        reasons=(Reason(cause, detail, subjects),))
+                        reasons=(Reason(cause, detail, subjects),), recovery=recovery)
 
 
 def amended(repository: str, commit: str, branches: Sequence[BranchResult],
-            reasons: Iterable[Reason] = (), removed: Iterable[str] = ()) -> AmendOutcome:
+            reasons: Iterable[Reason] = (), removed: Iterable[str] = (),
+            recovery: str = "") -> AmendOutcome:
     """The replacement was pushed at the branches that reached the payload.
 
     `completed` follows the pushes rather than the caller's word, so a run that left a branch on
-    the payload cannot be reported as done.
+    the payload cannot be reported as done. `recovery` names the captured pre-rewrite history when
+    a branch was moved and could not be put back.
     """
     acted = tuple(branches)
     if not acted:
@@ -159,7 +168,7 @@ def amended(repository: str, commit: str, branches: Sequence[BranchResult],
     return AmendOutcome(repository=repository,
                         completed=all(b.force_updated for b in acted),
                         commit=commit, branches=acted, reasons=tuple(reasons),
-                        removed=tuple(removed))
+                        removed=tuple(removed), recovery=recovery)
 
 
 _PHRASE = {
@@ -259,6 +268,8 @@ def render_amend_line(outcome: AmendOutcome) -> str:
     """
     repository = textsafe.plain(outcome.repository, 120)
     clauses = [_clause(r) for r in outcome.reasons]
+    if outcome.recovery:
+        clauses.append(f"your original history is saved at {textsafe.plain(outcome.recovery, 200)}")
     if not outcome.branches:
         return f"{repository}: {_NOTHING_MOVED}" + (f" — {'; '.join(clauses)}" if clauses else "")
     acts = []
