@@ -1144,6 +1144,8 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         self.assertNotIn("sfL", self._show("HEAD:postcss.config.mjs"))
         self.assertTrue(outcome.needs_review)
         self.assertIn(Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY, self._causes(outcome))
+        self.assertIn("README.md", render_amend_line(outcome),
+                      "the file needing manual recovery must be named, not just counted")
 
     def test_the_same_loader_on_a_sibling_branch_is_also_cleaned(self):
         clean = "const config = {};\nexport default config;\n"
