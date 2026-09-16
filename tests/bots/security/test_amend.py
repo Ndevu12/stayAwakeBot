@@ -1521,6 +1521,31 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         self.assertEqual(calls, [], "nothing may be force-pushed when it cannot produce a clean file")
         self.assertTrue(outcome.needs_review)
 
+    def test_a_predates_code_loader_is_excised_in_place_not_refused(self):
+        """A code-loader flagged by a commit finding whose only ancestor version also carries it
+        would refuse in the restore lane (`baseline-carries-payload`). Because it is a concealment
+        seam with a corrector, it is excised in place across every carrying commit instead — the file
+        is kept, the loader is gone, and the run completes."""
+        cfg = "postcss.config.mjs"
+        clean = "const config = {};\nexport default config;\n"
+        poisoned = _seam_line(clean)
+        self.write(self.d, cfg, poisoned)
+        self.commit(self.d, "C0 config carries a loader")
+        self.write(self.d, "app.js", "ok\n")
+        self.commit(self.d, "C1 unrelated work, the loader predates it")
+        flagged = self._rev()
+        self.write(self.d, "app.js", "ok2\n")
+        self.commit(self.d, "C2 more unrelated work")
+        scan = ScanResult(target=str(self.d), source="local",
+                          findings=[self._confirmed_finding(flagged, (cfg,))])
+        calls = []
+        outcome = self._act_full(scan, pusher=lambda *a: calls.append(a) or PushResult(True))
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertTrue(calls, "the clean history is force-pushed")
+        tip = self._show(f"{self.base}:{cfg}")
+        self.assertNotIn("sfL", tip, "the loader is excised")
+        self.assertIn("export default config", tip, "the real config is kept")
+
     def test_the_payload_check_recreates_a_symlink_from_its_blob_not_as_text(self):
         """A write-redirect symlink is a git mode-120000 blob holding the target string. Read back as
         a regular file it is invisible to the symlink matcher, so the payload check would clear a path

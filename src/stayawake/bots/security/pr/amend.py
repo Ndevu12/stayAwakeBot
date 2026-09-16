@@ -140,6 +140,34 @@ def _content_targets(repo: Path, scan, signatures) -> list[tuple]:
     return out
 
 
+def _predates_content_targets(repo: Path, scan, signatures, already: set[str]) -> list[tuple]:
+    """Confirmed commit-finding payload paths a code-loader corrector provably clears, as
+    `(path, carries, corrector)`. The corrector is derived from the path, not the finding's category,
+    and proven on the flagged commit's own blob; a path it cannot clear is left out. `already` are the
+    paths the HEAD content and remove lanes own."""
+    flat = _flat(signatures)
+    out = []
+    seen: set[str] = set()
+    for finding, anchors in _confirmed_commits(scan):
+        sha = getattr(finding, "commit_sha", None)
+        if not sha:
+            continue
+        carries = footprint.carries_code_loader(flat)
+        for path in anchors:
+            if not path or path in already or path in seen:
+                continue
+            blob = gitutil.file_at(repo, sha, path)
+            if not carries(blob):
+                continue
+            corrector = footprint.code_loader_corrector(path, flat)
+            cleaned = corrector(blob)
+            if cleaned is None or carries(cleaned):
+                continue
+            seen.add(path)
+            out.append((path, carries, corrector))
+    return out
+
+
 def _foreign_targets(scan, remove_foreign: bool) -> list[str]:
     """Paths of confirmed wholly-foreign files to remove whole, or [] unless removal was asked."""
     if not remove_foreign:
@@ -536,6 +564,15 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
         clean[finding.path] = (carries, corrector)
         clean_shas.update(carrying)
         cleaned_head[finding.path] = head_clean
+
+    for path, carries, corrector in _predates_content_targets(repo, scan, signatures, set(clean)):
+        carrying = _carrying_commits(repo, path, carries)
+        if carrying is None:
+            return refused(display, Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, path)
+        if not carrying:
+            continue
+        clean[path] = (carries, corrector)
+        clean_shas.update(carrying)
 
     remove: dict[str, str] = {}
     remove_shas: set[str] = set()

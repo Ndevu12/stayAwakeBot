@@ -51,14 +51,27 @@ def line_marker_strip(text: str, patterns: list[re.Pattern]) -> str | None:
     return result
 
 
+def carries_code_loader(signatures) -> Callable[[str], bool]:
+    """`carries(text) -> bool` for a code-loader payload, from the content signatures alone."""
+    content_sig = codeloader_content_sig(signatures)
+    return lambda text: _carries_payload(text, content_sig)
+
+
+def code_loader_corrector(path: str, signatures) -> Callable[[str], "str | None"]:
+    """`corrector(text) -> clean_text | None` that excises a code-loader concealment seam from
+    `path`, using its extension and the content signatures."""
+    content_sig = codeloader_content_sig(signatures)
+    ext = _ext(path)
+    return lambda text: _seam_strip(text, ext, content_sig)
+
+
 def carries_footprint(finding, signatures) -> Callable[[str], bool] | None:
     """`carries(text) -> bool` for this finding's footprint, or None when its category is not
     excised here."""
     category = getattr(finding, "category", None)
     path = getattr(finding, "path", "") or ""
     if category == CODE_LOADER:
-        content_sig = codeloader_content_sig(signatures)
-        return lambda text: _carries_payload(text, content_sig)
+        return carries_code_loader(signatures)
     if category == GIT_MARKER:
         patterns = _marker_patterns(path, signatures)
         if not patterns:
@@ -73,9 +86,7 @@ def corrector_for(finding, signatures) -> Callable[[str], "str | None"] | None:
     category = getattr(finding, "category", None)
     path = getattr(finding, "path", "") or ""
     if category == CODE_LOADER:
-        content_sig = codeloader_content_sig(signatures)
-        ext = _ext(path)
-        return lambda text: _seam_strip(text, ext, content_sig)
+        return code_loader_corrector(path, signatures)
     if category == GIT_MARKER:
         patterns = _marker_patterns(path, signatures)
         if not patterns:
