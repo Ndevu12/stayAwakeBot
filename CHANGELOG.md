@@ -14,6 +14,11 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Changed
+- **On a terminal, `saw fix amend` asks you about each file it is unsure of, instead of leaving
+  them all.** It still removes confirmed payloads by itself; for an unconfirmed file it shows a safe
+  preview and what the file arrived with, and keeps or removes it as you choose. It asks only on a
+  real terminal for a single local repository — never in CI, a hook, or a remote or parallel run —
+  and never removes anything unless you say so.
 - **`saw fix amend` cleans the branches it can, instead of refusing everything when one commit
   cannot be fixed.** A commit it cannot safely rewrite — and any branch that reaches it — is
   reported for review, while every other branch is still cleaned and force-updated. The run reports

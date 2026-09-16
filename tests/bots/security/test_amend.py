@@ -19,6 +19,7 @@ from stayawake.bots.security.models import CONFIRMED, HEURISTIC, Finding, ScanRe
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.pr import amend as amendmod
 from stayawake.bots.security.pr.amend import amend_outcome, amend_repo
+from stayawake.bots.security.pr.resolve import Decision
 from stayawake.bots.security.pr.outcome import (BranchResult, Cause, Reason, amended,
                                                       render_amend_line)
 from stayawake.bots.security.targets import ScanOptions
@@ -1564,6 +1565,117 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         outcome = self._act_full(scan, pusher=lambda *a: calls.append(a) or PushResult(True))
         self.assertFalse(outcome.completed, "a co-resident payload must prevent a 'clean' excise")
         self.assertEqual(calls, [], "nothing is force-pushed when the excise would not fully clean")
+
+    def _run_with_findings(self, findings, resolver=None):
+        scan = ScanResult(target=str(self.d), source="local", findings=findings)
+        with self._remote():
+            with mock.patch("stayawake.bots.security.pr.amend.scan_target", return_value=scan):
+                return amend_outcome(self.d, "acme/app", ScanOptions(), load_signatures(),
+                                     [], "t", pusher=_ok_push, resolver=resolver)
+
+    def _confirmed_loader_and_suspect(self):
+        self.write(self.d, "cfg.mjs", _seam_line("const c = {};\nexport default c;\n"))
+        self.write(self.d, "suspect.bin", "MZ\x00an unrecognised blob\n")
+        self.commit(self.d, "add config with a loader, and a suspect file")
+        self.write(self.d, "app.js", "ok\n")
+        self.commit(self.d, "later work")
+        return [Finding("loader-seam", "code-loader", Severity.CRITICAL, "cfg.mjs", "loader",
+                        confidence=CONFIRMED),
+                Finding("suspect-file", "fake-font", Severity.HIGH, "suspect.bin", "unrecognised",
+                        confidence=HEURISTIC)]
+
+    def _present(self, spec):
+        return subprocess.run(["git", "-C", str(self.d), "cat-file", "-e", spec],
+                              capture_output=True).returncode == 0
+
+    def test_the_operator_can_remove_an_uncertain_file(self):
+        """A heuristic (uncertain) file the verb would leave alone is put to an injected resolver;
+        when it answers remove, the file is dropped from history alongside the confirmed cleanup."""
+        findings = self._confirmed_loader_and_suspect()
+        asked = []
+
+        def resolver(item):
+            asked.append(item.path)
+            return Decision(remove=(item.path == "suspect.bin"))
+
+        outcome = self._run_with_findings(findings, resolver=resolver)
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertIn("suspect.bin", asked, "the operator is asked about the uncertain file")
+        self.assertNotIn("cfg.mjs", asked, "the confirmed loader is handled without asking")
+        self.assertFalse(self._present(f"{self.base}:suspect.bin"),
+                         "the file the operator removed is gone from the delivered tip")
+
+    def test_an_uncertain_file_the_operator_keeps_is_left_alone(self):
+        findings = self._confirmed_loader_and_suspect()
+        outcome = self._run_with_findings(findings, resolver=lambda item: Decision(remove=False))
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertTrue(self._present(f"{self.base}:suspect.bin"),
+                        "a file the operator kept stays in history")
+
+    def test_an_uncertain_file_is_untouched_without_a_resolver(self):
+        findings = self._confirmed_loader_and_suspect()
+        outcome = self._run_with_findings(findings, resolver=None)
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertTrue(self._present(f"{self.base}:suspect.bin"),
+                        "an uncertain file is untouched when no operator is asked")
+
+    def _evil_merge_with_uncertain(self):
+        """Merge the fixture's feature branch, smuggling a loader into x.js and dropping an
+        unrecognised blob at merge time; both are born at the merge. Findings = the confirmed
+        evil-merge loader (x.js) + a heuristic on the blob."""
+        _git(self.d, "merge", "--no-ff", "--no-commit", "feature")
+        self.write(self.d, "x.js", "var ok = 1;\neval(String.fromCharCode(1, 2, 3));\n")
+        self.write(self.d, "blob.bin", "MZ\x00an unrecognised blob\n")
+        _git(self.d, "add", "x.js", "blob.bin")
+        _git(self.d, "-c", "user.name=Inj", "-c", "user.email=i@t.test",
+             "commit", "-qm", "merge (smuggled loader and blob)")
+        merge = self._rev()
+        return merge, [
+            Finding("evil-merge-loader", "evil-merge", Severity.CRITICAL, merge[:10], "loader",
+                    vector="evil-merge", commit_sha=merge, related_paths=("x.js",),
+                    confidence=CONFIRMED),
+            Finding("suspect-file", "fake-font", Severity.HIGH, "blob.bin", "unrecognised",
+                    confidence=HEURISTIC)]
+
+    def test_an_uncertain_file_shows_what_it_arrived_with(self):
+        """A file born at the same injection merge as a confirmed payload is presented with that
+        merge and the confirmed paths saw is removing from it."""
+        merge, findings = self._evil_merge_with_uncertain()
+        seen = {}
+
+        def resolver(item):
+            seen[item.path] = item
+            return Decision(remove=False)
+
+        outcome = self._run_with_findings(findings, resolver=resolver)
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        item = seen["blob.bin"]
+        self.assertEqual(item.introduced_by, merge[:12])
+        self.assertIn("x.js", item.arrived_with_removed)
+
+    def test_an_uncertain_file_saw_cannot_place_carries_no_blast_radius(self):
+        """When saw cannot tie the file to a known injection merge, the item says so plainly —
+        an empty origin and no siblings, never a false 'arrived alone'."""
+        seen = {}
+
+        def resolver(item):
+            seen[item.path] = item
+            return Decision(remove=False)
+
+        outcome = self._run_with_findings(self._confirmed_loader_and_suspect(), resolver=resolver)
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        item = seen["suspect.bin"]
+        self.assertEqual(item.introduced_by, "")
+        self.assertEqual(item.arrived_with_removed, ())
+
+    def test_a_raising_resolver_leaves_the_file_and_does_not_sink_the_run(self):
+        """A resolver fault must not abort the confirmed cleanup; the uncertain file is left as-is."""
+        def resolver(item):
+            raise RuntimeError("the prompt UI blew up")
+        outcome = self._run_with_findings(self._confirmed_loader_and_suspect(), resolver=resolver)
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertTrue(self._present(f"{self.base}:suspect.bin"),
+                        "a resolver fault leaves the uncertain file in place")
 
     def test_the_payload_check_recreates_a_symlink_from_its_blob_not_as_text(self):
         """A write-redirect symlink is a git mode-120000 blob holding the target string. Read back as

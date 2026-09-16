@@ -173,6 +173,51 @@ def _predates_content_targets(repo: Path, scan, signatures, allowlist, opts,
     return out
 
 
+def _blast_radius(repo: Path, path: str,
+                  infected: dict[str, tuple[str, ...]]) -> tuple[str, tuple[str, ...]]:
+    """`(introduced_by, arrived_with_removed)` tying `path` to a confirmed injection merge that
+    brought it: the merge's short id and the confirmed paths saw is removing from it. `("", ())`
+    when no known injection merge brought this path; never raises."""
+    for sha, payloads in infected.items():
+        try:
+            born = mergedetect.born_at_merge(repo, sha, (path,))
+        except Exception:
+            continue
+        if path in born:
+            return sha[:12], tuple(payloads)
+    return "", ()
+
+
+def _uncertain_items(repo: Path, scan, taken: set[str],
+                     infected: dict[str, tuple[str, ...]]) -> list:
+    """Heuristic, non-advisory file findings this verb would otherwise leave untouched, as
+    `UncertainItem`s for an operator to judge. `taken` are the paths the confirmed lanes own;
+    `infected` maps each injection merge to the paths saw is removing from it, used to tell the
+    operator what each file arrived with. A finding whose file is not present at HEAD is skipped."""
+    from stayawake.bots.security.models import HEURISTIC
+    from stayawake.bots.security.pr.resolve import UncertainItem
+    out = []
+    seen: set[str] = set()
+    for f in scan.findings:
+        if getattr(f, "confidence", None) != HEURISTIC or getattr(f, "advisory_only", False):
+            continue
+        path = getattr(f, "path", "") or ""
+        if not path or path in taken or path in seen or getattr(f, "commit_sha", None):
+            continue
+        entry = gitutil.tree_entry(repo, "HEAD", path)
+        if entry is None:
+            continue
+        seen.add(path)
+        introduced_by, arrived = _blast_radius(repo, path, infected)
+        out.append(UncertainItem(
+            path=path, category=getattr(f, "category", "") or "",
+            signature_id=getattr(f, "signature_id", "") or "",
+            description=getattr(f, "description", "") or "",
+            preview=stdout_bytes(repo, ["cat-file", "blob", entry[1]]) or b"",
+            introduced_by=introduced_by, arrived_with_removed=arrived))
+    return out
+
+
 def _foreign_targets(scan, remove_foreign: bool) -> list[str]:
     """Paths of confirmed wholly-foreign files to remove whole, or [] unless removal was asked."""
     if not remove_foreign:
@@ -506,23 +551,24 @@ def _survivors(repo: Path, slug: str, olds: list[str], token: str | None) -> lis
 def amend_repo(repo: Path, opts, signatures, allowlist, token: str | None = None, *,
                pusher=None, remove_foreign: bool = False,
                identity_fallback: str | None = None,
-               operator_context: Path | None = None) -> str:
+               operator_context: Path | None = None, resolver=None) -> str:
     """Force-update every branch that still reaches a confirmed past-commit payload.
 
     The local rewrite is a step. The result is the remote refs moving. Returns one operator line.
-    With `remove_foreign`, a confirmed wholly-foreign file is removed from history too.
+    With `remove_foreign`, a confirmed wholly-foreign file is removed from history too. `resolver`,
+    when given, is asked to keep or remove each heuristic file the verb would otherwise leave.
     """
     display = gitutil.origin_slug(repo) or str(repo).replace(str(Path.home()), "~")
     outcome = amend_outcome(repo, display, opts, signatures, allowlist, token, pusher=pusher,
                             remove_foreign=remove_foreign, identity_fallback=identity_fallback,
-                            operator_context=operator_context)
+                            operator_context=operator_context, resolver=resolver)
     return render_amend_line(outcome)
 
 
 def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, *,
                   pusher=None, remove_foreign: bool = False,
                   identity_fallback: str | None = None,
-                  operator_context: Path | None = None) -> AmendOutcome:
+                  operator_context: Path | None = None, resolver=None) -> AmendOutcome:
     """The act, as a structure. Prose is rendered from this and never parsed back out of it.
 
     `operator_context` is where the operator's own git config lives (signer, identity); it defaults
@@ -607,6 +653,27 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
             continue
         remove[path] = entry[1]
         remove_shas.update(foreign)
+
+    if resolver is not None:
+        held = set(clean) | set(remove) | {p for ps in infected.values() for p in ps}
+        for item in _uncertain_items(repo, scan, held, infected):
+            try:
+                answer = resolver(item)
+            except Exception:                  # a resolver fault leaves the file for review
+                continue
+            if not answer.remove:
+                continue
+            entry = gitutil.tree_entry(repo, "HEAD", item.path)
+            if entry is None:
+                continue
+            hist = _foreign_history(repo, item.path, entry[1])
+            if hist is None:
+                return refused(display, Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, item.path)
+            _holders, foreign = hist
+            if not foreign:
+                continue
+            remove[item.path] = entry[1]
+            remove_shas.update(foreign)
 
     infected = {sha: tuple(p for p in ps if p not in clean and p not in remove)
                 for sha, ps in infected.items()}

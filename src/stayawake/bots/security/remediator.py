@@ -277,7 +277,8 @@ def _fix_remote(cfg, opts, sigs, allowlist, prog: Streamer, *,
 
 def amend(config_path: str | None = None, *, paths: list[str] | None = None,
           remote: bool = False, slugs: list[str] | None = None,
-          no_stream: bool = False, jobs=None, remove_foreign: bool = False) -> int:
+          no_stream: bool = False, jobs=None, remove_foreign: bool = False,
+          resolver=None) -> int:
     """`saw fix amend`: replace past commits that still carry the payload and force-update
     each branch they sat on. `--remote` clones the named GitHub targets and does the same.
     Never `--pr`. A local rewrite that does not update the remote is not a fix.
@@ -301,7 +302,7 @@ def amend(config_path: str | None = None, *, paths: list[str] | None = None,
                                  remove_foreign=remove_foreign)
     else:
         outcomes = _amend_local(cfg, opts, sigs, allowlist, paths, prog, jobs=jobs,
-                                remove_foreign=remove_foreign)
+                                remove_foreign=remove_foreign, resolver=resolver)
     if not outcomes:
         # Nothing was examined. The four paths that reach here — a denied preflight, a malformed
         # slug, an empty resolution, a named path that matched no repository — all printed an
@@ -320,7 +321,7 @@ def amend(config_path: str | None = None, *, paths: list[str] | None = None,
 
 
 def _amend_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *,
-                 jobs=None, remove_foreign: bool = False) -> list[FixOutcome]:
+                 jobs=None, remove_foreign: bool = False, resolver=None) -> list[FixOutcome]:
     from stayawake.core.identity import Intent
     missing = named_but_absent(paths)
     if missing:
@@ -340,6 +341,7 @@ def _amend_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *,
     # A local checkout is already the operator's config context; only the identity fallback is
     # needed (for when a GitHub App token cannot name itself), resolved once for the sweep.
     ident_fallback = auth._gh_fallback() if source == "github-app" else None
+    gated_resolver = resolver if len(repos) == 1 else None
 
     def make_outcome(repo, *, spin):
         display = _disp(repo)
@@ -349,7 +351,7 @@ def _amend_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *,
         from stayawake.bots.security.pr.amend import amend_outcome
         return _amend_outcome(lambda r=repo, t=tok: amend_outcome(
             r, display, opts, sigs, allowlist, t, remove_foreign=remove_foreign,
-            identity_fallback=ident_fallback), display)
+            identity_fallback=ident_fallback, resolver=gated_resolver), display)
 
     labels = [_disp(r) for r in repos]
     return _run_fix_sweep(repos, labels, make_outcome, prog, jobs=jobs, verb="Amending")

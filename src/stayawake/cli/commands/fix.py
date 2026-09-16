@@ -15,6 +15,7 @@ import sys
 from stayawake.bots.security import remediator
 from stayawake.cli.argtypes import add_jobs_arg, no_stream_requested
 from stayawake.cli.helptext import add_command
+from stayawake.cli.resolve import build_resolver
 from stayawake.utils import exitcodes
 
 
@@ -91,7 +92,8 @@ def run(a: argparse.Namespace) -> int:
                                 remote=a.remote,
                                 slugs=(rest or None) if a.remote else None,
                                 no_stream=no_stream_requested(a), jobs=a.jobs,
-                                remove_foreign=a.remove_foreign)
+                                remove_foreign=a.remove_foreign,
+                                resolver=build_resolver())
     if a.remove_foreign:
         print("saw fix --remove-foreign is only valid with `amend`", file=sys.stderr)
         return exitcodes.INCOMPLETE

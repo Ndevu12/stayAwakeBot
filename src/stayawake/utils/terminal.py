@@ -19,7 +19,9 @@ class ColorLevel(IntEnum):
     TRUECOLOR = 3
 
 
-def _isatty(stream: TextIO) -> bool:
+def is_tty(stream: TextIO) -> bool:
+    """True when `stream` is a real terminal; False for a pipe, a captured buffer, or a stream
+    whose isatty() is missing or raises."""
     try:
         return bool(stream.isatty())
     except Exception:                      # a stream with no / broken isatty → treat as not a TTY
@@ -35,7 +37,7 @@ def color_level(stream: TextIO | None = None) -> ColorLevel:
         return ColorLevel.NONE
 
     if not env.clicolor_force():                       # forced colour skips the TTY/CI/dumb gates
-        if not _isatty(stream):
+        if not is_tty(stream):
             return ColorLevel.NONE                     # piped / captured / redirected → clean text
         if (env.get(env.TERM) or "").lower() == "dumb":
             return ColorLevel.NONE
