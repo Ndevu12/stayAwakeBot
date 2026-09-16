@@ -1814,3 +1814,26 @@ class TestAmendActsOnContentPayload(_AmendFixture):
                  if subprocess.run(["git", "-C", str(self.d), "show", f"{c}:{p}"],
                                    capture_output=True, text=True).stdout == "REAL-INTER-FONT-BYTES\n"]
         self.assertTrue(legit, "the legitimate earlier version of the reused path is preserved")
+
+
+class TestDeliveredRemovals(unittest.TestCase):
+    """`_delivered_removals` names only what a delivered branch actually dropped, from the
+    authoritative replacement records — never a payload path left on an isolated branch."""
+
+    def test_names_delivered_and_foreign_but_not_an_isolated_replacement(self):
+        from types import SimpleNamespace
+
+        from stayawake.bots.security.pr.amend import _delivered_removals
+        delivered = SimpleNamespace(removed=("public/fonts/loader.js", "public/fonts/README.md"))
+        isolated = SimpleNamespace(removed=("iso/only.js",))
+        out = _delivered_removals(
+            {"deadbeef": delivered, "cafebabe": isolated},
+            delivered_reach={"deadbeef"},
+            remove={"camouflage.woff2": "oid1"})
+        self.assertEqual(out, {"public/fonts/loader.js", "public/fonts/README.md",
+                               "camouflage.woff2"})
+        self.assertNotIn("iso/only.js", out)
+
+
+if __name__ == "__main__":
+    unittest.main()

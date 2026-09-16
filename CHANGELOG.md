@@ -29,6 +29,8 @@ reader, not the mechanism or the weakness it closed.
   no confirmed payload of any kind; if anything else remains it is still left for review.
 
 ### Fixed
+- **`saw fix amend` lists the files it removed accurately.** The removed-files line now names only
+  paths a delivered branch actually dropped, not paths on a branch the run had to isolate.
 - **When `saw fix amend` hands something back for you to do, it says exactly what and where.**
   Files that need manual recovery are named rather than counted, a confirmed commit it cannot
   resolve reports what the scan saw, and a run that moved branches and could not put them back

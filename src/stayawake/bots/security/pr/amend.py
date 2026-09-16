@@ -188,6 +188,18 @@ def _blast_radius(repo: Path, path: str,
     return "", ()
 
 
+def _delivered_removals(replacements: dict, delivered_reach: set[str],
+                        remove: dict[str, str]) -> set[str]:
+    """Paths the delivered branches actually dropped: each delivered replacement's removed paths, plus
+    the whole-file foreign removals. Reads the authoritative replacement records, so it names only what
+    a delivered branch removed."""
+    out = set(remove)
+    for sha, repl in replacements.items():
+        if sha in delivered_reach:
+            out.update(repl.removed)
+    return out
+
+
 def _uncertain_items(repo: Path, scan, taken: set[str],
                      infected: dict[str, tuple[str, ...]]) -> list:
     """Heuristic, non-advisory file findings this verb would otherwise leave untouched, as
@@ -599,7 +611,6 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
         return refused(display, Cause.SCAN_DID_NOT_FINISH)
     commits = _confirmed_commits(scan)
     infected: dict[str, tuple[str, ...]] = {}
-    injected_removed: set[str] = set()
     for finding, anchors in commits:
         reported = getattr(finding, "commit_sha", None) or ""
         sha = _full(repo, reported)
@@ -611,7 +622,6 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
         paths = tuple(_swept_paths(repo, sha, related, anchors))
         if not paths:
             return refused(display, Cause.COMMIT_SHAPE_NOT_MODELLED, sha[:12])
-        injected_removed |= mergedetect.born_at_merge(repo, sha, paths)
         infected[sha] = tuple(dict.fromkeys(infected.get(sha, ()) + paths))
 
     clean: dict[str, tuple] = {}
@@ -835,7 +845,8 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
             # history is the operator's problem whether or not any push succeeded.
             survivors.insert(0, Reason(Cause.LEFT_PART_WAY, ", ".join(unrestored)))
             recovery = str(captured.path or "")
+    removed = _delivered_removals(replacements, delivered_reach, remove)
     touched = len(delivered_infected)
     label = (oldest[:12] if touched == 1 else f"{touched} commits from {oldest[:12]}")
     return amended(display, label, tuple(results) + tuple(isolated), tuple(survivors),
-                   sorted(set(remove) | injected_removed), recovery=recovery)
+                   sorted(removed), recovery=recovery)
