@@ -140,12 +140,15 @@ def _content_targets(repo: Path, scan, signatures) -> list[tuple]:
     return out
 
 
-def _predates_content_targets(repo: Path, scan, signatures, already: set[str]) -> list[tuple]:
+def _predates_content_targets(repo: Path, scan, signatures, allowlist, opts,
+                              already: set[str]) -> list[tuple]:
     """Confirmed commit-finding payload paths a code-loader corrector provably clears, as
     `(path, carries, corrector)`. The corrector is derived from the path, not the finding's category,
-    and proven on the flagged commit's own blob; a path it cannot clear is left out. `already` are the
-    paths the HEAD content and remove lanes own."""
+    and proven on the flagged commit's own blob; a path it cannot clear is left out. The cleaned blob
+    is then re-scanned in full, so a path whose file carries a second, co-resident payload of another
+    class is left out too. `already` are the paths the HEAD content and remove lanes own."""
     flat = _flat(signatures)
+    payload = _payload_matchers(signatures)
     out = []
     seen: set[str] = set()
     for finding, anchors in _confirmed_commits(scan):
@@ -162,6 +165,8 @@ def _predates_content_targets(repo: Path, scan, signatures, already: set[str]) -
             corrector = footprint.code_loader_corrector(path, flat)
             cleaned = corrector(blob)
             if cleaned is None or carries(cleaned):
+                continue
+            if _content_confirms(cleaned.encode("utf-8"), path, payload, allowlist, opts):
                 continue
             seen.add(path)
             out.append((path, carries, corrector))
@@ -388,18 +393,53 @@ _CAUSE_PER_REFUSAL_KIND = {
 }
 
 
-def _survives(repo, signatures, allowlist, opts) -> object:
-    """`check(treeish, path) -> str | None` for whether a path's content in a tree confirms a payload.
-    Takes the repo, the by-matcher signatures, the allowlist, and the scan options. Returns the check;
-    a truthy result — a signature id, or an unreadable/errored token — means treat the path as unclean."""
+def _payload_matchers(signatures):
+    """The by-matcher signatures minus the groups that need the repo, history, or install state —
+    the matchers that judge a single file's own content."""
+    return ({k: v for k, v in signatures.items()
+             if k not in ("git-history", "dependency-audit", "installed-package-audit")}
+            if isinstance(signatures, dict) else signatures)
+
+
+def _content_confirms(content: bytes, path: str, payload, allowlist, opts,
+                      is_symlink: bool = False) -> str | None:
+    """The confirmed signature id `content` triggers when scanned as `path`, or None. A truthy
+    result — a signature id or an errored token — means treat the content as unclean."""
     import os
     import shutil
     import tempfile
     from stayawake.bots.security import scanner as _scanner
     from stayawake.bots.security.targets.base import Target
-    payload = ({k: v for k, v in signatures.items()
-                if k not in ("git-history", "dependency-audit", "installed-package-audit")}
-               if isinstance(signatures, dict) else signatures)
+    tmp = tempfile.mkdtemp(prefix="saw-amend-oracle-")
+    try:
+        dest = os.path.join(tmp, path)
+        os.makedirs(os.path.dirname(dest) or tmp, exist_ok=True)
+        if is_symlink:
+            os.symlink(os.fsdecode(content), dest)
+        else:
+            with open(dest, "wb") as handle:
+                handle.write(content)
+        target = Target(tmp, tmp, opts, include_only=(path,))
+        target.names_one_file = True
+        target.is_repo = False
+        result = _scanner.scan_target(target, payload, allowlist)
+    except (OSError, ValueError):
+        return "materialize-error"
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    if result.error is not None:
+        return "scan-error"
+    return next((getattr(f, "signature_id", "confirmed") for f in result.findings
+                 if getattr(f, "path", "") == path
+                 and getattr(f, "confidence", None) == CONFIRMED
+                 and not getattr(f, "advisory_only", False)), None)
+
+
+def _survives(repo, signatures, allowlist, opts) -> object:
+    """`check(treeish, path) -> str | None` for whether a path's content in a tree confirms a payload.
+    Takes the repo, the by-matcher signatures, the allowlist, and the scan options. Returns the check;
+    a truthy result — a signature id, or an unreadable/errored token — means treat the path as unclean."""
+    payload = _payload_matchers(signatures)
     scanned: dict[tuple, str | None] = {}
 
     def check(treeish, path):
@@ -412,32 +452,8 @@ def _survives(repo, signatures, allowlist, opts) -> object:
             if blob is None:
                 scanned[(path, sha)] = "read-error"
             else:
-                tmp = tempfile.mkdtemp(prefix="saw-amend-oracle-")
-                try:
-                    dest = os.path.join(tmp, path)
-                    os.makedirs(os.path.dirname(dest) or tmp, exist_ok=True)
-                    if entry[0] == "120000":
-                        os.symlink(os.fsdecode(blob), dest)
-                    else:
-                        with open(dest, "wb") as handle:
-                            handle.write(blob)
-                    target = Target(tmp, tmp, opts, include_only=(path,))
-                    target.names_one_file = True
-                    target.is_repo = False
-                    result = _scanner.scan_target(target, payload, allowlist)
-                    if result.error is not None:
-                        verdict = "scan-error"
-                    else:
-                        verdict = next(
-                            (getattr(f, "signature_id", "confirmed") for f in result.findings
-                             if getattr(f, "path", "") == path
-                             and getattr(f, "confidence", None) == CONFIRMED
-                             and not getattr(f, "advisory_only", False)), None)
-                except (OSError, ValueError):
-                    verdict = "materialize-error"
-                finally:
-                    shutil.rmtree(tmp, ignore_errors=True)
-                scanned[(path, sha)] = verdict
+                scanned[(path, sha)] = _content_confirms(blob, path, payload, allowlist, opts,
+                                                         is_symlink=(entry[0] == "120000"))
         return scanned[(path, sha)]
 
     return check
@@ -565,7 +581,8 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
         clean_shas.update(carrying)
         cleaned_head[finding.path] = head_clean
 
-    for path, carries, corrector in _predates_content_targets(repo, scan, signatures, set(clean)):
+    for path, carries, corrector in _predates_content_targets(
+            repo, scan, signatures, allowlist, opts, set(clean)):
         carrying = _carrying_commits(repo, path, carries)
         if carrying is None:
             return refused(display, Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, path)

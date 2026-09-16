@@ -18,6 +18,10 @@ reader, not the mechanism or the weakness it closed.
   cannot be fixed.** A commit it cannot safely rewrite — and any branch that reaches it — is
   reported for review, while every other branch is still cleaned and force-updated. The run reports
   itself done only when no confirmed payload is left reachable on any branch it touched.
+- **`saw fix amend` removes an injected loader from a file that never had a clean version, instead
+  of refusing it.** When the only earlier version of a file also carries the loader, saw excises the
+  loader in place across history and keeps the rest of the file — but only when the file is left with
+  no confirmed payload of any kind; if anything else remains it is still left for review.
 
 ### Fixed
 - **When `saw fix amend` hands something back for you to do, it says exactly what and where.**

@@ -1546,6 +1546,25 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         self.assertNotIn("sfL", tip, "the loader is excised")
         self.assertIn("export default config", tip, "the real config is kept")
 
+    def test_a_predates_code_loader_beside_a_second_payload_is_not_excised(self):
+        """Excising the code-loader seam would leave a co-resident payload of another class behind.
+        The cleaned blob is re-scanned in full, so the path is not routed to excise — it is left to
+        refuse rather than force-pushed as clean."""
+        cfg = "postcss.config.mjs"
+        clean = ("const config = {};\nexport default config;\n"
+                 "A Mini Shai-Hulud has Appeared\n")
+        self.write(self.d, cfg, _seam_line(clean))
+        self.commit(self.d, "C0 config carries a loader AND a second payload")
+        self.write(self.d, "app.js", "ok\n")
+        self.commit(self.d, "C1 unrelated")
+        flagged = self._rev()
+        scan = ScanResult(target=str(self.d), source="local",
+                          findings=[self._confirmed_finding(flagged, (cfg,))])
+        calls = []
+        outcome = self._act_full(scan, pusher=lambda *a: calls.append(a) or PushResult(True))
+        self.assertFalse(outcome.completed, "a co-resident payload must prevent a 'clean' excise")
+        self.assertEqual(calls, [], "nothing is force-pushed when the excise would not fully clean")
+
     def test_the_payload_check_recreates_a_symlink_from_its_blob_not_as_text(self):
         """A write-redirect symlink is a git mode-120000 blob holding the target string. Read back as
         a regular file it is invisible to the symlink matcher, so the payload check would clear a path
