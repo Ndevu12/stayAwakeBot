@@ -14,8 +14,9 @@ from typing import Callable
 class UncertainItem:
     """One heuristic finding put to the operator.
 
-    `preview` is the file's own bytes (the caller renders them safely); `context` is a short plain
-    description of where the file came from.
+    `preview` is the file's own bytes (the caller renders them safely). `introduced_by` is the short
+    id of the merge that brought this file, or "" when saw could not tie it to one; `arrived_with_removed`
+    are the confirmed paths from that same merge saw is already removing.
     """
 
     path: str
@@ -23,7 +24,8 @@ class UncertainItem:
     signature_id: str
     description: str
     preview: bytes
-    context: str
+    introduced_by: str = ""
+    arrived_with_removed: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

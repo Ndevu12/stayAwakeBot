@@ -173,10 +173,27 @@ def _predates_content_targets(repo: Path, scan, signatures, allowlist, opts,
     return out
 
 
-def _uncertain_items(repo: Path, scan, taken: set[str]) -> list:
+def _blast_radius(repo: Path, path: str,
+                  infected: dict[str, tuple[str, ...]]) -> tuple[str, tuple[str, ...]]:
+    """`(introduced_by, arrived_with_removed)` tying `path` to a confirmed injection merge that
+    brought it: the merge's short id and the confirmed paths saw is removing from it. `("", ())`
+    when no known injection merge brought this path; never raises."""
+    for sha, payloads in infected.items():
+        try:
+            born = mergedetect.born_at_merge(repo, sha, (path,))
+        except Exception:
+            continue
+        if path in born:
+            return sha[:12], tuple(payloads)
+    return "", ()
+
+
+def _uncertain_items(repo: Path, scan, taken: set[str],
+                     infected: dict[str, tuple[str, ...]]) -> list:
     """Heuristic, non-advisory file findings this verb would otherwise leave untouched, as
-    `UncertainItem`s for an operator to judge. `taken` are the paths the confirmed lanes own; a
-    finding whose file is not present at HEAD is skipped."""
+    `UncertainItem`s for an operator to judge. `taken` are the paths the confirmed lanes own;
+    `infected` maps each injection merge to the paths saw is removing from it, used to tell the
+    operator what each file arrived with. A finding whose file is not present at HEAD is skipped."""
     from stayawake.bots.security.models import HEURISTIC
     from stayawake.bots.security.pr.resolve import UncertainItem
     out = []
@@ -191,12 +208,13 @@ def _uncertain_items(repo: Path, scan, taken: set[str]) -> list:
         if entry is None:
             continue
         seen.add(path)
+        introduced_by, arrived = _blast_radius(repo, path, infected)
         out.append(UncertainItem(
             path=path, category=getattr(f, "category", "") or "",
             signature_id=getattr(f, "signature_id", "") or "",
             description=getattr(f, "description", "") or "",
             preview=stdout_bytes(repo, ["cat-file", "blob", entry[1]]) or b"",
-            context=getattr(f, "vector", "") or getattr(f, "category", "") or ""))
+            introduced_by=introduced_by, arrived_with_removed=arrived))
     return out
 
 
@@ -638,7 +656,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
 
     if resolver is not None:
         held = set(clean) | set(remove) | {p for ps in infected.values() for p in ps}
-        for item in _uncertain_items(repo, scan, held):
+        for item in _uncertain_items(repo, scan, held, infected):
             if not resolver(item).remove:
                 continue
             entry = gitutil.tree_entry(repo, "HEAD", item.path)
