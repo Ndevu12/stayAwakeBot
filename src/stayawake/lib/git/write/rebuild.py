@@ -27,11 +27,9 @@ from stayawake.lib.git.write.replace import Replacement, carried_forward, tree_e
 class Rebuild:
     """What the rebuild produced.
 
-    `mapping` is old sha -> new sha for every commit that was rebuilt clean. A commit absent from it
-    was either untouched (keeps its identity) or blocked. `blocked` is every commit that could not
-    be remediated — a commit whose own correction failed, plus every descendant of it (a clean
-    commit written onto a blocked parent would re-link the payload) — each mapped to its
-    `(kind, refusal)`. A branch whose tip is in `blocked` cannot be delivered; the rest can.
+    `mapping` is old sha -> new sha for every commit rebuilt clean; a commit absent from it was
+    untouched or blocked. `blocked` maps each commit that could not be remediated — one whose own
+    correction failed, and every descendant of it — to its `(kind, refusal)`.
     """
 
     mapping: dict[str, str] = field(default_factory=dict)
@@ -87,16 +85,15 @@ def rebuild_without_payload(repo: str | Path, graph: list[tuple[str, list[str]]]
                             replacements: dict[str, Replacement],
                             write_commit, still_carries=None, clean=None, remove=None,
                             pre_blocked: dict[str, tuple[str, str]] | None = None) -> Rebuild:
-    """Rebuild each infected commit parents-first and carry its correction into every commit
-    after it. A commit that cannot be remediated does not abort the run: it and its descendants are
-    recorded in `blocked` and skipped, so the branches that reach none of them can still be
-    delivered.
+    """Rebuild each infected commit parents-first and carry its correction into every commit after
+    it. A commit that cannot be remediated, and its descendants, are recorded in `blocked` and
+    skipped rather than aborting the run.
 
     `write_commit(commit, tree, new_parents) -> (sha, kind, refusal)`, `still_carries`, `clean`,
     and `remove` are injected. `clean` maps a path to `(carries, corrector)`, excised in place at
     each commit whose blob at that path carries the footprint; `remove` maps a path to a blob id,
     dropped from every commit that holds exactly that blob. `pre_blocked` seeds commits already
-    known un-remediable (a refused replacement), so their descendants are skipped from the start.
+    known un-remediable.
     """
     mapping: dict[str, str] = {}
     corrections: dict[str, tuple[str, tuple[str, str] | None]] = {}
@@ -105,8 +102,6 @@ def rebuild_without_payload(repo: str | Path, graph: list[tuple[str, list[str]]]
     carried: list[str] = []
 
     for sha, ps in graph:
-        # A commit already blocked, or one whose parent is blocked: a clean commit written onto a
-        # blocked parent would splice it back onto the payload, so the whole descendant cone is out.
         inherited = next((blocked[p] for p in ps if p in blocked), None)
         if sha in blocked or inherited is not None:
             blocked.setdefault(sha, inherited or blocked[sha])

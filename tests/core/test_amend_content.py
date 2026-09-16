@@ -715,9 +715,7 @@ class TestAMovedBlobIsNotARemovedPayload(unittest.TestCase):
 
 class TestPartialDeliveryIsolatesTheBlockedCone(unittest.TestCase):
     """A commit that cannot be remediated no longer sinks the whole run: it and its descendants are
-    recorded in `blocked` and skipped, and a branch that reaches none of them is still rebuilt clean.
-    This is the denial-of-remediation fix — one un-remediable artifact must not keep every other
-    branch infected."""
+    blocked and skipped, and a branch that reaches none of them is still rebuilt clean."""
 
     def _clean_beside_blocked(self):
         repo = _new_repo()

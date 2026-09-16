@@ -625,9 +625,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
         recovered_paths |= set(replacement.recovered)
         replacements[sha] = replacement
 
-    # Objects only — no reference moves until the capture below has been read back. A commit that
-    # cannot be remediated does not sink the run: it and its descendants land in `rebuilt.blocked`,
-    # and the branches that reach none of them are still delivered.
+    # Objects only — no reference moves until the capture below has been read back.
     rebuilt = gitrebuild.rebuild_without_payload(
         repo, plan, replacements,
         lambda sha, tree, new_parents: gitamend.rewrite_commit(repo, sha, tree, new_parents,
@@ -638,9 +636,6 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     new_tips = {tip: rebuilt.tip(tip) for _n, tip, _c in heads}
     flagged = {p for paths in infected.values() for p in paths} | set(clean) | set(remove)
 
-    # A branch whose tip reaches a blocked commit cannot be made clean, and a branch whose replay
-    # dropped content the finding did not name would lose the operator's work: both are isolated —
-    # reported, nothing moved — while every branch that reached none of that is delivered.
     deliverable: list[tuple[str, str, str]] = []
     isolated: list[BranchResult] = []
     for name, tip, cas in heads:
@@ -659,14 +654,16 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
         deliverable.append((name, tip, cas))
 
     if not deliverable:
-        # Nothing could be delivered: this repository is where partial delivery collapses back to a
-        # full refusal. Carry the reason a branch was isolated so the operator sees why.
         reason = isolated[0].reason if isolated else Reason(Cause.PAYLOAD_STILL_REACHABLE)
         return refused(display, reason.cause, reason.detail, reason.subjects)
 
     delivered_tips = {tip: new_tips[tip] for _n, tip, _c in deliverable}
-    oldest = next((sha for sha, _ps in plan if sha in rebuilt.mapping), oldest)
-    delivered_infected = [s for s in all_infected if s in rebuilt.mapping]
+    # Count and name only commits a delivered branch reaches, not ones rebuilt for an isolated one.
+    reachable = gitutil.stdout(repo, ["rev-list", *[t for _n, t, _c in deliverable]]).split()
+    delivered_reach = set(reachable)
+    oldest = next((sha for sha, _ps in plan
+                   if sha in rebuilt.mapping and sha in delivered_reach), oldest)
+    delivered_infected = [s for s in all_infected if s in rebuilt.mapping and s in delivered_reach]
 
     path_checks = {p: survives for p in flagged if p not in remove}
     path_checks.update({p: (lambda tr, pth, c=carries: c(gitutil.file_at(repo, tr, pth)))
@@ -717,8 +714,6 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
             # history is the operator's problem whether or not any push succeeded.
             survivors.insert(0, Reason(Cause.LEFT_PART_WAY, ", ".join(unrestored)))
             recovery = str(captured.path or "")
-    # Every branch that reached the payload appears in the result — isolated ones as not
-    # force-updated — so `completed` is false while any confirmed payload is still reachable.
     touched = len(delivered_infected)
     label = (oldest[:12] if touched == 1 else f"{touched} commits from {oldest[:12]}")
     return amended(display, label, tuple(results) + tuple(isolated), tuple(survivors),

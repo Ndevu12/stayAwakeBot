@@ -13,6 +13,12 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Changed
+- **`saw fix amend` cleans the branches it can, instead of refusing everything when one commit
+  cannot be fixed.** A commit it cannot safely rewrite — and any branch that reaches it — is
+  reported for review, while every other branch is still cleaned and force-updated. The run reports
+  itself done only when no confirmed payload is left reachable on any branch it touched.
+
 ### Fixed
 - **When `saw fix amend` hands something back for you to do, it says exactly what and where.**
   Files that need manual recovery are named rather than counted, a confirmed commit it cannot
