@@ -155,11 +155,12 @@ def _foreign_targets(scan, remove_foreign: bool) -> list[str]:
 
 
 def _unhandled_confirmed(scan, signatures, revert_paths: set[str],
-                         cleaned_head: dict[str, str], remove_paths: set[str]) -> int:
-    """How many confirmed, non-advisory findings this verb neither reverts (a revert path),
-    excises (its footprint gone from the cleaned HEAD of its path), nor removes whole."""
+                         cleaned_head: dict[str, str], remove_paths: set[str]) -> list[str]:
+    """The paths of confirmed, non-advisory findings this verb neither reverts (a revert path),
+    excises (its footprint gone from the cleaned HEAD of its path), nor removes whole. Each is a
+    file the operator must recover by hand, so the caller can name them rather than count them."""
     flat = _flat(signatures)
-    count = 0
+    paths: list[str] = []
     for f in scan.findings:
         if getattr(f, "confidence", None) != CONFIRMED or getattr(f, "advisory_only", False):
             continue
@@ -171,8 +172,9 @@ def _unhandled_confirmed(scan, signatures, revert_paths: set[str],
         carries = footprint.carries_footprint(f, flat)
         if carries is not None and path in cleaned_head and not carries(cleaned_head[path]):
             continue
-        count += 1
-    return count
+        if path and path not in paths:
+            paths.append(path)
+    return paths
 
 
 _MAX_PATH_HISTORY = 100_000
@@ -508,9 +510,12 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     infected: dict[str, tuple[str, ...]] = {}
     injected_removed: set[str] = set()
     for finding, anchors in commits:
-        sha = _full(repo, getattr(finding, "commit_sha", None) or "")
+        reported = getattr(finding, "commit_sha", None) or ""
+        sha = _full(repo, reported)
         if not sha:
-            return refused(display, Cause.CONFIRMED_COMMIT_UNRESOLVED)
+            named = ", ".join(getattr(finding, "related_paths", ()) or ())
+            return refused(display, Cause.CONFIRMED_COMMIT_UNRESOLVED,
+                           f"{reported[:12]}: {named}" if named else (reported[:12] or "?"))
         related = tuple(getattr(finding, "related_paths", ()) or ())
         paths = tuple(_swept_paths(repo, sha, related, anchors))
         if not paths:
@@ -526,7 +531,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
         if carrying is None:
             return refused(display, Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, finding.path)
         if not carrying:
-            return refused(display, Cause.CONFIRMED_COMMIT_UNRESOLVED)
+            return refused(display, Cause.CONFIRMED_COMMIT_UNRESOLVED, finding.path)
         clean[finding.path] = (carries, corrector)
         clean_shas.update(carrying)
         cleaned_head[finding.path] = head_clean
@@ -556,7 +561,8 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     unhandled = _unhandled_confirmed(scan, signatures, taken, cleaned_head, remove)
     if not infected and not clean and not remove:
         if unhandled:
-            return refused(display, Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY, str(unhandled))
+            return refused(display, Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY,
+                           str(len(unhandled)), ", ".join(sorted(unhandled)))
         return refused(display, Cause.NO_CONFIRMED_PAYLOAD)
 
     all_infected = set(infected) | clean_shas | remove_shas
@@ -653,7 +659,8 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     try:
         moved = gitamend.point_branches(repo, heads, new_tips)
     except gitamend.AmendUnwindFailed as unwound:
-        return refused(display, Cause.LEFT_PART_WAY, ", ".join(unwound.unrestored))
+        return refused(display, Cause.LEFT_PART_WAY, ", ".join(unwound.unrestored),
+                       recovery=str(captured.path or ""))
     if moved is None:
         return refused(display, Cause.REPLAY_FAILED, ", ".join(n for n, _, _ in heads))
 
@@ -672,7 +679,9 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
         survivors.insert(0, Reason(Cause.FILE_RESTORED_FROM_A_PARENT,
                                    ", ".join(sorted(recovered_paths))))
     if unhandled:
-        survivors.insert(0, Reason(Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY, str(unhandled)))
+        survivors.insert(0, Reason(Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY,
+                                   str(len(unhandled)), ", ".join(sorted(unhandled))))
+    recovery = ""
     if failed:
         try:
             unrestored = gitamend.restore_branches(repo, heads, moved, failed)
@@ -683,7 +692,8 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
             # same refused restore was silent on this side, and a local branch left on rewritten
             # history is the operator's problem whether or not any push succeeded.
             survivors.insert(0, Reason(Cause.LEFT_PART_WAY, ", ".join(unrestored)))
+            recovery = str(captured.path or "")
     touched = len(all_infected)
     label = (oldest[:12] if touched == 1 else f"{touched} commits from {oldest[:12]}")
     return amended(display, label, tuple(results), tuple(survivors),
-                   sorted(set(remove) | injected_removed))
+                   sorted(set(remove) | injected_removed), recovery=recovery)
