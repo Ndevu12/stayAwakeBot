@@ -356,6 +356,7 @@ _CAUSE_PER_REFUSAL_KIND = {
     "message": Cause.REPLACEMENT_NOT_WRITTEN,
     "baseline-carries-payload": Cause.PAYLOAD_PREDATES_THIS_COMMIT,
     "changed-downstream": Cause.PAYLOAD_CHANGED_AFTER_THIS_COMMIT,
+    "replacement-loses-more": Cause.REPLACEMENT_LOSES_MORE_THAN_THE_PAYLOAD,
 }
 
 
@@ -608,19 +609,19 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
 
     survives = _survives(repo, signatures, allowlist, opts)
     replacements = {}
+    blocked_commits: dict[str, tuple[str, str]] = {}
     recovered_paths: set[str] = set()
     for sha, paths in infected.items():
         replacement = gitamend.replacement_commit(repo, sha, paths, signing, survives)
         if not replacement.ok:
-            return refused(display,
-                           _CAUSE_PER_REFUSAL_KIND.get(replacement.kind,
-                                                  Cause.REPLACEMENT_NOT_WRITTEN),
-                           replacement.refusal or sha[:12])
+            blocked_commits[sha] = (replacement.kind or "replacement",
+                                    replacement.refusal or sha[:12])
+            continue
         beyond = [p for p in gitamend.discarded_delta(repo, sha, replacement.sha)
                   if p not in paths]
         if beyond:
-            return refused(display, Cause.REPLACEMENT_LOSES_MORE_THAN_THE_PAYLOAD,
-                           ", ".join(sorted(beyond)[:5]))
+            blocked_commits[sha] = ("replacement-loses-more", ", ".join(sorted(beyond)[:5]))
+            continue
         recovered_paths |= set(replacement.recovered)
         replacements[sha] = replacement
 
@@ -629,40 +630,60 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
         repo, plan, replacements,
         lambda sha, tree, new_parents: gitamend.rewrite_commit(repo, sha, tree, new_parents,
                                                                signing),
-        survives, clean=clean, remove=remove)
-    if not rebuilt.ok:
-        return refused(display,
-                       _CAUSE_PER_REFUSAL_KIND.get(rebuilt.kind, Cause.REPLACEMENT_NOT_WRITTEN),
-                       rebuilt.refusal)
+        survives, clean=clean, remove=remove, pre_blocked=blocked_commits)
+    blocked = rebuilt.blocked
 
     new_tips = {tip: rebuilt.tip(tip) for _n, tip, _c in heads}
     flagged = {p for paths in infected.values() for p in paths} | set(clean) | set(remove)
-    for name, tip, _cas in heads:
+
+    deliverable: list[tuple[str, str, str]] = []
+    isolated: list[BranchResult] = []
+    for name, tip, cas in heads:
+        if tip in blocked:
+            kind, refusal = blocked[tip]
+            isolated.append(BranchResult(name, False, Reason(
+                _CAUSE_PER_REFUSAL_KIND.get(kind, Cause.REPLACEMENT_NOT_WRITTEN), refusal)))
+            continue
         beyond = [p for p in gitamend.discarded_delta(repo, tip, new_tips[tip])
                   if p not in flagged]
         if beyond:
-            return refused(display, Cause.REPLAY_CHANGED_UNRELATED_COMMITS,
-                           f"{name}: " + ", ".join(sorted(beyond)[:3]))
+            isolated.append(BranchResult(name, False, Reason(
+                Cause.REPLAY_CHANGED_UNRELATED_COMMITS,
+                f"{name}: " + ", ".join(sorted(beyond)[:3]))))
+            continue
+        deliverable.append((name, tip, cas))
+
+    if not deliverable:
+        reason = isolated[0].reason if isolated else Reason(Cause.PAYLOAD_STILL_REACHABLE)
+        return refused(display, reason.cause, reason.detail, reason.subjects)
+
+    delivered_tips = {tip: new_tips[tip] for _n, tip, _c in deliverable}
+    # Count and name only commits a delivered branch reaches, not ones rebuilt for an isolated one.
+    reachable = gitutil.stdout(repo, ["rev-list", *[t for _n, t, _c in deliverable]]).split()
+    delivered_reach = set(reachable)
+    oldest = next((sha for sha, _ps in plan
+                   if sha in rebuilt.mapping and sha in delivered_reach), oldest)
+    delivered_infected = [s for s in all_infected if s in rebuilt.mapping and s in delivered_reach]
 
     path_checks = {p: survives for p in flagged if p not in remove}
     path_checks.update({p: (lambda tr, pth, c=carries: c(gitutil.file_at(repo, tr, pth)))
                         for p, (carries, _c) in clean.items()})
-    left = _payload_left(repo, all_infected, rebuilt, new_tips, path_checks, remove)
+    left = _payload_left(repo, all_infected, rebuilt, delivered_tips, path_checks, remove)
     if left:
         return refused(display, Cause.PAYLOAD_STILL_REACHABLE, "; ".join(left[:3]))
 
-    captured = capture_bundle(repo, [(tip, new_tips[tip]) for _n, tip, _c in heads],
+    captured = capture_bundle(repo, [(tip, new_tips[tip]) for _n, tip, _c in deliverable],
                               _capture_path(slug, oldest[:12]))
     if not captured.ok:
         return refused(display, Cause.CAPTURE_FAILED, captured.reason)
 
     try:
-        moved = gitamend.point_branches(repo, heads, new_tips)
+        moved = gitamend.point_branches(repo, deliverable, delivered_tips)
     except gitamend.AmendUnwindFailed as unwound:
         return refused(display, Cause.LEFT_PART_WAY, ", ".join(unwound.unrestored),
                        recovery=str(captured.path or ""))
     if moved is None:
-        return refused(display, Cause.REPLAY_FAILED, ", ".join(n for n, _, _ in heads))
+        return refused(display, Cause.REPLAY_FAILED, ", ".join(n for n, _, _ in deliverable))
 
     results: list[BranchResult] = []
     failed: list[str] = []
@@ -674,7 +695,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
         cause = result.reason.cause if result.reason is not None else None
         if not result.force_updated and cause is not Cause.PUSH_NOT_CONFIRMED:
             failed.append(branch)
-    survivors = _survivors(repo, slug, sorted(all_infected), token)
+    survivors = _survivors(repo, slug, sorted(delivered_infected), token)
     if recovered_paths:
         survivors.insert(0, Reason(Cause.FILE_RESTORED_FROM_A_PARENT,
                                    ", ".join(sorted(recovered_paths))))
@@ -684,7 +705,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     recovery = ""
     if failed:
         try:
-            unrestored = gitamend.restore_branches(repo, heads, moved, failed)
+            unrestored = gitamend.restore_branches(repo, deliverable, moved, failed)
         except gitamend.AmendUnwindFailed as unwound:
             unrestored = unwound.unrestored
         if unrestored:
@@ -693,7 +714,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
             # history is the operator's problem whether or not any push succeeded.
             survivors.insert(0, Reason(Cause.LEFT_PART_WAY, ", ".join(unrestored)))
             recovery = str(captured.path or "")
-    touched = len(all_infected)
+    touched = len(delivered_infected)
     label = (oldest[:12] if touched == 1 else f"{touched} commits from {oldest[:12]}")
-    return amended(display, label, tuple(results), tuple(survivors),
+    return amended(display, label, tuple(results) + tuple(isolated), tuple(survivors),
                    sorted(set(remove) | injected_removed), recovery=recovery)

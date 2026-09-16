@@ -25,28 +25,20 @@ from stayawake.lib.git.write.replace import Replacement, carried_forward, tree_e
 
 @dataclass(frozen=True)
 class Rebuild:
-    """What the rebuild produced, or the reason there is none.
+    """What the rebuild produced.
 
-    `mapping` is old sha -> new sha for every commit that had to change. A commit absent from it
-    was not touched and keeps its identity.
+    `mapping` is old sha -> new sha for every commit rebuilt clean; a commit absent from it was
+    untouched or blocked. `blocked` maps each commit that could not be remediated — one whose own
+    correction failed, and every descendant of it — to its `(kind, refusal)`.
     """
 
     mapping: dict[str, str] = field(default_factory=dict)
+    blocked: dict[str, tuple[str, str]] = field(default_factory=dict)
     replaced: tuple[str, ...] = ()
     carried: tuple[str, ...] = ()
-    kind: str = ""
-    refusal: str = ""
-
-    @property
-    def ok(self) -> bool:
-        return not self.kind
 
     def tip(self, old_tip: str) -> str:
         return self.mapping.get(old_tip, old_tip)
-
-
-def _refused(kind: str, refusal: str) -> Rebuild:
-    return Rebuild(kind=kind, refusal=refusal)
 
 
 def ordered_graph(repo: str | Path, tips: list[str]) -> list[tuple[str, list[str]]]:
@@ -91,50 +83,64 @@ def commits_to_rebuild(graph: list[tuple[str, list[str]]],
 
 def rebuild_without_payload(repo: str | Path, graph: list[tuple[str, list[str]]],
                             replacements: dict[str, Replacement],
-                            write_commit, still_carries=None, clean=None, remove=None) -> Rebuild:
-    """Rebuild each infected commit parents-first and carry its correction into every commit
-    after it.
+                            write_commit, still_carries=None, clean=None, remove=None,
+                            pre_blocked: dict[str, tuple[str, str]] | None = None) -> Rebuild:
+    """Rebuild each infected commit parents-first and carry its correction into every commit after
+    it. A commit that cannot be remediated, and its descendants, are recorded in `blocked` and
+    skipped rather than aborting the run.
 
     `write_commit(commit, tree, new_parents) -> (sha, kind, refusal)`, `still_carries`, `clean`,
     and `remove` are injected. `clean` maps a path to `(carries, corrector)`, excised in place at
     each commit whose blob at that path carries the footprint; `remove` maps a path to a blob id,
-    dropped from every commit that holds exactly that blob.
+    dropped from every commit that holds exactly that blob. `pre_blocked` seeds commits already
+    known un-remediable.
     """
     mapping: dict[str, str] = {}
     corrections: dict[str, tuple[str, tuple[str, str] | None]] = {}
+    blocked: dict[str, tuple[str, str]] = dict(pre_blocked or {})
     replaced: list[str] = []
     carried: list[str] = []
 
     for sha, ps in graph:
+        inherited = next((blocked[p] for p in ps if p in blocked), None)
+        if sha in blocked or inherited is not None:
+            blocked.setdefault(sha, inherited or blocked[sha])
+            continue
+
         replacement = replacements.get(sha)
         if replacement is not None:
             if not replacement.ok:
-                return _refused(replacement.kind or "replacement",
-                                f"{sha[:12]}: {replacement.refusal}")
+                blocked[sha] = (replacement.kind or "replacement", replacement.refusal)
+                continue
             for path, entry in replacement.plan:
                 current = tree_entry(repo, sha, path)
                 if current is None:
                     continue
                 corrections[path] = (current[1], entry)
 
-        tree, blocked = (carried_forward(repo, sha, corrections, still_carries, clean, remove)
-                         if (corrections or clean or remove) else (None, ""))
-        if blocked:
-            return _refused("changed-downstream",
-                            f"{sha[:12]} changed {blocked} and it still carries the payload — "
+        tree, blocked_path = (carried_forward(repo, sha, corrections, still_carries, clean, remove)
+                              if (corrections or clean or remove) else (None, ""))
+        if blocked_path:
+            blocked[sha] = ("changed-downstream",
+                            f"{sha[:12]} changed {blocked_path} and it still carries the payload — "
                             "that commit needs its own finding")
+            continue
         if corrections and tree is None:
-            return _refused("not-applied",
+            blocked[sha] = ("not-applied",
                             f"{sha[:12]}: the correction could not be carried into this commit")
+            continue
         if tree is None:
             tree = stdout(repo, ["rev-parse", f"{sha}^{{tree}}"]).strip()
         if not tree:
-            return _refused("write", f"{sha[:12]}: its tree could not be read")
+            blocked[sha] = ("write", f"{sha[:12]}: its tree could not be read")
+            continue
 
         new_sha, kind, refusal = write_commit(sha, tree, [mapping.get(p, p) for p in ps])
         if not new_sha:
-            return _refused(kind or "write", f"{sha[:12]}: {refusal}")
+            blocked[sha] = (kind or "write", f"{sha[:12]}: {refusal}")
+            continue
         mapping[sha] = new_sha
         (replaced if replacement is not None else carried).append(sha)
 
-    return Rebuild(mapping=mapping, replaced=tuple(replaced), carried=tuple(carried))
+    return Rebuild(mapping=mapping, blocked=blocked,
+                   replaced=tuple(replaced), carried=tuple(carried))
