@@ -66,5 +66,25 @@ class TestCorrectorFor(unittest.TestCase):
         self.assertIsNone(clean("node_modules\ndist/\n"))
 
 
+class TestAnchoredMarkerIsSeenOnAnyLine(unittest.TestCase):
+    """A git-marker pattern anchored with `^`/`$` must match on any line, not only the first — the
+    whole-text `carries` check otherwise misses a carrier whose marker is not on line one."""
+
+    def _anchored(self):
+        return [{"category": "git-marker", "id": "anchored-test",
+                 "pattern": r"^EVIL_MARKER$", "file_globs": ["notes.txt"]}]
+
+    def test_patterns_compile_multiline(self):
+        pats = footprint._marker_patterns("notes.txt", self._anchored())
+        self.assertTrue(pats)
+        self.assertTrue(pats[0].flags & re.MULTILINE)
+
+    def test_carries_sees_an_anchored_marker_below_line_one(self):
+        carries = footprint.carries_footprint(_finding("git-marker", "notes.txt"), self._anchored())
+        self.assertTrue(carries("clean line\nEVIL_MARKER\n"), "a marker on line two must be seen")
+        self.assertTrue(carries("EVIL_MARKER\n"))
+        self.assertFalse(carries("clean line\nnot the marker\n"))
+
+
 if __name__ == "__main__":
     unittest.main()

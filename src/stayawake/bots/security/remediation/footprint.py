@@ -28,7 +28,7 @@ def _marker_patterns(path: str, signatures) -> list[re.Pattern]:
         if s.get("category") != GIT_MARKER or not s.get("pattern"):
             continue
         if globs_ok(path, s):
-            out.append(re.compile(s["pattern"], re.IGNORECASE))
+            out.append(re.compile(s["pattern"], re.IGNORECASE | re.MULTILINE))
     return out
 
 
