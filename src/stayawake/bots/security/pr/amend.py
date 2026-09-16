@@ -657,7 +657,11 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     if resolver is not None:
         held = set(clean) | set(remove) | {p for ps in infected.values() for p in ps}
         for item in _uncertain_items(repo, scan, held, infected):
-            if not resolver(item).remove:
+            try:
+                answer = resolver(item)
+            except Exception:                  # a resolver fault leaves the file for review
+                continue
+            if not answer.remove:
                 continue
             entry = gitutil.tree_entry(repo, "HEAD", item.path)
             if entry is None:

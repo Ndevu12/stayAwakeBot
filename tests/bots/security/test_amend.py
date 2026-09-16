@@ -1668,6 +1668,15 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         self.assertEqual(item.introduced_by, "")
         self.assertEqual(item.arrived_with_removed, ())
 
+    def test_a_raising_resolver_leaves_the_file_and_does_not_sink_the_run(self):
+        """A resolver fault must not abort the confirmed cleanup; the uncertain file is left as-is."""
+        def resolver(item):
+            raise RuntimeError("the prompt UI blew up")
+        outcome = self._run_with_findings(self._confirmed_loader_and_suspect(), resolver=resolver)
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertTrue(self._present(f"{self.base}:suspect.bin"),
+                        "a resolver fault leaves the uncertain file in place")
+
     def test_the_payload_check_recreates_a_symlink_from_its_blob_not_as_text(self):
         """A write-redirect symlink is a git mode-120000 blob holding the target string. Read back as
         a regular file it is invisible to the symlink matcher, so the payload check would clear a path
