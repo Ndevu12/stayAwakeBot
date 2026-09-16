@@ -610,7 +610,7 @@ class TestEveryInfectedCommitInOneRun(unittest.TestCase):
 
         out, _plan = _rebuild(repo, infected, [head])
 
-        self.assertTrue(out.ok, out.refusal)
+        self.assertFalse(out.blocked, out.blocked)
         new_head = out.tip(head)
         for path in ("one.js", "two.js", "three.js"):
             self.assertFalse(_git(repo, "ls-tree", "--name-only", new_head, "--", path).strip(),
@@ -668,7 +668,7 @@ class TestEveryInfectedCommitInOneRun(unittest.TestCase):
 
         out, _plan = _rebuild(repo, {first: ("x.js",)}, [head])
 
-        self.assertTrue(out.ok, out.refusal)
+        self.assertFalse(out.blocked, out.blocked)
         self.assertEqual(_git(repo, "show", f"{out.tip(head)}:x.js").strip(),
                          "rewritten by a person")
         self.assertFalse(_git(repo, "ls-tree", "--name-only", out.tip(first), "--", "x.js").strip(),
@@ -692,24 +692,89 @@ class TestAMovedBlobIsNotARemovedPayload(unittest.TestCase):
         _commit(repo, "C2 edits the same file")
         return repo, {first: ("util.js",)}, _rev(repo, "HEAD")
 
-    def test_a_later_edit_that_keeps_the_payload_stops_the_run(self):
+    def test_a_later_edit_that_keeps_the_payload_blocks_that_commit(self):
         repo, infected, head = self._edited_after(
             "export const clean = 1;\nPAYLOAD\nexport const two = 2;\n")
 
         out, _plan = _rebuild(repo, infected, [head], _carries(repo))
 
-        self.assertFalse(out.ok)
-        self.assertEqual(out.kind, "changed-downstream")
-        self.assertIn("util.js", out.refusal)
+        self.assertIn(head, out.blocked, "the downstream commit that re-carries it is blocked")
+        self.assertEqual(out.blocked[head][0], "changed-downstream")
+        self.assertIn("util.js", out.blocked[head][1])
+        self.assertNotIn(head, out.mapping, "a blocked commit is not delivered")
 
     def test_a_later_edit_that_removed_it_is_left_alone(self):
         repo, infected, head = self._edited_after("export const clean = 1;\ncleaned up\n")
 
         out, _plan = _rebuild(repo, infected, [head], _carries(repo))
 
-        self.assertTrue(out.ok, out.refusal)
+        self.assertFalse(out.blocked, out.blocked)
         self.assertEqual(_git(repo, "show", f"{out.tip(head)}:util.js"),
                          "export const clean = 1;\ncleaned up\n")
+
+
+class TestPartialDeliveryIsolatesTheBlockedCone(unittest.TestCase):
+    """A commit that cannot be remediated no longer sinks the whole run: it and its descendants are
+    recorded in `blocked` and skipped, and a branch that reaches none of them is still rebuilt clean.
+    This is the denial-of-remediation fix — one un-remediable artifact must not keep every other
+    branch infected."""
+
+    def _clean_beside_blocked(self):
+        repo = _new_repo()
+        _write(repo, "app.js", "base\n")
+        _commit(repo, "C0 clean")
+        base = _rev(repo, "HEAD")
+        _write(repo, "one.js", "PAYLOAD ONE\n")
+        _commit(repo, "C1 infected, remediable")
+        main_tip = _rev(repo, "HEAD")
+        _git(repo, "checkout", "-q", "-b", "feat", base)
+        _write(repo, "util.js", "clean\nPAYLOAD\n")
+        _commit(repo, "C2 infected")
+        c2 = _rev(repo, "HEAD")
+        _write(repo, "util.js", "clean\nPAYLOAD\nmore\n")
+        _commit(repo, "C3 re-carries the payload the correction cannot clean")
+        feat_tip = _rev(repo, "HEAD")
+        return repo, {main_tip: ("one.js",), c2: ("util.js",)}, main_tip, feat_tip
+
+    def test_the_clean_branch_is_delivered_while_the_blocked_branch_is_isolated(self):
+        repo, infected, main_tip, feat_tip = self._clean_beside_blocked()
+
+        out, _plan = _rebuild(repo, infected, [main_tip, feat_tip], _carries(repo))
+
+        self.assertIn(feat_tip, out.blocked, "the re-carrying tip is blocked")
+        self.assertEqual(out.blocked[feat_tip][0], "changed-downstream")
+        self.assertNotIn(feat_tip, out.mapping)
+        self.assertEqual(out.tip(feat_tip), feat_tip, "the blocked branch tip is left untouched")
+
+        self.assertIn(main_tip, out.mapping, "the clean branch is still delivered")
+        new_main = out.tip(main_tip)
+        self.assertNotEqual(new_main, main_tip)
+        self.assertFalse(_git(repo, "ls-tree", "--name-only", new_main, "--", "one.js").strip(),
+                         "the deliverable branch's payload is removed")
+
+    def test_a_blocked_merge_second_parent_isolates_the_branch_through_it(self):
+        repo = _new_repo()
+        _write(repo, "app.js", "base\n")
+        _commit(repo, "C0 clean")
+        base = _rev(repo, "HEAD")
+        _git(repo, "checkout", "-q", "-b", "side", base)
+        _write(repo, "util.js", "clean\nPAYLOAD\n")
+        _commit(repo, "S1 infected")
+        s1 = _rev(repo, "HEAD")
+        _write(repo, "util.js", "clean\nPAYLOAD\nmore\n")
+        _commit(repo, "S2 re-carries it")
+        _git(repo, "checkout", "-q", "main")
+        _write(repo, "main.js", "ok\n")
+        _commit(repo, "M1 clean mainline")
+        _git(repo, "merge", "--no-ff", "--no-commit", "-q", "side")
+        _git(repo, "commit", "-qm", "M2 merges the blocked side")
+        merge_tip = _rev(repo, "HEAD")
+
+        out, _plan = _rebuild(repo, {s1: ("util.js",)}, [merge_tip], _carries(repo))
+
+        self.assertIn(merge_tip, out.blocked,
+                      "a tip reaching the blocked commit through a merge second parent is blocked")
+        self.assertNotIn(merge_tip, out.mapping)
 
 
 class TestABranchNameCannotHideFromTheSweep(unittest.TestCase):

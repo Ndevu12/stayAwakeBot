@@ -781,6 +781,7 @@ class TestAmendGates(_AmendFixture):
             mapping = {before: before}
             replaced = (before,)
             carried = ()
+            blocked = {}
             kind = ""
             refusal = ""
             ok = True
@@ -805,6 +806,7 @@ class TestAmendGates(_AmendFixture):
             mapping = {before: before}
             replaced = (before,)
             carried = ()
+            blocked = {}
             kind = ""
             refusal = ""
             ok = True
@@ -823,6 +825,7 @@ class TestAmendGates(_AmendFixture):
             mapping = {infected: sha}
             replaced = (infected,)
             carried = ()
+            blocked = {}
             kind = ""
             refusal = ""
             ok = True
