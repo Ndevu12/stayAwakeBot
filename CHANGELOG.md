@@ -13,6 +13,12 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Fixed
+- **When `saw fix amend` hands something back for you to do, it says exactly what and where.**
+  Files that need manual recovery are named rather than counted, a confirmed commit it cannot
+  resolve reports what the scan saw, and a run that moved branches and could not put them back
+  tells you where your original history was saved so you can restore it.
+
 ## [0.11.4] - 2026-09-16
 
 ### Changed

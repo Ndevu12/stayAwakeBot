@@ -213,6 +213,35 @@ class TestAnInconsistentOutcomeIsRefused(unittest.TestCase):
         self.assertFalse(amended("o/r", _SHA, [BranchResult("dev", False)]).completed)
 
 
+class TestARefusalNamesWhatToActOn(unittest.TestCase):
+    """A refusal that hands work back to a person must name the work. "Review by hand" with nothing
+    named leaves the operator with nowhere to start — the exact case `Reason.subjects` exists for."""
+
+    def test_manual_recovery_names_the_files_not_only_a_count(self):
+        line = render_amend_line(refused("o/r", Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY,
+                                         "2", "src/loader.js, assets/logo.png"))
+        self.assertIn("src/loader.js", line)
+        self.assertIn("assets/logo.png", line)
+
+    def test_an_unresolved_confirmed_commit_names_what_the_scan_reported(self):
+        line = render_amend_line(refused("o/r", Cause.CONFIRMED_COMMIT_UNRESOLVED,
+                                         "abc123456789: src/x.js"))
+        self.assertIn("abc123456789", line)
+        self.assertIn("src/x.js", line)
+
+    def test_a_run_left_part_way_names_where_the_history_is_saved(self):
+        bundle = "/home/u/.local/state/saw/amend/o-r/abc123456789/capture.bundle"
+        refusal = render_amend_line(refused("o/r", Cause.LEFT_PART_WAY, "main, dev",
+                                            recovery=bundle))
+        self.assertIn(bundle, refusal)
+        moved = render_amend_line(amended("o/r", _SHA, [BranchResult("main", True)],
+                                          (Reason(Cause.LEFT_PART_WAY, "dev"),), recovery=bundle))
+        self.assertIn(bundle, moved)
+
+    def test_a_clean_run_does_not_carry_a_recovery_clause(self):
+        self.assertNotIn("original history is saved", render_amend_line(_complete()))
+
+
 class TestTheLineIsSafeToPrint(unittest.TestCase):
     def test_a_crafted_detail_cannot_break_the_line_or_forge_a_log_command(self):
         line = render_amend_line(refused("o/r", Cause.REMOTE_BRANCH_UNREADABLE,
