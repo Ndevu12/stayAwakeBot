@@ -70,6 +70,14 @@ class TestRenderItem(unittest.TestCase):
         self.assertIn("could not determine", out)
         self.assertIn("treat with caution", out)
 
+    def test_a_heuristic_file_says_unsure(self):
+        self.assertIn("saw is unsure", render_item(_item()))
+
+    def test_a_confirmed_unremediable_file_says_saw_confirmed_it(self):
+        out = render_item(_item(confirmed=True))
+        self.assertIn("saw confirmed this file is malicious", out)
+        self.assertNotIn("saw is unsure", out)
+
 
 if __name__ == "__main__":
     unittest.main()

