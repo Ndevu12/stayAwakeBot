@@ -1864,10 +1864,18 @@ class TestDeliveredRemovals(unittest.TestCase):
         out = _delivered_removals(
             {"deadbeef": delivered, "cafebabe": isolated},
             delivered_reach={"deadbeef"},
-            remove={"camouflage.woff2": "oid1"})
+            remove_holders={"camouflage.woff2": {"deadbeef"}})
         self.assertEqual(out, {"public/fonts/loader.js", "public/fonts/README.md",
                                "camouflage.woff2"})
         self.assertNotIn("iso/only.js", out)
+
+    def test_a_foreign_removal_reached_only_by_an_isolated_branch_is_not_named(self):
+        from stayawake.bots.security.pr.amend import _delivered_removals
+        out = _delivered_removals(
+            {}, delivered_reach={"deadbeef"},
+            remove_holders={"delivered.woff2": {"deadbeef"}, "isolated.woff2": {"cafebabe"}})
+        self.assertIn("delivered.woff2", out)
+        self.assertNotIn("isolated.woff2", out)
 
 
 if __name__ == "__main__":

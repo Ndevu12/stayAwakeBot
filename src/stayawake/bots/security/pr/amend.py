@@ -189,11 +189,11 @@ def _blast_radius(repo: Path, path: str,
 
 
 def _delivered_removals(replacements: dict, delivered_reach: set[str],
-                        remove: dict[str, str]) -> set[str]:
+                        remove_holders: dict[str, set[str]]) -> set[str]:
     """Paths the delivered branches actually dropped: each delivered replacement's removed paths, plus
-    the whole-file foreign removals. Reads the authoritative replacement records, so it names only what
-    a delivered branch removed."""
-    out = set(remove)
+    the foreign whole-file removals whose holding commits a delivered branch reaches. Names only what a
+    delivered branch removed, never a path dropped solely on an isolated branch."""
+    out = {p for p, holders in remove_holders.items() if holders & delivered_reach}
     for sha, repl in replacements.items():
         if sha in delivered_reach:
             out.update(repl.removed)
@@ -651,6 +651,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
 
     remove: dict[str, str] = {}
     remove_shas: set[str] = set()
+    remove_holders: dict[str, set[str]] = {}
     for path in _foreign_targets(scan, remove_foreign):
         if path in clean or path in {p for ps in infected.values() for p in ps}:
             continue
@@ -665,6 +666,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
             continue
         remove[path] = entry[1]
         remove_shas.update(foreign)
+        remove_holders[path] = set(foreign)
 
     if resolver is not None:
         held = set(clean) | set(remove) | {p for ps in infected.values() for p in ps}
@@ -686,6 +688,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
                 continue
             remove[item.path] = entry[1]
             remove_shas.update(foreign)
+            remove_holders[item.path] = set(foreign)
 
     infected = {sha: tuple(p for p in ps if p not in clean and p not in remove)
                 for sha, ps in infected.items()}
@@ -847,7 +850,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
             # history is the operator's problem whether or not any push succeeded.
             survivors.insert(0, Reason(Cause.LEFT_PART_WAY, ", ".join(unrestored)))
             recovery = str(captured.path or "")
-    removed = _delivered_removals(replacements, delivered_reach, remove)
+    removed = _delivered_removals(replacements, delivered_reach, remove_holders)
     touched = len(delivered_infected)
     label = (oldest[:12] if touched == 1 else f"{touched} commits from {oldest[:12]}")
     return amended(display, label, tuple(results) + tuple(isolated), tuple(survivors),
