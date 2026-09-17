@@ -200,6 +200,48 @@ def _delivered_removals(replacements: dict, delivered_reach: set[str],
     return out
 
 
+def _register_removal(repo: Path, path: str, remove: dict, remove_shas: set,
+                      remove_holders: dict) -> str:
+    """Register `path` for whole-file removal via its foreign history. Returns "" on success or skip
+    (not foreign / absent from HEAD), or "too-large" when history cannot be enumerated (caller refuses)."""
+    entry = gitutil.tree_entry(repo, "HEAD", path)
+    if entry is None:
+        return ""
+    hist = _foreign_history(repo, path, entry[1])
+    if hist is None:
+        return "too-large"
+    _holders, foreign = hist
+    if not foreign:
+        return ""
+    remove[path] = entry[1]
+    remove_shas.update(foreign)
+    remove_holders[path] = set(foreign)
+    return ""
+
+
+def _unhandled_items(repo: Path, scan, unhandled: set[str]) -> list:
+    """`UncertainItem`s for confirmed paths saw could not automatically remediate, offered to the
+    operator to remove whole. `unhandled` are those paths; one absent from HEAD is skipped."""
+    from stayawake.bots.security.pr.resolve import UncertainItem
+    out: list = []
+    seen: set[str] = set()
+    for f in scan.findings:
+        path = getattr(f, "path", "") or ""
+        if path not in unhandled or path in seen:
+            continue
+        entry = gitutil.tree_entry(repo, "HEAD", path)
+        if entry is None:
+            continue
+        seen.add(path)
+        out.append(UncertainItem(
+            path=path, category=getattr(f, "category", "") or "",
+            signature_id=getattr(f, "signature_id", "") or "",
+            description=getattr(f, "description", "") or "",
+            preview=stdout_bytes(repo, ["cat-file", "blob", entry[1]]) or b"",
+            confirmed=True))
+    return out
+
+
 def _uncertain_items(repo: Path, scan, taken: set[str],
                      infected: dict[str, tuple[str, ...]]) -> list:
     """Heuristic, non-advisory file findings this verb would otherwise leave untouched, as
@@ -673,20 +715,9 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
                 answer = resolver(item)
             except Exception:                  # a resolver fault leaves the file for review
                 continue
-            if not answer.remove:
-                continue
-            entry = gitutil.tree_entry(repo, "HEAD", item.path)
-            if entry is None:
-                continue
-            hist = _foreign_history(repo, item.path, entry[1])
-            if hist is None:
+            if answer.remove and _register_removal(
+                    repo, item.path, remove, remove_shas, remove_holders) == "too-large":
                 return refused(display, Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, item.path)
-            _holders, foreign = hist
-            if not foreign:
-                continue
-            remove[item.path] = entry[1]
-            remove_shas.update(foreign)
-            remove_holders[item.path] = set(foreign)
 
     infected = {sha: tuple(p for p in ps if p not in clean and p not in remove)
                 for sha, ps in infected.items()}
@@ -694,6 +725,16 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     taken = {p for ps in infected.values() for p in ps}
 
     unhandled = _unhandled_confirmed(scan, signatures, taken, cleaned_head, remove)
+    if resolver is not None and unhandled:
+        for item in _unhandled_items(repo, scan, unhandled):
+            try:
+                answer = resolver(item)
+            except Exception:
+                continue
+            if answer.remove and _register_removal(
+                    repo, item.path, remove, remove_shas, remove_holders) == "too-large":
+                return refused(display, Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, item.path)
+        unhandled = _unhandled_confirmed(scan, signatures, taken, cleaned_head, remove)
     if not infected and not clean and not remove:
         if unhandled:
             return refused(display, Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY,

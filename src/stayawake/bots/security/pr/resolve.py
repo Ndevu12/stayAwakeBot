@@ -26,6 +26,7 @@ class UncertainItem:
     preview: bytes
     introduced_by: str = ""
     arrived_with_removed: tuple[str, ...] = ()
+    confirmed: bool = False
 
 
 @dataclass(frozen=True)
