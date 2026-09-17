@@ -1588,6 +1588,41 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         return subprocess.run(["git", "-C", str(self.d), "cat-file", "-e", spec],
                               capture_output=True).returncode == 0
 
+    def _deliverable_beside_an_uncharacterizable_commit(self):
+        """A removable content loader on the default branch, and an INDEPENDENT branch whose evil
+        merge saw confirms but cannot characterize (its payload_paths are disjoint from what the
+        merge introduced, so nothing is swept). Findings for both."""
+        root = self._rev()
+        _git(self.d, "checkout", "-qb", "iso", root)
+        _git(self.d, "merge", "--no-ff", "--no-commit", "feature")
+        self.write(self.d, "evil/b.js", "eval(atob('cGF5bG9hZA=='));\n")
+        _git(self.d, "add", "evil/b.js")
+        _git(self.d, "-c", "user.name=Inj", "-c", "user.email=i@t.test",
+             "commit", "-qm", "merge (uncharacterizable)")
+        iso_merge = self._rev()
+        _git(self.d, "checkout", "-q", self.base)
+        self.write(self.d, "cfg.mjs", _seam_line("const c = {};\nexport default c;\n"))
+        self.commit(self.d, "add config with a loader")
+        return iso_merge, [
+            Finding("loader-seam", "code-loader", Severity.CRITICAL, "cfg.mjs", "loader",
+                    confidence=CONFIRMED),
+            Finding("evil-merge-loader", "evil-merge", Severity.CRITICAL, iso_merge[:10], "loader",
+                    vector="evil-merge", commit_sha=iso_merge, related_paths=("evil/b.js",),
+                    payload_paths=("phantom-not-in-related.js",), confidence=CONFIRMED)]
+
+    def test_an_uncharacterizable_commit_isolates_its_branch_while_the_rest_delivers(self):
+        """A confirmed commit saw cannot characterize isolates only the branch that reaches it; an
+        independent clean-able branch is still delivered, instead of the whole run refusing."""
+        _iso_merge, findings = self._deliverable_beside_an_uncharacterizable_commit()
+        outcome = self._run_with_findings(findings)
+        by_name = {b.name: b for b in outcome.branches}
+        self.assertIn(self.base, by_name)
+        self.assertIn("iso", by_name)
+        self.assertTrue(by_name[self.base].force_updated, "the clean branch is still delivered")
+        self.assertFalse(by_name["iso"].force_updated, "the uncharacterizable branch is isolated")
+        self.assertEqual(by_name["iso"].reason.cause, Cause.COMMIT_SHAPE_NOT_MODELLED)
+        self.assertTrue(outcome.needs_review)
+
     def test_the_operator_can_remove_an_uncertain_file(self):
         """A heuristic (uncertain) file the verb would leave alone is put to an injected resolver;
         when it answers remove, the file is dropped from history alongside the confirmed cleanup."""

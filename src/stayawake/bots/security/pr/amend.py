@@ -611,6 +611,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
         return refused(display, Cause.SCAN_DID_NOT_FINISH)
     commits = _confirmed_commits(scan)
     infected: dict[str, tuple[str, ...]] = {}
+    uncharacterized: dict[str, tuple[str, str]] = {}
     for finding, anchors in commits:
         reported = getattr(finding, "commit_sha", None) or ""
         sha = _full(repo, reported)
@@ -621,7 +622,8 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
         related = tuple(getattr(finding, "related_paths", ()) or ())
         paths = tuple(_swept_paths(repo, sha, related, anchors))
         if not paths:
-            return refused(display, Cause.COMMIT_SHAPE_NOT_MODELLED, sha[:12])
+            uncharacterized[sha] = ("shape", sha[:12])
+            continue
         infected[sha] = tuple(dict.fromkeys(infected.get(sha, ()) + paths))
 
     clean: dict[str, tuple] = {}
@@ -697,7 +699,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
                            str(len(unhandled)), ", ".join(sorted(unhandled)))
         return refused(display, Cause.NO_CONFIRMED_PAYLOAD)
 
-    all_infected = set(infected) | clean_shas | remove_shas
+    all_infected = set(infected) | clean_shas | remove_shas | set(uncharacterized)
     heads = _branches_carrying_any(repo, all_infected)
     if not heads:
         return refused(display, Cause.COMMIT_ON_NO_BRANCH,
@@ -740,7 +742,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
 
     survives = _survives(repo, signatures, allowlist, opts)
     replacements = {}
-    blocked_commits: dict[str, tuple[str, str]] = {}
+    blocked_commits: dict[str, tuple[str, str]] = dict(uncharacterized)
     recovered_paths: set[str] = set()
     for sha, paths in infected.items():
         replacement = gitamend.replacement_commit(repo, sha, paths, signing, survives)
