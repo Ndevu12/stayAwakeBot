@@ -69,8 +69,8 @@ def register(sub) -> None:
                         "Deleting branches is not something `saw` does — remove any you no longer "
                         "want on GitHub.")
     p.add_argument("--remove-foreign", action="store_true", dest="remove_foreign",
-                   help="with `amend`: also remove a confirmed wholly-foreign file from history "
-                        "(a file that is entirely the artifact, with nothing legitimate to keep)")
+                   help="deprecated and ignored: `amend` removes a confirmed wholly-foreign file "
+                        "from history by default")
     p.set_defaults(func=run)
 
 
@@ -92,11 +92,10 @@ def run(a: argparse.Namespace) -> int:
                                 remote=a.remote,
                                 slugs=(rest or None) if a.remote else None,
                                 no_stream=no_stream_requested(a), jobs=a.jobs,
-                                remove_foreign=a.remove_foreign,
                                 resolver=build_resolver())
     if a.remove_foreign:
-        print("saw fix --remove-foreign is only valid with `amend`", file=sys.stderr)
-        return exitcodes.INCOMPLETE
+        print("note: --remove-foreign is deprecated and ignored; a confirmed wholly-foreign file "
+              "is removed by default", file=sys.stderr)
     remote = a.remote or bool(a.user) or bool(a.org)
     return remediator.fix(a.config, pr=a.pr, remote=remote,
                           paths=None if remote else (positionals or None),

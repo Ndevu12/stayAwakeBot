@@ -230,10 +230,8 @@ def _uncertain_items(repo: Path, scan, taken: set[str],
     return out
 
 
-def _foreign_targets(scan, remove_foreign: bool) -> list[str]:
-    """Paths of confirmed wholly-foreign files to remove whole, or [] unless removal was asked."""
-    if not remove_foreign:
-        return []
+def _foreign_targets(scan) -> list[str]:
+    """Paths of confirmed wholly-foreign files to remove whole."""
     out: list[str] = []
     for f in scan.findings:
         if getattr(f, "confidence", None) != CONFIRMED or getattr(f, "advisory_only", False):
@@ -561,24 +559,24 @@ def _survivors(repo: Path, slug: str, olds: list[str], token: str | None) -> lis
 
 
 def amend_repo(repo: Path, opts, signatures, allowlist, token: str | None = None, *,
-               pusher=None, remove_foreign: bool = False,
+               pusher=None,
                identity_fallback: str | None = None,
                operator_context: Path | None = None, resolver=None) -> str:
     """Force-update every branch that still reaches a confirmed past-commit payload.
 
     The local rewrite is a step. The result is the remote refs moving. Returns one operator line.
-    With `remove_foreign`, a confirmed wholly-foreign file is removed from history too. `resolver`,
-    when given, is asked to keep or remove each heuristic file the verb would otherwise leave.
+    A confirmed wholly-foreign file is removed from history too. `resolver`, when given, is asked to
+    keep or remove each heuristic file the verb would otherwise leave.
     """
     display = gitutil.origin_slug(repo) or str(repo).replace(str(Path.home()), "~")
     outcome = amend_outcome(repo, display, opts, signatures, allowlist, token, pusher=pusher,
-                            remove_foreign=remove_foreign, identity_fallback=identity_fallback,
+                            identity_fallback=identity_fallback,
                             operator_context=operator_context, resolver=resolver)
     return render_amend_line(outcome)
 
 
 def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, *,
-                  pusher=None, remove_foreign: bool = False,
+                  pusher=None,
                   identity_fallback: str | None = None,
                   operator_context: Path | None = None, resolver=None) -> AmendOutcome:
     """The act, as a structure. Prose is rendered from this and never parsed back out of it.
@@ -652,7 +650,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     remove: dict[str, str] = {}
     remove_shas: set[str] = set()
     remove_holders: dict[str, set[str]] = {}
-    for path in _foreign_targets(scan, remove_foreign):
+    for path in _foreign_targets(scan):
         if path in clean or path in {p for ps in infected.values() for p in ps}:
             continue
         entry = gitutil.tree_entry(repo, "HEAD", path)

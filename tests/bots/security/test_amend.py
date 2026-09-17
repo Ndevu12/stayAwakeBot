@@ -58,21 +58,22 @@ class TestFixAmendCli(unittest.TestCase):
         self.assertFalse(m.call_args.kwargs["remote"])
 
     @mock.patch("stayawake.bots.security.remediator.amend", return_value=0)
-    def test_amend_remove_foreign_routes(self, m):
+    def test_amend_accepts_the_deprecated_remove_foreign_flag(self, m):
         rc = cli.main(["fix", "amend", ".", "--remove-foreign"])
         self.assertEqual(rc, 0)
-        self.assertTrue(m.call_args.kwargs["remove_foreign"])
+        m.assert_called_once()
+        self.assertNotIn("remove_foreign", m.call_args.kwargs)
         self.assertEqual(m.call_args.kwargs["paths"], ["."])
 
     @mock.patch("stayawake.bots.security.remediator.fix", return_value=0)
     @mock.patch("stayawake.bots.security.remediator.amend", return_value=0)
-    def test_remove_foreign_without_amend_is_refused(self, mamend, mfix):
+    def test_remove_foreign_outside_amend_is_a_deprecated_no_op(self, mamend, mfix):
         with redirect_stderr(io.StringIO()) as err:
             rc = cli.main(["fix", "--remove-foreign"])
-        self.assertEqual(rc, 2)
+        self.assertEqual(rc, 0)
+        mfix.assert_called_once()
         mamend.assert_not_called()
-        mfix.assert_not_called()
-        self.assertIn("only valid with", err.getvalue())
+        self.assertIn("deprecated", err.getvalue())
 
     @mock.patch("stayawake.bots.security.remediator.amend", return_value=0)
     def test_amend_remote_routes(self, m):
@@ -1080,11 +1081,11 @@ def _seam_line(clean_prefix: str) -> str:
 class TestAmendActsOnContentPayload(_AmendFixture):
     """A confirmed payload in a file, carrying no commit id, is rewritten out of history."""
 
-    def _act_full(self, scan, pusher=_ok_push, remove_foreign=False):
+    def _act_full(self, scan, pusher=_ok_push):
         with self._remote():
             with mock.patch("stayawake.bots.security.pr.amend.scan_target", return_value=scan):
                 return amend_outcome(self.d, "acme/app", ScanOptions(), load_signatures(),
-                                     [], "t", pusher=pusher, remove_foreign=remove_foreign)
+                                     [], "t", pusher=pusher)
 
     def test_a_loader_in_an_evolving_file_is_excised_at_every_commit(self):
         clean = "const config = {};\nexport default config;\n"
@@ -1742,7 +1743,7 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         self.commit(self.d, "more unrelated work")
         scan = ScanResult(target=str(self.d), source="local",
                           findings=[self._foreign_finding(p)])
-        outcome = self._act_full(scan, pusher=lambda *a: PushResult(True), remove_foreign=True)
+        outcome = self._act_full(scan, pusher=lambda *a: PushResult(True))
         self.assertTrue(outcome.completed, self._causes(outcome))
         tip = self._rev(self.base)
         reachable = subprocess.run(["git", "-C", str(self.d), "rev-list", tip],
@@ -1753,22 +1754,20 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         self.assertEqual([], present, f"foreign file still in history at {present}")
         self.assertEqual("ok2\n", self._show(f"{self.base}:app.js"), "unrelated work is kept")
 
-    def test_without_the_flag_a_foreign_file_is_left_for_review(self):
+    def test_a_confirmed_foreign_file_is_removed_by_default(self):
         p = "src/fonts/BlockchainFont.woff2"
         self.write(self.d, p, "wOF2\x00camouflage-blob\n")
         self.commit(self.d, "add the foreign font")
-        before = self._rev()
         scan = ScanResult(target=str(self.d), source="local",
                           findings=[self._foreign_finding(p)])
         outcome = self._act_full(scan, pusher=lambda *a: PushResult(True))
-        self.assertFalse(outcome.completed)
-        self.assertIn(Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY, self._causes(outcome))
-        self.assertEqual(before, self._rev(), "nothing removed without the flag")
-        self.assertEqual(0, subprocess.run(
-            ["git", "-C", str(self.d), "cat-file", "-e", f"HEAD:{p}"],
-            capture_output=True).returncode, "the file is still there")
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertIn(p, outcome.removed)
+        self.assertNotEqual(0, subprocess.run(
+            ["git", "-C", str(self.d), "cat-file", "-e", f"{self.base}:{p}"],
+            capture_output=True).returncode, "the foreign file is removed by default")
 
-    def test_a_heuristic_whole_file_finding_is_never_removed_by_either_route(self):
+    def test_a_heuristic_whole_file_finding_is_never_removed(self):
         p = "src/fonts/Maybe.woff2"
         self.write(self.d, p, "wOF2\x00unsure\n")
         self.commit(self.d, "add a file only a heuristic flags")
@@ -1776,10 +1775,9 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         finding = Finding("fake-font-blockchain", "fake-font", Severity.HIGH, p,
                           "wholly foreign", remediation="quarantine-file", confidence=HEURISTIC)
         scan = ScanResult(target=str(self.d), source="local", findings=[finding])
-        for flag in (False, True):
-            outcome = self._act_full(scan, pusher=lambda *a: PushResult(True), remove_foreign=flag)
-            self.assertFalse(outcome.completed, f"a heuristic finding was acted on (flag={flag})")
-            self.assertEqual(before, self._rev(), f"a ref moved on a heuristic finding (flag={flag})")
+        outcome = self._act_full(scan, pusher=lambda *a: PushResult(True))
+        self.assertFalse(outcome.completed, "a heuristic finding was acted on")
+        self.assertEqual(before, self._rev(), "a ref moved on a heuristic finding")
 
     def test_a_partial_run_does_not_claim_a_removal(self):
         from stayawake.bots.security.pr.outcome import amended, BranchResult, render_amend_line
@@ -1797,7 +1795,7 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         self.commit(self.d, "unrelated work")
         scan = ScanResult(target=str(self.d), source="local",
                           findings=[self._foreign_finding(p)])
-        outcome = self._act_full(scan, pusher=lambda *a: PushResult(True), remove_foreign=True)
+        outcome = self._act_full(scan, pusher=lambda *a: PushResult(True))
         self.assertTrue(outcome.completed, self._causes(outcome))
         self.assertIn(p, outcome.removed)
         self.assertIn(p, render_amend_line(outcome))
@@ -1817,7 +1815,7 @@ class TestAmendActsOnContentPayload(_AmendFixture):
                           findings=[self._foreign_finding(p)])
         moved = []
         outcome = self._act_full(
-            scan, pusher=lambda b, d, l: moved.append(b) or PushResult(True), remove_foreign=True)
+            scan, pusher=lambda b, d, l: moved.append(b) or PushResult(True))
         self.assertTrue(outcome.completed, self._causes(outcome))
         for ref in (self.base, "victim"):
             self.assertNotEqual(0, subprocess.run(
@@ -1837,8 +1835,7 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         scan = ScanResult(target=str(self.d), source="local",
                           findings=[self._foreign_finding(p)])
         calls = []
-        outcome = self._act_full(scan, pusher=lambda *a: calls.append(a) or PushResult(True),
-                                 remove_foreign=True)
+        outcome = self._act_full(scan, pusher=lambda *a: calls.append(a) or PushResult(True))
         self.assertFalse(outcome.completed, "a reused path is not whole-removed")
         self.assertIn(Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY, self._causes(outcome))
         self.assertEqual(before, self._rev(), "nothing moved")
