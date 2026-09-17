@@ -14,6 +14,10 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Changed
+- **`saw fix amend` removes a confirmed wholly-foreign file by default; `--remove-foreign` is
+  deprecated and ignored.** A file that is entirely the malware's artifact — with nothing legitimate
+  to keep — is now removed from history without the flag. A file that ever held a legitimate version
+  is still kept.
 - **On a terminal, `saw fix amend` asks you about each file it is unsure of, instead of leaving
   them all.** It still removes confirmed payloads by itself; for an unconfirmed file it shows a safe
   preview and what the file arrived with, and keeps or removes it as you choose. It asks only on a
