@@ -1624,6 +1624,16 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         self.assertEqual(by_name["iso"].reason.cause, Cause.COMMIT_SHAPE_NOT_MODELLED)
         self.assertTrue(outcome.needs_review)
 
+    def test_the_operator_can_deliver_an_unmodellable_branch_by_removing_its_files(self):
+        """The branch that isolates on an un-modellable commit is delivered instead when the operator
+        removes that commit's injected files."""
+        _iso, findings = self._deliverable_beside_an_uncharacterizable_commit()
+        outcome = self._run_with_findings(findings, resolver=lambda item: Decision(remove=True))
+        by_name = {b.name: b for b in outcome.branches}
+        self.assertTrue(by_name["iso"].force_updated,
+                        "the operator removed the injected files and iso was delivered")
+        self.assertFalse(self._present("iso:evil/b.js"), "the injected file is gone from iso")
+
     def test_the_operator_can_remove_an_uncertain_file(self):
         """A heuristic (uncertain) file the verb would leave alone is put to an injected resolver;
         when it answers remove, the file is dropped from history alongside the confirmed cleanup."""

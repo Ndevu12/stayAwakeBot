@@ -201,10 +201,11 @@ def _delivered_removals(replacements: dict, delivered_reach: set[str],
 
 
 def _register_removal(repo: Path, path: str, remove: dict, remove_shas: set,
-                      remove_holders: dict) -> str:
-    """Register `path` for whole-file removal via its foreign history. Returns "" on success or skip
-    (not foreign / absent from HEAD), or "too-large" when history cannot be enumerated (caller refuses)."""
-    entry = gitutil.tree_entry(repo, "HEAD", path)
+                      remove_holders: dict, treeish: str = "HEAD") -> str:
+    """Register `path` for whole-file removal via its foreign history, keyed on its blob at `treeish`.
+    Returns "" on success or skip (not foreign / absent), or "too-large" when history cannot be
+    enumerated (caller refuses)."""
+    entry = gitutil.tree_entry(repo, treeish, path)
     if entry is None:
         return ""
     hist = _foreign_history(repo, path, entry[1])
@@ -239,6 +240,23 @@ def _unhandled_items(repo: Path, scan, unhandled: set[str]) -> list:
             description=getattr(f, "description", "") or "",
             preview=stdout_bytes(repo, ["cat-file", "blob", entry[1]]) or b"",
             confirmed=True))
+    return out
+
+
+def _path_items(repo: Path, paths, treeish: str, introduced_by: str = "") -> list:
+    """`UncertainItem`s for specific paths present at `treeish`, offered to the operator to remove whole
+    — the injected files of a commit saw could not model. `introduced_by` is the merge's short id."""
+    from stayawake.bots.security.pr.resolve import UncertainItem
+    out: list = []
+    for path in paths:
+        entry = gitutil.tree_entry(repo, treeish, path)
+        if entry is None:
+            continue
+        out.append(UncertainItem(
+            path=path, category="evil-merge", signature_id="",
+            description="injected by a merge saw could not model",
+            preview=stdout_bytes(repo, ["cat-file", "blob", entry[1]]) or b"",
+            introduced_by=introduced_by, confirmed=True))
     return out
 
 
@@ -652,6 +670,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     commits = _confirmed_commits(scan)
     infected: dict[str, tuple[str, ...]] = {}
     uncharacterized: dict[str, tuple[str, str]] = {}
+    uncharacterized_paths: dict[str, tuple[str, ...]] = {}
     for finding, anchors in commits:
         reported = getattr(finding, "commit_sha", None) or ""
         sha = _full(repo, reported)
@@ -663,6 +682,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
         paths = tuple(_swept_paths(repo, sha, related, anchors))
         if not paths:
             uncharacterized[sha] = ("shape", sha[:12])
+            uncharacterized_paths[sha] = tuple(sorted(mergedetect.born_at_merge(repo, sha, related)))
             continue
         infected[sha] = tuple(dict.fromkeys(infected.get(sha, ()) + paths))
 
@@ -735,6 +755,23 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
                     repo, item.path, remove, remove_shas, remove_holders) == "too-large":
                 return refused(display, Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, item.path)
         unhandled = _unhandled_confirmed(scan, signatures, taken, cleaned_head, remove)
+    if resolver is not None and uncharacterized:
+        for sha in list(uncharacterized):
+            present = [p for p in uncharacterized_paths.get(sha, ())
+                       if gitutil.tree_entry(repo, sha, p) is not None]
+            if not present:
+                continue
+            for item in _path_items(repo, present, sha, sha[:12]):
+                try:
+                    answer = resolver(item)
+                except Exception:
+                    continue
+                if answer.remove and _register_removal(
+                        repo, item.path, remove, remove_shas, remove_holders, sha) == "too-large":
+                    return refused(display, Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, item.path)
+            if all(p in remove for p in present):
+                del uncharacterized[sha]
+
     if not infected and not clean and not remove:
         if unhandled:
             return refused(display, Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY,

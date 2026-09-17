@@ -14,9 +14,11 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Changed
-- **On a terminal, `saw fix amend` offers to remove a confirmed payload it could not clean
-  automatically, instead of only telling you to recover it by hand.** Without a terminal the run
-  still reports it for manual recovery, unchanged.
+- **On a terminal, `saw fix amend` offers to remove the files behind a unit it could not remediate
+  automatically** — a confirmed payload it could not clean, or a commit whose shape it could not
+  model — instead of only reporting them. Removing an un-modellable commit's injected files delivers
+  a branch that would otherwise be isolated. Without a terminal these are reported for review,
+  unchanged.
 - **`saw fix amend` removes a confirmed wholly-foreign file by default; `--remove-foreign` is
   deprecated and ignored.** A file that is entirely the malware's artifact — with nothing legitimate
   to keep — is now removed from history without the flag. A file that ever held a legitimate version
