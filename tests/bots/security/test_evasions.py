@@ -39,6 +39,14 @@ class TestScannerEvasions(unittest.TestCase):
         (self.d / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR" + bytes(range(64)) * 8)
         self.assertEqual(_scan(self.d), set())
 
+    def test_the_camouflage_fonts_readme_is_heuristic_not_confirmed(self):
+        (self.d / "public" / "fonts").mkdir(parents=True)
+        (self.d / "public" / "fonts" / "README.md").write_text(
+            "# Fonts\nTypefaces for the Blockchain Explorer web app. We ship TechMono.\n")
+        finding = next(f for f in scan_target(LocalRepoTarget(self.d, "t", ScanOptions()), SIGS, [])
+                       .findings if f.signature_id == "camouflage-blockchain-readme")
+        self.assertEqual(finding.confidence, "heuristic")
+
     def test_oversized_source_file_tail_is_scanned(self):
         # C2: payload appended past the size cap is still found via head+tail scan.
         opts = ScanOptions(max_file_bytes=200)

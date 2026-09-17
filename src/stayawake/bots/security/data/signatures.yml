@@ -101,6 +101,7 @@ signatures:
   - id: camouflage-blockchain-readme
     category: camouflage
     severity: medium
+    confidence: heuristic
     matcher: content
     pattern: 'Blockchain Explorer|BlockchainFont|TechMono'
     file_globs: ["**/fonts/README.md", "**/fonts/*.md"]
