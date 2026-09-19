@@ -5,8 +5,8 @@ description: saw scan — hunt for supply-chain worms across repositories. Read-
 # `saw scan`
 
 Hunt for supply-chain worms across repositories or directories. The full report — with full match
-evidence — renders to stdout and **nothing is persisted** unless you ask for a sink; progress goes to
-stderr. `scan` never changes a file.
+evidence — renders to stdout; progress goes to stderr. The last line is the verdict. The clean is
+[`saw fix`](fix.md).
 
 ```text
 saw scan [TARGETS...] [-r] [--user U] [--org O] [-c FILE] [-p PATH] [-j N]

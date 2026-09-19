@@ -21,7 +21,6 @@ _CYAN  = ((95, 211, 221), 80, "96")
 _DIM   = ((122, 133, 148), 244, "90")
 _FAINT = ((88, 96, 110), 240, "90")
 _WHITE = ((240, 246, 252), 231, "97")
-_FG    = ((201, 211, 222), 252, "37")
 
 _URL = "github.com/Ndevu12/stayAwakeBot"
 
@@ -67,14 +66,14 @@ def render_welcome(level: ColorLevel, version: str) -> str:
         ("the sentinel saw the worm", _DIM, True),
         None,
         ("supply-chain worm hunter", _GREEN, False),
-        ("offline · persists nothing", _DIM, False),
+        ("the hunt, the clean, the host, the gate", _DIM, False),
         None,
     ])
     lines += ["", C("Get started", _WHITE, bold=True)]
     cmds = [
-            ("saw scan .", "hunt this repo for supply-chain worms (read-only)"),
-            ("saw audit", "credential · editor · CI hygiene"),
-            ("saw harden", "host denials, read back before they count"),
+            ("saw scan .", "the repo, the lockfile, the install, and the host"),
+            ("saw audit", "the machine — credentials, editor, start-up"),
+            ("saw harden", "host controls, in place after a read-back"),
             ("saw intro", "a 60-second tour"),
             ("saw <command> -h", "help for any command"),
     ]
@@ -82,12 +81,12 @@ def render_welcome(level: ColorLevel, version: str) -> str:
     for cmd, desc in cmds:
         lines.append("  " + C(cmd, _CYAN, bold=True) + " " * (w - len(cmd) + 3) + C(desc, _DIM))
     lines += ["", C(f"saw v{version} ", _DIM) + C("· ", _FAINT)
-              + C("zero code runs at install", _GREEN) + C(" · ", _FAINT) + C(_URL, _CYAN), ""]
+              + C("the hunt, the clean, the host, the gate", _GREEN) + C(" · ", _FAINT) + C(_URL, _CYAN), ""]
     return "\n".join(lines) + "\n"
 
 
 def render_intro(level: ColorLevel, version: str) -> str:
-    """The fuller `saw intro` tour: what it is, the verbs, why it's safe, and how to gate CI."""
+    """The fuller `saw intro` tour: what it is, the work, and how to start."""
     def C(text, spec, **kw):
         return _paint(level, text, spec, **kw)
 
@@ -96,30 +95,23 @@ def render_intro(level: ColorLevel, version: str) -> str:
         ("stayAwakeBot", _WHITE, False),
         ("the sentinel saw the worm", _DIM, True),
         None,
-        ("detect · report · auto-fix", _GREEN, False),
+        ("detect · remediate · prevent", _GREEN, False),
         None,
     ])
     lines += [
         "", C("What it is", _WHITE, bold=True),
-        C("  A local supply-chain worm hunter — it detects, reports, and auto-fixes", _DIM),
-        C("  self-propagating malware: obfuscated loaders, fake fonts, VS Code", _DIM),
-        C('  auto-run tasks, and stealth "evil merges".', _DIM),
-        "", C("Four verbs", _WHITE, bold=True),
-        "  " + C("saw scan  ", _CYAN, bold=True) + C("  hunt worms (read-only) — ", _DIM)
-        + C("the exit code IS the verdict", _FG),
-        "  " + C("saw fix   ", _CYAN, bold=True) + C("  recover from git onto a clean branch; ", _DIM)
-        + C("--pr", _MINT) + C(" opens a PR", _DIM),
-        "  " + C("saw audit ", _CYAN, bold=True) + C("  credential · editor · CI hygiene", _DIM),
-        "  " + C("saw harden", _CYAN, bold=True) + C("  host denials; in place only after a read-back", _DIM),
-        "", C("Why it's safe", _WHITE, bold=True),
-        "  " + C("· runs ", _DIM) + C("zero code at install", _GREEN)
-        + C(" (that's the very vector it hunts)", _DIM),
-        "  " + C("· fully accurate ", _DIM) + C("offline", _GREEN)
-        + C("; only sandbox-escaping -x is opt-in", _DIM),
-        C("  · persists nothing by default", _DIM),
+        C("  A supply-chain worm hunter. It hunts where the worm lands:", _DIM),
+        C("  repositories, lockfiles, installed packages, and the host.", _DIM),
+        "", C("The work", _WHITE, bold=True),
+        "  " + C("saw scan  ", _CYAN, bold=True) + C("  the tree and the host", _DIM),
+        "  " + C("saw hook  ", _CYAN, bold=True) + C("  a clone, a pull, a switch, a rebase", _DIM),
+        "  " + C("saw fix   ", _CYAN, bold=True) + C("  the previous version onto a pull request  ", _DIM)
+        + C("--pr", _MINT),
+        "  " + C("saw harden", _CYAN, bold=True) + C("  this machine", _DIM),
+        "  " + C("saw guard ", _CYAN, bold=True) + C("  the merge", _DIM),
         "",
-        C("Gate CI  ", _WHITE, bold=True) + C("saw scan", _CYAN, bold=True)
-        + C("  →  exit 1 on infection fails the build", _DIM),
+        C("Start    ", _WHITE, bold=True) + C("saw scan", _CYAN, bold=True)
+        + C("  — the last line of the report is the verdict", _DIM),
         C("Docs     ", _WHITE, bold=True) + C(_URL, _CYAN),
         C(f"saw v{version}", _FAINT), "",
     ]

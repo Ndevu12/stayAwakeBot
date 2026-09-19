@@ -475,7 +475,7 @@ class TestTopLevel(unittest.TestCase):
     def test_intro_prints_tour(self):
         with redirect_stdout(io.StringIO()) as buf:
             self.assertEqual(cli.main(["intro"]), 0)
-        self.assertIn("Four verbs", buf.getvalue())
+        self.assertIn("The work", buf.getvalue())
         self.assertIn("saw harden", buf.getvalue())
 
     def test_welcome_alias_routes_to_intro(self):

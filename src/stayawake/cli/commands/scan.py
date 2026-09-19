@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 """`saw scan` — hunt supply-chain worms (READ-ONLY). Routes to security.service.scan.
 
-Terminal-first: by default the result is rendered to the terminal and NOTHING is written to
-disk. The verdict is the exit code (0 clean / 1 infected), unconditionally. Scope is LOCAL by
-default (given paths / configured globs / the current repo); `--remote` (or naming `--user`/
-`--org`) scans GitHub repos instead — ad-hoc selectors, else configured targets, else your own
-repos. Persisting/alerting is opt-in: --json, --sarif FILE, -d DIR (redacted), --alert.
-Remediation lives in `saw fix`, never here.
+The hunt writes a report to the terminal. The last line is the verdict. The clean is
+`saw fix`. Scope is LOCAL by default (given paths / configured globs / the current repo);
+`--remote` (or naming `--user`/`--org`) scans GitHub repos instead. Persisting/alerting is
+opt-in: --json, --sarif FILE, -d DIR (redacted), --alert.
 """
 from __future__ import annotations
 
@@ -24,17 +22,14 @@ def register(sub) -> None:
         sub, "scan", aliases=["s", "sc"],
         help="hunt supply-chain worms (read-only)",
         description=(
-            "Hunt supply-chain worms across repositories or directories. Read-only — a scan "
-            "never changes a file; remediation lives in `saw fix`. The full report renders to "
-            "the terminal and nothing is persisted unless you ask for it, and the exit code is "
-            "the verdict unconditionally: 0 clean, 1 infected, 2 could not complete."),
+            "Hunt supply-chain worms across repositories or directories. The full report "
+            "renders to the terminal. The last line is the verdict. The clean is `saw fix`."),
         examples=[
-            ("saw scan", "report to the terminal, writes nothing"),
+            ("saw scan", "the last line of the report is the verdict"),
             ("saw scan ./svc-a ./svc-b", "specific local paths"),
             ("saw scan src/app/loader.js", "one directory, or one file"),
             ("saw scan --org UB-TechDEV -j 8", "a whole org, 8 repos at once"),
             ("saw scan --deep", "content-scan installed dependency code"),
-            ("saw scan; echo $?", "CI gate: the exit code IS the verdict"),
         ])
     p.add_argument("paths", nargs="*", metavar="TARGETS",
                    help="local paths — a repository, a directory or a single file; or, with "

@@ -1,5 +1,5 @@
 ---
-description: saw intro — a short tour of what saw is, its verbs, and why it is safe to run.
+description: saw intro — a short tour of the hunt, the clean, the host, and the gate.
 ---
 
 # `saw intro`
