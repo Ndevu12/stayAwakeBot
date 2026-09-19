@@ -1,5 +1,5 @@
 ---
-description: Install saw, scan a repository, read the verdict and act on it. A guided first run in about five minutes, with no token and no configuration.
+description: Install saw, scan a repository, read the verdict and act on it. A guided first run in about five minutes.
 ---
 
 # Your first scan
@@ -35,8 +35,7 @@ Stand in a repository and run:
 saw scan
 ```
 
-Nothing is sent anywhere, no token is needed, and no file is written. The full report renders to your
-terminal.
+The hunt runs on the tree you have. The last line of the report is the verdict.
 
 ## 3. Read the verdict
 

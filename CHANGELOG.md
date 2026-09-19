@@ -14,6 +14,8 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Changed
+- **The README and the opening docs name the work.** They listed what a scan is not. They now
+  name the hunt, the clean, the host, and the gate.
 - **On a terminal, `saw fix amend` offers to replace a confirmed file it could not clean with content
   you supply.** For a confirmed payload with no clean earlier version to restore, you can point saw at
   a replacement file; saw scans that content, and only if it is clean puts it in place of the payload,

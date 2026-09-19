@@ -16,21 +16,16 @@ A single compromised dependency is how one package becomes an organisation-wide 
 Self-propagating packages spread through installs, builds and merges — arriving with code you
 asked for, and running before you ever read it.
 
-**`saw` hunts them where they land**: in your repositories, your lockfiles, your installed
-dependency tree, and your machine's start-up surface. It then remediates through a pull request
-and gates CI, so an infected change cannot merge.
-
-**Offline and accurate with zero flags.** A default scan needs no network and no configuration.
-A CI gate is one line: run `saw scan`.
+**`saw` hunts them where they land**: repositories, lockfiles, installed packages, and the
+machine's start-up surface. The fix opens as a pull request. The host is hardened; the merge is
+gated.
 
 | | |
 | --- | --- |
-| **Detect** | `saw scan` — repositories, lockfiles and installed dependency trees. Read-only, always. |
-| **Remediate** | `saw fix` — prepares a cleanup branch per infected repo, `--pr` to publish. `saw fix amend` replaces past commits that still carry the payload and force-updates those branches. `saw discard` undoes the branch/PR path. |
-| **Prevent** | `saw guard` — install and verify the CI gate on any repo. `saw hook` — scan on clone and pull, *before* you install or build. |
-| **Audit** | `saw audit` — host hygiene and branch-protection posture, stating plainly what it did **not** examine. |
-| **Harden** | `saw harden` — create host denials; in place only after a read-back. Never a project's tree. |
-| **Advisories** | `saw db` — an offline corpus for dependency CVE and malicious-package matching. |
+| **Detect** | `saw scan` — the tree and the host. `saw hook` — a clone, a pull, a switch, a rebase. `saw audit` — credentials, editor settings, start-up. |
+| **Remediate** | `saw fix` — the previous version onto a pull request; `--pr` publishes it. `saw fix amend` replaces past commits that still carry the payload. `saw discard` undoes the branch. |
+| **Prevent** | `saw harden` — this machine; in place after a read-back. `saw guard` — the merge. |
+| **Advisories** | `saw db` — the advisory corpus for CVE and malicious-package matching. |
 
 ## Quick start
 
@@ -76,9 +71,9 @@ New here? `saw intro` is a 60-second tour, and `saw search "…"` finds the comm
 > The distribution is published as **`stayawakebot`**; the security CLI is the terse **`saw`**
 > command (see the [CLI reference](docs/reference/cli/index.md)).
 
-## Don't hand-maintain that workflow
+## Gate the merge
 
-**Gate any repository's CI with one command — no install, no clone.**
+**`saw guard` writes the CI gate, keeps it pinned, and proves branch protection requires it.**
 
 Every repository you own should refuse an infected merge. `saw guard` writes that GitHub Actions
 workflow, keeps it pinned, and proves it is enforced — for one repository or a whole organisation.
@@ -90,7 +85,7 @@ Each command below stands alone; reach for the one you need.
 saw guard setup
 ```
 
-**Or raise it as a pull request** instead, which never pushes to `main`:
+**Or raise it as a pull request:**
 
 ```bash
 saw guard setup --pr
@@ -168,9 +163,9 @@ Other inputs: `config-file` to supply your own allowlist, `fail-on` to choose th
 the build (default `infected`), and `upload-sarif` to send findings to code scanning.
 See [Harden a repository](docs/how-to/harden-a-repo.md).
 
-## Run via Docker (no local Python needed)
+## Run via Docker
 
-Prefer not to install a Python toolchain at all? Pull the image and scan a mounted repo:
+Scan a mounted repository from the published image:
 
 ```bash
 docker run --rm -v "$PWD:/repo:ro" ghcr.io/ndevu12/stayawakebot \
