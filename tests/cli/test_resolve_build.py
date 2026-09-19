@@ -10,7 +10,7 @@ import os
 import unittest
 from unittest import mock
 
-from stayawake.bots.security.pr.resolve import UncertainItem
+from stayawake.bots.security.pr.resolve import REMOVE, UncertainItem
 from stayawake.cli.resolve.build import build_resolver
 
 
@@ -42,7 +42,7 @@ class TestBuildResolver(unittest.TestCase):
         with mock.patch.dict(os.environ, {}, clear=True):
             resolver = build_resolver(_TTY(lines=["remove\n"]), _TTY())
         self.assertIsNotNone(resolver)
-        self.assertTrue(resolver(_item()).remove)
+        self.assertEqual(resolver(_item()).action, REMOVE)
 
     def test_a_non_tty_input_gives_no_resolver(self):
         with mock.patch.dict(os.environ, {}, clear=True):

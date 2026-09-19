@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Render one uncertain file into safe operator text for the keep/remove prompt.
 
-The file's own bytes are attacker-controlled, so every line the file contributes is sanitised with
-`textsafe.plain` and shown inside a fixed frame the content cannot forge; binary, unreadable, or
-not-human-judgeable content is described rather than printed.
+Every line the file contributes is sanitised with `textsafe.plain` and shown inside a fixed frame;
+binary, unreadable, or not-human-judgeable content is described, not printed.
 """
 from __future__ import annotations
 
@@ -74,5 +73,9 @@ def render_item(item: UncertainItem) -> str:
     ]
     if item.description:
         head.append(f"  why:     {textsafe.plain(item.description)}")
-    head += ["  " + _origin_line(item), _DIVIDER]
+    head.append("  " + _origin_line(item))
+    if item.restore_candidate is not None:
+        head.append(f"  restore: saw can put back the clean version from "
+                    f"{textsafe.plain(item.restore_source) or 'an earlier commit'}")
+    head.append(_DIVIDER)
     return "\n".join(head + _body(item) + [_FOOTER])

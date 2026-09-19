@@ -1,14 +1,8 @@
 #!/usr/bin/env python3
 """The tree a commit should have recorded: its own tree, corrected only where the payload is.
 
-Rebuilding a commit from its parents destroys everything else it contributed — a conflict
-resolution, a fixup made during the merge, a file it deleted — and the caller is then left
-refusing rather than losing them. MEASURED: the two shapes that actually occur (a merge that
-resolved a conflict AND smuggled the payload; a merge that made a legitimate edit AND smuggled
-the payload) were both refused, and the first is the shape an attacker would choose.
-
-The recorded tree is right about every path the finding did not name. Only the named ones are
-wrong. Correcting those is the smaller change and the more accurate one.
+The recorded tree is kept for every path the finding did not name; only the named paths are
+corrected.
 """
 from __future__ import annotations
 
@@ -173,22 +167,24 @@ def write_blob(repo: str | Path, text: str) -> str | None:
 
 def carried_forward(repo: str | Path, commit: str,
                     corrections: dict[str, tuple[str, tuple[str, str] | None]],
-                    still_carries=None, clean=None, remove=None) -> tuple[str | None, str]:
+                    still_carries=None, clean=None, remove=None,
+                    substitute=None) -> tuple[str | None, str]:
     """`commit`'s recorded tree with each correction carried into it, as `(tree, blocked)`.
 
     `corrections` maps a path to `(payload_blob, entry)`: where the commit's blob still equals
     `payload_blob` it is set to `entry`. `clean` maps a path to `(carries, corrector)`: where the
     commit's blob carries the footprint it is rewritten by `corrector` and re-checked with
-    `carries`. `remove` maps a path to a blob id; the path is dropped wherever the commit holds
-    exactly that blob, so a different (legitimate) version of the path is kept. `blocked` names a
-    path that could not be made clean (then `tree` is None), including a rewrite whose UTF-8 bytes
-    are not a subsequence of the original blob."""
+    `carries`. `substitute` maps a path to `(payload_blob, entry)`: where the commit holds exactly
+    `payload_blob` the path is set to `entry`. `remove` maps a path to a blob id, dropped wherever
+    the commit holds exactly that blob. `blocked` names a path that could not be made clean (then
+    `tree` is None), including a rewrite whose UTF-8 bytes are not a subsequence of the original
+    blob."""
     plan = []
     for path, oid in (remove or {}).items():
         current = tree_entry(repo, commit, path)
         if current is not None and current[1] == oid:
             plan.append((path, None))
-    for path, (payload_blob, entry) in corrections.items():
+    for path, (payload_blob, entry) in list(corrections.items()) + list((substitute or {}).items()):
         current = tree_entry(repo, commit, path)
         if current is None:
             continue

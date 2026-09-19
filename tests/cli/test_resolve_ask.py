@@ -1,55 +1,73 @@
 #!/usr/bin/env python3
-"""Tests for `cli.resolve.ask` — the one-item keep/remove prompt.
+"""Tests for `cli.resolve.ask` — the one-item keep/remove/restore prompt.
 
-Driven with StringIO stand-ins: `remove` and its short forms remove; blank, unknown, and end of
-input keep; an unclear answer is re-asked before keeping.
+Driven with StringIO stand-ins: `remove` and its short forms remove; `restore` restores when the item
+carries a clean version; blank, unknown, and end of input keep; an unclear answer is re-asked before
+keeping.
 """
 from __future__ import annotations
 
 import io
 import unittest
 
-from stayawake.bots.security.pr.resolve import UncertainItem
-from stayawake.cli.resolve.ask import ask_decision
+from stayawake.bots.security.pr.resolve import KEEP, REMOVE, RESTORE, UncertainItem
+from stayawake.cli.resolve.ask import ask_resolution
 
 
-def _item():
-    return UncertainItem("x.js", "code-loader", "sig", "why", b"const a = 1;\n", "", ())
+def _item(restore_candidate=None, restore_source=""):
+    return UncertainItem("x.js", "code-loader", "sig", "why", b"const a = 1;\n",
+                         restore_candidate=restore_candidate, restore_source=restore_source)
 
 
-def _ask(typed):
-    return ask_decision(_item(), stdin=io.StringIO(typed), stderr=io.StringIO())
+def _ask(typed, **kw):
+    return ask_resolution(_item(**kw), stdin=io.StringIO(typed), stderr=io.StringIO())
 
 
-class TestAskDecision(unittest.TestCase):
+class TestAskResolution(unittest.TestCase):
     def test_remove_removes(self):
-        self.assertTrue(_ask("remove\n").remove)
+        self.assertEqual(_ask("remove\n").action, REMOVE)
 
     def test_short_and_yes_forms_remove(self):
-        self.assertTrue(_ask("r\n").remove)
-        self.assertTrue(_ask("  YES \n").remove)
-        self.assertTrue(_ask("y\n").remove)
+        self.assertEqual(_ask("r\n").action, REMOVE)
+        self.assertEqual(_ask("  YES \n").action, REMOVE)
+        self.assertEqual(_ask("y\n").action, REMOVE)
 
     def test_keep_and_no_keep(self):
-        self.assertFalse(_ask("keep\n").remove)
-        self.assertFalse(_ask("no\n").remove)
+        self.assertEqual(_ask("keep\n").action, KEEP)
+        self.assertEqual(_ask("no\n").action, KEEP)
 
     def test_a_blank_line_keeps(self):
-        self.assertFalse(_ask("\n").remove)
+        self.assertEqual(_ask("\n").action, KEEP)
 
     def test_end_of_input_keeps(self):
-        self.assertFalse(_ask("").remove)
+        self.assertEqual(_ask("").action, KEEP)
 
     def test_an_unclear_answer_is_re_asked_then_honoured(self):
-        self.assertTrue(_ask("what?\nremove\n").remove)
+        self.assertEqual(_ask("what?\nremove\n").action, REMOVE)
 
     def test_unclear_answers_exhaust_to_keep(self):
-        self.assertFalse(_ask("a\nb\nc\nremove\n").remove)
+        self.assertEqual(_ask("a\nb\nc\nremove\n").action, KEEP)
 
     def test_the_safe_block_is_shown_to_the_operator(self):
         err = io.StringIO()
-        ask_decision(_item(), stdin=io.StringIO("keep\n"), stderr=err)
+        ask_resolution(_item(), stdin=io.StringIO("keep\n"), stderr=err)
         self.assertIn("do NOT trust", err.getvalue())
+
+    def test_restore_is_offered_and_returns_the_candidate_when_present(self):
+        entry = ("100644", "a" * 40)
+        answer = _ask("restore\n", restore_candidate=entry, restore_source="dead00beef01")
+        self.assertEqual(answer.action, RESTORE)
+        self.assertEqual(answer.restore, entry)
+
+    def test_restore_is_ignored_when_no_candidate(self):
+        # With no clean version to put back, "restore" is unknown and is re-asked, then kept.
+        self.assertEqual(_ask("restore\nrestore\nrestore\n").action, KEEP)
+
+    def test_the_restore_prompt_is_shown_only_when_a_candidate_exists(self):
+        err = io.StringIO()
+        ask_resolution(_item(restore_candidate=("100644", "b" * 40), restore_source="c0ffee00"),
+                       stdin=io.StringIO("keep\n"), stderr=err)
+        self.assertIn("restore", err.getvalue().lower())
 
 
 if __name__ == "__main__":
