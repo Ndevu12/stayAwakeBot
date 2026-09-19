@@ -1,0 +1,36 @@
+{
+  "default_branch": "main",
+  "branches": [
+    "copy/name-the-work",
+    "dependabot/github_actions/github-actions-1b993b6b53",
+    "feat/a-masquerading-file-is-confirmed-by-what-executes-it",
+    "feat/the-operator-decides-what-arrived-with-the-malware",
+    "feat/the-pr-says-what-to-do-about-a-dependency",
+    "fix/amend-verifies-the-history-it-delivered",
+    "gh-pages",
+    "main",
+    "origin"
+  ],
+  "parent": {
+    "copy/name-the-work": "main",
+    "dependabot/github_actions/github-actions-1b993b6b53": "main",
+    "feat/a-masquerading-file-is-confirmed-by-what-executes-it": "main",
+    "feat/the-operator-decides-what-arrived-with-the-malware": "main",
+    "feat/the-pr-says-what-to-do-about-a-dependency": "main",
+    "fix/amend-verifies-the-history-it-delivered": "main",
+    "gh-pages": "main",
+    "main": null,
+    "origin": "main"
+  },
+  "order": [
+    "main",
+    "copy/name-the-work",
+    "dependabot/github_actions/github-actions-1b993b6b53",
+    "feat/a-masquerading-file-is-confirmed-by-what-executes-it",
+    "feat/the-operator-decides-what-arrived-with-the-malware",
+    "feat/the-pr-says-what-to-do-about-a-dependency",
+    "fix/amend-verifies-the-history-it-delivered",
+    "gh-pages",
+    "origin"
+  ]
+}
