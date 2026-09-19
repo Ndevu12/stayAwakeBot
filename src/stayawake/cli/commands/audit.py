@@ -21,15 +21,11 @@ def register(sub) -> None:
         help="hygiene + branch-protection audit",
         description=(
             "Audit this machine's security posture, and optionally a repository's branch "
-            "protection. "
-            "Read-only. Every run ends with a rotation-safety verdict, and exit 3 means "
-            "rotating a credential is not safe yet — active persistence was found, or the "
-            "persistence surface could not be verified."),
+            "protection. Every run ends with a rotation-safety verdict."),
         examples=[
-            ("saw audit", "hygiene, persistence, rotation verdict"),
+            ("saw audit", "the last line is the rotation-safety verdict"),
             ("saw audit --verify", "content-scan what a weak signal names"),
             ("saw audit --repo Ndevu12/strix -f", "also gate on branch protection"),
-            ("saw audit; echo $?", "3 = rotation UNSAFE"),
         ])
     p.add_argument("--repo", metavar="OWNER/NAME", default=None,
                    help="also audit this repo's branch protection (needs a token)")
