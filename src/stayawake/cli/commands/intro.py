@@ -24,8 +24,9 @@ def register(sub) -> None:
         sub, "intro", aliases=["welcome"],
         help="a 60-second tour of saw",
         description=(
-            "A tour of the hunt, the clean, the host, and the gate. Bare `saw` prints the "
-            "shorter welcome; the full command list is always at `saw -h`."),
+            "A branded tour: what saw is, the four verbs, why it is safe to run, and how to "
+            "gate CI. It runs no scan and touches nothing. Bare `saw` prints the shorter "
+            "welcome; the full command list is always at `saw -h`."),
         examples=[
             ("saw", "the short welcome banner"),
             ("saw intro", "the fuller tour"),
