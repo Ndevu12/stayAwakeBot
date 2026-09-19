@@ -165,6 +165,23 @@ def write_blob(repo: str | Path, text: str) -> str | None:
             pass
 
 
+def write_blob_bytes(repo: str | Path, data: bytes) -> str | None:
+    """The object id of `data` stored as a blob, or None on failure."""
+    fd, tmp = tempfile.mkstemp(prefix="saw-blob-")
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+        res = run(repo, ["hash-object", "-w", "--no-filters", "--", tmp])
+        if res is None or res.returncode != 0:
+            return None
+        return (res.stdout or "").strip() or None
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
 def carried_forward(repo: str | Path, commit: str,
                     corrections: dict[str, tuple[str, tuple[str, str] | None]],
                     still_carries=None, clean=None, remove=None,

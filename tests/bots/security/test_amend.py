@@ -19,7 +19,7 @@ from stayawake.bots.security.models import CONFIRMED, HEURISTIC, Finding, ScanRe
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.pr import amend as amendmod
 from stayawake.bots.security.pr.amend import amend_outcome, amend_repo
-from stayawake.bots.security.pr.resolve import KEEP, REMOVE, RESTORE, Resolution
+from stayawake.bots.security.pr.resolve import KEEP, REMOVE, RESTORE, SUPPLY, Resolution
 from stayawake.bots.security.pr.outcome import (BranchResult, Cause, Reason, amended,
                                                       render_amend_line)
 from stayawake.bots.security.targets import ScanOptions
@@ -1791,6 +1791,43 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         self.assertFalse(outcome.completed)
         self.assertIn(Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY, self._causes(outcome))
         self.assertTrue(self._present(f"{self.base}:util.js"))
+
+    def test_the_operator_can_supply_replacement_content_for_a_confirmed_file(self):
+        """A confirmed payload with no clean ancestor is replaced with content the operator supplies,
+        kept in place, when they choose supply."""
+        seen = []
+
+        def resolver(item):
+            seen.append(item)
+            return Resolution(SUPPLY, supply=b"export const ok = true;\n")
+
+        outcome = self._run_with_findings(self._unhandled_confirmed_file(), resolver=resolver)
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertTrue(self._present(f"{self.base}:steal.js"), "the replaced file stays in history")
+        self.assertEqual(self.git(self.d, "cat-file", "blob", f"{self.base}:steal.js"),
+                         "export const ok = true;\n")
+        self.assertIn(Cause.FILE_REPLACED_WITH_SUPPLIED_CONTENT, self._causes(outcome))
+        self.assertTrue(seen[0].keep_content)
+
+    def test_supplied_content_that_still_carries_a_payload_is_rejected(self):
+        """Content the operator supplies is re-scanned; if it still confirms a payload it is not
+        accepted and the file still needs manual recovery."""
+        def resolver(item):
+            return Resolution(SUPPLY, supply=_seam_line("const c = {};\nexport default c;\n").encode())
+
+        outcome = self._run_with_findings(self._unhandled_confirmed_file(), resolver=resolver)
+        self.assertFalse(outcome.completed)
+        self.assertIn(Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY, self._causes(outcome))
+        self.assertTrue(self._present(f"{self.base}:steal.js"))
+
+    def test_a_malformed_supply_answer_is_kept_not_crashed(self):
+        """A resolver that returns a non-bytes supply value must not sink the run; the file is left."""
+        outcome = self._run_with_findings(
+            self._unhandled_confirmed_file(),
+            resolver=lambda item: Resolution(SUPPLY, supply="not bytes"))
+        self.assertFalse(outcome.completed)
+        self.assertIn(Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY, self._causes(outcome))
+        self.assertTrue(self._present(f"{self.base}:steal.js"))
 
     def test_the_payload_check_recreates_a_symlink_from_its_blob_not_as_text(self):
         """A write-redirect symlink is a git mode-120000 blob holding the target string. Read back as

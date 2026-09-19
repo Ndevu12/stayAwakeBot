@@ -14,6 +14,11 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Changed
+- **On a terminal, `saw fix amend` offers to replace a confirmed file it could not clean with content
+  you supply.** For a confirmed payload with no clean earlier version to restore, you can point saw at
+  a replacement file; saw scans that content, and only if it is clean puts it in place of the payload,
+  keeping the file. Content that still carries a payload is refused and the file is left for review. It
+  offers this only on a real terminal for a single local repository.
 - **On a terminal, `saw fix amend` offers to restore a clean earlier version of a confirmed file it
   could not clean, instead of only removing it or reporting it.** When a file was clean before it was
   poisoned, saw finds that earlier version on the mainline history, checks it is clean, and puts it

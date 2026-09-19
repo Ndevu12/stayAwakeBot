@@ -75,6 +75,7 @@ class Cause(Enum):
     PAYLOAD_NEEDS_MANUAL_RECOVERY = "payload-needs-manual-recovery"
     FILE_RESTORED_FROM_A_PARENT = "file-restored-from-a-parent"
     FILE_RESTORED_TO_A_CLEAN_VERSION = "file-restored-to-a-clean-version"
+    FILE_REPLACED_WITH_SUPPLIED_CONTENT = "file-replaced-with-supplied-content"
     HISTORY_TOO_LARGE_TO_ENUMERATE = "history-too-large-to-enumerate"
 
 
@@ -235,6 +236,9 @@ _PHRASE = {
         "{detail} was restored from a parent because the merge dropped it — confirm it should be kept",
     Cause.FILE_RESTORED_TO_A_CLEAN_VERSION:
         "{detail} was put back to an earlier clean version in place of the payload — confirm it should "
+        "be kept",
+    Cause.FILE_REPLACED_WITH_SUPPLIED_CONTENT:
+        "{detail} was replaced with content you supplied in place of the payload — confirm it should "
         "be kept",
     Cause.HISTORY_TOO_LARGE_TO_ENUMERATE:
         "a reported file changed too many times to enumerate its history safely — recover it by hand",

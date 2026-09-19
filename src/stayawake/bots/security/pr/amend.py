@@ -7,7 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from stayawake.bots.security.models import CONFIRMED
-from stayawake.bots.security.pr.resolve import REMOVE, RESTORE
+from stayawake.bots.security.pr.resolve import REMOVE, RESTORE, SUPPLY
 from stayawake.bots.security.remediation import footprint
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.targets import LocalRepoTarget
@@ -22,6 +22,7 @@ from stayawake.lib.git.write import rebuild as gitrebuild
 from stayawake.lib.git.write.capture import capture_bundle
 from stayawake.lib.git.write.push import PushResult, force_update_head, publish_head
 from stayawake.lib.git.write import sign
+from stayawake.lib.git.write.replace import write_blob_bytes
 from stayawake.lib import git as gitutil
 from stayawake.utils import env
 
@@ -253,11 +254,36 @@ def _register_substitute(repo: Path, path: str, entry: tuple[str, str], substitu
     return ""
 
 
+def _register_supply(repo: Path, path: str, content: bytes, substitute: dict, substitute_shas: set,
+                     payload, allowlist, opts) -> str:
+    """Register `path` for restore-in-place to operator-supplied `content`, keyed on its HEAD blob.
+    Returns "" on success or skip (absent / not carried), "carries" when `content` still confirms a
+    payload, "unwritable" when its blob cannot be written, or "too-large" when the path's history
+    cannot be enumerated."""
+    if _content_confirms(content, path, payload, allowlist, opts):
+        return "carries"
+    current = gitutil.tree_entry(repo, "HEAD", path)
+    if current is None:
+        return ""
+    blob = write_blob_bytes(repo, content)
+    if blob is None:
+        return "unwritable"
+    hist = _foreign_history(repo, path, current[1])
+    if hist is None:
+        return "too-large"
+    _holders, foreign = hist
+    if not foreign:
+        return ""
+    substitute[path] = (current[1], (current[0], blob))
+    substitute_shas.update(foreign)
+    return ""
+
+
 def _unhandled_items(repo: Path, scan, unhandled: set[str], survives=None) -> list:
     """`UncertainItem`s for confirmed paths saw could not automatically remediate, offered to the
-    operator to remove whole or restore to a clean earlier version. `unhandled` are those paths; one
-    absent from HEAD is skipped. When `survives` is given, each item carries the nearest clean version
-    saw can put back, if it found one."""
+    operator to remove whole, restore to a clean earlier version, or supply replacement content.
+    `unhandled` are those paths; one absent from HEAD is skipped. When `survives` is given, each item
+    carries the nearest clean version saw can put back, if it found one."""
     from stayawake.bots.security.pr.resolve import UncertainItem
     out: list = []
     seen: set[str] = set()
@@ -275,7 +301,7 @@ def _unhandled_items(repo: Path, scan, unhandled: set[str], survives=None) -> li
             signature_id=getattr(f, "signature_id", "") or "",
             description=getattr(f, "description", "") or "",
             preview=stdout_bytes(repo, ["cat-file", "blob", entry[1]]) or b"",
-            confirmed=True,
+            confirmed=True, keep_content=True,
             restore_candidate=(restorable[0] if restorable else None),
             restore_source=(restorable[1] if restorable else "")))
     return out
@@ -769,6 +795,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     survives = _survives(repo, signatures, allowlist, opts)
     substitute: dict[str, tuple[str, tuple[str, str]]] = {}
     substitute_shas: set[str] = set()
+    supply_paths: set[str] = set()
 
     if resolver is not None:
         held = set(clean) | set(remove) | {p for ps in infected.values() for p in ps}
@@ -797,6 +824,12 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
                 if _register_substitute(repo, item.path, answer.restore,
                                         substitute, substitute_shas) == "too-large":
                     return refused(display, Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, item.path)
+            elif answer.action == SUPPLY and isinstance(answer.supply, bytes):
+                if _register_supply(repo, item.path, answer.supply, substitute, substitute_shas,
+                                    _payload_matchers(signatures), allowlist, opts) == "too-large":
+                    return refused(display, Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, item.path)
+                if item.path in substitute:
+                    supply_paths.add(item.path)
             elif answer.action == REMOVE and _register_removal(
                     repo, item.path, remove, remove_shas, remove_holders) == "too-large":
                 return refused(display, Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, item.path)
@@ -957,9 +990,13 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
         if not result.force_updated and cause is not Cause.PUSH_NOT_CONFIRMED:
             failed.append(branch)
     survivors = _survivors(repo, slug, sorted(delivered_infected), token)
-    restored = sorted(p for p in substitute
-                      if any(gitutil.tree_entry(repo, t, p) is not None
-                             for t in delivered_tips.values()))
+    delivered_sub = [p for p in substitute
+                     if any(gitutil.tree_entry(repo, t, p) is not None
+                            for t in delivered_tips.values())]
+    supplied = sorted(p for p in delivered_sub if p in supply_paths)
+    restored = sorted(p for p in delivered_sub if p not in supply_paths)
+    if supplied:
+        survivors.insert(0, Reason(Cause.FILE_REPLACED_WITH_SUPPLIED_CONTENT, ", ".join(supplied)))
     if restored:
         survivors.insert(0, Reason(Cause.FILE_RESTORED_TO_A_CLEAN_VERSION, ", ".join(restored)))
     if recovered_paths:
