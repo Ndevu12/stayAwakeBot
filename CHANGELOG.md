@@ -14,6 +14,12 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Changed
+- **On a terminal, `saw fix amend` offers to restore a clean earlier version of a confirmed file it
+  could not clean, instead of only removing it or reporting it.** When a file was clean before it was
+  poisoned, saw finds that earlier version on the mainline history, checks it is clean, and puts it
+  back in place of the payload — keeping the file rather than deleting it. It offers this only for a
+  confirmed payload that has such a version, and only on a real terminal for a single local
+  repository; without a terminal the file is reported for review, unchanged.
 - **On a terminal, `saw fix amend` offers to remove the files behind a unit it could not remediate
   automatically** — a confirmed payload it could not clean, or a commit whose shape it could not
   model — instead of only reporting them. Removing an un-modellable commit's injected files delivers

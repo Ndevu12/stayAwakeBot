@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """`saw fix amend` — replace past commits that still carry the payload and force-update
-each branch they sat on. Never `--pr`. Never moves a tag.
-
-Bare `saw fix` is unchanged. A local rewrite that does not update the remote is not a fix.
+each branch they sat on. Never `--pr`. Never moves a tag. Bare `saw fix` is unchanged.
 """
 from __future__ import annotations
 
 from pathlib import Path
 
 from stayawake.bots.security.models import CONFIRMED
+from stayawake.bots.security.pr.resolve import REMOVE, RESTORE
 from stayawake.bots.security.remediation import footprint
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.targets import LocalRepoTarget
@@ -204,7 +203,7 @@ def _register_removal(repo: Path, path: str, remove: dict, remove_shas: set,
                       remove_holders: dict, treeish: str = "HEAD") -> str:
     """Register `path` for whole-file removal via its foreign history, keyed on its blob at `treeish`.
     Returns "" on success or skip (not foreign / absent), or "too-large" when history cannot be
-    enumerated (caller refuses)."""
+    enumerated."""
     entry = gitutil.tree_entry(repo, treeish, path)
     if entry is None:
         return ""
@@ -220,9 +219,45 @@ def _register_removal(repo: Path, path: str, remove: dict, remove_shas: set,
     return ""
 
 
-def _unhandled_items(repo: Path, scan, unhandled: set[str]) -> list:
+def _clean_ancestor(repo: Path, path: str, survives) -> tuple[tuple[str, str], str] | None:
+    """The nearest earlier clean version of `path` on its first-parent history, as
+    `((mode, oid), short_sha)`, or None. Walks newest first and returns the first version that differs
+    from HEAD and does not confirm a payload."""
+    head = gitutil.tree_entry(repo, "HEAD", path)
+    head_oid = head[1] if head else None
+    for sha in gitutil.file_commits(repo, path, limit=_MAX_PATH_HISTORY, first_parent=True):
+        entry = gitutil.tree_entry(repo, sha, path)
+        if entry is None or entry[1] == head_oid:
+            continue
+        if not survives(sha, path):
+            return entry, sha[:12]
+    return None
+
+
+def _register_substitute(repo: Path, path: str, entry: tuple[str, str], substitute: dict,
+                         substitute_shas: set, treeish: str = "HEAD") -> str:
+    """Register `path` for restore-in-place: wherever a commit holds it at its `treeish` blob, put
+    `entry` back. Returns "" on success or skip (absent / not carried), or "too-large" when the
+    path's history cannot be enumerated."""
+    current = gitutil.tree_entry(repo, treeish, path)
+    if current is None:
+        return ""
+    hist = _foreign_history(repo, path, current[1])
+    if hist is None:
+        return "too-large"
+    _holders, foreign = hist
+    if not foreign:
+        return ""
+    substitute[path] = (current[1], entry)
+    substitute_shas.update(foreign)
+    return ""
+
+
+def _unhandled_items(repo: Path, scan, unhandled: set[str], survives=None) -> list:
     """`UncertainItem`s for confirmed paths saw could not automatically remediate, offered to the
-    operator to remove whole. `unhandled` are those paths; one absent from HEAD is skipped."""
+    operator to remove whole or restore to a clean earlier version. `unhandled` are those paths; one
+    absent from HEAD is skipped. When `survives` is given, each item carries the nearest clean version
+    saw can put back, if it found one."""
     from stayawake.bots.security.pr.resolve import UncertainItem
     out: list = []
     seen: set[str] = set()
@@ -234,12 +269,15 @@ def _unhandled_items(repo: Path, scan, unhandled: set[str]) -> list:
         if entry is None:
             continue
         seen.add(path)
+        restorable = _clean_ancestor(repo, path, survives) if survives is not None else None
         out.append(UncertainItem(
             path=path, category=getattr(f, "category", "") or "",
             signature_id=getattr(f, "signature_id", "") or "",
             description=getattr(f, "description", "") or "",
             preview=stdout_bytes(repo, ["cat-file", "blob", entry[1]]) or b"",
-            confirmed=True))
+            confirmed=True,
+            restore_candidate=(restorable[0] if restorable else None),
+            restore_source=(restorable[1] if restorable else "")))
     return out
 
 
@@ -728,6 +766,10 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
         remove_shas.update(foreign)
         remove_holders[path] = set(foreign)
 
+    survives = _survives(repo, signatures, allowlist, opts)
+    substitute: dict[str, tuple[str, tuple[str, str]]] = {}
+    substitute_shas: set[str] = set()
+
     if resolver is not None:
         held = set(clean) | set(remove) | {p for ps in infected.values() for p in ps}
         for item in _uncertain_items(repo, scan, held, infected):
@@ -735,7 +777,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
                 answer = resolver(item)
             except Exception:                  # a resolver fault leaves the file for review
                 continue
-            if answer.remove and _register_removal(
+            if answer.action == REMOVE and _register_removal(
                     repo, item.path, remove, remove_shas, remove_holders) == "too-large":
                 return refused(display, Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, item.path)
 
@@ -746,15 +788,20 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
 
     unhandled = _unhandled_confirmed(scan, signatures, taken, cleaned_head, remove)
     if resolver is not None and unhandled:
-        for item in _unhandled_items(repo, scan, unhandled):
+        for item in _unhandled_items(repo, scan, unhandled, survives):
             try:
                 answer = resolver(item)
             except Exception:
                 continue
-            if answer.remove and _register_removal(
+            if answer.action == RESTORE and answer.restore is not None:
+                if _register_substitute(repo, item.path, answer.restore,
+                                        substitute, substitute_shas) == "too-large":
+                    return refused(display, Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, item.path)
+            elif answer.action == REMOVE and _register_removal(
                     repo, item.path, remove, remove_shas, remove_holders) == "too-large":
                 return refused(display, Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, item.path)
-        unhandled = _unhandled_confirmed(scan, signatures, taken, cleaned_head, remove)
+        unhandled = _unhandled_confirmed(scan, signatures, taken, cleaned_head,
+                                         set(remove) | set(substitute))
     if resolver is not None and uncharacterized:
         for sha in list(uncharacterized):
             present = [p for p in uncharacterized_paths.get(sha, ())
@@ -766,26 +813,27 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
                     answer = resolver(item)
                 except Exception:
                     continue
-                if answer.remove and _register_removal(
+                if answer.action == REMOVE and _register_removal(
                         repo, item.path, remove, remove_shas, remove_holders, sha) == "too-large":
                     return refused(display, Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, item.path)
             if all(p in remove for p in present):
                 del uncharacterized[sha]
 
-    if not infected and not clean and not remove:
+    if not infected and not clean and not remove and not substitute:
         if unhandled:
             return refused(display, Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY,
                            str(len(unhandled)), ", ".join(sorted(unhandled)))
         return refused(display, Cause.NO_CONFIRMED_PAYLOAD)
 
-    all_infected = set(infected) | clean_shas | remove_shas | set(uncharacterized)
+    all_infected = set(infected) | clean_shas | remove_shas | substitute_shas | set(uncharacterized)
     heads = _branches_carrying_any(repo, all_infected)
     if not heads:
         return refused(display, Cause.COMMIT_ON_NO_BRANCH,
                        ", ".join(sorted(s[:12] for s in all_infected)))
     covered = {n for n, _t, _c in heads}
     off_plan = _branches_left_carrying(repo, clean, covered) + \
-        _branches_left_holding(repo, remove, covered)
+        _branches_left_holding(repo, remove, covered) + \
+        _branches_left_holding(repo, {p: fo for p, (fo, _e) in substitute.items()}, covered)
     if off_plan:
         return refused(display, Cause.PAYLOAD_STILL_REACHABLE, ", ".join(sorted(set(off_plan))))
 
@@ -819,7 +867,6 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     if behind:
         return refused(display, Cause.LOCAL_MISSING_REMOTE_COMMITS, ", ".join(behind))
 
-    survives = _survives(repo, signatures, allowlist, opts)
     replacements = {}
     blocked_commits: dict[str, tuple[str, str]] = dict(uncharacterized)
     recovered_paths: set[str] = set()
@@ -842,11 +889,13 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
         repo, plan, replacements,
         lambda sha, tree, new_parents: gitamend.rewrite_commit(repo, sha, tree, new_parents,
                                                                signing),
-        survives, clean=clean, remove=remove, pre_blocked=blocked_commits)
+        survives, clean=clean, remove=remove, pre_blocked=blocked_commits,
+        substitute=substitute)
     blocked = rebuilt.blocked
 
     new_tips = {tip: rebuilt.tip(tip) for _n, tip, _c in heads}
-    flagged = {p for paths in infected.values() for p in paths} | set(clean) | set(remove)
+    flagged = ({p for paths in infected.values() for p in paths}
+               | set(clean) | set(remove) | set(substitute))
 
     deliverable: list[tuple[str, str, str]] = []
     isolated: list[BranchResult] = []
@@ -908,6 +957,11 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
         if not result.force_updated and cause is not Cause.PUSH_NOT_CONFIRMED:
             failed.append(branch)
     survivors = _survivors(repo, slug, sorted(delivered_infected), token)
+    restored = sorted(p for p in substitute
+                      if any(gitutil.tree_entry(repo, t, p) is not None
+                             for t in delivered_tips.values()))
+    if restored:
+        survivors.insert(0, Reason(Cause.FILE_RESTORED_TO_A_CLEAN_VERSION, ", ".join(restored)))
     if recovered_paths:
         survivors.insert(0, Reason(Cause.FILE_RESTORED_FROM_A_PARENT,
                                    ", ".join(sorted(recovered_paths))))

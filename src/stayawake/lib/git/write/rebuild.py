@@ -1,18 +1,8 @@
 #!/usr/bin/env python3
 """Rebuild a bounded stretch of history with every infected commit replaced at once.
 
-Replacing one commit while others still carry the payload is not a partial fix — the repository
-is still infected and the run reports success. The set is what the scan confirmed; the stretch
-rebuilt is everything from the OLDEST of them to the branch tips, which is the same stretch a
-single replacement of that oldest commit would already have re-identified. Cleaning five commits
-instead of one is therefore the same rewrite, not five times the blast radius.
-
-MEASURED, and it decided the mechanism. A tree is a SNAPSHOT: rebuilding a commit with remapped
-parents but its recorded tree leaves the payload at the branch tip, because every later commit
-records it again. `rebase` gets that right only because it replays DIFFS — and pays for it by
-re-merging every merge in the stretch, which silently re-resolves a conflict someone settled by
-hand. So each commit keeps its own recorded tree and the correction is carried forward into it,
-which removes the payload everywhere AND leaves every merge exactly as it was recorded.
+The stretch runs from the oldest confirmed commit to the branch tips. Each commit keeps its own
+recorded tree with the correction carried forward into it.
 """
 from __future__ import annotations
 
@@ -84,16 +74,18 @@ def commits_to_rebuild(graph: list[tuple[str, list[str]]],
 def rebuild_without_payload(repo: str | Path, graph: list[tuple[str, list[str]]],
                             replacements: dict[str, Replacement],
                             write_commit, still_carries=None, clean=None, remove=None,
-                            pre_blocked: dict[str, tuple[str, str]] | None = None) -> Rebuild:
+                            pre_blocked: dict[str, tuple[str, str]] | None = None,
+                            substitute=None) -> Rebuild:
     """Rebuild each infected commit parents-first and carry its correction into every commit after
     it. A commit that cannot be remediated, and its descendants, are recorded in `blocked` and
-    skipped rather than aborting the run.
+    skipped.
 
     `write_commit(commit, tree, new_parents) -> (sha, kind, refusal)`, `still_carries`, `clean`,
-    and `remove` are injected. `clean` maps a path to `(carries, corrector)`, excised in place at
-    each commit whose blob at that path carries the footprint; `remove` maps a path to a blob id,
-    dropped from every commit that holds exactly that blob. `pre_blocked` seeds commits already
-    known un-remediable.
+    `remove`, and `substitute` are injected. `clean` maps a path to `(carries, corrector)`, excised
+    in place at each commit whose blob at that path carries the footprint; `remove` maps a path to a
+    blob id, dropped from every commit that holds exactly that blob; `substitute` maps a path to
+    `(payload_blob, entry)`, put back to `entry` at every commit holding exactly that blob.
+    `pre_blocked` seeds commits already known un-remediable.
     """
     mapping: dict[str, str] = {}
     corrections: dict[str, tuple[str, tuple[str, str] | None]] = {}
@@ -118,8 +110,9 @@ def rebuild_without_payload(repo: str | Path, graph: list[tuple[str, list[str]]]
                     continue
                 corrections[path] = (current[1], entry)
 
-        tree, blocked_path = (carried_forward(repo, sha, corrections, still_carries, clean, remove)
-                              if (corrections or clean or remove) else (None, ""))
+        tree, blocked_path = (carried_forward(repo, sha, corrections, still_carries, clean, remove,
+                                              substitute)
+                              if (corrections or clean or remove or substitute) else (None, ""))
         if blocked_path:
             blocked[sha] = ("changed-downstream",
                             f"{sha[:12]} changed {blocked_path} and it still carries the payload — "
