@@ -10,13 +10,14 @@ from __future__ import annotations
 import io
 import unittest
 
-from stayawake.bots.security.pr.resolve import KEEP, REMOVE, RESTORE, UncertainItem
+from stayawake.bots.security.pr.resolve import KEEP, REMOVE, RESTORE, SUPPLY, UncertainItem
 from stayawake.cli.resolve.ask import ask_resolution
 
 
-def _item(restore_candidate=None, restore_source=""):
+def _item(restore_candidate=None, restore_source="", keep_content=False):
     return UncertainItem("x.js", "code-loader", "sig", "why", b"const a = 1;\n",
-                         restore_candidate=restore_candidate, restore_source=restore_source)
+                         restore_candidate=restore_candidate, restore_source=restore_source,
+                         keep_content=keep_content)
 
 
 def _ask(typed, **kw):
@@ -68,6 +69,29 @@ class TestAskResolution(unittest.TestCase):
         ask_resolution(_item(restore_candidate=("100644", "b" * 40), restore_source="c0ffee00"),
                        stdin=io.StringIO("keep\n"), stderr=err)
         self.assertIn("restore", err.getvalue().lower())
+
+    def test_supply_reads_the_bytes_of_a_file_the_operator_names(self):
+        import os
+        import tempfile
+        fd, path = tempfile.mkstemp()
+        os.write(fd, b"export const ok = true;\n")
+        os.close(fd)
+        try:
+            answer = ask_resolution(_item(keep_content=True),
+                                    stdin=io.StringIO(f"supply\n{path}\n"), stderr=io.StringIO())
+        finally:
+            os.unlink(path)
+        self.assertEqual(answer.action, SUPPLY)
+        self.assertEqual(answer.supply, b"export const ok = true;\n")
+
+    def test_supply_is_not_offered_without_keep_content(self):
+        self.assertEqual(_ask("supply\nsupply\nsupply\n").action, KEEP)
+
+    def test_an_unreadable_supplied_path_falls_through_to_keep(self):
+        answer = ask_resolution(_item(keep_content=True),
+                                stdin=io.StringIO("supply\n/no/such/file/here\n"),
+                                stderr=io.StringIO())
+        self.assertEqual(answer.action, KEEP)
 
 
 if __name__ == "__main__":
