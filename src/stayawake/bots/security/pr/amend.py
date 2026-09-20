@@ -189,11 +189,15 @@ def _blast_radius(repo: Path, path: str,
 
 
 def _delivered_removals(replacements: dict, delivered_reach: set[str],
-                        remove_holders: dict[str, set[str]]) -> set[str]:
+                        remove_holders: dict[str, set[str]],
+                        purge_holders: dict[str, set[str]] | None = None) -> set[str]:
     """Paths the delivered branches actually dropped: each delivered replacement's removed paths, plus
-    the foreign whole-file removals whose holding commits a delivered branch reaches. Names only what a
-    delivered branch removed, never a path dropped solely on an isolated branch."""
-    out = {p for p, holders in remove_holders.items() if holders & delivered_reach}
+    every whole-file or carrying-version removal whose holding commits a delivered branch reaches.
+    Names only what a delivered branch removed, never a path dropped solely on an isolated branch."""
+    held = dict(remove_holders)
+    for path, holders in (purge_holders or {}).items():
+        held[path] = held.get(path, set()) | holders
+    out = {p for p, holders in held.items() if holders & delivered_reach}
     for sha, repl in replacements.items():
         if sha in delivered_reach:
             out.update(repl.removed)
@@ -230,11 +234,12 @@ def _purge_carriers(repo: Path, path: str, survives) -> set[str] | None:
     return {sha for sha in changed if survives(sha, path)}
 
 
-def _register_purge(repo: Path, path: str, purge: set, purge_shas: set, survives) -> str:
-    """Schedule `path` to be dropped from every commit whose version of it carries a payload, adding
-    the path to `purge` and its carrying commits to `purge_shas`. Takes the repo, the path, those two
-    sets, and the `survives` oracle. Returns "too-large" when the history is too long to walk, else "".
-    """
+def _register_purge(repo: Path, path: str, purge: set, purge_shas: set, survives,
+                    purge_holders: dict | None = None) -> str:
+    """Schedule `path` to be dropped from every commit whose version of it carries a payload. Takes
+    the repo, the path, the purge set and carrier set to fill, the `survives` oracle, and optionally a
+    map recording which commits carried it. Returns "too-large" when the history is too long to walk,
+    else ""."""
     carriers = _purge_carriers(repo, path, survives)
     if carriers is None:
         return "too-large"
@@ -242,7 +247,22 @@ def _register_purge(repo: Path, path: str, purge: set, purge_shas: set, survives
         return ""
     purge.add(path)
     purge_shas.update(carriers)
+    if purge_holders is not None:
+        purge_holders[path] = set(carriers)
     return ""
+
+
+def _register_operator_removal(repo: Path, path: str, remove: dict, remove_shas: set,
+                               remove_holders: dict, purge: set, purge_shas: set, survives,
+                               treeish: str = "HEAD", purge_holders: dict | None = None) -> str:
+    """Schedule the removal an operator asked for: the version they were shown, and every other
+    version of `path` that still carries a payload. Takes the repo, the path, the removal and purge
+    collections to fill, the `survives` oracle, and the treeish they judged. Returns "too-large" when
+    the history is too long to walk, else ""."""
+    outcome = _register_removal(repo, path, remove, remove_shas, remove_holders, treeish)
+    if outcome:
+        return outcome
+    return _register_purge(repo, path, purge, purge_shas, survives, purge_holders)
 
 
 def _clean_ancestor(repo: Path, path: str, survives) -> tuple[tuple[str, str], str] | None:
@@ -847,6 +867,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     supply_paths: set[str] = set()
     purge: set[str] = set()
     purge_shas: set[str] = set()
+    purge_holders: dict[str, set[str]] = {}
 
     if resolver is not None:
         held = set(clean) | set(remove) | {p for ps in infected.values() for p in ps}
@@ -855,8 +876,10 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
                 answer = resolver(item)
             except Exception:                  # a resolver fault leaves the file for review
                 continue
-            if answer.action == REMOVE and _register_removal(
-                    repo, item.path, remove, remove_shas, remove_holders) == "too-large":
+            if answer.action == REMOVE and _register_operator_removal(
+                    repo, item.path, remove, remove_shas, remove_holders,
+                    purge, purge_shas, survives,
+                    purge_holders=purge_holders) == "too-large":
                 return refused(display, Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, item.path)
 
     infected = {sha: tuple(p for p in ps if p not in clean and p not in remove)
@@ -881,11 +904,13 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
                     return refused(display, Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, item.path)
                 if item.path in substitute:
                     supply_paths.add(item.path)
-            elif answer.action == REMOVE and _register_removal(
-                    repo, item.path, remove, remove_shas, remove_holders) == "too-large":
+            elif answer.action == REMOVE and _register_operator_removal(
+                    repo, item.path, remove, remove_shas, remove_holders,
+                    purge, purge_shas, survives,
+                    purge_holders=purge_holders) == "too-large":
                 return refused(display, Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, item.path)
         unhandled = _unhandled_confirmed(scan, signatures, taken, cleaned_head,
-                                         set(remove) | set(substitute))
+                                         set(remove) | set(substitute) | set(purge))
     if resolver is not None and uncharacterized:
         for sha in list(uncharacterized):
             present = [p for p in uncharacterized_paths.get(sha, ())
@@ -897,8 +922,9 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
                     answer = resolver(item)
                 except Exception:
                     continue
-                if answer.action == REMOVE and _register_removal(
-                        repo, item.path, remove, remove_shas, remove_holders, sha) == "too-large":
+                if answer.action == REMOVE and _register_operator_removal(
+                        repo, item.path, remove, remove_shas, remove_holders,
+                        purge, purge_shas, survives, sha, purge_holders) == "too-large":
                     return refused(display, Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, item.path)
             if all(p in remove for p in present):
                 del uncharacterized[sha]
@@ -1031,7 +1057,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
                    if sha in rebuilt.mapping and sha in delivered_reach), oldest)
     delivered_infected = [s for s in all_infected if s in rebuilt.mapping and s in delivered_reach]
 
-    path_checks = {p: survives for p in flagged if p not in remove}
+    path_checks = {p: survives for p in flagged}
     path_checks.update({p: (lambda tr, pth, c=carries: c(gitutil.file_at(repo, tr, pth)))
                         for p, (carries, _c) in clean.items()})
     left = _payload_left(repo, all_infected, rebuilt, delivered_tips, path_checks, remove)
@@ -1089,7 +1115,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
             # history is the operator's problem whether or not any push succeeded.
             survivors.insert(0, Reason(Cause.LEFT_PART_WAY, ", ".join(unrestored)))
             recovery = str(captured.path or "")
-    removed = set(_delivered_removals(replacements, delivered_reach, remove_holders)) | purge
+    removed = _delivered_removals(replacements, delivered_reach, remove_holders, purge_holders)
     touched = len(delivered_infected)
     label = (oldest[:12] if touched == 1 else f"{touched} commits from {oldest[:12]}")
     return amended(display, label, tuple(results) + tuple(isolated), tuple(survivors),

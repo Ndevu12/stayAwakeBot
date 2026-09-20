@@ -2,9 +2,11 @@
 """Put one uncertain file to the operator and read a keep/remove/restore/supply answer.
 
 The safe rendering is written to the error stream and one line is read from input. `remove`/`r`/
-`yes`/`y` removes; `restore`/`re` puts back the clean version saw found; `supply`/`su` replaces it
-with a file the operator names; both are offered only when they apply. Every other answer — including
-a blank line and end of input — keeps. An unclear answer is re-asked a few times before keeping.
+`yes`/`y` removes the file from every commit whose version of it carries the payload, rewriting each
+branch that carries one; `restore`/`re` puts back the clean version saw found; `supply`/`su` replaces
+it with a file the operator names; both are offered only when they apply. Every other answer —
+including a blank line and end of input — keeps. An unclear answer is re-asked a few times before
+keeping.
 """
 from __future__ import annotations
 
@@ -24,8 +26,8 @@ _MAX_TRIES = 3
 
 
 def _question(can_restore: bool, can_supply: bool) -> str:
-    """The prompt line offering the actions available for this item."""
-    parts = ["type 'remove' to delete"]
+    """The prompt line offering the actions available for this item, each naming how far it reaches."""
+    parts = ["type 'remove' to delete it from every commit that carries it"]
     if can_restore:
         parts.append("'restore' to put back the clean version")
     if can_supply:
