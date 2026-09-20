@@ -170,46 +170,66 @@ def fetch_refs(repo: str | Path, *, token: str | None = None) -> FetchResult:
     return FetchResult(False, _without_token(reported, token))
 
 
-def branches_carrying(repo: str | Path, sha: str) -> list[tuple[str, str, str]]:
-    """Each branch that still reaches `sha`: `(name, replay_tip, cas_old)`.
+_LOCAL_REF = "refs/heads/"
+_ORIGIN_REF = "refs/remotes/origin/"
+_NOT_A_BRANCH = ("refs/remotes/origin/HEAD", "refs/remotes/origin/notes",
+                 "refs/remotes/origin/notes/*", "refs/remotes/origin/replace/*")
+"""The origin refs `branch_name_of` rejects, as globs a rev walk can exclude. Kept beside it because
+the two must answer alike; `test_ref_scope` pins that they do."""
 
-    `origin/*` is included so a commit that only sits on a fetched remote-tracking
-    ref is still a branch this identity may have to update. Notes and replace refs
-    are not branches. A local head for the same name wins the tip. `cas_old` is
-    that local tip, or the zero SHA when the local ref does not exist yet.
-    """
+
+def branch_name_of(ref: str) -> str:
+    """Name the branch a ref stands for, for every part of an amend that has to agree on which refs
+    it may update. Takes the full ref name. Returns the short branch name, or "" for a ref that is
+    not such a branch — origin's HEAD, notes and replace refs among them."""
+    if ref.startswith(_LOCAL_REF):
+        return ref[len(_LOCAL_REF):]
+    if not ref.startswith(_ORIGIN_REF):
+        return ""
+    short = ref[len(_ORIGIN_REF):]
+    if not short or short == "HEAD" or short == "notes":
+        return ""
+    if short.startswith("notes/") or short.startswith("replace/"):
+        return ""
+    return short
+
+
+def branch_refs(repo: str | Path) -> list[tuple[str, str]]:
+    """List every ref an amend has to read history from. Takes the repo. Returns `(name, ref)` for
+    each local head and each fetched origin branch, keeping BOTH where a name has one of each: a
+    local head and the origin ref of the same name diverge, and either may hold a version the other
+    does not. Which single ref an amend then updates is `branches_carrying`'s answer, not this one."""
+    found: list[tuple[str, str]] = []
+    for scope in (_LOCAL_REF.rstrip("/"), _ORIGIN_REF.rstrip("/")):
+        for line in stdout(repo, ["for-each-ref", "--format=%(refname)", scope]).splitlines():
+            ref = line.strip()
+            name = branch_name_of(ref)
+            if name:
+                found.append((name, ref))
+    return sorted(found)
+
+
+def branches_carrying(repo: str | Path, sha: str) -> list[tuple[str, str, str]]:
+    """Find every branch that still reaches `sha`. Takes the repo and the sha. Returns
+    `(name, replay_tip, cas_old)` per branch, where `cas_old` is the local tip, or the zero SHA when
+    no local ref of that name exists yet; a local head for the same name wins the tip."""
     full = stdout(repo, ["rev-parse", sha]).strip() or sha
     found: dict[str, str] = {}
-    remote = stdout(repo, ["for-each-ref", "--format=%(refname) %(objectname)",
-                           f"--contains={full}", "refs/remotes/origin"])
-    for line in remote.splitlines():
-        parts = line.split()
-        if len(parts) != 2:
-            continue
-        ref, tip = parts[0].strip(), parts[1].strip()
-        if not ref.startswith("refs/remotes/origin/"):
-            continue
-        short = ref[len("refs/remotes/origin/"):]
-        if not short or short == "HEAD":
-            continue
-        if short == "notes" or short.startswith("notes/") or short.startswith("replace/"):
-            continue
-        found[short] = tip
-    local = stdout(repo, ["for-each-ref", "--format=%(refname) %(objectname)",
-                          f"--contains={full}", "refs/heads"])
     local_tips: dict[str, str] = {}
-    for line in local.splitlines():
-        parts = line.split()
-        if len(parts) != 2:
-            continue
-        ref, tip = parts[0].strip(), parts[1].strip()
-        if not ref.startswith("refs/heads/"):
-            continue
-        name = ref[len("refs/heads/"):]
-        if not name:
-            continue
-        local_tips[name] = tip
-        found[name] = tip
+    for scope in (_ORIGIN_REF.rstrip("/"), _LOCAL_REF.rstrip("/")):
+        listing = stdout(repo, ["for-each-ref", "--format=%(refname) %(objectname)",
+                                f"--contains={full}", scope])
+        for line in listing.splitlines():
+            parts = line.split()
+            if len(parts) != 2:
+                continue
+            ref, tip = parts[0].strip(), parts[1].strip()
+            name = branch_name_of(ref)
+            if not name:
+                continue
+            if ref.startswith(_LOCAL_REF):
+                local_tips[name] = tip
+            found[name] = tip
     zero = "0" * 40
     return [(name, tip, local_tips.get(name, zero)) for name, tip in found.items()]
 
@@ -316,14 +336,17 @@ def file_commits(repo: str | Path, path: str, limit: int = 50,
     blob reachable only through its malicious side), so recovery uses this mode; the default
     keeps the full history walk for callers that want every version.
 
-    `all_branches=True` walks every local branch with full history (no merge simplification),
-    not only HEAD.
+    `all_branches=True` walks every local head and every fetched origin branch — both where a name
+    has one of each — with full history (no merge simplification), not only HEAD, so a version
+    reachable only from a fetched branch is enumerated with the rest. The refs go in as globs, not
+    one argument each, so a repository with many branches cannot outgrow the argument list.
     """
     args = ["log", f"-n{limit}", "--format=%H"]
     if first_parent:
         args.append("--first-parent")
     if all_branches:
-        args += ["--branches", "--full-history"]
+        args += [f"--exclude={glob}" for glob in _NOT_A_BRANCH]
+        args += [f"--glob={_ORIGIN_REF}*", "--branches", "--full-history"]
     args += ["--", path]
     out = stdout(repo, args)
     return [ln.strip() for ln in out.splitlines() if ln.strip()]

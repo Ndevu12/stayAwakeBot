@@ -422,8 +422,9 @@ _MAX_PATH_HISTORY = 100_000
 
 
 def _carrying_commits(repo: Path, path: str, carries) -> list[str] | None:
-    """Every commit on any local branch whose blob at `path` carries the footprint, or None when
-    the path's history reaches the enumeration bound and cannot be walked with certainty."""
+    """Walk `path`'s history and collect the commits whose version of it carries the footprint.
+    Takes the repo, the path, and the footprint check. Returns those commits, or None when the
+    history is too long to walk."""
     changed = gitutil.file_commits(repo, path, limit=_MAX_PATH_HISTORY, all_branches=True)
     if len(changed) >= _MAX_PATH_HISTORY:
         return None
@@ -431,8 +432,9 @@ def _carrying_commits(repo: Path, path: str, carries) -> list[str] | None:
 
 
 def _foreign_history(repo: Path, path: str, oid: str) -> tuple[list[str], list[str]] | None:
-    """`(commits holding path, commits holding it at exactly blob oid)` across every local branch,
-    or None when the path's history reaches the enumeration bound and cannot be walked."""
+    """Walk `path`'s history and separate the commits that hold it from those holding exactly `oid`.
+    Takes the repo, the path, and that blob id. Returns `(holders, holders at oid)`, or None when the
+    history is too long to walk."""
     changed = gitutil.file_commits(repo, path, limit=_MAX_PATH_HISTORY, all_branches=True)
     if len(changed) >= _MAX_PATH_HISTORY:
         return None
@@ -448,33 +450,34 @@ def _foreign_history(repo: Path, path: str, oid: str) -> tuple[list[str], list[s
 
 
 def _branches_left_carrying(repo: Path, clean: dict, covered: set[str]) -> list[str]:
-    """Local branches, outside `covered`, whose tip still carries a clean-mode footprint."""
+    """Find the branches this run would leave behind carrying a clean-mode footprint. Takes the repo,
+    the excised paths with their footprint checks, and the branch names the run already covers.
+    Returns the names of the rest whose tip still carries one."""
     if not clean:
         return []
     out: set[str] = set()
-    listing = gitutil.stdout(repo, ["for-each-ref", "--format=%(refname:short)", "refs/heads"])
-    for name in (ln.strip() for ln in listing.splitlines() if ln.strip()):
+    for name, ref in gitutil.branch_refs(repo):
         if name in covered:
             continue
         for path, (carries, _corrector) in clean.items():
-            if carries(gitutil.file_at(repo, name, path)):
+            if carries(gitutil.file_at(repo, ref, path)):
                 out.add(name)
                 break
     return sorted(out)
 
 
 def _branches_left_holding(repo: Path, remove: dict, covered: set[str]) -> list[str]:
-    """Local branches, outside `covered`, whose tip still holds the foreign blob of a path
-    scheduled for removal."""
+    """Find the branches this run would leave behind holding a blob scheduled for removal. Takes the
+    repo, each path mapped to that blob, and the branch names the run already covers. Returns the
+    names of the rest whose tip still holds one."""
     if not remove:
         return []
     out: set[str] = set()
-    listing = gitutil.stdout(repo, ["for-each-ref", "--format=%(refname:short)", "refs/heads"])
-    for name in (ln.strip() for ln in listing.splitlines() if ln.strip()):
+    for name, ref in gitutil.branch_refs(repo):
         if name in covered:
             continue
         for path, oid in remove.items():
-            entry = gitutil.tree_entry(repo, name, path)
+            entry = gitutil.tree_entry(repo, ref, path)
             if entry is not None and entry[1] == oid:
                 out.add(name)
                 break
@@ -488,12 +491,11 @@ def _branches_left_purging(repo: Path, purge: set, survives, covered: set[str]) 
     if not purge:
         return []
     out: set[str] = set()
-    listing = gitutil.stdout(repo, ["for-each-ref", "--format=%(refname:short)", "refs/heads"])
-    for name in (ln.strip() for ln in listing.splitlines() if ln.strip()):
+    for name, ref in gitutil.branch_refs(repo):
         if name in covered:
             continue
         for path in purge:
-            if survives(name, path):
+            if survives(ref, path):
                 out.add(name)
                 break
     return sorted(out)
