@@ -56,6 +56,11 @@ reader, not the mechanism or the weakness it closed.
   no confirmed payload of any kind; if anything else remains it is still left for review.
 
 ### Fixed
+- **`saw fix amend` no longer reports a file removed while another copy of it is still in your
+  history.** A file that had been committed more than once could keep an earlier copy, and a branch
+  could be force-updated that should have been held back for review — so an earlier run that reported
+  itself done may not have been, and is worth running again. Removing a file now removes every version
+  of it that still carries the payload, and a run that would leave one behind refuses instead.
 - **`saw fix amend` now reads the history of every branch it may update, not only your local ones.**
   It updates fetched `origin/*` branches as well as local ones, but looked for the payload only in
   local history — so a copy held on a branch that exists only on the remote, or on one your local

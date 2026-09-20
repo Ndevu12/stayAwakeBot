@@ -198,13 +198,18 @@ def carried_forward(repo: str | Path, commit: str,
     `tree` is None), including a rewrite whose UTF-8 bytes are not a subsequence of the original
     blob."""
     plan = []
+    dropped: set[str] = set()
     for path, oid in (remove or {}).items():
         current = tree_entry(repo, commit, path)
         if current is not None and current[1] == oid:
             plan.append((path, None))
+            dropped.add(path)
     for path in (purge or set()):
+        if path in dropped:
+            continue
         if tree_entry(repo, commit, path) is not None and still_carries and still_carries(commit, path):
             plan.append((path, None))
+            dropped.add(path)
     for path, (payload_blob, entry) in list(corrections.items()) + list((substitute or {}).items()):
         current = tree_entry(repo, commit, path)
         if current is None:

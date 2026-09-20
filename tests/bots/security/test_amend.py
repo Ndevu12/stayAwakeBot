@@ -1780,6 +1780,71 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         return [Finding("exfil-secret", "exfil", Severity.CRITICAL, "steal.js",
                         "exfiltrates an env secret", confidence=CONFIRMED)]
 
+    def _confirmed_file_poisoned_twice(self):
+        """A payload the real scanner confirms, committed in two different versions, carrying a
+        finding whose category has no corrector so it reaches the operator rather than the excise
+        lane. Returns the two shas."""
+        self.write(self.d, "loader.js", _seam_line("var a = 1;"))
+        first = self.commit(self.d, "the dropper lands")
+        self.write(self.d, "loader.js", _seam_line("var a = 1;\nvar c = 3;"))
+        second = self.commit(self.d, "the dropper is updated")
+        return first, second, [Finding("exfil-secret", "exfil", Severity.CRITICAL, "loader.js",
+                                       "exfiltrates an env secret", confidence=CONFIRMED)]
+
+    def test_removing_a_file_poisoned_twice_never_reports_done_with_a_version_left(self):
+        """The operator removes a confirmed payload that was committed twice. If the run reports
+        itself done, no version of that payload may remain reachable."""
+        _first, _second, findings = self._confirmed_file_poisoned_twice()
+        outcome = self._run_with_findings(findings, resolver=lambda item: Resolution(REMOVE))
+        if outcome.completed:
+            hist = self.git(self.d, "log", "--all", "-p", "--", "loader.js")
+            self.assertNotIn(_LOADER, hist,
+                             "a payload version survived a run that reported the file removed")
+
+    def test_removing_a_file_poisoned_twice_still_delivers(self):
+        """The sibling of the honesty pin above: refusing every such run would satisfy that one
+        vacuously, so hold the operator's removal to actually completing."""
+        _first, _second, findings = self._confirmed_file_poisoned_twice()
+        outcome = self._run_with_findings(findings, resolver=lambda item: Resolution(REMOVE))
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertFalse(self._present(f"{self.base}:loader.js"))
+
+    def _unmodellable_commit_with_an_updated_dropper(self):
+        """An un-modellable evil merge on `iso` whose dropper is updated one commit later, beside a
+        normally-remediable loader on the default branch."""
+        root = self._rev()
+        _git(self.d, "checkout", "-qb", "iso", root)
+        _git(self.d, "merge", "--no-ff", "--no-commit", "feature")
+        self.write(self.d, "evil/b.js", _seam_line("var stage = 1;"))
+        _git(self.d, "add", "evil/b.js")
+        _git(self.d, "-c", "user.name=Inj", "-c", "user.email=i@t.test",
+             "commit", "-qm", "merge (uncharacterizable)")
+        iso_merge = self._rev()
+        self.write(self.d, "evil/b.js", _seam_line("var stage = 2;"))
+        self.commit(self.d, "the dropper is updated")
+        _git(self.d, "checkout", "-q", self.base)
+        self.write(self.d, "cfg.mjs", _seam_line("const c = {};\nexport default c;\n"))
+        self.commit(self.d, "add config with a loader")
+        return iso_merge, [
+            Finding("loader-seam", "code-loader", Severity.CRITICAL, "cfg.mjs", "loader",
+                    confidence=CONFIRMED),
+            Finding("evil-merge-loader", "evil-merge", Severity.CRITICAL, iso_merge[:10], "loader",
+                    vector="evil-merge", commit_sha=iso_merge, related_paths=("evil/b.js",),
+                    payload_paths=("phantom-not-in-related.js",), confidence=CONFIRMED)]
+
+    def test_unblocking_an_unmodellable_commit_never_delivers_a_tip_that_still_carries(self):
+        """The operator removes an un-modellable commit's injected file, but the dropper was updated
+        after that commit. A branch must never be force-updated still carrying it."""
+        _merge, findings = self._unmodellable_commit_with_an_updated_dropper()
+        outcome = self._run_with_findings(findings, resolver=lambda item: Resolution(REMOVE))
+        by_name = {b.name: b for b in outcome.branches}
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertTrue(by_name["iso"].force_updated, "the un-blocked branch is delivered")
+        self.assertFalse(self._present("iso:evil/b.js"),
+                         "iso was force-updated with the dropper still at its tip")
+        hist = self.git(self.d, "log", "--all", "-p", "--", "evil/b.js")
+        self.assertNotIn(_LOADER, hist, "no version of the dropper survives the run")
+
     def test_the_operator_can_remove_a_confirmed_file_saw_could_not_auto_clean(self):
         """A confirmed payload with no automatic remediation (would be needs-manual-recovery) is
         removed when the operator says so, instead of the run refusing."""
