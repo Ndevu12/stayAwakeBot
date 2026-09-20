@@ -111,19 +111,19 @@ def rebuild_without_payload(repo: str | Path, graph: list[tuple[str, list[str]]]
                     continue
                 corrections[path] = (current[1], entry)
 
-        tree, blocked_path = (carried_forward(repo, sha, corrections, still_carries, clean, remove,
-                                              substitute, purge)
-                              if (corrections or clean or remove or substitute or purge)
-                              else (None, ""))
-        if blocked_path:
-            blocked[sha] = ("changed-downstream",
-                            f"{sha[:12]} changed {blocked_path} and it still carries the payload — "
-                            "that commit needs its own finding")
-            continue
-        if corrections and tree is None:
-            blocked[sha] = ("not-applied",
-                            f"{sha[:12]}: the correction could not be carried into this commit")
-            continue
+        tree = None
+        if corrections or clean or remove or substitute or purge:
+            tree, blocked_path = carried_forward(repo, sha, corrections, still_carries, clean,
+                                                 remove, substitute, purge)
+            if blocked_path:
+                blocked[sha] = ("changed-downstream",
+                                f"{sha[:12]} changed {blocked_path} and it still carries the "
+                                "payload — that commit needs its own finding")
+                continue
+            if tree is None:
+                blocked[sha] = ("not-applied",
+                                f"{sha[:12]}: the correction could not be carried into this commit")
+                continue
         if tree is None:
             tree = stdout(repo, ["rev-parse", f"{sha}^{{tree}}"]).strip()
         if not tree:
