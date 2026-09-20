@@ -73,8 +73,41 @@ not belong beside the code at all: it goes where the reasoning is kept.
 explaining. It does not — it needs naming. `_TOOLCHAIN` wants a paragraph;
 `_TOOLCHAIN_THAT_LEAVES_EACH_KIND` wants nothing.
 
-**Where the reasoning legitimately goes is the function that uses it.** A docstring says what the
-code establishes and why the answer is shaped that way; a comment over a constant is restating the
-constant. If you have written three lines above a name, move them into the function below it and see
-how much survives.
+**A comment over a constant is restating the constant.** If you have written three lines above a
+name, move them into the function below it and see how much survives — then hold what survives to
+the docstring rule below, which is narrower than it looks.
+
+## A docstring says what the function DOES — never what it cannot do
+
+Three parts, in order, and nothing else: **one short line of WHAT IT DOES**, then **WHAT IT TAKES**
+(each parameter that is not obvious), then **WHAT IT RETURNS**, including the falsy or absent case.
+No algorithm, no "because", no measurement, no history, no rejected alternative, no threat model —
+that reasoning goes to the private tracker, never to any surface that ships.
+
+The failure that keeps recurring is subtler than writing reasoning: **letting the gap become the
+definition.**
+
+```python
+# WRONG — opens on the result, then spends its words on the limit
+"""Every commit on any local branch whose blob at `path` still confirms a payload, or None when
+the path's history reaches the enumeration bound and cannot be walked."""
+
+# RIGHT — a verb first, the limit demoted to one returns clause
+"""Walk `path`'s history and collect the commits whose version of it carries a payload. Takes the
+repo, the path, and the `survives` oracle that judges each version. Returns those commits, or None
+when the history is too long to walk."""
+```
+
+- **Lead with a verb.** "Walk … and collect …", "Schedule … to be dropped …", "Search … for …".
+  Opening with a noun phrase — "Every commit that …", "The nearest …", "`X`s for …" — describes the
+  return value, not the behaviour, and step one is then simply missing.
+- **The limit is never the subject.** `None`, error tokens, "skipped", "too-large" belong in the
+  returns clause, at the end, in one breath. They do not get to define the function.
+- **A scope word is not a definition.** "on any local branch" states a known scope *gap* as if it
+  were the contract. Say what it walks; if the scope is a defect, it belongs in the tracker.
+- **The test:** delete every clause about what it *cannot* do. If what is left does not say what the
+  function *does*, the docstring is wrong.
+
+Do not copy the surrounding style — older docstrings in this codebase explain rationale at length.
+New and touched docstrings follow this rule.
 
