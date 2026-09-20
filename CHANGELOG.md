@@ -56,6 +56,11 @@ reader, not the mechanism or the weakness it closed.
   no confirmed payload of any kind; if anything else remains it is still left for review.
 
 ### Fixed
+- **`saw fix amend` now reads the history of every branch it may update, not only your local ones.**
+  It updates fetched `origin/*` branches as well as local ones, but looked for the payload only in
+  local history — so a copy held on a branch that exists only on the remote, or on one your local
+  branch has fallen behind, could be left in place while the run reported the repository clean. It
+  now searches both sides of every branch name before deciding anything is gone.
 - **`saw fix amend` lists the files it removed accurately.** The removed-files line now names only
   paths a delivered branch actually dropped, not paths on a branch the run had to isolate.
 - **When `saw fix amend` hands something back for you to do, it says exactly what and where.**
