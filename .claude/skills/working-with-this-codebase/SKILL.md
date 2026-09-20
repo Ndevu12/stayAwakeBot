@@ -43,8 +43,32 @@ tangent once, then let it go; don't keep dragging it back. Reproduce a bug with 
 When you spawn investigator subagents to find the best approach, give them an **open, upgrade-oriented
 mandate** — "find the strongest proper improvement, measure it" — not a biased checklist that primes
 them to hunt only downsides. Consider all sides, but the objective is the best upgrade, and let them
-honestly reject non-fitting ideas rather than force them. Adversarial *refuters*, used to gate a
-security change, are the deliberate opposite — don't conflate the two.
+honestly reject non-fitting ideas rather than force them.
+
+## Brief from the root — bound the cost, never the thinking
+
+Adversarial *refuters* are narrower than investigators: each is handed one property and told to break
+it. That is right for **verifying** a property, and wrong as the whole gate. **A gate built only of
+narrow refuters can only find faults inside your design — never that the design is wrong.**
+
+MEASURED on the amend track: an unsound remediation design was caught by a throwaway probe I wrote,
+not by the gate that had just passed it; and a ref-scope fix took three rounds because each round I
+moved the frame and the refuters dutifully re-verified inside the new one.
+
+- **Always include one reviewer with a free hand**, told in as many words not to take your framing:
+  *"I am deliberately not telling you what to check. Decide for yourself whether this is the right
+  approach."* Give it the PROBLEM, stated neutrally, and the diff — then let it read the code.
+- **Watch what leaks your framing into a brief**: pre-explaining your mechanism, listing the
+  properties, naming the prior verdict, and — the quiet one — declaring "accepted residuals", which
+  fences off whole avenues before anyone looks.
+- **Different agents get different lenses, not the same list.** Usability, safety-seam, mechanics,
+  adversarial. Independent lenses that CONVERGE are evidence; agents agreeing with your checklist are
+  not — you wrote the checklist.
+- **Bound the cost, not the judgement.** A budget and a shape count ("~20 tool calls", "the most
+  serious thing you find") keeps a hunt from running away; it is not a licence to pre-decide what
+  counts. An open *question* with a bounded *budget* is the shape.
+- **Run them before building, not only after.** On this track, launching agents before implementing
+  caught that an instinct to refuse was itself a denial-of-remediation bug.
 
 ## Tests are the spec — you may not delete one to go green
 
