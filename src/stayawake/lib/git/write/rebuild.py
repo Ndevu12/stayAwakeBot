@@ -75,7 +75,7 @@ def rebuild_without_payload(repo: str | Path, graph: list[tuple[str, list[str]]]
                             replacements: dict[str, Replacement],
                             write_commit, still_carries=None, clean=None, remove=None,
                             pre_blocked: dict[str, tuple[str, str]] | None = None,
-                            substitute=None) -> Rebuild:
+                            substitute=None, purge=None) -> Rebuild:
     """Rebuild each infected commit parents-first and carry its correction into every commit after
     it. A commit that cannot be remediated, and its descendants, are recorded in `blocked` and
     skipped.
@@ -84,7 +84,8 @@ def rebuild_without_payload(repo: str | Path, graph: list[tuple[str, list[str]]]
     `remove`, and `substitute` are injected. `clean` maps a path to `(carries, corrector)`, excised
     in place at each commit whose blob at that path carries the footprint; `remove` maps a path to a
     blob id, dropped from every commit that holds exactly that blob; `substitute` maps a path to
-    `(payload_blob, entry)`, put back to `entry` at every commit holding exactly that blob.
+    `(payload_blob, entry)`, put back to `entry` at every commit holding exactly that blob; `purge`
+    is a set of paths dropped from every commit whose blob at that path still carries a payload.
     `pre_blocked` seeds commits already known un-remediable.
     """
     mapping: dict[str, str] = {}
@@ -111,8 +112,9 @@ def rebuild_without_payload(repo: str | Path, graph: list[tuple[str, list[str]]]
                 corrections[path] = (current[1], entry)
 
         tree, blocked_path = (carried_forward(repo, sha, corrections, still_carries, clean, remove,
-                                              substitute)
-                              if (corrections or clean or remove or substitute) else (None, ""))
+                                              substitute, purge)
+                              if (corrections or clean or remove or substitute or purge)
+                              else (None, ""))
         if blocked_path:
             blocked[sha] = ("changed-downstream",
                             f"{sha[:12]} changed {blocked_path} and it still carries the payload — "

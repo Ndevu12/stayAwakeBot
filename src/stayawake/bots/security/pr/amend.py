@@ -22,7 +22,7 @@ from stayawake.lib.git.write import rebuild as gitrebuild
 from stayawake.lib.git.write.capture import capture_bundle
 from stayawake.lib.git.write.push import PushResult, force_update_head, publish_head
 from stayawake.lib.git.write import sign
-from stayawake.lib.git.write.replace import write_blob_bytes
+from stayawake.lib.git.write.replace import replacement_tree, write_blob_bytes
 from stayawake.lib import git as gitutil
 from stayawake.utils import env
 
@@ -217,6 +217,28 @@ def _register_removal(repo: Path, path: str, remove: dict, remove_shas: set,
     remove[path] = entry[1]
     remove_shas.update(foreign)
     remove_holders[path] = set(foreign)
+    return ""
+
+
+def _purge_carriers(repo: Path, path: str, survives) -> set[str] | None:
+    """Every commit on any local branch whose blob at `path` still confirms a payload, or None when
+    the path's history reaches the enumeration bound and cannot be walked."""
+    changed = gitutil.file_commits(repo, path, limit=_MAX_PATH_HISTORY, all_branches=True)
+    if len(changed) >= _MAX_PATH_HISTORY:
+        return None
+    return {sha for sha in changed if survives(sha, path)}
+
+
+def _register_purge(repo: Path, path: str, purge: set, purge_shas: set, survives) -> str:
+    """Register `path` for removal at every commit whose version of it confirms a payload. Returns ""
+    on success or skip (no carrying version), or "too-large" when history cannot be enumerated."""
+    carriers = _purge_carriers(repo, path, survives)
+    if carriers is None:
+        return "too-large"
+    if not carriers:
+        return ""
+    purge.add(path)
+    purge_shas.update(carriers)
     return ""
 
 
@@ -447,6 +469,22 @@ def _branches_left_holding(repo: Path, remove: dict, covered: set[str]) -> list[
         for path, oid in remove.items():
             entry = gitutil.tree_entry(repo, name, path)
             if entry is not None and entry[1] == oid:
+                out.add(name)
+                break
+    return sorted(out)
+
+
+def _branches_left_purging(repo: Path, purge: set, survives, covered: set[str]) -> list[str]:
+    """Local branches, outside `covered`, whose tip still carries a payload at a purged path."""
+    if not purge:
+        return []
+    out: set[str] = set()
+    listing = gitutil.stdout(repo, ["for-each-ref", "--format=%(refname:short)", "refs/heads"])
+    for name in (ln.strip() for ln in listing.splitlines() if ln.strip()):
+        if name in covered:
+            continue
+        for path in purge:
+            if survives(name, path):
                 out.add(name)
                 break
     return sorted(out)
@@ -796,6 +834,8 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     substitute: dict[str, tuple[str, tuple[str, str]]] = {}
     substitute_shas: set[str] = set()
     supply_paths: set[str] = set()
+    purge: set[str] = set()
+    purge_shas: set[str] = set()
 
     if resolver is not None:
         held = set(clean) | set(remove) | {p for ps in infected.values() for p in ps}
@@ -852,13 +892,31 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
             if all(p in remove for p in present):
                 del uncharacterized[sha]
 
-    if not infected and not clean and not remove and not substitute:
+    blocked_infected: dict[str, tuple[str, str]] = {}
+    for sha in list(infected):
+        rep = replacement_tree(repo, sha, infected[sha], survives)
+        if not rep.ok:
+            blocked_infected[sha] = (rep.kind or "replacement", rep.refusal or sha[:12])
+    if resolver is not None and blocked_infected:
+        for sha in blocked_infected:
+            present = [p for p in infected[sha] if gitutil.tree_entry(repo, sha, p) is not None]
+            for item in _path_items(repo, present, sha, sha[:12]):
+                try:
+                    answer = resolver(item)
+                except Exception:
+                    continue
+                if answer.action == REMOVE and _register_purge(
+                        repo, item.path, purge, purge_shas, survives) == "too-large":
+                    return refused(display, Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, item.path)
+
+    if not infected and not clean and not remove and not substitute and not purge:
         if unhandled:
             return refused(display, Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY,
                            str(len(unhandled)), ", ".join(sorted(unhandled)))
         return refused(display, Cause.NO_CONFIRMED_PAYLOAD)
 
-    all_infected = set(infected) | clean_shas | remove_shas | substitute_shas | set(uncharacterized)
+    all_infected = (set(infected) | clean_shas | remove_shas | substitute_shas | purge_shas
+                    | set(uncharacterized))
     heads = _branches_carrying_any(repo, all_infected)
     if not heads:
         return refused(display, Cause.COMMIT_ON_NO_BRANCH,
@@ -866,7 +924,8 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     covered = {n for n, _t, _c in heads}
     off_plan = _branches_left_carrying(repo, clean, covered) + \
         _branches_left_holding(repo, remove, covered) + \
-        _branches_left_holding(repo, {p: fo for p, (fo, _e) in substitute.items()}, covered)
+        _branches_left_holding(repo, {p: fo for p, (fo, _e) in substitute.items()}, covered) + \
+        _branches_left_purging(repo, purge, survives, covered)
     if off_plan:
         return refused(display, Cause.PAYLOAD_STILL_REACHABLE, ", ".join(sorted(set(off_plan))))
 
@@ -904,6 +963,8 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     blocked_commits: dict[str, tuple[str, str]] = dict(uncharacterized)
     recovered_paths: set[str] = set()
     for sha, paths in infected.items():
+        if all(p in purge for p in paths):
+            continue
         replacement = gitamend.replacement_commit(repo, sha, paths, signing, survives)
         if not replacement.ok:
             blocked_commits[sha] = (replacement.kind or "replacement",
@@ -923,12 +984,12 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
         lambda sha, tree, new_parents: gitamend.rewrite_commit(repo, sha, tree, new_parents,
                                                                signing),
         survives, clean=clean, remove=remove, pre_blocked=blocked_commits,
-        substitute=substitute)
+        substitute=substitute, purge=purge)
     blocked = rebuilt.blocked
 
     new_tips = {tip: rebuilt.tip(tip) for _n, tip, _c in heads}
     flagged = ({p for paths in infected.values() for p in paths}
-               | set(clean) | set(remove) | set(substitute))
+               | set(clean) | set(remove) | set(substitute) | set(purge))
 
     deliverable: list[tuple[str, str, str]] = []
     isolated: list[BranchResult] = []
@@ -1017,7 +1078,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
             # history is the operator's problem whether or not any push succeeded.
             survivors.insert(0, Reason(Cause.LEFT_PART_WAY, ", ".join(unrestored)))
             recovery = str(captured.path or "")
-    removed = _delivered_removals(replacements, delivered_reach, remove_holders)
+    removed = set(_delivered_removals(replacements, delivered_reach, remove_holders)) | purge
     touched = len(delivered_infected)
     label = (oldest[:12] if touched == 1 else f"{touched} commits from {oldest[:12]}")
     return amended(display, label, tuple(results) + tuple(isolated), tuple(survivors),

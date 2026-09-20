@@ -185,7 +185,7 @@ def write_blob_bytes(repo: str | Path, data: bytes) -> str | None:
 def carried_forward(repo: str | Path, commit: str,
                     corrections: dict[str, tuple[str, tuple[str, str] | None]],
                     still_carries=None, clean=None, remove=None,
-                    substitute=None) -> tuple[str | None, str]:
+                    substitute=None, purge=None) -> tuple[str | None, str]:
     """`commit`'s recorded tree with each correction carried into it, as `(tree, blocked)`.
 
     `corrections` maps a path to `(payload_blob, entry)`: where the commit's blob still equals
@@ -193,13 +193,17 @@ def carried_forward(repo: str | Path, commit: str,
     commit's blob carries the footprint it is rewritten by `corrector` and re-checked with
     `carries`. `substitute` maps a path to `(payload_blob, entry)`: where the commit holds exactly
     `payload_blob` the path is set to `entry`. `remove` maps a path to a blob id, dropped wherever
-    the commit holds exactly that blob. `blocked` names a path that could not be made clean (then
+    the commit holds exactly that blob. `purge` is a set of paths dropped at every commit whose blob
+    at that path `still_carries` a payload. `blocked` names a path that could not be made clean (then
     `tree` is None), including a rewrite whose UTF-8 bytes are not a subsequence of the original
     blob."""
     plan = []
     for path, oid in (remove or {}).items():
         current = tree_entry(repo, commit, path)
         if current is not None and current[1] == oid:
+            plan.append((path, None))
+    for path in (purge or set()):
+        if tree_entry(repo, commit, path) is not None and still_carries and still_carries(commit, path):
             plan.append((path, None))
     for path, (payload_blob, entry) in list(corrections.items()) + list((substitute or {}).items()):
         current = tree_entry(repo, commit, path)

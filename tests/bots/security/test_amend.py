@@ -1081,11 +1081,11 @@ def _seam_line(clean_prefix: str) -> str:
 class TestAmendActsOnContentPayload(_AmendFixture):
     """A confirmed payload in a file, carrying no commit id, is rewritten out of history."""
 
-    def _act_full(self, scan, pusher=_ok_push):
+    def _act_full(self, scan, pusher=_ok_push, resolver=None):
         with self._remote():
             with mock.patch("stayawake.bots.security.pr.amend.scan_target", return_value=scan):
                 return amend_outcome(self.d, "acme/app", ScanOptions(), load_signatures(),
-                                     [], "t", pusher=pusher)
+                                     [], "t", pusher=pusher, resolver=resolver)
 
     def test_a_loader_in_an_evolving_file_is_excised_at_every_commit(self):
         clean = "const config = {};\nexport default config;\n"
@@ -1522,6 +1522,57 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         self.assertFalse(outcome.completed, "must refuse — the only version to restore is poisoned")
         self.assertEqual(calls, [], "nothing may be force-pushed when it cannot produce a clean file")
         self.assertTrue(outcome.needs_review)
+
+    def test_the_operator_can_remove_a_blocked_commits_payload_across_its_whole_history(self):
+        """A confirmed commit whose only clean version also carries the payload isolates today; on a
+        terminal the operator removes it, and it is dropped from EVERY carrying commit — ancestor
+        included — so the run completes with the payload gone from all history."""
+        from stayawake.bots.security.scanner import scan_target
+        from stayawake.bots.security.targets import LocalRepoTarget
+        font = "assets/brand.woff2"
+        poisoned = "GENUINE-BRAND-FONT-METADATA-v1\nA Mini Shai-Hulud has Appeared\n"
+        self.write(self.d, font, poisoned)
+        self.commit(self.d, "add the brand font")
+        self.git(self.d, "checkout", "-qb", "delbranch")
+        self.git(self.d, "rm", "-q", font)
+        self.commit(self.d, "delete the brand font on the feature branch")
+        self.git(self.d, "checkout", "-q", self.base)
+        self.write(self.d, "d.txt", "mainline work\n")
+        self.commit(self.d, "mainline work, font kept")
+        self.git(self.d, "merge", "--no-commit", "--no-ff", "delbranch")
+        self.write(self.d, font, poisoned + "// build tweak\n")
+        self.commit(self.d, "Merge pull request #1 from delbranch")
+        scan = scan_target(LocalRepoTarget(self.d, str(self.d), ScanOptions()), load_signatures())
+        outcome = self._act_full(scan, resolver=lambda item: Resolution(REMOVE),
+                                 pusher=lambda *a: PushResult(True))
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        hist = self.git(self.d, "log", "--all", "-p", "--", font)
+        self.assertNotIn("A Mini Shai-Hulud", hist, "the payload is gone from all history")
+
+    def test_a_blocked_commit_without_a_resolver_still_isolates(self):
+        """Without an operator, a confirmed commit that cannot be auto-replaced still isolates — the
+        non-interactive floor is unchanged."""
+        from stayawake.bots.security.scanner import scan_target
+        from stayawake.bots.security.targets import LocalRepoTarget
+        font = "assets/brand.woff2"
+        poisoned = "GENUINE-BRAND-FONT-METADATA-v1\nA Mini Shai-Hulud has Appeared\n"
+        self.write(self.d, font, poisoned)
+        self.commit(self.d, "add the brand font")
+        self.git(self.d, "checkout", "-qb", "delbranch")
+        self.git(self.d, "rm", "-q", font)
+        self.commit(self.d, "delete the brand font on the feature branch")
+        self.git(self.d, "checkout", "-q", self.base)
+        self.write(self.d, "d.txt", "mainline work\n")
+        self.commit(self.d, "mainline work, font kept")
+        self.git(self.d, "merge", "--no-commit", "--no-ff", "delbranch")
+        self.write(self.d, font, poisoned + "// build tweak\n")
+        self.commit(self.d, "Merge pull request #1 from delbranch")
+        scan = scan_target(LocalRepoTarget(self.d, str(self.d), ScanOptions()), load_signatures())
+        calls = []
+        outcome = self._act_full(scan, resolver=None,
+                                 pusher=lambda *a: calls.append(a) or PushResult(True))
+        self.assertFalse(outcome.completed)
+        self.assertEqual(calls, [], "nothing is force-pushed")
 
     def test_a_predates_code_loader_is_excised_in_place_not_refused(self):
         """A code-loader flagged by a commit finding whose only ancestor version also carries it
