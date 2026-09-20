@@ -14,6 +14,13 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Changed
+- **On a terminal, `saw fix amend` offers to remove a confirmed commit it could not clean
+  automatically, dropping the payload from every commit that carries it.** A commit whose only clean
+  version also carries the payload — a poisoned re-add, a merge conflict on the payload — used to
+  isolate its branch. Now you can remove it, and saw drops that file from every commit whose version
+  of it still carries a payload, back through history, so nothing is left reachable; a clean earlier
+  version of the file is kept. It offers this only on a real terminal for a single local repository;
+  without a terminal the commit isolates its branch for review, unchanged.
 - **On a terminal, `saw fix amend` offers to replace a confirmed file it could not clean with content
   you supply.** For a confirmed payload with no clean earlier version to restore, you can point saw at
   a replacement file; saw scans that content, and only if it is clean puts it in place of the payload,
