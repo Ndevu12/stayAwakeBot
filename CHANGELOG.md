@@ -13,6 +13,11 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Fixed
+- **A `saw fix amend` refusal now names the commit it could not change**, instead of an object
+  you cannot find.
+- **`saw fix amend` says when it could not use content you supplied, and names the file.**
+
 ### Changed
 - **On a terminal, `saw fix amend` offers to remove a confirmed commit it could not clean
   automatically, dropping the payload from every commit that carries it.** A commit whose only clean

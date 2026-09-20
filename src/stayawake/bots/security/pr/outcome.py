@@ -76,6 +76,8 @@ class Cause(Enum):
     FILE_RESTORED_FROM_A_PARENT = "file-restored-from-a-parent"
     FILE_RESTORED_TO_A_CLEAN_VERSION = "file-restored-to-a-clean-version"
     FILE_REPLACED_WITH_SUPPLIED_CONTENT = "file-replaced-with-supplied-content"
+    SUPPLIED_CONTENT_REJECTED = "supplied-content-rejected"
+    SUPPLIED_CONTENT_UNWRITABLE = "supplied-content-unwritable"
     HISTORY_TOO_LARGE_TO_ENUMERATE = "history-too-large-to-enumerate"
 
 
@@ -144,15 +146,17 @@ class AmendOutcome:
         return any(r.cause not in _NEEDING_NO_ACTION for r in self.reasons)
 
 
-def refused(repository: str, cause: Cause, detail: str = "",
-            subjects: str = "", recovery: str = "") -> AmendOutcome:
-    """Nothing was force-updated, and this is the one reason why. No ref moved.
+def refused(repository: str, cause: Cause, detail: str = "", subjects: str = "",
+            recovery: str = "", also: tuple[Reason, ...] = ()) -> AmendOutcome:
+    """Nothing was force-updated, and this is the leading reason why. No ref moved.
 
     `recovery` is set only on a refusal that already moved branches and could not put them back;
-    it names where the pre-rewrite history was captured.
+    it names where the pre-rewrite history was captured. `also` carries further reasons to report
+    alongside the leading one.
     """
     return AmendOutcome(repository=repository, completed=False,
-                        reasons=(Reason(cause, detail, subjects),), recovery=recovery)
+                        reasons=(Reason(cause, detail, subjects),) + tuple(also),
+                        recovery=recovery)
 
 
 def amended(repository: str, commit: str, branches: Sequence[BranchResult],
@@ -240,6 +244,11 @@ _PHRASE = {
     Cause.FILE_REPLACED_WITH_SUPPLIED_CONTENT:
         "{detail} was replaced with content you supplied in place of the payload — confirm it should "
         "be kept",
+    Cause.SUPPLIED_CONTENT_REJECTED:
+        "the content you supplied for {detail} carries a payload itself, so it was not used — supply "
+        "a different version",
+    Cause.SUPPLIED_CONTENT_UNWRITABLE:
+        "the content you supplied for {detail} could not be written, so it was not used",
     Cause.HISTORY_TOO_LARGE_TO_ENUMERATE:
         "a reported file changed too many times to enumerate its history safely — recover it by hand",
 }
