@@ -49,8 +49,7 @@ class HistoryTarget(Target):
         super().__init__(root, display, opts)
         self._sha_by_path = {path: shas[index] for path, shas in versions.items()
                              if index < len(shas)}
-        self.stored_links, self.stored_links_established = (
-            (links, True) if links is not None else stored_link_targets(root))
+        self.stored_links = links if links is not None else stored_link_targets(root)[0]
 
     def __len__(self) -> int:
         return len(self._sha_by_path)

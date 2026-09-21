@@ -6,6 +6,7 @@ ever executing repository code. The evil-merge detector and the recovery walks b
 other queries read, because a query can only answer for refs the clone actually has."""
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -85,7 +86,24 @@ def commit_count(repo: str | Path, ref: str = "HEAD") -> int | None:
 _TYPE_MASK, _LINK_TYPE, _TREE_TYPE = 0o170000, 0o120000, 0o040000
 _ENTRY_TYPES = (0o100000, _LINK_TYPE, _TREE_TYPE, 0o160000)
 _MAX_LINK_TARGET_BYTES = 4096
-_OWN_OBJECTS = ["--no-replace-objects"]
+_OBJECT_ID_BYTES = 20
+
+
+def _own_env() -> dict:
+    """Build the environment a query of a repository's own objects runs in. Returns it."""
+    return dict(os.environ, GIT_GRAFT_FILE=os.path.join(os.devnull, "grafts"))
+
+
+def _own_view(repo: str | Path, args: list[str]):
+    """Ask git about the objects a repository holds, not about a view configured over them. Takes
+    the repo and the arguments. Returns the completed process, or None when it could not run."""
+    return run(repo, ["--no-replace-objects", *args], env=_own_env())
+
+
+def _own_view_fed(repo: str | Path, args: list[str], stdin: bytes) -> bytes | None:
+    """Ask git about the objects a repository holds, feeding `stdin`. Takes the repo, the arguments
+    and the bytes to write. Returns the raw stdout, or None on any failure."""
+    return stdout_bytes_fed(repo, ["--no-replace-objects", *args], stdin, env=_own_env())
 
 
 def _entry_type(mode: bytes) -> int | None:
@@ -124,10 +142,11 @@ def _tree_entries(body: bytes) -> tuple[list, bool]:
     while pos < len(body):
         space = body.find(b" ", pos)
         nul = body.find(b"\0", space + 1)
-        if space == -1 or nul == -1 or nul + 21 > len(body):
+        if space == -1 or nul == -1 or nul + 1 + _OBJECT_ID_BYTES > len(body):
             break
-        entries.append((body[pos:space], body[space + 1:nul], body[nul + 1:nul + 21].hex()))
-        pos = nul + 21
+        entries.append((body[pos:space], body[space + 1:nul],
+                        body[nul + 1:nul + 1 + _OBJECT_ID_BYTES].hex()))
+        pos = nul + 1 + _OBJECT_ID_BYTES
     return entries, pos == len(body)
 
 
@@ -136,7 +155,7 @@ def _read_trees(repo: str | Path, ids: list[str]) -> tuple[dict[str, list], bool
     whether every id asked for was read whole."""
     if not ids:
         return {}, True
-    raw = stdout_bytes_fed(repo, _OWN_OBJECTS + ["cat-file", "--batch"], "\n".join(ids).encode())
+    raw = _own_view_fed(repo, ["cat-file", "--batch"], "\n".join(ids).encode())
     if raw is None:
         return {}, False
     out: dict[str, list] = {}
@@ -155,15 +174,20 @@ def stored_as_links(repo: str | Path, *,
     """Search a repository's reachable history for the paths it stores a symlink at. Takes the repo
     and a bound on the paths visited. Returns those paths mapped to the blob ids stored there, and
     whether the whole history was read."""
-    roots = run(repo, _OWN_OBJECTS + ["rev-list", "--all", "--format=%T"])
-    direct = run(repo, _OWN_OBJECTS + ["for-each-ref", "--format=%(objectname) %(objecttype)%0a"
-                                                       "%(*objectname) %(*objecttype)"])
-    if roots is None or roots.returncode != 0 or direct is None or direct.returncode != 0:
+    roots = _own_view(repo, ["rev-list", "--all", "--format=%T"])
+    refs = _own_view(repo, ["for-each-ref", "--format=%(refname)"])
+    if roots is None or roots.returncode != 0 or refs is None or refs.returncode != 0:
         return {}, False
-    complete = not (roots.stderr.strip() or direct.stderr.strip())
+    complete = not roots.stderr.strip()
     named = [ln.strip() for ln in roots.stdout.splitlines() if not ln.startswith("commit ")]
-    named += [p[0] for p in (ln.split() for ln in direct.stdout.splitlines())
-              if len(p) == 2 and p[1] == "tree"]
+    wanted = [ln.strip() for ln in refs.stdout.splitlines() if ln.strip()]
+    peeled = _own_view_fed(repo, ["cat-file", "--batch-check"],
+                           "".join(f"{ref}^{{tree}}\n" for ref in wanted).encode())
+    if peeled is None:
+        return {}, False
+    lines = peeled.decode("utf-8", "replace").splitlines()
+    complete = complete and len(lines) == len(wanted)
+    named += [p[0] for p in (ln.split() for ln in lines) if len(p) == 3 and p[1] == "tree"]
     out: dict[str, set[str]] = {}
     seen: set[tuple[str, str]] = set()
     level = [(tree, "") for tree in dict.fromkeys(named) if tree]
@@ -201,7 +225,7 @@ def stored_link_targets(repo: str | Path, *,
     if not at_path:
         return {}, complete
     wanted = sorted({sha for shas in at_path.values() for sha in shas})
-    sized = stdout_bytes_fed(repo, _OWN_OBJECTS + ["cat-file", "--batch-check"], "\n".join(wanted).encode())
+    sized = _own_view_fed(repo, ["cat-file", "--batch-check"], "\n".join(wanted).encode())
     if sized is None:
         return {}, False
     readable = []
@@ -210,9 +234,7 @@ def stored_link_targets(repo: str | Path, *,
         if (len(parts) >= 3 and parts[1] == "blob" and parts[2].isdigit()
                 and int(parts[2]) <= _MAX_LINK_TARGET_BYTES):
             readable.append(parts[0])
-        else:
-            complete = False
-    raw = stdout_bytes_fed(repo, _OWN_OBJECTS + ["cat-file", "--batch"], "\n".join(readable).encode())
+    raw = _own_view_fed(repo, ["cat-file", "--batch"], "\n".join(readable).encode())
     if raw is None:
         return {}, False
     text_of: dict[str, str] = {}
@@ -238,7 +260,7 @@ def reachable_blobs(repo: str | Path, *, limit: int = 200_000) -> tuple[list[tup
     the tag's own name where a path goes, and `--filter=object:type=blob` does not drop it either.
     No deduplication — `rev-list --objects` emits each object once, measured 0 repeats in 20400.
     """
-    listing = run(repo, ["cat-file", "--batch-check", "--batch-all-objects", "--unordered"])
+    listing = _own_view(repo, ["cat-file", "--batch-check", "--batch-all-objects", "--unordered"])
     if listing is None or listing.returncode != 0:
         return [], False
     # git EXITS 0 having skipped an object it cannot unpack, naming it on stderr only. The sha then
@@ -247,7 +269,7 @@ def reachable_blobs(repo: str | Path, *, limit: int = 200_000) -> tuple[list[tup
     complete = not listing.stderr.strip()
     blob_shas = {line.split()[0] for line in listing.stdout.splitlines()
                  if len(line.split()) >= 2 and line.split()[1] == "blob"}
-    walk = run(repo, ["rev-list", "--objects", "--all"])
+    walk = _own_view(repo, ["rev-list", "--objects", "--all"])
     if walk is None or walk.returncode != 0:
         return [], False
     complete = complete and not walk.stderr.strip()

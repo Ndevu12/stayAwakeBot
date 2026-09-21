@@ -11,6 +11,7 @@ from pathlib import Path
 from fnmatch import fnmatch
 from typing import Any
 
+from stayawake.utils import textsafe
 from stayawake.bots.security.models import (CONFIRMED, HEURISTIC, RESIDUE, QUARANTINE_DIR,
                                             Finding, ScanResult, Severity)
 from stayawake.bots.security.matchers import REGISTRY
@@ -203,12 +204,14 @@ def history_residue_note(root, opts, signatures, allowlist) -> str | None:
 
 def _history_residue_note(root, opts, signatures, allowlist) -> str | None:
     from stayawake.bots.security.targets.history import HistoryTarget, versions_by_path
+    from stayawake.lib.git.query import stored_link_targets
     versions, complete = versions_by_path(root)
-    if not versions:
+    links, every_link = stored_link_targets(root)
+    if not versions and not links:
         # A failed git command degrades to an empty result, so "git could not answer" and "there is
         # genuinely nothing here" arrive identically; `complete` is what separates them. Silence is
         # what this note exists to end, but a fresh repository has honestly nothing to report.
-        if complete:
+        if complete and every_link:
             return "History was read: this repository stores no earlier version of any path."
         return ("History could not be read: nothing was returned for this repository, so whether "
                 "it still stores a payload is UNKNOWN, not no.")
@@ -216,13 +219,11 @@ def _history_residue_note(root, opts, signatures, allowlist) -> str | None:
     # committed it picks that name: filing the same bytes under an allowlisted path suppresses the
     # stored payload. Signature-wide rules carry the same operator intent and cannot be aimed.
     unaimable = [r for r in (allowlist or []) if isinstance(r, dict) and not r.get("path_glob")]
-    from stayawake.lib.git.query import stored_link_targets
-    links, every_link = stored_link_targets(root)
     hits, scanned, unread = [], 0, set()
     for index in range(_HISTORY_ROUNDS):
         target = HistoryTarget(root, str(root), opts, versions, index,
                                links if index == 0 else {})
-        if not len(target):
+        if index and not len(target):
             break
         scanned += len(target)
         result = scan_target(target, signatures, unaimable)
@@ -248,9 +249,11 @@ def _history_residue_note(root, opts, signatures, allowlist) -> str | None:
                 f"across {len(versions)} path(s), so whether it still stores one is UNKNOWN, not "
                 f"no.{cut}")
     paths = sorted({f.path for f in hits})
+    paths.sort(key=lambda path: path in links)
+    shown = [textsafe.plain(path, limit=200) for path in paths[:5]]
     more = len(paths) - 5
     return (f"{len(paths)} path(s) still STORE a confirmed payload reachable from a ref: "
-            f"{'; '.join(paths[:5])}"
+            f"{'; '.join(shown)}"
             f"{f'; and {more} more' if more > 0 else ''}. Removing these needs a history rewrite "
             f"and the hosting provider's collection — a fix that cleans the tree does not reach "
             f"them.{cut}")

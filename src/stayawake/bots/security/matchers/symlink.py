@@ -64,15 +64,15 @@ def _graded(rel: str, raw: str, resolved: Path, resolved_root: Path,
     return None
 
 
-def _stored_finding(rel: str, raw: str, root: Path, redirect_sig: dict | None) -> list:
+def _stored_finding(rel: str, raw: str, redirect_sig: dict | None) -> list:
     """Grade a stored version at `rel` naming `raw`. Takes the path it is stored at, the target it
-    names, the repository root and the redirect signature. Returns the findings it warrants."""
+    names and the redirect signature. Returns the findings it warrants."""
     if redirect_sig is None:
         return []
-    resolved = Path(os.path.normpath(os.path.join(str(root), os.path.dirname(rel), raw)))
-    if resolved == root or root in resolved.parents:
+    within = os.path.normpath(os.path.join(os.path.dirname(rel), raw))
+    if not os.path.isabs(raw) and within.split(os.sep)[0] != os.pardir:
         return []
-    reaches = Path(os.path.normpath(os.path.join("/", os.path.dirname(rel), raw)))
+    reaches = Path(os.path.normpath(os.path.join(os.sep, os.path.dirname(rel), raw)))
     label = sink_label(raw, reaches)
     if label is None:
         return []
@@ -108,7 +108,7 @@ class SymlinkMatcher(Matcher):
         if stored is not None:
             for rel, raws in sorted(stored.items()):
                 for raw in raws:
-                    findings += _stored_finding(rel, raw, root, redirect_sig)
+                    findings += _stored_finding(rel, raw, redirect_sig)
             return findings
         for dirpath, dirnames, filenames in os.walk(target.scan_root):  # followlinks=False (default)
             # Classify DIRECTORY entries BEFORE pruning for descent, so a write-redirect symlink whose

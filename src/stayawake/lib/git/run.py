@@ -52,12 +52,13 @@ def run_ok(repo: str | Path | None, args: list[str], *, env: dict | None = None,
     return res is not None and res.returncode == 0
 
 
-def stdout_bytes_fed(repo: str | Path, args: list[str], stdin: bytes) -> bytes | None:
-    """Run a git command with `stdin` written to it. Takes the repo, the arguments and the bytes to
-    write. Returns its raw stdout undecoded, or None on any failure."""
+def stdout_bytes_fed(repo: str | Path, args: list[str], stdin: bytes,
+                     env: dict | None = None) -> bytes | None:
+    """Run a git command with `stdin` written to it. Takes the repo, the arguments, the bytes to
+    write and the environment to run in. Returns its raw stdout undecoded, or None on any failure."""
     try:
         res = subprocess.run(_argv(repo, args), input=stdin, capture_output=True,
-                             timeout=LOCAL_TIMEOUT)
+                             timeout=LOCAL_TIMEOUT, env=env)
     except (OSError, subprocess.SubprocessError):
         return None
     return res.stdout if res.returncode == 0 else None

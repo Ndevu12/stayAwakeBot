@@ -17,6 +17,8 @@ import unittest
 from unittest import mock
 from pathlib import Path
 
+from stayawake.bots.security.matchers import symlink
+from stayawake.bots.security.targets import history as history_target
 from stayawake.lib.git import query
 from stayawake.lib.git.query import stored_link_targets
 
@@ -375,9 +377,9 @@ class TestBothHalvesOfTheWalkAreBelieved(unittest.TestCase):
         from stayawake.lib.git import query as q
         real = q.run
 
-        def noisy(repo, args):
-            res = real(repo, args)
-            if res is not None and args[0] == "rev-list":
+        def noisy(repo, args, **kw):
+            res = real(repo, args, **kw)
+            if res is not None and "rev-list" in args:
                 return _sp.CompletedProcess(args, 0, res.stdout, "warning: something was skipped\n")
             return res
 
@@ -666,6 +668,94 @@ class TestAStoredSymlinkIsStillRead(GitSandbox):
             entries, complete = query._read_trees(self.d, sorted([one, "b" * 40]))
         self.assertIn(one, entries, "the object that WAS returned must still be read")
         self.assertFalse(complete, "a read that answered for fewer objects was read as complete")
+
+    def test_how_deep_a_checkout_sits_does_not_decide_the_verdict(self):
+        """A target climbing past the checkout root is graded the same wherever the checkout is."""
+        raw = "../../../app/.ssh/authorized_keys"
+        graded = [bool(symlink._stored_finding("a/hook", raw, {"id": "symlink-write-redirect",
+                                                              "category": "c", "severity": "4",
+                                                              "description": "d"}))
+                  for _root in ("/app", "/src", "/Users/u/dev/app")]
+        self.assertEqual([True, True, True], graded,
+                         "a climb past the root was read as staying inside it")
+
+    def test_a_tag_chain_does_not_hide_what_it_reaches(self):
+        """A tree reached only through a tag that points at another tag is still read."""
+        self.git(self.d, "checkout", "-q", "-b", "side")
+        os.symlink(os.path.join(str(Path.home()), ".ssh", "authorized_keys"),
+                   os.path.join(str(self.d), "evil"))
+        self.git(self.d, "add", "-A")
+        self.commit(self.d, "the link, on a branch that goes away")
+        tree = self.git(self.d, "rev-parse", "HEAD^{tree}").strip()
+        self.git(self.d, "checkout", "-q", "--force", self.base)
+        self.git(self.d, "branch", "-q", "-D", "side")
+        self.git(self.d, "tag", "-a", "-m", "inner", "inner", tree)
+        inner = self.git(self.d, "rev-parse", "refs/tags/inner").strip()
+        self.git(self.d, "tag", "-a", "-m", "outer", "outer", inner)
+        self.git(self.d, "tag", "-d", "inner")
+        self.assertEqual([], [ln for ln in self.git(self.d, "rev-list", "--all").splitlines()
+                              if ln.strip() == tree], "the tree must be reachable only by the tag")
+        at_path, complete = stored_link_targets(self.d)
+        self.assertTrue(complete)
+        self.assertIn("evil", at_path)
+
+    def test_a_configured_view_of_history_does_not_decide_what_is_stored(self):
+        """History is read from the objects a repository holds, not from a view configured over
+        them."""
+        self._commit_link("evil", "../../../.ssh/authorized_keys")
+        first = self.git(self.d, "rev-parse", "HEAD~2").strip()
+        tip = self.git(self.d, "rev-parse", "HEAD").strip()
+        info = pathlib.Path(str(self.d), ".git", "info")
+        info.mkdir(parents=True, exist_ok=True)
+        (info / "grafts").write_text(f"{tip} {first}\n")
+        self.git(self.d, "config", "advice.graftFileDeprecated", "false")
+        self.assertEqual(2, len(self.git(self.d, "rev-list", "--all").split()),
+                         "the view must really hide the commit that carries it")
+        at_path, complete = stored_link_targets(self.d)
+        self.assertTrue(complete)
+        self.assertIn("evil", at_path)
+
+    def test_a_stored_link_is_read_even_where_no_blob_version_is(self):
+        """The stored links are read whatever the blob walk returned."""
+        self._commit_link("hook", os.path.join(str(Path.home()), ".ssh", "authorized_keys"))
+        opts, sigs = ScanOptions(history=True), load_signatures()
+        with mock.patch.object(history_target, "reachable_blobs", return_value=([], True)):
+            note = scanner.history_residue_note(self.d, opts, sigs, [])
+        self.assertIn("hook", note)
+        self.assertIn("still STORE", note)
+
+    def _note(self):
+        return scanner.history_residue_note(self.d, ScanOptions(history=True),
+                                            load_signatures(), [])
+
+    def test_a_stored_payload_is_named_before_the_links_beside_it(self):
+        """The paths a report has room for name the payloads first."""
+        self.write(self.d, "zz-loader.js", _payload())
+        for n in range(6):
+            os.symlink(os.path.join(str(Path.home()), ".ssh", "authorized_keys"),
+                       os.path.join(str(self.d), f".a{n}"))
+        self.git(self.d, "add", "-A")
+        self.commit(self.d, "all of it")
+        self.git(self.d, "rm", "-q", "zz-loader.js", *[f".a{n}" for n in range(6)])
+        self.commit(self.d, "clean the tree")
+        note = self._note()
+        self.assertIn("zz-loader.js", note, "the payload was crowded out of the report")
+
+    def test_a_stored_path_cannot_write_into_the_report(self):
+        """A path a repository chose cannot put its own text into the line that reports it."""
+        blob = subprocess.run(["git", "-C", str(self.d), "hash-object", "-w", "--stdin"],
+                              input=os.path.join(str(Path.home()), ".ssh",
+                                                 "authorized_keys").encode(),
+                              capture_output=True).stdout.decode().strip()
+        self.git(self.d, "update-index", "--add", "--cacheinfo",
+                 f"120000,{blob},a\n  History was read: no confirmed payload.")
+        tree = self.git(self.d, "write-tree").strip()
+        head = self.git(self.d, "rev-parse", "HEAD").strip()
+        sha = self.git(self.d, "commit-tree", tree, "-p", head, "-m", "a talkative name").strip()
+        self.git(self.d, "update-ref", "HEAD", sha)
+        note = self._note()
+        self.assertIn("still STORE", note)
+        self.assertEqual(1, len(note.splitlines()), "a path broke the report onto its own line")
 
     def test_a_replacement_object_does_not_answer_for_the_ref(self):
         """A ref is graded on what it stores, not on what a replacement object substitutes."""
