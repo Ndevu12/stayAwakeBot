@@ -16,6 +16,8 @@ reader, not the mechanism or the weakness it closed.
 ### Fixed
 - **A scan now reports a symlink a repository still stores, not only one in the working tree.**
   Re-scan any repository you rely on.
+- **A history scan now says when it could not read everything a repository stores.** Treat that
+  result as incomplete and run it again.
 - **A `saw fix amend` refusal now names the commit it could not change**, instead of an object
   you cannot find.
 - **`saw fix amend` says when it could not use content you supplied, and names the file.**

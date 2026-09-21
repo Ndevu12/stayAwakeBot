@@ -216,11 +216,12 @@ def _history_residue_note(root, opts, signatures, allowlist) -> str | None:
     # committed it picks that name: filing the same bytes under an allowlisted path suppresses the
     # stored payload. Signature-wide rules carry the same operator intent and cannot be aimed.
     unaimable = [r for r in (allowlist or []) if isinstance(r, dict) and not r.get("path_glob")]
-    from stayawake.lib.git.query import stored_as_links
-    links = stored_as_links(root)
+    from stayawake.lib.git.query import stored_link_targets
+    links, every_link = stored_link_targets(root)
     hits, scanned, unread = [], 0, set()
     for index in range(_HISTORY_ROUNDS):
-        target = HistoryTarget(root, str(root), opts, versions, index, links)
+        target = HistoryTarget(root, str(root), opts, versions, index,
+                               links if index == 0 else {})
         if not len(target):
             break
         scanned += len(target)
@@ -232,7 +233,7 @@ def _history_residue_note(root, opts, signatures, allowlist) -> str | None:
            f" path(s) were not read." if beyond else "")
     if not complete:
         cut += " The walk hit its object budget, so what was enumerated is not all of it."
-    if not links[1]:
+    if not every_link:
         cut += " Not every stored version could be established."
     if unread:
         # By PATH, not by failed attempt: every version is read once per matcher, so counting
@@ -240,12 +241,16 @@ def _history_residue_note(root, opts, signatures, allowlist) -> str | None:
         scanned -= len(unread)
         cut += f" {len(unread)} stored version(s) could not be read at all."
     if not hits:
-        return (f"History was read: no confirmed payload in {scanned} stored version(s) across "
-                f"{len(versions)} path(s).{cut}")
+        if complete and every_link and not unread:
+            return (f"History was read: no confirmed payload in {scanned} stored version(s) across "
+                    f"{len(versions)} path(s).{cut}")
+        return (f"History was read in part: no confirmed payload in {scanned} stored version(s) "
+                f"across {len(versions)} path(s), so whether it still stores one is UNKNOWN, not "
+                f"no.{cut}")
     paths = sorted({f.path for f in hits})
     more = len(paths) - 5
-    return (f"{len(paths)} path(s) still STORE a confirmed payload reachable from a ref, though "
-            f"not in the working tree: {'; '.join(paths[:5])}"
+    return (f"{len(paths)} path(s) still STORE a confirmed payload reachable from a ref: "
+            f"{'; '.join(paths[:5])}"
             f"{f'; and {more} more' if more > 0 else ''}. Removing these needs a history rewrite "
             f"and the hosting provider's collection — a fix that cleans the tree does not reach "
             f"them.{cut}")

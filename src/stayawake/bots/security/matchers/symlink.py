@@ -50,9 +50,9 @@ def _classify(p: Path, repo_root: Path, resolved_root: Path,
 
 def _graded(rel: str, raw: str, resolved: Path, resolved_root: Path,
             redirect_sig: dict | None, escape_sig: dict | None, is_dir: bool) -> Finding | None:
-    """The finding a link at `rel` pointing at `raw` warrants, or None. Takes the path it is known
-    by, the target it names, where that target resolves to, the repository root, the two signatures
-    and whether it names a directory."""
+    """Grade a link at `rel` naming `raw`. Takes the path it is known by, the target it names, where
+    that target resolves to, the repository root, the two signatures and whether it names a
+    directory. Returns the finding it warrants, or None."""
     if resolved == resolved_root or resolved_root in resolved.parents:
         return None                           # stays inside the repo → normal
     if redirect_sig is not None:
@@ -65,20 +65,18 @@ def _graded(rel: str, raw: str, resolved: Path, resolved_root: Path,
 
 
 def _stored_finding(rel: str, raw: str, root: Path, redirect_sig: dict | None) -> list:
-    """The findings a version stored at `rel` pointing at `raw` warrants. Takes the path it is
-    stored at, the target it names, the repository root and the redirect signature. Returns them;
-    a stored entry records no directory bit, so only a write redirect can be established."""
-    joined = os.path.join(str(root), os.path.dirname(rel), raw)
-    resolved = Path(os.path.normpath(joined))
-    if resolved != root and root not in resolved.parents:
-        try:
-            canonical = Path(os.path.realpath(joined))
-        except (OSError, ValueError):
-            canonical = resolved
-        if canonical == root or root in canonical.parents:
-            return []
-    found = _graded(rel, raw, resolved, root, redirect_sig, None, False)
-    return [found] if found is not None else []
+    """Grade a stored version at `rel` naming `raw`. Takes the path it is stored at, the target it
+    names, the repository root and the redirect signature. Returns the findings it warrants."""
+    if redirect_sig is None:
+        return []
+    resolved = Path(os.path.normpath(os.path.join(str(root), os.path.dirname(rel), raw)))
+    if resolved == root or root in resolved.parents:
+        return []
+    reaches = Path(os.path.normpath(os.path.join("/", os.path.dirname(rel), raw)))
+    label = sink_label(raw, reaches)
+    if label is None:
+        return []
+    return [_finding(redirect_sig, rel, f"symlink → {raw} redirects a write into {label}")]
 
 
 class SymlinkMatcher(Matcher):

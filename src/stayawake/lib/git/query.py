@@ -82,9 +82,26 @@ def commit_count(repo: str | Path, ref: str = "HEAD") -> int | None:
     return int(out) if out.isdigit() else None
 
 
-def _tree_objects(raw: bytes):
-    """Every tree in a `cat-file --batch` stream, as `(tree id, entries, whole)`. Takes the raw
-    stream. Yields them; `whole` is False for a tree whose entries did not parse to the end."""
+_TYPE_MASK, _LINK_TYPE, _TREE_TYPE = 0o170000, 0o120000, 0o040000
+_ENTRY_TYPES = (0o100000, _LINK_TYPE, _TREE_TYPE, 0o160000)
+_MAX_LINK_TARGET_BYTES = 4096
+_OWN_OBJECTS = ["--no-replace-objects"]
+
+
+def _entry_type(mode: bytes) -> int | None:
+    """Read a tree entry's mode as the object type git gives it. Takes the mode field. Returns the
+    type bits, or None for a mode that names no type git records."""
+    try:
+        bits = int(mode, 8) & _TYPE_MASK
+    except ValueError:
+        return None
+    return bits if bits in _ENTRY_TYPES else None
+
+
+def _batch_objects(raw: bytes):
+    """Frame each object in a `cat-file --batch` stream. Takes the raw stream. Yields
+    `(id, kind, body, whole)` per object, with empty strings and False for an id git did not
+    resolve, and `whole` False for a body the stream ended before."""
     at = 0
     while at < len(raw):
         nl = raw.find(b"\n", at)
@@ -92,58 +109,125 @@ def _tree_objects(raw: bytes):
             return
         parts = raw[at:nl].split()
         if len(parts) < 3 or not parts[2].isdigit():
-            # `cat-file --batch` reports a missing or ambiguous id inline and exits 0.
-            yield "", [], False
+            yield "", "", b"", False
             at = nl + 1
             continue
         size = int(parts[2])
         body, at = raw[nl + 1:nl + 1 + size], nl + 1 + size + 1
-        if parts[1] != b"tree":
-            continue
-        entries, pos = [], 0
-        while pos < len(body):
-            space = body.find(b" ", pos)
-            nul = body.find(b"\0", space + 1)
-            if space == -1 or nul == -1 or nul + 21 > len(body):
-                break
-            entries.append((body[pos:space], body[space + 1:nul], body[nul + 1:nul + 21].hex()))
-            pos = nul + 21
-        yield parts[0].decode(), entries, pos == len(body)
+        yield parts[0].decode(), parts[1].decode(), body, len(body) == size
 
 
-def stored_as_links(repo: str | Path) -> tuple[dict[str, set[str]], bool]:
-    """Every path a reachable tree stores a symlink at, mapped to the blob ids stored there, and
-    whether every tree was read. Takes the repo. Returns the map and the flag."""
-    walk = run(repo, ["rev-list", "--objects", "--all"])
-    listing = run(repo, ["cat-file", "--batch-check", "--batch-all-objects", "--unordered"])
-    if walk is None or walk.returncode != 0 or listing is None or listing.returncode != 0:
-        return {}, False
-    kind = {}
-    for line in listing.stdout.splitlines():
-        parts = line.split()
-        if len(parts) >= 2:
-            kind[parts[0]] = parts[1]
-    at_path = {}
-    for line in walk.stdout.split("\n"):
-        sha, _, path = line.partition(" ")
-        if kind.get(sha) == "tree":
-            at_path[sha] = path
-    complete = not (walk.stderr.strip() or listing.stderr.strip())
-    if not at_path:
-        return {}, complete
-    raw = stdout_bytes_fed(repo, ["cat-file", "--batch"], "\n".join(at_path).encode())
+def _tree_entries(body: bytes) -> tuple[list, bool]:
+    """Split a tree object into its entries. Takes the object's body. Returns `(mode, name, id)`
+    per entry, and whether they parsed to the end."""
+    entries, pos = [], 0
+    while pos < len(body):
+        space = body.find(b" ", pos)
+        nul = body.find(b"\0", space + 1)
+        if space == -1 or nul == -1 or nul + 21 > len(body):
+            break
+        entries.append((body[pos:space], body[space + 1:nul], body[nul + 1:nul + 21].hex()))
+        pos = nul + 21
+    return entries, pos == len(body)
+
+
+def _read_trees(repo: str | Path, ids: list[str]) -> tuple[dict[str, list], bool]:
+    """Read tree objects in one batch. Takes the repo and the ids. Returns each one's entries, and
+    whether every id asked for was read whole."""
+    if not ids:
+        return {}, True
+    raw = stdout_bytes_fed(repo, _OWN_OBJECTS + ["cat-file", "--batch"], "\n".join(ids).encode())
     if raw is None:
         return {}, False
+    out: dict[str, list] = {}
+    complete = True
+    for oid, kind, body, whole in _batch_objects(raw):
+        if not whole or kind != "tree":
+            complete = False
+            continue
+        out[oid], ended = _tree_entries(body)
+        complete = complete and ended
+    return out, complete and len(out) == len(ids)
+
+
+def stored_as_links(repo: str | Path, *,
+                    limit: int = 200_000) -> tuple[dict[str, set[str]], bool]:
+    """Search a repository's reachable history for the paths it stores a symlink at. Takes the repo
+    and a bound on the paths visited. Returns those paths mapped to the blob ids stored there, and
+    whether the whole history was read."""
+    roots = run(repo, _OWN_OBJECTS + ["rev-list", "--all", "--format=%T"])
+    direct = run(repo, _OWN_OBJECTS + ["for-each-ref", "--format=%(objectname) %(objecttype)%0a"
+                                                       "%(*objectname) %(*objecttype)"])
+    if roots is None or roots.returncode != 0 or direct is None or direct.returncode != 0:
+        return {}, False
+    complete = not (roots.stderr.strip() or direct.stderr.strip())
+    named = [ln.strip() for ln in roots.stdout.splitlines() if not ln.startswith("commit ")]
+    named += [p[0] for p in (ln.split() for ln in direct.stdout.splitlines())
+              if len(p) == 2 and p[1] == "tree"]
     out: dict[str, set[str]] = {}
-    read_all = True
-    for tree, entries, whole in _tree_objects(raw):
-        read_all = read_all and whole
-        base = at_path.get(tree, "")
-        for mode, name, sha in entries:
-            if mode == b"120000":
+    seen: set[tuple[str, str]] = set()
+    level = [(tree, "") for tree in dict.fromkeys(named) if tree]
+    while level:
+        level = [pair for pair in dict.fromkeys(level) if pair not in seen]
+        if not level:
+            break
+        if len(seen) + len(level) > limit:
+            return out, False
+        seen.update(level)
+        entries_of, read_all = _read_trees(repo, sorted({tree for tree, _ in level}))
+        complete = complete and read_all
+        deeper = []
+        for tree, base in level:
+            for mode, name, sha in entries_of.get(tree, ()):
+                kind = _entry_type(mode)
                 rel = name.decode("utf-8", "replace")
-                out.setdefault(f"{base}/{rel}" if base else rel, set()).add(sha)
-    return out, complete and read_all
+                path = f"{base}/{rel}" if base else rel
+                if kind == _LINK_TYPE:
+                    out.setdefault(path, set()).add(sha)
+                elif kind == _TREE_TYPE:
+                    deeper.append((sha, path))
+                elif kind is None:
+                    complete = False
+        level = deeper
+    return out, complete
+
+
+def stored_link_targets(repo: str | Path, *,
+                        limit: int = 200_000) -> tuple[dict[str, list[str]], bool]:
+    """Read the target stored at each path a repository's history holds a symlink at. Takes the repo
+    and a bound on the paths visited. Returns those paths mapped to the targets stored there, and
+    whether every one of them was established."""
+    at_path, complete = stored_as_links(repo, limit=limit)
+    if not at_path:
+        return {}, complete
+    wanted = sorted({sha for shas in at_path.values() for sha in shas})
+    sized = stdout_bytes_fed(repo, _OWN_OBJECTS + ["cat-file", "--batch-check"], "\n".join(wanted).encode())
+    if sized is None:
+        return {}, False
+    readable = []
+    for line in sized.decode("utf-8", "replace").splitlines():
+        parts = line.split()
+        if (len(parts) >= 3 and parts[1] == "blob" and parts[2].isdigit()
+                and int(parts[2]) <= _MAX_LINK_TARGET_BYTES):
+            readable.append(parts[0])
+        else:
+            complete = False
+    raw = stdout_bytes_fed(repo, _OWN_OBJECTS + ["cat-file", "--batch"], "\n".join(readable).encode())
+    if raw is None:
+        return {}, False
+    text_of: dict[str, str] = {}
+    for oid, kind, body, whole in _batch_objects(raw):
+        if not whole or kind != "blob":
+            complete = False
+            continue
+        text_of[oid] = body.decode("utf-8", "replace")
+    out, every = {}, True
+    for rel, shas in at_path.items():
+        raws = [text_of[sha] for sha in sorted(shas) if sha in text_of]
+        every = every and len(raws) == len(shas)
+        if raws:
+            out[rel] = raws
+    return out, complete and every
 
 
 def reachable_blobs(repo: str | Path, *, limit: int = 200_000) -> tuple[list[tuple[str, str]], bool]:

@@ -8,8 +8,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Iterator
 
-from stayawake.lib.git.query import reachable_blobs, stored_as_links
-from stayawake.lib.git.run import stdout_bytes
+from stayawake.lib.git.query import reachable_blobs, stored_link_targets
 
 from .base import TRUNCATION_MARKER, Target
 
@@ -46,13 +45,12 @@ class HistoryTarget(Target):
     source = "history"
 
     def __init__(self, root, display: str, opts, versions: dict[str, list[str]],
-                 index: int = 0, links: tuple | None = None):
+                 index: int = 0, links: dict[str, list[str]] | None = None):
         super().__init__(root, display, opts)
         self._sha_by_path = {path: shas[index] for path, shas in versions.items()
                              if index < len(shas)}
-        at_path, _complete = (links if links is not None else stored_as_links(root))
-        self.stored_links = {rel: [self._blob_text(sha) for sha in sorted(shas)]
-                             for rel, shas in at_path.items()}
+        self.stored_links, self.stored_links_established = (
+            (links, True) if links is not None else stored_link_targets(root))
 
     def __len__(self) -> int:
         return len(self._sha_by_path)
@@ -72,11 +70,6 @@ class HistoryTarget(Target):
     # Three readers reach the filesystem on the base class, and the content tier — the one carrying
     # every confirmed signature — uses `read_source_windows`, not `read_bytes`. Overriding one of
     # the three scanned nothing and reported clean.
-    def _blob_text(self, sha: str) -> str:
-        """The stored blob's text, empty when it cannot be read. Takes the blob id."""
-        raw = stdout_bytes(self.root, ["cat-file", "blob", sha])
-        return raw.decode("utf-8", "replace").strip() if raw is not None else ""
-
     def read_text(self, rel: str) -> str | None:
         data = self.read_bytes(rel)
         if data is None:

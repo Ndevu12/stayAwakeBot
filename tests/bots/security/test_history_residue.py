@@ -9,11 +9,16 @@ from __future__ import annotations
 
 import os
 import pathlib
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
 from unittest import mock
 from pathlib import Path
+
+from stayawake.lib.git import query
+from stayawake.lib.git.query import stored_link_targets
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -83,6 +88,20 @@ class TestWhatHistoryStillCarries(GitSandbox):
         note = scanner.history_residue_note(repo, ScanOptions(history=True), self._sigs(), [])
         self.assertIn("History was read", note)
         self.assertNotIn("still STORE", note)
+
+    def test_a_history_it_could_not_finish_reading_is_not_reported_as_read(self):
+        """A read that could not be established reports UNKNOWN, never no payload."""
+        repo = self.new_repo()
+        self.write(repo, "index.js", "module.exports = 1;\n")
+        self.commit(repo, "only commit")
+        opts, sigs = ScanOptions(history=True), self._sigs()
+        settled = scanner.history_residue_note(repo, opts, sigs, [])
+        self.assertIn("History was read:", settled)
+        self.assertNotIn("UNKNOWN", settled)
+        with mock.patch.object(query, "stored_link_targets", return_value=({}, False)):
+            partial = scanner.history_residue_note(repo, opts, sigs, [])
+        self.assertIn("UNKNOWN", partial, "an unestablished read still claimed no payload")
+        self.assertNotIn("History was read:", partial)
 
     def test_a_stored_version_can_be_fetched_by_the_name_reported(self):
         """The path is the real one — an identity encoded into it defeats every allowlist glob and
@@ -505,27 +524,60 @@ class TestAStoredSymlinkIsStillRead(GitSandbox):
         self.commit(self.d, f"remove {rel} from the tree")
 
     def test_a_write_redirect_no_longer_in_the_tree_is_still_stored(self):
-        """One checkout of the earlier commit puts the link back on disk, so the stored version is
-        the thing that matters, not what the tree happens to hold now."""
+        """A version the working tree no longer holds is still graded."""
         self._commit_link("tools/postinstall",
                           os.path.join(str(Path.home()), ".ssh", "authorized_keys"))
         found = [(f.signature_id, f.path) for f in self._stored()]
         self.assertIn(("symlink-write-redirect", "tools/postinstall"), found)
 
-    def test_a_target_that_returns_inside_through_a_link_is_not_a_redirect(self):
-        """The target leaves the repository by name and comes back through a symlink. It is
-        resolved the way the working-tree scan resolves it, so the name alone does not decide."""
-        self.write(self.d, "secrets/.ssh/config", "Host example\n")
-        self.commit(self.d, "add the file it really points at")
-        alias = os.path.join(os.path.dirname(str(self.d)), "alias")
-        os.symlink(os.path.join(str(self.d), "secrets"), alias)
-        self._commit_link("cfg", os.path.join(alias, ".ssh", "config"))
-        self.assertEqual([], [(f.signature_id, f.path) for f in self._stored()],
-                         "a target that resolves back inside the repository was read as leaving it")
+    def test_an_alias_on_disk_does_not_excuse_a_stored_redirect(self):
+        """An uncommitted symlink in the checkout does not excuse a stored redirect."""
+        self._commit_link("a/hook", "../../beside/.ssh/authorized_keys")
+        shutil.rmtree(os.path.join(str(self.d), "a"), ignore_errors=True)
+        os.symlink("x/y", os.path.join(str(self.d), "a"))
+        inside = os.path.realpath(os.path.join(str(self.d), "a", "hook", "..", "..",
+                                               "beside", ".ssh", "authorized_keys"))
+        self.assertTrue(inside.startswith(os.path.realpath(str(self.d)) + os.sep),
+                        "the alias must make realpath land inside, or nothing is being excused")
+        self.assertIn(("symlink-write-redirect", "a/hook"),
+                      [(f.signature_id, f.path) for f in self._stored()])
+
+    def test_a_committed_alias_does_not_suppress_a_stored_redirect(self):
+        """Two repositories storing the same link answer the same, whatever else either commits."""
+        self._commit_link("a/hook", "../../evil/.ssh/authorized_keys")
+        bare = [(f.signature_id, f.path) for f in self._stored()]
+        shutil.rmtree(os.path.join(str(self.d), "a"), ignore_errors=True)
+        os.symlink("x/y", os.path.join(str(self.d), "a"))
+        self.git(self.d, "add", "-A")
+        self.commit(self.d, "add a workspace alias")
+        self.assertIn(("symlink-write-redirect", "a/hook"), bare)
+        self.assertIn(("symlink-write-redirect", "a/hook"),
+                      [(f.signature_id, f.path) for f in self._stored()])
+
+    def test_a_tree_mounted_twice_is_graded_at_each_depth(self):
+        """A tree stored at two depths is graded at each of them."""
+        blob = subprocess.run(["git", "-C", str(self.d), "hash-object", "-w", "--stdin"],
+                              input=b"../../.ssh/authorized_keys",
+                              capture_output=True).stdout.decode().strip()
+        for at in ("shallow", "d1/d2"):
+            self.git(self.d, "update-index", "--add", "--cacheinfo", f"120000,{blob},{at}/hook")
+        tree = self.git(self.d, "write-tree").strip()
+        head = self.git(self.d, "rev-parse", "HEAD").strip()
+        sha = self.git(self.d, "commit-tree", tree, "-p", head, "-m", "mount it twice").strip()
+        self.git(self.d, "update-ref", "HEAD", sha)
+        mounts = {self.git(self.d, "rev-parse", f"{sha}:{at}").strip()
+                  for at in ("shallow", "d1/d2")}
+        self.assertEqual(1, len(mounts), "the two mounts must be one tree object, or this is not "
+                                         "the shape that is being pinned")
+        at_path, complete = stored_link_targets(self.d)
+        self.assertTrue(complete)
+        self.assertEqual({"shallow/hook", "d1/d2/hook"}, set(at_path),
+                         "a tree mounted twice was enumerated at one of its paths")
+        self.assertIn(("symlink-write-redirect", "shallow/hook"),
+                      [(f.signature_id, f.path) for f in self._stored()])
 
     def test_a_file_sharing_the_links_bytes_does_not_hide_it(self):
-        """Git stores one blob for identical content and emits it under one name. The link is found
-        at the path that stores it, so committing a file with the same bytes hides nothing."""
+        """A file sharing a link's bytes does not hide the link."""
         target = os.path.join(str(Path.home()), ".ssh", "authorized_keys")
         self.write(self.d, "aaa_notes.txt", target)
         self.commit(self.d, "a file whose content is the target, sorting first")
@@ -534,9 +586,8 @@ class TestAStoredSymlinkIsStillRead(GitSandbox):
         self.assertIn(("symlink-write-redirect", "hook"), found)
 
     def test_what_sits_beside_a_clone_does_not_decide_its_verdict(self):
-        """Two clones of one repository, the same objects, differing only in what sits next to
-        them. A stored link is graded by where it points, so both answer the same."""
-        self._commit_link("cfg", "../beside/config")
+        """Two clones of one repository answer the same, whatever sits beside each."""
+        self._commit_link("cfg", "../beside/.aws/credentials")
         here = os.path.dirname(str(self.d))
         verdicts = []
         for name, plant in (("clone_a", False), ("clone_b", True)):
@@ -548,8 +599,129 @@ class TestAStoredSymlinkIsStillRead(GitSandbox):
             if plant:
                 os.symlink(os.path.join(str(Path.home()), ".aws"), beside)
             verdicts.append(sorted(f.signature_id for f in self._stored_in(Path(root))))
+        self.assertEqual(["symlink-write-redirect"], verdicts[0],
+                         "the target must reach a sink, or neither clone can answer anything")
         self.assertEqual(verdicts[0], verdicts[1],
                          "what sat beside the clone changed its verdict")
+
+    def _tree_with(self, mode: bytes, name: bytes, oid: str) -> str:
+        """Write a tree holding one entry, exactly as spelled. Takes the mode, the name and the
+        object it points at. Returns the new tree's id."""
+        body = mode + b" " + name + b"\0" + bytes.fromhex(oid)
+        return subprocess.run(["git", "-C", str(self.d), "hash-object", "-t", "tree", "-w",
+                               "--literally", "--stdin"], input=body,
+                              capture_output=True).stdout.decode().strip()
+
+    def _commit_tree(self, tree: str) -> str:
+        head = self.git(self.d, "rev-parse", "HEAD").strip()
+        sha = self.git(self.d, "commit-tree", tree, "-p", head, "-m", "as spelled").strip()
+        self.git(self.d, "update-ref", "HEAD", sha)
+        return sha
+
+    def test_a_mode_is_read_as_the_type_git_gives_it(self):
+        """A symlink entry spelled with a leading zero is still a symlink."""
+        blob = subprocess.run(["git", "-C", str(self.d), "hash-object", "-w", "--stdin"],
+                              input=b"../../../.ssh/authorized_keys",
+                              capture_output=True).stdout.decode().strip()
+        sub = self._tree_with(b"0120000", b"hook", blob)
+        self._commit_tree(self._tree_with(b"40000", b"sub", sub))
+        at_path, complete = stored_link_targets(self.d)
+        self.assertTrue(complete)
+        self.assertEqual(["sub/hook"], sorted(at_path))
+
+    def test_a_subtree_spelled_unusually_is_not_silently_skipped(self):
+        """A directory entry git reads as a tree is walked, and one it does not is not read as
+        empty."""
+        blob = subprocess.run(["git", "-C", str(self.d), "hash-object", "-w", "--stdin"],
+                              input=b"../../../.ssh/authorized_keys",
+                              capture_output=True).stdout.decode().strip()
+        sub = self._tree_with(b"120000", b"hook", blob)
+        self._commit_tree(self._tree_with(b"040000", b"sub", sub))
+        at_path, complete = stored_link_targets(self.d)
+        self.assertEqual(["sub/hook"], sorted(at_path))
+        self.assertTrue(complete)
+
+    def test_an_entry_naming_no_type_is_not_read_as_nothing(self):
+        """An entry whose mode names no type git records leaves the read unestablished."""
+        blob = subprocess.run(["git", "-C", str(self.d), "hash-object", "-w", "--stdin"],
+                              input=b"x\n", capture_output=True).stdout.decode().strip()
+        self._commit_tree(self._tree_with(b"000000", b"odd", blob))
+        _at_path, complete = stored_link_targets(self.d)
+        self.assertFalse(complete, "an entry naming no type was read as nothing")
+
+    def test_a_subtree_that_cannot_be_read_is_not_read_as_empty(self):
+        """A directory whose object the repository does not hold leaves the read unestablished."""
+        self._commit_tree(self._tree_with(b"40000", b"sub", "0" * 40))
+        _at_path, complete = stored_link_targets(self.d)
+        self.assertFalse(complete, "a subtree that could not be read was read as empty")
+
+    def test_a_batch_that_ends_early_is_not_read_as_complete(self):
+        """A read that returns fewer objects than were asked for leaves the read unestablished."""
+        self.write(self.d, "a/b/keep", "x\n")
+        self.commit(self.d, "two levels")
+        one = self.git(self.d, "rev-parse", "HEAD^{tree}").strip()
+        whole = subprocess.run(["git", "-C", str(self.d), "cat-file", "--batch"],
+                               input=one.encode(), capture_output=True).stdout
+        with mock.patch.object(query, "stdout_bytes_fed", return_value=whole):
+            entries, complete = query._read_trees(self.d, sorted([one, "b" * 40]))
+        self.assertIn(one, entries, "the object that WAS returned must still be read")
+        self.assertFalse(complete, "a read that answered for fewer objects was read as complete")
+
+    def test_a_replacement_object_does_not_answer_for_the_ref(self):
+        """A ref is graded on what it stores, not on what a replacement object substitutes."""
+        self._commit_link("hook", "../../../.ssh/authorized_keys")
+        carrying = self.git(self.d, "rev-parse", "HEAD").strip()
+        self.write(self.d, "ok.txt", "nothing here\n")
+        self.git(self.d, "add", "-A")
+        self.commit(self.d, "a clean twin")
+        twin = self.git(self.d, "rev-parse", "HEAD").strip()
+        self.git(self.d, "update-ref", "refs/heads/release", carrying)
+        self.git(self.d, "replace", carrying, twin)
+        at_path, _ = stored_link_targets(self.d)
+        self.assertIn("hook", at_path)
+
+    def test_a_version_that_cannot_be_established_is_not_read_as_inside(self):
+        """A stored target too long to read is reported as unestablished, never as one inside."""
+        blob = subprocess.run(["git", "-C", str(self.d), "hash-object", "-w", "--stdin"],
+                              input=b"a" * 9000, capture_output=True).stdout.decode().strip()
+        self.git(self.d, "update-index", "--add", "--cacheinfo", f"120000,{blob},huge")
+        tree = self.git(self.d, "write-tree").strip()
+        head = self.git(self.d, "rev-parse", "HEAD").strip()
+        sha = self.git(self.d, "commit-tree", tree, "-p", head, "-m", "an unreadable target").strip()
+        self.git(self.d, "update-ref", "HEAD", sha)
+        at_path, complete = stored_link_targets(self.d)
+        self.assertNotIn("huge", at_path)
+        self.assertFalse(complete, "a version that was never read was reported as established")
+
+    def test_where_a_clone_sits_does_not_decide_its_verdict(self):
+        """Two clones of one repository answer the same, wherever each sits."""
+        self._commit_link("doc", "../otherplugin/doc")
+        here = os.path.dirname(str(self.d))
+        verdicts = []
+        for under in ("plain", os.path.join(".vim", "pack", "plugins", "start")):
+            root = os.path.join(here, under, "pkg")
+            os.makedirs(os.path.dirname(root), exist_ok=True)
+            self.git(self.d, "clone", "-q", str(self.d), root)
+            verdicts.append(sorted(f.signature_id for f in self._stored_in(Path(root))))
+        self.assertEqual(verdicts[0], verdicts[1],
+                         "the directory the clone sits under changed its verdict")
+
+    def test_a_target_is_graded_as_it_is_stored(self):
+        """A stored target is graded exactly as stored, whitespace included."""
+        keys = os.path.join(str(self.d), "a", ".ssh")
+        os.makedirs(keys, exist_ok=True)
+        self.write(self.d, "a/.ssh/authorized_keys", "the repository's own fixture\n")
+        self.commit(self.d, "add the fixture")
+        blob = subprocess.run(["git", "-C", str(self.d), "hash-object", "-w", "--stdin"],
+                              input=b"   ../../../../.ssh/authorized_keys",
+                              capture_output=True).stdout.decode().strip()
+        self.git(self.d, "update-index", "--add", "--cacheinfo",
+                 f"120000,{blob},a/b/c/hook")
+        tree = self.git(self.d, "write-tree").strip()
+        head = self.git(self.d, "rev-parse", "HEAD").strip()
+        sha = self.git(self.d, "commit-tree", tree, "-p", head, "-m", "a spaced target").strip()
+        self.git(self.d, "update-ref", "HEAD", sha)
+        self.assertEqual([], [f.signature_id for f in self._stored_in(self.d)])
 
     def test_a_file_named_like_a_mode_is_not_read_as_one(self):
         """A name is content, not structure: a repository storing no symlink reports none."""
@@ -559,8 +731,7 @@ class TestAStoredSymlinkIsStillRead(GitSandbox):
         self.assertEqual([], [(f.signature_id, f.path) for f in self._stored_all_rounds()])
 
     def test_every_target_a_link_ever_had_is_still_stored(self):
-        """A link pointed somewhere sensitive and somewhere ordinary. Both versions are stored, so
-        the one that redirects is reported whichever was committed first."""
+        """Every target a link ever had is graded, in either commit order."""
         for first_is_sink in (True, False):
             with self.subTest(sink_first=first_is_sink):
                 d = self.new_repo(f"retarget{first_is_sink}", user__name="T",

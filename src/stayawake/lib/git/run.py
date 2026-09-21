@@ -53,8 +53,8 @@ def run_ok(repo: str | Path | None, args: list[str], *, env: dict | None = None,
 
 
 def stdout_bytes_fed(repo: str | Path, args: list[str], stdin: bytes) -> bytes | None:
-    """Raw stdout of a git command fed `stdin`, undecoded — None on any failure. Takes the repo, the
-    arguments and the bytes to write."""
+    """Run a git command with `stdin` written to it. Takes the repo, the arguments and the bytes to
+    write. Returns its raw stdout undecoded, or None on any failure."""
     try:
         res = subprocess.run(_argv(repo, args), input=stdin, capture_output=True,
                              timeout=LOCAL_TIMEOUT)

@@ -70,28 +70,26 @@ moved the frame and the refuters dutifully re-verified inside the new one.
 - **Run them before building, not only after.** On this track, launching agents before implementing
   caught that an instinct to refuse was itself a denial-of-remediation bug.
 
-## Before you start: the known-defects register
+## The engineering record is private, and it is read before work starts
 
-`Ndevu12/saw` holds `known-defects/` — every defect that is real, reproduced and **not yet fixed**,
-grouped by the area of the tool it is about. It is not the issue tracker. **Read the area you are
-about to work in before you start**, so the same thing is not rediscovered a fourth time and so a
-`clean` result is never read as more than it is. Read `analysis/README.md` first for the evidence
-grades every claim there carries.
+The maintainer keeps the engineering record — what has been established about the tool, and what is
+being tracked — in a private repository, not here. **Read the part covering the area you are about
+to work in before you start**, and read its `README` first for the evidence grade every claim there
+carries.
 
-**React when you hit one — do not re-file it.** A defect you hit again is the same defect: add the
-occurrence to its entry with the **verdict and criticality at that stage**. The same behaviour can be
-a coverage note at scan tier and critical at a remediation tier, and that difference is the record's
-value. Filing it again as new loses "this is the third sighting".
+**When you hit something already recorded, add to that record rather than starting a new one.** Note
+the occurrence with the verdict and the seriousness *at the stage you hit it* — the same behaviour
+can be a passing note in one command and decisive in another, and that difference is the record's
+value. Starting a fresh entry loses the fact that this is the third sighting.
 
-**What never goes in the register:** anything that lets a scan report `clean` over something it did
-not read. Being pre-existing is not a reason and neither is being busy — fix it, or fail it closed
-with the proper exit code. Nor does anything the change itself broke: that is fixed in the change,
-and its history is the record.
+**Some things do not belong in a record at all.** Anything that would let a run report a clean result
+over something it did not read is fixed, or failed closed with the proper exit code — being
+pre-existing is not a reason, and neither is being busy. Nor does anything your own change broke:
+that is fixed in the change, and its history is the record.
 
-An entry answers four questions in order — what happens, how it was reproduced, whether the change
-that found it introduced it, what it costs the operator — and **never how to fix it**: a gap and a
-proposed repair are different records. Cite by symbol, never `file:line`. Version, never overwrite.
-Both are machine-checked.
+An entry answers, in order, what happens, how it was reproduced, whether the change that found it
+introduced it, and what it costs the operator — and **never how to fix it**: a gap and a proposed
+repair are different records. Cite by symbol, never `file:line`. Version, never overwrite.
 
 ## Tests are the spec — you may not delete one to go green
 
