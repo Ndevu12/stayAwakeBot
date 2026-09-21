@@ -849,6 +849,39 @@ class TestAStoredSymlinkIsStillRead(GitSandbox):
         self.assertIn("visible", at_path)
         self.assertFalse(complete, "a tree that stopped parsing was read as fully read")
 
+    def test_an_aimed_rule_silences_its_path_and_no_other(self):
+        """A rule aimed at one path silences that path; the same bytes stored elsewhere still
+        report, so filing a copy under an allowed name hides nothing."""
+        self.write(self.d, "tests/fixtures/loader.js", _payload())
+        self.write(self.d, "src/loader.js", _payload())
+        self.git(self.d, "add", "-A")
+        self.commit(self.d, "the same bytes at two paths")
+        rule = [{"signature": "loader-fromcharcode-127", "path_glob": "tests/**"}]
+        note = scanner.history_residue_note(self.d, ScanOptions(history=True),
+                                            load_signatures(), rule)
+        self.assertIn("src/loader.js", note, "the aimed rule silenced a path it did not name")
+        self.assertNotIn("tests/fixtures/loader.js", note,
+                         "the aimed rule did not silence the path it named")
+
+    def test_the_read_goes_further_when_the_operator_says_so(self):
+        """One answer decides whether a read may go past what the repository holds."""
+        origin = self.new_repo("origin2")
+        self.git(origin, "config", "uploadpack.allowFilter", "true")
+        os.makedirs(os.path.join(str(origin), "deep"), exist_ok=True)
+        os.symlink(os.path.join(str(Path.home()), ".ssh", "authorized_keys"),
+                   os.path.join(str(origin), "deep", "evil"))
+        self.git(origin, "add", "-A")
+        self.commit(origin, "the link")
+        partial = os.path.join(os.path.dirname(str(origin)), "partial2")
+        subprocess.run(["git", "clone", "-q", "--filter=tree:0", "--no-checkout", "--no-local",
+                        f"file://{origin}", partial], capture_output=True, check=True)
+        sigs = load_signatures()
+        refused = scanner.history_residue_note(partial, ScanOptions(history=True), sigs, [])
+        self.assertIn("UNKNOWN", refused)
+        allowed = scanner.history_residue_note(
+            partial, ScanOptions(history=True, confirm_remote_read=lambda: True), sigs, [])
+        self.assertIn("deep/evil", allowed, "an answered yes did not let the read finish")
+
     def test_a_replacement_object_does_not_answer_for_the_ref(self):
         """A ref is graded on what it stores, not on what a replacement object substitutes."""
         self._commit_link("hook", "../../../.ssh/authorized_keys")

@@ -83,8 +83,8 @@ def commit_count(repo: str | Path, ref: str = "HEAD") -> int | None:
     return int(out) if out.isdigit() else None
 
 
-_TYPE_MASK, _LINK_TYPE, _TREE_TYPE = 0o170000, 0o120000, 0o040000
-_ENTRY_TYPES = (0o100000, _LINK_TYPE, _TREE_TYPE, 0o160000)
+_TYPE_MASK, _LINK_TYPE, _TREE_TYPE, _FILE_TYPE = 0o170000, 0o120000, 0o040000, 0o100000
+_ENTRY_TYPES = (_FILE_TYPE, _LINK_TYPE, _TREE_TYPE, 0o160000)
 _MAX_LINK_TARGET_BYTES = 4096
 _OBJECT_ID_BYTES = 20
 
@@ -184,11 +184,12 @@ def _read_trees(repo: str | Path, ids: list[str]) -> tuple[dict[str, list], bool
     return out, complete and len(out) == len(ids)
 
 
-def stored_as_links(repo: str | Path, *, limit: int = 200_000,
-                    offline: bool = True) -> tuple[dict[str, set[str]], bool]:
-    """Search a repository's reachable history for the paths it stores a symlink at. Takes the repo,
-    a bound on the paths visited and whether the read must stay local. Returns those paths mapped to
-    the blob ids stored there, and whether the whole history was read."""
+def stored_entries(repo: str | Path, *, limit: int = 200_000,
+                   offline: bool = True) -> tuple[dict[str, list[tuple[str, int]]], bool]:
+    """Walk a repository's reachable history and collect what it stores at every path. Takes the
+    repo, a bound on the paths visited and whether the read must stay local. Returns each path
+    mapped to the `(object id, entry type)` pairs stored there, and whether the whole history was
+    read."""
     if offline and not holds_its_objects(repo):
         return {}, False
     roots = _own_view(repo, ["rev-list", "--all", "--format=%T"])
@@ -205,7 +206,7 @@ def stored_as_links(repo: str | Path, *, limit: int = 200_000,
     lines = peeled.decode("utf-8", "replace").splitlines()
     complete = complete and len(lines) == len(wanted)
     named += [p[0] for p in (ln.split() for ln in lines) if len(p) == 3 and p[1] == "tree"]
-    out: dict[str, set[str]] = {}
+    out: dict[str, list[tuple[str, int]]] = {}
     seen: set[tuple[str, str]] = set()
     level = [(tree, "") for tree in dict.fromkeys(named) if tree]
     while level:
@@ -223,14 +224,39 @@ def stored_as_links(repo: str | Path, *, limit: int = 200_000,
                 kind = _entry_type(mode)
                 rel = name.decode("utf-8", "replace")
                 path = f"{base}/{rel}" if base else rel
-                if kind == _LINK_TYPE:
-                    out.setdefault(path, set()).add(sha)
-                elif kind == _TREE_TYPE:
+                if kind == _TREE_TYPE:
                     deeper.append((sha, path))
                 elif kind is None:
                     complete = False
+                elif (sha, kind) not in out.setdefault(path, []):
+                    out[path].append((sha, kind))
         level = deeper
-    return out, complete
+    return out, complete and _all_readable(repo, out)
+
+
+def _all_readable(repo: str | Path, at_path: dict) -> bool:
+    """Ask whether every object a walk collected can be read back. Takes the repo and what it
+    collected. Returns True when git answered for all of them."""
+    wanted = sorted({sha for entries in at_path.values() for sha, _kind in entries})
+    if not wanted:
+        return True
+    answered = _own_view_fed(repo, ["cat-file", "--batch-check"], "\n".join(wanted).encode())
+    if answered is None:
+        return False
+    good = {ln.split()[0] for ln in answered.decode("utf-8", "replace").splitlines()
+            if len(ln.split()) == 3 and ln.split()[1] in ("blob", "commit")}
+    return good >= set(wanted)
+
+
+def stored_as_links(repo: str | Path, *, limit: int = 200_000,
+                    offline: bool = True) -> tuple[dict[str, set[str]], bool]:
+    """Search a repository's reachable history for the paths it stores a symlink at. Takes the repo,
+    a bound on the paths visited and whether the read must stay local. Returns those paths mapped to
+    the blob ids stored there, and whether the whole history was read."""
+    at_path, complete = stored_entries(repo, limit=limit, offline=offline)
+    return ({path: {sha for sha, kind in entries if kind == _LINK_TYPE}
+             for path, entries in at_path.items()
+             if any(kind == _LINK_TYPE for _sha, kind in entries)}, complete)
 
 
 def stored_link_targets(repo: str | Path, *, limit: int = 200_000,
@@ -271,39 +297,13 @@ def stored_link_targets(repo: str | Path, *, limit: int = 200_000,
 
 def reachable_blobs(repo: str | Path, *, limit: int = 200_000,
                     offline: bool = True) -> tuple[list[tuple[str, str]], bool]:
-    """Every distinct blob reachable from ANY ref, as (sha, one path it is known by), and whether
-    the walk completed.
-
-    The type is asked of git, not inferred from having a name: an annotated tag is emitted under
-    the tag's own name where a path goes, and `--filter=object:type=blob` does not drop it either.
-    No deduplication — `rev-list --objects` emits each object once, measured 0 repeats in 20400.
-    """
-    if offline and not holds_its_objects(repo):
-        return [], False
-    listing = _own_view(repo, ["cat-file", "--batch-check", "--batch-all-objects", "--unordered"])
-    if listing is None or listing.returncode != 0:
-        return [], False
-    # git EXITS 0 having skipped an object it cannot unpack, naming it on stderr only. The sha then
-    # fails the type test below and leaves the walk silently, so the caller must not be told this
-    # was a complete read. Both commands can do it, and only one was being read.
-    complete = not listing.stderr.strip()
-    blob_shas = {line.split()[0] for line in listing.stdout.splitlines()
-                 if len(line.split()) >= 2 and line.split()[1] == "blob"}
-    walk = _own_view(repo, ["rev-list", "--objects", "--all"])
-    if walk is None or walk.returncode != 0:
-        return [], False
-    complete = complete and not walk.stderr.strip()
-    out = walk.stdout
-    seen: dict[str, str] = {}
-    for line in out.split("\n"):        # not splitlines: it breaks on \r and \x0b too, truncating a path
-        sha, _, path = line.partition(" ")
-        if sha not in blob_shas:
-            continue          # a commit, a tree, or a tag object emitted under the tag's own name
-        if len(seen) >= limit:
-            complete = False
-            break
-        seen[sha] = path.strip()
-    return list(seen.items()), complete
+    """Collect every blob a repository's reachable history stores, at every path it stores it at.
+    Takes the repo, a bound on the paths visited and whether the read must stay local. Returns
+    `(object id, path)` per stored version, and whether the whole history was read."""
+    at_path, complete = stored_entries(repo, limit=limit, offline=offline)
+    out = [(sha, path) for path, entries in sorted(at_path.items())
+           for sha, kind in entries if kind in (_FILE_TYPE, _LINK_TYPE)]
+    return out, complete
 
 
 def branches_matching(repo: str | Path, pattern: str) -> list[str]:

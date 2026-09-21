@@ -202,10 +202,22 @@ def history_residue_note(root, opts, signatures, allowlist) -> str | None:
                 "still stores a payload is UNKNOWN, not no.")
 
 
+def _may_read_beyond_local(opts) -> bool:
+    """Decide whether a history read may go past what the repository holds. Takes the scan options.
+    Returns True when the operator allowed it, either by flag or by answering."""
+    if getattr(opts, "external_audit", False):
+        return True
+    ask = getattr(opts, "confirm_remote_read", None)
+    try:
+        return bool(ask and ask())
+    except Exception:
+        return False
+
+
 def _history_residue_note(root, opts, signatures, allowlist) -> str | None:
     from stayawake.bots.security.targets.history import HistoryTarget, versions_by_path
     from stayawake.lib.git.query import holds_its_objects, stored_link_targets
-    offline = not getattr(opts, "external_audit", False)
+    offline = not _may_read_beyond_local(opts)
     versions, complete = versions_by_path(root, offline=offline)
     links, every_link = stored_link_targets(root, offline=offline)
     finish = ("" if not offline or holds_its_objects(root) else
@@ -218,10 +230,6 @@ def _history_residue_note(root, opts, signatures, allowlist) -> str | None:
             return "History was read: this repository stores no earlier version of any path."
         return ("History could not be read: nothing was returned for this repository, so whether "
                 f"it still stores a payload is UNKNOWN, not no.{finish}")
-    # A `path_glob` rule is decided against the ONE name git emits for a blob, and whoever
-    # committed it picks that name: filing the same bytes under an allowlisted path suppresses the
-    # stored payload. Signature-wide rules carry the same operator intent and cannot be aimed.
-    unaimable = [r for r in (allowlist or []) if isinstance(r, dict) and not r.get("path_glob")]
     hits, scanned, unread = [], 0, set()
     for index in range(_HISTORY_ROUNDS):
         target = HistoryTarget(root, str(root), opts, versions, index,
@@ -229,7 +237,7 @@ def _history_residue_note(root, opts, signatures, allowlist) -> str | None:
         if index and not len(target):
             break
         scanned += len(target)
-        result = scan_target(target, signatures, unaimable)
+        result = scan_target(target, signatures, allowlist)
         hits += [f for f in result.findings if f.confidence == CONFIRMED]
         unread |= set(target.read_errors)
     beyond = sum(max(len(v) - _HISTORY_ROUNDS, 0) for v in versions.values())
