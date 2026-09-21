@@ -15,9 +15,10 @@ from .base import TRUNCATION_MARKER, Target
 _CHUNK = 1 << 20
 
 
-def versions_by_path(root, limit: int = 200_000) -> tuple[dict[str, list[str]], bool]:
+def versions_by_path(root, limit: int = 200_000,
+                     offline: bool = True) -> tuple[dict[str, list[str]], bool]:
     """Stored blob shas grouped by the path they are known by, and whether the walk completed."""
-    blobs, complete = reachable_blobs(root, limit=limit)
+    blobs, complete = reachable_blobs(root, limit=limit, offline=offline)
     grouped: dict[str, list[str]] = defaultdict(list)
     for sha, path in blobs:
         grouped[path].append(sha)
@@ -44,10 +45,12 @@ class HistoryTarget(Target):
 
     source = "history"
 
-    def __init__(self, root, display: str, opts, versions: dict[str, list[str]], index: int = 0):
+    def __init__(self, root, display: str, opts, versions: dict[str, list[str]],
+                 index: int = 0, links: dict[str, list[str]] | None = None):
         super().__init__(root, display, opts)
         self._sha_by_path = {path: shas[index] for path, shas in versions.items()
                              if index < len(shas)}
+        self.stored_links = links or {}
 
     def __len__(self) -> int:
         return len(self._sha_by_path)

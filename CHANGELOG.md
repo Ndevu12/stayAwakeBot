@@ -14,6 +14,14 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Fixed
+- **A scan now reports the symlinks a repository still stores, and no longer counts one that is in
+  the working tree among them.** Re-scan any repository you rely on.
+- **A history scan now says when it could not read everything a repository stores.** Treat that
+  result as incomplete and run it again.
+- **An allowlist rule aimed at a path now applies to what a repository stores too**, not only to
+  what is in the working tree.
+- **A history scan stays local.** Where it cannot read a repository in full it says so and says
+  what to do; `--external` lets it finish the read.
 - **A `saw fix amend` refusal now names the commit it could not change**, instead of an object
   you cannot find.
 - **`saw fix amend` says when it could not use content you supplied, and names the file.**

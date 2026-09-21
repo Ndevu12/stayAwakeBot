@@ -49,6 +49,7 @@ class ScanOptions:
     scan_build_outputs: bool = False
     dependency_advisories: bool = True
     external_audit: bool = False
+    confirm_remote_read: object = None
     deep: bool = False
     history: bool = False        # also read what the repository still stores on other refs
 

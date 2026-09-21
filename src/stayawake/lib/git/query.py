@@ -6,12 +6,13 @@ ever executing repository code. The evil-merge detector and the recovery walks b
 other queries read, because a query can only answer for refs the clone actually has."""
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
 
 from stayawake.lib.git.auth import github_https_auth, run_remote_git
-from stayawake.lib.git.run import run, stdout, NETWORK_TIMEOUT
+from stayawake.lib.git.run import run, stdout, stdout_bytes_fed, NETWORK_TIMEOUT
 
 
 def is_git_repo(repo: str | Path) -> bool:
@@ -82,38 +83,227 @@ def commit_count(repo: str | Path, ref: str = "HEAD") -> int | None:
     return int(out) if out.isdigit() else None
 
 
-def reachable_blobs(repo: str | Path, *, limit: int = 200_000) -> tuple[list[tuple[str, str]], bool]:
-    """Every distinct blob reachable from ANY ref, as (sha, one path it is known by), and whether
-    the walk completed.
+_TYPE_MASK, _LINK_TYPE, _TREE_TYPE, _FILE_TYPE = 0o170000, 0o120000, 0o040000, 0o100000
+_ENTRY_TYPES = (_FILE_TYPE, _LINK_TYPE, _TREE_TYPE, 0o160000)
+_MAX_LINK_TARGET_BYTES = 4096
+_OBJECT_ID_BYTES = 20
 
-    The type is asked of git, not inferred from having a name: an annotated tag is emitted under
-    the tag's own name where a path goes, and `--filter=object:type=blob` does not drop it either.
-    No deduplication — `rev-list --objects` emits each object once, measured 0 repeats in 20400.
-    """
-    listing = run(repo, ["cat-file", "--batch-check", "--batch-all-objects", "--unordered"])
-    if listing is None or listing.returncode != 0:
-        return [], False
-    # git EXITS 0 having skipped an object it cannot unpack, naming it on stderr only. The sha then
-    # fails the type test below and leaves the walk silently, so the caller must not be told this
-    # was a complete read. Both commands can do it, and only one was being read.
-    complete = not listing.stderr.strip()
-    blob_shas = {line.split()[0] for line in listing.stdout.splitlines()
-                 if len(line.split()) >= 2 and line.split()[1] == "blob"}
-    walk = run(repo, ["rev-list", "--objects", "--all"])
-    if walk is None or walk.returncode != 0:
-        return [], False
-    complete = complete and not walk.stderr.strip()
-    out = walk.stdout
-    seen: dict[str, str] = {}
-    for line in out.split("\n"):        # not splitlines: it breaks on \r and \x0b too, truncating a path
-        sha, _, path = line.partition(" ")
-        if sha not in blob_shas:
-            continue          # a commit, a tree, or a tag object emitted under the tag's own name
-        if len(seen) >= limit:
-            complete = False
+
+_INHERITED_LOCATION = ("GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE", "GIT_OBJECT_DIRECTORY",
+                       "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_INDEX_FILE", "GIT_NAMESPACE")
+
+
+def _own_env() -> dict:
+    """Build the environment a query of a repository's own objects runs in. Returns it."""
+    env = {k: v for k, v in os.environ.items() if k not in _INHERITED_LOCATION}
+    env["GIT_GRAFT_FILE"] = os.path.join(os.devnull, "grafts")
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    return env
+
+
+def holds_its_objects(repo: str | Path) -> bool:
+    """Ask whether a repository holds the objects it names. Takes the repo. Returns False when it
+    would reach a remote for them, or when the question could not be answered."""
+    res = run(repo, ["config", "--get-regexp",
+                     r"^(remote\..*\.promisor|extensions\.partialclone)$"], env=_own_env())
+    return res is not None and not (res.stdout or "").strip()
+
+
+def _own_view(repo: str | Path, args: list[str]):
+    """Ask git about the objects a repository holds, not about a view configured over them. Takes
+    the repo and the arguments. Returns the completed process, or None when it could not run."""
+    return run(repo, ["--no-replace-objects", *args], env=_own_env())
+
+
+def _own_view_fed(repo: str | Path, args: list[str], stdin: bytes) -> bytes | None:
+    """Ask git about the objects a repository holds, feeding `stdin`. Takes the repo, the arguments
+    and the bytes to write. Returns the raw stdout, or None on any failure."""
+    return stdout_bytes_fed(repo, ["--no-replace-objects", *args], stdin, env=_own_env())
+
+
+def _entry_type(mode: bytes) -> int | None:
+    """Read a tree entry's mode as the object type git gives it. Takes the mode field. Returns the
+    type bits, or None for a mode that names no type git records."""
+    try:
+        bits = int(mode, 8) & _TYPE_MASK
+    except ValueError:
+        return None
+    return bits if bits in _ENTRY_TYPES else None
+
+
+def _batch_objects(raw: bytes):
+    """Frame each object in a `cat-file --batch` stream. Takes the raw stream. Yields
+    `(id, kind, body, whole)` per object, with empty strings and False for an id git did not
+    resolve, and `whole` False for a body the stream ended before."""
+    at = 0
+    while at < len(raw):
+        nl = raw.find(b"\n", at)
+        if nl == -1:
+            return
+        parts = raw[at:nl].split()
+        if len(parts) < 3 or not parts[2].isdigit():
+            yield "", "", b"", False
+            at = nl + 1
+            continue
+        size = int(parts[2])
+        body, at = raw[nl + 1:nl + 1 + size], nl + 1 + size + 1
+        yield parts[0].decode(), parts[1].decode(), body, len(body) == size
+
+
+def _tree_entries(body: bytes) -> tuple[list, bool]:
+    """Split a tree object into its entries. Takes the object's body. Returns `(mode, name, id)`
+    per entry, and whether they parsed to the end."""
+    entries, pos = [], 0
+    while pos < len(body):
+        space = body.find(b" ", pos)
+        nul = body.find(b"\0", space + 1)
+        if space == -1 or nul == -1 or nul + 1 + _OBJECT_ID_BYTES > len(body):
             break
-        seen[sha] = path.strip()
-    return list(seen.items()), complete
+        entries.append((body[pos:space], body[space + 1:nul],
+                        body[nul + 1:nul + 1 + _OBJECT_ID_BYTES].hex()))
+        pos = nul + 1 + _OBJECT_ID_BYTES
+    return entries, pos == len(body)
+
+
+def _read_trees(repo: str | Path, ids: list[str]) -> tuple[dict[str, list], bool]:
+    """Read tree objects in one batch. Takes the repo and the ids. Returns each one's entries, and
+    whether every id asked for was read whole."""
+    if not ids:
+        return {}, True
+    raw = _own_view_fed(repo, ["cat-file", "--batch"], "\n".join(ids).encode())
+    if raw is None:
+        return {}, False
+    out: dict[str, list] = {}
+    complete = True
+    for oid, kind, body, whole in _batch_objects(raw):
+        if not whole or kind != "tree":
+            complete = False
+            continue
+        out[oid], ended = _tree_entries(body)
+        complete = complete and ended
+    return out, complete and len(out) == len(ids)
+
+
+def stored_entries(repo: str | Path, *, limit: int = 200_000,
+                   offline: bool = True) -> tuple[dict[str, list[tuple[str, int]]], bool]:
+    """Walk a repository's reachable history and collect what it stores at every path. Takes the
+    repo, a bound on the paths visited and whether the read must stay local. Returns each path
+    mapped to the `(object id, entry type)` pairs stored there, and whether the whole history was
+    read."""
+    if offline and not holds_its_objects(repo):
+        return {}, False
+    roots = _own_view(repo, ["rev-list", "--all", "--format=%T"])
+    refs = _own_view(repo, ["for-each-ref", "--format=%(refname)"])
+    if roots is None or roots.returncode != 0 or refs is None or refs.returncode != 0:
+        return {}, False
+    complete = not roots.stderr.strip()
+    named = [ln.strip() for ln in roots.stdout.splitlines() if not ln.startswith("commit ")]
+    wanted = [ln.strip() for ln in refs.stdout.splitlines() if ln.strip()]
+    peeled = _own_view_fed(repo, ["cat-file", "--batch-check"],
+                           "".join(f"{ref}^{{tree}}\n" for ref in wanted).encode())
+    if peeled is None:
+        return {}, False
+    lines = peeled.decode("utf-8", "replace").splitlines()
+    complete = complete and len(lines) == len(wanted)
+    named += [p[0] for p in (ln.split() for ln in lines) if len(p) == 3 and p[1] == "tree"]
+    out: dict[str, list[tuple[str, int]]] = {}
+    seen: set[tuple[str, str]] = set()
+    level = [(tree, "") for tree in dict.fromkeys(named) if tree]
+    while level:
+        level = [pair for pair in dict.fromkeys(level) if pair not in seen]
+        if not level:
+            break
+        if len(seen) + len(level) > limit:
+            return out, False
+        seen.update(level)
+        entries_of, read_all = _read_trees(repo, sorted({tree for tree, _ in level}))
+        complete = complete and read_all
+        deeper = []
+        for tree, base in level:
+            for mode, name, sha in entries_of.get(tree, ()):
+                kind = _entry_type(mode)
+                rel = name.decode("utf-8", "replace")
+                path = f"{base}/{rel}" if base else rel
+                if kind == _TREE_TYPE:
+                    deeper.append((sha, path))
+                elif kind is None:
+                    complete = False
+                elif (sha, kind) not in out.setdefault(path, []):
+                    out[path].append((sha, kind))
+        level = deeper
+    return out, complete and _all_readable(repo, out)
+
+
+def _all_readable(repo: str | Path, at_path: dict) -> bool:
+    """Ask whether every object a walk collected can be read back. Takes the repo and what it
+    collected. Returns True when git answered for all of them."""
+    wanted = sorted({sha for entries in at_path.values() for sha, _kind in entries})
+    if not wanted:
+        return True
+    answered = _own_view_fed(repo, ["cat-file", "--batch-check"], "\n".join(wanted).encode())
+    if answered is None:
+        return False
+    good = {ln.split()[0] for ln in answered.decode("utf-8", "replace").splitlines()
+            if len(ln.split()) == 3 and ln.split()[1] in ("blob", "commit")}
+    return good >= set(wanted)
+
+
+def stored_as_links(repo: str | Path, *, limit: int = 200_000,
+                    offline: bool = True) -> tuple[dict[str, set[str]], bool]:
+    """Search a repository's reachable history for the paths it stores a symlink at. Takes the repo,
+    a bound on the paths visited and whether the read must stay local. Returns those paths mapped to
+    the blob ids stored there, and whether the whole history was read."""
+    at_path, complete = stored_entries(repo, limit=limit, offline=offline)
+    return ({path: {sha for sha, kind in entries if kind == _LINK_TYPE}
+             for path, entries in at_path.items()
+             if any(kind == _LINK_TYPE for _sha, kind in entries)}, complete)
+
+
+def stored_link_targets(repo: str | Path, *, limit: int = 200_000,
+                        offline: bool = True) -> tuple[dict[str, list[str]], bool]:
+    """Read the target stored at each path a repository's history holds a symlink at. Takes the repo
+    and a bound on the paths visited. Returns those paths mapped to the targets stored there, and
+    whether every one of them was established."""
+    at_path, complete = stored_as_links(repo, limit=limit, offline=offline)
+    if not at_path:
+        return {}, complete
+    wanted = sorted({sha for shas in at_path.values() for sha in shas})
+    sized = _own_view_fed(repo, ["cat-file", "--batch-check"], "\n".join(wanted).encode())
+    if sized is None:
+        return {}, False
+    readable = []
+    for line in sized.decode("utf-8", "replace").splitlines():
+        parts = line.split()
+        if (len(parts) >= 3 and parts[1] == "blob" and parts[2].isdigit()
+                and int(parts[2]) <= _MAX_LINK_TARGET_BYTES):
+            readable.append(parts[0])
+    raw = _own_view_fed(repo, ["cat-file", "--batch"], "\n".join(readable).encode())
+    if raw is None:
+        return {}, False
+    text_of: dict[str, str] = {}
+    for oid, kind, body, whole in _batch_objects(raw):
+        if not whole or kind != "blob":
+            complete = False
+            continue
+        text_of[oid] = body.split(b"\0", 1)[0].decode("utf-8", "replace")
+    out, every = {}, True
+    for rel, shas in at_path.items():
+        raws = [text_of[sha] for sha in sorted(shas) if sha in text_of]
+        every = every and len(raws) == len(shas)
+        if raws:
+            out[rel] = raws
+    return out, complete and every
+
+
+def reachable_blobs(repo: str | Path, *, limit: int = 200_000,
+                    offline: bool = True) -> tuple[list[tuple[str, str]], bool]:
+    """Collect every blob a repository's reachable history stores, at every path it stores it at.
+    Takes the repo, a bound on the paths visited and whether the read must stay local. Returns
+    `(object id, path)` per stored version, and whether the whole history was read."""
+    at_path, complete = stored_entries(repo, limit=limit, offline=offline)
+    out = [(sha, path) for path, entries in sorted(at_path.items())
+           for sha, kind in entries if kind in (_FILE_TYPE, _LINK_TYPE)]
+    return out, complete
 
 
 def branches_matching(repo: str | Path, pattern: str) -> list[str]:

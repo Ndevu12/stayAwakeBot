@@ -96,23 +96,23 @@ class TestEveryRefIsReached(GitSandbox):
         for n in range(6):
             self.write(repo, f"f{n}.txt", f"{n}\n")
             self.commit(repo, f"c{n}")
-        blobs, complete = query.reachable_blobs(repo, limit=3)
+        whole, _ = query.reachable_blobs(repo)
+        bounded, complete = query.reachable_blobs(repo, limit=3)
         self.assertFalse(complete)
-        self.assertEqual(len(blobs), 3)
+        self.assertLess(len(bounded), len(whole), "the bound cut nothing")
 
-    def test_a_name_git_truncated_still_gets_its_content_read(self):
-        """`rev-list --objects` does not quote, and git emits a path containing a newline cut at
-        that newline — `we\\nird.js` arrives as `we`, and the real name is not in the output to
-        recover. So the name is unreliable by construction and content must not be gated on it."""
+    def test_a_name_holding_a_newline_is_recovered_whole(self):
+        """A path is read from the tree that stores it, so a name an object listing would cut at a
+        newline arrives intact and its content is read under that name."""
         repo = self._repo_with_history()
         (repo / "we\nird.js").write_bytes(b"payload\n")
         self.git(repo, "add", "-A")
         self.commit(repo, "a path with a newline in it")
         names = self._paths(repo)
-        self.assertIn("we", names, "git truncated it, and that is what there is to work with")
+        self.assertIn("we\nird.js", names, "the real name was not recovered")
+        self.assertNotIn("we", names, "a cut name was reported beside the real one")
         target = HistoryTarget(repo, str(repo), ScanOptions(), _versions(repo))
-        self.assertEqual(target.read_bytes("we"), b"payload\n",
-                         "an extension-less name must still be read, or the truncation hides it")
+        self.assertEqual(target.read_bytes("we\nird.js"), b"payload\n")
 
     def test_an_object_git_cannot_unpack_is_not_reported_as_a_complete_read(self):
         """`cat-file --batch-check --batch-all-objects` EXITS 0 having skipped a corrupt object,
