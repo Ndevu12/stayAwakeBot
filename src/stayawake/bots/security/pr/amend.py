@@ -316,15 +316,7 @@ def _register_supply(repo: Path, path: str, content: bytes, substitute: dict, su
     blob = write_blob_bytes(repo, content)
     if blob is None:
         return "unwritable"
-    hist = _foreign_history(repo, path, current[1])
-    if hist is None:
-        return "too-large"
-    _holders, foreign = hist
-    if not foreign:
-        return ""
-    substitute[path] = (current[1], (current[0], blob))
-    substitute_shas.update(foreign)
-    return ""
+    return _register_substitute(repo, path, (current[0], blob), substitute, substitute_shas)
 
 
 def _unhandled_items(repo: Path, scan, unhandled: set[str], survives=None) -> list:
@@ -640,6 +632,18 @@ _CAUSE_PER_REFUSAL_KIND = {
     "replacement-loses-more": Cause.REPLACEMENT_LOSES_MORE_THAN_THE_PAYLOAD,
 }
 
+_SUPPLY_REFUSALS = {
+    "carries": Cause.SUPPLIED_CONTENT_REJECTED,
+    "unwritable": Cause.SUPPLIED_CONTENT_UNWRITABLE,
+}
+
+
+def _supply_refusals(rejected: dict) -> tuple:
+    """The reasons naming operator-supplied content the run could not use, one per cause. Takes the
+    map of path to cause. Returns those reasons."""
+    return tuple(Reason(cause, ", ".join(sorted(p for p, c in rejected.items() if c is cause)))
+                 for cause in sorted(set(rejected.values()), key=lambda c: c.value))
+
 
 def _payload_matchers(signatures):
     """The by-matcher signatures minus the groups that need the repo, history, or install state —
@@ -778,28 +782,36 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     to `repo`. `identity_fallback` is the operator's session credential for the authority gate. Both
     pass straight through to the gates.
     """
+    rejected_supply: dict[str, Cause] = {}
+
+    def _refuse(cause: Cause, detail: str = "", subjects: str = "",
+                recovery: str = "") -> AmendOutcome:
+        """Refuse, carrying any operator answer the run could not use."""
+        return refused(display, cause, detail, subjects, recovery,
+                       also=_supply_refusals(rejected_supply))
+
     if not gitutil.is_git_repo(repo):
-        return refused(display, Cause.NOT_A_GIT_REPOSITORY)
+        return _refuse(Cause.NOT_A_GIT_REPOSITORY)
     if gitamend.is_dirty(repo):
-        return refused(display, Cause.WORKING_TREE_NOT_CLEAN)
+        return _refuse(Cause.WORKING_TREE_NOT_CLEAN)
 
     slug = gitutil.origin_slug(repo)
     if not slug:
-        return refused(display, Cause.NO_REMOTE)
+        return _refuse(Cause.NO_REMOTE)
     if not (token or "").strip() and pusher is None:
-        return refused(display, Cause.NO_CREDENTIAL)
+        return _refuse(Cause.NO_CREDENTIAL)
 
     permitted = authority.may_rewrite(slug, token, identity_fallback=identity_fallback)
     if not permitted.permitted:
-        return refused(display, Cause.NOT_PERMITTED_TO_REWRITE,
+        return _refuse(Cause.NOT_PERMITTED_TO_REWRITE,
                        permitted.detail or permitted.reason)
     fetched = gitutil.fetch_refs(repo, token=token)
     if not fetched.ok:
-        return refused(display, Cause.REMOTE_REFS_UNREADABLE, fetched.reason)
+        return _refuse(Cause.REMOTE_REFS_UNREADABLE, fetched.reason)
 
     scan = scan_target(LocalRepoTarget(repo, str(repo), opts), signatures, allowlist)
     if scan.error is not None:
-        return refused(display, Cause.SCAN_DID_NOT_FINISH)
+        return _refuse(Cause.SCAN_DID_NOT_FINISH)
     commits = _confirmed_commits(scan)
     infected: dict[str, tuple[str, ...]] = {}
     uncharacterized: dict[str, tuple[str, str]] = {}
@@ -809,7 +821,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
         sha = _full(repo, reported)
         if not sha:
             named = ", ".join(getattr(finding, "related_paths", ()) or ())
-            return refused(display, Cause.CONFIRMED_COMMIT_UNRESOLVED,
+            return _refuse(Cause.CONFIRMED_COMMIT_UNRESOLVED,
                            f"{reported[:12]}: {named}" if named else (reported[:12] or "?"))
         related = tuple(getattr(finding, "related_paths", ()) or ())
         paths = tuple(_swept_paths(repo, sha, related, anchors))
@@ -825,9 +837,9 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     for finding, carries, corrector, head_clean in _content_targets(repo, scan, signatures):
         carrying = _carrying_commits(repo, finding.path, carries)
         if carrying is None:
-            return refused(display, Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, finding.path)
+            return _refuse(Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, finding.path)
         if not carrying:
-            return refused(display, Cause.CONFIRMED_COMMIT_UNRESOLVED, finding.path)
+            return _refuse(Cause.CONFIRMED_COMMIT_UNRESOLVED, finding.path)
         clean[finding.path] = (carries, corrector)
         clean_shas.update(carrying)
         cleaned_head[finding.path] = head_clean
@@ -836,7 +848,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
             repo, scan, signatures, allowlist, opts, set(clean)):
         carrying = _carrying_commits(repo, path, carries)
         if carrying is None:
-            return refused(display, Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, path)
+            return _refuse(Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, path)
         if not carrying:
             continue
         clean[path] = (carries, corrector)
@@ -853,7 +865,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
             continue
         hist = _foreign_history(repo, path, entry[1])
         if hist is None:
-            return refused(display, Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, path)
+            return _refuse(Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, path)
         holders, foreign = hist
         if not foreign or set(holders) != set(foreign):
             continue
@@ -880,7 +892,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
                     repo, item.path, remove, remove_shas, remove_holders,
                     purge, purge_shas, survives,
                     purge_holders=purge_holders) == "too-large":
-                return refused(display, Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, item.path)
+                return _refuse(Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, item.path)
 
     infected = {sha: tuple(p for p in ps if p not in clean and p not in remove)
                 for sha, ps in infected.items()}
@@ -897,18 +909,22 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
             if answer.action == RESTORE and answer.restore is not None:
                 if _register_substitute(repo, item.path, answer.restore,
                                         substitute, substitute_shas) == "too-large":
-                    return refused(display, Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, item.path)
+                    return _refuse(Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, item.path)
             elif answer.action == SUPPLY and isinstance(answer.supply, bytes):
-                if _register_supply(repo, item.path, answer.supply, substitute, substitute_shas,
-                                    _payload_matchers(signatures), allowlist, opts) == "too-large":
-                    return refused(display, Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, item.path)
-                if item.path in substitute:
+                refusal = _register_supply(repo, item.path, answer.supply, substitute,
+                                           substitute_shas, _payload_matchers(signatures),
+                                           allowlist, opts)
+                if refusal == "too-large":
+                    return _refuse(Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, item.path)
+                if refusal:
+                    rejected_supply[item.path] = _SUPPLY_REFUSALS[refusal]
+                elif item.path in substitute:
                     supply_paths.add(item.path)
             elif answer.action == REMOVE and _register_operator_removal(
                     repo, item.path, remove, remove_shas, remove_holders,
                     purge, purge_shas, survives,
                     purge_holders=purge_holders) == "too-large":
-                return refused(display, Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, item.path)
+                return _refuse(Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, item.path)
         unhandled = _unhandled_confirmed(scan, signatures, taken, cleaned_head,
                                          set(remove) | set(substitute) | set(purge))
     if resolver is not None and uncharacterized:
@@ -925,7 +941,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
                 if answer.action == REMOVE and _register_operator_removal(
                         repo, item.path, remove, remove_shas, remove_holders,
                         purge, purge_shas, survives, sha, purge_holders) == "too-large":
-                    return refused(display, Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, item.path)
+                    return _refuse(Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, item.path)
             if all(p in remove for p in present):
                 del uncharacterized[sha]
 
@@ -944,19 +960,19 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
                     continue
                 if answer.action == REMOVE and _register_purge(
                         repo, item.path, purge, purge_shas, survives) == "too-large":
-                    return refused(display, Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, item.path)
+                    return _refuse(Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, item.path)
 
     if not infected and not clean and not remove and not substitute and not purge:
         if unhandled:
-            return refused(display, Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY,
+            return _refuse(Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY,
                            str(len(unhandled)), ", ".join(sorted(unhandled)))
-        return refused(display, Cause.NO_CONFIRMED_PAYLOAD)
+        return _refuse(Cause.NO_CONFIRMED_PAYLOAD)
 
     all_infected = (set(infected) | clean_shas | remove_shas | substitute_shas | purge_shas
                     | set(uncharacterized))
     heads = _branches_carrying_any(repo, all_infected)
     if not heads:
-        return refused(display, Cause.COMMIT_ON_NO_BRANCH,
+        return _refuse(Cause.COMMIT_ON_NO_BRANCH,
                        ", ".join(sorted(s[:12] for s in all_infected)))
     covered = {n for n, _t, _c in heads}
     off_plan = _branches_left_carrying(repo, clean, covered) + \
@@ -964,7 +980,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
         _branches_left_holding(repo, {p: fo for p, (fo, _e) in substitute.items()}, covered) + \
         _branches_left_purging(repo, purge, survives, covered)
     if off_plan:
-        return refused(display, Cause.PAYLOAD_STILL_REACHABLE, ", ".join(sorted(set(off_plan))))
+        return _refuse(Cause.PAYLOAD_STILL_REACHABLE, ", ".join(sorted(set(off_plan))))
 
     graph = gitrebuild.ordered_graph(repo, [tip for _n, tip, _c in heads])
     plan = gitrebuild.commits_to_rebuild(graph, all_infected)
@@ -972,7 +988,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     if uncovered:
         # A confirmed commit no branch reaches is not amendable here, and counting it as replaced
         # would report commits the run never touched.
-        return refused(display, Cause.COMMIT_ON_NO_BRANCH,
+        return _refuse(Cause.COMMIT_ON_NO_BRANCH,
                        ", ".join(s[:12] for s in uncovered))
     oldest = plan[0][0]
 
@@ -984,17 +1000,17 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
         history_is_signed=sign.any_signed(repo, [sha for sha, _ps in plan]),
         trust_local_programs=operator_context is None)
     if signing.must_refuse:
-        return refused(display, Cause.SIGNING_UNAVAILABLE, signing.reason)
+        return _refuse(Cause.SIGNING_UNAVAILABLE, signing.reason)
     if sign.committer_identity(repo) is None:
-        return refused(display, Cause.NO_COMMITTER_IDENTITY)
+        return _refuse(Cause.NO_COMMITTER_IDENTITY)
 
     leases, unread = _collect_remote_heads(repo, slug, [n for n, _, _ in heads], token)
     if unread is not None:
-        return refused(display, Cause.REMOTE_BRANCH_UNREADABLE, unread)
+        return _refuse(Cause.REMOTE_BRANCH_UNREADABLE, unread)
     behind = sorted(name for name, tip, _cas in heads
                     if leases.get(name) and not gitutil.is_ancestor(repo, leases[name], tip))
     if behind:
-        return refused(display, Cause.LOCAL_MISSING_REMOTE_COMMITS, ", ".join(behind))
+        return _refuse(Cause.LOCAL_MISSING_REMOTE_COMMITS, ", ".join(behind))
 
     replacements = {}
     blocked_commits: dict[str, tuple[str, str]] = dict(uncharacterized)
@@ -1047,7 +1063,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
 
     if not deliverable:
         reason = isolated[0].reason if isolated else Reason(Cause.PAYLOAD_STILL_REACHABLE)
-        return refused(display, reason.cause, reason.detail, reason.subjects)
+        return _refuse(reason.cause, reason.detail, reason.subjects)
 
     delivered_tips = {tip: new_tips[tip] for _n, tip, _c in deliverable}
     # Count and name only commits a delivered branch reaches, not ones rebuilt for an isolated one.
@@ -1062,20 +1078,20 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
                         for p, (carries, _c) in clean.items()})
     left = _payload_left(repo, all_infected, rebuilt, delivered_tips, path_checks, remove)
     if left:
-        return refused(display, Cause.PAYLOAD_STILL_REACHABLE, "; ".join(left[:3]))
+        return _refuse(Cause.PAYLOAD_STILL_REACHABLE, "; ".join(left[:3]))
 
     captured = capture_bundle(repo, [(tip, new_tips[tip]) for _n, tip, _c in deliverable],
                               _capture_path(slug, oldest[:12]))
     if not captured.ok:
-        return refused(display, Cause.CAPTURE_FAILED, captured.reason)
+        return _refuse(Cause.CAPTURE_FAILED, captured.reason)
 
     try:
         moved = gitamend.point_branches(repo, deliverable, delivered_tips)
     except gitamend.AmendUnwindFailed as unwound:
-        return refused(display, Cause.LEFT_PART_WAY, ", ".join(unwound.unrestored),
+        return _refuse(Cause.LEFT_PART_WAY, ", ".join(unwound.unrestored),
                        recovery=str(captured.path or ""))
     if moved is None:
-        return refused(display, Cause.REPLAY_FAILED, ", ".join(n for n, _, _ in deliverable))
+        return _refuse(Cause.REPLAY_FAILED, ", ".join(n for n, _, _ in deliverable))
 
     results: list[BranchResult] = []
     failed: list[str] = []
@@ -1100,6 +1116,8 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     if recovered_paths:
         survivors.insert(0, Reason(Cause.FILE_RESTORED_FROM_A_PARENT,
                                    ", ".join(sorted(recovered_paths))))
+    for reason in reversed(_supply_refusals(rejected_supply)):
+        survivors.insert(0, reason)
     if unhandled:
         survivors.insert(0, Reason(Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY,
                                    str(len(unhandled)), ", ".join(sorted(unhandled))))
