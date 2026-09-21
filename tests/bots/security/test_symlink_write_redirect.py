@@ -9,6 +9,8 @@ CONFIRMED / critical (no legitimate purpose); never follows the link. All agains
 from __future__ import annotations
 
 import os
+import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -16,7 +18,18 @@ from pathlib import Path
 from stayawake.bots.security.models import INFECTED, CLEAN, SUSPICIOUS
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.scanner import scan_target
+from stayawake.bots.security import write_sinks
+from stayawake.bots.security.matchers import symlink
+from stayawake.lib.git import query
 from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions
+
+
+def _stored(name: str, target: str):
+    """Grade one stored version the way history does. Takes the path and the target it names.
+    Returns the findings."""
+    return symlink._stored_finding(
+        name, target, {},
+        {"id": WRITE_REDIRECT, "category": "c", "severity": "4", "description": "d"})
 
 SIGS = load_signatures()
 WRITE_REDIRECT = "symlink-write-redirect"
@@ -55,6 +68,8 @@ class TestSinkTruePositives(_Base):
         ".config/autostart/x.desktop": "autostart", ".crontab": "crontab",
         ".local/share/systemd/user/x.service": "systemd-user",
         ".local/bin/black": "path-bin", ".cargo/bin/x": "cargo-bin",
+        ".deno/bin/x": "deno-bin", ".bun/bin/npm": "bun-bin",
+        ".config/fish/conf.d/00-x.fish": "fish drop-in",
         ".vimrc": "vim", ".config/nvim/init.lua": "nvim", ".emacs": "emacs", ".emacs.d/init.el": "emacs.d",
         ".config/Code/User/settings.json": "vscode-user-settings",
         ".ipython/profile_default/startup/00-x.py": "ipython", ".jupyter/x.py": "jupyter",
@@ -177,6 +192,157 @@ class TestFalsePositiveBoundaries(_Base):
         self.assertEqual(r.verdict, CLEAN)
 
 
+    def test_a_repository_that_links_into_its_own_control_directory_is_not_confirmed(self):
+        objects = self.repo / ".git" / "annex" / "objects" / "Wz"
+        objects.mkdir(parents=True, exist_ok=True)
+        (objects / "SHA256E-data").write_text("x\n")
+        (self.repo / "data.nii").symlink_to(objects / "SHA256E-data")
+        self.assertNotIn(WRITE_REDIRECT, {f.signature_id for f in self._scan().findings})
+        self._link("leaked", self.outside / ".ssh" / "authorized_keys")
+        self.assertIn(WRITE_REDIRECT, self._ids())
+
+
+class TestGitsOwnExecSurface(_Base):
+    """A link into what git runs from a control directory is a redirect wherever it lands."""
+
+    EXEC = {"githooks": ".git/hooks", "hook": ".git/hooks/pre-commit", "cfg": ".git/config",
+            "deep": "../.git/config", "sub": "../.git/modules/pkg/hooks",
+            "wt": ".git/worktrees/w/config.worktree",
+            "nested-sub": ".git/modules/vendor/libfoo/hooks/pre-commit",
+            "nested-cfg": ".git/modules/packages/ui/config",
+            "bare": "../mirror.git/hooks/post-receive"}
+    STORAGE = {"annexed": "../.git/annex/objects/Wz/8j/SHA256E-x",
+               "lfs": ".git/lfs/objects/aa/bb", "packed": ".git/objects/pack/p.pack",
+               "workflow": ".github/workflows", "ignore": ".gitignore",
+               "own-hooks-dir": "scripts/.git-hooks",
+               "lock": ".git/config.lock", "backup": ".git/config.bak",
+               "turned-off": ".git/hooks-disabled/x", "longer": ".git/hooksomething"}
+
+    def test_what_git_runs_is_a_redirect(self):
+        for name, target in self.EXEC.items():
+            with self.subTest(target=target):
+                (self.repo / name).symlink_to(self.repo / target)
+                self.assertIn(WRITE_REDIRECT, self._ids(), target)
+                self.assertIn(WRITE_REDIRECT,
+                              {f.signature_id for f in _stored(name, target)}, target)
+                (self.repo / name).unlink()
+
+    def test_where_it_lands_decides_and_not_how_it_is_spelled(self):
+        (self.repo / "docs").mkdir(exist_ok=True)
+        (self.repo / "docs" / "README.md").write_text("x\n")
+        (self.repo / "doc").symlink_to(self.repo / ".git" / "hooks" / ".." / ".." / "docs"
+                                       / "README.md")
+        self.assertNotIn(WRITE_REDIRECT, self._ids())
+
+    def test_what_git_only_stores_is_not(self):
+        for name, target in self.STORAGE.items():
+            with self.subTest(target=target):
+                (self.repo / name).symlink_to(self.repo / target)
+                self.assertNotIn(WRITE_REDIRECT, self._ids(), target)
+                self.assertEqual([], _stored(name, target), target)
+                (self.repo / name).unlink()
+        self._link("leaked", self.outside / ".ssh" / "authorized_keys")
+        self.assertIn(WRITE_REDIRECT, self._ids())
+
+
+class TestTheLinkTextAndTheLanding(unittest.TestCase):
+    """Check that the link text and where it lands are each matched."""
+
+    def test_the_link_text_alone_names_a_sink(self):
+        self.assertEqual("shell startup file",
+                         write_sinks.sink_label("../../.zshrc", Path("/elsewhere/tmpfile")))
+
+    def test_where_it_lands_alone_names_a_sink(self):
+        self.assertEqual("SSH keys/config (~/.ssh)",
+                         write_sinks.sink_label("x", Path("/u/.ssh/id_ed25519")))
+
+
+class TestACheckoutInsideASinkIsOneQuestion(unittest.TestCase):
+    """Check that a repository inside a sink and a link to a sibling are answered alike."""
+
+    SIG = {"id": WRITE_REDIRECT, "category": "c", "severity": "4", "description": "d"}
+    ROOT = "/u/.vim/pack/p/start/pkgA"
+
+    def _graded(self, raw, resolved):
+        return bool(symlink._graded("k", raw, Path(resolved), Path(self.ROOT),
+                                    self.SIG, None, False))
+
+    def test_the_inert_sibling_and_the_executed_one_are_answered_alike(self):
+        inert = self._graded("../pkgB/doc/x.txt", "/u/.vim/pack/p/start/pkgB/doc/x.txt")
+        executed = self._graded("../pkgB/plugin/x.vim", "/u/.vim/pack/p/start/pkgB/plugin/x.vim")
+        self.assertEqual(inert, executed, "the two were separated — update this characterisation")
+        self.assertTrue(executed, "the one the sink's owner executes must still be reported")
+
+    def test_a_checkout_inside_a_sink_still_reports_reaching_it(self):
+        for raw, resolved, root in (
+                ("../../../..", "/u/.vim", "/u/.vim/pack/x/start/plug"),
+                ("../cron.d/evil.sh", "/etc/cron.d/evil.sh", "/etc/nixos"),
+                ("../LaunchAgents/x.plist", "/u/Library/LaunchAgents/x.plist", "/u/Library/proj"),
+                ("../../bin/black", "/u/.local/bin/black", "/u/.local/share/proj")):
+            with self.subTest(root=root):
+                self.assertTrue(bool(symlink._graded("k", raw, Path(resolved), Path(root),
+                                                     self.SIG, None, False)))
+
+
+class TestWhereARepositoryRuns(unittest.TestCase):
+    """Check that a repository is asked where it executes from."""
+
+    def _repo(self, name):
+        root = Path(tempfile.mkdtemp()) / name
+        root.mkdir()
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        for k, v in (("user.email", "t@t"), ("user.name", "t")):
+            subprocess.run(["git", "-C", str(root), "config", k, v], check=True)
+        (root / "a.js").write_text("const x = 1;\n")
+        return root
+
+    def _reports(self, root):
+        r = scan_target(LocalRepoTarget(root, "t", ScanOptions()), SIGS, [])
+        return WRITE_REDIRECT in {f.signature_id for f in r.findings}
+
+    def test_a_hooks_directory_kept_in_the_tree_is_still_where_it_runs(self):
+        root = self._repo("tracked")
+        (root / ".githooks").mkdir()
+        shutil.rmtree(root / ".git" / "hooks", ignore_errors=True)
+        (root / ".git" / "hooks").symlink_to("../.githooks")
+        (root / "x").symlink_to(".git/hooks/pre-commit")
+        self.assertTrue(self._reports(root))
+
+    def test_a_repository_that_names_its_own_hooks_directory_is_believed(self):
+        root = self._repo("hookspath")
+        (root / "myhooks").mkdir()
+        subprocess.run(["git", "-C", str(root), "config", "core.hooksPath", "myhooks"], check=True)
+        (root / "x").symlink_to("myhooks/pre-commit")
+        self.assertTrue(self._reports(root))
+
+    def test_a_control_directory_kept_elsewhere_is_still_found(self):
+        root = self._repo("elsewhere")
+        moved = root.parent / "realgitdir"
+        (root / ".git").rename(moved)
+        (root / ".git").symlink_to("../realgitdir")
+        (root / "x").symlink_to(".git/config")
+        self.assertTrue(self._reports(root))
+
+    def test_the_scanned_repository_answers_not_one_named_in_the_environment(self):
+        root = self._repo("asked")
+        (root / "myhooks").mkdir()
+        subprocess.run(["git", "-C", str(root), "config", "core.hooksPath", "myhooks"], check=True)
+        (root / "x").symlink_to("myhooks/pre-commit")
+        elsewhere = self._repo("unrelated")
+        prior = os.environ.get("GIT_DIR")
+        os.environ["GIT_DIR"] = str(elsewhere / ".git")
+        try:
+            runs_from = query.exec_paths(root)
+            self.assertTrue(self._reports(root))
+        finally:
+            if prior is None:
+                os.environ.pop("GIT_DIR", None)
+            else:
+                os.environ["GIT_DIR"] = prior
+        self.assertTrue(any(str(root) in p for p in runs_from), runs_from)
+        self.assertFalse(any(str(elsewhere) in p for p in runs_from), runs_from)
+
+
 class TestSafety(_Base):
     def test_symlink_loop_completes(self):
         (self.repo / "loop_a").symlink_to(self.repo / "loop_b")
@@ -187,6 +353,120 @@ class TestSafety(_Base):
         # An absolute target naming a sink (attacker who knows the layout) is caught via the raw text.
         (self.repo / "k").symlink_to("/home/victim/.ssh/authorized_keys")
         self.assertIn(WRITE_REDIRECT, self._ids())
+
+class TestWhatFollowsAControlDirectory(unittest.TestCase):
+    """Check what a control directory is followed through to."""
+
+    REPORT = (
+        "/r/.git",
+        "/r/.git/modules/pkg",
+        "/r/.git/worktrees/w",
+        "/r/.git/hooks/pre-commit",
+        "/r/.git/config",
+        "/r/.git/worktrees/w/config.worktree",
+        "/r/.git/modules/pkg/hooks/pre-commit",
+        "/r/.git/modules/" + "a/" * 18 + "hooks/pre-commit",
+        "/other/.git/hooks/pre-commit",
+        "/srv/foo.git/hooks/pre-commit",
+    )
+    SILENT = (
+        "/w/app.git/packages/web/config",
+        "/w/app.git/packages/web/src/hooks",
+        "/labs/mirrors.git/proj/etc/config",
+        "/r/.git/annex/objects/x/y/f",
+        "/r/.git/lfs/objects/aa/bb/f",
+        "/r/.git/objects/pack/p.pack",
+        "/r/.git/refs/heads/config",
+        "/r/.git/refs/heads/feature/hooks",
+        "/r/.git/config.lock",
+        "/r/.git/hooks-disabled/x",
+    )
+
+    def test_it_reports_what_git_runs(self):
+        for path in self.REPORT:
+            with self.subTest(path):
+                self.assertTrue(write_sinks.control_exec_sink(Path(path)))
+
+    def test_it_stays_silent_on_what_git_stores(self):
+        for path in self.SILENT:
+            with self.subTest(path):
+                self.assertFalse(write_sinks.control_exec_sink(Path(path)))
+
+
+class TestWhatARepositorySaysAboutItself(unittest.TestCase):
+    """Check which answers about where a repository runs are believed."""
+
+    def _repo(self, hooks_path):
+        root = Path(tempfile.mkdtemp()) / "handed-over"
+        (root / "docs").mkdir(parents=True)
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "core.hooksPath", hooks_path], check=True)
+        (root / "a.js").write_text("const x = 1;\n")
+        (root / "README.md").write_text("hi\n")
+        (root / "alias").symlink_to("README.md")
+        (root / "docsalias").symlink_to("docs")
+        return root
+
+    def _reports(self, root):
+        r = scan_target(LocalRepoTarget(root, "t", ScanOptions()), SIGS, [])
+        return WRITE_REDIRECT in {f.signature_id for f in r.findings}
+
+    def test_an_answer_naming_the_working_tree_is_dropped(self):
+        root = self._repo(".")
+        self.assertFalse(self._reports(root))
+        self.assertFalse(any(str(root) == p for p in query.exec_paths(root)))
+
+    def test_an_answer_naming_a_parent_of_the_working_tree_is_dropped(self):
+        root = self._repo("..")
+        self.assertFalse(self._reports(root))
+
+    def test_an_ordinary_hooks_directory_is_still_believed(self):
+        root = self._repo("myhooks")
+        (root / "myhooks").mkdir()
+        (root / "x").symlink_to("myhooks/pre-commit")
+        self.assertTrue(self._reports(root))
+
+    def test_it_is_believed_whatever_case_the_link_spells_it_in(self):
+        root = self._repo("myhooks")
+        (root / "myhooks").mkdir()
+        (root / "x").symlink_to("MyHooks/pre-commit")
+        self.assertTrue(self._reports(root))
+
+
+class TestPerUserExecutableDirectories(unittest.TestCase):
+    """Check which directories of executables are matched."""
+
+    REPORT = ("/Users/u/.yarn/bin/yarn", "/Users/u/.volta/bin/node", "/Users/u/.asdf/shims/python",
+              "/home/u/.rbenv/shims/ruby", "/root/.local/bin/x",
+              "/Users/u/.nvm/versions/node/v20.11.0/bin/node",
+              "/Users/u/.sdkman/candidates/java/current/bin/java")
+    SILENT = ("/Users/u/dev/tools/proj/.venv/bin/python", "/Users/u/dev/proj/.venv-verify/bin/python3",
+              "/Users/u/dev/other-repo/.github/bin/lint.sh", "/Users/u/dev/p/.tox/py311/bin/pytest")
+
+    def test_it_reports_a_per_user_executable_directory(self):
+        for path in self.REPORT:
+            with self.subTest(path):
+                self.assertEqual("PATH executable dir", write_sinks.sink_label(path, Path(path)))
+
+    def test_it_leaves_a_workspace_directory_alone(self):
+        for path in self.SILENT:
+            with self.subTest(path):
+                self.assertIsNone(write_sinks.sink_label(path, Path(path)))
+
+
+class TestPythonStartupHooks(unittest.TestCase):
+    """Check that a file the interpreter executes at start is a sink."""
+
+    def test_it_reports_a_path_configuration_file(self):
+        p = "/Users/u/.local/lib/python3.11/site-packages/evil.pth"
+        self.assertEqual("Python startup hook (exec-on-start)", write_sinks.sink_label(p, Path(p)))
+
+    def test_it_reports_a_customize_module(self):
+        p = "/usr/lib/python3/dist-packages/usercustomize.py"
+        self.assertEqual("Python startup hook (exec-on-start)", write_sinks.sink_label(p, Path(p)))
+
+    def test_it_leaves_an_ordinary_module_alone(self):
+        self.assertIsNone(write_sinks.sink_label("docs/customize.py", Path("/r/docs/customize.py")))
 
 
 if __name__ == "__main__":

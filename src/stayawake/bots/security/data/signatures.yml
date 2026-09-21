@@ -469,5 +469,5 @@ signatures:
     severity: critical
     matcher: symlink
     confidence: confirmed   # INFECTED — a committed symlink whose target is ~/.ssh, a shell startup
-    description: "A committed symlink points at a sensitive write-target outside the repo (SSH authorized_keys/keys, a shell/editor/REPL startup file, git/cloud/service credentials, a GPG keyring, a PATH executable dir, or an OS-persistence directory such as LaunchAgents/systemd/cron). A tool or agent asked to write the link's path writes THROUGH it into that sink — the GhostApproval / SymJacking write-redirect (#1161)."
+    description: "A committed symlink points at a sensitive write-target (SSH authorized_keys/keys, a shell/editor/REPL startup file, git/cloud/service credentials, a GPG keyring, a PATH executable dir, an OS-persistence directory such as LaunchAgents/systemd/cron, or what git itself runs). A tool or agent asked to write the link's path writes THROUGH it into that sink — the GhostApproval / SymJacking write-redirect (#1161)."
     remediation: manual

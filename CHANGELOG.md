@@ -14,6 +14,11 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Fixed
+- **A scan reports more of the committed symlinks that redirect a write somewhere dangerous**,
+  including into what git itself runs, into files a Python interpreter executes at start-up, and
+  into more of the per-user directories your shell and version managers put on your path. Re-scan
+  any repository you rely on.
+- **A scan no longer grades everyday symlinks inside an ordinary repository as critical.**
 - **A scan now reports the symlinks a repository still stores, and no longer counts one that is in
   the working tree among them.** Re-scan any repository you rely on.
 - **A history scan now says when it could not read everything a repository stores.** Treat that

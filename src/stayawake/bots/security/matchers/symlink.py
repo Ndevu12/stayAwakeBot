@@ -7,12 +7,12 @@ following the link or reading what is behind it.
 from __future__ import annotations
 
 import os
-import re
 from pathlib import Path
 
 from stayawake.bots.security.models import Finding, Severity
 from stayawake.bots.security.matchers.base import Matcher
-from stayawake.bots.security.write_sinks import sink_label
+from stayawake.bots.security.write_sinks import (CONTROL_EXEC_LABEL, control_exec_sink, sink_label)
+from stayawake.lib.git.query import exec_paths
 
 _MAX_LINK_HOPS = 40
 _MAX_LINK_STATES = 256
@@ -26,11 +26,11 @@ def _finding(sig: dict, rel: str, evidence: str) -> Finding:
 
 
 def _classify(p: Path, repo_root: Path, resolved_root: Path,
-              redirect_sig: dict | None, escape_sig: dict | None, is_dir: bool) -> Finding | None:
-    """The finding this symlink warrants, or None. Only ESCAPING links matter: a write-redirect sink is
-    outside the repo, and a scan-evasion escape is by definition outside. An intra-repo link (a monorepo
-    alias, a link to the repo's OWN dotfile) is neither. resolve() canonicalizes without reading the
-    target; ELOOP/unresolvable/unreadable → skipped (no DoS, no crash)."""
+              redirect_sig: dict | None, escape_sig: dict | None, is_dir: bool,
+              runs_from: set | None = None) -> Finding | None:
+    """Grade a symlink on disk. Takes the link, the repository root, its resolved form, the two
+    signatures and whether it names a directory. Returns the finding it warrants, or None — a link
+    whose target cannot be resolved is not graded."""
     try:
         if not p.is_symlink():
             return None
@@ -48,16 +48,21 @@ def _classify(p: Path, repo_root: Path, resolved_root: Path,
         rel = str(p.relative_to(repo_root))
     except ValueError:
         rel = str(p)
-    return _graded(rel, raw, resolved, resolved_root, redirect_sig, escape_sig, is_dir)
+    return _graded(rel, raw, resolved, resolved_root, redirect_sig, escape_sig, is_dir,
+                   runs_from)
 
 
 def _graded(rel: str, raw: str, resolved: Path, resolved_root: Path,
-            redirect_sig: dict | None, escape_sig: dict | None, is_dir: bool) -> Finding | None:
+            redirect_sig: dict | None, escape_sig: dict | None, is_dir: bool,
+            runs_from: set | None = None) -> Finding | None:
     """Grade a link at `rel` naming `raw`. Takes the path it is known by, the target it names, where
     that target resolves to, the repository root, the two signatures and whether it names a
     directory. Returns the finding it warrants, or None."""
+    if redirect_sig is not None and control_exec_sink(resolved, runs_from):
+        return _finding(redirect_sig, rel,
+                        f"symlink → {raw} redirects a write into {CONTROL_EXEC_LABEL}")
     if resolved == resolved_root or resolved_root in resolved.parents:
-        return None                           # stays inside the repo → normal
+        return None
     if redirect_sig is not None:
         label = sink_label(raw, resolved)
         if label is not None:                 # escaping → a sensitive write-sink → CONFIRMED critical
@@ -114,13 +119,17 @@ def _stored_finding(rel: str, raw: str, stored: dict, redirect_sig: dict | None)
     names, every stored link and the redirect signature. Returns the findings it warrants."""
     if redirect_sig is None:
         return []
+    reaches_exec = False
     for land, left in sorted(_landings(rel, raw, stored)):
-        if not left:
-            continue
-        label = sink_label(raw, Path(land))
-        if label is not None:
-            return [_finding(redirect_sig, rel,
-                             f"symlink → {raw} redirects a write into {label}")]
+        if left:
+            label = sink_label(raw, Path(land))
+            if label is not None:
+                return [_finding(redirect_sig, rel,
+                                 f"symlink → {raw} redirects a write into {label}")]
+        reaches_exec = reaches_exec or control_exec_sink(Path(land))
+    if reaches_exec:
+        return [_finding(redirect_sig, rel,
+                         f"symlink → {raw} redirects a write into {CONTROL_EXEC_LABEL}")]
     return []
 
 
@@ -138,14 +147,14 @@ class SymlinkMatcher(Matcher):
         except (OSError, RuntimeError):
             return []
         exclude = getattr(target.opts, "exclude_dirs", set())
+        runs_from = exec_paths(target.root)
         findings: list[Finding] = []
         if getattr(target, "names_one_file", False):
             for rel in (target.include_only or ()):
                 entry = target.root / rel
-                # Same rule the walk applies to an excluded NAME: a build-output link is checked for
-                # a write redirect, never for an escape — naming it must not invent a finding.
                 esc = None if entry.name in exclude else escape_sig
-                f = _classify(entry, target.root, root, redirect_sig, esc, entry.is_dir())
+                f = _classify(entry, target.root, root, redirect_sig, esc, entry.is_dir(),
+                              runs_from)
                 if f is not None:
                     findings.append(f)
             return findings
@@ -156,20 +165,16 @@ class SymlinkMatcher(Matcher):
                     findings += _stored_finding(rel, raw, stored, redirect_sig)
             return findings
         for dirpath, dirnames, filenames in os.walk(target.scan_root):  # followlinks=False (default)
-            # Classify DIRECTORY entries BEFORE pruning for descent, so a write-redirect symlink whose
-            # NAME is an excluded dir (`dist -> ~/.ssh`, `node_modules -> ~/.ssh`) is still caught —
-            # `dist`/`build` are exactly where build tools write. Pruning only stops DESCENT, and
-            # os.walk(followlinks=False) never descends a symlink anyway. For an excluded name we run the
-            # write-redirect check ONLY (escape_sig=None): a benign build-output dir link escaping to a
             for name in dirnames:
                 esc = None if name in exclude else escape_sig
-                f = _classify(Path(dirpath) / name, target.root, root, redirect_sig, esc, True)
+                f = _classify(Path(dirpath) / name, target.root, root, redirect_sig, esc, True,
+                              runs_from)
                 if f is not None:
                     findings.append(f)
             dirnames[:] = [d for d in dirnames if d not in exclude]
-            # FILE symlinks: a write-redirect can be a file link (the canonical GhostApproval shape); a
             for name in filenames:
-                f = _classify(Path(dirpath) / name, target.root, root, redirect_sig, escape_sig, False)
+                f = _classify(Path(dirpath) / name, target.root, root, redirect_sig, escape_sig,
+                              False, runs_from)
                 if f is not None:
                     findings.append(f)
         return findings
