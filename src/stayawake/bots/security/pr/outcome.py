@@ -161,18 +161,19 @@ def refused(repository: str, cause: Cause, detail: str = "", subjects: str = "",
 
 def amended(repository: str, commit: str, branches: Sequence[BranchResult],
             reasons: Iterable[Reason] = (), removed: Iterable[str] = (),
-            recovery: str = "") -> AmendOutcome:
+            recovery: str = "", reachable: bool = False) -> AmendOutcome:
     """The replacement was pushed at the branches that reached the payload.
 
-    `completed` follows the pushes rather than the caller's word, so a run that left a branch on
-    the payload cannot be reported as done. `recovery` names the captured pre-rewrite history when
-    a branch was moved and could not be put back.
+    `completed` follows the pushes and the delivered result rather than the caller's word: a run
+    that left a branch on the payload, or that `reachable` says still reaches one, cannot be
+    reported as done. `recovery` names the captured pre-rewrite history when a branch was moved and
+    could not be put back.
     """
     acted = tuple(branches)
     if not acted:
         raise ValueError("an amend that touched no branch is a refusal, not an amend")
     return AmendOutcome(repository=repository,
-                        completed=all(b.force_updated for b in acted),
+                        completed=all(b.force_updated for b in acted) and not reachable,
                         commit=commit, branches=acted, reasons=tuple(reasons),
                         removed=tuple(removed), recovery=recovery)
 

@@ -54,6 +54,18 @@ def _payload_left(repo: Path, olds, rebuilt, new_tips: dict[str, str],
     return left
 
 
+def _delivered_carriers(repo: Path, moved: dict[str, str], paths, survives) -> list[str] | None:
+    """Commits reachable from the delivered branch tips whose version of a remediated path still
+    carries a payload. Takes the repo, the branch tips as they now stand, the remediated paths, and
+    the `survives` oracle. Returns one line per carrier, or None when the history is too long to
+    walk."""
+    shas = gitutil.commits_touching(repo, sorted(set(moved.values())), paths, _MAX_PATH_HISTORY)
+    if shas is None:
+        return None
+    return [f"{sha[:12]} still carries {path}"
+            for sha in shas for path in sorted(paths) if survives(sha, path)]
+
+
 def _branches_carrying_any(repo: Path, infected) -> list[tuple[str, str, str]]:
     """Every branch that reaches ANY of the infected commits, each named once.
 
@@ -1093,6 +1105,8 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     if moved is None:
         return _refuse(Cause.REPLAY_FAILED, ", ".join(n for n, _, _ in deliverable))
 
+    carriers = _delivered_carriers(repo, moved, flagged, survives)
+
     results: list[BranchResult] = []
     failed: list[str] = []
     for branch in moved:
@@ -1133,8 +1147,12 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
             # history is the operator's problem whether or not any push succeeded.
             survivors.insert(0, Reason(Cause.LEFT_PART_WAY, ", ".join(unrestored)))
             recovery = str(captured.path or "")
+    if carriers is None:
+        survivors.insert(0, Reason(Cause.HISTORY_TOO_LARGE_TO_ENUMERATE))
+    elif carriers:
+        survivors.insert(0, Reason(Cause.PAYLOAD_STILL_REACHABLE, ", ".join(carriers[:5])))
     removed = _delivered_removals(replacements, delivered_reach, remove_holders, purge_holders)
     touched = len(delivered_infected)
     label = (oldest[:12] if touched == 1 else f"{touched} commits from {oldest[:12]}")
     return amended(display, label, tuple(results) + tuple(isolated), tuple(survivors),
-                   sorted(removed), recovery=recovery)
+                   sorted(removed), recovery=recovery, reachable=carriers is None or bool(carriers))

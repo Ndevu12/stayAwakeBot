@@ -14,6 +14,10 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Fixed
+- **`saw fix amend` reports a run as complete only when the history it delivered no longer reaches
+  the payload.** It previously reported on what it set out to do rather than what it left behind,
+  so a run could report success while a branch it had just updated still carried the payload. What
+  remains is now stated first. Run it again on any repository you have remediated.
 - **A `saw fix amend` refusal now names the commit it could not change**, instead of an object
   you cannot find.
 - **`saw fix amend` says when it could not use content you supplied, and names the file.**

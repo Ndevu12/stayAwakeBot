@@ -2149,3 +2149,55 @@ class TestFailedWrites(_AmendFixture):
                 self.d, [(head, [])], {}, lambda *a: ("", "", ""), remove={"any.js": "deadbeef"})
         self.assertIn(head, out.blocked, "a failed carry must block the commit")
         self.assertEqual("not-applied", out.blocked[head][0])
+
+
+class TestTheVerbVerifiesItsOwnOutcome(TestAmendActsOnContentPayload):
+    """What the delivered refs hold after a run, asked of the refs and not of the plan."""
+
+    def _payload_reachable_from(self, ref):
+        """Every commit reachable from `ref` holding a blob the scanner confirms, by plumbing."""
+        from stayawake.bots.security.pr.amend import _survives
+        check = _survives(self.d, load_signatures(), [], ScanOptions())
+        walk = subprocess.run(["git", "-C", str(self.d), "rev-list", ref],
+                              capture_output=True, text=True).stdout.split()
+        out = []
+        for sha in walk:
+            listing = subprocess.run(["git", "-C", str(self.d), "ls-tree", "-r", "--name-only", sha],
+                                     capture_output=True, text=True).stdout.split("\n")
+            out += [f"{sha[:10]}:{p}" for p in listing if p and check(sha, p)]
+        return out
+
+    def test_a_completed_run_delivers_no_ref_that_still_reaches_the_payload(self):
+        """A run reports completion only when the refs it delivered hold no confirmed payload."""
+        findings = self._confirmed_file_with_a_clean_ancestor()
+        outcome = self._run_with_findings(
+            findings, resolver=lambda item: Resolution(RESTORE, item.restore_candidate))
+        if outcome.completed:
+            self.assertEqual([], self._payload_reachable_from(self.base),
+                             "a completed run delivered a ref that still reaches the payload")
+
+    def test_a_run_that_leaves_the_payload_reachable_is_not_reported_complete(self):
+        """A rewrite is delivered whatever the result, so one un-remediable file cannot suppress
+        removal of the rest. What the delivered refs still reach sets the verdict: the run is not
+        complete, the residue leads the reasons, and the operator is told to act."""
+        findings = self._confirmed_file_with_a_clean_ancestor()
+        pushed = []
+
+        def recording_pusher(*a):
+            pushed.append(a)
+            return PushResult(True)
+
+        scan = ScanResult(target=str(self.d), source="local", findings=findings)
+        with self._remote():
+            with mock.patch("stayawake.bots.security.pr.amend.scan_target", return_value=scan):
+                with mock.patch("stayawake.bots.security.pr.amend._delivered_carriers",
+                                return_value=["deadbeef1234 still carries util.js"]):
+                    outcome = amend_outcome(
+                        self.d, "acme/app", ScanOptions(), load_signatures(), [], "t",
+                        pusher=recording_pusher,
+                        resolver=lambda i: Resolution(RESTORE, i.restore_candidate))
+        self.assertFalse(outcome.completed, "a run that still reaches the payload read as complete")
+        self.assertTrue(outcome.needs_review)
+        self.assertNotEqual([], pushed, "the branches it could remediate were withheld")
+        self.assertEqual(Cause.PAYLOAD_STILL_REACHABLE, self._causes(outcome)[0],
+                         "the residue must lead, not trail a green headline")
