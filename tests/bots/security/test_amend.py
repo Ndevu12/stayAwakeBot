@@ -2167,15 +2167,6 @@ class TestTheVerbVerifiesItsOwnOutcome(TestAmendActsOnContentPayload):
             out += [f"{sha[:10]}:{p}" for p in listing if p and check(sha, p)]
         return out
 
-    def test_a_completed_run_delivers_no_ref_that_still_reaches_the_payload(self):
-        """A run reports completion only when the refs it delivered hold no confirmed payload."""
-        findings = self._confirmed_file_with_a_clean_ancestor()
-        outcome = self._run_with_findings(
-            findings, resolver=lambda item: Resolution(RESTORE, item.restore_candidate))
-        if outcome.completed:
-            self.assertEqual([], self._payload_reachable_from(self.base),
-                             "a completed run delivered a ref that still reaches the payload")
-
     def test_a_run_that_leaves_the_payload_reachable_is_not_reported_complete(self):
         """A rewrite is delivered whatever the result, so one un-remediable file cannot suppress
         removal of the rest. What the delivered refs still reach sets the verdict: the run is not

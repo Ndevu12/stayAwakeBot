@@ -325,14 +325,19 @@ def tracked(repo: str | Path, path: str) -> bool:
 
 def commits_touching(repo: str | Path, tips, paths, limit: int = 50) -> list[str] | None:
     """Commits reachable from `tips` that touched any of `paths`, newest first. Takes the repo, the
-    tips to walk from, the paths, and the bound. Returns the shas, or None when the walk reaches the
-    bound and cannot be trusted to be complete."""
+    tips to walk from, the paths, and the bound. Each path is matched literally, so a name is never
+    read as a pathspec pattern. Returns the shas, or None when the walk fails or reaches the bound,
+    so a caller cannot read an incomplete answer as an empty one."""
     tips = sorted({t for t in (tips or []) if t})
     paths = sorted({p for p in (paths or []) if p})
     if not tips or not paths:
         return []
-    args = ["rev-list", f"--max-count={limit + 1}", "--full-history", *tips, "--", *paths]
-    shas = (stdout(repo, args) or "").split()
+    args = ["rev-list", f"--max-count={limit + 1}", "--full-history", *tips, "--",
+            *(f":(literal){p}" for p in paths)]
+    res = run(repo, args)
+    if res is None or res.returncode != 0:
+        return None
+    shas = (res.stdout or "").split()
     return None if len(shas) > limit else shas
 
 
