@@ -54,16 +54,31 @@ def _payload_left(repo: Path, olds, rebuilt, new_tips: dict[str, str],
     return left
 
 
+_CARRIERS_SHOWN = 5
+
+
 def _delivered_carriers(repo: Path, moved: dict[str, str], paths, survives) -> list[str] | None:
-    """Commits reachable from the delivered branch tips whose version of a remediated path still
-    carries a payload. Takes the repo, the branch tips as they now stand, the remediated paths, and
-    the `survives` oracle. Returns one line per carrier, or None when the history is too long to
-    walk."""
-    shas = gitutil.commits_touching(repo, sorted(set(moved.values())), paths, _MAX_PATH_HISTORY)
-    if shas is None:
-        return None
-    return [f"{sha[:12]} still carries {path}"
-            for sha in shas for path in sorted(paths) if survives(sha, path)]
+    """Commits reachable from each delivered branch, read back from its ref, whose version of a
+    remediated path still carries a payload. Takes the repo, the branches the run moved, the
+    remediated paths, and the `survives` oracle. Returns one line per carrier up to the reporting
+    bound, or None when a ref or a history could not be read."""
+    tips = []
+    for name in sorted(moved):
+        sha = gitutil.stdout(repo, ["rev-parse", "--verify", f"refs/heads/{name}^{{commit}}"]).strip()
+        if not sha:
+            return None
+        tips.append(sha)
+    found: list[str] = []
+    for path in sorted(paths):
+        shas = gitutil.commits_touching(repo, tips, [path], _MAX_PATH_HISTORY)
+        if shas is None:
+            return None
+        for sha in shas:
+            if survives(sha, path):
+                found.append(f"{sha[:12]} still carries {path}")
+                if len(found) >= _CARRIERS_SHOWN:
+                    return found
+    return found
 
 
 def _branches_carrying_any(repo: Path, infected) -> list[tuple[str, str, str]]:

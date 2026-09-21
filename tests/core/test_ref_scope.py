@@ -134,3 +134,27 @@ class TestRefScope(GitSandbox):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCommitsTouching(GitSandbox):
+    """The walk a run uses to read back what its delivered branches still reach."""
+
+    def setUp(self):
+        super().setUp()
+        self.d = self.new_repo("walk", user__name="T", user__email="t@t.test")
+
+    def test_a_walk_it_could_not_run_is_not_an_empty_walk(self):
+        """A caller decides whether remediation finished from this answer, so a failed walk must be
+        distinguishable from one that found nothing."""
+        self.write(self.d, "app.js", "var ok = 1;\n")
+        self.commit(self.d, "add app.js")
+        self.assertEqual(1, len(gitutil.commits_touching(self.d, ["HEAD"], ["app.js"], 100)))
+        self.assertIsNone(gitutil.commits_touching(self.d, ["0" * 40], ["app.js"], 100),
+                          "a walk that could not run read as a walk that found nothing")
+
+    def test_a_walk_past_its_bound_is_not_an_empty_walk(self):
+        """A history longer than the bound cannot be reported complete."""
+        for i in range(4):
+            self.write(self.d, "app.js", f"var v = {i};\n")
+            self.commit(self.d, f"edit {i}")
+        self.assertIsNone(gitutil.commits_touching(self.d, ["HEAD"], ["app.js"], 2))
