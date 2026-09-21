@@ -39,6 +39,28 @@ pip-compile pyproject.toml --generate-hashes --strip-extras -o requirements.lock
 
 Commit the result. The diff shows exactly which versions moved, which is the point.
 
+## Running the tests
+
+```
+python -m unittest discover -s tests
+```
+
+A few tests read the real machine. They substitute most of what they exercise, but not all of it,
+so a finding that exists on your computer and not on a clean CI runner makes them fail locally
+while the same commit is green in CI. Those assertions carry a notice saying so, appended to the
+usual failure text.
+
+Before treating one as a regression, run the same test against `origin/main` in a throwaway
+worktree and compare:
+
+```
+git worktree add -q --detach /tmp/mainwt origin/main
+cd /tmp/mainwt && PYTHONPATH=src python -m unittest <the failing test>
+git worktree remove --force /tmp/mainwt && git worktree prune
+```
+
+If it fails there too, it belongs to your machine, not to your change.
+
 ## Pull requests
 - Keep commits focused; describe **what** changed (not internal roadmap phases).
 - Run the suite locally; the **Worm Guard** CI gate must pass (it blocks any infected/evil-merge change).

@@ -23,6 +23,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from unittest import mock
 
 from stayawake import cli
+from tests.support.real_host import READS_THE_REAL_HOST
 from stayawake.utils import exitcodes
 
 
@@ -378,7 +379,7 @@ class TestAudit(unittest.TestCase):
     @mock.patch("stayawake.lib.auth.resolve_token", return_value=(None, None))
     def test_clean_audit_returns_zero(self, *_):
         with redirect_stdout(io.StringIO()):
-            self.assertEqual(cli.main(["audit"]), 0)
+            self.assertEqual(cli.main(["audit"]), 0, READS_THE_REAL_HOST)
 
     @mock.patch("stayawake.bots.security.hygiene.render", return_value="")
     @mock.patch("stayawake.bots.security.hygiene.check_host_artifacts", return_value=[])
@@ -393,7 +394,7 @@ class TestAudit(unittest.TestCase):
         warning.severity = "warning"
         m_cred.return_value = [warning]
         with redirect_stdout(io.StringIO()):
-            self.assertEqual(cli.main(["audit", "-f"]), 1)
+            self.assertEqual(cli.main(["audit", "-f"]), 1, READS_THE_REAL_HOST)
 
     @mock.patch("stayawake.bots.security.hygiene.render", return_value="")
     @mock.patch("stayawake.bots.security.hygiene.audit_checks", return_value=[])

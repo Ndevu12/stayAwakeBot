@@ -14,6 +14,7 @@ from contextlib import redirect_stdout
 from unittest import mock
 
 from stayawake.bots.security import hygiene
+from tests.support.real_host import READS_THE_REAL_HOST
 from stayawake.bots.security.hygiene.models import (ROTATION_UNSAFE_IDS, SURFACE_NOT_IMPLEMENTED_ID,
                                                     persistence_surface_is_enumerable)
 from stayawake.bots.security.hygiene.outcome import CHECKED_CLEAN, NOT_IMPLEMENTED
@@ -72,8 +73,9 @@ class TestTheRunSaysItAndGates(unittest.TestCase):
         self.assertIn(SURFACE_NOT_IMPLEMENTED_ID, ROTATION_UNSAFE_IDS)
         with mock.patch("sys.platform", "win32"):
             report = hygiene.render(hygiene.audit(), color=False, width=90)
-        self.assertNotIn("persistence surface enumerated and clean", report)
-        self.assertIn("UNKNOWN", report)
+        self.assertNotIn("persistence surface enumerated and clean", report,
+                         READS_THE_REAL_HOST)
+        self.assertIn("UNKNOWN", report, READS_THE_REAL_HOST)
 
     def test_the_audit_does_not_exit_zero_there(self):
         # Asserted through the real exit gate, but with the probe list fabricated rather than the
