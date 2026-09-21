@@ -306,6 +306,37 @@ def reachable_blobs(repo: str | Path, *, limit: int = 200_000,
     return out, complete
 
 
+def _holds_the_tree(here: str, root: str) -> bool:
+    """Ask whether a path contains a repository's whole working tree. Takes the path and the
+    repository root, both resolved. Returns True when it is that root or an ancestor of it."""
+    return here == root or root.startswith(here.rstrip(os.sep) + os.sep)
+
+
+def exec_paths(repo: str | Path) -> set[str]:
+    """Ask a repository where it executes from. Takes the repo. Returns the resolved hooks directory
+    and config file, empty when git could not say."""
+    try:
+        root = os.path.realpath(str(repo))
+    except (OSError, ValueError):
+        root = os.path.normpath(str(repo))
+    out = set()
+    for what in ("hooks", "config"):
+        res = run(repo, ["rev-parse", "--git-path", what], env=_own_env())
+        if res is None or res.returncode != 0:
+            continue
+        answer = (res.stdout or "").strip()
+        if not answer:
+            continue
+        here = answer if os.path.isabs(answer) else os.path.join(str(repo), answer)
+        try:
+            here = os.path.realpath(here)
+        except (OSError, ValueError):
+            here = os.path.normpath(here)
+        if not _holds_the_tree(here, root):
+            out.add(here)
+    return out
+
+
 def branches_matching(repo: str | Path, pattern: str) -> list[str]:
     """Local branch names matching a glob, e.g. 'security/auto-clean*'."""
     out = stdout(repo, ["for-each-ref", "--format=%(refname:short)", f"refs/heads/{pattern}"])
