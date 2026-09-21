@@ -89,9 +89,24 @@ _MAX_LINK_TARGET_BYTES = 4096
 _OBJECT_ID_BYTES = 20
 
 
+_INHERITED_LOCATION = ("GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE", "GIT_OBJECT_DIRECTORY",
+                       "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_INDEX_FILE", "GIT_NAMESPACE")
+
+
 def _own_env() -> dict:
     """Build the environment a query of a repository's own objects runs in. Returns it."""
-    return dict(os.environ, GIT_GRAFT_FILE=os.path.join(os.devnull, "grafts"))
+    env = {k: v for k, v in os.environ.items() if k not in _INHERITED_LOCATION}
+    env["GIT_GRAFT_FILE"] = os.path.join(os.devnull, "grafts")
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    return env
+
+
+def holds_its_objects(repo: str | Path) -> bool:
+    """Ask whether a repository holds the objects it names. Takes the repo. Returns False when it
+    would reach a remote for them, or when the question could not be answered."""
+    res = run(repo, ["config", "--get-regexp",
+                     r"^(remote\..*\.promisor|extensions\.partialclone)$"], env=_own_env())
+    return res is not None and not (res.stdout or "").strip()
 
 
 def _own_view(repo: str | Path, args: list[str]):
@@ -169,11 +184,13 @@ def _read_trees(repo: str | Path, ids: list[str]) -> tuple[dict[str, list], bool
     return out, complete and len(out) == len(ids)
 
 
-def stored_as_links(repo: str | Path, *,
-                    limit: int = 200_000) -> tuple[dict[str, set[str]], bool]:
-    """Search a repository's reachable history for the paths it stores a symlink at. Takes the repo
-    and a bound on the paths visited. Returns those paths mapped to the blob ids stored there, and
-    whether the whole history was read."""
+def stored_as_links(repo: str | Path, *, limit: int = 200_000,
+                    offline: bool = True) -> tuple[dict[str, set[str]], bool]:
+    """Search a repository's reachable history for the paths it stores a symlink at. Takes the repo,
+    a bound on the paths visited and whether the read must stay local. Returns those paths mapped to
+    the blob ids stored there, and whether the whole history was read."""
+    if offline and not holds_its_objects(repo):
+        return {}, False
     roots = _own_view(repo, ["rev-list", "--all", "--format=%T"])
     refs = _own_view(repo, ["for-each-ref", "--format=%(refname)"])
     if roots is None or roots.returncode != 0 or refs is None or refs.returncode != 0:
@@ -216,12 +233,12 @@ def stored_as_links(repo: str | Path, *,
     return out, complete
 
 
-def stored_link_targets(repo: str | Path, *,
-                        limit: int = 200_000) -> tuple[dict[str, list[str]], bool]:
+def stored_link_targets(repo: str | Path, *, limit: int = 200_000,
+                        offline: bool = True) -> tuple[dict[str, list[str]], bool]:
     """Read the target stored at each path a repository's history holds a symlink at. Takes the repo
     and a bound on the paths visited. Returns those paths mapped to the targets stored there, and
     whether every one of them was established."""
-    at_path, complete = stored_as_links(repo, limit=limit)
+    at_path, complete = stored_as_links(repo, limit=limit, offline=offline)
     if not at_path:
         return {}, complete
     wanted = sorted({sha for shas in at_path.values() for sha in shas})
@@ -242,7 +259,7 @@ def stored_link_targets(repo: str | Path, *,
         if not whole or kind != "blob":
             complete = False
             continue
-        text_of[oid] = body.decode("utf-8", "replace")
+        text_of[oid] = body.split(b"\0", 1)[0].decode("utf-8", "replace")
     out, every = {}, True
     for rel, shas in at_path.items():
         raws = [text_of[sha] for sha in sorted(shas) if sha in text_of]
@@ -252,7 +269,8 @@ def stored_link_targets(repo: str | Path, *,
     return out, complete and every
 
 
-def reachable_blobs(repo: str | Path, *, limit: int = 200_000) -> tuple[list[tuple[str, str]], bool]:
+def reachable_blobs(repo: str | Path, *, limit: int = 200_000,
+                    offline: bool = True) -> tuple[list[tuple[str, str]], bool]:
     """Every distinct blob reachable from ANY ref, as (sha, one path it is known by), and whether
     the walk completed.
 
@@ -260,6 +278,8 @@ def reachable_blobs(repo: str | Path, *, limit: int = 200_000) -> tuple[list[tup
     the tag's own name where a path goes, and `--filter=object:type=blob` does not drop it either.
     No deduplication — `rev-list --objects` emits each object once, measured 0 repeats in 20400.
     """
+    if offline and not holds_its_objects(repo):
+        return [], False
     listing = _own_view(repo, ["cat-file", "--batch-check", "--batch-all-objects", "--unordered"])
     if listing is None or listing.returncode != 0:
         return [], False

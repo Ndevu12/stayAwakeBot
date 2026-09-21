@@ -8,16 +8,17 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Iterator
 
-from stayawake.lib.git.query import reachable_blobs, stored_link_targets
+from stayawake.lib.git.query import reachable_blobs
 
 from .base import TRUNCATION_MARKER, Target
 
 _CHUNK = 1 << 20
 
 
-def versions_by_path(root, limit: int = 200_000) -> tuple[dict[str, list[str]], bool]:
+def versions_by_path(root, limit: int = 200_000,
+                     offline: bool = True) -> tuple[dict[str, list[str]], bool]:
     """Stored blob shas grouped by the path they are known by, and whether the walk completed."""
-    blobs, complete = reachable_blobs(root, limit=limit)
+    blobs, complete = reachable_blobs(root, limit=limit, offline=offline)
     grouped: dict[str, list[str]] = defaultdict(list)
     for sha, path in blobs:
         grouped[path].append(sha)
@@ -49,7 +50,7 @@ class HistoryTarget(Target):
         super().__init__(root, display, opts)
         self._sha_by_path = {path: shas[index] for path, shas in versions.items()
                              if index < len(shas)}
-        self.stored_links = links if links is not None else stored_link_targets(root)[0]
+        self.stored_links = links or {}
 
     def __len__(self) -> int:
         return len(self._sha_by_path)

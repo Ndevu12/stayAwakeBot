@@ -204,9 +204,12 @@ def history_residue_note(root, opts, signatures, allowlist) -> str | None:
 
 def _history_residue_note(root, opts, signatures, allowlist) -> str | None:
     from stayawake.bots.security.targets.history import HistoryTarget, versions_by_path
-    from stayawake.lib.git.query import stored_link_targets
-    versions, complete = versions_by_path(root)
-    links, every_link = stored_link_targets(root)
+    from stayawake.lib.git.query import holds_its_objects, stored_link_targets
+    offline = not getattr(opts, "external_audit", False)
+    versions, complete = versions_by_path(root, offline=offline)
+    links, every_link = stored_link_targets(root, offline=offline)
+    finish = ("" if not offline or holds_its_objects(root) else
+              " Clone this repository again, or re-run with `--external`, to read the rest.")
     if not versions and not links:
         # A failed git command degrades to an empty result, so "git could not answer" and "there is
         # genuinely nothing here" arrive identically; `complete` is what separates them. Silence is
@@ -214,7 +217,7 @@ def _history_residue_note(root, opts, signatures, allowlist) -> str | None:
         if complete and every_link:
             return "History was read: this repository stores no earlier version of any path."
         return ("History could not be read: nothing was returned for this repository, so whether "
-                "it still stores a payload is UNKNOWN, not no.")
+                f"it still stores a payload is UNKNOWN, not no.{finish}")
     # A `path_glob` rule is decided against the ONE name git emits for a blob, and whoever
     # committed it picks that name: filing the same bytes under an allowlisted path suppresses the
     # stored payload. Signature-wide rules carry the same operator intent and cannot be aimed.
@@ -232,10 +235,9 @@ def _history_residue_note(root, opts, signatures, allowlist) -> str | None:
     beyond = sum(max(len(v) - _HISTORY_ROUNDS, 0) for v in versions.values())
     cut = (f" {beyond} further version(s) of {sum(1 for v in versions.values() if len(v) > _HISTORY_ROUNDS)}"
            f" path(s) were not read." if beyond else "")
-    if not complete:
-        cut += " The walk hit its object budget, so what was enumerated is not all of it."
-    if not every_link:
-        cut += " Not every stored version could be established."
+    if not complete or not every_link:
+        cut += " Not all of what it stores could be enumerated."
+    cut += finish
     if unread:
         # By PATH, not by failed attempt: every version is read once per matcher, so counting
         # attempts inflated this fivefold and drove the number reported as read negative.
@@ -249,9 +251,12 @@ def _history_residue_note(root, opts, signatures, allowlist) -> str | None:
                 f"across {len(versions)} path(s), so whether it still stores one is UNKNOWN, not "
                 f"no.{cut}")
     paths = sorted({f.path for f in hits})
-    paths.sort(key=lambda path: path in links)
-    shown = [textsafe.plain(path, limit=200) for path in paths[:5]]
-    more = len(paths) - 5
+    payloads = [path for path in paths if path not in links]
+    redirects = [path for path in paths if path in links]
+    named = payloads[:3] + redirects[:2]
+    named += (payloads[3:] + redirects[2:])[:max(0, 5 - len(named))]
+    shown = [textsafe.plain(path, limit=200) for path in named]
+    more = len(paths) - len(named)
     return (f"{len(paths)} path(s) still STORE a confirmed payload reachable from a ref: "
             f"{'; '.join(shown)}"
             f"{f'; and {more} more' if more > 0 else ''}. Removing these needs a history rewrite "

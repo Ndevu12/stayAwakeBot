@@ -429,9 +429,9 @@ class TestItSaysSoWhenItCouldNotRead(GitSandbox):
         from stayawake.bots.security.targets import history as hist
         real = hist.versions_by_path
         with mock.patch.object(hist, "versions_by_path",
-                               lambda root, limit=200_000: (real(root)[0], False)):
+                               lambda root, limit=200_000, offline=True: (real(root)[0], False)):
             note = scanner.history_residue_note(repo, ScanOptions(history=True), self._sigs(), [])
-        self.assertIn("object budget", note)
+        self.assertIn("Not all of what it stores could be enumerated", note)
 
 
 class TestEveryLocalTargetGetsIt(GitSandbox):
@@ -492,7 +492,8 @@ class TestAStoredSymlinkIsStillRead(GitSandbox):
         """The confirmed findings a scan of `root`'s stored versions reports."""
         from stayawake.bots.security.targets.history import HistoryTarget, versions_by_path
         versions, _complete = versions_by_path(root)
-        target = HistoryTarget(root, str(root), ScanOptions(), versions, 0)
+        target = HistoryTarget(root, str(root), ScanOptions(), versions, 0,
+                               stored_link_targets(root)[0])
         return [f for f in scanner.scan_target(target, load_signatures(), []).findings
                 if f.confidence == CONFIRMED]
 
@@ -501,7 +502,8 @@ class TestAStoredSymlinkIsStillRead(GitSandbox):
         versions, _complete = versions_by_path(self.d)
         out = []
         for index in range(20):
-            target = HistoryTarget(self.d, str(self.d), ScanOptions(), versions, index)
+            target = HistoryTarget(self.d, str(self.d), ScanOptions(), versions, index,
+                                   stored_link_targets(self.d)[0] if index == 0 else {})
             if not len(target):
                 break
             out += [f for f in scanner.scan_target(target, load_signatures(), []).findings
@@ -511,7 +513,8 @@ class TestAStoredSymlinkIsStillRead(GitSandbox):
     def _stored(self):
         from stayawake.bots.security.targets.history import HistoryTarget, versions_by_path
         versions, _complete = versions_by_path(self.d)
-        target = HistoryTarget(self.d, str(self.d), ScanOptions(), versions, 0)
+        target = HistoryTarget(self.d, str(self.d), ScanOptions(), versions, 0,
+                               stored_link_targets(self.d)[0])
         return [f for f in scanner.scan_target(target, load_signatures(), []).findings
                 if f.confidence == CONFIRMED]
 
@@ -669,15 +672,60 @@ class TestAStoredSymlinkIsStillRead(GitSandbox):
         self.assertIn(one, entries, "the object that WAS returned must still be read")
         self.assertFalse(complete, "a read that answered for fewer objects was read as complete")
 
-    def test_how_deep_a_checkout_sits_does_not_decide_the_verdict(self):
-        """A target climbing past the checkout root is graded the same wherever the checkout is."""
-        raw = "../../../app/.ssh/authorized_keys"
-        graded = [bool(symlink._stored_finding("a/hook", raw, {"id": "symlink-write-redirect",
-                                                              "category": "c", "severity": "4",
-                                                              "description": "d"}))
-                  for _root in ("/app", "/src", "/Users/u/dev/app")]
-        self.assertEqual([True, True, True], graded,
-                         "a climb past the root was read as staying inside it")
+    _SIG = {"id": "symlink-write-redirect", "category": "c", "severity": "4", "description": "d"}
+
+    def test_a_target_climbing_far_past_the_root_still_escapes(self):
+        """A target that climbs further than the repository is deep has left it."""
+        self.assertTrue(symlink._stored_finding("a/hook", "../../../app/.ssh/authorized_keys",
+                                                {}, self._SIG))
+
+    def test_a_target_is_followed_through_the_links_the_repository_stores(self):
+        """A checkout walks the links it restores, so grading one reads the others."""
+        stored = {"hop": ["/"], "link": ["hop/Users/v/.ssh/authorized_keys"]}
+        self.assertTrue(symlink._stored_finding("link", stored["link"][0], stored, self._SIG),
+                        "a target reaching its sink through another stored link was missed")
+        relative = {"pkg/up": ["../../../../.."], "pkg/k": ["up/Users/v/.ssh/authorized_keys"]}
+        self.assertTrue(symlink._stored_finding("pkg/k", relative["pkg/k"][0], relative, self._SIG))
+
+    def test_a_chain_longer_than_a_checkout_follows_still_escapes(self):
+        """A chain a checkout is willing to follow is followed for as far as it goes."""
+        deep = {f"h{n}": [f"h{n + 1}"] for n in range(30)}
+        deep["h30"] = ["/Users/v/.ssh/authorized_keys"]
+        self.assertTrue(symlink._stored_finding("h0", deep["h0"][0], deep, self._SIG),
+                        "a chain shorter than a checkout would follow was given up on")
+
+    def test_a_chain_that_cannot_be_settled_is_still_reported(self):
+        """A target the walk gave up following is judged on the path it names."""
+        stored = {"a": ["b"], "b": ["c"], "c": ["inside/here"]}
+        raw = "a/../../.ssh/authorized_keys"
+        landings = symlink._landings("start", raw, stored, budget=1)
+        self.assertEqual({("/.ssh/authorized_keys", True)}, landings,
+                         "a chain the walk gave up on left nothing to judge")
+
+    def test_a_target_is_read_the_way_a_checkout_reads_it(self):
+        """A stored target ends where the system stops reading it."""
+        blob = subprocess.run(["git", "-C", str(self.d), "hash-object", "-w", "--stdin"],
+                              input=b"/Users/v/.zshrc\0.md", capture_output=True
+                              ).stdout.decode().strip()
+        self.git(self.d, "update-index", "--add", "--cacheinfo", f"120000,{blob},readme.md")
+        tree = self.git(self.d, "write-tree").strip()
+        head = self.git(self.d, "rev-parse", "HEAD").strip()
+        sha = self.git(self.d, "commit-tree", tree, "-p", head, "-m", "a padded target").strip()
+        self.git(self.d, "update-ref", "HEAD", sha)
+        self.assertEqual(["/Users/v/.zshrc"], stored_link_targets(self.d)[0]["readme.md"])
+        self.assertIn(("symlink-write-redirect", "readme.md"),
+                      [(f.signature_id, f.path) for f in self._stored()])
+
+    def test_the_repository_scanned_is_the_one_named(self):
+        """The repository a scan answers about is the one it was given."""
+        self._commit_link("ctl", os.path.join(str(Path.home()), ".ssh", "authorized_keys"))
+        elsewhere = self.new_repo("elsewhere")
+        self.write(elsewhere, "a.txt", "nothing\n")
+        self.commit(elsewhere, "only commit")
+        with mock.patch.dict(os.environ, {"GIT_DIR": os.path.join(str(elsewhere), ".git")}):
+            at_path, complete = stored_link_targets(self.d)
+        self.assertTrue(complete)
+        self.assertIn("ctl", at_path, "the scan answered about a repository nobody named")
 
     def test_a_tag_chain_does_not_hide_what_it_reaches(self):
         """A tree reached only through a tag that points at another tag is still read."""
@@ -756,6 +804,50 @@ class TestAStoredSymlinkIsStillRead(GitSandbox):
         note = self._note()
         self.assertIn("still STORE", note)
         self.assertEqual(1, len(note.splitlines()), "a path broke the report onto its own line")
+
+    def test_a_repository_that_would_fetch_is_refused_rather_than_fetched_from(self):
+        """A history read stays offline: a repository whose objects live elsewhere is refused."""
+        origin = self.new_repo("origin")
+        self.git(origin, "config", "uploadpack.allowFilter", "true")
+        os.makedirs(os.path.join(str(origin), "deep"), exist_ok=True)
+        os.symlink(os.path.join(str(Path.home()), ".ssh", "authorized_keys"),
+                   os.path.join(str(origin), "deep", "evil"))
+        self.git(origin, "add", "-A")
+        self.commit(origin, "the link")
+        partial = os.path.join(os.path.dirname(str(origin)), "partial")
+        subprocess.run(["git", "clone", "-q", "--filter=tree:0", "--no-checkout", "--no-local",
+                        f"file://{origin}", partial], capture_output=True, check=True)
+        held = lambda: subprocess.run(["git", "-C", partial, "count-objects", "-v"],
+                                      capture_output=True, text=True).stdout
+        before = held()
+        at_path, complete = stored_link_targets(partial)
+        self.assertFalse(complete, "a repository that does not hold its objects read as complete")
+        self.assertEqual({}, at_path)
+        self.assertEqual(before, held(), "the read reached a remote for objects")
+        note = scanner.history_residue_note(partial, ScanOptions(history=True),
+                                            load_signatures(), [])
+        self.assertIn("UNKNOWN", note)
+        self.assertIn("Clone this repository again", note)
+        self.assertIn("--external", note)
+        for named in ("promisor", "partial", "filter", "fetch", "network", "remote"):
+            self.assertNotIn(named, note, f"the note named why it could not read: {named}")
+        with_external = scanner.history_residue_note(
+            partial, ScanOptions(history=True, external_audit=True), load_signatures(), [])
+        self.assertIn("deep/evil", with_external, "--external did not let the read finish")
+
+    def test_a_tree_whose_entries_stop_short_is_not_read_as_complete(self):
+        """A tree the walk could not parse to the end leaves the read unestablished."""
+        blob = subprocess.run(["git", "-C", str(self.d), "hash-object", "-w", "--stdin"],
+                              input=b"/Users/v/.ssh/authorized_keys",
+                              capture_output=True).stdout.decode().strip()
+        body = b"120000 visible\0" + bytes.fromhex(blob) + b"120000noseparator"
+        tree = subprocess.run(["git", "-C", str(self.d), "hash-object", "-t", "tree", "-w",
+                               "--literally", "--stdin"], input=body,
+                              capture_output=True).stdout.decode().strip()
+        self._commit_tree(tree)
+        at_path, complete = stored_link_targets(self.d)
+        self.assertIn("visible", at_path)
+        self.assertFalse(complete, "a tree that stopped parsing was read as fully read")
 
     def test_a_replacement_object_does_not_answer_for_the_ref(self):
         """A ref is graded on what it stores, not on what a replacement object substitutes."""
