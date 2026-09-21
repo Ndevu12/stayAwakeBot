@@ -216,9 +216,11 @@ def _history_residue_note(root, opts, signatures, allowlist) -> str | None:
     # committed it picks that name: filing the same bytes under an allowlisted path suppresses the
     # stored payload. Signature-wide rules carry the same operator intent and cannot be aimed.
     unaimable = [r for r in (allowlist or []) if isinstance(r, dict) and not r.get("path_glob")]
+    from stayawake.lib.git.query import stored_as_links
+    links = stored_as_links(root)
     hits, scanned, unread = [], 0, set()
     for index in range(_HISTORY_ROUNDS):
-        target = HistoryTarget(root, str(root), opts, versions, index)
+        target = HistoryTarget(root, str(root), opts, versions, index, links)
         if not len(target):
             break
         scanned += len(target)
@@ -230,6 +232,8 @@ def _history_residue_note(root, opts, signatures, allowlist) -> str | None:
            f" path(s) were not read." if beyond else "")
     if not complete:
         cut += " The walk hit its object budget, so what was enumerated is not all of it."
+    if not links[1]:
+        cut += " Not every stored version could be established."
     if unread:
         # By PATH, not by failed attempt: every version is read once per matcher, so counting
         # attempts inflated this fivefold and drove the number reported as read negative.

@@ -52,6 +52,17 @@ def run_ok(repo: str | Path | None, args: list[str], *, env: dict | None = None,
     return res is not None and res.returncode == 0
 
 
+def stdout_bytes_fed(repo: str | Path, args: list[str], stdin: bytes) -> bytes | None:
+    """Raw stdout of a git command fed `stdin`, undecoded — None on any failure. Takes the repo, the
+    arguments and the bytes to write."""
+    try:
+        res = subprocess.run(_argv(repo, args), input=stdin, capture_output=True,
+                             timeout=LOCAL_TIMEOUT)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return res.stdout if res.returncode == 0 else None
+
+
 def stdout_bytes(repo: str | Path, args: list[str]) -> bytes | None:
     """Raw stdout, undecoded — None on any failure.
 

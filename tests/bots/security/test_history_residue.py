@@ -7,6 +7,7 @@ remediated repository red and cost the exit code its meaning.
 """
 from __future__ import annotations
 
+import os
 import pathlib
 import sys
 import tempfile
@@ -18,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from support.gitrepo import GitSandbox                                   # noqa: E402
 from stayawake.bots.security.resolution import LocalTarget, REPOSITORY
+from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security import scanner                             # noqa: E402
 from stayawake.bots.security.models import (CLEAN, CONFIRMED,           # noqa: E402
                                              ScanReport, ScanResult)
@@ -453,3 +455,147 @@ class TestARemoteTargetIsRefusedRatherThanHalfAnswered(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAStoredSymlinkIsStillRead(GitSandbox):
+    """A symlink is stored as a blob holding its target, so history reads it like any other."""
+
+    def setUp(self):
+        super().setUp()
+        self.d = self.new_repo("links", user__name="T", user__email="t@t.test")
+        self.write(self.d, "seed.txt", "seed\n")
+        self.commit(self.d, "seed")
+        self.base = self.git(self.d, "rev-parse", "--abbrev-ref", "HEAD").strip()
+
+    def _stored_in(self, root):
+        """The confirmed findings a scan of `root`'s stored versions reports."""
+        from stayawake.bots.security.targets.history import HistoryTarget, versions_by_path
+        versions, _complete = versions_by_path(root)
+        target = HistoryTarget(root, str(root), ScanOptions(), versions, 0)
+        return [f for f in scanner.scan_target(target, load_signatures(), []).findings
+                if f.confidence == CONFIRMED]
+
+    def _stored_all_rounds(self):
+        from stayawake.bots.security.targets.history import HistoryTarget, versions_by_path
+        versions, _complete = versions_by_path(self.d)
+        out = []
+        for index in range(20):
+            target = HistoryTarget(self.d, str(self.d), ScanOptions(), versions, index)
+            if not len(target):
+                break
+            out += [f for f in scanner.scan_target(target, load_signatures(), []).findings
+                    if f.confidence == CONFIRMED]
+        return out
+
+    def _stored(self):
+        from stayawake.bots.security.targets.history import HistoryTarget, versions_by_path
+        versions, _complete = versions_by_path(self.d)
+        target = HistoryTarget(self.d, str(self.d), ScanOptions(), versions, 0)
+        return [f for f in scanner.scan_target(target, load_signatures(), []).findings
+                if f.confidence == CONFIRMED]
+
+    def _commit_link(self, rel, target):
+        import os
+        os.makedirs(os.path.dirname(os.path.join(str(self.d), rel)), exist_ok=True)
+        os.symlink(target, os.path.join(str(self.d), rel))
+        self.git(self.d, "add", "-A")
+        self.commit(self.d, f"add {rel}")
+        os.remove(os.path.join(str(self.d), rel))
+        self.git(self.d, "add", "-A")
+        self.commit(self.d, f"remove {rel} from the tree")
+
+    def test_a_write_redirect_no_longer_in_the_tree_is_still_stored(self):
+        """One checkout of the earlier commit puts the link back on disk, so the stored version is
+        the thing that matters, not what the tree happens to hold now."""
+        self._commit_link("tools/postinstall",
+                          os.path.join(str(Path.home()), ".ssh", "authorized_keys"))
+        found = [(f.signature_id, f.path) for f in self._stored()]
+        self.assertIn(("symlink-write-redirect", "tools/postinstall"), found)
+
+    def test_a_target_that_returns_inside_through_a_link_is_not_a_redirect(self):
+        """The target leaves the repository by name and comes back through a symlink. It is
+        resolved the way the working-tree scan resolves it, so the name alone does not decide."""
+        self.write(self.d, "secrets/.ssh/config", "Host example\n")
+        self.commit(self.d, "add the file it really points at")
+        alias = os.path.join(os.path.dirname(str(self.d)), "alias")
+        os.symlink(os.path.join(str(self.d), "secrets"), alias)
+        self._commit_link("cfg", os.path.join(alias, ".ssh", "config"))
+        self.assertEqual([], [(f.signature_id, f.path) for f in self._stored()],
+                         "a target that resolves back inside the repository was read as leaving it")
+
+    def test_a_file_sharing_the_links_bytes_does_not_hide_it(self):
+        """Git stores one blob for identical content and emits it under one name. The link is found
+        at the path that stores it, so committing a file with the same bytes hides nothing."""
+        target = os.path.join(str(Path.home()), ".ssh", "authorized_keys")
+        self.write(self.d, "aaa_notes.txt", target)
+        self.commit(self.d, "a file whose content is the target, sorting first")
+        self._commit_link("hook", target)
+        found = [(f.signature_id, f.path) for f in self._stored_all_rounds()]
+        self.assertIn(("symlink-write-redirect", "hook"), found)
+
+    def test_what_sits_beside_a_clone_does_not_decide_its_verdict(self):
+        """Two clones of one repository, the same objects, differing only in what sits next to
+        them. A stored link is graded by where it points, so both answer the same."""
+        self._commit_link("cfg", "../beside/config")
+        here = os.path.dirname(str(self.d))
+        verdicts = []
+        for name, plant in (("clone_a", False), ("clone_b", True)):
+            root = os.path.join(here, name)
+            self.git(self.d, "clone", "-q", str(self.d), root)
+            beside = os.path.join(here, "beside")
+            if os.path.lexists(beside):
+                os.remove(beside)
+            if plant:
+                os.symlink(os.path.join(str(Path.home()), ".aws"), beside)
+            verdicts.append(sorted(f.signature_id for f in self._stored_in(Path(root))))
+        self.assertEqual(verdicts[0], verdicts[1],
+                         "what sat beside the clone changed its verdict")
+
+    def test_a_file_named_like_a_mode_is_not_read_as_one(self):
+        """A name is content, not structure: a repository storing no symlink reports none."""
+        self.write(self.d, "report 2026-09-21 120000 rows.csv",
+                   os.path.join(str(Path.home()), ".ssh", "authorized_keys"))
+        self.commit(self.d, "an ordinary noon timestamp in a file name")
+        self.assertEqual([], [(f.signature_id, f.path) for f in self._stored_all_rounds()])
+
+    def test_every_target_a_link_ever_had_is_still_stored(self):
+        """A link pointed somewhere sensitive and somewhere ordinary. Both versions are stored, so
+        the one that redirects is reported whichever was committed first."""
+        for first_is_sink in (True, False):
+            with self.subTest(sink_first=first_is_sink):
+                d = self.new_repo(f"retarget{first_is_sink}", user__name="T",
+                                  user__email="t@t.test")
+                self.write(d, "lib/x", "x\n")
+                self.commit(d, "the file it is sometimes pointed at")
+                sink = os.path.join(str(Path.home()), ".ssh", "authorized_keys")
+                for target in ((sink, "lib/x") if first_is_sink else ("lib/x", sink)):
+                    link = os.path.join(str(d), "hook")
+                    if os.path.lexists(link):
+                        os.remove(link)
+                    os.symlink(target, link)
+                    self.git(d, "add", "-A")
+                    self.commit(d, "point it")
+                os.remove(os.path.join(str(d), "hook"))
+                self.git(d, "add", "-A")
+                self.commit(d, "remove it from the tree")
+                found = [f.signature_id for f in self._stored_in(d)]
+                self.assertIn("symlink-write-redirect", found)
+
+    def test_a_link_only_a_merge_introduced_is_still_stored(self):
+        """A link recorded in the merge's own tree and in neither parent was still stored."""
+        self.git(self.d, "checkout", "-qb", "side")
+        self.write(self.d, "side.js", "ok\n")
+        self.commit(self.d, "work on the side branch")
+        self.git(self.d, "checkout", "-q", self.base)
+        self.write(self.d, "app.js", "ok\n")
+        self.commit(self.d, "work on the base branch")
+        self.git(self.d, "merge", "-q", "--no-ff", "--no-commit", "side")
+        os.symlink(os.path.join(str(Path.home()), ".ssh", "authorized_keys"),
+                   os.path.join(str(self.d), "hook"))
+        self.git(self.d, "add", "-A")
+        self.commit(self.d, "merge side, smuggling a link into the merge itself")
+        os.remove(os.path.join(str(self.d), "hook"))
+        self.git(self.d, "add", "-A")
+        self.commit(self.d, "remove it from the tree")
+        found = [(f.signature_id, f.path) for f in self._stored()]
+        self.assertIn(("symlink-write-redirect", "hook"), found)

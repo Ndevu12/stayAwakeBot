@@ -37,8 +37,6 @@ def _classify(p: Path, repo_root: Path, resolved_root: Path,
         resolved = p.resolve()
     except (OSError, RuntimeError):
         return None                           # ELOOP / unresolvable → skip
-    if resolved == resolved_root or resolved_root in resolved.parents:
-        return None                           # stays inside the repo → normal
     try:
         raw = os.readlink(p)
     except OSError:
@@ -47,6 +45,16 @@ def _classify(p: Path, repo_root: Path, resolved_root: Path,
         rel = str(p.relative_to(repo_root))
     except ValueError:
         rel = str(p)
+    return _graded(rel, raw, resolved, resolved_root, redirect_sig, escape_sig, is_dir)
+
+
+def _graded(rel: str, raw: str, resolved: Path, resolved_root: Path,
+            redirect_sig: dict | None, escape_sig: dict | None, is_dir: bool) -> Finding | None:
+    """The finding a link at `rel` pointing at `raw` warrants, or None. Takes the path it is known
+    by, the target it names, where that target resolves to, the repository root, the two signatures
+    and whether it names a directory."""
+    if resolved == resolved_root or resolved_root in resolved.parents:
+        return None                           # stays inside the repo → normal
     if redirect_sig is not None:
         label = sink_label(raw, resolved)
         if label is not None:                 # escaping → a sensitive write-sink → CONFIRMED critical
@@ -54,6 +62,23 @@ def _classify(p: Path, repo_root: Path, resolved_root: Path,
     if escape_sig is not None and is_dir:      # escaping directory → non-sink → scan-evasion HEURISTIC
         return _finding(escape_sig, rel, f"symlink → {raw} resolves outside the repo root (contents unscanned)")
     return None
+
+
+def _stored_finding(rel: str, raw: str, root: Path, redirect_sig: dict | None) -> list:
+    """The findings a version stored at `rel` pointing at `raw` warrants. Takes the path it is
+    stored at, the target it names, the repository root and the redirect signature. Returns them;
+    a stored entry records no directory bit, so only a write redirect can be established."""
+    joined = os.path.join(str(root), os.path.dirname(rel), raw)
+    resolved = Path(os.path.normpath(joined))
+    if resolved != root and root not in resolved.parents:
+        try:
+            canonical = Path(os.path.realpath(joined))
+        except (OSError, ValueError):
+            canonical = resolved
+        if canonical == root or root in canonical.parents:
+            return []
+    found = _graded(rel, raw, resolved, root, redirect_sig, None, False)
+    return [found] if found is not None else []
 
 
 class SymlinkMatcher(Matcher):
@@ -80,6 +105,12 @@ class SymlinkMatcher(Matcher):
                 f = _classify(entry, target.root, root, redirect_sig, esc, entry.is_dir())
                 if f is not None:
                     findings.append(f)
+            return findings
+        stored = getattr(target, "stored_links", None)
+        if stored is not None:
+            for rel, raws in sorted(stored.items()):
+                for raw in raws:
+                    findings += _stored_finding(rel, raw, root, redirect_sig)
             return findings
         for dirpath, dirnames, filenames in os.walk(target.scan_root):  # followlinks=False (default)
             # Classify DIRECTORY entries BEFORE pruning for descent, so a write-redirect symlink whose

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from stayawake.lib.git.auth import github_https_auth, run_remote_git
-from stayawake.lib.git.run import run, stdout, NETWORK_TIMEOUT
+from stayawake.lib.git.run import run, stdout, stdout_bytes_fed, NETWORK_TIMEOUT
 
 
 def is_git_repo(repo: str | Path) -> bool:
@@ -80,6 +80,70 @@ def commit_count(repo: str | Path, ref: str = "HEAD") -> int | None:
     """Commits reachable from `ref`, or None when it cannot be counted (no commits, unreadable)."""
     out = stdout(repo, ["rev-list", "--count", ref]).strip()
     return int(out) if out.isdigit() else None
+
+
+def _tree_objects(raw: bytes):
+    """Every tree in a `cat-file --batch` stream, as `(tree id, entries, whole)`. Takes the raw
+    stream. Yields them; `whole` is False for a tree whose entries did not parse to the end."""
+    at = 0
+    while at < len(raw):
+        nl = raw.find(b"\n", at)
+        if nl == -1:
+            return
+        parts = raw[at:nl].split()
+        if len(parts) < 3 or not parts[2].isdigit():
+            # `cat-file --batch` reports a missing or ambiguous id inline and exits 0.
+            yield "", [], False
+            at = nl + 1
+            continue
+        size = int(parts[2])
+        body, at = raw[nl + 1:nl + 1 + size], nl + 1 + size + 1
+        if parts[1] != b"tree":
+            continue
+        entries, pos = [], 0
+        while pos < len(body):
+            space = body.find(b" ", pos)
+            nul = body.find(b"\0", space + 1)
+            if space == -1 or nul == -1 or nul + 21 > len(body):
+                break
+            entries.append((body[pos:space], body[space + 1:nul], body[nul + 1:nul + 21].hex()))
+            pos = nul + 21
+        yield parts[0].decode(), entries, pos == len(body)
+
+
+def stored_as_links(repo: str | Path) -> tuple[dict[str, set[str]], bool]:
+    """Every path a reachable tree stores a symlink at, mapped to the blob ids stored there, and
+    whether every tree was read. Takes the repo. Returns the map and the flag."""
+    walk = run(repo, ["rev-list", "--objects", "--all"])
+    listing = run(repo, ["cat-file", "--batch-check", "--batch-all-objects", "--unordered"])
+    if walk is None or walk.returncode != 0 or listing is None or listing.returncode != 0:
+        return {}, False
+    kind = {}
+    for line in listing.stdout.splitlines():
+        parts = line.split()
+        if len(parts) >= 2:
+            kind[parts[0]] = parts[1]
+    at_path = {}
+    for line in walk.stdout.split("\n"):
+        sha, _, path = line.partition(" ")
+        if kind.get(sha) == "tree":
+            at_path[sha] = path
+    complete = not (walk.stderr.strip() or listing.stderr.strip())
+    if not at_path:
+        return {}, complete
+    raw = stdout_bytes_fed(repo, ["cat-file", "--batch"], "\n".join(at_path).encode())
+    if raw is None:
+        return {}, False
+    out: dict[str, set[str]] = {}
+    read_all = True
+    for tree, entries, whole in _tree_objects(raw):
+        read_all = read_all and whole
+        base = at_path.get(tree, "")
+        for mode, name, sha in entries:
+            if mode == b"120000":
+                rel = name.decode("utf-8", "replace")
+                out.setdefault(f"{base}/{rel}" if base else rel, set()).add(sha)
+    return out, complete and read_all
 
 
 def reachable_blobs(repo: str | Path, *, limit: int = 200_000) -> tuple[list[tuple[str, str]], bool]:
