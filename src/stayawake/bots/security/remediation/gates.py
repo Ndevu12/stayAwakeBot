@@ -103,7 +103,7 @@ def _line_is_pure_payload(ln: str, content_sig) -> bool:
     <blob>`) rides on the blob's average density + a substring fingerprint match and would be
     dropped whole. Requiring each statement to be individually payload defers that instead.
 
-    KNOWN RESIDUAL (same irreducible class as, mitigated by the quarantine backup): this
+    KNOWN RESIDUAL (same irreducible class as, mitigated by the rollback copy): this
     still can't separate a legit statement that *mimics* a loader token (a real DEL-char char-code
     handler, a function carrying the worm's decoder name) or minified legit code that reads as a
     base64 run, from the worm's own connective code — no byte rule can, on a shared line. It
@@ -134,7 +134,7 @@ def _concealment_seam(line: str, content_sig) -> str | None:
         as if it were payload (adversarial catch — the exec-sink gate dropped real code).
     The residual (same irreducible class as/): a genuinely packed suffix that carries an
     actual worm literal yet is legit minified code would be excised — bounded by the caller's
-    `analyze_file` 'result is normal, not packed' gate, the re-scan-to-confirm, and the quarantine."""
+    `analyze_file` 'result is normal, not packed' gate, the re-scan-to-confirm, and the rollback copy."""
     n, i = len(line), 0
     while i < n:
         if not _is_concealment(line[i]):
@@ -279,7 +279,7 @@ def _seam_strip(work: str, ext: str, content_sig) -> str | None:
     (`_worm_shim_block` + `_shim_is_dead`) — a semantic no-op that restores the original byte-for-
     byte; a shim a config actually uses is kept. Deterministic, so apply_recovery re-proves the
     excision by simply re-running this on the on-disk file and requiring the same result; the
-    original is quarantined first, so a mis-cut is recoverable."""
+    original is copied to the rollback store first, so a mis-cut is recoverable."""
     changed = False
     out: list[str] = []
     for raw in work.splitlines(keepends=True):
@@ -308,7 +308,7 @@ def _seam_strip(work: str, ext: str, content_sig) -> str | None:
         # obfuscated forms (split-token via concat-fold, `(0, eval)(`, light alias /
         # runtime-key). It STILL can't see a renamed binding whose RHS is itself computed,
         # a bare dangerous require whose exec is built at runtime past that window, or every
-        # here; the PR this fix lands in is human-reviewed, and the original is quarantined.
+        # here; the PR this fix lands in is human-reviewed, and the original is kept for rollback.
         return None
     if analyze_file(stripped, ext):        # result still looks packed → not a clean hand-authored file
         return None

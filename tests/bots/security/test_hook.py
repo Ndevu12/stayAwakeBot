@@ -320,7 +320,7 @@ class TestRunEventScope(_Isolated):
         self.assertEqual(hook._load_cache(), {os.path.realpath(repo): "fresh"})
 
 
-def _quarantined(home: Path) -> list[Path]:
+def _set_aside(home: Path) -> list[Path]:
     root = home / ".local" / "state" / "saw" / "quarantine" / "hooks"
     return sorted(root.iterdir()) if root.is_dir() else []
 
@@ -351,14 +351,14 @@ class TestSawsDirectoryIsSawsAlone(_Isolated):
         self.assertEqual(sorted(p.name for p in managed.iterdir()), sorted(hook._HOOKS))
         for event in hook._HOOKS:
             self.assertEqual(hook.hookscript.verdict(managed / event), hook.hookscript.PRISTINE)
-        kept = _quarantined(self.home)
+        kept = _set_aside(self.home)
         self.assertEqual(len(kept), 3, kept)
         by_name = {f.name.split("-", 1)[1]: f for f in kept}
         self.assertIn("curl -s http://127.0.0.1:9/p | sh", (by_name["post-checkout"] / "kept" / "post-checkout").read_text())
         record = json.loads((by_name["post-checkout"] / "origin.json").read_text())
         self.assertEqual(record["path"], str(planted))
         self.assertTrue(record["sha256"].startswith(hook.hookscript.digest_file(by_name["post-checkout"] / "kept" / "post-checkout")[:64]))
-        self.assertIn("quarantined", text)
+        self.assertIn("set aside", text)
         self.assertIn(str(planted), text)
 
     def test_an_altered_saw_hook_is_repaired_and_its_content_kept(self):
@@ -369,7 +369,7 @@ class TestSawsDirectoryIsSawsAlone(_Isolated):
         code, text = self._quiet(hook.install)
         self.assertEqual(code, 0, text)
         self.assertEqual(hook.hookscript.verdict(managed / "post-merge"), hook.hookscript.PRISTINE)
-        (kept,) = _quarantined(self.home)
+        (kept,) = _set_aside(self.home)
         self.assertEqual((kept / "kept" / "post-merge").read_text(), altered)
         self.assertIn("repaired", text)
 
@@ -382,13 +382,13 @@ class TestSawsDirectoryIsSawsAlone(_Isolated):
         hook.gitutil.run_ok(None, ["config", "--global", "init.templateDir", str(user_tpl)])
         self.assertEqual(self._quiet(hook.install)[0], 0)
         self.assertIn("echo theirs", (user_tpl / "hooks" / "post-checkout.local").read_text())
-        self.assertEqual(_quarantined(self.home), [])
+        self.assertEqual(_set_aside(self.home), [])
         ours = user_tpl / "hooks" / "post-merge"
         ours.write_text(ours.read_text().replace("exit 0\n", "/tmp/.x/stage\nexit 0\n"))
         code, text = self._quiet(hook.install)
         self.assertEqual(code, 0, text)
         self.assertEqual(hook.hookscript.verdict(ours), hook.hookscript.PRISTINE)
-        self.assertEqual(len(_quarantined(self.home)), 1)
+        self.assertEqual(len(_set_aside(self.home)), 1)
         self.assertIn("echo theirs", (user_tpl / "hooks" / "post-checkout.local").read_text())
 
     def test_pointing_the_hooks_path_at_saws_directory_does_not_make_a_stranger_there_yours(self):
@@ -400,7 +400,7 @@ class TestSawsDirectoryIsSawsAlone(_Isolated):
         hook.gitutil.run_ok(None, ["config", "--global", "core.hooksPath", str(managed)])
         self.assertEqual(self._quiet(hook.install)[0], 0)
         self.assertFalse(planted.exists())
-        self.assertEqual(len(_quarantined(self.home)), 1)
+        self.assertEqual(len(_set_aside(self.home)), 1)
         self.assertEqual(hook.hookscript.altered_hooks(), [])
         planted.write_text("#!/bin/sh\n/tmp/.x/stage\n")
         self.assertEqual(hook.hookscript.altered_hooks(), [planted])
@@ -432,10 +432,10 @@ class TestSawsDirectoryIsSawsAlone(_Isolated):
         code, text = self._quiet(hook.uninstall)
         self.assertEqual(code, 0, text)
         self.assertEqual(list(managed.iterdir()), [])
-        kept = _quarantined(self.home)
+        kept = _set_aside(self.home)
         self.assertEqual(sorted(Path(json.loads((f / "origin.json").read_text())["path"]).name for f in kept),
                          ["post-checkout.local", "post-merge"])
-        self.assertIn("quarantined", text)
+        self.assertIn("set aside", text)
 
     def test_a_link_in_saws_directory_is_moved_aside_even_when_it_points_at_a_hook_saw_installs(self):
         managed = self._managed()
@@ -449,7 +449,7 @@ class TestSawsDirectoryIsSawsAlone(_Isolated):
         self.assertEqual(code, 0, text)
         self.assertFalse((managed / "post-checkout").is_symlink())
         self.assertEqual(hook.hookscript.verdict(managed / "post-checkout"), hook.hookscript.PRISTINE)
-        (kept,) = _quarantined(self.home)
+        (kept,) = _set_aside(self.home)
         self.assertTrue((kept / "kept" / "post-checkout").is_symlink())
         self.assertTrue(elsewhere.exists())
 
@@ -495,7 +495,7 @@ class TestRepair(_Isolated):
         code, text = self._quiet(hook.repair)
         self.assertEqual(code, 0)
         self.assertIn("nothing to repair", text)
-        self.assertEqual(_quarantined(self.home), [])
+        self.assertEqual(_set_aside(self.home), [])
 
     def test_repair_puts_back_the_hooks_in_every_seeded_repository_and_leaves_their_own(self):
         cfg = self.home / "security.yml"
@@ -525,19 +525,19 @@ class TestRepair(_Isolated):
         self.assertEqual(chained.read_text(), "#!/bin/sh\necho after\n")
         self.assertEqual(hook.hookscript.verdict(managed / "post-rewrite", (hook._saw_executable(), str(cfg))),
                          hook.hookscript.PRISTINE)
-        self.assertEqual(len(_quarantined(self.home)), 3)
+        self.assertEqual(len(_set_aside(self.home)), 3)
         self.assertIn(f"repaired: {altered}", text)
         self.assertIn(f"updated: {hooks / 'post-merge'}", text)
         self.assertIn(hook._saw_executable(), (hooks / "post-merge").read_text())
         self.assertIn(f"left: {theirs}", text)
         self.assertIn(f"chained: {chained}", text)
-        self.assertIn(f"quarantined: {managed / 'post-rewrite'}", text)
+        self.assertIn(f"set aside: {managed / 'post-rewrite'}", text)
 
         code, text = self._quiet(hook.repair)
         self.assertEqual(code, 0, text)
-        self.assertEqual(len(_quarantined(self.home)), 3)
+        self.assertEqual(len(_set_aside(self.home)), 3)
         self.assertNotIn("repaired:", text)
-        self.assertNotIn("quarantined:", text)
+        self.assertNotIn("set aside:", text)
         self.assertNotIn("updated:", text)
 
     def test_a_repository_git_cannot_answer_for_withholds_the_all_clear(self):
@@ -561,8 +561,8 @@ class TestRepair(_Isolated):
         (managed / "post-merge").write_text("#!/bin/sh\n/tmp/.x/stage\n")
         code, text = self._quiet(hook.repair)
         self.assertEqual(code, 0, text)
-        self.assertEqual(text.count("quarantined:"), 1)
-        self.assertEqual(len(_quarantined(self.home)), 1)
+        self.assertEqual(text.count("set aside:"), 1)
+        self.assertEqual(len(_set_aside(self.home)), 1)
         self.assertEqual(text.count(str(managed / "post-checkout")), 1, text)
 
 
@@ -633,7 +633,7 @@ class TestRepairLeavesWhatIsNotSaws(_Isolated):
         self.assertNotIn("\n  in place: forged", text)
         self.assertNotIn("\x1b", text)
         self.assertNotIn("payload", text)
-        (kept,) = _quarantined(self.home)
+        (kept,) = _set_aside(self.home)
         self.assertNotIn("\n", kept.name)
         self.assertNotIn("\x1b", kept.name)
         self.assertEqual(json.loads((kept / "origin.json").read_text())["path"], str(forged))
@@ -689,7 +689,7 @@ class TestNothingIsWrittenWhereItShouldNotBe(_Isolated):
         for event in hook._HOOKS:
             self.assertFalse((managed / event).is_symlink())
         self.assertEqual(sorted(p.name for p in managed.iterdir()), sorted(hook._HOOKS))
-        self.assertEqual(len(_quarantined(self.home)), 2)
+        self.assertEqual(len(_set_aside(self.home)), 2)
         user_tpl = self.home / "my-template"
         (user_tpl / "hooks").mkdir(parents=True)
         os.symlink(victim, user_tpl / "hooks" / "post-merge.saw-tmp")
@@ -725,7 +725,7 @@ class TestNothingIsWrittenWhereItShouldNotBe(_Isolated):
             self.assertEqual(hook.hookscript.verdict(repo / ".git" / "hooks" / event, (hook._saw_executable(), None)),
                              hook.hookscript.PRISTINE)
         self.assertIn(f"restored: {repo / '.git' / 'hooks' / 'post-checkout'}", text)
-        self.assertEqual(_quarantined(self.home), [])
+        self.assertEqual(_set_aside(self.home), [])
 
     def test_uninstall_never_lets_a_chained_hook_overwrite_one_it_could_not_move_aside(self):
         user_tpl = self.home / "my-template"
@@ -737,7 +737,7 @@ class TestNothingIsWrittenWhereItShouldNotBe(_Isolated):
         self.assertEqual(self._quiet(hook.install)[0], 0)
         altered = theirs.read_text().replace("exit 0\n", "/tmp/.x/stage\nexit 0\n")
         theirs.write_text(altered)
-        root = hook.hookscript.quarantine_dir()
+        root = hook.hookscript.set_aside_dir()
         root.parent.mkdir(parents=True)
         root.write_text("not a directory\n")
         code, text = self._quiet(hook.uninstall)
@@ -767,7 +767,7 @@ class TestNothingIsWrittenWhereItShouldNotBe(_Isolated):
         self.assertIn("could not verify", text)
         self.assertEqual((elsewhere / "thesis.txt").read_text(), "years\n")
         self.assertEqual(sorted(p.name for p in elsewhere.iterdir()), ["thesis.txt"])
-        self.assertEqual(_quarantined(self.home), [])
+        self.assertEqual(_set_aside(self.home), [])
 
     def test_a_linked_hook_of_the_operators_is_chained_without_touching_its_target(self):
         user_tpl = self.home / "my-template"
@@ -901,7 +901,7 @@ class TestRepairPutsBackOnlyWhatSawSeeded(_Isolated):
             code, text = self._quiet(hook.repair)
         self.assertEqual(code, 0, text)
         self.assertNotIn("updated:", text)
-        self.assertEqual(_quarantined(self.home), [])
+        self.assertEqual(_set_aside(self.home), [])
         self.assertEqual(hook.hookscript.installed(), recorded)
         gone = self.home / "gone" / "saw"
         hook.hookscript.declaration_path().write_text(json.dumps({"saw": str(gone), "config": None}))
@@ -986,7 +986,7 @@ class TestTheRecordIsTheOnlyAuthority(_Isolated):
         self.assertNotIn("Post-Checkout", os.listdir(managed))
         self.assertEqual(hook.hookscript.verdict(managed / "post-checkout", hook.hookscript.installed()),
                          hook.hookscript.PRISTINE)
-        self.assertEqual(len(_quarantined(self.home)), 1)
+        self.assertEqual(len(_set_aside(self.home)), 1)
 
     def test_a_hook_of_saws_own_that_is_gone_is_reported(self):
         self.assertEqual(self._quiet(hook.install)[0], 0)
@@ -1025,7 +1025,7 @@ class TestTheRecordIsTheOnlyAuthority(_Isolated):
         self.assertFalse(os.path.lexists(user_tpl / "hooks" / "post-merge.local"))
         self.assertEqual(hook.hookscript.verdict(user_tpl / "hooks" / "post-merge", hook.hookscript.installed()),
                          hook.hookscript.PRISTINE)
-        (kept,) = _quarantined(self.home)
+        (kept,) = _set_aside(self.home)
         self.assertTrue((kept / "kept" / "post-merge").is_symlink())
 
     def test_repair_settles_the_template_directory_the_record_names_and_no_other(self):
@@ -1066,7 +1066,7 @@ class TestTheRecordIsTheOnlyAuthority(_Isolated):
         code, text = self._quiet(hook.install)
         self.assertEqual(code, 0, text)
         self.assertFalse(planted.exists())
-        self.assertIn(f"quarantined: {planted}", text)
+        self.assertIn(f"set aside: {planted}", text)
 
     def test_uninstall_keeps_a_stale_hook_aside(self):
         self.assertEqual(self._quiet(hook.install)[0], 0)
@@ -1074,7 +1074,7 @@ class TestTheRecordIsTheOnlyAuthority(_Isolated):
         stale.write_text(hook.hookscript.render("post-merge", str(self.home / "evil" / "saw"), None))
         code, text = self._quiet(hook.uninstall)
         self.assertEqual(code, 0, text)
-        (kept,) = _quarantined(self.home)
+        (kept,) = _set_aside(self.home)
         self.assertIn(str(self.home / "evil" / "saw"), (kept / "kept" / "post-merge").read_text())
 
     def test_a_record_that_is_a_link_or_relative_is_refused(self):
@@ -1117,7 +1117,7 @@ class TestTheRecordIsTheOnlyAuthority(_Isolated):
 
     def test_what_saw_keeps_for_itself_is_never_a_hooks_directory(self):
         self.assertEqual(self._quiet(hook.install)[0], 0)
-        for kept in (hook.hookscript.quarantine_dir(), hook.hookscript.quarantine_dir() / "x"):
+        for kept in (hook.hookscript.set_aside_dir(), hook.hookscript.set_aside_dir() / "x"):
             kept.mkdir(parents=True, exist_ok=True)
             self.assertEqual(hook._repair_repository(kept, hook._saw_executable(), None)[0].state, hook.UNVERIFIED)
             self.assertEqual(hook._settle(kept, hook._saw_executable(), None, own=False)[0].state, hook.UNVERIFIED)
@@ -1147,7 +1147,7 @@ class TestTheRecordIsTheOnlyAuthority(_Isolated):
         self.assertEqual(code, 0, text)
         self.assertFalse((managed / "post-checkout.local").exists())
         self.assertEqual(hook._template_dirs()[1:], [])
-        self.assertEqual(len(_quarantined(self.home)), 1)
+        self.assertEqual(len(_set_aside(self.home)), 1)
 
     def test_a_relative_template_path_is_refused_before_anything_is_written(self):
         hook.gitutil.run_ok(None, ["config", "--global", "init.templateDir", "my-template"])
@@ -1159,12 +1159,12 @@ class TestTheRecordIsTheOnlyAuthority(_Isolated):
         self.assertFalse((Path.cwd() / "my-template").exists())
 
 
-class TestQuarantine(_Isolated):
+class TestSetAside(_Isolated):
     def test_a_dangling_link_is_moved_and_counted_as_moved(self):
         link = self.home / "hooks" / "post-checkout"
         link.parent.mkdir()
         os.symlink(self.home / "nowhere", link)
-        folder = hook.hookscript.quarantine(link)
+        folder = hook.hookscript.set_aside(link)
         self.assertIsNotNone(folder)
         self.assertFalse(os.path.lexists(link))
         self.assertTrue((folder / "kept" / "post-checkout").is_symlink())
@@ -1173,7 +1173,7 @@ class TestQuarantine(_Isolated):
         planted = self.home / "hooks" / "origin.json"
         planted.parent.mkdir()
         planted.write_text('{"planted": true}\n')
-        folder = hook.hookscript.quarantine(planted)
+        folder = hook.hookscript.set_aside(planted)
         self.assertEqual((folder / "kept" / "origin.json").read_text(), '{"planted": true}\n')
         self.assertEqual(json.loads((folder / "origin.json").read_text())["path"], str(planted))
 
@@ -1182,7 +1182,7 @@ class TestQuarantine(_Isolated):
         victim.parent.mkdir()
         victim.write_bytes(b"#!/bin/sh\n\x00payload\n")
         os.chmod(victim, 0o755)
-        folder = hook.hookscript.quarantine(victim)
+        folder = hook.hookscript.set_aside(victim)
         self.assertIsNotNone(folder)
         self.assertFalse(victim.exists())
         self.assertEqual((folder / "kept" / "pre-push").read_bytes(), b"#!/bin/sh\n\x00payload\n")
@@ -1198,25 +1198,25 @@ class TestQuarantine(_Isolated):
         link = self.home / "hooks" / "lib.sh"
         link.parent.mkdir()
         os.symlink(target, link)
-        folder = hook.hookscript.quarantine(link)
+        folder = hook.hookscript.set_aside(link)
         self.assertTrue((folder / "kept" / "lib.sh").is_symlink())
         self.assertTrue(target.exists())
         self.assertEqual(json.loads((folder / "origin.json").read_text())["symlink_target"], str(target))
         nested = self.home / "hooks" / "lib"
         (nested / "deep").mkdir(parents=True)
         (nested / "deep" / "x.sh").write_text("x\n")
-        folder = hook.hookscript.quarantine(nested)
+        folder = hook.hookscript.set_aside(nested)
         self.assertFalse(nested.exists())
         self.assertEqual((folder / "kept" / "lib" / "deep" / "x.sh").read_text(), "x\n")
 
-    def test_a_quarantine_that_cannot_hold_the_file_leaves_it_where_it_is(self):
+    def test_a_store_that_cannot_hold_the_file_leaves_it_where_it_is(self):
         victim = self.home / "hooks" / "pre-push"
         victim.parent.mkdir()
         victim.write_text("x\n")
-        root = hook.hookscript.quarantine_dir()
+        root = hook.hookscript.set_aside_dir()
         root.parent.mkdir(parents=True)
         os.symlink(self.home / "hooks", root)
-        self.assertIsNone(hook.hookscript.quarantine(victim))
+        self.assertIsNone(hook.hookscript.set_aside(victim))
         self.assertEqual(victim.read_text(), "x\n")
 
     def test_two_files_of_one_name_moved_in_one_second_are_both_kept(self):
@@ -1225,8 +1225,8 @@ class TestQuarantine(_Isolated):
         for p, body in ((a, "a\n"), (b, "b\n")):
             p.parent.mkdir()
             p.write_text(body)
-        fa = hook.hookscript.quarantine(a)
-        fb = hook.hookscript.quarantine(b)
+        fa = hook.hookscript.set_aside(a)
+        fb = hook.hookscript.set_aside(b)
         self.assertNotEqual(fa, fb)
         self.assertEqual({(fa / "kept" / "post-merge").read_text(), (fb / "kept" / "post-merge").read_text()}, {"a\n", "b\n"})
 

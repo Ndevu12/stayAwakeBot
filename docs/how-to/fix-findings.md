@@ -23,7 +23,7 @@ Re-running updates the same PR rather than opening another.
 ## What gets fixed, and what does not
 
 A payload is restored from git history — the real previous content, not a reconstruction — or the
-file is quarantined whole. `saw` never surgically edits a source file, so a fix cannot corrupt valid
+file is removed whole. `saw` never surgically edits a source file, so a fix cannot corrupt valid
 code. Where a clean version cannot be proven safe to restore, the finding is **deferred to review**
 with the exact reason and the command to inspect it. When a merge finding is still live in the
 working tree, those files are restored on the review branch; the merge commit itself is left in

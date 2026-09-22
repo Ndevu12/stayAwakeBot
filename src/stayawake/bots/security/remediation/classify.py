@@ -53,7 +53,7 @@ class Suggested:
     infected / was legitimately edited since infection, so no whole-file trusted version exists).
 
     That missing corroboration is the ONE thing the git-match adds over the five gates, and it is
-    exactly what a human reviewer + the quarantine backup close (see `_seam_strip`'s own note). So a
+    exactly what a human reviewer + the rollback copy close (see `_seam_strip`'s own note). So a
     Suggested is NOT trusted like a `Recovery`: it is still applied — `apply_suggested` writes the
     strip — but ONLY into the review branch as a SEPARATE, clearly-labeled commit that the operator
     must eyeball before merging (never auto-merged, and the run stays needs-review until they do).
@@ -92,7 +92,7 @@ def _merge_recovery(work, content_sig, merge_clean, path, sig, line):
     action = ("saw recovered this file to the clean version a proper 3-way merge would have produced — "
               "the evil merge introduced the payload beyond it. It derives from the merge's OTHER parent, "
               "not the first-parent history chain, so it is offered for REVIEW, not auto-applied: verify "
-              "the restored content before merging; the original is quarantined.")
+              "the restored content before merging; the original is kept for rollback.")
     return Suggested(path, sig, MERGE_CLEAN_RECOVERED, action,
                      _recovery_diff(work, merge_clean, content_sig), merge_clean, line, apply_mode="restore")
 
@@ -122,7 +122,7 @@ def _build_suggested(work, excised, content_sig, path, sig, reason, line) -> "Su
               "concealment-seam payload and keeps every other byte, and the kept code carries no "
               "payload or detectable exec sink. It is NOT git-corroborated (no clean committed "
               "version to compare against), so review that the kept code is untampered before "
-              "merging — the original is quarantined and this change is not auto-merged.")
+              "merging — the original is kept for rollback and this change is not auto-merged.")
     return Suggested(path, sig, reason, action, _recovery_diff(work, excised, content_sig), excised, line)
 
 
@@ -189,7 +189,7 @@ def classify_recovery(repo, finding, content_sig, merge_clean: str | None = None
                 return _try_suggest(work, ext, content_sig, Manual(
                     path, sig, BORN_INFECTED,
                     "No clean version in git history and the content is packed/obfuscated "
-                    "— likely born infected. Review and, if confirmed, remove/quarantine it.", line))
+                    "— likely born infected. Review and, if confirmed, remove it.", line))
             return Manual(path, sig, INTRINSIC_MATCH,
                           "No clean version in history, but it is a plain literal — likely intentional "
                           f"(test/research data). If so, allowlist `{sig}` for `{path}`.", line)

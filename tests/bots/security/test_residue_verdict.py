@@ -10,7 +10,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from stayawake.bots.security.models import (CLEAN, CONFIRMED, HEURISTIC, INFECTED, QUARANTINE_DIR,
+from stayawake.bots.security.models import (CLEAN, CONFIRMED, HEURISTIC, INFECTED, ROLLBACK_DIR,
                                             RESIDUE, RESIDUE_VERDICT, SUSPICIOUS, CONFIDENCE_LEVELS,
                                             Finding, ScanReport, ScanResult, Severity)
 from stayawake.bots.security.scanner import scan_target
@@ -55,7 +55,7 @@ class TestTheVerdictHasAFourthState(unittest.TestCase):
 
 
 class TestACleanupThatDidNotFinishIsNotClean(unittest.TestCase):
-    """The quarantine holds the original of every file a fix rewrote. A quarantined copy identical
+    """The rollback store holds the original of every file a fix rewrote. A copy identical
     to the live file means the backup happened and the rewrite did not."""
 
     def _tree(self) -> Path:
@@ -64,8 +64,8 @@ class TestACleanupThatDidNotFinishIsNotClean(unittest.TestCase):
         (root / "index.js").write_text("module.exports = 1;\n", encoding="utf-8")
         return root
 
-    def _quarantine(self, root: Path, relative: str, body: str) -> Path:
-        backup = root / QUARANTINE_DIR / relative
+    def _rollback_copy(self, root: Path, relative: str, body: str) -> Path:
+        backup = root / ROLLBACK_DIR / relative
         backup.parent.mkdir(parents=True, exist_ok=True)
         backup.write_text(body, encoding="utf-8")
         return backup
@@ -80,31 +80,31 @@ class TestACleanupThatDidNotFinishIsNotClean(unittest.TestCase):
         # The whole point: a successful fix backs the original up and rewrites the file, so the two
         # differ. Reporting every remediated repository as residue would be noise, not honesty.
         root = self._tree()
-        self._quarantine(root, "index.js", "module.exports = 1; // the original\n")
+        self._rollback_copy(root, "index.js", "module.exports = 1; // the original\n")
         self.assertEqual(self._scan(root).verdict, CLEAN)
 
     def test_a_backup_taken_with_no_rewrite_after_it_is_residue(self):
         root = self._tree()
-        self._quarantine(root, "index.js", (root / "index.js").read_text(encoding="utf-8"))
+        self._rollback_copy(root, "index.js", (root / "index.js").read_text(encoding="utf-8"))
         result = self._scan(root)
         self.assertEqual(result.verdict, RESIDUE_VERDICT)
         self.assertEqual([f.signature_id for f in result.findings], ["cleanup-residue"])
         self.assertIn("index.js", result.findings[0].description)
 
-    def test_a_quarantined_file_the_cleanup_removed_entirely_is_not_residue(self):
-        # Quarantine-and-delete is a complete remediation; there is no live file to compare.
+    def test_a_stored_file_the_cleanup_removed_entirely_is_not_residue(self):
+        # Copy-and-delete is a complete remediation; there is no live file to compare.
         root = self._tree()
-        self._quarantine(root, "dropped.js", "payload\n")
+        self._rollback_copy(root, "dropped.js", "payload\n")
         self.assertEqual(self._scan(root).verdict, CLEAN)
 
-    def test_an_empty_quarantine_directory_is_not_a_finding(self):
+    def test_an_empty_set_aside_directory_is_not_a_finding(self):
         root = self._tree()
-        (root / QUARANTINE_DIR).mkdir()
+        (root / ROLLBACK_DIR).mkdir()
         self.assertEqual(self._scan(root).verdict, CLEAN)
 
     def test_the_finding_says_what_it_is_rather_than_accusing(self):
         root = self._tree()
-        self._quarantine(root, "index.js", (root / "index.js").read_text(encoding="utf-8"))
+        self._rollback_copy(root, "index.js", (root / "index.js").read_text(encoding="utf-8"))
         finding = self._scan(root).findings[0]
         self.assertIn("Nothing new executes", finding.description)
         self.assertEqual(finding.severity, Severity.LOW)

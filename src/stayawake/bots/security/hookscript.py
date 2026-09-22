@@ -268,19 +268,19 @@ def verdict(path: Path, expected: tuple[str, str | None] | None = None) -> str:
     return ALTERED if claims_ours(text) else FOREIGN
 
 
-def quarantine_dir() -> Path:
+def set_aside_dir() -> Path:
     """Return the directory saw keeps what it removed from a hooks directory."""
     return Path(env.xdg_state_home()) / "saw" / "quarantine" / "hooks"
 
 
-def quarantine(path: Path) -> Path | None:
-    """Move `path`, a file or directory, whole into a fresh folder under `quarantine_dir()` beside a
+def set_aside(path: Path) -> Path | None:
+    """Move `path`, a file or directory, whole into a fresh folder under `set_aside_dir()` beside a
     record of where it came from; return that folder, or None if it could not be moved."""
     try:
         stat = path.lstat()
         digest = digest_file(path) if path.is_file() and not path.is_symlink() else None
         stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%S")
-        root = quarantine_dir()
+        root = set_aside_dir()
         root.mkdir(parents=True, exist_ok=True)
         if root.is_symlink() or not root.is_dir():
             return None

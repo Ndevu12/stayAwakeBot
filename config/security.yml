@@ -1,33 +1,19 @@
 # StayAwakeBot — Security sentinel configuration.
 #
-# Controls WHAT gets scanned and HOW the security subtask behaves. The signature
-# database (the WHAT-to-detect) ships inside the package; override it only if you
-# need a custom DB via `signatures_path` below.
+# Controls what gets scanned and how the security subtask behaves. The signature database ships
+# inside the package; override it only with `signatures_path` below.
+#
+# Reference for every key: https://saw-docs.ndevuspace.com/reference/configuration/
 
 settings:
-  # Directories never traversed during scanning. This list is shared with the CI worm-guard /
-  # release gates (they scan with `-c` this file), so every name here is a spot a committed payload
-  # could hide from the gate — keep it MINIMAL and payload-safe:
-  #   * self-output ".malware-quarantine" — holds removed payload lines verbatim, so scanning it
-  #     self-triggers. ("reports"/"sab-patches" are NO LONGER excluded (#1143): no reports are
-  #     committed, and report/patch evidence is REDACTED (sha256 + short preview), so they don't
-  #     self-trigger — excluding those common names globally was just a hiding spot in a target repo.)
-  #   * non-source vendored/build dirs (node_modules, dist, build, .next) — never committed source.
-  #   * ".venv" — the conventional local virtualenv. NOT bare "venv": that name is a plausible place
-  #     to smuggle a committed payload past the gate, and dropping it costs only a little local-scan
-  #     noise, so the gate errs toward scanning it.
+  # Directories never traversed during scanning. Keep this list minimal.
   exclude_dirs: [".git", "node_modules", ".next", "dist", "build", ".malware-quarantine", ".venv"]
   # Max file size (bytes) to read for content matching. Source files larger than this
   # are still scanned head+tail; only non-source assets are skipped.
   max_file_bytes: 2000000
-  # Shallow-clone depth for remote targets (history matchers need a few commits).
+  # Shallow-clone depth for remote targets.
   remote_clone_depth: 50
-  # Opt-in: also scan build outputs (default false). When true, the project build-output dirs
-  # (dist/build/out/.next) are un-pruned AND the obfuscation matcher runs its self-evident construct
-  # checks (charcode array / exec sink / base64 / escape run) on generated/minified paths — NOT the
-  # whole-file density heuristic (density is expected in bundles) — emitting a `heuristic`
-  # (SUSPICIOUS) `obfuscated-build-artifact`, never `confirmed`. Noisier by design; provenance is
-  # never a trust signal.
+  # Opt-in: also scan build outputs (default false). Noisier by design.
   # scan_build_outputs: false
   # Optional: where the report bundle is written. Setting this IS the opt-in (no -d needed);
   # `-d DIR` overrides it for one run, as does STAYAWAKE_REPORTS_DIR. Unset by all three, a
@@ -48,67 +34,46 @@ targets:
     include_forks: false
     include_archived: false
 
-# Findings to ignore (tune false positives). Each rule MUST name a `signature`
-# (optionally scoped by `path_glob`); a bare `path_glob` is ignored so it can never
-# blanket-suppress a fresh payload dropped on that path.
+# Findings to ignore. Each rule MUST name a `signature`, optionally scoped by `path_glob`;
+# a bare `path_glob` is ignored.
 #
-# These rules allow THIS repo's own intentional test material: the deliberately-infected
-# fixtures and the test files that assert on inert IoC literals. Each is signature-scoped to
-# `tests/**`, so a *real* payload dropped under tests/ that matches any OTHER signature is still
-# reported — and `saw scan --fix` no longer quarantines the security suite's own fixtures.
+# The rules below cover this repository's own test material and are scoped to it.
 allowlist:
-  # Camouflage / fake-font fixtures (tests/.../fixtures/infected/public/fonts/)
   - {signature: fake-font-fa-solid-400, path_glob: "tests/**"}
   - {signature: fake-font-text-woff, path_glob: "tests/**"}
   - {signature: camouflage-blockchain-readme, path_glob: "tests/**"}
-  # VS Code auto-run + .gitignore autopush fixtures
   - {signature: vscode-allow-automatic-tasks, path_glob: "tests/**"}
   - {signature: vscode-task-folderopen-exec, path_glob: "tests/**"}
   - {signature: vscode-task-runs-font, path_glob: "tests/**"}
   - {signature: gitignore-autopush-markers, path_glob: "tests/**"}
-  # Code-loader IoC literals in the infected fixture + detector test files
   - {signature: loader-seed-var, path_glob: "tests/**"}
   - {signature: loader-decoder-fn, path_glob: "tests/**"}
   - {signature: loader-global-v-marker, path_glob: "tests/**"}
   - {signature: loader-fromcharcode-127, path_glob: "tests/**"}
   - {signature: loader-global-bang, path_glob: "tests/**"}
   - {signature: loader-require-hijack, path_glob: "tests/**"}
-  # Heuristic shapes of the same packed fixture (postcss.config.mjs)
   - {signature: obfuscated-source-file, path_glob: "tests/**"}
   - {signature: oversized-config-line, path_glob: "tests/**"}
-  # destructive-intent detector — the detector's OWN source (taint/destructive.py) and its test
-  # fixtures legitimately contain the wipe patterns it matches (regexes, taxonomy, comments), exactly
-  # like exfil-shai-hulud-token@src/** above. Self-scoped; a user scanning their repo uses their own
-  # config, so their code is still scanned. #1334
   - {signature: destructive-home-wipe, path_glob: "src/**"}
   - {signature: destructive-home-wipe, path_glob: "tests/**"}
   - {signature: secure-home-wipe, path_glob: "src/**"}
   - {signature: secure-home-wipe, path_glob: "tests/**"}
-  # Exfil-branding signatures — this repo is a scanner, so its signature DB names the worm's own
-  # IoC phrases and its threat-intel prose legitimately references them. Suppress ONLY this repo's
-  # own mentions (self-scoped). The runner signature is file_globs-scoped, so it needs no rule.
-  - {signature: exfil-shai-hulud-branding, path_glob: "**/signatures.yml"}  # the DB names its own IoC phrase
-  - {signature: exfil-shai-hulud-branding, path_glob: "tests/**"}           # detector test literals
-  - {signature: exfil-shai-hulud-branding, path_glob: "CHANGELOG.md"}       # changelog documents the exact IoC
-  - {signature: exfil-shai-hulud-token, path_glob: "src/**"}                # obfuscation.py / hygiene.py / DB
-  - {signature: exfil-shai-hulud-token, path_glob: "docs/**"}               # security docs
-  - {signature: exfil-shai-hulud-token, path_glob: "CHANGELOG.md"}          # changelog
-  - {signature: exfil-shai-hulud-token, path_glob: "README.md"}             # README documents the worm it detects
-  - {signature: exfil-shai-hulud-token, path_glob: "tests/**"}              # detector test literals
-  - {signature: exfil-shai-hulud-token, path_glob: "config/**"}             # these allowlist rules name the sig IDs
-  - {signature: exfil-shai-hulud-token, path_glob: ".claude/**"}            # Claude Code permission rules quote this repo's own "Shai-Hulud" commit messages
-  # npm lifecycle-hook fixtures (tests/.../fixtures/infected/package.json)
+  - {signature: exfil-shai-hulud-branding, path_glob: "**/signatures.yml"}
+  - {signature: exfil-shai-hulud-branding, path_glob: "tests/**"}
+  - {signature: exfil-shai-hulud-branding, path_glob: "CHANGELOG.md"}
+  - {signature: exfil-shai-hulud-token, path_glob: "src/**"}
+  - {signature: exfil-shai-hulud-token, path_glob: "docs/**"}
+  - {signature: exfil-shai-hulud-token, path_glob: "CHANGELOG.md"}
+  - {signature: exfil-shai-hulud-token, path_glob: "README.md"}
+  - {signature: exfil-shai-hulud-token, path_glob: "tests/**"}
+  - {signature: exfil-shai-hulud-token, path_glob: "config/**"}
+  - {signature: exfil-shai-hulud-token, path_glob: ".claude/**"}
   - {signature: npm-lifecycle-dropper, path_glob: "tests/**"}
   - {signature: npm-lifecycle-remote-fetch, path_glob: "tests/**"}
   - {signature: npm-lifecycle-exec, path_glob: "tests/**"}
-  # Capability-graded loader signature: matches this repo's own infected corpus and the
-  # loader tests that quote payload shapes.
   - {signature: loader-require-escapes-esm, path_glob: "tests/**"}
-  # Claude Code agent-autorun fixtures (tests/.../fixtures/{infected,clean}/.claude/settings.json)
   - {signature: claude-hook-autorun, path_glob: "tests/**"}
   - {signature: claude-hook-runs-payload, path_glob: "tests/**"}
-  # Whitespace-concealment fixture — the infected postcss.config.mjs buries its payload behind a
-  # long space run (and dedicated test fixtures do the same).
   - {signature: whitespace-concealment, path_glob: "tests/**"}
 
 # Alerting. Channels read their secrets from env (SLACK_WEBHOOK_URL, GH_SECURITY_TOKEN).

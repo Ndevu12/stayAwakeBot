@@ -13,7 +13,7 @@ from stayawake.utils import scratch
 from stayawake.utils.streaming import status
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.targets import LocalRepoTarget
-from stayawake.bots.security.models import QUARANTINE_DIR, CONFIRMED, HEURISTIC
+from stayawake.bots.security.models import ROLLBACK_DIR, CONFIRMED, HEURISTIC
 from stayawake.bots.security import remediation
 from stayawake.bots.security.remediation import installed
 from stayawake.core import proposal
@@ -129,10 +129,10 @@ def _related_all_gone(repo: Path | None, sha: str | None, paths) -> bool:
     return all(introduced_liveness(repo, sha, p) == GONE for p in paths)
 
 
-def _untrack_quarantine(repo: Path) -> bool:
-    """Untrack the quarantine directory. True if nothing under it is tracked after."""
-    gitutil.unstage_cached(repo, QUARANTINE_DIR)
-    return not gitutil.tracked_under(repo, QUARANTINE_DIR)
+def _untrack_rollback(repo: Path) -> bool:
+    """Untrack the rollback store. True if nothing under it is tracked after."""
+    gitutil.unstage_cached(repo, ROLLBACK_DIR)
+    return not gitutil.tracked_under(repo, ROLLBACK_DIR)
 
 
 def _manual_for(f0, path: str, repo: Path | None = None) -> "remediation.Manual":
@@ -298,10 +298,10 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
             if not rescan.error:
                 auto = [f for f in _blocking(_freeze(rescan.findings)) if remediation.is_auto_fixable(f)]
             if auto:
-                applied += remediation.quarantine_residual(wt, auto, rollback)
-            if not _untrack_quarantine(wt):
+                applied += remediation.remove_residual(wt, auto, rollback)
+            if not _untrack_rollback(wt):
                 return None, _with_tree(
-                    f"ABORTED — could not untrack {QUARANTINE_DIR}/ (would commit backups)", tree_note), wt
+                    f"ABORTED — could not untrack {ROLLBACK_DIR}/ (would commit backups)", tree_note), wt
 
             signed = True
             if applied:

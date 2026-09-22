@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from stayawake.bots.security.models import QUARANTINE_DIR
+from stayawake.bots.security.models import ROLLBACK_DIR
 from stayawake.bots.security.remediation import installed
 
 
@@ -262,14 +262,14 @@ class TestItRefusesWhereRemovalWouldBeAGuess(unittest.TestCase):
         self.assertFalse(remediation.is_auto_fixable(wrap))
         self.assertEqual(remediation.plan([wrap]), [])
 
-    def test_a_scan_that_did_not_finish_does_not_quarantine(self):
+    def test_a_scan_that_did_not_finish_removes_nothing(self):
         from stayawake.bots.security import pr
         from stayawake.bots.security.models import Finding, ScanResult, Severity
 
-        quarantined = []
+        removed = []
 
         def spy_q(root, findings, q):
-            quarantined.extend(findings)
+            removed.extend(findings)
             return []
 
         finding = Finding("x", "persistence", Severity.HIGH, "telemetry.js",
@@ -279,17 +279,17 @@ class TestItRefusesWhereRemovalWouldBeAGuess(unittest.TestCase):
         idle = ScanResult("owner/repo", "local", [])
         _prepare_fix_against(
             [partial, partial, idle], lambda *a, **k: installed.Report(),
-            extra=(mock.patch.object(pr.remediation, "quarantine_residual", side_effect=spy_q),))
-        self.assertEqual(quarantined, [])
+            extra=(mock.patch.object(pr.remediation, "remove_residual", side_effect=spy_q),))
+        self.assertEqual(removed, [])
 
-    def test_an_unfinished_first_scan_does_not_quarantine_off_a_later_one(self):
+    def test_an_unfinished_first_scan_does_not_remove_off_a_later_one(self):
         from stayawake.bots.security import pr
         from stayawake.bots.security.models import Finding, ScanResult, Severity
 
-        quarantined = []
+        removed = []
 
         def spy_q(root, findings, q):
-            quarantined.extend(findings)
+            removed.extend(findings)
             return []
 
         finding = Finding("x", "persistence", Severity.HIGH, "telemetry.js",
@@ -300,8 +300,8 @@ class TestItRefusesWhereRemovalWouldBeAGuess(unittest.TestCase):
         idle = ScanResult("owner/repo", "local", [])
         _prepare_fix_against(
             [partial, later, idle], lambda *a, **k: installed.Report(),
-            extra=(mock.patch.object(pr.remediation, "quarantine_residual", side_effect=spy_q),))
-        self.assertEqual(quarantined, [])
+            extra=(mock.patch.object(pr.remediation, "remove_residual", side_effect=spy_q),))
+        self.assertEqual(removed, [])
 
     def test_without_a_lockfile_nothing_proves_the_tree(self):
         plan = installed.plan_removal(Path("/nowhere"), {("a", "1")}, [])
@@ -385,11 +385,11 @@ class TestTheTreeIsWalkedAsItActuallyIs(unittest.TestCase):
         nested.mkdir(parents=True)
         (nested / "package.json").write_text(json.dumps({"name": "stowaway", "version": "0.1"}),
                                              encoding="utf-8")
-        quarantine = repo.root / "q"
+        rollback = repo.root / "q"
         plan = installed.plan_removal(repo.root, {("left-pad", "1.0.0")}, [repo.lock])
-        installed.apply_removal(plan, quarantine)
+        installed.apply_removal(plan, rollback)
         self.assertFalse(parent.exists())
-        self.assertTrue((quarantine / installed.INSTALLED_DIR / "left-pad" / installed.INSTALLED_DIR
+        self.assertTrue((rollback / installed.INSTALLED_DIR / "left-pad" / installed.INSTALLED_DIR
                          / "stowaway" / "package.json").is_file())
 
     def test_a_linked_package_is_never_removed(self):
@@ -475,7 +475,7 @@ class TestNothingUnaccountedSurvivesTheTree(unittest.TestCase):
         loose = repo.root / installed.INSTALLED_DIR / "loose.js"
         loose.write_text("module.exports = 42;\n", encoding="utf-8")
         installed.remove_rebuildable(repo.root, remove_lockfiles=False)
-        saved = list((repo.root / QUARANTINE_DIR).rglob("loose.js"))
+        saved = list((repo.root / ROLLBACK_DIR).rglob("loose.js"))
         self.assertEqual(len(saved), 1, "a swept file was removed without a copy")
         self.assertEqual(saved[0].read_text(encoding="utf-8"), "module.exports = 42;\n")
 
@@ -568,9 +568,9 @@ class TestEachRunKeepsItsOwnEvidence(unittest.TestCase):
     def test_a_second_run_does_not_write_into_the_first(self):
         repo = _Repo()
         base = repo.root / ".malware-quarantine"
-        first = installed.next_quarantine(repo.root, base)
+        first = installed.next_rollback(repo.root, base)
         first.mkdir(parents=True)
-        second = installed.next_quarantine(repo.root, base)
+        second = installed.next_rollback(repo.root, base)
         self.assertNotEqual(first, second)
 
 
@@ -582,11 +582,11 @@ class TestPreservationHappensBeforeRemoval(unittest.TestCase):
         repo = _Repo()
         derivable = repo.install("left-pad", "1.0.0")
         unaccounted = repo.install("mystery", "9.9.9")
-        quarantine = repo.root / "q"
+        rollback = repo.root / "q"
         plan = installed.plan_removal(repo.root, {("left-pad", "1.0.0")}, [repo.lock])
-        preserved, removed = installed.apply_removal(plan, quarantine)
+        preserved, removed = installed.apply_removal(plan, rollback)
         self.assertEqual((preserved, removed), (1, 2))
-        self.assertTrue((quarantine / installed.INSTALLED_DIR / "mystery" / "package.json").is_file())
+        self.assertTrue((rollback / installed.INSTALLED_DIR / "mystery" / "package.json").is_file())
         self.assertFalse(unaccounted.exists(), "nothing unaccounted for survives the removal")
         self.assertFalse(derivable.exists())
 
@@ -700,7 +700,7 @@ class TestTheProjectTreeIsRemovedOnTheRepo(unittest.TestCase):
     def test_a_directory_the_user_excluded_from_scanning_is_never_removed(self):
         """`exclude_dirs` is documented as directories never TRAVERSED. It was unioned into the
         delete set, so vendored code, fixtures and test corpora were destroyed — with no copy,
-        because this path made no quarantine at all."""
+        because this path made no rollback store at all."""
         repo = _Repo()
         repo.install("left-pad", "1.0.0")
         for name in ("vendor", "fixtures", "testdata"):
@@ -742,7 +742,7 @@ class TestTheProjectTreeIsRemovedOnTheRepo(unittest.TestCase):
         report = installed.remove_rebuildable(repo.root)
         self.assertIn("dist", report.removed_builds)
         self.assertFalse((repo.root / "dist").exists())
-        saved = list((repo.root / QUARANTINE_DIR).rglob("dist/app.js"))
+        saved = list((repo.root / ROLLBACK_DIR).rglob("dist/app.js"))
         self.assertTrue(saved, "the content is gone with no copy")
         self.assertEqual(saved[0].read_text(encoding="utf-8"), "built")
 
@@ -753,7 +753,7 @@ class TestTheProjectTreeIsRemovedOnTheRepo(unittest.TestCase):
         repo.install("left-pad", "1.0.0")
         note = installed.remove_rebuildable(repo.root).note()
         self.assertIn("working tree", note)
-        self.assertIn(QUARANTINE_DIR, note)
+        self.assertIn(ROLLBACK_DIR, note)
         self.assertEqual(installed.Report().note(), "", "a run that did nothing claims nothing")
 
     def test_the_note_does_not_call_a_removed_package_kept(self):
@@ -803,7 +803,7 @@ class TestTheProjectTreeIsRemovedOnTheRepo(unittest.TestCase):
         installed.remove_rebuildable(repo.root)
         self.assertTrue(marker.is_file())
 
-    def test_a_linked_quarantine_is_not_written(self):
+    def test_a_linked_rollback_store_is_not_written(self):
         repo = _Repo()
         package = repo.install("left-pad", "1.0.0")
         host = Path(tempfile.mkdtemp())
@@ -920,7 +920,7 @@ class TestAConfirmedInfectionLeavesNoDerivedState(unittest.TestCase):
         repo = self._repo()
         repo.install("left-pad", "1.0.0")
         report = installed.remove_confirmed(repo.root, remove_lockfiles=True)
-        self.assertFalse((repo.root / QUARANTINE_DIR).exists(),
+        self.assertFalse((repo.root / ROLLBACK_DIR).exists(),
                          "a confirmed removal kept a copy of the payload")
         self.assertIsNone(report.copies)
 
@@ -1048,7 +1048,7 @@ class TestConfidenceChoosesTheRemoval(unittest.TestCase):
         report = installed.remove_installed(repo.root, confirmed=True, remove_lockfiles=False)
         self.assertFalse((repo.root / installed.INSTALLED_DIR).exists())
         self.assertEqual(report.unaccounted_packages, 0)
-        self.assertFalse((repo.root / QUARANTINE_DIR).exists())
+        self.assertFalse((repo.root / ROLLBACK_DIR).exists())
 
     def test_anything_less_keeps_what_no_lockfile_accounts_for(self):
         repo = _Repo()

@@ -34,7 +34,7 @@ opens the fix; it never makes the check pass. `saw fix amend` is not on that pat
 
 ## Fixes are recovered, not reconstructed
 
-A cleaned file comes from git history — the real previous content — or the file is quarantined whole.
+A cleaned file comes from git history — the real previous content — or the file is removed whole.
 `saw` never surgically edits a source file, so a fix cannot corrupt valid code. When a clean version
 cannot be proven safe to restore, the finding is deferred to review with the reason, rather than
 guessed at.

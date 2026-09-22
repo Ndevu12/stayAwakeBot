@@ -8,7 +8,7 @@ EXCISED when excising a concealment-hidden seam (+ a now-dead require-shim) repr
 committed version BYTE-FOR-BYTE (so nothing injected can ride along in the kept code), or DEFERRED
 to manual with a specific reason. A clean committed ancestor is required either way. Never an
 unbounded textual transform, never fabricated bytes; every result is re-proven, symlink-guarded,
-and quarantine-backed before it is written.
+and rollback-backed before it is written.
 """
 from __future__ import annotations
 
@@ -93,7 +93,7 @@ class TestRecovery(unittest.TestCase):
         _commit(d, "postcss.config.mjs", _infected_newlines(), "feat: landing page")  # payload lands
         disp = remediation.classify_recovery(d, _finding("postcss.config.mjs"), SIG)
         self.assertIsInstance(disp, remediation.Recovery)
-        ok = remediation.apply_recovery(d, disp, remediation.quarantine_path(d), SIG)
+        ok = remediation.apply_recovery(d, disp, remediation.rollback_path(d), SIG)
         self.assertTrue(ok)
         self.assertEqual((d / "postcss.config.mjs").read_text(), CLEAN)   # EXACT clean original
         self.assertNotIn("sfL", (d / "postcss.config.mjs").read_text())
@@ -104,7 +104,7 @@ class TestRecovery(unittest.TestCase):
         (d / "postcss.config.mjs").write_text(_infected_newlines(), encoding="utf-8")  # not committed
         disp = remediation.classify_recovery(d, _finding("postcss.config.mjs"), SIG)
         self.assertIsInstance(disp, remediation.Recovery)
-        self.assertTrue(remediation.apply_recovery(d, disp, remediation.quarantine_path(d), SIG))
+        self.assertTrue(remediation.apply_recovery(d, disp, remediation.rollback_path(d), SIG))
         self.assertEqual((d / "postcss.config.mjs").read_text(), CLEAN)
 
     def test_same_line_concealment_seam_is_surgically_excised(self):
@@ -118,7 +118,7 @@ class TestRecovery(unittest.TestCase):
         disp = remediation.classify_recovery(d, _finding("postcss.config.mjs"), SIG)
         self.assertIsInstance(disp, remediation.Recovery)
         self.assertTrue(disp.excised)
-        self.assertTrue(remediation.apply_recovery(d, disp, remediation.quarantine_path(d), SIG))
+        self.assertTrue(remediation.apply_recovery(d, disp, remediation.rollback_path(d), SIG))
         self.assertEqual((d / "postcss.config.mjs").read_text(), CLEAN)   # payload gone, rest intact
         self.assertNotIn("sfL", (d / "postcss.config.mjs").read_text())
 
@@ -144,7 +144,7 @@ class TestRecovery(unittest.TestCase):
 
     def test_intrinsic_literal_is_manual_allowlist(self):
         # A test file whose committed content contains a loader LITERAL (not packed) — there
-        # is no clean version, but it must NOT be quarantined/edited: flag as intrinsic.
+        # is no clean version, but it must NOT be removed/edited: flag as intrinsic.
         d = _repo()
         src = ('def test_detects_loader():\n'
                '    assert "var _$_1e42 = sfL(0)" in scan_output\n')
@@ -200,7 +200,7 @@ class TestRecovery(unittest.TestCase):
         _commit(d, "postcss.config.mjs", CLEAN, "add config")
         (d / "postcss.config.mjs").write_text(_infected_line(), encoding="utf-8")
         bad = remediation.Recovery("postcss.config.mjs", "deadbeef", "x", "", _infected_line())
-        self.assertFalse(remediation.apply_recovery(d, bad, remediation.quarantine_path(d), SIG))
+        self.assertFalse(remediation.apply_recovery(d, bad, remediation.rollback_path(d), SIG))
         # the working file is left untouched (no half-write)
         self.assertIn("sfL", (d / "postcss.config.mjs").read_text())
 
@@ -246,7 +246,7 @@ class TestRecovery(unittest.TestCase):
                 # apply must NOT drop the legit statement even if a Recovery were forced.
                 self.assertFalse(remediation.apply_recovery(
                     d, remediation.Recovery("app.mjs", "x", "x", "", CLEAN),
-                    remediation.quarantine_path(d), SIG))
+                    remediation.rollback_path(d), SIG))
                 self.assertIn("runServer" if label == "before" else "doLegit",
                               (d / "app.mjs").read_text())               # legit code intact
 
@@ -338,7 +338,7 @@ class TestRecoveryHardening(unittest.TestCase):
         _commit(d, "postcss.config.mjs", _infected_newlines(), "feat: landing page")
         disp = remediation.classify_recovery(d, _finding("postcss.config.mjs"), SIG)
         self.assertIsInstance(disp, remediation.Recovery)
-        self.assertTrue(remediation.apply_recovery(d, disp, remediation.quarantine_path(d), SIG))
+        self.assertTrue(remediation.apply_recovery(d, disp, remediation.rollback_path(d), SIG))
         self.assertEqual((d / "postcss.config.mjs").read_text(), CLEAN)
 
     def test_apply_reverts_when_clean_text_would_fabricate_or_drop_bytes(self):
@@ -349,7 +349,7 @@ class TestRecoveryHardening(unittest.TestCase):
         _commit(d, "a.mjs", CLEAN, "add config")
         (d / "a.mjs").write_text(_infected_newlines(), encoding="utf-8")
         fabricated = remediation.Recovery("a.mjs", "deadbeef", "x", "", "export const HACKED = 1;\n")
-        self.assertFalse(remediation.apply_recovery(d, fabricated, remediation.quarantine_path(d), SIG))
+        self.assertFalse(remediation.apply_recovery(d, fabricated, remediation.rollback_path(d), SIG))
         self.assertIn("global", (d / "a.mjs").read_text())              # untouched, payload intact
         self.assertNotIn("HACKED", (d / "a.mjs").read_text())           # fabricated text never written
 
@@ -358,7 +358,7 @@ class TestSeamExcision(unittest.TestCase):
     """The concealment-seam surgical excision: a confirmed loader hidden after a long whitespace
     run on a line of real code is cut out (clean prefix kept), preserving every other byte — no
     clean git ancestor required. A now-DEAD require-shim the worm prepended is removed too; a shim
-    the config actually uses is kept. Re-proven at apply time and quarantined first."""
+    the config actually uses is kept. Re-proven at apply time and copied first."""
 
     def test_excises_payload_and_dead_shim_byte_exact(self):
         # The full worm shape on a config: prepended require-shim + same-line concealment payload.
@@ -369,7 +369,7 @@ class TestSeamExcision(unittest.TestCase):
         disp = remediation.classify_recovery(d, _finding("postcss.config.mjs"), SIG)
         self.assertIsInstance(disp, remediation.Recovery)
         self.assertTrue(disp.excised)
-        self.assertTrue(remediation.apply_recovery(d, disp, remediation.quarantine_path(d), SIG))
+        self.assertTrue(remediation.apply_recovery(d, disp, remediation.rollback_path(d), SIG))
         result = (d / "postcss.config.mjs").read_text()
         self.assertEqual(result, CLEAN)                       # shim + payload both gone, byte-exact
         self.assertNotIn("createRequire", result)
@@ -386,7 +386,7 @@ class TestSeamExcision(unittest.TestCase):
         disp = remediation.classify_recovery(d, _finding("postcss.config.mjs"), SIG)
         self.assertIsInstance(disp, remediation.Recovery)
         self.assertTrue(disp.excised)
-        self.assertTrue(remediation.apply_recovery(d, disp, remediation.quarantine_path(d), SIG))
+        self.assertTrue(remediation.apply_recovery(d, disp, remediation.rollback_path(d), SIG))
         result = (d / "postcss.config.mjs").read_text()
         self.assertEqual(result, clean_with_shim)                  # byte-exact: shim + require kept
         self.assertNotIn("sfL", result)                            # payload gone
@@ -460,23 +460,23 @@ class TestSeamExcision(unittest.TestCase):
         (d / "c.mjs").write_text(_infected_line(), encoding="utf-8")
         tampered = remediation.Recovery("c.mjs", "(excised)", "x", "",
                                         "export default config;\n", excised=True)  # dropped the config
-        self.assertFalse(remediation.apply_recovery(d, tampered, remediation.quarantine_path(d), SIG))
+        self.assertFalse(remediation.apply_recovery(d, tampered, remediation.rollback_path(d), SIG))
         self.assertIn("sfL", (d / "c.mjs").read_text())            # untouched, payload intact
 
     # ── #1209 (Option B): apply_suggested WRITES the computed strip (into the review branch) ──
     def test_apply_suggested_applies_the_computed_strip(self):
         # A Suggested (no git ancestor) is applied by the SAME write machinery as an excised Recovery:
-        # re-prove _seam_strip on the live bytes, quarantine the original, write the strip, verify.
+        # re-prove _seam_strip on the live bytes, copy the original, write the strip, verify.
         # Payload gone, every other byte kept — the ONLY difference from Recovery is provenance.
         d = Path(tempfile.mkdtemp())                               # no git → NO_VCS Suggested
         (d / "next.config.mjs").write_text(_infected_line(), encoding="utf-8")
         disp = remediation.classify_recovery(d, _finding("next.config.mjs"), SIG)
         self.assertIsInstance(disp, remediation.Suggested)
-        q = remediation.quarantine_path(d)
+        q = remediation.rollback_path(d)
         self.assertTrue(remediation.apply_suggested(d, disp, q, SIG))
         self.assertEqual((d / "next.config.mjs").read_text(), CLEAN)   # clean prefix kept byte-exact
         self.assertNotIn("sfL", (d / "next.config.mjs").read_text())   # payload stripped
-        self.assertIn("sfL", (q / "next.config.mjs").read_text())      # original quarantined
+        self.assertIn("sfL", (q / "next.config.mjs").read_text())      # original kept for rollback
 
     def test_apply_suggested_refuses_when_live_bytes_diverge(self):
         # Re-proof against the file NOW: if it changed since classify so the canonical strip no longer
@@ -486,7 +486,7 @@ class TestSeamExcision(unittest.TestCase):
         disp = remediation.classify_recovery(d, _finding("next.config.mjs"), SIG)
         self.assertIsInstance(disp, remediation.Suggested)
         (d / "next.config.mjs").write_text("export default other;\n", encoding="utf-8")  # changed, no seam
-        self.assertFalse(remediation.apply_suggested(d, disp, remediation.quarantine_path(d), SIG))
+        self.assertFalse(remediation.apply_suggested(d, disp, remediation.rollback_path(d), SIG))
         self.assertEqual((d / "next.config.mjs").read_text(), "export default other;\n")  # untouched
 
     def test_apply_suggested_refuses_a_symlinked_target(self):
@@ -496,7 +496,7 @@ class TestSeamExcision(unittest.TestCase):
         (d / "real.mjs").write_text(_infected_line(), encoding="utf-8")
         os.symlink(d / "real.mjs", d / "link.mjs")
         sug = remediation.Suggested("link.mjs", "sig", remediation.NO_VCS, "x", "d", CLEAN, 1)
-        self.assertFalse(remediation.apply_suggested(d, sug, remediation.quarantine_path(d), SIG))
+        self.assertFalse(remediation.apply_suggested(d, sug, remediation.rollback_path(d), SIG))
         self.assertIn("sfL", (d / "real.mjs").read_text())         # real target untouched through link
 
     # ── adversarial negatives: the excision must NOT fire on legit near-misses ──
@@ -538,7 +538,7 @@ class TestSeamExcision(unittest.TestCase):
         (d / "real.mjs").write_text(_infected_line(), encoding="utf-8")
         os.symlink(d / "real.mjs", d / "link.mjs")
         rec = remediation.Recovery("link.mjs", "(excised)", "x", "", CLEAN, excised=True)
-        self.assertFalse(remediation.apply_recovery(d, rec, remediation.quarantine_path(d), SIG))
+        self.assertFalse(remediation.apply_recovery(d, rec, remediation.rollback_path(d), SIG))
         self.assertIn("sfL", (d / "real.mjs").read_text())      # real target untouched through the link
 
     def test_symlinked_ancestor_or_escape_is_refused(self):
@@ -550,7 +550,7 @@ class TestSeamExcision(unittest.TestCase):
         (outside / "real.mjs").write_text(_infected_line(), encoding="utf-8")
         os.symlink(outside, d / "linkdir")                      # d/linkdir -> outside the worktree
         rec = remediation.Recovery("linkdir/real.mjs", "(excised)", "x", "", CLEAN, excised=True)
-        self.assertFalse(remediation.apply_recovery(d, rec, remediation.quarantine_path(d), SIG))
+        self.assertFalse(remediation.apply_recovery(d, rec, remediation.rollback_path(d), SIG))
         self.assertIn("sfL", (outside / "real.mjs").read_text())   # out-of-tree file untouched
 
     # ── white-box guards for the new predicates ──
