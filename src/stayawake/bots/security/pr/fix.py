@@ -62,6 +62,7 @@ class _Fix:
     computed: tuple = ()
     suspicious: list = ()
     findings: list = ()
+    advisories: tuple = ()
     manual: tuple = ()
     signed: bool = True
     tree_note: str = ""
@@ -206,6 +207,7 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
     with status(f"scanning {label}…", enabled=spin):
         scan = _scan()
         findings = _freeze(scan.findings)
+        advisories = tuple(scan.advisories)
 
     tree_note = ""
     with status(f"fixing {label}…", enabled=spin):
@@ -359,15 +361,15 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
 
         if not applied and not computed:
             if residual:
-                return _Fix(base, branch, [], (), suspicious, findings, tuple(manual),
+                return _Fix(base, branch, [], (), suspicious, findings, advisories, tuple(manual),
                             tree_note=tree_note), "", wt
             if suspicious:
-                return _Fix(base, branch, [], (), suspicious, findings, (),
+                return _Fix(base, branch, [], (), suspicious, findings, advisories, (),
                             tree_note=tree_note), "", wt
             if scan.error or done.error:
                 return None, _with_tree("ABORTED — scan did not finish", tree_note), wt
             return None, _with_tree(f"'{base}' already clean — nothing to fix", tree_note), wt
-    return _Fix(base, branch, applied, tuple(computed), suspicious, findings, tuple(manual),
+    return _Fix(base, branch, applied, tuple(computed), suspicious, findings, advisories, tuple(manual),
                 signed=signed, tree_note=tree_note), "", wt
 
 
@@ -461,7 +463,8 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
             title = ("security: PARTIAL auto-remediation — manual review required" if partial
                      else "security: auto-remediate worm indicators")
             body = _pr_body(slug, fix.applied, computed=fix.computed,
-                            suspicious=fix.suspicious, manual=fix.manual)
+                            suspicious=fix.suspicious, manual=fix.manual,
+                            findings=fix.findings, advisories=fix.advisories)
             res = proposal.submit_change_pr(wt, slug, base, branch=fix.branch, title=title,
                                             body=body, token=token,
                                             issue=_issue_spec(owner, name, fix.findings),
