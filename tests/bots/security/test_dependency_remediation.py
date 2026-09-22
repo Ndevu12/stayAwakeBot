@@ -44,9 +44,12 @@ class TestRemediationBuilders(unittest.TestCase):
 
     def test_vulnerability_fix_upgrade_vs_no_fix(self):
         up = R.vulnerability_fix("npm", "left-pad", "1.3.0")
-        self.assertIn("Upgrade left-pad to 1.3.0", up)
-        self.assertIn("npm install left-pad@1.3.0", up)
-        self.assertIn("No patched version", R.vulnerability_fix("npm", "x", None))       # honest fallback
+        self.assertIn("Upgrade left-pad to 1.3.0", up.advice)
+        self.assertIn("npm install left-pad@1.3.0", up.advice)
+        self.assertEqual(up.action, R.UPGRADE)
+        no_fix = R.vulnerability_fix("npm", "x", None)
+        self.assertIn("No patched version", no_fix.advice)
+        self.assertEqual(no_fix.action, R.REMOVE)     # nothing to upgrade to
 
     def test_advisory_reference_prefers_ghsa_then_osv(self):
         self.assertEqual(R.advisory_reference("CVE-1", ("GHSA-aaaa-bbbb-cccc",)),
@@ -62,8 +65,15 @@ class TestRemediationBuilders(unittest.TestCase):
 
     def test_malware_fix_says_remove_not_upgrade(self):
         fix = R.malware_fix("evil")
-        self.assertIn("Remove evil", fix)
-        self.assertIn("upgrading does not help", fix)
+        self.assertIn("Remove evil", fix.advice)
+        self.assertIn("upgrading does not help", fix.advice)
+        self.assertEqual(fix.action, R.REMOVE)
+
+    def test_an_external_auditors_advisory_is_an_upgrade(self):
+        fix = R.external_advisory_fix("left-pad", "GHSA-1", "npm audit")
+        self.assertIn("Upgrade left-pad", fix.advice)
+        self.assertIn("GHSA-1", fix.advice)
+        self.assertEqual(fix.action, R.UPGRADE)
 
 
 class TestFindingCarriesRemediation(unittest.TestCase):

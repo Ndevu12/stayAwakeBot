@@ -8,8 +8,11 @@ from __future__ import annotations
 import sys
 from typing import TYPE_CHECKING
 
+from stayawake.bots.security.dependencies.remediation import dependency_actions, plain_lines
 from stayawake.utils.render import path_link, rule
 from stayawake.utils.terminal import supports_color
+
+_ACTION_LIMIT = 10
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -44,3 +47,21 @@ def _print_report_pointer(report_path: Path, *, spilled: bool, reason: str = "")
         f"    folder: {path_link(report_path.parent, on=on)}",
         bar,
     ]), file=sys.stderr)
+
+
+def _print_dependency_actions(results) -> None:
+    """Print what the operator should run about the flagged dependencies. Takes the scan results.
+    Prints nothing when none of them carries advice.
+
+    One block per run rather than a line per finding, on stderr beneath the report pointer, so the
+    commands stay together at the end of the run and out of a piped report body."""
+    groups = [g for r in results for g in (r.findings, r.advisories)]
+    actions = dependency_actions(*groups)
+    if not actions:
+        return
+    bar = rule(72)
+    out = [bar, "Act on these dependencies — saw does not change your manifests for you:"]
+    for title, group in (("Remove and replace", actions.remove), ("Upgrade", actions.upgrade)):
+        if group:
+            out += [f"  {title}:"] + plain_lines(group, _ACTION_LIMIT)
+    print("\n".join(out + [bar]), file=sys.stderr)

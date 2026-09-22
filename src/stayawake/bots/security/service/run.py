@@ -37,7 +37,8 @@ from stayawake.bots.security.resolution import (
 from stayawake.bots.security.service import workers as scan_workers
 from stayawake.bots.security.service.config import (
     _read_config, _options, _as_bool, _require_db_or_error, jobs_setting as _jobs_setting)
-from stayawake.bots.security.service.report import _status_tag, _print_report_pointer
+from stayawake.bots.security.service.report import (
+    _status_tag, _print_dependency_actions, _print_report_pointer)
 from stayawake.utils import exitcodes
 
 
@@ -347,6 +348,7 @@ def scan(config_path: str | None = None, *, remote: bool = False,
         reason = (f"{len(results)} repositories scanned" if len(results) > LARGE_FLEET
                   else "the report is larger than a terminal can show")
         _print_report_pointer(report_path, spilled=spill, reason=reason)
+    _print_dependency_actions(results)
 
     # Verdict as exit code. INFECTED (confirmed findings) → 1. A target that ERRORED (could not be
     # scanned at all — an unreadable/malformed config, a read failure, a failed clone) carries no
