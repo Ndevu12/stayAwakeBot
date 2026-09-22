@@ -14,12 +14,13 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
-- **saw now hands you the commands to run for a flagged dependency** — once at the end of a scan, at
-  the top of a saved report, and in the remediation pull request. npm, pip, gem, cargo, composer,
-  go and nuget.
+- **saw now lists the compromised dependency versions** — once at the end of a scan, at the top of a
+  saved report, and in the remediation pull request, with the command to remove each one.
 
 ### Security
 - **A package name from a scanned lockfile can no longer shape a command saw hands you.**
+- **saw no longer tells you which version to install.** It names the versions that are compromised
+  and leaves the choice to you, because an offline advisory cache cannot promise a version is safe.
 
 ### Fixed
 - **`saw fix` works again on a repository where an earlier run was interrupted.**

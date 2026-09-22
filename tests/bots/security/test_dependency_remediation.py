@@ -30,26 +30,24 @@ SIGS = [MAL_SIG, VULN_SIG]
 
 
 class TestRemediationBuilders(unittest.TestCase):
-    def test_upgrade_command_per_ecosystem(self):
-        self.assertEqual(R.upgrade_command("npm", "left-pad", "1.3.0"), "npm install left-pad@1.3.0")
-        self.assertIn("pip install 'requests>=2.31.0'", R.upgrade_command("pypi", "requests", "2.31.0"))
-        self.assertIn("cargo update -p x --precise 1.0.0", R.upgrade_command("cargo", "x", "1.0.0"))
-        self.assertTrue(R.upgrade_command("golang", "m", "1.2.3").endswith("@v1.2.3"))   # v-prefixed
-        self.assertTrue(R.upgrade_command("golang", "m", "v1.2.3").endswith("@v1.2.3"))  # no double-v
-        self.assertIsNone(R.upgrade_command("no-such-eco", "x", "1"))                    # graceful
+    def test_removal_command_per_ecosystem(self):
+        self.assertEqual(R.removal_command("npm", "left-pad"), "npm uninstall left-pad")
+        self.assertEqual(R.removal_command("pypi", "requests"), "pip uninstall -y requests")
+        self.assertEqual(R.removal_command("cargo", "x"), "cargo remove x")
+        self.assertIsNone(R.removal_command("no-such-eco", "x"))
 
     def test_ecosystem_name_is_canonicalized(self):
         # An OSV-style ecosystem name maps to the PURL command (crates.io → cargo).
-        self.assertEqual(R.upgrade_command("crates.io", "x", "1.0.0"), "cargo update -p x --precise 1.0.0")
+        self.assertEqual(R.removal_command("crates.io", "x"), "cargo remove x")
 
     def test_vulnerability_fix_upgrade_vs_no_fix(self):
-        up = R.vulnerability_fix("npm", "left-pad", "1.3.0")
-        self.assertIn("Upgrade left-pad to 1.3.0", up.advice)
-        self.assertIn("npm install left-pad@1.3.0", up.advice)
-        self.assertEqual(up.action, R.UPGRADE)
-        no_fix = R.vulnerability_fix("npm", "x", None)
+        up = R.vulnerability_fix("npm", "left-pad", "1.2.0", "1.3.0")
+        self.assertIn("left-pad 1.2.0 is affected", up.advice)
+        self.assertNotIn("1.3.0", up.advice)            # never names a version to install
+        self.assertEqual(up.state, R.VULNERABLE)
+        no_fix = R.vulnerability_fix("npm", "x", "1.0", None)
         self.assertIn("No patched version", no_fix.advice)
-        self.assertEqual(no_fix.action, R.REMOVE)     # nothing to upgrade to
+        self.assertEqual(no_fix.state, R.VULNERABLE)     # nothing to upgrade to
 
     def test_advisory_reference_prefers_ghsa_then_osv(self):
         self.assertEqual(R.advisory_reference("CVE-1", ("GHSA-aaaa-bbbb-cccc",)),
@@ -64,16 +62,16 @@ class TestRemediationBuilders(unittest.TestCase):
         self.assertIsNone(R.advisory_reference("has space", ()))
 
     def test_malware_fix_says_remove_not_upgrade(self):
-        fix = R.malware_fix("evil")
+        fix = R.malware_fix("evil", "1.0", "npm")
         self.assertIn("Remove evil", fix.advice)
         self.assertIn("upgrading does not help", fix.advice)
-        self.assertEqual(fix.action, R.REMOVE)
+        self.assertEqual(fix.state, R.MALICIOUS)
 
     def test_an_external_auditors_advisory_is_an_upgrade(self):
-        fix = R.external_advisory_fix("left-pad", "GHSA-1", "npm audit")
-        self.assertIn("Upgrade left-pad", fix.advice)
+        fix = R.external_advisory_fix("left-pad", "1.0.0", "GHSA-1", "npm audit")
+        self.assertIn("left-pad 1.0.0 is reported", fix.advice)
         self.assertIn("GHSA-1", fix.advice)
-        self.assertEqual(fix.action, R.UPGRADE)
+        self.assertEqual(fix.state, R.VULNERABLE)
 
 
 class TestFindingCarriesRemediation(unittest.TestCase):
@@ -108,8 +106,9 @@ class TestFindingCarriesRemediation(unittest.TestCase):
         f = _emit_advisory(adv, dep)
         self.assertTrue(f.advisory_only)
         self.assertEqual(f.fixed_version, "2.5.0")
-        self.assertIn("Upgrade shaky to 2.5.0", f.fix_advice)
-        self.assertIn("npm install shaky@2.5.0", f.fix_advice)
+        self.assertIn("shaky 2.0.0 is affected", f.fix_advice)
+        self.assertNotIn("2.5.0", f.fix_advice)         # the data keeps it; the advice never says it
+        self.assertEqual(f.package, "shaky@2.0.0")
         self.assertEqual(f.reference, "https://github.com/advisories/GHSA-xxxx-yyyy-zzzz")
 
     def test_malware_finding_says_remove_and_links(self):

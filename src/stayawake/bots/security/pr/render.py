@@ -146,10 +146,10 @@ def dependency_action_lines(findings=(), advisories=()) -> list[str]:
     actions = dependency_actions(findings, advisories)
     if not actions:
         return []
-    lines = ["", "## Run these before you merge", "",
+    lines = ["", "## Compromised dependencies", "",
              "This branch does not change your declared dependencies.", "", "```sh"]
-    for title, group in (("remove and replace — known-malicious", actions.remove),
-                         ("upgrade — patched version published", actions.upgrade)):
+    for title, group in (("known-malicious — remove and replace these", actions.malicious),
+                         ("affected by an advisory — move off these", actions.vulnerable)):
         if group:
             lines += [f"# {title}"] + markdown_lines(group, ACTION_LIMIT) + [""]
     return lines + ["```"]

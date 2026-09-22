@@ -15,26 +15,14 @@ from dataclasses import dataclass
 from stayawake.bots.security.dependencies.ecosystems import canonical_ecosystem
 from stayawake.utils import textsafe
 
-REMOVE = "remove"
-UPGRADE = "upgrade"
+MALICIOUS = "malicious"
+VULNERABLE = "vulnerable"
 
 _ID_RE = re.compile(r"[A-Za-z][A-Za-z0-9._-]{1,80}\Z")
 
 _NAME_RE = re.compile(r"@?[A-Za-z0-9][A-Za-z0-9._-]{0,99}(/[A-Za-z0-9][A-Za-z0-9._-]{0,99})?\Z")
 _VERSION_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,63}\Z")
 
-
-def _npm(n: str, v: str) -> str: return f"npm install {n}@{v}"
-def _pypi(n: str, v: str) -> str: return f"pip install '{n}>={v}'"
-def _gem(n: str, v: str) -> str: return f"bundle update {n} --conservative"
-def _cargo(n: str, v: str) -> str: return f"cargo update -p {n} --precise {v}"
-def _composer(n: str, v: str) -> str: return f"composer require {n}:>={v}"
-def _nuget(n: str, v: str) -> str: return f"dotnet add package {n} --version {v}"
-def _golang(n: str, v: str) -> str: return f"go get {n}@{v if v.startswith('v') else 'v' + v}"
-
-
-_UPGRADE = {"npm": _npm, "pypi": _pypi, "gem": _gem, "cargo": _cargo,
-            "composer": _composer, "golang": _golang, "nuget": _nuget}
 
 _REMOVE = {
     "npm": lambda n: f"npm uninstall {n}",
@@ -53,14 +41,6 @@ def _quoted(name: str, version: str = "0") -> tuple[str, str] | None:
     if not _NAME_RE.match(name) or not _VERSION_RE.match(version):
         return None
     return shlex.quote(name), shlex.quote(version)
-
-
-def upgrade_command(ecosystem: str, name: str, fixed_version: str) -> str | None:
-    """The install-this-version command for `ecosystem`. Returns None for an unknown ecosystem, or
-    when the name or version is not a plain package identifier."""
-    fn = _UPGRADE.get(canonical_ecosystem(ecosystem))
-    safe = _quoted(name, fixed_version)
-    return fn(*safe) if fn and safe else None
 
 
 def removal_command(ecosystem: str, name: str) -> str | None:
@@ -89,71 +69,72 @@ def advisory_reference(osv_id: str | None, aliases: tuple[str, ...] = ()) -> str
 
 @dataclass(frozen=True)
 class DependencyFix:
-    """What to do about one flagged dependency: the sentence for the report, the command to run,
-    and which action it is. `command` is a `#` comment line when saw can build no command."""
+    """What saw found about one flagged dependency: the sentence for the report, whether the
+    package is known-malicious or carries an advisory, the package as `name@version`, and the
+    command to remove it when saw can build one."""
 
     advice: str
-    action: str
-    command: str
+    state: str
+    package: str
+    command: str | None = None
 
 
 @dataclass(frozen=True)
 class DependencyAction:
-    """One command for the operator to run."""
+    """One flagged package, and the command to remove it when saw can build one."""
 
-    command: str
+    package: str
+    command: str | None = None
 
 
 @dataclass(frozen=True)
 class DependencyActions:
-    """The advice for one scan, split by action."""
+    """The flagged packages of one scan, split by what saw found."""
 
-    remove: tuple[DependencyAction, ...] = ()
-    upgrade: tuple[DependencyAction, ...] = ()
+    malicious: tuple[DependencyAction, ...] = ()
+    vulnerable: tuple[DependencyAction, ...] = ()
 
     def __bool__(self) -> bool:
-        return bool(self.remove or self.upgrade)
+        return bool(self.malicious or self.vulnerable)
 
 
-def _by_hand(name: str, what: str) -> str:
-    """Takes a package name and what to do about it. Returns a `#` comment line."""
-    return f"# {textsafe.plain(name, 100)} — {what}"
+def _coordinate(name: str, version: str) -> str:
+    """Takes a package name and version. Returns `name@version`, safe to print."""
+    shown = textsafe.plain(name, 100)
+    return f"{shown}@{textsafe.plain(version, 40)}" if version else shown
 
 
-def vulnerability_fix(ecosystem: str, name: str, fixed_version: str | None) -> DependencyFix:
-    """The fix for an ordinary CVE on a dependency. Takes the ecosystem, the package name and the
-    first patched version, or None when the advisory publishes no fix. Returns a `DependencyFix`:
-    an upgrade with the ecosystem's command, or a removal."""
+def vulnerability_fix(ecosystem: str, name: str, version: str,
+                      fixed_version: str | None) -> DependencyFix:
+    """The fix for an ordinary CVE on a dependency. Takes the ecosystem, the package name, the
+    version in this project and the first patched version, or None when the advisory publishes
+    none. Returns a `DependencyFix` naming the affected version."""
     if fixed_version:
-        base = f"Upgrade {name} to {fixed_version} or later (first patched version)."
-        cmd = upgrade_command(ecosystem, name, fixed_version)
-        return DependencyFix(f"{base}  {cmd}" if cmd else f"{base}  Bump it in your manifest and "
-                             "reinstall.", UPGRADE,
-                             cmd or _by_hand(name, f"upgrade to {textsafe.plain(fixed_version, 40)}"))
+        return DependencyFix(
+            f"{name} {version} is affected by this advisory. Move off it — read the advisory for "
+            "the versions it covers.", VULNERABLE, _coordinate(name, version))
     return DependencyFix(
         f"No patched version is published for this advisory — remove or replace {name}, or pin it "
-        "to a version outside the affected range.", REMOVE,
-        removal_command(ecosystem, name) or _by_hand(name, "remove, replace or pin it"))
+        "to a version outside the affected range.", VULNERABLE, _coordinate(name, version),
+        removal_command(ecosystem, name))
 
 
-def malware_fix(name: str, ecosystem: str = "") -> DependencyFix:
-    """The fix for a known-malicious dependency. Takes the package name and its ecosystem. Returns
-    a `DependencyFix` that removes it."""
+def malware_fix(name: str, version: str = "", ecosystem: str = "") -> DependencyFix:
+    """The fix for a known-malicious dependency. Takes the package name, its version and its
+    ecosystem. Returns a `DependencyFix` that removes it."""
     return DependencyFix(
         f"Remove {name} now — it is a known-malicious package, so upgrading does not help. Purge it "
         "from your lockfile and installed tree, then rotate any credentials it could have read.",
-        REMOVE,
-        removal_command(ecosystem, name) or _by_hand(name, "remove it and replace it"))
+        MALICIOUS, _coordinate(name, version), removal_command(ecosystem, name))
 
 
-def external_advisory_fix(name: str, advisory_id: str, tool: str) -> DependencyFix:
+def external_advisory_fix(name: str, version: str, advisory_id: str, tool: str) -> DependencyFix:
     """The fix for an advisory an external auditor raised. Takes the package name, the advisory id
     and the auditor that reported it. Returns a `DependencyFix` that upgrades, naming the advisory
     to read rather than a version."""
-    return DependencyFix(f"Upgrade {name} to a release that resolves {advisory_id} (see the "
-                         f"advisory), then re-run {tool}.", UPGRADE,
-                         _by_hand(name, f"upgrade to a release fixing "
-                                        f"{textsafe.plain(advisory_id, 40)}"))
+    return DependencyFix(f"{name} {version} is reported by {tool} under {advisory_id}. Read the "
+                         "advisory for the versions it covers.", VULNERABLE,
+                         _coordinate(name, version))
 
 
 def _field(item, name: str):
@@ -162,18 +143,18 @@ def _field(item, name: str):
 
 
 def dependency_actions(*groups) -> DependencyActions:
-    """The commands to hand an operator once per run. Takes any number of iterables of findings, as
-    objects or as payload dicts. Returns a `DependencyActions`, empty when none of them carries a
-    command. The same command raised by several findings is carried once."""
-    buckets: dict[str, dict[str, DependencyAction]] = {REMOVE: {}, UPGRADE: {}}
+    """What to hand an operator once per run. Takes any number of iterables of findings, as objects
+    or as payload dicts. Returns a `DependencyActions`, empty when none of them names a package. A
+    package flagged by several findings is carried once."""
+    buckets: dict[str, dict[str, DependencyAction]] = {MALICIOUS: {}, VULNERABLE: {}}
     for group in groups:
         for item in group:
-            command = _field(item, "fix_command")
-            bucket = buckets.get(_field(item, "dependency_action"))
-            if command and bucket is not None:
-                bucket.setdefault(command, DependencyAction(command))
-    return DependencyActions(remove=tuple(buckets[REMOVE].values()),
-                             upgrade=tuple(buckets[UPGRADE].values()))
+            package = _field(item, "package")
+            bucket = buckets.get(_field(item, "dependency_state"))
+            if package and bucket is not None:
+                bucket.setdefault(package, DependencyAction(package, _field(item, "fix_command")))
+    return DependencyActions(malicious=tuple(buckets[MALICIOUS].values()),
+                             vulnerable=tuple(buckets[VULNERABLE].values()))
 
 
 def _capped(actions: tuple[DependencyAction, ...], limit: int):
@@ -183,14 +164,20 @@ def _capped(actions: tuple[DependencyAction, ...], limit: int):
 
 
 def markdown_lines(actions: tuple[DependencyAction, ...], limit: int) -> list[str]:
-    """Takes the actions under one heading and the most to show. Returns the command lines."""
+    """Takes the actions under one heading and the most to show. Returns the lines: each package
+    as a comment, then the commands that remove them."""
     shown, left_out = _capped(actions, limit)
-    lines = [textsafe.plain(a.command, 300) for a in shown]
-    return lines + ([f"# \u2026and {left_out} more"] if left_out else [])
+    lines = [f"#   {a.package}" for a in shown]
+    if left_out:
+        lines.append(f"#   \u2026and {left_out} more")
+    return lines + [textsafe.plain(a.command, 300) for a in shown if a.command]
 
 
 def plain_lines(actions: tuple[DependencyAction, ...], limit: int) -> list[str]:
-    """Takes the actions under one heading and the most to show. Returns the command lines."""
+    """Takes the actions under one heading and the most to show. Returns the lines: each package
+    as a comment, then the commands that remove them."""
     shown, left_out = _capped(actions, limit)
-    lines = [f"  {textsafe.plain(a.command, 300)}" for a in shown]
-    return lines + ([f"  # \u2026and {left_out} more"] if left_out else [])
+    lines = [f"  #   {a.package}" for a in shown]
+    if left_out:
+        lines.append(f"  #   \u2026and {left_out} more")
+    return lines + [f"  {textsafe.plain(a.command, 300)}" for a in shown if a.command]

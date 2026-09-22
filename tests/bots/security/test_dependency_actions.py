@@ -9,8 +9,7 @@ from pathlib import Path
 from unittest import mock
 
 from stayawake.bots.security.dependencies.remediation import (
-    REMOVE, UPGRADE, external_advisory_fix, malware_fix, removal_command, upgrade_command,
-    vulnerability_fix)
+    MALICIOUS, VULNERABLE, external_advisory_fix, malware_fix, removal_command, vulnerability_fix)
 from stayawake.bots.security.models import Finding, ScanResult, Severity
 from stayawake.bots.security.pr.render import ACTION_LIMIT, dependency_action_lines, _pr_body
 from stayawake.bots.security.resolution import LocalTarget, REPOSITORY
@@ -20,15 +19,15 @@ from stayawake.bots.security.service.report import _print_dependency_actions
 from stayawake.bots.security.sinks.render import render_markdown
 from stayawake.bots.security import service
 
-REMOVE_CMD = "npm uninstall evil-pkg"
-UPGRADE_CMD = "npm install lodash@4.17.21"
+BAD = "evil-pkg@1.2.3"
+AFFECTED = "lodash@4.17.20"
 
 
-def _dep(command: str, *, action: str = REMOVE) -> Finding:
+def _dep(package: str, *, state: str = MALICIOUS, command: str | None = None) -> Finding:
     return Finding(signature_id="malicious-dependency", category="supply-chain-dep",
                    severity=Severity.CRITICAL, path="package.json", description="d",
-                   fix_advice="a sentence for the report", dependency_action=action,
-                   fix_command=command)
+                   fix_advice="a sentence for the report", dependency_state=state,
+                   fix_command=command, package=package)
 
 
 def _payload(findings=(), advisories=()) -> dict:
@@ -52,29 +51,36 @@ class TestTheComposerStatesTheCommand(unittest.TestCase):
     """The function that composes the advice also states the command to run."""
 
     def test_a_known_malicious_package_is_uninstalled(self):
-        fix = malware_fix("evil-pkg", "npm")
+        fix = malware_fix("evil-pkg", "1.2.3", "npm")
         self.assertEqual("npm uninstall evil-pkg", fix.command)
-        self.assertEqual(REMOVE, fix.action)
+        self.assertEqual(MALICIOUS, fix.state)
 
-    def test_a_patched_version_is_installed(self):
-        fix = vulnerability_fix("npm", "lodash", "4.17.21")
-        self.assertEqual("npm install lodash@4.17.21", fix.command)
-        self.assertEqual(UPGRADE, fix.action)
+    def test_an_advisory_names_the_affected_version_and_no_install(self):
+        fix = vulnerability_fix("npm", "lodash", "4.17.20", "4.17.21")
+        self.assertEqual("lodash@4.17.20", fix.package)
+        self.assertIsNone(fix.command)
+        self.assertEqual(VULNERABLE, fix.state)
 
-    def test_an_advisory_with_no_patched_version_uninstalls(self):
-        fix = vulnerability_fix("npm", "lodash", None)
+    def test_no_surface_ever_names_a_version_to_install(self):
+        """saw's advisory cache can be stale, so it never asserts a version is safe."""
+        fix = vulnerability_fix("npm", "lodash", "4.17.20", "4.17.21")
+        for text in (fix.advice, fix.package, fix.command or ""):
+            self.assertNotIn("4.17.21", text)
+
+    def test_an_advisory_with_no_patched_version_is_not_called_malicious(self):
+        """An unpatched CVE is not malware; saying so would be a false claim about the package."""
+        fix = vulnerability_fix("npm", "lodash", "4.17.20", None)
         self.assertEqual("npm uninstall lodash", fix.command)
-        self.assertEqual(REMOVE, fix.action)
+        self.assertEqual(VULNERABLE, fix.state)
 
     def test_an_external_auditors_advisory_has_no_command_to_give(self):
-        fix = external_advisory_fix("left-pad", "GHSA-1", "npm audit")
-        self.assertTrue(fix.command.startswith("#"))
-        self.assertIn("left-pad", fix.command)
-        self.assertIn("GHSA-1", fix.command)
-        self.assertEqual(UPGRADE, fix.action)
+        fix = external_advisory_fix("left-pad", "1.0.0", "GHSA-1", "npm audit")
+        self.assertIsNone(fix.command)
+        self.assertEqual("left-pad@1.0.0", fix.package)
+        self.assertEqual(VULNERABLE, fix.state)
 
     def test_an_unknown_ecosystem_gives_no_command(self):
-        self.assertTrue(malware_fix("x", "no-such-eco").command.startswith("#"))
+        self.assertIsNone(malware_fix("x", "1.0", "no-such-eco").command)
 
 
 class TestAHostileNameCannotReachTheShell(unittest.TestCase):
@@ -86,32 +92,39 @@ class TestAHostileNameCannotReachTheShell(unittest.TestCase):
     def test_no_hostile_name_builds_a_runnable_command(self):
         for name in self.HOSTILE:
             self.assertIsNone(removal_command("npm", name), name)
-            self.assertIsNone(upgrade_command("npm", name, "1.0.0"), name)
 
-    def test_no_hostile_version_builds_a_runnable_command(self):
-        for version in ["1.0.0; echo pwned", "`id`", "$(id)", "1.0|sh"]:
-            self.assertIsNone(upgrade_command("npm", "lodash", version), version)
+    def test_an_escape_in_a_package_name_never_reaches_the_terminal(self):
+        fix = malware_fix("evil\x1b[2J\x07", "1.0\n#", "npm")
+        out = _terminal(findings=[_dep(fix.package)])
+        self.assertNotIn("\x1b[2J", out)
+        self.assertNotIn("\x07", out)
+        self.assertEqual(1, len([l for l in out.splitlines() if "evil" in l]))
 
-    def test_a_hostile_name_degrades_to_an_inert_comment(self):
-        fix = malware_fix("evil; rm -rf ~", "npm")
-        self.assertTrue(fix.command.startswith("#"))
-        self.assertNotIn("npm uninstall", fix.command)
+    def test_a_hostile_name_yields_no_command_at_all(self):
+        fix = malware_fix("evil; rm -rf ~", "1.0", "npm")
+        self.assertIsNone(fix.command)
 
     def test_every_line_of_the_block_is_a_command_or_a_comment(self):
-        out = _terminal(findings=[_dep(malware_fix("evil; rm -rf ~", "npm").command)],
-                        advisories=[_dep(UPGRADE_CMD, action=UPGRADE)])
+        out = _terminal(findings=[_dep("evil; rm -rf ~@1.0")],
+                        advisories=[_dep("lodash@4.17.20", state=VULNERABLE)])
         payload = [ln.strip() for ln in out.splitlines()
                    if ln.startswith("  ") and ln.strip()]
         for line in payload:
             self.assertTrue(line.startswith("#") or line.startswith(("npm ", "pip ")), line)
 
+    def test_a_flagged_package_is_listed_even_when_it_has_no_command(self):
+        out = _terminal(findings=[_dep("evil; rm -rf ~@1.0")])
+        self.assertIn("evil; rm -rf ~@1.0", out)
+        self.assertNotIn("\nnpm uninstall evil", out)
+
     def test_a_terminal_escape_never_reaches_the_terminal(self):
-        out = _terminal(findings=[_dep("npm uninstall \x1b[2Jx\x07")])
+        out = _terminal(findings=[_dep("x@1.0", command="npm uninstall \x1b[2Jx\x07")])
         self.assertNotIn("\x1b[2J", out)
         self.assertNotIn("\x07", out)
 
     def test_a_newline_cannot_forge_a_second_command(self):
-        body = "\n".join(dependency_action_lines(findings=[_dep("npm uninstall a\nrm -rf ~")]))
+        body = "\n".join(dependency_action_lines(
+            findings=[_dep("x@1.0", command="npm uninstall a\nrm -rf ~")]))
         self.assertNotIn("\nrm -rf ~", body)
 
     def test_every_character_the_gate_admits_is_shell_safe(self):
@@ -123,29 +136,29 @@ class TestAHostileNameCannotReachTheShell(unittest.TestCase):
                 self.assertEqual(name, shlex.quote(name), f"gate admits {ch!r}, which needs quoting")
 
     def test_a_scoped_npm_name_still_works(self):
-        self.assertEqual("npm install @scope/pkg@1.0.0", upgrade_command("npm", "@scope/pkg", "1.0.0"))
+        self.assertEqual("npm uninstall @scope/pkg", removal_command("npm", "@scope/pkg"))
 
 
 class TestTheTwoCasesStayApart(unittest.TestCase):
     """Check which heading a command lands under."""
 
     def test_removals_and_upgrades_sit_under_their_own_heading(self):
-        body = "\n".join(dependency_action_lines(findings=[_dep(REMOVE_CMD)],
-                                                 advisories=[_dep(UPGRADE_CMD, action=UPGRADE)]))
-        self.assertIn("# remove and replace", body)
-        self.assertIn("# upgrade", body)
-        self.assertLess(body.index(REMOVE_CMD), body.index(UPGRADE_CMD))
+        body = "\n".join(dependency_action_lines(findings=[_dep(BAD)],
+                                                 advisories=[_dep(AFFECTED, state=VULNERABLE)]))
+        self.assertIn("# known-malicious", body)
+        self.assertIn("# affected by an advisory", body)
+        self.assertLess(body.index(BAD), body.index(AFFECTED))
 
     def test_only_removals_names_only_that_heading(self):
-        body = "\n".join(dependency_action_lines(findings=[_dep(REMOVE_CMD)]))
-        self.assertIn("# remove and replace", body)
-        self.assertNotIn("# upgrade", body)
+        body = "\n".join(dependency_action_lines(findings=[_dep(BAD)]))
+        self.assertIn("# known-malicious", body)
+        self.assertNotIn("# affected by an advisory", body)
 
 
 class TestItSaysEachCommandOnce(unittest.TestCase):
     def test_the_same_command_from_two_findings_is_said_once(self):
-        body = "\n".join(dependency_action_lines(findings=[_dep(REMOVE_CMD), _dep(REMOVE_CMD)]))
-        self.assertEqual(1, body.count(REMOVE_CMD))
+        body = "\n".join(dependency_action_lines(findings=[_dep(BAD), _dep(BAD)]))
+        self.assertEqual(1, body.count(BAD))
 
     def test_nothing_to_run_renders_nothing(self):
         self.assertEqual([], dependency_action_lines(findings=[], advisories=[]))
@@ -157,37 +170,37 @@ class TestItSaysEachCommandOnce(unittest.TestCase):
 
     def test_a_finding_that_names_no_action_renders_nothing(self):
         stray = Finding(signature_id="x", category="c", severity=Severity.LOW, path="p",
-                        description="d", fix_command="npm uninstall x")
+                        description="d", package="x@1.0")
         self.assertEqual([], dependency_action_lines(findings=[stray]))
 
 
 class TestTheListIsBounded(unittest.TestCase):
     def test_past_the_limit_the_rest_is_counted(self):
-        many = [_dep(f"npm uninstall p{i}") for i in range(ACTION_LIMIT + 10)]
+        many = [_dep(f"p{i}@1.0") for i in range(ACTION_LIMIT + 10)]
         body = "\n".join(dependency_action_lines(findings=many))
-        self.assertEqual(ACTION_LIMIT, body.count("npm uninstall p"))
+        self.assertEqual(ACTION_LIMIT, body.count("#   p"))
         self.assertIn("and 10 more", body)
 
 
 class TestEverySurfaceCarriesTheCommand(unittest.TestCase):
     def test_the_pull_request_body(self):
-        body = _pr_body("acme/app", [], advisories=[_dep(UPGRADE_CMD, action=UPGRADE)])
-        self.assertIn(UPGRADE_CMD, body)
+        body = _pr_body("acme/app", [], advisories=[_dep(AFFECTED, state=VULNERABLE)])
+        self.assertIn(AFFECTED, body)
         self.assertIn("```sh", body)
 
     def test_a_body_with_nothing_to_run_has_no_block(self):
         self.assertNotIn("```sh", _pr_body("acme/app", []))
 
     def test_the_report_file_at_the_top(self):
-        md = render_markdown(_payload(advisories=[_dep(UPGRADE_CMD, action=UPGRADE)]))
-        self.assertIn(UPGRADE_CMD, md)
-        self.assertLess(md.index("## Run these"), md.index("| Target |"))
+        md = render_markdown(_payload(advisories=[_dep(AFFECTED, state=VULNERABLE)]))
+        self.assertIn(AFFECTED, md)
+        self.assertLess(md.index("## Compromised dependencies"), md.index("| Target |"))
 
     def test_a_report_with_nothing_to_run_has_no_block(self):
-        self.assertNotIn("## Run these", render_markdown(_payload()))
+        self.assertNotIn("## Compromised dependencies", render_markdown(_payload()))
 
     def test_the_terminal_footer(self):
-        self.assertIn(UPGRADE_CMD, _terminal(advisories=[_dep(UPGRADE_CMD, action=UPGRADE)]))
+        self.assertIn(AFFECTED, _terminal(advisories=[_dep(AFFECTED, state=VULNERABLE)]))
 
     def test_a_run_with_nothing_to_run_prints_nothing(self):
         self.assertEqual("", _terminal())
@@ -206,11 +219,11 @@ class TestTheRunActuallyPrintsIt(unittest.TestCase):
 
     def test_a_scan_that_flags_a_dependency_prints_the_command(self):
         result = ScanResult(target="acme/app", source="local")
-        result.advisories.append(_dep(UPGRADE_CMD, action=UPGRADE))
-        self.assertIn(UPGRADE_CMD, self._scan(result))
+        result.advisories.append(_dep(AFFECTED, state=VULNERABLE))
+        self.assertIn(AFFECTED, self._scan(result))
 
     def test_a_scan_that_flags_nothing_prints_no_block(self):
-        self.assertNotIn("Run these", self._scan(ScanResult(target="acme/app", source="local")))
+        self.assertNotIn("Compromised dependencies", self._scan(ScanResult(target="acme/app", source="local")))
 
 
 if __name__ == "__main__":
