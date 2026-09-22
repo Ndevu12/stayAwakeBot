@@ -13,9 +13,15 @@ reader, not the mechanism or the weakness it closed.
 
 ## [Unreleased]
 
+### Added
+- **saw now hands you the commands to run for a flagged dependency** — once at the end of a scan, at
+  the top of a saved report, and in the remediation pull request. npm, pip, gem, cargo, composer,
+  go and nuget.
+
+### Security
+- **A package name from a scanned lockfile can no longer shape a command saw hands you.**
+
 ### Fixed
-- **A remediation pull request now says what to do about a flagged dependency** — remove and
-  replace a known-malicious one, or upgrade a vulnerable one to its patched version.
 - **`saw fix` works again on a repository where an earlier run was interrupted.**
 - **A run clears the temporary directories it creates**, and names what it could not.
 - **A scan reports more of the committed symlinks that redirect a write somewhere dangerous**,
