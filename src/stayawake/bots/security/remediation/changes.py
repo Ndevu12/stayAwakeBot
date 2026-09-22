@@ -9,17 +9,18 @@ from pathlib import Path
 
 from stayawake.utils.pathsafe import is_safe_write_target
 from stayawake.bots.security.matchers.base import load_jsonc
-from stayawake.bots.security.models import CONFIRMED, ROLLBACK_DIR
+from stayawake.bots.security.models import CONFIRMED, ROLLBACK_DIR, SAW_DIR
+from stayawake.bots.security.remediation.footprint import REMOVE_FILE
 
 _ACTIONS = {
-    "quarantine-file": "remove",
+    REMOVE_FILE: "remove",
     "remove-foreign-vscode": "vscode",
     "strip-gitignore-markers": "strip-gitignore",
 }
 _GITIGNORE_MARKER_PATTERNS = None
 
 _ROLLBACK_COMMENT = "# Remediation rollback copies (kept local, never committed)"
-_ROLLBACK_PATTERNS = (ROLLBACK_DIR + "/",)
+_ROLLBACK_PATTERNS = (SAW_DIR + "/",)
 
 
 def is_auto_fixable(finding) -> bool:

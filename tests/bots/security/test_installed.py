@@ -13,6 +13,7 @@ from unittest import mock
 
 from stayawake.bots.security.models import ROLLBACK_DIR
 from stayawake.bots.security.remediation import installed
+from stayawake.bots.security.remediation.footprint import REMOVE_FILE
 
 
 def _loader() -> str:
@@ -254,7 +255,7 @@ class TestItRefusesWhereRemovalWouldBeAGuess(unittest.TestCase):
 
         wrap = _Frozen(Finding(
             "x", "persistence", Severity.HIGH, "payload.js", "drop",
-            remediation="quarantine-file", confidence=HEURISTIC))
+            remediation=REMOVE_FILE, confidence=HEURISTIC))
         with self.assertRaises(AttributeError):
             wrap.confidence = "confirmed"
         with self.assertRaises(AttributeError):
@@ -273,7 +274,7 @@ class TestItRefusesWhereRemovalWouldBeAGuess(unittest.TestCase):
             return []
 
         finding = Finding("x", "persistence", Severity.HIGH, "telemetry.js",
-                          "drop", remediation="quarantine-file")
+                          "drop", remediation=REMOVE_FILE)
         partial = ScanResult("owner/repo", "local", [finding],
                              error="1 file(s) unreadable: secret.env")
         idle = ScanResult("owner/repo", "local", [])
@@ -293,7 +294,7 @@ class TestItRefusesWhereRemovalWouldBeAGuess(unittest.TestCase):
             return []
 
         finding = Finding("x", "persistence", Severity.HIGH, "telemetry.js",
-                          "drop", remediation="quarantine-file")
+                          "drop", remediation=REMOVE_FILE)
         partial = ScanResult("owner/repo", "local", [finding],
                              error="1 file(s) unreadable: secret.env")
         later = ScanResult("owner/repo", "local", [finding])
@@ -567,7 +568,7 @@ class TestRemovalIsDeepestFirst(unittest.TestCase):
 class TestEachRunKeepsItsOwnEvidence(unittest.TestCase):
     def test_a_second_run_does_not_write_into_the_first(self):
         repo = _Repo()
-        base = repo.root / ".malware-quarantine"
+        base = repo.root / ROLLBACK_DIR
         first = installed.next_rollback(repo.root, base)
         first.mkdir(parents=True)
         second = installed.next_rollback(repo.root, base)
@@ -657,7 +658,7 @@ class TestTheProjectTreeIsRemovedOnTheRepo(unittest.TestCase):
         report = installed.remove_rebuildable(repo.root, remove_lockfiles=True)
         self.assertFalse(repo.lock.is_file())
         self.assertFalse(package.exists())
-        kept = list((repo.root / ".malware-quarantine").rglob("package-lock.json"))
+        kept = list((repo.root / ROLLBACK_DIR).rglob("package-lock.json"))
         self.assertTrue(kept, "the lockfile was deleted without a copy")
         self.assertTrue(report.removed_lockfiles)
 
@@ -809,7 +810,8 @@ class TestTheProjectTreeIsRemovedOnTheRepo(unittest.TestCase):
         host = Path(tempfile.mkdtemp())
         marker = host / "keep"
         marker.write_text("x", encoding="utf-8")
-        (repo.root / ".malware-quarantine").symlink_to(host)
+        (repo.root / ROLLBACK_DIR).parent.mkdir(parents=True, exist_ok=True)
+        (repo.root / ROLLBACK_DIR).symlink_to(host)
         with self.assertRaises(OSError):
             installed.remove_rebuildable(repo.root)
         self.assertTrue(marker.is_file())

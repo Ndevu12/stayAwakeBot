@@ -270,7 +270,7 @@ def verdict(path: Path, expected: tuple[str, str | None] | None = None) -> str:
 
 def set_aside_dir() -> Path:
     """Return the directory saw keeps what it removed from a hooks directory."""
-    return Path(env.xdg_state_home()) / "saw" / "quarantine" / "hooks"
+    return Path(env.xdg_state_home()) / "saw" / "set-aside" / "hooks"
 
 
 def set_aside(path: Path) -> Path | None:

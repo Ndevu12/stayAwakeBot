@@ -12,7 +12,7 @@
 #               npm-manifest | workflow-yaml | dependency-audit | installed-package-audit | symlink
 #   description human-readable
 #   remediation strategy id (consumed in Phase 3): recover (git restore, code-loader) |
-#               quarantine-file | remove-foreign-vscode | strip-gitignore-markers | manual
+#               remove-file | remove-foreign-vscode | strip-gitignore-markers | manual
 #   confidence  verdict weight (OPTIONAL, default `confirmed`): confirmed | heuristic.
 #               Orthogonal to severity. Only a `confirmed` match drives an INFECTED
 #               verdict; a `heuristic` match (a SHAPE benign code can share — a packed
@@ -105,7 +105,7 @@ signatures:
     pattern: 'Blockchain Explorer|BlockchainFont|TechMono'
     file_globs: ["**/fonts/README.md", "**/fonts/*.md"]
     description: "Fake 'Blockchain Explorer' fonts README used as camouflage (GlassWorm-family)"
-    remediation: quarantine-file
+    remediation: remove-file
 
   # ── Fake font payload (filename + content cross-check via heuristic) ─────────
   - id: fake-font-fa-solid-400
@@ -124,7 +124,7 @@ signatures:
     kind: magic-byte-masquerade
     file_globs: ["*.woff", "*.woff2", "*.ttf", "*.otf"]
     description: "Font file whose bytes are actually JavaScript/text (disguised payload)"
-    remediation: quarantine-file
+    remediation: remove-file
 
   - id: disguised-binary-file
     category: fake-font
@@ -133,7 +133,7 @@ signatures:
     kind: magic-byte-masquerade
     file_globs: ["*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp", "*.bmp", "*.ico", "*.wasm", "*.pdf"]
     description: "Image/wasm/pdf file whose bytes are actually JavaScript/text (disguised payload)"
-    remediation: quarantine-file
+    remediation: remove-file
 
   # ── Oversized single line in a config file (obfuscation heuristic) ────────────
   - id: oversized-config-line
@@ -312,7 +312,7 @@ signatures:
     confidence: heuristic
     pattern: '.runner'
     description: "Committed file named .runner — likely a self-hosted runner registration config (review)"
-    remediation: quarantine-file
+    remediation: remove-file
 
   - id: runner-registration-content
     category: runner-persistence
@@ -322,7 +322,7 @@ signatures:
     prefilter: "url"   # cheap required-literal reject before the regex
     file_globs: ['.runner', '**/.runner', '**/actions-runner/**']
     description: "Committed self-hosted runner registration (.runner with a live registration endpoint) — durable CI persistence foothold"
-    remediation: quarantine-file
+    remediation: remove-file
 
   - id: runner-credentials-committed
     category: runner-persistence
@@ -331,7 +331,7 @@ signatures:
     confidence: heuristic
     pattern: '.credentials'
     description: "Committed .credentials file — pairs with a self-hosted runner install (review; benign alone)"
-    remediation: quarantine-file
+    remediation: remove-file
 
   # ── npm install-time lifecycle-hook execution (package.json) ─────────────────
   - id: npm-lifecycle-dropper

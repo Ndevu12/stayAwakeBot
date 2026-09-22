@@ -10,8 +10,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterator
 
+from stayawake.bots.security.models import SAW_DIR
+
 INSTALLED_DIR = "node_modules"
-_NOT_WALKED = frozenset({".git", ".malware-quarantine", ".hg", ".svn"})
+_NOT_WALKED = frozenset({".git", SAW_DIR, ".hg", ".svn"})
 _MAX_DEPTH = 8
 
 

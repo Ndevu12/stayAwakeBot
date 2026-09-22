@@ -10,12 +10,16 @@ from dataclasses import dataclass, field, asdict
 from enum import IntEnum
 from typing import Any
 
-ROLLBACK_DIR = ".malware-quarantine"
+SAW_DIR = ".saw"
+ROLLBACK_DIR = f"{SAW_DIR}/rollback"
 
 CONFIRMED = "confirmed"
 HEURISTIC = "heuristic"
 RESIDUE = "residue"
 CONFIDENCE_LEVELS = (CONFIRMED, HEURISTIC, RESIDUE)
+
+REMEDIATION_VERBS = ("manual", "recover", "remove-file", "remove-foreign-vscode",
+                     "strip-gitignore-markers")
 
 CLEAN = "clean"
 RESIDUE_VERDICT = "residue"

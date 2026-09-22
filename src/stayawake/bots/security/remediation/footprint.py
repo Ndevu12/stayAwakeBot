@@ -11,12 +11,12 @@ from stayawake.bots.security.remediation.gates import (
 
 CODE_LOADER = "code-loader"
 GIT_MARKER = "git-marker"
-QUARANTINE_FILE = "quarantine-file"
+REMOVE_FILE = "remove-file"
 
 
 def foreign_path(finding) -> str | None:
     """The path of a wholly-foreign file to remove whole, or None when the finding is not one."""
-    if getattr(finding, "remediation", None) != QUARANTINE_FILE:
+    if getattr(finding, "remediation", None) != REMOVE_FILE:
         return None
     return (getattr(finding, "path", "") or "") or None
 

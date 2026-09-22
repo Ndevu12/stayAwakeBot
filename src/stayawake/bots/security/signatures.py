@@ -16,7 +16,7 @@ from typing import Any
 import yaml
 
 from stayawake.bots.security.matchers import REGISTRY
-from stayawake.bots.security.models import CONFIDENCE_LEVELS
+from stayawake.bots.security.models import CONFIDENCE_LEVELS, REMEDIATION_VERBS
 
 _REQUIRED = ("id", "category", "severity", "matcher", "description")
 
@@ -49,6 +49,11 @@ def load_signatures(path: str | Path | None = None) -> dict[str, list[dict[str, 
         seen.add(s["id"])
         if s["matcher"] not in REGISTRY:
             raise ValueError(f"Unknown matcher '{s['matcher']}' in signature {s['id']}")
+        remediation = s.get("remediation")
+        if remediation is not None and remediation not in REMEDIATION_VERBS:
+            raise ValueError(
+                f"Signature {s['id']}: unknown remediation '{remediation}' "
+                f"(use one of {REMEDIATION_VERBS})")
         conf = s.get("confidence")
         if conf is not None and conf not in CONFIDENCE_LEVELS:
             raise ValueError(

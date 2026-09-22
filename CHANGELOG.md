@@ -42,10 +42,11 @@ reader, not the mechanism or the weakness it closed.
 - **`saw fix amend` says when it could not use content you supplied, and names the file.**
 
 ### Changed
-- **saw now names what it does to a file it cleans up.** A remediation pull request lists the
-  action as `remove` rather than `quarantine`, and `saw hook` reports a hook it moved out of the
-  way as `set aside`. Both descriptions were wrong: the file is removed, and the original is kept
-  only so the change can be rolled back.
+- **BREAKING — nothing is called a quarantine any more.** saw keeps its own files under one `.saw/`
+  directory (the fix's backup is `.saw/rollback`), a signature's removal verb is `remove-file`, and
+  `saw hook` keeps what it set aside under `saw/set-aside/hooks`. Update `exclude_dirs` to `.saw`
+  and any custom signature database.
+- **saw says `remove` and `set aside` where it used to say `quarantine`.**
 - **On a terminal, `saw fix amend` offers to remove a confirmed commit it could not clean
   automatically, dropping the payload from every commit that carries it.** A commit whose only clean
   version also carries the payload — a poisoned re-add, a merge conflict on the payload — used to

@@ -13,6 +13,8 @@ from stayawake.bots.security.signatures import load_signatures      # noqa: E402
 from stayawake.bots.security.scanner import scan_target             # noqa: E402
 from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions  # noqa: E402
 from stayawake.bots.security import remediation                     # noqa: E402
+from stayawake.bots.security.models import ROLLBACK_DIR, SAW_DIR
+from stayawake.bots.security.remediation.footprint import REMOVE_FILE
 
 FIX = Path(__file__).resolve().parent / "fixtures" / "infected"
 SIGS = load_signatures()
@@ -22,7 +24,7 @@ class TestRemediation(unittest.TestCase):
     def setUp(self):
         self.repo = Path(tempfile.mkdtemp()) / "repo"
         shutil.copytree(FIX, self.repo)
-        self.q = self.repo / ".malware-quarantine"
+        self.q = self.repo / ROLLBACK_DIR
 
     def _findings(self):
         return scan_target(LocalRepoTarget(self.repo, "t", ScanOptions()), SIGS, []).findings
@@ -61,13 +63,13 @@ class TestEnsureIgnored(unittest.TestCase):
 
     def test_creates_gitignore_when_absent(self):
         self.assertTrue(remediation.ensure_ignored(self.repo))
-        self.assertIn(".malware-quarantine/", self._lines())
+        self.assertIn(SAW_DIR + "/", self._lines())
 
     def test_appends_only_missing_patterns(self):
         self.gi.write_text("node_modules/\n", encoding="utf-8")
         self.assertTrue(remediation.ensure_ignored(self.repo))
         lines = self._lines()
-        self.assertEqual(lines.count(".malware-quarantine/"), 1, "must not duplicate")
+        self.assertEqual(lines.count(SAW_DIR + "/"), 1, "must not duplicate")
         self.assertIn("node_modules/", lines)
 
     def test_idempotent_no_change_when_present(self):
@@ -92,7 +94,7 @@ class TestStripAndResidual(unittest.TestCase):
         self.assertTrue(remediation.is_auto_fixable(good))
         self.assertFalse(remediation.is_auto_fixable(code_loader))
         self.assertFalse(remediation.is_auto_fixable(manual))
-        missing = type("F", (), {"remediation": "quarantine-file"})()
+        missing = type("F", (), {"remediation": REMOVE_FILE})()
         self.assertFalse(remediation.is_auto_fixable(missing))
 
     def test_remove_residual_removes_and_backs_up(self):
@@ -113,7 +115,7 @@ class TestStripAndResidual(unittest.TestCase):
         applied = remediation.apply(repo, [remediation.Change("remove", ".", "x")], q)
         self.assertEqual(applied, [])
         self.assertTrue(keep.is_file())
-        finding = type("F", (), {"path": ".", "remediation": "quarantine-file",
+        finding = type("F", (), {"path": ".", "remediation": REMOVE_FILE,
                                  "confidence": "confirmed", "description": "x"})()
         self.assertNotIn(".", {c.path for c in remediation.plan([finding])})
 
@@ -299,7 +301,7 @@ class TestActionScopeMatchesEvidence(unittest.TestCase):
         self.repo = Path(tempfile.mkdtemp()) / "repo"
         self.fonts = self.repo / "public" / "fonts"
         self.fonts.mkdir(parents=True)
-        self.q = self.repo / ".malware-quarantine"
+        self.q = self.repo / ROLLBACK_DIR
         (self.fonts / "README.md").write_text(self.CAMOUFLAGE_README, encoding="utf-8")
         (self.fonts / "Inter.woff2").write_bytes(self.GENUINE_WOFF2)
         (self.fonts / "NotoSans.ttf").write_bytes(self.GENUINE_TTF)

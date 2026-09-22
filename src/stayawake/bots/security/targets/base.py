@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterator
 
+from stayawake.bots.security.models import SAW_DIR
 from stayawake.bots.security.write_sinks import sink_label
 
 
@@ -43,7 +44,7 @@ def _ext(rel: str) -> str:
 @dataclass
 class ScanOptions:
     exclude_dirs: set[str] = field(default_factory=lambda: {
-        ".git", "node_modules", ".next", "dist", "build", ".malware-quarantine"})
+        ".git", "node_modules", ".next", "dist", "build", SAW_DIR})
     max_file_bytes: int = 2_000_000
     remote_clone_depth: int = 50
     scan_build_outputs: bool = False
