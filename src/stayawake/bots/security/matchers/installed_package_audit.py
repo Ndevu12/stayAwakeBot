@@ -71,7 +71,7 @@ class InstalledPackageAuditMatcher(Matcher):
 def _malicious(advisory, pkg) -> Finding:
     sig = advisory.signature
     cite = f" [{advisory.osv_id}]" if advisory.osv_id else ""
-    fix = malware_fix(pkg.name, pkg.ecosystem)
+    fix = malware_fix(pkg.name, pkg.version, pkg.ecosystem)
     return Finding(
         signature_id=sig["id"], category=sig["category"],
         severity=Severity.parse(sig["severity"]), path=pkg.path,
@@ -79,7 +79,8 @@ def _malicious(advisory, pkg) -> Finding:
         evidence=f"{pkg.name}@{pkg.version} INSTALLED on disk is known-malicious{cite} "
                  f"(caught even if the lockfile was not edited)",
         vector=sig["category"],
-        fix_advice=fix.advice, dependency_action=fix.action, fix_command=fix.command,
+        fix_advice=fix.advice, dependency_state=fix.state, fix_command=fix.command,
+        package=fix.package,
         reference=advisory_reference(advisory.osv_id, advisory.aliases), composed_evidence=True)
 
 

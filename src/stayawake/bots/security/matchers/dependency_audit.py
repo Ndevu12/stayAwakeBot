@@ -52,14 +52,15 @@ class DependencyAuditMatcher(Matcher):
 def _emit(advisory: Advisory, dep: ResolvedDependency) -> Finding:
     sig = advisory.signature
     cite = f" [{advisory.osv_id}]" if advisory.osv_id else ""
-    fix = malware_fix(dep.purl.name, dep.purl.type)
+    fix = malware_fix(dep.purl.name, dep.purl.version, dep.purl.type)
     return Finding(
         signature_id=sig["id"], category=sig["category"],
         severity=Severity.parse(sig["severity"]), path=dep.source_path,
         description=sig["description"], remediation=sig.get("remediation", "manual"),
         evidence=f"{dep.purl.coordinate} — known-malicious upstream package{cite} ({dep.source_name})",
         vector=sig["category"],
-        fix_advice=fix.advice, dependency_action=fix.action, fix_command=fix.command,
+        fix_advice=fix.advice, dependency_state=fix.state, fix_command=fix.command,
+        package=fix.package,
         reference=advisory_reference(advisory.osv_id, advisory.aliases), composed_evidence=True)
 
 
@@ -67,14 +68,16 @@ def _emit_advisory(advisory: Advisory, dep: ResolvedDependency) -> Finding:
     """A CVE/GHSA advisory on a declared dependency — informational, routed OUT of the verdict."""
     sig = advisory.signature
     cite = f" [{advisory.osv_id}]" if advisory.osv_id else ""
-    fix = vulnerability_fix(dep.purl.type, dep.purl.name, advisory.fixed_version)
+    fix = vulnerability_fix(dep.purl.type, dep.purl.name, dep.purl.version,
+                            advisory.fixed_version)
     return Finding(
         signature_id=sig["id"], category=sig["category"],
         severity=Severity.parse(sig["severity"]), path=dep.source_path,
         description=sig["description"], remediation=sig.get("remediation", "manual"),
         evidence=f"{dep.purl.coordinate} — known security advisory{cite} ({dep.source_name})",
         vector=sig["category"], advisory_only=True,
-        fix_advice=fix.advice, dependency_action=fix.action, fix_command=fix.command,
+        fix_advice=fix.advice, dependency_state=fix.state, fix_command=fix.command,
+        package=fix.package,
         fixed_version=advisory.fixed_version,
         reference=advisory_reference(advisory.osv_id, advisory.aliases), composed_evidence=True)
 
@@ -93,7 +96,8 @@ def _external_findings(target, signatures, seen: set[tuple[str, str]]) -> list[F
 
 def _emit_external(sig: dict, finding) -> Finding:
     """An external auditor's vulnerability → an advisory-tier finding, attributing the tool."""
-    fix = external_advisory_fix(finding.package, finding.advisory_id, finding.source_tool)
+    fix = external_advisory_fix(finding.package, finding.version, finding.advisory_id,
+                                finding.source_tool)
     return Finding(
         signature_id=sig["id"], category=sig["category"],
         severity=Severity.parse(finding.severity), path=finding.source_path or ".",
@@ -101,5 +105,6 @@ def _emit_external(sig: dict, finding) -> Finding:
         evidence=(f"{finding.package}@{finding.version} — {finding.advisory_id} "
                   f"(via {finding.source_tool})"),
         vector=sig["category"], advisory_only=True,
-        fix_advice=fix.advice, dependency_action=fix.action, fix_command=fix.command,
+        fix_advice=fix.advice, dependency_state=fix.state, fix_command=fix.command,
+        package=fix.package,
         reference=advisory_reference(finding.advisory_id), composed_evidence=True)

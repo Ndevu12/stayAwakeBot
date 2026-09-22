@@ -57,9 +57,9 @@ def _print_dependency_actions(results) -> None:
     if not actions:
         return
     bar = rule(72)
-    out = [bar, "Run these — saw does not change your manifests for you:"]
-    for title, group in (("remove and replace — known-malicious", actions.remove),
-                         ("upgrade — patched version published", actions.upgrade)):
+    out = [bar, "Compromised dependencies — saw does not change your manifests for you:"]
+    for title, group in (("known-malicious — remove and replace these", actions.malicious),
+                         ("affected by an advisory — move off these", actions.vulnerable)):
         if group:
             out += ["", f"  # {title}"] + plain_lines(group, _ACTION_LIMIT)
     print("\n".join(out + [bar]), file=sys.stderr)

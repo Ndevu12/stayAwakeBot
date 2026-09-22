@@ -280,9 +280,9 @@ def _action_block(payload: dict[str, Any]) -> list[str]:
     actions = dependency_actions(*groups)
     if not actions:
         return []
-    out = ["## Run these", "", "```sh"]
-    for title, group in (("remove and replace — known-malicious", actions.remove),
-                         ("upgrade — patched version published", actions.upgrade)):
+    out = ["## Compromised dependencies", "", "```sh"]
+    for title, group in (("known-malicious — remove and replace these", actions.malicious),
+                         ("affected by an advisory — move off these", actions.vulnerable)):
         if group:
             out += [f"# {title}"] + markdown_lines(group, _ACTION_LIMIT) + [""]
     return out + ["```", ""]
