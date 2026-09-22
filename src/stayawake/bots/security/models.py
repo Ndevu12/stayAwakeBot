@@ -83,6 +83,7 @@ class Finding:
     dependency_state: str | None = None
     fix_command: str | None = None
     package: str | None = None
+    package_name: str | None = None
     reference: str | None = None
 
     def to_dict(self) -> dict[str, Any]:

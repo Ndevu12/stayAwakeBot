@@ -50,8 +50,8 @@ def _print_report_pointer(report_path: Path, *, spilled: bool, reason: str = "")
 
 
 def _print_dependency_actions(results) -> None:
-    """Print what the operator should run about the flagged dependencies, on stderr. Takes the
-    scan results. Prints nothing when none of them carries advice."""
+    """Print the flagged dependencies and the commands that remove them, on stderr. Takes the
+    scan results. Prints nothing when none of them names a package."""
     groups = [g for r in results for g in (r.findings, r.advisories)]
     actions = dependency_actions(*groups)
     if not actions:

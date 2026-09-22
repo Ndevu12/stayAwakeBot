@@ -43,11 +43,11 @@ class TestRemediationBuilders(unittest.TestCase):
     def test_vulnerability_fix_upgrade_vs_no_fix(self):
         up = R.vulnerability_fix("npm", "left-pad", "1.2.0", "1.3.0")
         self.assertIn("left-pad 1.2.0 is affected", up.advice)
-        self.assertNotIn("1.3.0", up.advice)            # never names a version to install
+        self.assertNotIn("1.3.0", up.advice)
         self.assertEqual(up.state, R.VULNERABLE)
         no_fix = R.vulnerability_fix("npm", "x", "1.0", None)
         self.assertIn("No patched version", no_fix.advice)
-        self.assertEqual(no_fix.state, R.VULNERABLE)     # nothing to upgrade to
+        self.assertEqual(no_fix.state, R.VULNERABLE)
 
     def test_advisory_reference_prefers_ghsa_then_osv(self):
         self.assertEqual(R.advisory_reference("CVE-1", ("GHSA-aaaa-bbbb-cccc",)),
@@ -107,7 +107,7 @@ class TestFindingCarriesRemediation(unittest.TestCase):
         self.assertTrue(f.advisory_only)
         self.assertEqual(f.fixed_version, "2.5.0")
         self.assertIn("shaky 2.0.0 is affected", f.fix_advice)
-        self.assertNotIn("2.5.0", f.fix_advice)         # the data keeps it; the advice never says it
+        self.assertNotIn("2.5.0", f.fix_advice)
         self.assertEqual(f.package, "shaky@2.0.0")
         self.assertEqual(f.reference, "https://github.com/advisories/GHSA-xxxx-yyyy-zzzz")
 

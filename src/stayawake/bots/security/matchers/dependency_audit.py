@@ -60,7 +60,7 @@ def _emit(advisory: Advisory, dep: ResolvedDependency) -> Finding:
         evidence=f"{dep.purl.coordinate} — known-malicious upstream package{cite} ({dep.source_name})",
         vector=sig["category"],
         fix_advice=fix.advice, dependency_state=fix.state, fix_command=fix.command,
-        package=fix.package,
+        package=fix.package, package_name=fix.name,
         reference=advisory_reference(advisory.osv_id, advisory.aliases), composed_evidence=True)
 
 
@@ -77,7 +77,7 @@ def _emit_advisory(advisory: Advisory, dep: ResolvedDependency) -> Finding:
         evidence=f"{dep.purl.coordinate} — known security advisory{cite} ({dep.source_name})",
         vector=sig["category"], advisory_only=True,
         fix_advice=fix.advice, dependency_state=fix.state, fix_command=fix.command,
-        package=fix.package,
+        package=fix.package, package_name=fix.name,
         fixed_version=advisory.fixed_version,
         reference=advisory_reference(advisory.osv_id, advisory.aliases), composed_evidence=True)
 
@@ -106,5 +106,5 @@ def _emit_external(sig: dict, finding) -> Finding:
                   f"(via {finding.source_tool})"),
         vector=sig["category"], advisory_only=True,
         fix_advice=fix.advice, dependency_state=fix.state, fix_command=fix.command,
-        package=fix.package,
+        package=fix.package, package_name=fix.name,
         reference=advisory_reference(finding.advisory_id), composed_evidence=True)
