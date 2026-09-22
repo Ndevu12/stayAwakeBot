@@ -9,6 +9,7 @@ from pathlib import Path
 from stayawake.lib.adapters import github_api
 from stayawake.lib import git as gitutil
 from stayawake.lib.git.merge.liveness import introduced_liveness, PRESENT, GONE
+from stayawake.utils import scratch
 from stayawake.utils.streaming import status
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.targets import LocalRepoTarget
@@ -42,12 +43,6 @@ class _Frozen:
 
 def _freeze(findings):
     return [_Frozen(f) for f in findings]
-
-
-def _untrack_quarantine(repo: Path) -> bool:
-    """Untrack the quarantine directory. True if nothing under it is tracked after."""
-    gitutil.unstage_cached(repo, QUARANTINE_DIR)
-    return not gitutil.tracked_under(repo, QUARANTINE_DIR)
 
 
 def _reconcile_partial_label(owner: str, name: str, number: int, partial: bool, token: str) -> None:
@@ -133,6 +128,12 @@ def _related_all_gone(repo: Path | None, sha: str | None, paths) -> bool:
     return all(introduced_liveness(repo, sha, p) == GONE for p in paths)
 
 
+def _untrack_quarantine(repo: Path) -> bool:
+    """Untrack the quarantine directory. True if nothing under it is tracked after."""
+    gitutil.unstage_cached(repo, QUARANTINE_DIR)
+    return not gitutil.tracked_under(repo, QUARANTINE_DIR)
+
+
 def _manual_for(f0, path: str, repo: Path | None = None) -> "remediation.Manual":
     """Manual-review entry for a confirmed residual."""
     if getattr(f0, "vector", None) == "evil-merge":
@@ -182,14 +183,14 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
     if not gitutil.ref_exists(repo, baseref):
         return None, "no default branch to build a fix from — skipped", None
 
-    wt = Path(tempfile.mkdtemp(prefix="sab-fix-"))
-    quarantine = Path(tempfile.mkdtemp(prefix="sab-bak-"))
+    wt = scratch.new_dir("the fix worktree", teardown=gitutil.release_worktree(repo))
     branch = choose_fix_branch(
         base,
         exists=lambda n: gitutil.ref_exists(repo, f"origin/{n}"),
         fast_forwardable=lambda n: gitutil.is_ancestor(repo, f"origin/{n}", baseref))
     if not gitutil.add_worktree(repo, wt, branch, baseref):
         return None, "could not create worktree", wt
+    rollback = scratch.new_dir("rollback")
 
     content_sig = remediation.codeloader_content_sig([s for g in signatures.values() for s in g])
 
@@ -226,7 +227,7 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
                     lockfile_changes = _lockfile_changes(wt, report)
                 except OSError as exc:
                     tree_note = f"could not remove the installed tree ({exc})"
-            applied = lockfile_changes + remediation.apply(wt, remediation.plan(findings), quarantine)
+            applied = lockfile_changes + remediation.apply(wt, remediation.plan(findings), rollback)
             for f in findings:
                 sha = _merge_sha(f)
                 if not sha:
@@ -258,7 +259,7 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
                         continue
                 disp = remediation.classify_recovery(wt, f, content_sig, merge_clean=merge_clean.get(f.path))
                 if isinstance(disp, remediation.Recovery) and \
-                        remediation.apply_recovery(wt, disp, quarantine, content_sig):
+                        remediation.apply_recovery(wt, disp, rollback, content_sig):
                     seen_cl.add(f.path)
                     applied.append(remediation.Change("recover", disp.path, disp.label))
                 elif not corroborated:
@@ -281,7 +282,7 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
                     disp = remediation.classify_recovery(
                         wt, _AtPath(f, rp), content_sig, merge_clean=merge_clean.get(rp))
                     if conf == CONFIRMED and isinstance(disp, remediation.Recovery) and \
-                            remediation.apply_recovery(wt, disp, quarantine, content_sig):
+                            remediation.apply_recovery(wt, disp, rollback, content_sig):
                         seen_cl.add(rp)
                         applied.append(remediation.Change("recover", disp.path, disp.label))
                     elif isinstance(disp, remediation.Suggested):
@@ -295,11 +296,11 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
             if not rescan.error:
                 auto = [f for f in _blocking(_freeze(rescan.findings)) if remediation.is_auto_fixable(f)]
             if auto:
-                applied += remediation.quarantine_residual(wt, auto, quarantine)
-
+                applied += remediation.quarantine_residual(wt, auto, rollback)
             if not _untrack_quarantine(wt):
                 return None, _with_tree(
                     f"ABORTED — could not untrack {QUARANTINE_DIR}/ (would commit backups)", tree_note), wt
+
             signed = True
             if applied:
                 if not gitutil.stage_all(wt):
@@ -312,7 +313,7 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
 
             computed: list = []
             for disp in suggested:
-                if remediation.apply_suggested(wt, disp, quarantine, content_sig):
+                if remediation.apply_suggested(wt, disp, rollback, content_sig):
                     computed.append(disp)
                 else:
                     manual_reviews[disp.path] = remediation.Manual(

@@ -47,6 +47,7 @@ from stayawake.lib.git.merge import merge_commits, evil_merge_paths, clean_merge
 from stayawake.lib.git.write import (
     add_worktree,
     remove_worktree,
+    release_worktree,
     stage_all,
     unstage_cached,
     commit_fix,
@@ -70,7 +71,7 @@ __all__ = [
     "fetch_refs", "FetchResult",
     "remote_branches_matching", "ref_safe_segment", "choose_branch", "commit_count", "ref_counts",
     "merge_commits", "evil_merge_paths", "clean_merge_blob",
-    "add_worktree", "remove_worktree", "stage_all", "unstage_cached",
+    "add_worktree", "remove_worktree", "release_worktree", "stage_all", "unstage_cached",
     "commit_fix", "CommitResult", "BOT_AUTHOR", "push_branch", "push_branch_result", "PushResult",
     "delete_remote_branch",
     "format_patch", "fetch", "delete_branch",
