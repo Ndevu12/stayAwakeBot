@@ -6,6 +6,8 @@ from __future__ import annotations
 from stayawake.utils import textsafe
 from stayawake.bots.security.models import CONFIRMED
 from stayawake.bots.security import remediation
+from stayawake.bots.security.dependencies.remediation import (
+    dependency_actions, markdown_lines)
 from stayawake.core import proposal
 from stayawake.bots.security.pr.constants import ISSUE_LABEL
 
@@ -135,34 +137,22 @@ def _render_submit(res: proposal.SubmitResult, *, slug: str, base: str, partial:
     return (f"{slug}: {dash}{head} — " + "; ".join(bits) + ".")
 
 
-def dependency_actions(findings=(), advisories=()) -> list[str]:
-    """The lines telling an operator what to do about a flagged dependency. Takes the findings and
-    the advisories. Returns the body lines, empty when none carries advice.
+ACTION_LIMIT = 50
 
-    A package carrying a patched version is upgraded to it; one without is removed and replaced,
-    because a known-malicious package has no later version to move to."""
-    upgrade: dict[str, tuple[str, str | None]] = {}
-    replace: dict[str, tuple[str, str | None]] = {}
-    for item in [*findings, *advisories]:
-        advice = getattr(item, "fix_advice", None)
-        if not advice:
-            continue
-        where = upgrade if getattr(item, "fixed_version", None) else replace
-        where.setdefault(advice, (advice, getattr(item, "reference", None)))
-    if not upgrade and not replace:
+
+def dependency_action_lines(findings=(), advisories=()) -> list[str]:
+    """The lines telling an operator what to do about a flagged dependency. Takes the findings and
+    the advisories. Returns the body lines, empty when none carries advice."""
+    actions = dependency_actions(findings, advisories)
+    if not actions:
         return []
-    lines = ["", "## Act on these before you merge", "",
-             "This branch does not change your declared dependencies."]
-    for title, group in (("Remove and replace", replace), ("Upgrade", upgrade)):
-        if not group:
-            continue
-        lines += ["", f"**{title}**", ""]
-        for advice, reference in list(group.values())[:50]:
-            link = f" — {textsafe.code(reference)}" if reference else ""
-            lines.append(f"- {textsafe.code(advice)}{link}")
-        if len(group) > 50:
-            lines.append(f"- …and {len(group) - 50} more")
-    return lines
+    lines = ["", "## Run these before you merge", "",
+             "This branch does not change your declared dependencies.", "", "```sh"]
+    for title, group in (("remove and replace — known-malicious", actions.remove),
+                         ("upgrade — patched version published", actions.upgrade)):
+        if group:
+            lines += [f"# {title}"] + markdown_lines(group, ACTION_LIMIT) + [""]
+    return lines + ["```"]
 
 
 def _pr_body(slug: str, changes, computed=(), suspicious=(), manual=(), findings=(),
@@ -178,7 +168,7 @@ def _pr_body(slug: str, changes, computed=(), suspicious=(), manual=(), findings
          "branch applies what is provably safe but is **NOT a clean tree** (see below)."
          if partial else
          f"Automated worm remediation for {textsafe.code(slug)} by StayAwakeBot Security Sentinel."),
-        *dependency_actions(findings, advisories),
+        *dependency_action_lines(findings, advisories),
         "", "## Changes applied", ""]
     change_lines = [f"- {textsafe.code(c.action, 40)} — {textsafe.code(c.path)}" for c in changes[:200]]
     if len(changes) > 200:                    # bound the body — a hostile tree can't bloat it

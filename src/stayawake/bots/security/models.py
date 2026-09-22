@@ -76,6 +76,8 @@ class Finding:
     advisory_only: bool = False
     fix_advice: str | None = None
     fixed_version: str | None = None
+    dependency_action: str | None = None
+    fix_command: str | None = None
     reference: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
