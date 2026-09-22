@@ -28,6 +28,7 @@ from stayawake.lib.git.write import amend as gitamend
 from stayawake.lib.git.write.push import PushResult
 from tests.bots.security.test_evil_merge import EVIL_SIG, _git
 from tests.support.gitrepo import GitSandbox
+from stayawake.bots.security.remediation.footprint import REMOVE_FILE
 
 
 class _NoRemoteTags:
@@ -1317,7 +1318,7 @@ class TestAmendActsOnContentPayload(_AmendFixture):
 
     def _foreign_finding(self, path):
         return Finding("fake-font-blockchain", "fake-font", Severity.HIGH, path,
-                       "wholly foreign", remediation="quarantine-file", confidence=CONFIRMED)
+                       "wholly foreign", remediation=REMOVE_FILE, confidence=CONFIRMED)
 
     def test_an_evil_merge_injection_carrying_a_payload_removes_the_whole_injected_set(self):
         """The malware brought a set of files in one merge (none in either parent), one of them a
@@ -2031,7 +2032,7 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         self.commit(self.d, "add a file only a heuristic flags")
         before = self._rev()
         finding = Finding("fake-font-blockchain", "fake-font", Severity.HIGH, p,
-                          "wholly foreign", remediation="quarantine-file", confidence=HEURISTIC)
+                          "wholly foreign", remediation=REMOVE_FILE, confidence=HEURISTIC)
         scan = ScanResult(target=str(self.d), source="local", findings=[finding])
         outcome = self._act_full(scan, pusher=lambda *a: PushResult(True))
         self.assertFalse(outcome.completed, "a heuristic finding was acted on")

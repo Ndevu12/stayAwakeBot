@@ -99,7 +99,7 @@ class TestACleanupThatDidNotFinishIsNotClean(unittest.TestCase):
 
     def test_an_empty_set_aside_directory_is_not_a_finding(self):
         root = self._tree()
-        (root / ROLLBACK_DIR).mkdir()
+        (root / ROLLBACK_DIR).mkdir(parents=True)
         self.assertEqual(self._scan(root).verdict, CLEAN)
 
     def test_the_finding_says_what_it_is_rather_than_accusing(self):

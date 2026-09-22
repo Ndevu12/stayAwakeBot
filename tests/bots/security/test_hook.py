@@ -321,7 +321,7 @@ class TestRunEventScope(_Isolated):
 
 
 def _set_aside(home: Path) -> list[Path]:
-    root = home / ".local" / "state" / "saw" / "quarantine" / "hooks"
+    root = home / ".local" / "state" / "saw" / "set-aside" / "hooks"
     return sorted(root.iterdir()) if root.is_dir() else []
 
 
