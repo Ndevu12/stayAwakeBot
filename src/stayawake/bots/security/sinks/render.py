@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from stayawake.bots.security.dependencies.remediation import (
+    dependency_actions, markdown_lines)
 from stayawake.bots.security.redaction import redact, render_redacted
 from stayawake.utils.render import MARKER, SEVERITY, STATUS, paint, rule
 from stayawake.utils import textsafe
@@ -22,6 +24,8 @@ from stayawake.utils import textsafe
 # A note is tool-authored text that may QUOTE committer-chosen paths, so it is longer
 # than a single field but still never printed raw.
 _NOTE_LIMIT = 2000
+
+_ACTION_LIMIT = 50
 
 _SEV_COLOR = {s: SEVERITY[s] for s in ("critical", "high", "medium")}
 
@@ -268,9 +272,25 @@ def report_order(result: dict[str, Any]) -> tuple:
     return (verdict[0] if verdict else 4, -result["summary"]["total"], result["target"])
 
 
+def _action_block(payload: dict[str, Any]) -> list[str]:
+    """The dependency advice for the whole report. Takes the payload. Returns the Markdown block,
+    empty when nothing flagged carries advice."""
+    groups = [g for r in payload["results"]
+              for g in (r.get("findings", []), r.get("advisories", []))]
+    actions = dependency_actions(*groups)
+    if not actions:
+        return []
+    out = ["## Act on these dependencies", ""]
+    for title, group in (("Remove and replace", actions.remove), ("Upgrade", actions.upgrade)):
+        if group:
+            out += [f"**{title}**", ""] + markdown_lines(group, _ACTION_LIMIT) + [""]
+    return out
+
+
 def render_markdown(payload: dict[str, Any]) -> str:
     s = payload["summary"]
     out = [f"# Security scan — {payload['generated_at']}", "",
+           *_action_block(payload),
            f"**{s['targets']} targets** · {s['infected']} infected · "
            f"{s.get('suspicious', 0)} suspicious · {s.get('residue', 0)} residue · "
            f"{s['findings']} findings ({s['critical']} critical, {s['high']} high)", "",
