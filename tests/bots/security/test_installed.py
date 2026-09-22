@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -1046,7 +1047,7 @@ class TestConfidenceChoosesTheRemoval(unittest.TestCase):
         repo.install("mystery", "9.9.9")
         report = installed.remove_installed(repo.root, confirmed=True, remove_lockfiles=False)
         self.assertFalse((repo.root / installed.INSTALLED_DIR).exists())
-        self.assertEqual(report.preserved_packages, 0)
+        self.assertEqual(report.unaccounted_packages, 0)
         self.assertFalse((repo.root / QUARANTINE_DIR).exists())
 
     def test_anything_less_keeps_what_no_lockfile_accounts_for(self):
@@ -1054,7 +1055,7 @@ class TestConfidenceChoosesTheRemoval(unittest.TestCase):
         repo.install("left-pad", "1.0.0")
         repo.install("mystery", "9.9.9")
         report = installed.remove_installed(repo.root, confirmed=False, remove_lockfiles=False)
-        self.assertEqual(report.preserved_packages, 1)
+        self.assertEqual(report.unaccounted_packages, 1)
         self.assertIsNotNone(report.copies)
 
 
@@ -1078,7 +1079,7 @@ class TestConfirmedFixReachesTheRemover(unittest.TestCase):
         lockfile_root = called[0][1].get("lockfile_root")
         self.assertIsNotNone(lockfile_root)
         self.assertNotEqual(lockfile_root, called[0][0])
-        self.assertIn("sab-fix-", Path(lockfile_root).name)
+        self.assertIn("the-fix-worktree", Path(lockfile_root).parent.name)
 
     def test_ci_tells_the_remover_to_keep_the_lockfile(self):
         from stayawake.bots.security import pr
@@ -1120,6 +1121,33 @@ class TestConfirmedFixReachesTheRemover(unittest.TestCase):
         report = installed.Report(removed_lockfiles=[lock])
         changes = fixmod._lockfile_changes(wt, report)
         self.assertEqual([c.path for c in changes], ["package-lock.json"])
+
+
+class TestNothingLeavesTheTreeItMayNotBeRemovedFrom(unittest.TestCase):
+    """Check the order of the write-safety check and the copy."""
+
+    def test_an_entry_it_may_not_remove_is_not_copied_out(self):
+        repo = _Repo()
+        self.addCleanup(shutil.rmtree, repo.root, True)
+        kept = repo.install("keeper", "9.9.9")
+        aside = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, aside, True)
+        with mock.patch.object(installed, "is_safe_write_target", return_value=False):
+            installed._sweep_unaccounted(repo.root, aside)
+        self.assertEqual([], list(aside.rglob("*")))
+        self.assertTrue((kept / "index.js").is_file())
+
+    def test_a_build_output_is_not_removed_when_its_copy_is_short(self):
+        repo = _Repo()
+        self.addCleanup(shutil.rmtree, repo.root, True)
+        repo.install("left-pad", "1.0.0")
+        built = repo.root / "dist"
+        built.mkdir()
+        (built / "app.js").write_text("built\n", encoding="utf-8")
+        with mock.patch.object(installed, "_every_file_arrived", return_value=False):
+            with self.assertRaises(OSError):
+                installed.remove_rebuildable(repo.root, remove_lockfiles=False)
+        self.assertTrue((built / "app.js").is_file())
 
 
 if __name__ == "__main__":

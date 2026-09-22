@@ -156,7 +156,7 @@ def apply_removal(plan: RemovalPlan, quarantine: Path) -> tuple[int, int]:
     """
     if not plan.safe_to_remove:
         return 0, 0
-    preserved = 0
+    unaccounted = 0
     copied: list[InstalledPackage] = []
     for package in plan.preserve:
         destination = quarantine / package.path.relative_to(plan.root)
@@ -165,7 +165,7 @@ def apply_removal(plan: RemovalPlan, quarantine: Path) -> tuple[int, int]:
         if not _every_file_arrived(package.path, destination):
             raise OSError(f"the copy of {package.path} is incomplete, so nothing was removed")
         copied.append(package)
-        preserved += 1
+        unaccounted += 1
     removed = 0
     for package in sorted(plan.derivable + copied, key=lambda p: len(p.path.parts), reverse=True):
         if not package.path.exists():
@@ -174,7 +174,7 @@ def apply_removal(plan: RemovalPlan, quarantine: Path) -> tuple[int, int]:
             continue
         shutil.rmtree(package.path, ignore_errors=False)
         removed += 1
-    return preserved, removed
+    return unaccounted, removed
 
 
 def _every_file_arrived(source: Path, destination: Path) -> bool:
@@ -210,6 +210,8 @@ def _sweep_unaccounted(root: Path, quarantine: Path) -> int:
     except OSError:
         return 0
     for entry in entries:
+        if not entry.is_symlink() and not is_safe_write_target(entry, root):
+            continue
         destination = quarantine / entry.relative_to(root)
         destination.parent.mkdir(parents=True, exist_ok=True)
         if entry.is_symlink():
@@ -222,16 +224,12 @@ def _sweep_unaccounted(root: Path, quarantine: Path) -> int:
             shutil.copytree(entry, destination, symlinks=True, dirs_exist_ok=True)
             if not _every_file_arrived(entry, destination):
                 raise OSError(f"the copy of {entry} is incomplete, so nothing was removed")
-            if not is_safe_write_target(entry, root):
-                continue
             shutil.rmtree(entry)
             removed += 1
             continue
         shutil.copy2(entry, destination)
         if not destination.is_file():
             raise OSError(f"the copy of {entry} is incomplete, so nothing was removed")
-        if not is_safe_write_target(entry, root):
-            continue
         entry.unlink()
         removed += 1
     return removed
@@ -295,7 +293,7 @@ def _named(names: list[str], most: int = 3) -> str:
 @dataclass
 class Report:
     """What this run did to one repository tree."""
-    preserved_packages: int = 0
+    unaccounted_packages: int = 0
     removed_packages: int = 0
     removed_lockfiles: list[Path] = field(default_factory=list)
     removed_builds: list[str] = field(default_factory=list)
@@ -314,8 +312,8 @@ class Report:
             bits.append(f"removed {self.removed_trees} installed tree(s)")
         if self.removed_packages:
             bits.append(f"removed {self.removed_packages} installed package(s)")
-        if self.preserved_packages:
-            bits.append(f"{self.preserved_packages} of them unaccounted for")
+        if self.unaccounted_packages:
+            bits.append(f"{self.unaccounted_packages} of them unaccounted for")
         if self.removed_strays:
             bits.append(f"removed {self.removed_strays} more entr(y/ies) nothing accounted for")
         if self.removed_lockfiles:
@@ -423,7 +421,8 @@ def remove_installed(root: Path, *, confirmed: bool, remove_lockfiles: bool = Tr
 
     Takes the repository root, whether its infection is confirmed, whether the lockfile goes, and
     the tree the lockfiles are read from. Returns what was removed. A confirmed infection loses
-    every reproducible directory whole; anything less keeps what no lockfile can account for.
+    every reproducible directory whole; anything less copies what no lockfile accounts for aside
+    and then removes it too.
     """
     if confirmed:
         return remove_confirmed(root, remove_lockfiles=remove_lockfiles,
@@ -508,8 +507,9 @@ def remove_rebuildable(root: Path, *, remove_lockfiles: bool = True,
                        lockfile_root: Path | None = None) -> Report:
     """Remove this repository's installed tree, lockfile, and generated outputs. Bounded to `root`.
 
-    Kept for a repository that is not confirmed infected, where what the lockfile cannot account
-    for is preserved rather than deleted. A confirmed infection goes through `remove_confirmed`.
+    Takes the repository root, whether the lockfile goes, and the tree the lockfiles are read from.
+    Returns what was removed. What no lockfile accounts for is copied aside and then removed with
+    the rest. A confirmed infection goes through `remove_confirmed`.
     """
     report = Report()
     try:
@@ -552,8 +552,8 @@ def remove_rebuildable(root: Path, *, remove_lockfiles: bool = True,
             copies.append(lockfile)
 
     if plan.safe_to_remove:
-        preserved, removed = apply_removal(plan, _evidence())
-        report.preserved_packages = preserved
+        unaccounted, removed = apply_removal(plan, _evidence())
+        report.unaccounted_packages = unaccounted
         report.removed_packages = removed
         report.removed_strays = _sweep_unaccounted(root, _evidence())
         leftover = root / INSTALLED_DIR
@@ -568,7 +568,10 @@ def remove_rebuildable(root: Path, *, remove_lockfiles: bool = True,
 
     if plan.project_is_declared:
         for build in build_output_dirs(root):
-            shutil.copytree(build, _evidence() / build.name, symlinks=True, dirs_exist_ok=True)
+            destination = _evidence() / build.name
+            shutil.copytree(build, destination, symlinks=True, dirs_exist_ok=True)
+            if not _every_file_arrived(build, destination):
+                raise OSError(f"the copy of {build} is incomplete, so nothing was removed")
             shutil.rmtree(build)
             report.removed_builds.append(build.name)
 
