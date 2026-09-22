@@ -14,6 +14,8 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Fixed
+- **A remediation pull request now says what to do about a flagged dependency** — remove and
+  replace a known-malicious one, or upgrade a vulnerable one to its patched version.
 - **`saw fix` works again on a repository where an earlier run was interrupted.**
 - **A run clears the temporary directories it creates**, and names what it could not.
 - **A scan reports more of the committed symlinks that redirect a write somewhere dangerous**,
