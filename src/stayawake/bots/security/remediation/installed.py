@@ -11,8 +11,8 @@ from stayawake.utils import env
 from stayawake.utils.pathsafe import is_safe_write_target
 from stayawake.bots.security.dependencies import layout
 from stayawake.bots.security.dependencies.resolvers.npm import NpmResolver
-from stayawake.bots.security.models import QUARANTINE_DIR
-from stayawake.bots.security.remediation.changes import quarantine_path
+from stayawake.bots.security.models import ROLLBACK_DIR
+from stayawake.bots.security.remediation.changes import rollback_path
 from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions
 
 INSTALLED_DIR = layout.INSTALLED_DIR
@@ -23,8 +23,8 @@ _LOCKFILES = frozenset({
 _DERIVED_FILES = frozenset({".pnp.cjs", ".pnp.loader.mjs", ".pnp.data.json"})
 _ONLY_THESE_INSIDE = {".yarn": frozenset({"cache", "unplugged", "install-state.gz"})}
 _BUILD_OUTPUTS = frozenset({"dist", "build", "out", ".next"})
-_NOT_A_BUILD = frozenset({".git", INSTALLED_DIR, QUARANTINE_DIR, ".venv"})
-_NOT_WALKED = frozenset({".git", QUARANTINE_DIR})
+_NOT_A_BUILD = frozenset({".git", INSTALLED_DIR, ROLLBACK_DIR, ".venv"})
+_NOT_WALKED = frozenset({".git", ROLLBACK_DIR})
 
 
 @dataclass(frozen=True)
@@ -146,7 +146,7 @@ def plan_removal(root: Path, declared: set[tuple[str, str]], lockfiles: list[Pat
     return plan
 
 
-def apply_removal(plan: RemovalPlan, quarantine: Path) -> tuple[int, int]:
+def apply_removal(plan: RemovalPlan, rollback: Path) -> tuple[int, int]:
     """Preserve first, then remove — including what the lockfile could not account for.
 
     An unaccounted package is the most suspicious thing in a confirmed-infected tree, and
@@ -159,7 +159,7 @@ def apply_removal(plan: RemovalPlan, quarantine: Path) -> tuple[int, int]:
     unaccounted = 0
     copied: list[InstalledPackage] = []
     for package in plan.preserve:
-        destination = quarantine / package.path.relative_to(plan.root)
+        destination = rollback / package.path.relative_to(plan.root)
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(package.path, destination, symlinks=True, dirs_exist_ok=True)
         if not _every_file_arrived(package.path, destination):
@@ -195,10 +195,10 @@ def _every_file_arrived(source: Path, destination: Path) -> bool:
     return True
 
 
-def _sweep_unaccounted(root: Path, quarantine: Path) -> int:
+def _sweep_unaccounted(root: Path, rollback: Path) -> int:
     """Copy out and remove whatever is still under the installed tree.
 
-    Takes the repository root and this run's quarantine directory. Returns how many entries were
+    Takes the repository root and this run's rollback store. Returns how many entries were
     removed. Nothing is deleted before its copy is read back.
     """
     tree = root / INSTALLED_DIR
@@ -212,7 +212,7 @@ def _sweep_unaccounted(root: Path, quarantine: Path) -> int:
     for entry in entries:
         if not entry.is_symlink() and not is_safe_write_target(entry, root):
             continue
-        destination = quarantine / entry.relative_to(root)
+        destination = rollback / entry.relative_to(root)
         destination.parent.mkdir(parents=True, exist_ok=True)
         if entry.is_symlink():
             if not destination.is_symlink() and not destination.exists():
@@ -250,13 +250,13 @@ def _installed_remnants(root: Path) -> tuple[int, bool]:
         return 1, False
 
 
-def next_quarantine(root: Path, base: Path) -> Path:
+def next_rollback(root: Path, base: Path) -> Path:
     """A new subdirectory under `base` for this run."""
     for index in range(1, 1000):
         candidate = base / f"installed-{index}"
         if not candidate.exists():
             return candidate
-    raise OSError(f"cannot make a fresh quarantine under {base}")
+    raise OSError(f"cannot make a fresh rollback store under {base}")
 
 
 def declared_from_lockfiles(root: Path) -> tuple[set[tuple[str, str]], list[Path]]:
@@ -521,20 +521,20 @@ def remove_rebuildable(root: Path, *, remove_lockfiles: bool = True,
     proof = lockfile_root if lockfile_root is not None else root
     declared, lockfiles = declared_from_lockfiles(proof)
     plan = plan_removal(root, declared, lockfiles)
-    quarantine: Path | None = None
+    rollback: Path | None = None
 
     def _evidence() -> Path:
-        nonlocal quarantine
-        if quarantine is None:
-            candidate = next_quarantine(root, quarantine_path(root))
+        nonlocal rollback
+        if rollback is None:
+            candidate = next_rollback(root, rollback_path(root))
             if not is_safe_write_target(candidate, root):
-                raise OSError(f"quarantine is not inside {root}")
+                raise OSError(f"the rollback store is not inside {root}")
             candidate.mkdir(parents=True, exist_ok=True)
             if not is_safe_write_target(candidate, root):
-                raise OSError(f"quarantine is not inside {root}")
-            quarantine = candidate
+                raise OSError(f"the rollback store is not inside {root}")
+            rollback = candidate
             report.copies = _relative_to(candidate, root) or candidate
-        return quarantine
+        return rollback
 
     copies: list[Path] = []
     if remove_lockfiles:

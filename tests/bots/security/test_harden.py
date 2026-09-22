@@ -1564,7 +1564,7 @@ class TestItPutsTheHooksInPlaceToo(unittest.TestCase):
         # was altered under the operator is something that happened TO their machine, and it reads
         # differently from a first install.
         code, text = self._run(hook.Settling(
-            actions=[self._Action(hook.IN_PLACE), self._Action(hook.QUARANTINED)], target="/t"))
+            actions=[self._Action(hook.IN_PLACE), self._Action(hook.SET_ASIDE)], target="/t"))
         self.assertEqual(code, 0)
         self.assertIn("had been changed", text)
         self.assertNotIn("will be scanned", text, "a repair read as a routine install")

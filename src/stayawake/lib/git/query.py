@@ -55,7 +55,7 @@ def is_ancestor(repo: str | Path, ancestor: str, descendant: str) -> bool:
 
 def tracked_under(repo: str | Path, pathspec: str | Path) -> list[str]:
     """Tracked paths under `pathspec` (empty if none). Distinct from `tracked` (one exact path):
-    this answers 'is ANYTHING under this directory still tracked?' — the quarantine-clean check."""
+    this answers 'is ANYTHING under this directory still tracked?' — the rollback-store-clean check."""
     out = stdout(repo, ["ls-files", "--", str(pathspec)])
     return [ln for ln in out.splitlines() if ln.strip()]
 

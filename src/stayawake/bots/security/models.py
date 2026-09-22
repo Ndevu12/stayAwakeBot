@@ -10,7 +10,7 @@ from dataclasses import dataclass, field, asdict
 from enum import IntEnum
 from typing import Any
 
-QUARANTINE_DIR = ".malware-quarantine"
+ROLLBACK_DIR = ".malware-quarantine"
 
 CONFIRMED = "confirmed"
 HEURISTIC = "heuristic"

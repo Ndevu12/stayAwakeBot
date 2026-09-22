@@ -117,7 +117,7 @@ class TestNoDuplicatePr(unittest.TestCase):
              mock.patch.object(pr.remediation, "plan",
                                return_value=[Change("strip-payload", "evil.cjs")]), \
              mock.patch.object(pr.remediation, "apply", return_value=[]), \
-             mock.patch.object(pr.remediation, "quarantine_residual", return_value=[]), \
+             mock.patch.object(pr.remediation, "remove_residual", return_value=[]), \
              mock.patch.object(pr.github_api, "list_open_pulls", return_value=[]), \
              mock.patch.object(pr.github_api, "list_open_issues", return_value=[]), \
              mock.patch.object(pr.github_api, "create_issue",
@@ -154,7 +154,7 @@ class TestPartialFix(unittest.TestCase):
              mock.patch.object(pr.fix, "scan_target", return_value=infected), \
              mock.patch.object(pr.remediation, "plan", return_value=list(applied)), \
              mock.patch.object(pr.remediation, "apply", return_value=list(applied)), \
-             mock.patch.object(pr.remediation, "quarantine_residual", return_value=[]), \
+             mock.patch.object(pr.remediation, "remove_residual", return_value=[]), \
              mock.patch.object(pr.github_api, "list_open_pulls", return_value=list(existing_pulls)), \
              mock.patch.object(pr.github_api, "update_issue", return_value={"number": 7}) as update, \
              mock.patch.object(pr.github_api, "add_labels") as add_labels, \
@@ -247,7 +247,7 @@ class TestPartialFix(unittest.TestCase):
              mock.patch.object(pr.fix, "introduced_liveness", return_value=PRESENT), \
              mock.patch.object(pr.remediation, "plan", return_value=[]), \
              mock.patch.object(pr.remediation, "apply", return_value=[]), \
-             mock.patch.object(pr.remediation, "quarantine_residual", return_value=[]), \
+             mock.patch.object(pr.remediation, "remove_residual", return_value=[]), \
              mock.patch.object(pr.remediation, "classify_recovery", return_value=sug) as classify, \
              mock.patch.object(pr.remediation, "apply_suggested", return_value=True) as applyer, \
              mock.patch.object(pr.github_api, "list_open_pulls", return_value=[]), \
@@ -288,7 +288,7 @@ class TestPartialFix(unittest.TestCase):
              mock.patch.object(pr.fix, "introduced_liveness", return_value=PRESENT), \
              mock.patch.object(pr.remediation, "plan", return_value=[]), \
              mock.patch.object(pr.remediation, "apply", return_value=[]), \
-             mock.patch.object(pr.remediation, "quarantine_residual", return_value=[]), \
+             mock.patch.object(pr.remediation, "remove_residual", return_value=[]), \
              mock.patch.object(pr.remediation, "classify_recovery", return_value=sug) as classify, \
              mock.patch.object(pr.remediation, "apply_suggested", return_value=True) as applyer, \
              mock.patch.object(pr.github_api, "list_open_pulls", return_value=[]), \
@@ -321,7 +321,7 @@ class TestPartialFix(unittest.TestCase):
              mock.patch.object(pr.fix, "introduced_liveness", return_value=PRESENT), \
              mock.patch.object(pr.remediation, "plan", return_value=[]), \
              mock.patch.object(pr.remediation, "apply", return_value=[]), \
-             mock.patch.object(pr.remediation, "quarantine_residual", return_value=[]), \
+             mock.patch.object(pr.remediation, "remove_residual", return_value=[]), \
              mock.patch.object(pr.remediation, "classify_recovery", return_value=sug), \
              mock.patch.object(pr.remediation, "apply_suggested", return_value=True), \
              mock.patch.object(pr.github_api, "list_open_pulls", return_value=[]), \
@@ -359,7 +359,7 @@ class TestPartialFix(unittest.TestCase):
              mock.patch.object(pr.fix, "introduced_liveness", return_value=PRESENT), \
              mock.patch.object(pr.remediation, "plan", return_value=[]), \
              mock.patch.object(pr.remediation, "apply", return_value=[]), \
-             mock.patch.object(pr.remediation, "quarantine_residual", return_value=[]), \
+             mock.patch.object(pr.remediation, "remove_residual", return_value=[]), \
              mock.patch.object(pr.remediation, "classify_recovery", side_effect=classify), \
              mock.patch.object(pr.remediation, "apply_recovery", return_value=True) as recover, \
              mock.patch.object(pr.github_api, "list_open_pulls", return_value=[]), \
@@ -403,7 +403,7 @@ class TestPartialFix(unittest.TestCase):
              mock.patch.object(pr.fix, "introduced_liveness", return_value=PRESENT), \
              mock.patch.object(pr.remediation, "plan", return_value=[]), \
              mock.patch.object(pr.remediation, "apply", return_value=[]), \
-             mock.patch.object(pr.remediation, "quarantine_residual", return_value=[]), \
+             mock.patch.object(pr.remediation, "remove_residual", return_value=[]), \
              mock.patch.object(pr.remediation, "has_concealment_seam", return_value=True), \
              mock.patch.object(pr.remediation, "classify_recovery", side_effect=classify), \
              mock.patch.object(pr.remediation, "apply_suggested", return_value=True) as applyer, \
@@ -426,7 +426,7 @@ class TestPartialFix(unittest.TestCase):
                                return_value=ScanResult("owner/repo", "local", [self._EXFIL])), \
              mock.patch.object(pr.remediation, "plan", return_value=[]), \
              mock.patch.object(pr.remediation, "apply", return_value=[]), \
-             mock.patch.object(pr.remediation, "quarantine_residual", return_value=[]), \
+             mock.patch.object(pr.remediation, "remove_residual", return_value=[]), \
              mock.patch.object(pr.github_api, "list_open_issues",
                                return_value=[{"number": 3}]), \
              mock.patch.object(pr.github_api, "create_issue") as create_issue:
@@ -456,7 +456,7 @@ class TestPartialFix(unittest.TestCase):
         # outcome carries PARTIAL so the run counts as needs-review until a human reviews & merges.
         infected = ScanResult("owner/repo", "local", [self._LOADER])
         clean = ScanResult("owner/repo", "local", [])
-        # scans: initial (loader found) → trusted-tier quarantine rescan (clean, nothing auto-fixable)
+        # scans: initial (loader found) → trusted-tier removal rescan (clean, nothing auto-fixable)
         # → final residual rescan AFTER the computed strip is applied (clean).
         scans = [infected, clean, clean]
         sug = pr.remediation.Suggested("postcss.config.mjs", "loader", pr.remediation.NO_VCS,
@@ -466,7 +466,7 @@ class TestPartialFix(unittest.TestCase):
                                side_effect=lambda *a, **k: scans.pop(0) if scans else clean), \
              mock.patch.object(pr.remediation, "plan", return_value=[]), \
              mock.patch.object(pr.remediation, "apply", return_value=[]), \
-             mock.patch.object(pr.remediation, "quarantine_residual", return_value=[]), \
+             mock.patch.object(pr.remediation, "remove_residual", return_value=[]), \
              mock.patch.object(pr.remediation, "classify_recovery", return_value=sug), \
              mock.patch.object(pr.remediation, "apply_suggested", return_value=True) as applyer, \
              mock.patch.object(pr.github_api, "list_open_pulls", return_value=[]), \
@@ -822,7 +822,7 @@ class TestSuspiciousOnlyDisclosed(unittest.TestCase):
         return [
             mock.patch.object(pr.remediation, "plan", return_value=[]),
             mock.patch.object(pr.remediation, "apply", return_value=[]),
-            mock.patch.object(pr.remediation, "quarantine_residual", return_value=[]),
+            mock.patch.object(pr.remediation, "remove_residual", return_value=[]),
         ]
 
     def _submit(self, findings):

@@ -125,13 +125,13 @@ IN_PLACE = "in place"
 UPDATED = "updated"
 RESTORED = "restored"
 REPAIRED = "repaired"
-QUARANTINED = "quarantined"
+SET_ASIDE = "set aside"
 PRESERVED = "preserved"
 LEFT = "left"
 CHAINED = "chained"
 UNVERIFIED = "could not verify"
 UNREAD = "could not read"
-_SETTLED = frozenset({IN_PLACE, UPDATED, RESTORED, REPAIRED, QUARANTINED, PRESERVED, LEFT, CHAINED})
+_SETTLED = frozenset({IN_PLACE, UPDATED, RESTORED, REPAIRED, SET_ASIDE, PRESERVED, LEFT, CHAINED})
 
 
 @dataclass(frozen=True)
@@ -184,8 +184,8 @@ def _settle(hooks_dir: Path, saw: str, config: str | None, *, own: bool) -> list
         for p in sorted(hooks_dir.iterdir()):
             if p.name in _HOOKS:
                 continue
-            folder = hookscript.quarantine(p)
-            actions.append(Action(QUARANTINED, p, f"not a hook saw installs, kept at {folder}") if folder
+            folder = hookscript.set_aside(p)
+            actions.append(Action(SET_ASIDE, p, f"not a hook saw installs, kept at {folder}") if folder
                            else Action(UNVERIFIED, p, "could not be moved aside, so it was left as it is"))
     if not own:
         for event in _HOOKS:
@@ -203,17 +203,17 @@ def _settle(hooks_dir: Path, saw: str, config: str | None, *, own: bool) -> list
             continue
         outcome, detail = UPDATED, "a hook saw installs"
         if state in (hookscript.ALTERED, hookscript.STALE) or (state == hookscript.FOREIGN and own):
-            folder = hookscript.quarantine(dest)
+            folder = hookscript.set_aside(dest)
             if folder is None:
                 actions.append(Action(UNVERIFIED, dest, "could not be moved aside, so it was left as it is"))
                 continue
             outcome, detail = _kept(state, folder)
         elif state == hookscript.FOREIGN and dest.is_symlink() and not dest.is_file():
-            folder = hookscript.quarantine(dest)
+            folder = hookscript.set_aside(dest)
             if folder is None:
                 actions.append(Action(UNVERIFIED, dest, "could not be moved aside, so it was left as it is"))
                 continue
-            outcome, detail = QUARANTINED, f"a link to nothing, kept at {folder}"
+            outcome, detail = SET_ASIDE, f"a link to nothing, kept at {folder}"
         elif state == hookscript.FOREIGN:
             preserved = hooks_dir / f"{event}.local"
             try:
@@ -237,7 +237,7 @@ def _kept(state: str, folder: Path) -> tuple[str, str]:
         return REPAIRED, f"altered saw hook, kept at {folder}"
     if state == hookscript.STALE:
         return UPDATED, f"a hook saw installs naming another saw or config, or not runnable, kept at {folder}"
-    return QUARANTINED, f"not a hook saw installs, kept at {folder}"
+    return SET_ASIDE, f"not a hook saw installs, kept at {folder}"
 
 
 def _print_actions(actions: list[Action], stream) -> None:
@@ -275,7 +275,7 @@ class Settling:
         Distinct from a first install: this one means a hook was changed under the operator, which
         is a thing that happened to their machine rather than a thing this command set up.
         """
-        return any(a.state in (QUARANTINED, PRESERVED, RESTORED, REPAIRED) for a in self.actions)
+        return any(a.state in (SET_ASIDE, PRESERVED, RESTORED, REPAIRED) for a in self.actions)
 
 
 def settle_hooks(config_path: str | None = None) -> Settling:
@@ -354,8 +354,8 @@ def _settle_own_only() -> list[Action]:
     for p in sorted(own.iterdir()):
         if p.name in _HOOKS and hookscript.verdict(p, hookscript.installed()) == hookscript.PRISTINE:
             continue
-        folder = hookscript.quarantine(p)
-        actions.append(Action(QUARANTINED, p, f"not a hook saw installs, kept at {folder}") if folder
+        folder = hookscript.set_aside(p)
+        actions.append(Action(SET_ASIDE, p, f"not a hook saw installs, kept at {folder}") if folder
                        else Action(UNVERIFIED, p, "could not be moved aside, so it was left as it is"))
     return actions
 
@@ -426,16 +426,16 @@ def repair(*, no_stream: bool = False) -> int:
           else _paint("Not every hook could be put back — see below. Nothing was deleted.", "warn", out),
           file=out)
     _print_actions(actions, out)
-    if any(a.state in (REPAIRED, QUARANTINED) for a in actions):
-        print(_paint(f"  moved-aside files are kept under {hookscript.quarantine_dir()}", "dim", out),
+    if any(a.state in (REPAIRED, SET_ASIDE) for a in actions):
+        print(_paint(f"  moved-aside files are kept under {hookscript.set_aside_dir()}", "dim", out),
               file=out)
     return 0 if settled else 3
 
 
 def _inside_what_saw_keeps(hooks_dir: Path) -> bool:
-    """Return True if `hooks_dir` is, or lies under, saw's quarantine or template directory."""
+    """Return True if `hooks_dir` is, or lies under, saw's set-aside or template directory."""
     target = os.path.realpath(hooks_dir)
-    for kept in (hookscript.quarantine_dir(), template_dir()):
+    for kept in (hookscript.set_aside_dir(), template_dir()):
         root = os.path.realpath(kept)
         if target == root or target.startswith(root + os.sep):
             return True
@@ -463,7 +463,7 @@ def _repair_repository(hooks_dir: Path, saw: str, config: str | None, *, restore
         elif state in (hookscript.ABSENT, hookscript.FOREIGN) and not restore:
             continue
         elif state in (hookscript.ALTERED, hookscript.STALE, hookscript.ABSENT):
-            folder = hookscript.quarantine(dest) if state != hookscript.ABSENT else None
+            folder = hookscript.set_aside(dest) if state != hookscript.ABSENT else None
             if state != hookscript.ABSENT and folder is None:
                 actions.append(Action(UNVERIFIED, dest, "could not be moved aside, so it was left as it is"))
             elif _write_verified(dest, _hook_script(event, saw, config), hooks_dir):
@@ -501,9 +501,9 @@ def uninstall(*, no_stream: bool = False) -> int:
                         dest.unlink()
                         removed = gone = True
                     elif state in (hookscript.ALTERED, hookscript.STALE):
-                        folder = hookscript.quarantine(dest)
+                        folder = hookscript.set_aside(dest)
                         what = "altered saw hook" if state == hookscript.ALTERED else "a hook saw installs naming another saw or config"
-                        actions.append(Action(QUARANTINED, dest, f"{what}, kept at {folder}") if folder
+                        actions.append(Action(SET_ASIDE, dest, f"{what}, kept at {folder}") if folder
                                        else Action(UNVERIFIED, dest, "could not be moved aside, so it was left as it is"))
                         removed = removed or folder is not None
                         gone = folder is not None
@@ -512,8 +512,8 @@ def uninstall(*, no_stream: bool = False) -> int:
                         preserved.rename(dest)          # restore the foreign hook we chained to
                 if own:
                     for p in sorted(hooks_dir.iterdir()):
-                        folder = hookscript.quarantine(p)
-                        actions.append(Action(QUARANTINED, p, f"not a hook saw installs, kept at {folder}") if folder
+                        folder = hookscript.set_aside(p)
+                        actions.append(Action(SET_ASIDE, p, f"not a hook saw installs, kept at {folder}") if folder
                                        else Action(UNVERIFIED, p, "could not be moved aside, so it was left as it is"))
     except OSError as exc:
         print(f"error: {textsafe.plain(str(exc))}", file=sys.stderr)

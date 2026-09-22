@@ -9,17 +9,17 @@ from pathlib import Path
 
 from stayawake.utils.pathsafe import is_safe_write_target
 from stayawake.bots.security.matchers.base import load_jsonc
-from stayawake.bots.security.models import CONFIRMED, QUARANTINE_DIR
+from stayawake.bots.security.models import CONFIRMED, ROLLBACK_DIR
 
 _ACTIONS = {
-    "quarantine-file": "quarantine",
+    "quarantine-file": "remove",
     "remove-foreign-vscode": "vscode",
     "strip-gitignore-markers": "strip-gitignore",
 }
 _GITIGNORE_MARKER_PATTERNS = None
 
-_QUARANTINE_COMMENT = "# Malware quarantine / remediation artifacts (kept local, never committed)"
-_QUARANTINE_PATTERNS = (QUARANTINE_DIR + "/",)
+_ROLLBACK_COMMENT = "# Remediation rollback copies (kept local, never committed)"
+_ROLLBACK_PATTERNS = (ROLLBACK_DIR + "/",)
 
 
 def is_auto_fixable(finding) -> bool:
@@ -29,8 +29,8 @@ def is_auto_fixable(finding) -> bool:
     return getattr(finding, "remediation", "manual") in _ACTIONS
 
 
-def quarantine_path(root: Path) -> Path:
-    return root / QUARANTINE_DIR
+def rollback_path(root: Path) -> Path:
+    return root / ROLLBACK_DIR
 
 
 @dataclass(frozen=True)
@@ -52,7 +52,7 @@ def plan(findings) -> list[Change]:
             continue
         if action == "vscode":
             if f.path.endswith("tasks.json"):
-                c = Change("quarantine", f.path, "VS Code auto-run task harness")
+                c = Change("remove", f.path, "VS Code auto-run task harness")
             elif f.path.endswith("settings.json"):
                 c = Change("strip-settings", f.path, "remove allowAutomaticTasks/tasks")
             else:
@@ -91,35 +91,35 @@ def strip_settings_autorun(text: str) -> str:
 
 
 def ensure_ignored(root: Path) -> bool:
-    """Append quarantine ignore patterns to `root/.gitignore`. True if the file changed."""
+    """Append the rollback-store ignore patterns to `root/.gitignore`. True if the file changed."""
     gi = root / ".gitignore"
     if gi.is_symlink():
         return False
     text = gi.read_text(encoding="utf-8", errors="replace") if gi.exists() else ""
     present = {l.strip() for l in text.splitlines()}
-    missing = [p for p in _QUARANTINE_PATTERNS if p not in present]
+    missing = [p for p in _ROLLBACK_PATTERNS if p not in present]
     if not missing:
         return False
     block: list[str] = []
-    if _QUARANTINE_COMMENT not in present:
-        block.append(_QUARANTINE_COMMENT)
+    if _ROLLBACK_COMMENT not in present:
+        block.append(_ROLLBACK_COMMENT)
     block += missing
     head = (text.rstrip("\n") + "\n\n") if text.strip() else ""
     gi.write_text(head + "\n".join(block) + "\n", encoding="utf-8")
     return True
 
 
-def _dest_ready(quarantine: Path, dest: Path) -> bool:
+def _dest_ready(rollback: Path, dest: Path) -> bool:
     try:
         if dest.is_symlink() or dest.exists():
             return False
         try:
-            lexical = dest.relative_to(quarantine)
+            lexical = dest.relative_to(rollback)
         except ValueError:
             return False
         if lexical == Path(".") or ".." in lexical.parts:
             return False
-        q = quarantine.resolve()
+        q = rollback.resolve()
         resolved = dest.resolve()
         if resolved == q or not resolved.is_relative_to(q):
             return False
@@ -139,7 +139,7 @@ def _dest_ready(quarantine: Path, dest: Path) -> bool:
         return False
 
 
-def _backup(root: Path, rel: str, quarantine: Path) -> None:
+def _backup(root: Path, rel: str, rollback: Path) -> None:
     if Path(rel).is_absolute() or ".." in Path(rel).parts:
         return
     src = root / rel
@@ -147,11 +147,11 @@ def _backup(root: Path, rel: str, quarantine: Path) -> None:
         return
     if src.is_symlink():
         return
-    dest = quarantine / rel
-    if not _dest_ready(quarantine, dest):
+    dest = rollback / rel
+    if not _dest_ready(rollback, dest):
         return
     dest.parent.mkdir(parents=True, exist_ok=True)
-    if not _dest_ready(quarantine, dest):
+    if not _dest_ready(rollback, dest):
         return
     if src.is_dir():
         shutil.copytree(src, dest, symlinks=True)
@@ -171,33 +171,33 @@ def _delete_stays_in(root: Path, target: Path) -> bool:
         return False
 
 
-def quarantine_residual(root: Path, findings, quarantine: Path) -> list["Change"]:
+def remove_residual(root: Path, findings, rollback: Path) -> list["Change"]:
     """Back up and remove each remaining flagged path."""
     done: list[Change] = []
     for rel in sorted({f.path for f in findings}):
         target = root / rel
         if not target.exists() or not _delete_stays_in(root, target):
             continue
-        _backup(root, rel, quarantine)
+        _backup(root, rel, rollback)
         if target.is_dir() and not target.is_symlink():
             shutil.rmtree(target)
         else:
             target.unlink()
-        done.append(Change("quarantine", rel, "residual after remediation"))
+        done.append(Change("remove", rel, "residual after remediation"))
     return done
 
 
-def apply(root: Path, changes: list[Change], quarantine: Path) -> list[Change]:
-    """Apply changes in-place under `root`, backing up originals to `quarantine`.
+def apply(root: Path, changes: list[Change], rollback: Path) -> list[Change]:
+    """Apply changes in-place under `root`, backing up originals to `rollback`.
 
     Idempotent: a change whose target is already gone/clean is skipped.
     """
     applied: list[Change] = []
     for c in changes:
         target = root / c.path
-        if c.action == "quarantine":
+        if c.action == "remove":
             if target.exists() and _delete_stays_in(root, target):
-                _backup(root, c.path, quarantine)
+                _backup(root, c.path, rollback)
                 if target.is_dir() and not target.is_symlink():
                     shutil.rmtree(target)
                 else:
@@ -219,7 +219,7 @@ def apply(root: Path, changes: list[Change], quarantine: Path) -> list[Change]:
             else:
                 new = strip_settings_autorun(original)
             if new != original:
-                _backup(root, c.path, quarantine)
+                _backup(root, c.path, rollback)
                 target.write_text(new, encoding="utf-8")
                 applied.append(c)
     return applied

@@ -12,7 +12,7 @@ from fnmatch import fnmatch
 from typing import Any
 
 from stayawake.utils import textsafe
-from stayawake.bots.security.models import (CONFIRMED, HEURISTIC, RESIDUE, QUARANTINE_DIR,
+from stayawake.bots.security.models import (CONFIRMED, HEURISTIC, RESIDUE, ROLLBACK_DIR,
                                             Finding, ScanResult, Severity)
 from stayawake.bots.security.matchers import REGISTRY
 from stayawake.lib import git as gitutil
@@ -127,19 +127,19 @@ def finalize(display: str, source: str, by_matcher: dict[str, list[Finding]],
 def _cleanup_residue(root: Path) -> Finding | None:
     """Files a cleanup backed up and then did not change.
 
-    The quarantine holds the original of every file a fix rewrote, so a quarantined copy that is
+    The rollback store holds the original of every file a fix rewrote, so a copy of one that is
     byte-identical to the live file means the backup happened and the rewrite did not. Nothing new
     executes, and the tree is not what the project would carry — the state neither CLEAN nor
     INFECTED could express. Comparing bytes to bytes, so there is no shape to be wrong about."""
-    quarantine = root / QUARANTINE_DIR
+    rollback = root / ROLLBACK_DIR
     unchanged: list[str] = []
     try:
-        if not quarantine.is_dir():
+        if not rollback.is_dir():
             return None
-        for original in sorted(quarantine.rglob("*")):
+        for original in sorted(rollback.rglob("*")):
             if not original.is_file() or original.is_symlink():
                 continue
-            relative = original.relative_to(quarantine)
+            relative = original.relative_to(rollback)
             live = root / relative
             try:
                 if live.is_file() and live.read_bytes() == original.read_bytes():
@@ -159,7 +159,7 @@ def _cleanup_residue(root: Path) -> Finding | None:
         description=f"A cleanup backed up {len(unchanged)} file(s) here and then left them "
                     f"unchanged: {shown}. Nothing new executes, and this is not what the project "
                     "would carry.",
-        remediation="Re-run the cleanup, or restore these from the quarantined originals and "
+        remediation="Re-run the cleanup, or restore these from the stored originals and "
                     "clean them by hand.",
         confidence=RESIDUE,
         composed_evidence=True,

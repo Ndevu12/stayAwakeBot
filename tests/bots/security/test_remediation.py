@@ -28,7 +28,7 @@ class TestRemediation(unittest.TestCase):
         return scan_target(LocalRepoTarget(self.repo, "t", ScanOptions()), SIGS, []).findings
 
     def test_structural_apply_cleans_nonloader_findings(self):
-        # plan/apply handles only the reliable STRUCTURAL actions (quarantine fonts, strip
+        # plan/apply handles only the reliable STRUCTURAL actions (remove fonts, strip
         # exact .gitignore lines, drop autorun JSON keys). Categories with remediation=manual (or
         # heuristic confidence) are NOT surgically edited and remain after a bare plan/apply on this
         # (non-git) fixture: code-loader routes to git recovery; npm-lifecycle hooks aren't safely
@@ -42,7 +42,7 @@ class TestRemediation(unittest.TestCase):
         remaining = {f.category for f in self._findings()}
         self.assertEqual(remaining, {"code-loader", "npm-lifecycle", "agent-autorun", "camouflage"},
                          f"only manual-remediation categories should remain: {remaining}")
-        self.assertTrue(self.q.exists())            # originals preserved in quarantine
+        self.assertTrue(self.q.exists())            # originals preserved for rollback
 
     def test_idempotent(self):
         remediation.apply(self.repo, remediation.plan(self._findings()), self.q)
@@ -95,22 +95,22 @@ class TestStripAndResidual(unittest.TestCase):
         missing = type("F", (), {"remediation": "quarantine-file"})()
         self.assertFalse(remediation.is_auto_fixable(missing))
 
-    def test_quarantine_residual_removes_and_backs_up(self):
+    def test_remove_residual_removes_and_backs_up(self):
         repo = Path(tempfile.mkdtemp())
         (repo / "evil.cjs").write_text("module.exports = sfL(0)\n", encoding="utf-8")
-        q = remediation.quarantine_path(repo)
+        q = remediation.rollback_path(repo)
         finding = type("F", (), {"path": "evil.cjs"})()
-        done = remediation.quarantine_residual(repo, [finding], q)
-        self.assertEqual([c.action for c in done], ["quarantine"])
+        done = remediation.remove_residual(repo, [finding], q)
+        self.assertEqual([c.action for c in done], ["remove"])
         self.assertFalse((repo / "evil.cjs").exists())          # removed from the tree
         self.assertTrue((q / "evil.cjs").exists())              # backed up first
 
-    def test_quarantine_does_not_remove_the_repository_root(self):
+    def test_removal_does_not_remove_the_repository_root(self):
         repo = Path(tempfile.mkdtemp())
         keep = repo / "keep.txt"
         keep.write_text("x\n", encoding="utf-8")
         q = Path(tempfile.mkdtemp())
-        applied = remediation.apply(repo, [remediation.Change("quarantine", ".", "x")], q)
+        applied = remediation.apply(repo, [remediation.Change("remove", ".", "x")], q)
         self.assertEqual(applied, [])
         self.assertTrue(keep.is_file())
         finding = type("F", (), {"path": ".", "remediation": "quarantine-file",
@@ -165,7 +165,7 @@ class TestStripAndResidual(unittest.TestCase):
         self.assertEqual(applied, [])
         self.assertEqual(host.read_text(encoding="utf-8"), "temp_auto_push.bat\nkeep\n")
 
-    def test_backup_does_not_write_outside_quarantine(self):
+    def test_backup_does_not_write_outside_the_rollback_store(self):
         base = Path(tempfile.mkdtemp())
         repo = base / "repo"
         repo.mkdir()
@@ -217,19 +217,19 @@ class TestStripAndResidual(unittest.TestCase):
         self.assertFalse(ok)
         self.assertEqual(host.read_text(encoding="utf-8"), "payload\n")
 
-    def test_quarantine_does_not_follow_a_linked_directory(self):
+    def test_removal_does_not_follow_a_linked_directory(self):
         repo = Path(tempfile.mkdtemp())
         host = Path(tempfile.mkdtemp())
         payload = host / "payload.js"
         payload.write_text("x\n", encoding="utf-8")
         (repo / "escdir").symlink_to(host)
-        q = remediation.quarantine_path(repo)
+        q = remediation.rollback_path(repo)
         finding = type("F", (), {"path": "escdir/payload.js"})()
-        done = remediation.quarantine_residual(repo, [finding], q)
+        done = remediation.remove_residual(repo, [finding], q)
         self.assertEqual(done, [])
         self.assertTrue(payload.is_file())
         applied = remediation.apply(
-            repo, [remediation.Change("quarantine", "escdir/payload.js")], q)
+            repo, [remediation.Change("remove", "escdir/payload.js")], q)
         self.assertEqual(applied, [])
         self.assertTrue(payload.is_file())
 
@@ -241,7 +241,7 @@ class TestStripAndResidual(unittest.TestCase):
         link.symlink_to(secret)
         q = Path(tempfile.mkdtemp())
         remediation.changes._backup(repo, "link.txt", q)
-        # the symlink target's contents must not be copied into quarantine
+        # the symlink target's contents must not be copied into the rollback store
         self.assertFalse((q / "link.txt").exists())
 
     def test_strip_refuses_write_through_a_planted_symlink(self):
@@ -258,12 +258,12 @@ class TestStripAndResidual(unittest.TestCase):
         self.assertEqual(applied, [])                            # refused — never written through
         self.assertEqual(sink.read_text(), "SAFE ORIGINAL\n")   # the out-of-tree sink is untouched
 
-    def test_quarantine_of_a_symlinked_dir_unlinks_not_rmtrees(self):
-        # apply() quarantine of a symlink-to-directory must unlink the link, never rmtree THROUGH it.
+    def test_removal_of_a_symlinked_dir_unlinks_not_rmtrees(self):
+        # apply() removal of a symlink-to-directory must unlink the link, never rmtree THROUGH it.
         repo = Path(tempfile.mkdtemp())
         outside = Path(tempfile.mkdtemp()); (outside / "keep.txt").write_text("keep\n")
         (repo / "linkdir").symlink_to(outside, target_is_directory=True)
-        remediation.apply(repo, [remediation.Change("quarantine", "linkdir", "x")],
+        remediation.apply(repo, [remediation.Change("remove", "linkdir", "x")],
                           Path(tempfile.mkdtemp()))
         self.assertFalse((repo / "linkdir").exists())           # the planted link is removed
         self.assertTrue((outside / "keep.txt").exists())        # its target dir is untouched
