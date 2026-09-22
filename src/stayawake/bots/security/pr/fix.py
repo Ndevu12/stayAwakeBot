@@ -13,7 +13,9 @@ from stayawake.utils import scratch
 from stayawake.utils.streaming import status
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.targets import LocalRepoTarget
+from stayawake.bots.security.dependencies.remediation import MALICIOUS
 from stayawake.bots.security.models import ROLLBACK_DIR, CONFIRMED, HEURISTIC
+from stayawake.bots.security.remediation import manifest
 from stayawake.bots.security import remediation
 from stayawake.bots.security.remediation import installed
 from stayawake.core import proposal
@@ -74,6 +76,23 @@ class _Fix:
 
 def _with_tree(outcome: str, note: str) -> str:
     return outcome if not note else f"{outcome}\n    {note}"
+
+
+def _malicious_names(findings) -> set:
+    """Takes the findings. Returns the names of the packages saw knows to be malicious."""
+    return {f.package_name for f in findings
+            if getattr(f, "dependency_state", None) == MALICIOUS and f.package_name}
+
+
+def _manifest_changes(wt: Path, findings) -> list:
+    """Drop every known-malicious dependency from the manifests that declare it.
+
+    Takes the worktree and the findings. Returns the changes for the branch, empty when none
+    declares one.
+    """
+    rewritten = manifest.drop_dependencies(wt, _malicious_names(findings))
+    return [remediation.Change("update", rel, "removed a known-malicious dependency")
+            for rel in rewritten]
 
 
 def _lockfile_changes(wt: Path, report: installed.Report) -> list:
@@ -229,7 +248,8 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
                     lockfile_changes = _lockfile_changes(wt, report)
                 except OSError as exc:
                     tree_note = f"could not remove the installed tree ({exc})"
-            applied = lockfile_changes + remediation.apply(wt, remediation.plan(findings), rollback)
+            applied = (lockfile_changes + _manifest_changes(wt, findings)
+                       + remediation.apply(wt, remediation.plan(findings), rollback))
             for f in findings:
                 sha = _merge_sha(f)
                 if not sha:

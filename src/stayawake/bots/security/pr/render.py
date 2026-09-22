@@ -141,8 +141,8 @@ ACTION_LIMIT = 50
 
 
 def dependency_action_lines(findings=(), advisories=()) -> list[str]:
-    """The lines telling an operator what to do about a flagged dependency. Takes the findings and
-    the advisories. Returns the body lines, empty when none carries advice."""
+    """The lines naming the flagged dependencies and the commands that remove them. Takes the
+    findings and the advisories. Returns the body lines, empty when none names a package."""
     actions = dependency_actions(findings, advisories)
     if not actions:
         return []
