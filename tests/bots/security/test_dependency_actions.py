@@ -62,13 +62,11 @@ class TestTheComposerStatesTheCommand(unittest.TestCase):
         self.assertEqual(VULNERABLE, fix.state)
 
     def test_no_surface_ever_names_a_version_to_install(self):
-        """saw's advisory cache can be stale, so it never asserts a version is safe."""
         fix = vulnerability_fix("npm", "lodash", "4.17.20", "4.17.21")
         for text in (fix.advice, fix.package, fix.command or ""):
             self.assertNotIn("4.17.21", text)
 
     def test_an_advisory_with_no_patched_version_is_not_called_malicious(self):
-        """An unpatched CVE is not malware; saying so would be a false claim about the package."""
         fix = vulnerability_fix("npm", "lodash", "4.17.20", None)
         self.assertEqual("npm uninstall lodash", fix.command)
         self.assertEqual(VULNERABLE, fix.state)

@@ -14,6 +14,10 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
+- **`saw fix` removes a known-malicious dependency from `package.json`**, so reinstalling does not
+  bring it back. A package with an advisory is never removed — that stays your call. Other
+  ecosystems declare dependencies only in a lockfile, so there saw removes the lockfile and the
+  installed tree and names the package for you.
 - **saw now lists the compromised dependency versions** — once at the end of a scan, at the top of a
   saved report, and in the remediation pull request, with the command to remove each one.
 

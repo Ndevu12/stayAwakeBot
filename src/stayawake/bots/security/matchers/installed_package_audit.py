@@ -80,7 +80,7 @@ def _malicious(advisory, pkg) -> Finding:
                  f"(caught even if the lockfile was not edited)",
         vector=sig["category"],
         fix_advice=fix.advice, dependency_state=fix.state, fix_command=fix.command,
-        package=fix.package,
+        package=fix.package, package_name=fix.name,
         reference=advisory_reference(advisory.osv_id, advisory.aliases), composed_evidence=True)
 
 

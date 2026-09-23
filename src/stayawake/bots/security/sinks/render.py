@@ -273,8 +273,8 @@ def report_order(result: dict[str, Any]) -> tuple:
 
 
 def _action_block(payload: dict[str, Any]) -> list[str]:
-    """The dependency advice for the whole report. Takes the payload. Returns the Markdown block,
-    empty when nothing flagged carries advice."""
+    """The flagged dependencies for the whole report. Takes the payload. Returns the Markdown
+    block, empty when nothing flagged names a package."""
     groups = [g for r in payload["results"]
               for g in (r.get("findings", []), r.get("advisories", []))]
     actions = dependency_actions(*groups)

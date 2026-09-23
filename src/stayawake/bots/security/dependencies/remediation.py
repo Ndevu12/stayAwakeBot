@@ -76,6 +76,7 @@ class DependencyFix:
     advice: str
     state: str
     package: str
+    name: str
     command: str | None = None
 
 
@@ -112,10 +113,10 @@ def vulnerability_fix(ecosystem: str, name: str, version: str,
     if fixed_version:
         return DependencyFix(
             f"{name} {version} is affected by this advisory. Move off it — read the advisory for "
-            "the versions it covers.", VULNERABLE, _coordinate(name, version))
+            "the versions it covers.", VULNERABLE, _coordinate(name, version), name)
     return DependencyFix(
         f"No patched version is published for this advisory — remove or replace {name}, or pin it "
-        "to a version outside the affected range.", VULNERABLE, _coordinate(name, version),
+        "to a version outside the affected range.", VULNERABLE, _coordinate(name, version), name,
         removal_command(ecosystem, name))
 
 
@@ -125,7 +126,7 @@ def malware_fix(name: str, version: str = "", ecosystem: str = "") -> Dependency
     return DependencyFix(
         f"Remove {name} now — it is a known-malicious package, so upgrading does not help. Purge it "
         "from your lockfile and installed tree, then rotate any credentials it could have read.",
-        MALICIOUS, _coordinate(name, version), removal_command(ecosystem, name))
+        MALICIOUS, _coordinate(name, version), name, removal_command(ecosystem, name))
 
 
 def external_advisory_fix(name: str, version: str, advisory_id: str, tool: str) -> DependencyFix:
@@ -134,7 +135,7 @@ def external_advisory_fix(name: str, version: str, advisory_id: str, tool: str) 
     to read rather than a version."""
     return DependencyFix(f"{name} {version} is reported by {tool} under {advisory_id}. Read the "
                          "advisory for the versions it covers.", VULNERABLE,
-                         _coordinate(name, version))
+                         _coordinate(name, version), name)
 
 
 def _field(item, name: str):
