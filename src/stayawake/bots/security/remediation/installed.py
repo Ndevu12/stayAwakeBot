@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from stayawake.utils import env
-from stayawake.utils.pathsafe import is_safe_write_target
+from stayawake.utils.pathsafe import every_file_arrived, is_safe_write_target
 from stayawake.bots.security.dependencies import layout
 from stayawake.bots.security.dependencies.resolvers.npm import NpmResolver
 from stayawake.bots.security.models import ROLLBACK_DIR
@@ -162,7 +162,7 @@ def apply_removal(plan: RemovalPlan, rollback: Path) -> tuple[int, int]:
         destination = rollback / package.path.relative_to(plan.root)
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(package.path, destination, symlinks=True, dirs_exist_ok=True)
-        if not _every_file_arrived(package.path, destination):
+        if not every_file_arrived(package.path, destination):
             raise OSError(f"the copy of {package.path} is incomplete, so nothing was removed")
         copied.append(package)
         unaccounted += 1
@@ -175,24 +175,6 @@ def apply_removal(plan: RemovalPlan, rollback: Path) -> tuple[int, int]:
         shutil.rmtree(package.path, ignore_errors=False)
         removed += 1
     return unaccounted, removed
-
-
-def _every_file_arrived(source: Path, destination: Path) -> bool:
-    """Whether the copy holds every regular file the original does.
-
-    `copytree` can copy part of a tree and report the failures at the end, so "it did not raise" is
-    a weaker claim than the delete below needs. Symlinks are skipped: they are copied as links, and
-    a dangling one would read as missing.
-    """
-    try:
-        for path in source.rglob("*"):
-            if path.is_symlink() or not path.is_file():
-                continue
-            if not (destination / path.relative_to(source)).exists():
-                return False
-    except OSError:
-        return False
-    return True
 
 
 def _sweep_unaccounted(root: Path, rollback: Path) -> int:
@@ -222,7 +204,7 @@ def _sweep_unaccounted(root: Path, rollback: Path) -> int:
             continue
         if entry.is_dir():
             shutil.copytree(entry, destination, symlinks=True, dirs_exist_ok=True)
-            if not _every_file_arrived(entry, destination):
+            if not every_file_arrived(entry, destination):
                 raise OSError(f"the copy of {entry} is incomplete, so nothing was removed")
             shutil.rmtree(entry)
             removed += 1
@@ -570,7 +552,7 @@ def remove_rebuildable(root: Path, *, remove_lockfiles: bool = True,
         for build in build_output_dirs(root):
             destination = _evidence() / build.name
             shutil.copytree(build, destination, symlinks=True, dirs_exist_ok=True)
-            if not _every_file_arrived(build, destination):
+            if not every_file_arrived(build, destination):
                 raise OSError(f"the copy of {build} is incomplete, so nothing was removed")
             shutil.rmtree(build)
             report.removed_builds.append(build.name)
