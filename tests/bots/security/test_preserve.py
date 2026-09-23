@@ -144,6 +144,11 @@ class TestTheRunActuallyPreservesFirst(GitSandbox):
         self._fix()
         self.assertTrue(self._preserved(), "no saw/uncommitted-* branch was created")
 
+    def test_the_payload_is_gone_from_the_checkout(self):
+        (self.d / "public" / "fonts" / "text.woff").write_text(LOADER)
+        self._fix()
+        self.assertFalse((self.d / "public" / "fonts" / "text.woff").exists())
+
     def test_the_branch_holds_the_uncommitted_file(self):
         self._fix()
         branch = self._preserved()[0]

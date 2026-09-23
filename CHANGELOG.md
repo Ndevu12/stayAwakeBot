@@ -14,6 +14,11 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
+- **`saw fix` now removes the confirmed payload from the checkout you are standing in**, not only
+  from the branch it prepares. Each file is read again first, so one that no longer carries it is
+  left alone, and nothing is copied aside. A file it could not read is named, and your checkout is
+  not reported as clean.
+
 - **`saw fix` saves your uncommitted work on a local branch of its own.** It is named
   `saw/uncommitted-…`, is never pushed, and leaves your files, your branch and your staged changes
   exactly as they were. Files your `.gitignore` covers are not included.

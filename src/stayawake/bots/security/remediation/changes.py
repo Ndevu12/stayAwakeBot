@@ -141,7 +141,9 @@ def _dest_ready(rollback: Path, dest: Path) -> bool:
         return False
 
 
-def _backup(root: Path, rel: str, rollback: Path) -> None:
+def _backup(root: Path, rel: str, rollback: Path | None) -> None:
+    if rollback is None:
+        return
     if Path(rel).is_absolute() or ".." in Path(rel).parts:
         return
     src = root / rel
@@ -189,12 +191,14 @@ def remove_residual(root: Path, findings, rollback: Path) -> list["Change"]:
     return done
 
 
-def apply(root: Path, changes: list[Change], rollback: Path, *, condemned=None) -> list[Change]:
+def apply(root: Path, changes: list[Change], rollback: Path | None = None, *,
+          condemned=None) -> list[Change]:
     """Apply changes in-place under `root`, backing up originals to `rollback`.
 
-    Takes the tree, the changes, the rollback store, and optionally `condemned(path) -> str` —
-    asked again, at the moment of the act, whether the file still carries what was found. A path
-    it does not answer `"carries"` for is left alone. Returns the changes that were applied.
+    Takes the tree, the changes, a rollback store or None for no copy, and optionally
+    `condemned(path) -> str` — asked again, at the moment of the act, whether the file still
+    carries what was found. A path it does not answer `"carries"` for is left alone. Returns the
+    changes that were applied.
 
     Idempotent: a change whose target is already gone/clean is skipped.
     """

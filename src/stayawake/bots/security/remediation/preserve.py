@@ -19,7 +19,7 @@ MESSAGE = ("saw: the uncommitted working tree, after the cleanup\n\n"
 
 @dataclass(frozen=True)
 class Preserved:
-    """What a run put aside. `branch` is empty when nothing was; `reason` says why."""
+    """What a run put aside. `branch` is empty when nothing was, and `reason` names what stopped it."""
 
     branch: str = ""
     files: int = 0
