@@ -68,10 +68,16 @@ class _Fix:
     manual: tuple = ()
     signed: bool = True
     tree_note: str = ""
+    live_incomplete: bool = False
 
     @property
     def partial(self) -> bool:
         return bool(self.manual) or bool(self.computed)
+
+    @property
+    def needs_review(self) -> bool:
+        """Whether a person still has to look at this repository."""
+        return self.partial or self.live_incomplete
 
 
 def _with_tree(outcome: str, note: str) -> str:
@@ -253,6 +259,7 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
     tree_note = ""
     with status(f"fixing {label}…", enabled=spin):
         lockfile_changes: list = []
+        live_incomplete = False
         applied: list = []
         seen_cl: set = set()
         manual_reviews: dict = {}
@@ -274,6 +281,7 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
                 except OSError as exc:
                     tree_note = f"could not remove the installed tree ({exc})"
                 cleaned = live.clean(repo, findings, signatures, allowlist, opts)
+                live_incomplete = not cleaned.complete
                 kept_work = preserve.preserve(repo, theirs)
                 tree_note = "; ".join(
                     n for n in (tree_note, cleaned.note(), kept_work.note()) if n)
@@ -411,15 +419,31 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
         if not applied and not computed:
             if residual:
                 return _Fix(base, branch, [], (), suspicious, findings, advisories, tuple(manual),
-                            tree_note=tree_note), "", wt
+                            tree_note=tree_note, live_incomplete=live_incomplete), "", wt
             if suspicious:
                 return _Fix(base, branch, [], (), suspicious, findings, advisories, (),
-                            tree_note=tree_note), "", wt
+                            tree_note=tree_note, live_incomplete=live_incomplete), "", wt
             if scan.error or done.error:
                 return None, _with_tree("ABORTED — scan did not finish", tree_note), wt
             return None, _with_tree(f"'{base}' already clean — nothing to fix", tree_note), wt
     return _Fix(base, branch, applied, tuple(computed), suspicious, findings, advisories, tuple(manual),
-                signed=signed, tree_note=tree_note), "", wt
+                signed=signed, tree_note=tree_note, live_incomplete=live_incomplete), "", wt
+
+
+def _graded(fix, summary: str) -> "FixReport":
+    """Attach the prepared fix's grade to its summary. Takes the fix and the summary."""
+    return FixReport(summary, fix.needs_review if fix is not None else True)
+
+
+class FixReport(str):
+    """One repository's summary, carrying whether a person still has to look at it."""
+
+    needs_review: bool = False
+
+    def __new__(cls, summary: str, needs_review: bool = False):
+        self = super().__new__(cls, summary)
+        self.needs_review = needs_review
+        return self
 
 
 def prepare_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = None,
@@ -433,25 +457,25 @@ def prepare_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = N
             return f"{slug}: {outcome}"
         if not fix.applied and not fix.computed:
             if not fix.manual:
-                return _with_tree(_suspicious_only_outcome(slug, fix), fix.tree_note)
-            return _with_tree(
+                return _graded(fix, _with_tree(_suspicious_only_outcome(slug, fix), fix.tree_note))
+            return _graded(fix, _with_tree(
                 (f"{slug}: ABORTED — nothing auto-fixable; {len(fix.manual)} confirmed finding(s) "
                  "need manual review") + manual_review_lines(fix.manual) + suspicious_review_lines(fix.suspicious),
-                fix.tree_note)
+                fix.tree_note))
         if fix.partial:
             prepared = len(fix.applied) + len(fix.computed)
             need = ([f"{len(fix.computed)} computed strip(s) need review before merge"] if fix.computed else []) \
                 + ([f"{len(fix.manual)} confirmed finding(s) still need manual review"] if fix.manual else [])
-            return _with_tree(
+            return _graded(fix, _with_tree(
                 (f"{slug}: PARTIAL — prepared {prepared} change(s) on '{fix.branch}', "
                  f"but {' and '.join(need)} (`git -C {repo} diff {fix.base}...{fix.branch}`)"
                  ) + _signing_note(fix) + computed_review_lines(fix.computed) + manual_review_lines(fix.manual),
-                fix.tree_note)
-        return _with_tree(
+                fix.tree_note))
+        return _graded(fix, _with_tree(
             (f"{slug}: prepared {len(fix.applied)} change(s) on '{fix.branch}' — review "
              f"`git -C {repo} diff {fix.base}...{fix.branch}`, then `saw fix --pr` to open a PR"
              ) + _signing_note(fix),
-            fix.tree_note)
+            fix.tree_note))
     finally:
         if wt:
             gitutil.remove_worktree(repo, wt)
@@ -470,18 +494,18 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
                 return outcome
             if not fix.applied and not fix.computed:
                 if not fix.manual:
-                    return _with_tree(_suspicious_only_outcome(
-                        str(repo).replace(str(Path.home()), "~"), fix), fix.tree_note)
-                return _with_tree(
+                    return _graded(fix, _with_tree(_suspicious_only_outcome(
+                        str(repo).replace(str(Path.home()), "~"), fix), fix.tree_note))
+                return _graded(fix, _with_tree(
                     (f"ABORTED — nothing auto-fixable; {len(fix.manual)} confirmed finding(s) "
                      "need manual review (no GitHub origin — cannot file an issue)"
                      ) + manual_review_lines(fix.manual) + suspicious_review_lines(fix.suspicious),
-                    fix.tree_note)
-            return _with_tree(
+                    fix.tree_note))
+            return _graded(fix, _with_tree(
                 _mark_partial(
                     f"no GitHub origin — prepared on '{fix.branch}'; add a remote and push to open a PR",
                     fix.partial) + _signing_note(fix) + computed_review_lines(fix.computed) + manual_review_lines(fix.manual),
-                fix.tree_note)
+                fix.tree_note))
         finally:
             if wt:
                 gitutil.remove_worktree(repo, wt)
@@ -495,15 +519,15 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
             return f"{slug}: {outcome}"
         if not fix.applied and not fix.computed:
             if not fix.manual:
-                return _with_tree(_suspicious_only_outcome(slug, fix), fix.tree_note)
+                return _graded(fix, _with_tree(_suspicious_only_outcome(slug, fix), fix.tree_note))
             with status(f"filing manual-review issue for {slug}…", enabled=spin):
                 issue = proposal.file_dedup_issue(owner, name,
                                                   _issue_spec(owner, name, fix.findings), token)
             note = f"; {issue}" if issue else ""
-            return _with_tree(
+            return _graded(fix, _with_tree(
                 (f"{slug}: ABORTED — nothing auto-fixable; {len(fix.manual)} confirmed finding(s) "
                  f"need manual review{note}") + manual_review_lines(fix.manual) + suspicious_review_lines(fix.suspicious),
-                fix.tree_note)
+                fix.tree_note))
         base = fix.base
 
         def _publish() -> str:
@@ -522,10 +546,10 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
                 _reconcile_partial_label(owner, name, res.number, partial, token)
             return _render_submit(res, slug=slug, base=base, partial=partial)
 
-        return _with_tree(
+        return _graded(fix, _with_tree(
             _mark_partial(_publish(), fix.partial)
             + _signing_note(fix) + computed_review_lines(fix.computed) + manual_review_lines(fix.manual),
-            fix.tree_note)
+            fix.tree_note))
     finally:
         if wt:
             gitutil.remove_worktree(repo, wt)

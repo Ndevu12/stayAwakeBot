@@ -37,6 +37,9 @@ reader, not the mechanism or the weakness it closed.
 - **saw names the compromised versions instead of a version to install.**
 
 ### Fixed
+- **`saw fix` no longer reports success over a checkout it could not finish clearing.** A file it
+  could not read now makes the run exit for review.
+
 - **A generated directory your project commits is no longer removed.** It was documented as not
   touched and was being removed on its name alone.
 

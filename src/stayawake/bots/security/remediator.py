@@ -52,9 +52,10 @@ class FixOutcome:
 
 
 def _reviewed(fn, display: str) -> FixOutcome:
-    """Wrap a submit/prepare result, grading it by the markers OUR OWN renderer writes."""
+    """Wrap a submit/prepare result, taking its grade when it carries one."""
     text = _safe(fn, display)
-    return FixOutcome(text, _needs_review(text))
+    carried = getattr(text, "needs_review", None)
+    return FixOutcome(str(text), _needs_review(text) if carried is None else carried)
 
 
 def _safe(fn, display: str) -> str:
