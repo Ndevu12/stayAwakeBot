@@ -15,7 +15,7 @@ from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.targets import LocalRepoTarget
 from stayawake.bots.security.dependencies.remediation import MALICIOUS
 from stayawake.bots.security.models import ROLLBACK_DIR, CONFIRMED, HEURISTIC
-from stayawake.bots.security.remediation import manifest
+from stayawake.bots.security.remediation import manifest, preserve
 from stayawake.bots.security import remediation
 from stayawake.bots.security.remediation import installed
 from stayawake.core import proposal
@@ -238,6 +238,7 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
         merge_clean: dict = {}
         if not scan.error:
             if _blocking(findings):
+                theirs = preserve.uncommitted(repo)
                 try:
                     report = installed.remove_installed(
                         repo,
@@ -248,6 +249,8 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
                     lockfile_changes = _lockfile_changes(wt, report)
                 except OSError as exc:
                     tree_note = f"could not remove the installed tree ({exc})"
+                kept_work = preserve.preserve(repo, theirs)
+                tree_note = "; ".join(n for n in (tree_note, kept_work.note()) if n)
             applied = (lockfile_changes + _manifest_changes(wt, findings)
                        + remediation.apply(wt, remediation.plan(findings), rollback))
             for f in findings:

@@ -11,6 +11,7 @@ from stayawake.utils.pathsafe import is_safe_write_target
 from stayawake.bots.security.matchers.base import load_jsonc
 from stayawake.bots.security.models import CONFIRMED, ROLLBACK_DIR, SAW_DIR
 from stayawake.bots.security.remediation.footprint import REMOVE_FILE
+from stayawake.bots.security.remediation.oracle import CARRIES
 
 _ACTIONS = {
     REMOVE_FILE: "remove",
@@ -188,8 +189,12 @@ def remove_residual(root: Path, findings, rollback: Path) -> list["Change"]:
     return done
 
 
-def apply(root: Path, changes: list[Change], rollback: Path) -> list[Change]:
+def apply(root: Path, changes: list[Change], rollback: Path, *, condemned=None) -> list[Change]:
     """Apply changes in-place under `root`, backing up originals to `rollback`.
+
+    Takes the tree, the changes, the rollback store, and optionally `condemned(path) -> str` —
+    asked again, at the moment of the act, whether the file still carries what was found. A path
+    it does not answer `"carries"` for is left alone. Returns the changes that were applied.
 
     Idempotent: a change whose target is already gone/clean is skipped.
     """
@@ -197,6 +202,8 @@ def apply(root: Path, changes: list[Change], rollback: Path) -> list[Change]:
     for c in changes:
         target = root / c.path
         if c.action == "remove":
+            if condemned is not None and condemned(c.path) != CARRIES:
+                continue
             if target.exists() and _delete_stays_in(root, target):
                 _backup(root, c.path, rollback)
                 if target.is_dir() and not target.is_symlink():

@@ -14,6 +14,9 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
+- **`saw fix` saves your uncommitted work on a local branch of its own.** It is named
+  `saw/uncommitted-…`, is never pushed, and leaves your files, your branch and your staged changes
+  exactly as they were. Files your `.gitignore` covers are not included.
 - **`saw fix` removes a known-malicious dependency from `package.json`**, so reinstalling does not
   bring it back. A package with an advisory is never removed — that stays your call. Other
   ecosystems declare dependencies only in a lockfile, so there saw removes the lockfile and the
@@ -23,8 +26,7 @@ reader, not the mechanism or the weakness it closed.
 
 ### Security
 - **A package name from a scanned lockfile can no longer shape a command saw hands you.**
-- **saw no longer tells you which version to install.** It names the versions that are compromised
-  and leaves the choice to you, because an offline advisory cache cannot promise a version is safe.
+- **saw names the compromised versions instead of a version to install.**
 
 ### Fixed
 - **A cleanup no longer removes an installed package after copying a tree it could not read.**
