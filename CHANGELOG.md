@@ -27,6 +27,8 @@ reader, not the mechanism or the weakness it closed.
   and leaves the choice to you, because an offline advisory cache cannot promise a version is safe.
 
 ### Fixed
+- **A cleanup no longer removes an installed package after copying a tree it could not read.**
+  A directory it was refused permission to read counted as copied; now it stops and says so.
 - **A run clears the temporary directories it creates**, and names what it could not. Nothing
   cleared them before, so every run left one behind.
 - **`saw fix` works again on a repository where an earlier run was interrupted.**

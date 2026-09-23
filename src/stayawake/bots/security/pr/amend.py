@@ -9,7 +9,7 @@ from pathlib import Path
 from stayawake.bots.security.models import CONFIRMED
 from stayawake.utils import scratch
 from stayawake.bots.security.pr.resolve import REMOVE, RESTORE, SUPPLY
-from stayawake.bots.security.remediation import footprint
+from stayawake.bots.security.remediation import footprint, oracle
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.targets import LocalRepoTarget
 from stayawake.lib.git.auth import run_remote_git
@@ -149,7 +149,7 @@ def _predates_content_targets(repo: Path, scan, signatures, allowlist, opts,
     is then re-scanned in full, so a path whose file carries a second, co-resident payload of another
     class is left out too. `already` are the paths the HEAD content and remove lanes own."""
     flat = _flat(signatures)
-    payload = _payload_matchers(signatures)
+    payload = oracle.payload_matchers(signatures)
     out = []
     seen: set[str] = set()
     for finding, anchors in _confirmed_commits(scan):
@@ -167,7 +167,7 @@ def _predates_content_targets(repo: Path, scan, signatures, allowlist, opts,
             cleaned = corrector(blob)
             if cleaned is None or carries(cleaned):
                 continue
-            if _content_confirms(cleaned.encode("utf-8"), path, payload, allowlist, opts):
+            if oracle.content_confirms(cleaned.encode("utf-8"), path, payload, allowlist, opts):
                 continue
             seen.add(path)
             out.append((path, carries, corrector))
@@ -309,7 +309,7 @@ def _register_supply(repo: Path, path: str, content: bytes, substitute: dict, su
     substitution maps to fill, and the scan inputs. Returns "carries" when the content itself carries a
     payload, "unwritable" when its blob cannot be written, "too-large" when the history is too long to
     walk, else ""."""
-    if _content_confirms(content, path, payload, allowlist, opts):
+    if oracle.content_confirms(content, path, payload, allowlist, opts):
         return "carries"
     current = gitutil.tree_entry(repo, "HEAD", path)
     if current is None:
@@ -646,72 +646,6 @@ def _supply_refusals(rejected: dict) -> tuple:
                  for cause in sorted(set(rejected.values()), key=lambda c: c.value))
 
 
-def _payload_matchers(signatures):
-    """The by-matcher signatures minus the groups that need the repo, history, or install state —
-    the matchers that judge a single file's own content."""
-    return ({k: v for k, v in signatures.items()
-             if k not in ("git-history", "dependency-audit", "installed-package-audit")}
-            if isinstance(signatures, dict) else signatures)
-
-
-def _content_confirms(content: bytes, path: str, payload, allowlist, opts,
-                      is_symlink: bool = False) -> str | None:
-    """The confirmed signature id `content` triggers when scanned as `path`, or None. A truthy
-    result — a signature id or an errored token — means treat the content as unclean."""
-    import os
-    import shutil
-    import tempfile
-    from stayawake.bots.security import scanner as _scanner
-    from stayawake.bots.security.targets.base import Target
-    tmp = str(scratch.new_dir("the amend oracle"))
-    try:
-        dest = os.path.join(tmp, path)
-        os.makedirs(os.path.dirname(dest) or tmp, exist_ok=True)
-        if is_symlink:
-            os.symlink(os.fsdecode(content), dest)
-        else:
-            with open(dest, "wb") as handle:
-                handle.write(content)
-        target = Target(tmp, tmp, opts, include_only=(path,))
-        target.names_one_file = True
-        target.is_repo = False
-        result = _scanner.scan_target(target, payload, allowlist)
-    except (OSError, ValueError):
-        return "materialize-error"
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
-    if result.error is not None:
-        return "scan-error"
-    return next((getattr(f, "signature_id", "confirmed") for f in result.findings
-                 if getattr(f, "path", "") == path
-                 and getattr(f, "confidence", None) == CONFIRMED
-                 and not getattr(f, "advisory_only", False)), None)
-
-
-def _survives(repo, signatures, allowlist, opts) -> object:
-    """`check(treeish, path) -> str | None` for whether a path's content in a tree confirms a payload.
-    Takes the repo, the by-matcher signatures, the allowlist, and the scan options. Returns the check;
-    a truthy result — a signature id, or an unreadable/errored token — means treat the path as unclean."""
-    payload = _payload_matchers(signatures)
-    scanned: dict[tuple, str | None] = {}
-
-    def check(treeish, path):
-        entry = gitutil.tree_entry(repo, treeish, path)
-        if entry is None:
-            return None
-        sha = entry[1]
-        if (path, sha) not in scanned:
-            blob = stdout_bytes(repo, ["cat-file", "blob", sha])
-            if blob is None:
-                scanned[(path, sha)] = "read-error"
-            else:
-                scanned[(path, sha)] = _content_confirms(blob, path, payload, allowlist, opts,
-                                                         is_symlink=(entry[0] == "120000"))
-        return scanned[(path, sha)]
-
-    return check
-
-
 def _tags_at(repo: Path, slug: str, olds: list[str], token: str | None) -> tuple[list[str], bool]:
     """Tag names still pointing at the replaced commit, and whether that could be established.
 
@@ -874,7 +808,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
         remove_shas.update(foreign)
         remove_holders[path] = set(foreign)
 
-    survives = _survives(repo, signatures, allowlist, opts)
+    survives = oracle.survives(repo, signatures, allowlist, opts)
     substitute: dict[str, tuple[str, tuple[str, str]]] = {}
     substitute_shas: set[str] = set()
     supply_paths: set[str] = set()
@@ -913,7 +847,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
                     return _refuse(Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, item.path)
             elif answer.action == SUPPLY and isinstance(answer.supply, bytes):
                 refusal = _register_supply(repo, item.path, answer.supply, substitute,
-                                           substitute_shas, _payload_matchers(signatures),
+                                           substitute_shas, oracle.payload_matchers(signatures),
                                            allowlist, opts)
                 if refusal == "too-large":
                     return _refuse(Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, item.path)

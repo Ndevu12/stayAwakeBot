@@ -18,6 +18,7 @@ from stayawake import cli
 from stayawake.bots.security.models import CONFIRMED, HEURISTIC, Finding, ScanResult, Severity
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.pr import amend as amendmod
+from stayawake.bots.security.remediation import oracle
 from stayawake.bots.security.pr.amend import amend_outcome, amend_repo
 from stayawake.bots.security.pr.resolve import KEEP, REMOVE, RESTORE, SUPPLY, Resolution
 from stayawake.bots.security.pr.outcome import (BranchResult, Cause, Reason, amended,
@@ -1977,7 +1978,6 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         a regular file it is invisible to the symlink matcher, so the payload check would clear a path
         that still redirects a write into a sensitive sink. It recreates the symlink and sees the
         confirmed critical finding; a benign intra-repo link stays clean."""
-        from stayawake.bots.security.pr.amend import _survives
         poisoned = "tools/postinstall"
         benign = "tools/alias"
         os.makedirs(os.path.join(str(self.d), "tools"), exist_ok=True)
@@ -1988,7 +1988,7 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         self.git(self.d, "add", "-A")
         self.commit(self.d, "add a redirect symlink and a benign one")
         head = self._rev()
-        check = _survives(self.d, load_signatures(), [], ScanOptions())
+        check = oracle.survives(self.d, load_signatures(), [], ScanOptions())
         self.assertTrue(check(head, poisoned), "a write-redirect symlink must not read as clean")
         self.assertIsNone(check(head, benign), "an intra-repo symlink is not a payload")
 

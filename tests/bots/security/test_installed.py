@@ -509,7 +509,7 @@ class TestNothingUnaccountedSurvivesTheTree(unittest.TestCase):
         shims = repo.root / installed.INSTALLED_DIR / ".bin"
         shims.mkdir()
         (shims / "worm").write_text("#!/bin/sh\n", encoding="utf-8")
-        with mock.patch.object(installed, "_every_file_arrived", return_value=False):
+        with mock.patch.object(installed, "every_file_arrived", return_value=False):
             with self.assertRaises(OSError):
                 installed.remove_rebuildable(repo.root, remove_lockfiles=False)
         self.assertTrue((shims / "worm").is_file(), "a stray was removed without a whole copy")
@@ -1146,7 +1146,7 @@ class TestNothingLeavesTheTreeItMayNotBeRemovedFrom(unittest.TestCase):
         built = repo.root / "dist"
         built.mkdir()
         (built / "app.js").write_text("built\n", encoding="utf-8")
-        with mock.patch.object(installed, "_every_file_arrived", return_value=False):
+        with mock.patch.object(installed, "every_file_arrived", return_value=False):
             with self.assertRaises(OSError):
                 installed.remove_rebuildable(repo.root, remove_lockfiles=False)
         self.assertTrue((built / "app.js").is_file())

@@ -115,3 +115,54 @@ def canonical_id(path: str | Path) -> tuple | str:
 def distinct(paths) -> int:
     """How many of `paths` name genuinely different objects."""
     return len({canonical_id(p) for p in paths})
+
+
+def trusted_ancestor(path: Path) -> bool:
+    """Whether creating under `path` stays where the caller named.
+
+    A symbolic link is only accepted when root owns the link itself: the system's own
+    (`/var` → `/private/var`) resolves that way, and nobody without root could have put it there.
+    A link anyone else could have planted redirects the write and is refused."""
+    try:
+        st = path.lstat()
+    except OSError:
+        return False
+    if stat.S_ISLNK(st.st_mode):
+        return st.st_uid == 0 and path.is_dir()
+    return stat.S_ISDIR(st.st_mode)
+
+
+def reached_where_it_was_named(path: Path) -> bool:
+    """Whether every step to `path` stays where the caller said. Takes the path. Returns False when
+    any ancestor redirects it elsewhere."""
+    for ancestor in reversed(path.parents):
+        if not trusted_ancestor(ancestor):
+            return False
+    return True
+
+
+def every_file_arrived(source: Path, destination: Path) -> bool:
+    """Whether the copy holds every regular file the original does.
+
+    Takes the original and the copy. Returns False when a file is missing from the copy, or when
+    any part of the original could not be read. Symlinks are skipped: they are copied as links, and
+    a dangling one would read as missing.
+    """
+    unread = False
+
+    def _unreadable(_exc: OSError) -> None:
+        nonlocal unread
+        unread = True
+
+    try:
+        for here, _subdirs, names in os.walk(source, onerror=_unreadable):
+            root = Path(here)
+            for name in names:
+                path = root / name
+                if path.is_symlink() or not path.is_file():
+                    continue
+                if not (destination / path.relative_to(source)).exists():
+                    return False
+    except OSError:
+        return False
+    return not unread

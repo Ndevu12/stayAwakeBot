@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from stayawake.utils import hostdenial
+from stayawake.utils.pathsafe import reached_where_it_was_named, trusted_ancestor
 
 
 ENFORCING = "enforcing"
@@ -53,21 +54,6 @@ def _real_dir(path: Path) -> bool:
     return not stat.S_ISLNK(st.st_mode) and stat.S_ISDIR(st.st_mode)
 
 
-def _trusted_ancestor(path: Path) -> bool:
-    """Whether creating under `path` stays where the caller named.
-
-    A symbolic link is only accepted when root owns the link itself: the system's own
-    (`/var` → `/private/var`) resolves that way, and nobody without root could have put it there.
-    A link anyone else could have planted redirects the write and is refused."""
-    try:
-        st = path.lstat()
-    except OSError:
-        return False
-    if stat.S_ISLNK(st.st_mode):
-        return st.st_uid == 0 and path.is_dir()
-    return stat.S_ISDIR(st.st_mode)
-
-
 def _create_where_it_was_named(path: Path) -> bool:
     """Create `path` and any missing parent, one component at a time.
 
@@ -83,7 +69,7 @@ def _create_where_it_was_named(path: Path) -> bool:
                 return False
         except OSError:
             return False
-        if not _trusted_ancestor(ancestor):
+        if not trusted_ancestor(ancestor):
             return False
     try:
         os.mkdir(path)
@@ -313,18 +299,6 @@ def apply_one(path: Path) -> PathOutcome:
     return _hand_back(path, owner_before, "could not be verified")
 
 
-def _reached_where_it_was_named(path: Path) -> bool:
-    """Whether every step to `path` stays where the caller said.
-
-    The check the creating side makes, for the worse half: removing through a planted link unlocks
-    and deletes somewhere unintended. This side had none.
-    """
-    for ancestor in reversed(path.parents):
-        if not _trusted_ancestor(ancestor):
-            return False
-    return True
-
-
 def remove_one(path: Path) -> PathOutcome:
     """Take back a denial this tool placed, and nothing else.
 
@@ -334,7 +308,7 @@ def remove_one(path: Path) -> PathOutcome:
     does not target, is not this command's to open. The removal is read back; a directory still
     there afterwards is never reported as gone.
     """
-    if not _reached_where_it_was_named(path):
+    if not reached_where_it_was_named(path):
         return PathOutcome(path, NOT_WHERE_IT_WAS_NAMED,
                            "something on the way to this location redirects it elsewhere, so it "
                            "was not opened")
