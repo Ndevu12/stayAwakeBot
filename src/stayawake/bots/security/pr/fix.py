@@ -95,6 +95,29 @@ def _manifest_changes(wt: Path, findings) -> list:
             for rel in rewritten]
 
 
+def _committed_under(repo: Path):
+    """`committed(path) -> bool` for whether the repository tracks anything under a path.
+
+    Takes the repository. Returns the check; a path it cannot place under the repository reads as
+    committed.
+    """
+    def committed(path: Path) -> bool:
+        rel = _relative(repo, path)
+        if rel is None:
+            return True
+        return gitutil.tracked_under(repo, rel)
+
+    return committed
+
+
+def _relative(repo: Path, path: Path) -> str | None:
+    """The path relative to the repository, or None when it is not under it."""
+    try:
+        return path.resolve().relative_to(repo.resolve()).as_posix()
+    except (OSError, ValueError):
+        return None
+
+
 def _lockfile_changes(wt: Path, report: installed.Report) -> list:
     changes = []
     try:
@@ -244,7 +267,9 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
                         repo,
                         confirmed=bool(_blocking(findings)),
                         remove_lockfiles=not installed.lockfile_stays(),
-                        lockfile_root=wt)
+                        lockfile_root=wt,
+                        exclude=getattr(opts, "exclude_dirs", ()) or (),
+                        committed=_committed_under(repo))
                     tree_note = report.note()
                     lockfile_changes = _lockfile_changes(wt, report)
                 except OSError as exc:

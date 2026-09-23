@@ -34,6 +34,9 @@ reader, not the mechanism or the weakness it closed.
 - **saw names the compromised versions instead of a version to install.**
 
 ### Fixed
+- **A generated directory you listed under `exclude_dirs` is no longer removed**, and neither is one
+  your project commits. Both were documented as safe and were being removed anyway.
+
 - **A cleanup no longer removes an installed package after copying a tree it could not read.**
   A directory it was refused permission to read counted as copied; now it stops and says so.
 - **A run clears the temporary directories it creates**, and names what it could not. Nothing
