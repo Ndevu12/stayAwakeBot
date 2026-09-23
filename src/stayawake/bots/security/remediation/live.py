@@ -19,11 +19,11 @@ class LiveResult:
 
     @property
     def complete(self) -> bool:
-        """Whether every condemned path was accounted for. False when any could not be read."""
+        """Whether every condemned path was accounted for."""
         return not self.unread
 
     def note(self) -> str:
-        """Describe what happened in the checkout. Returns "" when nothing was planned."""
+        """Describe what happened in the checkout."""
         parts = []
         if self.removed:
             parts.append(f"removed {len(self.removed)} file(s) from your checkout")
@@ -35,11 +35,10 @@ class LiveResult:
 
 
 def clean(root: Path, findings, signatures, allowlist, opts) -> LiveResult:
-    """Remove from `root` what the findings condemn, reading each file again first.
+    """Remove from `root` what the findings condemn.
 
     Takes the checkout, the findings, the by-matcher signatures, the allowlist and the scan
-    options. Returns what was removed, what was left, and what could not be read. Nothing is
-    copied aside.
+    options. Returns what was removed, what was left, and what could not be read.
     """
     plan = [c for c in ch.plan(findings) if c.action == "remove"]
     if not plan:

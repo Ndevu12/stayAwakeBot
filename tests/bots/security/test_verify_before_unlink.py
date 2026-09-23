@@ -38,29 +38,29 @@ class _Tree(OwnTempRoot):
 
 
 class TestWhatTheVerifierSays(_Tree):
-    def test_a_payload_still_carries(self):
+    def test_it_answers_carries_for_a_payload(self):
         self._write("public/fonts/text.woff", LOADER)
         self.assertEqual(CARRIES, self._check()("public/fonts/text.woff"))
 
-    def test_a_file_that_no_longer_carries_says_so(self):
+    def test_it_answers_changed_for_a_clean_file(self):
         self._write("public/fonts/text.woff", GENUINE_FONT)
         self.assertEqual(CHANGED, self._check()("public/fonts/text.woff"))
 
-    def test_a_file_it_cannot_read_is_never_called_changed(self):
+    def test_it_answers_unreadable_when_it_cannot_read(self):
         self.assertEqual(UNREADABLE, self._check()("gone.js"))
 
 
 class TestApplyAsksAgain(_Tree):
     """Check what is removed and what is left."""
 
-    def test_a_file_that_still_carries_is_removed(self):
+    def test_a_payload_is_removed(self):
         target = self._write("public/fonts/text.woff", LOADER)
         done = ch.apply(self.root, [ch.Change("remove", "public/fonts/text.woff")],
                         self.rollback, condemned=self._check())
         self.assertFalse(target.exists())
         self.assertEqual(1, len(done))
 
-    def test_a_path_that_no_longer_carries_is_left_alone(self):
+    def test_only_a_payload_is_removed(self):
         target = self._write("public/fonts/text.woff", GENUINE_FONT)
         done = ch.apply(self.root, [ch.Change("remove", "public/fonts/text.woff")],
                         self.rollback, condemned=self._check())
@@ -68,14 +68,14 @@ class TestApplyAsksAgain(_Tree):
         self.assertEqual(GENUINE_FONT, target.read_bytes())
         self.assertEqual([], done)
 
-    def test_a_file_it_could_not_read_is_left_alone(self):
+    def test_a_run_over_an_unreadable_file_removes_nothing(self):
         self._write("public/fonts/text.woff", LOADER)
         done = ch.apply(self.root, [ch.Change("remove", "public/fonts/text.woff")],
                         self.rollback, condemned=lambda _p: UNREADABLE)
         self.assertTrue((self.root / "public/fonts/text.woff").exists())
         self.assertEqual([], done)
 
-    def test_without_a_verifier_it_behaves_as_before(self):
+    def test_it_removes_without_a_check(self):
         target = self._write("public/fonts/text.woff", GENUINE_FONT)
         done = ch.apply(self.root, [ch.Change("remove", "public/fonts/text.woff")], self.rollback)
         self.assertFalse(target.exists())

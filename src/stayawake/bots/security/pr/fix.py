@@ -98,8 +98,7 @@ def _manifest_changes(wt: Path, findings) -> list:
 def _committed_under(repo: Path):
     """`committed(path) -> bool` for whether the repository tracks anything under a path.
 
-    Takes the repository. Returns the check; a path it cannot place under the repository reads as
-    committed.
+    Takes the repository. Returns the check.
     """
     def committed(path: Path) -> bool:
         rel = _relative(repo, path)
@@ -268,7 +267,7 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
                         confirmed=bool(_blocking(findings)),
                         remove_lockfiles=not installed.lockfile_stays(),
                         lockfile_root=wt,
-                        exclude=getattr(opts, "exclude_dirs", ()) or (),
+                        keep=getattr(opts, "keep_dirs", ()) or (),
                         committed=_committed_under(repo))
                     tree_note = report.note()
                     lockfile_changes = _lockfile_changes(wt, report)

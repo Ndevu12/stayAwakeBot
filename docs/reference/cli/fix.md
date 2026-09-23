@@ -26,7 +26,8 @@ its patches, plugins and pinned releases, and only what the resolver writes ther
 
 **What is not this repository's, it does not take.** Anything linked to a location outside the
 repository loses the link, and what it points at is left alone. Directories you listed under
-`exclude_dirs` are never removed.
+`keep_dirs` are never removed; `exclude_dirs` says what is not scanned and does not
+decide this.
 
 `fix` cleans your working tree and records that as a new commit. What the repository already
 stored stays stored: the payload is still there in the earlier commit, and one `git show` puts it

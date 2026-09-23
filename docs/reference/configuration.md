@@ -17,6 +17,7 @@ Every `settings` key is optional, and the CLI equivalent wins when both are give
 | Key | Default | Effect |
 | --- | --- | --- |
 | `exclude_dirs` | `.git`, `node_modules`, `.next`, `dist`, `build`, `.saw`, `.venv` | Directories never traversed. Keep the list minimal. |
+| `keep_dirs` | *(empty)* | Directories a fix never removes. `exclude_dirs` does not decide this. |
 | `max_file_bytes` | `2000000` | Read cap for content matching. A larger *source* file is still scanned head and tail. |
 | `remote_clone_depth` | `50` | Clone depth for `--remote` targets. |
 | `scan_build_outputs` | `false` | Also examine `dist`/`build`/`out`/`.next`. Noisier by design; heuristic findings only. |

@@ -195,10 +195,8 @@ def apply(root: Path, changes: list[Change], rollback: Path | None = None, *,
           condemned=None) -> list[Change]:
     """Apply changes in-place under `root`, backing up originals to `rollback`.
 
-    Takes the tree, the changes, a rollback store or None for no copy, and optionally
-    `condemned(path) -> str` — asked again, at the moment of the act, whether the file still
-    carries what was found. A path it does not answer `"carries"` for is left alone. Returns the
-    changes that were applied.
+    Takes the tree, the changes, a rollback store or None, and optionally `condemned(path) -> str`.
+    Returns the changes that were applied.
 
     Idempotent: a change whose target is already gone/clean is skipped.
     """

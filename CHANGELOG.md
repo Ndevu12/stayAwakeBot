@@ -14,6 +14,9 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
+- **`keep_dirs` — directories a fix never removes.** Empty by default. `exclude_dirs` says what is
+  not scanned and no longer decides what is removed, so a generated tree is still cleared.
+
 - **`saw fix` now removes the confirmed payload from the checkout you are standing in**, not only
   from the branch it prepares. Each file is read again first, so one that no longer carries it is
   left alone, and nothing is copied aside. A file it could not read is named, and your checkout is
@@ -34,8 +37,8 @@ reader, not the mechanism or the weakness it closed.
 - **saw names the compromised versions instead of a version to install.**
 
 ### Fixed
-- **A generated directory you listed under `exclude_dirs` is no longer removed**, and neither is one
-  your project commits. Both were documented as safe and were being removed anyway.
+- **A generated directory your project commits is no longer removed.** It was documented as not
+  touched and was being removed on its name alone.
 
 - **A cleanup no longer removes an installed package after copying a tree it could not read.**
   A directory it was refused permission to read counted as copied; now it stops and says so.

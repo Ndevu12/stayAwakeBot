@@ -61,14 +61,14 @@ class TestThePayloadLeavesTheCheckout(_Checkout):
 
 
 class TestItSaysWhatItCouldNotDo(_Checkout):
-    def test_a_path_it_could_not_read_is_not_reported_as_removed(self):
+    def test_a_clean_run_is_complete(self):
         (self.root / "public" / "fonts" / "text.woff").write_text(LOADER)
         findings = self._findings()
         result = live.clean(self.root, findings, load_signatures(), [], ScanOptions())
         self.assertTrue(result.complete)
         self.assertEqual([], result.unread)
 
-    def test_a_checkout_it_could_not_fully_read_is_not_complete(self):
+    def test_a_run_it_could_not_finish_is_not_complete(self):
         (self.root / "public" / "fonts" / "text.woff").write_text(LOADER)
         findings = self._findings()
         (self.root / "public" / "fonts" / "text.woff").unlink()
@@ -76,7 +76,7 @@ class TestItSaysWhatItCouldNotDo(_Checkout):
         self.assertFalse(result.complete)
         self.assertIn("not clean", result.note())
 
-    def test_a_file_that_no_longer_carries_it_is_left_and_named(self):
+    def test_what_it_did_not_remove_is_named(self):
         payload = self.root / "public" / "fonts" / "text.woff"
         payload.write_text(LOADER)
         findings = self._findings()

@@ -332,15 +332,14 @@ class Report:
                 f"Reinstalling does not clear it; remove it yourself before you rebuild")
 
 
-def build_output_dirs(root: Path, *, exclude=(), committed=None) -> list[Path]:
-    """The generated trees under `root` a run may remove.
+def build_output_dirs(root: Path, *, keep=(), committed=None) -> list[Path]:
+    """The generated trees under `root` a run removes.
 
-    Takes the root, the directory names the operator excluded, and `committed(path) -> bool` for
-    whether the repository tracks anything under a path. Returns the trees to remove: never one the
-    operator excluded, and never one the repository commits.
+    Takes the root, the directory names to keep, and `committed(path) -> bool`. Returns the trees
+    to remove.
     """
     found = []
-    for name in sorted(_BUILD_OUTPUTS - _NOT_A_BUILD - set(exclude)):
+    for name in sorted(_BUILD_OUTPUTS - _NOT_A_BUILD - set(keep)):
         path = root / name
         if not (_is_real_directory(path) and is_safe_write_target(path, root)):
             continue
@@ -402,20 +401,20 @@ def remove_derived(path: Path, root: Path) -> bool:
 
 
 def remove_installed(root: Path, *, confirmed: bool, remove_lockfiles: bool = True,
-                     lockfile_root: Path | None = None, exclude=(), committed=None) -> Report:
+                     lockfile_root: Path | None = None, keep=(), committed=None) -> Report:
     """Remove what a finding of this confidence allows. Bounded to `root`.
 
     Takes the repository root, whether its infection is confirmed, whether the lockfile goes, the
-    tree the lockfiles are read from, the directory names the operator excluded, and
+    tree the lockfiles are read from, the directory names the operator asked to keep, and
     `committed(path) -> bool`. Returns what was removed. A confirmed infection loses every
     reproducible directory whole; anything less copies what no lockfile accounts for aside and then
     removes it too.
     """
     if confirmed:
         return remove_confirmed(root, remove_lockfiles=remove_lockfiles,
-                                lockfile_root=lockfile_root, exclude=exclude, committed=committed)
+                                lockfile_root=lockfile_root, keep=keep, committed=committed)
     return remove_rebuildable(root, remove_lockfiles=remove_lockfiles,
-                              lockfile_root=lockfile_root, exclude=exclude, committed=committed)
+                              lockfile_root=lockfile_root, keep=keep, committed=committed)
 
 
 def _still_there(path: Path) -> bool:
@@ -430,7 +429,7 @@ def _still_there(path: Path) -> bool:
         return True
 
 
-def remove_confirmed(root: Path, *, exclude=(), committed=None, remove_lockfiles: bool = True,
+def remove_confirmed(root: Path, *, keep=(), committed=None, remove_lockfiles: bool = True,
                      lockfile_root: Path | None = None) -> Report:
     """Delete what a confirmed infection leaves behind. Bounded to `root`.
 
@@ -453,7 +452,7 @@ def remove_confirmed(root: Path, *, exclude=(), committed=None, remove_lockfiles
             report.not_removed.append(path)
     report.unreadable.extend(unreadable)
 
-    for build in build_output_dirs(root, exclude=exclude, committed=committed):
+    for build in build_output_dirs(root, keep=keep, committed=committed):
         if remove_derived(build, root):
             report.removed_builds.append(build.name)
         elif _still_there(build):
@@ -490,7 +489,7 @@ def lockfiles_under(root: Path) -> list[Path]:
     return found
 
 
-def remove_rebuildable(root: Path, *, exclude=(), committed=None, remove_lockfiles: bool = True,
+def remove_rebuildable(root: Path, *, keep=(), committed=None, remove_lockfiles: bool = True,
                        lockfile_root: Path | None = None) -> Report:
     """Remove this repository's installed tree, lockfile, and generated outputs. Bounded to `root`.
 
@@ -554,7 +553,7 @@ def remove_rebuildable(root: Path, *, exclude=(), committed=None, remove_lockfil
             else plan.reason or "it is not this repository's to remove")
 
     if plan.project_is_declared:
-        for build in build_output_dirs(root, exclude=exclude, committed=committed):
+        for build in build_output_dirs(root, keep=keep, committed=committed):
             destination = _evidence() / build.name
             shutil.copytree(build, destination, symlinks=True, dirs_exist_ok=True)
             if not every_file_arrived(build, destination):

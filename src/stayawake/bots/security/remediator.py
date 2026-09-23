@@ -29,6 +29,7 @@ def _options(settings: dict) -> ScanOptions:
     base = ScanOptions()
     return ScanOptions(
         exclude_dirs=set(settings.get("exclude_dirs", base.exclude_dirs)),
+        keep_dirs=set(settings.get("keep_dirs", base.keep_dirs)),
         max_file_bytes=int(settings.get("max_file_bytes", base.max_file_bytes)),
         remote_clone_depth=int(settings.get("remote_clone_depth", base.remote_clone_depth)),
     )

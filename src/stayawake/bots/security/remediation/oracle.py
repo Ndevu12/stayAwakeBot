@@ -82,11 +82,10 @@ UNREADABLE = "unreadable"
 
 
 def still_condemned(root: Path, signatures, allowlist, opts):
-    """`check(path) -> str` for what the file at `path` is NOW.
+    """`check(path) -> str` for what the file at `path` is now.
 
     Takes the tree to read from, the by-matcher signatures, the allowlist and the scan options.
-    Returns the check: CARRIES when the bytes on disk still confirm a payload, CHANGED when they
-    no longer do, UNREADABLE when they could not be read.
+    Returns the check; its answer is one of CARRIES, CHANGED or UNREADABLE.
     """
     payload = payload_matchers(signatures)
 
