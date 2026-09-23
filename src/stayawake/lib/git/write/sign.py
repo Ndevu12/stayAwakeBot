@@ -30,12 +30,13 @@ from __future__ import annotations
 
 import os
 import shutil
-import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
 from stayawake.lib.git.run import run, run_ok
+
+from stayawake.utils import scratch
 
 PROBE_TIMEOUT = 10
 
@@ -271,7 +272,7 @@ def _first_probe_failure(config: Mapping[str, str]) -> str | None:
     """None when a throwaway repository configured like this one produced a real signature;
     otherwise the reason it could not. Nothing is written to the repository being scanned, and no
     key is ever created — the operator's existing key is used, or the probe fails."""
-    probe = Path(tempfile.mkdtemp(prefix="saw-signprobe-"))
+    probe = scratch.new_dir("a signing probe")
     try:
         if not run_ok(None, ["init", "-q", "-b", "main", str(probe)], timeout=PROBE_TIMEOUT):
             return "a probe repository could not be created"

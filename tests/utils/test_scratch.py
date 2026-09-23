@@ -10,28 +10,10 @@ from pathlib import Path
 from unittest import mock
 
 from stayawake.utils import scratch
+from tests.support.scratchroot import OwnTempRoot
 
 
-class _OwnTempRoot(unittest.TestCase):
-    """Every case runs against a temp root the test owns."""
-
-    def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix="scratch-test-")).resolve()
-        self.addCleanup(shutil.rmtree, self.tmp, True)
-        isolated = mock.patch.dict(os.environ, {"TMPDIR": str(self.tmp)})
-        isolated.start()
-        self.addCleanup(isolated.stop)
-        tempfile.tempdir = None
-        self.addCleanup(setattr, tempfile, "tempdir", None)
-        scratch._root = None
-        scratch._areas.clear()
-        self.addCleanup(scratch._areas.clear)
-
-    def _roots(self):
-        return [p for p in self.tmp.iterdir() if p.name.startswith(scratch.ROOT_PREFIX)]
-
-
-class TestOneRootHoldsTheRun(_OwnTempRoot):
+class TestOneRootHoldsTheRun(OwnTempRoot):
     """Check that everything a run makes sits under a single root."""
 
     def test_every_area_is_under_one_root(self):
@@ -64,7 +46,7 @@ class TestOneRootHoldsTheRun(_OwnTempRoot):
         self.assertEqual(["rollback", "the clone"], [a.purpose for a in scratch.held()])
 
 
-class TestReleaseTakesTheRunWithIt(_OwnTempRoot):
+class TestReleaseTakesTheRunWithIt(OwnTempRoot):
     """Check what release removes and what it leaves."""
 
     def test_it_removes_everything_the_run_made(self):
@@ -93,7 +75,7 @@ class TestReleaseTakesTheRunWithIt(_OwnTempRoot):
         self.assertEqual([], scratch.release())
 
 
-class TestWhatTheOperatorWasGivenSurvives(_OwnTempRoot):
+class TestWhatTheOperatorWasGivenSurvives(OwnTempRoot):
     """Check that output handed to the operator outlives the run that made it."""
 
     def test_a_kept_area_survives_release(self):
@@ -113,7 +95,7 @@ class TestWhatTheOperatorWasGivenSurvives(_OwnTempRoot):
         self.assertEqual([], self._roots())
 
 
-class TestATeardownThatFailsIsReported(_OwnTempRoot):
+class TestATeardownThatFailsIsReported(OwnTempRoot):
     """Check what a failure to release reports."""
 
     def test_the_reason_names_the_purpose_and_the_path(self):

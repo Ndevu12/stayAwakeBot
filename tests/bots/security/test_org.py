@@ -49,7 +49,7 @@ class TestRemoteFix(unittest.TestCase):
                                return_value=SimpleNamespace(returncode=0, stdout="", stderr="")), \
              mock.patch.object(remediator.pr_submit, "submit_fix_pr",
                                return_value="o/x: opened PR #1 (url)") as m_pr, \
-             mock.patch.object(resolution.shutil, "rmtree"):
+             mock.patch.object(resolution.scratch, "release_path", return_value=""):
             # Two repos, both cloned + PR'd cleanly → no repo needs review → exit 0.
             self.assertEqual(remediator.fix(_cfg(["o"]), remote=True, no_stream=True), 0)
             self.assertEqual(m_pr.call_count, 2)   # one PR attempt per repo
@@ -63,7 +63,7 @@ class TestRemoteFix(unittest.TestCase):
                                return_value=SimpleNamespace(returncode=0, stdout="", stderr="")), \
              mock.patch.object(remediator.pr_submit, "submit_fix_pr",
                                return_value="o/a: ABORTED — 1 finding still present"), \
-             mock.patch.object(resolution.shutil, "rmtree"):
+             mock.patch.object(resolution.scratch, "release_path", return_value=""):
             # A repo that couldn't be auto-cleaned (ABORTED) → exit 1 (needs manual review).
             self.assertEqual(remediator.fix(_cfg(["o"]), remote=True, no_stream=True), 1)
 

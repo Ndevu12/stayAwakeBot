@@ -4,7 +4,6 @@ shared `proposal` ladder). Never commits to the default branch, never runs the r
 from __future__ import annotations
 
 import re
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -14,6 +13,7 @@ from stayawake.utils import textsafe
 from stayawake.utils.render import SEVERITY, paint
 from stayawake.utils.streaming import status as spin_status
 from stayawake.core import proposal
+from stayawake.utils import scratch
 from stayawake.utils.pathsafe import is_safe_write_target
 from stayawake.bots.security.guard.constants import (
     STRIX_OWNER, STRIX_REPO, WORKFLOW_DIR, WORM_GUARD_FILE, SETUP_BRANCH,
@@ -285,7 +285,7 @@ def _setup_pr(repo: Path, plan: SetupPlan, base: str, token: str | None, spin: b
 
     baseref = f"origin/{base}" if gitutil.ref_exists(repo, f"origin/{base}") else base
     gitutil.fetch(repo, "origin", base)
-    wt = Path(tempfile.mkdtemp(prefix="sab-guard-"))
+    wt = scratch.new_dir("the guard worktree")
     if not gitutil.add_worktree(repo, wt, SETUP_BRANCH, baseref):
         gitutil.remove_worktree(repo, wt)
         return SetupResult(plan=plan, slug=slug, error="could not create a worktree for the PR")

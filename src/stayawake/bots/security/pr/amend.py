@@ -7,6 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from stayawake.bots.security.models import CONFIRMED
+from stayawake.utils import scratch
 from stayawake.bots.security.pr.resolve import REMOVE, RESTORE, SUPPLY
 from stayawake.bots.security.remediation import footprint
 from stayawake.bots.security.scanner import scan_target
@@ -662,7 +663,7 @@ def _content_confirms(content: bytes, path: str, payload, allowlist, opts,
     import tempfile
     from stayawake.bots.security import scanner as _scanner
     from stayawake.bots.security.targets.base import Target
-    tmp = tempfile.mkdtemp(prefix="saw-amend-oracle-")
+    tmp = str(scratch.new_dir("the amend oracle"))
     try:
         dest = os.path.join(tmp, path)
         os.makedirs(os.path.dirname(dest) or tmp, exist_ok=True)

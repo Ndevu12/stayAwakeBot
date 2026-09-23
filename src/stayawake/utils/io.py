@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from stayawake.utils import env
+from stayawake.utils import env, scratch
 
 
 def resolve_writable_dir(preferred: str | Path, *, label: str = "reports") -> Path:
@@ -35,7 +35,7 @@ def resolve_writable_dir(preferred: str | Path, *, label: str = "reports") -> Pa
             print(f"warning: {label} directory {preferred} is not writable; "
                   f"writing to {candidate} instead", file=sys.stderr)
         return candidate
-    last = Path(tempfile.mkdtemp(prefix="stayawake-reports-"))
+    last = scratch.kept_dir("the reports directory")
     print(f"warning: {label} directory {preferred} is not writable; "
           f"writing to {last} instead", file=sys.stderr)
     return last

@@ -7,14 +7,14 @@ corrected.
 from __future__ import annotations
 
 import os
-import shutil
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
 from stayawake.lib.git.merge.tree import auto_merge
 from stayawake.lib.git.query import file_at, parents, path_exists_at, tree_entry
 from stayawake.lib.git.run import run, run_ok, stdout, stdout_bytes
+
+from stayawake.utils import scratch
 
 _GITLINK = "160000"
 
@@ -150,9 +150,9 @@ def _not_applied(repo: str | Path, tree: str,
 
 def write_blob(repo: str | Path, text: str) -> str | None:
     """The object id of `text` stored as a blob with bytes verbatim, or None on failure."""
-    fd, tmp = tempfile.mkstemp(prefix="saw-blob-")
+    tmp = str(scratch.new_file("a blob"))
     try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
+        with open(tmp, "w", encoding="utf-8", newline="") as handle:
             handle.write(text)
         res = run(repo, ["hash-object", "-w", "--no-filters", "--", tmp])
         if res is None or res.returncode != 0:
@@ -167,9 +167,9 @@ def write_blob(repo: str | Path, text: str) -> str | None:
 
 def write_blob_bytes(repo: str | Path, data: bytes) -> str | None:
     """The object id of `data` stored as a blob, or None on failure."""
-    fd, tmp = tempfile.mkstemp(prefix="saw-blob-")
+    tmp = str(scratch.new_file("a blob"))
     try:
-        with os.fdopen(fd, "wb") as handle:
+        with open(tmp, "wb") as handle:
             handle.write(data)
         res = run(repo, ["hash-object", "-w", "--no-filters", "--", tmp])
         if res is None or res.returncode != 0:
@@ -254,8 +254,8 @@ def _write_corrected(repo: str | Path, commit: str,
                      plan: list[tuple[str, tuple[str, str] | None]]) -> str | None:
     """Write the corrected tree through a throwaway index, so the repository's own index — and
     therefore anything uncommitted in a worktree — is never touched."""
-    scratch = Path(tempfile.mkdtemp(prefix="saw-replace-"))
-    env = dict(os.environ, GIT_INDEX_FILE=str(scratch / "index"))
+    index_dir = scratch.new_dir("a throwaway index")
+    env = dict(os.environ, GIT_INDEX_FILE=str(index_dir / "index"))
     try:
         if not run_ok(repo, ["read-tree", commit], env=env):
             return None
@@ -275,4 +275,4 @@ def _write_corrected(repo: str | Path, commit: str,
         oid = (res.stdout or "").strip()
         return oid or None
     finally:
-        shutil.rmtree(scratch, ignore_errors=True)
+        scratch.release_path(index_dir)

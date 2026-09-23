@@ -4,10 +4,11 @@ on every branch that reached it. Capture the previous identifiers before any ref
 from __future__ import annotations
 
 import os
-import tempfile
 from pathlib import Path
 
 from stayawake.lib.git.query import parents
+
+from stayawake.utils import scratch
 from stayawake.lib.git.run import run, run_ok, stdout, stdout_bytes
 from stayawake.lib.git.write.replace import Replacement, replacement_tree
 from stayawake.lib.git.write.sign import (SigningStatus, sign_flags, signing_args, signing_env,
@@ -140,9 +141,9 @@ def rewrite_commit(repo: str | Path, commit: str, tree: str, new_parents: list[s
         # The BODY BYTES, written verbatim. `--format=%B` appends a newline of its own and decodes
         # through `errors="replace"`, so a message in a legacy encoding came back as U+FFFD and
         # every replacement grew a trailing blank line — both irreversible once pushed.
-        with tempfile.NamedTemporaryFile("wb", delete=False) as fh:
+        msg_path = str(scratch.new_file("a commit message"))
+        with open(msg_path, "wb") as fh:
             fh.write(body)
-            msg_path = fh.name
         res = run(repo, [*signing_args(signing), "commit-tree",
                          *sign_flags(signing, "commit-tree"), tree, *parent_args, "-F", msg_path],
                   env=signing_env(repo, env))
