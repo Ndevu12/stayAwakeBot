@@ -7,10 +7,10 @@ from __future__ import annotations
 
 import shutil
 import subprocess
-import tempfile
 from pathlib import Path
 
 from stayawake.lib import git as gitutil
+from stayawake.utils import scratch
 from stayawake.bots.security.targets.base import Target, ScanOptions
 
 
@@ -18,7 +18,7 @@ class RemoteRepoTarget(Target):
     source = "remote"
 
     def __init__(self, slug: str, opts: ScanOptions, token: str | None = None):
-        self._tmp = Path(tempfile.mkdtemp(prefix="sec-scan-"))
+        self._tmp = scratch.new_dir("a remote scan")
         super().__init__(self._tmp / "repo", slug, opts)
         self._slug = slug
         self._token = token

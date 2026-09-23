@@ -13,7 +13,7 @@ from stayawake.cli import commands
 from stayawake.cli._banner import render_welcome
 from stayawake.cli._meta import __version__
 from stayawake.cli.helptext import CommandHelpFormatter, examples_block
-from stayawake.utils import exitcodes, textsafe
+from stayawake.utils import exitcodes, scratch, textsafe
 from stayawake.utils.terminal import color_level
 
 
@@ -42,6 +42,16 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _clear_scratch() -> None:
+    """Remove what this run made under the temporary root, and name what survived."""
+    try:
+        left = scratch.release()
+    except Exception as exc:                      # noqa: BLE001 — clearing never fails a run
+        left = [f"{type(exc).__name__}: {exc}"]
+    for reason in left:
+        print(f"saw: left behind {textsafe.plain(reason, limit=300)}", file=sys.stderr)
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     # Hidden, reserved `saw sec <verb>` namespace: a leading `sec` token is a no-op
@@ -61,3 +71,5 @@ def main(argv: list[str] | None = None) -> int:
         print(f"saw {args.command}: the command did not complete. "
               f"{textsafe.plain(f'{type(exc).__name__}: {exc}', limit=300)}", file=sys.stderr)
         return exitcodes.DID_NOT_RUN
+    finally:
+        _clear_scratch()

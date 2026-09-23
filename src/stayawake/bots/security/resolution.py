@@ -7,15 +7,15 @@ import glob
 import os
 from dataclasses import dataclass, replace
 import re
-import shutil
 import subprocess
-import tempfile
+import sys
 from pathlib import Path
 
 from stayawake.bots.security.write_sinks import sink_label
 from stayawake.lib import auth
 from stayawake.lib import git as gitutil
 from stayawake.lib.adapters import github_api
+from stayawake.utils import scratch
 from stayawake.bots.security.targets import ScanOptions
 
 DEFAULT_CONFIG = "config/security.yml"
@@ -383,7 +383,7 @@ def cloned_repo(slug: str, token: str | None, *, depth: int | None = 50):
     `depth=None` is a full clone (every branch). A shallow clone is `--single-branch` and
     cannot see commits or refs the amend path has to update.
     """
-    tmp = Path(tempfile.mkdtemp(prefix="sab-clone-"))
+    tmp = scratch.new_dir("a clone")
     clone = tmp / "repo"
     try:
         def _attempt(url, env):
@@ -395,4 +395,6 @@ def cloned_repo(slug: str, token: str | None, *, depth: int | None = 50):
         r = gitutil.run_remote_git(slug, token, _attempt)
         yield clone if (r is not None and r.returncode == 0) else None
     finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+        why = scratch.release_path(tmp)
+        if why:
+            print(f"saw: left behind the clone at {tmp}: {why}", file=sys.stderr)

@@ -15,11 +15,12 @@ objects the rewrite removed from the ones it left alone.
 from __future__ import annotations
 
 import shutil
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
 from stayawake.lib.git.run import run, run_ok, stdout
+
+from stayawake.utils import scratch
 
 CAPTURE_REF_PREFIX = "refs/saw-capture/"
 
@@ -103,7 +104,7 @@ def _write_bundle(repo: str | Path, store: Path, old_tips: list[str], new_tips: 
     the evidence would survive by disabling the very thing it is evidence of. The staging
     repository owns the refs and is deleted with them; `repo` is never written to.
     """
-    stage = Path(tempfile.mkdtemp(prefix="saw-capture-"))
+    stage = scratch.new_dir("the capture staging repository")
     try:
         if not run_ok(None, ["init", "--quiet", "--bare", str(stage)]):
             return "the capture staging repository could not be created"

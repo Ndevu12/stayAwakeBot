@@ -23,8 +23,9 @@ reader, not the mechanism or the weakness it closed.
   and leaves the choice to you, because an offline advisory cache cannot promise a version is safe.
 
 ### Fixed
+- **A run clears the temporary directories it creates**, and names what it could not. Nothing
+  cleared them before, so every run left one behind.
 - **`saw fix` works again on a repository where an earlier run was interrupted.**
-- **A run clears the temporary directories it creates**, and names what it could not.
 - **A scan reports more of the committed symlinks that redirect a write somewhere dangerous**,
   including into what git itself runs, into files a Python interpreter executes at start-up, and
   into more of the per-user directories your shell and version managers put on your path. Re-scan

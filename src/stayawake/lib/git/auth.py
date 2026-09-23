@@ -6,7 +6,8 @@ from __future__ import annotations
 import contextlib
 import os
 import stat
-import tempfile
+
+from stayawake.utils import scratch
 
 _HOST = "github.com"
 _SSH_COMMAND = "ssh -o BatchMode=yes -o ConnectTimeout=15"
@@ -35,15 +36,14 @@ def github_https_auth(token: str | None):
     if os.name == "nt":  # no /bin/sh askpass on native Windows — keep credential-in-URL
         yield f"https://x-access-token:{token}@{_HOST}/", base_env
         return
-    fd, path = tempfile.mkstemp(prefix="sab-askpass-")
+    path = str(scratch.new_file("askpass", mode=stat.S_IRWXU))
     try:
-        with os.fdopen(fd, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             f.write("#!/bin/sh\n"
                     'case "$1" in\n'
                     "  Username*) printf %s 'x-access-token' ;;\n"
                     '  *) printf %s "$SAB_GH_TOKEN" ;;\n'
                     "esac\n")
-        os.chmod(path, stat.S_IRWXU)  # 0700: only this user can read/exec the helper
         env = dict(base_env, GIT_ASKPASS=path, SAB_GH_TOKEN=token)
         yield f"https://x-access-token@{_HOST}/", env
     finally:

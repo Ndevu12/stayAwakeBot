@@ -10,8 +10,8 @@ from __future__ import annotations
 import os
 
 from stayawake.utils.parallel import cpu_budget
+from stayawake.utils import scratch
 import sys
-import tempfile
 from pathlib import Path
 
 import heapq
@@ -341,7 +341,7 @@ def scan(config_path: str | None = None, *, remote: bool = False,
     # Spilled sweep: guarantee the FULL report exists off-terminal (same path large fleet already
     # used). Reuse -d when given; otherwise a temp dir. Highlight the path whenever a report was
     if spill and report_path is None:
-        tmp = Path(tempfile.mkdtemp(prefix="sab-report-"))
+        tmp = scratch.kept_dir("the full report")
         FileSink(tmp).emit(report)
         report_path = tmp / "latest.md"
     if report_path is not None:
