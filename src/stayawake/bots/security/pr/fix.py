@@ -404,7 +404,6 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
             sha = _merge_sha(f)
             if not sha or sha in have:
                 continue
-            # Restoring the live files does not remove the merge commit. Keep the history note.
             manual.append(_manual_for(f, sha, repo=wt))
             have.add(sha)
 

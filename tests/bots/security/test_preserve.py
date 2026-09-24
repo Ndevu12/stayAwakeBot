@@ -24,12 +24,12 @@ class TestTheBranchNeverCarriesThePayload(GitSandbox):
         self.write(self.repo, "app.js", "module.exports = 1;\n")
         self.commit(self.repo, "a starting point")
         (self.repo / "public" / "fonts").mkdir(parents=True)
-        (self.repo / "public" / "fonts" / "text.woff").write_text(LOADER)   # uncommitted payload
-        (self.repo / "notes.md").write_text("my own work\n")               # uncommitted, theirs
+        (self.repo / "public" / "fonts" / "text.woff").write_text(LOADER)
+        (self.repo / "notes.md").write_text("my own work\n")
 
     def test_what_the_cleanup_removed_is_not_on_the_branch(self):
         theirs = preserve.uncommitted(self.repo)
-        (self.repo / "public" / "fonts" / "text.woff").unlink()             # the cleanup removes it
+        (self.repo / "public" / "fonts" / "text.woff").unlink()
         done = preserve.preserve(self.repo, theirs)
         listed = self.git(self.repo, "ls-tree", "-r", "--name-only", done.branch)
         self.assertNotIn("text.woff", listed)
@@ -37,7 +37,7 @@ class TestTheBranchNeverCarriesThePayload(GitSandbox):
 
     def test_a_file_that_was_not_theirs_is_never_branched(self):
         theirs = preserve.uncommitted(self.repo)
-        theirs = [p for p in theirs if "text.woff" not in p]                # never noted as theirs
+        theirs = [p for p in theirs if "text.woff" not in p]
         done = preserve.preserve(self.repo, theirs)
         listed = self.git(self.repo, "ls-tree", "-r", "--name-only", done.branch)
         self.assertNotIn("text.woff", listed)
@@ -213,7 +213,7 @@ class TestTheRunActuallyPreservesFirst(GitSandbox):
         (self.d / "public" / "fonts").mkdir(parents=True)
         (self.d / "public" / "fonts" / "text.woff").write_text(LOADER)
         self.commit(self.d, "project and payload")
-        (self.d / "notes.txt").write_text("work in progress\n")     # uncommitted, untracked
+        (self.d / "notes.txt").write_text("work in progress\n")
 
     def _fix(self):
         with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):

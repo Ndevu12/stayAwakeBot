@@ -54,11 +54,7 @@ class RemovalPlan:
 
     @property
     def project_is_declared(self) -> bool:
-        """Whether anything states what this project should contain.
-
-        Weaker than `safe_to_remove` on purpose: a project with a lockfile and nothing installed
-        still rebuilds its own `dist`.
-        """
+        """Whether anything states what this project should contain."""
         return bool(self.lockfiles)
 
 
@@ -166,12 +162,10 @@ def plan_removal(root: Path, declared: set[tuple[str, str]], lockfiles: list[Pat
 
 
 def apply_removal(plan: RemovalPlan, rollback: Path) -> tuple[int, int]:
-    """Preserve first, then remove — including what the lockfile could not account for.
+    """Copy aside what no lockfile accounts for, then remove it with the rest.
 
-    An unaccounted package is the most suspicious thing in a confirmed-infected tree, and
-    `npm install` does not prune extraneous packages, so leaving it in place carried it through the
-    rebuild the operator is told to do. It is removed only after its copy is READ BACK: that copy is
-    the only one there is, and the whole reason it is taken is that nobody can say what this is.
+    Takes the plan and this run's rollback store. Returns how many packages were copied and how
+    many were removed. Nothing is removed before its copy has been read back.
     """
     if not plan.safe_to_remove:
         return 0, 0
@@ -404,8 +398,7 @@ def derived_paths(root: Path, unreadable: list[Path], keep=()) -> list[Path]:
 
     Takes the repository root, a list to record directories it could not read and the directory
     names to keep. Returns each installed tree, dependency cache and resolver file, deepest first.
-    Which directories are installed trees is `dependencies.layout`'s answer, so a removal clears
-    what a scan reads.
+    Which directories are installed trees is `dependencies.layout`'s answer.
     """
     trees = layout.installed_trees(root, unreadable)
     found: list[Path] = list(trees)
@@ -424,9 +417,8 @@ def derived_paths(root: Path, unreadable: list[Path], keep=()) -> list[Path]:
 def remove_derived(path: Path, root: Path) -> bool:
     """Delete one piece of derived state.
 
-    Takes the path and the repository root it must stay inside. Returns whether it was there and is
-    now gone. A link loses the link, and a link inside a directory is removed as a link, so what
-    either points at is left alone.
+    Takes the path and the repository root it must stay inside. Returns whether it was there and
+    is now gone. A link loses the link; what it points at is left alone.
     """
     try:
         if path.is_symlink():
@@ -465,8 +457,7 @@ def remove_installed(root: Path, *, confirmed: bool, remove_lockfiles: bool = Tr
 def _still_there(path: Path) -> bool:
     """Whether `path` is on disk after a removal was attempted.
 
-    Takes the path. Returns True when it is still there, and when that cannot be determined — an
-    answer nobody can give is not an answer that it is gone.
+    Takes the path. Returns True when it is still there, and when that cannot be read.
     """
     try:
         return path.exists() or path.is_symlink()
@@ -478,9 +469,9 @@ def remove_confirmed(root: Path, *, keep=(), committed=None, remove_lockfiles: b
                      lockfile_root: Path | None = None) -> Report:
     """Delete what a confirmed infection leaves behind. Bounded to `root`.
 
-    Takes the repository root, whether the lockfile goes, and the tree the lockfiles are read from.
-    Returns what was removed. Nothing here is copied first: an installed tree, a lockfile and a
-    build output are all reproducible, and a copy of an infected one is the payload kept on disk.
+    Takes the repository root, the directory names to keep, `committed(path) -> list[str]`,
+    whether the lockfile goes and the tree the lockfiles are read from. Returns what was removed.
+    Nothing is copied aside.
     """
     report = Report()
     try:
@@ -540,9 +531,9 @@ def remove_rebuildable(root: Path, *, keep=(), committed=None, remove_lockfiles:
                        lockfile_root: Path | None = None) -> Report:
     """Remove this repository's installed tree, lockfile, and generated outputs. Bounded to `root`.
 
-    Takes the repository root, whether the lockfile goes, and the tree the lockfiles are read from.
-    Returns what was removed. What no lockfile accounts for is copied aside and then removed with
-    the rest. A confirmed infection goes through `remove_confirmed`.
+    Takes the repository root, the directory names to keep, `committed(path) -> list[str]`,
+    whether the lockfile goes and the tree the lockfiles are read from. Returns what was removed.
+    What no lockfile accounts for is copied aside and then removed with the rest.
     """
     report = Report()
     try:
