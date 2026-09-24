@@ -22,18 +22,20 @@ from stayawake.utils import exitcodes
 def register(sub) -> None:
     p = add_command(
         sub, "fix",
-        help="prepare a cleanup branch per infected repo (--pr to open a PR)",
+        help="clear each infected checkout and prepare its cleanup branch (--pr to open a PR)",
         description=(
-            "Clean up detected worm findings on a branch. By default the fix is PREPARED on a "
-            "local `security/auto-clean` branch and nothing else happens — no push, no PR, no "
-            "network. Source changes land on that branch. On a confirmed infection it also removes "
-            "the installed tree, generated build outputs, and lockfile in this repository. "
+            "Clean up detected worm findings. By default the fix is PREPARED on a "
+            "local `security/auto-clean` branch and nothing is published — no push, no PR, no "
+            "network. On a confirmed infection saw also clears the checkout you are standing in: "
+            "the files it confirms, the installed tree, the generated build outputs and the "
+            "lockfile. What your working tree held and had not committed is recorded on a local "
+            "`saw/uncommitted-…` branch that is never pushed. "
             "Heuristic-only findings are disclosed for review, never auto-touched. "
             "`saw fix amend` replaces past commits that still carry the payload and "
             "force-updates each branch they sat on. The replaced commit keeps its "
             "original message. It does not open a pull request and it does not take "
             "`--branch`. If a remote branch cannot be read, nothing is force-updated. "
-            "Bare `saw fix` still only prepares a cleanup branch. "
+            "Bare `saw fix` publishes nothing. "
             "`saw discard` is the inverse of the branch/PR path."),
         examples=[
             ("saw fix", "prepare a branch per infected local repo"),

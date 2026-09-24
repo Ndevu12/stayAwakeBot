@@ -5,11 +5,11 @@ description: saw fix — clean detected findings on a branch and publish them on
 # `saw fix`
 
 Clean detected findings **on a branch**. By default `fix` prepares `security/auto-clean` locally and
-stops — no push, no PR, no network — for you to review. Source changes land on that branch. On a
-confirmed infection it also removes the installed tree, generated build outputs, and the lockfile
-in this repository (the lockfile is kept on CI). A merge finding that is still live in the working
-tree is restored there; the merge commit is left in history. `--pr` pushes and opens or updates one
-rolling PR per repository. Bare `saw fix` only ever prepares a cleanup branch.
+stops — no push, no PR, no network — for you to review. On a confirmed infection it also clears
+the checkout you are standing in: the files it confirms, the installed tree, generated build
+outputs, and the lockfile (the lockfile is kept on CI). A merge finding that is still live in the
+working tree is restored there; the merge commit is left in history. `--pr` pushes and opens or
+updates one rolling PR per repository. Bare `saw fix` publishes nothing.
 
 **Those removals happen in your working tree, as the run happens.** They are not staged on the
 branch and they do not wait for a pull request: the files are gone from the checkout you are
@@ -28,6 +28,12 @@ its patches, plugins and pinned releases, and only what the resolver writes ther
 repository loses the link, and what it points at is left alone. Directories you listed under
 `keep_dirs` are never removed; `exclude_dirs` says what is not scanned and does not
 decide this.
+
+**Your uncommitted work is kept.** Once the cleanup is done, what your working tree held and had
+not committed is recorded on a local branch named `saw/uncommitted-…`. It is never pushed, and
+your files, your branch and your staged changes are left exactly as they were. A file your
+`.gitignore` covers is not on it, and neither is one saw confirmed — that stays on disk and out of
+git.
 
 `fix` cleans your working tree and records that as a new commit. What the repository already
 stored stays stored: the payload is still there in the earlier commit, and one `git show` puts it
