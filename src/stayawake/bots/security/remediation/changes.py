@@ -11,7 +11,8 @@ from stayawake.utils.pathsafe import is_safe_write_target
 from stayawake.bots.security.matchers.base import load_jsonc
 from stayawake.bots.security.models import CONFIRMED, ROLLBACK_DIR, SAW_DIR
 from stayawake.bots.security.remediation.footprint import REMOVE_FILE
-from stayawake.bots.security.remediation.oracle import ABSENT, CARRIES, CHANGED, REFUSED
+from stayawake.bots.security.remediation.oracle import (ABSENT, CARRIES, CHANGED, REFUSED,
+                                                        UNREADABLE)
 
 _ACTIONS = {
     REMOVE_FILE: "remove",
@@ -228,21 +229,31 @@ def apply(root: Path, changes: list[Change], rollback: Path | None = None, *,
             applied.append(c)
         elif c.action in ("strip-gitignore", "strip-settings"):
             if not target.exists():
+                _skipped(on_skip, c.path, ABSENT)
                 continue
             if not is_safe_write_target(target, root):
+                _skipped(on_skip, c.path, REFUSED)
                 continue
             try:
                 if target.stat().st_nlink > 1:
+                    _skipped(on_skip, c.path, REFUSED)
                     continue
+                original = target.read_text(encoding="utf-8", errors="replace")
             except OSError:
+                _skipped(on_skip, c.path, UNREADABLE)
                 continue
-            original = target.read_text(encoding="utf-8", errors="replace")
             if c.action == "strip-gitignore":
                 new = strip_gitignore_text(original)
             else:
                 new = strip_settings_autorun(original)
-            if new != original:
-                _backup(root, c.path, rollback)
+            if new == original:
+                _skipped(on_skip, c.path, REFUSED)
+                continue
+            _backup(root, c.path, rollback)
+            try:
                 target.write_text(new, encoding="utf-8")
-                applied.append(c)
+            except OSError:
+                _skipped(on_skip, c.path, REFUSED)
+                continue
+            applied.append(c)
     return applied

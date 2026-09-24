@@ -19,11 +19,16 @@ MESSAGE = ("saw: the uncommitted working tree, after the cleanup\n\n"
 
 @dataclass(frozen=True)
 class Preserved:
-    """What a run put aside. `branch` is empty when nothing was, and `reason` names what stopped it."""
+    """What a run put aside.
+
+    `branch` is empty when nothing was, `reason` names what stopped it, and `blocked` is True only
+    when saw could not do what it should have rather than there being nothing to do.
+    """
 
     branch: str = ""
     files: int = 0
     reason: str = ""
+    blocked: bool = False
     withheld: int = 0
     unsaved: int = 0
 
@@ -97,27 +102,27 @@ def preserve(repo: str | Path, remembered: list[str] | None = None, *,
     env = dict(os.environ, GIT_INDEX_FILE=str(index_dir / "index"))
     try:
         if not run_ok(repo, ["read-tree", head], env=env):
-            return Preserved(reason="the current commit could not be read", withheld=withheld)
+            return Preserved(reason="the current commit could not be read", blocked=True, withheld=withheld)
         unsaved = _stage(repo, changed, env)
         if changed and len(unsaved) == len(changed):
-            return Preserved(reason="the working tree could not be staged", withheld=withheld)
+            return Preserved(reason="the working tree could not be staged", blocked=True, withheld=withheld)
         dropped = _drop(repo, sorted(named), env)
         if dropped is None:
-            return Preserved(reason="a path the scan named could not be kept out", withheld=withheld)
+            return Preserved(reason="a path the scan named could not be kept out", blocked=True, withheld=withheld)
         withheld += dropped
         if not changed and not dropped:
             return Preserved(withheld=withheld)
         res = run(repo, ["write-tree"], env=env)
         if res is None or res.returncode != 0:
-            return Preserved(reason="the working tree could not be written", withheld=withheld)
+            return Preserved(reason="the working tree could not be written", blocked=True, withheld=withheld)
         tree = (res.stdout or "").strip()
         res = run(repo, ["commit-tree", tree, "-p", head, "-m", MESSAGE])
         if res is None or res.returncode != 0:
-            return Preserved(reason=f"the branch could not be committed ({_why(res)})", withheld=withheld)
+            return Preserved(reason=f"the branch could not be committed ({_why(res)})", blocked=True, withheld=withheld)
         commit = (res.stdout or "").strip()
         branch = f"{BRANCH_PREFIX}{time.strftime('%Y-%m-%d-%H%M%S')}"
         if not run_ok(repo, ["update-ref", f"refs/heads/{branch}", commit]):
-            return Preserved(reason="the branch could not be created", withheld=withheld)
+            return Preserved(reason="the branch could not be created", blocked=True, withheld=withheld)
         return Preserved(branch=branch, files=len(changed) - len(unsaved),
                          withheld=withheld, unsaved=len(unsaved))
     finally:

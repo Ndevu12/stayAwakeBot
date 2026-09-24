@@ -16,6 +16,7 @@ class LiveResult:
     """What a run did to the live checkout."""
 
     removed: list[str] = field(default_factory=list)
+    stripped: list[str] = field(default_factory=list)
     absent: list[str] = field(default_factory=list)
     unread: list[str] = field(default_factory=list)
     refused: list[str] = field(default_factory=list)
@@ -23,7 +24,7 @@ class LiveResult:
     @property
     def named(self) -> list[str]:
         """Every path the plan condemned, whatever became of it."""
-        return self.removed + self.absent + self.unread + self.refused
+        return self.removed + self.stripped + self.absent + self.unread + self.refused
 
     @property
     def unfinished(self) -> list[str]:
@@ -40,6 +41,8 @@ class LiveResult:
         parts = []
         if self.removed:
             parts.append(f"removed {len(self.removed)} file(s) from your checkout")
+        if self.stripped:
+            parts.append(f"took what was found out of {len(self.stripped)} more")
         if self.unfinished:
             head = f"{len(self.unfinished)} still to deal with — your checkout is not clean"
             parts.append(f"{head}: {', '.join(self.unfinished)}" if detail else head)
@@ -52,7 +55,7 @@ def clean(root: Path, findings, signatures, allowlist, opts) -> LiveResult:
     Takes the checkout, the findings, the by-matcher signatures, the allowlist and the scan
     options. Returns what was removed and what was not.
     """
-    plan = [c for c in ch.plan(findings) if c.action == "remove"]
+    plan = ch.plan(findings)
     if not plan:
         return LiveResult()
     result = LiveResult()
@@ -64,7 +67,11 @@ def clean(root: Path, findings, signatures, allowlist, opts) -> LiveResult:
     applied = ch.apply(root, plan, None,
                        condemned=still_condemned(root, signatures, allowlist, opts),
                        on_skip=skipped)
-    result.removed.extend(c.path for c in applied)
+    for change in applied:
+        if change.action == "remove":
+            result.removed.append(change.path)
+        else:
+            result.stripped.append(change.path)
     return result
 
 
@@ -89,7 +96,7 @@ class CheckoutResult:
     def complete(self) -> bool:
         """Whether the checkout can be called clean."""
         return (self.removed.complete and not self.left_alone and not self.scan_error
-                and not self.failure and not self.kept.reason)
+                and not self.failure and not self.kept.blocked)
 
     def note(self, detail: bool = False) -> str:
         """Describe the whole pass, for the operator. Takes whether paths may be named."""
@@ -140,7 +147,7 @@ def clean_checkout(repo: Path, opts, signatures, allowlist, *, scan=None, keep=(
     verdict = still_condemned(repo, signatures, allowlist, opts)
     present = [p for p in named if verdict(p) != ABSENT]
     kept = preserve.preserve(repo, theirs, condemned=present)
-    dealt = set(removed.removed) | set(removed.absent)
+    dealt = set(removed.removed) | set(removed.stripped) | set(removed.absent)
     return CheckoutResult(confirmed=len(findings), report=report, removed=removed,
                           left_alone=[p for p in named if p not in dealt],
                           kept=kept, failure=failure)

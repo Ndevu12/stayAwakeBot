@@ -33,6 +33,7 @@ class _Project(GitSandbox):
     def setUp(self):
         super().setUp()
         self.d = self.new_repo("project", user__name="Tester")
+        self.write(self.d, "package-lock.json", '{"lockfileVersion": 3, "packages": {"": {}}}\n')
         for name in ("dist", "build"):
             (self.d / name).mkdir()
             (self.d / name / "artifact.js").write_text("generated\n")
@@ -242,6 +243,39 @@ class TestACommittedFileIsOnlyKeptWhenItWasRead(_Project):
         self.assertFalse(tree.exists())
 
 
+class TestNothingSaysABuildProducesThem(GitSandbox):
+    """Check a repository where no lockfile states that its output directories are produced."""
+
+    def setUp(self):
+        super().setUp()
+        self.d = self.new_repo("project", user__name="Tester")
+        self.write(self.d, "setup.py", "from setuptools import setup\nsetup()\n")
+        (self.d / "out").mkdir()
+        (self.d / "out" / "experiment-results.csv").write_text("a,b\n1,2\n")
+        (self.d / "dist").mkdir()
+        (self.d / "dist" / "myproj-1.0.tar.gz").write_bytes(b"a source release\n")
+
+    def _run(self):
+        return installed.remove_installed(self.d, confirmed=True,
+                                          committed=_committed_under(self.d))
+
+    def test_the_operators_only_copy_is_left_alone(self):
+        self._run()
+        self.assertTrue((self.d / "out" / "experiment-results.csv").is_file())
+        self.assertTrue((self.d / "dist" / "myproj-1.0.tar.gz").is_file())
+
+    def test_the_run_says_it_left_them_and_why(self):
+        note = self._run().note()
+        self.assertIn("nothing here says a build produces them", note)
+        self.assertIn("out", note)
+
+    def test_a_lockfile_is_what_says_they_are_produced(self):
+        self.write(self.d, "package-lock.json", '{"lockfileVersion": 3, "packages": {"": {}}}\n')
+        self._run()
+        self.assertFalse((self.d / "out").exists())
+        self.assertFalse((self.d / "dist").exists())
+
+
 class TestTheSettingReachesTheDecision(unittest.TestCase):
     def test_the_config_key_is_read(self):
         opts = _options({"keep_dirs": ["out"]})
@@ -265,15 +299,25 @@ class TestARunStillClearsAnExcludedBuildTree(GitSandbox):
         (self.d / "public" / "fonts").mkdir(parents=True)
         (self.d / "public" / "fonts" / "text.woff").write_text(
             "var _0x=String.fromCharCode(118,97,114);eval(_0x+\" x=1\");\n")
+        self.write(self.d, "package-lock.json", '{"lockfileVersion": 3, "packages": {"": {}}}\n')
         self.commit(self.d, "project and payload")
         (self.d / "dist").mkdir()
         (self.d / "dist" / "bundle.js").write_text("generated\n")
 
-    def test_the_generated_tree_is_removed_even_though_it_is_not_scanned(self):
-        self.assertIn("dist", ScanOptions().exclude_dirs)
+    def _fix(self):
         with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             remediator.fix(None, paths=[str(self.d)], no_stream=True)
+
+    def test_the_generated_tree_is_removed_even_though_it_is_not_scanned(self):
+        self.assertIn("dist", ScanOptions().exclude_dirs)
+        self._fix()
         self.assertFalse((self.d / "dist").exists())
+
+    def test_without_a_lockfile_it_is_left_where_it_is(self):
+        self.git(self.d, "rm", "-q", "package-lock.json")
+        self.commit(self.d, "no lockfile")
+        self._fix()
+        self.assertTrue((self.d / "dist" / "bundle.js").is_file())
 
 
 if __name__ == "__main__":

@@ -339,6 +339,7 @@ class Report:
     installed_tree_kept: str | None = None
     installed_entries_kept: int = 0
     operator_kept: list[str] = field(default_factory=list)
+    builds_left: list[str] = field(default_factory=list)
 
     def note(self) -> str:
         """What this did to the live checkout, what it left alone, and where the copies went."""
@@ -355,7 +356,7 @@ class Report:
             bits.append("removed the lockfile")
         if self.removed_builds:
             bits.append("removed " + ", ".join(self.removed_builds))
-        kept = "; ".join(n for n in (self.kept_note(), self.asked_note(),
+        kept = "; ".join(n for n in (self.kept_note(), self.asked_note(), self.builds_note(),
                                      self.survived_note()) if n)
         if not bits:
             return kept
@@ -371,6 +372,13 @@ class Report:
         """
         names = sorted({str(p.name) for p in self.not_removed + self.unreadable})
         return f"still there: {_named(names)}" if names else ""
+
+    def builds_note(self) -> str:
+        """The output directories nothing here says a build produces. Returns "" when there are none."""
+        if not self.builds_left:
+            return ""
+        return (f"left in place, because nothing here says a build produces them: "
+                f"{_named(sorted(self.builds_left))}. Check them yourself")
 
     def asked_note(self) -> str:
         """What the operator asked to keep and this run left. Returns "" when they asked for none."""
@@ -556,11 +564,14 @@ def remove_confirmed(root: Path, *, keep=(), remove_lockfiles: bool = True,
     report.operator_kept = [str(_relative_to(k, _resolved(root) or root) or k)
                             for k in kept_paths(root, keep)]
 
-    for build in build_output_dirs(root, keep=keep):
-        if remove_generated(build, root, (), keep):
-            report.removed_builds.append(build.name)
-        elif _still_there(build):
-            report.not_removed.append(build)
+    if _declares_a_build(lockfile_root if lockfile_root is not None else root):
+        for build in build_output_dirs(root, keep=keep):
+            if remove_generated(build, root, (), keep):
+                report.removed_builds.append(build.name)
+            elif _still_there(build):
+                report.not_removed.append(build)
+    else:
+        report.builds_left = [b.name for b in build_output_dirs(root, keep=keep)]
 
     if remove_lockfiles:
         proof = lockfile_root if lockfile_root is not None else root
@@ -575,6 +586,18 @@ def remove_confirmed(root: Path, *, keep=(), remove_lockfiles: bool = True,
                 live.unlink()
                 report.removed_lockfiles.append(live)
     return report
+
+
+def _declares_a_build(root: Path) -> bool:
+    """Whether anything in `root` states that its output directories are produced.
+
+    Takes the tree the lockfiles are read from. Returns True when a lockfile is there, which is
+    what says a build can reproduce them.
+    """
+    try:
+        return bool(lockfiles_under(root))
+    except OSError:
+        return False
 
 
 def lockfiles_under(root: Path) -> list[Path]:

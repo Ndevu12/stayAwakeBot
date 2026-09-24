@@ -192,8 +192,8 @@ class TestARewriteBetweenTheTwoReadsDoesNotSaveIt(_Checkout):
         self.assertTrue(result.complete)
 
 
-class TestAConfirmedFindingTheRemovalPlanCannotExpress(OwnTempRoot):
-    """Check the checkout a run cannot clear with a removal alone."""
+class TestAConfirmedFindingNoRemovalCanExpress(OwnTempRoot):
+    """Check a checkout whose confirmed finding is repaired rather than unlinked."""
 
     def setUp(self):
         super().setUp()
@@ -209,28 +209,36 @@ class TestAConfirmedFindingTheRemovalPlanCannotExpress(OwnTempRoot):
                                load_signatures(), [])
         return live.clean_checkout(self.root, ScanOptions(), load_signatures(), [], scan=scan)
 
-    def test_the_run_is_not_called_complete(self):
+    def test_what_was_found_is_taken_out_of_the_file(self):
         result = self._checkout()
         self.assertTrue(result.infected, "the fixture must carry a confirmed finding")
-        self.assertFalse(result.complete)
+        self.assertNotIn("allowAutomaticTasks",
+                         (self.root / ".vscode" / "settings.json").read_text())
+        self.assertIn(".vscode/settings.json", result.removed.stripped)
 
-    def test_the_operator_is_told_it_is_still_there(self):
-        self.assertIn("still in your checkout", self._checkout().note())
+    def test_the_run_is_complete_because_it_acted(self):
+        self.assertTrue(self._checkout().complete)
 
-    def test_it_is_not_copied_into_git(self):
-        result = self._checkout()
-        self.assertIn(".vscode/settings.json", result.left_alone)
-        self.assertEqual("", result.kept.branch,
-                         "no repository here, so nothing should have been branched")
+    def test_the_operator_is_told_it_acted(self):
+        self.assertIn("took what was found out of", self._checkout().note())
+
+    def test_the_operators_own_file_is_untouched(self):
+        self._checkout()
+        self.assertEqual("my own work\n", (self.root / "notes.md").read_text())
 
 
 class TestWhatMakesARunIncomplete(unittest.TestCase):
     """Check each thing that must stop a run being called clean."""
 
+    def test_nothing_to_branch_from_is_not_a_failure(self):
+        self.assertTrue(live.CheckoutResult(
+            kept=preserve.Preserved(reason="this repository has no commit to branch from")).complete)
+
     def test_a_preservation_that_failed_outright(self):
         result = live.CheckoutResult(
             confirmed=1,
-            kept=preserve.Preserved(reason="the working tree could not be staged"))
+            kept=preserve.Preserved(reason="the working tree could not be staged",
+                                    blocked=True))
         self.assertFalse(result.complete)
 
     def test_a_confirmed_path_it_did_not_clear(self):
