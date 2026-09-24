@@ -20,6 +20,6 @@ def build_resolver(stdin: TextIO | None = None,
     interactive or the run is automated. Defaults to the process stdin and stderr."""
     stdin = sys.stdin if stdin is None else stdin
     stderr = sys.stderr if stderr is None else stderr
-    if not prompt.interactive(stdin, stderr) or env.is_ci():
+    if not prompt.attended(stdin, stderr):
         return None
     return lambda item: ask_resolution(item, stdin=stdin, stderr=stderr)

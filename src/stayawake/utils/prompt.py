@@ -2,14 +2,14 @@
 """Reading one answer from an operator at the terminal.
 
 The prompt is written to the error stream (so a captured stdout stays machine-clean) and one line is
-read from the input stream. Whether asking is appropriate at all — CI, hooks, remote or parallel runs
-never ask — is decided by the caller; this module only handles the terminal itself.
+read from the input stream. `attended` answers whether there is a person to address at all.
 """
 from __future__ import annotations
 
 import sys
 from typing import TextIO
 
+from stayawake.utils import env
 from stayawake.utils.terminal import is_tty
 
 
@@ -18,6 +18,12 @@ def interactive(stdin: TextIO | None = None, stderr: TextIO | None = None) -> bo
     question and type an answer. Defaults to the process stdin and stderr."""
     return (is_tty(sys.stdin if stdin is None else stdin)
             and is_tty(sys.stderr if stderr is None else stderr))
+
+
+def attended(stdin: TextIO | None = None, stderr: TextIO | None = None) -> bool:
+    """True when a person is there to address: both streams are terminals and the run is not
+    automated. Defaults to the process stdin and stderr."""
+    return interactive(stdin, stderr) and not env.is_ci()
 
 
 def ask_line(prompt: str, *, stdin: TextIO | None = None,
