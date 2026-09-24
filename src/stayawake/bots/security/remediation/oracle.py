@@ -96,7 +96,7 @@ def still_condemned(root: Path, signatures, allowlist, opts):
                 content = os.fsencode(os.readlink(target))
                 verdict = content_confirms(content, path, payload, allowlist, opts, is_symlink=True)
             elif target.is_dir():
-                return CARRIES
+                return UNREADABLE
             else:
                 verdict = content_confirms(target.read_bytes(), path, payload, allowlist, opts)
         except OSError:

@@ -60,6 +60,37 @@ class TestThePayloadLeavesTheCheckout(_Checkout):
         self.assertEqual(before, sorted(str(p) for p in self.root.rglob("*")))
 
 
+class TestItNeverRemovesWhatItDidNotRead(_Checkout):
+    """Check what a run does to a path it cannot read as a file."""
+
+    def _condemn(self, path):
+        from stayawake.bots.security.models import Finding, Severity
+        return [Finding("x", "c", Severity.CRITICAL, path, "d",
+                        remediation="remove-file", confidence="confirmed")]
+
+    def test_a_directory_at_a_condemned_path_survives(self):
+        here = self.root / "public" / "fonts" / "text.woff"
+        here.mkdir(parents=True)
+        (here / "theirs.md").write_text("mine\n")
+        result = live.clean(self.root, self._condemn("public/fonts/text.woff"),
+                            load_signatures(), [], ScanOptions())
+        self.assertTrue((here / "theirs.md").exists())
+        self.assertEqual([], result.removed)
+
+    def test_a_run_that_met_one_is_not_complete(self):
+        (self.root / "public" / "fonts" / "text.woff").mkdir(parents=True)
+        result = live.clean(self.root, self._condemn("public/fonts/text.woff"),
+                            load_signatures(), [], ScanOptions())
+        self.assertFalse(result.complete)
+
+    def test_a_payload_file_is_still_removed(self):
+        payload = self.root / "public" / "fonts" / "text.woff"
+        payload.write_text(LOADER)
+        result = live.clean(self.root, self._findings(), load_signatures(), [], ScanOptions())
+        self.assertFalse(payload.exists())
+        self.assertEqual(["public/fonts/text.woff"], result.removed)
+
+
 class TestItSaysWhatItCouldNotDo(_Checkout):
     def test_a_clean_run_is_complete(self):
         (self.root / "public" / "fonts" / "text.woff").write_text(LOADER)
