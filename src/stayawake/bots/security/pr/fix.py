@@ -267,6 +267,7 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
         merge_clean: dict = {}
         checkout = live.clean_checkout(
             repo, opts, signatures, allowlist,
+            scan=scan_target,
             keep=getattr(opts, "keep_dirs", ()) or (),
             lockfile_root=wt,
             committed=_committed_under(repo),

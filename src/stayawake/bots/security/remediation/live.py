@@ -101,22 +101,24 @@ class CheckoutResult:
         return "; ".join(p for p in parts if p)
 
 
-def clean_checkout(repo: Path, opts, signatures, allowlist, *, keep=(),
+def clean_checkout(repo: Path, opts, signatures, allowlist, *, scan=None, keep=(),
                    lockfile_root: Path | None = None, committed=None,
                    remove_lockfiles: bool = True) -> CheckoutResult:
     """Scan the checkout the operator is standing in and clear what it confirms.
 
-    Takes the checkout, the scan options, the by-matcher signatures, the allowlist, the directory
-    names to keep, the tree the lockfiles are read from, `committed(path) -> list[str]` and whether
-    the lockfile goes. Returns what was found and what was done, the operator's own uncommitted
-    work put on a branch of its own.
+    Takes the checkout, the scan options, the by-matcher signatures, the allowlist, the scan to
+    run, the directory names to keep, the tree the lockfiles are read from,
+    `committed(path) -> list[str]` and whether the lockfile goes. Returns what was found and what
+    was done, the operator's own uncommitted work put on a branch of its own.
     """
-    from stayawake.bots.security.scanner import scan_target
     from stayawake.bots.security.targets import LocalRepoTarget
-    scan = scan_target(LocalRepoTarget(repo, str(repo), opts), signatures, allowlist)
-    if scan.error:
+    if scan is None:
+        from stayawake.bots.security.scanner import scan_target
+        scan = scan_target
+    read = scan(LocalRepoTarget(repo, str(repo), opts), signatures, allowlist)
+    if read.error:
         return CheckoutResult(scan_error="your checkout was not read in full, so it is not clean")
-    findings = [f for f in scan.findings if getattr(f, "confidence", None) == CONFIRMED]
+    findings = [f for f in read.findings if getattr(f, "confidence", None) == CONFIRMED]
     if not findings:
         return CheckoutResult()
     theirs = preserve.uncommitted(repo)
