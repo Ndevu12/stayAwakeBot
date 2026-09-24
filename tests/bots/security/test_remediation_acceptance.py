@@ -118,7 +118,19 @@ class TestTheWorkingTreeIsRemediated(_InfectedProject):
 
     def test_nothing_is_copied_aside(self):
         self._fix()
-        self.assertEqual("", self.git(self.d, "status", "--porcelain").strip())
+        stray = [l for l in self.git(self.d, "status", "--porcelain").splitlines()
+                 if l.startswith("??")]
+        self.assertEqual([], stray)
+
+    def test_the_payload_is_gone_from_the_working_tree(self):
+        self._fix()
+        for path in (THE_LOADER, THE_LAUNCHER):
+            self.assertFalse((self.d / path).exists(), path)
+
+    def test_the_projects_own_files_are_still_on_disk(self):
+        self._fix()
+        for path in PROJECT_OWN + GENUINE_ASSETS:
+            self.assertTrue((self.d / path).exists(), path)
 
     def test_the_projects_own_content_is_byte_identical(self):
         branch = self._fix()
