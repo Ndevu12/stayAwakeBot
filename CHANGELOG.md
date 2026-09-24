@@ -37,8 +37,11 @@ reader, not the mechanism or the weakness it closed.
   saved report, and in the remediation pull request, with the command to remove each one.
 
 ### Security
-- **The branch `saw fix` saves your uncommitted work on carries no file saw confirmed.** Each one
-  stays where it is on disk, and the run tells you how many were left out of it.
+- **The branch `saw fix` saves your uncommitted work on carries no file saw confirmed**, and no
+  copy of one is written into your repository on the way there. The run tells you how many were
+  kept out of it.
+- **A payload another name on your machine also points at loses its content, not only its name**,
+  so a shared copy does not stay live after the run.
 - **`saw fix` no longer calls your checkout clean when it confirmed something it did not clear.**
   Anything it confirmed and left behind is counted, named when you are there to read it, and sends
   the run for review.
@@ -56,11 +59,11 @@ reader, not the mechanism or the weakness it closed.
   it compares against says.
 
 - **A generated directory is cleared whole on a confirmed infection**, whatever your repository
-  commits inside it, once something in the project says a build produces it. Otherwise saw names it
-  and asks you to check it yourself, because it cannot be rebuilt from anything it can see. Name it
-  under `keep_dirs` to keep it either way.
-- **`saw fix` makes every repair it knows in your checkout.** What it took out of a file is
-  reported beside what it removed, and a repair that found nothing to change sends the run for
+  commits inside it. Nothing the repository itself says holds that back — name the directory under
+  `keep_dirs` if you need it kept, and reinstall or rebuild afterwards.
+- **`saw fix` makes every repair it knows in your checkout.** A repair edits only what it must and
+  leaves the rest of the file — its comments, its layout and its bytes — as it was. What it changed
+  is reported beside what it removed, and a repair it could not make exactly sends the run for
   review.
 
 - **The branch `saw fix` saves your uncommitted work on now holds all of it.** A file you had
@@ -68,6 +71,8 @@ reader, not the mechanism or the weakness it closed.
 
 - **One file git will not stage no longer costs you the whole branch.** What it would not take is
   counted and named, and everything else is saved.
+- **One file saw may not write no longer stops it dealing with the rest.** That path is named and
+  sends the run for review; every other one is still acted on.
 
 - **A cleanup no longer removes an installed package after copying a tree it could not read.**
   A directory it was refused permission to read counted as copied; now it stops and says so.

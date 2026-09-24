@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import shutil
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from stayawake.utils import env
 from stayawake.utils.pathsafe import every_file_arrived, is_safe_write_target
@@ -98,19 +98,20 @@ def kept_paths(root: Path, keep) -> list[Path]:
     """The directories the operator asked to keep, as paths under `root`.
 
     Takes the repository root and the entries to keep, each written relative to that root. Returns
-    one path per entry that names somewhere inside the repository.
+    one path per entry that names a directory of this repository as it is spelled; an entry that
+    reaches somewhere else, however it gets there, names nothing.
     """
-    here = _resolved(root)
-    if here is None:
+    base = _resolved(root)
+    if base is None:
         return []
     found = []
     for entry in keep or ():
-        text = str(entry).strip()
-        if not text:
+        spelled = PurePosixPath(str(entry).strip().replace("\\", "/"))
+        parts = [p for p in spelled.parts if p != "."]
+        if not parts or spelled.is_absolute() or ".." in parts:
             continue
-        spelled = Path(text)
-        candidate = _resolved(spelled if spelled.is_absolute() else root / text)
-        if candidate is None or candidate == here or here not in candidate.parents:
+        candidate = root.joinpath(*parts)
+        if _resolved(candidate) != base.joinpath(*parts):
             continue
         found.append(candidate)
     return found
@@ -124,10 +125,7 @@ def kept_by_operator(path: Path, root: Path, keep) -> bool:
     """
     if not keep:
         return False
-    here = _resolved(path)
-    if here is None:
-        return False
-    return any(here == kept or kept in here.parents for kept in kept_paths(root, keep))
+    return any(path == kept or kept in path.parents for kept in kept_paths(root, keep))
 
 
 def holds_a_kept_path(tree: Path, root: Path, keep) -> bool:
@@ -135,10 +133,7 @@ def holds_a_kept_path(tree: Path, root: Path, keep) -> bool:
 
     Takes the tree, the repository root and the directories to keep. Returns the answer.
     """
-    here = _resolved(tree)
-    if here is None:
-        return False
-    return any(here in kept.parents for kept in kept_paths(root, keep))
+    return any(tree in kept.parents for kept in kept_paths(root, keep))
 
 
 def _resolved(path: Path) -> Path | None:
@@ -420,14 +415,14 @@ def remove_generated(tree: Path, root: Path, tracked=(), keep=(), confirms=None)
 
     Takes the tree, the root it must stay inside, the tracked paths relative to that root, the
     directories to keep and `confirms(path) -> bool`. Returns whether the tree itself is gone. A
-    tracked path is left only when the reader was given and read it clean, so a tree nothing reads
-    goes whole.
+    tracked path is left only when a reader is given and reads it clean, so a caller that gives
+    none clears the tree whole.
     """
     kept = {root / t for t in tracked} if confirms is not None else set()
     if not kept and not keep:
         return remove_derived(tree, root)
     for path in sorted(tree.rglob("*"), key=lambda p: len(p.parts), reverse=True):
-        if kept_by_operator(path, root, keep):
+        if kept_by_operator(path, root, keep) or holds_a_kept_path(path, root, keep):
             continue
         if path in kept or any(_inside(k, path) for k in kept):
             if not (path.is_file() and confirms(path)):
@@ -511,10 +506,11 @@ def remove_installed(root: Path, *, confirmed: bool, remove_lockfiles: bool = Tr
     """Remove what a finding of this confidence allows. Bounded to `root`.
 
     Takes the repository root, whether its infection is confirmed, whether the lockfile goes, the
-    tree the lockfiles are read from, the directory names the operator asked to keep, and
-    `committed(path) -> list[str]` and `confirms(path) -> bool`. Returns what was removed. A confirmed infection loses every
-    reproducible directory whole; anything less copies what no lockfile accounts for aside and then
-    removes it too.
+    tree the lockfiles are read from and the directories to keep, with `committed(path)` and
+    `confirms(path)` for the lane that reads them. Returns what was removed. A confirmed infection
+    loses every reproducible directory whole, and only `keep` holds one back; anything less copies
+    what no lockfile accounts for aside, keeps what the repository tracks and a reader calls clean,
+    and removes the rest.
     """
     if confirmed:
         return remove_confirmed(root, remove_lockfiles=remove_lockfiles,
@@ -550,6 +546,8 @@ def remove_confirmed(root: Path, *, keep=(), remove_lockfiles: bool = True,
     except OSError:
         return report
 
+    report.operator_kept = [str(_relative_to(k, root) or k)
+                            for k in kept_paths(root, keep) if k.is_dir()]
     unreadable: list[Path] = []
     for path in derived_paths(root, unreadable, keep):
         if holds_a_kept_path(path, root, keep):
@@ -561,17 +559,13 @@ def remove_confirmed(root: Path, *, keep=(), remove_lockfiles: bool = True,
         elif _still_there(path):
             report.not_removed.append(path)
     report.unreadable.extend(unreadable)
-    report.operator_kept = [str(_relative_to(k, _resolved(root) or root) or k)
-                            for k in kept_paths(root, keep)]
 
-    if _declares_a_build(lockfile_root if lockfile_root is not None else root):
-        for build in build_output_dirs(root, keep=keep):
-            if remove_generated(build, root, (), keep):
-                report.removed_builds.append(build.name)
-            elif _still_there(build):
-                report.not_removed.append(build)
-    else:
-        report.builds_left = [b.name for b in build_output_dirs(root, keep=keep)]
+
+    for build in build_output_dirs(root, keep=keep):
+        if remove_generated(build, root, (), keep):
+            report.removed_builds.append(build.name)
+        elif _still_there(build):
+            report.not_removed.append(build)
 
     if remove_lockfiles:
         proof = lockfile_root if lockfile_root is not None else root
@@ -586,18 +580,6 @@ def remove_confirmed(root: Path, *, keep=(), remove_lockfiles: bool = True,
                 live.unlink()
                 report.removed_lockfiles.append(live)
     return report
-
-
-def _declares_a_build(root: Path) -> bool:
-    """Whether anything in `root` states that its output directories are produced.
-
-    Takes the tree the lockfiles are read from. Returns True when a lockfile is there, which is
-    what says a build can reproduce them.
-    """
-    try:
-        return bool(lockfiles_under(root))
-    except OSError:
-        return False
 
 
 def lockfiles_under(root: Path) -> list[Path]:

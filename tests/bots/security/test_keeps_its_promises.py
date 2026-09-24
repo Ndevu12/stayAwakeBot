@@ -149,6 +149,24 @@ class TestAConfirmedRunClearsAGeneratedTreeWhole(_Project):
         self.assertFalse((self.d / "build").exists())
 
 
+class TestAKeepEntryNamesThisRepository(_Project):
+    """Check what a keep entry may reach."""
+
+    def test_a_name_pointed_elsewhere_by_a_link_keeps_nothing(self):
+        (self.d / installed.INSTALLED_DIR / "pkg").mkdir(parents=True)
+        (self.d / installed.INSTALLED_DIR / "pkg" / "index.js").write_text("x\n")
+        (self.d / "data").symlink_to(installed.INSTALLED_DIR)
+        self.assertEqual([], installed.kept_paths(self.d, ("data",)))
+        installed.remove_installed(self.d, confirmed=True, keep=("data",),
+                                   committed=_committed_under(self.d))
+        self.assertFalse((self.d / installed.INSTALLED_DIR / "pkg").exists())
+
+    def test_a_directory_of_this_repository_is_still_kept(self):
+        (self.d / "data").mkdir()
+        (self.d / "data" / "mine.csv").write_text("theirs\n")
+        self.assertEqual([self.d / "data"], installed.kept_paths(self.d, ("data",)))
+
+
 class TestKeepingReachesEveryRemoval(_Project):
     """Check that a directory `keep_dirs` names survives whatever kind of directory it is."""
 
@@ -243,8 +261,8 @@ class TestACommittedFileIsOnlyKeptWhenItWasRead(_Project):
         self.assertFalse(tree.exists())
 
 
-class TestNothingSaysABuildProducesThem(GitSandbox):
-    """Check a repository where no lockfile states that its output directories are produced."""
+class TestAnOutputDirectoryIsNotJudgedByTheRepository(GitSandbox):
+    """Check that nothing a scanned repository can write decides whether an output tree goes."""
 
     def setUp(self):
         super().setUp()
@@ -259,21 +277,19 @@ class TestNothingSaysABuildProducesThem(GitSandbox):
         return installed.remove_installed(self.d, confirmed=True,
                                           committed=_committed_under(self.d))
 
-    def test_the_operators_only_copy_is_left_alone(self):
-        self._run()
-        self.assertTrue((self.d / "out" / "experiment-results.csv").is_file())
-        self.assertTrue((self.d / "dist" / "myproj-1.0.tar.gz").is_file())
-
-    def test_the_run_says_it_left_them_and_why(self):
-        note = self._run().note()
-        self.assertIn("nothing here says a build produces them", note)
-        self.assertIn("out", note)
-
-    def test_a_lockfile_is_what_says_they_are_produced(self):
-        self.write(self.d, "package-lock.json", '{"lockfileVersion": 3, "packages": {"": {}}}\n')
+    def test_they_go_whatever_the_project_says_about_itself(self):
         self._run()
         self.assertFalse((self.d / "out").exists())
         self.assertFalse((self.d / "dist").exists())
+
+    def test_the_run_names_what_it_took(self):
+        self.assertIn("out", self._run().note())
+
+    def test_naming_them_is_what_keeps_them(self):
+        installed.remove_installed(self.d, confirmed=True, keep=("out", "dist"),
+                                   committed=_committed_under(self.d))
+        self.assertTrue((self.d / "out" / "experiment-results.csv").is_file())
+        self.assertTrue((self.d / "dist" / "myproj-1.0.tar.gz").is_file())
 
 
 class TestTheSettingReachesTheDecision(unittest.TestCase):
@@ -313,11 +329,19 @@ class TestARunStillClearsAnExcludedBuildTree(GitSandbox):
         self._fix()
         self.assertFalse((self.d / "dist").exists())
 
-    def test_without_a_lockfile_it_is_left_where_it_is(self):
+    def test_it_goes_with_the_lockfile_removed_from_the_repository(self):
         self.git(self.d, "rm", "-q", "package-lock.json")
         self.commit(self.d, "no lockfile")
         self._fix()
-        self.assertTrue((self.d / "dist" / "bundle.js").is_file())
+        self.assertFalse((self.d / "dist" / "bundle.js").exists())
+
+    def test_it_goes_with_the_lockfile_committed_as_a_link(self):
+        self.git(self.d, "rm", "-q", "--cached", "package-lock.json")
+        (self.d / "package-lock.json").rename(self.d / ".package-lock.json")
+        (self.d / "package-lock.json").symlink_to(".package-lock.json")
+        self.commit(self.d, "the lockfile behind a link")
+        self._fix()
+        self.assertFalse((self.d / "dist" / "bundle.js").exists())
 
 
 if __name__ == "__main__":

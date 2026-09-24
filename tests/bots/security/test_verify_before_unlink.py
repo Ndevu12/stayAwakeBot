@@ -122,5 +122,74 @@ class TestARepairThatChangedNothingIsNotDone(_Tree):
         self.assertEqual([(".gitignore", ABSENT)], skips)
 
 
+class TestAFileItCannotDecodeIsNotRewritten(_Tree):
+    """Check what an in-place repair does to bytes it cannot read as text."""
+
+    def _run(self):
+        path = self.root / ".gitignore"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"# build\ncaf\xe9/\nsecrets\xff.key\n")
+        skips = []
+        ch.apply(self.root, [ch.Change("strip-gitignore", ".gitignore")], self.rollback,
+                 condemned=self._check(), on_skip=lambda p, r: skips.append((p, r)))
+        return path, skips
+
+    def test_the_bytes_are_untouched(self):
+        path, _ = self._run()
+        self.assertEqual(b"# build\ncaf\xe9/\nsecrets\xff.key\n", path.read_bytes())
+
+    def test_the_caller_is_told_it_was_not_done(self):
+        _, skips = self._run()
+        self.assertEqual([(".gitignore", REFUSED)], skips)
+
+
+class TestAFileUnderMoreThanOneNameLosesItsContent(_Tree):
+    """Check what removal leaves when another name points at the same bytes."""
+
+    def _linked(self):
+        target = self._write("public/fonts/text.woff", LOADER)
+        other = self.root.parent / "elsewhere.js"
+        other.parent.mkdir(parents=True, exist_ok=True)
+        if other.exists():
+            other.unlink()
+        import os
+        os.link(target, other)
+        self.addCleanup(lambda: other.unlink() if other.exists() else None)
+        return target, other
+
+    def test_the_bytes_go_with_the_name(self):
+        target, other = self._linked()
+        ch.apply(self.root, [ch.Change("remove", "public/fonts/text.woff")],
+                 self.rollback, condemned=self._check())
+        self.assertFalse(target.exists())
+        self.assertEqual(b"", other.read_bytes())
+
+    def test_a_file_with_one_name_is_simply_gone(self):
+        target = self._write("public/fonts/text.woff", LOADER)
+        ch.apply(self.root, [ch.Change("remove", "public/fonts/text.woff")],
+                 self.rollback, condemned=self._check())
+        self.assertFalse(target.exists())
+
+
+class TestOneRefusalCostsOnePath(_Tree):
+    """Check what a path it may not write does to the rest of the plan."""
+
+    def test_the_other_paths_are_still_acted_on(self):
+        locked = self._write("locked/payload.js", LOADER)
+        loose = self._write("public/fonts/text.woff", LOADER)
+        (self.root / "locked").chmod(0o500)
+        self.addCleanup((self.root / "locked").chmod, 0o700)
+        skips = []
+        done = ch.apply(self.root,
+                        [ch.Change("remove", "locked/payload.js"),
+                         ch.Change("remove", "public/fonts/text.woff")],
+                        self.rollback, condemned=self._check(),
+                        on_skip=lambda p, r: skips.append((p, r)))
+        self.assertTrue(locked.exists(), "the unwritable one should survive")
+        self.assertFalse(loose.exists(), "the other one should still have gone")
+        self.assertEqual([("locked/payload.js", REFUSED)], skips)
+        self.assertEqual(1, len(done))
+
+
 if __name__ == "__main__":
     unittest.main()

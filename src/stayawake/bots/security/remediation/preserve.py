@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from stayawake.lib.git.run import run, run_ok, stdout
@@ -45,7 +45,7 @@ class Preserved:
         """The counts that stayed out of the branch. Takes the text to lead with."""
         parts = []
         if self.withheld:
-            parts.append(f"{self.withheld} file(s) were left on disk and not copied into git")
+            parts.append(f"{self.withheld} file(s) saw named were kept out of it")
         if self.unsaved:
             parts.append(f"{self.unsaved} could not be put on the branch and stay on disk only")
         return f"{lead}{'; '.join(parts)}" if parts else ""
@@ -73,60 +73,117 @@ def uncommitted(repo: str | Path) -> list[str]:
     return found
 
 
-def preserve(repo: str | Path, remembered: list[str] | None = None, *,
-             condemned: list[str] | None = None) -> Preserved:
-    """Commit the working tree to a local branch, leaving HEAD, the index and the files alone.
+@dataclass
+class Snapshot:
+    """The working tree as it stood, held in this run's own index until it is committed."""
 
-    Takes the repository and, optionally, the paths to consider and the paths the scan named.
-    Returns what was put aside — an empty `Preserved` when nothing is still uncommitted, or one
-    carrying `reason` when it could not be done. A path the scan named stays on disk and out of
-    the branch.
+    repo: str | Path
+    head: str = ""
+    index: Path | None = None
+    staged: list[str] = field(default_factory=list)
+    unsaved: list[str] = field(default_factory=list)
+    reason: str = ""
+    blocked: bool = False
+
+    @property
+    def env(self) -> dict:
+        """The environment naming this snapshot's index."""
+        return dict(os.environ, GIT_INDEX_FILE=str(self.index / "index"))
+
+    def release(self) -> None:
+        """Give up the index this snapshot was held in."""
+        if self.index is not None:
+            scratch.release_path(self.index)
+            self.index = None
+
+
+def capture(repo: str | Path, only: list[str] | None = None,
+            skip: list[str] | None = None) -> Snapshot:
+    """Hold the working tree as it stands, without writing anything to the repository.
+
+    Takes the repository, optionally the only paths to hold, and the paths to leave out. Returns
+    the snapshot; `reason` names what stopped it. A path left out is never read into git at all.
+    The caller releases it, and `branch()` turns it into a local branch.
     """
     entries = uncommitted(repo)
-    if remembered is not None:
-        wanted = set(remembered)
+    if only is not None:
+        wanted = set(only)
         entries = [p for p in entries if p in wanted]
-    named = set(condemned or ())
-    changed, withheld = [], 0
-    for path in entries:
-        if path in named:
-            withheld += 1
-            continue
-        changed.append(path)
-    if not changed and not named:
-        return Preserved(withheld=withheld)
+    if skip:
+        away = set(skip)
+        entries = [p for p in entries if p not in away]
     head = stdout(repo, ["rev-parse", "HEAD"]).strip()
     if not head:
-        return Preserved(reason="this repository has no commit to branch from", withheld=withheld)
-    index_dir = scratch.new_dir("the uncommitted-work branch")
-    env = dict(os.environ, GIT_INDEX_FILE=str(index_dir / "index"))
+        return Snapshot(repo=repo, reason="this repository has no commit to branch from")
+    index = scratch.new_dir("the uncommitted-work branch")
+    snapshot = Snapshot(repo=repo, head=head, index=index)
+    if not run_ok(repo, ["read-tree", head], env=snapshot.env):
+        snapshot.reason, snapshot.blocked = "the current commit could not be read", True
+        return snapshot
+    snapshot.unsaved = _stage(repo, entries, snapshot.env)
+    if entries and len(snapshot.unsaved) == len(entries):
+        snapshot.reason, snapshot.blocked = "the working tree could not be staged", True
+        return snapshot
+    snapshot.staged = [p for p in entries if p not in set(snapshot.unsaved)]
+    return snapshot
+
+
+def branch(snapshot: Snapshot, condemned: list[str] | None = None) -> Preserved:
+    """Commit a snapshot to a local branch, leaving HEAD, the index and the files alone.
+
+    Takes the snapshot and the paths the scan named. Returns what was put aside. A named path
+    leaves the index first, so the branch carries none of them.
+    """
+    unsaved = len(snapshot.unsaved)
+    if snapshot.reason:
+        return Preserved(reason=snapshot.reason, blocked=snapshot.blocked, unsaved=unsaved)
+    repo, env = snapshot.repo, snapshot.env
+    named = sorted(set(condemned or ()))
+    dropped = _drop(repo, named, env)
+    if dropped is None:
+        return Preserved(reason="a path the scan named could not be kept out", blocked=True,
+                         unsaved=unsaved)
+    kept = [p for p in snapshot.staged if p not in set(named)]
+    if not kept:
+        return Preserved(withheld=dropped, unsaved=unsaved)
+    res = run(repo, ["write-tree"], env=env)
+    if res is None or res.returncode != 0:
+        return Preserved(reason="the working tree could not be written", blocked=True,
+                         withheld=dropped, unsaved=unsaved)
+    tree = (res.stdout or "").strip()
+    res = run(repo, ["commit-tree", tree, "-p", snapshot.head, "-m", MESSAGE])
+    if res is None or res.returncode != 0:
+        return Preserved(reason=f"the branch could not be committed ({_why(res)})", blocked=True,
+                         withheld=dropped, unsaved=unsaved)
+    name = _free_name(repo)
+    if not run_ok(repo, ["update-ref", f"refs/heads/{name}", (res.stdout or "").strip()]):
+        return Preserved(reason="the branch could not be created", blocked=True,
+                         withheld=dropped, unsaved=unsaved)
+    return Preserved(branch=name, files=len(kept), withheld=dropped, unsaved=unsaved)
+
+
+def preserve(repo: str | Path, remembered: list[str] | None = None, *,
+             condemned: list[str] | None = None) -> Preserved:
+    """Put the working tree on a local branch of its own, leaving the repository as it was.
+
+    Takes the repository, optionally the paths to consider and the paths the scan named. Returns
+    what was put aside. A path left out stays where it is on disk.
+    """
+    snapshot = capture(repo, remembered)
     try:
-        if not run_ok(repo, ["read-tree", head], env=env):
-            return Preserved(reason="the current commit could not be read", blocked=True, withheld=withheld)
-        unsaved = _stage(repo, changed, env)
-        if changed and len(unsaved) == len(changed):
-            return Preserved(reason="the working tree could not be staged", blocked=True, withheld=withheld)
-        dropped = _drop(repo, sorted(named), env)
-        if dropped is None:
-            return Preserved(reason="a path the scan named could not be kept out", blocked=True, withheld=withheld)
-        withheld += dropped
-        if not changed and not dropped:
-            return Preserved(withheld=withheld)
-        res = run(repo, ["write-tree"], env=env)
-        if res is None or res.returncode != 0:
-            return Preserved(reason="the working tree could not be written", blocked=True, withheld=withheld)
-        tree = (res.stdout or "").strip()
-        res = run(repo, ["commit-tree", tree, "-p", head, "-m", MESSAGE])
-        if res is None or res.returncode != 0:
-            return Preserved(reason=f"the branch could not be committed ({_why(res)})", blocked=True, withheld=withheld)
-        commit = (res.stdout or "").strip()
-        branch = f"{BRANCH_PREFIX}{time.strftime('%Y-%m-%d-%H%M%S')}"
-        if not run_ok(repo, ["update-ref", f"refs/heads/{branch}", commit]):
-            return Preserved(reason="the branch could not be created", blocked=True, withheld=withheld)
-        return Preserved(branch=branch, files=len(changed) - len(unsaved),
-                         withheld=withheld, unsaved=len(unsaved))
+        return branch(snapshot, condemned)
     finally:
-        scratch.release_path(index_dir)
+        snapshot.release()
+
+
+def _free_name(repo: str | Path) -> str:
+    """A branch name no ref holds yet. Takes the repository. Returns the name."""
+    stamp = time.strftime("%Y-%m-%d-%H%M%S")
+    for suffix in ("", *(f"-{n}" for n in range(2, 100))):
+        name = f"{BRANCH_PREFIX}{stamp}{suffix}"
+        if not run_ok(repo, ["show-ref", "--verify", "--quiet", f"refs/heads/{name}"]):
+            return name
+    return f"{BRANCH_PREFIX}{stamp}-{os.getpid()}"
 
 
 def _stage(repo: str | Path, paths: list[str], env: dict) -> list[str]:

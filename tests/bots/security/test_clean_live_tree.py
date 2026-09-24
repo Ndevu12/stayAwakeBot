@@ -200,7 +200,8 @@ class TestAConfirmedFindingNoRemovalCanExpress(OwnTempRoot):
         self.root = (self.tmp / "project").resolve()
         (self.root / ".vscode").mkdir(parents=True)
         (self.root / ".vscode" / "settings.json").write_text(
-            '{"task.allowAutomaticTasks": "on"}\n')
+            '{\n  // our ADR-14 says keep this\n  "editor.rulers": [100],\n'
+            '  "task.allowAutomaticTasks": "on"\n}\n')
         (self.root / "notes.md").write_text("my own work\n")
 
     def _checkout(self):
@@ -209,12 +210,18 @@ class TestAConfirmedFindingNoRemovalCanExpress(OwnTempRoot):
                                load_signatures(), [])
         return live.clean_checkout(self.root, ScanOptions(), load_signatures(), [], scan=scan)
 
-    def test_what_was_found_is_taken_out_of_the_file(self):
+    def test_what_was_found_is_turned_off_in_the_file(self):
         result = self._checkout()
         self.assertTrue(result.infected, "the fixture must carry a confirmed finding")
-        self.assertNotIn("allowAutomaticTasks",
-                         (self.root / ".vscode" / "settings.json").read_text())
+        self.assertIn('"task.allowAutomaticTasks": "off"',
+                      (self.root / ".vscode" / "settings.json").read_text())
         self.assertIn(".vscode/settings.json", result.removed.stripped)
+
+    def test_the_rest_of_their_file_is_left_exactly_as_it_was(self):
+        self._checkout()
+        text = (self.root / ".vscode" / "settings.json").read_text()
+        self.assertIn("// our ADR-14 says keep this", text)
+        self.assertIn('"editor.rulers": [100]', text)
 
     def test_the_run_is_complete_because_it_acted(self):
         self.assertTrue(self._checkout().complete)

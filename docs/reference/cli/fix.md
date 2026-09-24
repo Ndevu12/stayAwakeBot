@@ -33,11 +33,10 @@ repository root — `data`, or `dist/assets` for one directory of a generated tr
 keeps that directory at the root, not every directory sharing the name. `exclude_dirs` says what is
 not scanned and does not decide this.
 
-**Your uncommitted work is kept.** Once the cleanup is done, what your working tree held and had
-not committed is recorded on a local branch named `saw/uncommitted-…`. It is never pushed, and
+**Your uncommitted work is kept.** What your working tree held and had not committed is taken
+before anything is removed and recorded on a local branch named `saw/uncommitted-…`. It is never pushed, and
 your files, your branch and your staged changes are left exactly as they were. A file your
-`.gitignore` covers is not on it, and neither is one saw confirmed — that stays on disk and out of
-git.
+`.gitignore` covers is not on it, and neither is one saw confirmed.
 
 `fix` cleans your working tree and records that as a new commit. What the repository already
 stored stays stored: the payload is still there in the earlier commit, and one `git show` puts it

@@ -115,14 +115,14 @@ class CheckoutResult:
 
 
 def clean_checkout(repo: Path, opts, signatures, allowlist, *, scan=None, keep=(),
-                   lockfile_root: Path | None = None, committed=None,
+                   lockfile_root: Path | None = None, base_confirmed: bool = False,
                    remove_lockfiles: bool = True) -> CheckoutResult:
     """Scan the checkout the operator is standing in and clear what it confirms.
 
     Takes the checkout, the scan options, the by-matcher signatures, the allowlist, the scan to
-    run, the directory names to keep, the tree the lockfiles are read from,
-    `committed(path) -> list[str]` and whether the lockfile goes. Returns what was found and what
-    was done, the operator's own uncommitted work put on a branch of its own.
+    run, the directories to keep, the tree the lockfiles are read from, whether the branch this
+    fix is prepared against is confirmed too, and whether the lockfile goes. Returns what was found
+    and what was done, the operator's own uncommitted work put on a branch of its own.
     """
     from stayawake.bots.security.targets import LocalRepoTarget
     if scan is None:
@@ -132,19 +132,22 @@ def clean_checkout(repo: Path, opts, signatures, allowlist, *, scan=None, keep=(
     if read.error:
         return CheckoutResult(scan_error="your checkout was not read in full, so it is not clean")
     findings = [f for f in read.findings if getattr(f, "confidence", None) == CONFIRMED]
-    if not findings:
+    if not findings and not base_confirmed:
         return CheckoutResult()
-    theirs = preserve.uncommitted(repo)
-    report, failure = None, ""
+    snapshot = preserve.capture(repo, skip=[f.path for f in findings])
     try:
-        report = installed.remove_installed(repo, confirmed=True, keep=keep,
-                                            remove_lockfiles=remove_lockfiles,
-                                            lockfile_root=lockfile_root, committed=committed)
-    except OSError as exc:
-        failure = f"could not remove the installed tree ({exc})"
-    removed = clean(repo, findings, signatures, allowlist, opts)
-    named = sorted({f.path for f in findings} | set(removed.named))
-    kept = preserve.preserve(repo, theirs, condemned=named)
+        report, failure = None, ""
+        try:
+            report = installed.remove_installed(repo, confirmed=True, keep=keep,
+                                                remove_lockfiles=remove_lockfiles,
+                                                lockfile_root=lockfile_root)
+        except OSError as exc:
+            failure = f"could not remove the installed tree ({exc})"
+        removed = clean(repo, findings, signatures, allowlist, opts)
+        named = sorted({f.path for f in findings} | set(removed.named))
+        kept = preserve.branch(snapshot, named)
+    finally:
+        snapshot.release()
     dealt = set(removed.removed) | set(removed.stripped) | set(removed.absent)
     return CheckoutResult(confirmed=len(findings), report=report, removed=removed,
                           left_alone=[p for p in named if p not in dealt],

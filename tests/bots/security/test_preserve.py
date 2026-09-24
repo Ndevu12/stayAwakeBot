@@ -196,7 +196,7 @@ class TestWhatTheScanNamedStaysOutOfGit(GitSandbox):
         (self.repo / "notes.md").write_text("my own work\n")
         done = preserve.preserve(self.repo, condemned=["loader.js"])
         self.assertEqual(1, done.withheld)
-        self.assertIn("not copied into git", done.note())
+        self.assertIn("kept out of it", done.note())
 
     def test_nothing_but_a_condemned_path_makes_no_branch(self):
         (self.repo / "loader.js").write_text(LOADER)
@@ -238,6 +238,44 @@ class TestOneUnstageablePathDoesNotCostTheRest(GitSandbox):
         done = preserve.preserve(self.repo)
         self.assertTrue(done.branch, f"nothing was branched: {done.reason}")
         self.assertIn("work.md", self.git(self.repo, "ls-tree", "-r", "--name-only", done.branch))
+
+
+class TestANamedPathIsNeverReadIntoGit(GitSandbox):
+    """Check that a path the scan named leaves no object behind at all."""
+
+    def setUp(self):
+        super().setUp()
+        self.repo = self.new_repo()
+        self.write(self.repo, "app.js", "module.exports = 1;\n")
+        self.commit(self.repo, "a starting point")
+        (self.repo / "loader.js").write_text(LOADER)
+        (self.repo / "notes.md").write_text("my own work\n")
+
+    def _blobs(self):
+        """Every blob the object store holds, reachable or not."""
+        out = self.git(self.repo, "cat-file", "--batch-all-objects",
+                       "--batch-check=%(objectname) %(objecttype)")
+        return {line.split()[0] for line in out.splitlines()
+                if line.strip() and line.split()[1] == "blob"}
+
+    def test_no_object_of_it_is_written(self):
+        before = self._blobs()
+        snapshot = preserve.capture(self.repo, skip=["loader.js"])
+        try:
+            preserve.branch(snapshot, ["loader.js"])
+        finally:
+            snapshot.release()
+        for sha in self._blobs() - before:
+            self.assertNotIn("aHR0cHM6Ly9ldmlsLnRlc3Q",
+                             self.git(self.repo, "cat-file", "-p", sha))
+
+    def test_their_own_work_is_still_on_the_branch(self):
+        snapshot = preserve.capture(self.repo, skip=["loader.js"])
+        try:
+            done = preserve.branch(snapshot, ["loader.js"])
+        finally:
+            snapshot.release()
+        self.assertIn("notes.md", self.git(self.repo, "ls-tree", "-r", "--name-only", done.branch))
 
 
 class TestTheRunActuallyPreservesFirst(GitSandbox):

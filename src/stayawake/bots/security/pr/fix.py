@@ -275,7 +275,7 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
             scan=scan_target,
             keep=getattr(opts, "keep_dirs", ()) or (),
             lockfile_root=wt,
-            committed=_committed_under(repo),
+            base_confirmed=bool(_blocking(findings)),
             remove_lockfiles=not installed.lockfile_stays())
         if checkout.report is not None:
             lockfile_changes = _lockfile_changes(wt, checkout.report)
