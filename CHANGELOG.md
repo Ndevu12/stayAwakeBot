@@ -33,6 +33,8 @@ reader, not the mechanism or the weakness it closed.
   saved report, and in the remediation pull request, with the command to remove each one.
 
 ### Security
+- **The branch `saw fix` saves your uncommitted work on no longer carries a confirmed file.** The
+  file stays where it is on disk, and the run tells you how many were left out of it.
 - **A package name from a scanned lockfile can no longer shape a command saw hands you.**
 - **saw names the compromised versions instead of a version to install.**
 
@@ -42,6 +44,9 @@ reader, not the mechanism or the weakness it closed.
 
 - **A file your project commits inside a generated directory is no longer removed.** What is not
   committed there is still cleared, so a payload dropped beside it does not survive.
+
+- **The branch `saw fix` saves your uncommitted work on now holds all of it.** A file you had
+  renamed, or one whose name git prints in quotes, could leave the branch unwritten.
 
 - **A cleanup no longer removes an installed package after copying a tree it could not read.**
   A directory it was refused permission to read counted as copied; now it stops and says so.
