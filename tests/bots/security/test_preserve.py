@@ -2,6 +2,7 @@
 """The operator's uncommitted work goes on a local branch before anything is removed."""
 from __future__ import annotations
 
+import subprocess
 import unittest
 
 import io
@@ -202,6 +203,41 @@ class TestWhatTheScanNamedStaysOutOfGit(GitSandbox):
         done = preserve.preserve(self.repo, condemned=["loader.js"])
         self.assertEqual("", done.branch)
         self.assertEqual(1, done.withheld)
+
+
+class TestOneUnstageablePathDoesNotCostTheRest(GitSandbox):
+    """Check what a path git refuses does to the rest of the operator's work."""
+
+    def setUp(self):
+        super().setUp()
+        self.repo = self.new_repo()
+        self.write(self.repo, "app.js", "module.exports = 1;\n")
+        self.commit(self.repo, "a starting point")
+        (self.repo / "work.md").write_text("my own work\n")
+
+    def _nested_repo_without_a_commit(self):
+        sub = self.owned(self.repo / "vendorclone")
+        sub.mkdir()
+        subprocess.run(["git", "init", "-q", str(sub)], check=True, capture_output=True)
+        (sub / "README.md").write_text("vendored\n")
+
+    def test_the_rest_of_their_work_is_still_branched(self):
+        self._nested_repo_without_a_commit()
+        done = preserve.preserve(self.repo)
+        self.assertTrue(done.branch, f"nothing was branched: {done.reason}")
+        self.assertIn("work.md", self.git(self.repo, "ls-tree", "-r", "--name-only", done.branch))
+
+    def test_a_path_git_refused_is_counted_and_said(self):
+        self._nested_repo_without_a_commit()
+        done = preserve.preserve(self.repo)
+        self.assertEqual(1, done.unsaved)
+        self.assertIn("stay on disk only", done.note())
+
+    def test_a_leading_colon_does_not_cost_the_rest(self):
+        (self.repo / ":odd.txt").write_text("theirs\n")
+        done = preserve.preserve(self.repo)
+        self.assertTrue(done.branch, f"nothing was branched: {done.reason}")
+        self.assertIn("work.md", self.git(self.repo, "ls-tree", "-r", "--name-only", done.branch))
 
 
 class TestTheRunActuallyPreservesFirst(GitSandbox):

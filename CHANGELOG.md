@@ -34,8 +34,12 @@ reader, not the mechanism or the weakness it closed.
   saved report, and in the remediation pull request, with the command to remove each one.
 
 ### Security
-- **The branch `saw fix` saves your uncommitted work on no longer carries a confirmed file.** The
-  file stays where it is on disk, and the run tells you how many were left out of it.
+- **The branch `saw fix` saves your uncommitted work on no longer carries a confirmed file** —
+  whether or not that file is one saw could remove. It stays where it is on disk, and the run tells
+  you how many were left out of it.
+- **`saw fix` no longer calls your checkout clean when it confirmed something it did not clear.**
+  Anything it confirmed and left behind is counted, named when you are there to read it, and sends
+  the run for review.
 - **A package name from a scanned lockfile can no longer shape a command saw hands you.**
 - **saw names the compromised versions instead of a version to install.**
 
@@ -51,6 +55,10 @@ reader, not the mechanism or the weakness it closed.
 
 - **The branch `saw fix` saves your uncommitted work on now holds all of it.** A file you had
   renamed, or one whose name git prints in quotes, could leave the branch unwritten.
+
+- **One file git will not stage no longer costs you the whole branch.** A nested repository with no
+  commit of its own, or a name git reads as a pattern, stopped every other file being saved; those
+  are now counted and named, and the rest is saved.
 
 - **A cleanup no longer removes an installed package after copying a tree it could not read.**
   A directory it was refused permission to read counted as copied; now it stops and says so.

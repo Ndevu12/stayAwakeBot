@@ -25,6 +25,7 @@ class Preserved:
     files: int = 0
     reason: str = ""
     withheld: int = 0
+    unsaved: int = 0
 
     def note(self) -> str:
         """Describe what was put aside, for the operator. Returns "" when nothing was."""
@@ -36,10 +37,13 @@ class Preserved:
                 f"{self.branch} — it is never pushed") + self._withheld_note("; ")
 
     def _withheld_note(self, lead: str = "") -> str:
-        """The count that stayed out of git. Takes the text to lead with. Returns "" when none did."""
-        if not self.withheld:
-            return ""
-        return f"{lead}{self.withheld} file(s) were left on disk and not copied into git"
+        """The counts that stayed out of the branch. Takes the text to lead with."""
+        parts = []
+        if self.withheld:
+            parts.append(f"{self.withheld} file(s) were left on disk and not copied into git")
+        if self.unsaved:
+            parts.append(f"{self.unsaved} could not be put on the branch and stay on disk only")
+        return f"{lead}{'; '.join(parts)}" if parts else ""
 
 
 def uncommitted(repo: str | Path) -> list[str]:
@@ -94,7 +98,8 @@ def preserve(repo: str | Path, remembered: list[str] | None = None, *,
     try:
         if not run_ok(repo, ["read-tree", head], env=env):
             return Preserved(reason="the current commit could not be read", withheld=withheld)
-        if not _stage(repo, changed, env):
+        unsaved = _stage(repo, changed, env)
+        if len(unsaved) == len(changed):
             return Preserved(reason="the working tree could not be staged", withheld=withheld)
         dropped = _drop(repo, sorted(named), env)
         if dropped is None:
@@ -113,22 +118,28 @@ def preserve(repo: str | Path, remembered: list[str] | None = None, *,
         branch = f"{BRANCH_PREFIX}{time.strftime('%Y-%m-%d-%H%M%S')}"
         if not run_ok(repo, ["update-ref", f"refs/heads/{branch}", commit]):
             return Preserved(reason="the branch could not be created", withheld=withheld)
-        return Preserved(branch=branch, files=len(changed), withheld=withheld)
+        return Preserved(branch=branch, files=len(changed) - len(unsaved),
+                         withheld=withheld, unsaved=len(unsaved))
     finally:
         scratch.release_path(index_dir)
 
 
-def _stage(repo: str | Path, paths: list[str], env: dict) -> bool:
+def _stage(repo: str | Path, paths: list[str], env: dict) -> list[str]:
     """Stage the working tree into this run's own index.
 
-    Takes the repository, the paths to stage and the environment naming that index. Returns whether
-    every batch staged.
+    Takes the repository, the paths to stage and the environment naming that index. Returns the
+    paths that did not stage; a batch that git refuses is retried one path at a time, so one of
+    them cannot cost the rest.
     """
+    refused: list[str] = []
     for start in range(0, len(paths), _BATCH):
         batch = paths[start:start + _BATCH]
-        if not run_ok(repo, ["add", "-A", "--", *batch], env=env):
-            return False
-    return True
+        if run_ok(repo, ["add", "-A", "--", *batch], env=env):
+            continue
+        for path in batch:
+            if not run_ok(repo, ["add", "-A", "--", path], env=env):
+                refused.append(path)
+    return refused
 
 
 def _drop(repo: str | Path, paths: list[str], env: dict) -> int | None:

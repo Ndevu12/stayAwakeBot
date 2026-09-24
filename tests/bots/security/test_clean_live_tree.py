@@ -5,7 +5,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from stayawake.bots.security.remediation import live
+from stayawake.bots.security.remediation import live, preserve
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.targets import LocalRepoTarget
@@ -190,6 +190,60 @@ class TestARewriteBetweenTheTwoReadsDoesNotSaveIt(_Checkout):
     def test_the_run_is_complete_because_it_acted(self):
         _, result = self._condemned_then_rewritten(GENUINE_FONT)
         self.assertTrue(result.complete)
+
+
+class TestAConfirmedFindingTheRemovalPlanCannotExpress(OwnTempRoot):
+    """Check the checkout a run cannot clear with a removal alone."""
+
+    def setUp(self):
+        super().setUp()
+        self.root = (self.tmp / "project").resolve()
+        (self.root / ".vscode").mkdir(parents=True)
+        (self.root / ".vscode" / "settings.json").write_text(
+            '{"task.allowAutomaticTasks": "on"}\n')
+        (self.root / "notes.md").write_text("my own work\n")
+
+    def _checkout(self):
+        def scan(*_a, **_k):
+            return scan_target(LocalRepoTarget(self.root, "p", ScanOptions()),
+                               load_signatures(), [])
+        return live.clean_checkout(self.root, ScanOptions(), load_signatures(), [], scan=scan)
+
+    def test_the_run_is_not_called_complete(self):
+        result = self._checkout()
+        self.assertTrue(result.infected, "the fixture must carry a confirmed finding")
+        self.assertFalse(result.complete)
+
+    def test_the_operator_is_told_it_is_still_there(self):
+        self.assertIn("still in your checkout", self._checkout().note())
+
+    def test_it_is_not_copied_into_git(self):
+        result = self._checkout()
+        self.assertIn(".vscode/settings.json", result.left_alone)
+        self.assertEqual("", result.kept.branch,
+                         "no repository here, so nothing should have been branched")
+
+
+class TestWhatMakesARunIncomplete(unittest.TestCase):
+    """Check each thing that must stop a run being called clean."""
+
+    def test_a_preservation_that_failed_outright(self):
+        result = live.CheckoutResult(
+            confirmed=1,
+            kept=preserve.Preserved(reason="the working tree could not be staged"))
+        self.assertFalse(result.complete)
+
+    def test_a_confirmed_path_it_did_not_clear(self):
+        self.assertFalse(live.CheckoutResult(confirmed=1, left_alone=["a.js"]).complete)
+
+    def test_a_checkout_it_could_not_read(self):
+        self.assertFalse(live.CheckoutResult(scan_error="not read in full").complete)
+
+    def test_an_installed_tree_it_could_not_remove(self):
+        self.assertFalse(live.CheckoutResult(confirmed=1, failure="could not remove").complete)
+
+    def test_a_run_with_none_of_those_is_complete(self):
+        self.assertTrue(live.CheckoutResult().complete)
 
 
 if __name__ == "__main__":

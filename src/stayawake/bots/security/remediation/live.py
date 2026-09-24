@@ -73,6 +73,7 @@ class CheckoutResult:
     """What a run found in the operator's checkout and what it did about it."""
 
     confirmed: int = 0
+    left_alone: list[str] = field(default_factory=list)
     report: object = None
     removed: LiveResult = field(default_factory=LiveResult)
     kept: preserve.Preserved = field(default_factory=preserve.Preserved)
@@ -87,14 +88,23 @@ class CheckoutResult:
     @property
     def complete(self) -> bool:
         """Whether the checkout can be called clean."""
-        return self.removed.complete and not self.scan_error and not self.failure
+        return (self.removed.complete and not self.left_alone and not self.scan_error
+                and not self.failure and not self.kept.reason)
 
     def note(self, detail: bool = False) -> str:
         """Describe the whole pass, for the operator. Takes whether paths may be named."""
         parts = [self.scan_error, self.failure,
                  self.report.note() if self.report is not None else "",
-                 self.removed.note(detail), self.kept.note()]
+                 self.removed.note(detail), self._left_note(detail), self.kept.note()]
         return "; ".join(p for p in parts if p)
+
+    def _left_note(self, detail: bool) -> str:
+        """What the run confirmed and did not clear. Takes whether paths may be named."""
+        if not self.left_alone:
+            return ""
+        head = (f"{len(self.left_alone)} confirmed file(s) are still in your checkout — "
+                "your checkout is not clean")
+        return f"{head}: {', '.join(self.left_alone)}" if detail else head
 
 
 def clean_checkout(repo: Path, opts, signatures, allowlist, *, scan=None, keep=(),
@@ -126,6 +136,11 @@ def clean_checkout(repo: Path, opts, signatures, allowlist, *, scan=None, keep=(
     except OSError as exc:
         failure = f"could not remove the installed tree ({exc})"
     removed = clean(repo, findings, signatures, allowlist, opts)
-    kept = preserve.preserve(repo, theirs, condemned=removed.named)
+    named = sorted({f.path for f in findings} | set(removed.named))
+    verdict = still_condemned(repo, signatures, allowlist, opts)
+    present = [p for p in named if verdict(p) != ABSENT]
+    kept = preserve.preserve(repo, theirs, condemned=present)
+    dealt = set(removed.removed) | set(removed.absent)
     return CheckoutResult(confirmed=len(findings), report=report, removed=removed,
+                          left_alone=[p for p in named if p not in dealt],
                           kept=kept, failure=failure)
