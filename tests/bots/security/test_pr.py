@@ -62,6 +62,21 @@ def _patch_git(**overrides):
         yield
 
 
+def _checkout_reads(result):
+    """Patch the checkout lane to read `result`.
+
+    Takes the scan result the operator's checkout is read with. Returns the patch, so the lane does
+    not draw on the scans the fix worktree is read with.
+    """
+    real = pr.fix.live.clean_checkout
+
+    def clean_checkout(repo, opts, signatures, allowlist, **kw):
+        kw["scan"] = lambda *a, **k: result
+        return real(repo, opts, signatures, allowlist, **kw)
+
+    return mock.patch.object(pr.fix.live, "clean_checkout", clean_checkout)
+
+
 class TestSlug(unittest.TestCase):
     def test_parses_ssh_and_https(self):
         # slug parsing now lives in core.git.query (flat-exported); pr reaches it via gitutil.
@@ -81,6 +96,7 @@ class TestNoDuplicatePr(unittest.TestCase):
         # First scan finds the payload; the post-apply re-scan(s) come back clean.
         scans = [infected, clean, clean]
         with _patch_git(), \
+             _checkout_reads(scans[0]), \
              mock.patch.object(pr.fix, "scan_target",
                                side_effect=lambda *a, **k: scans.pop(0) if scans else clean), \
              mock.patch.object(pr.remediation, "plan",
@@ -316,6 +332,7 @@ class TestPartialFix(unittest.TestCase):
         clean = ScanResult("owner/repo", "local", [])
         scans = [infected, infected, clean]
         with _patch_git(), \
+             _checkout_reads(scans[0]), \
              mock.patch.object(pr.fix, "scan_target",
                                side_effect=lambda *a, **k: scans.pop(0) if scans else clean), \
              mock.patch.object(pr.fix, "introduced_liveness", return_value=PRESENT), \
@@ -462,6 +479,7 @@ class TestPartialFix(unittest.TestCase):
         sug = pr.remediation.Suggested("postcss.config.mjs", "loader", pr.remediation.NO_VCS,
                                        "review the kept code before merging", "diff", "clean\n", 1)
         with _patch_git(), \
+             _checkout_reads(scans[0]), \
              mock.patch.object(pr.fix, "scan_target",
                                side_effect=lambda *a, **k: scans.pop(0) if scans else clean), \
              mock.patch.object(pr.remediation, "plan", return_value=[]), \
@@ -560,6 +578,7 @@ class TestSigningWarning(unittest.TestCase):
         clean = ScanResult("owner/repo", "local", [])
         scans = [ScanResult("owner/repo", "local", []), clean, clean]
         with _patch_git(commit_fix=lambda repo, msg: commit_result), \
+             _checkout_reads(scans[0]), \
              mock.patch.object(pr.fix, "scan_target",
                                side_effect=lambda *a, **k: scans.pop(0) if scans else clean), \
              mock.patch.object(pr.remediation, "plan", return_value=[self._SAFE]), \
@@ -592,6 +611,7 @@ class TestSigningWarning(unittest.TestCase):
         clean = ScanResult("owner/repo", "local", [])
         scans = [ScanResult("owner/repo", "local", []), clean, clean]
         with _patch_git(commit_fix=lambda repo, msg: CommitResult(committed=True, signed=False)), \
+             _checkout_reads(scans[0]), \
              mock.patch.object(pr.fix, "scan_target",
                                side_effect=lambda *a, **k: scans.pop(0) if scans else clean), \
              mock.patch.object(pr.remediation, "plan", return_value=[self._SAFE]), \
@@ -655,6 +675,7 @@ class TestReadOnlyFallback(unittest.TestCase):
                  ScanResult("owner/repo", "local", [])]
         with _patch_git(push_branch=lambda repo, slug, branch, token, **kw: False,   # read-only
                         format_patch=lambda repo, ref="HEAD": "From abc\nSubject: fix\n\npatch-body\n"), \
+             _checkout_reads(scans[0]), \
              mock.patch.object(pr.fix, "scan_target",
                                side_effect=lambda *a, **k: scans.pop(0) if scans else scans), \
              mock.patch.object(pr.remediation, "plan",
@@ -710,6 +731,7 @@ class TestForkPr(unittest.TestCase):
         with _patch_git(origin_slug=lambda repo: "up/repo", push_branch=fake_push,
                         format_patch=lambda repo, ref="HEAD": "patch-body\n"), \
              mock.patch.object(proposal.time, "sleep", return_value=None), \
+             _checkout_reads(scans[0]), \
              mock.patch.object(pr.fix, "scan_target",
                                side_effect=lambda *a, **k: scans.pop(0) if scans else scans), \
              mock.patch.object(pr.remediation, "plan",
