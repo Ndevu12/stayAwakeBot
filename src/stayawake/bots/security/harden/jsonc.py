@@ -81,6 +81,32 @@ def value_at(text: str, key: str) -> str | None:
     return found.group(2) if found else None
 
 
+def remove_key(text: str, key: str) -> tuple[str, Edit] | None:
+    """`text` with the member at `key` taken out, and nothing else about the file changed.
+
+    Takes the file's text and the key. Returns the text and what the key held, or None when the key
+    is not there exactly once. The separator that joined it to its neighbour goes with it.
+    """
+    blanked = code_only(text)
+    matches = list(_key_pattern(key).finditer(blanked))
+    if len(matches) != 1:
+        return None
+    found = matches[0]
+    start, end = found.start(), found.end(2)
+    after = end
+    while after < len(blanked) and blanked[after].isspace():
+        after += 1
+    if after < len(blanked) and blanked[after] == ",":
+        end = after + 1
+    else:
+        before = start
+        while before > 0 and blanked[before - 1].isspace():
+            before -= 1
+        if before > 0 and blanked[before - 1] == ",":
+            start = before - 1
+    return text[:start] + text[end:], Edit(key, "", found.group(2))
+
+
 def set_value(text: str, key: str, value: str) -> tuple[str, Edit] | None:
     """`text` with `key` set to the literal `value`. None when it could not be done exactly once.
 

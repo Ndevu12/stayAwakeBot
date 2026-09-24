@@ -210,11 +210,11 @@ class TestAConfirmedFindingNoRemovalCanExpress(OwnTempRoot):
                                load_signatures(), [])
         return live.clean_checkout(self.root, ScanOptions(), load_signatures(), [], scan=scan)
 
-    def test_what_was_found_is_turned_off_in_the_file(self):
+    def test_what_was_found_is_taken_out_of_the_file(self):
         result = self._checkout()
         self.assertTrue(result.infected, "the fixture must carry a confirmed finding")
-        self.assertIn('"task.allowAutomaticTasks": "off"',
-                      (self.root / ".vscode" / "settings.json").read_text())
+        self.assertNotIn("allowAutomaticTasks",
+                         (self.root / ".vscode" / "settings.json").read_text())
         self.assertIn(".vscode/settings.json", result.removed.stripped)
 
     def test_the_rest_of_their_file_is_left_exactly_as_it_was(self):

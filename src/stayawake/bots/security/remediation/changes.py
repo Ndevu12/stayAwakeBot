@@ -85,12 +85,12 @@ def strip_gitignore_text(text: str) -> str:
 
 
 def strip_settings_autorun(text: str) -> str:
-    """`text` with the automatic-task setting turned off, and nothing else about the file changed.
+    """`text` with the automatic-task setting taken out, and nothing else about the file changed.
 
     Takes the file's text. Returns it unchanged when the setting is not there exactly once, so a
     file saw cannot edit precisely is left for a person rather than rewritten.
     """
-    done = jsonc.set_value(text, "task.allowAutomaticTasks", '"off"')
+    done = jsonc.remove_key(text, "task.allowAutomaticTasks")
     return done[0] if done else text
 
 
