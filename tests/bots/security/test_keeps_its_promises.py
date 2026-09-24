@@ -119,6 +119,40 @@ class TestARunKeepsWhatTheProjectCommits(_Project):
         self.assertTrue((self.d / "dist" / "artifact.js").exists())
 
 
+class TestKeepingReachesEveryRemoval(_Project):
+    """Check that a directory `keep_dirs` names survives whatever kind of directory it is."""
+
+    def setUp(self):
+        super().setUp()
+        (self.d / installed.INSTALLED_DIR / "left-pad").mkdir(parents=True)
+        (self.d / installed.INSTALLED_DIR / "left-pad" / "index.js").write_text("module.exports=1;\n")
+        (self.d / "vendor").mkdir()
+        (self.d / "vendor" / "package-lock.json").write_text("{}\n")
+
+    def _remove(self, keep):
+        installed.remove_installed(self.d, confirmed=True, keep=keep,
+                                   committed=_committed_under(self.d))
+
+    def test_the_installed_tree_survives_when_it_is_named(self):
+        self._remove(("node_modules",))
+        self.assertTrue((self.d / installed.INSTALLED_DIR / "left-pad" / "index.js").is_file())
+
+    def test_the_installed_tree_goes_when_it_is_not(self):
+        self._remove(())
+        self.assertFalse((self.d / installed.INSTALLED_DIR).exists())
+
+    def test_a_lockfile_inside_a_kept_directory_survives(self):
+        self._remove(("vendor",))
+        self.assertTrue((self.d / "vendor" / "package-lock.json").is_file())
+
+    def test_a_file_inside_a_kept_directory_of_a_generated_tree_survives(self):
+        (self.d / "dist" / "keep-me").mkdir()
+        (self.d / "dist" / "keep-me" / "asset.js").write_text("generated\n")
+        self._remove(("keep-me",))
+        self.assertTrue((self.d / "dist" / "keep-me" / "asset.js").is_file())
+        self.assertFalse((self.d / "dist" / "artifact.js").exists())
+
+
 class TestTheSettingReachesTheDecision(unittest.TestCase):
     def test_the_config_key_is_read(self):
         opts = _options({"keep_dirs": ["out"]})

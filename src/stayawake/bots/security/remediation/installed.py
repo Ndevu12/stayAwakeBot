@@ -98,6 +98,22 @@ def _scoped_children(scope: Path) -> list[Path]:
         return []
 
 
+def kept_by_operator(path: Path, root: Path, keep) -> bool:
+    """Whether the operator asked for this path to stay.
+
+    Takes the path, the repository root it lies under and the directory names to keep. Returns
+    True when the path is one of those directories or sits inside one.
+    """
+    if not keep:
+        return False
+    try:
+        parts = path.relative_to(root).parts
+    except ValueError:
+        return False
+    names = set(keep)
+    return any(part in names for part in parts)
+
+
 def _is_real_directory(path: Path) -> bool:
     """True when `path` is a directory and not a symlink."""
     try:
@@ -125,7 +141,8 @@ def _read_package(package: Path) -> InstalledPackage:
                             path=package)
 
 
-def plan_removal(root: Path, declared: set[tuple[str, str]], lockfiles: list[Path]) -> RemovalPlan:
+def plan_removal(root: Path, declared: set[tuple[str, str]], lockfiles: list[Path],
+                 keep=()) -> RemovalPlan:
     """Split the installed tree by what `declared` proves. Does not write."""
     plan = RemovalPlan(root=root, lockfiles=lockfiles)
     if not lockfiles:
@@ -136,6 +153,8 @@ def plan_removal(root: Path, declared: set[tuple[str, str]], lockfiles: list[Pat
         return plan
     for package in installed_packages(root):
         if not is_safe_write_target(package.path, root):
+            continue
+        if kept_by_operator(package.path, root, keep):
             continue
         if package.version and package.identity in declared and _sits_where_its_name_says(package):
             plan.derivable.append(package)
@@ -338,24 +357,28 @@ def build_output_dirs(root: Path, *, keep=()) -> list[Path]:
     Takes the root and the directory names to keep. Returns the trees.
     """
     found = []
-    for name in sorted(_BUILD_OUTPUTS - _NOT_A_BUILD - set(keep)):
+    for name in sorted(_BUILD_OUTPUTS - _NOT_A_BUILD):
         path = root / name
+        if kept_by_operator(path, root, keep):
+            continue
         if _is_real_directory(path) and is_safe_write_target(path, root):
             found.append(path)
     return found
 
 
-def remove_generated(tree: Path, root: Path, tracked=()) -> bool:
+def remove_generated(tree: Path, root: Path, tracked=(), keep=()) -> bool:
     """Remove what the repository does not track under `tree`.
 
-    Takes the tree, the root it must stay inside, and the tracked paths relative to that root.
-    Returns whether the tree itself is gone.
+    Takes the tree, the root it must stay inside, the tracked paths relative to that root and the
+    directory names to keep. Returns whether the tree itself is gone.
     """
     kept = {root / t for t in tracked}
-    if not kept:
+    if not kept and not keep:
         return remove_derived(tree, root)
     for path in sorted(tree.rglob("*"), key=lambda p: len(p.parts), reverse=True):
         if path in kept or any(_inside(k, path) for k in kept):
+            continue
+        if kept_by_operator(path, root, keep):
             continue
         remove_derived(path, root)
     return not tree.exists()
@@ -376,12 +399,13 @@ def _relative_to(path: Path, root: Path) -> Path | None:
         return None
 
 
-def derived_paths(root: Path, unreadable: list[Path]) -> list[Path]:
+def derived_paths(root: Path, unreadable: list[Path], keep=()) -> list[Path]:
     """Everything under `root` that a package manager wrote rather than a person.
 
-    Takes the repository root and a list to record directories it could not read. Returns each
-    installed tree, dependency cache and resolver file, deepest first. Which directories are
-    installed trees is `dependencies.layout`'s answer, so a removal clears what a scan reads.
+    Takes the repository root, a list to record directories it could not read and the directory
+    names to keep. Returns each installed tree, dependency cache and resolver file, deepest first.
+    Which directories are installed trees is `dependencies.layout`'s answer, so a removal clears
+    what a scan reads.
     """
     trees = layout.installed_trees(root, unreadable)
     found: list[Path] = list(trees)
@@ -393,7 +417,8 @@ def derived_paths(root: Path, unreadable: list[Path]) -> list[Path]:
             for name in sorted(held):
                 if (holder / tool / name).exists():
                     found.append(holder / tool / name)
-    return sorted(set(found), key=lambda p: len(p.parts), reverse=True)
+    return sorted({p for p in found if not kept_by_operator(p, root, keep)},
+                  key=lambda p: len(p.parts), reverse=True)
 
 
 def remove_derived(path: Path, root: Path) -> bool:
@@ -465,7 +490,7 @@ def remove_confirmed(root: Path, *, keep=(), committed=None, remove_lockfiles: b
         return report
 
     unreadable: list[Path] = []
-    for path in derived_paths(root, unreadable):
+    for path in derived_paths(root, unreadable, keep):
         if remove_derived(path, root):
             report.removed_trees += 1
         elif _still_there(path):
@@ -473,7 +498,7 @@ def remove_confirmed(root: Path, *, keep=(), committed=None, remove_lockfiles: b
     report.unreadable.extend(unreadable)
 
     for build in build_output_dirs(root, keep=keep):
-        if remove_generated(build, root, committed(build) if committed else ()):
+        if remove_generated(build, root, committed(build) if committed else (), keep):
             report.removed_builds.append(build.name)
         elif _still_there(build):
             report.not_removed.append(build)
@@ -483,6 +508,8 @@ def remove_confirmed(root: Path, *, keep=(), committed=None, remove_lockfiles: b
         for lockfile in lockfiles_under(proof):
             for live in {lockfile, root / (_relative_to(lockfile, proof) or lockfile.name)}:
                 if not live.is_file() or live.is_symlink():
+                    continue
+                if kept_by_operator(live, root, keep):
                     continue
                 if not is_safe_write_target(live, root if live != lockfile else proof):
                     continue
@@ -526,7 +553,7 @@ def remove_rebuildable(root: Path, *, keep=(), committed=None, remove_lockfiles:
 
     proof = lockfile_root if lockfile_root is not None else root
     declared, lockfiles = declared_from_lockfiles(proof)
-    plan = plan_removal(root, declared, lockfiles)
+    plan = plan_removal(root, declared, lockfiles, keep)
     rollback: Path | None = None
 
     def _evidence() -> Path:
@@ -578,7 +605,7 @@ def remove_rebuildable(root: Path, *, keep=(), committed=None, remove_lockfiles:
             shutil.copytree(build, destination, symlinks=True, dirs_exist_ok=True)
             if not every_file_arrived(build, destination):
                 raise OSError(f"the copy of {build} is incomplete, so nothing was removed")
-            if remove_generated(build, root, committed(build) if committed else ()):
+            if remove_generated(build, root, committed(build) if committed else (), keep):
                 report.removed_builds.append(build.name)
 
     seen: set[Path] = set()
