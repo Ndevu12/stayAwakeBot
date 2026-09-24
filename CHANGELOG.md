@@ -14,6 +14,21 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
+- **`keep_dirs` — directories a fix never removes.** Empty by default. Write each one relative to
+  the repository root: `data` keeps that directory at the root, `dist/assets` keeps one directory
+  of a generated tree, and anything inside a kept directory stays too. `exclude_dirs` says what is
+  not scanned and no longer decides what is removed, so a generated tree is still cleared. The run
+  names what it left because you asked.
+
+- **`saw fix` now removes the confirmed payload from the checkout you are standing in**, not only
+  from the branch it prepares. It reads your checkout as it stands, so a file you have not
+  committed, one you committed but have not pushed, and one only your own branch carries are all
+  removed, and nothing is copied aside. A file it could not read leaves your checkout un-clean, and
+  is named when you are there to read it; one that is already gone does not.
+
+- **`saw fix` saves your uncommitted work on a local branch of its own.** It is named
+  `saw/uncommitted-…`, is never pushed, and leaves your files, your branch and your staged changes
+  exactly as they were. Files your `.gitignore` covers are not included.
 - **`saw fix` removes a known-malicious dependency from `package.json`**, so reinstalling does not
   bring it back. A package with an advisory is never removed — that stays your call. Other
   ecosystems declare dependencies only in a lockfile, so there saw removes the lockfile and the
@@ -22,11 +37,43 @@ reader, not the mechanism or the weakness it closed.
   saved report, and in the remediation pull request, with the command to remove each one.
 
 ### Security
+- **The branch `saw fix` saves your uncommitted work on carries no file saw confirmed**, and no
+  copy of one is written into your repository on the way there. The run tells you how many were
+  kept out of it.
+- **A payload another name on your machine also points at loses its content, not only its name**,
+  so a shared copy does not stay live after the run.
+- **`saw fix` no longer calls your checkout clean when it confirmed something it did not clear.**
+  Anything it confirmed and left behind is counted, named when you are there to read it, and sends
+  the run for review.
 - **A package name from a scanned lockfile can no longer shape a command saw hands you.**
-- **saw no longer tells you which version to install.** It names the versions that are compromised
-  and leaves the choice to you, because an offline advisory cache cannot promise a version is safe.
+- **saw names the compromised versions instead of a version to install.**
 
 ### Fixed
+- **`saw fix` no longer reports success over a checkout it could not finish clearing.** A file it
+  could not read now sends the run for review.
+
+- **`saw fix` no longer calls the run clean because the default branch is.** Your checkout is read
+  and reported on its own, and when there was no branch to prepare the run still reports what it
+  could not clear there.
+- **A checkout `saw fix` could not read in full is never reported as clean**, whatever the branch
+  it compares against says.
+
+- **A generated directory is cleared whole on a confirmed infection**, whatever your repository
+  commits inside it. Nothing the repository itself says holds that back — name the directory under
+  `keep_dirs` if you need it kept, and reinstall or rebuild afterwards.
+- **`saw fix` makes every repair it knows in your checkout.** A repair edits only what it must and
+  leaves the rest of the file — its comments, its layout and its bytes — as it was. What it changed
+  is reported beside what it removed, and a repair it could not make exactly sends the run for
+  review.
+
+- **The branch `saw fix` saves your uncommitted work on now holds all of it.** A file you had
+  renamed, or one whose name git prints in quotes, could leave the branch unwritten.
+
+- **One file git will not stage no longer costs you the whole branch.** What it would not take is
+  counted and named, and everything else is saved.
+- **One file saw may not write no longer stops it dealing with the rest.** That path is named and
+  sends the run for review; every other one is still acted on.
+
 - **A cleanup no longer removes an installed package after copying a tree it could not read.**
   A directory it was refused permission to read counted as copied; now it stops and says so.
 - **A run clears the temporary directories it creates**, and names what it could not. Nothing

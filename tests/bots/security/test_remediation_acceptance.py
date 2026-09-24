@@ -118,7 +118,19 @@ class TestTheWorkingTreeIsRemediated(_InfectedProject):
 
     def test_nothing_is_copied_aside(self):
         self._fix()
-        self.assertEqual("", self.git(self.d, "status", "--porcelain").strip())
+        stray = [l for l in self.git(self.d, "status", "--porcelain").splitlines()
+                 if l.startswith("??")]
+        self.assertEqual([], stray)
+
+    def test_the_payload_is_gone_from_the_working_tree(self):
+        self._fix()
+        for path in (THE_LOADER, THE_LAUNCHER):
+            self.assertFalse((self.d / path).exists(), path)
+
+    def test_the_projects_own_files_are_still_on_disk(self):
+        self._fix()
+        for path in PROJECT_OWN + GENUINE_ASSETS:
+            self.assertTrue((self.d / path).exists(), path)
 
     def test_the_projects_own_content_is_byte_identical(self):
         branch = self._fix()
@@ -127,7 +139,14 @@ class TestTheWorkingTreeIsRemediated(_InfectedProject):
 
     def test_a_scan_of_the_remediated_tree_reports_clean(self):
         branch = self._fix()
-        self.git(self.d, "checkout", "-q", branch)
+        elsewhere = self.owned(self.root / "prepared")
+        self.git(self.d, "worktree", "add", "-q", str(elsewhere), branch)
+        self.addCleanup(self.git_may_fail, self.d, "worktree", "remove", "--force",
+                        str(elsewhere))
+        self.assertEqual("clean", self._scan(elsewhere).verdict)
+
+    def test_a_scan_of_the_checkout_itself_reports_clean(self):
+        self._fix()
         self.assertEqual("clean", self._scan().verdict)
 
 

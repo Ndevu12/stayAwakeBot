@@ -5,11 +5,11 @@ description: saw fix — clean detected findings on a branch and publish them on
 # `saw fix`
 
 Clean detected findings **on a branch**. By default `fix` prepares `security/auto-clean` locally and
-stops — no push, no PR, no network — for you to review. Source changes land on that branch. On a
-confirmed infection it also removes the installed tree, generated build outputs, and the lockfile
-in this repository (the lockfile is kept on CI). A merge finding that is still live in the working
-tree is restored there; the merge commit is left in history. `--pr` pushes and opens or updates one
-rolling PR per repository. Bare `saw fix` only ever prepares a cleanup branch.
+stops — no push, no PR, no network — for you to review. On a confirmed infection it also clears
+the checkout you are standing in: the files it confirms, the installed tree, generated build
+outputs, and the lockfile (the lockfile is kept on CI). A merge finding that is still live in the
+working tree is restored there; the merge commit is left in history. `--pr` pushes and opens or
+updates one rolling PR per repository. Bare `saw fix` publishes nothing.
 
 **Those removals happen in your working tree, as the run happens.** They are not staged on the
 branch and they do not wait for a pull request: the files are gone from the checkout you are
@@ -21,12 +21,22 @@ of one, the lockfiles, and the generated output directories. Whichever package m
 uses, and however many, the same holds. Nothing inside any of them is kept. Reinstall and rebuild
 to restore them; whatever installed them can install them again.
 
-What a project *commits* alongside those is not touched: a package manager's own directory keeps
-its patches, plugins and pinned releases, and only what the resolver writes there is removed.
+A package manager's own directory keeps its patches, plugins and pinned releases, and only what the
+resolver writes there is removed. A generated output directory goes whole, including what your
+repository commits inside it: nothing reads those directories, so nothing in one can be called
+clean. Name it under `keep_dirs` to keep it.
 
 **What is not this repository's, it does not take.** Anything linked to a location outside the
 repository loses the link, and what it points at is left alone. Directories you listed under
-`exclude_dirs` are never removed.
+`keep_dirs` are never removed, and neither is anything inside them. Write each one relative to the
+repository root — `data`, or `dist/assets` for one directory of a generated tree. A name alone
+keeps that directory at the root, not every directory sharing the name. `exclude_dirs` says what is
+not scanned and does not decide this.
+
+**Your uncommitted work is kept.** What your working tree held and had not committed is taken
+before anything is removed and recorded on a local branch named `saw/uncommitted-…`. It is never pushed, and
+your files, your branch and your staged changes are left exactly as they were. A file your
+`.gitignore` covers is not on it, and neither is one saw confirmed.
 
 `fix` cleans your working tree and records that as a new commit. What the repository already
 stored stays stored: the payload is still there in the earlier commit, and one `git show` puts it

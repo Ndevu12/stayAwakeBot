@@ -29,6 +29,7 @@ def _options(settings: dict) -> ScanOptions:
     base = ScanOptions()
     return ScanOptions(
         exclude_dirs=set(settings.get("exclude_dirs", base.exclude_dirs)),
+        keep_dirs=set(settings.get("keep_dirs", base.keep_dirs)),
         max_file_bytes=int(settings.get("max_file_bytes", base.max_file_bytes)),
         remote_clone_depth=int(settings.get("remote_clone_depth", base.remote_clone_depth)),
     )
@@ -51,9 +52,10 @@ class FixOutcome:
 
 
 def _reviewed(fn, display: str) -> FixOutcome:
-    """Wrap a submit/prepare result, grading it by the markers OUR OWN renderer writes."""
+    """Wrap a submit/prepare result, taking its grade when it carries one."""
     text = _safe(fn, display)
-    return FixOutcome(text, _needs_review(text))
+    carried = getattr(text, "needs_review", None)
+    return FixOutcome(str(text), _needs_review(text) if carried is None else carried)
 
 
 def _safe(fn, display: str) -> str:

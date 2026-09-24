@@ -46,14 +46,27 @@ class _Repo:
         return package
 
 
-def _prepare_fix_against(scans, spy, extra=()):
-    """Drive `saw fix` far enough that the CONFIRMED gate either fires or does not."""
+def _prepare_fix_against(scans, spy, extra=(), live=None):
+    """Drive `saw fix` far enough that the CONFIRMED gate either fires or does not.
+
+    Takes the scans the fix worktree is read with, the remover to call in place of the real one,
+    extra patches, and the scan the operator's own checkout is read with — the first of `scans`
+    when none is given.
+    """
     from stayawake.bots.security import pr
     from stayawake.bots.security.models import ScanResult
     from stayawake.lib.git.write.commit import CommitResult
 
     idle = ScanResult("owner/repo", "local", [])
+    checkout_reads = live if live is not None else (scans[0] if scans else idle)
+    real_clean_checkout = pr.fix.live.clean_checkout
+
+    def clean_checkout(repo, opts, signatures, allowlist, **kw):
+        kw["scan"] = lambda *a, **k: checkout_reads
+        return real_clean_checkout(repo, opts, signatures, allowlist, **kw)
+
     patches = [
+        mock.patch.object(pr.fix.live, "clean_checkout", clean_checkout),
         mock.patch.object(pr.gitutil, "origin_slug", return_value=None),
         mock.patch.object(pr.gitutil, "default_branch", return_value="main"),
         mock.patch.object(pr.gitutil, "ref_exists", return_value=True),
