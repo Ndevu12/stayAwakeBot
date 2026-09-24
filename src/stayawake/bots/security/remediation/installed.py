@@ -407,22 +407,35 @@ def build_output_dirs(root: Path, *, keep=()) -> list[Path]:
     return found
 
 
-def remove_generated(tree: Path, root: Path, tracked=(), keep=()) -> bool:
-    """Remove what the repository does not track under `tree`.
+def remove_generated(tree: Path, root: Path, tracked=(), keep=(), confirms=None) -> bool:
+    """Remove what the repository does not track under `tree`, and what it tracks but carries.
 
-    Takes the tree, the root it must stay inside, the tracked paths relative to that root and the
-    directory names to keep. Returns whether the tree itself is gone.
+    Takes the tree, the root it must stay inside, the tracked paths relative to that root, the
+    directories to keep and `confirms(path) -> bool`. Returns whether the tree itself is gone. A
+    tracked path is left only when the reader was given and read it clean, so a tree nothing reads
+    goes whole.
     """
-    kept = {root / t for t in tracked}
+    kept = {root / t for t in tracked} if confirms is not None else set()
     if not kept and not keep:
         return remove_derived(tree, root)
     for path in sorted(tree.rglob("*"), key=lambda p: len(p.parts), reverse=True):
-        if path in kept or any(_inside(k, path) for k in kept):
-            continue
         if kept_by_operator(path, root, keep):
             continue
+        if path in kept or any(_inside(k, path) for k in kept):
+            if not (path.is_file() and confirms(path)):
+                continue
         remove_derived(path, root)
+    if _is_empty(tree):
+        remove_derived(tree, root)
     return not tree.exists()
+
+
+def _is_empty(tree: Path) -> bool:
+    """Whether nothing is left under `tree`. Takes the tree. Returns False when it cannot look."""
+    try:
+        return not any(tree.iterdir())
+    except OSError:
+        return False
 
 
 def _inside(candidate: Path, parent: Path) -> bool:
@@ -485,20 +498,22 @@ def remove_derived(path: Path, root: Path) -> bool:
 
 
 def remove_installed(root: Path, *, confirmed: bool, remove_lockfiles: bool = True,
-                     lockfile_root: Path | None = None, keep=(), committed=None) -> Report:
+                     lockfile_root: Path | None = None, keep=(), committed=None,
+                     confirms=None) -> Report:
     """Remove what a finding of this confidence allows. Bounded to `root`.
 
     Takes the repository root, whether its infection is confirmed, whether the lockfile goes, the
     tree the lockfiles are read from, the directory names the operator asked to keep, and
-    `committed(path) -> list[str]`. Returns what was removed. A confirmed infection loses every
+    `committed(path) -> list[str]` and `confirms(path) -> bool`. Returns what was removed. A confirmed infection loses every
     reproducible directory whole; anything less copies what no lockfile accounts for aside and then
     removes it too.
     """
     if confirmed:
         return remove_confirmed(root, remove_lockfiles=remove_lockfiles,
-                                lockfile_root=lockfile_root, keep=keep, committed=committed)
+                                lockfile_root=lockfile_root, keep=keep)
     return remove_rebuildable(root, remove_lockfiles=remove_lockfiles,
-                              lockfile_root=lockfile_root, keep=keep, committed=committed)
+                              lockfile_root=lockfile_root, keep=keep, committed=committed,
+                              confirms=confirms)
 
 
 def _still_there(path: Path) -> bool:
@@ -512,13 +527,13 @@ def _still_there(path: Path) -> bool:
         return True
 
 
-def remove_confirmed(root: Path, *, keep=(), committed=None, remove_lockfiles: bool = True,
+def remove_confirmed(root: Path, *, keep=(), remove_lockfiles: bool = True,
                      lockfile_root: Path | None = None) -> Report:
     """Delete what a confirmed infection leaves behind. Bounded to `root`.
 
-    Takes the repository root, the directory names to keep, `committed(path) -> list[str]`,
-    whether the lockfile goes and the tree the lockfiles are read from. Returns what was removed.
-    Nothing is copied aside.
+    Takes the repository root, the directories to keep, whether the lockfile goes and the tree the
+    lockfiles are read from. Returns what was removed. A generated tree goes whole: nothing reads
+    those directories, so nothing in one can be called clean. Nothing is copied aside.
     """
     report = Report()
     try:
@@ -542,7 +557,7 @@ def remove_confirmed(root: Path, *, keep=(), committed=None, remove_lockfiles: b
                             for k in kept_paths(root, keep)]
 
     for build in build_output_dirs(root, keep=keep):
-        if remove_generated(build, root, committed(build) if committed else (), keep):
+        if remove_generated(build, root, (), keep):
             report.removed_builds.append(build.name)
         elif _still_there(build):
             report.not_removed.append(build)
@@ -581,7 +596,7 @@ def lockfiles_under(root: Path) -> list[Path]:
 
 
 def remove_rebuildable(root: Path, *, keep=(), committed=None, remove_lockfiles: bool = True,
-                       lockfile_root: Path | None = None) -> Report:
+                       lockfile_root: Path | None = None, confirms=None) -> Report:
     """Remove this repository's installed tree, lockfile, and generated outputs. Bounded to `root`.
 
     Takes the repository root, the directory names to keep, `committed(path) -> list[str]`,
@@ -649,7 +664,8 @@ def remove_rebuildable(root: Path, *, keep=(), committed=None, remove_lockfiles:
             shutil.copytree(build, destination, symlinks=True, dirs_exist_ok=True)
             if not every_file_arrived(build, destination):
                 raise OSError(f"the copy of {build} is incomplete, so nothing was removed")
-            if remove_generated(build, root, committed(build) if committed else (), keep):
+            if remove_generated(build, root, committed(build) if committed else (), keep,
+                            confirms):
                 report.removed_builds.append(build.name)
 
     seen: set[Path] = set()

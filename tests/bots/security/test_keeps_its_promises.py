@@ -13,6 +13,21 @@ from stayawake.bots.security.remediation import installed
 from stayawake.bots.security.targets.base import ScanOptions
 from tests.support.gitrepo import GitSandbox
 
+LOADER = "var _0x=String.fromCharCode(118,97,114);eval(_0x+\" x=1\");\n"
+
+
+def _reads_clean(path):
+    """A reader that read every file and found nothing. Takes the path. Returns False."""
+    return False
+
+
+def _carries_the_loader(path):
+    """A reader that finds the loader. Takes the path. Returns whether the file holds it."""
+    try:
+        return LOADER.strip() in path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return True
+
 
 class _Project(GitSandbox):
     def setUp(self):
@@ -54,7 +69,13 @@ class TestNotScannedIsNotTheSameAsNotRemoved(_Project):
 class TestWhatTheProjectCommitsIsKept(_Project):
     """Check what survives inside a generated tree the project partly commits."""
 
-    def _clear(self, name="dist"):
+    def _clear(self, name="dist", confirms=None):
+        tree = self.d / name
+        reader = confirms or _reads_clean
+        return installed.remove_generated(tree, self.d, _committed_under(self.d)(tree),
+                                          confirms=reader)
+
+    def _clear_unread(self, name="dist"):
         tree = self.d / name
         return installed.remove_generated(tree, self.d, _committed_under(self.d)(tree))
 
@@ -107,16 +128,24 @@ class TestTheCheckItself(_Project):
         self.assertTrue(_committed_under(self.d)(self.root / "elsewhere"))
 
 
-class TestARunKeepsWhatTheProjectCommits(_Project):
-    """Check what a removal run leaves, through the lane that calls it."""
+class TestAConfirmedRunClearsAGeneratedTreeWhole(_Project):
+    """Check what a confirmed run leaves in a generated directory."""
 
-    def test_it_clears_the_untracked_and_keeps_the_committed(self):
+    def _run(self, keep=()):
+        installed.remove_installed(self.d, confirmed=True, remove_lockfiles=False,
+                                   keep=keep, committed=_committed_under(self.d))
+
+    def test_what_the_project_commits_there_goes_too(self):
         self.commit(self.d, "commits both trees")
         (self.d / "dist" / "dropped.js").write_text("payload\n")
-        installed.remove_installed(self.d, confirmed=True, remove_lockfiles=False,
-                                   keep=(), committed=_committed_under(self.d))
-        self.assertFalse((self.d / "dist" / "dropped.js").exists())
+        self._run()
+        self.assertFalse((self.d / "dist").exists())
+
+    def test_naming_it_is_how_the_operator_keeps_it(self):
+        self.commit(self.d, "commits both trees")
+        self._run(keep=("dist",))
         self.assertTrue((self.d / "dist" / "artifact.js").exists())
+        self.assertFalse((self.d / "build").exists())
 
 
 class TestKeepingReachesEveryRemoval(_Project):
@@ -182,6 +211,35 @@ class TestKeepingReachesEveryRemoval(_Project):
                                             committed=_committed_under(self.d))
         self.assertIn("left in place as you asked", report.note())
         self.assertIn("vendor", report.note())
+
+
+class TestACommittedFileIsOnlyKeptWhenItWasRead(_Project):
+    """Check what decides that a file the project commits may stay."""
+
+    def setUp(self):
+        super().setUp()
+        self.commit(self.d, "commits both trees")
+
+    def _clear(self, confirms=None):
+        tree = self.d / "dist"
+        reader = confirms if confirms is not None else _carries_the_loader
+        return installed.remove_generated(tree, self.d, _committed_under(self.d)(tree),
+                                          confirms=reader)
+
+    def test_a_committed_file_that_carries_the_payload_is_removed(self):
+        (self.d / "dist" / "artifact.js").write_text(LOADER)
+        self.commit(self.d, "commits the payload too")
+        self._clear()
+        self.assertFalse((self.d / "dist" / "artifact.js").exists())
+
+    def test_a_committed_file_that_reads_clean_stays(self):
+        self._clear()
+        self.assertTrue((self.d / "dist" / "artifact.js").exists())
+
+    def test_without_a_reader_the_tree_goes_whole(self):
+        tree = self.d / "dist"
+        installed.remove_generated(tree, self.d, _committed_under(self.d)(tree))
+        self.assertFalse(tree.exists())
 
 
 class TestTheSettingReachesTheDecision(unittest.TestCase):

@@ -144,3 +144,4 @@ def clean_checkout(repo: Path, opts, signatures, allowlist, *, scan=None, keep=(
     return CheckoutResult(confirmed=len(findings), report=report, removed=removed,
                           left_alone=[p for p in named if p not in dealt],
                           kept=kept, failure=failure)
+

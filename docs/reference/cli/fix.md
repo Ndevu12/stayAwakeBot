@@ -21,8 +21,10 @@ of one, the lockfiles, and the generated output directories. Whichever package m
 uses, and however many, the same holds. Nothing inside any of them is kept. Reinstall and rebuild
 to restore them; whatever installed them can install them again.
 
-What a project *commits* alongside those is not touched: a package manager's own directory keeps
-its patches, plugins and pinned releases, and only what the resolver writes there is removed.
+A package manager's own directory keeps its patches, plugins and pinned releases, and only what the
+resolver writes there is removed. A generated output directory goes whole, including what your
+repository commits inside it: nothing reads those directories, so nothing in one can be called
+clean. Name it under `keep_dirs` to keep it.
 
 **What is not this repository's, it does not take.** Anything linked to a location outside the
 repository loses the link, and what it points at is left alone. Directories you listed under

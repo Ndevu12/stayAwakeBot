@@ -56,8 +56,9 @@ reader, not the mechanism or the weakness it closed.
 - **A checkout `saw fix` could not read in full is never reported as clean**, whatever the branch
   it compares against says.
 
-- **A file your project commits inside a generated directory is no longer removed.** What is not
-  committed there is still cleared, so a payload dropped beside it does not survive.
+- **A generated directory is still cleared whole on a confirmed infection**, whatever your
+  repository commits inside it — nothing reads those directories, so nothing there can be called
+  clean. Name it under `keep_dirs` to keep it.
 
 - **The branch `saw fix` saves your uncommitted work on now holds all of it.** A file you had
   renamed, or one whose name git prints in quotes, could leave the branch unwritten.
