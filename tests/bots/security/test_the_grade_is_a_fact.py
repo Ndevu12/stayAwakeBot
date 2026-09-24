@@ -84,6 +84,16 @@ class TestTheLiveResultReachesTheGrade(GitSandbox):
         report = self._prepare(live.LiveResult(unread=["public/fonts/text.woff"]))
         self.assertTrue(report.needs_review)
 
+    def test_an_automated_run_does_not_name_the_path(self):
+        report = self._prepare(live.LiveResult(refused=["public/fonts/text.woff"]))
+        self.assertNotIn("public/fonts", str(report))
+        self.assertIn("still to deal with", str(report))
+
+    def test_a_person_at_a_terminal_is_told_the_path(self):
+        with mock.patch.object(fixmod, "_may_name_paths", return_value=True):
+            report = self._prepare(live.LiveResult(refused=["public/fonts/text.woff"]))
+        self.assertIn("public/fonts/text.woff", str(report))
+
 
 if __name__ == "__main__":
     unittest.main()

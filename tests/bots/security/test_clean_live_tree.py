@@ -91,6 +91,46 @@ class TestItNeverRemovesWhatItDidNotRead(_Checkout):
         self.assertEqual(["public/fonts/text.woff"], result.removed)
 
 
+class TestARefusedRemovalIsNotCalledClean(_Checkout):
+    """Check what a run says when it could not act on a condemned path."""
+
+    def _redirected(self):
+        outside = (self.tmp / "elsewhere" / "fonts")
+        outside.mkdir(parents=True)
+        (outside / "text.woff").write_text(LOADER)
+        (self.root / "public" / "fonts").rmdir()
+        (self.root / "public" / "fonts").symlink_to(outside)
+        from stayawake.bots.security.models import Finding, Severity
+        return [Finding("x", "c", Severity.CRITICAL, "public/fonts/text.woff", "d",
+                        remediation="remove-file", confidence="confirmed")]
+
+    def test_it_is_not_reported_as_no_longer_carrying(self):
+        result = live.clean(self.root, self._redirected(), load_signatures(), [], ScanOptions())
+        self.assertEqual([], result.changed)
+        self.assertEqual(["public/fonts/text.woff"], result.refused)
+
+    def test_the_run_is_not_complete(self):
+        result = live.clean(self.root, self._redirected(), load_signatures(), [], ScanOptions())
+        self.assertFalse(result.complete)
+
+
+class TestItNamesPathsOnlyForAPerson(_Checkout):
+    """Check what the note gives away to each audience."""
+
+    def _unfinished(self):
+        result = live.LiveResult()
+        result.refused.append("public/fonts/text.woff")
+        return result
+
+    def test_a_person_at_a_terminal_is_told_which_path(self):
+        self.assertIn("public/fonts/text.woff", self._unfinished().note(detail=True))
+
+    def test_an_automated_run_is_given_the_count_only(self):
+        note = self._unfinished().note()
+        self.assertNotIn("public/fonts", note)
+        self.assertIn("1 still to deal with", note)
+
+
 class TestItSaysWhatItCouldNotDo(_Checkout):
     def test_a_clean_run_is_complete(self):
         (self.root / "public" / "fonts" / "text.woff").write_text(LOADER)
@@ -114,7 +154,7 @@ class TestItSaysWhatItCouldNotDo(_Checkout):
         payload.write_bytes(GENUINE_FONT)
         result = live.clean(self.root, findings, load_signatures(), [], ScanOptions())
         self.assertTrue(payload.exists())
-        self.assertIn("public/fonts/text.woff", result.left)
+        self.assertIn("public/fonts/text.woff", result.changed)
 
 
 if __name__ == "__main__":

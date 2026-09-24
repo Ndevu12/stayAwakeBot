@@ -11,7 +11,7 @@ from stayawake.utils.pathsafe import is_safe_write_target
 from stayawake.bots.security.matchers.base import load_jsonc
 from stayawake.bots.security.models import CONFIRMED, ROLLBACK_DIR, SAW_DIR
 from stayawake.bots.security.remediation.footprint import REMOVE_FILE
-from stayawake.bots.security.remediation.oracle import CARRIES
+from stayawake.bots.security.remediation.oracle import ABSENT, CARRIES, REFUSED
 
 _ACTIONS = {
     REMOVE_FILE: "remove",
@@ -163,6 +163,12 @@ def _backup(root: Path, rel: str, rollback: Path | None) -> None:
         shutil.copy2(src, dest, follow_symlinks=False)
 
 
+def _skipped(on_skip, path: str, reason: str) -> None:
+    """Tell the caller a change was not applied. Takes the callback, the path and the reason."""
+    if on_skip is not None:
+        on_skip(path, reason)
+
+
 def _delete_stays_in(root: Path, target: Path) -> bool:
     try:
         base = root.resolve()
@@ -192,11 +198,11 @@ def remove_residual(root: Path, findings, rollback: Path) -> list["Change"]:
 
 
 def apply(root: Path, changes: list[Change], rollback: Path | None = None, *,
-          condemned=None) -> list[Change]:
+          condemned=None, on_skip=None) -> list[Change]:
     """Apply changes in-place under `root`, backing up originals to `rollback`.
 
-    Takes the tree, the changes, a rollback store or None, and optionally `condemned(path) -> str`.
-    Returns the changes that were applied.
+    Takes the tree, the changes, a rollback store or None, optionally `condemned(path) -> str`,
+    and optionally `on_skip(path, reason)`. Returns the changes that were applied.
 
     Idempotent: a change whose target is already gone/clean is skipped.
     """
@@ -204,15 +210,22 @@ def apply(root: Path, changes: list[Change], rollback: Path | None = None, *,
     for c in changes:
         target = root / c.path
         if c.action == "remove":
-            if condemned is not None and condemned(c.path) != CARRIES:
+            verdict = condemned(c.path) if condemned is not None else CARRIES
+            if verdict != CARRIES:
+                _skipped(on_skip, c.path, verdict)
                 continue
-            if target.exists() and _delete_stays_in(root, target):
-                _backup(root, c.path, rollback)
-                if target.is_dir() and not target.is_symlink():
-                    shutil.rmtree(target)
-                else:
-                    target.unlink()
-                applied.append(c)
+            if not target.exists():
+                _skipped(on_skip, c.path, ABSENT)
+                continue
+            if not _delete_stays_in(root, target):
+                _skipped(on_skip, c.path, REFUSED)
+                continue
+            _backup(root, c.path, rollback)
+            if target.is_dir() and not target.is_symlink():
+                shutil.rmtree(target)
+            else:
+                target.unlink()
+            applied.append(c)
         elif c.action in ("strip-gitignore", "strip-settings"):
             if not target.exists():
                 continue

@@ -6,7 +6,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from stayawake.bots.security.remediation import changes as ch
-from stayawake.bots.security.remediation.oracle import CARRIES, UNREADABLE, still_condemned
+from stayawake.bots.security.remediation.oracle import (ABSENT, CHANGED, REFUSED, UNREADABLE,
+                                                        still_condemned)
 
 
 @dataclass
@@ -14,23 +15,31 @@ class LiveResult:
     """What a run did to the live checkout."""
 
     removed: list[str] = field(default_factory=list)
-    left: list[str] = field(default_factory=list)
+    changed: list[str] = field(default_factory=list)
+    absent: list[str] = field(default_factory=list)
     unread: list[str] = field(default_factory=list)
+    refused: list[str] = field(default_factory=list)
+
+    @property
+    def unfinished(self) -> list[str]:
+        """The paths still to account for."""
+        return self.unread + self.refused
 
     @property
     def complete(self) -> bool:
         """Whether every condemned path was accounted for."""
-        return not self.unread
+        return not self.unfinished
 
-    def note(self) -> str:
-        """Describe what happened in the checkout."""
+    def note(self, detail: bool = False) -> str:
+        """Describe what happened in the checkout. Takes whether paths may be named."""
         parts = []
         if self.removed:
             parts.append(f"removed {len(self.removed)} file(s) from your checkout")
-        if self.left:
-            parts.append(f"left {len(self.left)} that no longer carried it")
-        if self.unread:
-            parts.append(f"COULD NOT READ {len(self.unread)} — your checkout is not clean")
+        if self.changed:
+            parts.append(f"left {len(self.changed)} that no longer carried it")
+        if self.unfinished:
+            head = f"{len(self.unfinished)} still to deal with — your checkout is not clean"
+            parts.append(f"{head}: {', '.join(self.unfinished)}" if detail else head)
         return "; ".join(parts)
 
 
@@ -38,26 +47,20 @@ def clean(root: Path, findings, signatures, allowlist, opts) -> LiveResult:
     """Remove from `root` what the findings condemn.
 
     Takes the checkout, the findings, the by-matcher signatures, the allowlist and the scan
-    options. Returns what was removed, what was left, and what could not be read.
+    options. Returns what was removed and what was not.
     """
     plan = [c for c in ch.plan(findings) if c.action == "remove"]
     if not plan:
         return LiveResult()
-    check = still_condemned(root, signatures, allowlist, opts)
     result = LiveResult()
-    verdicts = {}
+    bucket = {CHANGED: result.changed, ABSENT: result.absent,
+              UNREADABLE: result.unread, REFUSED: result.refused}
 
-    def _asked(path: str) -> str:
-        verdicts[path] = check(path)
-        return verdicts[path]
+    def skipped(path: str, reason: str) -> None:
+        bucket.get(reason, result.unread).append(path)
 
-    applied = ch.apply(root, plan, None, condemned=_asked)
-    done = {c.path for c in applied}
-    for c in plan:
-        if c.path in done:
-            result.removed.append(c.path)
-        elif verdicts.get(c.path) == UNREADABLE:
-            result.unread.append(c.path)
-        elif verdicts.get(c.path) is not None:
-            result.left.append(c.path)
+    applied = ch.apply(root, plan, None,
+                       condemned=still_condemned(root, signatures, allowlist, opts),
+                       on_skip=skipped)
+    result.removed.extend(c.path for c in applied)
     return result

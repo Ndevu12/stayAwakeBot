@@ -79,6 +79,8 @@ def survives(repo, signatures, allowlist, opts) -> object:
 CARRIES = "carries"
 CHANGED = "changed"
 UNREADABLE = "unreadable"
+REFUSED = "refused"
+ABSENT = "absent"
 
 
 def still_condemned(root: Path, signatures, allowlist, opts):

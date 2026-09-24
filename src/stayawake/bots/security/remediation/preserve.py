@@ -28,7 +28,7 @@ class Preserved:
     def note(self) -> str:
         """Describe what was put aside, for the operator. Returns "" when nothing was."""
         if self.reason:
-            return f"could not put your uncommitted work on a branch first: {self.reason}"
+            return f"could not put your uncommitted work on a branch: {self.reason}"
         if not self.branch:
             return ""
         return (f"{self.files} uncommitted file(s) saved on the local branch "

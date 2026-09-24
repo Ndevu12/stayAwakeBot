@@ -9,7 +9,7 @@ from pathlib import Path
 from stayawake.lib.adapters import github_api
 from stayawake.lib import git as gitutil
 from stayawake.lib.git.merge.liveness import introduced_liveness, PRESENT, GONE
-from stayawake.utils import scratch
+from stayawake.utils import env, prompt, scratch
 from stayawake.utils.streaming import status
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.targets import LocalRepoTarget
@@ -99,6 +99,12 @@ def _manifest_changes(wt: Path, findings) -> list:
     rewritten = manifest.drop_dependencies(wt, _malicious_names(findings))
     return [remediation.Change("update", rel, "removed a known-malicious dependency")
             for rel in rewritten]
+
+
+def _may_name_paths() -> bool:
+    """Whether this run may name paths in what it prints. Returns True only for a person at a
+    terminal."""
+    return prompt.interactive() and not env.is_ci()
 
 
 def _committed_under(repo: Path):
@@ -284,7 +290,8 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
                 live_incomplete = not cleaned.complete
                 kept_work = preserve.preserve(repo, theirs)
                 tree_note = "; ".join(
-                    n for n in (tree_note, cleaned.note(), kept_work.note()) if n)
+                    n for n in (tree_note, cleaned.note(_may_name_paths()),
+                                kept_work.note()) if n)
             applied = (lockfile_changes + _manifest_changes(wt, findings)
                        + remediation.apply(wt, remediation.plan(findings), rollback))
             for f in findings:
