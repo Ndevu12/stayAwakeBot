@@ -51,7 +51,10 @@ reader, not the mechanism or the weakness it closed.
   could not read now sends the run for review.
 
 - **`saw fix` no longer calls the run clean because the default branch is.** Your checkout is read
-  and reported on its own.
+  and reported on its own, and when there was no branch to prepare the run still reports what it
+  could not clear there.
+- **A checkout `saw fix` could not read in full is never reported as clean**, whatever the branch
+  it compares against says.
 
 - **A file your project commits inside a generated directory is no longer removed.** What is not
   committed there is still cleared, so a payload dropped beside it does not survive.

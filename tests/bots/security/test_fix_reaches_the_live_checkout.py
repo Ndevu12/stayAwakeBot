@@ -7,7 +7,13 @@ import subprocess
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 
+from unittest import mock
+
 from stayawake.bots.security import remediator
+from stayawake.bots.security.pr import fix as fixmod
+from stayawake.bots.security.remediation import live
+from stayawake.bots.security.signatures import load_signatures
+from stayawake.bots.security.targets.base import ScanOptions
 from tests.support.gitrepo import GitSandbox
 
 LOADER = ("const _0x1a=['aHR0cHM6Ly9ldmlsLnRlc3Q='];\n"
@@ -95,6 +101,37 @@ class TestACleanCheckoutIsLeftAlone(_CleanOrigin):
 
     def test_the_run_says_it_is_clean(self):
         self.assertIn("clean", self.run_fix())
+
+
+class TestACleanBaseDoesNotHideTheCheckoutsGrade(_CleanOrigin):
+    """Check the grade on the path where no fix branch is prepared."""
+
+    def _report(self, result):
+        with mock.patch.object(fixmod.live, "clean", return_value=result), \
+             redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            return fixmod.prepare_fix(self.repo, ScanOptions(), load_signatures(), [])
+
+    def test_a_checkout_it_could_not_finish_needs_review(self):
+        self.drop_payload()
+        report = self._report(live.LiveResult(unread=[PAYLOAD]))
+        self.assertTrue(report.needs_review, str(report))
+
+    def test_a_checkout_it_finished_does_not(self):
+        self.drop_payload()
+        report = self._report(live.LiveResult(removed=[PAYLOAD]))
+        self.assertFalse(report.needs_review, str(report))
+
+    def test_a_checkout_it_could_not_read_is_not_called_clean(self):
+        self.drop_payload()
+        locked = self.repo / "vault"
+        locked.mkdir()
+        (locked / "evil.js").write_text(LOADER)
+        locked.chmod(0o000)
+        self.addCleanup(locked.chmod, 0o700)
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            report = fixmod.prepare_fix(self.repo, ScanOptions(), load_signatures(), [])
+        self.assertNotIn("already clean", str(report))
+        self.assertTrue(report.needs_review, str(report))
 
 
 if __name__ == "__main__":

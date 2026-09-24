@@ -99,7 +99,7 @@ def preserve(repo: str | Path, remembered: list[str] | None = None, *,
         if not run_ok(repo, ["read-tree", head], env=env):
             return Preserved(reason="the current commit could not be read", withheld=withheld)
         unsaved = _stage(repo, changed, env)
-        if len(unsaved) == len(changed):
+        if changed and len(unsaved) == len(changed):
             return Preserved(reason="the working tree could not be staged", withheld=withheld)
         dropped = _drop(repo, sorted(named), env)
         if dropped is None:

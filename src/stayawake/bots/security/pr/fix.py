@@ -80,8 +80,13 @@ class _Fix:
         return self.partial or self.live_incomplete
 
 
-def _with_tree(outcome: str, note: str) -> str:
-    return outcome if not note else f"{outcome}\n    {note}"
+def _with_tree(outcome: str, note: str, needs_review: bool = False) -> "FixReport":
+    """One repository's outcome, with what happened to its checkout under it.
+
+    Takes the outcome, the note and whether a person still has to look. Returns the summary
+    carrying that grade, so it survives a path where no fix was prepared.
+    """
+    return FixReport(outcome if not note else f"{outcome}\n    {note}", needs_review)
 
 
 def _malicious_names(findings) -> set:
@@ -355,11 +360,11 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
             signed = True
             if applied:
                 if not gitutil.stage_all(wt):
-                    return None, _with_tree("ABORTED — could not stage the fix (git add failed)", tree_note), wt
+                    return None, _with_tree("ABORTED — could not stage the fix (git add failed)", tree_note, True), wt
                 commit = gitutil.commit_fix(wt, "security: auto-remediate worm indicators\n\n"
                                             + "\n".join(f"- {c.action}: {c.path}" for c in applied))
                 if not commit.committed:
-                    return None, _with_tree("ABORTED — could not commit the fix (git commit failed)", tree_note), wt
+                    return None, _with_tree("ABORTED — could not commit the fix (git commit failed)", tree_note, True), wt
                 signed = commit.signed
 
             computed: list = []
@@ -415,11 +420,15 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
                 return _Fix(base, branch, [], (), suspicious, findings, advisories, (),
                             tree_note=tree_note, live_incomplete=live_incomplete), "", wt
             if scan.error or done.error:
-                return None, _with_tree("ABORTED — scan did not finish", tree_note), wt
+                return None, _with_tree("ABORTED — scan did not finish", tree_note, True), wt
+            if checkout.scan_error:
+                return None, _with_tree(f"'{base}' is clean — your checkout was not read in full",
+                                        tree_note, True), wt
             if checkout.infected:
                 return None, _with_tree(f"'{base}' is clean — your checkout was not",
-                                        tree_note), wt
-            return None, _with_tree(f"'{base}' already clean — nothing to fix", tree_note), wt
+                                        tree_note, live_incomplete), wt
+            return None, _with_tree(f"'{base}' already clean — nothing to fix",
+                                    tree_note, live_incomplete), wt
     return _Fix(base, branch, applied, tuple(computed), suspicious, findings, advisories, tuple(manual),
                 signed=signed, tree_note=tree_note, live_incomplete=live_incomplete), "", wt
 
@@ -448,7 +457,7 @@ def prepare_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = N
                                   label=slug, spin=spin)
     try:
         if fix is None:
-            return f"{slug}: {outcome}"
+            return FixReport(f"{slug}: {outcome}", getattr(outcome, "needs_review", True))
         if not fix.applied and not fix.computed:
             if not fix.manual:
                 return _graded(fix, _with_tree(_suspicious_only_outcome(slug, fix), fix.tree_note))
