@@ -21,6 +21,11 @@ class LiveResult:
     refused: list[str] = field(default_factory=list)
 
     @property
+    def named(self) -> list[str]:
+        """Every path the plan condemned, whatever became of it."""
+        return self.removed + self.changed + self.absent + self.unread + self.refused
+
+    @property
     def unfinished(self) -> list[str]:
         """The paths still to account for."""
         return self.unread + self.refused

@@ -282,7 +282,7 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
                     tree_note = f"could not remove the installed tree ({exc})"
                 cleaned = live.clean(repo, findings, signatures, allowlist, opts)
                 live_incomplete = not cleaned.complete
-                kept_work = preserve.preserve(repo, theirs)
+                kept_work = preserve.preserve(repo, theirs, condemned=cleaned.named)
                 tree_note = "; ".join(
                     n for n in (tree_note, cleaned.note(prompt.attended()),
                                 kept_work.note()) if n)

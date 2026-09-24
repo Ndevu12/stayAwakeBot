@@ -121,6 +121,89 @@ class TestItDoesNotDisturbTheOperator(GitSandbox):
         self.assertEqual("module.exports = 2;\n", shown)
 
 
+class TestItReadsWhatGitReports(GitSandbox):
+    """Check the shapes git's own listing uses."""
+
+    def setUp(self):
+        super().setUp()
+        self.repo = self.new_repo()
+        self.write(self.repo, "old.js", "module.exports = 1;\n")
+        self.write(self.repo, "steady.js", "module.exports = 0;\n")
+        self.commit(self.repo, "a starting point")
+
+    def test_a_rename_reads_as_both_of_its_ends(self):
+        self.git(self.repo, "mv", "old.js", "new.js")
+        listed = preserve.uncommitted(self.repo)
+        self.assertIn("new.js", listed)
+        self.assertIn("old.js", listed)
+        self.assertFalse([p for p in listed if "->" in p])
+
+    def test_a_rename_does_not_cost_the_rest_of_the_work(self):
+        self.git(self.repo, "mv", "old.js", "new.js")
+        self.write(self.repo, "steady.js", "module.exports = 9;\n")
+        done = preserve.preserve(self.repo)
+        self.assertEqual("", done.reason)
+        listed = self.git(self.repo, "ls-tree", "-r", "--name-only", done.branch)
+        self.assertIn("new.js", listed)
+        self.assertNotIn("old.js", listed)
+        self.assertEqual("module.exports = 9;\n",
+                         self.git(self.repo, "show", f"{done.branch}:steady.js"))
+
+    def test_a_name_git_would_quote_is_still_preserved(self):
+        self.write(self.repo, "caf\u00e9 note.js", "console.log(1);\n")
+        done = preserve.preserve(self.repo)
+        self.assertEqual("", done.reason)
+        self.assertEqual("console.log(1);\n",
+                         self.git(self.repo, "show", f"{done.branch}:caf\u00e9 note.js"))
+
+
+class TestWhatTheScanNamedStaysOutOfGit(GitSandbox):
+    """Check that a condemned path is not carried into the object store."""
+
+    def setUp(self):
+        super().setUp()
+        self.repo = self.new_repo()
+        self.write(self.repo, "app.js", "module.exports = 1;\n")
+        self.commit(self.repo, "a starting point")
+
+    def _tree(self, done):
+        return self.git(self.repo, "ls-tree", "-r", "--name-only", done.branch)
+
+    def test_one_still_on_disk_is_not_on_the_branch(self):
+        (self.repo / "loader.js").write_text(LOADER)
+        (self.repo / "notes.md").write_text("my own work\n")
+        done = preserve.preserve(self.repo, condemned=["loader.js"])
+        self.assertNotIn("loader.js", self._tree(done))
+        self.assertIn("notes.md", self._tree(done))
+
+    def test_one_still_on_disk_is_left_where_it_is(self):
+        (self.repo / "loader.js").write_text(LOADER)
+        preserve.preserve(self.repo, condemned=["loader.js"])
+        self.assertEqual(LOADER, (self.repo / "loader.js").read_text())
+
+    def test_one_the_commit_already_carries_is_not_on_the_branch(self):
+        self.write(self.repo, "loader.js", LOADER)
+        self.commit(self.repo, "the payload, committed")
+        (self.repo / "notes.md").write_text("my own work\n")
+        done = preserve.preserve(self.repo, condemned=["loader.js"])
+        self.assertNotIn("loader.js", self._tree(done))
+        self.assertIn("notes.md", self._tree(done))
+
+    def test_the_operator_is_told_what_stayed_out(self):
+        self.write(self.repo, "loader.js", LOADER)
+        self.commit(self.repo, "the payload, committed")
+        (self.repo / "notes.md").write_text("my own work\n")
+        done = preserve.preserve(self.repo, condemned=["loader.js"])
+        self.assertEqual(1, done.withheld)
+        self.assertIn("not copied into git", done.note())
+
+    def test_nothing_but_a_condemned_path_makes_no_branch(self):
+        (self.repo / "loader.js").write_text(LOADER)
+        done = preserve.preserve(self.repo, condemned=["loader.js"])
+        self.assertEqual("", done.branch)
+        self.assertEqual(1, done.withheld)
+
+
 class TestTheRunActuallyPreservesFirst(GitSandbox):
     """Check what a run leaves behind."""
 
