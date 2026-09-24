@@ -40,8 +40,8 @@ reader, not the mechanism or the weakness it closed.
 - **`saw fix` no longer reports success over a checkout it could not finish clearing.** A file it
   could not read now makes the run exit for review.
 
-- **A generated directory your project commits is no longer removed.** It was documented as not
-  touched and was being removed on its name alone.
+- **A file your project commits inside a generated directory is no longer removed.** What is not
+  committed there is still cleared, so a payload dropped beside it does not survive.
 
 - **A cleanup no longer removes an installed package after copying a tree it could not read.**
   A directory it was refused permission to read counted as copied; now it stops and says so.

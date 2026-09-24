@@ -51,20 +51,48 @@ class TestNotScannedIsNotTheSameAsNotRemoved(_Project):
         self.assertEqual(set(), ScanOptions().keep_dirs)
 
 
-class TestADirectoryTheProjectCommits(_Project):
-    """Check what the repository's own tracking does to the collection."""
+class TestWhatTheProjectCommitsIsKept(_Project):
+    """Check what survives inside a generated tree the project partly commits."""
 
-    def test_a_committed_tree_is_not_collected(self):
-        self.commit(self.d, "commits dist and build deliberately")
-        self.assertEqual([], self._names(committed=_committed_under(self.d)))
+    def _clear(self, name="dist"):
+        tree = self.d / name
+        return installed.remove_generated(tree, self.d, _committed_under(self.d)(tree))
 
-    def test_a_generated_tree_is_still_collected(self):
-        self.git(self.d, "add", "dist")
-        self.git(self.d, "commit", "-qm", "commits dist only")
-        self.assertEqual(["build"], self._names(committed=_committed_under(self.d)))
+    def test_a_wholly_generated_tree_goes(self):
+        self.assertTrue(self._clear())
+        self.assertFalse((self.d / "dist").exists())
 
-    def test_a_tree_git_cannot_answer_for_is_not_collected(self):
-        self.assertEqual([], self._names(committed=lambda _p: True))
+    def test_a_committed_file_survives(self):
+        self.commit(self.d, "commits both trees")
+        self._clear()
+        self.assertTrue((self.d / "dist" / "artifact.js").exists())
+
+    def test_an_untracked_file_beside_a_committed_one_is_still_removed(self):
+        self.commit(self.d, "commits both trees")
+        (self.d / "dist" / "dropped.js").write_text("payload\n")
+        self._clear()
+        self.assertFalse((self.d / "dist" / "dropped.js").exists())
+        self.assertTrue((self.d / "dist" / "artifact.js").exists())
+
+    def test_a_nested_untracked_file_is_removed_too(self):
+        self.commit(self.d, "commits both trees")
+        (self.d / "dist" / "sub").mkdir()
+        (self.d / "dist" / "sub" / "dropped.js").write_text("payload\n")
+        self._clear()
+        self.assertFalse((self.d / "dist" / "sub" / "dropped.js").exists())
+
+    def test_a_directory_holding_a_committed_file_survives(self):
+        (self.d / "dist" / "keepme").mkdir()
+        (self.d / "dist" / "keepme" / "tracked.js").write_text("mine\n")
+        self.commit(self.d, "commits a nested file under dist")
+        (self.d / "dist" / "keepme" / "dropped.js").write_text("payload\n")
+        self._clear()
+        self.assertTrue((self.d / "dist" / "keepme" / "tracked.js").exists())
+        self.assertFalse((self.d / "dist" / "keepme" / "dropped.js").exists())
+
+    def test_a_path_outside_the_repository_is_answered_as_tracked(self):
+        self.assertEqual([str(self.root / "elsewhere")],
+                         _committed_under(self.d)(self.root / "elsewhere"))
 
 
 class TestTheCheckItself(_Project):
@@ -77,6 +105,18 @@ class TestTheCheckItself(_Project):
 
     def test_a_path_outside_the_repository_is_treated_as_committed(self):
         self.assertTrue(_committed_under(self.d)(self.root / "elsewhere"))
+
+
+class TestARunKeepsWhatTheProjectCommits(_Project):
+    """Check what a removal run leaves, through the lane that calls it."""
+
+    def test_it_clears_the_untracked_and_keeps_the_committed(self):
+        self.commit(self.d, "commits both trees")
+        (self.d / "dist" / "dropped.js").write_text("payload\n")
+        installed.remove_installed(self.d, confirmed=True, remove_lockfiles=False,
+                                   keep=(), committed=_committed_under(self.d))
+        self.assertFalse((self.d / "dist" / "dropped.js").exists())
+        self.assertTrue((self.d / "dist" / "artifact.js").exists())
 
 
 class TestTheSettingReachesTheDecision(unittest.TestCase):

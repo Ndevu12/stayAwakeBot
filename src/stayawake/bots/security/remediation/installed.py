@@ -332,21 +332,41 @@ class Report:
                 f"Reinstalling does not clear it; remove it yourself before you rebuild")
 
 
-def build_output_dirs(root: Path, *, keep=(), committed=None) -> list[Path]:
-    """The generated trees under `root` a run removes.
+def build_output_dirs(root: Path, *, keep=()) -> list[Path]:
+    """The generated trees under `root` a run clears.
 
-    Takes the root, the directory names to keep, and `committed(path) -> bool`. Returns the trees
-    to remove.
+    Takes the root and the directory names to keep. Returns the trees.
     """
     found = []
     for name in sorted(_BUILD_OUTPUTS - _NOT_A_BUILD - set(keep)):
         path = root / name
-        if not (_is_real_directory(path) and is_safe_write_target(path, root)):
-            continue
-        if committed is not None and committed(path):
-            continue
-        found.append(path)
+        if _is_real_directory(path) and is_safe_write_target(path, root):
+            found.append(path)
     return found
+
+
+def remove_generated(tree: Path, root: Path, tracked=()) -> bool:
+    """Remove what the repository does not track under `tree`.
+
+    Takes the tree, the root it must stay inside, and the tracked paths relative to that root.
+    Returns whether the tree itself is gone.
+    """
+    kept = {root / t for t in tracked}
+    if not kept:
+        return remove_derived(tree, root)
+    for path in sorted(tree.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+        if path in kept or any(_inside(k, path) for k in kept):
+            continue
+        remove_derived(path, root)
+    return not tree.exists()
+
+
+def _inside(candidate: Path, parent: Path) -> bool:
+    """Whether `candidate` lies under `parent`."""
+    try:
+        return candidate.is_relative_to(parent)
+    except (OSError, ValueError):
+        return False
 
 
 def _relative_to(path: Path, root: Path) -> Path | None:
@@ -452,8 +472,8 @@ def remove_confirmed(root: Path, *, keep=(), committed=None, remove_lockfiles: b
             report.not_removed.append(path)
     report.unreadable.extend(unreadable)
 
-    for build in build_output_dirs(root, keep=keep, committed=committed):
-        if remove_derived(build, root):
+    for build in build_output_dirs(root, keep=keep):
+        if remove_generated(build, root, committed(build) if committed else ()):
             report.removed_builds.append(build.name)
         elif _still_there(build):
             report.not_removed.append(build)
@@ -553,13 +573,13 @@ def remove_rebuildable(root: Path, *, keep=(), committed=None, remove_lockfiles:
             else plan.reason or "it is not this repository's to remove")
 
     if plan.project_is_declared:
-        for build in build_output_dirs(root, keep=keep, committed=committed):
+        for build in build_output_dirs(root, keep=keep):
             destination = _evidence() / build.name
             shutil.copytree(build, destination, symlinks=True, dirs_exist_ok=True)
             if not every_file_arrived(build, destination):
                 raise OSError(f"the copy of {build} is incomplete, so nothing was removed")
-            shutil.rmtree(build)
-            report.removed_builds.append(build.name)
+            if remove_generated(build, root, committed(build) if committed else ()):
+                report.removed_builds.append(build.name)
 
     seen: set[Path] = set()
     for lockfile in copies:

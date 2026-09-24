@@ -102,14 +102,14 @@ def _manifest_changes(wt: Path, findings) -> list:
 
 
 def _committed_under(repo: Path):
-    """`committed(path) -> bool` for whether the repository tracks anything under a path.
+    """`committed(path) -> list[str]` for the paths the repository tracks under a path.
 
-    Takes the repository. Returns the check.
+    Takes the repository. Returns the check; its answers are relative to the repository.
     """
-    def committed(path: Path) -> bool:
+    def committed(path: Path) -> list[str]:
         rel = _relative(repo, path)
         if rel is None:
-            return True
+            return [str(path)]
         return gitutil.tracked_under(repo, rel)
 
     return committed
