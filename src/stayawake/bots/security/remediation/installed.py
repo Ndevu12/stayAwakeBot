@@ -426,7 +426,7 @@ def remove_installed(root: Path, *, confirmed: bool, remove_lockfiles: bool = Tr
 
     Takes the repository root, whether its infection is confirmed, whether the lockfile goes, the
     tree the lockfiles are read from, the directory names the operator asked to keep, and
-    `committed(path) -> bool`. Returns what was removed. A confirmed infection loses every
+    `committed(path) -> list[str]`. Returns what was removed. A confirmed infection loses every
     reproducible directory whole; anything less copies what no lockfile accounts for aside and then
     removes it too.
     """

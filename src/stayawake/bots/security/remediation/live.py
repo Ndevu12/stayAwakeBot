@@ -5,7 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from stayawake.bots.security.remediation import changes as ch
+from stayawake.bots.security.models import CONFIRMED
+from stayawake.bots.security.remediation import changes as ch, installed, preserve
 from stayawake.bots.security.remediation.oracle import (ABSENT, CHANGED, REFUSED, UNREADABLE,
                                                         still_condemned)
 
@@ -69,3 +70,64 @@ def clean(root: Path, findings, signatures, allowlist, opts) -> LiveResult:
                        on_skip=skipped)
     result.removed.extend(c.path for c in applied)
     return result
+
+
+@dataclass
+class CheckoutResult:
+    """What a run found in the operator's checkout and what it did about it."""
+
+    confirmed: int = 0
+    report: object = None
+    removed: LiveResult = field(default_factory=LiveResult)
+    kept: preserve.Preserved = field(default_factory=preserve.Preserved)
+    scan_error: str = ""
+    failure: str = ""
+
+    @property
+    def infected(self) -> bool:
+        """Whether the checkout carried a confirmed payload."""
+        return self.confirmed > 0
+
+    @property
+    def complete(self) -> bool:
+        """Whether the checkout can be called clean."""
+        return self.removed.complete and not self.scan_error and not self.failure
+
+    def note(self, detail: bool = False) -> str:
+        """Describe the whole pass, for the operator. Takes whether paths may be named."""
+        parts = [self.scan_error, self.failure,
+                 self.report.note() if self.report is not None else "",
+                 self.removed.note(detail), self.kept.note()]
+        return "; ".join(p for p in parts if p)
+
+
+def clean_checkout(repo: Path, opts, signatures, allowlist, *, keep=(),
+                   lockfile_root: Path | None = None, committed=None,
+                   remove_lockfiles: bool = True) -> CheckoutResult:
+    """Scan the checkout the operator is standing in and clear what it confirms.
+
+    Takes the checkout, the scan options, the by-matcher signatures, the allowlist, the directory
+    names to keep, the tree the lockfiles are read from, `committed(path) -> list[str]` and whether
+    the lockfile goes. Returns what was found and what was done, the operator's own uncommitted
+    work put on a branch of its own.
+    """
+    from stayawake.bots.security.scanner import scan_target
+    from stayawake.bots.security.targets import LocalRepoTarget
+    scan = scan_target(LocalRepoTarget(repo, str(repo), opts), signatures, allowlist)
+    if scan.error:
+        return CheckoutResult(scan_error="your checkout was not read in full, so it is not clean")
+    findings = [f for f in scan.findings if getattr(f, "confidence", None) == CONFIRMED]
+    if not findings:
+        return CheckoutResult()
+    theirs = preserve.uncommitted(repo)
+    report, failure = None, ""
+    try:
+        report = installed.remove_installed(repo, confirmed=True, keep=keep,
+                                            remove_lockfiles=remove_lockfiles,
+                                            lockfile_root=lockfile_root, committed=committed)
+    except OSError as exc:
+        failure = f"could not remove the installed tree ({exc})"
+    removed = clean(repo, findings, signatures, allowlist, opts)
+    kept = preserve.preserve(repo, theirs, condemned=removed.named)
+    return CheckoutResult(confirmed=len(findings), report=report, removed=removed,
+                          kept=kept, failure=failure)

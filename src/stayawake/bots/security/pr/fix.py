@@ -15,7 +15,7 @@ from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.targets import LocalRepoTarget
 from stayawake.bots.security.dependencies.remediation import MALICIOUS
 from stayawake.bots.security.models import ROLLBACK_DIR, CONFIRMED, HEURISTIC
-from stayawake.bots.security.remediation import live, manifest, preserve
+from stayawake.bots.security.remediation import live, manifest
 from stayawake.bots.security import remediation
 from stayawake.bots.security.remediation import installed
 from stayawake.core import proposal
@@ -265,27 +265,17 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
         manual_reviews: dict = {}
         suggested: list = []
         merge_clean: dict = {}
+        checkout = live.clean_checkout(
+            repo, opts, signatures, allowlist,
+            keep=getattr(opts, "keep_dirs", ()) or (),
+            lockfile_root=wt,
+            committed=_committed_under(repo),
+            remove_lockfiles=not installed.lockfile_stays())
+        if checkout.report is not None:
+            lockfile_changes = _lockfile_changes(wt, checkout.report)
+        live_incomplete = not checkout.complete
+        tree_note = checkout.note(prompt.attended())
         if not scan.error:
-            if _blocking(findings):
-                theirs = preserve.uncommitted(repo)
-                try:
-                    report = installed.remove_installed(
-                        repo,
-                        confirmed=bool(_blocking(findings)),
-                        remove_lockfiles=not installed.lockfile_stays(),
-                        lockfile_root=wt,
-                        keep=getattr(opts, "keep_dirs", ()) or (),
-                        committed=_committed_under(repo))
-                    tree_note = report.note()
-                    lockfile_changes = _lockfile_changes(wt, report)
-                except OSError as exc:
-                    tree_note = f"could not remove the installed tree ({exc})"
-                cleaned = live.clean(repo, findings, signatures, allowlist, opts)
-                live_incomplete = not cleaned.complete
-                kept_work = preserve.preserve(repo, theirs, condemned=cleaned.named)
-                tree_note = "; ".join(
-                    n for n in (tree_note, cleaned.note(prompt.attended()),
-                                kept_work.note()) if n)
             applied = (lockfile_changes + _manifest_changes(wt, findings)
                        + remediation.apply(wt, remediation.plan(findings), rollback))
             for f in findings:
@@ -426,6 +416,9 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
                             tree_note=tree_note, live_incomplete=live_incomplete), "", wt
             if scan.error or done.error:
                 return None, _with_tree("ABORTED — scan did not finish", tree_note), wt
+            if checkout.infected:
+                return None, _with_tree(f"'{base}' is clean — your checkout was not",
+                                        tree_note), wt
             return None, _with_tree(f"'{base}' already clean — nothing to fix", tree_note), wt
     return _Fix(base, branch, applied, tuple(computed), suspicious, findings, advisories, tuple(manual),
                 signed=signed, tree_note=tree_note, live_incomplete=live_incomplete), "", wt
