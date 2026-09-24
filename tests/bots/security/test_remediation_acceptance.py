@@ -139,7 +139,14 @@ class TestTheWorkingTreeIsRemediated(_InfectedProject):
 
     def test_a_scan_of_the_remediated_tree_reports_clean(self):
         branch = self._fix()
-        self.git(self.d, "checkout", "-q", branch)
+        elsewhere = self.owned(self.root / "prepared")
+        self.git(self.d, "worktree", "add", "-q", str(elsewhere), branch)
+        self.addCleanup(self.git_may_fail, self.d, "worktree", "remove", "--force",
+                        str(elsewhere))
+        self.assertEqual("clean", self._scan(elsewhere).verdict)
+
+    def test_a_scan_of_the_checkout_itself_reports_clean(self):
+        self._fix()
         self.assertEqual("clean", self._scan().verdict)
 
 

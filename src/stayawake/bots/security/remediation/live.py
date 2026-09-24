@@ -144,9 +144,7 @@ def clean_checkout(repo: Path, opts, signatures, allowlist, *, scan=None, keep=(
         failure = f"could not remove the installed tree ({exc})"
     removed = clean(repo, findings, signatures, allowlist, opts)
     named = sorted({f.path for f in findings} | set(removed.named))
-    verdict = still_condemned(repo, signatures, allowlist, opts)
-    present = [p for p in named if verdict(p) != ABSENT]
-    kept = preserve.preserve(repo, theirs, condemned=present)
+    kept = preserve.preserve(repo, theirs, condemned=named)
     dealt = set(removed.removed) | set(removed.stripped) | set(removed.absent)
     return CheckoutResult(confirmed=len(findings), report=report, removed=removed,
                           left_alone=[p for p in named if p not in dealt],
