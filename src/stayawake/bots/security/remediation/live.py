@@ -7,7 +7,7 @@ from pathlib import Path
 
 from stayawake.bots.security.models import CONFIRMED
 from stayawake.bots.security.remediation import changes as ch, installed, preserve
-from stayawake.bots.security.remediation.oracle import (ABSENT, CHANGED, REFUSED, UNREADABLE,
+from stayawake.bots.security.remediation.oracle import (ABSENT, REFUSED, UNREADABLE,
                                                         still_condemned)
 
 
@@ -16,7 +16,6 @@ class LiveResult:
     """What a run did to the live checkout."""
 
     removed: list[str] = field(default_factory=list)
-    changed: list[str] = field(default_factory=list)
     absent: list[str] = field(default_factory=list)
     unread: list[str] = field(default_factory=list)
     refused: list[str] = field(default_factory=list)
@@ -24,7 +23,7 @@ class LiveResult:
     @property
     def named(self) -> list[str]:
         """Every path the plan condemned, whatever became of it."""
-        return self.removed + self.changed + self.absent + self.unread + self.refused
+        return self.removed + self.absent + self.unread + self.refused
 
     @property
     def unfinished(self) -> list[str]:
@@ -41,8 +40,6 @@ class LiveResult:
         parts = []
         if self.removed:
             parts.append(f"removed {len(self.removed)} file(s) from your checkout")
-        if self.changed:
-            parts.append(f"left {len(self.changed)} that no longer carried it")
         if self.unfinished:
             head = f"{len(self.unfinished)} still to deal with — your checkout is not clean"
             parts.append(f"{head}: {', '.join(self.unfinished)}" if detail else head)
@@ -59,8 +56,7 @@ def clean(root: Path, findings, signatures, allowlist, opts) -> LiveResult:
     if not plan:
         return LiveResult()
     result = LiveResult()
-    bucket = {CHANGED: result.changed, ABSENT: result.absent,
-              UNREADABLE: result.unread, REFUSED: result.refused}
+    bucket = {ABSENT: result.absent, UNREADABLE: result.unread, REFUSED: result.refused}
 
     def skipped(path: str, reason: str) -> None:
         bucket.get(reason, result.unread).append(path)

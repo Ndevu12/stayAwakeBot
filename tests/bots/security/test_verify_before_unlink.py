@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 from stayawake.bots.security.remediation import changes as ch
-from stayawake.bots.security.remediation.oracle import (CARRIES, CHANGED, UNREADABLE,
+from stayawake.bots.security.remediation.oracle import (ABSENT, CARRIES, CHANGED, UNREADABLE,
                                                         still_condemned)
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.targets.base import ScanOptions
@@ -46,8 +46,14 @@ class TestWhatTheVerifierSays(_Tree):
         self._write("public/fonts/text.woff", GENUINE_FONT)
         self.assertEqual(CHANGED, self._check()("public/fonts/text.woff"))
 
+    def test_it_answers_absent_when_the_path_is_gone(self):
+        self.assertEqual(ABSENT, self._check()("gone.js"))
+
     def test_it_answers_unreadable_when_it_cannot_read(self):
-        self.assertEqual(UNREADABLE, self._check()("gone.js"))
+        self._write("locked/payload.js", LOADER)
+        (self.root / "locked").chmod(0o000)
+        self.addCleanup((self.root / "locked").chmod, 0o700)
+        self.assertEqual(UNREADABLE, self._check()("locked/payload.js"))
 
 
 class TestApplyAsksAgain(_Tree):
@@ -60,13 +66,20 @@ class TestApplyAsksAgain(_Tree):
         self.assertFalse(target.exists())
         self.assertEqual(1, len(done))
 
-    def test_only_a_payload_is_removed(self):
+    def test_only_what_the_plan_names_is_removed(self):
+        self._write("public/fonts/text.woff", LOADER)
+        beside = self._write("public/fonts/real.woff", GENUINE_FONT)
+        ch.apply(self.root, [ch.Change("remove", "public/fonts/text.woff")],
+                 self.rollback, condemned=self._check())
+        self.assertTrue(beside.exists())
+        self.assertEqual(GENUINE_FONT, beside.read_bytes())
+
+    def test_a_path_rewritten_after_the_scan_is_still_removed(self):
         target = self._write("public/fonts/text.woff", GENUINE_FONT)
         done = ch.apply(self.root, [ch.Change("remove", "public/fonts/text.woff")],
                         self.rollback, condemned=self._check())
-        self.assertTrue(target.exists())
-        self.assertEqual(GENUINE_FONT, target.read_bytes())
-        self.assertEqual([], done)
+        self.assertFalse(target.exists())
+        self.assertEqual(1, len(done))
 
     def test_a_run_over_an_unreadable_file_removes_nothing(self):
         self._write("public/fonts/text.woff", LOADER)

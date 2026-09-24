@@ -20,9 +20,8 @@ reader, not the mechanism or the weakness it closed.
 - **`saw fix` now removes the confirmed payload from the checkout you are standing in**, not only
   from the branch it prepares. It reads your checkout as it stands, so a file you have not
   committed, one you committed but have not pushed, and one only your own branch carries are all
-  removed. Each file is read again first, so one that no longer carries it is left alone, and
-  nothing is copied aside. A file it could not read leaves your checkout un-clean, and is named
-  when you are there to read it.
+  removed, and nothing is copied aside. A file it could not read leaves your checkout un-clean, and
+  is named when you are there to read it; one that is already gone does not.
 
 - **`saw fix` saves your uncommitted work on a local branch of its own.** It is named
   `saw/uncommitted-…`, is never pushed, and leaves your files, your branch and your staged changes

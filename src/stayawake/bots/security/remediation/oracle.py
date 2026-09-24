@@ -87,7 +87,7 @@ def still_condemned(root: Path, signatures, allowlist, opts):
     """`check(path) -> str` for what the file at `path` is now.
 
     Takes the tree to read from, the by-matcher signatures, the allowlist and the scan options.
-    Returns the check; its answer is one of CARRIES, CHANGED or UNREADABLE.
+    Returns the check; its answer is one of CARRIES, CHANGED, ABSENT or UNREADABLE.
     """
     payload = payload_matchers(signatures)
 
@@ -101,6 +101,8 @@ def still_condemned(root: Path, signatures, allowlist, opts):
                 return UNREADABLE
             else:
                 verdict = content_confirms(target.read_bytes(), path, payload, allowlist, opts)
+        except FileNotFoundError:
+            return ABSENT
         except OSError:
             return UNREADABLE
         if verdict in ("materialize-error", "scan-error"):

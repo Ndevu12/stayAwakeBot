@@ -106,7 +106,7 @@ class TestARefusedRemovalIsNotCalledClean(_Checkout):
 
     def test_it_is_not_reported_as_no_longer_carrying(self):
         result = live.clean(self.root, self._redirected(), load_signatures(), [], ScanOptions())
-        self.assertEqual([], result.changed)
+        self.assertEqual([], result.removed)
         self.assertEqual(["public/fonts/text.woff"], result.refused)
 
     def test_the_run_is_not_complete(self):
@@ -142,19 +142,54 @@ class TestItSaysWhatItCouldNotDo(_Checkout):
     def test_a_run_it_could_not_finish_is_not_complete(self):
         (self.root / "public" / "fonts" / "text.woff").write_text(LOADER)
         findings = self._findings()
-        (self.root / "public" / "fonts" / "text.woff").unlink()
+        (self.root / "public" / "fonts").chmod(0o000)
+        self.addCleanup((self.root / "public" / "fonts").chmod, 0o700)
         result = live.clean(self.root, findings, load_signatures(), [], ScanOptions())
         self.assertFalse(result.complete)
         self.assertIn("not clean", result.note())
+
+    def test_a_path_already_gone_does_not_make_the_run_unfinished(self):
+        (self.root / "public" / "fonts" / "text.woff").write_text(LOADER)
+        findings = self._findings()
+        (self.root / "public" / "fonts" / "text.woff").unlink()
+        result = live.clean(self.root, findings, load_signatures(), [], ScanOptions())
+        self.assertTrue(result.complete)
+        self.assertIn("public/fonts/text.woff", result.absent)
 
     def test_what_it_did_not_remove_is_named(self):
         payload = self.root / "public" / "fonts" / "text.woff"
         payload.write_text(LOADER)
         findings = self._findings()
-        payload.write_bytes(GENUINE_FONT)
+        payload.chmod(0o000)
+        (self.root / "public" / "fonts").chmod(0o500)
+        self.addCleanup(lambda: ((self.root / "public" / "fonts").chmod(0o700),
+                                 payload.chmod(0o600) if payload.exists() else None))
         result = live.clean(self.root, findings, load_signatures(), [], ScanOptions())
-        self.assertTrue(payload.exists())
-        self.assertIn("public/fonts/text.woff", result.changed)
+        self.assertIn("public/fonts/text.woff", result.unfinished)
+
+
+class TestARewriteBetweenTheTwoReadsDoesNotSaveIt(_Checkout):
+    """Check what happens when the condemned bytes change after the scan."""
+
+    def _condemned_then_rewritten(self, replacement: bytes):
+        payload = self.root / "public" / "fonts" / "text.woff"
+        payload.write_text(LOADER)
+        findings = self._findings()
+        payload.write_bytes(replacement)
+        return payload, live.clean(self.root, findings, load_signatures(), [], ScanOptions())
+
+    def test_the_file_is_still_removed(self):
+        payload, result = self._condemned_then_rewritten(GENUINE_FONT)
+        self.assertFalse(payload.exists())
+        self.assertIn("public/fonts/text.woff", result.removed)
+
+    def test_a_rewrite_that_no_longer_confirms_does_not_make_the_run_clean_of_it(self):
+        payload, result = self._condemned_then_rewritten(b"var x = 1;\n")
+        self.assertFalse(payload.exists())
+
+    def test_the_run_is_complete_because_it_acted(self):
+        _, result = self._condemned_then_rewritten(GENUINE_FONT)
+        self.assertTrue(result.complete)
 
 
 if __name__ == "__main__":

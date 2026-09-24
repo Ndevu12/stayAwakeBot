@@ -11,7 +11,7 @@ from stayawake.utils.pathsafe import is_safe_write_target
 from stayawake.bots.security.matchers.base import load_jsonc
 from stayawake.bots.security.models import CONFIRMED, ROLLBACK_DIR, SAW_DIR
 from stayawake.bots.security.remediation.footprint import REMOVE_FILE
-from stayawake.bots.security.remediation.oracle import ABSENT, CARRIES, REFUSED
+from stayawake.bots.security.remediation.oracle import ABSENT, CARRIES, CHANGED, REFUSED
 
 _ACTIONS = {
     REMOVE_FILE: "remove",
@@ -211,7 +211,7 @@ def apply(root: Path, changes: list[Change], rollback: Path | None = None, *,
         target = root / c.path
         if c.action == "remove":
             verdict = condemned(c.path) if condemned is not None else CARRIES
-            if verdict != CARRIES:
+            if verdict not in (CARRIES, CHANGED):
                 _skipped(on_skip, c.path, verdict)
                 continue
             if not target.exists():
