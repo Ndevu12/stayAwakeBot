@@ -94,20 +94,59 @@ def _scoped_children(scope: Path) -> list[Path]:
         return []
 
 
+def kept_paths(root: Path, keep) -> list[Path]:
+    """The directories the operator asked to keep, as paths under `root`.
+
+    Takes the repository root and the entries to keep, each written relative to that root. Returns
+    one path per entry that names somewhere inside the repository.
+    """
+    here = _resolved(root)
+    if here is None:
+        return []
+    found = []
+    for entry in keep or ():
+        text = str(entry).strip()
+        if not text:
+            continue
+        spelled = Path(text)
+        candidate = _resolved(spelled if spelled.is_absolute() else root / text)
+        if candidate is None or candidate == here or here not in candidate.parents:
+            continue
+        found.append(candidate)
+    return found
+
+
 def kept_by_operator(path: Path, root: Path, keep) -> bool:
     """Whether the operator asked for this path to stay.
 
-    Takes the path, the repository root it lies under and the directory names to keep. Returns
-    True when the path is one of those directories or sits inside one.
+    Takes the path, the repository root it lies under and the directories to keep. Returns True
+    when the path is one of them or sits inside one.
     """
     if not keep:
         return False
-    try:
-        parts = path.relative_to(root).parts
-    except ValueError:
+    here = _resolved(path)
+    if here is None:
         return False
-    names = set(keep)
-    return any(part in names for part in parts)
+    return any(here == kept or kept in here.parents for kept in kept_paths(root, keep))
+
+
+def holds_a_kept_path(tree: Path, root: Path, keep) -> bool:
+    """Whether anything the operator asked to keep lies inside `tree`.
+
+    Takes the tree, the repository root and the directories to keep. Returns the answer.
+    """
+    here = _resolved(tree)
+    if here is None:
+        return False
+    return any(here in kept.parents for kept in kept_paths(root, keep))
+
+
+def _resolved(path: Path) -> Path | None:
+    """`path` with its links followed, or None when it cannot be read."""
+    try:
+        return path.resolve()
+    except OSError:
+        return None
 
 
 def _is_real_directory(path: Path) -> bool:
@@ -299,6 +338,7 @@ class Report:
     unreadable: list[Path] = field(default_factory=list)
     installed_tree_kept: str | None = None
     installed_entries_kept: int = 0
+    operator_kept: list[str] = field(default_factory=list)
 
     def note(self) -> str:
         """What this did to the live checkout, what it left alone, and where the copies went."""
@@ -315,7 +355,8 @@ class Report:
             bits.append("removed the lockfile")
         if self.removed_builds:
             bits.append("removed " + ", ".join(self.removed_builds))
-        kept = "; ".join(n for n in (self.kept_note(), self.survived_note()) if n)
+        kept = "; ".join(n for n in (self.kept_note(), self.asked_note(),
+                                     self.survived_note()) if n)
         if not bits:
             return kept
         done = "; ".join(bits) + " — from your working tree now, not only on the branch"
@@ -330,6 +371,12 @@ class Report:
         """
         names = sorted({str(p.name) for p in self.not_removed + self.unreadable})
         return f"still there: {_named(names)}" if names else ""
+
+    def asked_note(self) -> str:
+        """What the operator asked to keep and this run left. Returns "" when they asked for none."""
+        if not self.operator_kept:
+            return ""
+        return f"left in place as you asked: {_named(sorted(self.operator_kept))}"
 
     def kept_note(self) -> str:
         """What is still installed, and why it was left there.
@@ -482,11 +529,17 @@ def remove_confirmed(root: Path, *, keep=(), committed=None, remove_lockfiles: b
 
     unreadable: list[Path] = []
     for path in derived_paths(root, unreadable, keep):
+        if holds_a_kept_path(path, root, keep):
+            remove_generated(path, root, (), keep)
+            report.removed_trees += 1
+            continue
         if remove_derived(path, root):
             report.removed_trees += 1
         elif _still_there(path):
             report.not_removed.append(path)
     report.unreadable.extend(unreadable)
+    report.operator_kept = [str(_relative_to(k, _resolved(root) or root) or k)
+                            for k in kept_paths(root, keep)]
 
     for build in build_output_dirs(root, keep=keep):
         if remove_generated(build, root, committed(build) if committed else (), keep):

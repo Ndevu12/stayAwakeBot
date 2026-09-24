@@ -14,8 +14,11 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
-- **`keep_dirs` — directories a fix never removes.** Empty by default. `exclude_dirs` says what is
-  not scanned and no longer decides what is removed, so a generated tree is still cleared.
+- **`keep_dirs` — directories a fix never removes.** Empty by default. Write each one relative to
+  the repository root: `data` keeps that directory at the root, `dist/assets` keeps one directory
+  of a generated tree, and anything inside a kept directory stays too. `exclude_dirs` says what is
+  not scanned and no longer decides what is removed, so a generated tree is still cleared. The run
+  names what it left because you asked.
 
 - **`saw fix` now removes the confirmed payload from the checkout you are standing in**, not only
   from the branch it prepares. It reads your checkout as it stands, so a file you have not

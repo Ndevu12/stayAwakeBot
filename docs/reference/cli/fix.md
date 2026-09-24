@@ -26,8 +26,10 @@ its patches, plugins and pinned releases, and only what the resolver writes ther
 
 **What is not this repository's, it does not take.** Anything linked to a location outside the
 repository loses the link, and what it points at is left alone. Directories you listed under
-`keep_dirs` are never removed; `exclude_dirs` says what is not scanned and does not
-decide this.
+`keep_dirs` are never removed, and neither is anything inside them. Write each one relative to the
+repository root — `data`, or `dist/assets` for one directory of a generated tree. A name alone
+keeps that directory at the root, not every directory sharing the name. `exclude_dirs` says what is
+not scanned and does not decide this.
 
 **Your uncommitted work is kept.** Once the cleanup is done, what your working tree held and had
 not committed is recorded on a local branch named `saw/uncommitted-…`. It is never pushed, and

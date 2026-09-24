@@ -148,9 +148,40 @@ class TestKeepingReachesEveryRemoval(_Project):
     def test_a_file_inside_a_kept_directory_of_a_generated_tree_survives(self):
         (self.d / "dist" / "keep-me").mkdir()
         (self.d / "dist" / "keep-me" / "asset.js").write_text("generated\n")
-        self._remove(("keep-me",))
+        self._remove(("dist/keep-me",))
         self.assertTrue((self.d / "dist" / "keep-me" / "asset.js").is_file())
         self.assertFalse((self.d / "dist" / "artifact.js").exists())
+
+    def test_a_directory_inside_the_installed_tree_survives_when_it_is_named(self):
+        (self.d / installed.INSTALLED_DIR / "keepme").mkdir(parents=True)
+        (self.d / installed.INSTALLED_DIR / "keepme" / "PRECIOUS.txt").write_text("patched\n")
+        self._remove(("node_modules/keepme",))
+        self.assertTrue((self.d / installed.INSTALLED_DIR / "keepme" / "PRECIOUS.txt").is_file())
+        self.assertFalse((self.d / installed.INSTALLED_DIR / "left-pad").exists())
+
+    def test_a_name_does_not_keep_the_same_name_somewhere_else(self):
+        deep = self.d / "dist" / "data"
+        deep.mkdir(parents=True)
+        (deep / "evil.js").write_text("payload\n")
+        (self.d / "data").mkdir()
+        (self.d / "data" / "mine.csv").write_text("theirs\n")
+        self._remove(("data",))
+        self.assertTrue((self.d / "data" / "mine.csv").is_file())
+        self.assertFalse((deep / "evil.js").exists(),
+                         "a bare name must not keep the same name at depth")
+
+    def test_an_entry_outside_the_repository_names_nothing(self):
+        self.assertEqual([], installed.kept_paths(self.d, ("../elsewhere", "/etc", "", "..")))
+
+    def test_an_entry_with_a_separator_names_the_path_it_spells(self):
+        self.assertEqual([self.d.resolve() / "dist" / "assets"],
+                         installed.kept_paths(self.d, ("dist/assets",)))
+
+    def test_the_run_says_what_it_left_because_it_was_asked(self):
+        report = installed.remove_installed(self.d, confirmed=True, keep=("vendor",),
+                                            committed=_committed_under(self.d))
+        self.assertIn("left in place as you asked", report.note())
+        self.assertIn("vendor", report.note())
 
 
 class TestTheSettingReachesTheDecision(unittest.TestCase):
