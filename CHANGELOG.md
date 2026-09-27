@@ -25,6 +25,9 @@ reader, not the mechanism or the weakness it closed.
 - **A scan now reads every well-formed editor settings, task and manifest file it meets.** Some
   valid files were read as empty, so what they declared went unexamined. Upgrading is recommended;
   rescan repositories you scanned before.
+- **Scanning or fixing a repository no longer runs programs that repository's own git settings name.**
+  The signing program and credentials a fix uses come from your own git settings, never the scanned
+  repository's.
 - **A package name from a scanned lockfile can no longer shape a command saw hands you.**
 - **saw no longer tells you which version to install.** It names the versions that are compromised
   and leaves the choice to you, because an offline advisory cache cannot promise a version is safe.

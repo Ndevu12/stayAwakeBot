@@ -66,7 +66,7 @@ class _Isolated(unittest.TestCase):
 
 class TestInstallUninstall(_Isolated):
     def _global_template(self):
-        return hook.gitutil.stdout(None, ["config", "--global", "--get", "init.templateDir"]).strip()
+        return hook.gitutil.stdout(None, ["config", "--global", "--get", "init.templateDir"], context=hook.gitutil.OPERATOR_CONFIG).strip()
 
     def test_install_sets_templatedir_and_writes_executable_hooks(self):
         self.assertEqual(hook.install(), 0)
@@ -108,7 +108,7 @@ class TestInstallUninstall(_Isolated):
     def test_install_warns_on_conflicting_global_hookspath(self):
         # A global core.hooksPath makes git ignore .git/hooks — our template hooks would silently
         # never run. Install must WARN, not report a false success.
-        hook.gitutil.run_ok(None, ["config", "--global", "core.hooksPath", str(self.home / "hp")])
+        hook.gitutil.run_ok(None, ["config", "--global", "core.hooksPath", str(self.home / "hp")], context=hook.gitutil.OPERATOR_CONFIG)
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             self.assertEqual(hook.install(), 0)
@@ -124,7 +124,7 @@ class TestNeverClobber(_Isolated):
         foreign = user_tpl / "hooks" / "post-checkout"
         foreign.write_text("#!/bin/sh\necho theirs\n")
         os.chmod(foreign, 0o755)
-        hook.gitutil.run_ok(None, ["config", "--global", "init.templateDir", str(user_tpl)])
+        hook.gitutil.run_ok(None, ["config", "--global", "init.templateDir", str(user_tpl)], context=hook.gitutil.OPERATOR_CONFIG)
 
         self.assertEqual(hook.install(), 0)
         # Their hook is preserved as .local and OUR hook chains to it (never clobbered).
@@ -136,7 +136,7 @@ class TestNeverClobber(_Isolated):
         self.assertIn("post-checkout.local", ours)
         # We did NOT hijack their templateDir setting.
         self.assertEqual(
-            hook.gitutil.stdout(None, ["config", "--global", "--get", "init.templateDir"]).strip(),
+            hook.gitutil.stdout(None, ["config", "--global", "--get", "init.templateDir"], context=hook.gitutil.OPERATOR_CONFIG).strip(),
             str(user_tpl))
 
     def test_uninstall_restores_the_foreign_hook(self):
@@ -145,7 +145,7 @@ class TestNeverClobber(_Isolated):
         foreign = user_tpl / "hooks" / "post-checkout"
         foreign.write_text("#!/bin/sh\necho theirs\n")
         os.chmod(foreign, 0o755)
-        hook.gitutil.run_ok(None, ["config", "--global", "init.templateDir", str(user_tpl)])
+        hook.gitutil.run_ok(None, ["config", "--global", "init.templateDir", str(user_tpl)], context=hook.gitutil.OPERATOR_CONFIG)
         hook.install()
         hook.uninstall()
         restored = user_tpl / "hooks" / "post-checkout"
@@ -379,7 +379,7 @@ class TestSawsDirectoryIsSawsAlone(_Isolated):
         theirs = user_tpl / "hooks" / "post-checkout"
         theirs.write_text("#!/bin/sh\necho theirs\n")
         os.chmod(theirs, 0o755)
-        hook.gitutil.run_ok(None, ["config", "--global", "init.templateDir", str(user_tpl)])
+        hook.gitutil.run_ok(None, ["config", "--global", "init.templateDir", str(user_tpl)], context=hook.gitutil.OPERATOR_CONFIG)
         self.assertEqual(self._quiet(hook.install)[0], 0)
         self.assertIn("echo theirs", (user_tpl / "hooks" / "post-checkout.local").read_text())
         self.assertEqual(_set_aside(self.home), [])
@@ -397,7 +397,7 @@ class TestSawsDirectoryIsSawsAlone(_Isolated):
         planted = managed / "post-checkout.local"
         planted.write_text("#!/bin/sh\n/tmp/.x/stage\n")
         os.chmod(planted, 0o755)
-        hook.gitutil.run_ok(None, ["config", "--global", "core.hooksPath", str(managed)])
+        hook.gitutil.run_ok(None, ["config", "--global", "core.hooksPath", str(managed)], context=hook.gitutil.OPERATOR_CONFIG)
         self.assertEqual(self._quiet(hook.install)[0], 0)
         self.assertFalse(planted.exists())
         self.assertEqual(len(_set_aside(self.home)), 1)
@@ -580,7 +580,7 @@ class TestRepairLeavesWhatIsNotSaws(_Isolated):
         theirs = theirs_tpl / "hooks" / "post-checkout"
         theirs.write_text("#!/bin/sh\n. \"$(dirname \"$0\")/_/husky.sh\"\n")
         os.chmod(theirs, 0o755)
-        hook.gitutil.run_ok(None, ["config", "--global", "init.templateDir", str(theirs_tpl)])
+        hook.gitutil.run_ok(None, ["config", "--global", "init.templateDir", str(theirs_tpl)], context=hook.gitutil.OPERATOR_CONFIG)
         code, text = self._quiet(hook.repair)
         self.assertEqual(code, 0, text)
         self.assertEqual(theirs.read_text(), "#!/bin/sh\n. \"$(dirname \"$0\")/_/husky.sh\"\n")
@@ -640,7 +640,7 @@ class TestRepairLeavesWhatIsNotSaws(_Isolated):
 
     def test_a_hooks_path_that_is_saws_own_directory_is_not_a_bypass(self):
         managed = self.home / ".config" / "saw" / "git-template" / "hooks"
-        hook.gitutil.run_ok(None, ["config", "--global", "core.hooksPath", str(managed)])
+        hook.gitutil.run_ok(None, ["config", "--global", "core.hooksPath", str(managed)], context=hook.gitutil.OPERATOR_CONFIG)
         code, text = self._quiet(hook.install)
         self.assertEqual(code, 0, text)
         self.assertNotIn("WON'T run", text)
@@ -693,7 +693,7 @@ class TestNothingIsWrittenWhereItShouldNotBe(_Isolated):
         user_tpl = self.home / "my-template"
         (user_tpl / "hooks").mkdir(parents=True)
         os.symlink(victim, user_tpl / "hooks" / "post-merge.saw-tmp")
-        hook.gitutil.run_ok(None, ["config", "--global", "init.templateDir", str(user_tpl)])
+        hook.gitutil.run_ok(None, ["config", "--global", "init.templateDir", str(user_tpl)], context=hook.gitutil.OPERATOR_CONFIG)
         code, text = self._quiet(hook.install)
         self.assertEqual(code, 0, text)
         self.assertEqual(victim.read_text(), "precious\n")
@@ -733,7 +733,7 @@ class TestNothingIsWrittenWhereItShouldNotBe(_Isolated):
         theirs = user_tpl / "hooks" / "post-checkout"
         theirs.write_text("#!/bin/sh\necho theirs\n")
         os.chmod(theirs, 0o755)
-        hook.gitutil.run_ok(None, ["config", "--global", "init.templateDir", str(user_tpl)])
+        hook.gitutil.run_ok(None, ["config", "--global", "init.templateDir", str(user_tpl)], context=hook.gitutil.OPERATOR_CONFIG)
         self.assertEqual(self._quiet(hook.install)[0], 0)
         altered = theirs.read_text().replace("exit 0\n", "/tmp/.x/stage\nexit 0\n")
         theirs.write_text(altered)
@@ -776,7 +776,7 @@ class TestNothingIsWrittenWhereItShouldNotBe(_Isolated):
         key.write_text("SECRET\n")
         os.chmod(key, 0o600)
         os.symlink(key, user_tpl / "hooks" / "post-checkout")
-        hook.gitutil.run_ok(None, ["config", "--global", "init.templateDir", str(user_tpl)])
+        hook.gitutil.run_ok(None, ["config", "--global", "init.templateDir", str(user_tpl)], context=hook.gitutil.OPERATOR_CONFIG)
         code, text = self._quiet(hook.install)
         self.assertEqual(code, 0, text)
         self.assertEqual(oct(key.stat().st_mode & 0o777), oct(0o600))
@@ -932,7 +932,7 @@ class TestRepairPutsBackOnlyWhatSawSeeded(_Isolated):
             p = managed / event
             p.write_text(hook.hookscript.render(event, hook._saw_executable(), str(self.home / "old.yml")))
             os.chmod(p, 0o755)
-        hook.gitutil.run_ok(None, ["config", "--global", "init.templateDir", str(managed.parent)])
+        hook.gitutil.run_ok(None, ["config", "--global", "init.templateDir", str(managed.parent)], context=hook.gitutil.OPERATOR_CONFIG)
         self.assertIsNone(hook.hookscript.installed())
         self.assertEqual(hook.hookscript.altered_hooks(), [])
         text = self._quiet(hook.status)[1]
@@ -1019,7 +1019,7 @@ class TestTheRecordIsTheOnlyAuthority(_Isolated):
         user_tpl = self.home / "my-template"
         (user_tpl / "hooks").mkdir(parents=True)
         os.symlink("post-merge", user_tpl / "hooks" / "post-merge")
-        hook.gitutil.run_ok(None, ["config", "--global", "init.templateDir", str(user_tpl)])
+        hook.gitutil.run_ok(None, ["config", "--global", "init.templateDir", str(user_tpl)], context=hook.gitutil.OPERATOR_CONFIG)
         code, text = self._quiet(hook.install)
         self.assertEqual(code, 0, text)
         self.assertFalse(os.path.lexists(user_tpl / "hooks" / "post-merge.local"))
@@ -1031,7 +1031,7 @@ class TestTheRecordIsTheOnlyAuthority(_Isolated):
     def test_repair_settles_the_template_directory_the_record_names_and_no_other(self):
         user_tpl = self.home / "my-template"
         (user_tpl / "hooks").mkdir(parents=True)
-        hook.gitutil.run_ok(None, ["config", "--global", "init.templateDir", str(user_tpl)])
+        hook.gitutil.run_ok(None, ["config", "--global", "init.templateDir", str(user_tpl)], context=hook.gitutil.OPERATOR_CONFIG)
         self.assertEqual(self._quiet(hook.install)[0], 0)
         self.assertEqual(hook.hookscript.installed_into(), user_tpl / "hooks")
         other = self.home / "other-template"
@@ -1042,7 +1042,7 @@ class TestTheRecordIsTheOnlyAuthority(_Isolated):
         theirs = other / "hooks" / "post-merge"
         theirs.write_text("#!/bin/sh\necho theirs\n")
         os.chmod(theirs, 0o755)
-        hook.gitutil.run_ok(None, ["config", "--global", "init.templateDir", str(other)])
+        hook.gitutil.run_ok(None, ["config", "--global", "init.templateDir", str(other)], context=hook.gitutil.OPERATOR_CONFIG)
         code, text = self._quiet(hook.repair)
         self.assertEqual(code, 0, text)
         self.assertIn(f"updated: {planted}", text)
@@ -1058,7 +1058,7 @@ class TestTheRecordIsTheOnlyAuthority(_Isolated):
     def test_install_always_sweeps_saws_own_directory(self):
         user_tpl = self.home / "my-template"
         (user_tpl / "hooks").mkdir(parents=True)
-        hook.gitutil.run_ok(None, ["config", "--global", "init.templateDir", str(user_tpl)])
+        hook.gitutil.run_ok(None, ["config", "--global", "init.templateDir", str(user_tpl)], context=hook.gitutil.OPERATOR_CONFIG)
         managed = self._managed()
         managed.mkdir(parents=True)
         planted = managed / "post-checkout.local"
@@ -1094,7 +1094,7 @@ class TestTheRecordIsTheOnlyAuthority(_Isolated):
         self.assertEqual(self._quiet(hook.install)[0], 0)
         moved = self.home / "dotfiles" / "git-template"
         __import__("shutil").copytree(self._managed().parent, moved)
-        hook.gitutil.run_ok(None, ["config", "--global", "init.templateDir", str(moved)])
+        hook.gitutil.run_ok(None, ["config", "--global", "init.templateDir", str(moved)], context=hook.gitutil.OPERATOR_CONFIG)
         altered = moved / "hooks" / "post-merge"
         altered.write_text(altered.read_text().replace("exit 0\n", "/tmp/.x/stage\nexit 0\n"))
         self.assertEqual(hook.hookscript.altered_hooks(), [altered])
@@ -1139,7 +1139,7 @@ class TestTheRecordIsTheOnlyAuthority(_Isolated):
         spelled = managed.parent.parent / "Git-Template"
         if not spelled.exists():
             self.skipTest("this filesystem tells the two names apart")
-        hook.gitutil.run_ok(None, ["config", "--global", "init.templateDir", str(spelled)])
+        hook.gitutil.run_ok(None, ["config", "--global", "init.templateDir", str(spelled)], context=hook.gitutil.OPERATOR_CONFIG)
         planted = managed / "post-checkout"
         planted.write_text("#!/bin/sh\n/tmp/.x/stage\n")
         os.chmod(planted, 0o755)
@@ -1150,7 +1150,7 @@ class TestTheRecordIsTheOnlyAuthority(_Isolated):
         self.assertEqual(len(_set_aside(self.home)), 1)
 
     def test_a_relative_template_path_is_refused_before_anything_is_written(self):
-        hook.gitutil.run_ok(None, ["config", "--global", "init.templateDir", "my-template"])
+        hook.gitutil.run_ok(None, ["config", "--global", "init.templateDir", "my-template"], context=hook.gitutil.OPERATOR_CONFIG)
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
             code, text = self._quiet(hook.install)

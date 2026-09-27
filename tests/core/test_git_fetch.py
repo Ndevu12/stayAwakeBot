@@ -21,6 +21,7 @@ from unittest import mock
 
 from stayawake.lib.git.query import branches_carrying, fetch_refs
 from stayawake.lib.git.run import run as real_run, NETWORK_TIMEOUT
+from tests.support.local_remotes import allow_local_remotes
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -30,6 +31,10 @@ def _git(repo: Path, *args: str) -> str:
 
 
 class _Fixture(unittest.TestCase):
+    def setUp(self):
+        super().setUp()
+        allow_local_remotes(self)
+
     def _tmpdir(self) -> Path:
         d = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, d, ignore_errors=True)
@@ -107,6 +112,18 @@ class TestFetchMakesCarriersVisible(_Fixture):
         self.assertIn("main", self._carriers(clone, sha))
 
 
+    def test_the_remotes_default_branch_and_its_head_survive_the_refresh(self):
+        remote, sha = self._remote_carrying_payload()
+        clone = self._clone(remote)
+        self.assertEqual("refs/remotes/origin/main",
+                         _git(clone, "symbolic-ref", "refs/remotes/origin/HEAD"))
+        self.assertTrue(fetch_refs(clone).ok)
+        self.assertEqual(sha, _git(clone, "rev-parse", "refs/remotes/origin/main"),
+                         "the refresh removed the remote's default branch")
+        self.assertEqual("refs/remotes/origin/main",
+                         _git(clone, "symbolic-ref", "refs/remotes/origin/HEAD"))
+
+
 class TestFailureIsARefusal(_Fixture):
     def test_repo_without_a_remote_is_a_refusal(self):
         solo, _sha = self._remote_carrying_payload()
@@ -130,7 +147,7 @@ class TestFailureIsARefusal(_Fixture):
     def test_git_that_cannot_run_is_a_refusal(self):
         remote, _sha = self._remote_carrying_payload()
         clone = self._clone(remote)
-        with mock.patch("stayawake.lib.git.query.run", return_value=None):
+        with mock.patch("stayawake.lib.git.write.fetch.run", return_value=None):
             result = fetch_refs(clone)
         self.assertFalse(result.ok)
         self.assertTrue(result.reason.strip())
@@ -150,7 +167,7 @@ class TestCredentialSafety(_Fixture):
             seen.update(repo=r, args=args, kwargs=kwargs)
             return real_run(r, args, **kwargs)
 
-        with mock.patch("stayawake.lib.git.query.run", side_effect=recording_run):
+        with mock.patch("stayawake.lib.git.write.fetch.run", side_effect=recording_run):
             seen["result"] = fetch_refs(repo, token=token)
         return seen
 
@@ -187,7 +204,7 @@ class TestCredentialSafety(_Fixture):
             args=["git", "fetch"], returncode=128,
             stdout="", stderr=f"fatal: could not read from https://x-access-token:{token}@...")
 
-        with mock.patch("stayawake.lib.git.query.run", return_value=leaky) as ran:
+        with mock.patch("stayawake.lib.git.write.fetch.run", return_value=leaky) as ran:
             result = fetch_refs(clone, token=token)
 
         self.assertFalse(result.ok)

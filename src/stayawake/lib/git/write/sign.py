@@ -34,7 +34,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from stayawake.lib.git.run import run, run_ok
+from stayawake.lib.git import operator_config, owned
+from stayawake.lib.git.run import SAW_OWNED, UNTRUSTED, run, run_ok
 
 from stayawake.utils import scratch
 
@@ -57,8 +58,6 @@ _SIGNING_CONFIG_KEYS = (
     "gpg.ssh.allowedsignersfile",
 )
 
-# The subset of the above whose VALUE git runs as a program while signing. `trust_local_programs`
-# governs whether these are honoured from `repo` — see `signing_status`.
 _EXECUTED_PROGRAM_KEYS = (
     "gpg.program",
     "gpg.openpgp.program",
@@ -114,10 +113,8 @@ def signing_status(repo: str | Path, *, history_is_signed: bool = False,
     than silently stripping what it found. Runs a git subprocess and a real signing attempt, so
     hold the result and pass it around rather than calling this once per commit.
 
-    `trust_local_programs` False drops the config keys whose value git executes as a program
-    (`gpg.program`, `gpg.ssh.program`, …), so the signer program comes from git's own system/global
-    resolution and PATH, not from `repo`. Pass it False when `repo` is a config context the operator
-    did not name.
+    The signer program is always the operator's global one or git's default, never `repo`'s
+    (see `_resolved_signing_config`); `trust_local_programs` is accepted and ignored.
     """
     config = _resolved_signing_config(repo, trust_local_programs=trust_local_programs)
     signature_format = config.get("gpg.format") or "openpgp"
@@ -146,7 +143,7 @@ def carries_signature(repo: str | Path, sha: str) -> bool | None:
     `N` on a host with no `allowedSignersFile` — and a rewrite would then strip a signature it had
     just decided was not there.
     """
-    res = run(repo, ["cat-file", "commit", sha], timeout=PROBE_TIMEOUT)
+    res = run(repo, ["cat-file", "commit", sha], timeout=PROBE_TIMEOUT, context=UNTRUSTED)
     if res is None or res.returncode != 0:
         return None
     headers = res.stdout.split("\n\n", 1)[0]
@@ -232,20 +229,28 @@ def sign_flags(status: SigningStatus, command: str) -> tuple[str, ...]:
 
 
 def _resolved_signing_config(repo: str | Path, *, trust_local_programs: bool = True) -> dict[str, str]:
-    """Every signing key git would resolve for `repo`. `--list` emits system, global, local and
-    worktree scopes in that order, so the last value seen for a key is the one git would use —
-    `commit.gpgsign` still goes through `--type=bool`, because reimplementing git's spelling of
-    truth (`yes`, `on`, `1`, a valueless key) is exactly how a config check drifts from git.
-
-    With `trust_local_programs` False the executable-program keys are not carried out of `repo`; git
-    then resolves the signer program from its own system/global config and PATH."""
-    resolved: dict[str, str] = {}
-    listing = run(repo, ["config", "--list", "-z"], timeout=PROBE_TIMEOUT)
+    """Every signing key the rewrite of `repo` signs with. The signer programs come from the
+    operator's global config, else git's defaults, and are always passed explicitly. Every
+    other key, the signing key, the format, the identity and `commit.gpgsign`, follows git's
+    precedence, `repo` over global, with `commit.gpgsign` read through `--type=bool`.
+    `trust_local_programs` is accepted and changes nothing."""
+    del trust_local_programs
+    operator = operator_config.global_config()
+    local: dict[str, str] = {}
+    listing = run(repo, ["config", "--list", "-z"], timeout=PROBE_TIMEOUT, context=UNTRUSTED)
     if listing is not None and listing.returncode == 0:
         for entry in listing.stdout.split("\0"):
             key, _, value = entry.partition("\n")
             if key in _SIGNING_CONFIG_KEYS and value:
-                resolved[key] = value
+                local[key] = value
+    resolved: dict[str, str] = {}
+    for key in _SIGNING_CONFIG_KEYS:
+        if key in _EXECUTED_PROGRAM_KEYS:
+            continue
+        value = local.get(key) or operator.get(key)
+        if value:
+            resolved[key] = value
+    resolved.update(_signer_programs(operator))
     enabled = _config_value(repo, "commit.gpgsign", as_bool=True)
     if enabled:
         resolved["commit.gpgsign"] = enabled
@@ -254,18 +259,41 @@ def _resolved_signing_config(repo: str | Path, *, trust_local_programs: bool = T
         # git resolves a signing-key path against its own cwd, which `-C` moves to the probe
         # repository. Left relative, a working key would probe as broken — a false refusal.
         resolved["user.signingkey"] = str((Path(repo) / key_path).resolve())
-    if not trust_local_programs:
-        for key in _EXECUTED_PROGRAM_KEYS:
-            resolved.pop(key, None)
     return resolved
 
 
+def _signer_programs(operator: Mapping[str, str]) -> dict[str, str]:
+    """Each program key git may run while signing, set to the operator's global value or git's
+    default. An empty `gpg.ssh.defaultkeycommand` runs nothing."""
+    openpgp = operator.get("gpg.openpgp.program") or operator.get("gpg.program") or "gpg"
+    return {"gpg.program": openpgp,
+            "gpg.openpgp.program": openpgp,
+            "gpg.x509.program": operator.get("gpg.x509.program") or "gpgsm",
+            "gpg.ssh.program": operator.get("gpg.ssh.program") or "ssh-keygen",
+            "gpg.ssh.defaultkeycommand": operator.get("gpg.ssh.defaultkeycommand", "")}
+
+
+def fix_commit_signing(repo: str | Path) -> tuple[str, ...]:
+    """The `-c` settings a commit saw makes on behalf of `repo` signs with: whether `repo` asks
+    for a signature, and the signer the operator configured. Nothing is probed; the commit itself
+    is the attempt."""
+    config = _resolved_signing_config(repo)
+    args = ["-c", f"commit.gpgsign={config.get('commit.gpgsign') or 'false'}"]
+    for key, value in sorted(config.items()):
+        if key not in ("commit.gpgsign", "user.name", "user.email"):
+            args += ["-c", f"{key}={value}"]
+    return tuple(args)
+
+
 def _config_value(repo: str | Path, key: str, *, as_bool: bool = False) -> str:
+    """`key` as `repo` sets it, else as the operator's global config does, else ""."""
     args = ["config", "--get"] + (["--type=bool"] if as_bool else []) + [key]
-    res = run(repo, args, timeout=PROBE_TIMEOUT)
-    if res is None or res.returncode != 0:
-        return ""
-    return res.stdout.strip()
+    res = run(repo, args, timeout=PROBE_TIMEOUT, context=UNTRUSTED)
+    if res is not None and res.returncode == 0 and res.stdout.strip():
+        return res.stdout.strip()
+    if as_bool:
+        return operator_config.global_bool(key)
+    return operator_config.global_config().get(key, "")
 
 
 def _first_probe_failure(config: Mapping[str, str]) -> str | None:
@@ -274,8 +302,10 @@ def _first_probe_failure(config: Mapping[str, str]) -> str | None:
     key is ever created — the operator's existing key is used, or the probe fails."""
     probe = scratch.new_dir("a signing probe")
     try:
-        if not run_ok(None, ["init", "-q", "-b", "main", str(probe)], timeout=PROBE_TIMEOUT):
+        if not run_ok(None, ["init", "-q", "-b", "main", "--template=", str(probe)],
+                      timeout=PROBE_TIMEOUT, context=SAW_OWNED):
             return "a probe repository could not be created"
+        owned.own(probe)
         # `-c` overrides rather than written config: command-line scope is how git layers config
         # anyway, and it drops 12 subprocesses off a probe that measured 1.15s.
         overrides = [arg
@@ -283,7 +313,8 @@ def _first_probe_failure(config: Mapping[str, str]) -> str | None:
                      for arg in ("-c", f"{key}={value}")]
         res = run(probe, [*overrides, "commit", "--allow-empty", "-q",
                           "-m", "saw signing probe", "-S"],
-                  env=_refuse_to_prompt(dict(os.environ)), timeout=PROBE_TIMEOUT)
+                  env=_refuse_to_prompt(dict(os.environ)), timeout=PROBE_TIMEOUT,
+                  context=SAW_OWNED)
         if res is None:
             return f"the signing attempt did not finish within {PROBE_TIMEOUT}s"
         if res.returncode != 0:
@@ -292,13 +323,14 @@ def _first_probe_failure(config: Mapping[str, str]) -> str | None:
             return "the probe commit was created but carried no signature"
         return None
     finally:
+        owned.disown(probe)
         shutil.rmtree(probe, ignore_errors=True)
 
 
 def _has_signature_header(probe: Path) -> bool:
     """A signature on the object, not merely a zero exit. Only the header block is inspected, so
     a commit *message* mentioning gpgsig cannot stand in for a signature."""
-    res = run(probe, ["cat-file", "commit", "HEAD"], timeout=PROBE_TIMEOUT)
+    res = run(probe, ["cat-file", "commit", "HEAD"], timeout=PROBE_TIMEOUT, context=SAW_OWNED)
     if res is None or res.returncode != 0:
         return False
     headers = res.stdout.split("\n\n", 1)[0]

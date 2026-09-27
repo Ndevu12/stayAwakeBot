@@ -833,7 +833,9 @@ class TestAStoredSymlinkIsStillRead(GitSandbox):
             self.assertNotIn(named, note, f"the note named why it could not read: {named}")
         with_external = scanner.history_residue_note(
             partial, ScanOptions(history=True, external_audit=True), load_signatures(), [])
-        self.assertIn("deep/evil", with_external, "--external did not let the read finish")
+        self.assertIn("UNKNOWN", with_external)
+        self.assertNotIn("deep/evil", with_external, "--external fetched the missing objects")
+        self.assertEqual(before, held(), "--external let the history read reach a remote")
 
     def test_a_tree_whose_entries_stop_short_is_not_read_as_complete(self):
         """A tree the walk could not parse to the end leaves the read unestablished."""
@@ -863,8 +865,9 @@ class TestAStoredSymlinkIsStillRead(GitSandbox):
         self.assertNotIn("tests/fixtures/loader.js", note,
                          "the aimed rule did not silence the path it named")
 
-    def test_the_read_goes_further_when_the_operator_says_so(self):
-        """One answer decides whether a read may go past what the repository holds."""
+    def test_the_read_stays_local_even_when_the_operator_says_yes(self):
+        """A history read never fetches the objects a partial clone lacks: an answered yes still
+        leaves the read UNKNOWN and the repository unchanged."""
         origin = self.new_repo("origin2")
         self.git(origin, "config", "uploadpack.allowFilter", "true")
         os.makedirs(os.path.join(str(origin), "deep"), exist_ok=True)
@@ -875,12 +878,17 @@ class TestAStoredSymlinkIsStillRead(GitSandbox):
         partial = os.path.join(os.path.dirname(str(origin)), "partial2")
         subprocess.run(["git", "clone", "-q", "--filter=tree:0", "--no-checkout", "--no-local",
                         f"file://{origin}", partial], capture_output=True, check=True)
+        held = lambda: subprocess.run(["git", "-C", partial, "count-objects", "-v"],
+                                      capture_output=True, text=True).stdout
+        before = held()
         sigs = load_signatures()
         refused = scanner.history_residue_note(partial, ScanOptions(history=True), sigs, [])
         self.assertIn("UNKNOWN", refused)
-        allowed = scanner.history_residue_note(
+        answered = scanner.history_residue_note(
             partial, ScanOptions(history=True, confirm_remote_read=lambda: True), sigs, [])
-        self.assertIn("deep/evil", allowed, "an answered yes did not let the read finish")
+        self.assertIn("UNKNOWN", answered)
+        self.assertNotIn("deep/evil", answered, "an answered yes fetched the missing objects")
+        self.assertEqual(before, held(), "an answered yes let the history read reach a remote")
 
     def test_a_replacement_object_does_not_answer_for_the_ref(self):
         """A ref is graded on what it stores, not on what a replacement object substitutes."""

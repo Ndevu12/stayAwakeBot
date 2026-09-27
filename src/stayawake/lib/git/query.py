@@ -11,8 +11,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from stayawake.lib.git.auth import github_https_auth, run_remote_git
-from stayawake.lib.git.run import run, stdout, stdout_bytes_fed, NETWORK_TIMEOUT
+from stayawake.lib.git import remote as gitremote
+from stayawake.lib.git.run import run, stdout, stdout_bytes_fed
 
 
 def is_git_repo(repo: str | Path) -> bool:
@@ -65,7 +65,8 @@ def remote_has_branch(remote: str, branch: str, *, repo: str | Path | None = Non
     """True if `branch` exists on `remote` (a remote name like 'origin', or an explicit URL).
     `repo=None` runs `ls-remote` against an explicit URL with no local clone (the by-slug
     discard path); `env` carries credential-safe auth (see `github_https_auth`)."""
-    res = run(repo, ["ls-remote", "--heads", remote, branch], env=env, timeout=NETWORK_TIMEOUT)
+    url = gitremote.resolve(remote, repo)
+    res = None if url is None else gitremote.ls_remote(url, ["--heads", branch], env=env)
     return res is not None and res.returncode == 0 and bool(res.stdout.strip())
 
 
@@ -351,44 +352,11 @@ class FetchResult:
     reason: str = ""
 
 
-def _without_token(text: str, token: str | None) -> str:
-    return text.replace(token, "***") if token else text
-
-
 def fetch_refs(repo: str | Path, *, token: str | None = None) -> FetchResult:
     """Refresh every `refs/remotes/origin/*` from the remote, pruning the ones it no longer has.
-
-    `branches_carrying` can only see branches this clone fetched, so on a stale clone a branch
-    that carries an infected commit is invisible and a sweep reports it updated every carrier
-    when it did not. The explicit `+refs/heads/*:refs/remotes/origin/*` is what makes the
-    refresh complete: a bare `git fetch origin` honours the clone's CONFIGURED refspec, which a
-    `--single-branch` clone narrows to one branch, and stays blind to the rest. `--prune` is
-    the other half — a branch deleted on the remote must stop counting as a carrier.
-
-    Never raises, and never reports success it did not achieve: git failing, being unable to
-    run, or exceeding `NETWORK_TIMEOUT` all return `ok=False` with a reason. `write.fetch` is
-    the neighbouring single-ref helper; it returns a bare bool and cannot express that refusal.
-
-    `token` authenticates through `github_https_auth`, so the secret reaches git only in the
-    child environment. Trap: that helper falls back to credential-in-URL on Windows, so git's
-    own message is scrubbed of the token before it becomes a `reason` anyone may log.
-    """
-    slug = origin_slug(repo) if token else None
-    refspec = "+refs/heads/*:refs/remotes/origin/*"
-    if slug:
-        res = run_remote_git(slug, token, lambda url, env: run(
-            repo, ["fetch", "--prune", "--no-tags", url, refspec], env=env,
-            timeout=NETWORK_TIMEOUT))
-    else:
-        with github_https_auth(token) as (_prefix, env):
-            res = run(repo, ["fetch", "--prune", "--no-tags", "origin", refspec],
-                      env=env, timeout=NETWORK_TIMEOUT)
-    if res is None:
-        return FetchResult(False, "git fetch could not run, or exceeded the network timeout")
-    if res.returncode == 0:
-        return FetchResult(True)
-    reported = (res.stderr or res.stdout or "").strip() or f"git fetch exited {res.returncode}"
-    return FetchResult(False, _without_token(reported, token))
+    Implemented by `write.fetch.fetch_refs`."""
+    from stayawake.lib.git.write.fetch import fetch_refs as refresh
+    return refresh(repo, token=token)
 
 
 _LOCAL_REF = "refs/heads/"
@@ -459,7 +427,8 @@ def remote_branches_matching(remote: str, pattern: str, *, repo: str | Path | No
                              env: dict | None = None) -> list[str] | None:
     """Branch names on `remote` matching a glob. `None` when the remote could not be listed —
     an empty list means it answered and nothing matched."""
-    res = run(repo, ["ls-remote", "--heads", remote, pattern], env=env, timeout=NETWORK_TIMEOUT)
+    url = gitremote.resolve(remote, repo)
+    res = None if url is None else gitremote.ls_remote(url, ["--heads", pattern], env=env)
     if res is None or res.returncode != 0:
         return None
     return [ln.split("refs/heads/", 1)[1].strip()

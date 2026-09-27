@@ -9,6 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from stayawake.lib.git.run import OPERATOR_CONFIG, run as git_run
 from stayawake.utils.invocation import POSIX_SHELLS
 from .models import HygieneIssue, SCRATCH_ROOTS, _WIPER_NOTE
 
@@ -236,15 +237,18 @@ _GIT_BOOL = {"true", "false", "yes", "no", "on", "off", "1", "0"}
 _GIT_BANG_KEY = re.compile(r"^(?:alias\.[^=]+|credential\.(?:[^=]+\.)?helper)$")
 
 
+def _list_global_config():
+    """`git config --global --list -z`, run from no repository. Returns the completed process, or
+    None when git could not run."""
+    return git_run(None, ["config", "--global", "--list", "-z"], timeout=10,
+                   context=OPERATOR_CONFIG)
+
+
 def _git_global_config() -> list[tuple[str, str]]:
     """(key, value) pairs from the GLOBAL git config only (never a scanned repo's local config).
     Git-absent / no config → []. Uses -z framing so a multi-line value can't desync the parse."""
-    try:
-        r = subprocess.run(["git", "config", "--global", "--list", "-z"],
-                           capture_output=True, text=True, errors="replace", timeout=10)
-    except (FileNotFoundError, OSError, subprocess.SubprocessError):
-        return []
-    if r.returncode != 0:
+    r = _list_global_config()
+    if r is None or r.returncode != 0:
         return []
     pairs: list[tuple[str, str]] = []
     for chunk in r.stdout.split("\0"):
@@ -289,10 +293,8 @@ def git_config_predicate() -> str | None:
     check did not cover."""
     if not _has_global_git_config():
         return None                       # nothing on disk to be configured to run
-    try:
-        listing = subprocess.run(["git", "config", "--global", "--list", "-z"],
-                                 capture_output=True, text=True, errors="replace", timeout=10)
-    except (FileNotFoundError, OSError, subprocess.SubprocessError):
+    listing = _list_global_config()
+    if listing is None:
         return ("A global git configuration exists but git could not be run to read it, so what it "
                 "makes git execute was not examined.")
     if listing.returncode != 0:

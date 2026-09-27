@@ -14,13 +14,11 @@ objects the rewrite removed from the ones it left alone.
 """
 from __future__ import annotations
 
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from stayawake.lib.git.run import run, run_ok, stdout
-
-from stayawake.utils import scratch
+from stayawake.lib.git.borrowed import borrow
+from stayawake.lib.git.run import UNTRUSTED, run, stdout
 
 CAPTURE_REF_PREFIX = "refs/saw-capture/"
 
@@ -70,63 +68,46 @@ def _range_args(tips: list[str], exclusions: list[str]) -> list[str]:
 
 def _count(repo: str | Path, args: list[str]) -> int | None:
     """The integer a counting git command printed, or None when it could not answer."""
-    res = run(repo, args)
+    res = run(repo, args, context=UNTRUSTED)
     if res is None or res.returncode != 0:
         return None
     text = (res.stdout or "").strip()
     return int(text) if text.isdigit() else None
 
 
-def _object_store(repo: str | Path) -> Path | None:
-    """Absolute path to the repository's object database, or None when `repo` is not a repo.
-
-    `--git-path objects` is the form that also answers for a LINKED WORKTREE, where it resolves
-    to the main repository's store; `--absolute-git-dir` there names a per-worktree directory
-    that holds no objects at all. It prints a path relative to `repo` for a normal and a bare
-    repository, so a relative answer is resolved against `repo`.
-    """
-    named = stdout(repo, ["rev-parse", "--git-path", "objects"]).strip()
-    if not named:
-        return None
-    store = Path(named)
-    return store if store.is_absolute() else (Path(repo) / store).resolve()
-
-
-def _write_bundle(repo: str | Path, store: Path, old_tips: list[str], new_tips: list[str],
-                  destination: Path) -> str:
-    """Write the bundle from a throwaway repository that reads `repo`'s objects through
-    `alternates`. Returns '' on success, else an operator-readable reason.
-
-    `git bundle create` names its contents by REF and refuses a rev list holding none of them
-    ("Refusing to create empty bundle" — measured, git 2.39), so each old tip needs a ref.
-    Rejected: creating those refs in `repo`. Capture runs BEFORE any ref moves, so a capture ref
-    left behind by a crash keeps the old tip reachable and the rewrite then orphans nothing —
-    the evidence would survive by disabling the very thing it is evidence of. The staging
-    repository owns the refs and is deleted with them; `repo` is never written to.
-    """
-    stage = scratch.new_dir("the capture staging repository")
+def _write_bundle(repo: str | Path, old_tips: list[str], new_tips: list[str],
+                  destination: Path) -> tuple[bool, str]:
+    """Write the bundle from a saw-owned repository that reads `repo`'s objects through `alternates`,
+    with a ref there for each old tip, and read it back there; `repo` is never written to.
+    Returns `(written, reason)`: reason '' on success, else an operator-readable one, with
+    `written` saying whether a file was left to inspect."""
     try:
-        if not run_ok(None, ["init", "--quiet", "--bare", str(stage)]):
-            return "the capture staging repository could not be created"
-        try:
-            (stage / "objects" / "info" / "alternates").write_text(f"{store}\n", encoding="utf-8")
-        except OSError as exc:
-            return f"the captured objects could not be reached: {exc}"
-        capture_refs = []
-        for tip in old_tips:
-            ref = f"{CAPTURE_REF_PREFIX}{tip}"
-            if not run_ok(stage, ["update-ref", ref, tip]):
-                return f"the orphaned tip {tip[:12]} could not be named for capture"
-            capture_refs.append(ref)
-        res = run(stage, ["bundle", "create", str(destination),
-                          *_range_args(capture_refs, new_tips)])
-        if res is None:
-            return "git bundle create could not run"
-        if res.returncode != 0:
-            return f"the capture could not be written: {(res.stderr or res.stdout or '').strip()}"
-        return ""
-    finally:
-        shutil.rmtree(stage, ignore_errors=True)
+        with borrow(repo) as stage:
+            capture_refs = []
+            for tip in old_tips:
+                ref = f"{CAPTURE_REF_PREFIX}{tip}"
+                if not _ok(stage.run(["update-ref", ref, tip])):
+                    return False, f"the orphaned tip {tip[:12]} could not be named for capture"
+                capture_refs.append(ref)
+            res = stage.run(["bundle", "create", str(destination),
+                             *_range_args(capture_refs, new_tips)])
+            if res is None:
+                return False, "git bundle create could not run"
+            if res.returncode != 0:
+                return False, f"the capture could not be written: {(res.stderr or res.stdout or '').strip()}"
+            checked = stage.run(["bundle", "verify", str(destination)])
+            if checked is None:
+                return True, "git bundle verify could not run"
+            if checked.returncode != 0:
+                detail = (checked.stderr or checked.stdout or "").strip()
+                return True, f"the capture did not read back: {detail}"
+            return True, ""
+    except OSError as exc:
+        return False, f"the captured objects could not be reached: {exc}"
+
+
+def _ok(res) -> bool:
+    return res is not None and res.returncode == 0
 
 
 def capture_bundle(repo: str | Path, orphaned: list[tuple[str, str]],
@@ -163,8 +144,7 @@ def capture_bundle(repo: str | Path, orphaned: list[tuple[str, str]],
         return BundleResult(None, False, 0, 0, "")
     objects = _count(repo, ["rev-list", "--objects", "--count", *orphaned_range]) or 0
 
-    store = _object_store(repo)
-    if store is None:
+    if not stdout(repo, ["rev-parse", "--git-dir"], context=UNTRUSTED).strip():
         return BundleResult(None, False, commits, objects,
                             f"{repo} is not a git repository")
     try:
@@ -173,15 +153,7 @@ def capture_bundle(repo: str | Path, orphaned: list[tuple[str, str]],
         return BundleResult(None, False, commits, objects,
                             f"the capture destination could not be created: {exc}")
 
-    failure = _write_bundle(repo, store, old_tips, new_tips, dest)
+    written, failure = _write_bundle(repo, old_tips, new_tips, dest)
     if failure:
-        return BundleResult(None, False, commits, objects, failure)
-
-    checked = run(repo, ["bundle", "verify", str(dest)])
-    if checked is None:
-        return BundleResult(dest, False, commits, objects, "git bundle verify could not run")
-    if checked.returncode != 0:
-        detail = (checked.stderr or checked.stdout or "").strip()
-        return BundleResult(dest, False, commits, objects,
-                            f"the capture did not read back: {detail}")
+        return BundleResult(dest if written else None, False, commits, objects, failure)
     return BundleResult(dest, True, commits, objects, "")

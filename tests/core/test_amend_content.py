@@ -17,7 +17,7 @@ import unittest
 from unittest import mock
 from pathlib import Path
 
-from stayawake.lib.git.merge.tree import auto_merge
+from stayawake.lib.git.borrowed import borrow
 from stayawake.lib.git import query
 from stayawake.lib.git.query import changed_paths
 from stayawake.lib.git.write import amend, rebuild
@@ -241,13 +241,12 @@ class TestPointBranchAtGuard(unittest.TestCase):
         real = amend.run_ok
 
         def only_the_first_update_ref(r, args, **kw):
-            if args[:1] == ["reset"]:
-                return False
             if args[:1] == ["update-ref"] and args[2:3] == [before]:
                 return False          # the put-back is refused too
             return real(r, args, **kw)
 
-        with mock.patch.object(amend, "run_ok", only_the_first_update_ref):
+        with mock.patch.object(amend, "run_ok", only_the_first_update_ref), \
+             mock.patch.object(amend.working_tree.PreparedMove, "apply", return_value=False):
             with self.assertRaises(amend.AmendUnwindFailed) as raised:
                 amend.point_branch_at(repo, "main", target, before)
         self.assertEqual(raised.exception.unrestored, ["main"])
@@ -357,13 +356,15 @@ class TestTheConflictSetIsPathsOnly(unittest.TestCase):
         _write(repo, "f.txt", "MAIN\nline2\n")
         _commit(repo, "main work")
 
-        merged = auto_merge(repo, _rev(repo, "main"), _rev(repo, "side"))
+        with borrow(repo) as borrowed:
+            merged = borrowed.merge_tree(_rev(repo, "main"), _rev(repo, "side"))
 
         self.assertEqual(merged.conflicted, frozenset({"f.txt"}))
 
     def test_a_clean_merge_conflicts_on_nothing(self):
         repo, _evil = _repo_with_evil_merge()
-        merged = auto_merge(repo, _rev(repo, "HEAD^1"), _rev(repo, "HEAD^2"))
+        with borrow(repo) as borrowed:
+            merged = borrowed.merge_tree(_rev(repo, "HEAD^1"), _rev(repo, "HEAD^2"))
         self.assertEqual(merged.conflicted, frozenset())
 
 

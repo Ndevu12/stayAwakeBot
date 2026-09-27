@@ -225,7 +225,7 @@ class _AmendFixture(GitSandbox):
                  dict(side_effect=lambda r, s, b, tk: (True, self._rev(b)))),
                 # `_tags_at` asks the REMOTE for tags; unstubbed every gate test would wait out
                 # the network timeout against a repository that does not exist.
-                ("run", dict(return_value=_NoRemoteTags())),
+                ("gitremote.ls_remote", dict(return_value=_NoRemoteTags())),
             ):
                 held = amendmod
                 for part in target.split("."):
@@ -972,7 +972,7 @@ class TestAmendGates(_AmendFixture):
                       f"{real}\trefs/heads/{self.base}\n")
             stderr = ""
 
-        with mock.patch(self.AT + "run", return_value=R()):
+        with mock.patch(self.AT + "gitremote.ls_remote", return_value=R()):
             known, sha = amendmod._read_remote_head(self.d, "acme/app", self.base, "t")
         self.assertTrue(known)
         self.assertEqual(sha, real)
@@ -1005,7 +1005,7 @@ class TestAmendGates(_AmendFixture):
             stdout = f"{old}\trefs/tags/v1.0^{{}}\n"
             stderr = ""
 
-        with mock.patch(self.AT + "run", return_value=R()), \
+        with mock.patch(self.AT + "gitremote.ls_remote", return_value=R()), \
              mock.patch(self.AT + "authority.fork_count", return_value=0):
             outcome = self._act()
         self.assertIn(Cause.TAGS_AT_REPLACED_COMMIT, self._causes(outcome))
@@ -1020,7 +1020,7 @@ class TestAmendGates(_AmendFixture):
             stdout = ""
             stderr = "could not read"
 
-        with mock.patch(self.AT + "run", return_value=R()), \
+        with mock.patch(self.AT + "gitremote.ls_remote", return_value=R()), \
              mock.patch(self.AT + "authority.fork_count", return_value=0):
             outcome = self._act()
         self.assertIn(Cause.TAGS_NOT_ESTABLISHED, self._causes(outcome))

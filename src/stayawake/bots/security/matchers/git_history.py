@@ -59,26 +59,31 @@ class GitHistoryMatcher(Matcher):
         heuristic_sig = next((s for s in by_conf.values() if s.get("confidence") == "heuristic"), None)
         content_sig = build_confirmed_loader_check(all_signatures or signatures)
         findings: list[Finding] = []
-        for sha in gitutil.merge_commits(target.repo_root)[:_MAX_CANDIDATES]:
-            evil = gitutil.evil_merge_paths(target.repo_root, sha, content_sig=content_sig,
-                                            obfuscation_reason=_obfuscation_reason)
-            if not evil:
-                continue
-            meta = gitutil.commit_meta(target.repo_root, sha)
-            paths = sorted(evil)
-            loader_paths = [p for p in paths if evil[p].startswith(_LOADER_REASON_PREFIX)]
-            sig = (loader_sig if loader_paths else heuristic_sig) or heuristic_sig or loader_sig
-            why = evil[(loader_paths or paths)[0]]
-            findings.append(Finding(
-                signature_id=sig["id"], category=sig["category"],
-                severity=Severity.parse(sig["severity"]), path=sha[:10],
-                description=sig["description"], remediation=sig.get("remediation", "manual"),
-                evidence=f"{len(evil)} corroborated path(s) introduced beyond a clean "
-                         f"3-way merge; e.g. {paths[:3]} ({why}); "
-                         f"{_liveness_note(target.repo_root, sha, paths)}; "
-                         f"by {meta.get('author_email','?')}",
-                vector="evil-merge", related_paths=tuple(paths),
-                payload_paths=tuple(loader_paths), commit_sha=sha,
-                confidence=(HEURISTIC if sig.get("confidence") == "heuristic" else CONFIRMED),
-                composed_evidence=True))
+        with gitutil.borrowed_or_none(target.repo_root) as borrowed:
+            for sha in gitutil.merge_commits(target.repo_root)[:_MAX_CANDIDATES]:
+                evil = gitutil.evil_merge_paths(target.repo_root, sha, content_sig=content_sig,
+                                                obfuscation_reason=_obfuscation_reason,
+                                                borrowed=borrowed)
+                if evil:
+                    findings.append(self._finding(target, sha, evil, loader_sig, heuristic_sig))
         return findings
+
+    @staticmethod
+    def _finding(target, sha: str, evil: dict[str, str], loader_sig, heuristic_sig) -> Finding:
+        meta = gitutil.commit_meta(target.repo_root, sha)
+        paths = sorted(evil)
+        loader_paths = [p for p in paths if evil[p].startswith(_LOADER_REASON_PREFIX)]
+        sig = (loader_sig if loader_paths else heuristic_sig) or heuristic_sig or loader_sig
+        why = evil[(loader_paths or paths)[0]]
+        return Finding(
+            signature_id=sig["id"], category=sig["category"],
+            severity=Severity.parse(sig["severity"]), path=sha[:10],
+            description=sig["description"], remediation=sig.get("remediation", "manual"),
+            evidence=f"{len(evil)} corroborated path(s) introduced beyond a clean "
+                     f"3-way merge; e.g. {paths[:3]} ({why}); "
+                     f"{_liveness_note(target.repo_root, sha, paths)}; "
+                     f"by {meta.get('author_email','?')}",
+            vector="evil-merge", related_paths=tuple(paths),
+            payload_paths=tuple(loader_paths), commit_sha=sha,
+            confidence=(HEURISTIC if sig.get("confidence") == "heuristic" else CONFIRMED),
+            composed_evidence=True)

@@ -104,7 +104,8 @@ def forget() -> None:
 
 def global_template_dir() -> str | None:
     """Return git's global `init.templateDir`, or None when unset."""
-    val = gitutil.stdout(None, ["config", "--global", "--get", "init.templateDir"]).strip()
+    val = gitutil.stdout(None, ["config", "--global", "--get", "init.templateDir"],
+                         context=gitutil.OPERATOR_CONFIG).strip()
     return os.path.expanduser(val) if val else None
 
 
@@ -236,7 +237,8 @@ def _ask(repo: Path, args: list[str]) -> str:
 
 def global_hooks_path() -> str | None:
     """Return git's global `core.hooksPath`, or None when unset."""
-    val = gitutil.stdout(None, ["config", "--global", "--get", "core.hooksPath"]).strip()
+    val = gitutil.stdout(None, ["config", "--global", "--get", "core.hooksPath"],
+                         context=gitutil.OPERATOR_CONFIG).strip()
     return val or None
 
 
