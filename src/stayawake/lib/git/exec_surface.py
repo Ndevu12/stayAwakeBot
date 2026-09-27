@@ -21,9 +21,6 @@ HOOK_NAMES = frozenset((
 MAX_INCLUDE_DEPTH = 10
 MAX_GIT_DIRS = 256
 MAX_CONFIG_BYTES = 4 << 20
-MAX_ATTRIBUTE_BYTES = 1 << 20
-MAX_ATTRIBUTE_FILES = 10_000
-_DRIVER_ATTRIBUTES = ("filter", "diff", "merge")
 _INCLUDE_NAMES = ("include.path",)
 @dataclass(frozen=True)
 class ConfigEntry:
@@ -229,71 +226,6 @@ def _last(entries: list[ConfigEntry], key: str) -> ConfigEntry | None:
     return next((e for e in reversed(entries) if e.key.lower() == key and e.value), None)
 
 
-def _attribute_drivers(text: str, drivers: dict[str, set]) -> None:
-    """Collect the driver names an attributes file selects. Takes its text and the sets to add
-    to. Returns nothing."""
-    for raw in text.splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        for token in line.split()[1:]:
-            name, eq, value = token.partition("=")
-            if eq and name in drivers and value:
-                drivers[name].add(value)
-
-
-def _tracked_attribute_files(work_tree: Path) -> list[Path] | None:
-    """List the attributes files the index tracks. Takes the working tree. Returns their paths,
-    or None when git could not list them."""
-    res = run(work_tree, ["ls-files", "-z"])
-    if res is None or res.returncode != 0:
-        return None
-    return [work_tree / rel for rel in res.stdout.split("\0")
-            if rel and rel.rsplit("/", 1)[-1] == ".gitattributes"][:MAX_ATTRIBUTE_FILES]
-
-
-def selected_drivers(work_tree: Path, common_dir: Path, entries: list[ConfigEntry],
-                     surface: ExecSurface) -> dict[str, set] | None:
-    """Collect the filter, diff and merge drivers any attributes source selects. Takes the working
-    tree, the common git directory, the configuration entries and the surface. Returns the names by
-    attribute, or None when the sources could not all be read."""
-    drivers: dict[str, set] = {name: set() for name in _DRIVER_ATTRIBUTES}
-    sources = [common_dir / "info" / "attributes", work_tree / ".gitattributes"]
-    configured = _last(entries, "core.attributesfile")
-    if configured is not None:
-        sources.append(_resolve(work_tree, configured.value))
-    tracked = _tracked_attribute_files(work_tree)
-    complete = tracked is not None
-    sources += tracked or []
-    for path in dict.fromkeys(sources):
-        if not os.path.lexists(path):
-            continue
-        try:
-            if not pathsafe.is_regular_file(path) or path.stat().st_size > MAX_ATTRIBUTE_BYTES:
-                surface.unexamined.append(f"{path}: not a readable attributes file")
-                complete = False
-                continue
-        except OSError as exc:
-            surface.unexamined.append(f"{path}: {type(exc).__name__}")
-            complete = False
-            continue
-        text = pathsafe.read_regular_text(path)
-        if text is None:
-            surface.unexamined.append(f"{path}: unreadable")
-            complete = False
-            continue
-        _attribute_drivers(text, drivers)
-    return drivers if complete else None
-
-
-def _runs_under_attributes(command: Command, drivers: dict[str, set] | None) -> bool:
-    """Say whether a driver entry is selected. Takes the command and the selected drivers (None
-    when unknown, which selects every driver). Returns True when git would run it."""
-    if command.rule.driver is None or drivers is None:
-        return True
-    return subsection(command.entry.key) in drivers[command.rule.driver]
-
-
 def _hooks(hooks_dir: Path, runs: bool, git_dir: Path | None, surface: ExecSurface) -> list[Hook]:
     """List the files in a hooks directory under a hook's name. Takes the directory, whether git
     runs hooks from it, the git directory it serves and the surface. Returns them by name."""
@@ -358,10 +290,8 @@ def read_exec_surface(work_tree: Path) -> ExecSurface | None:
         surface.unexamined.append(f"{git_dir}: {type(exc).__name__}")
         return surface
     entries = _repo_config(git_dir, common_dir, surface)
-    drivers = selected_drivers(work_tree, common_dir, entries, surface)
     surface.git_dirs = list(dict.fromkeys([git_dir, common_dir]))
-    surface.commands = [c for c in _commands(entries, common_dir)
-                        if _runs_under_attributes(c, drivers)]
+    surface.commands = _commands(entries, common_dir)
     surface.hooks_dir = _hooks_dir(work_tree, common_dir, entries)
     surface.hooks = _hooks(surface.hooks_dir, True, common_dir, surface)
     default_hooks = common_dir / "hooks"
@@ -369,8 +299,7 @@ def read_exec_surface(work_tree: Path) -> ExecSurface | None:
         surface.hooks += _hooks(default_hooks, False, common_dir, surface)
     others = list(common_dir.glob("worktrees/*/config.worktree"))
     for config in others:
-        surface.commands += [c for c in _commands(read_config(config, surface), common_dir)
-                             if _runs_under_attributes(c, drivers)]
+        surface.commands += _commands(read_config(config, surface), common_dir)
     module_dirs = _module_git_dirs(common_dir, surface) + _submodule_pointers(work_tree, surface)
     for module in dict.fromkeys(module_dirs):
         if module in surface.git_dirs or len(surface.git_dirs) >= MAX_GIT_DIRS:

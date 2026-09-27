@@ -14,7 +14,7 @@ UNTRUSTED_SUBCOMMANDS = frozenset({
     "cat-file", "ls-tree", "rev-list", "rev-parse", "for-each-ref", "show-ref", "merge-base",
     "diff", "diff-tree", "log", "show", "ls-files", "hash-object", "read-tree", "write-tree",
     "update-index", "commit-tree", "mktree", "update-ref", "config", "symbolic-ref", "remote",
-    "tag", "worktree",
+    "tag", "worktree", "check-attr",
 })
 
 DIFF_SUBCOMMANDS = frozenset({"diff", "diff-tree", "log", "show"})

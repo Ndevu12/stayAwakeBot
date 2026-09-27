@@ -78,6 +78,49 @@ class TestAFilteredFileIsDecidedByItsRecord(_Checkout):
         self.assertEqual("y\n", (self.repo / "data.bin").read_text())
 
 
+class TestEveryRecordedChangeIsSeen(_Checkout):
+    """Check changes the stat data alone reveals."""
+
+    def setUp(self):
+        super().setUp()
+        self.repo = self.repo_with({".gitattributes": "*.bin filter=store\n", "keep.txt": "v1\n",
+                                    "data.bin": "x\n"})
+
+    def test_a_mode_change(self):
+        (self.repo / "keep.txt").chmod(0o755)
+        self.assertTrue(working_tree.is_dirty(self.repo))
+
+    def test_a_same_size_write_with_its_time_put_back(self):
+        path = self.repo / "keep.txt"
+        before = os.lstat(path)
+        time.sleep(0.01)
+        path.write_text("OP\n")
+        os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+        self.assertTrue(working_tree.is_dirty(self.repo))
+
+    def test_a_filtered_file_recorded_in_the_same_tick_as_the_index_is_clean(self):
+        index = self.repo / ".git" / "index"
+        recorded = os.lstat(self.repo / "data.bin").st_mtime_ns
+        os.utime(index, ns=(recorded, recorded))
+        self.assertFalse(working_tree.is_dirty(self.repo))
+
+
+class TestAttributesGitAppliesAreTheOnesUsed(_Checkout):
+    """Check attributes that come from a file the repository does not track."""
+
+    def test_a_move_over_a_file_an_untracked_attributes_file_filters_is_refused(self):
+        repo = self.repo_with({"f.s": "one\n"})
+        old = self.rev(repo)
+        (repo / "f.s").write_text("two\n")
+        self.git(repo, "commit", "-qam", "next")
+        new = self.rev(repo)
+        (repo / ".git" / "info").mkdir(exist_ok=True)
+        (repo / ".git" / "info" / "exclude").write_text(".gitattributes\n")
+        (repo / ".gitattributes").write_text("*.s filter=rot\n")
+        self.assertFalse(gitamend.point_branch_at(repo, "main", old, new))
+        self.assertEqual("two\n", (repo / "f.s").read_text())
+
+
 class TestASubmodulesWorkIsKept(_Checkout):
     """Check a submodule checked out inside the operator's checkout."""
 

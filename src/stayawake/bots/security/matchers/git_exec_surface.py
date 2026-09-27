@@ -44,6 +44,10 @@ _INLINE_INTERPRETER_CODE = re.compile(
 _DECODE_THEN_EVAL = re.compile(
     r"\b(?:eval|exec|Function|execSync|runInThisContext)\s{0,8}\(\s{0,8}[^;)\n]{0,64}?"
     r"\b(?:atob|Buffer\.from|b64decode|fromCharCode|decompress|fromhex|unhexlify)\b")
+_NETWORK_TOOL = re.compile(
+    r"\b(?:curl|wget|urlopen|urllib\.request|urlretrieve|Invoke-WebRequest|Invoke-RestMethod|iwr|irm"
+    r"|ncat|netcat|socat|nc)\b|\bfetch\s{0,8}\(|\b(?:requests|https?)\.get\s{0,8}\(|/dev/(?:tcp|udp)/",
+    re.IGNORECASE)
 _SCRIPT_SHEBANG = re.compile(r"^#!.{0,200}?\b(?:node|nodejs|bun|deno)\b")
 
 
@@ -122,7 +126,9 @@ def _in_git_dir_outside_hooks(path: Path, surface: ExecSurface) -> bool:
 def _unsafe_location(path: Path, surface: ExecSurface) -> str | None:
     """Say why a program or directory sits somewhere others can plant code. Takes the path and the
     surface. Returns the reason, or None."""
-    if _under_scratch(path):
+    inside = _within(Path(os.path.realpath(path)),
+                     [Path(os.path.realpath(p)) for p in [surface.work_tree, *surface.git_dirs]])
+    if _under_scratch(path) and not inside:
         return "under a shared scratch directory"
     if _other_writable(path) or _other_writable(path.parent):
         return "in a world-writable directory"
@@ -147,6 +153,19 @@ class _Grader:
             return None
         text = pathsafe.read_regular_text(path)
         return self.payload_check(text) if text else None
+
+    def _fetches_or_decodes(self, path: Path) -> bool:
+        """Whether a program file reaches the network, or decodes code and runs it. Takes the
+        file. Returns False when it cannot be read."""
+        try:
+            if path.stat().st_size > self.max_bytes:
+                return False
+        except OSError:
+            return False
+        text = pathsafe.read_regular_text(path) or ""
+        live = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
+        return bool(_NETWORK_TOOL.search(live) or FETCH_OR_DECODE_THEN_RUN.search(live)
+                    or _DECODE_THEN_EVAL.search(live))
 
     def command(self, c: Command) -> Judgement | None:
         key, where, value = c.entry.key, c.entry.source, c.entry.value
@@ -174,7 +193,9 @@ class _Grader:
             return Judgement(CONFIRMED, where, key, f"its command matches {hit}", value, c)
         carriers = []
         for path in _pointed_files(text, self.surface):
-            found = self._payload_in_file(path)
+            found = self._payload_in_file(path) or (
+                "a program that reaches the network or decodes and runs code" if rule.fires_on_its_own
+                and self._fetches_or_decodes(path) else None)
             if found:
                 carriers.append((path, found))
         if carriers:
@@ -183,9 +204,9 @@ class _Grader:
                              payload_files=tuple(p for p, _ in carriers))
         fetch_or_decode = bool(FETCH_OR_DECODE_THEN_RUN.search(text)
                                or _DECODE_THEN_EVAL.search(text))
-        if rule.fires_on_its_own and fetch_or_decode:
-            return Judgement(CONFIRMED, where, key, "git runs it on its own and it downloads or "
-                             "decodes code and runs it", value, c)
+        if rule.fires_on_its_own and (fetch_or_decode or _NETWORK_TOOL.search(text)):
+            return Judgement(CONFIRMED, where, key, "git runs it on its own and it reaches the "
+                             "network or decodes and runs code", value, c)
         reasons = []
         if fetch_or_decode:
             reasons.append("downloads or decodes code and runs it")

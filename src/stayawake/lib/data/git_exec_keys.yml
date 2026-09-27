@@ -7,6 +7,7 @@
 #                       unless-boolean     a boolean value is a toggle, anything else a command line
 #                       hooks-directory    the value names the directory hooks run from
 #                       ext-transport      the subsection after `ext::` is a command line
+#                       ext-address        a value starting `ext::` is a command line
 #                       enables-transport  the value switches a command-running transport on
 #   bang              a leading `!` is shell syntax to strip before reading the command (OPTIONAL)
 #   driver            the attribute that must select this entry before it runs:
@@ -70,3 +71,21 @@ keys:
     runs: ext-transport
   - key: protocol.ext.allow
     runs: enables-transport
+  - key: gpg.ssh.defaultkeycommand
+    fires_on_its_own: true
+  - key: core.alternaterefscommand
+    fires_on_its_own: true
+  - key: interactive.difffilter
+  - key: trailer.*.cmd
+  - key: trailer.*.command
+  - key: sendemail.sendmailcmd
+  - key: sendemail.tocmd
+  - key: sendemail.cccmd
+  - key: browser.*.cmd
+  - key: man.*.cmd
+  - key: remote.*.url
+    runs: ext-address
+    fires_on_its_own: true
+  - key: remote.*.pushurl
+    runs: ext-address
+    fires_on_its_own: true

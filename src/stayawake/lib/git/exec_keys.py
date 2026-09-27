@@ -16,9 +16,10 @@ AFTER_BANG = "after-bang"
 UNLESS_BOOLEAN = "unless-boolean"
 HOOKS_DIRECTORY = "hooks-directory"
 EXT_TRANSPORT = "ext-transport"
+EXT_ADDRESS = "ext-address"
 ENABLES_TRANSPORT = "enables-transport"
 _RUNS = frozenset({COMMAND, AFTER_BANG, UNLESS_BOOLEAN, HOOKS_DIRECTORY, EXT_TRANSPORT,
-                   ENABLES_TRANSPORT})
+                   EXT_ADDRESS, ENABLES_TRANSPORT})
 _DRIVERS = frozenset({"filter", "diff", "merge"})
 _BOOLEAN_WORDS = frozenset({"true", "false", "yes", "no", "on", "off", "1", "0", ""})
 _EXT_PREFIX = "ext::"
@@ -55,6 +56,8 @@ class ExecKey:
             return None
         if self.runs == AFTER_BANG and not text.startswith("!"):
             return None
+        if self.runs == EXT_ADDRESS:
+            return text[len(_EXT_PREFIX):] if text.lower().startswith(_EXT_PREFIX) else None
         return text[1:].lstrip() if self.bang and text.startswith("!") else text
 
 
