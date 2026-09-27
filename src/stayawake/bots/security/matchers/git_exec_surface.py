@@ -30,7 +30,7 @@ _MAX_POINTED_FILES = 8
 _MAX_PROGRAM_TOKENS = 2
 _EXT_ALWAYS = frozenset({"always"})
 
-_OPTS = r"(?:-[\w-]{1,20}\s{1,8}){0,4}"
+_OPTS = r"(?:-[\w:=.-]{1,40}\s{1,8}){0,4}"
 _INLINE_INTERPRETER_CODE = re.compile(
     r"(?<![\w.-])(?:"
     rf"(?:node|nodejs|bun)(?:\.exe)?\s{{1,8}}{_OPTS}(?:-e|--eval|-p|--print)(?![\w-])"
@@ -40,14 +40,22 @@ _INLINE_INTERPRETER_CODE = re.compile(
     rf"|php\s{{1,8}}{_OPTS}-r(?![\w-])"
     rf"|osascript\s{{1,8}}{_OPTS}-e(?![\w-])"
     rf"|(?:sh|bash|zsh|dash|ksh)\s{{1,8}}{_OPTS}-[a-zA-Z]{{0,4}}c(?![\w-])"
-    r")")
+    rf"|(?:pwsh|powershell)(?:\.exe)?\s{{1,8}}{_OPTS}-(?:c|command|e|ec|encodedcommand)(?![\w-])"
+    r")", re.IGNORECASE)
 _DECODE_THEN_EVAL = re.compile(
     r"\b(?:eval|exec|Function|execSync|runInThisContext)\s{0,8}\(\s{0,8}[^;)\n]{0,64}?"
     r"\b(?:atob|Buffer\.from|b64decode|fromCharCode|decompress|fromhex|unhexlify)\b")
-_NETWORK_TOOL = re.compile(
-    r"\b(?:curl|wget|urlopen|urllib\.request|urlretrieve|Invoke-WebRequest|Invoke-RestMethod|iwr|irm"
-    r"|ncat|netcat|socat|nc)\b|\bfetch\s{0,8}\(|\b(?:requests|https?)\.get\s{0,8}\(|/dev/(?:tcp|udp)/",
+_FETCHED = (r"(?:urlopen|urlretrieve|requests\.get|https?\.get|fetch|DownloadString|DownloadFile"
+            r"|Invoke-WebRequest|Invoke-RestMethod|recv|file_get_contents|curl|wget)")
+_EVALUATOR = r"(?:eval|exec|Function|IEX|Invoke-Expression|execSync|runInThisContext)"
+_FETCH_THEN_EVAL = re.compile(
+    rf"\b{_EVALUATOR}\b[^\n]{{0,256}}?\b{_FETCHED}\b|\b{_FETCHED}\b[^\n]{{0,256}}?\b{_EVALUATOR}\b",
     re.IGNORECASE)
+_SUBSTITUTED_FETCH = re.compile(
+    r"\b(?:sh|bash|zsh|dash|ksh)\s{1,8}-[a-zA-Z]{0,4}c\s{1,8}[\"']?\$\(\s{0,8}(?:curl|wget)\b",
+    re.IGNORECASE)
+_COMPOUND = re.compile(r"[;`]|&&|\|\||\$\(")
+_SPLIT_QUOTES = re.compile(r"''|\"\"|\\(?=\w)")
 _SCRIPT_SHEBANG = re.compile(r"^#!.{0,200}?\b(?:node|nodejs|bun|deno)\b")
 
 
@@ -102,7 +110,9 @@ def _pointed_files(text: str, surface: ExecSurface) -> list[Path]:
     found: list[Path] = []
     for token in _tokens(text):
         for part in token.split("="):
-            if not part or part.startswith("-") or ("/" not in part and "." not in part):
+            if not part or part.startswith("-"):
+                continue
+            if "/" not in part and "." not in part and not (surface.work_tree / part).is_file():
                 continue
             expanded = os.path.expanduser(part)
             candidate = Path(expanded if os.path.isabs(expanded) else surface.work_tree / expanded)
@@ -155,17 +165,18 @@ class _Grader:
         return self.payload_check(text) if text else None
 
     def _fetches_or_decodes(self, path: Path) -> bool:
-        """Whether a program file reaches the network, or decodes code and runs it. Takes the
-        file. Returns False when it cannot be read."""
+        """Whether a program file downloads or decodes code and runs it, by the standard a hook is
+        judged by. Takes the file. Returns False when it cannot be read or is not text."""
         try:
             if path.stat().st_size > self.max_bytes:
                 return False
         except OSError:
             return False
         text = pathsafe.read_regular_text(path) or ""
-        live = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
-        return bool(_NETWORK_TOOL.search(live) or FETCH_OR_DECODE_THEN_RUN.search(live)
-                    or _DECODE_THEN_EVAL.search(live))
+        if "\0" in text:
+            return False
+        return any(FETCH_OR_DECODE_THEN_RUN.search(_SPLIT_QUOTES.sub("", line))
+                   for line in text.splitlines() if not line.lstrip().startswith("#"))
 
     def command(self, c: Command) -> Judgement | None:
         key, where, value = c.entry.key, c.entry.source, c.entry.value
@@ -194,7 +205,7 @@ class _Grader:
         carriers = []
         for path in _pointed_files(text, self.surface):
             found = self._payload_in_file(path) or (
-                "a program that reaches the network or decodes and runs code" if rule.fires_on_its_own
+                "a program that downloads or decodes code and runs it" if rule.fires_on_its_own
                 and self._fetches_or_decodes(path) else None)
             if found:
                 carriers.append((path, found))
@@ -202,18 +213,23 @@ class _Grader:
             return Judgement(CONFIRMED, where, key,
                              f"runs a file that matches {carriers[0][1]}", value, c,
                              payload_files=tuple(p for p, _ in carriers))
-        fetch_or_decode = bool(FETCH_OR_DECODE_THEN_RUN.search(text)
-                               or _DECODE_THEN_EVAL.search(text))
-        if rule.fires_on_its_own and (fetch_or_decode or _NETWORK_TOOL.search(text)):
-            return Judgement(CONFIRMED, where, key, "git runs it on its own and it reaches the "
-                             "network or decodes and runs code", value, c)
+        joined = _SPLIT_QUOTES.sub("", text)
+        fetch_or_decode = bool(FETCH_OR_DECODE_THEN_RUN.search(joined)
+                               or _DECODE_THEN_EVAL.search(joined)
+                               or _FETCH_THEN_EVAL.search(joined)
+                               or _SUBSTITUTED_FETCH.search(joined))
+        if rule.fires_on_its_own and fetch_or_decode:
+            return Judgement(CONFIRMED, where, key, "git runs it on its own and it downloads or "
+                             "decodes code and runs it", value, c)
         reasons = []
         if fetch_or_decode:
             reasons.append("downloads or decodes code and runs it")
         if rule.runs == exec_keys.EXT_TRANSPORT:
             reasons.append("rewrites a remote address into a command line")
-        if not key.lower().startswith("alias.") and _INLINE_INTERPRETER_CODE.search(text):
+        if not key.lower().startswith("alias.") and _INLINE_INTERPRETER_CODE.search(joined):
             reasons.append("hands code to an interpreter inline")
+        if rule.fires_on_its_own and _COMPOUND.search(joined):
+            reasons.append("git runs a compound command line on its own")
         for program in _program_paths(text, self.surface.work_tree):
             why = _unsafe_location(program, self.surface)
             if why:

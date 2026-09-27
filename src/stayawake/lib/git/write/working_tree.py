@@ -241,6 +241,14 @@ def is_dirty(worktree: str | Path, *, _depth: int = 0) -> bool:
     stale = [rel for rel, (mode, _oid) in committed.items() if mode != _GITLINK
              and not _stat_unchanged(worktree / os.fsdecode(rel), stats.get(rel, {}), mode,
                                      track_executable)]
+    for rel in stale:
+        recorded = stats.get(rel, {}).get(b"size", b"0")
+        try:
+            if recorded != b"0" and os.lstat(worktree / os.fsdecode(rel)).st_size & 0xFFFFFFFF \
+                    != int(recorded):
+                return True
+        except (OSError, ValueError):
+            return True
     if stale:
         object_format = stdout(worktree, ["rev-parse", "--show-object-format"],
                                context=UNTRUSTED).strip() or "sha1"

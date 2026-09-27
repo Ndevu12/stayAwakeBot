@@ -105,6 +105,16 @@ class TestEveryRecordedChangeIsSeen(_Checkout):
         self.assertFalse(working_tree.is_dirty(self.repo))
 
 
+class TestASizeChangeIsAChange(_Checkout):
+    """Check a file whose size changed although its converted content did not."""
+
+    def test_line_endings_rewritten_by_the_operator(self):
+        repo = self.repo_with({".gitattributes": "* text=auto\n", "a.txt": b"one\r\ntwo\r\n"})
+        self.assertFalse(working_tree.is_dirty(repo))
+        (repo / "a.txt").write_bytes(b"one\ntwo\n")
+        self.assertTrue(working_tree.is_dirty(repo))
+
+
 class TestAttributesGitAppliesAreTheOnesUsed(_Checkout):
     """Check attributes that come from a file the repository does not track."""
 
