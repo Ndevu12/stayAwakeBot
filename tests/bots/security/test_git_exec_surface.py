@@ -206,10 +206,17 @@ class TestLegitimateToolsAreNotConfirmed(ExecSurfaceSandbox):
         repo = self.repo()
         self.write(repo, ".gitattributes", "*.pdf diff=pdf\n*.jpg diff=exif\n*.db diff=sqlite3\n")
         self.append_config(repo, '[diff "pdf"]\n\ttextconv = pdftotext -layout\n'
-                                 '[diff "exif"]\n\ttextconv = exiftool\n'
-                                 '[diff "sqlite3"]\n\ttextconv = "echo .dump | sqlite3"\n'
-                                 '\tbinary = true\n')
-        self.assert_only_informational(repo, at_least=3)
+                                 '[diff "exif"]\n\ttextconv = exiftool\n')
+        self.assert_only_informational(repo, at_least=2)
+
+    def test_a_shell_recipe_is_suspicious_at_most(self):
+        repo = self.repo()
+        self.append_config(repo, '[diff "sqlite3"]\n\ttextconv = "echo .dump | sqlite3"\n'
+                                 '[diff "zip"]\n\ttextconv = sh -c \'unzip -p "$0"\'\n'
+                                 '[filter "dater"]\n\tclean = perl -pe \'s/x/y/\'\n')
+        tiers = self.graded(repo)
+        self.assertEqual([f.evidence for f in tiers[CONFIRMED]], [])
+        self.assertEqual(3, len(tiers[HEURISTIC]))
 
     def test_watchman_and_rs_git_fsmonitor(self):
         repo = self.repo()

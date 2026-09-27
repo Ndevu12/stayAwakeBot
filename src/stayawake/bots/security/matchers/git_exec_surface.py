@@ -12,6 +12,7 @@ from pathlib import Path
 from stayawake.bots.security import hookscript
 from stayawake.bots.security.hygiene.mechanism import (FETCH_OR_DECODE_THEN_RUN, _other_writable,
                                                        _under_scratch)
+from stayawake.bots.security.matchers import command_shape
 from stayawake.bots.security.matchers.base import Matcher, build_any_payload_check
 from stayawake.bots.security.models import (CONFIRMED, HEURISTIC, INFORMATIONAL, Finding,
                                             Severity)
@@ -54,7 +55,6 @@ _FETCH_THEN_EVAL = re.compile(
 _SUBSTITUTED_FETCH = re.compile(
     r"\b(?:sh|bash|zsh|dash|ksh)\s{1,8}-[a-zA-Z]{0,4}c\s{1,8}[\"']?\$\(\s{0,8}(?:curl|wget)\b",
     re.IGNORECASE)
-_COMPOUND = re.compile(r"[;`]|&&|\|\||\$\(")
 _SPLIT_QUOTES = re.compile(r"''|\"\"|\\(?=\w)")
 _SCRIPT_SHEBANG = re.compile(r"^#!.{0,200}?\b(?:node|nodejs|bun|deno)\b")
 
@@ -218,7 +218,8 @@ class _Grader:
                                or _DECODE_THEN_EVAL.search(joined)
                                or _FETCH_THEN_EVAL.search(joined)
                                or _SUBSTITUTED_FETCH.search(joined))
-        if rule.fires_on_its_own and fetch_or_decode:
+        if rule.fires_on_its_own and (fetch_or_decode
+                                      or command_shape.feeds_a_download_to_a_runner(text)):
             return Judgement(CONFIRMED, where, key, "git runs it on its own and it downloads or "
                              "decodes code and runs it", value, c)
         reasons = []
@@ -226,10 +227,10 @@ class _Grader:
             reasons.append("downloads or decodes code and runs it")
         if rule.runs == exec_keys.EXT_TRANSPORT:
             reasons.append("rewrites a remote address into a command line")
-        if not key.lower().startswith("alias.") and _INLINE_INTERPRETER_CODE.search(joined):
+        if rule.fires_on_its_own:
+            reasons += [f"git runs it on its own and {why}" for why in command_shape.not_plain(text)]
+        elif not key.lower().startswith("alias.") and _INLINE_INTERPRETER_CODE.search(joined):
             reasons.append("hands code to an interpreter inline")
-        if rule.fires_on_its_own and _COMPOUND.search(joined):
-            reasons.append("git runs a compound command line on its own")
         for program in _program_paths(text, self.surface.work_tree):
             why = _unsafe_location(program, self.surface)
             if why:
