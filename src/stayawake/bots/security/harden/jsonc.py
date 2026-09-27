@@ -13,6 +13,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from stayawake.bots.security.jsonc import code_only
+
 
 @dataclass(frozen=True)
 class Edit:
@@ -25,46 +27,6 @@ class Edit:
     @property
     def adds(self) -> bool:
         return self.was is None
-
-
-def code_only(text: str) -> str:
-    """`text` with every comment blanked out, character for character.
-
-    Positions still line up, so a search runs on this and the slice comes from the original.
-    """
-    out = list(text)
-    index, size, in_string, escaped = 0, len(text), False, False
-    while index < size:
-        char = text[index]
-        if in_string:
-            if escaped:
-                escaped = False
-            elif char == "\\":
-                escaped = True
-            elif char == '"':
-                in_string = False
-            index += 1
-            continue
-        if char == '"':
-            in_string = True
-            index += 1
-            continue
-        if char == "/" and index + 1 < size and text[index + 1] == "/":
-            while index < size and text[index] != "\n":
-                out[index] = " "
-                index += 1
-            continue
-        if char == "/" and index + 1 < size and text[index + 1] == "*":
-            while index < size and not (text[index] == "/" and index and text[index - 1] == "*"):
-                if text[index] != "\n":
-                    out[index] = " "
-                index += 1
-            if index < size:
-                out[index] = " "
-                index += 1
-            continue
-        index += 1
-    return "".join(out)
 
 
 def _key_pattern(key: str) -> re.Pattern:
