@@ -8,10 +8,13 @@ from pathlib import Path
 from stayawake.lib.git.run import OPERATOR_CONFIG, run
 
 
-def global_config() -> dict[str, str]:
+def global_config(repo: str | Path | None = None) -> dict[str, str]:
     """Every key in the operator's global git config, lower-cased as git lists it, with the last
-    value git would use. Empty when there is none or it cannot be read."""
-    res = run(None, ["config", "--global", "--list", "-z"], context=OPERATOR_CONFIG)
+    value git would use. Takes the repository the values are for, so a conditional include in the
+    global config applies as it would there; None reads from no repository. Empty when there is
+    none or it cannot be read."""
+    res = (run(repo, ["config", "--global", "--includes", "--list", "-z"]) if repo is not None
+           else run(None, ["config", "--global", "--includes", "--list", "-z"], context=OPERATOR_CONFIG))
     found: dict[str, str] = {}
     if res is None or res.returncode != 0:
         return found
@@ -22,10 +25,13 @@ def global_config() -> dict[str, str]:
     return found
 
 
-def global_bool(key: str) -> str:
+def global_bool(key: str, repo: str | Path | None = None) -> str:
     """`key` from the operator's global config as git spells a boolean (`true`/`false`), or ""
-    when it is not set there."""
-    res = run(None, ["config", "--global", "--type=bool", "--get", key], context=OPERATOR_CONFIG)
+    when it is not set there. Takes the key and the repository it is read for (see
+    `global_config`)."""
+    res = (run(repo, ["config", "--global", "--includes", "--type=bool", "--get", key]) if repo is not None
+           else run(None, ["config", "--global", "--includes", "--type=bool", "--get", key],
+                    context=OPERATOR_CONFIG))
     return res.stdout.strip() if res is not None and res.returncode == 0 else ""
 
 

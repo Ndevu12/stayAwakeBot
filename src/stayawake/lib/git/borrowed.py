@@ -49,6 +49,31 @@ class Borrowed:
         """Git's clean 3-way merge of `a` and `b`, written here. Returns None when there is none."""
         return auto_merge(self.path, a, b)
 
+    @contextlib.contextmanager
+    def attributes_then(self, extra: bytes) -> Iterator[None]:
+        """Hold the operator's attributes followed by `extra` while the block runs. Takes the
+        lines to append."""
+        info = self.path / "info" / "attributes"
+        info.write_bytes(self.attributes + extra)
+        try:
+            yield
+        finally:
+            with contextlib.suppress(OSError):
+                info.write_bytes(self.attributes)
+
+    def filtered(self, paths: list[bytes]) -> set[bytes] | None:
+        """The paths among `paths` the operator's attributes send through a filter. Takes paths
+        relative to the working tree. Returns them, or None when git could not say."""
+        if not paths:
+            return set()
+        res = run(self.path, ["check-attr", "-z", "--stdin", "filter"], context=SAW_OWNED,
+                  input_text=os.fsdecode(b"\0".join(paths) + b"\0"))
+        if res is None or res.returncode != 0:
+            return None
+        fields = os.fsencode(res.stdout or "").split(b"\0")
+        return {fields[i] for i in range(0, len(fields) - 2, 3)
+                if fields[i + 2] not in (b"unspecified", b"unset")}
+
     def materialise(self, treeish: str, dest: str | Path) -> bool:
         """Write `treeish`'s files under `dest` exactly as stored: no filter, end-of-line or encoding
         conversion. Takes the tree-ish and an existing directory. Returns whether every step ran."""

@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """An operator's checkout read and moved without `status` or `reset --hard`. The index and HEAD are
-read as listings, the working tree's bytes are hashed in Python as git hashes a blob, and a
-checkout follows its branch by writing the changed paths' raw bytes from a saw-owned repository and
-swapping in an index prepared on a private copy."""
+read as listings; a tracked file is clean when its recorded stat data still matches, and otherwise
+when its bytes, converted by git's built-in end-of-line and ident rules, hash to the recorded blob.
+A checkout follows its branch by writing the changed paths with those same conversions from a
+saw-owned repository and swapping in an index prepared on a private copy."""
 from __future__ import annotations
 
 import hashlib
 import os
+import re
 import shutil
 import stat
 from pathlib import Path
@@ -20,7 +22,9 @@ from stayawake.utils import scratch
 _GITLINK = b"160000"
 _SYMLINK = b"120000"
 _EXECUTABLE = b"100755"
-_RAW_BYTES_ATTRIBUTES = "* -text -eol -filter -ident -working-tree-encoding\n"
+_NO_FILTER = b"* -filter\n"
+_STAT_FIELD = re.compile(rb"(ctime|mtime|dev|ino|uid|gid|size|flags): (\S+)")
+_SUBMODULE_DEPTH = 8
 
 
 class TreeStateUnknown(OSError):
@@ -64,8 +68,65 @@ def _blob_id(data: bytes, object_format: str) -> bytes:
     return digest.hexdigest().encode()
 
 
-def _file_matches(path: Path, mode: bytes, oid: bytes, object_format: str,
-                  track_executable: bool) -> bool:
+def _recorded_stats(worktree: Path) -> dict[bytes, dict[bytes, bytes]] | None:
+    """`{path: {field: value}}` of the stat data the index records for each entry. Takes the
+    working tree. Returns None when git could not list it."""
+    out = stdout_bytes(worktree, ["ls-files", "-s", "--debug", "-z"], context=UNTRUSTED)
+    if out is None:
+        return None
+    stats: dict[bytes, dict[bytes, bytes]] = {}
+    chunks = out.split(b"\0")
+    header = chunks[0]
+    for chunk in chunks[1:]:
+        lines = chunk.split(b"\n")
+        fields: dict[bytes, bytes] = {}
+        rest = 0
+        for rest, line in enumerate(lines):
+            found = _STAT_FIELD.findall(line) if line.startswith(b"  ") else []
+            if not found:
+                break
+            fields.update(found)
+        else:
+            rest = len(lines)
+        path = header.partition(b"\t")[2]
+        if path:
+            stats[path] = fields
+        header = b"\n".join(lines[rest:])
+    return stats
+
+
+def _nanoseconds(value: bytes) -> int:
+    seconds, _, fraction = value.partition(b":")
+    return int(seconds) * 1_000_000_000 + int(fraction or b"0")
+
+
+def _stat_unchanged(path: Path, recorded: dict[bytes, bytes], index_written_ns: int) -> bool:
+    """Whether `path` still has the stat data the index recorded, and the record predates the
+    index. Takes the file, its recorded fields and when the index was written. Returns False
+    when unsure."""
+    try:
+        info = os.lstat(path)
+        mtime = _nanoseconds(recorded[b"mtime"])
+        return (mtime < index_written_ns and info.st_mtime_ns == mtime
+                and info.st_size & 0xFFFFFFFF == int(recorded[b"size"])
+                and info.st_ino & 0xFFFFFFFF == int(recorded[b"ino"]))
+    except (OSError, KeyError, ValueError):
+        return False
+
+
+def _blob_id(data: bytes, object_format: str) -> bytes:
+    digest = hashlib.new("sha256" if object_format == "sha256" else "sha1")
+    digest.update(b"blob %d\0" % len(data))
+    digest.update(data)
+    return digest.hexdigest().encode()
+
+
+def _content_matches(borrowed, worktree: Path, rel: bytes, mode: bytes, oid: bytes,
+                     object_format: str, track_executable: bool) -> bool:
+    """Whether the file at `rel` holds what the index records, its bytes converted by git's
+    built-in rules for that path. Takes the saw-owned repository, the working tree, the path, its
+    recorded mode and id, the object format and whether the executable bit counts."""
+    path = worktree / os.fsdecode(rel)
     try:
         info = os.lstat(path)
         if mode == _SYMLINK:
@@ -75,16 +136,32 @@ def _file_matches(path: Path, mode: bytes, oid: bytes, object_format: str,
             return False
         if track_executable and bool(info.st_mode & stat.S_IXUSR) != (mode == _EXECUTABLE):
             return False
-        return _blob_id(path.read_bytes(), object_format) == oid
+        data = path.read_bytes()
     except OSError:
         return False
+    hashed = stdout_bytes_fed(borrowed.path, ["hash-object", f"--path={os.fsdecode(rel)}",
+                                              "--stdin"], data, context=SAW_OWNED)
+    return hashed is not None and hashed.strip() == oid
 
 
-def is_dirty(worktree: str | Path) -> bool:
+def _submodule_dirty(worktree: Path, rel: bytes, oid: bytes, depth: int) -> bool:
+    """Whether the submodule checked out at `rel` holds anything the recorded commit does not.
+    Takes the working tree, the path, the recorded commit and the nesting depth. An uninitialised
+    submodule is clean."""
+    path = worktree / os.fsdecode(rel)
+    if not os.path.lexists(path / ".git"):
+        return False
+    if depth >= _SUBMODULE_DEPTH:
+        return True
+    head = stdout(path, ["rev-parse", "--verify", "--quiet", "HEAD"], context=UNTRUSTED).strip()
+    return head.encode() != oid or is_dirty(path, _depth=depth + 1)
+
+
+def is_dirty(worktree: str | Path, *, _depth: int = 0) -> bool:
     """Whether `worktree` holds anything its HEAD does not: a staged change, a conflict, a tracked
-    file whose bytes or mode differ, or an untracked file that is not ignored. Content is compared
-    as raw bytes, so a file a filter would have normalised reads as changed — the answer errs
-    towards dirty. A checkout that cannot be read is dirty."""
+    file whose content or mode differs, a submodule off its recorded commit or with work of its
+    own, or an untracked file that is not ignored. A changed file the operator's attributes send
+    through a filter counts as changed. A checkout that cannot be read is dirty."""
     worktree = Path(worktree)
     try:
         head = stdout(worktree, ["rev-parse", "--verify", "--quiet", "HEAD"],
@@ -97,16 +174,35 @@ def is_dirty(worktree: str | Path) -> bool:
         return True
     if {p: (m, o) for p, (m, o, _s) in indexed.items()} != committed:
         return True
-    object_format = stdout(worktree, ["rev-parse", "--show-object-format"],
-                           context=UNTRUSTED).strip() or "sha1"
-    track_executable = stdout(worktree, ["config", "--get", "--type=bool", "core.filemode"],
-                              context=UNTRUSTED).strip() != "false"
-    for path, (mode, oid) in committed.items():
-        if mode == _GITLINK:
-            continue
-        if not _file_matches(worktree / os.fsdecode(path), mode, oid, object_format,
-                             track_executable):
+    for rel, (mode, oid) in committed.items():
+        if mode == _GITLINK and _submodule_dirty(worktree, rel, oid, _depth):
             return True
+    stats = _recorded_stats(worktree)
+    gitdir = stdout(worktree, ["rev-parse", "--path-format=absolute", "--git-dir"],
+                    context=UNTRUSTED).strip()
+    try:
+        index_written = os.stat(Path(gitdir) / "index").st_mtime_ns if gitdir else 0
+    except OSError:
+        index_written = 0
+    if stats is None or not index_written:
+        return True
+    stale = [rel for rel, (mode, _oid) in committed.items() if mode != _GITLINK
+             and not _stat_unchanged(worktree / os.fsdecode(rel), stats.get(rel, {}), index_written)]
+    if stale:
+        object_format = stdout(worktree, ["rev-parse", "--show-object-format"],
+                               context=UNTRUSTED).strip() or "sha1"
+        track_executable = stdout(worktree, ["config", "--get", "--type=bool", "core.filemode"],
+                                  context=UNTRUSTED).strip() != "false"
+        with borrow(worktree) as borrowed:
+            filtered = borrowed.filtered(stale)
+            if filtered is None or filtered:
+                return True
+            with borrowed.attributes_then(_NO_FILTER):
+                for rel in stale:
+                    mode, oid = committed[rel]
+                    if not _content_matches(borrowed, worktree, rel, mode, oid, object_format,
+                                            track_executable):
+                        return True
     listing = ["ls-files", "-z", "--others", "--exclude-standard"]
     excludes = operator_config.global_excludes_file()
     if excludes is not None:
@@ -125,14 +221,17 @@ def _has_link_above(worktree: Path, rel: bytes) -> bool:
 
 
 def _write_paths(repo: Path, worktree: Path, commit: str, entries, paths: list[bytes]) -> bool:
-    """Write the raw bytes `commit` records at `paths` into `worktree`, and delete every path in
-    `paths` it does not record. Returns whether every one was written."""
+    """Write what `commit` records at `paths` into `worktree`, converted by git's built-in
+    end-of-line and ident rules, and delete every path in `paths` it does not record; a directory
+    holding a repository of its own is left in place. Returns whether every one was written."""
     deleted = [p for p in paths if p not in entries]
     written = [p for p in paths if p in entries and entries[p][0] != _GITLINK]
     for rel in deleted:
         if _has_link_above(worktree, rel):
             return False
         target = worktree / os.fsdecode(rel)
+        if os.path.lexists(target / ".git"):
+            continue
         try:
             if target.is_dir() and not target.is_symlink():
                 shutil.rmtree(target)
@@ -146,9 +245,7 @@ def _write_paths(repo: Path, worktree: Path, commit: str, entries, paths: list[b
             parent = parent.parent
     if not written:
         return True
-    with borrow(repo) as borrowed:
-        (borrowed.path / "info").mkdir(exist_ok=True)
-        (borrowed.path / "info" / "attributes").write_text(_RAW_BYTES_ATTRIBUTES, encoding="utf-8")
+    with borrow(repo) as borrowed, borrowed.attributes_then(_NO_FILTER):
         index = scratch.new_file("an index to write a checkout from")
         try:
             index.unlink()
@@ -178,7 +275,8 @@ class PreparedMove:
 
     def prepare(self) -> bool:
         """Rewrite a copy of the index to `new` and take the index lock. Returns whether both
-        happened; on False nothing is held."""
+        happened; on False nothing is held, and False when a path the move rewrites passes
+        through a filter."""
         try:
             before = _tree_entries(self.holder.worktree, self.old)
             self.target = _tree_entries(self.holder.worktree, self.new)
@@ -186,6 +284,13 @@ class PreparedMove:
             return False
         self.paths = sorted(p for p in set(before) | set(self.target)
                             if before.get(p) != self.target.get(p))
+        files = [p for p in self.paths
+                 if any(side.get(p, (_GITLINK,))[0] != _GITLINK for side in (before, self.target))]
+        if files:
+            with borrow(self.repo) as borrowed:
+                filtered = borrowed.filtered(files)
+            if filtered is None or filtered:
+                return False
         zero = b"0" * len(self.new)
         feed = b"".join(
             (b"%s %s\t%s\0" % (self.target[p][0], self.target[p][1], p)) if p in self.target

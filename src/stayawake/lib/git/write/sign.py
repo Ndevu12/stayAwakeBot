@@ -235,7 +235,7 @@ def _resolved_signing_config(repo: str | Path, *, trust_local_programs: bool = T
     precedence, `repo` over global, with `commit.gpgsign` read through `--type=bool`.
     `trust_local_programs` is accepted and changes nothing."""
     del trust_local_programs
-    operator = operator_config.global_config()
+    operator = operator_config.global_config(repo)
     local: dict[str, str] = {}
     listing = run(repo, ["config", "--list", "-z"], timeout=PROBE_TIMEOUT, context=UNTRUSTED)
     if listing is not None and listing.returncode == 0:
@@ -292,8 +292,8 @@ def _config_value(repo: str | Path, key: str, *, as_bool: bool = False) -> str:
     if res is not None and res.returncode == 0 and res.stdout.strip():
         return res.stdout.strip()
     if as_bool:
-        return operator_config.global_bool(key)
-    return operator_config.global_config().get(key, "")
+        return operator_config.global_bool(key, repo)
+    return operator_config.global_config(repo).get(key, "")
 
 
 def _first_probe_failure(config: Mapping[str, str]) -> str | None:

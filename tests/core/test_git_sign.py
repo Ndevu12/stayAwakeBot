@@ -240,6 +240,20 @@ class TestTheRepositorysSigningDataIsHonoured(SigningFixture):
                          "a signing program the repository configures ran")
 
 
+class TestAConditionalIncludeInTheOperatorsConfigApplies(SigningFixture):
+    """Check a signer the operator's global config names through a conditional include."""
+
+    def test_the_included_program_is_the_one_used(self):
+        repo = _repo(commit__gpgsign="true")
+        included = self.global_config.parent / "signing.inc"
+        subprocess.run(["git", "config", "--file", str(included), "gpg.ssh.program",
+                        "/opt/op-ssh-sign"], check=True, capture_output=True)
+        subprocess.run(["git", "config", "--file", str(included), "gpg.format", "ssh"],
+                       check=True, capture_output=True)
+        self.operator_sets(f"includeIf.gitdir:{repo.resolve()}/.path", str(included))
+        self.assertIn("gpg.ssh.program=/opt/op-ssh-sign", " ".join(sign.fix_commit_signing(repo)))
+
+
 class TestProbeSafety(SigningFixture):
     def test_the_probe_writes_nothing_to_the_repository(self):
         repo = self.signing_works()

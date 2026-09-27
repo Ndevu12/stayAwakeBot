@@ -33,6 +33,7 @@ HOOKS = ("post-checkout", "reference-transaction", "pre-commit", "prepare-commit
 
 class HostileRepository(GitSandbox):
     PROTOCOLS = "file:ext"
+    ATTRIBUTES = "* filter=evil\n"
 
     def setUp(self):
         super().setUp()
@@ -44,7 +45,7 @@ class HostileRepository(GitSandbox):
         self.op = self.new_repo("op")
         self.write(self.op, ".gitignore", INFECTED_GITIGNORE)
         self.write(self.op, "app.js", "console.log('ok');\n")
-        self.write(self.op, ".gitattributes", "* filter=evil\n")
+        self.write(self.op, ".gitattributes", self.ATTRIBUTES)
         self.base = self.commit(self.op, "init")
         self.git(self.op, "checkout", "-q", "-b", "next")
         self.write(self.op, "app.js", "console.log('next');\n")
@@ -199,11 +200,10 @@ class TestAmendRunsNoRepositoryCode(HostileRepository):
         (self.op / "new.js").write_text("new\n", encoding="utf-8")
         self.assertTrue(gitamend.is_dirty(self.op))
 
-    def test_moving_a_checked_out_branch_moves_its_tree_and_runs_nothing(self):
-        self.assertTrue(gitamend.point_branch_at(self.op, "main", self.next, self.base))
-        self.assertEqual(self.next, self.rev(self.op, "refs/heads/main"))
-        self.assertEqual("console.log('next');\n", (self.op / "app.js").read_text())
-        self.assertFalse(gitamend.is_dirty(self.op))
+    def test_moving_over_a_filtered_file_is_refused_before_anything_moves(self):
+        self.assertFalse(gitamend.point_branch_at(self.op, "main", self.next, self.base))
+        self.assertEqual(self.base, self.rev(self.op, "refs/heads/main"))
+        self.assertEqual("console.log('ok');\n", (self.op / "app.js").read_text())
         self.assertNothingRan()
 
     def test_capture_writes_a_verified_bundle_and_runs_nothing(self):
@@ -211,6 +211,17 @@ class TestAmendRunsNoRepositoryCode(HostileRepository):
                                   self.root / "capture" / "c.bundle")
         self.assertTrue(captured.ok, captured.reason)
         self.assertTrue(captured.verified)
+        self.assertNothingRan()
+
+
+class TestAMoveOverUnfilteredFilesRunsNoRepositoryCode(HostileRepository):
+    ATTRIBUTES = "*.bin filter=evil\n"
+
+    def test_moving_a_checked_out_branch_moves_its_tree_and_runs_nothing(self):
+        self.assertTrue(gitamend.point_branch_at(self.op, "main", self.next, self.base))
+        self.assertEqual(self.next, self.rev(self.op, "refs/heads/main"))
+        self.assertEqual("console.log('next');\n", (self.op / "app.js").read_text())
+        self.assertFalse(gitamend.is_dirty(self.op))
         self.assertNothingRan()
 
 

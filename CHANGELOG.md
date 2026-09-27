@@ -30,7 +30,8 @@ reader, not the mechanism or the weakness it closed.
   hook and the file it runs; anything else that runs is listed for you to see.
 - **Scanning or fixing a repository no longer runs programs that repository's own git settings name.**
   The signing program and credentials a fix uses come from your own git settings, never the scanned
-  repository's.
+  repository's. `saw fix amend` leaves a checked-out branch where it is, with the reason, when a
+  file it would rewrite on disk passes through a filter such as Git LFS.
 - **A package name from a scanned lockfile can no longer shape a command saw hands you.**
 - **saw no longer tells you which version to install.** It names the versions that are compromised
   and leaves the choice to you, because an offline advisory cache cannot promise a version is safe.
