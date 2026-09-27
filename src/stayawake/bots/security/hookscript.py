@@ -15,6 +15,7 @@ from typing import Callable
 
 from stayawake.utils import env, pathsafe
 from stayawake.lib import git as gitutil
+from stayawake.lib.git.exec_surface import HOOK_NAMES  # noqa: F401  (re-export)
 
 
 MARKER = "stayawake-scan-on-clone"
@@ -357,14 +358,6 @@ def dirs_seen(d: Path) -> list[Path]:
     """Return the template directories a repository's hooks directory must not be counted as."""
     configured = global_template_dir()
     return [hooks_dir()] + ([Path(configured) / "hooks"] if configured else [])
-
-
-HOOK_NAMES = frozenset((
-    "applypatch-msg pre-applypatch post-applypatch pre-commit pre-merge-commit prepare-commit-msg "
-    "commit-msg post-commit pre-rebase post-checkout post-merge pre-push pre-receive update "
-    "proc-receive post-receive post-update reference-transaction push-to-checkout pre-auto-gc "
-    "post-rewrite sendemail-validate fsmonitor-watchman post-index-change p4-changelist "
-    "p4-prepare-changelist p4-post-changelist p4-pre-submit").split())
 
 
 def runs_as_hook(name: str) -> bool:

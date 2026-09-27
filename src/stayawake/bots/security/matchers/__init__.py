@@ -18,13 +18,14 @@ from stayawake.bots.security.matchers.workflow import WorkflowYamlMatcher
 from stayawake.bots.security.matchers.dependency_audit import DependencyAuditMatcher
 from stayawake.bots.security.matchers.installed_package_audit import InstalledPackageAuditMatcher
 from stayawake.bots.security.matchers.symlink import SymlinkMatcher
+from stayawake.bots.security.matchers.git_exec_surface import GitExecSurfaceMatcher
 
 REGISTRY: dict[str, Matcher] = {
     m.handles: m for m in (
         ContentMatcher(), FilenameMatcher(), StructuralJsonMatcher(),
         HeuristicMatcher(), GitHistoryMatcher(), ObfuscationMatcher(), DestructiveMatcher(),
         NpmManifestMatcher(), WorkflowYamlMatcher(), DependencyAuditMatcher(),
-        InstalledPackageAuditMatcher(), SymlinkMatcher(),
+        InstalledPackageAuditMatcher(), SymlinkMatcher(), GitExecSurfaceMatcher(),
     )
 }
 

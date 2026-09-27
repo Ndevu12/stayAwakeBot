@@ -9,6 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from stayawake.lib.git import exec_keys
 from stayawake.lib.git.run import OPERATOR_CONFIG, run as git_run
 from stayawake.utils.invocation import POSIX_SHELLS
 from .models import HygieneIssue, SCRATCH_ROOTS, _WIPER_NOTE
@@ -24,13 +25,16 @@ _SCRATCH = rf"(?:{'|'.join(root + '/' for root in SCRATCH_ROOTS)})"
 _PIPE_SINK = rf"(?:{_POSIX_SHELL}\b|{_SCRIPT_INTERP}\b(?!\s*(?:[\w/.]|-\S)))"
 _EXEC_CMD = rf"(?:{_POSIX_SHELL}|{_SCRIPT_INTERP}|source)"
 _EXEC_WRAP = r"(?:env|sudo|nohup|nice|setsid|exec|command|stdbuf|time)"
-_FETCH_PIPE_EXEC = re.compile(
+_FETCH_OR_DECODE_THEN_RUN = (
     rf"\b{_FETCH}\b[^\n|]{{0,512}}+\|\s*{_PIPE_SINK}"                              # curl … | bash / | python[-]
     rf"|\beval\b[^\n]{{0,256}}\$\(\s*{_FETCH}\b"                                   # eval "$(curl …)"
     rf"|(?:^|[;&|]|\s){_EXEC_CMD}\b\s+<\(\s*{_FETCH}\b"                            # bash <(curl …)
     rf"|(?:^|[;&|])\s*\.\s+<\(\s*{_FETCH}\b"                                       # . <(curl …)   (stmt boundary)
-    rf"|\bbase64\s+(?:-d|-D|--decode)\b[^\n|]{{0,512}}+\|\s*{_PIPE_SINK}"           # … | base64 -d | sh
-    rf"|(?:^|[;&|]|\s){_EXEC_CMD}\b\s+[\"']?{_SCRATCH}",                           # bash /tmp/x ; source /tmp/x
+    rf"|\bbase64\s+(?:-d|-D|--decode)\b[^\n|]{{0,512}}+\|\s*{_PIPE_SINK}")          # … | base64 -d | sh
+FETCH_OR_DECODE_THEN_RUN = re.compile(_FETCH_OR_DECODE_THEN_RUN, re.IGNORECASE)
+_FETCH_PIPE_EXEC = re.compile(
+    _FETCH_OR_DECODE_THEN_RUN
+    + rf"|(?:^|[;&|]|\s){_EXEC_CMD}\b\s+[\"']?{_SCRATCH}",                         # bash /tmp/x ; source /tmp/x
     re.IGNORECASE)
 
 _SCRATCH_EXEC = re.compile(
@@ -226,15 +230,18 @@ def check_shell_profile() -> list[HygieneIssue]:
     return issues
 
 
-_GIT_EXEC_KEY = re.compile(
-    r"^(?:core\.(?:editor|pager|sshcommand|askpass)"
-    r"|sequence\.editor|alias\.[^=]+|filter\.[^=]+\.(?:clean|smudge|process)"
-    # credential.(?:<url>.)?helper — a per-URL helper execs too, so the sub-key variant can't slip
-    r"|diff\.(?:external|[^=]+\.command)|merge\.[^=]+\.driver|credential\.(?:[^=]+\.)?helper)$")
-
 _GIT_BOOL = {"true", "false", "yes", "no", "on", "off", "1", "0"}
 
-_GIT_BANG_KEY = re.compile(r"^(?:alias\.[^=]+|credential\.(?:[^=]+\.)?helper)$")
+
+def _git_exec_probe(key: str, value: str) -> str | None:
+    """Pick the text of a configured value git would run as a command. Takes the key and value.
+    Returns that text, or None when the key does not run a command."""
+    rule = exec_keys.rule_for(key)
+    if rule is None or rule.runs in (exec_keys.HOOKS_DIRECTORY, exec_keys.ENABLES_TRANSPORT):
+        return None
+    if rule.runs == exec_keys.EXT_TRANSPORT:
+        return rule.command(key, value)
+    return re.sub(r"^\s*!\s*", "", value) if rule.bang else value
 
 
 def _list_global_config():
@@ -358,8 +365,7 @@ def check_git_config_execution() -> list[HygieneIssue]:
                            "Verify it's a directory you control.",
                     remediation="If unfamiliar, unset it: git config --global --unset core.hooksPath.",
                 ))
-        elif _GIT_EXEC_KEY.match(key):
-            probe = re.sub(r"^\s*!\s*", "", val) if _GIT_BANG_KEY.match(key) else val
+        elif (probe := _git_exec_probe(key, val)) is not None:
             if _FETCH_PIPE_EXEC.search(probe) or _SCRATCH_EXEC.search(probe):
                 issues.append(HygieneIssue(
                     id="git-config-fetch-exec",

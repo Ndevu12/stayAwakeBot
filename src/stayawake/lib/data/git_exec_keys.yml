@@ -1,0 +1,72 @@
+# Configuration keys whose value git executes, or which change what git executes.
+#
+#   key               the key as `git config --list` prints it, lowercased; `*` matches any text
+#   runs              how the value is run (OPTIONAL, default `command`):
+#                       command            the value is a command line
+#                       after-bang         only a value starting with `!` is a command line
+#                       unless-boolean     a boolean value is a toggle, anything else a command line
+#                       hooks-directory    the value names the directory hooks run from
+#                       ext-transport      the subsection after `ext::` is a command line
+#                       enables-transport  the value switches a command-running transport on
+#   bang              a leading `!` is shell syntax to strip before reading the command (OPTIONAL)
+#   driver            the attribute that must select this entry before it runs:
+#                     filter | diff | merge (OPTIONAL)
+#   fires_on_its_own  git runs it during ordinary operations nobody asked it to run (OPTIONAL)
+version: 1
+
+keys:
+  - key: core.fsmonitor
+    runs: unless-boolean
+    fires_on_its_own: true
+  - key: core.hookspath
+    runs: hooks-directory
+  - key: core.editor
+  - key: core.pager
+  - key: core.sshcommand
+  - key: core.askpass
+  - key: core.gitproxy
+  - key: sequence.editor
+  - key: pager.*
+    runs: unless-boolean
+  - key: alias.*
+    runs: after-bang
+    bang: true
+  - key: credential.helper
+    bang: true
+  - key: credential.*.helper
+    bang: true
+  - key: filter.*.clean
+    driver: filter
+    fires_on_its_own: true
+  - key: filter.*.smudge
+    driver: filter
+    fires_on_its_own: true
+  - key: filter.*.process
+    driver: filter
+    fires_on_its_own: true
+  - key: diff.external
+    fires_on_its_own: true
+  - key: diff.*.command
+    driver: diff
+    fires_on_its_own: true
+  - key: diff.*.textconv
+    driver: diff
+    fires_on_its_own: true
+  - key: merge.*.driver
+    driver: merge
+    fires_on_its_own: true
+  - key: mergetool.*.cmd
+  - key: difftool.*.cmd
+  - key: gpg.program
+  - key: gpg.*.program
+  - key: remote.*.uploadpack
+  - key: remote.*.receivepack
+  - key: submodule.*.update
+    runs: after-bang
+    bang: true
+  - key: url.*.insteadof
+    runs: ext-transport
+  - key: url.*.pushinsteadof
+    runs: ext-transport
+  - key: protocol.ext.allow
+    runs: enables-transport

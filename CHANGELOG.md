@@ -25,6 +25,9 @@ reader, not the mechanism or the weakness it closed.
 - **A scan now reads every well-formed editor settings, task and manifest file it meets.** Some
   valid files were read as empty, so what they declared went unexamined. Upgrading is recommended;
   rescan repositories you scanned before.
+- **A scan now examines the programs a repository's own git settings and hooks would run.** One
+  that is confirmed malicious is reported as an infection, and `saw fix` removes that setting or
+  hook and the file it runs; anything else that runs is listed for you to see.
 - **Scanning or fixing a repository no longer runs programs that repository's own git settings name.**
   The signing program and credentials a fix uses come from your own git settings, never the scanned
   repository's.

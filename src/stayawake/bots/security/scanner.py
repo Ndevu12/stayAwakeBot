@@ -12,8 +12,8 @@ from fnmatch import fnmatch
 from typing import Any
 
 from stayawake.utils import textsafe
-from stayawake.bots.security.models import (CONFIRMED, HEURISTIC, RESIDUE, ROLLBACK_DIR,
-                                            Finding, ScanResult, Severity)
+from stayawake.bots.security.models import (CONFIRMED, HEURISTIC, INFORMATIONAL, RESIDUE,
+                                            ROLLBACK_DIR, Finding, ScanResult, Severity)
 from stayawake.bots.security.matchers import REGISTRY
 from stayawake.lib import git as gitutil
 
@@ -77,7 +77,8 @@ def finalize(display: str, source: str, by_matcher: dict[str, list[Finding]],
     `-j 1`. Findings are consumed in `matcher_order` (the signatures' matcher order), preserving the
     matcher-major insertion order that the final `(-severity, path)` stable sort relies on for ties."""
     result = ScanResult(target=display, source=source)
-    confidence_of = {s["id"]: (s["confidence"] if s.get("confidence") in (HEURISTIC, RESIDUE)
+    confidence_of = {s["id"]: (s["confidence"]
+                               if s.get("confidence") in (HEURISTIC, RESIDUE, INFORMATIONAL)
                                else CONFIRMED)
                      for s in all_sigs}
     for name in matcher_order:
@@ -88,6 +89,9 @@ def finalize(display: str, source: str, by_matcher: dict[str, list[Finding]],
                 # Advisory-tier (e.g. a dependency CVE): route OUT of `findings` so the verdict never
                 # sees it — reported separately, never gates the scan.
                 result.advisories.append(finding)
+            elif confidence_of.get(finding.signature_id) == INFORMATIONAL:
+                finding.confidence = INFORMATIONAL
+                result.informational.append(finding)
             else:
                 finding.confidence = confidence_of.get(finding.signature_id, CONFIRMED)
                 result.findings.append(finding)
