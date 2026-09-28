@@ -35,7 +35,7 @@ def _allowed(finding: Finding, allowlist: list[dict[str, Any]]) -> bool:
     is intentionally NOT honored — it would blanket-suppress *every* signature on
     that path, so a fresh payload dropped under e.g. a test-fixtures glob would slip
     through silently. Fixture allowlisting therefore requires `signature` (+ optional
-    `path_glob` to scope it)."""
+    `path_glob` to scope it, and an optional exact `evidence` to name one finding)."""
     for rule in allowlist or []:
         if not isinstance(rule, dict):
             continue                       # defensive: skip a non-mapping rule (config is validated upstream)
@@ -44,6 +44,8 @@ def _allowed(finding: Finding, allowlist: list[dict[str, Any]]) -> bool:
         if not sig or sig != finding.signature_id:
             continue                       # path-only rules are too broad — ignored
         if glob and not fnmatch(finding.path, glob):
+            continue
+        if "evidence" in rule and rule["evidence"] != finding.evidence:
             continue
         return True
     return False

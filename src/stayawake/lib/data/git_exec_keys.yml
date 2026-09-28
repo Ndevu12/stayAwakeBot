@@ -90,48 +90,11 @@ keys:
     runs: ext-address
     fires_on_its_own: true
 
-# Programs a key git runs on its own may name and still be listed as an ordinary tool, when the
-# value is one plain call of the operator's installed copy. Anything else such a key runs is
-# reported for review.
-plain_programs:
-  - git-lfs
-  - git-crypt
-  - git-annex
-  - rs-git-fsmonitor
-  - watchman
-  - nbstripout
-  - jupytext
-  - nbdime
-  - nbdiff
-  - nbmerge
-  - exiftool
-  - pdftotext
-  - pdfinfo
-  - docx2txt
-  - odt2txt
-  - catdoc
-  - xls2csv
-  - strings
-  - hexdump
-  - xxd
-  - od
-  - plutil
-  - textutil
-  - jq
-  - yq
-  - difft
-  - mergiraf
-  - npm-merge-driver
-  - git-merge-changelog
-  - dos2unix
-  - unix2dos
-  - tidy
-  - true
-  - "false"
-  - cat
-
-# Modules an interpreter may run with `-m` under the same rule.
-plain_modules:
-  - nbstripout
-  - jupytext
-  - nbdime
+  - key: lfs.customtransfer.*.path
+    fires_on_its_own: true
+  - key: lfs.extension.*.clean
+    fires_on_its_own: true
+  - key: lfs.extension.*.smudge
+    fires_on_its_own: true
+  - key: annex.*-command
+    fires_on_its_own: true

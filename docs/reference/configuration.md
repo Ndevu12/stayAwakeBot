@@ -41,6 +41,17 @@ allowlist:
     path_glob: "tests/**"
 ```
 
+An entry may also give `evidence`, the finding's evidence exactly as the report prints it, so it
+accepts that one finding and nothing else on the same path. Use it to accept a program you set up
+yourself for a repository's git settings, such as a filter:
+
+```yaml
+allowlist:
+  - signature: git-exec-suspicious
+    path_glob: ".git/config"
+    evidence: "filter.git-crypt.smudge = git-crypt smudge"
+```
+
 The allowlist is yours, not the scanned repository's — see [trust
 model](../explanation/trust-model.md).
 

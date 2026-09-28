@@ -25,11 +25,11 @@ _OPERATORS = frozenset({"|", "||", "&", "&&", ";", ";;", "<", ">", ">>", "<<", "
                         "|&", "<&", ">&", "<>", ">|"})
 _SHELL_SYNTAX = re.compile(r"[$`\\\n\r;|&<>(){}\[\]*?!#]")
 _POSITIONAL = re.compile(r"(?<![\w$])\$[0-9@*](?![\w{(])")
-_PLAIN_WORD = re.compile(r"[\w./%:=@+,~-]+")
-_VERSIONED = re.compile(r"^([a-z]+?)[\d.]*(?:\.exe)?$")
+_VERSIONED = re.compile(r"^(python|pypy|perl|ruby|php|lua|luajit|node|tclsh|bash|zsh|ksh|pwsh)[\d.]*(?:\.exe)?$")
 _ANSI_C = re.compile(r"\$'((?:[^'\\]|\\.){0,4096})'")
 _SHELL_READS_DOWNLOAD = re.compile(
-    r"(?:^|[\s;&|(])(?:\S*/)?(?:sh|bash|zsh|dash|ksh|ash|source|\.)(?:\s+-\S+){0,4}\s*<?\s*<\(\s*"
+    r"(?:(?:^|[\s;&|(])(?:\S*/)?(?:sh|bash|zsh|dash|ksh|ash)(?:\s+-\S+){0,4}\s*<"
+    r"|(?:^|[;&|(])\s*(?:source|\.))\s*<\(\s*"
     r"(?:\S*/)?(?:curl|wget|nc|ncat|socat|aria2c|ssh|scp|rsync|ftp|tftp)\b")
 _MAX_DEPTH = 3
 
@@ -58,26 +58,11 @@ def _tokens(text: str) -> list[str] | None:
 
 
 def name_of(token: str) -> str:
-    """A program's name as a word names it: its basename, lowercased, version suffix dropped."""
+    """A program's name as a word names it: its basename, lowercased, with the version suffix an
+    interpreter or shell is installed under dropped."""
     base = os.path.basename(token).lower()
     found = _VERSIONED.match(base)
     return found.group(1) if found else base
-
-
-def plain_words(text: str) -> list[str] | None:
-    """The words of `text` when it is one plain program call: nothing a shell reads as syntax,
-    only plain words, each optionally quoted; the arguments git appends may be named as `$1`,
-    `$@` and the like. Takes the text. Returns None otherwise."""
-    text = _POSITIONAL.sub("argument", text)
-    if _SHELL_SYNTAX.search(text):
-        return None
-    try:
-        words = shlex.split(text, posix=True)
-    except ValueError:
-        return None
-    if not words or not all(_PLAIN_WORD.fullmatch(w) for w in words):
-        return None
-    return words
 
 
 def _runner(words: list[str]) -> tuple[str, list[str]]:
@@ -124,15 +109,26 @@ def _inline(name: str, args: list[str]) -> bool:
     return False
 
 
+_CHECK_ONLY = {"node": {"--check", "-c"}, "nodejs": {"--check", "-c"}, "ruby": {"-c"},
+               "perl": {"-c"}, "php": {"-l", "--syntax-check"}}
+
+
 def _reads_code(name: str, args: list[str]) -> bool:
     """Whether a stage runs what it reads from its input as code. Takes its program and
     arguments."""
+    flags = [a for a in args if a.startswith("-") and not a.startswith("--") and a != "-"]
+    operands = [a for a in args if not a.startswith("-") or a == "-"]
     if name in SHELLS:
+        if any("n" in f[1:] for f in flags):
+            return False
         dash_c = next((i for i, a in enumerate(args)
                        if a.startswith("-") and not a.startswith("--") and "c" in a[1:]), None)
-        return dash_c is None or dash_c == len(args) - 1
+        if dash_c is not None:
+            return dash_c == len(args) - 1
+        return operands in ([], ["-"]) or any("s" in f[1:] for f in flags)
     if name in _CODE_FROM_INPUT:
-        operands = [a for a in args if not a.startswith("-") or a == "-"]
+        if _CHECK_ONLY.get(name, set()) & set(args):
+            return False
         return "-m" not in args and not _inline(name, args) and operands in ([], ["-"])
     return False
 

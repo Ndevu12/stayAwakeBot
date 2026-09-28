@@ -89,15 +89,6 @@ def exec_keys(path: Path = KEYS_FILE) -> tuple[ExecKey, ...]:
     return tuple(_entry(raw) for raw in data.get("keys") or ())
 
 
-@functools.lru_cache(maxsize=None)
-def plain_programs(path: Path = KEYS_FILE) -> tuple[frozenset[str], frozenset[str]]:
-    """Load the programs and interpreter modules a self-firing key may name and still be an
-    ordinary tool. Takes the file (default: the shipped list). Returns both sets, lowercased."""
-    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    return (frozenset(str(p).lower() for p in data.get("plain_programs") or ()),
-            frozenset(str(m).lower() for m in data.get("plain_modules") or ()))
-
-
 def rule_for(key: str) -> ExecKey | None:
     """Look up a key as git lists it. Returns its entry, or None when git does not execute it."""
     return next((rule for rule in exec_keys() if rule.matches(key)), None)

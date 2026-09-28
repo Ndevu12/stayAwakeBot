@@ -178,25 +178,6 @@ class _Grader:
         return any(FETCH_OR_DECODE_THEN_RUN.search(_SPLIT_QUOTES.sub("", line))
                    for line in text.splitlines() if not line.lstrip().startswith("#"))
 
-    def _ordinary_tool(self, text: str) -> bool:
-        """Whether a command line is one plain call of a listed tool the operator installed, of a
-        listed interpreter module, or of a script this repository holds. Takes the command line."""
-        words = command_shape.plain_words(text)
-        if words is None:
-            return False
-        programs, modules = exec_keys.plain_programs()
-        head = words[0]
-        name = command_shape.name_of(head)
-        inside = [Path(os.path.realpath(p)) for p in [self.surface.work_tree, *self.surface.git_dirs]]
-        located = Path(os.path.realpath(os.path.expanduser(head) if os.path.isabs(
-            os.path.expanduser(head)) else self.surface.work_tree / head))
-        if "/" in head and _within(located, inside):
-            return pathsafe.is_regular_file(located)
-        if name in programs:
-            return True
-        return (name in ("python", "pypy") and len(words) >= 3 and words[1] == "-m"
-                and words[2].lower() in modules)
-
     def command(self, c: Command) -> Judgement | None:
         key, where, value = c.entry.key, c.entry.source, c.entry.value
         rule, text = c.rule, c.command
@@ -248,9 +229,8 @@ class _Grader:
             reasons.append("rewrites a remote address into a command line")
         if rule.fires_on_its_own:
             reasons += [f"git runs it on its own and {why}" for why in command_shape.not_plain(text)]
-            if not reasons and not self._ordinary_tool(text):
-                reasons.append("git runs it on its own and saw does not know it as an ordinary "
-                               "tool")
+            if not reasons:
+                reasons.append("git runs a program this repository names, on its own")
         elif not key.lower().startswith("alias.") and _INLINE_INTERPRETER_CODE.search(joined):
             reasons.append("hands code to an interpreter inline")
         for program in _program_paths(text, self.surface.work_tree):
