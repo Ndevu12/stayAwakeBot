@@ -17,7 +17,7 @@ run that looked and found none.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Iterable, Sequence
 
@@ -123,6 +123,10 @@ class AmendOutcome:
     recovery: str = ""
     """Where the pre-rewrite history was captured, when a run left branches on rewritten history it
     could not put back. Empty otherwise. The one artifact that lets the operator undo the move."""
+    checkout: tuple[str, ...] = ()
+    """What cleaning the operator's checkout did, one clause each. Empty when it was not asked."""
+    checkout_settled: bool = True
+    """Whether that checkout ended clean."""
 
     def __post_init__(self) -> None:
         if self.completed and not self.branches:
@@ -143,7 +147,16 @@ class AmendOutcome:
         """
         if self.branches and not self.completed:
             return True
+        if not self.checkout_settled:
+            return True
         return any(r.cause not in _NEEDING_NO_ACTION for r in self.reasons)
+
+
+def with_checkout(outcome: AmendOutcome, clauses: Sequence[str], *,
+                  settled: bool) -> AmendOutcome:
+    """`outcome` with what cleaning the operator's checkout did. Takes the outcome, the clauses and
+    whether the checkout ended clean. Returns the new outcome."""
+    return replace(outcome, checkout=tuple(clauses), checkout_settled=settled)
 
 
 def refused(repository: str, cause: Cause, detail: str = "", subjects: str = "",
@@ -284,7 +297,8 @@ def render_amend_line(outcome: AmendOutcome) -> str:
     workflow command in a CI log.
     """
     repository = textsafe.plain(outcome.repository, 120)
-    clauses = [_clause(r) for r in outcome.reasons]
+    clauses = [_clause(r) for r in outcome.reasons] + [
+        textsafe.plain(c, 300) for c in outcome.checkout]
     if outcome.recovery:
         clauses.append(f"your original history is saved at {textsafe.plain(outcome.recovery, 200)}")
     if not outcome.branches:

@@ -173,7 +173,23 @@ def _paths(paths) -> str:
 
 
 def _checkout_line(verdict: FixVerdict, detail: bool) -> str:
-    state, found = verdict.checkout, verdict.checkout_detail
+    return checkout_sentence(verdict.checkout, verdict.checkout_detail,
+                             history_follows=bool(verdict.history.holds), detail=detail)
+
+
+def checkout_clauses(state: Checkout, found: CheckoutDetail) -> list[str]:
+    """What a checkout pass did, as clauses for a one-line report: its sentence, then its notes;
+    nothing when the checkout was already clean and nothing was noted. Takes the state and the
+    detail `checkout_of` gave."""
+    if state is Checkout.CLEAN and not found.notes:
+        return []
+    return [checkout_sentence(state, found), *found.notes]
+
+
+def checkout_sentence(state: Checkout, found: CheckoutDetail, *, history_follows: bool = False,
+                      detail: bool = True) -> str:
+    """The sentence that says what a checkout pass came to. Takes the state, the detail, whether a
+    line about the history follows it, and whether to name paths. Returns the sentence."""
     if state is Checkout.UNREAD:
         line = "your checkout was not read in full, so it is not called clean"
         if detail and found.unread:
@@ -189,7 +205,7 @@ def _checkout_line(verdict: FixVerdict, detail: bool) -> str:
             parts.append("your checkout is not clean")
         return "; ".join(parts + [textsafe.plain(r, 300) for r in found.reasons])
     if state is Checkout.CLEANED:
-        if verdict.history.holds:
+        if history_follows:
             return "your checkout is cleaned; your history still carries it:"
         line = f"your checkout is cleaned — removed {found.removed} file(s)"
         if found.stripped:

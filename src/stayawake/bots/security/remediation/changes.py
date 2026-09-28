@@ -75,7 +75,8 @@ def plan(findings) -> list[Change]:
 def text_repair(action: str):
     """`repair(text) -> repaired | None` for a change made by editing a file's text, None when the
     text needs no repair. Takes the change's action. Returns the function, or None when the action
-    does not edit text."""
+    does not edit text. A settings repair also offers `proves(before, after)`: whether every other
+    setting survives the rewrite unchanged."""
     edit = {"strip-settings": strip_settings_autorun,
             "strip-gitignore": strip_gitignore_text}.get(action)
     if edit is None:
@@ -86,6 +87,8 @@ def text_repair(action: str):
             return None
         repaired = edit(text)
         return None if repaired == text else repaired
+    if action == "strip-settings":
+        repair.proves = _keeps_the_rest
     return repair
 
 

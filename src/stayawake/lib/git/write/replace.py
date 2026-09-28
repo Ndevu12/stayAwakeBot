@@ -26,6 +26,13 @@ def _byte_subsequence(sub: bytes, whole: bytes) -> bool:
     return all(b in it for b in sub)
 
 
+def _proven(corrector, before: str, after: str) -> bool:
+    """Whether a corrector proves its own rewrite: it offers `proves(before, after)` and that
+    holds. Takes the corrector and the text before and after."""
+    proves = getattr(corrector, "proves", None)
+    return callable(proves) and bool(proves(before, after))
+
+
 @dataclass(frozen=True)
 class Replacement:
     """A corrected tree, or the reason there is none.
@@ -211,8 +218,8 @@ def carried_forward(repo: str | Path, commit: str,
     `payload_blob` the path is set to `entry`. `remove` maps a path to a blob id, dropped wherever
     the commit holds exactly that blob. `purge` is a set of paths dropped at every commit whose blob
     at that path `still_carries` a payload. `blocked` names a path that could not be made clean (then
-    `tree` is None), including a rewrite whose UTF-8 bytes are not a subsequence of the original
-    blob."""
+    `tree` is None), including a rewrite whose bytes are not a subsequence of the original blob and
+    that its corrector does not prove. Bytes that are not UTF-8 are carried through unchanged."""
     plan = []
     dropped: set[str] = set()
     for path, oid in (remove or {}).items():
@@ -241,20 +248,16 @@ def carried_forward(repo: str | Path, commit: str,
         original = stdout_bytes(repo, ["cat-file", "blob", current[1]])
         if original is None:
             return None, path
-        try:
-            text = original.decode("utf-8")
-        except UnicodeDecodeError:
-            if carries(original.decode("utf-8", errors="replace")):
-                return None, path
-            continue
+        text = original.decode("utf-8", "surrogateescape")
         if not carries(text):
             continue
         cleaned = corrector(text)
         if cleaned is None or carries(cleaned):
             return None, path
-        if not _byte_subsequence(cleaned.encode("utf-8"), original):
+        rewritten = cleaned.encode("utf-8", "surrogateescape")
+        if not (_byte_subsequence(rewritten, original) or _proven(corrector, text, cleaned)):
             return None, path
-        blob = write_blob(repo, cleaned)
+        blob = write_blob_bytes(repo, rewritten)
         if blob is None:
             return None, path
         plan.append((path, (current[0], blob)))

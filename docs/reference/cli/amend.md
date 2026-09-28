@@ -41,16 +41,20 @@ repository.
 
 It tells you and changes nothing when any of the above is missing, when the remote branches cannot
 be refreshed or read, when the replacement would drop content the finding does not cover, when the
-previous commits cannot be captured first, or when the working tree — or another worktree holding
-one of those branches — has uncommitted work the amended history does not already hold.
+previous commits cannot be captured first, when your checkout is in the middle of a merge, or when
+another worktree holding one of those branches has uncommitted work the amended history would
+overwrite.
 
-## After `saw fix`
+## Your checkout and your uncommitted work
 
-Run it straight after [`saw fix`](fix.md). The cleanup `fix` made in your checkout is exactly what
-the amended history holds, so it is not uncommitted work in the way: the amend takes the same files
-out of every commit that carried them, removes the launcher files `fix` removed and strips the same
-settings from every version of a settings file, then moves your checkout onto the result. A change
-of your own that the amended history does not hold still stops it before anything moves.
+The checkout you run it in is treated as [`saw fix`](fix.md) treats it. Your uncommitted work comes
+with you onto the amended history: a file the amend does not change keeps your edit, and a file it
+does change keeps your version on disk, with what you staged still staged. Then your checkout is
+cleaned as `fix` cleans it — the payload taken out of it and out of your staged changes, and your
+uncommitted work saved on a local `saw/uncommitted-…` branch. That branch is never pushed.
+
+Run straight after `fix`, it finishes the job: the files `fix` removed and the settings it stripped
+are taken out of every commit that carried them, whatever version each commit held.
 
 If it cannot finish, it puts the branches back and says so. If it moved a branch and could not put
 it back, it names that branch: look at that repository before doing anything else with it.

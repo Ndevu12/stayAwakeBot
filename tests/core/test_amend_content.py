@@ -217,7 +217,7 @@ class TestPointBranchAtGuard(unittest.TestCase):
         self.assertEqual((repo / "app.js").read_text(encoding="utf-8"),
                          "base\nuncommitted work\n")
 
-    def test_moves_a_checkout_that_already_holds_what_the_target_records(self):
+    def test_given_what_to_keep_it_moves_a_checkout_already_holding_the_target(self):
         repo, evil = _repo_with_evil_merge()
         before = _rev(repo, "refs/heads/main")
         target = _rev(repo, f"{evil}^1")
@@ -229,27 +229,50 @@ class TestPointBranchAtGuard(unittest.TestCase):
             else:
                 (repo / rel).unlink()
 
-        moved = amend.point_branch_at(repo, "main", target, before)
+        moved = amend.point_branch_at(repo, "main", target, before, keep=frozenset())
 
         self.assertTrue(moved)
         self.assertEqual(target, _rev(repo, "refs/heads/main"))
         self.assertEqual("", _git(repo, "status", "--porcelain"))
 
-    def test_refuses_while_something_staged_matches_neither_side(self):
+    def test_given_what_to_keep_it_refuses_staged_work_it_was_not_told_to_keep(self):
         repo, evil = _repo_with_evil_merge()
         before = _rev(repo, "refs/heads/main")
         target = _rev(repo, f"{evil}^1")
-        _write(repo, "app.js", "staged by the operator\n")
-        _git(repo, "add", "app.js")
-        (repo / "app.js").write_bytes(subprocess.run(
-            ["git", "-C", str(repo), "cat-file", "blob", f"{target}:app.js"],
+        self.assertIn("README.md", _git(repo, "diff", "--name-only", before, target).split())
+        _write(repo, "README.md", "staged by the operator\n")
+        _git(repo, "add", "README.md")
+        (repo / "README.md").write_bytes(subprocess.run(
+            ["git", "-C", str(repo), "cat-file", "blob", f"{target}:README.md"],
             capture_output=True, check=True).stdout)
 
-        moved = amend.point_branch_at(repo, "main", target, before)
+        moved = amend.point_branch_at(repo, "main", target, before, keep=frozenset())
 
         self.assertFalse(moved)
         self.assertEqual(before, _rev(repo, "refs/heads/main"))
+        self.assertIn("staged by the operator", _git(repo, "show", ":README.md"))
+
+    def test_given_what_to_keep_it_moves_past_work_on_paths_it_does_not_rewrite(self):
+        repo, evil = _repo_with_evil_merge()
+        before = _rev(repo, "refs/heads/main")
+        target = _rev(repo, f"{evil}^1")
+        self.assertNotIn("app.js", _git(repo, "diff", "--name-only", before, target).split())
+        _write(repo, "app.js", "staged by the operator\n")
+        _git(repo, "add", "app.js")
+        for rel in _git(repo, "diff", "--name-only", before, target).split():
+            shown = subprocess.run(["git", "-C", str(repo), "cat-file", "blob", f"{target}:{rel}"],
+                                   capture_output=True)
+            if shown.returncode == 0:
+                (repo / rel).write_bytes(shown.stdout)
+            else:
+                (repo / rel).unlink()
+
+        moved = amend.point_branch_at(repo, "main", target, before, keep=frozenset())
+
+        self.assertTrue(moved)
+        self.assertEqual(target, _rev(repo, "refs/heads/main"))
         self.assertIn("staged by the operator", _git(repo, "show", ":app.js"))
+        self.assertEqual("staged by the operator\n", (repo / "app.js").read_text())
 
     def test_a_reset_that_fails_puts_the_ref_back_before_refusing(self):
         """`update-ref` succeeds and `reset --hard` then fails — a held `.git/index.lock` is

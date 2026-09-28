@@ -516,11 +516,11 @@ class TestFixAmendRepo(_AmendFixture):
         seen = []
         real = gitamend.point_branches
 
-        def wrapped(repo, heads, new_tips):
+        def wrapped(repo, heads, new_tips, *rest):
             oldest = self._rev()
             self.assertTrue(amendmod._capture_path("acme/app", oldest[:12]).is_file())
             seen.append(True)
-            return real(repo, heads, new_tips)
+            return real(repo, heads, new_tips, *rest)
 
         with mock.patch("stayawake.bots.security.pr.amend.gitamend.point_branches",
                         wrapped):
@@ -1143,7 +1143,7 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         self.assertNotIn("sfL", self._show("victim:postcss.config.mjs"))
         self.assertIn("victim", moved)
 
-    def test_a_non_utf8_byte_beside_the_footprint_blocks_rather_than_corrupts(self):
+    def test_a_non_utf8_byte_beside_the_footprint_is_kept_byte_exact(self):
         (self.d / ".gitignore").write_bytes(b"node_modules\n")
         self.git(self.d, "add", ".gitignore")
         self.commit(self.d, "gitignore")
@@ -1157,14 +1157,11 @@ class TestAmendActsOnContentPayload(_AmendFixture):
                           confidence=CONFIRMED)
         scan = ScanResult(target=str(self.d), source="local", findings=[finding])
         calls = []
-        outcome = self._act_full(scan, pusher=lambda *a: calls.append(a) or PushResult(True))
-        self.assertFalse(outcome.completed,
-                         "a lossy re-encode of a legit byte must not be written")
-        self.assertEqual(before, self._rev(), "nothing moved")
-        self.assertEqual(calls, [])
+        self._act_full(scan, pusher=lambda *a: calls.append(a) or PushResult(True))
         raw = subprocess.run(["git", "-C", str(self.d), "cat-file", "blob", "HEAD:.gitignore"],
                              capture_output=True).stdout
-        self.assertIn(b"\xe9", raw, "the legit latin-1 byte is untouched")
+        self.assertEqual(b"node_modules\ncaf\xe9/\n", raw,
+                         "the marker is cut out and every other byte is kept as it was")
 
     def test_a_second_confirmed_payload_on_the_same_file_is_not_dropped(self):
         clean = "const config = {};\nexport default config;\n"
