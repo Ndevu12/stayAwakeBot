@@ -123,13 +123,15 @@ def _stat_unchanged(path: Path, recorded: dict[bytes, bytes], mode: bytes,
         return False
 
 
-def _attributes(repo: Path, paths: list[bytes], context) -> dict[bytes, dict[bytes, bytes]] | None:
+def _attributes(repo: Path, paths: list[bytes], context,
+                operator: list[str]) -> dict[bytes, dict[bytes, bytes]] | None:
     """`{path: {attribute: value}}` of the conversion attributes git applies to each path in
-    `repo`. Takes the repository, the paths and the context to ask in. Returns None when git
-    could not say."""
+    `repo`. Takes the repository, the paths, the context to ask in and the operator's own
+    settings as `-c` arguments. Returns None when git could not say."""
     if not paths:
         return {}
-    out = stdout_bytes_fed(repo, ["check-attr", "-z", "--stdin", *_CONVERSION_ATTRIBUTES],
+    out = stdout_bytes_fed(repo, [*operator, "check-attr", "-z", "--stdin",
+                                  *_CONVERSION_ATTRIBUTES],
                            b"\0".join(paths) + b"\0", context=context)
     if out is None:
         return None
@@ -141,12 +143,17 @@ def _attributes(repo: Path, paths: list[bytes], context) -> dict[bytes, dict[byt
 
 
 def _conversion_config(repo: Path) -> list[str]:
-    """The `-c` settings that carry `repo`'s end-of-line configuration, as data. Takes the
+    """The `-c` settings that carry the end-of-line configuration and attributes file git uses for
+    `repo`, as data: the repository's own value, else the operator's global one. Takes the
     repository. Returns them."""
+    operator = operator_config.global_config(repo)
     args = []
-    for key in _CONVERSION_CONFIG:
-        value = stdout(repo, ["config", "--get", key], context=UNTRUSTED).strip()
+    for key in (*_CONVERSION_CONFIG, "core.attributesfile"):
+        value = stdout(repo, ["config", "--get", key], context=UNTRUSTED).strip() \
+            or operator.get(key, "")
         if value:
+            if key == "core.attributesfile":
+                value = os.path.expanduser(value)
             args += ["-c", f"{key}={value}"]
     return args
 
@@ -155,8 +162,9 @@ def _converted_as_in(repo: Path, borrowed, paths: list[bytes]) -> bool:
     """Whether a saw-owned repository converts `paths` exactly as `repo` does and none passes
     through a filter. Takes the operator's repository, the saw-owned one and the paths. Returns
     False when git could not say."""
-    theirs = _attributes(repo, paths, UNTRUSTED)
-    ours = _attributes(borrowed.path, paths, SAW_OWNED)
+    operator = _conversion_config(repo)
+    theirs = _attributes(repo, paths, UNTRUSTED, operator)
+    ours = _attributes(borrowed.path, paths, SAW_OWNED, operator)
     if theirs is None or ours is None:
         return False
     for rel in paths:
@@ -262,10 +270,9 @@ def is_dirty(worktree: str | Path, *, _depth: int = 0) -> bool:
                     if not _content_matches(borrowed, worktree, rel, mode, oid, object_format,
                                             track_executable, conversion):
                         return True
-    listing = ["ls-files", "-z", "--others", "--exclude-standard"]
-    excludes = operator_config.global_excludes_file()
-    if excludes is not None:
-        listing.append(f"--exclude-from={excludes}")
+    excludes = operator_config.global_excludes_file(operator_config.global_config(worktree))
+    listing = (["-c", f"core.excludesFile={excludes}"] if excludes is not None else []) + [
+        "ls-files", "-z", "--others", "--exclude-standard"]
     untracked = stdout_bytes(worktree, listing, context=UNTRUSTED)
     return untracked is None or bool(untracked.strip(b"\0"))
 

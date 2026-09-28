@@ -4,9 +4,12 @@ leaves on disk."""
 from __future__ import annotations
 
 import os
+import threading
 import time
 import unittest
+from unittest import mock
 
+from stayawake.lib.git import attributes
 from stayawake.lib.git.write import amend as gitamend, working_tree
 from tests.support.gitrepo import GitSandbox
 
@@ -129,6 +132,56 @@ class TestAttributesGitAppliesAreTheOnesUsed(_Checkout):
         (repo / ".gitattributes").write_text("*.s filter=rot\n")
         self.assertFalse(gitamend.point_branch_at(repo, "main", old, new))
         self.assertEqual("two\n", (repo / "f.s").read_text())
+
+
+class TestAFifoIsNeverWaitedOn(_Checkout):
+    """Check an attributes file that is a named pipe no one writes to."""
+
+    def test_reading_it_returns_at_once(self):
+        repo = self.repo_with({"a.txt": "a\n"})
+        fifo = repo / ".git" / "info" / "attributes"
+        fifo.parent.mkdir(exist_ok=True)
+        os.mkfifo(fifo)
+        answers = []
+        reader = threading.Thread(target=lambda: answers.append(attributes.read_regular(fifo)),
+                                  daemon=True)
+        reader.start()
+        reader.join(5)
+        self.assertFalse(reader.is_alive(), "reading a named pipe waited for a writer")
+        self.assertEqual([None], answers)
+
+
+class TestTheOperatorsOwnSettingsCount(_Checkout):
+    """Check the operator's global attributes file and ignore file."""
+
+    def operator_config(self, text: str) -> None:
+        config = self.root / "operator.gitconfig"
+        config.write_text(text)
+        patched = mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(config)})
+        patched.start()
+        self.addCleanup(patched.stop)
+
+    def test_a_filter_their_global_attributes_name_refuses_a_move(self):
+        repo = self.repo_with({"f.s": "one\n"})
+        old = self.rev(repo)
+        (repo / "f.s").write_text("two\n")
+        self.git(repo, "commit", "-qam", "next")
+        new = self.rev(repo)
+        global_attributes = self.root / "global.attributes"
+        global_attributes.write_text("*.s filter=rot\n")
+        self.operator_config(f"[core]\n\tattributesFile = {global_attributes}\n")
+        self.assertFalse(gitamend.point_branch_at(repo, "main", old, new))
+        self.assertEqual("two\n", (repo / "f.s").read_text())
+
+    def test_the_repositorys_exclude_outranks_their_global_ignore(self):
+        repo = self.repo_with({"a.txt": "a\n"})
+        ignore = self.root / "global.ignore"
+        ignore.write_text("*.log\n")
+        self.operator_config(f"[core]\n\texcludesFile = {ignore}\n")
+        (repo / ".git" / "info").mkdir(exist_ok=True)
+        (repo / ".git" / "info" / "exclude").write_text("!keep.log\n")
+        (repo / "keep.log").write_text("mine\n")
+        self.assertTrue(working_tree.is_dirty(repo))
 
 
 class TestASubmodulesWorkIsKept(_Checkout):

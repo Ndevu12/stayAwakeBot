@@ -12,10 +12,11 @@ _MAX_ATTRIBUTES_BYTES = 1 << 20
 
 
 def read_regular(path: Path, limit: int = _MAX_ATTRIBUTES_BYTES) -> bytes | None:
-    """The bytes of `path` when it is a regular file within `limit`, without following a link.
-    Returns None otherwise."""
+    """The bytes of `path` when it is a regular file within `limit`, without following a link and
+    without waiting on anything that is not a file. Returns None otherwise."""
     try:
-        fd = os.open(str(path), os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        fd = os.open(str(path), os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                     | getattr(os, "O_NONBLOCK", 0))
     except OSError:
         return None
     try:
