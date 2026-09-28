@@ -1924,6 +1924,11 @@ signature database ships inside the package.</p>
 <td>Directories never traversed. Keep the list minimal.</td>
 </tr>
 <tr>
+<td><code>keep_dirs</code></td>
+<td><em>(empty)</em></td>
+<td>Directories a fix never removes, each written relative to the repository root (<code>data</code>, <code>dist/assets</code>). A path outside the repository is ignored. <code>exclude_dirs</code> does not decide this.</td>
+</tr>
+<tr>
 <td><code>max_file_bytes</code></td>
 <td><code>2000000</code></td>
 <td>Read cap for content matching. A larger <em>source</em> file is still scanned head and tail.</td>
