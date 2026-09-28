@@ -52,6 +52,9 @@ allowlist:
     evidence: "filter.git-crypt.smudge = git-crypt smudge"
 ```
 
+Such an entry accepts the setting, not what a script it names contains later; a script that turns
+malicious is still reported as an infection.
+
 The allowlist is yours, not the scanned repository's — see [trust
 model](../explanation/trust-model.md).
 

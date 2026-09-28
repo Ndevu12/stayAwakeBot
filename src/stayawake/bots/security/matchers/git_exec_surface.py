@@ -46,11 +46,12 @@ _INLINE_INTERPRETER_CODE = re.compile(
 _DECODE_THEN_EVAL = re.compile(
     r"\b(?:eval|exec|Function|execSync|runInThisContext)\s{0,8}\(\s{0,8}[^;)\n]{0,64}?"
     r"\b(?:atob|Buffer\.from|b64decode|fromCharCode|decompress|fromhex|unhexlify)\b")
-_FETCHED = (r"(?:urlopen|urlretrieve|requests\.get|https?\.get|fetch|DownloadString|DownloadFile"
+_FETCHED = (r"(?:urlopen|urlretrieve|requests\.get|https?\.get|fetch(?=\s{0,8}\()|DownloadString|DownloadFile"
             r"|Invoke-WebRequest|Invoke-RestMethod|recv|file_get_contents|curl|wget)")
-_EVALUATOR = r"(?:eval|exec|Function|IEX|Invoke-Expression|execSync|runInThisContext)"
+_EVALUATOR = (r"(?:(?:eval|exec|Function|execSync|runInThisContext)\s{0,8}\(|IEX\b|"
+              r"Invoke-Expression\b)")
 _FETCH_THEN_EVAL = re.compile(
-    rf"\b{_EVALUATOR}\b[^\n]{{0,256}}?\b{_FETCHED}\b|\b{_FETCHED}\b[^\n]{{0,256}}?\b{_EVALUATOR}\b",
+    rf"\b{_EVALUATOR}[^\n]{{0,256}}?\b{_FETCHED}\b|\b{_FETCHED}\b[^\n]{{0,256}}?\b{_EVALUATOR}",
     re.IGNORECASE)
 _SUBSTITUTED_FETCH = re.compile(
     r"\b(?:sh|bash|zsh|dash|ksh)\s{1,8}-[a-zA-Z]{0,4}c\s{1,8}[\"']?\$\(\s{0,8}(?:curl|wget)\b",
@@ -102,20 +103,20 @@ def _program_paths(text: str, work_tree: Path) -> list[Path]:
     return [p for p in found if p is not None]
 
 
-def _pointed_files(text: str, surface: ExecSurface) -> list[Path]:
+def _pointed_files(text: str, surface: ExecSurface, base: Path | None = None) -> list[Path]:
     """Find the files a command line names inside the repository, its git directories or the
     home directory. Takes the command and the surface. Returns their resolved paths."""
     roots = [Path(os.path.realpath(p)) for p in
-             [surface.work_tree, *surface.git_dirs, Path.home()]]
+             [base or surface.work_tree, surface.work_tree, *surface.git_dirs, Path.home()]]
     found: list[Path] = []
     for token in _tokens(text):
         for part in token.split("="):
             if not part or part.startswith("-"):
                 continue
-            if "/" not in part and "." not in part and not (surface.work_tree / part).is_file():
+            if "/" not in part and "." not in part and not ((base or surface.work_tree) / part).is_file():
                 continue
             expanded = os.path.expanduser(part)
-            candidate = Path(expanded if os.path.isabs(expanded) else surface.work_tree / expanded)
+            candidate = Path(expanded if os.path.isabs(expanded) else (base or surface.work_tree) / expanded)
             real = Path(os.path.realpath(candidate))
             if _within(real, roots) and pathsafe.is_regular_file(real) and real not in found:
                 found.append(real)
@@ -203,10 +204,11 @@ class _Grader:
         if hit:
             return Judgement(CONFIRMED, where, key, f"its command matches {hit}", value, c)
         carriers = []
-        for path in _pointed_files(text, self.surface):
+        base = self.surface.work_trees.get(c.git_dir, self.surface.work_tree)
+        for path in _pointed_files(text, self.surface, base):
             found = self._payload_in_file(path) or (
-                "a program that downloads or decodes code and runs it" if rule.fires_on_its_own
-                and self._fetches_or_decodes(path) else None)
+                "a program that downloads or decodes code and runs it"
+                if self._fetches_or_decodes(path) else None)
             if found:
                 carriers.append((path, found))
         if carriers:
@@ -218,13 +220,10 @@ class _Grader:
                                or _DECODE_THEN_EVAL.search(joined)
                                or _FETCH_THEN_EVAL.search(joined)
                                or _SUBSTITUTED_FETCH.search(joined))
-        if rule.fires_on_its_own and (fetch_or_decode
-                                      or command_shape.feeds_a_download_to_a_runner(text)):
-            return Judgement(CONFIRMED, where, key, "git runs it on its own and it downloads or "
-                             "decodes code and runs it", value, c)
+        if fetch_or_decode or command_shape.feeds_a_download_to_a_runner(text):
+            return Judgement(CONFIRMED, where, key, "it downloads or decodes code and runs it",
+                             value, c)
         reasons = []
-        if fetch_or_decode:
-            reasons.append("downloads or decodes code and runs it")
         if rule.runs == exec_keys.EXT_TRANSPORT:
             reasons.append("rewrites a remote address into a command line")
         if rule.fires_on_its_own:

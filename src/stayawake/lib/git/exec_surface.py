@@ -69,6 +69,7 @@ class ExecSurface:
     git_dir: Path | None = None
     common_dir: Path | None = None
     git_dirs: list[Path] = field(default_factory=list)
+    work_trees: dict[Path, Path] = field(default_factory=dict)
     hooks_dir: Path | None = None
     commands: list[Command] = field(default_factory=list)
     includes: list[Include] = field(default_factory=list)
@@ -306,6 +307,9 @@ def read_exec_surface(work_tree: Path) -> ExecSurface | None:
             continue
         surface.git_dirs.append(module)
         module_entries = read_config(module / "config", surface)
+        configured = _last(module_entries, "core.worktree")
+        if configured is not None:
+            surface.work_trees[module] = _resolve(module, configured.value)
         surface.commands += _commands(module_entries, module)
         surface.hooks += _hooks(module / "hooks", True, module, surface)
     return surface
