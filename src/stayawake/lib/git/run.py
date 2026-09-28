@@ -9,6 +9,8 @@ as `GitRefused` when `allowlist.RAISE_ON_REFUSAL` is set, as the test suite sets
 """
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import subprocess
 import sys
 from pathlib import Path
@@ -66,6 +68,24 @@ def _prepare(repo: str | Path | None, args: list[str], env: dict | None,
     return argv, child, (str(neutral_dir()) if repo is None else None)
 
 
+class GitTimedOut(RuntimeError):
+    """A git command did not answer within its timeout while a scan was reading."""
+
+
+_TIMEOUT_FAILS_CLOSED = contextvars.ContextVar("saw_git_timeout_fails_closed", default=False)
+
+
+@contextlib.contextmanager
+def timeouts_fail_closed():
+    """Within the block, a git command that times out raises `GitTimedOut` instead of answering
+    None, so a reader cannot take a stalled command for an empty answer."""
+    token = _TIMEOUT_FAILS_CLOSED.set(True)
+    try:
+        yield
+    finally:
+        _TIMEOUT_FAILS_CLOSED.reset(token)
+
+
 def run(repo: str | Path | None, args: list[str], *, env: dict | None = None,
         timeout: int | None = LOCAL_TIMEOUT, context: Context = UNTRUSTED,
         input_text: str | None = None) -> subprocess.CompletedProcess | None:
@@ -84,6 +104,10 @@ def run(repo: str | Path | None, args: list[str], *, env: dict | None = None,
     try:
         return subprocess.run(argv, capture_output=True, text=True, errors="replace",
                               timeout=timeout, check=False, env=child, cwd=cwd, input=input_text)
+    except subprocess.TimeoutExpired:
+        if _TIMEOUT_FAILS_CLOSED.get():
+            raise GitTimedOut(f"git {args[0] if args else ''} did not answer within {timeout}s")
+        return None
     except (subprocess.SubprocessError, OSError):
         return None
 

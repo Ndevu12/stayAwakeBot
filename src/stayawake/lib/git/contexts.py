@@ -40,6 +40,7 @@ _NO_EXECUTION = (
     ("maintenance.auto", "false"),
     ("credential.helper", ""),
     ("log.showSignature", "false"),
+    ("log.mailmap", "false"),
     ("commit.gpgSign", "false"),
     ("tag.gpgSign", "false"),
     ("gpg.program", "false"),

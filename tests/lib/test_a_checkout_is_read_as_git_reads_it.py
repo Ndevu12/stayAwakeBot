@@ -173,6 +173,17 @@ class TestTheOperatorsOwnSettingsCount(_Checkout):
         self.assertFalse(gitamend.point_branch_at(repo, "main", old, new))
         self.assertEqual("two\n", (repo / "f.s").read_text())
 
+    def test_the_repositorys_own_ignore_file_outranks_theirs(self):
+        repo = self.repo_with({"a.txt": "a\n"})
+        empty = self.root / "empty.ignore"
+        empty.write_text("")
+        self.git(repo, "config", "core.excludesFile", str(empty))
+        ignore = self.root / "global.ignore"
+        ignore.write_text("*.log\n")
+        self.operator_config(f"[core]\n\texcludesFile = {ignore}\n")
+        (repo / "notes.log").write_text("mine\n")
+        self.assertTrue(working_tree.is_dirty(repo))
+
     def test_the_repositorys_exclude_outranks_their_global_ignore(self):
         repo = self.repo_with({"a.txt": "a\n"})
         ignore = self.root / "global.ignore"
@@ -182,6 +193,24 @@ class TestTheOperatorsOwnSettingsCount(_Checkout):
         (repo / ".git" / "info" / "exclude").write_text("!keep.log\n")
         (repo / "keep.log").write_text("mine\n")
         self.assertTrue(working_tree.is_dirty(repo))
+
+
+class TestADirectoryAMoveDropsIsKeptWhenItHoldsAnything(_Checkout):
+    """Check a directory, never initialised as a submodule, that holds the operator's files."""
+
+    def test_its_files_survive(self):
+        repo = self.repo_with({"a.txt": "a\n"})
+        head = self.rev(repo)
+        (repo / "sub").mkdir()
+        (repo / "sub" / "work.txt").write_text("precious\n")
+        self.assertTrue(working_tree._write_paths(repo, repo, head, {}, [b"sub"]))
+        self.assertEqual("precious\n", (repo / "sub" / "work.txt").read_text())
+
+    def test_an_empty_one_is_removed(self):
+        repo = self.repo_with({"a.txt": "a\n"})
+        (repo / "sub").mkdir()
+        self.assertTrue(working_tree._write_paths(repo, repo, self.rev(repo), {}, [b"sub"]))
+        self.assertFalse((repo / "sub").exists())
 
 
 class TestASubmodulesWorkIsKept(_Checkout):

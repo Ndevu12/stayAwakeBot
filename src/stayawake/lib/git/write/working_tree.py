@@ -270,7 +270,9 @@ def is_dirty(worktree: str | Path, *, _depth: int = 0) -> bool:
                     if not _content_matches(borrowed, worktree, rel, mode, oid, object_format,
                                             track_executable, conversion):
                         return True
-    excludes = operator_config.global_excludes_file(operator_config.global_config(worktree))
+    own = stdout(worktree, ["config", "--get", "core.excludesFile"], context=UNTRUSTED).strip()
+    excludes = None if own else operator_config.global_excludes_file(
+        operator_config.global_config(worktree))
     listing = (["-c", f"core.excludesFile={excludes}"] if excludes is not None else []) + [
         "ls-files", "-z", "--others", "--exclude-standard"]
     untracked = stdout_bytes(worktree, listing, context=UNTRUSTED)
@@ -289,19 +291,19 @@ def _has_link_above(worktree: Path, rel: bytes) -> bool:
 def _write_paths(repo: Path, worktree: Path, commit: str, entries, paths: list[bytes]) -> bool:
     """Write what `commit` records at `paths` into `worktree`, converted by git's built-in
     end-of-line and ident rules, and delete every path in `paths` it does not record; a directory
-    holding a repository of its own is left in place. Returns whether every one was written."""
+    holding anything is left in place, as git leaves it. Returns whether every one was written."""
     deleted = [p for p in paths if p not in entries]
     written = [p for p in paths if p in entries and entries[p][0] != _GITLINK]
     for rel in deleted:
         if _has_link_above(worktree, rel):
             return False
         target = worktree / os.fsdecode(rel)
-        if os.path.lexists(target / ".git"):
-            continue
         try:
             if target.is_dir() and not target.is_symlink():
-                shutil.rmtree(target)
-            elif os.path.lexists(target):
+                if not any(target.iterdir()):
+                    target.rmdir()
+                continue
+            if os.path.lexists(target):
                 target.unlink()
         except OSError:
             return False

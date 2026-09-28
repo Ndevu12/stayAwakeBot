@@ -9,10 +9,13 @@ no git subprocess outside `lib/git/run.py`, and nothing outside the UNTRUSTED al
 from __future__ import annotations
 
 import ast
+import importlib
 import os
 import stat
+import threading
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from stayawake.lib import git as gitutil
 from stayawake.lib.git import allowlist, owned
@@ -256,6 +259,49 @@ class TestBorrowed(HostileRepo):
             merged = borrowed.merge_tree(self.rev(repo, "main"), self.rev(repo, "side"))
         self.assertIsNotNone(merged)
         self.assertEqual(frozenset(), merged.conflicted)
+
+
+class TestAStalledGitCommand(GitSandbox):
+    """Check what a git command that does not answer in time becomes."""
+
+    def test_outside_a_scan_it_answers_none(self):
+        runner = importlib.import_module("stayawake.lib.git.run")
+        with mock.patch.object(runner.subprocess, "run",
+                               side_effect=runner.subprocess.TimeoutExpired("git", 1)):
+            self.assertIsNone(runner.run(None, ["config", "--global", "--list"]))
+
+    def test_inside_a_scan_the_repository_is_not_read_in_full(self):
+        from stayawake.bots.security.scanner import scan_target
+        from stayawake.bots.security.signatures import load_signatures
+        from stayawake.bots.security.targets.base import ScanOptions
+        from stayawake.bots.security.targets.local import LocalRepoTarget
+        runner = importlib.import_module("stayawake.lib.git.run")
+        repo = self.new_repo("stalled")
+        self.write(repo, "a.txt", "a\n")
+        self.commit(repo, "init")
+        real = runner.subprocess.run
+
+        def merges_stall(argv, *args, **kwargs):
+            if "--merges" in argv:
+                raise runner.subprocess.TimeoutExpired(argv, 1)
+            return real(argv, *args, **kwargs)
+        with mock.patch.object(runner.subprocess, "run", side_effect=merges_stall):
+            result = scan_target(LocalRepoTarget(repo, str(repo), ScanOptions()),
+                                 load_signatures(), [])
+        self.assertTrue(result.error, "a scan whose git did not answer was called clean")
+
+    def test_a_mailmap_that_is_a_pipe_does_not_stall_a_log(self):
+        repo = self.new_repo("mailmap")
+        self.write(repo, "a.txt", "a\n")
+        self.commit(repo, "init")
+        os.mkfifo(repo / ".mailmap")
+        answers = []
+        reader = threading.Thread(target=lambda: answers.append(
+            run(repo, ["log", "-1", "--format=%an"], timeout=20)), daemon=True)
+        reader.start()
+        reader.join(10)
+        self.assertFalse(reader.is_alive(), "git log waited on the mailmap")
+        self.assertEqual(0, answers[0].returncode)
 
 
 if __name__ == "__main__":
