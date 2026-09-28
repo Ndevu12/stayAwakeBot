@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Iterator
 
 from stayawake.lib.git.query import reachable_blobs
+from stayawake.lib.git.run import open_stdout
 
 from .base import TRUNCATION_MARKER, Target
 
@@ -84,8 +85,12 @@ class HistoryTarget(Target):
             yield 0, text
 
     def _cat_file(self, sha: str):
-        return subprocess.Popen(["git", "-C", str(Path(self.root)), "cat-file", "blob", sha],
-                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        """Stream the stored blob `sha`, as the walk that named it read the store: replace refs off.
+        Raises OSError when git could not start or refused the command."""
+        proc = open_stdout(Path(self.root), ["--no-replace-objects", "cat-file", "blob", sha])
+        if proc is None:
+            raise OSError(f"git could not read stored blob {sha}")
+        return proc
 
     def _stream(self, rel: str, cap: int) -> tuple[bytes | None, bool]:
         """At most `cap` bytes of a stored version, and whether there were more.

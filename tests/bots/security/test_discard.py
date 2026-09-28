@@ -9,10 +9,15 @@ from unittest import mock
 from stayawake.bots.security.pr import discard as discardmod
 from stayawake.bots.security.pr.constants import FIX_BRANCH
 from stayawake.lib import git as gitutil
+from tests.support.local_remotes import allow_local_remotes
 from tests.support.gitrepo import GitSandbox
 
 
 class TestDiscardRemoteBranch(GitSandbox):
+    def setUp(self):
+        super().setUp()
+        allow_local_remotes(self)
+
     def _bare_with(self, *heads: str):
         remote = self.owned(self.root / "acme" / "app.git")
         remote.parent.mkdir(parents=True)
@@ -100,6 +105,10 @@ class TestDiscardRemotePr(GitSandbox):
 
 
 class TestDiscardBranchStillSweepsOrigin(GitSandbox):
+    def setUp(self):
+        super().setUp()
+        allow_local_remotes(self)
+
     def test_local_discard_deletes_the_family_on_origin(self):
         remote = self.owned(self.root / "origin.git")
         subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(remote)],

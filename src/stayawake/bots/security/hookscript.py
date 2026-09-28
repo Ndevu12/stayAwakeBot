@@ -15,6 +15,7 @@ from typing import Callable
 
 from stayawake.utils import env, pathsafe
 from stayawake.lib import git as gitutil
+from stayawake.lib.git.exec_surface import HOOK_NAMES  # noqa: F401  (re-export)
 
 
 MARKER = "stayawake-scan-on-clone"
@@ -104,7 +105,8 @@ def forget() -> None:
 
 def global_template_dir() -> str | None:
     """Return git's global `init.templateDir`, or None when unset."""
-    val = gitutil.stdout(None, ["config", "--global", "--get", "init.templateDir"]).strip()
+    val = gitutil.stdout(None, ["config", "--global", "--get", "init.templateDir"],
+                         context=gitutil.OPERATOR_CONFIG).strip()
     return os.path.expanduser(val) if val else None
 
 
@@ -236,7 +238,8 @@ def _ask(repo: Path, args: list[str]) -> str:
 
 def global_hooks_path() -> str | None:
     """Return git's global `core.hooksPath`, or None when unset."""
-    val = gitutil.stdout(None, ["config", "--global", "--get", "core.hooksPath"]).strip()
+    val = gitutil.stdout(None, ["config", "--global", "--get", "core.hooksPath"],
+                         context=gitutil.OPERATOR_CONFIG).strip()
     return val or None
 
 
@@ -355,14 +358,6 @@ def dirs_seen(d: Path) -> list[Path]:
     """Return the template directories a repository's hooks directory must not be counted as."""
     configured = global_template_dir()
     return [hooks_dir()] + ([Path(configured) / "hooks"] if configured else [])
-
-
-HOOK_NAMES = frozenset((
-    "applypatch-msg pre-applypatch post-applypatch pre-commit pre-merge-commit prepare-commit-msg "
-    "commit-msg post-commit pre-rebase post-checkout post-merge pre-push pre-receive update "
-    "proc-receive post-receive post-update reference-transaction push-to-checkout pre-auto-gc "
-    "post-rewrite sendemail-validate fsmonitor-watchman post-index-change p4-changelist "
-    "p4-prepare-changelist p4-post-changelist p4-pre-submit").split())
 
 
 def runs_as_hook(name: str) -> bool:

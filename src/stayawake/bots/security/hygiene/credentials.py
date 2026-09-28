@@ -10,6 +10,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from stayawake.lib.git.run import OPERATOR_CONFIG, run as git_run
 from stayawake.utils import textsafe
 from .models import HygieneIssue, _WIPER_NOTE
 
@@ -61,6 +62,7 @@ def _run(cmd: list[str], *, input_text: str | None = None, timeout: int = 10,
         return None
 
 
+_GIT_TIMEOUT = 10
 _IMPOSSIBLE_KEYCHAIN_HOST = "saw-selftest-no-such-host.invalid"
 
 
@@ -141,7 +143,8 @@ def _credential_helper_origins() -> list[tuple[str, str]]:
     """(origin, value) pairs for the active `credential.helper` config, via
     `git config --show-origin --get-all`. Origin looks like `file:/path/to/gitconfig`; value is the
     helper (e.g. `osxkeychain`, or empty when a config resets the list). [] when git is absent."""
-    r = _run(["git", "config", "--show-origin", "--get-all", "credential.helper"])
+    r = git_run(None, ["config", "--show-origin", "--get-all", "credential.helper"],
+                timeout=_GIT_TIMEOUT, context=OPERATOR_CONFIG)
     if r is None or r.returncode != 0:
         return []
     pairs: list[tuple[str, str]] = []
@@ -183,10 +186,14 @@ def _https_token_status() -> bool | None:
                 and never assert the token is unused.
     Distinguishing None from False matters: a probe FAILURE must not masquerade as 'not in use' and
     invite a deletion."""
-    r = _run(["git", "credential", "fill"], input_text="protocol=https\nhost=github.com\n\n")
+    r = git_run(None, ["credential", "fill"], input_text="protocol=https\nhost=github.com\n\n",
+                timeout=_GIT_TIMEOUT, context=OPERATOR_CONFIG)
     if r is None:
         return None
-    return r.returncode == 0 and "password=" in (r.stdout or "")
+    served = r.returncode == 0 and any(line.startswith("password=")
+                                       for line in (r.stdout or "").splitlines())
+    del r
+    return served
 
 
 def _ssh_key_present() -> bool:

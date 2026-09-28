@@ -18,6 +18,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from stayawake.lib.git import borrowed as borrowed_mod
 from stayawake.lib.git.write import capture as capture_mod
 from stayawake.lib.git.write.capture import BundleResult, capture_bundle
 
@@ -187,7 +188,7 @@ class TestFailuresAreReturnedNotRaised(_CaptureCase):
     def test_a_bundle_that_does_not_read_back_is_a_failure(self):
         # The pin on verification: git writes the file, then rejects it on read-back. Without a
         # `git bundle verify` step this returns a happy result over unusable evidence.
-        real_run = capture_mod.run
+        real_run = borrowed_mod.run
 
         def reject_on_verify(repo, args, **kwargs):
             if args[:2] == ["bundle", "verify"]:
@@ -195,7 +196,7 @@ class TestFailuresAreReturnedNotRaised(_CaptureCase):
                     args, 1, "", "error: does not look like a v2 or v3 bundle file\n")
             return real_run(repo, args, **kwargs)
 
-        with mock.patch.object(capture_mod, "run", side_effect=reject_on_verify):
+        with mock.patch.object(borrowed_mod, "run", side_effect=reject_on_verify):
             result = self.capture()
         self.assertFalse(result.verified)
         self.assertFalse(result.ok)

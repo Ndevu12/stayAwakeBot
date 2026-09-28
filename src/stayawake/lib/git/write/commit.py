@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Commit the remediation — as the security bot, and NEVER silently losing the fix when the
-repo enforces signed commits but signing can't complete in a non-interactive subprocess."""
+"""Commit the remediation as the security bot, in the fix checkout saw made."""
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
 
-from stayawake.lib.git.run import run
+from stayawake.lib.git.run import SAW_OWNED, run
+from stayawake.lib.git.write.sign import fix_commit_signing
+from stayawake.lib.git.write.worktree import held_checkout, land
 
 BOT_AUTHOR = ("-c", "user.name=StayAwakeBot Security",
               "-c", "user.email=security-bot@stayawake.local")
@@ -23,25 +24,22 @@ class CommitResult:
 
 
 def commit_fix(repo: str | Path, message: str) -> CommitResult:
-    """Commit the staged fix as the security bot, returning what actually happened.
-
-    The commit inherits the repo's config, including `commit.gpgsign=true`. In a throwaway
-    worktree subprocess, SSH/GPG signing frequently CAN'T complete (no agent, no passphrase
-    prompt, a key that isn't present) and `git commit` exits non-zero. The historical bug: the
-    return code went unchecked, so the failure was swallowed and the caller reported a
-    "prepared" fix on a branch that had **zero commits** — a phantom success.
-
-    So: check the first (normally-signed) attempt; if it fails, retry ONCE with
-    `-c commit.gpgsign=false` so a commit blocked *by signing* still lands, and report it
-    unsigned. The retry disables ONLY signing — it does NOT add `--no-verify`, so a genuinely
-    rejecting `pre-commit` hook (or an empty tree) fails both attempts and we return
-    `committed=False`; the caller then reports an honest failure instead of an empty branch.
-    We never silently bypass a repo's commit hooks.
-    """
-    res = run(repo, [*BOT_AUTHOR, "commit", "-m", message])
-    if res is not None and res.returncode == 0:
-        return CommitResult(committed=True, signed=True)
-    res = run(repo, [*BOT_AUTHOR, "-c", "commit.gpgsign=false", "commit", "-m", message])
-    if res is not None and res.returncode == 0:
-        return CommitResult(committed=True, signed=False)
-    return CommitResult(committed=False, signed=False)
+    """Commit the staged fix in the fix checkout at `repo` as the security bot, then land it on the
+    branch in the operator's repository. Signs when the operator's repository asks for
+    signatures, with the signer the operator configured globally (`sign.fix_commit_signing`); a
+    signed attempt that fails is retried once unsigned and reported unsigned. Returns what
+    happened: `committed=False` when the commit fails or cannot be landed. No hook of the
+    operator's repository runs."""
+    checkout = held_checkout(repo)
+    if checkout is None:
+        return CommitResult(committed=False, signed=False)
+    signing = fix_commit_signing(checkout.operator_repo)
+    signed = True
+    res = run(repo, [*BOT_AUTHOR, *signing, "commit", "-q", "-m", message], context=SAW_OWNED)
+    if res is None or res.returncode != 0:
+        signed = False
+        res = run(repo, [*BOT_AUTHOR, *signing, "-c", "commit.gpgsign=false",
+                         "commit", "-q", "-m", message], context=SAW_OWNED)
+    if res is None or res.returncode != 0 or land(repo):
+        return CommitResult(committed=False, signed=False)
+    return CommitResult(committed=True, signed=signed)

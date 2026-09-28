@@ -9,7 +9,9 @@ from pathlib import Path
 from stayawake.lib.git.query import parents
 
 from stayawake.utils import scratch
-from stayawake.lib.git.run import run, run_ok, stdout, stdout_bytes
+from stayawake.lib.git.run import UNTRUSTED, run, run_ok, stdout_bytes
+from stayawake.lib.git.write import working_tree
+from stayawake.lib.git.write.checkouts import checked_out_at
 from stayawake.lib.git.write.replace import Replacement, replacement_tree
 from stayawake.lib.git.write.sign import (SigningStatus, sign_flags, signing_args, signing_env,
                                           signing_status)
@@ -19,7 +21,8 @@ _ZERO = "0" * 40
 
 
 def is_dirty(repo: str | Path) -> bool:
-    return bool(stdout(repo, ["status", "--porcelain"]).strip())
+    """Whether the checkout at `repo` holds anything its HEAD does not (`working_tree.is_dirty`)."""
+    return working_tree.is_dirty(repo)
 
 
 def _differing_paths(repo: str | Path, base: str, target: str) -> list[str] | None:
@@ -30,14 +33,15 @@ def _differing_paths(repo: str | Path, base: str, target: str) -> list[str] | No
     directory would be reported under a name matching nothing the caller holds. Renames stay
     off — the claim is about the content at a path, not about identity across a move.
     """
-    res = run(repo, ["diff", "--name-only", "--no-renames", "-z", base, target])
+    res = run(repo, ["diff", "--no-textconv", "--no-ext-diff", "--name-only", "--no-renames",
+                     "-z", base, target], context=UNTRUSTED)
     if res is None or res.returncode != 0:
         return None
     return sorted({p for p in (res.stdout or "").split("\0") if p})
 
 
 def _tree_paths(repo: str | Path, treeish: str) -> list[str]:
-    res = run(repo, ["ls-tree", "-r", "--name-only", "-z", treeish])
+    res = run(repo, ["ls-tree", "-r", "--name-only", "-z", treeish], context=UNTRUSTED)
     if res is None or res.returncode != 0:
         return []
     return sorted({p for p in (res.stdout or "").split("\0") if p})
@@ -116,7 +120,7 @@ def rewrite_commit(repo: str | Path, commit: str, tree: str, new_parents: list[s
     fidelity guarantees rather than whatever a replay happened to preserve.
     """
     signing = signing_status(repo) if signing is None else signing
-    raw = stdout_bytes(repo, ["cat-file", "commit", commit])
+    raw = stdout_bytes(repo, ["cat-file", "commit", commit], context=UNTRUSTED)
     if not raw:
         return "", "message", "the original commit could not be read"
     headers, _, body = raw.partition(b"\n\n")
@@ -146,7 +150,7 @@ def rewrite_commit(repo: str | Path, commit: str, tree: str, new_parents: list[s
             fh.write(body)
         res = run(repo, [*signing_args(signing), "commit-tree",
                          *sign_flags(signing, "commit-tree"), tree, *parent_args, "-F", msg_path],
-                  env=signing_env(repo, env))
+                  env=signing_env(repo, env), context=UNTRUSTED)
     finally:
         if msg_path:
             try:
@@ -203,7 +207,7 @@ def restore_branches(repo: str | Path, heads: list[tuple[str, str, str]],
         if not new_tip or cas_old is None:
             continue
         if cas_old == _ZERO:
-            if not run_ok(repo, ["update-ref", "-d", f"refs/heads/{name}"]):
+            if not run_ok(repo, ["update-ref", "-d", f"refs/heads/{name}"], context=UNTRUSTED):
                 unrestored.append(name)
             continue
         try:
@@ -215,48 +219,52 @@ def restore_branches(repo: str | Path, heads: list[tuple[str, str, str]],
 
 
 def checkout_holding(repo: str | Path, branch: str) -> Path | None:
-    """The worktree with `branch` checked out, or None when no worktree has it.
+    """The working tree with `branch` checked out, or None when no checkout has it.
 
-    Every worktree, not just `repo`'s own. `git update-ref` will happily move a branch that a
+    Every checkout, not just `repo`'s own. `git update-ref` will happily move a branch that a
     LINKED worktree has checked out, and that worktree's tree is then left at the old content
     with the difference staged — so asking only `symbolic-ref HEAD` here answered for one
-    checkout and silently skipped the rest.
+    checkout and silently skipped the rest. Raises OSError when that cannot be established.
     """
-    listed = stdout(repo, ["worktree", "list", "--porcelain"])
-    path: str | None = None
-    for line in listed.splitlines():
-        if line.startswith("worktree "):
-            path = line[len("worktree "):].strip()
-        elif line.strip() == f"branch refs/heads/{branch}" and path:
-            return Path(path)
-    return None
+    holder = checked_out_at(repo, branch)
+    return None if holder is None else holder.worktree
 
 
 def point_branch_at(repo: str | Path, branch: str, new: str, old: str) -> bool:
     """Compare-and-swap `refs/heads/branch` from `old` to `new`.
 
-    The worktree holding that branch — any worktree, not only this one — is reset with it, so
-    this refuses outright, before the ref moves, while that tree holds uncommitted work. The
-    guard sits here rather than with the caller because `reset --hard` is here: a checked-out
-    branch reaches this function from the amend path, from the restore path, and from anything
-    added next, and only one of those has to forget the check for the work to be gone.
+    The checkout holding that branch — any checkout, not only this one — follows it, so this
+    refuses outright, before the ref moves, while that tree holds uncommitted work. The guard sits
+    here rather than with the caller because the tree is rewritten here: a checked-out branch
+    reaches this function from the amend path, from the restore path, and from anything added
+    next, and only one of those has to forget the check for the work to be gone.
     """
-    holder = checkout_holding(repo, branch)
-    if holder is not None and is_dirty(holder):
+    try:
+        holder = checked_out_at(repo, branch)
+    except OSError:
         return False
-    if not run_ok(repo, ["update-ref", f"refs/heads/{branch}", new, old]):
+    if holder is not None and is_dirty(holder.worktree):
         return False
-    if holder is None:
+    move = None
+    if holder is not None:
+        move = working_tree.PreparedMove(Path(repo), holder, old, new)
+        if not move.prepare():
+            move.release()
+            return False
+    if not run_ok(repo, ["update-ref", f"refs/heads/{branch}", new, old], context=UNTRUSTED):
+        if move is not None:
+            move.release()
+        return False
+    if move is None:
         return True
-    if run_ok(holder, ["reset", "--hard", "--quiet", "HEAD"]):
+    if move.apply():
+        move.release()
         return True
-    # The ref is at `new` and the tree is not. A held `index.lock` or an unwritable file is enough
-    # (measured: `update-ref` succeeds, `reset` exits 128). Returning False from here told the
-    # caller nothing had moved while the branch sat on the replacement with the old content staged
-    # as a change — the operator's next commit would put the payload back on top of the clean
-    # history. So the ref goes back, and a refusal is only reported once the branch AND the tree
-    # are demonstrably where they started.
-    if run_ok(repo, ["update-ref", f"refs/heads/{branch}", old, new]) and not is_dirty(holder):
+    # The ref moved and the tree did not: both go back before a refusal is reported.
+    restored = move.restore_files()
+    move.release()
+    if run_ok(repo, ["update-ref", f"refs/heads/{branch}", old, new], context=UNTRUSTED) \
+            and restored and not is_dirty(holder.worktree):
         return False
     raise AmendUnwindFailed(repo, unrestored=[branch], moved={branch: new})
 

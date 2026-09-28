@@ -92,11 +92,18 @@ class SigningFixture(unittest.TestCase):
     config already enables ssh signing, which would otherwise decide these outcomes."""
 
     def setUp(self):
+        self.global_config = Path(tempfile.mkdtemp(prefix="saw-signglobal-")) / "gitconfig"
+        self.global_config.write_text("", encoding="utf-8")
         isolated = mock.patch.dict(os.environ,
-                                   {"GIT_CONFIG_GLOBAL": "/dev/null",
+                                   {"GIT_CONFIG_GLOBAL": str(self.global_config),
                                     "GIT_CONFIG_SYSTEM": "/dev/null"})
         isolated.start()
         self.addCleanup(isolated.stop)
+
+    def operator_sets(self, key: str, value: str) -> None:
+        """Set `key` in the operator's global config."""
+        subprocess.run(["git", "config", "--file", str(self.global_config), key, value],
+                       check=True, capture_output=True)
 
     def signing_off(self) -> Path:
         return _repo(commit__gpgsign="false")
@@ -155,43 +162,96 @@ class TestSignatureFormats(SigningFixture):
 
     def test_openpgp_format_signs_through_the_configured_gpg_program(self):
         repo = _repo(commit__gpgsign="true", gpg__format="openpgp",
-                     user__signingkey="DEADBEEF",
-                     gpg__program=str(_script(_GPG_THAT_SIGNS)))
+                     user__signingkey="DEADBEEF")
+        self.operator_sets("gpg.program", str(_script(_GPG_THAT_SIGNS)))
         status = signing_status(repo)
         self.assertTrue(status.available, status.reason)
         self.assertEqual(status.signature_format, "openpgp")
 
     def test_openpgp_that_cannot_sign_is_a_refusal(self):
         repo = _repo(commit__gpgsign="true", gpg__format="openpgp",
-                     user__signingkey="DEADBEEF",
-                     gpg__program=str(_script(_GPG_THAT_FAILS)))
+                     user__signingkey="DEADBEEF")
+        self.operator_sets("gpg.program", str(_script(_GPG_THAT_FAILS)))
         status = signing_status(repo)
         self.assertTrue(status.must_refuse)
         self.assertIn("gpg", status.reason.lower())
 
-    def test_signer_program_is_not_taken_from_an_untrusted_context(self):
-        # With trust_local_programs False the signer program comes from git's own resolution, not
-        # from this context's config.
+    def test_a_rewrite_in_the_repository_runs_the_operators_signer_not_the_repositorys(self):
+        ran = Path(tempfile.mkdtemp(prefix="saw-ran-")) / "ran"
+        planted = _script(f"#!/bin/sh\ntouch '{ran}'\ncat > /dev/null\nexit 1\n")
+        repo = _repo(commit__gpgsign="true", gpg__format="openpgp",
+                     user__signingkey="DEADBEEF", gpg__program=str(planted))
+        self.operator_sets("gpg.program", str(_script(_GPG_THAT_SIGNS)))
+        status = signing_status(repo)
+        self.assertTrue(status.available, status.reason)
+        tree = _git(repo, "rev-parse", "HEAD^{tree}").strip()
+        res = run(repo, [*signing_args(status), "commit-tree",
+                         *sign_flags(status, "commit-tree"), tree, "-m", "rewrite"])
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertFalse(ran.exists(), "the repository's gpg.program ran during the rewrite")
+
+    def test_signer_program_is_never_taken_from_the_repository(self):
         ran = Path(tempfile.mkdtemp(prefix="saw-ran-")) / "ran"
         program = _script(f"#!/bin/sh\ntouch '{ran}'\ncat > /dev/null\nexit 1\n")
         repo = _repo(commit__gpgsign="true", gpg__format="openpgp",
                      user__signingkey="DEADBEEF", gpg__program=str(program))
-        signing_status(repo)  # trusted (default): the context's program is used
-        self.assertTrue(ran.exists(), "a trusted context uses its configured program")
-        ran.unlink()
+        signing_status(repo)
         signing_status(repo, trust_local_programs=False)
-        self.assertFalse(ran.exists(),
-                         "an untrusted context's program is not used")
+        self.assertFalse(ran.exists(), "a repository's gpg.program is not run")
+        self.operator_sets("gpg.program", str(program))
+        signing_status(repo)
+        self.assertTrue(ran.exists(), "the operator's own gpg.program is")
 
     def test_a_signer_that_reports_success_but_signs_nothing_is_a_refusal(self):
         repo = _repo(commit__gpgsign="true", gpg__format="openpgp",
-                     user__signingkey="DEADBEEF",
-                     gpg__program=str(_script(_GPG_THAT_CLAIMS_SUCCESS_AND_SIGNS_NOTHING)))
+                     user__signingkey="DEADBEEF")
+        self.operator_sets("gpg.program", str(_script(_GPG_THAT_CLAIMS_SUCCESS_AND_SIGNS_NOTHING)))
         status = signing_status(repo)
         self.assertTrue(status.must_refuse,
                         "git exits 0 here and writes an unsigned commit; only inspecting the "
                         "object catches it")
         self.assertIn("no signature", status.reason)
+
+
+class TestTheRepositorysSigningDataIsHonoured(SigningFixture):
+    """The signing key and format follow git's precedence, the repository over the operator's global
+    config; the signing programs come from the operator's global config."""
+
+    def test_a_repository_ssh_key_and_format_are_honoured_and_its_programs_are_not_run(self):
+        ran = Path(tempfile.mkdtemp(prefix="saw-ran-"))
+        planted = {key: _script(f"#!/bin/sh\ntouch '{ran / key}'\ncat > /dev/null\nexit 1\n")
+                   for key in ("gpg.program", "gpg.ssh.program", "gpg.x509.program")}
+        repo_key = _ssh_signing_key()
+        repo = _repo(commit__gpgsign="true", gpg__format="ssh", user__signingkey=str(repo_key),
+                     **{k.replace(".", "__"): str(v) for k, v in planted.items()})
+        self.operator_sets("gpg.format", "openpgp")
+        self.operator_sets("user.signingkey", "OPERATORS-OPENPGP-KEY")
+        status = signing_status(repo)
+        self.assertTrue(status.available, status.reason)
+        self.assertEqual("ssh", status.signature_format)
+        self.assertEqual(str(repo_key), dict(status.config)["user.signingkey"])
+        tree = _git(repo, "rev-parse", "HEAD^{tree}").strip()
+        res = run(repo, [*signing_args(status), "commit-tree",
+                         *sign_flags(status, "commit-tree"), tree, "-m", "rewrite"],
+                  env=signing_env(repo))
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertIn("BEGIN SSH SIGNATURE", _git(repo, "cat-file", "commit", res.stdout.strip()))
+        self.assertEqual([], sorted(p.name for p in ran.iterdir()),
+                         "a signing program the repository configures ran")
+
+
+class TestAConditionalIncludeInTheOperatorsConfigApplies(SigningFixture):
+    """Check a signer the operator's global config names through a conditional include."""
+
+    def test_the_included_program_is_the_one_used(self):
+        repo = _repo(commit__gpgsign="true")
+        included = self.global_config.parent / "signing.inc"
+        subprocess.run(["git", "config", "--file", str(included), "gpg.ssh.program",
+                        "/opt/op-ssh-sign"], check=True, capture_output=True)
+        subprocess.run(["git", "config", "--file", str(included), "gpg.format", "ssh"],
+                       check=True, capture_output=True)
+        self.operator_sets(f"includeIf.gitdir:{repo.resolve()}/.path", str(included))
+        self.assertIn("gpg.ssh.program=/opt/op-ssh-sign", " ".join(sign.fix_commit_signing(repo)))
 
 
 class TestProbeSafety(SigningFixture):
@@ -206,8 +266,8 @@ class TestProbeSafety(SigningFixture):
 
     def test_a_signer_that_blocks_resolves_to_unavailable_within_the_timeout(self):
         repo = _repo(commit__gpgsign="true", gpg__format="ssh",
-                     user__signingkey=str(_ssh_signing_key()),
-                     gpg__ssh__program=str(_script(_SIGNER_THAT_BLOCKS)))
+                     user__signingkey=str(_ssh_signing_key()))
+        self.operator_sets("gpg.ssh.program", str(_script(_SIGNER_THAT_BLOCKS)))
         with mock.patch.object(sign, "PROBE_TIMEOUT", 2):
             started = time.monotonic()
             status = signing_status(repo)

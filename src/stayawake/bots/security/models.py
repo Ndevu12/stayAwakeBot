@@ -16,7 +16,8 @@ ROLLBACK_DIR = f"{SAW_DIR}/rollback"
 CONFIRMED = "confirmed"
 HEURISTIC = "heuristic"
 RESIDUE = "residue"
-CONFIDENCE_LEVELS = (CONFIRMED, HEURISTIC, RESIDUE)
+INFORMATIONAL = "informational"
+CONFIDENCE_LEVELS = (CONFIRMED, HEURISTIC, RESIDUE, INFORMATIONAL)
 
 REMEDIATION_VERBS = ("manual", "recover", "remove-file", "remove-foreign-vscode",
                      "strip-gitignore-markers")
@@ -102,6 +103,7 @@ class ScanResult:
     error: str | None = None
     advisories: list[Finding] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    informational: list[Finding] = field(default_factory=list)
 
     @property
     def verdict(self) -> str:
@@ -161,7 +163,7 @@ class ScanResult:
         }
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out = {
             "target": self.target,
             "source": self.source,
             "verdict": self.verdict,
@@ -174,6 +176,9 @@ class ScanResult:
             "advisories": [a.to_dict() for a in self.advisories],
             "notes": list(self.notes),
         }
+        if self.informational:
+            out["informational"] = [i.to_dict() for i in self.informational]
+        return out
 
 
 @dataclass

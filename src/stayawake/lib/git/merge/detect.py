@@ -3,13 +3,15 @@
 parents, gated through corroboration so benign conflict resolutions don't false-positive."""
 from __future__ import annotations
 
+import contextlib
+import sys
 from pathlib import Path
 
 import posixpath
 
 from stayawake.lib.git.query import (parents, changed_paths, path_exists_at, file_at,
                                     list_tree)
-from stayawake.lib.git.merge.tree import auto_merge, auto_merge_tree
+from stayawake.lib.git.borrowed import Borrowed, BorrowError, borrow
 from stayawake.lib.git.merge.corroborate import corroborated
 
 
@@ -55,15 +57,34 @@ def clean_merge_blob(repo: str | Path, merge_sha: str, path: str) -> str | None:
     ps = parents(repo, merge_sha)
     if len(ps) != 2:
         return None
-    base_tree = auto_merge_tree(repo, ps[0], ps[1])
-    if base_tree is None or not path_exists_at(repo, base_tree, path):
-        return None
-    text = file_at(repo, base_tree, path)
+    with borrowed_or_none(repo, None) as borrowed:
+        if borrowed is None:
+            return None
+        merged = borrowed.merge_tree(ps[0], ps[1])
+        if merged is None or not path_exists_at(borrowed.path, merged.tree, path):
+            return None
+        text = file_at(borrowed.path, merged.tree, path)
     return text or None
 
 
+@contextlib.contextmanager
+def borrowed_or_none(repo: str | Path, borrowed: Borrowed | None = None):
+    """Yield `borrowed`, else a new borrowed-objects repository over `repo`, else None with a warning
+    when one cannot be made."""
+    if borrowed is not None:
+        yield borrowed
+        return
+    with contextlib.ExitStack() as stack:
+        try:
+            made = stack.enter_context(borrow(repo))
+        except BorrowError as exc:
+            print(f"saw: the clean merge could not be replayed for {repo}: {exc}", file=sys.stderr)
+            made = None
+        yield made
+
+
 def evil_merge_paths(repo: str | Path, merge_sha: str, content_sig=None,
-                     obfuscation_reason=None) -> dict[str, str]:
+                     obfuscation_reason=None, *, borrowed: Borrowed | None = None) -> dict[str, str]:
     """Paths whose content the merge introduced BEYOND a clean 3-way merge of its parents
     AND for which that introduction is CORROBORATED as review-evading (see `corroborated`).
 
@@ -87,14 +108,21 @@ def evil_merge_paths(repo: str | Path, merge_sha: str, content_sig=None,
     ps = parents(repo, merge_sha)
     if len(ps) < 2:
         return {}
+    if len(ps) != 2:
+        return _flag(repo, merge_sha, ps, ps[0], None, content_sig, obfuscation_reason)
+    with borrowed_or_none(repo, borrowed) as replay:
+        merged = replay.merge_tree(ps[0], ps[1]) if replay is not None else None
+        if merged is None:
+            return _flag(repo, merge_sha, ps, ps[0], None, content_sig, obfuscation_reason)
+        return _flag(replay.path, merge_sha, ps, merged.tree, merged.conflicted, content_sig,
+                     obfuscation_reason)
 
-    merged = auto_merge(repo, ps[0], ps[1]) if len(ps) == 2 else None
-    if merged is None:
-        base_tree, conflicted = ps[0], None
-    else:
-        base_tree, conflicted = merged.tree, merged.conflicted
+
+def _flag(repo: str | Path, merge_sha: str, ps: list[str], base_tree: str, conflicted,
+          content_sig, obfuscation_reason) -> dict[str, str]:
+    """The corroborated paths `merge_sha` changed against `base_tree`, read in `repo` — the
+    borrowed-objects repository whenever `base_tree` was written there."""
     deviating = changed_paths(repo, base_tree, merge_sha, diff_filter="AM")
-
     flagged: dict[str, str] = {}
     for path in deviating:
         ok, reason = corroborated(repo, base_tree, merge_sha, path, ps,

@@ -14,6 +14,7 @@ from pathlib import Path
 from stayawake.bots.security.write_sinks import sink_label
 from stayawake.lib import auth
 from stayawake.lib import git as gitutil
+from stayawake.lib.git.owned import own, disown
 from stayawake.lib.adapters import github_api
 from stayawake.utils import scratch
 from stayawake.bots.security.targets import ScanOptions
@@ -387,14 +388,19 @@ def cloned_repo(slug: str, token: str | None, *, depth: int | None = 50):
     clone = tmp / "repo"
     try:
         def _attempt(url, env):
-            cmd = ["git", "clone", "--quiet"]
+            args = ["clone", "--quiet"]
             if depth is not None:
-                cmd += ["--depth", str(depth)]
-            cmd += [url, str(clone)]
-            return subprocess.run(cmd, capture_output=True, text=True, check=False, env=env)
+                args += ["--depth", str(depth)]
+            args += [url, str(clone)]
+            return gitutil.run(None, args, env=env, timeout=None,
+                               context=gitutil.OPERATOR_PUSH)
         r = gitutil.run_remote_git(slug, token, _attempt)
-        yield clone if (r is not None and r.returncode == 0) else None
+        cloned = r is not None and r.returncode == 0
+        if cloned:
+            own(clone)
+        yield clone if cloned else None
     finally:
+        disown(clone)
         why = scratch.release_path(tmp)
         if why:
             print(f"saw: left behind the clone at {tmp}: {why}", file=sys.stderr)

@@ -12,10 +12,11 @@ from fnmatch import fnmatch
 from typing import Any
 
 from stayawake.utils import textsafe
-from stayawake.bots.security.models import (CONFIRMED, HEURISTIC, RESIDUE, ROLLBACK_DIR,
-                                            Finding, ScanResult, Severity)
+from stayawake.bots.security.models import (CONFIRMED, HEURISTIC, INFORMATIONAL, RESIDUE,
+                                            ROLLBACK_DIR, Finding, ScanResult, Severity)
 from stayawake.bots.security.matchers import REGISTRY
 from stayawake.lib import git as gitutil
+from stayawake.lib.git.run import stalls_recorded
 
 
 def _accepts_all_signatures(matcher) -> bool:
@@ -35,7 +36,7 @@ def _allowed(finding: Finding, allowlist: list[dict[str, Any]]) -> bool:
     is intentionally NOT honored — it would blanket-suppress *every* signature on
     that path, so a fresh payload dropped under e.g. a test-fixtures glob would slip
     through silently. Fixture allowlisting therefore requires `signature` (+ optional
-    `path_glob` to scope it)."""
+    `path_glob` to scope it, and an optional exact `evidence` to name one finding)."""
     for rule in allowlist or []:
         if not isinstance(rule, dict):
             continue                       # defensive: skip a non-mapping rule (config is validated upstream)
@@ -44,6 +45,8 @@ def _allowed(finding: Finding, allowlist: list[dict[str, Any]]) -> bool:
         if not sig or sig != finding.signature_id:
             continue                       # path-only rules are too broad — ignored
         if glob and not fnmatch(finding.path, glob):
+            continue
+        if "evidence" in rule and rule["evidence"] != finding.evidence:
             continue
         return True
     return False
@@ -62,8 +65,10 @@ def run_matchers(target, matcher_names: list[str],
         if not matcher:
             continue
         sigs = signatures_by_matcher.get(name, [])
-        findings = (matcher.scan(target, sigs, all_signatures=all_sigs)
-                    if _accepts_all_signatures(matcher) else matcher.scan(target, sigs))
+        with stalls_recorded() as stalled:
+            findings = (matcher.scan(target, sigs, all_signatures=all_sigs)
+                        if _accepts_all_signatures(matcher) else matcher.scan(target, sigs))
+        target.read_errors.extend(f"{name}: {why}" for why in stalled)
         out[name] = list(findings)
     return out
 
@@ -77,7 +82,8 @@ def finalize(display: str, source: str, by_matcher: dict[str, list[Finding]],
     `-j 1`. Findings are consumed in `matcher_order` (the signatures' matcher order), preserving the
     matcher-major insertion order that the final `(-severity, path)` stable sort relies on for ties."""
     result = ScanResult(target=display, source=source)
-    confidence_of = {s["id"]: (s["confidence"] if s.get("confidence") in (HEURISTIC, RESIDUE)
+    confidence_of = {s["id"]: (s["confidence"]
+                               if s.get("confidence") in (HEURISTIC, RESIDUE, INFORMATIONAL)
                                else CONFIRMED)
                      for s in all_sigs}
     for name in matcher_order:
@@ -88,6 +94,9 @@ def finalize(display: str, source: str, by_matcher: dict[str, list[Finding]],
                 # Advisory-tier (e.g. a dependency CVE): route OUT of `findings` so the verdict never
                 # sees it — reported separately, never gates the scan.
                 result.advisories.append(finding)
+            elif confidence_of.get(finding.signature_id) == INFORMATIONAL:
+                finding.confidence = INFORMATIONAL
+                result.informational.append(finding)
             else:
                 finding.confidence = confidence_of.get(finding.signature_id, CONFIRMED)
                 result.findings.append(finding)

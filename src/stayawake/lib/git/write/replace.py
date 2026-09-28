@@ -10,9 +10,11 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from stayawake.lib.git.merge.tree import auto_merge
+from stayawake.lib.git.borrowed import borrow
+from stayawake.lib.git.merge.tree import AutoMerge
 from stayawake.lib.git.query import file_at, parents, path_exists_at, tree_entry
 from stayawake.lib.git.run import run, run_ok, stdout, stdout_bytes
+from stayawake.lib.git.write.transfer import adopt_objects
 
 from stayawake.utils import scratch
 
@@ -55,6 +57,20 @@ def _refused(kind: str, refusal: str) -> Replacement:
     return Replacement(kind=kind, refusal=refusal)
 
 
+def _replayed_merge(repo: str | Path, a: str, b: str) -> AutoMerge | None:
+    """Git's clean 3-way merge of `a` and `b`, replayed in a saw-owned repository over `repo`'s
+    objects, with the merged tree handed to `repo`. Returns None when there is no clean merge
+    or its tree could not be handed over."""
+    try:
+        with borrow(repo) as borrowed:
+            merged = borrowed.merge_tree(a, b)
+            if merged is None or adopt_objects(repo, borrowed.path, [merged.tree], [a, b]):
+                return None
+            return merged
+    except OSError:
+        return None
+
+
 def _baseline(repo: str | Path, ps: list[str]) -> tuple[str | None, frozenset[str]]:
     """The tree this commit should have had, and the paths git could not decide on its own.
 
@@ -63,7 +79,7 @@ def _baseline(repo: str | Path, ps: list[str]) -> tuple[str | None, frozenset[st
     nominating one parent as the truth.
     """
     if len(ps) == 2:
-        merged = auto_merge(repo, ps[0], ps[1])
+        merged = _replayed_merge(repo, ps[0], ps[1])
         return (merged.tree, merged.conflicted) if merged else (None, frozenset())
     if len(ps) == 1:
         return ps[0], frozenset()

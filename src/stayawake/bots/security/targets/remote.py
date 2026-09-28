@@ -6,12 +6,13 @@ Never installs, builds, runs hooks, or opens an editor — clone-and-read only.
 from __future__ import annotations
 
 import shutil
-import subprocess
 from pathlib import Path
 
 from stayawake.lib import git as gitutil
 from stayawake.utils import scratch
 from stayawake.bots.security.targets.base import Target, ScanOptions
+
+_CLONE_TIMEOUT = 300
 
 
 class RemoteRepoTarget(Target):
@@ -25,10 +26,10 @@ class RemoteRepoTarget(Target):
 
     def clone(self) -> bool:
         def _attempt(url, env):
-            return subprocess.run(
-                ["git", "clone", "--depth", str(self.opts.remote_clone_depth), "--no-tags",
-                 "--config", "core.hooksPath=/dev/null", url, str(self.root)],
-                capture_output=True, text=True, timeout=300, env=env, check=False)
+            return gitutil.run(None, ["clone", "--depth", str(self.opts.remote_clone_depth),
+                                      "--no-tags", "--config", "core.hooksPath=/dev/null", url,
+                                      str(self.root)],
+                               env=env, timeout=_CLONE_TIMEOUT, context=gitutil.OPERATOR_PUSH)
         r = gitutil.run_remote_git(self._slug, self._token, _attempt)
         return r is not None and r.returncode == 0
 

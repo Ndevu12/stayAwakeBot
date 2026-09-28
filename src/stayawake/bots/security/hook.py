@@ -77,7 +77,8 @@ _is_ours = hookscript.is_ours
 def _global_hookspath() -> str | None:
     """A global `core.hooksPath`, if set — it OVERRIDES every repo's `.git/hooks`, so our
     template-seeded hooks would silently never run. Detected so install/status can warn."""
-    val = gitutil.stdout(None, ["config", "--global", "--get", "core.hooksPath"]).strip()
+    val = gitutil.stdout(None, ["config", "--global", "--get", "core.hooksPath"],
+                         context=gitutil.OPERATOR_CONFIG).strip()
     return val or None
 
 
@@ -303,7 +304,7 @@ def settle_hooks(config_path: str | None = None) -> Settling:
         else:
             actions = _settle(_hooks_dir(), saw, config, own=True)
             if not gitutil.run_ok(None, ["config", "--global", "init.templateDir",
-                                         str(template_dir())]):
+                                         str(template_dir())], context=gitutil.OPERATOR_CONFIG):
                 return Settling(code=2, problem="could not set git's global init.templateDir.")
             target = str(template_dir())
     except HookError as exc:
@@ -519,7 +520,8 @@ def uninstall(*, no_stream: bool = False) -> int:
         print(f"error: {textsafe.plain(str(exc))}", file=sys.stderr)
         return 3
     if existing and _same_path(existing, template_dir()):
-        gitutil.run_ok(None, ["config", "--global", "--unset", "init.templateDir"])
+        gitutil.run_ok(None, ["config", "--global", "--unset", "init.templateDir"],
+                       context=gitutil.OPERATOR_CONFIG)
         removed = True
     hookscript.forget()
     out = _tape(no_stream)

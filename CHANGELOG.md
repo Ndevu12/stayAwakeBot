@@ -25,6 +25,16 @@ reader, not the mechanism or the weakness it closed.
 - **A scan now reads every well-formed editor settings, task and manifest file it meets.** Some
   valid files were read as empty, so what they declared went unexamined. Upgrading is recommended;
   rescan repositories you scanned before.
+- **A scan now examines the programs a repository's own git settings and hooks would run.** One
+  that is confirmed malicious is reported as an infection, and `saw fix` removes that setting or
+  hook and the file it runs. A program git would run on its own is reported for you to review;
+  accept one you set up yourself with an allowlist entry that names its `evidence`.
+- **Scanning or fixing a repository no longer runs programs that repository's own git settings name.**
+  The signing program and credentials a fix uses come from your own git settings, never the scanned
+  repository's. `saw fix amend` leaves a checked-out branch where it is, with the reason, when a
+  file it would rewrite on disk passes through a filter such as Git LFS.
+- **A scan no longer calls a repository clean when a git command it runs does not answer in
+  time.** The repository is reported as not read in full.
 - **A package name from a scanned lockfile can no longer shape a command saw hands you.**
 - **saw no longer tells you which version to install.** It names the versions that are compromised
   and leaves the choice to you, because an offline advisory cache cannot promise a version is safe.
