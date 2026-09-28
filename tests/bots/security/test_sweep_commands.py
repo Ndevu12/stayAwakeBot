@@ -18,6 +18,12 @@ from stayawake.bots.security.guard import sweep as guard_sweep
 from stayawake.bots.security.guard.detect import GuardStatus
 from stayawake.bots.security.targets import ScanOptions
 from stayawake.utils.streaming import Streamer
+from stayawake.bots.security.pr.fix_verdict import BaseFix, BaseState, Checkout, FixVerdict
+
+
+def _prepared(repo) -> FixVerdict:
+    label = f"{remediator._disp(repo)}: prepared"
+    return FixVerdict(label, BaseFix(BaseState.PREPARED, label, "main", "b"), Checkout.CLEAN)
 
 
 def _commit_repo(name: str) -> Path:
@@ -45,7 +51,7 @@ class TestFixSweepDeterminism(unittest.TestCase):
     def _fix_local_outcomes(self, jobs):
         # Deterministic per-repo outcome keyed on the repo path, so ordering is observable.
         def prepare(repo, *a, **k):
-            return f"{remediator._disp(repo)}: prepared"
+            return _prepared(repo)
         with mock.patch.object(remediator.pr_submit, "prepare_fix", side_effect=prepare):
             return remediator._fix_local({}, ScanOptions(), [], [], self.paths,
                                          _quiet_streamer(), publish=False, jobs=jobs)
@@ -77,7 +83,7 @@ class TestFixSweepFailClosed(unittest.TestCase):
         def prepare(repo, *a, **k):
             if Path(repo).name == bad_name:
                 raise RuntimeError("kaboom")
-            return f"{remediator._disp(repo)}: prepared"
+            return _prepared(repo)
 
         with mock.patch.object(remediator.pr_submit, "prepare_fix", side_effect=prepare):
             # _fix_local isolates the failure into a needs-review string...
@@ -86,10 +92,10 @@ class TestFixSweepFailClosed(unittest.TestCase):
         self.assertEqual(len(outcomes), 4, "a raising repo must not drop its peers")
         # The flag, not the wording that used to stand in for it.
         self.assertTrue(any(o.needs_review for o in outcomes))
-        # ...and fix() maps any needs-review outcome to a non-zero exit.
+        # ...and fix() maps any needs-review outcome to an incomplete run.
         with mock.patch.object(remediator.pr_submit, "prepare_fix", side_effect=prepare):
             rc = remediator.fix(None, paths=paths, no_stream=True, jobs=4)
-        self.assertEqual(rc, 1)
+        self.assertEqual(rc, remediator.exitcodes.INCOMPLETE)
 
 
 class TestFixRemoteNoTokenBleed(unittest.TestCase):

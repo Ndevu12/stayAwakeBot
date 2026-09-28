@@ -2,11 +2,16 @@
 """Host-level denials: enforcing only after read-back; never remove what is already there."""
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import tempfile
+import time
 import types
 import unittest
+
+from stayawake.bots.security.jsonc import load_jsonc
+
 from pathlib import Path
 import contextlib
 import pwd
@@ -17,6 +22,7 @@ from stayawake.bots.security.harden import approvals as agentapprovals
 from stayawake.bots.security.harden import settings as editorsettings
 from stayawake.bots.security.harden import live
 from stayawake.bots.security.harden import denial
+from stayawake.bots.security.harden import jsonc
 from stayawake.bots.security.hygiene import host_artifacts
 from stayawake.bots.security.hygiene.models import HygieneIssue, PROCESSES_NOT_READABLE_ID
 from stayawake.utils import hostdenial, operator
@@ -1772,6 +1778,86 @@ class TestNoTestTouchesTheRealMachine(unittest.TestCase):
                     if needed not in given:
                         unguarded.append((node.lineno, needed))
         self.assertEqual(unguarded, [], f"these would act on this machine: {unguarded}")
+
+
+class TestRemovingAMemberLeavesTheRestAsItWas(unittest.TestCase):
+    """Check what `remove_key` and `remove_member` take and what they leave."""
+
+    def test_every_occurrence_of_a_duplicated_key_goes(self):
+        text = '{"task.allowAutomaticTasks":"off","a":1,"task.allowAutomaticTasks":"on"}'
+        out, _ = jsonc.remove_key(text, "task.allowAutomaticTasks")
+        self.assertEqual('{"a":1}', out)
+
+    def test_an_escaped_quote_in_a_neighbour_is_not_a_boundary(self):
+        text = '{"a": "o\\"n", "task.allowAutomaticTasks": "on"}'
+        out, _ = jsonc.remove_key(text, "task.allowAutomaticTasks")
+        self.assertEqual('{"a": "o\\"n"}', out)
+
+    def test_an_exponent_number_is_taken_whole(self):
+        text = '{"task.allowAutomaticTasks": 1e5, "a": 1}'
+        out, _ = jsonc.remove_key(text, "task.allowAutomaticTasks")
+        self.assertEqual('{"a": 1}', out)
+
+    def test_a_list_member_goes_with_its_brackets(self):
+        text = '{\n  // mine\n  "editor.rulers": [100],\n  "tasks": [{"label": "x", "args": ["]", "}"]}]\n}\n'
+        out, _ = jsonc.remove_member(text, "tasks")
+        self.assertEqual('{\n  // mine\n  "editor.rulers": [100]\n}\n', out)
+
+    def test_a_member_that_never_closes_is_refused(self):
+        self.assertIsNone(jsonc.remove_member('{"tasks": [{"label": "x"', "tasks"))
+
+    def test_an_absent_member_is_none(self):
+        self.assertIsNone(jsonc.remove_member('{"a": 1}', "tasks"))
+
+    def test_a_member_nested_in_one_of_the_same_name_is_taken_with_it(self):
+        text = ('{\n  "a": 1,\n  "tasks": {"version": "2.0.0", "tasks": [{"label": "p"}]},\n'
+                '  "files.exclude": {"dist": true}\n}\n')
+        out, _ = jsonc.remove_member(text, "tasks")
+        self.assertEqual({"a": 1, "files.exclude": {"dist": True}}, json.loads(out))
+
+    def test_a_member_of_that_name_inside_another_object_is_left(self):
+        text = '{"todo.config": {"tasks": ["write docs"], "x": 1}}'
+        self.assertIsNone(jsonc.remove_member(text, "tasks"))
+
+    def test_a_comment_after_the_member_stays(self):
+        text = '{\n  "tasks": [1],\n  // keep 100\n  "editor.rulers": [100]\n}\n'
+        out, _ = jsonc.remove_member(text, "tasks")
+        self.assertIn("// keep 100", out)
+
+
+    def test_a_key_of_that_name_inside_another_object_is_left(self):
+        text = '{"x": {"task.allowAutomaticTasks": "off"}, "task.allowAutomaticTasks": "on"}'
+        out, _ = jsonc.remove_key(text, "task.allowAutomaticTasks")
+        self.assertEqual({"x": {"task.allowAutomaticTasks": "off"}}, load_jsonc(out))
+
+    def test_every_one_of_many_duplicates_is_taken_out(self):
+        members = ['"task.allowAutomaticTasks": "on"', '"a": 1'] * 500
+        text = "{\n  " + ",\n  // note\n  ".join(members) + "\n}\n"
+        out, _ = jsonc.remove_key(text, "task.allowAutomaticTasks")
+        self.assertEqual({"a": 1}, load_jsonc(out))
+        self.assertEqual(500, out.count('"a": 1'))
+        self.assertEqual(999, out.count("// note"))
+
+    def test_a_comment_before_the_last_member_stays(self):
+        text = '{"a": 2, // my note\n "tasks": [1]}'
+        out, _ = jsonc.remove_member(text, "tasks")
+        self.assertIn("// my note", out)
+        self.assertEqual({"a": 2}, load_jsonc(out))
+
+    def test_a_comment_between_the_member_and_its_comma_stays(self):
+        text = '{"tasks": [1] /* keep me */,\n "b": 2}'
+        out, _ = jsonc.remove_member(text, "tasks")
+        self.assertIn("/* keep me */", out)
+        self.assertEqual({"b": 2}, load_jsonc(out))
+
+    def test_many_nested_members_are_read_in_one_pass(self):
+        text = "{" + ",".join(f'"k{n}": {{"tasks": [1]}}' for n in range(4000)) + ', "tasks": [1]}'
+        started = time.monotonic()
+        out, _ = jsonc.remove_member(text, "tasks")
+        self.assertLess(time.monotonic() - started, 2.0)
+        parsed = load_jsonc(out)
+        self.assertNotIn("tasks", parsed)
+        self.assertEqual({"tasks": [1]}, parsed["k3999"])
 
 
 if __name__ == "__main__":

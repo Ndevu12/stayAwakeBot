@@ -15,15 +15,18 @@ from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.targets import LocalRepoTarget
 from stayawake.bots.security.dependencies.remediation import MALICIOUS
 from stayawake.bots.security.models import ROLLBACK_DIR, CONFIRMED, HEURISTIC
-from stayawake.bots.security.remediation import manifest
+from stayawake.bots.security.remediation import live, manifest
 from stayawake.bots.security import remediation
 from stayawake.bots.security.remediation import installed
 from stayawake.core import proposal
+from stayawake.bots.security.pr import held
 from stayawake.bots.security.pr.constants import FIX_BRANCH, PARTIAL_LABEL
 from stayawake.bots.security.pr.branches import choose_fix_branch
+from stayawake.bots.security.pr.fix_verdict import (
+    BaseFix, BaseState, Checkout, CheckoutDetail, FixVerdict, History, checkout_of)
 from stayawake.bots.security.pr.render import (
-    manual_review_lines, computed_review_lines, suspicious_review_lines,
-    _issue_spec, _mark_partial, _pr_body, _render_submit)
+    PARTIAL_MARK, manual_review_lines, computed_review_lines, suspicious_review_lines,
+    _issue_spec, _pr_body, _render_submit)
 
 class _Frozen:
     """A finding whose `confidence` is read once."""
@@ -56,6 +59,14 @@ def _reconcile_partial_label(owner: str, name: str, number: int, partial: bool, 
 
 
 @dataclass(frozen=True)
+class _CheckoutSeen:
+    """What the checkout pass came to, and what the history still stores where it cleared."""
+    state: Checkout = Checkout.UNREAD
+    detail: CheckoutDetail = CheckoutDetail()
+    history: History = History()
+
+
+@dataclass(frozen=True)
 class _Fix:
     """A prepared fix: branch, applied changes, and leftover findings."""
     base: str
@@ -67,15 +78,20 @@ class _Fix:
     advisories: tuple = ()
     manual: tuple = ()
     signed: bool = True
-    tree_note: str = ""
+    checkout: _CheckoutSeen = _CheckoutSeen()
 
     @property
     def partial(self) -> bool:
         return bool(self.manual) or bool(self.computed)
 
 
-def _with_tree(outcome: str, note: str) -> str:
-    return outcome if not note else f"{outcome}\n    {note}"
+@dataclass(frozen=True)
+class _Stopped:
+    """A run that prepared no fix: what the base branch came to, and the checkout."""
+    state: BaseState
+    text: str
+    base: str = ""
+    checkout: _CheckoutSeen = _CheckoutSeen()
 
 
 def _malicious_names(findings) -> set:
@@ -95,13 +111,37 @@ def _manifest_changes(wt: Path, findings) -> list:
             for rel in rewritten]
 
 
-def _lockfile_changes(wt: Path, report: installed.Report) -> list:
+def _committed_under(repo: Path):
+    """`committed(path) -> list[str]` for the paths the repository tracks under a path.
+
+    Takes the repository. Returns the check; its answers are relative to the repository.
+    """
+    def committed(path: Path) -> list[str]:
+        rel = _relative(repo, path)
+        if rel is None:
+            return [str(path)]
+        return gitutil.tracked_under(repo, rel)
+
+    return committed
+
+
+def _relative(repo: Path, path: Path) -> str | None:
+    """The path relative to the repository, or None when it is not under it."""
+    try:
+        return path.resolve().relative_to(repo.resolve()).as_posix()
+    except (OSError, ValueError):
+        return None
+
+
+def _lockfile_changes(wt: Path, removed: list[Path]) -> list:
+    """The fix branch's record of the lockfiles taken out of it. Takes the worktree and the removed
+    lockfiles. Returns one change for each that lay in the worktree."""
     changes = []
     try:
         origin = wt.resolve()
     except OSError:
         return changes
-    for path in report.removed_lockfiles:
+    for path in removed:
         try:
             rel = path.resolve().relative_to(origin)
         except (OSError, ValueError):
@@ -196,12 +236,13 @@ def _suspicious_only_outcome(label: str, fix: "_Fix") -> str:
 
 
 def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = None,
-               label: str = "", spin: bool = False) -> tuple["_Fix | None", str, Path | None]:
-    """Build the fix in a throwaway worktree. Returns `(fix, outcome, worktree)`."""
+               label: str = "", spin: bool = False) -> tuple["_Fix | _Stopped", Path | None]:
+    """Build the fix in a throwaway worktree. Returns `(fix or why none was prepared, worktree)`."""
     base = base or gitutil.default_branch(repo)
     baseref = f"origin/{base}" if gitutil.ref_exists(repo, f"origin/{base}") else base
     if not gitutil.ref_exists(repo, baseref):
-        return None, "no default branch to build a fix from — skipped", None
+        return _Stopped(BaseState.ABORTED, "no default branch to build a fix from — skipped",
+                        base), None
 
     wt = scratch.new_dir("the fix worktree", teardown=gitutil.release_worktree(repo))
     branch = choose_fix_branch(
@@ -209,7 +250,7 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
         exists=lambda n: gitutil.ref_exists(repo, f"origin/{n}"),
         fast_forwardable=lambda n: gitutil.is_ancestor(repo, f"origin/{n}", baseref))
     if not gitutil.add_worktree(repo, wt, branch, baseref):
-        return None, "could not create worktree", wt
+        return _Stopped(BaseState.ABORTED, "could not create worktree", base), wt
     rollback = scratch.new_dir("rollback")
 
     content_sig = remediation.codeloader_content_sig([s for g in signatures.values() for s in g])
@@ -228,7 +269,6 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
         findings = _freeze(scan.findings)
         advisories = tuple(scan.advisories)
 
-    tree_note = ""
     with status(f"fixing {label}…", enabled=spin):
         lockfile_changes: list = []
         applied: list = []
@@ -236,18 +276,26 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
         manual_reviews: dict = {}
         suggested: list = []
         merge_clean: dict = {}
+        checkout = live.clean_checkout(
+            repo, opts, signatures, allowlist,
+            scan=scan_target,
+            keep=getattr(opts, "keep_dirs", ()) or (),
+            lockfile_root=wt,
+            base_confirmed=bool(_blocking(findings)),
+            remove_lockfiles=not installed.lockfile_stays())
+        if _blocking(findings) and not scan.error:
+            removed = list(getattr(checkout.report, "removed_lockfiles", None) or ())
+            if not installed.lockfile_stays():
+                removed += installed.remove_lockfiles_of(
+                    wt, keep=getattr(opts, "keep_dirs", ()) or ())
+            lockfile_changes = _lockfile_changes(wt, removed)
+        state, detail = checkout_of(checkout)
+        seen = _CheckoutSeen(state, detail, held.history_holds(
+            repo, checkout.cleared, baseref, signatures, allowlist, opts, fix_branch=branch))
+
+        def stopped(text: str) -> tuple[_Stopped, Path]:
+            return _Stopped(BaseState.ABORTED, text, base, seen), wt
         if not scan.error:
-            if _blocking(findings):
-                try:
-                    report = installed.remove_installed(
-                        repo,
-                        confirmed=bool(_blocking(findings)),
-                        remove_lockfiles=not installed.lockfile_stays(),
-                        lockfile_root=wt)
-                    tree_note = report.note()
-                    lockfile_changes = _lockfile_changes(wt, report)
-                except OSError as exc:
-                    tree_note = f"could not remove the installed tree ({exc})"
             applied = (lockfile_changes + _manifest_changes(wt, findings)
                        + remediation.apply(wt, remediation.plan(findings), rollback))
             for f in findings:
@@ -320,17 +368,16 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
             if auto:
                 applied += remediation.remove_residual(wt, auto, rollback)
             if not _untrack_rollback(wt):
-                return None, _with_tree(
-                    f"ABORTED — could not untrack {ROLLBACK_DIR}/ (would commit backups)", tree_note), wt
+                return stopped(f"ABORTED — could not untrack {ROLLBACK_DIR}/ (would commit backups)")
 
             signed = True
             if applied:
                 if not gitutil.stage_all(wt):
-                    return None, _with_tree("ABORTED — could not stage the fix (git add failed)", tree_note), wt
+                    return stopped("ABORTED — could not stage the fix (git add failed)")
                 commit = gitutil.commit_fix(wt, "security: auto-remediate worm indicators\n\n"
                                             + "\n".join(f"- {c.action}: {c.path}" for c in applied))
                 if not commit.committed:
-                    return None, _with_tree("ABORTED — could not commit the fix (git commit failed)", tree_note), wt
+                    return stopped("ABORTED — could not commit the fix (git commit failed)")
                 signed = commit.signed
 
             computed: list = []
@@ -344,14 +391,12 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
                         "review and remove the payload manually.", disp.line)
             if computed:
                 if not gitutil.stage_all(wt):
-                    return None, _with_tree(
-                        "ABORTED — could not stage the computed strip (git add failed)", tree_note), wt
+                    return stopped("ABORTED — could not stage the computed strip (git add failed)")
                 commit = gitutil.commit_fix(
                     wt, "security: computed payload strip — REVIEW REQUIRED (not git-corroborated)\n\n"
                     + "\n".join(f"- strip-computed: {d.path}" for d in computed))
                 if not commit.committed:
-                    return None, _with_tree(
-                        "ABORTED — could not commit the computed strip (git commit failed)", tree_note), wt
+                    return stopped("ABORTED — could not commit the computed strip (git commit failed)")
                 signed = signed and commit.signed
         else:
             signed = True
@@ -375,54 +420,73 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
             sha = _merge_sha(f)
             if not sha or sha in have:
                 continue
-            # Restoring the live files does not remove the merge commit. Keep the history note.
             manual.append(_manual_for(f, sha, repo=wt))
             have.add(sha)
 
         if not applied and not computed:
             if residual:
                 return _Fix(base, branch, [], (), suspicious, findings, advisories, tuple(manual),
-                            tree_note=tree_note), "", wt
+                            checkout=seen), wt
             if suspicious:
                 return _Fix(base, branch, [], (), suspicious, findings, advisories, (),
-                            tree_note=tree_note), "", wt
+                            checkout=seen), wt
             if scan.error or done.error:
-                return None, _with_tree("ABORTED — scan did not finish", tree_note), wt
-            return None, _with_tree(f"'{base}' already clean — nothing to fix", tree_note), wt
+                return stopped("ABORTED — scan did not finish")
+            text = (f"'{base}' already clean — nothing to fix" if seen.state is Checkout.CLEAN
+                    else f"'{base}' is clean")
+            return _Stopped(BaseState.NOTHING_TO_FIX, text, base, seen), wt
     return _Fix(base, branch, applied, tuple(computed), suspicious, findings, advisories, tuple(manual),
-                signed=signed, tree_note=tree_note), "", wt
+                signed=signed, checkout=seen), wt
+
+
+def _verdict(repository: str, base_fix: BaseFix, checkout: _CheckoutSeen) -> FixVerdict:
+    return FixVerdict(repository, base_fix, checkout.state, checkout.history, checkout.detail)
+
+
+def _stopped_verdict(label: str, stop: _Stopped) -> FixVerdict:
+    return _verdict(label, BaseFix(stop.state, f"{label}: {stop.text}", stop.base), stop.checkout)
+
+
+def _not_fixed(label: str, fix: _Fix, text: str, *, published: bool) -> FixVerdict:
+    """The verdict when nothing was auto-fixable: heuristic findings only, or confirmed ones that
+    need a person."""
+    state = BaseState.MANUAL if fix.manual else BaseState.SUSPICIOUS_ONLY
+    return _verdict(label, BaseFix(state, text, fix.base, published=published), fix.checkout)
+
+
+def _prepared_state(fix: _Fix) -> BaseState:
+    return BaseState.PARTIAL if fix.partial else BaseState.PREPARED
 
 
 def prepare_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = None,
-                spin: bool = False) -> str:
+                spin: bool = False) -> FixVerdict:
     """Prepare the fix on a local branch and stop. No push, no PR."""
     slug = gitutil.origin_slug(repo) or str(repo).replace(str(Path.home()), "~")
-    fix, outcome, wt = _build_fix(repo, opts, signatures, allowlist, base=base,
-                                  label=slug, spin=spin)
+    fix, wt = _build_fix(repo, opts, signatures, allowlist, base=base, label=slug, spin=spin)
     try:
-        if fix is None:
-            return f"{slug}: {outcome}"
+        if isinstance(fix, _Stopped):
+            return _stopped_verdict(slug, fix)
         if not fix.applied and not fix.computed:
             if not fix.manual:
-                return _with_tree(_suspicious_only_outcome(slug, fix), fix.tree_note)
-            return _with_tree(
-                (f"{slug}: ABORTED — nothing auto-fixable; {len(fix.manual)} confirmed finding(s) "
-                 "need manual review") + manual_review_lines(fix.manual) + suspicious_review_lines(fix.suspicious),
-                fix.tree_note)
+                return _not_fixed(slug, fix, _suspicious_only_outcome(slug, fix), published=False)
+            return _not_fixed(slug, fix, (
+                f"{slug}: ABORTED — nothing auto-fixable; {len(fix.manual)} confirmed finding(s) "
+                "need manual review") + manual_review_lines(fix.manual)
+                + suspicious_review_lines(fix.suspicious), published=False)
         if fix.partial:
             prepared = len(fix.applied) + len(fix.computed)
             need = ([f"{len(fix.computed)} computed strip(s) need review before merge"] if fix.computed else []) \
                 + ([f"{len(fix.manual)} confirmed finding(s) still need manual review"] if fix.manual else [])
-            return _with_tree(
-                (f"{slug}: PARTIAL — prepared {prepared} change(s) on '{fix.branch}', "
-                 f"but {' and '.join(need)} (`git -C {repo} diff {fix.base}...{fix.branch}`)"
-                 ) + _signing_note(fix) + computed_review_lines(fix.computed) + manual_review_lines(fix.manual),
-                fix.tree_note)
-        return _with_tree(
-            (f"{slug}: prepared {len(fix.applied)} change(s) on '{fix.branch}' — review "
-             f"`git -C {repo} diff {fix.base}...{fix.branch}`, then `saw fix --pr` to open a PR"
-             ) + _signing_note(fix),
-            fix.tree_note)
+            text = ((f"{slug}: PARTIAL — prepared {prepared} change(s) on '{fix.branch}', "
+                     f"but {' and '.join(need)} (`git -C {repo} diff {fix.base}...{fix.branch}`)"
+                     ) + _signing_note(fix) + computed_review_lines(fix.computed)
+                    + manual_review_lines(fix.manual))
+        else:
+            text = ((f"{slug}: prepared {len(fix.applied)} change(s) on '{fix.branch}' — review "
+                     f"`git -C {repo} diff {fix.base}...{fix.branch}`, then `saw fix --pr` to open a PR"
+                     ) + _signing_note(fix))
+        return _verdict(slug, BaseFix(_prepared_state(fix), text, fix.base, fix.branch),
+                        fix.checkout)
     finally:
         if wt:
             gitutil.remove_worktree(repo, wt)
@@ -430,73 +494,79 @@ def prepare_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = N
 
 def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
                   patches_dir: Path | None = None, *, base: str | None = None,
-                  spin: bool = False) -> str:
+                  spin: bool = False) -> FixVerdict:
     """Push the fix branch and open or update one PR."""
     slug = gitutil.origin_slug(repo)
     if not slug:
-        fix, outcome, wt = _build_fix(repo, opts, signatures, allowlist, base=base,
-                                      label=str(repo).replace(str(Path.home()), "~"), spin=spin)
-        try:
-            if fix is None:
-                return outcome
-            if not fix.applied and not fix.computed:
-                if not fix.manual:
-                    return _with_tree(_suspicious_only_outcome(
-                        str(repo).replace(str(Path.home()), "~"), fix), fix.tree_note)
-                return _with_tree(
-                    (f"ABORTED — nothing auto-fixable; {len(fix.manual)} confirmed finding(s) "
-                     "need manual review (no GitHub origin — cannot file an issue)"
-                     ) + manual_review_lines(fix.manual) + suspicious_review_lines(fix.suspicious),
-                    fix.tree_note)
-            return _with_tree(
-                _mark_partial(
-                    f"no GitHub origin — prepared on '{fix.branch}'; add a remote and push to open a PR",
-                    fix.partial) + _signing_note(fix) + computed_review_lines(fix.computed) + manual_review_lines(fix.manual),
-                fix.tree_note)
-        finally:
-            if wt:
-                gitutil.remove_worktree(repo, wt)
+        return _submit_without_origin(repo, opts, signatures, allowlist, base=base, spin=spin)
 
     owner, name = slug.split("/", 1)
     gitutil.fetch(repo, "origin", gitutil.default_branch(repo))
-    fix, outcome, wt = _build_fix(repo, opts, signatures, allowlist, base=base,
-                                  label=slug, spin=spin)
+    fix, wt = _build_fix(repo, opts, signatures, allowlist, base=base, label=slug, spin=spin)
     try:
-        if fix is None:
-            return f"{slug}: {outcome}"
+        if isinstance(fix, _Stopped):
+            return _stopped_verdict(slug, fix)
         if not fix.applied and not fix.computed:
             if not fix.manual:
-                return _with_tree(_suspicious_only_outcome(slug, fix), fix.tree_note)
+                return _not_fixed(slug, fix, _suspicious_only_outcome(slug, fix), published=True)
             with status(f"filing manual-review issue for {slug}…", enabled=spin):
                 issue = proposal.file_dedup_issue(owner, name,
                                                   _issue_spec(owner, name, fix.findings), token)
             note = f"; {issue}" if issue else ""
-            return _with_tree(
-                (f"{slug}: ABORTED — nothing auto-fixable; {len(fix.manual)} confirmed finding(s) "
-                 f"need manual review{note}") + manual_review_lines(fix.manual) + suspicious_review_lines(fix.suspicious),
-                fix.tree_note)
+            return _not_fixed(slug, fix, (
+                f"{slug}: ABORTED — nothing auto-fixable; {len(fix.manual)} confirmed finding(s) "
+                f"need manual review{note}") + manual_review_lines(fix.manual)
+                + suspicious_review_lines(fix.suspicious), published=True)
         base = fix.base
 
-        def _publish() -> str:
-          with status(f"opening PR for {slug}…", enabled=spin):
+        with status(f"opening PR for {slug}…", enabled=spin):
             partial = fix.partial
             title = ("security: PARTIAL auto-remediation — manual review required" if partial
                      else "security: auto-remediate worm indicators")
             body = _pr_body(slug, fix.applied, computed=fix.computed,
                             suspicious=fix.suspicious, manual=fix.manual,
-                            findings=fix.findings, advisories=fix.advisories)
+                            findings=fix.findings, advisories=fix.advisories, base=base)
             res = proposal.submit_change_pr(wt, slug, base, branch=fix.branch, title=title,
                                             body=body, token=token,
                                             issue=_issue_spec(owner, name, fix.findings),
                                             patches_dir=patches_dir)
-            if res.number is not None and res.kind in ("pr", "fork-pr"):
+            opened = res.number is not None and res.kind in ("pr", "fork-pr")
+            if opened:
                 _reconcile_partial_label(owner, name, res.number, partial, token)
-            return _render_submit(res, slug=slug, base=base, partial=partial)
+            text = _render_submit(res, slug=slug, base=base, partial=partial)
+        state = (BaseState.PR_FAILED if not opened
+                 else BaseState.PARTIAL if partial else BaseState.PR_OPENED)
+        return _verdict(slug, BaseFix(
+            state, text + _signing_note(fix) + computed_review_lines(fix.computed)
+            + manual_review_lines(fix.manual), base, fix.branch,
+            pull_request=res.number if opened else None, published=True), fix.checkout)
+    finally:
+        if wt:
+            gitutil.remove_worktree(repo, wt)
 
-        return _with_tree(
-            _mark_partial(_publish(), fix.partial)
-            + _signing_note(fix) + computed_review_lines(fix.computed) + manual_review_lines(fix.manual),
-            fix.tree_note)
+
+def _submit_without_origin(repo: Path, opts, signatures, allowlist, *, base: str | None,
+                           spin: bool) -> FixVerdict:
+    """`saw fix --pr` in a repository with no GitHub origin: prepare the branch and say so."""
+    label = str(repo).replace(str(Path.home()), "~")
+    fix, wt = _build_fix(repo, opts, signatures, allowlist, base=base, label=label, spin=spin)
+    try:
+        if isinstance(fix, _Stopped):
+            return _stopped_verdict(label, fix)
+        if not fix.applied and not fix.computed:
+            if not fix.manual:
+                return _not_fixed(label, fix, _suspicious_only_outcome(label, fix), published=True)
+            return _not_fixed(label, fix, (
+                f"{label}: ABORTED — nothing auto-fixable; {len(fix.manual)} confirmed finding(s) "
+                "need manual review (no GitHub origin — cannot file an issue)"
+                ) + manual_review_lines(fix.manual) + suspicious_review_lines(fix.suspicious),
+                published=True)
+        text = (f"{label}: no GitHub origin — prepared on '{fix.branch}'; add a remote and push "
+                "to open a PR" + (PARTIAL_MARK if fix.partial else "")
+                + _signing_note(fix) + computed_review_lines(fix.computed)
+                + manual_review_lines(fix.manual))
+        return _verdict(label, BaseFix(_prepared_state(fix), text, fix.base, fix.branch,
+                                       published=True), fix.checkout)
     finally:
         if wt:
             gitutil.remove_worktree(repo, wt)

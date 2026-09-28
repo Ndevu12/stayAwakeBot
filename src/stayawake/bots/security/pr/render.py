@@ -11,13 +11,7 @@ from stayawake.bots.security.dependencies.remediation import (
 from stayawake.core import proposal
 from stayawake.bots.security.pr.constants import ISSUE_LABEL
 
-def _mark_partial(outcome: str, partial: bool) -> str:
-    """Guarantee a PARTIAL fix's outcome carries the marker so `remediator.fix` counts it as
-    needs-review and the run exits non-zero — NO MATTER which push / PR /
-    fork / patch / issue branch produced it. This single structural gate replaces per-branch
-    tagging, which an adversarial pass proved too easy to forget (four fallback returns dropped it,
-    silently reporting a still-infected partial fix as a clean exit 0)."""
-    return outcome if (not partial or "PARTIAL" in outcome) else f"{outcome}  [PARTIAL — manual review required]"
+PARTIAL_MARK = "  [PARTIAL — manual review required]"
 
 
 def _review_lines(items, header: str, limit: int = 20) -> str:
@@ -100,23 +94,30 @@ def _issue_spec(owner: str, name: str, findings) -> proposal.IssueSpec:
 
 def _render_submit(res: proposal.SubmitResult, *, slug: str, base: str, partial: bool) -> str:
     """Render a `proposal.SubmitResult` into `saw fix`'s exact operator outcome — the fix-domain
-    wording (the PARTIAL tag, the 'auto-clean' framing) lives HERE, never in the shared seam. The
-    single `_mark_partial` choke point still wraps this return."""
+    wording (the PARTIAL tag, the 'auto-clean' framing) lives HERE, never in the shared seam. A
+    partial fix is marked on every path. The grade is not read from this text."""
+    text, marked = _submit_text(res, slug=slug, base=base, partial=partial)
+    return text if marked or not partial else text + PARTIAL_MARK
+
+
+def _submit_text(res: proposal.SubmitResult, *, slug: str, base: str,
+                 partial: bool) -> tuple[str, bool]:
+    """The outcome of a submit, and whether it already carries the partial marker."""
     semi = "PARTIAL (manual review required); " if partial else ""
     dash = "PARTIAL (manual review required) — " if partial else ""
     if res.kind == "pr":
         if res.action == "updated":
-            return f"{slug}: {semi}updated existing PR #{res.number} ({res.url}) — no duplicate"
-        return f"{slug}: {semi}opened PR #{res.number} ({res.url})"
+            return f"{slug}: {semi}updated existing PR #{res.number} ({res.url}) — no duplicate", True
+        return f"{slug}: {semi}opened PR #{res.number} ({res.url})", True
     if res.kind == "pr-create-failed":
-        return f"{slug}: branch pushed but PR API call failed (network/SSL or token scope)"
+        return f"{slug}: branch pushed but PR API call failed (network/SSL or token scope)", False
     if res.kind == "fork-pr":
         verb = "updated existing fork PR" if res.action == "updated" else "opened fork PR"
-        return f"{slug}: {dash}{verb} #{res.number} ({res.url}) from {res.fork_slug}"
+        return f"{slug}: {dash}{verb} #{res.number} ({res.url}) from {res.fork_slug}", True
     if res.kind == "fork-not-ready":
-        return f"{slug}: forked to {res.fork_slug} but it wasn't ready in time — retry later"
+        return f"{slug}: forked to {res.fork_slug} but it wasn't ready in time — retry later", False
     if res.kind == "fork-pr-create-failed":
-        return f"{slug}: pushed to fork {res.fork_slug} but PR creation failed (check token scope)"
+        return f"{slug}: pushed to fork {res.fork_slug} but PR creation failed (check token scope)", False
     bits = []
     if res.patch_path:
         bits.append(f"saved the fix as a patch at {res.patch_path} "
@@ -127,14 +128,14 @@ def _render_submit(res: proposal.SubmitResult, *, slug: str, base: str, partial:
         from stayawake.core.identity import push_failure_message
         from stayawake.core.identity.classify import PushFailure
         if res.push_reason:
-            return f"{slug}: {dash}{push_failure_message(PushFailure(res.push_reason, res.push_detail))}"
-        return f"{slug}: branch push failed (check token write scope)"
+            return f"{slug}: {dash}{push_failure_message(PushFailure(res.push_reason, res.push_detail))}", True
+        return f"{slug}: branch push failed (check token write scope)", False
     from stayawake.core.identity import push_failure_message
     from stayawake.core.identity.classify import PushFailure
     head = (push_failure_message(PushFailure(res.push_reason, res.push_detail))
             if res.push_reason else
             "push rejected (no write access, or the branch requires signed commits?)")
-    return (f"{slug}: {dash}{head} — " + "; ".join(bits) + ".")
+    return (f"{slug}: {dash}{head} — " + "; ".join(bits) + "."), True
 
 
 ACTION_LIMIT = 50
@@ -156,7 +157,7 @@ def dependency_action_lines(findings=(), advisories=()) -> list[str]:
 
 
 def _pr_body(slug: str, changes, computed=(), suspicious=(), manual=(), findings=(),
-             advisories=()) -> str:
+             advisories=(), base: str = "") -> str:
     """Render the PR body. A PARTIAL fix is any tree that is NOT fully git-corroborated
     clean — either residual CONFIRMED findings with no safe fix (`manual`), OR computed strips that
     ARE applied (a separate commit) but are NOT git-corroborated and MUST be reviewed before merge
@@ -219,8 +220,11 @@ def _pr_body(slug: str, changes, computed=(), suspicious=(), manual=(), findings
         for f in suspicious[:50]:
             loc = f.path + (f":{f.line}" if getattr(f, "line", None) else "")
             lines.append(f"- {textsafe.code(f.signature_id)} — {textsafe.code(loc)}")
-    lines += ["", "Originals are recoverable from git history. Evil-merge findings (if any) "
-              "are reported separately and need a manual history rewrite.", "",
+    target = textsafe.code(base) if base else "the base branch"
+    lines += ["", f"This removes it from {target}. Earlier commits still store it; "
+              "`saw scan --history` lists them.", "",
+              "Evil-merge findings (if any) are reported separately and need a manual history "
+              "rewrite.", "",
               "_Review and merge if correct. This is a single rolling PR — re-runs update it "
               "rather than opening duplicates._"]
     return "\n".join(lines)

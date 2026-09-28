@@ -15,6 +15,7 @@ from stayawake.bots.security import remediator
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions
+from stayawake.utils import exitcodes
 from tests.support.gitrepo import GitSandbox
 
 GENUINE_FONT = b"wOFF\x00\x01\x00\x00genuine third-party font bytes\n"
@@ -118,7 +119,19 @@ class TestTheWorkingTreeIsRemediated(_InfectedProject):
 
     def test_nothing_is_copied_aside(self):
         self._fix()
-        self.assertEqual("", self.git(self.d, "status", "--porcelain").strip())
+        stray = [l for l in self.git(self.d, "status", "--porcelain").splitlines()
+                 if l.startswith("??")]
+        self.assertEqual([], stray)
+
+    def test_the_payload_is_gone_from_the_working_tree(self):
+        self._fix()
+        for path in (THE_LOADER, THE_LAUNCHER):
+            self.assertFalse((self.d / path).exists(), path)
+
+    def test_the_projects_own_files_are_still_on_disk(self):
+        self._fix()
+        for path in PROJECT_OWN + GENUINE_ASSETS:
+            self.assertTrue((self.d / path).exists(), path)
 
     def test_the_projects_own_content_is_byte_identical(self):
         branch = self._fix()
@@ -127,7 +140,14 @@ class TestTheWorkingTreeIsRemediated(_InfectedProject):
 
     def test_a_scan_of_the_remediated_tree_reports_clean(self):
         branch = self._fix()
-        self.git(self.d, "checkout", "-q", branch)
+        elsewhere = self.owned(self.root / "prepared")
+        self.git(self.d, "worktree", "add", "-q", str(elsewhere), branch)
+        self.addCleanup(self.git_may_fail, self.d, "worktree", "remove", "--force",
+                        str(elsewhere))
+        self.assertEqual("clean", self._scan(elsewhere).verdict)
+
+    def test_a_scan_of_the_checkout_itself_reports_clean(self):
+        self._fix()
         self.assertEqual("clean", self._scan().verdict)
 
 
@@ -157,17 +177,12 @@ class TestTheReportMatchesTheResult(_InfectedProject):
         with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             return remediator.fix(None, paths=[str(self.d)], no_stream=True)
 
-    @unittest.expectedFailure
     def test_it_does_not_report_success_while_the_loader_survives(self):
         code = self._fix_exit()
         loader = self._blob(f"{self.base}:{THE_LOADER}")
         survives = any(loader in self.git(self.d, "ls-tree", "-r", r) for r in self._refs())
-        if survives:
-            self.assertNotEqual(0, code)
-
-    def test_it_does_report_success_today(self):
-        """Pin the exit code reported today."""
-        self.assertEqual(0, self._fix_exit())
+        self.assertTrue(survives)
+        self.assertEqual(exitcodes.FINDINGS, code)
 
 
 if __name__ == "__main__":

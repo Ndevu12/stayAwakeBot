@@ -221,11 +221,12 @@ def _submodule_dirty(worktree: Path, rel: bytes, oid: bytes, depth: int) -> bool
     return head.encode() != oid or is_dirty(path, _depth=depth + 1)
 
 
-def is_dirty(worktree: str | Path, *, _depth: int = 0) -> bool:
-    """Whether `worktree` holds anything its HEAD does not: a staged change, a conflict, a tracked
-    file whose content or mode differs, a submodule off its recorded commit or with work of its
-    own, or an untracked file that is not ignored. A changed file the operator's attributes send
-    through a filter counts as changed. A checkout that cannot be read is dirty."""
+def uncommitted_paths(worktree: str | Path, *, _depth: int = 0) -> list[bytes] | None:
+    """Every path `worktree` holds differently from its HEAD: a staged change, a conflict, a
+    tracked file whose content or mode differs from the index, a submodule off its recorded
+    commit or with work of its own, and each untracked file that is not ignored. A changed file
+    the operator's attributes send through a filter is listed. Takes the working tree. Returns
+    the paths, or None when git could not say."""
     worktree = Path(worktree)
     try:
         head = stdout(worktree, ["rev-parse", "--verify", "--quiet", "HEAD"],
@@ -233,50 +234,62 @@ def is_dirty(worktree: str | Path, *, _depth: int = 0) -> bool:
         committed = _tree_entries(worktree, head) if head else {}
         indexed = _index_entries(worktree)
     except (TreeStateUnknown, ValueError):
-        return True
-    if any(stage_number != b"0" for _m, _o, stage_number in indexed.values()):
-        return True
-    if {p: (m, o) for p, (m, o, _s) in indexed.items()} != committed:
-        return True
-    for rel, (mode, oid) in committed.items():
+        return None
+    changed: set[bytes] = {rel for rel in set(committed) | set(indexed)
+                           if rel not in indexed or indexed[rel][2] != b"0"
+                           or committed.get(rel) != indexed[rel][:2]}
+    tracked = {rel: (mode, oid) for rel, (mode, oid, stage) in indexed.items() if stage == b"0"}
+    for rel, (mode, oid) in tracked.items():
         if mode == _GITLINK and _submodule_dirty(worktree, rel, oid, _depth):
-            return True
+            changed.add(rel)
     stats = _recorded_stats(worktree)
     if stats is None:
-        return True
+        return None
     track_executable = stdout(worktree, ["config", "--get", "--type=bool", "core.filemode"],
                               context=UNTRUSTED).strip() != "false"
-    stale = [rel for rel, (mode, _oid) in committed.items() if mode != _GITLINK
+    stale = [rel for rel, (mode, _oid) in tracked.items() if mode != _GITLINK
              and not _stat_unchanged(worktree / os.fsdecode(rel), stats.get(rel, {}), mode,
                                      track_executable)]
+    compare = []
     for rel in stale:
         recorded = stats.get(rel, {}).get(b"size", b"0")
         try:
-            if recorded != b"0" and os.lstat(worktree / os.fsdecode(rel)).st_size & 0xFFFFFFFF \
-                    != int(recorded):
-                return True
+            resized = recorded != b"0" and os.lstat(
+                worktree / os.fsdecode(rel)).st_size & 0xFFFFFFFF != int(recorded)
         except (OSError, ValueError):
-            return True
-    if stale:
+            resized = True
+        (changed.add(rel) if resized else compare.append(rel))
+    if compare:
         object_format = stdout(worktree, ["rev-parse", "--show-object-format"],
                                context=UNTRUSTED).strip() or "sha1"
         conversion = _conversion_config(worktree)
         with borrow(worktree) as borrowed:
-            if not _converted_as_in(worktree, borrowed, stale):
-                return True
-            with borrowed.attributes_then(_NO_FILTER):
-                for rel in stale:
-                    mode, oid = committed[rel]
-                    if not _content_matches(borrowed, worktree, rel, mode, oid, object_format,
-                                            track_executable, conversion):
-                        return True
+            if not _converted_as_in(worktree, borrowed, compare):
+                changed.update(compare)
+            else:
+                with borrowed.attributes_then(_NO_FILTER):
+                    for rel in compare:
+                        mode, oid = tracked[rel]
+                        if not _content_matches(borrowed, worktree, rel, mode, oid,
+                                                object_format, track_executable, conversion):
+                            changed.add(rel)
     own = stdout(worktree, ["config", "--get", "core.excludesFile"], context=UNTRUSTED).strip()
     excludes = None if own else operator_config.global_excludes_file(
         operator_config.global_config(worktree))
     listing = (["-c", f"core.excludesFile={excludes}"] if excludes is not None else []) + [
         "ls-files", "-z", "--others", "--exclude-standard"]
     untracked = stdout_bytes(worktree, listing, context=UNTRUSTED)
-    return untracked is None or bool(untracked.strip(b"\0"))
+    if untracked is None:
+        return None
+    changed.update(p for p in untracked.split(b"\0") if p)
+    return sorted(changed)
+
+
+def is_dirty(worktree: str | Path, *, _depth: int = 0) -> bool:
+    """Whether `worktree` holds anything its HEAD does not (see `uncommitted_paths`). Takes the
+    working tree. A checkout that cannot be read is dirty."""
+    found = uncommitted_paths(worktree, _depth=_depth)
+    return found is None or bool(found)
 
 
 def _has_link_above(worktree: Path, rel: bytes) -> bool:
@@ -328,6 +341,43 @@ def _write_paths(repo: Path, worktree: Path, commit: str, entries, paths: list[b
             return done is not None
         finally:
             scratch.release_path(index)
+
+
+def rewrite_index(worktree: str | Path, feed: bytes) -> bool:
+    """Apply `update-index --index-info` lines to the index of the checkout at `worktree`: on a
+    private copy first, then swapped in while git's own `index.lock` is held. Takes the checkout
+    and the NUL-separated lines. Returns whether the index now holds them; on False it is
+    untouched."""
+    gitdir = stdout(worktree, ["rev-parse", "--path-format=absolute", "--git-dir"],
+                    context=UNTRUSTED).strip()
+    if not gitdir:
+        return False
+    index, lock = Path(gitdir) / "index", Path(gitdir) / "index.lock"
+    try:
+        fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        os.close(fd)
+    except OSError:
+        return False
+    held = True
+    private = scratch.new_file("the index a run rewrites")
+    try:
+        shutil.copyfile(index, private)
+        if stdout_bytes_fed(worktree, ["update-index", "-z", "--index-info"], feed,
+                            env={"GIT_INDEX_FILE": str(private)}, context=UNTRUSTED) is None:
+            return False
+        shutil.copyfile(private, lock)
+        os.replace(lock, index)
+        held = False
+        return True
+    except OSError:
+        return False
+    finally:
+        if held:
+            try:
+                os.unlink(lock)
+            except OSError:
+                pass
+        scratch.release_path(private)
 
 
 class PreparedMove:

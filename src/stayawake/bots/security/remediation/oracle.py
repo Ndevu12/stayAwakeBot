@@ -2,6 +2,7 @@
 """Whether content still confirms a payload — asked of a path in a tree, or of bytes."""
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from stayawake.bots.security.models import CONFIRMED
@@ -71,5 +72,41 @@ def survives(repo, signatures, allowlist, opts) -> object:
                 scanned[(path, sha)] = content_confirms(blob, path, payload, allowlist, opts,
                                                          is_symlink=(entry[0] == "120000"))
         return scanned[(path, sha)]
+
+    return check
+
+
+CARRIES = "carries"
+CHANGED = "changed"
+UNREADABLE = "unreadable"
+REFUSED = "refused"
+ABSENT = "absent"
+
+
+def still_condemned(root: Path, signatures, allowlist, opts):
+    """`check(path) -> str` for what the file at `path` is now.
+
+    Takes the tree to read from, the by-matcher signatures, the allowlist and the scan options.
+    Returns the check; its answer is one of CARRIES, CHANGED, ABSENT or UNREADABLE.
+    """
+    payload = payload_matchers(signatures)
+
+    def check(path: str) -> str:
+        target = root / path
+        try:
+            if target.is_symlink():
+                content = os.fsencode(os.readlink(target))
+                verdict = content_confirms(content, path, payload, allowlist, opts, is_symlink=True)
+            elif target.is_dir():
+                return UNREADABLE
+            else:
+                verdict = content_confirms(target.read_bytes(), path, payload, allowlist, opts)
+        except FileNotFoundError:
+            return ABSENT
+        except OSError:
+            return UNREADABLE
+        if verdict in ("materialize-error", "scan-error"):
+            return UNREADABLE
+        return CARRIES if verdict else CHANGED
 
     return check
