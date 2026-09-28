@@ -290,6 +290,29 @@ class TestAStalledGitCommand(GitSandbox):
                                  load_signatures(), [])
         self.assertTrue(result.error, "a scan whose git did not answer was called clean")
 
+    def test_what_a_matcher_found_before_a_stall_is_kept(self):
+        from stayawake.bots.security import scanner
+        from stayawake.bots.security.models import Finding, Severity
+        from stayawake.bots.security.targets.base import ScanOptions
+        from stayawake.bots.security.targets.local import LocalRepoTarget
+        runner = importlib.import_module("stayawake.lib.git.run")
+        repo = self.new_repo("partial")
+        self.write(repo, "a.txt", "a\n")
+        self.commit(repo, "init")
+
+        class FindsThenStalls:
+            def scan(self, target, signatures):
+                found = Finding("x", "c", Severity.CRITICAL, "a.txt", "d", confidence="confirmed")
+                runner.run(target.root, ["rev-parse", "HEAD"])
+                return [found]
+        target = LocalRepoTarget(repo, str(repo), ScanOptions())
+        with mock.patch.dict(scanner.REGISTRY, {"finds-then-stalls": FindsThenStalls()}), \
+                mock.patch.object(runner.subprocess, "run",
+                                  side_effect=runner.subprocess.TimeoutExpired("git", 1)):
+            out = scanner.run_matchers(target, ["finds-then-stalls"], {"finds-then-stalls": []}, [])
+        self.assertEqual(1, len(out["finds-then-stalls"]))
+        self.assertTrue(target.read_errors)
+
     def test_a_mailmap_that_is_a_pipe_does_not_stall_a_log(self):
         repo = self.new_repo("mailmap")
         self.write(repo, "a.txt", "a\n")

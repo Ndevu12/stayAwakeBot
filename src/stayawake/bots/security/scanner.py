@@ -16,7 +16,7 @@ from stayawake.bots.security.models import (CONFIRMED, HEURISTIC, INFORMATIONAL,
                                             ROLLBACK_DIR, Finding, ScanResult, Severity)
 from stayawake.bots.security.matchers import REGISTRY
 from stayawake.lib import git as gitutil
-from stayawake.lib.git.run import GitTimedOut, timeouts_fail_closed
+from stayawake.lib.git.run import stalls_recorded
 
 
 def _accepts_all_signatures(matcher) -> bool:
@@ -65,13 +65,10 @@ def run_matchers(target, matcher_names: list[str],
         if not matcher:
             continue
         sigs = signatures_by_matcher.get(name, [])
-        try:
-            with timeouts_fail_closed():
-                findings = (matcher.scan(target, sigs, all_signatures=all_sigs)
-                            if _accepts_all_signatures(matcher) else matcher.scan(target, sigs))
-        except GitTimedOut as exc:
-            target.read_errors.append(f"{name}: {exc}")
-            findings = []
+        with stalls_recorded() as stalled:
+            findings = (matcher.scan(target, sigs, all_signatures=all_sigs)
+                        if _accepts_all_signatures(matcher) else matcher.scan(target, sigs))
+        target.read_errors.extend(f"{name}: {why}" for why in stalled)
         out[name] = list(findings)
     return out
 

@@ -68,22 +68,26 @@ def _prepare(repo: str | Path | None, args: list[str], env: dict | None,
     return argv, child, (str(neutral_dir()) if repo is None else None)
 
 
-class GitTimedOut(RuntimeError):
-    """A git command did not answer within its timeout while a scan was reading."""
-
-
-_TIMEOUT_FAILS_CLOSED = contextvars.ContextVar("saw_git_timeout_fails_closed", default=False)
+_STALLED = contextvars.ContextVar("saw_git_stalled", default=None)
 
 
 @contextlib.contextmanager
-def timeouts_fail_closed():
-    """Within the block, a git command that times out raises `GitTimedOut` instead of answering
-    None, so a reader cannot take a stalled command for an empty answer."""
-    token = _TIMEOUT_FAILS_CLOSED.set(True)
+def stalls_recorded():
+    """Within the block, every git command that does not answer in time is recorded, while it
+    still answers None to its caller. Yields the list the records go into."""
+    stalled: list[str] = []
+    token = _STALLED.set(stalled)
     try:
-        yield
+        yield stalled
     finally:
-        _TIMEOUT_FAILS_CLOSED.reset(token)
+        _STALLED.reset(token)
+
+
+def _stalled(args: list[str], timeout) -> None:
+    """Record a git command that did not answer in time. Takes its arguments and the timeout."""
+    record = _STALLED.get()
+    if record is not None:
+        record.append(f"git {args[0] if args else ''} did not answer within {timeout}s")
 
 
 def run(repo: str | Path | None, args: list[str], *, env: dict | None = None,
@@ -105,8 +109,7 @@ def run(repo: str | Path | None, args: list[str], *, env: dict | None = None,
         return subprocess.run(argv, capture_output=True, text=True, errors="replace",
                               timeout=timeout, check=False, env=child, cwd=cwd, input=input_text)
     except subprocess.TimeoutExpired:
-        if _TIMEOUT_FAILS_CLOSED.get():
-            raise GitTimedOut(f"git {args[0] if args else ''} did not answer within {timeout}s")
+        _stalled(args, timeout)
         return None
     except (subprocess.SubprocessError, OSError):
         return None
@@ -129,6 +132,9 @@ def stdout_bytes_fed(repo: str | Path | None, args: list[str], stdin: bytes, *,
     try:
         res = subprocess.run(argv, input=stdin, capture_output=True, timeout=LOCAL_TIMEOUT,
                              env=child, cwd=cwd)
+    except subprocess.TimeoutExpired:
+        _stalled(args, LOCAL_TIMEOUT)
+        return None
     except (OSError, subprocess.SubprocessError):
         return None
     return res.stdout if res.returncode == 0 else None
@@ -144,6 +150,9 @@ def stdout_bytes(repo: str | Path | None, args: list[str], *,
     argv, child, cwd = prepared
     try:
         res = subprocess.run(argv, capture_output=True, timeout=LOCAL_TIMEOUT, env=child, cwd=cwd)
+    except subprocess.TimeoutExpired:
+        _stalled(args, LOCAL_TIMEOUT)
+        return None
     except (OSError, subprocess.SubprocessError):
         return None
     return res.stdout if res.returncode == 0 else None
