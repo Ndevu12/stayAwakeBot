@@ -39,6 +39,7 @@ from stayawake.bots.security.service.config import (
     _read_config, _options, _as_bool, _require_db_or_error, jobs_setting as _jobs_setting)
 from stayawake.bots.security.service.report import (
     _status_tag, _print_dependency_actions, _print_report_pointer)
+from stayawake.lib.git.run import one_pass
 from stayawake.utils import exitcodes
 
 
@@ -126,9 +127,9 @@ def _scan_one_target(scope, display: str, opts, sigs, allowlist, workers: int,
     matchers (each once), then MERGE raw findings through `scanner.finalize` — byte-identical to a
     sequential scan. Below the floor / 1 worker, scan sequentially (no pool overhead)."""
     try:
-        result = _scan_one_target_inner(scope, display, opts, sigs, allowlist, workers,
-                                        progress_on, settings)
-        return result
+        with one_pass():
+            return _scan_one_target_inner(scope, display, opts, sigs, allowlist, workers,
+                                          progress_on, settings)
     except Exception as exc:  # never let one target crash the CLI — fail CLOSED (mirrors scan_target)
         return ScanResult(target=display, source="local",
                           error=f"scan worker failed: {type(exc).__name__}: {exc}")

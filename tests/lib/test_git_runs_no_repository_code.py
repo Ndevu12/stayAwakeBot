@@ -327,5 +327,282 @@ class TestAStalledGitCommand(GitSandbox):
         self.assertEqual(0, answers[0].returncode)
 
 
+class TestARepositoryWhoseConfigurationWaitsIsNotAsked(GitSandbox):
+    """Check a repository whose configuration every git command would wait on, within one pass."""
+
+    def setUp(self):
+        super().setUp()
+        self.runner = importlib.import_module("stayawake.lib.git.run")
+        self.waits = self.new_repo("waits")
+        self.other = self.new_repo("other")
+        self.pipe = self.root / "pipe"
+        os.mkfifo(self.pipe)
+        self.started = []
+        real = self.runner.subprocess.run
+
+        def counted(argv, *args, **kwargs):
+            self.started.append(argv)
+            if argv[1:3] == ["-C", str(self.waits)] and self._includes_the_pipe():
+                raise self.runner.subprocess.TimeoutExpired(argv, 1)
+            return real(argv, *args, **kwargs)
+        patcher = mock.patch.object(self.runner.subprocess, "run", side_effect=counted)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _includes_the_pipe(self):
+        return f"[include]\n\tpath = {self.pipe}" in (self.waits / ".git" / "config").read_text()
+
+    def _include(self, text):
+        with open(self.waits / ".git" / "config", "a", encoding="utf-8") as fh:
+            fh.write(text)
+
+    def _asked_in(self, repo):
+        return [argv for argv in self.started if argv[1:3] == ["-C", str(repo)]]
+
+    def test_no_command_there_starts_git(self):
+        self._include(f"[include]\n\tpath = {self.pipe}\n")
+        with self.runner.one_pass(), self.runner.stalls_recorded() as stalled:
+            self.assertIsNone(self.runner.run(self.waits, ["rev-parse", "HEAD"]))
+            self.assertIsNone(self.runner.stdout_bytes(self.waits, ["ls-files"]))
+            self.assertIsNone(self.runner.stdout_bytes_fed(self.waits, ["ls-files"], b""))
+        self.assertEqual([], self._asked_in(self.waits))
+        self.assertEqual(3, len(stalled))
+        self.assertIn(str(self.waits), stalled[0])
+
+    def test_a_streamed_command_there_is_not_started(self):
+        with mock.patch("stayawake.lib.git.exec_surface.config_waits", return_value=True), \
+                mock.patch.object(self.runner.subprocess, "Popen") as popen:
+            with self.runner.one_pass():
+                self.assertIsNone(self.runner.open_stdout(self.other, ["ls-files"]))
+        popen.assert_not_called()
+
+    def test_a_pipe_included_from_an_included_file_counts(self):
+        middle = self.root / "middle.cfg"
+        middle.write_text(f"[include]\n\tpath = {self.pipe}\n")
+        self._include(f"[include]\n\tpath = {middle}\n")
+        with self.runner.one_pass():
+            self.assertIsNone(self.runner.run(self.waits, ["rev-parse", "HEAD"]))
+        self.assertEqual([], self._asked_in(self.waits))
+
+    def test_a_pipe_named_only_under_a_condition_leaves_every_command_asked(self):
+        self._include(f'[includeIf "gitdir:/no/such/place/"]\n\tpath = {self.pipe}\n')
+        with self.runner.one_pass():
+            answer = self.runner.run(self.waits, ["rev-parse", "HEAD"])
+        self.assertEqual(1, len(self._asked_in(self.waits)))
+        self.assertIsNotNone(answer)
+
+    def test_another_repository_is_still_asked(self):
+        self._include(f"[include]\n\tpath = {self.pipe}\n")
+        with self.runner.one_pass():
+            self.runner.run(self.waits, ["rev-parse", "HEAD"])
+            answer = self.runner.run(self.other, ["rev-parse", "--git-dir"])
+        self.assertEqual(0, answer.returncode)
+
+    def test_outside_a_pass_every_command_is_asked(self):
+        self._include(f"[include]\n\tpath = {self.pipe}\n")
+        self.runner.run(self.waits, ["rev-parse", "HEAD"])
+        self.runner.run(self.waits, ["ls-files"])
+        self.assertEqual(2, len(self._asked_in(self.waits)))
+
+    def test_a_new_pass_reads_the_configuration_again(self):
+        config = (self.waits / ".git" / "config").read_text()
+        self._include(f"[include]\n\tpath = {self.pipe}\n")
+        with self.runner.one_pass():
+            self.runner.run(self.waits, ["rev-parse", "HEAD"])
+        (self.waits / ".git" / "config").write_text(config)
+        with self.runner.one_pass():
+            self.runner.run(self.waits, ["rev-parse", "HEAD"])
+        self.assertEqual(1, len(self._asked_in(self.waits)))
+
+    def test_a_pass_inside_a_pass_shares_its_answers(self):
+        self._include(f"[include]\n\tpath = {self.pipe}\n")
+        with mock.patch("stayawake.lib.git.exec_surface.config_waits",
+                        return_value=True) as read:
+            with self.runner.one_pass():
+                self.runner.run(self.waits, ["rev-parse", "HEAD"])
+                with self.runner.one_pass():
+                    self.runner.run(self.waits, ["ls-files"])
+        self.assertEqual(1, read.call_count)
+
+    def test_a_scan_runs_no_git_there_and_is_not_clean(self):
+        from stayawake.bots.security.scanner import scan_target
+        from stayawake.bots.security.signatures import load_signatures
+        from stayawake.bots.security.targets.base import ScanOptions
+        from stayawake.bots.security.targets.local import LocalRepoTarget
+        self.write(self.waits, "a.txt", "a\n")
+        self._include(f"[include]\n\tpath = {self.pipe}\n")
+        result = scan_target(LocalRepoTarget(self.waits, str(self.waits), ScanOptions()),
+                             load_signatures(), [])
+        self.assertTrue(result.error)
+        self.assertEqual([], self._asked_in(self.waits))
+
+
+class TestWhatCountsAsAConfigurationGitWouldWaitOn(GitSandbox):
+    """Check which repositories are judged to make every git command wait, against git itself."""
+
+    def setUp(self):
+        super().setUp()
+        from stayawake.lib.git import exec_surface
+        self.waits = exec_surface.config_waits
+        self.surface = exec_surface
+        self.repo = self.new_repo("repo")
+        self.pipe = self.root / "pipe"
+        os.mkfifo(self.pipe)
+
+    def _include(self, value, repo=None):
+        with open((repo or self.repo) / ".git" / "config", "a", encoding="utf-8") as fh:
+            fh.write(f"[include]\n\tpath = {value}\n")
+
+    def test_an_included_pipe_is_certain(self):
+        self._include(self.pipe)
+        self.assertTrue(self.waits(self.repo))
+
+    def test_a_relative_include_is_joined_to_the_including_file(self):
+        os.mkfifo(self.repo / ".git" / "piped")
+        self._include("piped")
+        self.assertTrue(self.waits(self.repo))
+
+    def test_a_relative_include_through_a_link_is_resolved_by_the_file_system(self):
+        elsewhere = self.root / "elsewhere" / "inner"
+        elsewhere.mkdir(parents=True)
+        (self.repo / ".git" / "lnk").symlink_to(elsewhere)
+        os.mkfifo(self.repo / ".git" / "x")
+        self._include("lnk/../x")
+        self.assertFalse(self.waits(self.repo))
+
+    def test_a_worktree_configuration_file_is_never_counted(self):
+        self.git(self.repo, "config", "extensions.worktreeConfig", "true")
+        os.mkfifo(self.repo / ".git" / "config.worktree")
+        self.assertFalse(self.waits(self.repo))
+
+    def test_an_include_named_by_a_prefix_placeholder_is_not_counted(self):
+        (self.repo / ".git" / "%(prefix)").mkdir()
+        os.mkfifo(self.repo / ".git" / "%(prefix)" / "pipe")
+        self._include("%(prefix)/pipe")
+        self.assertFalse(self.waits(self.repo))
+
+    def test_an_incomplete_git_directory_inside_a_repository_is_not_counted(self):
+        sub = self.repo / "sub"
+        (sub / ".git").mkdir(parents=True)
+        os.mkfifo(sub / ".git" / "config")
+        self.assertFalse(self.waits(sub))
+
+    def test_a_directory_without_its_own_git_directory_is_not_counted(self):
+        self._include(self.pipe)
+        (self.repo / "sub").mkdir()
+        self.assertFalse(self.waits(self.repo / "sub"))
+
+    def test_a_link_into_another_repository_is_judged_by_where_it_leads(self):
+        other = self.new_repo("other")
+        (other / "sub").mkdir()
+        self._include(self.pipe)
+        (self.repo / "link").symlink_to(other / "sub")
+        self.assertFalse(self.waits(self.repo / "link"))
+
+    def test_a_git_directory_pointer_is_resolved_by_the_file_system(self):
+        work = self.root / "w"
+        work.mkdir()
+        deep = self.root / "else2" / "deep"
+        deep.mkdir(parents=True)
+        (work / "lnk").symlink_to(deep)
+        real = self.root / "else2" / "g"
+        __import__("shutil").copytree(self.repo / ".git", real)
+        fake = work / "g"
+        __import__("shutil").copytree(self.repo / ".git", fake)
+        (fake / "config").unlink()
+        os.mkfifo(fake / "config")
+        (work / ".git").write_text("gitdir: lnk/../g\n")
+        self.assertFalse(self.waits(work))
+
+    def test_a_git_directory_whose_head_git_rejects_is_not_counted(self):
+        sub = self.repo / "sub"
+        (sub / ".git" / "objects").mkdir(parents=True)
+        (sub / ".git" / "refs").mkdir()
+        (sub / ".git" / "HEAD").write_text("junk\n")
+        os.mkfifo(sub / ".git" / "config")
+        self.assertFalse(self.waits(sub))
+
+    def test_includes_deeper_than_git_follows_are_not_counted(self):
+        previous = self.pipe
+        for i in range(self.surface.MAX_INCLUDE_DEPTH + 2):
+            here = self.root / f"d{i}.cfg"
+            here.write_text(f"[include]\n\tpath = {previous}\n")
+            previous = here
+        self._include(previous)
+        self.assertFalse(self.waits(self.repo))
+
+    def test_a_wide_include_tree_is_read_within_a_bound(self):
+        count = self.surface.MAX_WAIT_FILES + 44
+        for i in range(count):
+            (self.root / f"n{i}.cfg").write_text("[core]\n\tx = 1\n")
+            self._include(self.root / f"n{i}.cfg")
+        read = []
+        real = self.surface.list_config_file
+
+        def counted(path):
+            read.append(path)
+            return real(path)
+        with mock.patch.object(self.surface, "list_config_file", side_effect=counted):
+            self.assertFalse(self.waits(self.repo))
+        self.assertLessEqual(len(read), self.surface.MAX_WAIT_FILES)
+
+    def test_reading_one_named_configuration_file_is_never_skipped(self):
+        runner = importlib.import_module("stayawake.lib.git.run")
+        self._include(self.pipe)
+        with runner.one_pass():
+            self.assertTrue(runner._not_answering(self.repo, ["rev-parse", "HEAD"]))
+            for named in (["config", "--global", "--list"],
+                          ["config", "--file", str(self.root / "x.cfg"), "--list"],
+                          ["config", f"--file={self.root / 'x.cfg'}", "--list"]):
+                self.assertFalse(runner._not_answering(self.repo, named))
+
+
+class TestARepositoryWithOneSlowCommandIsStillAsked(GitSandbox):
+    """Check a repository where one git command does not answer in time while git itself does."""
+
+    def setUp(self):
+        super().setUp()
+        self.runner = importlib.import_module("stayawake.lib.git.run")
+        self.repo = self.new_repo("large")
+        self.write(self.repo, "a.txt", "a\n")
+        self.commit(self.repo, "init")
+        self.started = []
+        real = self.runner.subprocess.run
+
+        def one_command_is_slow(argv, *args, **kwargs):
+            self.started.append(argv)
+            if "--merges" in argv:
+                raise self.runner.subprocess.TimeoutExpired(argv, 1)
+            return real(argv, *args, **kwargs)
+        patcher = mock.patch.object(self.runner.subprocess, "run", side_effect=one_command_is_slow)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_every_timeout_leaves_the_next_command_asked(self):
+        with self.runner.one_pass():
+            for _ in range(3):
+                self.runner.run(self.repo, ["rev-list", "--merges", "HEAD"])
+        self.assertEqual(3, len([argv for argv in self.started if "--merges" in argv]))
+
+    def test_later_commands_there_still_run(self):
+        with self.runner.one_pass():
+            self.assertIsNone(self.runner.run(self.repo, ["rev-list", "--merges", "HEAD"]))
+            answer = self.runner.run(self.repo, ["rev-parse", "HEAD"])
+        self.assertIsNotNone(answer)
+        self.assertEqual(0, answer.returncode)
+
+    def test_a_scan_still_runs_every_other_git_command(self):
+        from stayawake.bots.security.scanner import scan_target
+        from stayawake.bots.security.signatures import load_signatures
+        from stayawake.bots.security.targets.base import ScanOptions
+        from stayawake.bots.security.targets.local import LocalRepoTarget
+        result = scan_target(LocalRepoTarget(self.repo, str(self.repo), ScanOptions()),
+                             load_signatures(), [])
+        self.assertTrue(result.error)
+        after = self.started[next(i for i, argv in enumerate(self.started) if "--merges" in argv) + 1:]
+        inside = [argv for argv in after
+                  if argv[1:3] == ["-C", str(self.repo)] and "--git-dir" not in argv]
+        self.assertTrue(inside, "no git command ran in the repository after one slow command")
+
 if __name__ == "__main__":
     unittest.main()

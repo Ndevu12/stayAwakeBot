@@ -2,6 +2,7 @@
 """Local machine hygiene checks (credentials + VS Code), all mocked — no real probing."""
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 import stat
@@ -35,6 +36,24 @@ def tearDownModule():
     else:
         os.environ["SAW_AUTORUN_BASELINE"] = _state_was
     shutil.rmtree(_state_dir, ignore_errors=True)
+
+
+def only_probe(name: str, issues: list) -> list:
+    """Patches that leave one audit probe answering `issues` and every other probe answering none.
+    Takes the probe's name in `hygiene` and its issues. Returns the patches, not yet started."""
+    others = sorted(n for n in dir(hygiene) if n.startswith("check_") and n != name
+                    and callable(getattr(hygiene, n)))
+    return ([mock.patch.object(hygiene, n, return_value=[]) for n in others]
+            + [mock.patch.object(hygiene, name, return_value=issues)])
+
+
+def audit_ids_with_only(name: str, issue) -> list[str]:
+    """The ids an audit reports when only the probe `name` reports `issue`. Takes the probe's name
+    and the issue. Returns the ids."""
+    with contextlib.ExitStack() as stack:
+        for patch in only_probe(name, [issue]):
+            stack.enter_context(patch)
+        return [i.id for i in hygiene.audit()]
 
 
 class TestCredentials(unittest.TestCase):
@@ -290,12 +309,7 @@ class TestRunnerPersistence(unittest.TestCase):
         # Regression: audit() is the SINGLE composition site and must include every probe,
         # so a probe added there is never silently dropped by a caller that hand-assembles checks.
         sentinel = hygiene.HygieneIssue("self-hosted-runner-persistence", "warning", "T", "D", "F")
-        with mock.patch.object(hygiene, "check_credentials", return_value=[]), \
-             mock.patch.object(hygiene, "check_editors", return_value=[]), \
-             mock.patch.object(hygiene, "check_branch_protection", return_value=[]), \
-             mock.patch.object(hygiene, "check_persistence", return_value=[]), \
-             mock.patch.object(hygiene, "check_runner_persistence", return_value=[sentinel]):
-            ids = [i.id for i in hygiene.audit()]
+        ids = audit_ids_with_only("check_runner_persistence", sentinel)
         self.assertIn("self-hosted-runner-persistence", ids)
 
 
@@ -373,12 +387,7 @@ class TestPersistence(unittest.TestCase):
 
     def test_audit_composes_persistence(self):
         sentinel = hygiene.HygieneIssue("os-service-persistence", "warning", "T", "D", "F")
-        with mock.patch.object(hygiene, "check_credentials", return_value=[]), \
-             mock.patch.object(hygiene, "check_editors", return_value=[]), \
-             mock.patch.object(hygiene, "check_branch_protection", return_value=[]), \
-             mock.patch.object(hygiene, "check_runner_persistence", return_value=[]), \
-             mock.patch.object(hygiene, "check_persistence", return_value=[sentinel]):
-            ids = [i.id for i in hygiene.audit()]
+        ids = audit_ids_with_only("check_persistence", sentinel)
         self.assertIn("os-service-persistence", ids)
 
 
@@ -500,13 +509,7 @@ class TestHostArtifacts(unittest.TestCase):
 
     def test_audit_composes_host_artifacts(self):
         sentinel = hygiene.HygieneIssue("host-drop-artifacts", "warning", "T", "D", "F")
-        with mock.patch.object(hygiene, "check_credentials", return_value=[]), \
-             mock.patch.object(hygiene, "check_editors", return_value=[]), \
-             mock.patch.object(hygiene, "check_runner_persistence", return_value=[]), \
-             mock.patch.object(hygiene, "check_persistence", return_value=[]), \
-             mock.patch.object(hygiene, "check_branch_protection", return_value=[]), \
-             mock.patch.object(hygiene, "check_host_artifacts", return_value=[sentinel]):
-            ids = [i.id for i in hygiene.audit()]
+        ids = audit_ids_with_only("check_host_artifacts", sentinel)
         self.assertIn("host-drop-artifacts", ids)
 
 
@@ -1143,30 +1146,12 @@ class TestMechanismPersistenceComposition(unittest.TestCase):
     """The three new probes must flow through the single audit() composition site (#1161), and
     their active-compromise findings must lead the rotate-LAST runbook."""
 
-    def _only(self, name, sentinel):
-        # Mock every OTHER check to [] so audit() yields just the sentinel deterministically.
-        others = {"check_credentials", "check_editors", "check_branch_protection",
-                  "check_persistence", "check_runner_persistence", "check_host_artifacts",
-                  "check_ssh_authorized_keys", "check_shell_profile",
-                  "check_git_config_execution"} - {name}
-        ctx = [mock.patch.object(hygiene, o, return_value=[]) for o in others]
-        ctx.append(mock.patch.object(hygiene, name, return_value=[sentinel]))
-        return ctx
-
     def test_audit_composes_each_new_probe(self):
         for name, sid in [("check_ssh_authorized_keys", "ssh-authorized-keys-forced-command"),
                           ("check_shell_profile", "shell-profile-fetch-exec"),
                           ("check_git_config_execution", "git-fsmonitor-command")]:
             sentinel = hygiene.HygieneIssue(sid, "warning", "T", "D", "F")
-            patches = self._only(name, sentinel)
-            for p in patches:
-                p.start()
-            try:
-                ids = [i.id for i in hygiene.audit()]
-            finally:
-                for p in patches:
-                    p.stop()
-            self.assertIn(sid, ids)
+            self.assertIn(sid, audit_ids_with_only(name, sentinel))
 
     def test_active_backdoor_ids_trigger_incident_runbook(self):
         for sid in ("ssh-authorized-keys-forced-command", "shell-profile-fetch-exec",

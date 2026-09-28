@@ -16,7 +16,7 @@ from stayawake.bots.security.models import (CONFIRMED, HEURISTIC, INFORMATIONAL,
                                             ROLLBACK_DIR, Finding, ScanResult, Severity)
 from stayawake.bots.security.matchers import REGISTRY
 from stayawake.lib import git as gitutil
-from stayawake.lib.git.run import stalls_recorded
+from stayawake.lib.git.run import one_pass, stalls_recorded
 
 
 def _accepts_all_signatures(matcher) -> bool:
@@ -317,6 +317,13 @@ def scan_target(target, signatures_by_matcher: dict[str, list[dict[str, Any]]],
     the same `finalize`."""
     all_sigs = [s for group in signatures_by_matcher.values() for s in group]
     order = list(signatures_by_matcher.keys())
+    with one_pass():
+        return _scan_target(target, signatures_by_matcher, allowlist, all_sigs, order)
+
+
+def _scan_target(target, signatures_by_matcher, allowlist, all_sigs, order) -> ScanResult:
+    """`scan_target`'s body, run inside one pass. Takes the target, the signatures by matcher, the
+    allowlist, every signature and the matcher order. Returns the result."""
     try:
         by_matcher = run_matchers(target, order, signatures_by_matcher, all_sigs)
         # A named file has no tree to answer about: `root` is only the directory it sits in, and
