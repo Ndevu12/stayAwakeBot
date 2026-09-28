@@ -132,5 +132,78 @@ class TestRefScope(GitSandbox):
         self.assertEqual(carrying["feature"][1], "0" * 40)
 
 
+class TestBlobPaths(GitSandbox):
+    """`blob_paths` answers where a blob ever sat."""
+
+    CONTENT = "wOF2\x00camouflage\n"
+
+    def setUp(self):
+        super().setUp()
+        self.d = self.new_repo("paths", user__name="T", user__email="t@t.test")
+        self.write(self.d, "a.txt", "one\n")
+        self.commit(self.d, "root")
+        self.base = self.git(self.d, "rev-parse", "--abbrev-ref", "HEAD").strip()
+
+    def _oid(self, spec):
+        return self.git(self.d, "rev-parse", spec).strip()
+
+    def test_a_renamed_blob_is_found_at_both_paths(self):
+        self.write(self.d, "src/evil.woff2", self.CONTENT)
+        self.commit(self.d, "add")
+        self.write(self.d, "assets/renamed.woff2", self.CONTENT)
+        (self.d / "src/evil.woff2").unlink()
+        self.commit(self.d, "rename")
+        oid = self._oid("HEAD:assets/renamed.woff2")
+        self.assertEqual(sorted(gitutil.blob_paths(self.d, oid)),
+                         ["assets/renamed.woff2", "src/evil.woff2"])
+
+    def test_a_blob_born_in_a_merge_commit_is_found(self):
+        self.git(self.d, "checkout", "-qb", "feature")
+        self.write(self.d, "b.txt", "two\n")
+        self.commit(self.d, "feature work")
+        self.git(self.d, "checkout", "-q", self.base)
+        self.git(self.d, "merge", "--no-ff", "--no-commit", "-q", "feature")
+        self.write(self.d, "smuggled.woff2", self.CONTENT)
+        self.git(self.d, "add", "-A")
+        self.git(self.d, "commit", "-qm", "merge")
+        oid = self._oid("HEAD:smuggled.woff2")
+        self.assertIn("smuggled.woff2", gitutil.blob_paths(self.d, oid))
+
+    def test_a_blob_only_on_a_fetched_ref_is_found(self):
+        self.git(self.d, "checkout", "-qb", "tmp")
+        self.write(self.d, "only/origin.woff2", self.CONTENT)
+        sha = self.commit(self.d, "fetched only")
+        self.git(self.d, "update-ref", "refs/remotes/origin/stale", sha)
+        self.git(self.d, "checkout", "-q", self.base)
+        self.git(self.d, "branch", "-qD", "tmp")
+        oid = self.git(self.d, "rev-parse", f"{sha}:only/origin.woff2").strip()
+        self.assertIn("only/origin.woff2", gitutil.blob_paths(self.d, oid))
+
+    def test_a_blob_the_history_never_held_yields_nothing(self):
+        self.assertEqual(gitutil.blob_paths(self.d, "0" * 40), [])
+
+    def test_a_renamed_blob_at_a_non_ascii_path_is_found_byte_exact(self):
+        old = "src/évil.woff2"
+        self.write(self.d, old, self.CONTENT)
+        self.commit(self.d, "add")
+        self.write(self.d, "assets/renamed.woff2", self.CONTENT)
+        (self.d / old).unlink()
+        self.commit(self.d, "rename")
+        oid = self._oid("HEAD:assets/renamed.woff2")
+        self.assertEqual(sorted(gitutil.blob_paths(self.d, oid)),
+                         ["assets/renamed.woff2", old])
+
+    def test_a_blob_in_a_root_commit_is_found(self):
+        self.git(self.d, "config", "log.showRoot", "false")
+        oid = self._oid("HEAD:a.txt")
+        self.assertIn("a.txt", gitutil.blob_paths(self.d, oid))
+
+    def test_a_walk_longer_than_the_bound_answers_none(self):
+        self.write(self.d, "src/evil.woff2", self.CONTENT)
+        self.commit(self.d, "add")
+        oid = self._oid("HEAD:src/evil.woff2")
+        self.assertIsNone(gitutil.blob_paths(self.d, oid, limit=1))
+
+
 if __name__ == "__main__":
     unittest.main()

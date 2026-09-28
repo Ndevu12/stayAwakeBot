@@ -72,6 +72,9 @@ reader, not the mechanism or the weakness it closed.
 - **saw names the compromised versions instead of a version to install.**
 
 ### Fixed
+- **A file `saw fix amend` removes does not survive the history it rewrites.** The file is taken
+  out of every commit that held it, and a run that cannot manage that refuses and names the
+  branches still holding it, instead of completing.
 - **`saw fix amend` now accounts for a removed file wherever your repository can still reach it.**
   After amending history it reports any remaining place your repository holds a file it removed,
   names each one, and marks the run for review until you have cleared them.
