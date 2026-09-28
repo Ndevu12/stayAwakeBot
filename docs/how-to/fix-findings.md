@@ -4,9 +4,10 @@ description: Clean an infected repository with saw fix, which prepares the chang
 
 # Fix findings
 
-`saw fix` cleans an infected repository **on a branch**, for you to review. Source changes land
-there and it pushes nothing unless you ask. On a confirmed infection it also removes the installed
-tree, generated build outputs, and the lockfile in this repository (the lockfile is kept on CI).
+`saw fix` cleans an infected repository **on a branch**, for you to review, and pushes nothing
+unless you ask. On a confirmed infection it also clears the checkout you are standing in — the
+files it confirms, the installed tree, generated build outputs, and the lockfile (the lockfile is
+kept on CI) — and records what you had not committed on a local `saw/uncommitted-…` branch.
 Flags: [CLI reference](../reference/cli/fix.md).
 
 ```bash

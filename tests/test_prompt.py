@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Tests for `utils.prompt` — the terminal primitives behind an interactive operator question.
 
-`interactive` gates on both streams being real terminals; `ask_line` writes the prompt to the error
-stream, reads one line, and returns None (never crashes) at end of input or on a broken stream.
+`interactive` gates on both streams being real terminals; `attended` adds that the run is not
+automated; `ask_line` writes the prompt to the error stream, reads one line, and returns None
+(never crashes) at end of input or on a broken stream.
 """
 from __future__ import annotations
 
@@ -89,3 +90,33 @@ class TestAskLine(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class _Tty:
+    def isatty(self):
+        return True
+
+
+class _Pipe:
+    def isatty(self):
+        return False
+
+
+class TestAttended(unittest.TestCase):
+    """Check when there is a person to address."""
+
+    def test_two_terminals_and_no_automation_is_attended(self):
+        with mock.patch.object(prompt.env, "is_ci", return_value=False):
+            self.assertTrue(prompt.attended(_Tty(), _Tty()))
+
+    def test_an_automated_run_is_not_attended(self):
+        with mock.patch.object(prompt.env, "is_ci", return_value=True):
+            self.assertFalse(prompt.attended(_Tty(), _Tty()))
+
+    def test_a_piped_input_is_not_attended(self):
+        with mock.patch.object(prompt.env, "is_ci", return_value=False):
+            self.assertFalse(prompt.attended(_Pipe(), _Tty()))
+
+    def test_a_piped_prompt_stream_is_not_attended(self):
+        with mock.patch.object(prompt.env, "is_ci", return_value=False):
+            self.assertFalse(prompt.attended(_Tty(), _Pipe()))

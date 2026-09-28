@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from stayawake.lib import auth
-from stayawake.utils import env, parallel
+from stayawake.utils import env, exitcodes, parallel, prompt
 from stayawake.lib import git as gitutil
 from stayawake.lib.adapters import github_api
 from stayawake.utils.streaming import Streamer, stream_enabled, status
@@ -23,12 +23,14 @@ from stayawake.bots.security.resolution import (
     resolve_remote as _resolve_remote)
 from stayawake.bots.security.targets import ScanOptions
 from stayawake.bots.security import pr as pr_submit
+from stayawake.bots.security.pr.fix_verdict import Checkout, FixVerdict, Grade, render_fix_verdict
 
 
 def _options(settings: dict) -> ScanOptions:
     base = ScanOptions()
     return ScanOptions(
         exclude_dirs=set(settings.get("exclude_dirs", base.exclude_dirs)),
+        keep_dirs=set(settings.get("keep_dirs", base.keep_dirs)),
         max_file_bytes=int(settings.get("max_file_bytes", base.max_file_bytes)),
         remote_clone_depth=int(settings.get("remote_clone_depth", base.remote_clone_depth)),
     )
@@ -40,20 +42,37 @@ def _resolve_config(config_path: str | None, targets: list[str] | None = None) -
 
 @dataclass(frozen=True)
 class FixOutcome:
-    """One repo's result. `needs_review` is decided WHERE the failure is known, never re-read from
+    """One repo's result. The grade is decided WHERE the failure is known, never re-read from
     the summary: the remote arm's auth and clone failures said nothing a substring test matched, so
-    a repo no credential could reach exited 0."""
+    a repo no credential could reach exited 0. `acted` is whether the run changed something."""
     summary: str
-    needs_review: bool = False
+    grade: Grade = Grade.NEEDS_REVIEW
+    acted: bool = False
+
+    @property
+    def needs_review(self) -> bool:
+        return self.grade is Grade.NEEDS_REVIEW
 
     def __str__(self) -> str:
         return self.summary
 
 
-def _reviewed(fn, display: str) -> FixOutcome:
-    """Wrap a submit/prepare result, grading it by the markers OUR OWN renderer writes."""
-    text = _safe(fn, display)
-    return FixOutcome(text, _needs_review(text))
+def _review(summary: str) -> FixOutcome:
+    """An outcome a person has to look at."""
+    return FixOutcome(summary, Grade.NEEDS_REVIEW)
+
+
+def _graded_fix(fn, display: str) -> FixOutcome:
+    """One repo's fix, graded from its verdict. An exception, or anything that is not a verdict,
+    needs review."""
+    try:
+        verdict = fn()
+    except Exception as exc:  # noqa: BLE001 — isolate a single repo, keep the run going
+        return _review(f"{display}: error — {exc}")
+    if not isinstance(verdict, FixVerdict):
+        return _review(f"{display}: error — the run returned no verdict")
+    acted = verdict.checkout is not Checkout.CLEAN or bool(verdict.base_fix.branch)
+    return FixOutcome(render_fix_verdict(verdict, prompt.attended()), verdict.grade, acted)
 
 
 def _safe(fn, display: str) -> str:
@@ -71,8 +90,9 @@ def _amend_outcome(fn, display: str) -> FixOutcome:
     try:
         outcome = fn()
     except Exception as exc:  # noqa: BLE001 — isolate a single repo, keep the run going
-        return FixOutcome(f"{display}: error — {exc}", needs_review=True)
-    return FixOutcome(render_amend_line(outcome), outcome.needs_review)
+        return _review(f"{display}: error — {exc}")
+    return FixOutcome(render_amend_line(outcome),
+                      Grade.NEEDS_REVIEW if outcome.needs_review else Grade.DONE)
 
 
 def _preflight(token: str | None, intent=None) -> str | None:
@@ -118,21 +138,28 @@ def _disp(repo: Path) -> str:
     return str(repo).replace(os.path.expanduser("~"), "~")
 
 
-def _needs_review(text: str) -> bool:
-    """A repo needs manual review when its outcome is an error, an abort, or a PARTIAL fix —
-    the tree isn't provably clean, so `fix` must exit non-zero for it (invariant #1). This is the ONE
-    predicate the board tag and the final `fix()` tally both use, so they can never disagree."""
-    return "ABORTED" in text or ": error" in text or "PARTIAL" in text
-
-
 def _board_detail(label: str, text: str) -> str:
     """The outcome string starts with the repo label (`f"{slug}: …"`); drop that prefix so the
     board's per-repo line doesn't print the label twice."""
     return text[len(label):].lstrip(": ").strip() or text if text.startswith(label) else text
 
 
+_FIX_TAGS = {Grade.NEEDS_REVIEW: "[review  ]", Grade.HISTORY_REMAINS: "[history ]"}
+
+
+def fix_tag(outcome: FixOutcome) -> str:
+    """The board tag for one repository's fix, read from its grade."""
+    if outcome.grade in _FIX_TAGS:
+        return _FIX_TAGS[outcome.grade]
+    return "[cleaned ]" if outcome.acted else "[clean   ]"
+
+
+def _amend_tag(outcome: FixOutcome) -> str:
+    return "[review  ]" if outcome.needs_review else "[fixed   ]"
+
+
 def _run_fix_sweep(items, labels, make_outcome, prog: Streamer, *, jobs,
-                   verb: str) -> list[FixOutcome]:
+                   verb: str, tag=_amend_tag) -> list[FixOutcome]:
     """Run one repo's operation over each item, returning outcomes in SUBMISSION order (so
     `fix()`'s needs-review tally is deterministic at any `-j`). `make_outcome(item, spin=…)` does the
     repo's work and never raises (it wraps its work in `_safe`).
@@ -158,12 +185,11 @@ def _run_fix_sweep(items, labels, make_outcome, prog: Streamer, *, jobs,
     swept = run_sweep(
         lambda item: make_outcome(item, spin=False), items, jobs=workers,
         backend=parallel.THREAD, labels=labels,
-        describe=lambda o: (("[review  ]" if o.error or o.value.needs_review
-                             else "[fixed   ]"), "",
+        describe=lambda o: (("[review  ]" if o.error else tag(o.value)), "",
                             f"      → {_board_detail(labels[o.index], str(o.value or o.error))}"),
         progress_on=prog.enabled, verb=verb)
     return [o.value if not o.error
-            else FixOutcome(f"{labels[o.index]}: error — {o.error}", needs_review=True)
+            else _review(f"{labels[o.index]}: error — {o.error}")
             for o in swept]
 
 
@@ -213,7 +239,7 @@ def _fix_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *, publish: bo
             line = (f"{_disp(repo)}: error — no branch '{name}'. "
                     f"Check the name, or omit --branch to fix the repository default.")
             prog.line(f"      → {line}")     # the sweep only prints what it PROCESSES
-            refused.append(FixOutcome(line, needs_review=True))
+            refused.append(_review(line))
         items += [(repo, base) for base in bases]
     if not items:
         return refused
@@ -229,14 +255,15 @@ def _fix_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *, publish: bo
         if publish:
             tok, aerr = auth.act_token(token, source, gitutil.origin_slug(repo))
             if aerr:      # a repo no credential can reach was NOT fixed
-                return FixOutcome(f"{display}: error — {aerr}", needs_review=True)
-            return _reviewed(lambda: pr_submit.submit_fix_pr(repo, opts, sigs, allowlist, tok,
-                                                            base=base, spin=spin), display)
-        return _reviewed(lambda: pr_submit.prepare_fix(repo, opts, sigs, allowlist, base=base,
-                                                       spin=spin), display)
+                return _review(f"{display}: error — {aerr}")
+            return _graded_fix(lambda: pr_submit.submit_fix_pr(repo, opts, sigs, allowlist, tok,
+                                                               base=base, spin=spin), display)
+        return _graded_fix(lambda: pr_submit.prepare_fix(repo, opts, sigs, allowlist, base=base,
+                                                          spin=spin), display)
 
     labels = [_item_label(_disp(r), b) for r, b in items]
-    return refused + _run_fix_sweep(items, labels, make_outcome, prog, jobs=jobs, verb="Fixing")
+    return refused + _run_fix_sweep(items, labels, make_outcome, prog, jobs=jobs, verb="Fixing",
+                                    tag=fix_tag)
 
 
 def _fix_remote(cfg, opts, sigs, allowlist, prog: Streamer, *,
@@ -262,17 +289,18 @@ def _fix_remote(cfg, opts, sigs, allowlist, prog: Streamer, *,
     def make_outcome(slug, *, spin):
         tok, aerr = auth.act_token(token, source, slug)
         if aerr:
-            return FixOutcome(f"{slug}: {aerr}", needs_review=True)
+            return _review(f"{slug}: {aerr}")
         # `status` shows a live "cloning…" spinner in the sequential path; off under concurrency
         # (the board reports in-flight state). submit_fix_pr then drives its own phase spinners.
         with status(f"cloning {slug}…", enabled=spin), \
                 resolution.cloned_repo(slug, tok) as clone:        # phase 0: clone (shared helper)
             if clone is None:
-                return FixOutcome(f"{slug}: clone failed (check token access)", needs_review=True)
-            return _reviewed(lambda: pr_submit.submit_fix_pr(clone, opts, sigs, allowlist, tok,
-                                                            spin=spin), slug)
+                return _review(f"{slug}: clone failed (check token access)")
+            return _graded_fix(lambda: pr_submit.submit_fix_pr(clone, opts, sigs, allowlist, tok,
+                                                               spin=spin), slug)
 
-    return _run_fix_sweep(resolved, list(resolved), make_outcome, prog, jobs=jobs, verb="Fixing")
+    return _run_fix_sweep(resolved, list(resolved), make_outcome, prog, jobs=jobs, verb="Fixing",
+                          tag=fix_tag)
 
 
 def amend(config_path: str | None = None, *, paths: list[str] | None = None,
@@ -381,11 +409,11 @@ def _amend_remote(cfg, opts, sigs, allowlist, prog: Streamer, *,
     def make_outcome(slug, *, spin):
         tok, aerr = auth.act_token(token, source, slug)
         if aerr:
-            return FixOutcome(f"{slug}: {aerr}", needs_review=True)
+            return _review(f"{slug}: {aerr}")
         with status(f"cloning {slug}…", enabled=spin), \
                 resolution.cloned_repo(slug, tok, depth=None) as clone:
             if clone is None:
-                return FixOutcome(f"{slug}: clone failed (check token access)", needs_review=True)
+                return _review(f"{slug}: clone failed (check token access)")
             from stayawake.bots.security.pr.amend import amend_outcome
             return _amend_outcome(lambda c=clone, t=tok: amend_outcome(
                 c, slug, opts, sigs, allowlist, t,
@@ -403,8 +431,9 @@ def fix(config_path: str | None = None, *, pr: bool = False, remote: bool = Fals
     `pr=True` (`--pr`) also push + open/update one rolling PR each; with `remote=True`
     (`--remote`) sweep GitHub targets resolved by the ladder (ad-hoc `users`/`orgs`/
     `slugs` → config → your own repos). A multi-repo sweep runs up to `jobs` repos at once
-    (AUTO by default; `-j 1` forces sequential). Streams each repo's outcome. Returns 2 if an
-    explicit --config is missing, 1 if any repo needs manual review, else 0."""
+    (AUTO by default; `-j 1` forces sequential). Streams each repo's outcome. Returns INCOMPLETE if
+    an explicit --config is missing or any repo needs review, FINDINGS if any history still stores
+    what was cleared, else CLEAN."""
     cfg = _resolve_config(config_path, targets=None if remote else paths)
     if cfg is None:
         return 2
@@ -424,12 +453,31 @@ def fix(config_path: str | None = None, *, pr: bool = False, remote: bool = Fals
     if not outcomes:
         prog.line("No repositories to fix.")
         return 0
-    needs_review = sum(1 for o in outcomes if o.needs_review)
+    prog.line(fix_tally(outcomes))
+    return fix_status(outcomes)
+
+
+def fix_tally(outcomes) -> str:
+    """The closing line of a fix run, counted from each repository's grade."""
+    review = sum(1 for o in outcomes if o.grade is Grade.NEEDS_REVIEW)
+    history = sum(1 for o in outcomes if o.grade is Grade.HISTORY_REMAINS)
     n = len(outcomes)
-    plural = "y" if n == 1 else "ies"
-    prog.line(f"\nProcessed {n} repositor{plural}"
-              + (f"; {needs_review} need manual review." if needs_review else "."))
-    return 1 if needs_review else 0
+    parts = [f"\nProcessed {n} repositor{'y' if n == 1 else 'ies'}"]
+    if review:
+        parts.append(f"{review} need review")
+    if history:
+        parts.append(f"{history} still carry it in their history")
+    return "; ".join(parts) + "."
+
+
+def fix_status(outcomes) -> int:
+    """The status a fix run ends with, from each repository's grade."""
+    grades = {o.grade for o in outcomes}
+    if Grade.NEEDS_REVIEW in grades:
+        return exitcodes.INCOMPLETE
+    if Grade.HISTORY_REMAINS in grades:
+        return exitcodes.FINDINGS
+    return exitcodes.CLEAN
 
 
 # ── saw discard ──────────────────────────────────────────────────────────────────

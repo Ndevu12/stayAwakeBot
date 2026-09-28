@@ -29,8 +29,17 @@ class Edit:
         return self.was is None
 
 
+_STRING = r'"(?:[^"\\]|\\.)*"'
+_NUMBER = r'-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?'
+
+
 def _key_pattern(key: str) -> re.Pattern:
-    return re.compile(r'("' + re.escape(key) + r'"\s*:\s*)("[^"]*"|true|false|null|-?[\d.]+)')
+    return re.compile(r'("' + re.escape(key) + r'"\s*:\s*)(' + _STRING + r'|true|false|null|'
+                      + _NUMBER + r')')
+
+
+def _member_pattern(key: str) -> re.Pattern:
+    return re.compile(r'"' + re.escape(key) + r'"\s*:\s*(?=[\[{])')
 
 
 def value_at(text: str, key: str) -> str | None:
@@ -41,6 +50,202 @@ def value_at(text: str, key: str) -> str | None:
     """
     found = _key_pattern(key).search(code_only(text))
     return found.group(2) if found else None
+
+
+def remove_key(text: str, key: str) -> tuple[str, Edit] | None:
+    """`text` with every top-level member at `key` holding a literal taken out.
+
+    Takes the file's text and the key. Returns the text and the last value the key held, or None
+    when the key is not there at the top level. The separator that joined each one to its
+    neighbour goes with it.
+    """
+    blanked = code_only(text)
+    matches = list(_key_pattern(key).finditer(blanked))
+    tops = _at_top_level(blanked, [m.start() for m in matches])
+    spans = [(m.start(), m.end(2), m.group(2)) for m in matches if m.start() in tops]
+    if not spans:
+        return None
+    return _cut(text, blanked, [(a, b) for a, b, _ in spans]), Edit(key, "", spans[-1][2])
+
+
+def _at_top_level(blanked: str, starts) -> set[int]:
+    """Which of `starts` lie directly inside the outermost object. Takes comment-free text and
+    positions. Returns those positions, found in one pass over the text."""
+    found, depth, at, in_string = set(), 0, 0, False
+    for position in sorted(set(starts)):
+        while at < position:
+            ch = blanked[at]
+            if in_string:
+                if ch == "\\":
+                    at += 1
+                elif ch == '"':
+                    in_string = False
+            elif ch == '"':
+                in_string = True
+            elif ch in "[{":
+                depth += 1
+            elif ch in "]}":
+                depth -= 1
+            at += 1
+        if depth == 1 and not in_string:
+            found.add(position)
+    return found
+
+
+def remove_member(text: str, key: str) -> tuple[str, Edit] | None:
+    """`text` with every top-level member at `key` holding an object or a list taken out.
+
+    Takes the file's text and the key. Returns the text and an `Edit` naming the key, or None when
+    the key is not there at the top level or one of its values does not close.
+    """
+    blanked = code_only(text)
+    matches = list(_member_pattern(key).finditer(blanked))
+    tops = _at_top_level(blanked, [m.start() for m in matches])
+    spans = []
+    for found in matches:
+        if found.start() not in tops:
+            continue
+        close = _closing(blanked, found.end())
+        if close is None:
+            return None
+        spans.append((found.start(), close + 1))
+    if not spans:
+        return None
+    return _cut(text, blanked, spans), Edit(key, "", "")
+
+
+def _closing(blanked: str, start: int) -> int | None:
+    """The index of the bracket closing the one at `start`. Takes comment-free text. Returns None
+    when it never closes."""
+    pairs = {"[": "]", "{": "}"}
+    depth, index, in_string = 0, start, False
+    while index < len(blanked):
+        ch = blanked[index]
+        if in_string:
+            if ch == "\\":
+                index += 1
+            elif ch == '"':
+                in_string = False
+        elif ch == '"':
+            in_string = True
+        elif ch in pairs:
+            depth += 1
+        elif ch in pairs.values():
+            depth -= 1
+            if depth == 0:
+                return index
+        index += 1
+    return None
+
+
+class _Rest:
+    """The text after a position, held as pieces so removing from its front costs only what is
+    removed. Takes nothing. Pieces pushed later come first."""
+
+    def __init__(self):
+        self._pieces: list[tuple[str, str]] = []
+        self._offset = 0
+        self._front: tuple[int, str] | None = (0, "")
+
+    def push(self, text: str, blanked: str) -> None:
+        """Put `text`, with its comment-free twin `blanked`, in front of what is held."""
+        if not text:
+            return
+        if self._offset:
+            front_text, front_blanked = self._pieces[-1]
+            self._pieces[-1] = (front_text[self._offset:], front_blanked[self._offset:])
+            self._offset = 0
+        self._pieces.append((text, blanked))
+        lead = len(blanked) - len(blanked.lstrip())
+        if lead < len(blanked):
+            self._front = (lead, blanked[lead])
+        elif self._front is not None:
+            self._front = (self._front[0] + lead, self._front[1])
+
+    def _chars(self):
+        for index in range(len(self._pieces) - 1, -1, -1):
+            text, blanked = self._pieces[index]
+            for at in range(self._offset if index == len(self._pieces) - 1 else 0, len(text)):
+                yield text[at], blanked[at]
+
+    def leading_space(self) -> tuple[int, str]:
+        """How many characters at the front are blank once comments are gone, and the first one
+        after them (empty at the end)."""
+        if self._front is None:
+            count, following = 0, ""
+            for _, blanked_char in self._chars():
+                if not blanked_char.isspace():
+                    following = blanked_char
+                    break
+                count += 1
+            self._front = (count, following)
+        return self._front
+
+    def take(self, count: int) -> tuple[str, str]:
+        """Remove `count` characters from the front. Returns them and their comment-free twin."""
+        taken_text, taken_blanked = [], []
+        if self._front is not None and count <= self._front[0]:
+            self._front = (self._front[0] - count, self._front[1])
+        else:
+            self._front = None
+        while count and self._pieces:
+            text, blanked = self._pieces[-1]
+            end = min(len(text), self._offset + count)
+            taken_text.append(text[self._offset:end])
+            taken_blanked.append(blanked[self._offset:end])
+            count -= end - self._offset
+            if end == len(text):
+                self._pieces.pop()
+                self._offset = 0
+            else:
+                self._offset = end
+        return "".join(taken_text), "".join(taken_blanked)
+
+    def drop_while(self, characters: str) -> None:
+        """Remove characters from the front while they are among `characters`."""
+        count = 0
+        for text_char, _ in self._chars():
+            if text_char not in characters:
+                break
+            count += 1
+        self.take(count)
+
+    def text(self) -> str:
+        """Everything held, in order."""
+        pieces = [text for text, _ in reversed(self._pieces)]
+        if pieces and self._offset:
+            pieces[0] = pieces[0][self._offset:]
+        return "".join(pieces)
+
+
+def _cut(text: str, blanked: str, spans: list[tuple[int, int]]) -> str:
+    """`text` with each span removed along with the comma that joined it. Takes the text, its
+    comment-free twin and the spans, in any order. Returns the text; a comment beside a span stays.
+    Runs in time linear in the text."""
+    rest, kept_to = _Rest(), len(text)
+    for start, end in sorted(spans, reverse=True):
+        rest.push(text[end:kept_to], blanked[end:kept_to])
+        spaces, following = rest.leading_space()
+        if following == ",":
+            between, between_blanked = rest.take(spaces)
+            rest.take(1)
+            if between.strip():
+                rest.push(between, between_blanked)
+            else:
+                rest.drop_while(" \t")
+            kept_to = start
+            continue
+        before = start
+        while before > 0 and blanked[before - 1].isspace():
+            before -= 1
+        if before > 0 and blanked[before - 1] == ",":
+            comma = before - 1
+            if text[before:start].strip():
+                rest.push(text[comma + 1:start], blanked[comma + 1:start])
+            kept_to = comma
+            continue
+        kept_to = start
+    return text[:kept_to] + rest.text()
 
 
 def set_value(text: str, key: str, value: str) -> tuple[str, Edit] | None:

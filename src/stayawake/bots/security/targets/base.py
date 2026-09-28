@@ -45,6 +45,7 @@ def _ext(rel: str) -> str:
 class ScanOptions:
     exclude_dirs: set[str] = field(default_factory=lambda: {
         ".git", "node_modules", ".next", "dist", "build", SAW_DIR})
+    keep_dirs: set[str] = field(default_factory=set)
     max_file_bytes: int = 2_000_000
     remote_clone_depth: int = 50
     scan_build_outputs: bool = False

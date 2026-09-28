@@ -11,6 +11,12 @@ import unittest
 from unittest import mock
 
 from stayawake.bots.security import remediator
+from stayawake.bots.security.pr.fix_verdict import (
+    BaseFix, BaseState, Checkout, FixVerdict, Grade)
+
+
+def _verdict(state: BaseState, summary: str) -> FixVerdict:
+    return FixVerdict("owner/repo", BaseFix(state, summary, "main"), Checkout.CLEAN)
 
 
 class RemoteFixExitCase(unittest.TestCase):
@@ -29,7 +35,8 @@ class RemoteFixExitCase(unittest.TestCase):
                                return_value=(["owner/repo"], "tok", "app")), \
              mock.patch.object(remediator.resolution, "cloned_repo", return_value=cm), \
              mock.patch.object(remediator.pr_submit, "submit_fix_pr",
-                               return_value=submit or "owner/repo: fixed"):
+                               return_value=submit or _verdict(BaseState.PR_OPENED,
+                                                               "owner/repo: fixed")):
             return remediator.fix(remote=True, slugs=["owner/repo"], no_stream=True, jobs=1)
 
 
@@ -42,29 +49,35 @@ class TestAnUnfixedRepoFailsClosed(RemoteFixExitCase):
         self.assertNotEqual(0, self._run(clone=None))
 
     def test_an_aborted_fix_still_exits_non_zero(self):
-        self.assertNotEqual(0, self._run(clone=mock.Mock(), submit="owner/repo: ABORTED — dirty"))
+        self.assertNotEqual(0, self._run(clone=mock.Mock(), submit=_verdict(BaseState.ABORTED,
+                                                                "owner/repo: ABORTED — dirty")))
 
     def test_a_partial_fix_still_exits_non_zero(self):
-        self.assertNotEqual(0, self._run(clone=mock.Mock(), submit="owner/repo: PARTIAL — 1 left"))
+        self.assertNotEqual(0, self._run(clone=mock.Mock(), submit=_verdict(BaseState.PARTIAL,
+                                                                "owner/repo: PARTIAL — 1 left")))
 
     def test_a_real_fix_still_exits_zero(self):
         # The gate must not become "always fail" — that would be a different kind of useless.
-        self.assertEqual(0, self._run(clone=mock.Mock(), submit="owner/repo: fixed 2 file(s)"))
+        self.assertEqual(0, self._run(clone=mock.Mock(), submit=_verdict(BaseState.PR_OPENED,
+                                                                "owner/repo: fixed 2 file(s)")))
+
+    def test_a_string_where_a_verdict_belongs_needs_review(self):
+        rc = self._run(clone=mock.Mock(), submit="owner/repo: fixed 2 file(s)")
+        self.assertEqual(remediator.exitcodes.INCOMPLETE, rc)
 
 
 class TestTheGradeIsCarriedNotReparsed(unittest.TestCase):
     """The tally reads a flag set where the failure is known, so wording can change freely."""
 
     def test_a_failure_worded_without_any_marker_still_counts(self):
-        outcome = remediator.FixOutcome("owner/repo: App not installed", needs_review=True)
+        outcome = remediator.FixOutcome("owner/repo: App not installed", Grade.NEEDS_REVIEW)
         for marker in ("ABORTED", ": error", "PARTIAL"):
             self.assertNotIn(marker, outcome.summary)
         self.assertTrue(outcome.needs_review)
 
     def test_the_default_does_not_claim_success(self):
-        # A plain summary defaults to not-needing-review, so every FAILURE site must say so; the
-        # tests above are what hold that line.
-        self.assertFalse(remediator.FixOutcome("owner/repo: fixed").needs_review)
+        # An outcome that names no grade needs review; success is always stated.
+        self.assertTrue(remediator.FixOutcome("owner/repo: fixed").needs_review)
 
 
 if __name__ == "__main__":

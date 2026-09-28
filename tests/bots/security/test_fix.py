@@ -19,6 +19,13 @@ from unittest import mock
 from stayawake.bots.security import service, remediator
 from stayawake.bots.security import pr as pr_submit
 from stayawake.lib.adapters import github_api
+from stayawake.bots.security.pr.fix_verdict import BaseFix, BaseState, Checkout, FixVerdict
+from stayawake.utils import exitcodes
+
+
+def _verdict(state: BaseState, summary: str, checkout: Checkout = Checkout.CLEAN) -> FixVerdict:
+    """A fix run's verdict for one repository, as `prepare_fix` / `submit_fix_pr` return it."""
+    return FixVerdict("repo", BaseFix(state, summary, "main", "security/auto-clean"), checkout)
 
 # A CONFIRMED, auto-fixable finding: the worm's .gitignore auto-push markers.
 INFECTED_FILES = {".gitignore": "node_modules\ntemp_auto_push.bat\nbranch_structure.json\n"}
@@ -52,7 +59,8 @@ class TestConfigOptional(unittest.TestCase):
         try:
             os.chdir(d)
             with mock.patch.object(remediator.pr_submit, "prepare_fix",
-                                   return_value="repo: prepared 1 change(s)") as m_prep:
+                                   return_value=_verdict(BaseState.PREPARED,
+                                                        "repo: prepared 1 change(s)")) as m_prep:
                 rc = remediator.fix(None, no_stream=True)
         finally:
             os.chdir(cwd)
@@ -68,7 +76,8 @@ class TestFixLocal(unittest.TestCase):
         d = _git_repo(INFECTED_FILES)
         before = (d / ".gitignore").read_text()
         with mock.patch.object(remediator.pr_submit, "prepare_fix",
-                               return_value="repo: prepared 1 change(s) on 'security/auto-clean'") as m_prep, \
+                               return_value=_verdict(BaseState.PREPARED, "repo: prepared 1 change(s) "
+                                                    "on 'security/auto-clean'")) as m_prep, \
              mock.patch.object(remediator.pr_submit, "submit_fix_pr") as m_pub:
             rc = remediator.fix(None, paths=[str(d)], no_stream=True)
         self.assertEqual(rc, 0)
@@ -84,7 +93,8 @@ class TestFixLocal(unittest.TestCase):
              mock.patch.object(remediator.github_api, "installation_permissions", return_value=None), \
              mock.patch.object(remediator.github_api, "get_authenticated_user", return_value={"login": "me"}), \
              mock.patch.object(remediator.pr_submit, "submit_fix_pr",
-                               return_value="repo: opened PR #1 (url)") as m_pub, \
+                               return_value=_verdict(BaseState.PR_OPENED,
+                                                    "repo: opened PR #1 (url)")) as m_pub, \
              mock.patch.object(remediator.pr_submit, "prepare_fix") as m_prep:
             rc = remediator.fix(None, pr=True, paths=[str(d)], no_stream=True)
         self.assertEqual(rc, 0)
@@ -103,18 +113,22 @@ class TestFixLocal(unittest.TestCase):
         self.assertEqual(rc, 0)
         m_pub.assert_not_called()              # pre-flight aborts before any push
 
-    def test_aborted_repo_makes_exit_one(self):
+    def test_aborted_repo_is_incomplete(self):
         d = _git_repo(INFECTED_FILES)
         with mock.patch.object(remediator.pr_submit, "prepare_fix",
-                               return_value="repo: ABORTED — 1 finding still present"):
-            self.assertEqual(remediator.fix(None, paths=[str(d)], no_stream=True), 1)
+                               return_value=_verdict(BaseState.ABORTED,
+                                                     "repo: ABORTED — 1 finding still present")):
+            self.assertEqual(remediator.fix(None, paths=[str(d)], no_stream=True),
+                             exitcodes.INCOMPLETE)
 
-    def test_partial_repo_makes_exit_one(self):
-        # A PARTIAL fix (#1183) shipped safe changes but the tree isn't clean → exit non-zero.
+    def test_partial_repo_is_incomplete(self):
+        # A PARTIAL fix (#1183) shipped safe changes but the tree isn't clean → not a success.
         d = _git_repo(INFECTED_FILES)
         with mock.patch.object(remediator.pr_submit, "prepare_fix",
-                               return_value="repo: PARTIAL — prepared 1 safe change(s), 2 need review"):
-            self.assertEqual(remediator.fix(None, paths=[str(d)], no_stream=True), 1)
+                               return_value=_verdict(BaseState.PARTIAL, "repo: PARTIAL — prepared "
+                                                     "1 safe change(s), 2 need review")):
+            self.assertEqual(remediator.fix(None, paths=[str(d)], no_stream=True),
+                             exitcodes.INCOMPLETE)
 
 
 class TestTokenIsValid(unittest.TestCase):

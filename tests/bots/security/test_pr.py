@@ -15,6 +15,7 @@ from unittest import mock
 
 
 from stayawake.bots.security import pr                              # noqa: E402
+from stayawake.bots.security.pr.fix_verdict import render_fix_verdict  # noqa: E402
 from stayawake.core import proposal                        # noqa: E402
 from stayawake.bots.security.models import Finding, Severity, ScanResult  # noqa: E402
 from stayawake.bots.security.remediation import Change             # noqa: E402
@@ -62,6 +63,26 @@ def _patch_git(**overrides):
         yield
 
 
+def _line(verdict) -> str:
+    """The operator's text for a verdict."""
+    return render_fix_verdict(verdict)
+
+
+def _checkout_reads(result):
+    """Patch the checkout lane to read `result`.
+
+    Takes the scan result the operator's checkout is read with. Returns the patch, so the lane does
+    not draw on the scans the fix worktree is read with.
+    """
+    real = pr.fix.live.clean_checkout
+
+    def clean_checkout(repo, opts, signatures, allowlist, **kw):
+        kw["scan"] = lambda *a, **k: result
+        return real(repo, opts, signatures, allowlist, **kw)
+
+    return mock.patch.object(pr.fix.live, "clean_checkout", clean_checkout)
+
+
 class TestSlug(unittest.TestCase):
     def test_parses_ssh_and_https(self):
         # slug parsing now lives in core.git.query (flat-exported); pr reaches it via gitutil.
@@ -81,6 +102,7 @@ class TestNoDuplicatePr(unittest.TestCase):
         # First scan finds the payload; the post-apply re-scan(s) come back clean.
         scans = [infected, clean, clean]
         with _patch_git(), \
+             _checkout_reads(scans[0]), \
              mock.patch.object(pr.fix, "scan_target",
                                side_effect=lambda *a, **k: scans.pop(0) if scans else clean), \
              mock.patch.object(pr.remediation, "plan",
@@ -93,7 +115,7 @@ class TestNoDuplicatePr(unittest.TestCase):
              mock.patch.object(pr.github_api, "remove_label"), \
              mock.patch.object(pr.github_api, "create_pull",
                                return_value={"number": 99, "html_url": "u"}) as create:
-            outcome = pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t")
+            outcome = _line(pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t"))
         return outcome, create, update
 
     def test_opens_pr_when_none_exists(self):
@@ -123,7 +145,7 @@ class TestNoDuplicatePr(unittest.TestCase):
              mock.patch.object(pr.github_api, "create_issue",
                                return_value={"number": 9, "html_url": "iu"}), \
              mock.patch.object(pr.github_api, "create_pull") as create:
-            outcome = pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t")
+            outcome = _line(pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t"))
         create.assert_not_called()                         # no fix PR
         self.assertIn("ABORTED", outcome)
 
@@ -163,7 +185,7 @@ class TestPartialFix(unittest.TestCase):
              mock.patch.object(pr.github_api, "create_issue",
                                return_value={"number": 9, "html_url": "iu"}) as create_issue, \
              mock.patch.object(pr.github_api, "create_pull", return_value=create_pull_result) as create:
-            outcome = pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t")
+            outcome = _line(pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t"))
         return SimpleNamespace(outcome=outcome, create=create, update=update, add_labels=add_labels,
                                remove_label=remove_label, create_issue=create_issue)
 
@@ -258,7 +280,7 @@ class TestPartialFix(unittest.TestCase):
                                return_value={"number": 9, "html_url": "iu"}), \
              mock.patch.object(pr.github_api, "create_pull",
                                return_value={"number": 55, "html_url": "u"}) as create:
-            outcome = pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t")
+            outcome = _line(pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t"))
         classify.assert_called()
         self.assertEqual(classify.call_args.args[1].path, "tailwind.config.js")
         applyer.assert_called_once()
@@ -297,7 +319,7 @@ class TestPartialFix(unittest.TestCase):
              mock.patch.object(pr.github_api, "create_issue"), \
              mock.patch.object(pr.github_api, "create_pull",
                                return_value={"number": 55, "html_url": "u"}) as create:
-            outcome = pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t")
+            outcome = _line(pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t"))
         classify.assert_called()
         self.assertEqual(classify.call_args.args[1].path, "postcss.config.mjs")
         applyer.assert_called_once()
@@ -316,6 +338,7 @@ class TestPartialFix(unittest.TestCase):
         clean = ScanResult("owner/repo", "local", [])
         scans = [infected, infected, clean]
         with _patch_git(), \
+             _checkout_reads(scans[0]), \
              mock.patch.object(pr.fix, "scan_target",
                                side_effect=lambda *a, **k: scans.pop(0) if scans else clean), \
              mock.patch.object(pr.fix, "introduced_liveness", return_value=PRESENT), \
@@ -331,7 +354,7 @@ class TestPartialFix(unittest.TestCase):
              mock.patch.object(pr.github_api, "create_issue"), \
              mock.patch.object(pr.github_api, "create_pull",
                                return_value={"number": 55, "html_url": "u"}) as create:
-            outcome = pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t")
+            outcome = _line(pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t"))
         body = create.call_args.kwargs["body"]
         self.assertIn("PARTIAL", outcome)
         self.assertIn("96dcbd397c", body)
@@ -414,7 +437,7 @@ class TestPartialFix(unittest.TestCase):
              mock.patch.object(pr.github_api, "create_issue"), \
              mock.patch.object(pr.github_api, "create_pull",
                                return_value={"number": 55, "html_url": "u"}):
-            outcome = pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t")
+            outcome = _line(pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t"))
         self.assertIn(("tailwind.config.js", "evil-merge"), classified)
         applyer.assert_called_once()
         self.assertIn("PARTIAL", outcome)
@@ -430,7 +453,7 @@ class TestPartialFix(unittest.TestCase):
              mock.patch.object(pr.github_api, "list_open_issues",
                                return_value=[{"number": 3}]), \
              mock.patch.object(pr.github_api, "create_issue") as create_issue:
-            outcome = pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t")
+            outcome = _line(pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t"))
         create_issue.assert_not_called()                    # existing issue → no duplicate
         self.assertIn("ABORTED", outcome)
         self.assertIn("already tracks", outcome)
@@ -462,6 +485,7 @@ class TestPartialFix(unittest.TestCase):
         sug = pr.remediation.Suggested("postcss.config.mjs", "loader", pr.remediation.NO_VCS,
                                        "review the kept code before merging", "diff", "clean\n", 1)
         with _patch_git(), \
+             _checkout_reads(scans[0]), \
              mock.patch.object(pr.fix, "scan_target",
                                side_effect=lambda *a, **k: scans.pop(0) if scans else clean), \
              mock.patch.object(pr.remediation, "plan", return_value=[]), \
@@ -476,7 +500,7 @@ class TestPartialFix(unittest.TestCase):
              mock.patch.object(pr.github_api, "create_issue", return_value={"number": 9, "html_url": "iu"}), \
              mock.patch.object(pr.github_api, "create_pull",
                                return_value={"number": 55, "html_url": "u"}) as create:
-            outcome = pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t")
+            outcome = _line(pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t"))
         applyer.assert_called_once()                            # the computed strip WAS applied
         create.assert_called_once()                             # a PR IS opened (computed is shippable)
         kw = create.call_args.kwargs
@@ -560,6 +584,7 @@ class TestSigningWarning(unittest.TestCase):
         clean = ScanResult("owner/repo", "local", [])
         scans = [ScanResult("owner/repo", "local", []), clean, clean]
         with _patch_git(commit_fix=lambda repo, msg: commit_result), \
+             _checkout_reads(scans[0]), \
              mock.patch.object(pr.fix, "scan_target",
                                side_effect=lambda *a, **k: scans.pop(0) if scans else clean), \
              mock.patch.object(pr.remediation, "plan", return_value=[self._SAFE]), \
@@ -569,7 +594,7 @@ class TestSigningWarning(unittest.TestCase):
              mock.patch.object(pr.github_api, "remove_label"), \
              mock.patch.object(pr.github_api, "create_pull",
                                return_value={"number": 5, "html_url": "u"}):
-            return pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t")
+            return _line(pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t"))
 
     def test_unsigned_commit_warns_but_still_opens_pr(self):
         outcome = self._run_pr(CommitResult(committed=True, signed=False))
@@ -592,11 +617,12 @@ class TestSigningWarning(unittest.TestCase):
         clean = ScanResult("owner/repo", "local", [])
         scans = [ScanResult("owner/repo", "local", []), clean, clean]
         with _patch_git(commit_fix=lambda repo, msg: CommitResult(committed=True, signed=False)), \
+             _checkout_reads(scans[0]), \
              mock.patch.object(pr.fix, "scan_target",
                                side_effect=lambda *a, **k: scans.pop(0) if scans else clean), \
              mock.patch.object(pr.remediation, "plan", return_value=[self._SAFE]), \
              mock.patch.object(pr.remediation, "apply", return_value=[self._SAFE]):
-            outcome = pr.prepare_fix(Path("/repo"), object(), {}, [])
+            outcome = _line(pr.prepare_fix(Path("/repo"), object(), {}, []))
         self.assertIn("prepared 1 change", outcome)
         self.assertIn("UNSIGNED", outcome)
 
@@ -655,6 +681,7 @@ class TestReadOnlyFallback(unittest.TestCase):
                  ScanResult("owner/repo", "local", [])]
         with _patch_git(push_branch=lambda repo, slug, branch, token, **kw: False,   # read-only
                         format_patch=lambda repo, ref="HEAD": "From abc\nSubject: fix\n\npatch-body\n"), \
+             _checkout_reads(scans[0]), \
              mock.patch.object(pr.fix, "scan_target",
                                side_effect=lambda *a, **k: scans.pop(0) if scans else scans), \
              mock.patch.object(pr.remediation, "plan",
@@ -667,8 +694,8 @@ class TestReadOnlyFallback(unittest.TestCase):
              mock.patch.object(pr.github_api, "list_open_issues", return_value=existing_issues), \
              mock.patch.object(pr.github_api, "create_issue",
                                return_value={"number": 5, "html_url": "iu"}) as create_issue:
-            outcome = pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t",
-                                       patches_dir=out)
+            outcome = _line(pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t",
+                                       patches_dir=out))
         return outcome, create_pull, create_issue
 
     def test_saves_patch_and_opens_issue(self):
@@ -710,6 +737,7 @@ class TestForkPr(unittest.TestCase):
         with _patch_git(origin_slug=lambda repo: "up/repo", push_branch=fake_push,
                         format_patch=lambda repo, ref="HEAD": "patch-body\n"), \
              mock.patch.object(proposal.time, "sleep", return_value=None), \
+             _checkout_reads(scans[0]), \
              mock.patch.object(pr.fix, "scan_target",
                                side_effect=lambda *a, **k: scans.pop(0) if scans else scans), \
              mock.patch.object(pr.remediation, "plan",
@@ -729,7 +757,7 @@ class TestForkPr(unittest.TestCase):
              mock.patch.object(pr.github_api, "list_open_issues", return_value=[]), \
              mock.patch.object(pr.github_api, "create_issue",
                                return_value={"number": 1, "html_url": "iu"}) as create_issue:
-            outcome = pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t", patches_dir=out)
+            outcome = _line(pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t", patches_dir=out))
         return outcome, create_pull, create_issue, out
 
     def test_opens_cross_fork_pr(self):
@@ -837,7 +865,7 @@ class TestSuspiciousOnlyDisclosed(unittest.TestCase):
              contextlib.ExitStack() as stack:
             for p in self._no_op_remediation():
                 stack.enter_context(p)
-            outcome = pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t")
+            outcome = _line(pr.submit_fix_pr(Path("/repo"), object(), {}, [], token="t"))
         return SimpleNamespace(outcome=outcome, create_pull=create_pull, create_issue=create_issue)
 
     def _prepare(self, findings):
@@ -847,7 +875,7 @@ class TestSuspiciousOnlyDisclosed(unittest.TestCase):
              contextlib.ExitStack() as stack:
             for p in self._no_op_remediation():
                 stack.enter_context(p)
-            return pr.prepare_fix(Path("/repo"), object(), {}, [])
+            return _line(pr.prepare_fix(Path("/repo"), object(), {}, []))
 
     def test_submit_discloses_not_clean(self):
         r = self._submit([self._EVIL_MERGE, self._OBFUSCATED])

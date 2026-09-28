@@ -5,7 +5,9 @@ from __future__ import annotations
 import shutil
 import os
 import tempfile
+import json
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -18,6 +20,9 @@ from stayawake.bots.security.remediation.footprint import REMOVE_FILE
 
 FIX = Path(__file__).resolve().parent / "fixtures" / "infected"
 SIGS = load_signatures()
+
+
+from stayawake.bots.security.remediation import changes
 
 
 class TestRemediation(unittest.TestCase):
@@ -364,6 +369,43 @@ class TestActionScopeMatchesEvidence(unittest.TestCase):
         self.assertTrue((self.fonts / "fa-solid-400.woff2").exists())
         self.assertEqual((self.fonts / "fa-solid-400.woff2").read_bytes(), self.GENUINE_WOFF2)
         self.assertFalse((self.fonts / "README.md").exists())
+
+
+class TestASettingsEditKeepsTheRest(unittest.TestCase):
+    """Check that a settings edit takes out the automatic tasks and keeps every other member."""
+
+    def test_a_clean_edit_is_kept(self):
+        out = changes.strip_settings_autorun('{"a": 1, "tasks": [1], "b": 2}')
+        self.assertEqual({"a": 1, "b": 2}, json.loads(out))
+
+    def test_an_edit_that_would_not_parse_writes_the_file_back_whole(self):
+        text = '{"a": 1, "tasks": [1], "b": 2}'
+        with mock.patch.object(changes.jsonc, "remove_member", return_value=('{"a": 1', None)):
+            self.assertEqual({"a": 1, "b": 2}, json.loads(changes.strip_settings_autorun(text)))
+
+    def test_an_edit_that_drops_another_member_writes_the_file_back_whole(self):
+        text = '{"a": 1, "tasks": [1], "b": 2}'
+        with mock.patch.object(changes.jsonc, "remove_member", return_value=('{"a": 1}', None)):
+            self.assertEqual({"a": 1, "b": 2}, json.loads(changes.strip_settings_autorun(text)))
+
+    def test_a_key_spelled_with_an_escape_is_taken_out(self):
+        text = '{\n  "a": 1,\n  "t\\u0061sks": {"tasks": []},\n  "task.allowAutomaticTasks": "on"\n}\n'
+        self.assertEqual({"a": 1}, json.loads(changes.strip_settings_autorun(text)))
+
+    def test_a_file_that_is_not_valid_utf8_keeps_its_other_bytes(self):
+        root = Path(tempfile.mkdtemp(prefix="saw-settings-"))
+        self.addCleanup(shutil.rmtree, root)
+        settings = root / ".vscode" / "settings.json"
+        settings.parent.mkdir()
+        settings.write_bytes(b'{\n  "x": "\xff",\n  "task.allowAutomaticTasks": "on"\n}\n')
+        changes.apply(root, [changes.Change("strip-settings", ".vscode/settings.json")])
+        self.assertEqual(b'{\n  "x": "\xff"\n}\n', settings.read_bytes())
+
+    def test_a_double_slash_inside_a_string_does_not_stop_the_edit(self):
+        text = '{\n  // mine\n  "a": "see //x",\n  "task.allowAutomaticTasks": "on",\n}\n'
+        out = changes.strip_settings_autorun(text)
+        self.assertNotIn("allowAutomaticTasks", out)
+        self.assertIn("// mine", out)
 
 
 if __name__ == "__main__":

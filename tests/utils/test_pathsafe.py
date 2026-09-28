@@ -103,7 +103,7 @@ class _Tree(unittest.TestCase):
 
 
 class TestTrustedAncestor(_Tree):
-    """What may stand between a caller and the path it named."""
+    """Check what is accepted as an ancestor."""
 
     def test_a_real_directory_is_trusted(self):
         (self.d / "real").mkdir()
@@ -127,7 +127,7 @@ class TestTrustedAncestor(_Tree):
 
 
 class TestReachedWhereItWasNamed(_Tree):
-    """Every step to the path, not just its last component."""
+    """Check a path whose ancestors are plain, and one redirected partway."""
 
     def test_a_plain_chain_is_reached(self):
         (self.d / "a" / "b").mkdir(parents=True)
@@ -140,7 +140,7 @@ class TestReachedWhereItWasNamed(_Tree):
 
 
 class TestEveryFileArrived(_Tree):
-    """Whether a copy is complete enough to delete the original."""
+    """Check what a complete and an incomplete copy report."""
 
     def _pair(self):
         src, dst = self.d / "s", self.d / "d"
@@ -165,7 +165,6 @@ class TestEveryFileArrived(_Tree):
         self.assertTrue(pathsafe.every_file_arrived(src, dst))
 
     def test_a_source_it_could_not_read_is_never_called_arrived(self):
-        """This gates a delete: reporting "arrived" over a tree it could not read would lose it."""
         src, dst = self._pair()
         (dst / "a" / "f.txt").write_text("x")
         self.assertTrue(pathsafe.every_file_arrived(src, dst))

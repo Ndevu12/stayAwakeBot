@@ -8,6 +8,8 @@ import os
 import subprocess
 import unittest
 from pathlib import Path
+
+from stayawake.bots.security.pr.fix_verdict import render_fix_verdict
 from unittest import mock
 
 from tests.support.gitrepo import GitSandbox
@@ -103,7 +105,7 @@ class TestFixRunsNoRepositoryCode(HostileRepository):
     def test_preparing_the_fix_builds_the_branch_and_runs_nothing(self):
         with mock.patch.object(prfix.gitutil, "origin_slug", lambda repo: "acme/app"):
             outcome = pr.prepare_fix(self.op, ScanOptions(), SIGNATURES, [])
-        self.assertIn("prepared 1 change", outcome)
+        self.assertIn("prepared 1 change", render_fix_verdict(outcome))
         tip = self._fix_branch_tip()
         self.assertEqual(self.base, self.rev(self.op, f"{tip}^"))
         self.assertNotIn("temp_auto_push.bat", self.git(self.op, "cat-file", "blob",
@@ -125,7 +127,7 @@ class TestFixRunsNoRepositoryCode(HostileRepository):
              mock.patch.object(prfix.github_api, "add_labels"), \
              mock.patch.object(prfix.github_api, "remove_label"):
             outcome = pr.submit_fix_pr(self.op, ScanOptions(), SIGNATURES, [], token="t")
-        self.assertIn("opened PR #7", outcome)
+        self.assertIn("opened PR #7", render_fix_verdict(outcome))
         self.assertEqual(self._fix_branch_tip(),
                          self.git(self.remote, "rev-parse", "refs/heads/security/auto-clean-main")
                          .strip())

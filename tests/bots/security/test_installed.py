@@ -46,14 +46,29 @@ class _Repo:
         return package
 
 
-def _prepare_fix_against(scans, spy, extra=()):
-    """Drive `saw fix` far enough that the CONFIRMED gate either fires or does not."""
+def _prepare_fix_against(scans, spy, extra=(), live=None):
+    """Drive `saw fix` far enough that the CONFIRMED gate either fires or does not.
+
+    Takes the scans the fix worktree is read with, the remover to call in place of the real one,
+    extra patches, and the scan the operator's own checkout is read with — the first of `scans`
+    when none is given.
+    """
     from stayawake.bots.security import pr
     from stayawake.bots.security.models import ScanResult
     from stayawake.lib.git.write.commit import CommitResult
 
     idle = ScanResult("owner/repo", "local", [])
+    checkout_reads = live if live is not None else (scans[0] if scans else idle)
+    real_clean_checkout = pr.fix.live.clean_checkout
+
+    def clean_checkout(repo, opts, signatures, allowlist, **kw):
+        kw["scan"] = lambda *a, **k: checkout_reads
+        return real_clean_checkout(repo, opts, signatures, allowlist, **kw)
+
     patches = [
+        mock.patch.object(pr.fix.live, "clean_checkout", clean_checkout),
+        mock.patch.object(pr.fix.live.preserve, "can_hold", return_value=""),
+        mock.patch.object(pr.fix.live.preserve, "uncommitted", return_value=[]),
         mock.patch.object(pr.gitutil, "origin_slug", return_value=None),
         mock.patch.object(pr.gitutil, "default_branch", return_value="main"),
         mock.patch.object(pr.gitutil, "ref_exists", return_value=True),
@@ -1121,7 +1136,7 @@ class TestConfirmedFixReachesTheRemover(unittest.TestCase):
         wt = Path(tempfile.mkdtemp())
         lock = wt / "package-lock.json"
         report = installed.Report(removed_lockfiles=[lock])
-        changes = fixmod._lockfile_changes(wt, report)
+        changes = fixmod._lockfile_changes(wt, report.removed_lockfiles)
         self.assertEqual([c.path for c in changes], ["package-lock.json"])
 
 
@@ -1150,6 +1165,25 @@ class TestNothingLeavesTheTreeItMayNotBeRemovedFrom(unittest.TestCase):
             with self.assertRaises(OSError):
                 installed.remove_rebuildable(repo.root, remove_lockfiles=False)
         self.assertTrue((built / "app.js").is_file())
+
+
+class TestWhatTheOperatorIsToldToDo(unittest.TestCase):
+    """Check the next step the run names after removing what a package manager produced."""
+
+    def test_a_removed_lockfile_is_regenerated_by_reinstalling(self):
+        note = installed.Report(removed_lockfiles=[Path("package-lock.json")]).note()
+        self.assertIn("reinstall", note)
+        for wrong in ("git checkout", "git restore", "restore it", "bring it back"):
+            self.assertNotIn(wrong, note)
+
+    def test_every_removal_names_the_same_step(self):
+        for report in (installed.Report(removed_trees=1), installed.Report(removed_packages=2),
+                       installed.Report(removed_builds=["dist"])):
+            with self.subTest(report=report):
+                self.assertIn("reinstall and rebuild", report.note())
+
+    def test_nothing_removed_names_no_step(self):
+        self.assertNotIn("reinstall", installed.Report().note())
 
 
 if __name__ == "__main__":

@@ -11,6 +11,8 @@ from unittest import mock
 from stayawake.bots.security import remediator
 from stayawake.bots.security import resolution
 from stayawake.bots.security import service
+from stayawake.bots.security.pr.fix_verdict import BaseFix, BaseState, Checkout, FixVerdict
+from stayawake.utils import exitcodes
 
 
 def _cfg(users):
@@ -25,6 +27,10 @@ def _cfg(users):
 def _fake_https_auth(_token):
     yield ("https://x@github.com/", {})
 
+
+
+def _verdict(state, summary):
+    return FixVerdict("o/x", BaseFix(state, summary, "main"), Checkout.CLEAN)
 
 class TestRemoteFix(unittest.TestCase):
     def test_no_token_is_noop(self):
@@ -48,13 +54,14 @@ class TestRemoteFix(unittest.TestCase):
              mock.patch.object(resolution.subprocess, "run",
                                return_value=SimpleNamespace(returncode=0, stdout="", stderr="")), \
              mock.patch.object(remediator.pr_submit, "submit_fix_pr",
-                               return_value="o/x: opened PR #1 (url)") as m_pr, \
+                               return_value=_verdict(BaseState.PR_OPENED,
+                                                     "o/x: opened PR #1 (url)")) as m_pr, \
              mock.patch.object(resolution.scratch, "release_path", return_value=""):
             # Two repos, both cloned + PR'd cleanly → no repo needs review → exit 0.
             self.assertEqual(remediator.fix(_cfg(["o"]), remote=True, no_stream=True), 0)
             self.assertEqual(m_pr.call_count, 2)   # one PR attempt per repo
 
-    def test_aborted_repo_makes_exit_one(self):
+    def test_aborted_repo_is_incomplete(self):
         with mock.patch.object(service.auth, "resolve_token", return_value=("t", "env")), \
              mock.patch.object(remediator.github_api, "get_authenticated_user", return_value={"login": "o"}), \
              mock.patch.object(service.github_api, "list_repos", return_value=["o/a"]), \
@@ -62,10 +69,12 @@ class TestRemoteFix(unittest.TestCase):
              mock.patch.object(resolution.subprocess, "run",
                                return_value=SimpleNamespace(returncode=0, stdout="", stderr="")), \
              mock.patch.object(remediator.pr_submit, "submit_fix_pr",
-                               return_value="o/a: ABORTED — 1 finding still present"), \
+                               return_value=_verdict(BaseState.ABORTED,
+                                                     "o/a: ABORTED — 1 finding still present")), \
              mock.patch.object(resolution.scratch, "release_path", return_value=""):
-            # A repo that couldn't be auto-cleaned (ABORTED) → exit 1 (needs manual review).
-            self.assertEqual(remediator.fix(_cfg(["o"]), remote=True, no_stream=True), 1)
+            # A repo that couldn't be auto-cleaned (ABORTED) needs review → the run is incomplete.
+            self.assertEqual(remediator.fix(_cfg(["o"]), remote=True, no_stream=True),
+                             exitcodes.INCOMPLETE)
 
     def test_preflight_failure_pushes_nothing(self):
         # API unreachable / bad token → pre-flight aborts BEFORE any clone or push.
