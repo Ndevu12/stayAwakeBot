@@ -47,11 +47,15 @@ _DECODE_THEN_EVAL = re.compile(
     r"\b(?:eval|exec|Function|execSync|runInThisContext)\s{0,8}\(\s{0,8}[^;)\n]{0,64}?"
     r"\b(?:atob|Buffer\.from|b64decode|fromCharCode|decompress|fromhex|unhexlify)\b")
 _FETCHED = (r"(?:urlopen|urlretrieve|requests\.get|https?\.get|fetch(?=\s{0,8}\()|DownloadString|DownloadFile"
-            r"|Invoke-WebRequest|Invoke-RestMethod|recv|file_get_contents|curl|wget)")
-_EVALUATOR = (r"(?:(?:eval|exec|Function|execSync|runInThisContext)\s{0,8}\(|IEX\b|"
-              r"Invoke-Expression\b)")
+            r"|Invoke-WebRequest|Invoke-RestMethod|iwr|irm|recv|file_get_contents|curl|wget)")
+_EVALUATOR = r"(?:eval|exec|Function|execSync|runInThisContext)\s{0,8}\("
+_FETCHED_RE = re.compile(rf"\b{_FETCHED}\b", re.IGNORECASE)
 _FETCH_THEN_EVAL = re.compile(
     rf"\b{_EVALUATOR}[^\n]{{0,256}}?\b{_FETCHED}\b|\b{_FETCHED}\b[^\n]{{0,256}}?\b{_EVALUATOR}",
+    re.IGNORECASE)
+_POWERSHELL_EVAL = re.compile(
+    r"\|\s{0,8}(?:iex|Invoke-Expression)\b"
+    r"|\b(?:pwsh|powershell)(?:\.exe)?\b[^\n]{0,512}?\b(?:iex|Invoke-Expression)\b",
     re.IGNORECASE)
 _SUBSTITUTED_FETCH = re.compile(
     r"\b(?:sh|bash|zsh|dash|ksh)\s{1,8}-[a-zA-Z]{0,4}c\s{1,8}[\"']?\$\(\s{0,8}(?:curl|wget)\b",
@@ -182,6 +186,7 @@ class _Grader:
     def command(self, c: Command) -> Judgement | None:
         key, where, value = c.entry.key, c.entry.source, c.entry.value
         rule, text = c.rule, c.command
+        base = self.surface.work_trees.get(c.git_dir, self.surface.work_tree)
         if rule.runs == exec_keys.ENABLES_TRANSPORT:
             if (value or "").strip().lower() in _EXT_ALWAYS:
                 return Judgement(HEURISTIC, where, key, "switches on a transport that runs a "
@@ -191,7 +196,7 @@ class _Grader:
             if not value:
                 return None
             directory = Path(os.path.normpath(os.path.expanduser(value) if os.path.isabs(
-                os.path.expanduser(value)) else self.surface.work_tree / value))
+                os.path.expanduser(value)) else base / value))
             why = _unsafe_location(directory, self.surface)
             if why:
                 return Judgement(HEURISTIC, where, key, f"runs hooks from a directory {why}",
@@ -204,7 +209,6 @@ class _Grader:
         if hit:
             return Judgement(CONFIRMED, where, key, f"its command matches {hit}", value, c)
         carriers = []
-        base = self.surface.work_trees.get(c.git_dir, self.surface.work_tree)
         for path in _pointed_files(text, self.surface, base):
             found = self._payload_in_file(path) or (
                 "a program that downloads or decodes code and runs it"
@@ -219,6 +223,7 @@ class _Grader:
         fetch_or_decode = bool(FETCH_OR_DECODE_THEN_RUN.search(joined)
                                or _DECODE_THEN_EVAL.search(joined)
                                or _FETCH_THEN_EVAL.search(joined)
+                               or (_POWERSHELL_EVAL.search(joined) and _FETCHED_RE.search(joined))
                                or _SUBSTITUTED_FETCH.search(joined))
         if fetch_or_decode or command_shape.feeds_a_download_to_a_runner(text):
             return Judgement(CONFIRMED, where, key, "it downloads or decodes code and runs it",
@@ -232,7 +237,7 @@ class _Grader:
                 reasons.append("git runs a program this repository names, on its own")
         elif not key.lower().startswith("alias.") and _INLINE_INTERPRETER_CODE.search(joined):
             reasons.append("hands code to an interpreter inline")
-        for program in _program_paths(text, self.surface.work_tree):
+        for program in _program_paths(text, base):
             why = _unsafe_location(program, self.surface)
             if why:
                 reasons.append(f"runs a program {why}")
