@@ -400,8 +400,31 @@ class TestASettingsEditKeepsTheRest(unittest.TestCase):
 
     def test_a_whole_file_rewrite_of_an_escaped_lone_surrogate_writes_it_escaped(self):
         out = changes.strip_settings_autorun('{"x": "\\ud800", "t\\u0061sks": {}}')
-        self.assertEqual({"x": "\ud800"}, json.loads(out))
-        out.encode("utf-8", "surrogateescape")
+        self.assertEqual(b'{\n  "x": "\\ud800"\n}\n', out.encode("utf-8", "surrogateescape"))
+
+    def test_a_whole_file_rewrite_of_an_escaped_low_surrogate_writes_it_escaped(self):
+        original = b'{"a":"\\udcff","task\\u002eallowAutomaticTasks":"on"}\n'
+        out = changes.strip_settings_autorun(original.decode("utf-8", "surrogateescape"))
+        self.assertEqual(b'{\n  "a": "\\udcff"\n}\n', out.encode("utf-8", "surrogateescape"))
+
+    def test_a_whole_file_rewrite_keeps_a_raw_byte_raw_beside_the_same_character_escaped(self):
+        original = b'{"a":"\xff\\udcff","\\udcff\xff":1,"task\\u002eallowAutomaticTasks":"on"}\n'
+        out = changes.strip_settings_autorun(original.decode("utf-8", "surrogateescape"))
+        self.assertEqual(b'{\n  "a": "\xff\\udcff",\n  "\\udcff\xff": 1\n}\n',
+                         out.encode("utf-8", "surrogateescape"))
+
+    def test_a_whole_file_rewrite_keeps_a_raw_byte_when_an_escape_spells_a_private_character(self):
+        original = (b'{"a":"\xff","\\udb80\\udc00":["\\udb80\\udc01"],'
+                    b'"task\\u002eallowAutomaticTasks":"on"}\n')
+        out = changes.strip_settings_autorun(original.decode("utf-8", "surrogateescape"))
+        self.assertEqual(b'{\n  "a": "\xff",\n  "\xf3\xb0\x80\x80": [\n    "\xf3\xb0\x80\x81"\n  ]\n}\n',
+                         out.encode("utf-8", "surrogateescape"))
+
+    def test_a_whole_file_rewrite_with_no_free_stand_in_writes_raw_bytes_escaped(self):
+        original = b'{"a":"\xfe\xff","task\\u002eallowAutomaticTasks":"on"}\n'
+        with mock.patch.object(changes, "_STAND_IN_POINTS", range(0xF0000, 0xF0001)):
+            out = changes.strip_settings_autorun(original.decode("utf-8", "surrogateescape"))
+        self.assertEqual(b'{\n  "a": "\\udcfe\\udcff"\n}\n', out.encode("utf-8", "surrogateescape"))
 
     def test_a_key_spelled_with_an_escape_is_taken_out(self):
         text = '{\n  "a": 1,\n  "t\\u0061sks": {"tasks": []},\n  "task.allowAutomaticTasks": "on"\n}\n'

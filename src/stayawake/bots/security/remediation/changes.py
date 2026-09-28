@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,6 +25,9 @@ _GITIGNORE_MARKER_PATTERNS = None
 
 _ROLLBACK_COMMENT = "# Remediation rollback copies (kept local, never committed)"
 _ROLLBACK_PATTERNS = (SAW_DIR + "/",)
+_RAW_BYTE = re.compile("[\udc80-\udcff]")
+_SURROGATE = re.compile("[\ud800-\udfff]")
+_STAND_IN_POINTS = range(0xF0000, 0x110000)
 
 
 def is_auto_fixable(finding) -> bool:
@@ -129,24 +133,65 @@ def strip_settings_autorun(text: str) -> str:
 
 
 def _rewritten_without_autorun(text: str) -> str:
-    """`text` parsed and written back without the automatic-task setting and the task list, every
-    character written as itself so bytes that are not UTF-8 come back as they were. Takes the
-    file's text. Returns it unchanged when it does not parse to an object holding either, or holds a
-    number JSON cannot write back."""
+    """`text` parsed and written back without the automatic-task setting and the task list. A byte
+    that is not UTF-8 is written back as the same byte and an escaped surrogate as the same escape.
+    Takes the file's text. Returns it unchanged when it does not parse to an object holding either,
+    or holds a number JSON cannot write back."""
     data = load_jsonc(text)
-    if not isinstance(data, dict) or not ({"task.allowAutomaticTasks", "tasks"} & data.keys()):
+    if not _holds_autorun(data):
         return text
+    stand_ins = _stand_ins_for_raw_bytes(text, data)
+    if stand_ins:
+        data = load_jsonc(text.translate(stand_ins))
+        if not _holds_autorun(data):
+            return text
     data.pop("task.allowAutomaticTasks", None)
     data.pop("tasks", None)
     try:
+        if stand_ins is None:
+            return json.dumps(data, indent=2, allow_nan=False) + "\n"
         written = json.dumps(data, indent=2, ensure_ascii=False, allow_nan=False) + "\n"
-        try:
-            written.encode("utf-8", "surrogateescape")
-        except UnicodeEncodeError:
-            written = json.dumps(data, indent=2, allow_nan=False) + "\n"
     except ValueError:
         return text
-    return written
+    written = _SURROGATE.sub(lambda found: "\\u%04x" % ord(found.group()), written)
+    return written.translate({ord(stand_in): chr(raw) for raw, stand_in in stand_ins.items()})
+
+
+def _holds_autorun(data) -> bool:
+    """Whether parsed settings are an object holding the automatic-task setting or the task list."""
+    return isinstance(data, dict) and bool({"task.allowAutomaticTasks", "tasks"} & data.keys())
+
+
+def _stand_ins_for_raw_bytes(text: str, data) -> dict[int, str] | None:
+    """A translation table giving each character of `text` that holds a byte that is not UTF-8 its
+    own private-use character, one found nowhere in `text` or in the strings `data` holds.
+
+    Takes the text and the value it parses to. Returns the table, empty when `text` holds no such
+    byte, or None when too few unused characters are left.
+    """
+    raw = sorted(set(_RAW_BYTE.findall(text)))
+    if not raw:
+        return {}
+    taken = set(text)
+    for string in _strings_in(data):
+        taken.update(string)
+    free = (chr(point) for point in _STAND_IN_POINTS if chr(point) not in taken)
+    table = {ord(character): stand_in for character, stand_in in zip(raw, free)}
+    return table if len(table) == len(raw) else None
+
+
+def _strings_in(value):
+    """Every key and every string `value` holds, at any depth."""
+    pending = [value]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, str):
+            yield item
+        elif isinstance(item, dict):
+            pending.extend(item.keys())
+            pending.extend(item.values())
+        elif isinstance(item, list):
+            pending.extend(item)
 
 
 def _keeps_the_rest(before: str, after: str) -> bool:
