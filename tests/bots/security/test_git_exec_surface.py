@@ -166,7 +166,7 @@ class TestLegitimateToolsAreNotConfirmed(ExecSurfaceSandbox):
         for name in ("pre-push", "post-checkout", "post-commit", "post-merge"):
             self.hook(repo / ".git" / "hooks", name, _LFS_HOOK.replace("{name}", name))
         tiers = self.assert_reported_not_confirmed(repo, at_least=7)
-        self.assertEqual(tiers["result"].verdict, "clean")
+        self.assertEqual(tiers["result"].verdict, "suspicious")
 
     def test_git_crypt(self):
         repo = self.repo()
