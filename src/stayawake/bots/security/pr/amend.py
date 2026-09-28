@@ -120,6 +120,13 @@ def _flat(signatures) -> list:
     return list(signatures or [])
 
 
+def _committed_anywhere(repo: Path, path: str) -> bool:
+    """Whether any commit a branch reaches holds `path`. Takes the repository and the path. Returns
+    True when that cannot be established."""
+    found = gitutil.run(repo, ["rev-list", "--all", "-n", "1", "--", path])
+    return found is None or found.returncode != 0 or bool(found.stdout.strip())
+
+
 def _same_checkout(holder: Path, repo: Path) -> bool:
     """Whether two paths name the same working tree. Takes both. Returns the answer."""
     try:
@@ -944,6 +951,8 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
 
     unhandled = _unhandled_confirmed(scan, signatures, taken, cleaned_head,
                                      set(remove) | set(purge))
+    if keep_operator_changes:
+        unhandled = [p for p in unhandled if _committed_anywhere(repo, p)]
     if resolver is not None and unhandled:
         for item in _unhandled_items(repo, scan, unhandled, survives):
             try:
@@ -971,6 +980,8 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
                 return _refuse(Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, item.path)
         unhandled = _unhandled_confirmed(scan, signatures, taken, cleaned_head,
                                          set(remove) | set(substitute) | set(purge))
+        if keep_operator_changes:
+            unhandled = [p for p in unhandled if _committed_anywhere(repo, p)]
     if resolver is not None and uncharacterized:
         for sha in list(uncharacterized):
             present = [p for p in uncharacterized_paths.get(sha, ())
@@ -1137,7 +1148,7 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
             if in_way is None or in_way.blocking:
                 return _refuse(Cause.WORKING_TREE_NOT_CLEAN, ", ".join(in_way.blocking[:3])
                                if in_way is not None else "")
-            keep[name] = frozenset(in_way.carryable)
+            keep[name] = frozenset(in_way.carryable) | frozenset(in_way.already)
         elif gitamend.is_dirty(holder):
             return _refuse(Cause.WORKING_TREE_NOT_CLEAN)
 
@@ -1156,8 +1167,10 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
 
     results: list[BranchResult] = []
     failed: list[str] = []
+    cleaned_here: list[str] = []
     for branch in moved:
-        if branch.startswith(preserve.BRANCH_PREFIX):
+        if branch.startswith(preserve.BRANCH_PREFIX) and not (leases or {}).get(branch):
+            cleaned_here.append(branch)
             continue
         result = _force_update_branch(repo, slug, branch, token, pusher=pusher,
                                       lease=(leases or {}).get(branch),
@@ -1184,6 +1197,8 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
     if unhandled:
         survivors.insert(0, Reason(Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY,
                                    str(len(unhandled)), ", ".join(sorted(unhandled))))
+    if cleaned_here:
+        survivors.append(Reason(Cause.SAVED_WORK_CLEANED_HERE, ", ".join(cleaned_here)))
     recovery = ""
     if failed:
         try:
@@ -1199,5 +1214,9 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
     removed = _delivered_removals(replacements, delivered_reach, remove_holders, purge_holders)
     touched = len(delivered_infected)
     label = (oldest[:12] if touched == 1 else f"{touched} commits from {oldest[:12]}")
+    if not results and not isolated:
+        return AmendOutcome(repository=display, completed=False, commit=label,
+                            reasons=tuple(survivors), removed=tuple(sorted(removed)),
+                            recovery=recovery)
     return amended(display, label, tuple(results) + tuple(isolated), tuple(survivors),
                    sorted(removed), recovery=recovery)

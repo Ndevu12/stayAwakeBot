@@ -191,6 +191,8 @@ def _content_matches(borrowed, worktree: Path, rel: bytes, mode: bytes, oid: byt
     recorded mode and id, the object format, whether the executable bit counts and the
     operator's end-of-line settings as `-c` arguments."""
     path = worktree / os.fsdecode(rel)
+    if _has_link_above(worktree, rel):
+        return False
     try:
         info = os.lstat(path)
         if mode == _SYMLINK:
@@ -290,11 +292,32 @@ def uncommitted_paths(worktree: str | Path, *, _depth: int = 0) -> list[bytes] |
 class ChangesInTheWay:
     """The uncommitted changes a checkout holds on the paths a move to another commit rewrites.
 
-    `carryable` are changes a move can leave as they are on disk; `blocking` are changes no move
-    can keep: a conflict anywhere, or a changed submodule on a rewritten path."""
+    `carryable` are changes a move can leave as they are on disk; `already` are changes that
+    already hold what the target records; `blocking` are what no move can keep: a merge, rebase,
+    cherry-pick or revert in progress, a conflict anywhere, a changed submodule on a rewritten
+    path, and a rewritten path reached through a link."""
 
     carryable: tuple[str, ...] = ()
+    already: tuple[str, ...] = ()
     blocking: tuple[str, ...] = ()
+
+
+_OPERATIONS = ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply")
+
+
+def operations_in_progress(worktree: Path) -> list[str] | None:
+    """The git operations `worktree` is in the middle of. Takes the working tree. Returns their
+    names, or None when git could not say where it keeps them."""
+    args = ["rev-parse"] + [part for name in _OPERATIONS for part in ("--git-path", name)]
+    listed = stdout(worktree, args, context=UNTRUSTED).splitlines()
+    if len(listed) != len(_OPERATIONS):
+        return None
+    found = []
+    for name, where in zip(_OPERATIONS, listed):
+        path = Path(where) if os.path.isabs(where) else worktree / where
+        if os.path.lexists(path):
+            found.append(name)
+    return found
 
 
 def changes_in_the_way(worktree: str | Path, commit: str) -> ChangesInTheWay | None:
@@ -304,11 +327,10 @@ def changes_in_the_way(worktree: str | Path, commit: str) -> ChangesInTheWay | N
     the way. Takes the working tree and the commit. Returns them, or None when the checkout cannot
     be read."""
     worktree = Path(worktree)
+    operations = operations_in_progress(worktree)
     changed = uncommitted_paths(worktree)
-    if changed is None:
+    if changed is None or operations is None:
         return None
-    if not changed:
-        return ChangesInTheWay()
     try:
         head = stdout(worktree, ["rev-parse", "--verify", "--quiet", "HEAD"],
                       context=UNTRUSTED).strip()
@@ -317,18 +339,24 @@ def changes_in_the_way(worktree: str | Path, commit: str) -> ChangesInTheWay | N
         indexed = _index_entries(worktree)
     except (TreeStateUnknown, ValueError):
         return None
+    rewritten = {rel for rel in set(committed) | set(target) if committed.get(rel) != target.get(rel)}
     blocking = [rel for rel, entry in indexed.items() if entry[2] != b"0"]
+    blocking += [rel for rel in rewritten if _has_link_above(worktree, rel)]
+    blocking += [name.encode() for name in operations]
     carryable: list[bytes] = []
+    already: list[bytes] = []
     present = []
     for rel in changed:
-        if rel in blocking or committed.get(rel) == target.get(rel):
+        if rel in blocking or rel not in rewritten:
             continue
         staged = indexed.get(rel)
         if staged is not None and staged[:2] not in (committed.get(rel), target.get(rel)):
             carryable.append(rel)
         elif rel not in target:
-            if os.path.lexists(worktree / os.fsdecode(rel)) or _has_link_above(worktree, rel):
+            if os.path.lexists(worktree / os.fsdecode(rel)):
                 carryable.append(rel)
+            else:
+                already.append(rel)
         elif target[rel][0] == _GITLINK:
             blocking.append(rel)
         else:
@@ -344,11 +372,12 @@ def changes_in_the_way(worktree: str | Path, commit: str) -> ChangesInTheWay | N
                 carryable.extend(present)
             else:
                 with borrowed.attributes_then(_NO_FILTER):
-                    carryable.extend(rel for rel in present
-                                     if not _content_matches(borrowed, worktree, rel, *target[rel],
-                                                             object_format, track_executable,
-                                                             conversion))
+                    for rel in present:
+                        matches = _content_matches(borrowed, worktree, rel, *target[rel],
+                                                   object_format, track_executable, conversion)
+                        (already if matches else carryable).append(rel)
     return ChangesInTheWay(tuple(sorted(os.fsdecode(r) for r in carryable)),
+                           tuple(sorted(os.fsdecode(r) for r in already)),
                            tuple(sorted({os.fsdecode(r) for r in blocking})))
 
 

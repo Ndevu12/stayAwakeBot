@@ -264,7 +264,8 @@ def point_branch_at(repo: str | Path, branch: str, new: str, old: str,
             in_way = working_tree.changes_in_the_way(holder.worktree, new)
             if in_way is None or in_way.blocking or not set(in_way.carryable) <= set(keep):
                 return False
-            kept = frozenset(os.fsencode(p) for p in in_way.carryable)
+            kept = frozenset(os.fsencode(p) for p in
+                             set(keep) | set(in_way.carryable) | set(in_way.already))
         before_dirty = working_tree.uncommitted_paths(holder.worktree)
         if before_dirty is None:
             return False

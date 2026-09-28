@@ -119,10 +119,13 @@ class _InfectedProject(GitSandbox):
         with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             return remediator.fix(None, paths=[str(self.d)], no_stream=True)
 
-    def _amend(self, pusher=_pushed):
+    def _amend(self, pusher=_pushed, remote_head=None):
         """Run the verb that answers for history, offline, on the operator's own checkout as
-        `saw fix amend` does. Returns its outcome."""
-        with github_answers(lambda branch: self.rev(self.d, branch)), \
+        `saw fix amend` does. `remote_head(branch)` is what the remote holds ("" for nothing);
+        by default it holds every local branch except saved work. Returns its outcome."""
+        def held(branch):
+            return "" if branch.startswith("saw/uncommitted-") else self.rev(self.d, branch)
+        with github_answers(remote_head or held), \
                 redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             return amend_outcome(self.d, "acme/app", ScanOptions(), load_signatures(), [], "t",
                                  pusher=pusher, operator_checkout=True)
@@ -223,11 +226,8 @@ class TestARescanIsClean(_Remediated):
 class TestTheReportMatchesTheResult(_Remediated):
     """Criterion 6: the report says exactly what was measured."""
 
-    def test_history_is_never_reported_clean_while_a_ref_reaches_the_loader(self):
-        if self._payload_in_history():
-            causes = {r.cause.name for r in self.amended.reasons}
-            self.assertTrue(not self.amended.completed or causes & {
-                "PAYLOAD_NEEDS_MANUAL_RECOVERY", "PAYLOAD_STILL_REACHABLE"})
+    def test_history_is_reported_clean_only_when_no_ref_reaches_the_loader(self):
+        self.assertEqual(not self._payload_in_history(), self.amended.completed)
 
     def test_fix_reports_success_only_when_nothing_is_left_on_disk(self):
         if self._payload_on_disk():
@@ -359,6 +359,64 @@ class TestTheOperatorsOwnWorkIsKept(_InfectedProject):
         self.assertFalse(outcome.completed)
         self.assertEqual(before, self.rev(self.d))
         self.assertIn("editor.wordWrap", (self.d / THE_SHARED_CONFIG).read_text())
+
+    def test_a_merge_in_progress_stops_it_before_anything_moves(self):
+        self.git(self.d, "checkout", "-q", "-b", "side", self.clean_root)
+        (self.d / "notes.md").write_text("side\n")
+        self.commit(self.d, "side work")
+        self.git(self.d, "checkout", "-q", self.base)
+        self.git_may_fail(self.d, "merge", "--no-commit", "--no-ff", "side")
+        before = self.rev(self.d)
+        outcome = self._amend()
+        self.assertIn("WORKING_TREE_NOT_CLEAN", [r.cause.name for r in outcome.reasons])
+        self.assertEqual(before, self.rev(self.d))
+        self.assertEqual(0, self.git_may_fail(self.d, "rev-parse", "-q", "--verify",
+                                              "MERGE_HEAD").returncode)
+
+    def test_undoing_the_move_after_fix_never_writes_the_payload_back(self):
+        from unittest import mock
+        from stayawake.bots.security.remediation import live
+        self._fix()
+        with mock.patch.object(live, "clean_checkout", return_value=live.CheckoutResult()):
+            self._amend(pusher=lambda branch, dest, lease: PushResult(False))
+        self.assertEqual([], self._payload_on_disk())
+        self.assertFalse((self.d / THE_LAUNCHER).exists())
+
+    def test_a_folder_replaced_by_a_link_stops_it_and_the_link_stays(self):
+        import shutil
+        outside = self.root / "outside"
+        shutil.copytree(self.d / ".vscode", outside)
+        shutil.rmtree(self.d / ".vscode")
+        (self.d / ".vscode").symlink_to(outside)
+        outcome = self._amend()
+        self.assertIn("WORKING_TREE_NOT_CLEAN", [r.cause.name for r in outcome.reasons])
+        self.assertTrue((self.d / ".vscode").is_symlink())
+
+    def test_saved_work_the_remote_already_holds_is_cleaned_there_too(self):
+        self.git(self.d, "branch", "saw/uncommitted-earlier", self.base)
+        pushed = []
+
+        def recorded(branch, dest, lease):
+            pushed.append(branch)
+            return PushResult(True)
+        self._amend(pusher=recorded, remote_head=lambda branch: self.rev(self.d, branch))
+        self.assertIn("saw/uncommitted-earlier", pushed)
+
+    def test_when_only_saved_work_carries_it_the_saved_work_is_cleaned(self):
+        self.git(self.d, "branch", "saw/uncommitted-earlier", self.base)
+        self.git(self.d, "checkout", "-q", "--detach", self.base)
+        self.git(self.d, "branch", "-D", self.base)
+        outcome = self._amend()
+        self.assertIn("SAVED_WORK_CLEANED_HERE", [r.cause.name for r in outcome.reasons])
+        tree = self.git(self.d, "ls-tree", "-r", "--name-only", "saw/uncommitted-earlier").split()
+        self.assertNotIn(THE_LOADER, tree)
+
+    def test_an_untracked_copy_is_removed_and_not_called_manual_recovery(self):
+        (self.d / "public" / "fonts" / "extra.woff").write_text(LOADER)
+        outcome = self._amend()
+        manual = [r for r in outcome.reasons if r.cause.name == "PAYLOAD_NEEDS_MANUAL_RECOVERY"]
+        self.assertFalse(any("extra.woff" in (r.subjects or "") for r in manual))
+        self.assertEqual([], self._payload_on_disk())
 
     def test_work_saved_by_fix_is_cleaned_locally_and_never_pushed(self):
         (self.d / "package.json").write_text(PACKAGE_JSON.replace("1.0.0", "1.2.0"))

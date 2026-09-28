@@ -41,9 +41,9 @@ repository.
 
 It tells you and changes nothing when any of the above is missing, when the remote branches cannot
 be refreshed or read, when the replacement would drop content the finding does not cover, when the
-previous commits cannot be captured first, when your checkout is in the middle of a merge, or when
-another worktree holding one of those branches has uncommitted work the amended history would
-overwrite.
+previous commits cannot be captured first, when your checkout is in the middle of a merge, rebase,
+cherry-pick or revert, when a folder the amend rewrites has been replaced by a link, or when another
+worktree holding one of those branches has any uncommitted work.
 
 ## Your checkout and your uncommitted work
 
@@ -51,7 +51,8 @@ The checkout you run it in is treated as [`saw fix`](fix.md) treats it. Your unc
 with you onto the amended history: a file the amend does not change keeps your edit, and a file it
 does change keeps your version on disk, with what you staged still staged. Then your checkout is
 cleaned as `fix` cleans it — the payload taken out of it and out of your staged changes, and your
-uncommitted work saved on a local `saw/uncommitted-…` branch. That branch is never pushed.
+uncommitted work saved on a local `saw/uncommitted-…` branch. Saved work is cleaned on your
+machine and never pushed; a saved branch the remote already holds is force-updated like any other.
 
 Run straight after `fix`, it finishes the job: the files `fix` removed and the settings it stripped
 are taken out of every commit that carried them, whatever version each commit held.

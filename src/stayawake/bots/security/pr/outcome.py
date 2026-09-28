@@ -79,9 +79,11 @@ class Cause(Enum):
     SUPPLIED_CONTENT_REJECTED = "supplied-content-rejected"
     SUPPLIED_CONTENT_UNWRITABLE = "supplied-content-unwritable"
     HISTORY_TOO_LARGE_TO_ENUMERATE = "history-too-large-to-enumerate"
+    SAVED_WORK_CLEANED_HERE = "saved-work-cleaned-here"
 
 
-_NEEDING_NO_ACTION = frozenset({Cause.PREVIOUS_OBJECTS_UNCOLLECTED, Cause.NO_CONFIRMED_PAYLOAD})
+_NEEDING_NO_ACTION = frozenset({Cause.PREVIOUS_OBJECTS_UNCOLLECTED, Cause.NO_CONFIRMED_PAYLOAD,
+                                Cause.SAVED_WORK_CLEANED_HERE})
 
 
 @dataclass(frozen=True)
@@ -249,6 +251,9 @@ _PHRASE = {
     Cause.PREVIOUS_OBJECTS_UNCOLLECTED: "previous objects remain until collected",
     Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY:
         "{detail} confirmed finding(s) here need manual recovery — this verb could not remove them",
+    Cause.SAVED_WORK_CLEANED_HERE:
+        "the payload was also taken out of your saved work on {detail}, on this machine; saved work "
+        "is never pushed",
     Cause.FILE_RESTORED_FROM_A_PARENT:
         "{detail} was restored from a parent because the merge dropped it — confirm it should be kept",
     Cause.FILE_RESTORED_TO_A_CLEAN_VERSION:
