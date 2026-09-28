@@ -484,12 +484,19 @@ def _unstaged(entry, recorded) -> bool:
 
 class PreparedMove:
     """A checkout about to follow its branch: its index already rewritten on a private copy and
-    its `index.lock` held, so nothing else writes the index between the ref move and the swap."""
+    its `index.lock` held, so nothing else writes the index between the ref move and the swap.
+
+    `keep` names paths left as they are on disk; each keeps what was staged there, or follows the
+    branch when nothing was. `restage` gives, for kept paths, the index entries to put back
+    exactly (None for no entry). `kept_entries` records what was staged at each kept path before
+    the move."""
 
     def __init__(self, repo: Path, holder: Checkout, old: str, new: str,
-                 keep: frozenset[bytes] = frozenset()):
+                 keep: frozenset[bytes] = frozenset(), restage: dict | None = None):
         self.repo, self.holder, self.old, self.new = repo, holder, old, new
         self.keep = keep
+        self.restage = restage
+        self.kept_entries: dict = {}
         self.lock = holder.gitdir / "index.lock"
         self.staged = scratch.new_file("the index a checkout moves to")
         self.paths: list[bytes] = []
@@ -519,11 +526,17 @@ class PreparedMove:
             staged = _index_entries(self.holder.worktree) if self.keep else {}
         except (TreeStateUnknown, ValueError):
             return False
-        indexed = [p for p in self.paths
-                   if p not in self.keep or _unstaged(staged.get(p), before.get(p))]
-        feed = b"".join(
-            (b"%s %s\t%s\0" % (self.target[p][0], self.target[p][1], p)) if p in self.target
-            else (b"0 %s\t%s\0" % (zero, p)) for p in indexed)
+        self.kept_entries = {p: staged.get(p) for p in self.paths if p in self.keep}
+        lines = []
+        for p in self.paths:
+            if p in self.keep and self.restage is not None and p in self.restage:
+                entry = self.restage[p]
+                lines.append(b"%s %s\t%s\0" % (entry[0], entry[1], p) if entry is not None
+                             else b"0 %s\t%s\0" % (zero, p))
+            elif p not in self.keep or _unstaged(staged.get(p), before.get(p)):
+                lines.append(b"%s %s\t%s\0" % (self.target[p][0], self.target[p][1], p)
+                             if p in self.target else b"0 %s\t%s\0" % (zero, p))
+        feed = b"".join(lines)
         try:
             shutil.copyfile(self.holder.gitdir / "index", self.staged)
             fd = os.open(self.lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)

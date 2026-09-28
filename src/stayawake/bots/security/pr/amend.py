@@ -1136,6 +1136,7 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
         return _refuse(Cause.PAYLOAD_STILL_REACHABLE, "; ".join(left[:3]))
 
     keep: dict[str, frozenset[str]] = {}
+    staging: dict[str, dict] = {}
     for name, tip, _c in deliverable:
         try:
             holder = gitamend.checkout_holding(repo, name)
@@ -1158,7 +1159,7 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
         return _refuse(Cause.CAPTURE_FAILED, captured.reason)
 
     try:
-        moved = gitamend.point_branches(repo, deliverable, delivered_tips, keep)
+        moved = gitamend.point_branches(repo, deliverable, delivered_tips, keep, staging)
     except gitamend.AmendUnwindFailed as unwound:
         return _refuse(Cause.LEFT_PART_WAY, ", ".join(unwound.unrestored),
                        recovery=str(captured.path or ""))
@@ -1202,7 +1203,7 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
     recovery = ""
     if failed:
         try:
-            unrestored = gitamend.restore_branches(repo, deliverable, moved, failed, keep)
+            unrestored = gitamend.restore_branches(repo, deliverable, moved, failed, keep, staging)
         except gitamend.AmendUnwindFailed as unwound:
             unrestored = unwound.unrestored
         if unrestored:

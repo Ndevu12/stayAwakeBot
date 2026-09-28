@@ -129,20 +129,24 @@ def strip_settings_autorun(text: str) -> str:
 
 
 def _rewritten_without_autorun(text: str) -> str:
-    """`text` parsed and written back without the automatic-task setting and the task list. Takes
-    the file's text. Returns it unchanged when it does not parse to an object holding either, holds
-    bytes that are not UTF-8, or holds a number JSON cannot write back."""
-    if any("\udc80" <= ch <= "\udcff" for ch in text):
-        return text
+    """`text` parsed and written back without the automatic-task setting and the task list, every
+    character written as itself so bytes that are not UTF-8 come back as they were. Takes the
+    file's text. Returns it unchanged when it does not parse to an object holding either, or holds a
+    number JSON cannot write back."""
     data = load_jsonc(text)
     if not isinstance(data, dict) or not ({"task.allowAutomaticTasks", "tasks"} & data.keys()):
         return text
     data.pop("task.allowAutomaticTasks", None)
     data.pop("tasks", None)
     try:
-        return json.dumps(data, indent=2, allow_nan=False) + "\n"
+        written = json.dumps(data, indent=2, ensure_ascii=False, allow_nan=False) + "\n"
+        try:
+            written.encode("utf-8", "surrogateescape")
+        except UnicodeEncodeError:
+            written = json.dumps(data, indent=2, allow_nan=False) + "\n"
     except ValueError:
         return text
+    return written
 
 
 def _keeps_the_rest(before: str, after: str) -> bool:

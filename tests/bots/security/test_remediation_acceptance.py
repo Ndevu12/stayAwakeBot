@@ -382,6 +382,16 @@ class TestTheOperatorsOwnWorkIsKept(_InfectedProject):
         self.assertEqual([], self._payload_on_disk())
         self.assertFalse((self.d / THE_LAUNCHER).exists())
 
+    def test_undoing_the_move_keeps_what_was_staged(self):
+        from unittest import mock
+        from stayawake.bots.security.remediation import live
+        self._fix()
+        self.git(self.d, "add", "-A")
+        before = self.git(self.d, "status", "--porcelain")
+        with mock.patch.object(live, "clean_checkout", return_value=live.CheckoutResult()):
+            self._amend(pusher=lambda branch, dest, lease: PushResult(False))
+        self.assertEqual(before, self.git(self.d, "status", "--porcelain"))
+
     def test_a_folder_replaced_by_a_link_stops_it_and_the_link_stays(self):
         import shutil
         outside = self.root / "outside"

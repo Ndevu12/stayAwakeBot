@@ -389,10 +389,19 @@ class TestASettingsEditKeepsTheRest(unittest.TestCase):
             self.assertEqual({"a": 1, "b": 2}, json.loads(changes.strip_settings_autorun(text)))
 
     def test_a_rewrite_json_cannot_write_back_leaves_the_file(self):
-        for text in ('{"x": 1e400, "t\\u0061sks": {}, "task.allowAutomaticTasks": "on"}',
-                     '{"x": "\udcff", "t\\u0061sks": {}}'):
-            with self.subTest(text=text):
-                self.assertEqual(text, changes.strip_settings_autorun(text))
+        text = '{"x": 1e400, "t\\u0061sks": {}, "task.allowAutomaticTasks": "on"}'
+        self.assertEqual(text, changes.strip_settings_autorun(text))
+
+    def test_a_whole_file_rewrite_keeps_bytes_that_are_not_utf8(self):
+        original = b'{"editor.x":"\xff","editor.tabSize":2,"task\\u002eallowAutomaticTasks":"on"}\n'
+        out = changes.strip_settings_autorun(original.decode("utf-8", "surrogateescape"))
+        self.assertEqual(b'{\n  "editor.x": "\xff",\n  "editor.tabSize": 2\n}\n',
+                         out.encode("utf-8", "surrogateescape"))
+
+    def test_a_whole_file_rewrite_of_an_escaped_lone_surrogate_writes_it_escaped(self):
+        out = changes.strip_settings_autorun('{"x": "\\ud800", "t\\u0061sks": {}}')
+        self.assertEqual({"x": "\ud800"}, json.loads(out))
+        out.encode("utf-8", "surrogateescape")
 
     def test_a_key_spelled_with_an_escape_is_taken_out(self):
         text = '{\n  "a": 1,\n  "t\\u0061sks": {"tasks": []},\n  "task.allowAutomaticTasks": "on"\n}\n'
