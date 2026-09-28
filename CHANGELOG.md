@@ -72,6 +72,12 @@ reader, not the mechanism or the weakness it closed.
 - **saw names the compromised versions instead of a version to install.**
 
 ### Fixed
+- **`saw fix amend` finishes what `saw fix` began.** Run straight after `saw fix`, it amends the
+  infected commits instead of stopping at the checkout `fix` cleaned, and it takes out of history
+  everything `fix` repairs, whichever version each commit held: the payload, the launcher files
+  and the injected settings, keeping every other setting and every byte around them. Your own
+  uncommitted work comes with you onto the amended history, and your checkout is then cleaned and
+  your work saved exactly as `saw fix` does; the saved branch is never pushed.
 - **A repository that makes git wait no longer holds a scan for minutes.** The scan reports it as
   not read in full and keeps whatever it had already found. Every other repository, however slow,
   is read as before.

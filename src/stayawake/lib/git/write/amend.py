@@ -20,6 +20,12 @@ from stayawake.lib.git.write.sign import (SigningStatus, sign_flags, signing_arg
 _ZERO = "0" * 40
 
 
+def changes_in_the_way(worktree: str | Path, commit: str):
+    """The uncommitted changes in `worktree` a move to `commit` would overwrite
+    (`working_tree.changes_in_the_way`)."""
+    return working_tree.changes_in_the_way(worktree, commit)
+
+
 def is_dirty(repo: str | Path) -> bool:
     """Whether the checkout at `repo` holds anything its HEAD does not (`working_tree.is_dirty`)."""
     return working_tree.is_dirty(repo)
@@ -193,8 +199,12 @@ class AmendUnwindFailed(RuntimeError):
 
 
 def restore_branches(repo: str | Path, heads: list[tuple[str, str, str]],
-                     moved: dict[str, str], failed: list[str]) -> list[str]:
-    """Put `failed` branches back to their captured tips. Created local heads are deleted.
+                     moved: dict[str, str], failed: list[str],
+                     keep: dict[str, frozenset[str]] | None = None,
+                     staging: dict[str, dict] | None = None) -> list[str]:
+    """Put `failed` branches back to their captured tips. Created local heads are deleted. `keep`
+    names, per branch, the uncommitted changes its checkout keeps across the move, and `staging`
+    what was staged at them before it, which is put back.
 
     Returns the names it could NOT restore — empty when every one is back. It used to return
     nothing, so a refused restore was silent and the operator was told branches were put back
@@ -211,7 +221,8 @@ def restore_branches(repo: str | Path, heads: list[tuple[str, str, str]],
                 unrestored.append(name)
             continue
         try:
-            if not point_branch_at(repo, name, cas_old, new_tip):
+            if not point_branch_at(repo, name, cas_old, new_tip, keep=(keep or {}).get(name),
+                                   restage=(staging or {}).get(name)):
                 unrestored.append(name)
         except AmendUnwindFailed:
             unrestored.append(name)
@@ -230,11 +241,17 @@ def checkout_holding(repo: str | Path, branch: str) -> Path | None:
     return None if holder is None else holder.worktree
 
 
-def point_branch_at(repo: str | Path, branch: str, new: str, old: str) -> bool:
+def point_branch_at(repo: str | Path, branch: str, new: str, old: str,
+                    keep: frozenset[str] | None = None, staging: dict | None = None,
+                    restage: dict | None = None) -> bool:
     """Compare-and-swap `refs/heads/branch` from `old` to `new`.
 
     The checkout holding that branch — any checkout, not only this one — follows it, so this
-    refuses outright, before the ref moves, while that tree holds uncommitted work. The guard sits
+    refuses outright, before the ref moves, while that tree holds uncommitted work. Given `keep`,
+    uncommitted work the move does not overwrite comes along, and so does work on the paths `keep`
+    names: those stay as they are on disk, and what was staged there stays staged. `staging`
+    receives what was staged at each kept path; `restage` puts such a record back exactly, for a
+    move that undoes an earlier one. The guard sits
     here rather than with the caller because the tree is rewritten here: a checked-out branch
     reaches this function from the amend path, from the restore path, and from anything added
     next, and only one of those has to forget the check for the work to be gone.
@@ -243,14 +260,29 @@ def point_branch_at(repo: str | Path, branch: str, new: str, old: str) -> bool:
         holder = checked_out_at(repo, branch)
     except OSError:
         return False
-    if holder is not None and is_dirty(holder.worktree):
-        return False
+    before_dirty = None
+    kept: frozenset[bytes] = frozenset()
+    if holder is not None:
+        if keep is None:
+            if is_dirty(holder.worktree):
+                return False
+        else:
+            in_way = working_tree.changes_in_the_way(holder.worktree, new)
+            if in_way is None or in_way.blocking or not set(in_way.carryable) <= set(keep):
+                return False
+            kept = frozenset(os.fsencode(p) for p in
+                             set(keep) | set(in_way.carryable) | set(in_way.already))
+        before_dirty = working_tree.uncommitted_paths(holder.worktree)
+        if before_dirty is None:
+            return False
     move = None
     if holder is not None:
-        move = working_tree.PreparedMove(Path(repo), holder, old, new)
+        move = working_tree.PreparedMove(Path(repo), holder, old, new, keep=kept, restage=restage)
         if not move.prepare():
             move.release()
             return False
+        if staging is not None:
+            staging.update(move.kept_entries)
     if not run_ok(repo, ["update-ref", f"refs/heads/{branch}", new, old], context=UNTRUSTED):
         if move is not None:
             move.release()
@@ -264,14 +296,18 @@ def point_branch_at(repo: str | Path, branch: str, new: str, old: str) -> bool:
     restored = move.restore_files()
     move.release()
     if run_ok(repo, ["update-ref", f"refs/heads/{branch}", old, new], context=UNTRUSTED) \
-            and restored and not is_dirty(holder.worktree):
+            and restored and working_tree.uncommitted_paths(holder.worktree) == before_dirty:
         return False
     raise AmendUnwindFailed(repo, unrestored=[branch], moved={branch: new})
 
 
 def point_branches(repo: str | Path, heads: list[tuple[str, str, str]],
-                   new_tips: dict[str, str]) -> dict[str, str] | None:
-    """Repoint every `(name, replay_tip, cas_old)` at the tip the rebuild produced for it.
+                   new_tips: dict[str, str],
+                   keep: dict[str, frozenset[str]] | None = None,
+                   staging: dict[str, dict] | None = None) -> dict[str, str] | None:
+    """Repoint every `(name, replay_tip, cas_old)` at the tip the rebuild produced for it. `keep`
+    names, per branch, the uncommitted changes its checkout keeps across the move; `staging`
+    receives, per branch, what was staged at them, for an undo to put back.
 
     None when a compare-and-swap fails. A CAS that failed part way used to leave the branches
     before it moved while the caller reported that nothing had; anything already moved is put
@@ -282,8 +318,10 @@ def point_branches(repo: str | Path, heads: list[tuple[str, str, str]],
         new_tip = new_tips.get(tip)
         if not new_tip:
             continue
-        if not point_branch_at(repo, name, new_tip, cas_old):
-            unrestored = restore_branches(repo, heads, moved, list(moved))
+        recorded = staging.setdefault(name, {}) if staging is not None else None
+        if not point_branch_at(repo, name, new_tip, cas_old, keep=(keep or {}).get(name),
+                               staging=recorded):
+            unrestored = restore_branches(repo, heads, moved, list(moved), keep, staging)
             if unrestored:
                 raise AmendUnwindFailed(repo, unrestored=unrestored, moved=moved)
             return None

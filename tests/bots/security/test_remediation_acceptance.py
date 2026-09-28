@@ -95,7 +95,9 @@ class _InfectedProject(GitSandbox):
             oid = line.split()[0] if line.split() else ""
             if self.git_may_fail(self.d, "cat-file", "-t", oid).stdout.strip() != "blob":
                 continue
-            if PAYLOAD_MARK in self.git_may_fail(self.d, "cat-file", "-p", oid).stdout:
+            stored = subprocess.run(["git", "-C", str(self.d), "cat-file", "blob", oid],
+                                    capture_output=True, stdin=subprocess.DEVNULL).stdout
+            if PAYLOAD_MARK.encode() in stored:
                 out.append(oid)
         return out
 
@@ -117,12 +119,16 @@ class _InfectedProject(GitSandbox):
         with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             return remediator.fix(None, paths=[str(self.d)], no_stream=True)
 
-    def _amend(self):
-        """Run the verb that answers for history, offline. Returns its outcome."""
-        with github_answers(lambda branch: self.rev(self.d, branch)), \
+    def _amend(self, pusher=_pushed, remote_head=None):
+        """Run the verb that answers for history, offline, on the operator's own checkout as
+        `saw fix amend` does. `remote_head(branch)` is what the remote holds ("" for nothing);
+        by default it holds every local branch except saved work. Returns its outcome."""
+        def held(branch):
+            return "" if branch.startswith("saw/uncommitted-") else self.rev(self.d, branch)
+        with github_answers(remote_head or held), \
                 redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             return amend_outcome(self.d, "acme/app", ScanOptions(), load_signatures(), [], "t",
-                                 pusher=_pushed)
+                                 pusher=pusher, operator_checkout=True)
 
 
 class TestTheFixtureCarriesTheInfection(_InfectedProject):
@@ -166,7 +172,6 @@ class TestTheLoaderIsGone(_Remediated):
     def test_no_file_in_the_checkout_holds_it(self):
         self.assertEqual([], self._payload_on_disk())
 
-    @unittest.expectedFailure
     def test_no_ref_reaches_it(self):
         self.assertEqual([], self._payload_in_history())
 
@@ -174,13 +179,11 @@ class TestTheLoaderIsGone(_Remediated):
 class TestEveryLauncherIsDisarmed(_Remediated):
     """Criterion 2: every mechanism that launches it is gone or disarmed."""
 
-    @unittest.expectedFailure
     def test_the_launcher_file_is_gone(self):
         self.assertFalse((self.d / THE_LAUNCHER).exists())
         self.assertNotIn(THE_LAUNCHER,
                          self.git(self.d, "ls-tree", "-r", "--name-only", "HEAD").split())
 
-    @unittest.expectedFailure
     def test_the_injected_setting_is_gone_and_the_real_ones_survive(self):
         on_disk = json.loads((self.d / THE_SHARED_CONFIG).read_text())
         committed = json.loads(self.git(self.d, "show", f"HEAD:{THE_SHARED_CONFIG}"))
@@ -229,6 +232,216 @@ class TestTheReportMatchesTheResult(_Remediated):
     def test_fix_reports_success_only_when_nothing_is_left_on_disk(self):
         if self._payload_on_disk():
             self.assertNotEqual(0, self.fix_exit)
+
+
+class _AVariantOfTheInfection(_InfectedProject):
+    """The fixture with one more commit on top, written by `later()`."""
+
+    def setUp(self):
+        super().setUp()
+        self.later()
+        self.commit(self.d, "a later change")
+        self.before = {p: (self.d / p).read_bytes() for p in PROJECT_OWN + GENUINE_ASSETS}
+
+    def later(self):
+        raise NotImplementedError
+
+    def _settings(self):
+        return json.loads(subprocess.run(
+            ["git", "-C", str(self.d), "cat-file", "blob", f"HEAD:{THE_SHARED_CONFIG}"],
+            capture_output=True, check=True).stdout.decode("utf-8", "surrogateescape"))
+
+    def assert_no_payload_is_left(self):
+        self.assertEqual([], self._payload_on_disk())
+        self.assertEqual([], self._payload_in_history())
+        for path in PROJECT_OWN + GENUINE_ASSETS:
+            self.assertEqual(self.before[path], self._committed(path), path)
+
+
+class TestAnEscapedSettingsKeyIsStrippedFromHistory(_AVariantOfTheInfection):
+    """Check a settings file only a whole-file rewrite can repair, on a clean checkout."""
+
+    def later(self):
+        (self.d / THE_SHARED_CONFIG).write_text(
+            '{"editor.tabSize":2,"task\\u002eallowAutomaticTasks":"on","files.eol":"\\n"}\n')
+
+    def test_amend_alone_leaves_no_payload_and_keeps_the_real_settings(self):
+        self._amend()
+        self.assert_no_payload_is_left()
+        settings = self._settings()
+        self.assertNotIn("task.allowAutomaticTasks", settings)
+        self.assertEqual(2, settings.get("editor.tabSize"))
+
+
+class TestSettingsThatAreNotUtf8AreStrippedByteExact(_AVariantOfTheInfection):
+    """Check a settings file holding a byte that is not UTF-8."""
+
+    def later(self):
+        (self.d / THE_SHARED_CONFIG).write_bytes(
+            b'{"editor.x":"\xff","editor.tabSize":2,"task.allowAutomaticTasks":"on"}\n')
+
+    def test_amend_alone_strips_the_setting_and_keeps_the_other_bytes(self):
+        self._amend()
+        self.assert_no_payload_is_left()
+        stored = subprocess.run(
+            ["git", "-C", str(self.d), "cat-file", "blob", f"HEAD:{THE_SHARED_CONFIG}"],
+            capture_output=True, check=True).stdout
+        self.assertEqual(b'{"editor.x":"\xff","editor.tabSize":2}\n', stored)
+
+
+class TestALoaderChangedInALaterCommitIsGone(_AVariantOfTheInfection):
+    """Check a loader whose bytes differ between the commits that hold it."""
+
+    def later(self):
+        (self.d / THE_LOADER).write_text(LOADER + "// v2\n")
+
+    def test_fix_then_amend_leaves_no_payload(self):
+        self._fix()
+        self._amend()
+        self.assert_no_payload_is_left()
+        self.assertEqual("clean", self._scan().verdict)
+
+
+class TestALauncherChangedInALaterCommitIsGone(_AVariantOfTheInfection):
+    """Check a launcher whose bytes differ between the commits that hold it."""
+
+    def later(self):
+        (self.d / THE_LAUNCHER).write_text(LAUNCHER.replace('"prep"', '"prepare"'))
+
+    def test_fix_then_amend_leaves_no_launcher(self):
+        self._fix()
+        self._amend()
+        self.assert_no_payload_is_left()
+        self.assertFalse((self.d / THE_LAUNCHER).exists())
+        for ref in self._refs():
+            tree = self.git(self.d, "ls-tree", "-r", "--name-only", ref).split()
+            self.assertNotIn(THE_LAUNCHER, tree, ref)
+
+
+class TestAPayloadAmendCannotTakeOutIsNamedNotBlamedOnTheCheckout(_InfectedProject):
+    """Check the reason given when only a payload the rewrite cannot take out stops the move."""
+
+    def test_it_is_reported_as_manual_recovery(self):
+        from unittest import mock
+        self._fix()
+        with mock.patch("stayawake.bots.security.pr.amend._foreign_targets", return_value=[]):
+            outcome = self._amend()
+        causes = [r.cause.name for r in outcome.reasons]
+        self.assertIn("PAYLOAD_NEEDS_MANUAL_RECOVERY", causes)
+        self.assertNotIn("WORKING_TREE_NOT_CLEAN", causes)
+
+
+class TestTheOperatorsOwnWorkIsKept(_InfectedProject):
+    """Check that the operator's own uncommitted work survives the rewrite, as `saw fix` keeps it."""
+
+    def test_an_edit_the_rewrite_does_not_touch_stays_and_the_payload_goes(self):
+        self._fix()
+        (self.d / "package.json").write_text(PACKAGE_JSON.replace("1.0.0", "1.1.0"))
+        self._amend()
+        self.assertIn("1.1.0", (self.d / "package.json").read_text())
+        self.assertEqual([], self._payload_in_history())
+        self.assertEqual([], self._payload_on_disk())
+
+    def test_an_edit_to_a_file_the_rewrite_repairs_stays_repaired(self):
+        (self.d / THE_SHARED_CONFIG).write_text(SETTINGS_INJECTED.replace(
+            '"files.eol"', '"editor.wordWrap":"on","files.eol"'))
+        self._amend()
+        settings = json.loads((self.d / THE_SHARED_CONFIG).read_text())
+        self.assertEqual("on", settings.get("editor.wordWrap"))
+        self.assertNotIn("task.allowAutomaticTasks", settings)
+        self.assertEqual([], self._payload_in_history())
+
+    def test_a_refused_push_puts_the_branch_back_and_keeps_the_edit(self):
+        (self.d / THE_SHARED_CONFIG).write_text(SETTINGS_INJECTED.replace(
+            '"files.eol"', '"editor.wordWrap":"on","files.eol"'))
+        before = self.rev(self.d)
+        outcome = self._amend(pusher=lambda branch, dest, lease: PushResult(False))
+        self.assertFalse(outcome.completed)
+        self.assertEqual(before, self.rev(self.d))
+        self.assertIn("editor.wordWrap", (self.d / THE_SHARED_CONFIG).read_text())
+
+    def test_a_merge_in_progress_stops_it_before_anything_moves(self):
+        self.git(self.d, "checkout", "-q", "-b", "side", self.clean_root)
+        (self.d / "notes.md").write_text("side\n")
+        self.commit(self.d, "side work")
+        self.git(self.d, "checkout", "-q", self.base)
+        self.git_may_fail(self.d, "merge", "--no-commit", "--no-ff", "side")
+        before = self.rev(self.d)
+        outcome = self._amend()
+        self.assertIn("WORKING_TREE_NOT_CLEAN", [r.cause.name for r in outcome.reasons])
+        self.assertEqual(before, self.rev(self.d))
+        self.assertEqual(0, self.git_may_fail(self.d, "rev-parse", "-q", "--verify",
+                                              "MERGE_HEAD").returncode)
+
+    def test_undoing_the_move_after_fix_never_writes_the_payload_back(self):
+        from unittest import mock
+        from stayawake.bots.security.remediation import live
+        self._fix()
+        with mock.patch.object(live, "clean_checkout", return_value=live.CheckoutResult()):
+            self._amend(pusher=lambda branch, dest, lease: PushResult(False))
+        self.assertEqual([], self._payload_on_disk())
+        self.assertFalse((self.d / THE_LAUNCHER).exists())
+
+    def test_undoing_the_move_keeps_what_was_staged(self):
+        from unittest import mock
+        from stayawake.bots.security.remediation import live
+        self._fix()
+        self.git(self.d, "add", "-A")
+        before = self.git(self.d, "status", "--porcelain")
+        with mock.patch.object(live, "clean_checkout", return_value=live.CheckoutResult()):
+            self._amend(pusher=lambda branch, dest, lease: PushResult(False))
+        self.assertEqual(before, self.git(self.d, "status", "--porcelain"))
+
+    def test_a_folder_replaced_by_a_link_stops_it_and_the_link_stays(self):
+        import shutil
+        outside = self.root / "outside"
+        shutil.copytree(self.d / ".vscode", outside)
+        shutil.rmtree(self.d / ".vscode")
+        (self.d / ".vscode").symlink_to(outside)
+        outcome = self._amend()
+        self.assertIn("WORKING_TREE_NOT_CLEAN", [r.cause.name for r in outcome.reasons])
+        self.assertTrue((self.d / ".vscode").is_symlink())
+
+    def test_saved_work_the_remote_already_holds_is_cleaned_there_too(self):
+        self.git(self.d, "branch", "saw/uncommitted-earlier", self.base)
+        pushed = []
+
+        def recorded(branch, dest, lease):
+            pushed.append(branch)
+            return PushResult(True)
+        self._amend(pusher=recorded, remote_head=lambda branch: self.rev(self.d, branch))
+        self.assertIn("saw/uncommitted-earlier", pushed)
+
+    def test_when_only_saved_work_carries_it_the_saved_work_is_cleaned(self):
+        self.git(self.d, "branch", "saw/uncommitted-earlier", self.base)
+        self.git(self.d, "checkout", "-q", "--detach", self.base)
+        self.git(self.d, "branch", "-D", self.base)
+        outcome = self._amend()
+        self.assertIn("SAVED_WORK_CLEANED_HERE", [r.cause.name for r in outcome.reasons])
+        tree = self.git(self.d, "ls-tree", "-r", "--name-only", "saw/uncommitted-earlier").split()
+        self.assertNotIn(THE_LOADER, tree)
+
+    def test_an_untracked_copy_is_removed_and_not_called_manual_recovery(self):
+        (self.d / "public" / "fonts" / "extra.woff").write_text(LOADER)
+        outcome = self._amend()
+        manual = [r for r in outcome.reasons if r.cause.name == "PAYLOAD_NEEDS_MANUAL_RECOVERY"]
+        self.assertFalse(any("extra.woff" in (r.subjects or "") for r in manual))
+        self.assertEqual([], self._payload_on_disk())
+
+    def test_work_saved_by_fix_is_cleaned_locally_and_never_pushed(self):
+        (self.d / "package.json").write_text(PACKAGE_JSON.replace("1.0.0", "1.2.0"))
+        self._fix()
+        saved = [r for r in self._refs() if "/saw/uncommitted-" in r]
+        self.assertTrue(saved)
+        pushed = []
+
+        def recorded(branch, dest, lease):
+            pushed.append(branch)
+            return PushResult(True)
+        self._amend(pusher=recorded)
+        self.assertFalse([b for b in pushed if b.startswith("saw/uncommitted-")])
+        self.assertEqual([], self._payload_in_history())
+        self.assertIn("1.2.0", (self.d / "package.json").read_text())
 
 
 if __name__ == "__main__":

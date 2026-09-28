@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,6 +25,9 @@ _GITIGNORE_MARKER_PATTERNS = None
 
 _ROLLBACK_COMMENT = "# Remediation rollback copies (kept local, never committed)"
 _ROLLBACK_PATTERNS = (SAW_DIR + "/",)
+_RAW_BYTE = re.compile("[\udc80-\udcff]")
+_SURROGATE = re.compile("[\ud800-\udfff]")
+_STAND_IN_POINTS = range(0xF0000, 0x110000)
 
 
 def is_auto_fixable(finding) -> bool:
@@ -44,27 +48,52 @@ class Change:
     detail: str = ""
 
 
+def repair_for(finding) -> Change | None:
+    """The change that repairs one confirmed finding, or None when it has no automatic repair.
+    Takes the finding. Returns the change."""
+    if not is_auto_fixable(finding):
+        return None
+    action = _ACTIONS[getattr(finding, "remediation", "manual")]
+    path = finding.path
+    if not path or Path(path) in (Path("."), Path("..")):
+        return None
+    if action == "vscode":
+        if path.endswith("tasks.json"):
+            return Change("remove", path, "VS Code auto-run task harness")
+        if path.endswith("settings.json"):
+            return Change("strip-settings", path, "remove allowAutomaticTasks/tasks")
+        return None
+    return Change(action, path, finding.description[:60])
+
+
 def plan(findings) -> list[Change]:
     """Map findings to a deduped list of changes (pure — no filesystem access)."""
     changes: dict[tuple[str, str], Change] = {}
     for f in findings:
-        if not is_auto_fixable(f):
-            continue
-        action = _ACTIONS[getattr(f, "remediation", "manual")]
-        path = f.path
-        if not path or Path(path) in (Path("."), Path("..")):
-            continue
-        if action == "vscode":
-            if f.path.endswith("tasks.json"):
-                c = Change("remove", f.path, "VS Code auto-run task harness")
-            elif f.path.endswith("settings.json"):
-                c = Change("strip-settings", f.path, "remove allowAutomaticTasks/tasks")
-            else:
-                continue
-        else:
-            c = Change(action, path, f.description[:60])
-        changes[(c.action, c.path)] = c
+        c = repair_for(f)
+        if c is not None:
+            changes[(c.action, c.path)] = c
     return list(changes.values())
+
+
+def text_repair(action: str):
+    """`repair(text) -> repaired | None` for a change made by editing a file's text, None when the
+    text needs no repair. Takes the change's action. Returns the function, or None when the action
+    does not edit text. A settings repair also offers `proves(before, after)`: whether every other
+    setting survives the rewrite unchanged."""
+    edit = {"strip-settings": strip_settings_autorun,
+            "strip-gitignore": strip_gitignore_text}.get(action)
+    if edit is None:
+        return None
+
+    def repair(text: str) -> str | None:
+        if not text:
+            return None
+        repaired = edit(text)
+        return None if repaired == text else repaired
+    if action == "strip-settings":
+        repair.proves = _keeps_the_rest
+    return repair
 
 
 def _gitignore_marker_patterns():
@@ -104,14 +133,65 @@ def strip_settings_autorun(text: str) -> str:
 
 
 def _rewritten_without_autorun(text: str) -> str:
-    """`text` parsed and written back without the automatic-task setting and the task list. Takes
-    the file's text. Returns it unchanged when it does not parse to an object holding either."""
+    """`text` parsed and written back without the automatic-task setting and the task list. A byte
+    that is not UTF-8 is written back as the same byte and an escaped surrogate as the same escape.
+    Takes the file's text. Returns it unchanged when it does not parse to an object holding either,
+    or holds a number JSON cannot write back."""
     data = load_jsonc(text)
-    if not isinstance(data, dict) or not ({"task.allowAutomaticTasks", "tasks"} & data.keys()):
+    if not _holds_autorun(data):
         return text
+    stand_ins = _stand_ins_for_raw_bytes(text, data)
+    if stand_ins:
+        data = load_jsonc(text.translate(stand_ins))
+        if not _holds_autorun(data):
+            return text
     data.pop("task.allowAutomaticTasks", None)
     data.pop("tasks", None)
-    return json.dumps(data, indent=2) + "\n"
+    try:
+        if stand_ins is None:
+            return json.dumps(data, indent=2, allow_nan=False) + "\n"
+        written = json.dumps(data, indent=2, ensure_ascii=False, allow_nan=False) + "\n"
+    except ValueError:
+        return text
+    written = _SURROGATE.sub(lambda found: "\\u%04x" % ord(found.group()), written)
+    return written.translate({ord(stand_in): chr(raw) for raw, stand_in in stand_ins.items()})
+
+
+def _holds_autorun(data) -> bool:
+    """Whether parsed settings are an object holding the automatic-task setting or the task list."""
+    return isinstance(data, dict) and bool({"task.allowAutomaticTasks", "tasks"} & data.keys())
+
+
+def _stand_ins_for_raw_bytes(text: str, data) -> dict[int, str] | None:
+    """A translation table giving each character of `text` that holds a byte that is not UTF-8 its
+    own private-use character, one found nowhere in `text` or in the strings `data` holds.
+
+    Takes the text and the value it parses to. Returns the table, empty when `text` holds no such
+    byte, or None when too few unused characters are left.
+    """
+    raw = sorted(set(_RAW_BYTE.findall(text)))
+    if not raw:
+        return {}
+    taken = set(text)
+    for string in _strings_in(data):
+        taken.update(string)
+    free = (chr(point) for point in _STAND_IN_POINTS if chr(point) not in taken)
+    table = {ord(character): stand_in for character, stand_in in zip(raw, free)}
+    return table if len(table) == len(raw) else None
+
+
+def _strings_in(value):
+    """Every key and every string `value` holds, at any depth."""
+    pending = [value]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, str):
+            yield item
+        elif isinstance(item, dict):
+            pending.extend(item.keys())
+            pending.extend(item.values())
+        elif isinstance(item, list):
+            pending.extend(item)
 
 
 def _keeps_the_rest(before: str, after: str) -> bool:

@@ -4,19 +4,24 @@ each branch they sat on. Never `--pr`. Never moves a tag. Bare `saw fix` is unch
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 from stayawake.bots.security.models import CONFIRMED
 from stayawake.utils import scratch
 from stayawake.bots.security.pr.resolve import REMOVE, RESTORE, SUPPLY
-from stayawake.bots.security.remediation import footprint, oracle
+from stayawake.bots.security.remediation import (changes, footprint, installed, live, oracle,
+                                                 preserve)
+from stayawake.bots.security.pr.fix_verdict import Checkout, checkout_clauses, checkout_of
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.targets import LocalRepoTarget
 from stayawake.lib.git.auth import run_remote_git
+from stayawake.lib.git.borrowed import BorrowError, borrow
 from stayawake.lib.git import remote as gitremote
 from stayawake.lib.git.run import UNTRUSTED, stdout_bytes
 from stayawake.bots.security.pr.outcome import (AmendOutcome, BranchResult, Cause, Reason,
-                                                      amended, refused, render_amend_line)
+                                                amended, refused, render_amend_line,
+                                                with_checkout)
 from stayawake.lib.git import authority
 from stayawake.lib.git.merge import detect as mergedetect
 from stayawake.lib.git.write import amend as gitamend
@@ -115,6 +120,66 @@ def _flat(signatures) -> list:
     return list(signatures or [])
 
 
+def _committed_anywhere(repo: Path, path: str) -> bool:
+    """Whether any commit a branch reaches holds `path`. Takes the repository and the path. Returns
+    True when that cannot be established."""
+    found = gitutil.run(repo, ["rev-list", "--all", "-n", "1", "--", path])
+    return found is None or found.returncode != 0 or bool(found.stdout.strip())
+
+
+def _same_checkout(holder: Path, repo: Path) -> bool:
+    """Whether two paths name the same working tree. Takes both. Returns the answer."""
+    try:
+        return Path(holder).resolve() == Path(repo).resolve()
+    except OSError:
+        return False
+
+
+def _committed_scan(repo: Path, opts, signatures, allowlist):
+    """A scan of the files HEAD records, written out exactly as stored. Takes the repository, the
+    scan options, the signatures and the allowlist. Returns the result, or None when HEAD could
+    not be written out."""
+    head = gitutil.stdout(repo, ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"]).strip()
+    if not head:
+        return None
+    dest = scratch.new_dir("the files HEAD records")
+    try:
+        with borrow(repo) as borrowed:
+            if not borrowed.materialise(head, dest):
+                return None
+        target = LocalRepoTarget(dest, str(repo), opts)
+        target.is_repo = False
+        return scan_target(target, signatures, allowlist)
+    except BorrowError:
+        return None
+    finally:
+        scratch.release_path(dest)
+
+
+def _add_file_findings(scan, committed) -> None:
+    """Add to `scan` each file finding `committed` makes that `scan` does not. Takes both
+    results."""
+    seen = {(f.path, f.signature_id) for f in scan.findings}
+    scan.findings.extend(f for f in committed.findings
+                         if not getattr(f, "commit_sha", None)
+                         and (f.path, f.signature_id) not in seen)
+
+
+def _repair_checks(finding, flat) -> tuple:
+    """`(carries, corrector)` for a finding this verb repairs by editing the file, or
+    `(None, None)`. Takes the finding and the flat signatures. The footprint's own excision comes
+    first; otherwise the text repair the working-tree fix makes."""
+    corrector = footprint.corrector_for(finding, flat)
+    carries = footprint.carries_footprint(finding, flat)
+    if corrector is not None and carries is not None:
+        return carries, corrector
+    repair = changes.repair_for(finding)
+    edit = changes.text_repair(repair.action) if repair is not None else None
+    if edit is None:
+        return None, None
+    return (lambda text: edit(text) is not None), edit
+
+
 def _content_targets(repo: Path, scan, signatures) -> list[tuple]:
     """Confirmed file findings this verb can excise, as `(finding, carries, corrector,
     cleaned_head)`, one per path and only where the corrector clears the footprint at HEAD."""
@@ -127,8 +192,7 @@ def _content_targets(repo: Path, scan, signatures) -> list[tuple]:
         path = getattr(f, "path", "") or ""
         if not path or path in seen or getattr(f, "commit_sha", None):
             continue
-        corrector = footprint.corrector_for(f, flat)
-        carries = footprint.carries_footprint(f, flat)
+        carries, corrector = _repair_checks(f, flat)
         if corrector is None or carries is None:
             continue
         head = gitutil.file_at(repo, "HEAD", path)
@@ -398,12 +462,15 @@ def _uncertain_items(repo: Path, scan, taken: set[str],
 
 
 def _foreign_targets(scan) -> list[str]:
-    """Paths of confirmed wholly-foreign files to remove whole."""
+    """Paths of confirmed files to remove whole: wholly-foreign files, and files the working-tree
+    fix removes."""
     out: list[str] = []
     for f in scan.findings:
         if getattr(f, "confidence", None) != CONFIRMED or getattr(f, "advisory_only", False):
             continue
-        path = footprint.foreign_path(f)
+        repair = changes.repair_for(f)
+        path = footprint.foreign_path(f) or (repair.path if repair is not None
+                                             and repair.action == "remove" else None)
         if path and path not in out:
             out.append(path)
     return out
@@ -424,7 +491,7 @@ def _unhandled_confirmed(scan, signatures, revert_paths: set[str],
         path = getattr(f, "path", "") or ""
         if path in revert_paths or path in remove_paths:
             continue
-        carries = footprint.carries_footprint(f, flat)
+        carries, _corrector = _repair_checks(f, flat)
         if carries is not None and path in cleaned_head and not carries(cleaned_head[path]):
             continue
         if path and path not in paths:
@@ -709,16 +776,48 @@ def amend_repo(repo: Path, opts, signatures, allowlist, token: str | None = None
     return render_amend_line(outcome)
 
 
+@dataclass
+class _Found:
+    """What the history pass learned that the checkout pass acts on."""
+
+    confirmed: bool = False
+
+
 def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, *,
                   pusher=None,
                   identity_fallback: str | None = None,
-                  operator_context: Path | None = None, resolver=None) -> AmendOutcome:
+                  operator_context: Path | None = None, resolver=None,
+                  operator_checkout: bool = False) -> AmendOutcome:
     """The act, as a structure. Prose is rendered from this and never parsed back out of it.
 
     `operator_context` is where the operator's own git config lives (signer, identity); it defaults
     to `repo`. `identity_fallback` is the operator's session credential for the authority gate. Both
-    pass straight through to the gates.
+    pass straight through to the gates. `operator_checkout` says `repo` is the checkout the operator
+    works in: its own uncommitted changes are carried across the rewrite, and once history is done
+    the checkout is cleaned as `saw fix` cleans it, the operator's uncommitted work saved first.
     """
+    found = _Found()
+    outcome = _history_outcome(repo, display, opts, signatures, allowlist, token, pusher=pusher,
+                               identity_fallback=identity_fallback,
+                               operator_context=operator_context, resolver=resolver,
+                               keep_operator_changes=operator_checkout, found=found)
+    if not operator_checkout or not gitutil.is_git_repo(repo):
+        return outcome
+    checkout = live.clean_checkout(repo, opts, signatures, allowlist,
+                                   keep=getattr(opts, "keep_dirs", ()) or (),
+                                   base_confirmed=found.confirmed,
+                                   remove_lockfiles=not installed.lockfile_stays())
+    state, detail = checkout_of(checkout)
+    return with_checkout(outcome, checkout_clauses(state, detail),
+                         settled=state in (Checkout.CLEAN, Checkout.CLEANED))
+
+
+def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, token, *,
+                     pusher, identity_fallback, operator_context, resolver,
+                     keep_operator_changes: bool, found: _Found) -> AmendOutcome:
+    """Rewrite the history that carries a confirmed payload and move each branch that reached it.
+    Takes `amend_outcome`'s arguments, whether the operator's own uncommitted changes in `repo` are
+    carried across the move, and where to record what was found. Returns the outcome."""
     rejected_supply: dict[str, Cause] = {}
 
     def _refuse(cause: Cause, detail: str = "", subjects: str = "",
@@ -729,7 +828,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
 
     if not gitutil.is_git_repo(repo):
         return _refuse(Cause.NOT_A_GIT_REPOSITORY)
-    if gitamend.is_dirty(repo):
+    if not keep_operator_changes and gitamend.is_dirty(repo):
         return _refuse(Cause.WORKING_TREE_NOT_CLEAN)
 
     slug = gitutil.origin_slug(repo)
@@ -749,6 +848,13 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     scan = scan_target(LocalRepoTarget(repo, str(repo), opts), signatures, allowlist)
     if scan.error is not None:
         return _refuse(Cause.SCAN_DID_NOT_FINISH)
+    if gitamend.is_dirty(repo):
+        committed = _committed_scan(repo, opts, signatures, allowlist)
+        if committed is None or committed.error is not None:
+            return _refuse(Cause.SCAN_DID_NOT_FINISH)
+        _add_file_findings(scan, committed)
+    found.confirmed = any(getattr(f, "confidence", None) == CONFIRMED
+                          and not getattr(f, "advisory_only", False) for f in scan.findings)
     commits = _confirmed_commits(scan)
     infected: dict[str, tuple[str, ...]] = {}
     uncharacterized: dict[str, tuple[str, str]] = {}
@@ -794,6 +900,7 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     remove: dict[str, str] = {}
     remove_shas: set[str] = set()
     remove_holders: dict[str, set[str]] = {}
+    varied: list[str] = []
     for path in _foreign_targets(scan):
         if path in clean or path in {p for ps in infected.values() for p in ps}:
             continue
@@ -804,7 +911,10 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
         if hist is None:
             return _refuse(Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, path)
         holders, foreign = hist
-        if not foreign or set(holders) != set(foreign):
+        if not foreign:
+            continue
+        if set(holders) != set(foreign):
+            varied.append(path)
             continue
         remove[path] = entry[1]
         remove_shas.update(foreign)
@@ -817,6 +927,9 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     purge: set[str] = set()
     purge_shas: set[str] = set()
     purge_holders: dict[str, set[str]] = {}
+    for path in varied:
+        if _register_purge(repo, path, purge, purge_shas, survives, purge_holders) == "too-large":
+            return _refuse(Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, path)
 
     if resolver is not None:
         held = set(clean) | set(remove) | {p for ps in infected.values() for p in ps}
@@ -836,7 +949,10 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     infected = {sha: ps for sha, ps in infected.items() if ps}
     taken = {p for ps in infected.values() for p in ps}
 
-    unhandled = _unhandled_confirmed(scan, signatures, taken, cleaned_head, remove)
+    unhandled = _unhandled_confirmed(scan, signatures, taken, cleaned_head,
+                                     set(remove) | set(purge))
+    if keep_operator_changes:
+        unhandled = [p for p in unhandled if _committed_anywhere(repo, p)]
     if resolver is not None and unhandled:
         for item in _unhandled_items(repo, scan, unhandled, survives):
             try:
@@ -864,6 +980,8 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
                 return _refuse(Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, item.path)
         unhandled = _unhandled_confirmed(scan, signatures, taken, cleaned_head,
                                          set(remove) | set(substitute) | set(purge))
+        if keep_operator_changes:
+            unhandled = [p for p in unhandled if _committed_anywhere(repo, p)]
     if resolver is not None and uncharacterized:
         for sha in list(uncharacterized):
             present = [p for p in uncharacterized_paths.get(sha, ())
@@ -1017,13 +1135,31 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     if left:
         return _refuse(Cause.PAYLOAD_STILL_REACHABLE, "; ".join(left[:3]))
 
+    keep: dict[str, frozenset[str]] = {}
+    staging: dict[str, dict] = {}
+    for name, tip, _c in deliverable:
+        try:
+            holder = gitamend.checkout_holding(repo, name)
+        except OSError:
+            return _refuse(Cause.WORKING_TREE_NOT_CLEAN)
+        if holder is None:
+            continue
+        if keep_operator_changes and _same_checkout(holder, repo):
+            in_way = gitamend.changes_in_the_way(holder, delivered_tips[tip])
+            if in_way is None or in_way.blocking:
+                return _refuse(Cause.WORKING_TREE_NOT_CLEAN, ", ".join(in_way.blocking[:3])
+                               if in_way is not None else "")
+            keep[name] = frozenset(in_way.carryable) | frozenset(in_way.already)
+        elif gitamend.is_dirty(holder):
+            return _refuse(Cause.WORKING_TREE_NOT_CLEAN)
+
     captured = capture_bundle(repo, [(tip, new_tips[tip]) for _n, tip, _c in deliverable],
                               _capture_path(slug, oldest[:12]))
     if not captured.ok:
         return _refuse(Cause.CAPTURE_FAILED, captured.reason)
 
     try:
-        moved = gitamend.point_branches(repo, deliverable, delivered_tips)
+        moved = gitamend.point_branches(repo, deliverable, delivered_tips, keep, staging)
     except gitamend.AmendUnwindFailed as unwound:
         return _refuse(Cause.LEFT_PART_WAY, ", ".join(unwound.unrestored),
                        recovery=str(captured.path or ""))
@@ -1032,7 +1168,11 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
 
     results: list[BranchResult] = []
     failed: list[str] = []
+    cleaned_here: list[str] = []
     for branch in moved:
+        if branch.startswith(preserve.BRANCH_PREFIX) and not (leases or {}).get(branch):
+            cleaned_here.append(branch)
+            continue
         result = _force_update_branch(repo, slug, branch, token, pusher=pusher,
                                       lease=(leases or {}).get(branch),
                                       sha12=oldest[:12])
@@ -1058,10 +1198,12 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     if unhandled:
         survivors.insert(0, Reason(Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY,
                                    str(len(unhandled)), ", ".join(sorted(unhandled))))
+    if cleaned_here:
+        survivors.append(Reason(Cause.SAVED_WORK_CLEANED_HERE, ", ".join(cleaned_here)))
     recovery = ""
     if failed:
         try:
-            unrestored = gitamend.restore_branches(repo, deliverable, moved, failed)
+            unrestored = gitamend.restore_branches(repo, deliverable, moved, failed, keep, staging)
         except gitamend.AmendUnwindFailed as unwound:
             unrestored = unwound.unrestored
         if unrestored:
@@ -1073,5 +1215,9 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     removed = _delivered_removals(replacements, delivered_reach, remove_holders, purge_holders)
     touched = len(delivered_infected)
     label = (oldest[:12] if touched == 1 else f"{touched} commits from {oldest[:12]}")
+    if not results and not isolated:
+        return AmendOutcome(repository=display, completed=False, commit=label,
+                            reasons=tuple(survivors), removed=tuple(sorted(removed)),
+                            recovery=recovery)
     return amended(display, label, tuple(results) + tuple(isolated), tuple(survivors),
                    sorted(removed), recovery=recovery)

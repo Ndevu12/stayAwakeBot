@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import stat
+from dataclasses import dataclass
 from pathlib import Path
 
 from stayawake.lib.git import operator_config
@@ -190,6 +191,8 @@ def _content_matches(borrowed, worktree: Path, rel: bytes, mode: bytes, oid: byt
     recorded mode and id, the object format, whether the executable bit counts and the
     operator's end-of-line settings as `-c` arguments."""
     path = worktree / os.fsdecode(rel)
+    if _has_link_above(worktree, rel):
+        return False
     try:
         info = os.lstat(path)
         if mode == _SYMLINK:
@@ -283,6 +286,100 @@ def uncommitted_paths(worktree: str | Path, *, _depth: int = 0) -> list[bytes] |
         return None
     changed.update(p for p in untracked.split(b"\0") if p)
     return sorted(changed)
+
+
+@dataclass(frozen=True)
+class ChangesInTheWay:
+    """The uncommitted changes a checkout holds on the paths a move to another commit rewrites.
+
+    `carryable` are changes a move can leave as they are on disk; `already` are changes that
+    already hold what the target records; `blocking` are what no move can keep: a merge, rebase,
+    cherry-pick or revert in progress, a conflict anywhere, a changed submodule on a rewritten
+    path, and a rewritten path reached through a link."""
+
+    carryable: tuple[str, ...] = ()
+    already: tuple[str, ...] = ()
+    blocking: tuple[str, ...] = ()
+
+
+_OPERATIONS = ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply")
+
+
+def operations_in_progress(worktree: Path) -> list[str] | None:
+    """The git operations `worktree` is in the middle of. Takes the working tree. Returns their
+    names, or None when git could not say where it keeps them."""
+    args = ["rev-parse"] + [part for name in _OPERATIONS for part in ("--git-path", name)]
+    listed = stdout(worktree, args, context=UNTRUSTED).splitlines()
+    if len(listed) != len(_OPERATIONS):
+        return None
+    found = []
+    for name, where in zip(_OPERATIONS, listed):
+        path = Path(where) if os.path.isabs(where) else worktree / where
+        if os.path.lexists(path):
+            found.append(name)
+    return found
+
+
+def changes_in_the_way(worktree: str | Path, commit: str) -> ChangesInTheWay | None:
+    """The uncommitted changes in `worktree` that a move to `commit` would overwrite: each path
+    the move rewrites whose state on disk is not what `commit` records there, or whose staged
+    entry differs from both HEAD and `commit`. A change on a path the move leaves alone is not in
+    the way. Takes the working tree and the commit. Returns them, or None when the checkout cannot
+    be read."""
+    worktree = Path(worktree)
+    operations = operations_in_progress(worktree)
+    changed = uncommitted_paths(worktree)
+    if changed is None or operations is None:
+        return None
+    try:
+        head = stdout(worktree, ["rev-parse", "--verify", "--quiet", "HEAD"],
+                      context=UNTRUSTED).strip()
+        committed = _tree_entries(worktree, head) if head else {}
+        target = _tree_entries(worktree, commit)
+        indexed = _index_entries(worktree)
+    except (TreeStateUnknown, ValueError):
+        return None
+    across = set(committed) | set(target)
+    rewritten = {rel for rel in across if committed.get(rel) != target.get(rel)}
+    blocking = [rel for rel, entry in indexed.items() if entry[2] != b"0"]
+    blocking += [rel for rel in rewritten if _has_link_above(worktree, rel)]
+    blocking += [name.encode() for name in operations]
+    carryable: list[bytes] = []
+    already: list[bytes] = []
+    present = []
+    for rel in changed:
+        if rel in blocking or rel not in rewritten:
+            continue
+        staged = indexed.get(rel)
+        if staged is not None and staged[:2] not in (committed.get(rel), target.get(rel)):
+            carryable.append(rel)
+        elif rel not in target:
+            if os.path.lexists(worktree / os.fsdecode(rel)):
+                carryable.append(rel)
+            else:
+                already.append(rel)
+        elif target[rel][0] == _GITLINK:
+            blocking.append(rel)
+        else:
+            present.append(rel)
+    if present:
+        object_format = stdout(worktree, ["rev-parse", "--show-object-format"],
+                               context=UNTRUSTED).strip() or "sha1"
+        track_executable = stdout(worktree, ["config", "--get", "--type=bool", "core.filemode"],
+                                  context=UNTRUSTED).strip() != "false"
+        conversion = _conversion_config(worktree)
+        with borrow(worktree) as borrowed:
+            if not _converted_as_in(worktree, borrowed, present):
+                carryable.extend(present)
+            else:
+                with borrowed.attributes_then(_NO_FILTER):
+                    for rel in present:
+                        matches = _content_matches(borrowed, worktree, rel, *target[rel],
+                                                   object_format, track_executable, conversion)
+                        (already if matches else carryable).append(rel)
+    return ChangesInTheWay(tuple(sorted(os.fsdecode(r) for r in carryable)),
+                           tuple(sorted(os.fsdecode(r) for r in already)),
+                           tuple(sorted({os.fsdecode(r) for r in blocking})))
 
 
 def is_dirty(worktree: str | Path, *, _depth: int = 0) -> bool:
@@ -380,12 +477,27 @@ def rewrite_index(worktree: str | Path, feed: bytes) -> bool:
         scratch.release_path(private)
 
 
+def _unstaged(entry, recorded) -> bool:
+    """Whether an index entry holds what HEAD records at its path, the operator having staged
+    nothing there. Takes the index entry (or None) and HEAD's entry (or None)."""
+    return (entry[:2] if entry is not None else None) == recorded
+
+
 class PreparedMove:
     """A checkout about to follow its branch: its index already rewritten on a private copy and
-    its `index.lock` held, so nothing else writes the index between the ref move and the swap."""
+    its `index.lock` held, so nothing else writes the index between the ref move and the swap.
 
-    def __init__(self, repo: Path, holder: Checkout, old: str, new: str):
+    `keep` names paths left as they are on disk; each keeps what was staged there, or follows the
+    branch when nothing was. `restage` gives, for kept paths, the index entries to put back
+    exactly (None for no entry). `kept_entries` records what was staged at each kept path before
+    the move."""
+
+    def __init__(self, repo: Path, holder: Checkout, old: str, new: str,
+                 keep: frozenset[bytes] = frozenset(), restage: dict | None = None):
         self.repo, self.holder, self.old, self.new = repo, holder, old, new
+        self.keep = keep
+        self.restage = restage
+        self.kept_entries: dict = {}
         self.lock = holder.gitdir / "index.lock"
         self.staged = scratch.new_file("the index a checkout moves to")
         self.paths: list[bytes] = []
@@ -411,9 +523,21 @@ class PreparedMove:
             if not converts_alike:
                 return False
         zero = b"0" * len(self.new)
-        feed = b"".join(
-            (b"%s %s\t%s\0" % (self.target[p][0], self.target[p][1], p)) if p in self.target
-            else (b"0 %s\t%s\0" % (zero, p)) for p in self.paths)
+        try:
+            staged = _index_entries(self.holder.worktree) if self.keep else {}
+        except (TreeStateUnknown, ValueError):
+            return False
+        self.kept_entries = {p: staged.get(p) for p in self.paths if p in self.keep}
+        lines = []
+        for p in self.paths:
+            if p in self.keep and self.restage is not None and p in self.restage:
+                entry = self.restage[p]
+                lines.append(b"%s %s\t%s\0" % (entry[0], entry[1], p) if entry is not None
+                             else b"0 %s\t%s\0" % (zero, p))
+            elif p not in self.keep or _unstaged(staged.get(p), before.get(p)):
+                lines.append(b"%s %s\t%s\0" % (self.target[p][0], self.target[p][1], p)
+                             if p in self.target else b"0 %s\t%s\0" % (zero, p))
+        feed = b"".join(lines)
         try:
             shutil.copyfile(self.holder.gitdir / "index", self.staged)
             fd = os.open(self.lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
@@ -432,7 +556,8 @@ class PreparedMove:
         """Write the changed paths and swap in the prepared index. Returns whether both landed;
         on False the index is untouched and the lock released."""
         try:
-            if not _write_paths(self.repo, self.holder.worktree, self.new, self.target, self.paths):
+            if not _write_paths(self.repo, self.holder.worktree, self.new, self.target,
+                                [p for p in self.paths if p not in self.keep]):
                 self.release()
                 return False
             shutil.copyfile(self.staged, self.lock)
@@ -447,7 +572,8 @@ class PreparedMove:
         """Write the changed paths back to what `old` records. Returns whether all were."""
         try:
             before = _tree_entries(self.holder.worktree, self.old)
-            return _write_paths(self.repo, self.holder.worktree, self.old, before, self.paths)
+            return _write_paths(self.repo, self.holder.worktree, self.old, before,
+                                [p for p in self.paths if p not in self.keep])
         except (TreeStateUnknown, OSError, ValueError):
             return False
 

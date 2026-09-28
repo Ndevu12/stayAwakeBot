@@ -377,7 +377,8 @@ def _amend_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *,
         from stayawake.bots.security.pr.amend import amend_outcome
         return _amend_outcome(lambda r=repo, t=tok: amend_outcome(
             r, display, opts, sigs, allowlist, t,
-            identity_fallback=ident_fallback, resolver=gated_resolver), display)
+            identity_fallback=ident_fallback, resolver=gated_resolver,
+            operator_checkout=True), display)
 
     labels = [_disp(r) for r in repos]
     return _run_fix_sweep(repos, labels, make_outcome, prog, jobs=jobs, verb="Amending")
