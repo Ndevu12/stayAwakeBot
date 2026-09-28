@@ -25,6 +25,10 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+_FIXTURE_GIT = {"stdin": subprocess.DEVNULL, "timeout": 120}
+"""How a fixture's own git runs: with nothing on its stdin, and failing rather than waiting when a
+program the fixture configured does not end."""
+
 
 class OutsideTheSandbox(AssertionError):
     """A helper was pointed at a path this test does not own."""
@@ -75,7 +79,7 @@ class GitSandbox(unittest.TestCase):
         repo = self.owned(self.root / name)
         repo.mkdir(parents=True, exist_ok=True)
         subprocess.run(["git", "init", "-q", "-b", "main", str(repo)],
-                       check=True, capture_output=True)
+                       check=True, capture_output=True, **_FIXTURE_GIT)
         settings = {"user.email": "t@t.test", "user.name": "T", "commit.gpgsign": "false",
                     "tag.gpgsign": "false"}
         settings.update({k.replace("__", "."): v for k, v in config.items()})
@@ -98,13 +102,13 @@ class GitSandbox(unittest.TestCase):
     def git(self, repo: Path, *args: str) -> str:
         """A git command that must succeed."""
         res = subprocess.run(["git", "-C", str(self.owned(repo)), *args],
-                             check=True, capture_output=True, text=True)
+                             check=True, capture_output=True, text=True, **_FIXTURE_GIT)
         return res.stdout
 
     def git_may_fail(self, repo: Path, *args: str) -> subprocess.CompletedProcess:
         """A git command whose non-zero exit is part of the fixture — a conflicting merge, say."""
         return subprocess.run(["git", "-C", str(self.owned(repo)), *args],
-                              capture_output=True, text=True)
+                              capture_output=True, text=True, **_FIXTURE_GIT)
 
     def rev(self, repo: Path, ref: str = "HEAD") -> str:
         return self.git(repo, "rev-parse", ref).strip()
@@ -113,7 +117,7 @@ class GitSandbox(unittest.TestCase):
         """The commit object's bytes, undecoded — a message in a legacy encoding does not survive
         being read as text, which is the thing several of these tests are about."""
         return subprocess.run(["git", "-C", str(self.owned(repo)), "cat-file", "commit", rev],
-                              capture_output=True).stdout
+                              capture_output=True, **_FIXTURE_GIT).stdout
 
     def raw_body(self, repo: Path, rev: str) -> bytes:
         return self.raw_commit(repo, rev).partition(b"\n\n")[2]

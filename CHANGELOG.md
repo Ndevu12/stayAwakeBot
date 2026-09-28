@@ -72,6 +72,9 @@ reader, not the mechanism or the weakness it closed.
 - **saw names the compromised versions instead of a version to install.**
 
 ### Fixed
+- **A repository that makes git wait no longer holds a scan for minutes.** The scan reports it as
+  not read in full and keeps whatever it had already found. Every other repository, however slow,
+  is read as before.
 - **`saw fix` no longer reports success over a checkout it could not finish clearing.** A file it
   could not read now sends the run for review.
 

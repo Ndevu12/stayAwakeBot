@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -20,7 +21,7 @@ from stayawake.lib.git.allowlist import GitRefused
 from stayawake.lib.git.contexts import (Context, UNTRUSTED, SAW_OWNED, OPERATOR_PUSH,
                                         OPERATOR_CONFIG, child_env, config_prefix, neutral_dir)
 
-__all__ = ["run", "run_ok", "stdout", "stdout_bytes", "stdout_bytes_fed", "open_stdout",
+__all__ = ["run", "run_ok", "stdout", "stdout_bytes", "stdout_bytes_fed", "open_stdout", "one_pass",
            "GitRefused", "UNTRUSTED", "SAW_OWNED", "OPERATOR_PUSH", "OPERATOR_CONFIG",
            "LOCAL_TIMEOUT", "NETWORK_TIMEOUT"]
 
@@ -83,6 +84,62 @@ def stalls_recorded():
         _STALLED.reset(token)
 
 
+_UNANSWERED = contextvars.ContextVar("saw_git_unanswered", default=None)
+
+
+@contextlib.contextmanager
+def one_pass():
+    """Within the block, a repository whose configuration every git command would wait on is not
+    asked: each command there answers None at once and is recorded as not run. Whether it would
+    wait is read once per repository. Every other repository is asked as outside the block. A
+    block inside another shares the outer one's answers."""
+    if _UNANSWERED.get() is not None:
+        yield
+        return
+    token = _UNANSWERED.set({})
+    try:
+        yield
+    finally:
+        _UNANSWERED.reset(token)
+
+
+def _where(repo: str | Path) -> str:
+    """The key a repository's answer is kept under. Takes the repo. Returns its resolved path."""
+    try:
+        return os.path.realpath(repo)
+    except (OSError, ValueError):
+        return str(repo)
+
+
+def _not_answering(repo: str | Path | None, args: list[str]) -> bool:
+    """Whether every git command in this repository would wait on its configuration, within the
+    current pass. Takes the repo and the arguments. Returns True, recording the command as not
+    run, when so."""
+    answers = _UNANSWERED.get()
+    if answers is None or repo is None or _reads_named_configuration_only(args):
+        return False
+    key = _where(repo)
+    if key not in answers:
+        from stayawake.lib.git.exec_surface import config_waits
+        answers[key] = config_waits(repo)
+    if not answers[key]:
+        return False
+    record = _STALLED.get()
+    if record is not None:
+        record.append(f"git {args[0] if args else ''} was not run: every git command would wait "
+                      f"on the configuration of {repo}")
+    return True
+
+
+def _reads_named_configuration_only(args: list[str]) -> bool:
+    """Whether a command reads one named configuration file and not the repository's. Takes the
+    arguments. Returns the answer."""
+    _, sub, rest = allowlist.split(list(args))
+    return sub == "config" and any(
+        flag in ("--global", "--system", "--file", "-f", "--blob")
+        or flag.startswith(("--file=", "--blob=")) for flag in rest)
+
+
 def _stalled(args: list[str], timeout) -> None:
     """Record a git command that did not answer in time. Takes its arguments and the timeout."""
     record = _STALLED.get()
@@ -102,7 +159,7 @@ def run(repo: str | Path | None, args: list[str], *, env: dict | None = None,
     conflict yet prints the tree); output decodes with `errors="replace"`.
     """
     prepared = _prepare(repo, args, env, context)
-    if prepared is None:
+    if prepared is None or _not_answering(repo, args):
         return None
     argv, child, cwd = prepared
     try:
@@ -126,7 +183,7 @@ def stdout_bytes_fed(repo: str | Path | None, args: list[str], stdin: bytes, *,
                      env: dict | None = None, context: Context = UNTRUSTED) -> bytes | None:
     """Run a git command with `stdin` written to it. Returns its raw stdout, or None on any failure."""
     prepared = _prepare(repo, args, env, context)
-    if prepared is None:
+    if prepared is None or _not_answering(repo, args):
         return None
     argv, child, cwd = prepared
     try:
@@ -145,7 +202,7 @@ def stdout_bytes(repo: str | Path | None, args: list[str], *,
     """Raw stdout, undecoded — None on any failure. For content whose BYTES are the thing, such as a
     commit message in a legacy encoding."""
     prepared = _prepare(repo, args, None, context)
-    if prepared is None:
+    if prepared is None or _not_answering(repo, args):
         return None
     argv, child, cwd = prepared
     try:
@@ -163,7 +220,7 @@ def open_stdout(repo: str | Path | None, args: list[str], *,
     """Start a git command whose stdout the caller streams. Returns the process, or None when it was
     refused or could not start. The caller owns the process and must wait for or kill it."""
     prepared = _prepare(repo, args, None, context)
-    if prepared is None:
+    if prepared is None or _not_answering(repo, args):
         return None
     argv, child, cwd = prepared
     try:

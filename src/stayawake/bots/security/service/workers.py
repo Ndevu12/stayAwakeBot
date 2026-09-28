@@ -13,6 +13,7 @@ from stayawake.bots.security.scanner import attach_history_note, run_matchers, s
 from stayawake.bots.security.targets import LocalRepoTarget, RemoteRepoTarget
 from stayawake.bots.security.matchers import REGISTRY
 from stayawake.bots.security.resolution import LocalTarget
+from stayawake.lib.git.run import one_pass
 
 
 @dataclass
@@ -231,7 +232,7 @@ class MatcherJob:
 
 def collect_partial(job: MatcherJob) -> RawPartial:
     buf = io.StringIO()
-    with redirect_stdout(buf), redirect_stderr(buf):
+    with redirect_stdout(buf), redirect_stderr(buf), one_pass():
         target = read_as(job.scope, job.display, job.opts, include_only=job.include)
         by_matcher = run_matchers(target, list(job.matcher_names), job.signatures, job.all_sigs)
     return RawPartial(by_matcher, list(target.read_errors), list(target.coverage_notes),
