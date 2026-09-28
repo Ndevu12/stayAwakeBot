@@ -12,7 +12,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
-from contextlib import ExitStack, contextmanager, redirect_stderr
+from contextlib import redirect_stderr
 
 from stayawake import cli
 from stayawake.bots.security.models import CONFIRMED, HEURISTIC, Finding, ScanResult, Severity
@@ -29,14 +29,8 @@ from stayawake.lib.git.write import amend as gitamend
 from stayawake.lib.git.write.push import PushResult
 from tests.bots.security.test_evil_merge import EVIL_SIG, _git
 from tests.support.gitrepo import GitSandbox
+from tests.support.offline_github import github_answers
 from stayawake.bots.security.remediation.footprint import REMOVE_FILE
-
-
-class _NoRemoteTags:
-    """What `git ls-remote --tags` looks like for a remote carrying no tags."""
-    returncode = 0
-    stdout = ""
-    stderr = ""
 
 
 def _sigs():
@@ -201,39 +195,11 @@ class _AmendFixture(GitSandbox):
     def _amend(self, pusher=_ok_push, **kw):
         return render_amend_line(self._act(pusher=pusher, **kw))
 
-    @contextmanager
     def _remote(self, *, permitted=True, protected=False):
         """The answers this path must get from GitHub before it may move anything: who may
         rewrite, whether the refs refreshed, and what each remote branch is at. Every amend goes
         through them, so the harness supplies them rather than letting them be skipped."""
-        import stayawake.bots.security.pr.amend as amendmod
-        from stayawake.bots.security import remediator as remediatormod
-        at = "stayawake.bots.security.pr.amend."
-        with ExitStack() as stack:
-            stack.enter_context(mock.patch.object(remediatormod, "_preflight",
-                                                  return_value=None))
-            for target, patch in (
-                ("gitutil.origin_slug", dict(return_value="acme/app")),
-                ("authority.may_rewrite", dict(return_value=mock.Mock(
-                    permitted=permitted, conclusive=True,
-                    reason="owner" if permitted else "unauthorized"))),
-                ("authority.ref_protection", dict(return_value=mock.Mock(
-                    protected=protected, reason="rule_read"))),
-                ("authority.fork_count", dict(return_value=0)),
-                ("gitutil.fetch_refs", dict(return_value=mock.Mock(ok=True, reason=""))),
-                ("_read_remote_head",
-                 dict(side_effect=lambda r, s, b, tk: (True, self._rev(b)))),
-                # `_tags_at` asks the REMOTE for tags; unstubbed every gate test would wait out
-                # the network timeout against a repository that does not exist.
-                ("gitremote.ls_remote", dict(return_value=_NoRemoteTags())),
-            ):
-                held = amendmod
-                for part in target.split("."):
-                    held = getattr(held, part)
-                if isinstance(held, mock.Mock):
-                    continue  # a test that supplies its own answer keeps it
-                stack.enter_context(mock.patch(at + target, **patch))
-            yield
+        return github_answers(self._rev, permitted=permitted, protected=protected)
 
     def _act(self, pusher=_ok_push, *, permitted=True, protected=False, **kw):
         with self._remote(permitted=permitted, protected=protected):
