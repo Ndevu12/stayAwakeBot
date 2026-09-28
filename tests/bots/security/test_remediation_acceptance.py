@@ -166,7 +166,6 @@ class TestTheLoaderIsGone(_Remediated):
     def test_no_file_in_the_checkout_holds_it(self):
         self.assertEqual([], self._payload_on_disk())
 
-    @unittest.expectedFailure
     def test_no_ref_reaches_it(self):
         self.assertEqual([], self._payload_in_history())
 
@@ -174,13 +173,11 @@ class TestTheLoaderIsGone(_Remediated):
 class TestEveryLauncherIsDisarmed(_Remediated):
     """Criterion 2: every mechanism that launches it is gone or disarmed."""
 
-    @unittest.expectedFailure
     def test_the_launcher_file_is_gone(self):
         self.assertFalse((self.d / THE_LAUNCHER).exists())
         self.assertNotIn(THE_LAUNCHER,
                          self.git(self.d, "ls-tree", "-r", "--name-only", "HEAD").split())
 
-    @unittest.expectedFailure
     def test_the_injected_setting_is_gone_and_the_real_ones_survive(self):
         on_disk = json.loads((self.d / THE_SHARED_CONFIG).read_text())
         committed = json.loads(self.git(self.d, "show", f"HEAD:{THE_SHARED_CONFIG}"))
@@ -229,6 +226,20 @@ class TestTheReportMatchesTheResult(_Remediated):
     def test_fix_reports_success_only_when_nothing_is_left_on_disk(self):
         if self._payload_on_disk():
             self.assertNotEqual(0, self.fix_exit)
+
+
+class TestTheOperatorsOwnWorkStopsTheRewrite(_InfectedProject):
+    """Check that uncommitted work of the operator's own is never overwritten by the rewrite."""
+
+    def test_amend_leaves_the_branch_and_the_work_where_they_are(self):
+        self._fix()
+        (self.d / "package.json").write_text(PACKAGE_JSON.replace("1.0.0", "1.1.0"))
+        before = self.rev(self.d, "HEAD")
+        outcome = self._amend()
+        self.assertFalse(outcome.completed)
+        self.assertIn("WORKING_TREE_NOT_CLEAN", [r.cause.name for r in outcome.reasons])
+        self.assertEqual(before, self.rev(self.d, "HEAD"))
+        self.assertIn("1.1.0", (self.d / "package.json").read_text())
 
 
 if __name__ == "__main__":

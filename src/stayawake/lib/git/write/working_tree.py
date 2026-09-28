@@ -285,6 +285,53 @@ def uncommitted_paths(worktree: str | Path, *, _depth: int = 0) -> list[bytes] |
     return sorted(changed)
 
 
+def holds_only(worktree: str | Path, commit: str) -> bool:
+    """Whether every uncommitted change in `worktree` is one `commit` already records: each
+    changed path on disk holds what `commit` holds there, or is absent where `commit` has none,
+    and nothing staged or in conflict differs from both HEAD and `commit`. Takes the working tree
+    and the commit. Returns False when the checkout cannot be read."""
+    worktree = Path(worktree)
+    changed = uncommitted_paths(worktree)
+    if changed is None:
+        return False
+    if not changed:
+        return True
+    try:
+        head = stdout(worktree, ["rev-parse", "--verify", "--quiet", "HEAD"],
+                      context=UNTRUSTED).strip()
+        committed = _tree_entries(worktree, head) if head else {}
+        target = _tree_entries(worktree, commit)
+        indexed = _index_entries(worktree)
+    except (TreeStateUnknown, ValueError):
+        return False
+    present = []
+    for rel in changed:
+        staged = indexed.get(rel)
+        if staged is not None and (staged[2] != b"0"
+                                   or staged[:2] not in (committed.get(rel), target.get(rel))):
+            return False
+        if rel not in target:
+            if os.path.lexists(worktree / os.fsdecode(rel)) or _has_link_above(worktree, rel):
+                return False
+        elif target[rel][0] == _GITLINK:
+            return False
+        else:
+            present.append(rel)
+    if not present:
+        return True
+    object_format = stdout(worktree, ["rev-parse", "--show-object-format"],
+                           context=UNTRUSTED).strip() or "sha1"
+    track_executable = stdout(worktree, ["config", "--get", "--type=bool", "core.filemode"],
+                              context=UNTRUSTED).strip() != "false"
+    conversion = _conversion_config(worktree)
+    with borrow(worktree) as borrowed:
+        if not _converted_as_in(worktree, borrowed, present):
+            return False
+        with borrowed.attributes_then(_NO_FILTER):
+            return all(_content_matches(borrowed, worktree, rel, *target[rel], object_format,
+                                        track_executable, conversion) for rel in present)
+
+
 def is_dirty(worktree: str | Path, *, _depth: int = 0) -> bool:
     """Whether `worktree` holds anything its HEAD does not (see `uncommitted_paths`). Takes the
     working tree. A checkout that cannot be read is dirty."""

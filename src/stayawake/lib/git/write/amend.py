@@ -20,6 +20,12 @@ from stayawake.lib.git.write.sign import (SigningStatus, sign_flags, signing_arg
 _ZERO = "0" * 40
 
 
+def holds_only(worktree: str | Path, commit: str) -> bool:
+    """Whether every uncommitted change in `worktree` is one `commit` already records
+    (`working_tree.holds_only`)."""
+    return working_tree.holds_only(worktree, commit)
+
+
 def is_dirty(repo: str | Path) -> bool:
     """Whether the checkout at `repo` holds anything its HEAD does not (`working_tree.is_dirty`)."""
     return working_tree.is_dirty(repo)
@@ -234,7 +240,8 @@ def point_branch_at(repo: str | Path, branch: str, new: str, old: str) -> bool:
     """Compare-and-swap `refs/heads/branch` from `old` to `new`.
 
     The checkout holding that branch — any checkout, not only this one — follows it, so this
-    refuses outright, before the ref moves, while that tree holds uncommitted work. The guard sits
+    refuses outright, before the ref moves, while that tree holds uncommitted work `new` does not
+    already record. The guard sits
     here rather than with the caller because the tree is rewritten here: a checked-out branch
     reaches this function from the amend path, from the restore path, and from anything added
     next, and only one of those has to forget the check for the work to be gone.
@@ -243,7 +250,7 @@ def point_branch_at(repo: str | Path, branch: str, new: str, old: str) -> bool:
         holder = checked_out_at(repo, branch)
     except OSError:
         return False
-    if holder is not None and is_dirty(holder.worktree):
+    if holder is not None and not working_tree.holds_only(holder.worktree, new):
         return False
     move = None
     if holder is not None:

@@ -42,7 +42,15 @@ repository.
 It tells you and changes nothing when any of the above is missing, when the remote branches cannot
 be refreshed or read, when the replacement would drop content the finding does not cover, when the
 previous commits cannot be captured first, or when the working tree — or another worktree holding
-one of those branches — has uncommitted work.
+one of those branches — has uncommitted work the amended history does not already hold.
+
+## After `saw fix`
+
+Run it straight after [`saw fix`](fix.md). The cleanup `fix` made in your checkout is exactly what
+the amended history holds, so it is not uncommitted work in the way: the amend takes the same files
+out of every commit that carried them, removes the launcher files `fix` removed and strips the same
+settings from every version of a settings file, then moves your checkout onto the result. A change
+of your own that the amended history does not hold still stops it before anything moves.
 
 If it cannot finish, it puts the branches back and says so. If it moved a branch and could not put
 it back, it names that branch: look at that repository before doing anything else with it.

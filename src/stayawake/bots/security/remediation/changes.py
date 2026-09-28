@@ -44,27 +44,49 @@ class Change:
     detail: str = ""
 
 
+def repair_for(finding) -> Change | None:
+    """The change that repairs one confirmed finding, or None when it has no automatic repair.
+    Takes the finding. Returns the change."""
+    if not is_auto_fixable(finding):
+        return None
+    action = _ACTIONS[getattr(finding, "remediation", "manual")]
+    path = finding.path
+    if not path or Path(path) in (Path("."), Path("..")):
+        return None
+    if action == "vscode":
+        if path.endswith("tasks.json"):
+            return Change("remove", path, "VS Code auto-run task harness")
+        if path.endswith("settings.json"):
+            return Change("strip-settings", path, "remove allowAutomaticTasks/tasks")
+        return None
+    return Change(action, path, finding.description[:60])
+
+
 def plan(findings) -> list[Change]:
     """Map findings to a deduped list of changes (pure — no filesystem access)."""
     changes: dict[tuple[str, str], Change] = {}
     for f in findings:
-        if not is_auto_fixable(f):
-            continue
-        action = _ACTIONS[getattr(f, "remediation", "manual")]
-        path = f.path
-        if not path or Path(path) in (Path("."), Path("..")):
-            continue
-        if action == "vscode":
-            if f.path.endswith("tasks.json"):
-                c = Change("remove", f.path, "VS Code auto-run task harness")
-            elif f.path.endswith("settings.json"):
-                c = Change("strip-settings", f.path, "remove allowAutomaticTasks/tasks")
-            else:
-                continue
-        else:
-            c = Change(action, path, f.description[:60])
-        changes[(c.action, c.path)] = c
+        c = repair_for(f)
+        if c is not None:
+            changes[(c.action, c.path)] = c
     return list(changes.values())
+
+
+def text_repair(action: str):
+    """`repair(text) -> repaired | None` for a change made by editing a file's text, None when the
+    text needs no repair. Takes the change's action. Returns the function, or None when the action
+    does not edit text."""
+    edit = {"strip-settings": strip_settings_autorun,
+            "strip-gitignore": strip_gitignore_text}.get(action)
+    if edit is None:
+        return None
+
+    def repair(text: str) -> str | None:
+        if not text:
+            return None
+        repaired = edit(text)
+        return None if repaired == text else repaired
+    return repair
 
 
 def _gitignore_marker_patterns():

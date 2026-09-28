@@ -9,10 +9,11 @@ from pathlib import Path
 from stayawake.bots.security.models import CONFIRMED
 from stayawake.utils import scratch
 from stayawake.bots.security.pr.resolve import REMOVE, RESTORE, SUPPLY
-from stayawake.bots.security.remediation import footprint, oracle
+from stayawake.bots.security.remediation import changes, footprint, oracle
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.targets import LocalRepoTarget
 from stayawake.lib.git.auth import run_remote_git
+from stayawake.lib.git.borrowed import BorrowError, borrow
 from stayawake.lib.git import remote as gitremote
 from stayawake.lib.git.run import UNTRUSTED, stdout_bytes
 from stayawake.bots.security.pr.outcome import (AmendOutcome, BranchResult, Cause, Reason,
@@ -115,6 +116,51 @@ def _flat(signatures) -> list:
     return list(signatures or [])
 
 
+def _committed_scan(repo: Path, opts, signatures, allowlist):
+    """A scan of the files HEAD records, written out exactly as stored. Takes the repository, the
+    scan options, the signatures and the allowlist. Returns the result, or None when HEAD could
+    not be written out."""
+    head = gitutil.stdout(repo, ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"]).strip()
+    if not head:
+        return None
+    dest = scratch.new_dir("the files HEAD records")
+    try:
+        with borrow(repo) as borrowed:
+            if not borrowed.materialise(head, dest):
+                return None
+        target = LocalRepoTarget(dest, str(repo), opts)
+        target.is_repo = False
+        return scan_target(target, signatures, allowlist)
+    except BorrowError:
+        return None
+    finally:
+        scratch.release_path(dest)
+
+
+def _add_file_findings(scan, committed) -> None:
+    """Add to `scan` each file finding `committed` makes that `scan` does not. Takes both
+    results."""
+    seen = {(f.path, f.signature_id) for f in scan.findings}
+    scan.findings.extend(f for f in committed.findings
+                         if not getattr(f, "commit_sha", None)
+                         and (f.path, f.signature_id) not in seen)
+
+
+def _repair_checks(finding, flat) -> tuple:
+    """`(carries, corrector)` for a finding this verb repairs by editing the file, or
+    `(None, None)`. Takes the finding and the flat signatures. The footprint's own excision comes
+    first; otherwise the text repair the working-tree fix makes."""
+    corrector = footprint.corrector_for(finding, flat)
+    carries = footprint.carries_footprint(finding, flat)
+    if corrector is not None and carries is not None:
+        return carries, corrector
+    repair = changes.repair_for(finding)
+    edit = changes.text_repair(repair.action) if repair is not None else None
+    if edit is None:
+        return None, None
+    return (lambda text: edit(text) is not None), edit
+
+
 def _content_targets(repo: Path, scan, signatures) -> list[tuple]:
     """Confirmed file findings this verb can excise, as `(finding, carries, corrector,
     cleaned_head)`, one per path and only where the corrector clears the footprint at HEAD."""
@@ -127,8 +173,7 @@ def _content_targets(repo: Path, scan, signatures) -> list[tuple]:
         path = getattr(f, "path", "") or ""
         if not path or path in seen or getattr(f, "commit_sha", None):
             continue
-        corrector = footprint.corrector_for(f, flat)
-        carries = footprint.carries_footprint(f, flat)
+        carries, corrector = _repair_checks(f, flat)
         if corrector is None or carries is None:
             continue
         head = gitutil.file_at(repo, "HEAD", path)
@@ -398,12 +443,15 @@ def _uncertain_items(repo: Path, scan, taken: set[str],
 
 
 def _foreign_targets(scan) -> list[str]:
-    """Paths of confirmed wholly-foreign files to remove whole."""
+    """Paths of confirmed files to remove whole: wholly-foreign files, and files the working-tree
+    fix removes."""
     out: list[str] = []
     for f in scan.findings:
         if getattr(f, "confidence", None) != CONFIRMED or getattr(f, "advisory_only", False):
             continue
-        path = footprint.foreign_path(f)
+        repair = changes.repair_for(f)
+        path = footprint.foreign_path(f) or (repair.path if repair is not None
+                                             and repair.action == "remove" else None)
         if path and path not in out:
             out.append(path)
     return out
@@ -424,7 +472,7 @@ def _unhandled_confirmed(scan, signatures, revert_paths: set[str],
         path = getattr(f, "path", "") or ""
         if path in revert_paths or path in remove_paths:
             continue
-        carries = footprint.carries_footprint(f, flat)
+        carries, _corrector = _repair_checks(f, flat)
         if carries is not None and path in cleaned_head and not carries(cleaned_head[path]):
             continue
         if path and path not in paths:
@@ -729,8 +777,6 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
 
     if not gitutil.is_git_repo(repo):
         return _refuse(Cause.NOT_A_GIT_REPOSITORY)
-    if gitamend.is_dirty(repo):
-        return _refuse(Cause.WORKING_TREE_NOT_CLEAN)
 
     slug = gitutil.origin_slug(repo)
     if not slug:
@@ -749,6 +795,11 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     scan = scan_target(LocalRepoTarget(repo, str(repo), opts), signatures, allowlist)
     if scan.error is not None:
         return _refuse(Cause.SCAN_DID_NOT_FINISH)
+    if gitamend.is_dirty(repo):
+        committed = _committed_scan(repo, opts, signatures, allowlist)
+        if committed is None or committed.error is not None:
+            return _refuse(Cause.SCAN_DID_NOT_FINISH)
+        _add_file_findings(scan, committed)
     commits = _confirmed_commits(scan)
     infected: dict[str, tuple[str, ...]] = {}
     uncharacterized: dict[str, tuple[str, str]] = {}
@@ -1016,6 +1067,14 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     left = _payload_left(repo, all_infected, rebuilt, delivered_tips, path_checks, remove)
     if left:
         return _refuse(Cause.PAYLOAD_STILL_REACHABLE, "; ".join(left[:3]))
+
+    for name, tip, _c in deliverable:
+        try:
+            holder = gitamend.checkout_holding(repo, name)
+        except OSError:
+            return _refuse(Cause.WORKING_TREE_NOT_CLEAN)
+        if holder is not None and not gitamend.holds_only(holder, delivered_tips[tip]):
+            return _refuse(Cause.WORKING_TREE_NOT_CLEAN)
 
     captured = capture_bundle(repo, [(tip, new_tips[tip]) for _n, tip, _c in deliverable],
                               _capture_path(slug, oldest[:12]))
