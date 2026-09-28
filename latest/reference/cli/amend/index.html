@@ -1986,7 +1986,8 @@ cleaned as <code>fix</code> cleans it — the payload taken out of it and out of
 uncommitted work saved on a local <code>saw/uncommitted-…</code> branch. Saved work is cleaned on your
 machine and never pushed; a saved branch the remote already holds is force-updated like any other.</p>
 <p>Run straight after <code>fix</code>, it finishes the job: the files <code>fix</code> removed and the settings it stripped
-are taken out of every commit that carried them, whatever version each commit held.</p>
+are taken out of every commit that carried them, whatever version each commit held. It reports
+completion only when the history it rewrote no longer holds them.</p>
 <p>If it cannot finish, it puts the branches back and says so. If it moved a branch and could not put
 it back, it names that branch: look at that repository before doing anything else with it.</p>
 <h2 id="what-it-leaves-for-you">What it leaves for you<a class="headerlink" href="#what-it-leaves-for-you" title="Permanent link">&para;</a></h2>
