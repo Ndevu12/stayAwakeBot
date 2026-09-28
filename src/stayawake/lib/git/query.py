@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from stayawake.lib.git import remote as gitremote
-from stayawake.lib.git.run import run, stdout, stdout_bytes_fed
+from stayawake.lib.git.run import run, stdout, stdout_bytes, stdout_bytes_fed
 
 
 def is_git_repo(repo: str | Path) -> bool:
@@ -540,6 +540,53 @@ def file_commits(repo: str | Path, path: str, limit: int = 50,
     args += ["--", path]
     out = stdout(repo, args)
     return [ln.strip() for ln in out.splitlines() if ln.strip()]
+
+
+_SHA_BYTES = frozenset(b"0123456789abcdef")
+
+
+def _commit_header(token: bytes) -> bytes | None:
+    """The commit id a log header token names, or None when the token is not one."""
+    line = token.strip(b"\n")
+    if len(line) in (40, 64) and all(c in _SHA_BYTES for c in line):
+        return line
+    return None
+
+
+def blob_paths(repo: str | Path, oid: str, limit: int = 100_000) -> list[str] | None:
+    """Every path at which the blob `oid` was ever written or removed. Takes the repo, the blob id
+    and the walk bound. Returns the paths, or None when they could not be established."""
+    args = ["-c", "log.showRoot=true", "log", f"-n{limit}", "--format=%H", "-m", "--raw", "-z",
+            "--no-abbrev", f"--find-object={oid}"]
+    args += [f"--exclude={glob}" for glob in _NOT_A_BRANCH]
+    args += [f"--glob={_ORIGIN_REF}*", "--branches", "--full-history"]
+    out = stdout_bytes(repo, args)
+    if out is None:
+        return None
+    want = oid.encode("ascii")
+    commits: set[bytes] = set()
+    paths: list[str] = []
+    expected, matched = 0, False
+    for token in out.split(b"\0"):
+        if expected:
+            if matched and token:
+                name = token.decode("utf-8", "surrogateescape")
+                if name not in paths:
+                    paths.append(name)
+            expected -= 1
+            continue
+        head, colon, meta = token.partition(b":")
+        sha = _commit_header(head)
+        if sha is not None:
+            commits.add(sha)
+        if colon:
+            fields = meta.split()
+            status = fields[-1] if fields else b""
+            expected = 2 if status[:1] in (b"R", b"C") else 1
+            matched = want in fields
+    if len(commits) >= limit:
+        return None
+    return paths
 
 
 def introduced_added_text(repo: str | Path, base_tree: str, target: str, path: str) -> str:

@@ -587,9 +587,8 @@ def _branches_left_purging(repo: Path, purge: set, survives, covered: set[str]) 
 
 
 def _candidate_refs(repo: Path) -> list[tuple[str, str]]:
-    """Every ref outside the branches an amend rewrites, as `(name, tip)` — tags, non-origin
-    remotes, arbitrary namespaces, every stash reflog entry, and each linked worktree's HEAD. Local
-    heads and `refs/remotes/origin/*` are excluded. Takes the repo. Returns the refs."""
+    """Every ref outside the branches an amend rewrites, as `(name, tip)`. Takes the repo. Returns
+    the refs."""
     out: list[tuple[str, str]] = []
     named = gitutil.stdout(repo, ["for-each-ref", "--format=%(refname) %(objectname)", "refs/"],
                            context=UNTRUSTED)
@@ -620,8 +619,10 @@ def _reachable_blobs(repo: Path, tips: list[str], exclude: list[str]) -> set[str
     and the tips to exclude. Returns the ids."""
     if not tips:
         return set()
-    listing = gitutil.stdout(repo, ["rev-list", "--objects", *tips, "--not", *exclude],
-                             context=UNTRUSTED)
+    args = ["rev-list", "--objects", *tips]
+    if exclude:
+        args += ["--not", *exclude]
+    listing = gitutil.stdout(repo, args, context=UNTRUSTED)
     return {parts[0] for line in listing.splitlines() if (parts := line.split())}
 
 
@@ -974,6 +975,25 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
         remove[path] = entry[1]
         remove_shas.update(foreign)
         remove_holders[path] = set(foreign)
+        elsewhere = gitutil.blob_paths(repo, entry[1])
+        if elsewhere is None:
+            return _refuse(Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, path)
+        for former in elsewhere:
+            if (former in remove or former in varied or former in clean
+                    or former in {p for ps in infected.values() for p in ps}):
+                continue
+            hist = _foreign_history(repo, former, entry[1])
+            if hist is None:
+                return _refuse(Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, former)
+            former_holders, former_foreign = hist
+            if not former_foreign:
+                return _refuse(Cause.PAYLOAD_STILL_REACHABLE, former)
+            if set(former_holders) != set(former_foreign):
+                varied.append(former)
+                continue
+            remove[former] = entry[1]
+            remove_shas.update(former_foreign)
+            remove_holders[former] = set(former_foreign)
 
     survives = oracle.survives(repo, signatures, allowlist, opts)
     substitute: dict[str, tuple[str, tuple[str, str]]] = {}
@@ -1077,6 +1097,19 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
             return _refuse(Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY,
                            str(len(unhandled)), ", ".join(sorted(unhandled)))
         return _refuse(Cause.NO_CONFIRMED_PAYLOAD)
+
+    malicious_oids: set[str] = set(remove.values())
+    malicious_oids |= {fo for fo, _e in substitute.values()}
+    for path, holders in purge_holders.items():
+        for sha in holders:
+            entry = gitutil.tree_entry(repo, sha, path)
+            if entry is not None:
+                malicious_oids.add(entry[1])
+    for path, (carries, _c) in clean.items():
+        for sha in clean_shas:
+            entry = gitutil.tree_entry(repo, sha, path)
+            if entry is not None and carries(gitutil.file_at(repo, sha, path)):
+                malicious_oids.add(entry[1])
 
     all_infected = (set(infected) | clean_shas | remove_shas | substitute_shas | purge_shas
                     | set(uncharacterized))
@@ -1189,6 +1222,19 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
     left = _payload_left(repo, all_infected, rebuilt, delivered_tips, path_checks, remove)
     if left:
         return _refuse(Cause.PAYLOAD_STILL_REACHABLE, "; ".join(left[:3]))
+    covered_names = {n for n, _t, _c in heads}
+    post_view = [(name, delivered_tips[tip]) for name, tip, _c in deliverable]
+    for name, ref in gitutil.branch_refs(repo):
+        if name in covered_names:
+            continue
+        tip = gitutil.stdout(repo, ["rev-parse", ref]).strip()
+        if tip:
+            post_view.append((name, tip))
+    left_oids = malicious_oids & _reachable_blobs(repo, [tip for _n, tip in post_view], [])
+    if left_oids:
+        holding = sorted({name for name, tip in post_view
+                          if malicious_oids & _reachable_blobs(repo, [tip], [])})
+        return _refuse(Cause.PAYLOAD_STILL_REACHABLE, ", ".join(holding))
 
     keep: dict[str, frozenset[str]] = {}
     staging: dict[str, dict] = {}

@@ -55,7 +55,8 @@ uncommitted work saved on a local `saw/uncommitted-…` branch. Saved work is cl
 machine and never pushed; a saved branch the remote already holds is force-updated like any other.
 
 Run straight after `fix`, it finishes the job: the files `fix` removed and the settings it stripped
-are taken out of every commit that carried them, whatever version each commit held.
+are taken out of every commit that carried them, whatever version each commit held. It reports
+completion only when the history it rewrote no longer holds them.
 
 If it cannot finish, it puts the branches back and says so. If it moved a branch and could not put
 it back, it names that branch: look at that repository before doing anything else with it.
