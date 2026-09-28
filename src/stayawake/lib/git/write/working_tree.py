@@ -339,7 +339,8 @@ def changes_in_the_way(worktree: str | Path, commit: str) -> ChangesInTheWay | N
         indexed = _index_entries(worktree)
     except (TreeStateUnknown, ValueError):
         return None
-    rewritten = {rel for rel in set(committed) | set(target) if committed.get(rel) != target.get(rel)}
+    across = set(committed) | set(target)
+    rewritten = {rel for rel in across if committed.get(rel) != target.get(rel)}
     blocking = [rel for rel, entry in indexed.items() if entry[2] != b"0"]
     blocking += [rel for rel in rewritten if _has_link_above(worktree, rel)]
     blocking += [name.encode() for name in operations]
