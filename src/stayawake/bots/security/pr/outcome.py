@@ -80,6 +80,7 @@ class Cause(Enum):
     SUPPLIED_CONTENT_UNWRITABLE = "supplied-content-unwritable"
     HISTORY_TOO_LARGE_TO_ENUMERATE = "history-too-large-to-enumerate"
     SAVED_WORK_CLEANED_HERE = "saved-work-cleaned-here"
+    PAYLOAD_REACHABLE_FROM_OTHER_REFS = "payload-reachable-from-other-refs"
 
 
 _NEEDING_NO_ACTION = frozenset({Cause.PREVIOUS_OBJECTS_UNCOLLECTED, Cause.NO_CONFIRMED_PAYLOAD,
@@ -244,6 +245,8 @@ _PHRASE = {
     Cause.REPLAY_FAILED: "the replay failed; branches left as they stood",
     Cause.PUSH_REFUSED: "the push was refused",
     Cause.TAGS_AT_REPLACED_COMMIT: "tags still point at it",
+    Cause.PAYLOAD_REACHABLE_FROM_OTHER_REFS:
+        "still reachable from {detail} — a tag, stash, or another ref can put it back; clear it there too",
     Cause.FORKS_EXIST: "forks still carry it",
     Cause.TAGS_NOT_ESTABLISHED:
         "whether a tag still points at the replaced commit could not be established",

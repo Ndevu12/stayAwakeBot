@@ -72,6 +72,9 @@ reader, not the mechanism or the weakness it closed.
 - **saw names the compromised versions instead of a version to install.**
 
 ### Fixed
+- **`saw fix amend` now accounts for a removed file wherever your repository can still reach it.**
+  After amending history it reports any remaining place your repository holds a file it removed,
+  names each one, and marks the run for review until you have cleared them.
 - **`saw fix amend` finishes what `saw fix` began.** Run straight after `saw fix`, it amends the
   infected commits instead of stopping at the checkout `fix` cleaned, and it takes out of history
   everything `fix` repairs, whichever version each commit held: the payload, the launcher files
