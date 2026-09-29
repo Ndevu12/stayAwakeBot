@@ -124,16 +124,21 @@ def hook_disabled() -> bool:
     return _truthy(get(SAW_HOOK_DISABLED))
 
 
-def hook_timeout() -> float:
-    """Wall-clock budget (seconds) for one scan-on-clone scan, so a giant clone can never hang git.
-    `SAW_HOOK_TIMEOUT` overrides the 60s default; `0`/negative/invalid means no cap."""
+_HOOK_TIMEOUT_DEFAULTS = {"pre-push": 20.0}
+
+
+def hook_timeout(event: str | None = None) -> float:
+    """Wall-clock budget (seconds) for one git-hook scan, so a giant clone or push can never hang
+    git. `SAW_HOOK_TIMEOUT` overrides the default for every event (60s, 20s for a push);
+    `0`/negative/invalid means no cap."""
+    default = _HOOK_TIMEOUT_DEFAULTS.get(event or "", 60.0)
     raw = get(SAW_HOOK_TIMEOUT)
     if raw is None:
-        return 60.0
+        return default
     try:
         val = float(raw)
     except ValueError:
-        return 60.0
+        return default
     return val if val > 0 else 0.0
 
 

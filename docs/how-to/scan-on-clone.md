@@ -5,9 +5,12 @@ description: Scan code the moment it lands — a clone, pull, branch switch or r
 # Scan on clone
 
 A worm fires when you install dependencies, run a build, or open the folder in an editor — not when
-you clone.
-`saw hook` puts a scan in between: a fresh clone, a pull, a branch switch or a rebase is scanned and
-you are warned *before* you run anything. Flags: [CLI reference](../reference/cli/hook.md).
+you clone. And a worm spreads when you push it on to a shared remote, where it reaches your
+collaborators and your CI.
+`saw hook` puts a scan in between on both sides: a fresh clone, a pull, a branch switch or a rebase
+is scanned and you are warned *before* you run anything, and a `git push` is checked for every file
+version it would publish, and reported, *before* the code leaves your machine. Flags:
+[CLI reference](../reference/cli/hook.md).
 
 ```bash
 saw hook install                       # future clones and pulls are scanned automatically
@@ -29,6 +32,7 @@ repositories it has seeded and reports a hook saw did not install or one that ha
 **Limits worth knowing.** It applies to repositories cloned or created *after* you install it, which
 is how git's template mechanism works — scan the ones you already have with `saw scan ~/dev`. A
 global `core.hooksPath` overrides it, and `install`/`status` warn when one is set. `git reset --hard`
-fires no git hook at all, so scan that yourself.
+fires no git hook at all, so scan that yourself. saw never stops a push: it reports what the push
+carries, and a push it could not check in full reads as not verified, never clean.
 
 CI has no clone hook; the equivalent there is [gate CI](gate-ci.md).

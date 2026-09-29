@@ -53,14 +53,16 @@ class GitHistoryMatcher(Matcher):
 
     def scan(self, target, signatures, all_signatures=None):
         by_conf = {s["id"]: s for s in signatures if s.get("kind") == "evil-merge"}
-        if not by_conf or not gitutil.is_git_repo(target.repo_root):
+        named = getattr(target, "merge_scope", None)
+        if not by_conf or named == [] or (named is None and not gitutil.is_git_repo(target.repo_root)):
             return []
         loader_sig = next((s for s in by_conf.values() if s.get("confidence") != "heuristic"), None)
         heuristic_sig = next((s for s in by_conf.values() if s.get("confidence") == "heuristic"), None)
         content_sig = build_confirmed_loader_check(all_signatures or signatures)
         findings: list[Finding] = []
         with gitutil.borrowed_or_none(target.repo_root) as borrowed:
-            for sha in gitutil.merge_commits(target.repo_root)[:_MAX_CANDIDATES]:
+            merges = gitutil.merge_commits(target.repo_root) if named is None else named
+            for sha in merges[:_MAX_CANDIDATES]:
                 evil = gitutil.evil_merge_paths(target.repo_root, sha, content_sig=content_sig,
                                                 obfuscation_reason=_obfuscation_reason,
                                                 borrowed=borrowed)

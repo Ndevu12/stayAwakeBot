@@ -328,7 +328,8 @@ def _scan_target(target, signatures_by_matcher, allowlist, all_sigs, order) -> S
         by_matcher = run_matchers(target, order, signatures_by_matcher, all_sigs)
         # A named file has no tree to answer about: `root` is only the directory it sits in, and
         # every root-keyed step below it would report on what the operator did not name.
-        root = None if getattr(target, "names_one_file", False) else getattr(target, "scan_root", None)
+        root = (None if getattr(target, "names_one_file", False)
+                or not getattr(target, "reads_checkout", True) else getattr(target, "scan_root", None))
         return finalize(target.display, target.source, by_matcher, order,
                         getattr(target, "read_errors", None) or [],
                         getattr(target, "coverage_notes", None) or [],

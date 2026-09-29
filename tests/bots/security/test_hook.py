@@ -17,7 +17,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from stayawake.bots.security import hook
+from stayawake.bots.security import hook, hook_report
 
 _INFECTED = "node_modules\ntemp_auto_push.bat\nbranch_structure.json\n"   # confirmed worm markers
 
@@ -909,7 +909,7 @@ class TestRepairPutsBackOnlyWhatSawSeeded(_Isolated):
             (hook._hooks_dir() / event).write_text(hook.hookscript.render(event, str(gone), None))
         code, text = self._quiet(hook.repair)
         self.assertEqual(code, 0, text)
-        self.assertEqual(text.count("updated:"), 3)
+        self.assertEqual(text.count("updated:"), len(hook._HOOKS))
         self.assertIn(hook._saw_executable(), (hook._hooks_dir() / "post-merge").read_text())
 
     def test_a_recorded_config_that_is_gone_stops_repair_and_is_named_by_status(self):
@@ -1251,7 +1251,7 @@ class TestHookScript(unittest.TestCase):
 
     def test_remediation_commands_use_a_distinct_colour(self):
         from stayawake.utils.render import LINK, SEVERITY
-        with mock.patch.object(hook, "supports_color", return_value=True):
+        with mock.patch.object(hook_report, "supports_color", return_value=True):
             cmd = hook._cmd("saw scan /x", sys.stdout)          # a remediation command
             label = hook._paint("Inspect:", "dim", sys.stdout)  # surrounding prose
         self.assertIn(LINK, cmd)                                # command in the LINK colour…
@@ -1271,6 +1271,77 @@ class TestTrustModel(_Isolated):
         head = hook.gitutil.stdout(repo, ["rev-parse", "HEAD"]).strip()
         # config_path=None → operator has no allowlist → the finding is NOT suppressed.
         self.assertEqual(hook.run_event("post-checkout", [hook._NULL_REV, head, "1"]), 1)
+
+
+class TestTheOutboundHookIsInstalledWithTheOthers(_Isolated):
+    """saw installs `pre-push` beside the inbound hooks; its template passes the refs on intact."""
+
+    def test_the_installed_hook_reads_the_refs_it_is_given(self):
+        script = hook.hookscript.render("pre-push", "/usr/bin/saw", None)
+        self.assertIn('_feed | /usr/bin/saw hook run pre-push "$@" || true', script)
+        self.assertTrue(hook.hookscript.is_pristine(script))
+
+    def test_pre_push_is_installed_alongside_the_inbound_hooks(self):
+        hook.install()
+        self.assertIn("pre-push", hook._HOOKS)
+        self.assertTrue(hook.hookscript.is_ours(hook._hooks_dir() / "pre-push"))
+        self.assertIn("</dev/null", (hook._hooks_dir() / "post-merge").read_text())
+
+    def test_the_template_needs_no_temporary_file(self):
+        self.assertNotIn("mktemp", hook.hookscript.render("pre-push", "/usr/bin/saw", None))
+
+    def test_the_template_is_valid_shell(self):
+        for config in (None, "/etc/saw config.yml"):
+            script = hook.hookscript.render("pre-push", "/usr/bin/saw", config)
+            subprocess.run(["sh", "-n"], input=script.encode(), check=True)
+            self.assertTrue(hook.hookscript.is_pristine(script))
+
+    def _run_prepush_script(self, local_body, stdin=b"refs/heads/main a refs/heads/main b\n"):
+        d = Path(tempfile.mkdtemp(prefix="hook-pp-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
+        (d / "pre-push").write_text(hook.hookscript.render("pre-push", "true", None))
+        os.chmod(d / "pre-push", 0o755)
+        if local_body is not None:
+            (d / "pre-push.local").write_text(local_body)
+            os.chmod(d / "pre-push.local", 0o755)
+        return subprocess.run(["sh", str(d / "pre-push"), "origin", "url"], input=stdin).returncode
+
+    def test_the_chained_local_hook_receives_the_pushed_refs(self):
+        got = Path(tempfile.mkdtemp(prefix="hook-got-")) / "refs"
+        self.addCleanup(lambda: __import__("shutil").rmtree(got.parent, ignore_errors=True))
+        refs = b"refs/heads/main 1111 refs/heads/main 2222\n"
+        self._run_prepush_script(f'#!/bin/sh\ncat > "{got}"\n', stdin=refs)
+        self.assertEqual(got.read_bytes(), refs)
+
+    def test_a_blocking_chained_hook_can_still_reject_the_push(self):
+        self.assertEqual(self._run_prepush_script("#!/bin/sh\nexit 1\n"), 1)
+        self.assertEqual(self._run_prepush_script("#!/bin/sh\nexit 0\n"), 0)
+        self.assertEqual(self._run_prepush_script(None), 0)
+
+    def test_a_stripped_inbound_hook_reads_as_altered(self):
+        d = Path(tempfile.mkdtemp(prefix="hook-in-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
+        p = d / "post-merge"
+        p.write_text(hook.hookscript.render("post-merge", "/usr/bin/saw", None).replace(" </dev/null", ""))
+        os.chmod(p, 0o755)
+        self.assertEqual(hook.hookscript.verdict(p), hook.hookscript.ALTERED)
+
+    def test_an_operator_pre_push_with_its_own_chain_costs_only_the_push_check(self):
+        tmpl = self.home / "operator-template"
+        (tmpl / "hooks").mkdir(parents=True)
+        for name in ("pre-push", "pre-push.local"):
+            (tmpl / "hooks" / name).write_text("#!/bin/sh\nexit 0\n")
+            os.chmod(tmpl / "hooks" / name, 0o755)
+        subprocess.run(["git", "config", "--global", "init.templateDir", str(tmpl)], check=True)
+        self.assertEqual(hook.install(), 0)
+        for event in ("post-checkout", "post-merge", "post-rewrite"):
+            self.assertTrue(hook.hookscript.is_ours(tmpl / "hooks" / event))
+        self.assertEqual((tmpl / "hooks" / "pre-push").read_text(), "#!/bin/sh\nexit 0\n")
+
+    def test_the_kill_switch_silences_the_push_check(self):
+        with mock.patch.dict(os.environ, {"SAW_HOOK_DISABLED": "1"}), \
+                mock.patch.object(hook.outbound, "check_push", side_effect=AssertionError("ran")):
+            self.assertEqual(hook.run_event("pre-push", ["origin", "url"]), 0)
 
 
 if __name__ == "__main__":

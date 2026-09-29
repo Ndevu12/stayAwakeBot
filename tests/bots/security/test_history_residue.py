@@ -19,7 +19,7 @@ from pathlib import Path
 
 from stayawake.bots.security.matchers import symlink
 from stayawake.bots.security.targets import history as history_target
-from stayawake.lib.git import query
+from stayawake.lib.git import objects, query
 from stayawake.lib.git.query import stored_link_targets
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -374,8 +374,9 @@ class TestBothHalvesOfTheWalkAreBelieved(unittest.TestCase):
         `rev-list` exit 0 WITH stderr on this git, so this pins the contract rather than a
         reproduction: whatever either command complains about, the read is not called complete."""
         import subprocess as _sp
+        from stayawake.lib.git import objects as o
         from stayawake.lib.git import query as q
-        real = q.run
+        real = o.run
 
         def noisy(repo, args, **kw):
             res = real(repo, args, **kw)
@@ -383,7 +384,7 @@ class TestBothHalvesOfTheWalkAreBelieved(unittest.TestCase):
                 return _sp.CompletedProcess(args, 0, res.stdout, "warning: something was skipped\n")
             return res
 
-        with mock.patch.object(q, "run", noisy), tempfile.TemporaryDirectory() as d:
+        with mock.patch.object(o, "run", noisy), tempfile.TemporaryDirectory() as d:
             _sp.run(["git", "init", "-q", d], check=True)
             pathlib.Path(d, "a.js").write_text("// x\n")
             _sp.run(["git", "-C", d, "add", "-A"], check=True)
@@ -667,7 +668,7 @@ class TestAStoredSymlinkIsStillRead(GitSandbox):
         one = self.git(self.d, "rev-parse", "HEAD^{tree}").strip()
         whole = subprocess.run(["git", "-C", str(self.d), "cat-file", "--batch"],
                                input=one.encode(), capture_output=True).stdout
-        with mock.patch.object(query, "stdout_bytes_fed", return_value=whole):
+        with mock.patch.object(objects, "stdout_bytes_fed", return_value=whole):
             entries, complete = query._read_trees(self.d, sorted([one, "b" * 40]))
         self.assertIn(one, entries, "the object that WAS returned must still be read")
         self.assertFalse(complete, "a read that answered for fewer objects was read as complete")
