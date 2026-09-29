@@ -1793,9 +1793,12 @@
 
 <h1 id="scan-on-clone">Scan on clone<a class="headerlink" href="#scan-on-clone" title="Permanent link">&para;</a></h1>
 <p>A worm fires when you install dependencies, run a build, or open the folder in an editor — not when
-you clone.
-<code>saw hook</code> puts a scan in between: a fresh clone, a pull, a branch switch or a rebase is scanned and
-you are warned <em>before</em> you run anything. Flags: <a href="../../reference/cli/hook/">CLI reference</a>.</p>
+you clone. And a worm spreads when you push it on to a shared remote, where it reaches your
+collaborators and your CI.
+<code>saw hook</code> puts a scan in between on both sides: a fresh clone, a pull, a branch switch or a rebase
+is scanned and you are warned <em>before</em> you run anything, and a <code>git push</code> is checked for every file
+version it would publish, and reported, <em>before</em> the code leaves your machine. Flags:
+<a href="../../reference/cli/hook/">CLI reference</a>.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw<span class="w"> </span>hook<span class="w"> </span>install<span class="w">                       </span><span class="c1"># future clones and pulls are scanned automatically</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>saw<span class="w"> </span>hook<span class="w"> </span>install<span class="w"> </span>-c<span class="w"> </span>~/security.yml<span class="w">     </span><span class="c1"># scan them against YOUR allowlist</span>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>saw<span class="w"> </span>hook<span class="w"> </span>status<span class="w">                        </span><span class="c1"># active? where is its state?</span>
@@ -1812,7 +1815,8 @@ repositories it has seeded and reports a hook saw did not install or one that ha
 <p><strong>Limits worth knowing.</strong> It applies to repositories cloned or created <em>after</em> you install it, which
 is how git's template mechanism works — scan the ones you already have with <code>saw scan ~/dev</code>. A
 global <code>core.hooksPath</code> overrides it, and <code>install</code>/<code>status</code> warn when one is set. <code>git reset --hard</code>
-fires no git hook at all, so scan that yourself.</p>
+fires no git hook at all, so scan that yourself. saw never stops a push: it reports what the push
+carries, and a push it could not check in full reads as not verified, never clean.</p>
 <p>CI has no clone hook; the equivalent there is <a href="../gate-ci/">gate CI</a>.</p>
 
 

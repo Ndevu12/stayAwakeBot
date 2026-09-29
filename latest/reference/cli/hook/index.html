@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="saw hook — install global git hooks that scan a clone, pull or rebase before you run the code. Full option reference.">
+        <meta name="description" content="saw hook — install global git hooks that scan code as it lands and as you are about to publish it, before you run or push it. Full option reference.">
       
       
         <meta name="author" content="Jean Paul Elisa NIYOKWIZERWA">
@@ -77,13 +77,13 @@
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="saw documentation">
   <meta property="og:title" content="saw hook — saw documentation">
-  <meta property="og:description" content="saw hook — install global git hooks that scan a clone, pull or rebase before you run the code. Full option reference.">
+  <meta property="og:description" content="saw hook — install global git hooks that scan code as it lands and as you are about to publish it, before you run or push it. Full option reference.">
   <meta property="og:image" content="https://saw-docs.ndevuspace.com/latest/assets/og-card.png">
   <meta property="og:url" content="https://saw-docs.ndevuspace.com/latest/reference/cli/hook/">
 
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="saw hook — saw documentation">
-  <meta name="twitter:description" content="saw hook — install global git hooks that scan a clone, pull or rebase before you run the code. Full option reference.">
+  <meta name="twitter:description" content="saw hook — install global git hooks that scan code as it lands and as you are about to publish it, before you run or push it. Full option reference.">
   <meta name="twitter:image" content="https://saw-docs.ndevuspace.com/latest/assets/og-card.png">
 
   
@@ -93,7 +93,7 @@
       "@context": "https://schema.org",
       "@type": "TechArticle",
       "headline": "saw hook",
-      "description": "saw hook — install global git hooks that scan a clone, pull or rebase before you run the code. Full option reference.",
+      "description": "saw hook — install global git hooks that scan code as it lands and as you are about to publish it, before you run or push it. Full option reference.",
       "url": "https://saw-docs.ndevuspace.com/latest/reference/cli/hook/",
       "image": "https://saw-docs.ndevuspace.com/latest/assets/og-card.png",
       "inLanguage": "en",
@@ -1794,12 +1794,14 @@
 
 
 <h1 id="saw-hook"><code>saw hook</code><a class="headerlink" href="#saw-hook" title="Permanent link">&para;</a></h1>
-<p><strong>Scan on clone.</strong> Installs global git hooks so a fresh clone, a pull, a branch switch or a rebase
-scans what just landed and warns you <em>before</em> a dependency install, a build, or an editor auto-run
-task. It uses git's <code>init.templateDir</code> rather than a global <code>core.hooksPath</code>, so existing
-repositories are untouched, a repository's own hooks still run, and nothing is hijacked. The hook
-warns and points at <a href="../fix/"><code>saw fix</code></a>; it never modifies anything and can never break a git
-command. See <a href="../../../how-to/scan-on-clone/">scan on clone</a>.</p>
+<p><strong>Scan on clone, and before you push.</strong> Installs global git hooks so a fresh clone, a pull, a branch
+switch or a rebase scans what just landed and warns you <em>before</em> a dependency install, a build, or
+an editor auto-run task — and a <code>git push</code> is checked for every file version it would publish, and
+reported, <em>before</em> the code leaves your machine. It uses git's <code>init.templateDir</code> rather than a
+global <code>core.hooksPath</code>, so existing repositories are untouched, a repository's own hooks still run,
+and nothing is hijacked. The hook warns and points at <a href="../fix/"><code>saw fix</code></a>; it never modifies
+anything, never breaks a git command, and never stops a push. See
+<a href="../../../how-to/scan-on-clone/">scan on clone</a>.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw hook install [-c FILE] [--no-stream]
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>saw hook repair [--no-stream]
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>saw hook uninstall [--no-stream]
@@ -1860,6 +1862,14 @@ also forgets the repositories saw had seeded.</p>
 wall-clock budget (<code>SAW_HOOK_TIMEOUT</code>, default 60s) so a huge clone can never hang git; a scan that
 times out reports the tree as unverified, never clean. <code>git reset --hard</code> fires no git hook, so scan
 that case yourself with <a href="../scan/"><code>saw scan</code></a>.</p>
+<p>A push is checked for what it would publish: every branch and tag it sends, every commit in it, and
+what each branch and tag will serve once it lands, including one pushed back to an older state, as
+committed rather than as your working folder holds it. A worm it finds is named with the commit
+that carries it and pointed at <a href="../amend/"><code>saw fix amend</code></a>, which removes it from what you published;
+the push itself goes through. A push is checked under a shorter budget, 20s by default
+(<code>SAW_HOOK_TIMEOUT</code> sets both), and what it could not check in time reads as not verified and is
+checked the next time that repository pushes. A hook of yours that saw runs after its own, and
+Git LFS, keep their say over the push.</p>
 
 
 
