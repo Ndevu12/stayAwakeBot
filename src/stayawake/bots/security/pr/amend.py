@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable, NamedTuple
 
 from stayawake.bots.security.models import CONFIRMED
 from stayawake.utils import scratch
@@ -165,26 +166,53 @@ def _add_file_findings(scan, committed) -> None:
                          and (f.path, f.signature_id) not in seen)
 
 
-def _repair_checks(finding, flat) -> tuple:
-    """`(carries, corrector)` for a finding this verb repairs by editing the file, or
-    `(None, None)`. Takes the finding and the flat signatures. The footprint's own excision comes
-    first; otherwise the text repair the working-tree fix makes."""
+class Repair(NamedTuple):
+    """How a finding's file is made clean in place: `carries(text)` says the payload is present,
+    `corrector(text)` returns the cleaned text. Both are None when the finding has no such repair."""
+
+    carries: Callable[[str], bool] | None
+    corrector: Callable[[str], str | None] | None
+
+
+class ContentTarget(NamedTuple):
+    """A confirmed finding this verb excises in place, with its repair and the cleaned HEAD text."""
+
+    finding: object
+    carries: Callable[[str], bool]
+    corrector: Callable[[str], str | None]
+    cleaned: str
+
+
+class Operator(NamedTuple):
+    """How this amend reaches the operator and the remote: the push callback, the session credential
+    for the authority gate, where the operator's own git config lives, and the interactive resolver."""
+
+    pusher: Callable | None = None
+    identity_fallback: str | None = None
+    operator_context: Path | None = None
+    resolver: Callable | None = None
+
+
+def _repair_checks(finding, flat) -> Repair:
+    """The in-place repair for a finding this verb edits, or an empty `Repair`. Takes the finding
+    and the flat signatures. The footprint's own excision comes first; otherwise the text repair the
+    working-tree fix makes."""
     corrector = footprint.corrector_for(finding, flat)
     carries = footprint.carries_footprint(finding, flat)
     if corrector is not None and carries is not None:
-        return carries, corrector
+        return Repair(carries, corrector)
     repair = changes.repair_for(finding)
     edit = changes.text_repair(repair.action) if repair is not None else None
     if edit is None:
-        return None, None
-    return (lambda text: edit(text) is not None), edit
+        return Repair(None, None)
+    return Repair(lambda text: edit(text) is not None, edit)
 
 
-def _content_targets(repo: Path, scan, signatures) -> list[tuple]:
-    """Confirmed file findings this verb can excise, as `(finding, carries, corrector,
-    cleaned_head)`, one per path and only where the corrector clears the footprint at HEAD."""
+def _content_targets(repo: Path, scan, signatures) -> list[ContentTarget]:
+    """Confirmed file findings this verb can excise, one per path and only where the corrector clears
+    the footprint at HEAD."""
     flat = _flat(signatures)
-    out = []
+    out: list[ContentTarget] = []
     seen: set[str] = set()
     for f in scan.findings:
         if getattr(f, "confidence", None) != CONFIRMED or getattr(f, "advisory_only", False):
@@ -192,17 +220,17 @@ def _content_targets(repo: Path, scan, signatures) -> list[tuple]:
         path = getattr(f, "path", "") or ""
         if not path or path in seen or getattr(f, "commit_sha", None):
             continue
-        carries, corrector = _repair_checks(f, flat)
-        if corrector is None or carries is None:
+        repair = _repair_checks(f, flat)
+        if repair.corrector is None or repair.carries is None:
             continue
         head = gitutil.file_at(repo, "HEAD", path)
-        if not carries(head):
+        if not repair.carries(head):
             continue
-        cleaned = corrector(head)
-        if cleaned is None or carries(cleaned):
+        cleaned = repair.corrector(head)
+        if cleaned is None or repair.carries(cleaned):
             continue
         seen.add(path)
-        out.append((f, carries, corrector, cleaned))
+        out.append(ContentTarget(f, repair.carries, repair.corrector, cleaned))
     return out
 
 
@@ -491,7 +519,7 @@ def _unhandled_confirmed(scan, signatures, revert_paths: set[str],
         path = getattr(f, "path", "") or ""
         if path in revert_paths or path in remove_paths:
             continue
-        carries, _corrector = _repair_checks(f, flat)
+        carries = _repair_checks(f, flat).carries
         if carries is not None and path in cleaned_head and not carries(cleaned_head[path]):
             continue
         if path and path not in paths:
@@ -853,10 +881,10 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
     the checkout is cleaned as `saw fix` cleans it, the operator's uncommitted work saved first.
     """
     found = _Found()
-    outcome = _history_outcome(repo, display, opts, signatures, allowlist, token, pusher=pusher,
-                               identity_fallback=identity_fallback,
-                               operator_context=operator_context, resolver=resolver,
-                               keep_operator_changes=operator_checkout, found=found)
+    outcome = _history_outcome(
+        repo, display, opts, signatures, allowlist, token,
+        operator=Operator(pusher, identity_fallback, operator_context, resolver),
+        keep_operator_changes=operator_checkout, found=found)
     if not operator_checkout or not gitutil.is_git_repo(repo):
         return outcome
     checkout = live.clean_checkout(repo, opts, signatures, allowlist,
@@ -869,11 +897,13 @@ def amend_outcome(repo: Path, display: str, opts, signatures, allowlist, token, 
 
 
 def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, token, *,
-                     pusher, identity_fallback, operator_context, resolver,
-                     keep_operator_changes: bool, found: _Found) -> AmendOutcome:
+                     operator: Operator, keep_operator_changes: bool,
+                     found: _Found) -> AmendOutcome:
     """Rewrite the history that carries a confirmed payload and move each branch that reached it.
-    Takes `amend_outcome`'s arguments, whether the operator's own uncommitted changes in `repo` are
-    carried across the move, and where to record what was found. Returns the outcome."""
+    Takes `amend_outcome`'s scan arguments, the operator context, whether the operator's own
+    uncommitted changes in `repo` are carried across the move, and where to record what was found.
+    Returns the outcome."""
+    pusher, identity_fallback, operator_context, resolver = operator
     rejected_supply: dict[str, Cause] = {}
 
     def _refuse(cause: Cause, detail: str = "", subjects: str = "",
