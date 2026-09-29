@@ -19,7 +19,8 @@ from stayawake.lib.git.exec_surface import HOOK_NAMES  # noqa: F401  (re-export)
 
 
 MARKER = "stayawake-scan-on-clone"
-HOOKS = ("post-checkout", "post-merge", "post-rewrite")
+HOOKS = ("post-checkout", "post-merge", "post-rewrite", "pre-push")
+_READS_STDIN = frozenset({"pre-push"})
 LOCATION = "git-hook"
 
 
@@ -113,25 +114,68 @@ def global_template_dir() -> str | None:
 def render(event: str, saw: str, config: str | None) -> str:
     """Return the hook script saw installs for `event`, calling the `saw` executable."""
     cfg = f" --config {shlex.quote(config)}" if config else ""
-    return (
-        "#!/bin/sh\n"
-        f"# {MARKER} ({event}) — installed by `saw hook install` (#1195). Must never fail git.\n"
-        f'{shlex.quote(saw)} hook run{cfg} {event} "$@" </dev/null || true\n'
-        f'_local="$(dirname "$0")/{event}.local"\n'
-        '[ -x "$_local" ] && "$_local" "$@" || true\n'
-        "exit 0\n"
-    )
+    head = ("#!/bin/sh\n"
+            f"# {MARKER} ({event}) — installed by `saw hook install` (#1195). Must never fail git.\n")
+    local = f'_local="$(dirname "$0")/{event}.local"\n'
+    run_saw = f'{shlex.quote(saw)} hook run{cfg} {event}'
+    if event not in _READS_STDIN:
+        return (head
+                + f'{run_saw} "$@" </dev/null || true\n'
+                + local
+                + '[ -x "$_local" ] && "$_local" "$@" || true\n'
+                + "exit 0\n")
+    return (head
+            + local
+            + _CHAIN
+            + '_refs="$(cat)"\n'
+            + f'_feed | {run_saw} "$@" || true\n'
+            + '_feed | _chain "$@"\n'
+            + 'exit $?\n')
+
+
+_CHAIN = ('_feed() { [ -z "$_refs" ] || printf \'%s\\n\' "$_refs"; }\n'
+          '_chain() {\n'
+          'if [ -x "$_local" ]; then "$_local" "$@"; return $?; fi\n'
+          'git config --local --get lfs.repositoryformatversion >/dev/null 2>&1 || { cat >/dev/null; return 0; }\n'
+          'command -v git-lfs >/dev/null 2>&1 || { echo "This repository uses Git LFS, but '
+          'git-lfs was not found on your path." >&2; return 2; }\n'
+          'git lfs pre-push "$@"\n'
+          '}\n')
 
 
 _QUOTED = r"(?:[\w@%+=:,./-]{1,1024}|'(?:[^'\n]|'\"'\"'){0,1024}')"
-_PRISTINE = re.compile(
-    r"#!/bin/sh\n"
-    rf"# {re.escape(MARKER)} \((?P<event>{'|'.join(map(re.escape, HOOKS))})\) — installed by `saw hook install` \(#1195\)\. Must never fail git\.\n"
-    rf"(?P<command>{_QUOTED} hook run(?: --config {_QUOTED})? (?P=event)) \"\$@\" </dev/null \|\| true\n"
-    r'_local="\$\(dirname "\$0"\)/(?P=event)\.local"\n'
-    r'\[ -x "\$_local" \] && "\$_local" "\$@" \|\| true\n'
-    r"exit 0\n"
+_HEAD = (r"#!/bin/sh\n"
+         r"# " + re.escape(MARKER) + r" \((?P<event>{events})\) — installed by "
+         r"`saw hook install` \(#1195\)\. Must never fail git\.\n")
+_SAW_CMD = rf"(?P<command>(?P<saw>{_QUOTED}) hook run(?P<cfg>(?: --config {_QUOTED})?) (?P=event))"
+_LOCAL = r'_local="\$\(dirname "\$0"\)/(?P=event)\.local"\n'
+
+
+def _events_regex(reads_stdin: bool) -> str:
+    return "|".join(re.escape(e) for e in HOOKS if (e in _READS_STDIN) is reads_stdin)
+
+
+_PRISTINE_INBOUND = re.compile(
+    _HEAD.format(events=_events_regex(reads_stdin=False))
+    + _SAW_CMD + r' \"\$@\" </dev/null \|\| true\n'
+    + _LOCAL
+    + r'\[ -x "\$_local" \] && "\$_local" "\$@" \|\| true\n'
+    + r"exit 0\n"
 )
+_PRISTINE_PUSH = re.compile(
+    _HEAD.format(events=_events_regex(reads_stdin=True))
+    + _LOCAL
+    + re.escape(_CHAIN)
+    + r'_refs="\$\(cat\)"\n'
+    + r'_feed \| ' + _SAW_CMD + r' "\$@" \|\| true\n'
+    + r'_feed \| _chain "\$@"\n'
+    + r'exit \$\?\n'
+)
+
+
+def _pristine_match(text: str):
+    """Return the match for a hook saw installs, from whichever per-event template fits, or None."""
+    return _PRISTINE_INBOUND.fullmatch(text) or _PRISTINE_PUSH.fullmatch(text)
 
 
 def is_ours(path: Path) -> bool:
@@ -152,12 +196,12 @@ def claims_ours(text: str) -> bool:
 
 def is_pristine(text: str) -> bool:
     """Return True if `text` is exactly a hook script saw installs, unmodified."""
-    return _PRISTINE.fullmatch(text) is not None
+    return _pristine_match(text) is not None
 
 
 def event_of(text: str) -> str | None:
     """Return the event an unmodified hook script serves, or None."""
-    m = _PRISTINE.fullmatch(text)
+    m = _pristine_match(text)
     return m.group("event") if m else None
 
 
@@ -173,7 +217,7 @@ def is_installed(text: str, expected: tuple[str, str | None] | None = None) -> b
 
 def saw_command(text: str) -> list[str] | None:
     """Return the `saw` command an unmodified hook script runs, as argv, or None."""
-    m = _PRISTINE.fullmatch(text)
+    m = _pristine_match(text)
     if m is None:
         return None
     try:

@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from stayawake.lib.git import remote as gitremote
+from stayawake.lib.git.objects import batch_objects, link_targets, own_env, own_view, own_view_fed
 from stayawake.lib.git.run import run, stdout, stdout_bytes, stdout_bytes_fed
 
 
@@ -86,40 +87,15 @@ def commit_count(repo: str | Path, ref: str = "HEAD") -> int | None:
 
 _TYPE_MASK, _LINK_TYPE, _TREE_TYPE, _FILE_TYPE = 0o170000, 0o120000, 0o040000, 0o100000
 _ENTRY_TYPES = (_FILE_TYPE, _LINK_TYPE, _TREE_TYPE, 0o160000)
-_MAX_LINK_TARGET_BYTES = 4096
 _OBJECT_ID_BYTES = 20
-
-
-_INHERITED_LOCATION = ("GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE", "GIT_OBJECT_DIRECTORY",
-                       "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_INDEX_FILE", "GIT_NAMESPACE")
-
-
-def _own_env() -> dict:
-    """Build the environment a query of a repository's own objects runs in. Returns it."""
-    env = {k: v for k, v in os.environ.items() if k not in _INHERITED_LOCATION}
-    env["GIT_GRAFT_FILE"] = os.path.join(os.devnull, "grafts")
-    env["GIT_TERMINAL_PROMPT"] = "0"
-    return env
 
 
 def holds_its_objects(repo: str | Path) -> bool:
     """Ask whether a repository holds the objects it names. Takes the repo. Returns False when it
     would reach a remote for them, or when the question could not be answered."""
     res = run(repo, ["config", "--get-regexp",
-                     r"^(remote\..*\.promisor|extensions\.partialclone)$"], env=_own_env())
+                     r"^(remote\..*\.promisor|extensions\.partialclone)$"], env=own_env())
     return res is not None and not (res.stdout or "").strip()
-
-
-def _own_view(repo: str | Path, args: list[str]):
-    """Ask git about the objects a repository holds, not about a view configured over them. Takes
-    the repo and the arguments. Returns the completed process, or None when it could not run."""
-    return run(repo, ["--no-replace-objects", *args], env=_own_env())
-
-
-def _own_view_fed(repo: str | Path, args: list[str], stdin: bytes) -> bytes | None:
-    """Ask git about the objects a repository holds, feeding `stdin`. Takes the repo, the arguments
-    and the bytes to write. Returns the raw stdout, or None on any failure."""
-    return stdout_bytes_fed(repo, ["--no-replace-objects", *args], stdin, env=_own_env())
 
 
 def _entry_type(mode: bytes) -> int | None:
@@ -130,25 +106,6 @@ def _entry_type(mode: bytes) -> int | None:
     except ValueError:
         return None
     return bits if bits in _ENTRY_TYPES else None
-
-
-def _batch_objects(raw: bytes):
-    """Frame each object in a `cat-file --batch` stream. Takes the raw stream. Yields
-    `(id, kind, body, whole)` per object, with empty strings and False for an id git did not
-    resolve, and `whole` False for a body the stream ended before."""
-    at = 0
-    while at < len(raw):
-        nl = raw.find(b"\n", at)
-        if nl == -1:
-            return
-        parts = raw[at:nl].split()
-        if len(parts) < 3 or not parts[2].isdigit():
-            yield "", "", b"", False
-            at = nl + 1
-            continue
-        size = int(parts[2])
-        body, at = raw[nl + 1:nl + 1 + size], nl + 1 + size + 1
-        yield parts[0].decode(), parts[1].decode(), body, len(body) == size
 
 
 def _tree_entries(body: bytes) -> tuple[list, bool]:
@@ -171,12 +128,12 @@ def _read_trees(repo: str | Path, ids: list[str]) -> tuple[dict[str, list], bool
     whether every id asked for was read whole."""
     if not ids:
         return {}, True
-    raw = _own_view_fed(repo, ["cat-file", "--batch"], "\n".join(ids).encode())
+    raw = own_view_fed(repo, ["cat-file", "--batch"], "\n".join(ids).encode())
     if raw is None:
         return {}, False
     out: dict[str, list] = {}
     complete = True
-    for oid, kind, body, whole in _batch_objects(raw):
+    for oid, kind, body, whole in batch_objects(raw):
         if not whole or kind != "tree":
             complete = False
             continue
@@ -193,14 +150,14 @@ def stored_entries(repo: str | Path, *, limit: int = 200_000,
     read."""
     if offline and not holds_its_objects(repo):
         return {}, False
-    roots = _own_view(repo, ["rev-list", "--all", "--format=%T"])
-    refs = _own_view(repo, ["for-each-ref", "--format=%(refname)"])
+    roots = own_view(repo, ["rev-list", "--all", "--format=%T"])
+    refs = own_view(repo, ["for-each-ref", "--format=%(refname)"])
     if roots is None or roots.returncode != 0 or refs is None or refs.returncode != 0:
         return {}, False
     complete = not roots.stderr.strip()
     named = [ln.strip() for ln in roots.stdout.splitlines() if not ln.startswith("commit ")]
     wanted = [ln.strip() for ln in refs.stdout.splitlines() if ln.strip()]
-    peeled = _own_view_fed(repo, ["cat-file", "--batch-check"],
+    peeled = own_view_fed(repo, ["cat-file", "--batch-check"],
                            "".join(f"{ref}^{{tree}}\n" for ref in wanted).encode())
     if peeled is None:
         return {}, False
@@ -241,7 +198,7 @@ def _all_readable(repo: str | Path, at_path: dict) -> bool:
     wanted = sorted({sha for entries in at_path.values() for sha, _kind in entries})
     if not wanted:
         return True
-    answered = _own_view_fed(repo, ["cat-file", "--batch-check"], "\n".join(wanted).encode())
+    answered = own_view_fed(repo, ["cat-file", "--batch-check"], "\n".join(wanted).encode())
     if answered is None:
         return False
     good = {ln.split()[0] for ln in answered.decode("utf-8", "replace").splitlines()
@@ -268,32 +225,16 @@ def stored_link_targets(repo: str | Path, *, limit: int = 200_000,
     at_path, complete = stored_as_links(repo, limit=limit, offline=offline)
     if not at_path:
         return {}, complete
-    wanted = sorted({sha for shas in at_path.values() for sha in shas})
-    sized = _own_view_fed(repo, ["cat-file", "--batch-check"], "\n".join(wanted).encode())
-    if sized is None:
+    text_of, read_all = link_targets(repo, [sha for shas in at_path.values() for sha in shas])
+    if not text_of and not read_all:
         return {}, False
-    readable = []
-    for line in sized.decode("utf-8", "replace").splitlines():
-        parts = line.split()
-        if (len(parts) >= 3 and parts[1] == "blob" and parts[2].isdigit()
-                and int(parts[2]) <= _MAX_LINK_TARGET_BYTES):
-            readable.append(parts[0])
-    raw = _own_view_fed(repo, ["cat-file", "--batch"], "\n".join(readable).encode())
-    if raw is None:
-        return {}, False
-    text_of: dict[str, str] = {}
-    for oid, kind, body, whole in _batch_objects(raw):
-        if not whole or kind != "blob":
-            complete = False
-            continue
-        text_of[oid] = body.split(b"\0", 1)[0].decode("utf-8", "replace")
     out, every = {}, True
     for rel, shas in at_path.items():
         raws = [text_of[sha] for sha in sorted(shas) if sha in text_of]
         every = every and len(raws) == len(shas)
         if raws:
             out[rel] = raws
-    return out, complete and every
+    return out, complete and every and read_all
 
 
 def reachable_blobs(repo: str | Path, *, limit: int = 200_000,
@@ -322,7 +263,7 @@ def exec_paths(repo: str | Path) -> set[str]:
         root = os.path.normpath(str(repo))
     out = set()
     for what in ("hooks", "config"):
-        res = run(repo, ["rev-parse", "--git-path", what], env=_own_env())
+        res = run(repo, ["rev-parse", "--git-path", what], env=own_env())
         if res is None or res.returncode != 0:
             continue
         answer = (res.stdout or "").strip()

@@ -16,25 +16,22 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from stayawake.utils import env
-from stayawake.utils.config import load_yaml
 from stayawake.utils import pathsafe
 from stayawake.utils.pathsafe import is_safe_write_target
 from stayawake.utils import textsafe
-from stayawake.utils.render import LINK, SEVERITY, paint
 from stayawake.utils.streaming import Streamer, busy, status as spin_status, stream_enabled
-from stayawake.utils.terminal import supports_color
 from stayawake.lib import git as gitutil
-from stayawake.bots.security import hookscript
+from stayawake.bots.security import hookscript, outbound
+from stayawake.bots.security.hook_policy import operator_policy
+from stayawake.bots.security.hook_report import BRAND as _BRAND, command as _cmd, paint_at as _paint
 from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions
 from stayawake.bots.security.scanner import scan_target
-from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.config import resolve_config
-from stayawake.bots.security.service.config import _options
 
 _MARKER = hookscript.MARKER
 _HOOKS = hookscript.HOOKS
+_YIELDS_TO_THE_OPERATOR = frozenset({"pre-push"})
 _NULL_REV = "0" * 40
-_BRAND = "StayAwakeBot"
 _AVOID = ("install its dependencies (`npm install` / `pip install` / `yarn` / `pnpm`), open it in "
           "your editor/IDE (auto-run tasks & extensions fire on open), or build or run it")
 
@@ -43,19 +40,6 @@ class HookError(Exception):
     """A refusal that must NOT proceed (e.g. clobbering a foreign hook) — surfaced to the CLI."""
 
 
-_LEVELS = {"ok": SEVERITY["ok"], "warn": SEVERITY["warning"], "dim": SEVERITY["info"]}
-
-
-def _paint(text: str, level: str, stream) -> str:
-    """Colour `text` at a shared level (ok/warn/dim) iff the stream supports it — so a piped/CI/
-    NO_COLOR run degrades to clean text, exactly like the rest of the CLI."""
-    return paint(text, _LEVELS.get(level), on=supports_color(stream))
-
-
-def _cmd(text: str, stream) -> str:
-    """A runnable command, rendered in the shared LINK colour (bold cyan) so remediation commands
-    stand out distinctly from the prose — the same treatment `saw audit`/`saw auth` give commands."""
-    return paint(text, LINK, on=supports_color(stream))
 
 
 # ── paths (XDG, mirroring dependencies.db / lib.github_app) ─────────────────────────────
@@ -188,15 +172,23 @@ def _settle(hooks_dir: Path, saw: str, config: str | None, *, own: bool) -> list
             folder = hookscript.set_aside(p)
             actions.append(Action(SET_ASIDE, p, f"not a hook saw installs, kept at {folder}") if folder
                            else Action(UNVERIFIED, p, "could not be moved aside, so it was left as it is"))
+    yielded: set[str] = set()
     if not own:
         for event in _HOOKS:
             dest = hooks_dir / event
             if hookscript.verdict(dest, expected) == hookscript.FOREIGN and (hooks_dir / f"{event}.local").exists():
+                if event in _YIELDS_TO_THE_OPERATOR:
+                    yielded.add(event)
+                    continue
                 raise HookError(
                     f"{hooks_dir / f'{event}.local'} already exists — refusing to overwrite a preserved "
                     "hook. Resolve it by hand, then re-run `saw hook install`.")
     for event in _HOOKS:
         dest = hooks_dir / event
+        if event in yielded:
+            actions.append(Action(LEFT, dest, f"your {event} and {event}.local are both here, so "
+                                              "saw's check was not added"))
+            continue
         wanted = _hook_script(event, saw, config)
         state = hookscript.verdict(dest, expected)
         if state == hookscript.PRISTINE:
@@ -468,7 +460,7 @@ def _repair_repository(hooks_dir: Path, saw: str, config: str | None, *, restore
             if state != hookscript.ABSENT and folder is None:
                 actions.append(Action(UNVERIFIED, dest, "could not be moved aside, so it was left as it is"))
             elif _write_verified(dest, _hook_script(event, saw, config), hooks_dir):
-                outcome, detail = (RESTORED, "a hook saw seeded here was gone") if state == hookscript.ABSENT \
+                outcome, detail = (RESTORED, "a hook saw installs was not here") if state == hookscript.ABSENT \
                     else _kept(state, folder)
                 actions.append(Action(outcome, dest, detail))
             else:
@@ -642,13 +634,9 @@ def _changed_files(root: Path, base: str, head: str) -> tuple[str, ...]:
 def _operator_scan(root: Path, include, config_path: str | None, display: str):
     """Scan the just-landed tree with the OPERATOR's policy — packaged signatures + the operator's
     allowlist (from an explicit `--config` baked in at install), NEVER the cloned repo's own config."""
-    cfg = load_yaml(config_path) if (config_path and Path(config_path).is_file()) else {}
-    settings = cfg.get("settings", {}) if isinstance(cfg, dict) else {}
-    opts = _options(settings)
-    sigs = load_signatures(settings.get("signatures_path"))
-    allowlist = (cfg.get("allowlist") if isinstance(cfg, dict) else None) or []
-    with LocalRepoTarget(str(root), display, opts, include_only=include) as target:
-        return scan_target(target, sigs, allowlist)
+    policy = operator_policy(config_path)
+    with LocalRepoTarget(str(root), display, policy.opts, include_only=include) as target:
+        return scan_target(target, policy.signatures, policy.allowlist)
 
 
 _TIMED_OUT = object()
@@ -702,6 +690,11 @@ def run_event(event: str, argv: list[str], config_path: str | None = None,
     1 infected, 2 scan-error/unverified — but the hook wrapper forces exit 0 so git is never broken.
     The ENTIRE body is guarded: a hook must never emit a traceback mid-clone."""
     try:
+        if event == outbound.EVENT:
+            if env.hook_disabled():
+                return 0
+            refs_text = "" if sys.stdin.isatty() else sys.stdin.read()
+            return outbound.check_push(argv, refs_text, config_path, no_stream=no_stream)
         return _run_event(event, argv, config_path, no_stream=no_stream)
     except BaseException as exc:            # noqa: BLE001 — last-resort: never break/confuse git
         print(_paint(f"{_BRAND}: scan-on-clone error — {exc}", "warn", sys.stderr), file=sys.stderr)

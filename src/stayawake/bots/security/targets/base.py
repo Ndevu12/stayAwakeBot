@@ -58,6 +58,7 @@ class ScanOptions:
 
 class Target:
     source = "local"
+    reads_checkout = True
 
     def __init__(self, root: str | Path, display: str, opts: ScanOptions,
                  include_only: tuple[str, ...] | None = None, within: str | None = None):

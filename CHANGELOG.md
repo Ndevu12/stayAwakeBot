@@ -14,6 +14,15 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
+- **`saw hook` now checks a push before the code leaves your machine.** On `git push`, it checks
+  every file version the push would publish, on every branch and tag you push and in earlier
+  commits of the push, as committed rather than as your working folder holds it, and what each
+  branch or tag will serve once the push lands, including one pushed back to an older state. It
+  names a worm it finds and the commit that carries it; the push always goes through. A push it could not check in
+  full reads as not verified, never clean, and saw checks the rest the next time the repository
+  pushes. In a repository that uses Git LFS, large files upload as before. Run `saw hook repair` to
+  add it to repositories saw already set up.
+
 - **`keep_dirs` — directories a fix never removes.** Empty by default. Write each one relative to
   the repository root: `data` keeps that directory at the root, `dist/assets` keeps one directory
   of a generated tree, and anything inside a kept directory stays too. `exclude_dirs` says what is
@@ -72,6 +81,8 @@ reader, not the mechanism or the weakness it closed.
 - **saw names the compromised versions instead of a version to install.**
 
 ### Fixed
+- **`saw scan --history` no longer reports a package installed in your working folder as
+  something your history stores.**
 - **A file `saw fix amend` removes does not survive the history it rewrites.** The file is taken
   out of every commit that held it, and a run that cannot manage that refuses and names the
   branches still holding it, instead of completing.

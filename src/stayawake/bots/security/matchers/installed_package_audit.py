@@ -22,6 +22,8 @@ class InstalledPackageAuditMatcher(Matcher):
         self._store_factory = store_factory
 
     def scan(self, target, signatures, all_signatures=None):
+        if not getattr(target, "reads_checkout", True):
+            return []
         by_id = {s["id"]: s for s in signatures}
         store = self._store_factory(all_signatures or signatures)
         tamper_sig = by_id.get("tampered-installed-package")

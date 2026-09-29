@@ -45,6 +45,7 @@ class HistoryTarget(Target):
     """
 
     source = "history"
+    reads_checkout = False
 
     def __init__(self, root, display: str, opts, versions: dict[str, list[str]],
                  index: int = 0, links: dict[str, list[str]] | None = None):
@@ -52,6 +53,7 @@ class HistoryTarget(Target):
         self._sha_by_path = {path: shas[index] for path, shas in versions.items()
                              if index < len(shas)}
         self.stored_links = links or {}
+        self.read_ahead: dict[str, bytes] = {}
 
     def __len__(self) -> int:
         return len(self._sha_by_path)
@@ -102,6 +104,9 @@ class HistoryTarget(Target):
         sha = self._sha_by_path.get(rel)
         if sha is None:
             return None, False
+        if sha in self.read_ahead:
+            data = self.read_ahead[sha]
+            return data[:cap], len(data) > cap
         try:
             proc = self._cat_file(sha)
             with proc:

@@ -1,15 +1,17 @@
 ---
-description: saw hook — install global git hooks that scan a clone, pull or rebase before you run the code. Full option reference.
+description: saw hook — install global git hooks that scan code as it lands and as you are about to publish it, before you run or push it. Full option reference.
 ---
 
 # `saw hook`
 
-**Scan on clone.** Installs global git hooks so a fresh clone, a pull, a branch switch or a rebase
-scans what just landed and warns you *before* a dependency install, a build, or an editor auto-run
-task. It uses git's `init.templateDir` rather than a global `core.hooksPath`, so existing
-repositories are untouched, a repository's own hooks still run, and nothing is hijacked. The hook
-warns and points at [`saw fix`](fix.md); it never modifies anything and can never break a git
-command. See [scan on clone](../../how-to/scan-on-clone.md).
+**Scan on clone, and before you push.** Installs global git hooks so a fresh clone, a pull, a branch
+switch or a rebase scans what just landed and warns you *before* a dependency install, a build, or
+an editor auto-run task — and a `git push` is checked for every file version it would publish, and
+reported, *before* the code leaves your machine. It uses git's `init.templateDir` rather than a
+global `core.hooksPath`, so existing repositories are untouched, a repository's own hooks still run,
+and nothing is hijacked. The hook warns and points at [`saw fix`](fix.md); it never modifies
+anything, never breaks a git command, and never stops a push. See
+[scan on clone](../../how-to/scan-on-clone.md).
 
 ```text
 saw hook install [-c FILE] [--no-stream]
@@ -51,3 +53,12 @@ A pull or switch scans only what changed, so it is near-instant, and each scan r
 wall-clock budget (`SAW_HOOK_TIMEOUT`, default 60s) so a huge clone can never hang git; a scan that
 times out reports the tree as unverified, never clean. `git reset --hard` fires no git hook, so scan
 that case yourself with [`saw scan`](scan.md).
+
+A push is checked for what it would publish: every branch and tag it sends, every commit in it, and
+what each branch and tag will serve once it lands, including one pushed back to an older state, as
+committed rather than as your working folder holds it. A worm it finds is named with the commit
+that carries it and pointed at [`saw fix amend`](amend.md), which removes it from what you published;
+the push itself goes through. A push is checked under a shorter budget, 20s by default
+(`SAW_HOOK_TIMEOUT` sets both), and what it could not check in time reads as not verified and is
+checked the next time that repository pushes. A hook of yours that saw runs after its own, and
+Git LFS, keep their say over the push.

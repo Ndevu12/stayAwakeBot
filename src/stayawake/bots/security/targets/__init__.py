@@ -2,6 +2,7 @@
 from stayawake.bots.security.targets.base import Target, ScanOptions
 from stayawake.bots.security.targets.local import LocalRepoTarget
 from stayawake.bots.security.targets.history import HistoryTarget
+from stayawake.bots.security.targets.pushed import PushedTarget
 from stayawake.bots.security.targets.remote import RemoteRepoTarget
 
-__all__ = ["Target", "ScanOptions", "LocalRepoTarget", "HistoryTarget", "RemoteRepoTarget"]
+__all__ = ["Target", "ScanOptions", "LocalRepoTarget", "HistoryTarget", "PushedTarget", "RemoteRepoTarget"]
