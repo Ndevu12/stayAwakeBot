@@ -81,6 +81,12 @@ reader, not the mechanism or the weakness it closed.
 - **saw names the compromised versions instead of a version to install.**
 
 ### Fixed
+- **`saw fix amend` no longer calls a run done when it could not confirm the payload is gone.**
+  When it cannot tell whether a branch, a tag, a stash, another checkout or your copy of the remote
+  still holds what it took out, it finishes the rest of the clean-up and names what it could not
+  confirm for you to review. It now also checks every branch, tag, stash and other ref, each
+  checkout's own included, and brings your copy of the remote's branches up to date after it
+  pushes.
 - **`saw scan --history` no longer reports a package installed in your working folder as
   something your history stores.**
 - **A file `saw fix amend` removes does not survive the history it rewrites.** The file is taken

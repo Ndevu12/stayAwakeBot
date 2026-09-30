@@ -1852,6 +1852,15 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         self.assertIn(Cause.FILE_RESTORED_TO_A_CLEAN_VERSION, self._causes(outcome))
         self.assertIsNotNone(seen[0].restore_candidate, "the item offered a clean version to restore")
 
+    def test_a_restore_git_could_not_confirm_is_named_for_review_not_claimed(self):
+        findings = self._confirmed_file_with_a_clean_ancestor()
+        with mock.patch.object(amendmod, "_path_at", return_value=None):
+            outcome = self._run_with_findings(
+                findings, resolver=lambda item: Resolution(RESTORE, item.restore_candidate))
+        self.assertNotIn(Cause.FILE_RESTORED_TO_A_CLEAN_VERSION, self._causes(outcome))
+        self.assertIn(Cause.REMOVAL_NOT_CONFIRMED, self._causes(outcome))
+        self.assertIn("the rewritten util.js", render_amend_line(outcome))
+
     def test_a_confirmed_file_with_no_clean_ancestor_offers_no_restore(self):
         """A file that was born poisoned has no clean version to put back, so no restore is offered —
         the operator's only lever there is remove-whole."""

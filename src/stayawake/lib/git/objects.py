@@ -2,7 +2,9 @@
 """Read the objects a repository holds, never a view configured over them."""
 from __future__ import annotations
 
+import locale
 import os
+import sys
 from pathlib import Path
 
 from stayawake.lib.git.run import run, stdout_bytes_fed
@@ -104,3 +106,32 @@ def read_blobs(repo: str | Path, oids: list[str], *, max_each: int,
     raw = own_view_fed(repo, ["cat-file", "--batch"], "\n".join(chosen).encode()) if chosen else b""
     return ({oid: body for oid, kind, body, whole in batch_objects(raw or b"")
              if whole and kind == "blob"}, sizes)
+
+
+def reachable_objects(repo: str | Path, tips: list[str], exclude: list[str] | None = None) -> set[str] | None:
+    """Ask which objects are reachable from some commits and not from others. Takes the repo, the
+    commits to walk from and the commits to exclude. Returns the object ids, or None when git could
+    not answer."""
+    if not tips:
+        return set()
+    feed = "".join(f"{tip}\n" for tip in tips) + "".join(f"^{tip}\n" for tip in exclude or ())
+    out = own_view_fed(repo, ["rev-list", "--objects", "--stdin"], feed.encode())
+    if out is None:
+        return None
+    return {line.split()[0].decode("ascii", "replace") for line in out.splitlines() if line.split()}
+
+
+def blob(repo: str | Path, oid: str) -> bytes | None:
+    """Read one stored blob as the repository holds it. Takes the repo and the object id. Returns
+    its bytes, or None when git could not read it."""
+    return own_view_fed(repo, ["cat-file", "blob", oid], b"")
+
+
+def blob_text(repo: str | Path, oid: str) -> str | None:
+    """Read one stored blob as text, decoded and line-ended the way git's other text output reaches
+    saw. Takes the repo and the object id. Returns the text, or None when git could not read it."""
+    data = blob(repo, oid)
+    if data is None:
+        return None
+    encoding = "utf-8" if sys.flags.utf8_mode else locale.getencoding()
+    return data.decode(encoding, "replace").replace("\r\n", "\n").replace("\r", "\n")

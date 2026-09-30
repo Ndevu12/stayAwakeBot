@@ -81,6 +81,8 @@ class Cause(Enum):
     HISTORY_TOO_LARGE_TO_ENUMERATE = "history-too-large-to-enumerate"
     SAVED_WORK_CLEANED_HERE = "saved-work-cleaned-here"
     PAYLOAD_REACHABLE_FROM_OTHER_REFS = "payload-reachable-from-other-refs"
+    REMOVAL_NOT_CONFIRMED = "removal-not-confirmed"
+    REMOTE_COPY_NOT_REFRESHED = "remote-copy-not-refreshed"
 
 
 _NEEDING_NO_ACTION = frozenset({Cause.PREVIOUS_OBJECTS_UNCOLLECTED, Cause.NO_CONFIRMED_PAYLOAD,
@@ -247,6 +249,12 @@ _PHRASE = {
     Cause.TAGS_AT_REPLACED_COMMIT: "tags still point at it",
     Cause.PAYLOAD_REACHABLE_FROM_OTHER_REFS:
         "still reachable from {detail} — a tag, stash, or another ref can put it back; clear it there too",
+    Cause.REMOVAL_NOT_CONFIRMED:
+        "could not confirm the payload is gone from {detail}; look there before relying on this "
+        "run",
+    Cause.REMOTE_COPY_NOT_REFRESHED:
+        "your copy of the remote branches could not be brought up to date, so it may still point "
+        "at the replaced commits; fetch before you merge from it",
     Cause.FORKS_EXIST: "forks still carry it",
     Cause.TAGS_NOT_ESTABLISHED:
         "whether a tag still points at the replaced commit could not be established",
@@ -279,10 +287,30 @@ _NOTHING_MOVED = "nothing was force-updated"
 _NOT_FULLY_UPDATED = "the remote was not fully updated"
 
 
+_DETAIL_ROOM = 120
+
+
+def names_that_fit(names, room: int = _DETAIL_ROOM) -> str:
+    """Join names for one clause, as many as fit its room. Takes the names and the room. Returns them
+    in order, each once, ending "and N more" when some did not fit."""
+    names = list(dict.fromkeys(names))
+    shown: list[str] = []
+    for at, name in enumerate(names):
+        rest = len(names) - at - 1
+        tail = f" and {rest} more" if rest else ""
+        if len(", ".join([*shown, name]) + tail) > room:
+            if shown:
+                break
+            name = name[:max(room - len(tail) - 1, 1)] + "…"
+        shown.append(name)
+    rest = len(names) - len(shown)
+    return ", ".join(shown) + (f" and {rest} more" if rest else "")
+
+
 def _clause(reason: Reason) -> str:
     """One cause as prose. A phrase carrying `{detail}` places the identifier itself — a count
     reads as a count, not as a parenthetical after one."""
-    detail = textsafe.plain(reason.detail, 120)
+    detail = textsafe.plain(reason.detail, _DETAIL_ROOM)
     phrase = _PHRASE.get(reason.cause, _UNNAMED_CAUSE)
     if "{detail}" in phrase:
         phrase, detail = phrase.format(detail=detail), textsafe.plain(reason.subjects, 120)
