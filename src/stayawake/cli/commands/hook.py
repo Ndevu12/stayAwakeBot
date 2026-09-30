@@ -44,7 +44,7 @@ def register(sub) -> None:
         examples=[
             ("saw hook install", "scan every future clone and pull"),
             ("saw hook install -c ~/security.yml", "scan them against your allowlist"),
-            ("saw hook install ~/code", "also add the hooks to every repo under ~/code"),
+            ("saw hook install ~/code", "hooks for every repo under ~/code"),
         ])
     ins.add_argument("paths", nargs="*", metavar="PATH",
                      help="existing repositories, directories or globs to add the hooks to "
