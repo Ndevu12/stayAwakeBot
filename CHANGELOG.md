@@ -81,6 +81,9 @@ reader, not the mechanism or the weakness it closed.
 - **saw names the compromised versions instead of a version to install.**
 
 ### Fixed
+- **`saw audit` checks a cached GitHub token without a keychain prompt, without going online and
+  without reading the token.** It looks only at the entry git saves, and says when it cannot tell
+  whether git uses the token or could not read where it is kept.
 - **saw's git hooks reach the same verdict as `saw scan` for the same repository.**
 - **`saw fix amend` no longer calls a run done when it could not confirm the payload is gone.**
   When it cannot tell whether a branch, a tag, a stash, another checkout or your copy of the remote

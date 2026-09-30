@@ -20,7 +20,7 @@ from unittest import mock
 from stayawake.lib import git as gitutil
 from stayawake.lib.git import allowlist, owned
 from stayawake.lib.git.borrowed import borrow
-from stayawake.lib.git.contexts import child_env, UNTRUSTED, OPERATOR_PUSH
+from stayawake.lib.git.contexts import child_env, UNTRUSTED, OPERATOR_CONFIG, OPERATOR_PUSH
 from stayawake.lib.git.merge.detect import evil_merge_paths
 from stayawake.lib.git.query import introduced_added_text, file_commits, tracked_under
 from stayawake.lib.git.run import GitRefused, run
@@ -203,6 +203,11 @@ class TestContexts(HostileRepo):
         finally:
             del os.environ["GIT_DIR"]
         self.assertEqual(os.devnull, child_env(UNTRUSTED, None)["GIT_CONFIG_GLOBAL"])
+
+    def test_saw_reads_the_config_git_reads(self):
+        with mock.patch.dict(os.environ, {"GIT_CONFIG": "/elsewhere/config"}):
+            self.assertNotIn("GIT_CONFIG", child_env(OPERATOR_CONFIG, None))
+            self.assertNotIn("GIT_CONFIG", child_env(UNTRUSTED, None))
 
     def test_a_network_command_never_runs_in_a_repository_saw_did_not_make(self):
         repo = self.new_repo()
