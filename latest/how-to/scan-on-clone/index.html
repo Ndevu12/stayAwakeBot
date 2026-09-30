@@ -1799,24 +1799,23 @@ collaborators and your CI.
 is scanned and you are warned <em>before</em> you run anything, and a <code>git push</code> is checked for every file
 version it would publish, and reported, <em>before</em> the code leaves your machine. Flags:
 <a href="../../reference/cli/hook/">CLI reference</a>.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw<span class="w"> </span>hook<span class="w"> </span>install<span class="w">                       </span><span class="c1"># future clones and pulls are scanned automatically</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>saw<span class="w"> </span>hook<span class="w"> </span>install<span class="w"> </span>-c<span class="w"> </span>~/security.yml<span class="w">     </span><span class="c1"># scan them against YOUR allowlist</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>saw<span class="w"> </span>hook<span class="w"> </span>status<span class="w">                        </span><span class="c1"># active? where is its state?</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>saw<span class="w"> </span>hook<span class="w"> </span>uninstall<span class="w">                     </span><span class="c1"># stop</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="nv">SAW_HOOK_DISABLED</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>git<span class="w"> </span>clone<span class="w"> </span>&lt;url&gt;<span class="w">    </span><span class="c1"># one-off bypass, no uninstall needed</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw<span class="w"> </span>hook<span class="w"> </span>install<span class="w">                       </span><span class="c1"># new clones and this repository are scanned automatically</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>saw<span class="w"> </span>hook<span class="w"> </span>install<span class="w"> </span>~/dev<span class="w">                 </span><span class="c1"># give the hooks to every repository under ~/dev</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>saw<span class="w"> </span>hook<span class="w"> </span>install<span class="w"> </span>-c<span class="w"> </span>~/security.yml<span class="w">     </span><span class="c1"># scan them against YOUR allowlist</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>saw<span class="w"> </span>hook<span class="w"> </span>status<span class="w">                        </span><span class="c1"># active? where is its state?</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>saw<span class="w"> </span>hook<span class="w"> </span>uninstall<span class="w">                     </span><span class="c1"># stop</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="nv">SAW_HOOK_DISABLED</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>git<span class="w"> </span>clone<span class="w"> </span>&lt;url&gt;<span class="w">    </span><span class="c1"># one-off bypass, no uninstall needed</span>
 </code></pre></div>
 <p>The hook warns and points at <a href="../fix-findings/"><code>saw fix</code></a>. It modifies nothing and can never break a
 git command. It is scanned against <em>your</em> allowlist, never the cloned repository's own config — see
 <a href="../../explanation/trust-model/">trust model</a>.</p>
-<p><strong>What you are installing.</strong> A directory whose contents git runs, unprompted, in every repository
-you clone or create from then on. That is what makes scan-on-clone work, and it is also a place a
-foothold could be planted, so <a href="../audit-a-machine/"><code>saw audit</code></a> enumerates it along with the
-repositories it has seeded and reports a hook saw did not install or one that has been changed.</p>
-<p><strong>Limits worth knowing.</strong> It applies to repositories cloned or created <em>after</em> you install it, which
-is how git's template mechanism works — scan the ones you already have with <code>saw scan ~/dev</code>. A
-global <code>core.hooksPath</code> overrides it, and <code>install</code>/<code>status</code> warn when one is set. <code>git reset --hard</code>
-fires no git hook at all, so scan that yourself. saw never stops a push: it reports what the push
-carries, and a push it could not check in full reads as not verified, never clean.</p>
+<p><strong>What you are installing.</strong> Hooks that git runs, unprompted, in your repositories. Each repository
+keeps them current on its own, and <a href="../audit-a-machine/"><code>saw audit</code></a> reports a hook saw did not
+install or one that has been changed.</p>
+<p><strong>Limits worth knowing.</strong> <code>git reset --hard</code> runs no hook, so scan that yourself. If git is set to
+run every repository's hooks from one folder, saw's hooks do not run there, and <code>install</code> and
+<code>status</code> say so. saw never stops a push: a push it could not check in full reads as not verified,
+never clean.</p>
 <p>CI has no clone hook; the equivalent there is <a href="../gate-ci/">gate CI</a>.</p>
 
 

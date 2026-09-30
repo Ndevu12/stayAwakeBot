@@ -1166,6 +1166,24 @@
         
       
       
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    saw hook
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
       <a href="./" class="md-nav__link md-nav__link--active">
         
   
@@ -1182,6 +1200,36 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-to-expect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What to expect
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
       
     </li>
   
@@ -1770,6 +1818,25 @@
     
   
   
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-to-expect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What to expect
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
 </nav>
                   </div>
                 </div>
@@ -1794,15 +1861,12 @@
 
 
 <h1 id="saw-hook"><code>saw hook</code><a class="headerlink" href="#saw-hook" title="Permanent link">&para;</a></h1>
-<p><strong>Scan on clone, and before you push.</strong> Installs global git hooks so a fresh clone, a pull, a branch
-switch or a rebase scans what just landed and warns you <em>before</em> a dependency install, a build, or
-an editor auto-run task — and a <code>git push</code> is checked for every file version it would publish, and
-reported, <em>before</em> the code leaves your machine. It uses git's <code>init.templateDir</code> rather than a
-global <code>core.hooksPath</code>, so existing repositories are untouched, a repository's own hooks still run,
-and nothing is hijacked. The hook warns and points at <a href="../fix/"><code>saw fix</code></a>; it never modifies
-anything, never breaks a git command, and never stops a push. See
-<a href="../../../how-to/scan-on-clone/">scan on clone</a>.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw hook install [-c FILE] [--no-stream]
+<p><strong>Scan on clone, and before you push.</strong> saw's git hooks scan what lands in a repository (a clone,
+a pull, a branch switch, a rebase) and warn you <em>before</em> a dependency install, a build or an editor
+task runs it. A <code>git push</code> is checked for everything it would publish <em>before</em> the code leaves your
+machine. The hooks warn and point at <a href="../fix/"><code>saw fix</code></a>; they never change your code, never break a
+git command, and never stop a push. See <a href="../../../how-to/scan-on-clone/">scan on clone</a>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw hook install [PATH...] [-c FILE] [--no-stream]
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>saw hook repair [--no-stream]
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>saw hook uninstall [--no-stream]
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>saw hook status [--no-stream]
@@ -1817,59 +1881,49 @@ anything, never breaks a git command, and never stops a push. See
 <tbody>
 <tr>
 <td><code>install</code></td>
-<td>Point git's global <code>init.templateDir</code> at saw's template, so repositories cloned or created from now on get the hooks.</td>
+<td>Give the hooks to every repository you clone or create from now on, and to the repositories you already have.</td>
+</tr>
+<tr>
+<td><code>PATH...</code></td>
+<td>Repositories, folders or globs to give the hooks to. Without them: your configured local targets, else the repository you are in.</td>
 </tr>
 <tr>
 <td><code>repair</code></td>
-<td>Put back every hook saw installs, wherever git runs it, and move aside what stood in its place.</td>
+<td>Put back every hook saw installed, and set aside whatever stood in its place.</td>
 </tr>
 <tr>
 <td><code>uninstall</code></td>
-<td>Reverse it, restoring any hook it had to preserve.</td>
+<td>Remove saw's hooks and restore any hook of yours they ran before.</td>
 </tr>
 <tr>
 <td><code>status</code></td>
-<td>Whether it is active, the template directory, and the scan cache.</td>
+<td>Whether the hooks are in place and will run.</td>
 </tr>
 <tr>
 <td><code>-c</code>, <code>--config FILE</code></td>
-<td>Operator config whose allowlist clones are scanned against, baked into the hook. The hook never reads a cloned repository's own config.</td>
+<td>Your config, whose allowlist the hooks scan with. A repository's own config is never read.</td>
 </tr>
 <tr>
 <td><code>--no-stream</code></td>
-<td>Plain instant lines instead of live progress on the clone/pull scan. Same as <code>STAYAWAKE_NO_STREAM=1</code>.</td>
+<td>Plain instant lines instead of live progress. Same as <code>STAYAWAKE_NO_STREAM=1</code>.</td>
 </tr>
 </tbody>
 </table>
-<p><code>install</code> creates a directory whose contents git runs, unprompted, in every repository cloned or
-created afterwards. <a href="../audit/"><code>saw audit</code></a> enumerates that directory, any template directory you
-configured yourself, and the hooks of the repositories it has seeded, and reports a hook that was
-not installed by saw, or one that was installed by saw and has since been changed.</p>
-<p><code>repair</code> answers that report. It rewrites every hook saw installs, in the template directories and in
-every repository saw has seeded, and moves aside whatever was found in a hook's place. The
-directory saw manages is saw's alone: anything in it that is not a hook saw installs is moved aside
-too, on <code>install</code>, <code>repair</code> and <code>uninstall</code> alike. Nothing is deleted. What is moved aside is kept
-under saw's state directory beside a record of where it came from, for you to examine. A hook counts
-as back only after it is read back as written; one that could not be is named, and left as it was.
-A repository's own hooks are never touched; a hook of yours that saw chained to in a template
-directory you configured stays, and is restored by <code>uninstall</code>. <code>install</code> records which saw, which
-config and which directory it installed into; <code>repair</code> puts back exactly that, there and in the
-repositories saw has seeded, and asks you to run <code>install</code> once when no record exists. A seeded
-repository that runs its hooks from elsewhere is named and left alone. A hook of saw's that names another saw or config is put back as well. <code>uninstall</code>
-also forgets the repositories saw had seeded.</p>
-<p><code>status</code> says when something where saw's hooks run is not what saw installed.</p>
-<p>A pull or switch scans only what changed, so it is near-instant, and each scan runs under a
-wall-clock budget (<code>SAW_HOOK_TIMEOUT</code>, default 60s) so a huge clone can never hang git; a scan that
-times out reports the tree as unverified, never clean. <code>git reset --hard</code> fires no git hook, so scan
-that case yourself with <a href="../scan/"><code>saw scan</code></a>.</p>
-<p>A push is checked for what it would publish: every branch and tag it sends, every commit in it, and
-what each branch and tag will serve once it lands, including one pushed back to an older state, as
-committed rather than as your working folder holds it. A worm it finds is named with the commit
-that carries it and pointed at <a href="../amend/"><code>saw fix amend</code></a>, which removes it from what you published;
-the push itself goes through. A push is checked under a shorter budget, 20s by default
-(<code>SAW_HOOK_TIMEOUT</code> sets both), and what it could not check in time reads as not verified and is
-checked the next time that repository pushes. A hook of yours that saw runs after its own, and
-Git LFS, keep their say over the push.</p>
+<h2 id="what-to-expect">What to expect<a class="headerlink" href="#what-to-expect" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Your repositories stay current.</strong> Whenever one of saw's hooks runs, a saw hook that is missing or
+  out of date there is put back. Your own hooks keep running and are left as they are.</li>
+<li><strong>Nothing is deleted.</strong> Whatever saw sets aside is kept, with a record of where it came from, for
+  you to examine. A hook that could not be put back is named.</li>
+<li><strong><a href="../audit/"><code>saw audit</code></a> reports</strong> a hook saw did not install, or one of saw's that was changed;
+  <code>saw hook repair</code> puts it back.</li>
+<li><strong>Scans are quick and bounded.</strong> A pull or switch scans only what changed. Each scan has a time
+  budget (<code>SAW_HOOK_TIMEOUT</code>: 60s, 20s for a push). What could not be checked in time reads as not
+  verified, never clean.</li>
+<li><strong>A push goes through.</strong> A worm it would publish is named with the commit that carries it and
+  pointed at <a href="../amend/"><code>saw fix amend</code></a>. Your own pre-push hook and Git LFS keep their say.</li>
+<li><code>git reset --hard</code> runs no hook; check that case with <a href="../scan/"><code>saw scan</code></a>.</li>
+</ul>
 
 
 
