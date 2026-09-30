@@ -9,6 +9,8 @@ repositories. This is the enumeration those three axes share.
 from __future__ import annotations
 
 import sys
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -134,6 +136,49 @@ class TestEveryRefIsReached(GitSandbox):
         blobs, complete = query.reachable_blobs(self.new_repo("bare"))
         self.assertEqual(blobs, [])
         self.assertTrue(complete)
+
+
+class TestReachableObjectsIsFailClosed(unittest.TestCase):
+    """The reachability walk answers None, never an empty set, when git cannot walk."""
+
+    def test_a_tip_git_cannot_walk_answers_none(self):
+        from stayawake.lib.git import objects
+        with tempfile.TemporaryDirectory() as d:
+            subprocess.run(["git", "init", "-q", d], check=True)
+            self.assertIsNone(objects.reachable_objects(d, ["deadbeef" * 5]))
+
+    def test_nothing_to_walk_is_an_empty_answer(self):
+        from stayawake.lib.git import objects
+        self.assertEqual(objects.reachable_objects(".", []), set())
+
+
+class TestAQueryGitCouldNotAnswerIsNotANo(unittest.TestCase):
+    """The read helpers tell an answer from a failure to answer, against real git."""
+
+    def setUp(self):
+        from stayawake.lib import git as gitutil
+        self.gitutil = gitutil
+        self.tmp = tempfile.TemporaryDirectory()
+        self.repo = Path(self.tmp.name) / "r"
+        subprocess.run(["git", "init", "-q", str(self.repo)], check=True)
+        subprocess.run(["git", "-C", str(self.repo), "-c", "user.name=t", "-c", "user.email=t@t",
+                        "commit", "-q", "--allow-empty", "-m", "a"], check=True)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_an_ancestry_git_cannot_resolve_is_unknown(self):
+        self.assertIsNone(self.gitutil.ancestry(self.repo, "f" * 40, "HEAD"))
+        self.assertIs(True, self.gitutil.ancestry(self.repo, "HEAD", "HEAD"))
+
+    def test_an_entry_in_a_tree_git_cannot_resolve_is_unanswered(self):
+        self.assertEqual((False, None), self.gitutil.entry_at(self.repo, "f" * 40, "a"))
+        self.assertEqual((True, None), self.gitutil.entry_at(self.repo, "HEAD", "a"))
+
+    def test_branches_git_cannot_list_are_unknown_not_none(self):
+        self.assertTrue(self.gitutil.listed_branch_refs(self.repo))
+        (self.repo / ".git" / "packed-refs").write_text("not a packed-refs line\n")
+        self.assertIsNone(self.gitutil.listed_branch_refs(self.repo))
 
 
 if __name__ == "__main__":

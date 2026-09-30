@@ -50,8 +50,16 @@ def ref_exists(repo: str | Path, ref: str) -> bool:
 def is_ancestor(repo: str | Path, ancestor: str, descendant: str) -> bool:
     """True if `ancestor` is reachable from `descendant` — i.e. the update fast-forwards.
     Distinguishes a fix branch we can extend from one occupied by unrelated work."""
+    return ancestry(repo, ancestor, descendant) is True
+
+
+def ancestry(repo: str | Path, ancestor: str, descendant: str) -> bool | None:
+    """Ask whether one commit is an ancestor of another. Takes the repo and the two commits. Returns
+    the answer, or None when git could not give one."""
     res = run(repo, ["merge-base", "--is-ancestor", ancestor, descendant])
-    return res is not None and res.returncode == 0
+    if res is None or res.returncode not in (0, 1):
+        return None
+    return res.returncode == 0
 
 
 def tracked_under(repo: str | Path, pathspec: str | Path) -> list[str]:
@@ -329,9 +337,18 @@ def branch_refs(repo: str | Path) -> list[tuple[str, str]]:
     each local head and each fetched origin branch, keeping BOTH where a name has one of each: a
     local head and the origin ref of the same name diverge, and either may hold a version the other
     does not. Which single ref an amend then updates is `branches_carrying`'s answer, not this one."""
+    return listed_branch_refs(repo) or []
+
+
+def listed_branch_refs(repo: str | Path) -> list[tuple[str, str]] | None:
+    """List the refs `branch_refs` names. Takes the repo. Returns them, or None when git could not
+    list them."""
     found: list[tuple[str, str]] = []
     for scope in (_LOCAL_REF.rstrip("/"), _ORIGIN_REF.rstrip("/")):
-        for line in stdout(repo, ["for-each-ref", "--format=%(refname)", scope]).splitlines():
+        res = run(repo, ["for-each-ref", "--format=%(refname)", scope])
+        if res is None or res.returncode != 0:
+            return None
+        for line in (res.stdout or "").splitlines():
             ref = line.strip()
             name = branch_name_of(ref)
             if name:
@@ -418,16 +435,23 @@ def tree_entry(repo: str | Path, treeish: str, path: str) -> tuple[str, str] | N
     The MODE travels with the object: writing a blob back into an index without it turns an
     executable into a plain file and a symlink into a file holding its target as text.
     """
+    return entry_at(repo, treeish, path)[1]
+
+
+def entry_at(repo: str | Path, treeish: str, path: str) -> tuple[bool, tuple[str, str] | None]:
+    """Ask for the entry at a path in a commit or tree. Takes the repo, the commit or tree and the
+    path. Returns whether git answered, and the `(mode, oid)` entry, or None when the path is not
+    there."""
     res = run(repo, ["ls-tree", "--full-tree", treeish, "--", path])
     if res is None or res.returncode != 0:
-        return None
+        return False, None
     line = (res.stdout or "").strip()
     if not line:
-        return None
+        return True, None
     head = line.split("\t", 1)[0].split()
     if len(head) < 3:
-        return None
-    return head[0], head[2]
+        return False, None
+    return True, (head[0], head[2])
 
 
 def file_at(repo: str | Path, treeish: str, path: str) -> str:

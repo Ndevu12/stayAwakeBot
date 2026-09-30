@@ -4,6 +4,7 @@ each branch they sat on. Never `--pr`. Never moves a tag. Bare `saw fix` is unch
 """
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, NamedTuple
@@ -19,10 +20,10 @@ from stayawake.bots.security.targets import LocalRepoTarget
 from stayawake.lib.git.auth import run_remote_git
 from stayawake.lib.git.borrowed import BorrowError, borrow
 from stayawake.lib.git import remote as gitremote
-from stayawake.lib.git.run import UNTRUSTED, stdout_bytes
+from stayawake.lib.git.run import LOCAL_TIMEOUT, UNTRUSTED, stdout_bytes
 from stayawake.bots.security.pr.outcome import (AmendOutcome, BranchResult, Cause, Reason,
-                                                amended, refused, render_amend_line,
-                                                with_checkout)
+                                                amended, names_that_fit, refused,
+                                                render_amend_line, with_checkout)
 from stayawake.lib.git import authority
 from stayawake.lib.git.merge import detect as mergedetect
 from stayawake.lib.git.write import amend as gitamend
@@ -39,27 +40,117 @@ def _full(repo: Path, sha: str) -> str:
     return gitutil.stdout(repo, ["rev-parse", "--verify", f"{sha}^{{commit}}"]).strip()
 
 
-def _payload_left(repo: Path, olds, rebuilt, new_tips: dict[str, str],
-                  path_checks: dict, remove=()) -> list[str]:
+def _payload_left(repo: Path, olds, rebuilt, rewritten: list[tuple[str, str]],
+                  path_checks: dict, remove=()) -> tuple[list[str], list[str]]:
     """What the rebuilt objects still leave reaching the payload, checked before any reference
-    moves. Empty means clean. `olds` are the pre-rewrite carrying commits; `path_checks` maps each
-    corrected path to its own footprint check; `remove` maps a path to the foreign blob that must
-    be gone from the tree."""
-    left = []
+    moves. `olds` are the pre-rewrite carrying commits; `rewritten` pairs each branch to deliver with
+    its rebuilt tip; `path_checks` maps each corrected path to its own check, answering True, False
+    or None when it could not tell; `remove` maps a path to the foreign blob that must be gone from
+    the tree. Returns what still reaches it, and what could not be confirmed either way."""
+    left, unsure = [], []
     remove = remove or {}
     for old in sorted(olds):
-        for tip in sorted(set(new_tips.values())):
-            if gitutil.is_ancestor(repo, old, tip):
+        for name, tip in sorted(rewritten):
+            known = gitutil.ancestry(repo, old, tip)
+            if known is None:
+                unsure.append(f"the rewritten branch {name}")
+            elif known:
                 left.append(f"{old[:12]} is still reachable from the rebuilt history")
     for sha in sorted(set(rebuilt.mapping.values())):
         for path in sorted(path_checks):
-            if path_checks[path](sha, path):
+            verdict = path_checks[path](sha, path)
+            if verdict is None:
+                unsure.append(f"the rewritten {path}")
+            elif verdict:
                 left.append(f"{sha[:12]} still carries {path}")
         for path in sorted(remove):
-            entry = gitutil.tree_entry(repo, sha, path)
-            if entry is not None and entry[1] == remove[path]:
+            verdict = _holds(repo, sha, path, remove[path])
+            if verdict is None:
+                unsure.append(f"the rewritten {path}")
+            elif verdict:
                 left.append(f"{sha[:12]} still holds {path}")
-    return left
+    return left, unsure
+
+
+_NOT_A_FILE = ("040000", "160000")
+
+
+def _judged(verdict) -> bool | None:
+    """Read the `survives` oracle's answer as carries, clean, or not known. Takes the answer.
+    Returns True, False, or None for a version it could not judge."""
+    return None if oracle.could_not_judge(verdict) else bool(verdict)
+
+
+def _file_text(repo: Path, treeish: str, path: str) -> tuple[str, str] | None:
+    """Read the file a commit holds at a path. Takes the repo, the commit and the path. Returns its
+    `(blob id, text)`, `("", "")` when no file is there, or None when git could not read it."""
+    answered, entry = gitutil.entry_at(repo, treeish, path)
+    if not answered:
+        return None
+    if entry is None or entry[0] in _NOT_A_FILE:
+        return "", ""
+    text = gitutil.blob_text(repo, entry[1])
+    return None if text is None else (entry[1], text)
+
+
+def _carries_in(repo: Path, treeish: str, path: str, carries) -> bool | None:
+    """Ask whether a stored version of a file carries a footprint. Takes the repo, the commit, the
+    path and the footprint check. Returns the answer, False when no file is there, or None when git
+    could not read it."""
+    found = _file_text(repo, treeish, path)
+    if found is None:
+        return None
+    return bool(found[0]) and bool(carries(found[1]))
+
+
+def _holds(repo: Path, treeish: str, path: str, oid: str) -> bool | None:
+    """Ask whether a commit holds exactly one blob at a path. Takes the repo, the commit, the path
+    and the blob id. Returns the answer, or None when git could not read the tree."""
+    answered, entry = gitutil.entry_at(repo, treeish, path)
+    if not answered:
+        return None
+    return entry is not None and entry[1] == oid
+
+
+def _payload_blobs(repo: Path, remove: dict, substitute: dict, purge_holders: dict, clean: dict,
+                   clean_shas, infected: dict) -> tuple[set[str], list[str]]:
+    """Collect the stored versions this run takes out of history. Takes the repo, the blobs removed
+    and substituted, the commits holding each purged path, the excised paths with their footprint
+    checks, the commits carrying those footprints, and each confirmed commit with the paths it
+    carries the payload at. Returns their blob ids, and the paths whose version git could not
+    read."""
+    oids = set(remove.values()) | {fo for fo, _e in substitute.values()}
+    unsure: list[str] = []
+    held = [(path, sha) for path, holders in purge_holders.items() for sha in holders]
+    held += [(path, sha) for sha, paths in infected.items() for path in paths]
+    for path, sha in held:
+        answered, entry = gitutil.entry_at(repo, sha, path)
+        if not answered:
+            unsure.append(f"every copy of {path}")
+        elif entry is not None:
+            oids.add(entry[1])
+    for path, (carries, _c) in clean.items():
+        for sha in clean_shas:
+            found = _file_text(repo, sha, path)
+            if found is None:
+                unsure.append(f"every copy of {path}")
+            elif found[0] and carries(found[1]):
+                oids.add(found[0])
+    return oids, unsure
+
+
+def _reached_from(graph: list[tuple[str, list[str]]], tips) -> set[str]:
+    """Find the commits of a graph that some tips reach. Takes the `(commit, parents)` graph and the
+    tips. Returns their ids."""
+    parents = dict(graph)
+    seen: set[str] = set()
+    stack = [tip for tip in tips if tip in parents]
+    while stack:
+        sha = stack.pop()
+        if sha not in seen:
+            seen.add(sha)
+            stack.extend(parents.get(sha, ()))
+    return seen
 
 
 def _branches_carrying_any(repo: Path, infected) -> list[tuple[str, str, str]]:
@@ -558,112 +649,170 @@ def _foreign_history(repo: Path, path: str, oid: str) -> tuple[list[str], list[s
     return holders, foreign
 
 
-def _branches_left_carrying(repo: Path, clean: dict, covered: set[str]) -> list[str]:
-    """Find the branches this run would leave behind carrying a clean-mode footprint. Takes the repo,
-    the excised paths with their footprint checks, and the branch names the run already covers.
-    Returns the names of the rest whose tip still carries one."""
-    if not clean:
-        return []
+def _path_at(repo: Path, treeish: str, path: str) -> bool | None:
+    """Tell whether a commit holds a path. Takes the repo, the commit and the path. Returns the
+    answer, or None when git could not tell."""
+    answered, entry = gitutil.entry_at(repo, treeish, path)
+    return entry is not None if answered else None
+
+
+def _branches_left(repo: Path, checks, covered: set[str]) -> tuple[list[str], list[str]]:
+    """Find the branches this run would leave behind carrying the payload. Takes the repo, each
+    corrected path paired with its check — answering True, False, or None when it could not tell —
+    and the branch names the run already covers. Returns the names of the rest that still carry it,
+    and what could not be confirmed either way."""
+    if not checks:
+        return [], []
+    listed = gitutil.listed_branch_refs(repo)
+    if listed is None:
+        return [], ["the other branches"]
     out: set[str] = set()
-    for name, ref in gitutil.branch_refs(repo):
+    unsure: set[str] = set()
+    for name, ref in listed:
         if name in covered:
             continue
-        for path, (carries, _corrector) in clean.items():
-            if carries(gitutil.file_at(repo, ref, path)):
+        for path, check in checks:
+            verdict = check(ref, path)
+            if verdict is None:
+                unsure.add(f"branch {name}")
+            elif verdict:
                 out.add(name)
                 break
-    return sorted(out)
+    return sorted(out), sorted(unsure)
 
 
-def _holds_blob(repo: Path, treeish: str, path: str, oid: str) -> bool:
-    """Whether `treeish` holds exactly `oid` at `path`. Takes the repo, the treeish, the path and the
-    blob id. Returns True when it does."""
-    entry = gitutil.tree_entry(repo, treeish, path)
-    return entry is not None and entry[1] == oid
+def _answer(repo: Path, args: list[str]) -> str | None:
+    """Run one read-only git command. Takes the repo and the arguments. Returns its output, or None
+    when git could not answer."""
+    res = gitutil.run(repo, args, context=UNTRUSTED)
+    return None if res is None or res.returncode != 0 else (res.stdout or "")
 
 
-def _branches_left_holding(repo: Path, remove: dict, covered: set[str]) -> list[str]:
-    """Find the branches this run would leave behind holding a blob scheduled for removal. Takes the
-    repo, each path mapped to that blob, and the branch names the run already covers. Returns the
-    names of the rest whose tip still holds one."""
-    if not remove:
-        return []
-    out: set[str] = set()
-    for name, ref in gitutil.branch_refs(repo):
-        if name in covered:
-            continue
-        if any(_holds_blob(repo, ref, path, oid) for path, oid in remove.items()):
-            out.add(name)
-    return sorted(out)
+_PER_CHECKOUT = ("refs/bisect/", "refs/worktree/", "refs/rewritten/")
+_PSEUDO_REFS = ("ORIG_HEAD", "FETCH_HEAD", "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD",
+                "REBASE_HEAD", "BISECT_HEAD", "AUTO_MERGE")
 
 
-def _branches_left_purging(repo: Path, purge: set, survives, covered: set[str]) -> list[str]:
-    """Find the branches this run would leave behind carrying a purged path. Takes the repo, the
-    purged paths, the `survives` oracle, and the branch names the run already covers. Returns the
-    names of the rest whose tip still carries a payload at one of those paths."""
-    if not purge:
-        return []
-    out: set[str] = set()
-    for name, ref in gitutil.branch_refs(repo):
-        if name in covered:
-            continue
-        for path in purge:
-            if survives(ref, path):
-                out.add(name)
-                break
-    return sorted(out)
-
-
-def _candidate_refs(repo: Path) -> list[tuple[str, str]]:
-    """Every ref outside the branches an amend rewrites, as `(name, tip)`. Takes the repo. Returns
-    the refs."""
-    out: list[tuple[str, str]] = []
-    named = gitutil.stdout(repo, ["for-each-ref", "--format=%(refname) %(objectname)", "refs/"],
-                           context=UNTRUSTED)
-    for line in named.splitlines():
+def _pseudo_refs_in(repo: Path, gitdir: Path) -> list[tuple[str, str]] | None:
+    """List the pseudo-refs one checkout holds, such as `ORIG_HEAD`, with what they point at. Takes
+    the repo and the directory git keeps that checkout's refs in. Returns `(name, object id)` for
+    each present, or None when git could not answer."""
+    res = gitutil.run(repo, [f"--git-dir={gitdir}", "cat-file", "--batch-check"],
+                      context=UNTRUSTED, input_text="".join(f"{name}\n" for name in _PSEUDO_REFS))
+    if res is None or res.returncode != 0:
+        return None
+    lines = (res.stdout or "").splitlines()
+    if len(lines) != len(_PSEUDO_REFS):
+        return None
+    out = []
+    for name, line in zip(_PSEUDO_REFS, lines):
         parts = line.split()
-        if len(parts) != 2:
-            continue
-        refname = parts[0]
-        if (refname.startswith("refs/heads/") or refname.startswith("refs/remotes/origin/")
-                or refname == "refs/stash"):
-            continue
-        out.append((refname, parts[1]))
-    for i, sha in enumerate(gitutil.stdout(repo, ["rev-list", "-g", "refs/stash"],
-                                           context=UNTRUSTED).split()):
-        out.append((f"stash@{{{i}}}", sha))
+        if len(parts) == 3:
+            out.append((name, parts[0]))
+        elif parts[-1:] != ["missing"]:
+            return None
+    return out
+
+
+def _refs_in(repo: Path, patterns: list[str], gitdir: Path | None = None) -> list[tuple[str, str]] | None:
+    """List refs with their tips, leaving out a symbolic ref whose target is listed in its own right.
+    Takes the repo, the ref patterns, and the directory git keeps one checkout's refs in when those
+    are the ones asked for. Returns `(name, tip)` pairs, or None when git could not list them."""
+    pinned = [f"--git-dir={gitdir}"] if gitdir is not None else []
+    named = _answer(repo, [*pinned, "for-each-ref",
+                           "--format=%(refname)%00%(objectname)%00%(symref)", *patterns])
+    if named is None:
+        return None
+    rows = [parts for parts in (line.split("\0") for line in named.splitlines())
+            if len(parts) == 3 and parts[1]]
+    listed = {name for name, _tip, _target in rows}
+    return [(name, tip) for name, tip, target in rows if target not in listed]
+
+
+def _checkout_dirs(repo: Path) -> list[tuple[str, Path]] | None:
+    """Find the directory git keeps each checkout's own refs in. Takes the repo. Returns each as
+    `(label, directory)`, labelled the way git addresses another checkout's refs, or None when they
+    could not be found."""
+    common = _answer(repo, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
+    if common is None or not common.strip():
+        return None
+    root = Path(common.strip())
+    dirs = [("main-worktree", root)]
+    try:
+        dirs += [(f"worktrees/{d.name}", d) for d in sorted((root / "worktrees").iterdir())
+                 if d.is_dir()]
+    except FileNotFoundError:
+        pass
+    except OSError:
+        return None
+    return dirs
+
+
+def _candidate_refs(repo: Path) -> tuple[list[tuple[str, str]], list[str]]:
+    """Every ref the repository keeps, each checkout's own refs, every stash entry and each
+    checkout's HEAD, as `(name, tip)`. Takes the repo. Returns those it could list, and what it could
+    not list."""
+    out: list[tuple[str, str]] = []
+    unsure: list[str] = []
+    shared = _refs_in(repo, ["refs/"])
+    if shared is None:
+        unsure.append("the tags, stashes and other refs")
+    else:
+        out += [(name, tip) for name, tip in shared if not name.startswith(_PER_CHECKOUT)]
+    checkouts = _checkout_dirs(repo)
+    if checkouts is None:
+        unsure.append("the other checkouts' own refs")
+    for label, gitdir in checkouts or []:
+        own = _refs_in(repo, list(_PER_CHECKOUT), gitdir)
+        pseudo = _pseudo_refs_in(repo, gitdir)
+        if own is None or pseudo is None:
+            unsure.append(f"the refs of {label}")
+        out += [(f"{label}/{name}", tip) for name, tip in (own or []) + (pseudo or [])]
+    if any(name == "refs/stash" for name, _tip in out):
+        entries = _answer(repo, ["rev-list", "-g", "refs/stash"])
+        if entries is None:
+            unsure.append("the stash entries")
+        else:
+            stashed = entries.split()
+            out = [(name, tip) for name, tip in out if name != "refs/stash" or tip not in stashed]
+            out += [(f"stash@{{{i}}}", sha) for i, sha in enumerate(stashed)]
+    worktrees = _answer(repo, ["worktree", "list", "--porcelain"])
+    if worktrees is None:
+        unsure.append("the other checkouts")
     path = ""
-    for line in gitutil.stdout(repo, ["worktree", "list", "--porcelain"],
-                               context=UNTRUSTED).splitlines():
+    for line in (worktrees or "").splitlines():
         if line.startswith("worktree "):
             path = line[len("worktree "):]
         elif line.startswith("HEAD "):
             out.append((f"worktree {path}", line[len("HEAD "):].strip()))
-    return out
+    return out, unsure
 
 
-def _reachable_blobs(repo: Path, tips: list[str], exclude: list[str]) -> set[str]:
-    """The object ids reachable from `tips` but not from `exclude`. Takes the repo, the tips to walk
-    and the tips to exclude. Returns the ids."""
-    if not tips:
-        return set()
-    args = ["rev-list", "--objects", *tips]
-    if exclude:
-        args += ["--not", *exclude]
-    listing = gitutil.stdout(repo, args, context=UNTRUSTED)
-    return {parts[0] for line in listing.splitlines() if (parts := line.split())}
-
-
-def _refs_still_reaching(repo: Path, oids: set[str], clean_tips: list[str]) -> list[str]:
-    """Names of refs outside the rewritten branches from whose history any id in `oids` is reachable.
-    Takes the repo, the removed blob ids and the clean tips to exclude. Returns the ref names."""
+def _refs_still_reaching(repo: Path, oids: set[str],
+                         clean_tips: list[str]) -> tuple[list[str], list[str]]:
+    """Name the refs from whose history any id in `oids` is still reachable, judging each ref by what
+    it points at. Takes the repo, the payload's blob and commit ids, and the clean tips to exclude.
+    Returns the names of the refs that still reach one, and what could not be established."""
     if not oids:
-        return []
-    candidates = _candidate_refs(repo)
-    if not candidates or not (oids & _reachable_blobs(repo, [s for _n, s in candidates], clean_tips)):
-        return []
-    return sorted({name for name, sha in candidates
-                   if oids & _reachable_blobs(repo, [sha], clean_tips)})
+        return [], []
+    candidates, unsure = _candidate_refs(repo)
+    if not candidates:
+        return [], unsure
+    everything = gitutil.reachable_objects(repo, [s for _n, s in candidates], clean_tips)
+    if everything is not None and not oids & everything:
+        return [], unsure
+    deadline = None if everything is not None else time.monotonic() + LOCAL_TIMEOUT
+    holding = []
+    for at, (name, sha) in enumerate(candidates):
+        if deadline is not None and time.monotonic() > deadline:
+            unsure.append(f"{len(candidates) - at} more refs")
+            break
+        reached = gitutil.reachable_objects(repo, [sha], clean_tips)
+        if reached is None:
+            unsure.append(name)
+        elif oids & reached:
+            holding.append(name)
+    return sorted(set(holding)), unsure
 
 
 _OID = set("0123456789abcdef")
@@ -1128,32 +1277,27 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
                            str(len(unhandled)), ", ".join(sorted(unhandled)))
         return _refuse(Cause.NO_CONFIRMED_PAYLOAD)
 
-    malicious_oids: set[str] = set(remove.values())
-    malicious_oids |= {fo for fo, _e in substitute.values()}
-    for path, holders in purge_holders.items():
-        for sha in holders:
-            entry = gitutil.tree_entry(repo, sha, path)
-            if entry is not None:
-                malicious_oids.add(entry[1])
-    for path, (carries, _c) in clean.items():
-        for sha in clean_shas:
-            entry = gitutil.tree_entry(repo, sha, path)
-            if entry is not None and carries(gitutil.file_at(repo, sha, path)):
-                malicious_oids.add(entry[1])
+    malicious_oids, unread_versions = _payload_blobs(repo, remove, substitute, purge_holders, clean,
+                                                     clean_shas, infected)
 
     all_infected = (set(infected) | clean_shas | remove_shas | substitute_shas | purge_shas
                     | set(uncharacterized))
+    malicious_oids |= all_infected
     heads = _branches_carrying_any(repo, all_infected)
     if not heads:
         return _refuse(Cause.COMMIT_ON_NO_BRANCH,
                        ", ".join(sorted(s[:12] for s in all_infected)))
     covered = {n for n, _t, _c in heads}
-    off_plan = _branches_left_carrying(repo, clean, covered) + \
-        _branches_left_holding(repo, remove, covered) + \
-        _branches_left_holding(repo, {p: fo for p, (fo, _e) in substitute.items()}, covered) + \
-        _branches_left_purging(repo, purge, survives, covered)
+    off_plan, unread_branches = _branches_left(repo, [
+        *((p, lambda tr, pth, c=carries: _carries_in(repo, tr, pth, c))
+          for p, (carries, _c) in clean.items()),
+        *((p, lambda tr, pth, o=oid: _holds(repo, tr, pth, o)) for p, oid in remove.items()),
+        *((p, lambda tr, pth, o=fo: _holds(repo, tr, pth, o)) for p, (fo, _e) in substitute.items()),
+        *((p, lambda tr, pth: _judged(survives(tr, pth))) for p in purge),
+    ], covered)
     if off_plan:
-        return _refuse(Cause.PAYLOAD_STILL_REACHABLE, ", ".join(sorted(set(off_plan))))
+        return _refuse(Cause.PAYLOAD_STILL_REACHABLE, names_that_fit(off_plan))
+    unconfirmed = [*unread_versions, *unread_branches]
 
     graph = gitrebuild.ordered_graph(repo, [tip for _n, tip, _c in heads])
     plan = gitrebuild.commits_to_rebuild(graph, all_infected)
@@ -1240,31 +1384,45 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
 
     delivered_tips = {tip: new_tips[tip] for _n, tip, _c in deliverable}
     # Count and name only commits a delivered branch reaches, not ones rebuilt for an isolated one.
-    reachable = gitutil.stdout(repo, ["rev-list", *[t for _n, t, _c in deliverable]]).split()
-    delivered_reach = set(reachable)
+    delivered_reach = _reached_from(graph, [t for _n, t, _c in deliverable])
     oldest = next((sha for sha, _ps in plan
                    if sha in rebuilt.mapping and sha in delivered_reach), oldest)
     delivered_infected = [s for s in all_infected if s in rebuilt.mapping and s in delivered_reach]
 
-    path_checks = {p: survives for p in flagged}
-    path_checks.update({p: (lambda tr, pth, c=carries: c(gitutil.file_at(repo, tr, pth)))
+    path_checks = {p: (lambda tr, pth: _judged(survives(tr, pth))) for p in flagged}
+    path_checks.update({p: (lambda tr, pth, c=carries: _carries_in(repo, tr, pth, c))
                         for p, (carries, _c) in clean.items()})
-    left = _payload_left(repo, all_infected, rebuilt, delivered_tips, path_checks, remove)
+    left, unread_rewrite = _payload_left(
+        repo, all_infected, rebuilt, [(name, delivered_tips[tip]) for name, tip, _c in deliverable],
+        path_checks, remove)
     if left:
         return _refuse(Cause.PAYLOAD_STILL_REACHABLE, "; ".join(left[:3]))
+    unconfirmed += unread_rewrite
     covered_names = {n for n, _t, _c in heads}
     post_view = [(name, delivered_tips[tip]) for name, tip, _c in deliverable]
-    for name, ref in gitutil.branch_refs(repo):
+    others = gitutil.listed_branch_refs(repo)
+    if others is None:
+        unconfirmed.append("the other branches")
+    for name, ref in others or []:
         if name in covered_names:
             continue
-        tip = gitutil.stdout(repo, ["rev-parse", ref]).strip()
+        tip = (_answer(repo, ["rev-parse", ref]) or "").strip()
         if tip:
             post_view.append((name, tip))
-    left_oids = malicious_oids & _reachable_blobs(repo, [tip for _n, tip in post_view], [])
-    if left_oids:
-        holding = sorted({name for name, tip in post_view
-                          if malicious_oids & _reachable_blobs(repo, [tip], [])})
-        return _refuse(Cause.PAYLOAD_STILL_REACHABLE, ", ".join(holding))
+        else:
+            unconfirmed.append(f"branch {name}")
+    reached = gitutil.reachable_objects(repo, [tip for _n, tip in post_view])
+    if reached is None:
+        unconfirmed.append("every branch")
+    elif malicious_oids & reached:
+        holding, unread = [], []
+        for name, tip in post_view:
+            one = gitutil.reachable_objects(repo, [tip])
+            if one is None:
+                unread.append(name)
+            elif malicious_oids & one:
+                holding.append(name)
+        return _refuse(Cause.PAYLOAD_STILL_REACHABLE, names_that_fit(sorted(holding or unread)))
 
     keep: dict[str, frozenset[str]] = {}
     staging: dict[str, dict] = {}
@@ -1312,25 +1470,24 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
         if not result.force_updated and cause is not Cause.PUSH_NOT_CONFIRMED:
             failed.append(branch)
     survivors = _survivors(repo, slug, sorted(delivered_infected), token)
-    malicious_oids: set[str] = set(remove.values())
-    malicious_oids |= {fo for fo, _e in substitute.values()}
-    for path, holders in purge_holders.items():
-        for sha in holders:
-            entry = gitutil.tree_entry(repo, sha, path)
-            if entry is not None:
-                malicious_oids.add(entry[1])
-    for path, (carries, _c) in clean.items():
-        for sha in clean_shas:
-            entry = gitutil.tree_entry(repo, sha, path)
-            if entry is not None and carries(gitutil.file_at(repo, sha, path)):
-                malicious_oids.add(entry[1])
-    reachable_elsewhere = _refs_still_reaching(repo, malicious_oids, list(delivered_tips.values()))
+    refreshed = gitutil.fetch_refs(repo, token=token)
+    if not refreshed.ok:
+        survivors.append(Reason(Cause.REMOTE_COPY_NOT_REFRESHED, refreshed.reason))
+    reachable_elsewhere, unread_refs = _refs_still_reaching(repo, malicious_oids,
+                                                            list(delivered_tips.values()))
+    unconfirmed += unread_refs
     if reachable_elsewhere:
         survivors.append(Reason(Cause.PAYLOAD_REACHABLE_FROM_OTHER_REFS,
-                                ", ".join(reachable_elsewhere)))
-    delivered_sub = [p for p in substitute
-                     if any(gitutil.tree_entry(repo, t, p) is not None
-                            for t in delivered_tips.values())]
+                                names_that_fit(reachable_elsewhere)))
+    delivered_sub = []
+    for path in substitute:
+        held = {_path_at(repo, t, path) for t in delivered_tips.values()}
+        if True in held:
+            delivered_sub.append(path)
+        elif None in held:
+            unconfirmed.append(f"the rewritten {path}")
+    if unconfirmed:
+        survivors.append(Reason(Cause.REMOVAL_NOT_CONFIRMED, names_that_fit(unconfirmed)))
     supplied = sorted(p for p in delivered_sub if p in supply_paths)
     restored = sorted(p for p in delivered_sub if p not in supply_paths)
     if supplied:

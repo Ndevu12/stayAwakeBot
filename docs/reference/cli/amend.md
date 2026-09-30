@@ -14,7 +14,8 @@ description: saw fix amend — amend the infected commits and force-update the b
 Replace a past commit that still carries the payload and force-update each branch it sat on. That
 force-update is the fix: an amend that never reaches the remote is not one. The replaced
 commit keeps its original message and its original author, and the commits after it are replayed
-onto the replacement.
+onto the replacement. Once the remote has moved, your clone's copy of the remote branches is
+refreshed to match it; if it cannot be, the run says so.
 
 ```text
 saw fix amend [TARGETS...]
@@ -68,6 +69,9 @@ it back, it names that branch: look at that repository before doing anything els
   same way.
 - **Tags and forks are reported, not changed.** A tag or a fork that still reaches the replaced
   commit keeps a copy of it, and the run tells you.
+- **What it cannot confirm, it does not call done.** When it cannot tell whether a branch, a tag,
+  a stash, another checkout or your copy of the remote still holds what it took out, it finishes
+  the rest of the clean-up and names what it could not confirm for you to review.
 - **The previous commits stay on the remote** until GitHub collects them.
 
 See [the safety envelope](../../explanation/safety-envelope.md) for what `fix` will and will not

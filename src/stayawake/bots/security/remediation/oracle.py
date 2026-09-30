@@ -7,8 +7,19 @@ from pathlib import Path
 
 from stayawake.bots.security.models import CONFIRMED
 from stayawake.lib import git as gitutil
-from stayawake.lib.git.run import stdout_bytes
 from stayawake.utils import scratch
+
+
+READ_ERROR = "read-error"
+MATERIALIZE_ERROR = "materialize-error"
+SCAN_ERROR = "scan-error"
+_NOT_JUDGED = frozenset({READ_ERROR, MATERIALIZE_ERROR, SCAN_ERROR})
+
+
+def could_not_judge(verdict) -> bool:
+    """Tell whether an answer from `content_confirms` or `survives` means the content went unjudged.
+    Takes the answer. Returns True for a read, write or scan that failed."""
+    return verdict in _NOT_JUDGED
 
 
 def payload_matchers(signatures):
@@ -41,11 +52,11 @@ def content_confirms(content: bytes, path: str, payload, allowlist, opts,
         target.is_repo = False
         result = _scanner.scan_target(target, payload, allowlist)
     except (OSError, ValueError):
-        return "materialize-error"
+        return MATERIALIZE_ERROR
     finally:
         scratch.release_path(Path(tmp))
     if result.error is not None:
-        return "scan-error"
+        return SCAN_ERROR
     return next((getattr(f, "signature_id", "confirmed") for f in result.findings
                  if getattr(f, "path", "") == path
                  and getattr(f, "confidence", None) == CONFIRMED
@@ -55,19 +66,22 @@ def content_confirms(content: bytes, path: str, payload, allowlist, opts,
 def survives(repo, signatures, allowlist, opts) -> object:
     """`check(treeish, path) -> str | None` for whether a path's content in a tree confirms a payload.
     Takes the repo, the by-matcher signatures, the allowlist, and the scan options. Returns the check;
-    a truthy result — a signature id, or an unreadable/errored token — means treat the path as unclean."""
+    a truthy result — a signature id, or an unreadable/errored token — means treat the path as
+    unclean, and so does a tree git could not read."""
     payload = payload_matchers(signatures)
     scanned: dict[tuple, str | None] = {}
 
     def check(treeish, path):
-        entry = gitutil.tree_entry(repo, treeish, path)
+        answered, entry = gitutil.entry_at(repo, treeish, path)
+        if not answered:
+            return READ_ERROR
         if entry is None:
             return None
         sha = entry[1]
         if (path, sha) not in scanned:
-            blob = stdout_bytes(repo, ["cat-file", "blob", sha])
+            blob = gitutil.blob(repo, sha)
             if blob is None:
-                scanned[(path, sha)] = "read-error"
+                scanned[(path, sha)] = READ_ERROR
             else:
                 scanned[(path, sha)] = content_confirms(blob, path, payload, allowlist, opts,
                                                          is_symlink=(entry[0] == "120000"))
@@ -105,7 +119,7 @@ def still_condemned(root: Path, signatures, allowlist, opts):
             return ABSENT
         except OSError:
             return UNREADABLE
-        if verdict in ("materialize-error", "scan-error"):
+        if could_not_judge(verdict):
             return UNREADABLE
         return CARRIES if verdict else CHANGED
 

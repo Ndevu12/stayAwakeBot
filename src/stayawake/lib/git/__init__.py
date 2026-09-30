@@ -16,6 +16,7 @@ Submodules:
 from stayawake.lib.git.run import (run, run_ok, stdout, UNTRUSTED, SAW_OWNED, OPERATOR_PUSH,
                                    OPERATOR_CONFIG, GitRefused)
 from stayawake.lib.git.auth import github_https_auth, github_remote, run_remote_git
+from stayawake.lib.git.objects import blob, blob_text, reachable_objects
 from stayawake.lib.git.query import (
     is_git_repo,
     slug_from_url,
@@ -27,6 +28,8 @@ from stayawake.lib.git.query import (
     path_exists_at,
     file_at,
     tree_entry,
+    entry_at,
+    ancestry,
     list_tree,
     tracked,
     tracked_under,
@@ -39,6 +42,7 @@ from stayawake.lib.git.query import (
     branches_matching,
     branches_carrying,
     branch_refs,
+    listed_branch_refs,
     branch_name_of,
     fetch_refs,
     FetchResult,
@@ -67,12 +71,13 @@ from stayawake.lib.git.write import (
 )
 
 __all__ = [
+    "blob", "blob_text", "reachable_objects",
     "run", "run_ok", "stdout", "UNTRUSTED", "SAW_OWNED", "OPERATOR_PUSH", "OPERATOR_CONFIG",
     "GitRefused", "github_https_auth", "github_remote", "run_remote_git",
     "is_git_repo", "slug_from_url", "origin_slug", "default_branch", "ref_exists",
-    "parents", "changed_paths", "path_exists_at", "file_at", "tree_entry", "list_tree", "tracked", "tracked_under",
+    "parents", "changed_paths", "path_exists_at", "file_at", "tree_entry", "entry_at", "ancestry", "list_tree", "tracked", "tracked_under",
     "file_commits", "blob_paths", "introduced_added_text", "commit_meta", "remote_has_branch", "is_ancestor",
-    "branches_matching", "branches_carrying", "branch_refs", "branch_name_of",
+    "branches_matching", "branches_carrying", "branch_refs", "listed_branch_refs", "branch_name_of",
     "fetch_refs", "FetchResult",
     "remote_branches_matching", "ref_safe_segment", "choose_branch", "commit_count", "ref_counts",
     "merge_commits", "evil_merge_paths", "clean_merge_blob", "borrowed_or_none",
