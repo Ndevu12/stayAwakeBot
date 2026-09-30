@@ -220,6 +220,9 @@ reader, not the mechanism or the weakness it closed.
   resolve reports what the scan saw, and a run that moved branches and could not put them back
   tells you where your original history was saved so you can restore it.
 
+### Removed
+- **`prevent/install-hooks.sh` is gone.** `saw hook install` gives every repository saw's hooks.
+
 ## [0.11.4] - 2026-09-16
 
 ### Changed
