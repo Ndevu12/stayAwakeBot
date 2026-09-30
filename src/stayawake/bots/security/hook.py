@@ -840,6 +840,11 @@ def _run_event(event: str, argv: list[str], config_path: str | None,
                      f"Until you've reviewed it, do NOT {_AVOID}.", "warn", err), file=err)
         print("   " + _paint("Review:", "dim", err) + " " + _cmd(f"saw scan {display}", err), file=err)
         return 0
+    if result.residue:
+        print(_paint(f"⚠  {_BRAND}: {display} — nothing here runs, but it holds what the project "
+                     "would not carry.", "warn", err), file=err)
+        print("   " + _paint("Review:", "dim", err) + " " + _cmd(f"saw scan {display}", err), file=err)
+        return 0
     if label == "clone":                    # a fresh clone: confirm it's clean (a pull stays quiet)
         print(_paint(f"✓ {_BRAND}: {display} scanned clean.", "ok", err), file=err)
     return 0

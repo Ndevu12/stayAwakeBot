@@ -169,6 +169,26 @@ class TestRepositoriesStayCurrentThroughTheirOwnOperations(_Isolated):
         self.assertFalse((self.repo / ".husky").exists())
 
 
+class TestTheHookReadsAResultAsTheScanDoes(_Isolated):
+
+    def test_a_residue_result_is_never_called_clean(self):
+        from stayawake.bots.security.models import RESIDUE, Finding, ScanResult, Severity
+        repo = self.home / "cloned"
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t",
+                        "commit", "-q", "--allow-empty", "-m", "a"], check=True)
+        self._in_repo(repo)
+        left = Finding("cleanup-residue", "remediation-residue", Severity.LOW, "a.js", "left behind",
+                       confidence=RESIDUE)
+        err = io.StringIO()
+        with mock.patch.object(hook, "_scan_within_budget",
+                               return_value=ScanResult(target=str(repo), source="local", findings=[left])), \
+                mock.patch.object(sys, "stderr", err):
+            hook.run_event("post-checkout", ["0" * 40, "1" * 40, "1"])
+        self.assertNotIn("scanned clean", err.getvalue())
+        self.assertIn("would not carry", err.getvalue())
+
+
 class TestInstallIsTheOneCentralPoint(_Isolated):
 
     def _existing(self, name):
