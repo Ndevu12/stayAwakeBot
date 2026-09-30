@@ -152,6 +152,10 @@ reader, not the mechanism or the weakness it closed.
 - **`saw fix amend` says when it could not use content you supplied, and names the file.**
 
 ### Changed
+- **Repositories you already have get saw's hooks, and keep them current.** `saw hook install`
+  also gives the hooks to the repositories you name, your configured local targets or the one you
+  run it in. From then on, whenever one of saw's hooks runs, a saw hook missing or out of date in
+  that repository is put back; your own hooks are left as they are.
 - **BREAKING — nothing is called a quarantine any more.** saw keeps its own files under one `.saw/`
   directory (the fix's backup is `.saw/rollback`), a signature's removal verb is `remove-file`, and
   `saw hook` keeps what it set aside under `saw/set-aside/hooks`. Update `exclude_dirs` to `.saw`

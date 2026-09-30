@@ -64,6 +64,163 @@ class _Isolated(unittest.TestCase):
         self.addCleanup(lambda: os.chdir(cwd))
 
 
+class TestEveryHookIsInstalledTheSameWay(_Isolated):
+    """saw's hooks are one set: a conflict costs only the hook it is on, and a repository that
+    already exists gets the whole set the way a new clone does."""
+
+    def _existing(self, name="existing"):
+        repo = self.home / name
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        return repo
+
+    def _ours(self, repo, event):
+        return hook.hookscript.is_ours(repo / ".git" / "hooks" / event)
+
+    def test_a_named_existing_repository_gets_every_hook(self):
+        repo = self._existing()
+        self.assertEqual(hook.install(repositories=[str(repo)]), 0)
+        for event in hook.hookscript.HOOKS:
+            self.assertTrue(self._ours(repo, event), event)
+
+    def test_an_existing_repositorys_own_hook_runs_after_saws(self):
+        repo = self._existing()
+        own = repo / ".git" / "hooks" / "pre-push"
+        own.write_text("#!/bin/sh\nexit 0\n")
+        os.chmod(own, 0o755)
+        self.assertEqual(hook.install(repositories=[str(repo)]), 0)
+        self.assertTrue(self._ours(repo, "pre-push"))
+        self.assertEqual((repo / ".git" / "hooks" / "pre-push.local").read_text(), "#!/bin/sh\nexit 0\n")
+
+    def test_a_repository_whose_hooks_run_from_elsewhere_is_left_and_named(self):
+        repo = self._existing()
+        subprocess.run(["git", "-C", str(repo), "config", "core.hooksPath", ".husky"], check=True)
+        out = io.StringIO()
+        with mock.patch.object(hook, "_tape", return_value=out):
+            self.assertEqual(hook.install(repositories=[str(repo)]), 0)
+        self.assertFalse(self._ours(repo, "pre-push"))
+        self.assertFalse((repo / ".husky").exists(), "nothing is written where its hooks path points")
+        self.assertIn(str(repo), out.getvalue())
+
+    def test_the_configured_local_targets_get_the_hooks(self):
+        repo = self._existing()
+        config = self.home / "security.yml"
+        config.write_text(f"targets:\n  local:\n    - {repo}\n")
+        self.assertEqual(hook.install(config_path=str(config)), 0)
+        self.assertTrue(self._ours(repo, "pre-push"))
+
+    def test_the_repository_it_runs_in_counts_only_when_asked(self):
+        repo = self._existing()
+        self._in_repo(repo)
+        self.assertEqual(hook.install(), 0)
+        self.assertFalse(self._ours(repo, "pre-push"))
+        self.assertEqual(hook.install(standing_in=True), 0)
+        self.assertTrue(self._ours(repo, "pre-push"))
+
+
+class TestRepositoriesStayCurrentThroughTheirOwnOperations(_Isolated):
+    """Every saw hook that runs brings its repository up to the full, current set, each hook from its
+    own template; a repository's own hooks are never touched by an operation."""
+
+    def setUp(self):
+        super().setUp()
+        self.repo = self.home / "existing"
+        subprocess.run(["git", "init", "-q", str(self.repo)], check=True)
+        self.hooks = self.repo / ".git" / "hooks"
+        self.assertEqual(hook.install(repositories=[str(self.repo)]), 0)
+        self._in_repo(self.repo)
+
+    def _operate(self, event="post-rewrite", argv=("amend",)):
+        err = io.StringIO()
+        with mock.patch.object(sys, "stderr", err):
+            hook.run_event(event, list(argv))
+        return err.getvalue()
+
+    def test_a_missing_hook_comes_back_on_the_next_operation(self):
+        (self.hooks / "pre-push").unlink()
+        said = self._operate()
+        self.assertTrue(hook.hookscript.is_ours(self.hooks / "pre-push"))
+        self.assertIn("pre-push", said)
+
+    def test_a_push_brings_the_other_hooks_back_too(self):
+        (self.hooks / "post-merge").unlink()
+        with mock.patch.object(hook.outbound, "check_push", return_value=0), \
+                mock.patch.object(sys, "stdin", io.StringIO("")):
+            self._operate("pre-push", ("origin", "url"))
+        self.assertTrue(hook.hookscript.is_ours(self.hooks / "post-merge"))
+
+    def test_a_stale_hook_is_upgraded_to_what_was_installed(self):
+        (self.hooks / "pre-push").write_text(hook.hookscript.render("pre-push", "/old/saw", None))
+        os.chmod(self.hooks / "pre-push", 0o755)
+        self._operate()
+        recorded = hook.hookscript.installed()
+        self.assertEqual((self.hooks / "pre-push").read_text(),
+                         hook.hookscript.render("pre-push", recorded[0], recorded[1]))
+
+    def test_an_operation_never_touches_the_repositorys_own_hook(self):
+        (self.hooks / "pre-push").write_text("#!/bin/sh\nexit 0\n")
+        os.chmod(self.hooks / "pre-push", 0o755)
+        self._operate()
+        self.assertEqual((self.hooks / "pre-push").read_text(), "#!/bin/sh\nexit 0\n")
+        self.assertFalse((self.hooks / "pre-push.local").exists())
+
+    def test_an_operation_writes_nothing_where_the_hooks_path_points(self):
+        subprocess.run(["git", "config", "core.hooksPath", ".husky"], check=True)
+        self._operate()
+        self.assertFalse((self.repo / ".husky").exists())
+
+
+class TestTheHookReadsAResultAsTheScanDoes(_Isolated):
+
+    def test_a_residue_result_is_never_called_clean(self):
+        from stayawake.bots.security.models import RESIDUE, Finding, ScanResult, Severity
+        repo = self.home / "cloned"
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t",
+                        "commit", "-q", "--allow-empty", "-m", "a"], check=True)
+        self._in_repo(repo)
+        left = Finding("cleanup-residue", "remediation-residue", Severity.LOW, "a.js", "left behind",
+                       confidence=RESIDUE)
+        err = io.StringIO()
+        with mock.patch.object(hook, "_scan_within_budget",
+                               return_value=ScanResult(target=str(repo), source="local", findings=[left])), \
+                mock.patch.object(sys, "stderr", err):
+            hook.run_event("post-checkout", ["0" * 40, "1" * 40, "1"])
+        self.assertNotIn("scanned clean", err.getvalue())
+        self.assertIn("would not carry", err.getvalue())
+
+
+class TestInstallIsTheOneCentralPoint(_Isolated):
+
+    def _existing(self, name):
+        repo = self.home / name
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t",
+                        "commit", "-q", "--allow-empty", "-m", "a"], check=True)
+        return repo
+
+    def test_install_brings_every_repository_it_knows_up_to_date(self):
+        repo = self._existing("known")
+        (repo / ".git" / "hooks").mkdir(exist_ok=True)
+        sha = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True,
+                             text=True, check=True).stdout.strip()
+        hook._remember(repo, sha)
+        self.assertEqual(hook.install(), 0)
+        for event in hook.hookscript.HOOKS:
+            self.assertTrue(hook.hookscript.is_ours(repo / ".git" / "hooks" / event), event)
+
+    def test_one_repository_that_refuses_does_not_stop_the_others(self):
+        refusing, fine = self._existing("refusing"), self._existing("fine")
+        for name in ("post-merge", "post-merge.local"):
+            (refusing / ".git" / "hooks" / name).write_text("#!/bin/sh\nexit 0\n")
+            os.chmod(refusing / ".git" / "hooks" / name, 0o755)
+        out = io.StringIO()
+        with mock.patch.object(hook, "_tape", return_value=out):
+            self.assertEqual(hook.install(repositories=[str(refusing), str(fine)]), 3)
+        self.assertTrue(hook.hookscript.is_ours(fine / ".git" / "hooks" / "pre-push"))
+        self.assertEqual((refusing / ".git" / "hooks" / "post-merge").read_text(), "#!/bin/sh\nexit 0\n")
+        self.assertIn("refusing", out.getvalue())
+
+
 class TestInstallUninstall(_Isolated):
     def _global_template(self):
         return hook.gitutil.stdout(None, ["config", "--global", "--get", "init.templateDir"], context=hook.gitutil.OPERATOR_CONFIG).strip()
@@ -112,8 +269,8 @@ class TestInstallUninstall(_Isolated):
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             self.assertEqual(hook.install(), 0)
-        self.assertIn("core.hooksPath", buf.getvalue())
-        self.assertIn("WON'T run", buf.getvalue())
+        self.assertIn(str(self.home / "hp"), buf.getvalue())
+        self.assertIn("will not run", buf.getvalue())
 
 
 class TestNeverClobber(_Isolated):

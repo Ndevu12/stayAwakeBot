@@ -13,7 +13,8 @@ version it would publish, and reported, *before* the code leaves your machine. F
 [CLI reference](../reference/cli/hook.md).
 
 ```bash
-saw hook install                       # future clones and pulls are scanned automatically
+saw hook install                       # new clones and this repository are scanned automatically
+saw hook install ~/dev                 # give the hooks to every repository under ~/dev
 saw hook install -c ~/security.yml     # scan them against YOUR allowlist
 saw hook status                        # active? where is its state?
 saw hook uninstall                     # stop
@@ -24,15 +25,13 @@ The hook warns and points at [`saw fix`](fix-findings.md). It modifies nothing a
 git command. It is scanned against *your* allowlist, never the cloned repository's own config — see
 [trust model](../explanation/trust-model.md).
 
-**What you are installing.** A directory whose contents git runs, unprompted, in every repository
-you clone or create from then on. That is what makes scan-on-clone work, and it is also a place a
-foothold could be planted, so [`saw audit`](audit-a-machine.md) enumerates it along with the
-repositories it has seeded and reports a hook saw did not install or one that has been changed.
+**What you are installing.** Hooks that git runs, unprompted, in your repositories. Each repository
+keeps them current on its own, and [`saw audit`](audit-a-machine.md) reports a hook saw did not
+install or one that has been changed.
 
-**Limits worth knowing.** It applies to repositories cloned or created *after* you install it, which
-is how git's template mechanism works — scan the ones you already have with `saw scan ~/dev`. A
-global `core.hooksPath` overrides it, and `install`/`status` warn when one is set. `git reset --hard`
-fires no git hook at all, so scan that yourself. saw never stops a push: it reports what the push
-carries, and a push it could not check in full reads as not verified, never clean.
+**Limits worth knowing.** `git reset --hard` runs no hook, so scan that yourself. If git is set to
+run every repository's hooks from one folder, saw's hooks do not run there, and `install` and
+`status` say so. saw never stops a push: a push it could not check in full reads as not verified,
+never clean.
 
 CI has no clone hook; the equivalent there is [gate CI](gate-ci.md).

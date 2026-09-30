@@ -33,27 +33,30 @@ def register(sub) -> None:
 
     ins = add_command(
         hsub, "install",
-        help="install the global scan-on-clone git hooks (future clones/pulls)",
-        description="Seed git's global init.templateDir so every FUTURE `git clone`/`git init` gets "
-                    "post-checkout / post-merge / post-rewrite hooks that scan what just landed (a "
-                    "clone, pull, branch switch, or rebase incl `git pull --rebase`) and warn before "
-                    "you run it. Forward-looking (existing repos are unaffected) and coexists with a "
-                    "repo's own hooks. Read-only, offline, operator-config only.",
+        help="install saw's git hooks (new clones and your existing repos)",
+        description="Give saw's git hooks to every repository you clone or create from now on, and "
+                    "to the ones you already have: those you name, your configured local targets, "
+                    "or the repository you run it in. The hooks scan what lands (a clone, pull, "
+                    "branch switch or rebase) and warn before you run it, and check a push before it "
+                    "leaves. Your own hooks keep running. Read-only and offline.",
         examples=[
             ("saw hook install", "scan every future clone and pull"),
             ("saw hook install -c ~/security.yml", "scan them against your allowlist"),
+            ("saw hook install ~/code", "hooks for every repo under ~/code"),
         ])
+    ins.add_argument("paths", nargs="*", metavar="PATH",
+                     help="existing repositories, directories or globs to add the hooks to "
+                          "(default: your configured local targets, else the repo you are in)")
     ins.add_argument("-c", "--config", default=None,
-                     help="operator config (its allowlist) to scan clones with — baked into the hook. "
-                          "The hook NEVER reads a cloned repo's own config.")
+                     help="your config, whose allowlist the hooks scan with; a repository's own "
+                          "config is never read")
     ins.set_defaults(func=run_install)
 
     un = add_command(
         hsub, "uninstall",
         help="remove the scan-on-clone git hooks",
-        description="Reverse `saw hook install`: remove saw's hooks, restore any hook they were "
-                    "chained onto, and unset git's global init.templateDir when saw owns it. Repos "
-                    "already cloned keep the hook in their own .git/hooks.",
+        description="Reverse `saw hook install`: remove saw's hooks and restore any hook of yours "
+                    "they ran before. Repositories already cloned keep the hooks they have.",
         examples=[
             ("saw hook uninstall", "stop scanning future clones"),
             ("SAW_HOOK_DISABLED=1 git clone <url>", "one-off bypass; stays installed"),
@@ -62,12 +65,10 @@ def register(sub) -> None:
 
     rp = add_command(
         hsub, "repair",
-        help="put back the hooks saw installs, wherever git runs them",
-        description="Put back every hook saw installs — in the template directories and in every "
-                    "repository saw has seeded — and move aside whatever was found in its place, or "
-                    "anything that is not saw's inside the directory saw manages. Nothing is deleted: "
-                    "what is moved aside is kept, with a record of where it came from, for you to "
-                    "examine. A hook counts as back only after it is read back as written.",
+        help="put back the hooks saw installed",
+        description="Put back every hook saw installed and set aside whatever stood in its place. "
+                    "Nothing is deleted: what is set aside is kept, with a record of where it came "
+                    "from, for you to examine.",
         examples=[
             ("saw hook repair", "after `saw audit` reports an altered saw hook"),
         ])
@@ -75,10 +76,9 @@ def register(sub) -> None:
 
     stt = add_command(
         hsub, "status",
-        help="show whether scan-on-clone is installed",
-        description="Report whether scan-on-clone is active, which template and hooks dir it uses, "
-                    "and where the scan cache lives — and warn when a global core.hooksPath or "
-                    "SAW_HOOK_DISABLED would silently stop the hooks from running.",
+        help="show whether saw's hooks are in place",
+        description="Report whether saw's hooks are in place and will run, and warn when something "
+                    "would stop them.",
         examples=[
             ("saw hook status", "is it active, and where is its state?"),
         ])
@@ -100,7 +100,8 @@ def run_repair(a: argparse.Namespace) -> int:
 
 def run_install(a: argparse.Namespace) -> int:
     from stayawake.bots.security import hook
-    return hook.install(config_path=a.config, no_stream=no_stream_requested(a))
+    return hook.install(config_path=a.config, no_stream=no_stream_requested(a),
+                        repositories=a.paths, standing_in=True)
 
 
 def run_uninstall(a: argparse.Namespace) -> int:

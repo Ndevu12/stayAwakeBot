@@ -36,8 +36,12 @@ _AVOID = ("install its dependencies (`npm install` / `pip install` / `yarn` / `p
           "your editor/IDE (auto-run tasks & extensions fire on open), or build or run it")
 
 
+
+
+
+
 class HookError(Exception):
-    """A refusal that must NOT proceed (e.g. clobbering a foreign hook) — surfaced to the CLI."""
+    """A hook saw would have to overwrite; the install stops and names it."""
 
 
 
@@ -59,8 +63,7 @@ _is_ours = hookscript.is_ours
 
 
 def _global_hookspath() -> str | None:
-    """A global `core.hooksPath`, if set — it OVERRIDES every repo's `.git/hooks`, so our
-    template-seeded hooks would silently never run. Detected so install/status can warn."""
+    """Return the folder git is set to run every repository's hooks from, if any."""
     val = gitutil.stdout(None, ["config", "--global", "--get", "core.hooksPath"],
                          context=gitutil.OPERATOR_CONFIG).strip()
     return val or None
@@ -92,9 +95,9 @@ def _tape(no_stream: bool, dest=None):
 def _warn_hookspath(stream) -> None:
     hp = _global_hookspath()
     if hp and not _same_path(os.path.expanduser(hp), _hooks_dir()):
-        print(_paint(f"  ⚠ heads-up: your global core.hooksPath ({textsafe.plain(hp, limit=4096)}) overrides per-repo "
-                     ".git/hooks, so scan-on-clone's hooks WON'T run. Point that hooksPath at "
-                     "saw's, or unset it.", "warn", stream), file=stream)
+        print(_paint(f"  ⚠ git is set to run every repository's hooks from "
+                     f"{textsafe.plain(hp, limit=4096)}, so saw's hooks will not run.", "warn", stream),
+              file=stream)
 
 
 def _same_path(a: str | Path, b: str | Path) -> bool:
@@ -271,13 +274,9 @@ class Settling:
         return any(a.state in (SET_ASIDE, PRESERVED, RESTORED, REPAIRED) for a in self.actions)
 
 
-def settle_hooks(config_path: str | None = None) -> Settling:
-    """Put the scan-on-clone hooks in place and say what that did.
-
-    Doing this twice changes nothing the second time: a hook already in place reads as such and is
-    not rewritten. Chains into an existing `init.templateDir` rather than replacing it, because git
-    holds only one.
-    """
+def settle_hooks(config_path: str | None = None, *, repositories: list[Path] | None = None) -> Settling:
+    """Put saw's hooks in place for new clones, the repositories named and every repository saw
+    knows. Takes the operator config and the repository roots. Returns what was done."""
     saw = _saw_executable()
     config = os.path.abspath(config_path) if config_path else None
     if config and resolve_config(config_path) is None:
@@ -286,7 +285,7 @@ def settle_hooks(config_path: str | None = None) -> Settling:
     existing = _global_template_dir()
     if existing and not os.path.isabs(existing):
         return Settling(code=2, problem=(
-            f"git's init.templateDir is relative ({textsafe.plain(existing, limit=4096)}); "
+            f"git's template folder is set to a relative path ({textsafe.plain(existing, limit=4096)}); "
             "make it absolute, then install."))
     try:
         if existing and not _same_path(existing, template_dir()):
@@ -297,7 +296,7 @@ def settle_hooks(config_path: str | None = None) -> Settling:
             actions = _settle(_hooks_dir(), saw, config, own=True)
             if not gitutil.run_ok(None, ["config", "--global", "init.templateDir",
                                          str(template_dir())], context=gitutil.OPERATOR_CONFIG):
-                return Settling(code=2, problem="could not set git's global init.templateDir.")
+                return Settling(code=2, problem="could not set git to give new clones saw's hooks.")
             target = str(template_dir())
     except HookError as exc:
         return Settling(code=2, problem=str(exc))
@@ -306,35 +305,83 @@ def settle_hooks(config_path: str | None = None) -> Settling:
     if not hookscript.declare(saw, config, Path(target) / "hooks"):
         actions.append(Action(UNVERIFIED, hookscript.declaration_path(),
                               "the record of what was installed could not be written"))
+    handled = [Path(target) / "hooks", _hooks_dir()]
+    try:
+        actions += _seed_repositories(repositories or [], saw, config, handled)
+        actions += _keep_seeded_current(saw, config, handled)
+    except OSError as exc:
+        return Settling(code=3, problem=textsafe.plain(str(exc)))
     return Settling(actions=actions, target=target)
 
 
-def install(config_path: str | None = None, *, no_stream: bool = False) -> int:
-    """Install the scan-on-clone hooks globally and report what happened."""
+def _repositories_named(patterns: list[str]) -> list[Path]:
+    """Find the repositories some paths or globs name, the way `saw scan` finds them. Takes the
+    patterns. Returns each repository root once."""
+    from stayawake.bots.security.resolution import resolve_local_targets
+    roots: list[Path] = []
+    for found in resolve_local_targets(patterns, ScanOptions()):
+        if os.path.lexists(found.root / ".git") and not any(_same_path(found.root, r) for r in roots):
+            roots.append(found.root)
+    return roots
+
+
+def _seed_repositories(roots: list[Path], saw: str, config: str | None,
+                       handled: list[Path]) -> list[Action]:
+    """Give repositories that already exist saw's hooks. Takes the repository roots, the saw
+    executable, the operator config and the hooks directories already handled, which it extends.
+    Returns what was done in each."""
+    actions: list[Action] = []
+    for root in roots:
+        hooks_dir = hookscript.repository_hooks_dir(root)
+        if hooks_dir is None:
+            actions.append(Action(UNREAD, root, "git could not say where this repository's hooks are"))
+            continue
+        if any(_same_path(hooks_dir, t) for t in handled):
+            continue
+        handled.append(hooks_dir)
+        if hookscript.repository_redirects_hooks(root):
+            actions.append(Action(LEFT, root, "its hooks path runs hooks from elsewhere, so saw's do not run here"))
+        else:
+            try:
+                actions += _settle(hooks_dir, saw, config, own=False)
+            except HookError as exc:
+                actions.append(Action(UNVERIFIED, root, str(exc)))
+    return actions
+
+
+def install(config_path: str | None = None, *, no_stream: bool = False,
+            repositories: list[str] | None = None, standing_in: bool = False) -> int:
+    """Install the scan-on-clone hooks globally, give them to repositories that already exist, and
+    report what happened. Takes the operator config, the paths or globs naming existing
+    repositories, and whether the repository the command runs in counts when none are named.
+    Returns the exit status."""
+    configured = ((resolve_config(config_path) or {}).get("targets", {}) or {}).get("local", []) \
+        if config_path else []
+    here = _repo_root() if standing_in else None
+    patterns = list(repositories or configured or ([str(here)] if here else []))
     with busy("installing scan-on-clone…", no_stream=no_stream):
-        done = settle_hooks(config_path)
+        done = settle_hooks(config_path, repositories=_repositories_named(patterns))
     if done.problem is not None:
         print(f"error: {done.problem}", file=sys.stderr)
         return done.code
     config = os.path.abspath(config_path) if config_path else None
     actions, target = done.actions, done.target
+    settled = done.settled
 
     out = _tape(no_stream)
-    settled = done.settled
     if settled:
         print(_paint("✓ scan-on-clone installed", "ok", out)
               + " — future `git clone` / `git pull` will be scanned automatically.", file=out)
     else:
         print(_paint("scan-on-clone is NOT fully installed — see below.", "warn", out), file=out)
-    print(f"  template dir: {textsafe.plain(str(target), limit=4096)}", file=out)
     if config:
         print(f"  scanning with operator config: {config}", file=out)
     _print_actions(actions, out)
-    print(_paint("  note: applies to repos cloned/created AFTER now (git init.templateDir); "
-                 "existing repos are unaffected.", "dim", out), file=out)
+    print(_paint("  repositories you clone or create from now on get the hooks too.", "dim", out),
+          file=out)
     print(_paint("  disable for one shell: SAW_HOOK_DISABLED=1   ·   remove: saw hook uninstall",
                  "dim", out), file=out)
-    _warn_hookspath(out)                     # a global core.hooksPath would silently override us
+    _warn_hookspath(out)
     return 0 if settled else 3
 
 
@@ -393,18 +440,7 @@ def repair(*, no_stream: bool = False) -> int:
             if configured and os.path.isabs(configured) and not any(_same_path(Path(configured) / "hooks", t) for t in seeded_by):
                 seeded_by.append(Path(configured) / "hooks")
                 actions += _repair_repository(Path(configured) / "hooks", saw, config, restore=False)
-            for repo in hookscript.seeded_repositories():
-                d = hookscript.repository_hooks_dir(repo)
-                if d is None:
-                    actions.append(Action(UNREAD, repo, "git could not say where this repository's hooks are"))
-                    continue
-                if any(_same_path(d, t) for t in seeded_by):
-                    continue
-                seeded_by.append(d)
-                if hookscript.repository_redirects_hooks(repo):
-                    actions.append(Action(LEFT, repo, "its hooks path runs hooks from elsewhere, so saw's do not run here"))
-                    continue
-                actions += _repair_repository(d, saw, config)
+            actions += _keep_seeded_current(saw, config, seeded_by)
     except HookError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -423,6 +459,64 @@ def repair(*, no_stream: bool = False) -> int:
         print(_paint(f"  moved-aside files are kept under {hookscript.set_aside_dir()}", "dim", out),
               file=out)
     return 0 if settled else 3
+
+
+def _keep_seeded_current(saw: str, config: str | None, seeded_by: list[Path]) -> list[Action]:
+    """Bring every repository saw's hooks have run in up to the full, current set, each hook written
+    for its own event; what is not saw's stays. Takes the saw executable, the operator config and
+    the hooks directories already handled, which it extends. Returns what was done."""
+    actions: list[Action] = []
+    for repo in hookscript.seeded_repositories():
+        d = hookscript.repository_hooks_dir(repo)
+        if d is None:
+            actions.append(Action(UNREAD, repo, "git could not say where this repository's hooks are"))
+            continue
+        if any(_same_path(d, t) for t in seeded_by):
+            continue
+        seeded_by.append(d)
+        if hookscript.repository_redirects_hooks(repo):
+            actions.append(Action(LEFT, repo, "its hooks path runs hooks from elsewhere, so saw's do not run here"))
+            continue
+        actions += _repair_repository(d, saw, config)
+    return actions
+
+
+def _keep_current(root: Path) -> list[Action]:
+    """Bring the repository a hook is running in up to the full, current set of saw's hooks, as
+    recorded at install. Takes the repository root. Returns what changed; nothing when there is no
+    record, or the repository runs its hooks from elsewhere."""
+    recorded = hookscript.installed()
+    if recorded is None or hookscript.repository_redirects_hooks(root):
+        return []
+    hooks_dir = hookscript.repository_hooks_dir(root)
+    if hooks_dir is None or _inside_what_saw_keeps(hooks_dir):
+        return []
+    saw = recorded[0] if os.path.isfile(recorded[0]) else _saw_executable()
+    return [a for a in _repair_repository(hooks_dir, saw, recorded[1])
+            if a.state not in (IN_PLACE, CHAINED, LEFT)]
+
+
+def _bring_up_to_date() -> None:
+    """Keep the repository a hook runs in current with saw's hooks, and say so in one line when
+    anything changed. Never stops the hook."""
+    root = _repo_root()
+    if root is None:
+        return
+    err = sys.stderr
+    try:
+        changed = _keep_current(root)
+    except OSError as exc:
+        print(_paint(f"{_BRAND}: could not bring this repository's hooks up to date — "
+                     f"{textsafe.plain(str(exc))}", "warn", err), file=err)
+        return
+    failed = sorted({a.path.name for a in changed if a.state == UNVERIFIED})
+    done = sorted({a.path.name for a in changed if a.state != UNVERIFIED})
+    if done:
+        print(_paint(f"{_BRAND}: brought this repository's hooks up to date ({', '.join(done)})",
+                     "dim", err), file=err)
+    if failed:
+        print(_paint(f"{_BRAND}: could not bring {', '.join(failed)} up to date here; "
+                     "run `saw hook repair`", "warn", err), file=err)
 
 
 def _inside_what_saw_keeps(hooks_dir: Path) -> bool:
@@ -474,9 +568,8 @@ def _repair_repository(hooks_dir: Path, saw: str, config: str | None, *, restore
 
 
 def uninstall(*, no_stream: bool = False) -> int:
-    """Reverse `install`: remove our hooks (restoring any preserved `<event>.local`) and, when the
-    global `init.templateDir` points at OUR managed dir, unset it. In saw's own directory an altered
-    hook, and anything that is not saw's, is moved aside rather than restored."""
+    """Remove saw's hooks, restore any hook of the operator's they ran before, and stop giving new
+    clones saw's hooks. Returns the exit status."""
     removed = False
     existing = _global_template_dir()
     actions: list[Action] = []
@@ -558,8 +651,8 @@ def status(*, no_stream: bool = False) -> int:
     if altered:
         print(_paint(f"  ⚠ {len(altered)} file(s) are not what saw installs, where saw's hooks run "
                      "— see `saw audit`; put them back with `saw hook repair`.", "warn", out), file=out)
-    print(f"  init.templateDir: {textsafe.plain(existing or '(unset)', limit=4096)}{'  (saw-managed)' if ours else ''}",
-          file=out)
+    print(f"  hooks for new clones: {textsafe.plain(existing or '(none)', limit=4096)}"
+          f"{'  (saw)' if ours else ''}", file=out)
     print(f"  hooks dir: {textsafe.plain(str(hooks_dir), limit=4096)}", file=out)
     print(f"  scan cache: {_cache_path()}", file=out)
     if disabled:
@@ -585,7 +678,8 @@ def _load_cache() -> dict:
 
 
 def _remember(root: Path, sha: str) -> None:
-    """Record the scanned SHA (best-effort — a cache write must never break the hook)."""
+    """Record the commit last scanned in a repository. Takes the root and the commit. A write that
+    fails is skipped."""
     try:
         cache = {r: s for r, s in _load_cache().items() if os.path.isdir(r)}
         cache[os.path.realpath(root)] = sha
@@ -632,8 +726,8 @@ def _changed_files(root: Path, base: str, head: str) -> tuple[str, ...]:
 
 
 def _operator_scan(root: Path, include, config_path: str | None, display: str):
-    """Scan the just-landed tree with the OPERATOR's policy — packaged signatures + the operator's
-    allowlist (from an explicit `--config` baked in at install), NEVER the cloned repo's own config."""
+    """Scan what just landed with the operator's policy: saw's signatures and the allowlist from the
+    config named at install, never the repository's own config. Returns the scan result."""
     policy = operator_policy(config_path)
     with LocalRepoTarget(str(root), display, policy.opts, include_only=include) as target:
         return scan_target(target, policy.signatures, policy.allowlist)
@@ -643,10 +737,8 @@ _TIMED_OUT = object()
 
 
 def _scan_within_budget(root: Path, include, config_path: str | None, display: str):
-    """Run the scan under `SAW_HOOK_TIMEOUT` (default 60s) so a giant clone can NEVER hang git.
-    Returns the ScanResult, `_TIMED_OUT` if the budget elapsed, or re-raises a scan exception. The
-    scan runs in a daemon thread; on timeout we abandon it (it dies with the hook process) and the
-    caller reports the tree as UNVERIFIED — never as clean."""
+    """Run the scan within the hook's time budget (`SAW_HOOK_TIMEOUT`). Returns the scan result,
+    `_TIMED_OUT` when the budget ran out, or re-raises the scan's error."""
     budget = env.hook_timeout()
     if budget <= 0:                                  # cap disabled → run inline
         return _operator_scan(root, include, config_path, display)
@@ -686,14 +778,14 @@ def _warn_infected(display: str, result) -> None:
 
 def run_event(event: str, argv: list[str], config_path: str | None = None,
               *, no_stream: bool = False) -> int:
-    """Invoked BY the installed git hook. Scan what just landed and warn. Returns 0 clean/skipped,
-    1 infected, 2 scan-error/unverified — but the hook wrapper forces exit 0 so git is never broken.
-    The ENTIRE body is guarded: a hook must never emit a traceback mid-clone."""
+    """Run the check for one git hook event. Takes the event, its arguments and the operator config.
+    Returns 0 clean or skipped, 1 infected, 2 not verified."""
     try:
         if event == outbound.EVENT:
             if env.hook_disabled():
                 return 0
             refs_text = "" if sys.stdin.isatty() else sys.stdin.read()
+            _bring_up_to_date()
             return outbound.check_push(argv, refs_text, config_path, no_stream=no_stream)
         return _run_event(event, argv, config_path, no_stream=no_stream)
     except BaseException as exc:            # noqa: BLE001 — last-resort: never break/confuse git
@@ -708,6 +800,7 @@ def _run_event(event: str, argv: list[str], config_path: str | None,
     root = _repo_root()
     if root is None:
         return 0
+    _bring_up_to_date()
     include, label = _scan_scope(event, argv, root)
     if label is None:                       # nothing worth scanning for this event
         return 0
@@ -745,6 +838,11 @@ def _run_event(event: str, argv: list[str], config_path: str | None,
     if result.suspicious:
         print(_paint(f"⚠  {_BRAND}: {display} — {len(result.findings)} suspicious signal(s). "
                      f"Until you've reviewed it, do NOT {_AVOID}.", "warn", err), file=err)
+        print("   " + _paint("Review:", "dim", err) + " " + _cmd(f"saw scan {display}", err), file=err)
+        return 0
+    if result.residue:
+        print(_paint(f"⚠  {_BRAND}: {display} — nothing here runs, but it holds what the project "
+                     "would not carry.", "warn", err), file=err)
         print("   " + _paint("Review:", "dim", err) + " " + _cmd(f"saw scan {display}", err), file=err)
         return 0
     if label == "clone":                    # a fresh clone: confirm it's clean (a pull stays quiet)
