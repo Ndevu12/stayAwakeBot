@@ -221,6 +221,78 @@ class TestInstallIsTheOneCentralPoint(_Isolated):
         self.assertIn("refusing", out.getvalue())
 
 
+class TestTheHookJudgesAsTheScanDoes(_Isolated):
+    """The hook reaches the verdict `saw scan` reaches for the same repository."""
+
+    def _repo_here(self, files):
+        repo = _repo(files)
+        self.addCleanup(lambda: __import__("shutil").rmtree(repo, ignore_errors=True))
+        self._in_repo(repo)
+        return repo
+
+    def _head(self, repo):
+        return subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True,
+                              text=True, check=True).stdout.strip()
+
+    def _clone_event(self, repo, **kw):
+        with contextlib.redirect_stderr(io.StringIO()):
+            return hook.run_event("post-checkout", ["0" * 40, self._head(repo), "1"], **kw)
+
+    def test_every_pulled_file_is_scanned(self):
+        repo = self._repo_here({"a.txt": "ok\n"})
+        base = self._head(repo)
+        (repo / "dép").mkdir()
+        (repo / "dép" / ".gitignore").write_text(_INFECTED)
+        _run(repo, "add", "-A")
+        _run(repo, "commit", "-qm", "pulled")
+        (repo / ".git" / "ORIG_HEAD").write_text(base + "\n")
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(hook.run_event("post-merge", ["0"]), 1)
+
+    def test_a_pull_git_cannot_describe_scans_the_whole_tree(self):
+        repo = self._repo_here({"a.txt": "ok\n"})
+        (repo / ".git" / "ORIG_HEAD").write_text(self._head(repo) + "\n")
+        with mock.patch.object(hook, "stdout_bytes", return_value=None):
+            self.assertEqual(hook._scan_scope("post-merge", ["0"], repo), (None, "pull"))
+
+    def test_an_infection_is_reported_before_an_unreadable_file(self):
+        from stayawake.bots.security.models import CONFIRMED, Finding, ScanResult, Severity
+        repo = self._repo_here({"a.txt": "ok\n"})
+        found = Finding("worm", "worm", Severity.CRITICAL, "a.txt", "worm", confidence=CONFIRMED)
+        result = ScanResult(target=str(repo), source="local", findings=[found],
+                            error="b.js could not be read")
+        with mock.patch.object(hook, "_scan_within_budget", return_value=result):
+            self.assertEqual(self._clone_event(repo), 1)
+
+    def test_an_infected_repository_is_reported_on_every_clone(self):
+        repo = self._repo_here({".gitignore": _INFECTED})
+        self.assertEqual(self._clone_event(repo), 1)
+        self.assertEqual(self._clone_event(repo), 1)
+
+    def test_a_clean_scan_is_reused_only_under_the_same_policy(self):
+        repo = self._repo_here({"a.txt": "ok\n"})
+        real = hook._scan_within_budget
+        scans = []
+
+        def counted(*a, **kw):
+            scans.append(a)
+            return real(*a, **kw)
+
+        config = self.home / "security.yml"
+        config.write_text("allowlist:\n  - signature: gitignore-autopush-markers\n    path_glob: '**'\n")
+        with mock.patch.object(hook, "_scan_within_budget", counted):
+            self.assertEqual(self._clone_event(repo), 0)
+            self.assertEqual(self._clone_event(repo), 0)
+            self.assertEqual(len(scans), 1)
+            self.assertEqual(self._clone_event(repo, config_path=str(config)), 0)
+        self.assertEqual(len(scans), 2)
+
+    def test_a_scanned_repository_is_still_one_repair_looks_after(self):
+        repo = self._repo_here({".gitignore": _INFECTED})
+        self._clone_event(repo)
+        self.assertIn(os.path.realpath(repo), [str(r) for r in hook.hookscript.seeded_repositories()])
+
+
 class TestInstallUninstall(_Isolated):
     def _global_template(self):
         return hook.gitutil.stdout(None, ["config", "--global", "--get", "init.templateDir"], context=hook.gitutil.OPERATOR_CONFIG).strip()
