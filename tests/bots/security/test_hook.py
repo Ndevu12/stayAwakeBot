@@ -249,8 +249,8 @@ class TestInstallUninstall(_Isolated):
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             self.assertEqual(hook.install(), 0)
-        self.assertIn("core.hooksPath", buf.getvalue())
-        self.assertIn("WON'T run", buf.getvalue())
+        self.assertIn(str(self.home / "hp"), buf.getvalue())
+        self.assertIn("will not run", buf.getvalue())
 
 
 class TestNeverClobber(_Isolated):

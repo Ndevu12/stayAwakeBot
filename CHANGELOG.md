@@ -153,11 +153,9 @@ reader, not the mechanism or the weakness it closed.
 
 ### Changed
 - **Repositories you already have get saw's hooks, and keep them current.** `saw hook install`
-  now also gives the hooks to the repositories you name, your configured local targets or the
-  repository you run it in, and brings every repository saw already knows up to the full current
-  set. After that, each repository keeps itself current on its own: whenever one of saw's hooks
-  runs there, a hook that is missing or out of date is put back, and the repository's own hooks
-  are left as they are.
+  also gives the hooks to the repositories you name, your configured local targets or the one you
+  run it in. From then on, whenever one of saw's hooks runs, a saw hook missing or out of date in
+  that repository is put back; your own hooks are left as they are.
 - **BREAKING — nothing is called a quarantine any more.** saw keeps its own files under one `.saw/`
   directory (the fix's backup is `.saw/rollback`), a signature's removal verb is `remove-file`, and
   `saw hook` keeps what it set aside under `saw/set-aside/hooks`. Update `exclude_dirs` to `.saw`
