@@ -21,7 +21,8 @@ from stayawake.utils.pathsafe import is_safe_write_target
 from stayawake.utils import textsafe
 from stayawake.utils.streaming import Streamer, busy, status as spin_status, stream_enabled
 from stayawake.lib import git as gitutil
-from stayawake.bots.security import hookscript, outbound
+from stayawake.bots.security import hookscript, outbound, push_record
+from stayawake.lib.git.run import stdout_bytes
 from stayawake.bots.security.hook_policy import operator_policy
 from stayawake.bots.security.hook_report import BRAND as _BRAND, command as _cmd, paint_at as _paint
 from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions
@@ -677,12 +678,21 @@ def _load_cache() -> dict:
         return {}
 
 
-def _remember(root: Path, sha: str) -> None:
-    """Record the commit last scanned in a repository. Takes the root and the commit. A write that
-    fails is skipped."""
+def _clean_key(head: str, config_path: str | None) -> str:
+    """Name a complete clean scan of a repository's tree. Takes the commit and the operator config.
+    Returns the commit joined to the digest of the policy it was judged under."""
+    policy = operator_policy(config_path)
+    digest = push_record.policy_digest(policy.signatures, policy.allowlist,
+                                       getattr(policy.opts, "max_file_bytes", 0))
+    return f"{head}:{digest}"
+
+
+def _remember(root: Path, key: str) -> None:
+    """Record a scanned repository, and the clean scan it may skip next time. Takes the root and
+    the clean key, or "" when the scan was not clean. A write that fails is skipped."""
     try:
         cache = {r: s for r, s in _load_cache().items() if os.path.isdir(r)}
-        cache[os.path.realpath(root)] = sha
+        cache[os.path.realpath(root)] = key
         path = _cache_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(cache))
@@ -691,38 +701,44 @@ def _remember(root: Path, sha: str) -> None:
 
 
 def _scan_scope(event: str, argv: list[str], root: Path):
-    """Decide what to scan for this event, as `(include_only, label)`:
-      * `(None, label)`  → full-tree scan (a fresh clone / a pull with no ORIG_HEAD),
-      * `(tuple, label)` → scan only those changed files — a pull or branch switch,
-      * `(False, None)`  → skip (a file checkout, or nothing changed). The caller skips on label None."""
+    """Decide what a hook event scans. Takes the event, its arguments and the repository root.
+    Returns `(include_only, label)`: `None` for the whole tree, a tuple of paths, or `(False, None)`
+    when there is nothing to scan."""
     if event == "post-checkout":
         old, new, flag = (argv + ["", "", ""])[:3]
-        if flag != "1":                     # a FILE checkout (`git checkout -- path`), not a ref move
+        if flag != "1":
             return False, None
-        if old == _NULL_REV:                # a fresh clone → everything is new
+        if old == _NULL_REV:
             return None, "clone"
         changed = _changed_files(root, old, new)
+        if changed is None:
+            return None, "checkout"
         return (changed, "checkout") if changed else (False, None)
-    if event == "post-merge":               # a pull/merge → scan only what the merge brought in
+    if event == "post-merge":
         if not gitutil.run_ok(root, ["rev-parse", "--verify", "ORIG_HEAD"]):
-            return None, "pull"             # no ORIG_HEAD (rare) → fall back to a full scan
+            return None, "pull"
         changed = _changed_files(root, "ORIG_HEAD", "HEAD")
+        if changed is None:
+            return None, "pull"
         return (changed, "pull") if changed else (False, None)
-    if event == "post-rewrite":             # a rebase (incl `git pull --rebase`) or `commit --amend`
-        # Rebase sets ORIG_HEAD to the pre-rewrite HEAD, so ORIG_HEAD..HEAD is exactly the code now
-        # in the tree (the replayed upstream commits). No ORIG_HEAD (some amends) → skip rather than
-        # full-scan on every amend. We read ORIG_HEAD, not the rewritten-pairs stdin (`</dev/null`).
+    if event == "post-rewrite":
         if not gitutil.run_ok(root, ["rev-parse", "--verify", "ORIG_HEAD"]):
             return False, None
         changed = _changed_files(root, "ORIG_HEAD", "HEAD")
+        if changed is None:
+            return None, "rewrite"
         return (changed, "rewrite") if changed else (False, None)
     return False, None
 
 
-def _changed_files(root: Path, base: str, head: str) -> tuple[str, ...]:
-    """Repo-relative paths that changed `base..head` and still exist as regular files."""
-    diff = gitutil.stdout(root, ["diff", "--name-only", base, head])
-    return tuple(f for f in diff.splitlines() if f and (root / f).is_file())
+def _changed_files(root: Path, base: str, head: str) -> tuple[str, ...] | None:
+    """List the repo-relative paths that changed `base..head` and still exist as regular files.
+    Takes the root and the two commits. Returns them, or None when git could not list them."""
+    diff = stdout_bytes(root, ["diff", "--name-only", "-z", base, head])
+    if diff is None:
+        return None
+    names = (os.fsdecode(raw) for raw in diff.split(b"\0") if raw)
+    return tuple(name for name in names if (root / name).is_file())
 
 
 def _operator_scan(root: Path, include, config_path: str | None, display: str):
@@ -802,17 +818,16 @@ def _run_event(event: str, argv: list[str], config_path: str | None,
         return 0
     _bring_up_to_date()
     include, label = _scan_scope(event, argv, root)
-    if label is None:                       # nothing worth scanning for this event
+    if label is None:
         return 0
 
     display = str(root).replace(os.path.expanduser("~"), "~")
     head = gitutil.stdout(root, ["rev-parse", "HEAD"]).strip()
-    if head and include is None and _load_cache().get(os.path.realpath(root)) == head:
-        return 0                            # already scanned this exact full tree
+    clean_key = _clean_key(head, config_path) if head and include is None else None
+    if clean_key and _load_cache().get(os.path.realpath(root)) == clean_key:
+        return 0
 
     err = sys.stderr
-    # A live spinner on stderr while we scan, so a `git clone` never LOOKS stuck (the scan can take a
-    # moment on a big tree). Transient — it clears before the verdict; a no-op when piped / CI.
     with spin_status(f"{_BRAND}: scanning {display} for supply-chain worms…",
                      enabled=stream_enabled(err, force_off=no_stream)):
         scanned = _scan_within_budget(root, include, config_path, display)
@@ -824,17 +839,16 @@ def _run_event(event: str, argv: list[str], config_path: str | None,
               file=err)
         return 2
     result = scanned
-
-    if head and include is None:            # only a full-tree scan is safe to cache by HEAD
-        _remember(root, head)
+    if clean_key:
+        _remember(root, "")
+    if result.infected:
+        _warn_infected(display, result)
+        return 1
     if result.error:
         print(_paint(f"{_BRAND}: scan-on-clone hit an error scanning {display} — "
                      f"{textsafe.plain(result.error)}",
                      "warn", err), file=err)
         return 2
-    if result.infected:
-        _warn_infected(display, result)
-        return 1
     if result.suspicious:
         print(_paint(f"⚠  {_BRAND}: {display} — {len(result.findings)} suspicious signal(s). "
                      f"Until you've reviewed it, do NOT {_AVOID}.", "warn", err), file=err)
@@ -845,6 +859,8 @@ def _run_event(event: str, argv: list[str], config_path: str | None,
                      "would not carry.", "warn", err), file=err)
         print("   " + _paint("Review:", "dim", err) + " " + _cmd(f"saw scan {display}", err), file=err)
         return 0
-    if label == "clone":                    # a fresh clone: confirm it's clean (a pull stays quiet)
+    if clean_key:
+        _remember(root, clean_key)
+    if label == "clone":
         print(_paint(f"✓ {_BRAND}: {display} scanned clean.", "ok", err), file=err)
     return 0

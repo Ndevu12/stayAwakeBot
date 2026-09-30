@@ -81,6 +81,7 @@ reader, not the mechanism or the weakness it closed.
 - **saw names the compromised versions instead of a version to install.**
 
 ### Fixed
+- **saw's git hooks reach the same verdict as `saw scan` for the same repository.**
 - **`saw fix amend` no longer calls a run done when it could not confirm the payload is gone.**
   When it cannot tell whether a branch, a tag, a stash, another checkout or your copy of the remote
   still holds what it took out, it finishes the rest of the clean-up and names what it could not
