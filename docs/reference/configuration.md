@@ -12,6 +12,9 @@ repository. Every CLI flag mentioned here is described in the [CLI reference](cl
 Targets (local globs and GitHub users/orgs), scan `settings`, the allowlist, and alert routing. The
 signature database ships inside the package.
 
+saw uses the config you name with `-c`, or the one you installed its hooks with
+(`saw hook install -c`).
+
 Every `settings` key is optional, and the CLI equivalent wins when both are given:
 
 | Key | Default | Effect |

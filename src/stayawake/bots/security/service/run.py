@@ -221,23 +221,14 @@ def scan(config_path: str | None = None, *, remote: bool = False,
     report_on = stream_enabled(sys.stdout, force_off=no_stream)
     prog = Streamer(enabled=progress_on, out=sys.stderr)
     cfg = _read_config(config_path, targets=paths)
-    if cfg is None:                    # a named config that is not there — the resolver said so
+    if cfg is None:
         return 2
     settings = cfg.get("settings", {})
     opts = _options(settings, no_advisories=no_advisories, external_audit=external_audit,
                     deep=deep, history=history)
     sigs = load_signatures(settings.get("signatures_path"))
     allowlist = cfg.get("allowlist") or []
-    # Fail CLOSED on a config we can't apply: an `allowlist` that isn't a list of mappings would
-    # otherwise crash the per-target scan (caught as an ERROR with an empty, clean-looking result).
-    # Reject it up front with a clear message rather than scanning under an unusable allowlist.
-    if not (isinstance(allowlist, list) and all(isinstance(r, dict) for r in allowlist)):
-        print("error: config `allowlist` must be a list of {signature, path_glob} mappings.",
-              file=sys.stderr)
-        return 2
 
-    # Fail-closed gate (opt-in): a CI scan that must not silently lose malware coverage. Default is
-    # fail-open — a missing/corrupt DB degrades to the always-shipped inline seed (never blind).
     if require_db or _as_bool(settings.get("require_db"), False):
         rc = _require_db_or_error()
         if rc is not None:
@@ -245,7 +236,6 @@ def scan(config_path: str | None = None, *, remote: bool = False,
 
     jobs_pref = jobs if jobs is not None else _jobs_setting(settings)
 
-    # --- WHAT to scan. LOCAL by default (explicit paths / configured globs / current repo);
     results: list[ScanResult] = []
     if remote:
         bad = invalid_slugs(slugs)
@@ -268,11 +258,11 @@ def scan(config_path: str | None = None, *, remote: bool = False,
                                     progress_on=progress_on)
     else:
         cfg_local = (cfg.get("targets", {}) or {}).get("local", []) or []
-        if paths:                                  # explicit ad-hoc paths
+        if paths:
             local_patterns = list(paths)
-        elif cfg_local:                            # configured local globs
+        elif cfg_local:
             local_patterns = list(cfg_local)
-        else:                                      # bare run → the repository being stood in
+        else:
             here = _enclosing_repo_root()
             if not (here / ".git").exists():
                 print(f"error: {here} is not a repository and none is above it, so a bare run has "
@@ -281,15 +271,10 @@ def scan(config_path: str | None = None, *, remote: bool = False,
                 return exitcodes.INCOMPLETE
             local_patterns = [str(here)]
             print(f"No targets configured; scanning current repository: {here}", file=sys.stderr)
-        # Discovery (the FS walk) is itself slow and silent — cover it with a spinner.
         unsearched: list[Path] = []
         with status("Discovering targets…", enabled=progress_on):
             found = resolve_local_targets(local_patterns, opts, unsearched=unsearched)
         repos = [t.root for t in found]
-        # Fail CLOSED when EXPLICIT targets (ad-hoc paths or configured globs) resolve to zero
-        # repositories — a stale glob or a checkout with no `.git` scanned NOTHING, which must not
-        # read as a clean pass. (A bare run has no explicit target, so it keeps its current-repo
-        # fallback above and is unaffected.)
         if (paths or cfg_local) and not repos:
             print("error: the requested target(s) named nothing this user can see on disk — a "
                   "path that is not there, or one under a directory this user cannot read. "
@@ -320,12 +305,11 @@ def scan(config_path: str | None = None, *, remote: bool = False,
     detail_units = sum(len(r.findings) + len(r.advisories) for r in results)
     spill = not json_out and (len(results) > LARGE_FLEET or detail_units > MANY_FINDINGS)
 
-    # --- compose the output sinks from the flags. Default is terminal-first and persists
     report_path: Path | None = None
     sinks: list[Sink] = [
         JsonSink() if json_out
         else TerminalSink(enabled=report_on, pager=report_on and pager,
-                          detail=not spill)]          # spill → same board as large fleet
+                          detail=not spill)]
     if sarif_path:
         sinks.append(SarifSink(sarif_path))
     settings_reports_dir = settings.get("reports_dir")
@@ -339,8 +323,6 @@ def scan(config_path: str | None = None, *, remote: bool = False,
     for sink in sinks:
         sink.emit(report)
 
-    # Spilled sweep: guarantee the FULL report exists off-terminal (same path large fleet already
-    # used). Reuse -d when given; otherwise a temp dir. Highlight the path whenever a report was
     if spill and report_path is None:
         tmp = scratch.kept_dir("the full report")
         FileSink(tmp).emit(report)
@@ -351,10 +333,6 @@ def scan(config_path: str | None = None, *, remote: bool = False,
         _print_report_pointer(report_path, spilled=spill, reason=reason)
     _print_dependency_actions(results)
 
-    # Verdict as exit code. INFECTED (confirmed findings) → 1. A target that ERRORED (could not be
-    # scanned at all — an unreadable/malformed config, a read failure, a failed clone) carries no
-    # verdict, so it must NEVER read as clean: fail CLOSED → 2. Otherwise clean → 0. Unconditional —
-    # the CI gate is just this exit code; SUSPICIOUS (heuristic-only) does not fail it.
     if report.any_infected:
         return 1
     if report.any_error:

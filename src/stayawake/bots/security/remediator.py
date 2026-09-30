@@ -17,6 +17,7 @@ from stayawake.utils.timeutil import now_iso
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security import resolution
 from stayawake.bots.security.config import resolve_config
+from stayawake.bots.security.service.config import _options
 from stayawake.bots.security.resolution import (
     discover_local_repos, invalid_slugs, REMOTE_EMPTY_HINT, DEFAULT_CONFIG,
     enclosing_repo_root as _enclosing_repo_root, remote_scope as _remote_scope,
@@ -24,16 +25,6 @@ from stayawake.bots.security.resolution import (
 from stayawake.bots.security.targets import ScanOptions
 from stayawake.bots.security import pr as pr_submit
 from stayawake.bots.security.pr.fix_verdict import Checkout, FixVerdict, Grade, render_fix_verdict
-
-
-def _options(settings: dict) -> ScanOptions:
-    base = ScanOptions()
-    return ScanOptions(
-        exclude_dirs=set(settings.get("exclude_dirs", base.exclude_dirs)),
-        keep_dirs=set(settings.get("keep_dirs", base.keep_dirs)),
-        max_file_bytes=int(settings.get("max_file_bytes", base.max_file_bytes)),
-        remote_clone_depth=int(settings.get("remote_clone_depth", base.remote_clone_depth)),
-    )
 
 
 def _resolve_config(config_path: str | None, targets: list[str] | None = None) -> dict | None:

@@ -9,6 +9,7 @@ from pathlib import Path
 from stayawake.utils.config import load_yaml
 from stayawake.bots.security.service.config import _options
 from stayawake.bots.security.signatures import load_signatures
+from stayawake.bots.security.config import ALLOWLIST_SHAPE, allowlist_ok
 
 
 @dataclass(frozen=True)
@@ -22,8 +23,11 @@ class HookPolicy:
 
 def operator_policy(config_path: str | None) -> HookPolicy:
     """Read the policy a hook scans under. Takes the operator's config path, recorded at install.
-    Returns the policy; with no config, the packaged signatures and an empty allowlist."""
+    Returns the policy; with no config, the packaged signatures and an empty allowlist. Raises
+    ValueError when the config's allowlist cannot be applied."""
     cfg = load_yaml(config_path) if (config_path and Path(config_path).is_file()) else {}
-    settings = cfg.get("settings", {}) if isinstance(cfg, dict) else {}
-    allowlist = (cfg.get("allowlist") if isinstance(cfg, dict) else None) or []
+    if not isinstance(cfg, dict) or not allowlist_ok(cfg):
+        raise ValueError(ALLOWLIST_SHAPE)
+    settings = cfg.get("settings", {})
+    allowlist = cfg.get("allowlist") or []
     return HookPolicy(_options(settings), load_signatures(settings.get("signatures_path")), allowlist)

@@ -46,22 +46,17 @@ def _options(settings: dict, *, no_advisories: bool = False,
     exclude = set(settings.get("exclude_dirs", base.exclude_dirs))
     scan_build_outputs = _as_bool(settings.get("scan_build_outputs"), base.scan_build_outputs)
     if scan_build_outputs:
-        exclude -= _BUILD_OUTPUT_DIRS          # let build outputs be traversed (matcher gates the rest)
+        exclude -= _BUILD_OUTPUT_DIRS
     return ScanOptions(
         exclude_dirs=exclude,
+        keep_dirs=set(settings.get("keep_dirs", base.keep_dirs)),
         max_file_bytes=int(settings.get("max_file_bytes", base.max_file_bytes)),
         remote_clone_depth=int(settings.get("remote_clone_depth", base.remote_clone_depth)),
         scan_build_outputs=scan_build_outputs,
-        # `--deep` (or config `deep: true`): content-scan installed dependency CODE with the confirmed
         deep=deep or _as_bool(settings.get("deep"), base.deep),
         history=history or _as_bool(settings.get("history"), base.history),
-        # The offline CVE-advisory tier is ON by default; `--no-advisories` or config
-        # `dependency_advisories: false` turns the section off.
         dependency_advisories=(not no_advisories) and _as_bool(
             settings.get("dependency_advisories"), base.dependency_advisories),
-        # External auditors are the one opt-in that leaves the offline sandbox (subprocess + a tool's
-        # own network) — CLI flag OR config, off by default. Strict bool coercion so a quoted
-        # `"false"` can't silently enable it.
         external_audit=external_audit or _as_bool(
             settings.get("external_audit"), base.external_audit),
     )

@@ -152,6 +152,9 @@ reader, not the mechanism or the weakness it closed.
 - **`saw fix amend` says when it could not use content you supplied, and names the file.**
 
 ### Changed
+- **`saw scan`, `saw fix` and the hooks use the same config:** the one you name with `-c`, or
+  the one you installed the hooks with. A `config/security.yml` in the directory you run from
+  is no longer read unless you name it.
 - **Repositories you already have get saw's hooks, and keep them current.** `saw hook install`
   also gives the hooks to the repositories you name, your configured local targets or the one you
   run it in. From then on, whenever one of saw's hooks runs, a saw hook missing or out of date in
