@@ -1937,7 +1937,8 @@ cleanly. Tell your collaborators before you run it. If you are not sure you want
 <p>Replace a past commit that still carries the payload and force-update each branch it sat on. That
 force-update is the fix: an amend that never reaches the remote is not one. The replaced
 commit keeps its original message and its original author, and the commits after it are replayed
-onto the replacement.</p>
+onto the replacement. Once the remote has moved, your clone's copy of the remote branches is
+refreshed to match it; if it cannot be, the run says so.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>saw fix amend [TARGETS...]
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>saw fix amend --remote OWNER/REPO [OWNER/REPO...]
 </code></pre></div>
@@ -1997,6 +1998,9 @@ it back, it names that branch: look at that repository before doing anything els
   same way.</li>
 <li><strong>Tags and forks are reported, not changed.</strong> A tag or a fork that still reaches the replaced
   commit keeps a copy of it, and the run tells you.</li>
+<li><strong>What it cannot confirm, it does not call done.</strong> When it cannot tell whether a branch, a tag,
+  a stash, another checkout or your copy of the remote still holds what it took out, it finishes
+  the rest of the clean-up and names what it could not confirm for you to review.</li>
 <li><strong>The previous commits stay on the remote</strong> until GitHub collects them.</li>
 </ul>
 <p>See <a href="../../../explanation/safety-envelope/">the safety envelope</a> for what <code>fix</code> will and will not
