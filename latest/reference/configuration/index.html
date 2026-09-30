@@ -1908,6 +1908,8 @@ repository. Every CLI flag mentioned here is described in the <a href="../cli/">
 <h2 id="the-scanner-configsecurityyml">The scanner (<code>config/security.yml</code>)<a class="headerlink" href="#the-scanner-configsecurityyml" title="Permanent link">&para;</a></h2>
 <p>Targets (local globs and GitHub users/orgs), scan <code>settings</code>, the allowlist, and alert routing. The
 signature database ships inside the package.</p>
+<p>saw uses the config you name with <code>-c</code>, or the one you installed its hooks with
+(<code>saw hook install -c</code>).</p>
 <p>Every <code>settings</code> key is optional, and the CLI equivalent wins when both are given:</p>
 <table>
 <thead>
