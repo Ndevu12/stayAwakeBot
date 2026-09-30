@@ -37,12 +37,18 @@ def register(sub) -> None:
         description="Seed git's global init.templateDir so every FUTURE `git clone`/`git init` gets "
                     "post-checkout / post-merge / post-rewrite hooks that scan what just landed (a "
                     "clone, pull, branch switch, or rebase incl `git pull --rebase`) and warn before "
-                    "you run it. Forward-looking (existing repos are unaffected) and coexists with a "
-                    "repo's own hooks. Read-only, offline, operator-config only.",
+                    "you run it. Repos cloned from now on get the hooks from git's template; existing "
+                    "repos get them too — the ones you name, your configured local targets, or the "
+                    "repo you run it in. Coexists with a repo's own hooks. Read-only, offline, "
+                    "operator-config only.",
         examples=[
             ("saw hook install", "scan every future clone and pull"),
             ("saw hook install -c ~/security.yml", "scan them against your allowlist"),
+            ("saw hook install ~/code", "also add the hooks to every repo under ~/code"),
         ])
+    ins.add_argument("paths", nargs="*", metavar="PATH",
+                     help="existing repositories, directories or globs to add the hooks to "
+                          "(default: your configured local targets, else the repo you are in)")
     ins.add_argument("-c", "--config", default=None,
                      help="operator config (its allowlist) to scan clones with — baked into the hook. "
                           "The hook NEVER reads a cloned repo's own config.")
@@ -100,7 +106,8 @@ def run_repair(a: argparse.Namespace) -> int:
 
 def run_install(a: argparse.Namespace) -> int:
     from stayawake.bots.security import hook
-    return hook.install(config_path=a.config, no_stream=no_stream_requested(a))
+    return hook.install(config_path=a.config, no_stream=no_stream_requested(a),
+                        repositories=a.paths, standing_in=True)
 
 
 def run_uninstall(a: argparse.Namespace) -> int:

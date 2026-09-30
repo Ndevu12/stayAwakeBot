@@ -8,13 +8,16 @@ description: saw hook — install global git hooks that scan code as it lands an
 switch or a rebase scans what just landed and warns you *before* a dependency install, a build, or
 an editor auto-run task — and a `git push` is checked for every file version it would publish, and
 reported, *before* the code leaves your machine. It uses git's `init.templateDir` rather than a
-global `core.hooksPath`, so existing repositories are untouched, a repository's own hooks still run,
-and nothing is hijacked. The hook warns and points at [`saw fix`](fix.md); it never modifies
+global `core.hooksPath`, so a repository's own hooks still run and nothing is hijacked. Repositories
+you already have get the same hooks when you install: the ones you name, your configured local
+targets, or the repository you run it in, and every repository saw already knows is brought up to
+date. From then on each repository keeps itself current: whenever one of saw's hooks runs there, a
+hook that is missing or out of date is put back. The hook warns and points at [`saw fix`](fix.md); it never modifies
 anything, never breaks a git command, and never stops a push. See
 [scan on clone](../../how-to/scan-on-clone.md).
 
 ```text
-saw hook install [-c FILE] [--no-stream]
+saw hook install [PATH...] [-c FILE] [--no-stream]
 saw hook repair [--no-stream]
 saw hook uninstall [--no-stream]
 saw hook status [--no-stream]
@@ -22,7 +25,8 @@ saw hook status [--no-stream]
 
 | Option / subcommand | Description |
 | --- | --- |
-| `install` | Point git's global `init.templateDir` at saw's template, so repositories cloned or created from now on get the hooks. |
+| `install` | Point git's global `init.templateDir` at saw's template, so repositories cloned or created from now on get the hooks, and add the same hooks to the repositories you already have. |
+| `PATH...` | Existing repositories, directories or globs to add the hooks to. Without them: the configured local targets, else the repository you are in. |
 | `repair` | Put back every hook saw installs, wherever git runs it, and move aside what stood in its place. |
 | `uninstall` | Reverse it, restoring any hook it had to preserve. |
 | `status` | Whether it is active, the template directory, and the scan cache. |
