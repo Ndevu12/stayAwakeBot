@@ -551,7 +551,7 @@ class TestNoDiscoveredValueRendersVerbatim(unittest.TestCase):
 
     def test_a_discovered_config_path_cannot_carry_control_text_into_a_command(self):
         from stayawake.bots.security.hygiene import credentials
-        store = credentials.KeychainStore(name="the test store", delete_command="delete-it")
+        store = credentials.KeychainStore(name="the test store", delete_command="delete-it", helpers=())
         with mock.patch.object(credentials, "_system_default_helper_origin",
                                return_value=self.HOSTILE), \
              mock.patch.object(credentials, "_https_token_status", return_value=None):

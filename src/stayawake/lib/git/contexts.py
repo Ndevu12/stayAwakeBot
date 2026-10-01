@@ -136,7 +136,7 @@ def config_prefix(context: Context) -> list[str]:
 
 
 def _injects_config(key: str) -> bool:
-    return key.startswith(GIT_CONFIG_INJECTION_PREFIXES)
+    return key == "GIT_CONFIG" or key.startswith(GIT_CONFIG_INJECTION_PREFIXES)
 
 
 def child_env(context: Context, env: dict | None, *, operator_scopes: bool | None = None,

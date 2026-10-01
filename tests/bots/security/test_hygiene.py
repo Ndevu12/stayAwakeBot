@@ -64,8 +64,8 @@ class TestCredentials(unittest.TestCase):
         so the test is independent of the host it runs on."""
         C = hygiene.credentials
         origins = origins if origins is not None else [("file:/Users/u/.gitconfig", "osxkeychain")]
-        with mock.patch.object(C, "_detect_cached_credential", return_value=store or C._MACOS_STORE), \
-             mock.patch.object(C, "_git_credentials_file_with_github", return_value=None), \
+        with mock.patch.object(C, "_detect_cached_credential", return_value=(store or C._MACOS_STORE, True)), \
+             mock.patch.object(C, "_git_credentials_file_with_github", return_value=False), \
              mock.patch.object(C, "_https_token_status", return_value=served), \
              mock.patch.object(C, "_ssh_key_present", return_value=ssh), \
              mock.patch.object(C, "_gh_configured", return_value=gh), \
@@ -143,7 +143,7 @@ class TestCredentials(unittest.TestCase):
 
     def test_clean_machine_has_no_credential_issues(self):
         with mock.patch.object(hygiene.credentials, "_detect_cached_credential", return_value=None), \
-             mock.patch.object(hygiene.credentials, "_git_credentials_file_with_github", return_value=None):
+             mock.patch.object(hygiene.credentials, "_git_credentials_file_with_github", return_value=False):
             self.assertEqual(hygiene.check_credentials(), [])
 
     def test_plaintext_git_credentials_detected(self):
@@ -151,7 +151,7 @@ class TestCredentials(unittest.TestCase):
             cred = Path(d) / ".git-credentials"
             cred.write_text("https://x:token@github.com\n", encoding="utf-8")
             with mock.patch.object(hygiene.Path, "home", return_value=Path(d)):
-                self.assertEqual(hygiene.credentials._git_credentials_file_with_github(), cred)
+                self.assertIs(hygiene.credentials._git_credentials_file_with_github(), True)
 
     def test_plaintext_remediation_is_wiper_safe(self):
         # The rotation advice must sequence rotation LAST and state the destructive risk — never the
@@ -159,7 +159,7 @@ class TestCredentials(unittest.TestCase):
         # reported product name: naming one variant dates the advice and reads as the only shape.
         with mock.patch.object(hygiene.credentials, "_detect_cached_credential", return_value=None), \
              mock.patch.object(hygiene.credentials, "_git_credentials_file_with_github",
-                               return_value=Path("/home/u/.git-credentials")):
+                               return_value=True):
             issues = hygiene.check_credentials()
         rem = next(i.remediation for i in issues if i.id == "git-credentials-plaintext")
         self.assertIn("wiper", rem)                             # states the destructive risk
@@ -173,35 +173,38 @@ class TestCredentials(unittest.TestCase):
         with mock.patch.object(C.sys, "platform", platform), \
              mock.patch.object(C, "_macos_keychain_has_github", return_value=mac), \
              mock.patch.object(C, "_linux_secret_has_github", return_value=lin), \
-             mock.patch.object(C, "_windows_credential_has_github", return_value=win):
+             mock.patch.object(C, "_windows_credential_has_github",
+                               return_value=["git:https://github.com"] if win else []):
             return C._detect_cached_credential()
 
     def test_detect_dispatches_to_the_right_store_per_platform(self):
         C = hygiene.credentials
-        self.assertIs(self._detect("darwin", mac=True), C._MACOS_STORE)
-        self.assertIs(self._detect("linux", lin=True), C._LINUX_STORE)
-        self.assertIs(self._detect("win32", win=True), C._WINDOWS_STORE)
+        self.assertEqual(self._detect("darwin", mac=True), (C._MACOS_STORE, True))
+        self.assertEqual(self._detect("linux", lin=True), (C._LINUX_STORE, True))
+        self.assertEqual(self._detect("win32", win=True), (C._WINDOWS_STORE, True))
 
-    def test_detect_returns_none_when_the_store_is_empty(self):
-        self.assertIsNone(self._detect("darwin", mac=False))
-        self.assertIsNone(self._detect("linux", lin=False))
-        self.assertIsNone(self._detect("win32", win=False))
+    def test_detect_says_the_store_is_empty(self):
+        C = hygiene.credentials
+        self.assertEqual(self._detect("darwin", mac=False), (C._MACOS_STORE, False))
+        self.assertEqual(self._detect("linux", lin=False), (C._LINUX_STORE, False))
+        self.assertEqual(self._detect("win32", win=False), (C._WINDOWS_STORE, False))
 
     def test_detect_unknown_platform_is_none(self):
         # An unsupported platform (or one whose store CLI is absent) reports nothing, never errors.
         self.assertIsNone(self._detect("freebsd", mac=True, lin=True, win=True))
 
     def test_linux_probe_never_captures_the_secret(self):
-        # SAFETY (#1260): libsecret's query verbs load the secret, so the Linux probe must run with
-        # output DISCARDED (capture=False) and read presence from the exit code — saw never holds the
-        # token. Lock both the discard and the rc-only detection.
         C = hygiene.credentials
-        with mock.patch.object(C, "_run", return_value=mock.Mock(returncode=0)) as run:
+        found = mock.Mock(returncode=0,
+                          stdout="([objectpath '/org/freedesktop/secrets/collection/login/1'], @ao [])")
+        with mock.patch.object(C, "_run", return_value=found) as run:
             self.assertTrue(C._linux_secret_has_github())
-        self.assertEqual(run.call_args.kwargs.get("capture"), False)   # secret discarded, not captured
-        self.assertIn("lookup", run.call_args.args[0])                 # rc-based lookup, not printing search
-        with mock.patch.object(C, "_run", return_value=mock.Mock(returncode=1)):
-            self.assertFalse(C._linux_secret_has_github())             # rc!=0 → absent
+        argv = " ".join(run.call_args.args[0])
+        self.assertIn("org.freedesktop.Secret.Service.SearchItems", argv)
+        for verb in ("GetSecret", "Unlock", "lookup", "search"):
+            self.assertNotIn(verb, argv)
+        with mock.patch.object(C, "_run", return_value=mock.Mock(returncode=0, stdout="(@ao [], @ao [])")):
+            self.assertFalse(C._linux_secret_has_github())
 
     def test_linux_finding_names_store_and_uses_libsecret_removal(self):
         f = self._keychain(served=False, ssh=True, store=hygiene.credentials._LINUX_STORE,
