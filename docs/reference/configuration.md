@@ -31,7 +31,7 @@ Every `settings` key is optional, and the CLI equivalent wins when both are give
 | `jobs` | auto | Worker count; an int, or `auto`. An unparseable value falls back to automatic rather than failing the scan. `-j` wins. |
 | `parallel_min_files` | `256` | File count below which a single target is scanned sequentially. |
 | `reports_dir` | — | Where a report bundle is written. Setting it **is** the opt-in — no `-d` needed. Precedence: `-d` → `STAYAWAKE_REPORTS_DIR` → this. With none of the three set, a scan writes nothing. |
-| `signatures_path` | packaged | Path to a custom signature database. |
+| `signatures_path` | packaged | Path to a custom signature database. Every signature in it states its `confidence`. |
 
 Booleans are parsed strictly, so `external_audit: "false"` reads as false rather than being coerced
 true — a security-sensitive setting can never be switched on by quoting.

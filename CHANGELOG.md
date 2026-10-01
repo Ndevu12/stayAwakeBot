@@ -217,6 +217,8 @@ reader, not the mechanism or the weakness it closed.
   of refusing it.** When the only earlier version of a file also carries the loader, saw excises the
   loader in place across history and keeps the rest of the file — but only when the file is left with
   no confirmed payload of any kind; if anything else remains it is still left for review.
+- **A custom signature database states each signature's confidence.** A signature without one is
+  refused, and the error names it.
 
 ### Fixed
 - **`saw fix amend` no longer reports a file removed while another copy of it is still in your
