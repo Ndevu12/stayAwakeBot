@@ -9,18 +9,26 @@ from pathlib import Path
 
 import posixpath
 
-from stayawake.lib.git.query import (changed_paths, file_text_at, list_tree, parents, stores_path, Unread)
+from stayawake.lib.git.query import (GITLINK_MODE, changed_paths, entries_at, file_text_at,
+                                     list_tree, parents, Unread)
 from stayawake.lib.git.borrowed import Borrowed, BorrowError, borrow
 from stayawake.lib.git.merge.corroborate import corroborated
 
 
 def born_at_merge(repo: str | Path, merge_sha: str, paths) -> set[str]:
-    """The subset of `paths` present in none of the merge's parents. Takes the repo, the merge sha,
-    and paths. Returns the set. Raises `Unread` when git could not read the merge's parents."""
+    """Find which of `paths` none of a commit's parents stores, reading each parent once. Takes the
+    repo, the commit and the paths. Returns those paths. Raises `Unread` when git could not read the
+    commit's parents or their files."""
     ps = parents(repo, merge_sha)
     if ps is None:
         raise Unread(f"the parents of {merge_sha[:12]}")
-    return {p for p in paths if all(not stores_path(repo, parent, p) for parent in ps)}
+    born = set(paths)
+    for parent in ps:
+        if not born:
+            break
+        stored = entries_at(repo, parent, sorted(born))
+        born -= {path for path, (mode, _oid) in stored.items() if mode != GITLINK_MODE}
+    return born
 
 
 def _entirely_born(repo: str | Path, merge_sha: str, directory: str) -> bool:
