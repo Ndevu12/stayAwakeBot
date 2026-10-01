@@ -1998,9 +1998,12 @@ it back, it names that branch: look at that repository before doing anything els
   same way.</li>
 <li><strong>Tags and forks are reported, not changed.</strong> A tag or a fork that still reaches the replaced
   commit keeps a copy of it, and the run tells you.</li>
-<li><strong>What it cannot confirm, it does not call done.</strong> When it cannot tell whether a branch, a tag,
-  a stash, another checkout or your copy of the remote still holds what it took out, it finishes
-  the rest of the clean-up and names what it could not confirm for you to review.</li>
+<li><strong>What it cannot confirm, it does not call done.</strong> When it cannot read a version of a file in
+  history, or cannot tell whether a branch, a tag, a stash, another checkout or your copy of the
+  remote still holds what it took out, it finishes the rest of the clean-up and names what it could
+  not confirm for you to review.</li>
+<li><strong>A clone missing part of its history is not rewritten.</strong> Fetch it in full first. A branch that
+  names a commit the clone does not hold is named for you to repair or delete.</li>
 <li><strong>The previous commits stay on the remote</strong> until GitHub collects them.</li>
 </ul>
 <p>See <a href="../../../explanation/safety-envelope/">the safety envelope</a> for what <code>fix</code> will and will not
