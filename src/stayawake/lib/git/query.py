@@ -41,6 +41,15 @@ def default_branch(repo: str | Path) -> str:
     return out.rsplit("/", 1)[-1] if out else "main"
 
 
+def names_a_commit(repo: str | Path, ref: str) -> bool:
+    """Whether a ref resolves to a commit. Takes the repo and the ref. Returns False when it names
+    none. Raises `Unread` naming the ref when git could not tell."""
+    res = run(repo, ["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"])
+    if res is None or res.returncode not in (0, 1):
+        raise Unread(ref)
+    return res.returncode == 0
+
+
 def ref_exists(repo: str | Path, ref: str) -> bool:
     """True if `ref` resolves in `repo` (a branch, tag, or `origin/<branch>`). Used to prefer a
     fresh `origin/<base>` but fall back to the local base so remediation works offline."""

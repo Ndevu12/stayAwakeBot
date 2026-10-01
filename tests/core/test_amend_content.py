@@ -528,7 +528,7 @@ class TestTheBaselineIsJudgedNotNominated(unittest.TestCase):
         replacement = amend.replacement_commit(
             repo, _rev(repo, "HEAD"), ["x.js"],
             still_carries=lambda treeish, path:
-                "payload" if "PAYLOAD" in (query.file_at(repo, treeish, path) or "") else None)
+                "payload" if "PAYLOAD" in (query.file_text_at(repo, treeish, path) or ("", ""))[1] else None)
 
         self.assertTrue(replacement.ok, "the parent here is clean")
 
@@ -538,7 +538,7 @@ class TestTheBaselineIsJudgedNotNominated(unittest.TestCase):
         second = amend.replacement_commit(
             repo, _rev(repo, "HEAD"), ["x.js"],
             still_carries=lambda treeish, path:
-                "payload" if "PAYLOAD" in (query.file_at(repo, treeish, path) or "") else None)
+                "payload" if "PAYLOAD" in (query.file_text_at(repo, treeish, path) or ("", ""))[1] else None)
 
         self.assertFalse(second.ok)
         self.assertEqual(second.kind, "baseline-carries-payload")
@@ -609,7 +609,7 @@ class TestTheCommitItselfIsReproduced(unittest.TestCase):
 
 def _carries(repo, marker: str = "PAYLOAD"):
     return lambda treeish, path: ("still carries it"
-                                  if marker in (query.file_at(repo, treeish, path) or "") else None)
+                                  if marker in (query.file_text_at(repo, treeish, path) or ("", ""))[1] else None)
 
 
 def _rebuild(repo: Path, infected: dict, tips: list[str], still_carries=None):

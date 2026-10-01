@@ -270,8 +270,10 @@ def _remote_action_reader(owner: str, name: str, token: str | None):
 
 def _ref_workflows(repo: Path, ref: str) -> dict[str, str]:
     """Workflow files as they exist ON a git ref (e.g. `origin/main`) — so `--pr` plans against the
-    PR TARGET (the default branch), not a possibly-untracked working-tree file. Raises `Unread` when
-    git could not read the ref."""
+    PR TARGET (the default branch), not a possibly-untracked working-tree file. None are there when
+    the ref names no commit. Raises `Unread` when git could not read the ref."""
+    if not gitutil.names_a_commit(repo, ref):
+        return {}
     listed = gitutil.list_tree(repo, ref, WORKFLOW_DIR)
     if listed is None:
         raise gitutil.Unread(f"the workflows on {ref}")
