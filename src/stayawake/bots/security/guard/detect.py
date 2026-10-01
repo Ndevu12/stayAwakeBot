@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+import posixpath
 from pathlib import Path
 
 import yaml
@@ -294,9 +295,12 @@ def _ref_action_reader(repo: Path, ref: str):
     def read(uses: str) -> str | None:
         rel = uses[2:].strip("/")
         for fn in ("action.yml", "action.yaml"):
-            found = gitutil.file_text_at(repo, ref, f"{rel}/{fn}")
+            path = posixpath.normpath(posixpath.join(rel, fn))
+            if path.startswith("../"):
+                return None
+            found = gitutil.file_text_at(repo, ref, path)
             if found is None:
-                raise gitutil.Unread(f"{rel}/{fn} on {ref}")
+                raise gitutil.Unread(f"{path} on {ref}")
             if found[1]:
                 return found[1]
         return None

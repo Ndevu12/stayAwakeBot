@@ -192,7 +192,7 @@ def stored_entries(repo: str | Path, *, limit: int = 200_000,
     for ref, line in zip(wanted, kinds):
         parts = line.split()
         if len(parts) == 3 and parts[1] == "blob":
-            out.setdefault(ref, []).append((parts[0], _FILE_TYPE))
+            out.setdefault(f"/{ref}", []).append((parts[0], _FILE_TYPE))
     seen: set[tuple[str, str]] = set()
     level = [(tree, "") for tree in dict.fromkeys(named) if tree]
     while level:
@@ -557,12 +557,13 @@ def file_text_at(repo: str | Path, treeish: str, path: str) -> tuple[str, str] |
 
 
 def stores_path(repo: str | Path, treeish: str, path: str) -> bool:
-    """Whether a commit or tree stores anything at a path. Takes the repo, the commit or tree and the
-    path. Raises `Unread` naming the path when git could not tell."""
+    """Whether a commit or tree stores content of its own at a path: a file, a link or a directory,
+    not a submodule there or above it. Takes the repo, the commit or tree and the path. Raises
+    `Unread` naming the path when git could not tell."""
     answered, entry = entry_at(repo, treeish, path)
     if not answered:
         raise Unread(path)
-    return entry is not None
+    return entry is not None and entry[0] != GITLINK_MODE
 
 
 def list_tree(repo: str | Path, treeish: str, path: str | Path) -> list[str] | None:

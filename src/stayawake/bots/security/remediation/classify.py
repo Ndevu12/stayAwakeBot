@@ -179,6 +179,8 @@ def classify_recovery(repo, finding, content_sig, merge_clean: str | None = None
         if commits is None:
             raise gitutil.Unread(path)
         for sha in commits:
+            if not gitutil.stores_path(repo, sha, path):
+                continue
             found = gitutil.file_text_at(repo, sha, path)
             if found is None:
                 raise gitutil.Unread(path)

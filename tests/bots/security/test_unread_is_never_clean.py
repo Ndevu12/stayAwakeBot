@@ -49,6 +49,44 @@ class TestTheMergeCheck(unittest.TestCase):
         with mock.patch.object(candidates, "run", return_value=None):
             self.assertIsNone(candidates.merge_commits(self.d))
 
+    def test_a_baseline_it_could_not_read_is_not_an_answer(self):
+        base = subprocess.run(["git", "-C", str(self.d), "rev-parse", "HEAD"], capture_output=True,
+                              text=True, check=True).stdout.strip()
+        _commit(self.d, "a.js", "one\ntwo\n", "second")
+        later = subprocess.run(["git", "-C", str(self.d), "rev-parse", "HEAD"], capture_output=True,
+                               text=True, check=True).stdout.strip()
+        with mock.patch.object(corroborate, "file_text_at", return_value=None):
+            with self.assertRaises(query.Unread):
+                corroborate.corroborated(self.d, base, later, "a.js", [base],
+                                         obfuscation_reason=lambda *a: None)
+
+
+class TestASubmoduleIsNotFileContent(unittest.TestCase):
+    def setUp(self):
+        self.d = _repo()
+        _commit(self.d, "a.js", "one\n", "first")
+        head = subprocess.run(["git", "-C", str(self.d), "rev-parse", "HEAD"], capture_output=True,
+                              text=True, check=True).stdout.strip()
+        subprocess.run(["git", "-C", str(self.d), "update-index", "--add", "--cacheinfo",
+                        f"160000,{head},vendor"], check=True)
+        subprocess.run(["git", "-C", str(self.d), "-c", "user.email=t@t", "-c", "user.name=t",
+                        "commit", "-qm", "submodule"], check=True)
+        self.parent = subprocess.run(["git", "-C", str(self.d), "rev-parse", "HEAD"],
+                                     capture_output=True, text=True, check=True).stdout.strip()
+
+    def test_a_parent_holding_a_submodule_there_does_not_store_the_file(self):
+        self.assertIs(query.stores_path(self.d, self.parent, "vendor"), False)
+        self.assertIs(query.stores_path(self.d, self.parent, "vendor/x.js"), False)
+        self.assertEqual(corroborate.corroborated(self.d, self.parent, self.parent, "vendor/x.js",
+                                                  [self.parent]),
+                         (True, "introduced file absent from every parent (review-evading)"))
+
+    def test_recovery_passes_over_a_version_a_submodule_holds(self):
+        with mock.patch.object(gitutil, "stores_path", return_value=False), \
+                mock.patch.object(gitutil, "file_text_at") as read:
+            remediation.classify_recovery(self.d, _finding("vendor"), SIG)
+        read.assert_not_called()
+
 
 class TestTheScanReadsWhatAnyRefNames(unittest.TestCase):
     def test_file_content_a_ref_names_directly_is_read(self):
@@ -59,7 +97,7 @@ class TestTheScanReadsWhatAnyRefNames(unittest.TestCase):
         subprocess.run(["git", "-C", str(d), "update-ref", "refs/tags/content", blob], check=True)
         entries, complete = query.stored_entries(d)
         self.assertTrue(complete)
-        self.assertIn((blob, query._FILE_TYPE), entries["refs/tags/content"])
+        self.assertIn((blob, query._FILE_TYPE), entries["/refs/tags/content"])
 
 
 class TestTheGateSetup(unittest.TestCase):
@@ -76,6 +114,12 @@ class TestTheGateSetup(unittest.TestCase):
                 guard_detect._ref_workflows(self.d, "HEAD")
             with self.assertRaises(query.Unread):
                 guard_detect._ref_action_reader(self.d, "HEAD")("./action")
+
+    def test_a_root_action_is_read_and_a_path_outside_is_not_an_action(self):
+        _commit(self.d, "action.yml", "name: root\n", "action")
+        reader = guard_detect._ref_action_reader(self.d, "HEAD")
+        self.assertEqual(reader("./"), "name: root\n")
+        self.assertIsNone(reader("./../elsewhere"))
 
     def test_the_setup_says_what_it_could_not_read(self):
         with mock.patch.object(provision, "_ref_workflows", side_effect=query.Unread("the workflows on main")), \
