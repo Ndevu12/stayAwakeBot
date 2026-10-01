@@ -11,7 +11,7 @@ distilled, actionable body.
 
 | Skill | Use it when |
 | --- | --- |
-| **saw-overview** | Starting any work here — what `saw` is, its verbs, and the safety invariants every change must respect. |
+| **saw-overview** | Starting any work here — what `saw` is, its verbs, the safety invariants every change must respect, and how saw decides what it removes and what it leaves to the operator. |
 | **engineering-standard** | Designing, adding capability, refactoring, or optimizing — SRP, DRY-not-too-DRY, self-documenting names, value-before-coverage, reuse-check + measure-first, right-depth. |
 | **working-with-this-codebase** | Every non-trivial task — analyze & align before consequential work, decide-and-recommend (no option menus), ask before decisive actions, stay focused, prove don't assert. |
 | **shipping-changes** | Committing or opening a PR — feature-branch PRs, rebase on `origin/main`, bare `Closes #NNNN`, CHANGELOG in-PR, signed commits. |

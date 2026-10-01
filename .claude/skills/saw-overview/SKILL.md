@@ -1,6 +1,6 @@
 ---
 name: saw-overview
-description: Read first when working on StayAwakeBot / the `saw` CLI. What the tool is, its command surface, and the safety invariants every change must respect (scan is read-only; fix is PR-only; heuristics are never auto-fixed; offline by default; fail closed).
+description: Read first when working on StayAwakeBot / the `saw` CLI. What the tool is, its command surface, the safety invariants every change must respect (scan is read-only; fix is PR-only; heuristics are never auto-fixed; offline by default; fail closed), and how saw decides what it removes on its own and what it leaves to the operator.
 ---
 
 # saw / StayAwakeBot — overview & safety invariants
@@ -71,6 +71,29 @@ preserved. **`saw` removes; it does not rebuild** — a rebuild re-runs the deli
 comes before anything destructive**, and a control that merely makes something fail is destruction by
 another route, bound by the same rule. **Every action is gated on a confirmed finding.**
 
+## How saw decides what to remove
+
+These are settled decisions. A change that would move any of them is the maintainer's call, made
+before the code, never a side effect of fixing something else.
+
+- **Evidence removes on its own.** A file carrying its own confirmed finding is removed without
+  asking, whether or not anyone is at the terminal. That is the floor every change keeps.
+- **What provably arrived with the malware goes with it**, even when it looks legitimate on its own.
+- **Arrival alone is the operator's decision.** A file whose only link to the malware is that it
+  arrived at the same time is never deleted without a person:
+  - Where saw can ask (an attended terminal, one local repository), it asks once per delivery: remove
+    them all, choose which, or keep. Enter keeps, and keep is final.
+  - Where nobody can be asked, nothing is deleted on that link alone. The files are named as the
+    operator's decision, the run is never reported clean or complete, and it gives the command that
+    asks.
+- **An answer only adds remediation.** What saw does on an operator's answer is checked like any other
+  removal, and no answer lowers what saw already proved.
+- **Confidence is declared, never inferred.** Every signature states its confidence.
+- **No downgrade, measured on the outcome.** Lowering a signature's confidence, or any change after
+  which a file is reported where it used to be removed, is a downgrade. It is compared against `main`
+  on the verdict and on what gets removed, not only on which findings fire. It needs the maintainer's
+  agreement and a missed-detection hunt in the same pass.
+
 ## Boundaries that settle questions before you reason about them
 
 Each of these was crossed in real work, and each crossing changed what a user was told.
@@ -81,7 +104,8 @@ Each of these was crossed in real work, and each crossing changed what a user wa
   never reports a clean result.
 - **A verdict that fires on an ordinary host is a defect, not caution.** It teaches operators to
   ignore the one code that matters, which protects the real findings underneath. Narrow it to the
-  case that is actually a hole, and measure that it does not fire on a healthy machine.
+  case that is actually a hole, measure that it does not fire on a healthy machine, and measure that
+  nothing it removed before stops being removed.
 - **`saw` reports on the host, never on itself.** No internal vocabulary reaches an operator. What
   they read is a condition of their machine and what to do about it — never that the tool may have
   failed its own checks.
@@ -91,5 +115,6 @@ Each of these was crossed in real work, and each crossing changed what a user wa
 - **`audit` audits and reports.** Nothing in that path may signal, stop or end a process. Acting is a
   different command's job, and it is gated on capture existing first.
 - **Escalate on corroboration, never on the trigger.** A condition a feature exists to provide is not
-  evidence of abuse of it, and two indicators one action creates are one act observed twice.
+  evidence of abuse of it, and two indicators one action creates are one act observed twice. This
+  governs raising a grade; a missing corroboration is never a reason to lower one that ships.
 

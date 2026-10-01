@@ -14,7 +14,8 @@ report, remediate (PR-only), prevent, plus dependency-CVE auditing and local hyg
 
 1. **Zero downgrade in the scanner.** A missed detection is worse than a slow scan. Detection changes
    and perf/refactor work must be **byte-identical in findings** — prove it, don't assert it — and
-   detectors are **tightened, never downgraded**.
+   detectors are **tightened, never downgraded**. A downgrade is measured on the verdict and on what
+   gets removed, against `main`. → `saw-overview` "How saw decides what to remove".
 2. **Analyze & ALIGN before consequential/design/security work.** Present the plan first; decide and
    recommend — **no option menus**. Ask before decisive/outward actions. Prove, don't assert. Stay
    focused. → `working-with-this-codebase`.
