@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="What a cached GitHub credential really risks, how to judge it by lifetime, scope and whether it can be copied, and how to remove one safely.">
+        <meta name="description" content="What a cached GitHub credential risks, how to judge it by lifetime, scope and whether it can be copied, and how to remove one you do not use.">
       
       
         <meta name="author" content="Jean Paul Elisa NIYOKWIZERWA">
@@ -27,7 +27,7 @@
     
     
       
-        <title>Credential hygiene: cached GitHub credentials and the worm threat model - saw documentation</title>
+        <title>Credential hygiene: cached GitHub credentials - saw documentation</title>
       
     
     
@@ -74,14 +74,14 @@
   
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="saw documentation">
-  <meta property="og:title" content="Credential hygiene: cached GitHub credentials and the worm threat model — saw documentation">
-  <meta property="og:description" content="What a cached GitHub credential really risks, how to judge it by lifetime, scope and whether it can be copied, and how to remove one safely.">
+  <meta property="og:title" content="Credential hygiene: cached GitHub credentials — saw documentation">
+  <meta property="og:description" content="What a cached GitHub credential risks, how to judge it by lifetime, scope and whether it can be copied, and how to remove one you do not use.">
   <meta property="og:image" content="https://saw-docs.ndevuspace.com/latest/assets/og-card.png">
   <meta property="og:url" content="https://saw-docs.ndevuspace.com/latest/explanation/credential-hygiene/">
 
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Credential hygiene: cached GitHub credentials and the worm threat model — saw documentation">
-  <meta name="twitter:description" content="What a cached GitHub credential really risks, how to judge it by lifetime, scope and whether it can be copied, and how to remove one safely.">
+  <meta name="twitter:title" content="Credential hygiene: cached GitHub credentials — saw documentation">
+  <meta name="twitter:description" content="What a cached GitHub credential risks, how to judge it by lifetime, scope and whether it can be copied, and how to remove one you do not use.">
   <meta name="twitter:image" content="https://saw-docs.ndevuspace.com/latest/assets/og-card.png">
 
   
@@ -90,8 +90,8 @@
     {
       "@context": "https://schema.org",
       "@type": "TechArticle",
-      "headline": "Credential hygiene: cached GitHub credentials and the worm threat model",
-      "description": "What a cached GitHub credential really risks, how to judge it by lifetime, scope and whether it can be copied, and how to remove one safely.",
+      "headline": "Credential hygiene: cached GitHub credentials",
+      "description": "What a cached GitHub credential risks, how to judge it by lifetime, scope and whether it can be copied, and how to remove one you do not use.",
       "url": "https://saw-docs.ndevuspace.com/latest/explanation/credential-hygiene/",
       "image": "https://saw-docs.ndevuspace.com/latest/assets/og-card.png",
       "inLanguage": "en",
@@ -130,7 +130,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#credential-hygiene-cached-github-credentials-and-the-worm-threat-model" class="md-skip">
+        <a href="#credential-hygiene-cached-github-credentials" class="md-skip">
           Skip to content
         </a>
       
@@ -169,7 +169,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Credential hygiene: cached GitHub credentials and the worm threat model
+              Credential hygiene: cached GitHub credentials
             
           </span>
         </div>
@@ -1724,7 +1724,7 @@
   <span class="md-ellipsis">
     
   
-    Credential hygiene: cached GitHub credentials and the worm threat model
+    Credential hygiene: cached GitHub credentials
   
 
     
@@ -1742,7 +1742,7 @@
   <span class="md-ellipsis">
     
   
-    Credential hygiene: cached GitHub credentials and the worm threat model
+    Credential hygiene: cached GitHub credentials
   
 
     
@@ -1768,10 +1768,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#who-this-is-for" class="md-nav__link">
+  <a href="#the-threat" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Who this is for
+        The threat
       
     </span>
   </a>
@@ -1779,10 +1779,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#1-the-threat-model-in-one-paragraph" class="md-nav__link">
+  <a href="#what-determines-the-risk" class="md-nav__link">
     <span class="md-ellipsis">
       
-        1. The threat model in one paragraph
+        What determines the risk
       
     </span>
   </a>
@@ -1790,10 +1790,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#2-why-cached-is-not-the-same-as-exposed" class="md-nav__link">
+  <a href="#deciding-what-to-do" class="md-nav__link">
     <span class="md-ellipsis">
       
-        2. Why "cached" is not the same as "exposed"
+        Deciding what to do
       
     </span>
   </a>
@@ -1801,10 +1801,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#3-the-decision-should-i-act-on-a-cached-credential-finding" class="md-nav__link">
+  <a href="#ways-to-authenticate" class="md-nav__link">
     <span class="md-ellipsis">
       
-        3. The decision: should I act on a cached-credential finding?
+        Ways to authenticate
       
     </span>
   </a>
@@ -1812,10 +1812,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#4-how-to-stay-authenticated-youll-use-more-than-one-harden-each" class="md-nav__link">
+  <a href="#removing-a-cached-token-you-do-not-use" class="md-nav__link">
     <span class="md-ellipsis">
       
-        4. How to stay authenticated (you'll use more than one — harden each)
+        Removing a cached token you do not use
       
     </span>
   </a>
@@ -1823,10 +1823,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#5-removing-a-redundant-cached-credential-the-verified-way" class="md-nav__link">
+  <a href="#what-removal-leaves-in-place" class="md-nav__link">
     <span class="md-ellipsis">
       
-        5. Removing a redundant cached credential — the verified way
+        What removal leaves in place
       
     </span>
   </a>
@@ -1834,10 +1834,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#6-scope-of-the-fix-what-deletion-does-not-touch" class="md-nav__link">
+  <a href="#if-the-host-may-be-compromised" class="md-nav__link">
     <span class="md-ellipsis">
       
-        6. Scope of the fix — what deletion does NOT touch
+        If the host may be compromised
       
     </span>
   </a>
@@ -1845,21 +1845,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#7-if-you-actually-suspect-this-host-is-compromised" class="md-nav__link">
+  <a href="#checklist" class="md-nav__link">
     <span class="md-ellipsis">
       
-        7. If you actually suspect this host is compromised
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#8-checklist" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        8. Checklist
+        Checklist
       
     </span>
   </a>
@@ -1909,10 +1898,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#who-this-is-for" class="md-nav__link">
+  <a href="#the-threat" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Who this is for
+        The threat
       
     </span>
   </a>
@@ -1920,10 +1909,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#1-the-threat-model-in-one-paragraph" class="md-nav__link">
+  <a href="#what-determines-the-risk" class="md-nav__link">
     <span class="md-ellipsis">
       
-        1. The threat model in one paragraph
+        What determines the risk
       
     </span>
   </a>
@@ -1931,10 +1920,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#2-why-cached-is-not-the-same-as-exposed" class="md-nav__link">
+  <a href="#deciding-what-to-do" class="md-nav__link">
     <span class="md-ellipsis">
       
-        2. Why "cached" is not the same as "exposed"
+        Deciding what to do
       
     </span>
   </a>
@@ -1942,10 +1931,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#3-the-decision-should-i-act-on-a-cached-credential-finding" class="md-nav__link">
+  <a href="#ways-to-authenticate" class="md-nav__link">
     <span class="md-ellipsis">
       
-        3. The decision: should I act on a cached-credential finding?
+        Ways to authenticate
       
     </span>
   </a>
@@ -1953,10 +1942,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#4-how-to-stay-authenticated-youll-use-more-than-one-harden-each" class="md-nav__link">
+  <a href="#removing-a-cached-token-you-do-not-use" class="md-nav__link">
     <span class="md-ellipsis">
       
-        4. How to stay authenticated (you'll use more than one — harden each)
+        Removing a cached token you do not use
       
     </span>
   </a>
@@ -1964,10 +1953,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#5-removing-a-redundant-cached-credential-the-verified-way" class="md-nav__link">
+  <a href="#what-removal-leaves-in-place" class="md-nav__link">
     <span class="md-ellipsis">
       
-        5. Removing a redundant cached credential — the verified way
+        What removal leaves in place
       
     </span>
   </a>
@@ -1975,10 +1964,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#6-scope-of-the-fix-what-deletion-does-not-touch" class="md-nav__link">
+  <a href="#if-the-host-may-be-compromised" class="md-nav__link">
     <span class="md-ellipsis">
       
-        6. Scope of the fix — what deletion does NOT touch
+        If the host may be compromised
       
     </span>
   </a>
@@ -1986,21 +1975,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#7-if-you-actually-suspect-this-host-is-compromised" class="md-nav__link">
+  <a href="#checklist" class="md-nav__link">
     <span class="md-ellipsis">
       
-        7. If you actually suspect this host is compromised
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#8-checklist" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        8. Checklist
+        Checklist
       
     </span>
   </a>
@@ -2032,194 +2010,141 @@
   
 
 
-<h1 id="credential-hygiene-cached-github-credentials-and-the-worm-threat-model">Credential hygiene: cached GitHub credentials and the worm threat model<a class="headerlink" href="#credential-hygiene-cached-github-credentials-and-the-worm-threat-model" title="Permanent link">&para;</a></h1>
-<blockquote>
-<p><strong>TL;DR</strong> — A GitHub token cached in your OS keychain is <strong>not</strong> automatically a vulnerability; the
-keychain is a recommended, encrypted store. What matters is the token's <strong>lifetime, scope, and
-whether it can be copied</strong> by a process running as you. It is normal to use <strong>several</strong> auth methods
-across projects (SSH, HTTPS + PAT, <code>gh</code>) — the goal is <strong>not</strong> to collapse to one, but to make
-<strong>each</strong> credential you keep low-risk, and to remove only the ones you genuinely don't use. Deleting
-a credential path you actually rely on just logs you out.</p>
-</blockquote>
-<p>This page backs the <code>cached-github-keychain</code> and <code>git-credentials-plaintext</code> findings from
-<a href="../../reference/cli/audit/"><code>saw audit</code></a>. Those findings deliberately <strong>inform</strong> rather than tell you to delete
-something — this page is the reasoning they link to.</p>
-<h2 id="who-this-is-for">Who this is for<a class="headerlink" href="#who-this-is-for" title="Permanent link">&para;</a></h2>
-<p>Developers on machines that install dependencies, run builds, and use editor or AI-agent tooling — the
-population that supply-chain worms (Shai-Hulud and variants) target. <code>saw audit</code> flags credential
-<em>surfaces</em> on your dev machine; this page explains what those findings do and don't mean.</p>
-<h2 id="1-the-threat-model-in-one-paragraph">1. The threat model in one paragraph<a class="headerlink" href="#1-the-threat-model-in-one-paragraph" title="Permanent link">&para;</a></h2>
-<p>The worm runs <strong>as your user</strong> (via an <code>npm</code> postinstall, a VS Code folder-open task, an agent auto-run
-hook). Once it runs as you, it can read anything <em>you</em> can read without extra authentication — your
-unlocked login keychain, your <code>~/.ssh</code> keys, your <code>gh</code> token. Its goal is to grab a working GitHub
-credential and <strong>push as you</strong> (to spread and to plant more). So the question is never "is this
-credential stored?" — it has to be stored to be usable. The question is <strong>"how much damage can a copy
-of it do, and can it even be copied?"</strong></p>
-<h2 id="2-why-cached-is-not-the-same-as-exposed">2. Why "cached" is not the same as "exposed"<a class="headerlink" href="#2-why-cached-is-not-the-same-as-exposed" title="Permanent link">&para;</a></h2>
+<h1 id="credential-hygiene-cached-github-credentials">Credential hygiene: cached GitHub credentials<a class="headerlink" href="#credential-hygiene-cached-github-credentials" title="Permanent link">&para;</a></h1>
+<p>A GitHub token in your OS keychain is normal: the keychain is an encrypted store and the recommended
+place for it. What decides the risk is the token's lifetime, its scope, and whether a process running
+as you can copy it. Most developers authenticate in several ways (SSH, HTTPS with a token, <code>gh</code>). Keep
+each one low-risk, and remove only the ones you do not use.</p>
+<p>This page explains the <code>cached-github-keychain</code> and <code>git-credentials-plaintext</code> findings of
+<a href="../../reference/cli/audit/"><code>saw audit</code></a>. When the keychain or <code>~/.git-credentials</code> could not be read,
+the audit reports that it was not read; unlock or open it and run the audit again.</p>
+<h2 id="the-threat">The threat<a class="headerlink" href="#the-threat" title="Permanent link">&para;</a></h2>
+<p>Supply-chain worms run as your user, through an <code>npm</code> install script, an editor task that runs when a
+folder opens, or an agent hook. From there they read what you can read without authenticating again:
+an unlocked keychain, <code>~/.ssh</code>, the <code>gh</code> token. They look for a working GitHub credential to push
+with. A credential has to be stored to be usable, so what matters is how much a copy of it can do, and
+whether it can be copied at all.</p>
+<h2 id="what-determines-the-risk">What determines the risk<a class="headerlink" href="#what-determines-the-risk" title="Permanent link">&para;</a></h2>
 <ul>
-<li>A credential must live <em>somewhere</em> to work: git-HTTPS → keychain, <code>gh</code> → keychain, SSH → <code>~/.ssh</code>.</li>
-<li>The macOS login Keychain (and equivalents) is <strong>encrypted at rest</strong> and is the <strong>recommended</strong> store
-  — strictly better than plaintext <code>~/.git-credentials</code> (<code>credential.helper store</code>).</li>
-<li>"The token is in my keychain" is normal, not a misconfiguration.</li>
-<li>The fallacy to avoid: <em>"it's in use, so it's safe."</em> Usage and exposure are unrelated. A live token
-  is worth stealing <strong>because</strong> it works.</li>
+<li>A credential is kept somewhere to work: git over HTTPS in the keychain, <code>gh</code> in the keychain, SSH
+  in <code>~/.ssh</code>.</li>
+<li>The OS keychain is encrypted at rest, and a better place than a plaintext <code>~/.git-credentials</code>
+  (<code>credential.helper store</code>).</li>
+<li>A token in use is not safer for it: a working token is the one worth copying.</li>
 </ul>
-<p><strong>What actually determines risk</strong> — rank your credentials by these, not by where they're stored:</p>
 <table>
 <thead>
 <tr>
 <th>Property</th>
-<th>Safer</th>
-<th>Riskier</th>
+<th>Lower risk</th>
+<th>Higher risk</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><strong>Lifetime</strong></td>
-<td>short-lived / auto-refreshed (minutes–hours)</td>
-<td>non-expiring PAT</td>
+<td>short-lived or auto-refreshed (minutes to hours)</td>
+<td>a token that never expires</td>
 </tr>
 <tr>
 <td><strong>Scope</strong></td>
-<td>least-privilege, single-repo</td>
+<td>least privilege, one repository</td>
 <td><code>repo</code> + <code>admin:*</code> + <code>gist</code></td>
 </tr>
 <tr>
-<td><strong>Exfiltratability</strong></td>
-<td>hardware-backed <code>sk-</code>/FIDO key (cannot be copied)</td>
-<td>bearer token or plain key file (copy the bytes, replay anywhere)</td>
+<td><strong>Copyable</strong></td>
+<td>a hardware-backed <code>sk-</code>/FIDO key</td>
+<td>a bearer token or a plain key file</td>
 </tr>
 </tbody>
 </table>
-<p>A <strong>bearer token</strong> is the worst of these: copy the string, replay it from the attacker's own machine,
-instantly, no key material needed. That's why worms prefer tokens over SSH keys — and why a long-lived,
-broadly-scoped bearer token is the finding worth caring about, regardless of <em>which</em> keychain slot
-holds it.</p>
-<blockquote>
-<p><code>saw audit</code> does <strong>not</strong> read your token's bytes — it never handles a live secret. So it can't tell a
-short-lived least-scope token from a non-expiring <code>repo</code>-scoped PAT. That judgement is yours; this
-table is how to make it.</p>
-</blockquote>
-<h2 id="3-the-decision-should-i-act-on-a-cached-credential-finding">3. The decision: should I act on a cached-credential finding?<a class="headerlink" href="#3-the-decision-should-i-act-on-a-cached-credential-finding" title="Permanent link">&para;</a></h2>
-<p>First, correct a common bad instinct: <strong>using more than one auth method is fine and normal.</strong> SSH for
-some repos, HTTPS + a PAT for others (org SSO, CI, containers/Codespaces, or networks that block SSH
-port 22), <code>gh</code> for API work — a real dev's machine has several, on purpose, and often because the
-environment forces it. The goal is <strong>not</strong> to collapse to one. So the question is not "do I have
-another path?" but "do I actually <em>use</em> this one?"</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>Do you INTENTIONALLY use HTTPS auth for any project/workflow?
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├─ YES → keep it. Do NOT delete it. Instead make THIS credential low-risk:
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>│        short-lived, least-scope, hardware-backed where the method allows (§2, §4).
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>├─ NO / it's a stale leftover you don't recognize → removal candidate.
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>│        Remove it the verified way (§5); you lose nothing because you don't use it.
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>└─ It's your ONLY path and you're unsure → do NOT delete first. Stand up a
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>         replacement (§4), verify it works, THEN remove.
+<p>A bearer token can be replayed from any machine, so a long-lived, broadly scoped one is the credential
+to deal with first. <code>saw audit</code> reports where a token is kept; use the table to judge its lifetime and
+scope.</p>
+<h2 id="deciding-what-to-do">Deciding what to do<a class="headerlink" href="#deciding-what-to-do" title="Permanent link">&para;</a></h2>
+<p>Using more than one way to authenticate is normal: SSH for some repositories, HTTPS with a token for
+others (SSO, CI, containers, networks that block port 22), <code>gh</code> for the API. For each credential, the
+question is whether you use it.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>Do you use HTTPS auth for any project?
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├─ Yes → keep it, and make it short-lived, least-scope and hardware-backed where you can.
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>├─ No, it is a leftover → remove it (below).
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>└─ It is your only path → set up another path first, check it works, then remove it.
 </code></pre></div>
-<p>"Delete it" is only valid for a credential you <strong>don't use</strong>. A path you rely on is not "redundant"
-just because another path also exists — deleting it is an outage, not a fix.</p>
-<h2 id="4-how-to-stay-authenticated-youll-use-more-than-one-harden-each">4. How to stay authenticated (you'll use more than one — harden each)<a class="headerlink" href="#4-how-to-stay-authenticated-youll-use-more-than-one-harden-each" title="Permanent link">&para;</a></h2>
-<p>Authentication needs <em>a path</em>, not a <em>cache</em>, and most devs keep several paths for different projects
-and environments. That's fine — the security goal is that <strong>every</strong> credential you keep is
-low-blast-radius (short lifetime, least scope, non-exfiltratable where possible), <strong>not</strong> that you pick
-a single method. These are options to combine and harden, not a menu to choose one from —
-best-to-workable:</p>
+<h2 id="ways-to-authenticate">Ways to authenticate<a class="headerlink" href="#ways-to-authenticate" title="Permanent link">&para;</a></h2>
+<p>Combine these as your projects need, strongest first:</p>
 <ol>
-<li><strong>Hardware-backed SSH key</strong> (<code>sk-ed25519</code> / FIDO security key) → <code>git@github.com</code> remotes.</li>
-<li>Your session can <em>sign</em> with it; a worm <strong>cannot copy</strong> it. This is the only tier that defeats
-     copy-and-replay.</li>
-<li><code>ssh-keygen -t ed25519-sk -C "yubikey-github"</code>, add the <code>.pub</code> to GitHub, set your remote to SSH.</li>
-<li><strong><code>gh</code> as git's credential helper</strong> — <code>gh auth setup-git</code>.</li>
-<li>git borrows <code>gh</code>'s <strong>short-lived, auto-refreshed</strong> keyring token; no separate git cache to rot. A
-     stolen copy expires fast. Centrally revocable with <code>gh auth logout</code>.</li>
-<li><strong>Plain SSH key in <code>~/.ssh</code></strong> (passphrase-protected, loaded into <code>ssh-agent</code> for the session).</li>
-<li>Works and is the common default, but the key file is copyable — protect it with a passphrase so
-     the file alone isn't enough.</li>
-<li><strong>In-memory HTTPS cache</strong> — <code>git config --global credential.helper 'cache --timeout=3600'</code>.</li>
-<li>Lives in RAM only, evaporates on timeout/reboot; never persisted to disk or keychain.</li>
+<li><strong>Hardware-backed SSH key</strong> (<code>ed25519-sk</code>, a FIDO security key) with <code>git@github.com</code> remotes. It
+   signs, and cannot be copied.</li>
+<li><code>ssh-keygen -t ed25519-sk -C "yubikey-github"</code>, add the <code>.pub</code> to GitHub, and use SSH remotes.</li>
+<li><strong><code>gh</code> as git's credential helper</strong>: <code>gh auth setup-git</code>. git uses <code>gh</code>'s short-lived,
+   auto-refreshed token, and <code>gh auth logout</code> revokes it.</li>
+<li><strong>SSH key in <code>~/.ssh</code></strong>, protected by a passphrase and loaded into <code>ssh-agent</code>.</li>
+<li><strong>In-memory HTTPS cache</strong>: <code>git config --global credential.helper 'cache --timeout=3600'</code>. It is
+   kept in memory until the timeout or a restart.</li>
 </ol>
-<p>Check what you use today:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>ssh<span class="w"> </span>-T<span class="w"> </span>git@github.com<span class="w">                 </span><span class="c1"># "Hi &lt;you&gt;!" =&gt; SSH already works</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>gh<span class="w"> </span>auth<span class="w"> </span>status<span class="w">                        </span><span class="c1"># is gh logged in, and via keyring?</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>git<span class="w"> </span>remote<span class="w"> </span>-v<span class="w">                         </span><span class="c1"># git@github.com =&gt; SSH ; https:// =&gt; token path</span>
+<p>To see what you use today:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>ssh<span class="w"> </span>-T<span class="w"> </span>git@github.com<span class="w">                 </span><span class="c1"># "Hi &lt;you&gt;!" means SSH works</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>gh<span class="w"> </span>auth<span class="w"> </span>status<span class="w">                        </span><span class="c1"># whether gh is logged in</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>git<span class="w"> </span>remote<span class="w"> </span>-v<span class="w">                         </span><span class="c1"># git@github.com is SSH; https:// uses a token</span>
 <a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>git<span class="w"> </span>config<span class="w"> </span>--get-all<span class="w"> </span>credential.helper
 </code></pre></div>
-<h2 id="5-removing-a-redundant-cached-credential-the-verified-way">5. Removing a redundant cached credential — the <em>verified</em> way<a class="headerlink" href="#5-removing-a-redundant-cached-credential-the-verified-way" title="Permanent link">&para;</a></h2>
-<p>This is the exact journey that trips people up; do it in order and <strong>verify at the end</strong>.</p>
-<p><strong>a. Find where the helper actually comes from</strong> (it is often NOT in your user config):</p>
+<h2 id="removing-a-cached-token-you-do-not-use">Removing a cached token you do not use<a class="headerlink" href="#removing-a-cached-token-you-do-not-use" title="Permanent link">&para;</a></h2>
+<p><strong>1. Find where the helper is set.</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>git<span class="w"> </span>config<span class="w"> </span>--show-origin<span class="w"> </span>--get-all<span class="w"> </span>credential.helper
 </code></pre></div>
-<p>On macOS this frequently resolves to Apple's Command Line Tools default —
-<code>/Library/Developer/CommandLineTools/usr/share/git-core/gitconfig</code> — which you <strong>cannot</strong> <code>--unset</code>
-(it's a read-only system default). <code>git config --unset credential.helper</code> will silently succeed and
-change nothing.</p>
-<p><strong>b. Reset the inherited helper</strong> by adding an empty value at global scope (an empty helper resets the
-list):</p>
+<p>On macOS this is often the Command Line Tools default,
+<code>/Library/Developer/CommandLineTools/usr/share/git-core/gitconfig</code>. It is a read-only system file, so
+<code>git config --unset</code> leaves it in place.</p>
+<p><strong>2. Clear the inherited helper</strong> by adding an empty value to your global config:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>git<span class="w"> </span>config<span class="w"> </span>--global<span class="w"> </span>--add<span class="w"> </span>credential.helper<span class="w"> </span><span class="s2">""</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>git<span class="w"> </span>config<span class="w"> </span>--get-all<span class="w"> </span>credential.helper<span class="w">   </span><span class="c1"># shows: osxkeychain &lt;newline&gt; (blank) =&gt; the blank resets it</span>
 </code></pre></div>
-<p><strong>c. Inspect before deleting</strong> (avoid nuking the wrong entry if you have several):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>security<span class="w"> </span>find-internet-password<span class="w"> </span>-s<span class="w"> </span>github.com<span class="w">          </span><span class="c1"># macOS: presence (add -g to view the secret)</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>secret-tool<span class="w"> </span>lookup<span class="w"> </span>server<span class="w"> </span>github.com<span class="w"> </span>&gt;/dev/null<span class="w">        </span><span class="c1"># Linux (libsecret): succeeds if present (secret discarded)</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>cmdkey<span class="w"> </span>/list:git:https://github.com<span class="w">                    </span><span class="c1"># Windows: show the Credential Manager entry</span>
+<p><strong>3. Delete the token</strong> with the command <code>saw audit</code> prints for your platform.</p>
+<p><strong>4. Check the result.</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nb">printf</span><span class="w"> </span><span class="s1">'protocol=https\nhost=github.com\n\n'</span><span class="w"> </span><span class="p">|</span><span class="w"> </span><span class="nv">GIT_TERMINAL_PROMPT</span><span class="o">=</span><span class="m">0</span><span class="w"> </span><span class="nv">GIT_ASKPASS</span><span class="o">=</span><span class="w"> </span><span class="nv">GCM_INTERACTIVE</span><span class="o">=</span>never<span class="w"> </span>git<span class="w"> </span>credential<span class="w"> </span>fill
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>ssh<span class="w"> </span>-T<span class="w"> </span>git@github.com
 </code></pre></div>
-<p><strong>d. Delete the cached token</strong> — use your platform's store (<code>saw audit</code> prints the one for your OS):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>security<span class="w"> </span>delete-internet-password<span class="w"> </span>-s<span class="w"> </span>github.com<span class="w">        </span><span class="c1"># macOS Keychain</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>secret-tool<span class="w"> </span>clear<span class="w"> </span>server<span class="w"> </span>github.com<span class="w">                    </span><span class="c1"># Linux libsecret/gnome-keyring</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="c1">#   (equivalently: git credential-libsecret erase &lt;&lt;&lt; $'protocol=https\nhost=github.com\n')</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>cmdkey<span class="w"> </span>/delete:git:https://github.com<span class="w">                  </span><span class="c1"># Windows Credential Manager</span>
-</code></pre></div>
-<p><strong>e. VERIFY it actually stopped caching</strong> — the step everyone skips:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>security<span class="w"> </span>find-internet-password<span class="w"> </span>-s<span class="w"> </span>github.com<span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">"STILL PRESENT"</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">"GONE"</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="nb">printf</span><span class="w"> </span><span class="s1">'protocol=https\nhost=github.com\n\n'</span><span class="w"> </span><span class="p">|</span><span class="w"> </span><span class="nv">GIT_TERMINAL_PROMPT</span><span class="o">=</span><span class="m">0</span><span class="w"> </span>git<span class="w"> </span>credential<span class="w"> </span>fill
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="c1">#   -&gt; if this prints a `password=` line, a helper is still serving a token; if it errors on</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="c1">#      "could not read Username", no helper is caching. That error is the success signal.</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>ssh<span class="w"> </span>-T<span class="w"> </span>git@github.com<span class="w">                                  </span><span class="c1"># confirm you are STILL authenticated (via SSH)</span>
-</code></pre></div>
-<h2 id="6-scope-of-the-fix-what-deletion-does-not-touch">6. Scope of the fix — what deletion does NOT touch<a class="headerlink" href="#6-scope-of-the-fix-what-deletion-does-not-touch" title="Permanent link">&para;</a></h2>
-<p>There are (at least) three separate github.com credential stores on a typical dev machine. Removing one
-leaves the others (the table names the macOS stores; Linux libsecret / Windows Credential Manager have
-the same git-HTTPS-vs-gh-vs-SSH split):</p>
+<p>The first command ends with "could not read Username" when no helper holds a token. The second
+confirms you can still authenticate over SSH.</p>
+<h2 id="what-removal-leaves-in-place">What removal leaves in place<a class="headerlink" href="#what-removal-leaves-in-place" title="Permanent link">&para;</a></h2>
+<p>A developer machine usually holds three separate github.com credentials:</p>
 <table>
 <thead>
 <tr>
 <th>Store</th>
 <th>Used by</th>
-<th>Removed by §5?</th>
+<th>Removed by the steps above</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>git-HTTPS token (macOS keychain <em>internet-password</em> / Linux libsecret / Windows Credential Manager)</td>
+<td>git's HTTPS token (macOS Keychain, Linux Secret Service, Windows Credential Manager)</td>
 <td>git over HTTPS</td>
-<td>✅ yes</td>
+<td>yes</td>
 </tr>
 <tr>
-<td><code>gh</code> token (keychain <em>generic-password</em>, <code>gh:github.com</code>)</td>
+<td><code>gh</code>'s token</td>
 <td>the <code>gh</code> CLI</td>
-<td>❌ no — <code>gh auth logout</code> to remove</td>
+<td>no; <code>gh auth logout</code> removes it</td>
 </tr>
 <tr>
 <td>SSH keys (<code>~/.ssh/id_*</code>)</td>
 <td>git over SSH</td>
-<td>❌ no — removing breaks your pushes</td>
+<td>no</td>
 </tr>
 </tbody>
 </table>
-<p>"Remove the cached credential entirely" ≠ "remove all GitHub credentials from the host." If your goal
-is the latter, you also <code>gh auth logout</code> and review <code>~/.ssh</code> — but note that keeping <code>gh</code>'s short-lived
-keyring token is a <em>recommended</em> end state, not a problem.</p>
-<h2 id="7-if-you-actually-suspect-this-host-is-compromised">7. If you actually suspect this host is compromised<a class="headerlink" href="#7-if-you-actually-suspect-this-host-is-compromised" title="Permanent link">&para;</a></h2>
-<p>This page is steady-state hygiene. If you have real evidence of the worm (see the persistence findings
-in <code>saw audit</code>), follow the incident-response order instead — <strong>isolate → neutralize persistence →
-rebuild → rotate credentials LAST</strong> — because rotating while persistence is live can trigger a reported
-home-directory wiper.</p>
-<h2 id="8-checklist">8. Checklist<a class="headerlink" href="#8-checklist" title="Permanent link">&para;</a></h2>
+<p>Keeping <code>gh</code>'s short-lived token is a good end state.</p>
+<h2 id="if-the-host-may-be-compromised">If the host may be compromised<a class="headerlink" href="#if-the-host-may-be-compromised" title="Permanent link">&para;</a></h2>
+<p>This page covers routine hygiene. If <code>saw audit</code> reports persistence, follow the incident order
+instead: isolate the host, remove the persistence, rebuild, and rotate credentials last. Rotating
+while persistence is running can trigger a home-directory wiper.</p>
+<h2 id="checklist">Checklist<a class="headerlink" href="#checklist" title="Permanent link">&para;</a></h2>
 <ul>
-<li>[ ] I know how my machine authenticates to GitHub today (SSH / gh-helper / HTTPS token).</li>
-<li>[ ] The credential I'm removing is one I genuinely <strong>don't use</strong> (not merely "I have another path
-      too"), or I've stood up a replacement first.</li>
-<li>[ ] My standing tokens are short-lived and least-scope (or I use a hardware-backed key).</li>
-<li>[ ] After removing a cached token, I <strong>verified</strong> caching stopped <em>and</em> that I'm still authenticated.</li>
-<li>[ ] I understand <code>gh</code> and SSH credentials are separate stores, untouched by deleting the git cache.</li>
+<li>[ ] I know how this machine authenticates to GitHub: SSH, <code>gh</code> as git's helper, or an HTTPS token.</li>
+<li>[ ] The credential I remove is one I do not use, or I have set up its replacement first.</li>
+<li>[ ] The tokens I keep are short-lived and least-scope, or I use a hardware-backed key.</li>
+<li>[ ] After removing a token, git no longer finds one and I can still authenticate.</li>
+<li>[ ] I know the <code>gh</code> token and SSH keys are separate, and stay in place.</li>
 </ul>
 
 
