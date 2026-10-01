@@ -450,7 +450,8 @@ def parents(repo: str | Path, sha: str) -> list[str] | None:
 
 def changed_paths(repo: str | Path, base: str, target: str,
                   diff_filter: str | None = None) -> set[str]:
-    """Paths that differ between two commits/trees (name-only).
+    """Paths that differ between two commits/trees (name-only). Raises `Unread` when git could not
+    compare them.
 
     `diff_filter` is passed straight to `git diff --diff-filter` (e.g. "AM" keeps only the
     paths `target` Adds or Modifies and drops Deletions) — callers that care about content
@@ -467,7 +468,7 @@ def changed_paths(repo: str | Path, base: str, target: str,
     args += [base, target]
     res = run(repo, args)
     if res is None or res.returncode != 0:
-        return set()
+        raise Unread(f"what {target[:12]} changes")
     return {p for p in (res.stdout or "").split("\0") if p}
 
 
@@ -668,10 +669,13 @@ def introduced_added_text(repo: str | Path, base_tree: str, target: str, path: s
     This is the review-evading content itself: the lines present in the recorded merge
     but NOT in the clean auto-merge of its parents. We analyse exactly this delta (never
     the whole file) so a benign conflict resolution that only re-arranges existing code
-    contributes nothing for the obfuscation detector to trip on."""
-    out = stdout(repo, ["diff", "--unified=0", "--no-color", base_tree, target, "--", path])
+    contributes nothing for the obfuscation detector to trip on. Raises `Unread` naming the path when
+    git could not compare them."""
+    res = run(repo, ["diff", "--unified=0", "--no-color", base_tree, target, "--", path])
+    if res is None or res.returncode != 0:
+        raise Unread(path)
     added: list[str] = []
-    for line in out.splitlines():
+    for line in (res.stdout or "").splitlines():
         if line.startswith("+++"):
             continue
         if line.startswith("+"):

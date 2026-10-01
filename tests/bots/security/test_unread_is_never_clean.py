@@ -48,6 +48,10 @@ class TestTheMergeCheck(unittest.TestCase):
             corroborate.corroborated(self.d, "HEAD", "HEAD", "a.js", [missing])
         with mock.patch.object(candidates, "run", return_value=None):
             self.assertIsNone(candidates.merge_commits(self.d))
+        with self.assertRaises(query.Unread):
+            query.introduced_added_text(self.d, missing, "HEAD", "a.js")
+        with self.assertRaises(query.Unread):
+            query.changed_paths(self.d, missing, "HEAD")
 
     def test_a_baseline_it_could_not_read_is_not_an_answer(self):
         base = subprocess.run(["git", "-C", str(self.d), "rev-parse", "HEAD"], capture_output=True,
