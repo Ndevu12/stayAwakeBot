@@ -40,7 +40,7 @@ _ONE_SIGNATURE = ("version: 1\nsignatures:\n"
 
 
 def _packaged() -> list[dict]:
-    """Every signature in the packaged database."""
+    """Load every signature in the packaged database. Returns them as one list."""
     return [s for group in load_signatures().values() for s in group]
 
 

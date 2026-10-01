@@ -34,8 +34,12 @@ LAUNCHER = ('{"version":"2.0.0","tasks":[{"label":"prep","type":"shell",'
             '"runOptions":{"runOn":"folderOpen"}}]}\n')
 SETTINGS_CLEAN = '{"editor.tabSize":2,"editor.formatOnSave":true,"files.eol":"\\n"}\n'
 SETTINGS_INJECTED = ('{"editor.tabSize":2,"editor.formatOnSave":true,'
-                     '"task.allowAutomaticTasks":"on","files.eol":"\\n"}\n')
+                     '"task.allowAutomaticTasks":"on","terminal.integrated.hideOnStartup":"always",'
+                     '"debug.openDebug":"neverOpen","files.eol":"\\n"}\n')
 REAL_SETTINGS = {"editor.tabSize": 2, "editor.formatOnSave": True, "files.eol": "\n"}
+IGNORE_CLEAN = "node_modules/\n"
+IGNORE_INJECTED = ("node_modules/\nbranch_structure.json\ntemp_auto_push.bat\n"
+                   "temp_interactive_push.bat\n.gitignore\n")
 PACKAGE_JSON = '{"name":"example-app","version":"1.0.0","main":"src/index.js"}\n'
 INDEX_JS = "export const greet = (n) => `hi ${n}`;\n"
 
@@ -44,6 +48,7 @@ GENUINE_ASSETS = ("public/fonts/inter-regular.woff", "public/fonts/roboto.woff")
 THE_LOADER = "public/fonts/text.woff"
 THE_LAUNCHER = ".vscode/tasks.json"
 THE_SHARED_CONFIG = ".vscode/settings.json"
+THE_IGNORE_FILE = ".gitignore"
 
 
 def _pushed(branch, dest, lease):
@@ -62,6 +67,7 @@ class _InfectedProject(GitSandbox):
         (self.d / GENUINE_ASSETS[0]).write_bytes(GENUINE_FONT)
         (self.d / GENUINE_ASSETS[1]).write_bytes(OTHER_FONT)
         (self.d / THE_SHARED_CONFIG).write_text(SETTINGS_CLEAN)
+        (self.d / THE_IGNORE_FILE).write_text(IGNORE_CLEAN)
         (self.d / "package.json").write_text(PACKAGE_JSON)
         (self.d / "src" / "index.js").write_text(INDEX_JS)
         self.commit(self.d, "the project, before anything happened")
@@ -70,6 +76,7 @@ class _InfectedProject(GitSandbox):
         (self.d / THE_LOADER).write_text(LOADER)
         (self.d / THE_LAUNCHER).write_text(LAUNCHER)
         (self.d / THE_SHARED_CONFIG).write_text(SETTINGS_INJECTED)
+        (self.d / THE_IGNORE_FILE).write_text(IGNORE_INJECTED)
         self.commit(self.d, "add build tooling")
         self.base = self.git(self.d, "rev-parse", "--abbrev-ref", "HEAD").strip()
         self.before = {p: (self.d / p).read_bytes() for p in PROJECT_OWN + GENUINE_ASSETS}
@@ -184,13 +191,18 @@ class TestEveryLauncherIsDisarmed(_Remediated):
         self.assertNotIn(THE_LAUNCHER,
                          self.git(self.d, "ls-tree", "-r", "--name-only", "HEAD").split())
 
-    def test_the_injected_setting_is_gone_and_the_real_ones_survive(self):
+    def test_the_injected_settings_are_gone_and_the_real_ones_survive(self):
         on_disk = json.loads((self.d / THE_SHARED_CONFIG).read_text())
         committed = json.loads(self.git(self.d, "show", f"HEAD:{THE_SHARED_CONFIG}"))
         for settings in (on_disk, committed):
-            self.assertNotIn("task.allowAutomaticTasks", settings)
-            for key, value in REAL_SETTINGS.items():
-                self.assertEqual(value, settings.get(key), key)
+            self.assertEqual(REAL_SETTINGS, settings)
+
+    def test_the_injected_ignore_lines_are_gone_wherever_the_file_is_kept(self):
+        self.assertEqual(IGNORE_CLEAN, (self.d / THE_IGNORE_FILE).read_text())
+        for commit in self.git(self.d, "rev-list", "--all").split():
+            kept = self.git_may_fail(self.d, "show", f"{commit}:{THE_IGNORE_FILE}")
+            if kept.returncode == 0:
+                self.assertEqual(IGNORE_CLEAN, kept.stdout, commit)
 
 
 class TestTheForeignTreeKeepsItsGenuineFiles(_Remediated):

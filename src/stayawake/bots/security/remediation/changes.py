@@ -23,6 +23,11 @@ _ACTIONS = {
 }
 _GITIGNORE_MARKER_PATTERNS = None
 
+_ALLOW_AUTOMATIC_TASKS = "task.allowAutomaticTasks"
+_TASK_LIST = "tasks"
+_PANEL_HIDING_SETTINGS = ("terminal.integrated.hideOnStartup", "debug.openDebug")
+_INJECTED_SETTINGS = frozenset((_ALLOW_AUTOMATIC_TASKS, _TASK_LIST) + _PANEL_HIDING_SETTINGS)
+
 _ROLLBACK_COMMENT = "# Remediation rollback copies (kept local, never committed)"
 _ROLLBACK_PATTERNS = (SAW_DIR + "/",)
 _RAW_BYTE = re.compile("[\udc80-\udcff]")
@@ -108,35 +113,36 @@ def _gitignore_marker_patterns():
 
 
 def strip_gitignore_text(text: str) -> str:
-    """`text` with every worm-marker line the signatures name removed; unchanged if none match."""
+    """Remove the marker lines, and the lines that go with them, from a .gitignore's text.
+    Takes the text. Returns the stripped text, or the text unchanged when it holds no marker."""
     from stayawake.bots.security.remediation import footprint
-    stripped = footprint.line_marker_strip(text, _gitignore_marker_patterns())
+    stripped = footprint.line_marker_strip(text, _gitignore_marker_patterns(),
+                                           footprint.lines_beside_markers(".gitignore"))
     return text if stripped is None else stripped
 
 
 def strip_settings_autorun(text: str) -> str:
-    """`text` with the automatic-task setting and the task list taken out, and nothing else about
-    the file changed.
-
-    Takes the file's text. Returns it unchanged when neither is there. When they cannot be taken
-    out where they sit with every other top-level member intact, the file is written back whole
-    without them, and its comments and layout are lost.
+    """Remove the injected settings from an editor settings file's text, keeping the rest.
+    Takes the text. Returns the repaired text, or the text unchanged when there is nothing to remove.
     """
     original = text
-    done = jsonc.remove_key(text, "task.allowAutomaticTasks")
+    done = jsonc.remove_key(text, _ALLOW_AUTOMATIC_TASKS)
     text = done[0] if done else text
-    done = jsonc.remove_member(text, "tasks")
+    done = jsonc.remove_member(text, _TASK_LIST)
     text = done[0] if done else text
-    if text != original and _keeps_the_rest(original, text):
+    if text == original:
+        return _rewritten_without_autorun(original)
+    for key in _PANEL_HIDING_SETTINGS:
+        done = jsonc.remove_key(text, key)
+        text = done[0] if done else text
+    if _keeps_the_rest(original, text):
         return text
     return _rewritten_without_autorun(original)
 
 
 def _rewritten_without_autorun(text: str) -> str:
-    """`text` parsed and written back without the automatic-task setting and the task list. A byte
-    that is not UTF-8 is written back as the same byte and an escaped surrogate as the same escape.
-    Takes the file's text. Returns it unchanged when it does not parse to an object holding either,
-    or holds a number JSON cannot write back."""
+    """Write an editor settings file back whole without the injected settings, every other byte kept.
+    Takes the text. Returns the rewritten text, or the text unchanged when it cannot be rewritten."""
     data = load_jsonc(text)
     if not _holds_autorun(data):
         return text
@@ -145,8 +151,8 @@ def _rewritten_without_autorun(text: str) -> str:
         data = load_jsonc(text.translate(stand_ins))
         if not _holds_autorun(data):
             return text
-    data.pop("task.allowAutomaticTasks", None)
-    data.pop("tasks", None)
+    for key in _INJECTED_SETTINGS:
+        data.pop(key, None)
     try:
         if stand_ins is None:
             return json.dumps(data, indent=2, allow_nan=False) + "\n"
@@ -158,8 +164,9 @@ def _rewritten_without_autorun(text: str) -> str:
 
 
 def _holds_autorun(data) -> bool:
-    """Whether parsed settings are an object holding the automatic-task setting or the task list."""
-    return isinstance(data, dict) and bool({"task.allowAutomaticTasks", "tasks"} & data.keys())
+    """Report whether parsed settings hold an automatic-task setting.
+    Takes the parsed value. Returns True when they do."""
+    return isinstance(data, dict) and bool({_ALLOW_AUTOMATIC_TASKS, _TASK_LIST} & data.keys())
 
 
 def _stand_ins_for_raw_bytes(text: str, data) -> dict[int, str] | None:
@@ -195,15 +202,14 @@ def _strings_in(value):
 
 
 def _keeps_the_rest(before: str, after: str) -> bool:
-    """Whether an edited settings file still parses and holds every other top-level member unchanged.
+    """Check that an edited settings file still parses with every other member unchanged.
     Takes the text before and after. Returns True when it does."""
     if after == before:
         return True
     old, new = load_jsonc(before), load_jsonc(after)
     if not isinstance(old, dict) or not isinstance(new, dict):
         return False
-    taken = {"task.allowAutomaticTasks", "tasks"}
-    return {k: v for k, v in old.items() if k not in taken} == new
+    return {k: v for k, v in old.items() if k not in _INJECTED_SETTINGS} == new
 
 
 def ensure_ignored(root: Path) -> bool:

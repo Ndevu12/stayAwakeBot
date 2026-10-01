@@ -38,6 +38,19 @@ class TestLineMarkerStrip(unittest.TestCase):
         out = footprint.line_marker_strip(text, self._P)
         self.assertTrue(all(ch in iter(text) for ch in out))  # subsequence
 
+    def test_the_line_that_ignores_the_file_itself_goes_with_a_marker(self):
+        for path in (".gitignore", "web/.gitignore"):
+            fix = footprint.corrector_for(_finding("git-marker", path), _flat())
+            self.assertEqual("node_modules/\n",
+                             fix("node_modules/\ntemp_auto_push.bat\n.gitignore\n /.gitignore\n"), path)
+
+    def test_a_file_that_only_ignores_itself_is_left(self):
+        fix = footprint.corrector_for(_finding("git-marker", ".gitignore"), _flat())
+        self.assertIsNone(fix("node_modules/\n.gitignore\n"))
+
+    def test_only_an_ignore_file_takes_more_than_its_markers(self):
+        self.assertEqual(frozenset(), footprint.lines_beside_markers("notes/.gitignore.md"))
+
 
 class TestCarriesFootprint(unittest.TestCase):
     def test_loader_check_does_not_flag_a_gitignore_marker(self):

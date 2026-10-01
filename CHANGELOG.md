@@ -85,6 +85,8 @@ reader, not the mechanism or the weakness it closed.
 - **saw names the compromised versions instead of a version to install.**
 
 ### Fixed
+- **`saw fix` and `saw fix amend` also remove injected editor settings that hide the terminal and
+  debug panels, and an injected `.gitignore` line that ignores the file itself.**
 - **`saw guard setup --pr` names what it could not read on the default branch** and does not plan
   the gate without it.
 - **`saw fix amend` names any version of a file it could not read for you to review**, and reads
