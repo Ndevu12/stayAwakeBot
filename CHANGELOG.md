@@ -14,6 +14,11 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
+- **On a terminal, `saw fix amend` asks about the other files added in the same commit as the
+  malware.** You take out all of them, some, or none; Enter keeps them. Without a terminal, and in
+  `saw fix`, none of them is removed: they are named and the run is not called done until you are
+  asked.
+
 - **`saw hook` now checks a push before the code leaves your machine.** On `git push`, it checks
   every file version the push would publish, on every branch and tag you push and in earlier
   commits of the push, as committed rather than as your working folder holds it, and what each

@@ -449,20 +449,13 @@ def parents(repo: str | Path, sha: str) -> list[str] | None:
 
 
 def changed_paths(repo: str | Path, base: str, target: str,
-                  diff_filter: str | None = None) -> set[str]:
-    """Paths that differ between two commits/trees (name-only). Raises `Unread` when git could not
-    compare them.
-
-    `diff_filter` is passed straight to `git diff --diff-filter` (e.g. "AM" keeps only the
-    paths `target` Adds or Modifies and drops Deletions) — callers that care about content
-    `target` *introduces* want to ignore paths it merely removes.
-    """
-    # `-z` is load-bearing, exactly as in `_differing_paths`: without it git C-quotes and
-    # octal-escapes any path holding a non-ASCII byte, a quote, a backslash, a tab or a newline.
-    # That spelling matches nothing when it is later looked up, so the path reads as absent —
-    # and a remediation path that treats "absent" as "this commit introduced it" then reports
-    # having removed something it never found.
+                  diff_filter: str | None = None, *, renames: bool = True) -> set[str]:
+    """Compare two commits or trees and list the paths that differ. Takes the repo, the base, the
+    target, the `git diff --diff-filter` letters to keep, and whether a renamed file is reported as
+    renamed. Returns the paths. Raises `Unread` when git could not compare them."""
     args = ["diff", "--name-only", "-z"]
+    if not renames:
+        args.append("--no-renames")
     if diff_filter:
         args.append(f"--diff-filter={diff_filter}")
     args += [base, target]
@@ -542,6 +535,25 @@ def entry_at(repo: str | Path, treeish: str, path: str) -> tuple[bool, tuple[str
             if parents.get(parent, ("",))[0] == GITLINK_MODE:
                 return True, parents[parent]
     return True, None
+
+
+def entries_at(repo: str | Path, treeish: str, paths=None) -> dict[str, tuple[str, str]]:
+    """Read the entry a commit or tree holds at each of several paths, as the repository stores
+    them. Takes the repo, the commit or tree and the paths, or None for every file it holds. Returns
+    the `(mode, oid)` of each path with an entry of its own there, by path. Raises `Unread` naming
+    the commit when git could not answer."""
+    if paths is None:
+        listed = _entries(repo, ["-r", treeish])
+        if listed is None:
+            raise Unread(f"the files of {treeish[:12]}")
+        return listed
+    found: dict[str, tuple[str, str]] = {}
+    for batch in _batches(list(dict.fromkeys(paths))):
+        listed = _entries(repo, ["-r", "-t", treeish, "--", *batch])
+        if listed is None:
+            raise Unread(f"the files of {treeish[:12]}")
+        found.update({path: listed[path] for path in batch if path in listed})
+    return found
 
 
 def file_text_at(repo: str | Path, treeish: str, path: str) -> tuple[str, str] | None:

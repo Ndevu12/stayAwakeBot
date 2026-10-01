@@ -86,10 +86,15 @@ class Cause(Enum):
     PAYLOAD_REACHABLE_FROM_OTHER_REFS = "payload-reachable-from-other-refs"
     REMOVAL_NOT_CONFIRMED = "removal-not-confirmed"
     REMOTE_COPY_NOT_REFRESHED = "remote-copy-not-refreshed"
+    ARRIVALS_UNDECIDED = "arrivals-undecided"
+    ARRIVALS_KEPT = "arrivals-kept"
+    ARRIVALS_IN_FIRST_COMMIT = "arrivals-in-first-commit"
+    ARRIVALS_UNREAD = "arrivals-unread"
+    ARRIVALS_NOT_RECORDED = "arrivals-not-recorded"
 
 
 _NEEDING_NO_ACTION = frozenset({Cause.PREVIOUS_OBJECTS_UNCOLLECTED, Cause.NO_CONFIRMED_PAYLOAD,
-                                Cause.SAVED_WORK_CLEANED_HERE})
+                                Cause.SAVED_WORK_CLEANED_HERE, Cause.ARRIVALS_KEPT})
 
 
 @dataclass(frozen=True)
@@ -289,6 +294,18 @@ _PHRASE = {
         "git could not read {detail} — check the repository with `git fsck`, then run this again",
     Cause.BRANCH_NAMES_NO_COMMIT:
         "{detail} names no commit this clone holds — repair or delete it, then run this again",
+    Cause.ARRIVALS_UNDECIDED:
+        "{detail} file(s) added in the same commit as the malware saw removed are your decision "
+        "and were kept for now — run saw fix amend in this repository, on a terminal, to be asked",
+    Cause.ARRIVALS_KEPT:
+        "you kept {detail} file(s) added in the same commit as the malware",
+    Cause.ARRIVALS_IN_FIRST_COMMIT:
+        "the malware is in this repository's first commit, so saw cannot tell which of its files "
+        "came with it — review that commit's files yourself",
+    Cause.ARRIVALS_UNREAD:
+        "saw could not read what else was added with the malware, so it is not called done",
+    Cause.ARRIVALS_NOT_RECORDED:
+        "saw could not record the files added with the malware for a later run to ask about",
 }
 
 _UNNAMED_CAUSE = "the run did not say why"

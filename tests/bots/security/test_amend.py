@@ -18,7 +18,7 @@ from stayawake import cli
 from stayawake.bots.security.models import CONFIRMED, HEURISTIC, Finding, ScanResult, Severity
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.pr import amend as amendmod
-from stayawake.bots.security.remediation import oracle
+from stayawake.bots.security.remediation import delivery, oracle
 from stayawake.bots.security.pr.amend import amend_outcome, amend_repo
 from stayawake.bots.security.pr.resolve import KEEP, REMOVE, RESTORE, SUPPLY, Resolution
 from stayawake.bots.security.pr.outcome import (BranchResult, Cause, Reason, amended,
@@ -1273,7 +1273,7 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         scan = ScanResult(target=str(self.d), source="local", findings=[finding])
         before = self._rev()
         calls = []
-        with mock.patch.object(amendmod, "_MAX_PATH_HISTORY", 2):
+        with mock.patch.object(arrival, "MAX_PATH_HISTORY", 2):
             outcome = self._act_full(scan, pusher=lambda *a: calls.append(a) or PushResult(True))
         self.assertFalse(outcome.completed)
         self.assertIn(Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, self._causes(outcome))
@@ -1397,12 +1397,13 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         maintainer's files with nothing malicious and have them deleted."""
         from stayawake.bots.security.scanner import scan_target
         from stayawake.bots.security.targets import LocalRepoTarget
-        from stayawake.bots.security.pr.amend import _confirmed_commits
+        from stayawake.bots.security.remediation.delivery import confirmed_commits
         self.git(self.d, "merge", "--no-commit", "--no-ff", "feature")
         self.write(self.d, "conf.json", '{"ok": true}\n')
         self.commit(self.d, "Merge pull request #1 from feature")
         scan = scan_target(LocalRepoTarget(self.d, str(self.d), ScanOptions()), load_signatures())
-        self.assertEqual([], _confirmed_commits(scan), "a payload-free injection must not be swept")
+        self.assertEqual([], confirmed_commits(scan.findings),
+                         "a payload-free injection must not be swept")
 
     def test_a_poisoned_readd_of_a_parent_file_is_restored_clean_and_flagged(self):
         """A merge re-adds a file with a payload; one parent still holds it clean, the other deleted
@@ -1715,20 +1716,63 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         self.assertEqual(item.introduced_by, merge[:12])
         self.assertIn("x.js", item.arrived_with_removed)
 
+    def _confirmed_loader_and_an_earlier_suspect(self):
+        self.write(self.d, "suspect.bin", "MZ\x00an unrecognised blob\n")
+        self.commit(self.d, "add a suspect file")
+        self.write(self.d, "cfg.mjs", _seam_line("const c = {};\nexport default c;\n"))
+        self.commit(self.d, "add config with a loader")
+        return [Finding("loader-seam", "code-loader", Severity.CRITICAL, "cfg.mjs", "loader",
+                        confidence=CONFIRMED),
+                Finding("suspect-file", "fake-font", Severity.HIGH, "suspect.bin", "unrecognised",
+                        confidence=HEURISTIC)]
+
     def test_an_uncertain_file_saw_cannot_place_carries_no_blast_radius(self):
-        """When saw cannot tie the file to a known injection merge, the item says so plainly —
-        an empty origin and no siblings, never a false 'arrived alone'."""
+        """A file no delivery added carries an empty origin and no siblings."""
         seen = {}
 
         def resolver(item):
-            seen[item.path] = item
+            seen[getattr(item, "path", "")] = item
             return Resolution(KEEP)
 
-        outcome = self._run_with_findings(self._confirmed_loader_and_suspect(), resolver=resolver)
+        outcome = self._run_with_findings(self._confirmed_loader_and_an_earlier_suspect(),
+                                          resolver=resolver)
         self.assertTrue(outcome.completed, self._causes(outcome))
         item = seen["suspect.bin"]
         self.assertEqual(item.introduced_by, "")
         self.assertEqual(item.arrived_with_removed, ())
+        self.assertFalse(item.origin_unread)
+
+    def test_an_uncertain_file_added_beside_a_payload_in_an_ordinary_commit_shows_that_commit(self):
+        """A file added in the same ordinary commit as a confirmed payload names that commit."""
+        seen = {}
+
+        def resolver(item):
+            seen[getattr(item, "path", "")] = item
+            return Resolution(KEEP)
+
+        findings = self._confirmed_loader_and_suspect()
+        delivered = self.git(self.d, "rev-parse", "HEAD~1").strip()
+        outcome = self._run_with_findings(findings, resolver=resolver)
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        item = seen["suspect.bin"]
+        self.assertEqual(item.introduced_by, delivered[:12])
+        self.assertEqual(item.arrived_with_removed, ("cfg.mjs",))
+
+    def test_an_origin_git_could_not_read_says_so(self):
+        """A file whose delivery git could not read is marked unread, never untied."""
+        seen = {}
+
+        def resolver(item):
+            seen[getattr(item, "path", "")] = item
+            return Resolution(KEEP)
+
+        findings = self._confirmed_loader_and_suspect()
+        with mock.patch.object(amendmod.delivery, "brought_by",
+                               side_effect=amendmod.gitutil.Unread("x")):
+            self._run_with_findings(findings, resolver=resolver)
+        item = seen["suspect.bin"]
+        self.assertEqual(item.introduced_by, "")
+        self.assertTrue(item.origin_unread)
 
     def test_a_raising_resolver_leaves_the_file_and_does_not_sink_the_run(self):
         """A resolver fault must not abort the confirmed cleanup; the uncertain file is left as-is."""
