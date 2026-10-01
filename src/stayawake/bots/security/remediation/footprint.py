@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import PurePosixPath
 from typing import Callable
 
 from stayawake.bots.security.matchers.base import globs_ok
@@ -12,6 +13,8 @@ from stayawake.bots.security.remediation.gates import (
 CODE_LOADER = "code-loader"
 GIT_MARKER = "git-marker"
 REMOVE_FILE = "remove-file"
+_IGNORE_FILE = ".gitignore"
+_IGNORE_FILE_IGNORING_ITSELF = frozenset({".gitignore", "/.gitignore"})
 
 
 def foreign_path(finding) -> str | None:
@@ -36,15 +39,25 @@ def _matches_any(text: str, patterns: list[re.Pattern]) -> bool:
     return any(p.search(text) for p in patterns)
 
 
-def line_marker_strip(text: str, patterns: list[re.Pattern]) -> str | None:
-    """`text` with every line a pattern matches removed. None if nothing matched, a pattern still
-    matches the result, or the result is not a subsequence of `text`."""
+def lines_beside_markers(path: str) -> frozenset[str]:
+    """Name the lines removed from `path` along with its markers.
+    Takes the file's path. Returns those lines, or an empty set."""
+    if PurePosixPath(path).name == _IGNORE_FILE:
+        return _IGNORE_FILE_IGNORING_ITSELF
+    return frozenset()
+
+
+def line_marker_strip(text: str, patterns: list[re.Pattern],
+                      beside: frozenset[str] = frozenset()) -> str | None:
+    """Remove the marker lines, and the lines in `beside`, from `text`.
+    Takes the text, the marker patterns and the lines that go with a marker. Returns the stripped
+    text, or None when nothing can be stripped."""
     if not patterns:
         return None
     lines = text.splitlines(keepends=True)
-    kept = [ln for ln in lines if not _matches_any(ln, patterns)]
-    if len(kept) == len(lines):
+    if not any(_matches_any(ln, patterns) for ln in lines):
         return None
+    kept = [ln for ln in lines if not _matches_any(ln, patterns) and ln.strip() not in beside]
     result = "".join(kept)
     if _matches_any(result, patterns) or not _is_subsequence(result, text):
         return None
@@ -81,8 +94,9 @@ def carries_footprint(finding, signatures) -> Callable[[str], bool] | None:
 
 
 def corrector_for(finding, signatures) -> Callable[[str], "str | None"] | None:
-    """`corrector(text) -> clean_text | None` for this finding, or None when its category is not
-    excised here."""
+    """Build the corrector that strips this finding's footprint from a file's text.
+    Takes the finding and the signatures. Returns `corrector(text) -> clean_text | None`, or None
+    when the finding has none."""
     category = getattr(finding, "category", None)
     path = getattr(finding, "path", "") or ""
     if category == CODE_LOADER:
@@ -91,5 +105,6 @@ def corrector_for(finding, signatures) -> Callable[[str], "str | None"] | None:
         patterns = _marker_patterns(path, signatures)
         if not patterns:
             return None
-        return lambda text: line_marker_strip(text, patterns)
+        beside = lines_beside_markers(path)
+        return lambda text: line_marker_strip(text, patterns, beside)
     return None

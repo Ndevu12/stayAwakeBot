@@ -11,6 +11,7 @@ from unittest import mock
 from pathlib import Path
 
 
+from stayawake.bots.security.jsonc import load_jsonc               # noqa: E402
 from stayawake.bots.security.signatures import load_signatures      # noqa: E402
 from stayawake.bots.security.scanner import scan_target             # noqa: E402
 from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions  # noqa: E402
@@ -444,6 +445,30 @@ class TestASettingsEditKeepsTheRest(unittest.TestCase):
         out = changes.strip_settings_autorun(text)
         self.assertNotIn("allowAutomaticTasks", out)
         self.assertIn("// mine", out)
+
+    def test_the_settings_that_hide_the_panels_go_with_the_automatic_tasks(self):
+        text = ('{\n  // mine\n  "a": 1,\n  "task.allowAutomaticTasks": "on",\n'
+                '  "terminal.integrated.hideOnStartup": "always",\n  "debug.openDebug": "neverOpen"\n}\n')
+        out = changes.strip_settings_autorun(text)
+        self.assertEqual({"a": 1}, load_jsonc(out))
+        self.assertIn("// mine", out)
+
+    def test_panel_settings_without_automatic_tasks_are_left(self):
+        text = '{"a": 1, "terminal.integrated.hideOnStartup": "always", "debug.openDebug": "neverOpen"}'
+        self.assertEqual(text, changes.strip_settings_autorun(text))
+
+    def test_a_whole_file_rewrite_takes_the_panel_settings_too(self):
+        text = '{"a": 1, "task\\u002eallowAutomaticTasks": "on", "debug.openDebug": "neverOpen"}'
+        self.assertEqual({"a": 1}, json.loads(changes.strip_settings_autorun(text)))
+
+
+
+class TestAnIgnoreFileRepair(unittest.TestCase):
+    """Check that a .gitignore repair takes out the markers and the line ignoring the file itself."""
+
+    def test_the_line_ignoring_the_file_itself_goes_with_the_markers(self):
+        self.assertEqual("node_modules/\n", changes.strip_gitignore_text(
+            "node_modules/\ntemp_auto_push.bat\n.gitignore\n"))
 
 
 if __name__ == "__main__":
