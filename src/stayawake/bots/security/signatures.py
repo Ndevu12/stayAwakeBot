@@ -18,7 +18,7 @@ import yaml
 from stayawake.bots.security.matchers import REGISTRY
 from stayawake.bots.security.models import CONFIDENCE_LEVELS, REMEDIATION_VERBS
 
-_REQUIRED = ("id", "category", "severity", "matcher", "description")
+_REQUIRED = ("id", "category", "severity", "matcher", "description", "confidence")
 
 
 def _read_default() -> str:
@@ -54,8 +54,8 @@ def load_signatures(path: str | Path | None = None) -> dict[str, list[dict[str, 
             raise ValueError(
                 f"Signature {s['id']}: unknown remediation '{remediation}' "
                 f"(use one of {REMEDIATION_VERBS})")
-        conf = s.get("confidence")
-        if conf is not None and conf not in CONFIDENCE_LEVELS:
+        conf = s["confidence"]
+        if conf not in CONFIDENCE_LEVELS:
             raise ValueError(
                 f"Signature {s['id']}: invalid confidence '{conf}' (use one of {CONFIDENCE_LEVELS})")
         grouped[s["matcher"]].append(s)
