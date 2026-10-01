@@ -62,10 +62,17 @@ class GitHistoryMatcher(Matcher):
         findings: list[Finding] = []
         with gitutil.borrowed_or_none(target.repo_root) as borrowed:
             merges = gitutil.merge_commits(target.repo_root) if named is None else named
+            if merges is None:
+                target.read_errors.append("the merge commits could not be listed")
+                return findings
             for sha in merges[:_MAX_CANDIDATES]:
-                evil = gitutil.evil_merge_paths(target.repo_root, sha, content_sig=content_sig,
-                                                obfuscation_reason=_obfuscation_reason,
-                                                borrowed=borrowed)
+                try:
+                    evil = gitutil.evil_merge_paths(target.repo_root, sha, content_sig=content_sig,
+                                                    obfuscation_reason=_obfuscation_reason,
+                                                    borrowed=borrowed)
+                except gitutil.Unread as missed:
+                    target.read_errors.append(f"merge {sha[:12]}: {missed.subject} could not be read")
+                    continue
                 if evil:
                     findings.append(self._finding(target, sha, evil, loader_sig, heuristic_sig))
         return findings

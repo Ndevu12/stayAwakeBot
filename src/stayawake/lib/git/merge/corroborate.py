@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from stayawake.lib.git.query import path_exists_at, introduced_added_text, file_at
+from stayawake.lib.git.query import Unread, file_text_at, introduced_added_text, stores_path
 
 CLEAN_DEVIATION = ("recorded content differs from the clean auto-merge at a path that did NOT "
                    "conflict — git cannot produce this, so it was edited during the merge")
@@ -23,15 +23,16 @@ def corroborated(repo: str | Path, base_tree: str, merge_sha: str, path: str,
 
     Content and obfuscation checks are INJECTED as callables so this module (in `lib.git`) stays
     free of any `bots.security` import — a lower layer must never depend up on the security domain. `content_sig` is `callable(text) -> reason|None`; `obfuscation_reason` is
-    `callable(path, delta, baseline_text) -> reason|None`. Absent → not evaluated."""
+    `callable(path, delta, baseline_text) -> reason|None`. Absent → not evaluated. Raises `Unread`
+    when git could not read what the decision rests on."""
     # A file no parent carries is review-evading whatever its content: no parent's diff shows it.
-    if all(not path_exists_at(repo, p, path) for p in parent_shas):
+    if all(not stores_path(repo, p, path) for p in parent_shas):
         return True, "introduced file absent from every parent (review-evading)"
 
     first_parent = parent_shas[0]
     baselines = [base_tree] if first_parent == base_tree else [base_tree, first_parent]
     pairs = [(b, introduced_added_text(repo, b, merge_sha, path)) for b in baselines
-             if path_exists_at(repo, b, path)]
+             if stores_path(repo, b, path)]
     pairs = [(b, d) for b, d in pairs if d.strip()]
     deltas = [d for _b, d in pairs]
     if not deltas:
@@ -54,7 +55,10 @@ def corroborated(repo: str | Path, base_tree: str, merge_sha: str, path: str,
     # one long high-entropy hunk, which is how ordinary framework source read as a packed payload.
     if obfuscation_reason is not None:
         for b, d in pairs:
-            reason = obfuscation_reason(path, d, file_at(repo, b, path))
+            baseline = file_text_at(repo, b, path)
+            if baseline is None:
+                raise Unread(path)
+            reason = obfuscation_reason(path, d, baseline[1])
             if reason:
                 return True, f"obfuscated merge-introduced hunk: {reason}"
     return False, ""

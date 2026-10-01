@@ -270,24 +270,33 @@ def _remote_action_reader(owner: str, name: str, token: str | None):
 
 def _ref_workflows(repo: Path, ref: str) -> dict[str, str]:
     """Workflow files as they exist ON a git ref (e.g. `origin/main`) — so `--pr` plans against the
-    PR TARGET (the default branch), not a possibly-untracked working-tree file."""
+    PR TARGET (the default branch), not a possibly-untracked working-tree file. Raises `Unread` when
+    git could not read the ref."""
+    listed = gitutil.list_tree(repo, ref, WORKFLOW_DIR)
+    if listed is None:
+        raise gitutil.Unread(f"the workflows on {ref}")
     out: dict[str, str] = {}
-    for path in gitutil.list_tree(repo, ref, WORKFLOW_DIR) or []:
+    for path in listed:
         if path.endswith((".yml", ".yaml")):
-            text = gitutil.file_at(repo, ref, path)
-            if text:
-                out[path] = text
+            found = gitutil.file_text_at(repo, ref, path)
+            if found is None:
+                raise gitutil.Unread(f"{path} on {ref}")
+            if found[1]:
+                out[path] = found[1]
     return out
 
 
 def _ref_action_reader(repo: Path, ref: str):
-    """Resolve a `uses: ./path` local composite action to its action.yml AS IT EXISTS ON `ref`."""
+    """Resolve a `uses: ./path` local composite action to its action.yml AS IT EXISTS ON `ref`. The
+    reader raises `Unread` when git could not read it."""
     def read(uses: str) -> str | None:
         rel = uses[2:].strip("/")
         for fn in ("action.yml", "action.yaml"):
-            text = gitutil.file_at(repo, ref, f"{rel}/{fn}")
-            if text:
-                return text
+            found = gitutil.file_text_at(repo, ref, f"{rel}/{fn}")
+            if found is None:
+                raise gitutil.Unread(f"{rel}/{fn} on {ref}")
+            if found[1]:
+                return found[1]
         return None
     return read
 

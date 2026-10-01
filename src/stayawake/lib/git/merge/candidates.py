@@ -5,12 +5,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from stayawake.lib.git.run import stdout
+from stayawake.lib.git.run import run
 
 _MERGE_REFS = ("--branches", "--tags", "--remotes")
 
 
-def merge_commits(repo: str | Path, refs: tuple[str, ...] = _MERGE_REFS) -> list[str]:
+def merge_commits(repo: str | Path, refs: tuple[str, ...] = _MERGE_REFS) -> list[str] | None:
     """SHAs of merge commits that are *candidates* for an evil merge — ALL of them,
     with no count cap (closes the G1 "merge buried behind N newer merges" miss).
 
@@ -41,10 +41,14 @@ def merge_commits(repo: str | Path, refs: tuple[str, ...] = _MERGE_REFS) -> list
     `evil_merge_paths` then runs on the survivors. The first-parent diff is non-empty
     for nearly every real merge, so this trades the combined-diff prefilter's
     aggressive (but unsound) drop for correctness; the `_MAX_CANDIDATES` cap in the
-    matcher bounds the confirm phase on pathological repositories.
+    matcher bounds the confirm phase on pathological repositories. None when git could not list
+    them.
     """
-    out = stdout(repo, ["log", "--merges", *refs, "--diff-merges=first-parent",
-                        "--name-only", "--format=%x01%H"])
+    res = run(repo, ["log", "--merges", *refs, "--diff-merges=first-parent",
+                     "--name-only", "--format=%x01%H"])
+    if res is None or res.returncode != 0:
+        return None
+    out = res.stdout or ""
     candidates: list[str] = []
     cur: str | None = None
     nonempty = False

@@ -13,7 +13,7 @@ from pathlib import Path
 from stayawake.lib.git.borrowed import borrow
 from stayawake.lib.git.merge.tree import AutoMerge
 from stayawake.lib.git.objects import blob, own_view
-from stayawake.lib.git.query import GITLINK_MODE, Unread, entry_at, file_at, parents
+from stayawake.lib.git.query import GITLINK_MODE, Unread, entry_at, parents
 from stayawake.lib.git.run import run
 from stayawake.lib.git.write.transfer import adopt_objects
 

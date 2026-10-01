@@ -3,13 +3,13 @@
 split per concern under one package but exposed as ONE flat API so callers are unchanged:
 
     from stayawake.lib import git
-    git.file_at(repo, sha, path)   git.evil_merge_paths(repo, merge)   git.run_ok(repo, args)
+    git.file_text_at(repo, sha, path)   git.evil_merge_paths(repo, merge)   git.run_ok(repo, args)
 
 Submodules:
   run     — the one git runner: run / run_ok (checked) / stdout, under a context (contexts)
   borrowed — a saw-owned repository over the operator's objects (merge-tree, materialise)
   auth    — credential-safe GitHub HTTPS (github_https_auth)
-  query   — read-only queries (file_at, file_commits, origin_slug, ref_exists, …)
+  query   — read-only queries (file_text_at, file_commits, origin_slug, ref_exists, …)
   merge   — evil-merge analysis (merge_commits, evil_merge_paths)
   write   — mutations (add_worktree, stage_all, commit_fix, push_branch, …)
 """
@@ -25,8 +25,7 @@ from stayawake.lib.git.query import (
     ref_exists,
     parents,
     changed_paths,
-    path_exists_at,
-    file_at,
+    stores_path,
     file_text_at,
     Unread,
     holds_its_history,
@@ -76,7 +75,7 @@ __all__ = [
     "run", "run_ok", "stdout", "UNTRUSTED", "SAW_OWNED", "OPERATOR_PUSH", "OPERATOR_CONFIG",
     "GitRefused", "github_https_auth", "github_remote", "run_remote_git",
     "is_git_repo", "slug_from_url", "origin_slug", "default_branch", "ref_exists",
-    "parents", "changed_paths", "path_exists_at", "file_at", "file_text_at", "Unread", "holds_its_history", "entry_at", "ancestry", "list_tree", "tracked", "tracked_under",
+    "parents", "changed_paths", "stores_path", "file_text_at", "Unread", "holds_its_history", "entry_at", "ancestry", "list_tree", "tracked", "tracked_under",
     "file_commits", "blob_paths", "introduced_added_text", "commit_meta", "remote_has_branch",
     "branches_matching", "branches_carrying", "unreadable_branch_refs", "listed_branch_refs", "branch_name_of",
     "fetch_refs", "FetchResult",
