@@ -9,8 +9,7 @@ from pathlib import Path
 
 import posixpath
 
-from stayawake.lib.git.query import (Unread, entry_at, parents, changed_paths, path_exists_at, file_at,
-                                    list_tree)
+from stayawake.lib.git.query import (changed_paths, file_text_at, list_tree, parents, stores_path, Unread)
 from stayawake.lib.git.borrowed import Borrowed, BorrowError, borrow
 from stayawake.lib.git.merge.corroborate import corroborated
 
@@ -21,15 +20,7 @@ def born_at_merge(repo: str | Path, merge_sha: str, paths) -> set[str]:
     ps = parents(repo, merge_sha)
     if ps is None:
         raise Unread(f"the parents of {merge_sha[:12]}")
-    return {p for p in paths if all(not _held(repo, parent, p) for parent in ps)}
-
-
-def _held(repo: str | Path, treeish: str, path: str) -> bool:
-    """Whether a commit stores a path. Raises `Unread` when git could not tell."""
-    answered, entry = entry_at(repo, treeish, path)
-    if not answered:
-        raise Unread(path)
-    return entry is not None
+    return {p for p in paths if all(not stores_path(repo, parent, p) for parent in ps)}
 
 
 def _entirely_born(repo: str | Path, merge_sha: str, directory: str) -> bool:
@@ -73,10 +64,8 @@ def clean_merge_blob(repo: str | Path, merge_sha: str, path: str) -> str | None:
         if borrowed is None:
             return None
         merged = borrowed.merge_tree(ps[0], ps[1])
-        if merged is None or not path_exists_at(borrowed.path, merged.tree, path):
-            return None
-        text = file_at(borrowed.path, merged.tree, path)
-    return text or None
+        found = file_text_at(borrowed.path, merged.tree, path) if merged is not None else None
+    return (found[1] or None) if found else None
 
 
 @contextlib.contextmanager
@@ -117,7 +106,9 @@ def evil_merge_paths(repo: str | Path, merge_sha: str, content_sig=None,
     produced no finding; the first-parent diff is byte-identity-agnostic and reaches it. The
     SAME corroboration gate is then applied, so a benign octopus stays clean.
     """
-    ps = parents(repo, merge_sha) or []
+    ps = parents(repo, merge_sha)
+    if ps is None:
+        raise Unread(f"merge {merge_sha[:12]}")
     if len(ps) < 2:
         return {}
     if len(ps) != 2:

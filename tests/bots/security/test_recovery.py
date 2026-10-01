@@ -324,8 +324,10 @@ class TestRecoveryHardening(unittest.TestCase):
         # The clean blob IS reachable via the default (simplified) walk, but NOT via first-parent.
         full = remediation.gitutil.file_commits(d, "m.mjs")
         fp = remediation.gitutil.file_commits(d, "m.mjs", first_parent=True)
-        self.assertTrue(any(remediation.gitutil.file_at(d, s, "m.mjs") == CLEAN for s in full))
-        self.assertFalse(any(remediation.gitutil.file_at(d, s, "m.mjs") == CLEAN for s in fp))
+        self.assertTrue(any((remediation.gitutil.file_text_at(d, s, "m.mjs") or ("", ""))[1] == CLEAN
+                            for s in full))
+        self.assertFalse(any((remediation.gitutil.file_text_at(d, s, "m.mjs") or ("", ""))[1] == CLEAN
+                             for s in fp))
 
         disp = remediation.classify_recovery(d, _finding("m.mjs"), SIG)
         self.assertIsInstance(disp, remediation.Manual)                 # never recovers to the side blob

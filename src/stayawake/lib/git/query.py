@@ -41,6 +41,15 @@ def default_branch(repo: str | Path) -> str:
     return out.rsplit("/", 1)[-1] if out else "main"
 
 
+def names_a_commit(repo: str | Path, ref: str) -> bool:
+    """Whether a ref resolves to a commit. Takes the repo and the ref. Returns False when it names
+    none. Raises `Unread` naming the ref when git could not tell."""
+    res = run(repo, ["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"])
+    if res is None or res.returncode not in (0, 1):
+        raise Unread(ref)
+    return res.returncode == 0
+
+
 def ref_exists(repo: str | Path, ref: str) -> bool:
     """True if `ref` resolves in `repo` (a branch, tag, or `origin/<branch>`). Used to prefer a
     fresh `origin/<base>` but fall back to the local base so remediation works offline."""
@@ -171,12 +180,19 @@ def stored_entries(repo: str | Path, *, limit: int = 200_000,
     wanted = [ln.strip() for ln in refs.stdout.splitlines() if ln.strip()]
     peeled = own_view_fed(repo, ["cat-file", "--batch-check"],
                            "".join(f"{ref}^{{tree}}\n" for ref in wanted).encode())
-    if peeled is None:
+    targets = own_view_fed(repo, ["cat-file", "--batch-check"],
+                           "".join(f"{ref}^{{}}\n" for ref in wanted).encode())
+    if peeled is None or targets is None:
         return {}, False
     lines = peeled.decode("utf-8", "replace").splitlines()
-    complete = complete and len(lines) == len(wanted)
+    kinds = targets.decode("utf-8", "replace").splitlines()
+    complete = complete and len(lines) == len(wanted) == len(kinds)
     named += [p[0] for p in (ln.split() for ln in lines) if len(p) == 3 and p[1] == "tree"]
     out: dict[str, list[tuple[str, int]]] = {}
+    for ref, line in zip(wanted, kinds):
+        parts = line.split()
+        if len(parts) == 3 and parts[1] == "blob":
+            out.setdefault(f"/{ref}", []).append((parts[0], _FILE_TYPE))
     seen: set[tuple[str, str]] = set()
     level = [(tree, "") for tree in dict.fromkeys(named) if tree]
     while level:
@@ -434,7 +450,8 @@ def parents(repo: str | Path, sha: str) -> list[str] | None:
 
 def changed_paths(repo: str | Path, base: str, target: str,
                   diff_filter: str | None = None) -> set[str]:
-    """Paths that differ between two commits/trees (name-only).
+    """Paths that differ between two commits/trees (name-only). Raises `Unread` when git could not
+    compare them.
 
     `diff_filter` is passed straight to `git diff --diff-filter` (e.g. "AM" keeps only the
     paths `target` Adds or Modifies and drops Deletions) — callers that care about content
@@ -451,16 +468,8 @@ def changed_paths(repo: str | Path, base: str, target: str,
     args += [base, target]
     res = run(repo, args)
     if res is None or res.returncode != 0:
-        return set()
+        raise Unread(f"what {target[:12]} changes")
     return {p for p in (res.stdout or "").split("\0") if p}
-
-
-def path_exists_at(repo: str | Path, treeish: str, path: str) -> bool:
-    """True if `path` exists at a commit/tree (presence only — independent of whether the
-    blob is text or binary). Used by the new-vs-ALL-parents corroborator so a binary file
-    that decodes to '' is never mistaken for an absent file."""
-    res = run(repo, ["cat-file", "-e", f"{treeish}:{path}"])
-    return res is not None and res.returncode == 0
 
 
 TREE_MODE = "040000"
@@ -548,12 +557,14 @@ def file_text_at(repo: str | Path, treeish: str, path: str) -> tuple[str, str] |
     return None if text is None else (entry[1], text)
 
 
-def file_at(repo: str | Path, treeish: str, path: str) -> str:
-    """Contents of `path` at a commit/tree (empty string if absent or binary-unreadable)."""
-    res = run(repo, ["cat-file", "-p", f"{treeish}:{path}"])
-    if res is None or res.returncode != 0 or not res.stdout:
-        return ""
-    return res.stdout
+def stores_path(repo: str | Path, treeish: str, path: str) -> bool:
+    """Whether a commit or tree stores content of its own at a path: a file, a link or a directory,
+    not a submodule there or above it. Takes the repo, the commit or tree and the path. Raises
+    `Unread` naming the path when git could not tell."""
+    answered, entry = entry_at(repo, treeish, path)
+    if not answered:
+        raise Unread(path)
+    return entry is not None and entry[0] != GITLINK_MODE
 
 
 def list_tree(repo: str | Path, treeish: str, path: str | Path) -> list[str] | None:
@@ -658,10 +669,13 @@ def introduced_added_text(repo: str | Path, base_tree: str, target: str, path: s
     This is the review-evading content itself: the lines present in the recorded merge
     but NOT in the clean auto-merge of its parents. We analyse exactly this delta (never
     the whole file) so a benign conflict resolution that only re-arranges existing code
-    contributes nothing for the obfuscation detector to trip on."""
-    out = stdout(repo, ["diff", "--unified=0", "--no-color", base_tree, target, "--", path])
+    contributes nothing for the obfuscation detector to trip on. Raises `Unread` naming the path when
+    git could not compare them."""
+    res = run(repo, ["diff", "--unified=0", "--no-color", base_tree, target, "--", path])
+    if res is None or res.returncode != 0:
+        raise Unread(path)
     added: list[str] = []
-    for line in out.splitlines():
+    for line in (res.stdout or "").splitlines():
         if line.startswith("+++"):
             continue
         if line.startswith("+"):

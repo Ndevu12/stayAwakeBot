@@ -175,8 +175,16 @@ def classify_recovery(repo, finding, content_sig, merge_clean: str | None = None
         # "clean-looking" blob reachable only through its malicious second parent; walking the
         # mainline (first-parent) chain only ever selects a version that actually landed on the
         # default branch, then `_carries_payload` re-validates it.
-        for sha in gitutil.file_commits(repo, path, first_parent=True):
-            c = gitutil.file_at(repo, sha, path)
+        commits = gitutil.file_commits(repo, path, first_parent=True)
+        if commits is None:
+            raise gitutil.Unread(path)
+        for sha in commits:
+            if not gitutil.stores_path(repo, sha, path):
+                continue
+            found = gitutil.file_text_at(repo, sha, path)
+            if found is None:
+                raise gitutil.Unread(path)
+            c = found[1]
             if c and not _carries_payload(c, content_sig):   # first version with no payload = clean
                 clean = (sha, c)
                 break

@@ -56,6 +56,8 @@ reader, not the mechanism or the weakness it closed.
   saved report, and in the remediation pull request, with the command to remove each one.
 
 ### Security
+- **`saw scan` reports a merge commit it could not read as not read, never as clean**, and reads
+  file content that a ref names directly.
 - **saw's git commands read each repository as it stores it, and never fetch from it on their own.**
   Only fetching and pushing reach the network, over HTTPS or SSH.
 - **A scan now reads every well-formed editor settings, task and manifest file it meets.** Some
@@ -83,6 +85,8 @@ reader, not the mechanism or the weakness it closed.
 - **saw names the compromised versions instead of a version to install.**
 
 ### Fixed
+- **`saw guard setup --pr` names what it could not read on the default branch** and does not plan
+  the gate without it.
 - **`saw fix amend` names any version of a file it could not read for you to review**, and reads
   history as the repository stores it. A clone missing part of its history, or with a branch that
   names a commit it does not hold, is not rewritten; the run says which.

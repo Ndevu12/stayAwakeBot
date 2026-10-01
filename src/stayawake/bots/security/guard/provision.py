@@ -342,12 +342,15 @@ def setup(repo: str | Path | None = None, *, token: str | None = None, ref: str 
         gitutil.fetch(repo, "origin", default_branch)
         baseref = (f"origin/{default_branch}" if gitutil.ref_exists(repo, f"origin/{default_branch}")
                    else default_branch)
-        workflows = _ref_workflows(repo, baseref)
         reader = _ref_action_reader(repo, baseref)
     else:
-        workflows = _local_workflows(repo)
         reader = _local_action_reader(repo)
-    plan = plan_setup(workflows, default_branch, pin, read_action=reader, scanner=scanner)
+    try:
+        workflows = _ref_workflows(repo, baseref) if pr else _local_workflows(repo)
+        plan = plan_setup(workflows, default_branch, pin, read_action=reader, scanner=scanner)
+    except gitutil.Unread as missed:
+        return SetupResult(error=f"couldn't read {missed.subject} — not planning the gate without "
+                                 "it; run this again")
     if plan.action == "present":
         return SetupResult(plan=plan)
     if plan.action == "conflict":
