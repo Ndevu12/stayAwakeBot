@@ -81,6 +81,13 @@ class TestAmendNamesWhatItCouldNotRead(_Survivors):
             outcome = self._act_removing_foreign()
         self._never_removed(outcome)
 
+    def test_copies_git_could_not_look_for_are_refused_as_unreadable(self):
+        self._foreign_on_main()
+        with mock.patch.object(amendmod.gitutil, "blob_paths", side_effect=amendmod.gitutil.Unread("x")):
+            outcome = self._act_removing_foreign()
+        self.assertFalse(outcome.completed)
+        self.assertIn(Cause.HISTORY_UNREADABLE, self._reasons(outcome))
+
     def test_a_branch_naming_no_commit_is_named_before_any_rewrite(self):
         self._foreign_on_main()
         tip = self.rev(self.d)

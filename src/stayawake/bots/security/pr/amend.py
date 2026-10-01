@@ -1212,7 +1212,10 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
             remove[path] = entry[1]
             remove_shas.update(foreign)
             remove_holders[path] = set(foreign)
-            elsewhere = gitutil.blob_paths(repo, entry[1])
+            try:
+                elsewhere = gitutil.blob_paths(repo, entry[1])
+            except gitutil.Unread:
+                return _refuse(Cause.HISTORY_UNREADABLE, f"every copy of {path}")
             if elsewhere is None:
                 return _refuse(Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, path)
             for former in elsewhere:

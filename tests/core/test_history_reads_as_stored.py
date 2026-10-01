@@ -28,6 +28,9 @@ class TestEntries(GitSandbox):
         self.write(self.d, "dir/a.js", "one\n")
         self.commit(self.d, "first")
 
+    def test_a_deep_absent_path_is_answered_as_absent(self):
+        self.assertEqual(query.entry_at(self.d, "HEAD", "a/" * 1100 + "f.js"), (True, None))
+
     def test_a_path_is_matched_exactly(self):
         self.assertEqual(query.entry_at(self.d, "HEAD", "dir/")[1], None)
         self.assertEqual(query.entry_at(self.d, "HEAD", "dir")[1][0], query.TREE_MODE)
@@ -71,6 +74,9 @@ class TestEntries(GitSandbox):
         with self.assertRaises(query.Unread):
             mergedetect.born_at_merge(self.d, missing, ["dir/a.js"])
         self.assertIsNone(query.list_tree(self.d, missing, "dir"))
+        with mock.patch.object(query, "own_view_fed", return_value=None):
+            with self.assertRaises(query.Unread):
+                query.blob_paths(self.d, "1" * 40)
         self.assertEqual(query.list_tree(self.d, "HEAD", "nowhere"), [])
         self.write(self.d, "dir/b.js", "two\n")
         head = self.commit(self.d, "second")
@@ -130,7 +136,8 @@ class TestHistoryWalk(GitSandbox):
         (self.d / ".git" / "refs" / "heads" / "ghost").write_text("1" * 40 + "\n")
         self.assertEqual(query.unreadable_branch_refs(self.d), ["refs/heads/ghost"])
         self.assertIsNone(query.file_commits(self.d, "a.js", all_branches=True))
-        self.assertIsNone(query.blob_paths(self.d, self.git(self.d, "rev-parse", "HEAD:a.js").strip()))
+        with self.assertRaises(query.Unread):
+            query.blob_paths(self.d, self.git(self.d, "rev-parse", "HEAD:a.js").strip())
 
     def test_a_walk_git_could_not_finish_is_not_an_empty_history(self):
         with mock.patch.object(query, "own_view", return_value=None):

@@ -475,6 +475,23 @@ class Unread(Exception):
         self.subject = subject
 
 
+_ARGV_BUDGET = 32_768
+
+
+def _batches(paths: list[str]):
+    """`paths` in order, in batches whose total length stays within one command line."""
+    batch: list[str] = []
+    size = 0
+    for path in paths:
+        if batch and size + len(path) > _ARGV_BUDGET:
+            yield batch
+            batch, size = [], 0
+        batch.append(path)
+        size += len(path) + 1
+    if batch:
+        yield batch
+
+
 def _parents_of(path: str) -> list[str]:
     parts = path.split("/")[:-1]
     return ["/".join(parts[:depth]) for depth in range(1, len(parts) + 1)]
@@ -508,12 +525,13 @@ def entry_at(repo: str | Path, treeish: str, path: str) -> tuple[bool, tuple[str
         return False, None
     if path in found or not _parents_of(path):
         return True, found.get(path)
-    parents = _entries(repo, ["-d", treeish, "--", *_parents_of(path)])
-    if parents is None:
-        return False, None
-    for parent in _parents_of(path):
-        if parents.get(parent, ("",))[0] == GITLINK_MODE:
-            return True, parents[parent]
+    for batch in _batches(_parents_of(path)):
+        parents = _entries(repo, ["-d", treeish, "--", *batch])
+        if parents is None:
+            return False, None
+        for parent in batch:
+            if parents.get(parent, ("",))[0] == GITLINK_MODE:
+                return True, parents[parent]
     return True, None
 
 
@@ -600,12 +618,13 @@ def _commit_header(token: bytes) -> bytes | None:
 
 def blob_paths(repo: str | Path, oid: str, limit: int = 100_000) -> list[str] | None:
     """Every path at which the blob `oid` was ever written or removed. Takes the repo, the blob id
-    and the walk bound. Returns the paths, or None when they could not be established."""
+    and the walk bound. Returns the paths, or None when the history is longer than the bound. Raises
+    `Unread` when git could not walk it."""
     args = ["-c", "log.showRoot=true", "log", f"-n{limit}", "--format=%H", "-m", "--raw", "-z",
             "--no-abbrev", f"--find-object={oid}", *_BRANCH_WALK]
     out = own_view_fed(repo, args, b"")
     if out is None:
-        return None
+        raise Unread(f"the copies of {oid[:12]}")
     want = oid.encode("ascii")
     commits: set[bytes] = set()
     paths: list[str] = []

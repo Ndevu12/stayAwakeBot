@@ -286,9 +286,9 @@ _PHRASE = {
     Cause.HISTORY_INCOMPLETE:
         "this clone does not hold its whole history — fetch it in full, then run this again",
     Cause.HISTORY_UNREADABLE:
-        "git could not read {detail} — run this again",
+        "git could not read {detail} — check the repository with `git fsck`, then run this again",
     Cause.BRANCH_NAMES_NO_COMMIT:
-        "{detail} names a commit this clone does not hold — repair or delete it, then run this again",
+        "{detail} names no commit this clone holds — repair or delete it, then run this again",
 }
 
 _UNNAMED_CAUSE = "the run did not say why"
