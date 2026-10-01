@@ -455,7 +455,13 @@ class TestAmendNeverCallsAnUnansweredCheckClean(_Survivors):
     def test_a_rewritten_history_git_could_not_relate_is_named_for_review(self):
         self._foreign_on_main()
         from stayawake.bots.security.pr import amend as amendmod
-        with mock.patch.object(amendmod.gitutil, "ancestry", return_value=None):
+        before = set(self.git(self.d, "rev-list", "--all").split())
+        real = amendmod.gitutil.ancestry
+
+        def rewritten_unrelated(repo, ancestor, descendant):
+            return real(repo, ancestor, descendant) if descendant in before else None
+
+        with mock.patch.object(amendmod.gitutil, "ancestry", rewritten_unrelated):
             outcome = self._act_removing_foreign()
         self._completes_and_names(outcome, f"the rewritten branch {self.base}")
 
@@ -566,9 +572,10 @@ class TestEachGateCheckAnswersYesNoOrUnknown(_AmendFixture):
         amendmod = self._amend()
         self.write(self.d, "a.js", "x\n")
         self.commit(self.d, "a")
-        with mock.patch.object(amendmod.gitutil, "entry_at", return_value=(False, None)):
+        from stayawake.lib.git import query
+        with mock.patch.object(query, "entry_at", return_value=(False, None)):
             self.assertIsNone(amendmod._carries_in(self.d, "HEAD", "a.js", lambda text: False))
-        with mock.patch.object(amendmod.gitutil, "blob_text", return_value=None):
+        with mock.patch.object(query, "blob_text", return_value=None):
             self.assertIsNone(amendmod._carries_in(self.d, "HEAD", "a.js", lambda text: False))
 
     def test_a_footprint_version_it_could_not_read_is_named(self):
@@ -580,9 +587,10 @@ class TestEachGateCheckAnswersYesNoOrUnknown(_AmendFixture):
         oids, unsure = amendmod._payload_blobs(self.d, {}, {}, {}, clean, {head}, {})
         self.assertEqual({self.git(self.d, "rev-parse", "HEAD:a.js").strip()}, oids)
         self.assertEqual([], unsure)
+        from stayawake.lib.git import query
         for broken in ({"entry_at": (False, None)}, {"blob_text": None}):
             (name, value), = broken.items()
-            with mock.patch.object(amendmod.gitutil, name, return_value=value):
+            with mock.patch.object(query, name, return_value=value):
                 oids, unsure = amendmod._payload_blobs(self.d, {}, {}, {}, clean, {head}, {})
             self.assertEqual((set(), ["every copy of a.js"]), (oids, unsure))
 

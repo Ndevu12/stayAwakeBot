@@ -248,7 +248,7 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
     branch = choose_fix_branch(
         base,
         exists=lambda n: gitutil.ref_exists(repo, f"origin/{n}"),
-        fast_forwardable=lambda n: gitutil.is_ancestor(repo, f"origin/{n}", baseref))
+        fast_forwardable=lambda n: gitutil.ancestry(repo, f"origin/{n}", baseref) is True)
     if not gitutil.add_worktree(repo, wt, branch, baseref):
         return _Stopped(BaseState.ABORTED, "could not create worktree", base), wt
     rollback = scratch.new_dir("rollback")

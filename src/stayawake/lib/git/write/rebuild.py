@@ -9,8 +9,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from stayawake.lib.git.run import stdout
-from stayawake.lib.git.write.replace import Replacement, carried_forward, tree_entry
+from stayawake.lib.git.objects import own_view
+from stayawake.lib.git.query import entry_at
+from stayawake.lib.git.write.replace import Replacement, carried_forward
+
+_BLOCKED = {
+    "changed-downstream": "{sha} changed {path} and it still carries the payload — that commit needs "
+                          "its own finding",
+    "unreadable": "{sha}: {path} could not be read",
+}
 
 
 @dataclass(frozen=True)
@@ -31,7 +38,13 @@ class Rebuild:
         return self.mapping.get(old_tip, old_tip)
 
 
-def ordered_graph(repo: str | Path, tips: list[str]) -> list[tuple[str, list[str]]]:
+def _own_output(repo: str | Path, args: list[str]) -> str | None:
+    """What git prints for `args`, read as the repository stores its objects, or None on failure."""
+    res = own_view(repo, args)
+    return res.stdout or "" if res is not None and res.returncode == 0 else None
+
+
+def ordered_graph(repo: str | Path, tips: list[str]) -> list[tuple[str, list[str]]] | None:
     """`(sha, parents)` for everything reachable from `tips`, parents before children.
 
     The whole graph, not a range from the oldest infected commit. Excluding the parents of each
@@ -42,10 +55,13 @@ def ordered_graph(repo: str | Path, tips: list[str]) -> list[tuple[str, list[str
 
     `--topo-order` rather than date order: a rewrite must see a parent before the child naming
     it, and commit dates do not order a graph. `--parents` makes it one subprocess for the graph.
+    Returns None when git could not walk it.
     """
     if not tips:
         return []
-    out = stdout(repo, ["rev-list", "--reverse", "--topo-order", "--parents", *tips])
+    out = _own_output(repo, ["rev-list", "--reverse", "--topo-order", "--parents", *tips])
+    if out is None:
+        return None
     graph = []
     for line in out.splitlines():
         shas = line.split()
@@ -105,27 +121,32 @@ def rebuild_without_payload(repo: str | Path, graph: list[tuple[str, list[str]]]
             if not replacement.ok:
                 blocked[sha] = (replacement.kind or "replacement", replacement.refusal)
                 continue
+            unread = None
             for path, entry in replacement.plan:
-                current = tree_entry(repo, sha, path)
-                if current is None:
-                    continue
-                corrections[path] = (current[1], entry)
+                answered, current = entry_at(repo, sha, path)
+                if not answered:
+                    unread = path
+                    break
+                if current is not None:
+                    corrections[path] = (current[1], entry)
+            if unread is not None:
+                blocked[sha] = ("unreadable", _BLOCKED["unreadable"].format(sha=sha[:12], path=unread))
+                continue
 
         tree = None
         if corrections or clean or remove or substitute or purge:
-            tree, blocked_path = carried_forward(repo, sha, corrections, still_carries, clean,
-                                                 remove, substitute, purge)
-            if blocked_path:
-                blocked[sha] = ("changed-downstream",
-                                f"{sha[:12]} changed {blocked_path} and it still carries the "
-                                "payload — that commit needs its own finding")
+            tree, refusal = carried_forward(repo, sha, corrections, still_carries, clean,
+                                            remove, substitute, purge)
+            if refusal:
+                kind, path = refusal
+                blocked[sha] = (kind, _BLOCKED[kind].format(sha=sha[:12], path=path))
                 continue
             if tree is None:
                 blocked[sha] = ("not-applied",
                                 f"{sha[:12]}: the correction could not be carried into this commit")
                 continue
         if tree is None:
-            tree = stdout(repo, ["rev-parse", f"{sha}^{{tree}}"]).strip()
+            tree = (_own_output(repo, ["rev-parse", f"{sha}^{{tree}}"]) or "").strip()
         if not tree:
             blocked[sha] = ("write", f"{sha[:12]}: its tree could not be read")
             continue
