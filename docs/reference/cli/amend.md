@@ -69,9 +69,12 @@ it back, it names that branch: look at that repository before doing anything els
   same way.
 - **Tags and forks are reported, not changed.** A tag or a fork that still reaches the replaced
   commit keeps a copy of it, and the run tells you.
-- **What it cannot confirm, it does not call done.** When it cannot tell whether a branch, a tag,
-  a stash, another checkout or your copy of the remote still holds what it took out, it finishes
-  the rest of the clean-up and names what it could not confirm for you to review.
+- **What it cannot confirm, it does not call done.** When it cannot read a version of a file in
+  history, or cannot tell whether a branch, a tag, a stash, another checkout or your copy of the
+  remote still holds what it took out, it finishes the rest of the clean-up and names what it could
+  not confirm for you to review.
+- **A clone missing part of its history is not rewritten.** Fetch it in full first. A branch that
+  names a commit the clone does not hold is named for you to repair or delete.
 - **The previous commits stay on the remote** until GitHub collects them.
 
 See [the safety envelope](../../explanation/safety-envelope.md) for what `fix` will and will not

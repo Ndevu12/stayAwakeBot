@@ -28,6 +28,8 @@ GIT_CONFIG_INJECTION_PREFIXES = ("GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT", "G
 _ISOLATION_VARS = ("GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM")
 
 OPERATOR_TRANSPORTS = ("https", "ssh")
+_STORED_VIEW = {"GIT_NO_REPLACE_OBJECTS": "1", "GIT_GRAFT_FILE": os.path.join(os.devnull, "grafts"),
+                "GIT_NO_LAZY_FETCH": "1"}
 
 _NO_EXECUTION = (
     ("core.fsmonitor", "false"),
@@ -165,6 +167,8 @@ def child_env(context: Context, env: dict | None, *, operator_scopes: bool | Non
         out["GIT_CONFIG_NOSYSTEM"] = "1"
         out["GIT_CONFIG_GLOBAL"] = os.devnull
     out["GIT_TERMINAL_PROMPT"] = "0"
+    out["GIT_ALLOW_PROTOCOL"] = ":".join(OPERATOR_TRANSPORTS) if context is OPERATOR_PUSH else ""
+    out.update(_STORED_VIEW)
     if repository_less:
         out["GIT_CEILING_DIRECTORIES"] = str(neutral_dir().parent)
     return out

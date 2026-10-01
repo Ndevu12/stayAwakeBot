@@ -9,7 +9,7 @@ from pathlib import Path
 
 import posixpath
 
-from stayawake.lib.git.query import (parents, changed_paths, path_exists_at, file_at,
+from stayawake.lib.git.query import (Unread, entry_at, parents, changed_paths, path_exists_at, file_at,
                                     list_tree)
 from stayawake.lib.git.borrowed import Borrowed, BorrowError, borrow
 from stayawake.lib.git.merge.corroborate import corroborated
@@ -17,13 +17,25 @@ from stayawake.lib.git.merge.corroborate import corroborated
 
 def born_at_merge(repo: str | Path, merge_sha: str, paths) -> set[str]:
     """The subset of `paths` present in none of the merge's parents. Takes the repo, the merge sha,
-    and paths. Returns the set."""
+    and paths. Returns the set. Raises `Unread` when git could not read the merge's parents."""
     ps = parents(repo, merge_sha)
-    return {p for p in paths if all(not path_exists_at(repo, parent, p) for parent in ps)}
+    if ps is None:
+        raise Unread(f"the parents of {merge_sha[:12]}")
+    return {p for p in paths if all(not _held(repo, parent, p) for parent in ps)}
+
+
+def _held(repo: str | Path, treeish: str, path: str) -> bool:
+    """Whether a commit stores a path. Raises `Unread` when git could not tell."""
+    answered, entry = entry_at(repo, treeish, path)
+    if not answered:
+        raise Unread(path)
+    return entry is not None
 
 
 def _entirely_born(repo: str | Path, merge_sha: str, directory: str) -> bool:
     contents = list_tree(repo, "HEAD", directory)
+    if contents is None:
+        raise Unread(directory)
     if not contents:
         return False
     return born_at_merge(repo, merge_sha, contents) == set(contents)
@@ -55,7 +67,7 @@ def clean_merge_blob(repo: str | Path, merge_sha: str, path: str) -> str | None:
     side branch), so a caller must treat it as REVIEW-REQUIRED, never auto-apply it — the first-parent
     recovery walk deliberately avoids trusting the second parent, and this must not launder that."""
     ps = parents(repo, merge_sha)
-    if len(ps) != 2:
+    if ps is None or len(ps) != 2:
         return None
     with borrowed_or_none(repo, None) as borrowed:
         if borrowed is None:
@@ -105,7 +117,7 @@ def evil_merge_paths(repo: str | Path, merge_sha: str, content_sig=None,
     produced no finding; the first-parent diff is byte-identity-agnostic and reaches it. The
     SAME corroboration gate is then applied, so a benign octopus stays clean.
     """
-    ps = parents(repo, merge_sha)
+    ps = parents(repo, merge_sha) or []
     if len(ps) < 2:
         return {}
     if len(ps) != 2:

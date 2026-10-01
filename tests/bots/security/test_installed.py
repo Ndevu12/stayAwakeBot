@@ -72,7 +72,7 @@ def _prepare_fix_against(scans, spy, extra=(), live=None):
         mock.patch.object(pr.gitutil, "origin_slug", return_value=None),
         mock.patch.object(pr.gitutil, "default_branch", return_value="main"),
         mock.patch.object(pr.gitutil, "ref_exists", return_value=True),
-        mock.patch.object(pr.gitutil, "is_ancestor", return_value=True),
+        mock.patch.object(pr.gitutil, "ancestry", return_value=True),
         mock.patch.object(pr.gitutil, "add_worktree", return_value=True),
         mock.patch.object(pr.gitutil, "remove_worktree", return_value=True),
         mock.patch.object(pr.gitutil, "unstage_cached", return_value=True),

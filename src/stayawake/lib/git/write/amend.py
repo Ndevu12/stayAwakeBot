@@ -46,10 +46,10 @@ def _differing_paths(repo: str | Path, base: str, target: str) -> list[str] | No
     return sorted({p for p in (res.stdout or "").split("\0") if p})
 
 
-def _tree_paths(repo: str | Path, treeish: str) -> list[str]:
+def _tree_paths(repo: str | Path, treeish: str) -> list[str] | None:
     res = run(repo, ["ls-tree", "-r", "--name-only", "-z", treeish], context=UNTRUSTED)
     if res is None or res.returncode != 0:
-        return []
+        return None
     return sorted({p for p in (res.stdout or "").split("\0") if p})
 
 
@@ -108,8 +108,10 @@ def replacement_commit(repo: str | Path, commit: str, flagged_paths,
     corrected = replacement_tree(repo, commit, flagged_paths, still_carries)
     if not corrected.ok:
         return corrected
-    sha, kind, refusal = rewrite_commit(repo, commit, corrected.tree,
-                                        parents(repo, commit), signing)
+    ps = parents(repo, commit)
+    if ps is None:
+        return Replacement(kind="unreadable", refusal=f"the parents of {commit[:12]} could not be read")
+    sha, kind, refusal = rewrite_commit(repo, commit, corrected.tree, ps, signing)
     if not sha:
         return Replacement(kind=kind, refusal=refusal)
     return Replacement(tree=corrected.tree, sha=sha, plan=corrected.plan,
@@ -171,7 +173,7 @@ def rewrite_commit(repo: str | Path, commit: str, tree: str, new_parents: list[s
     return sha, "", ""
 
 
-def discarded_delta(repo: str | Path, merge_sha: str, reconstructed_tree: str) -> list[str]:
+def discarded_delta(repo: str | Path, merge_sha: str, reconstructed_tree: str) -> list[str] | None:
     """Every repo-relative path where the reconstruction fails to reproduce what `merge_sha`
     recorded — the part of the merge's contribution that replacing it destroys.
 
@@ -181,7 +183,8 @@ def discarded_delta(repo: str | Path, merge_sha: str, reconstructed_tree: str) -
     refusing, or disclosing and going ahead, is the caller's decision.
 
     When git cannot compare the two, every path the merge recorded is returned — nothing can be
-    shown to survive, and an empty list would read as "the reconstruction loses nothing".
+    shown to survive, and an empty list would read as "the reconstruction loses nothing". None when
+    git could not list those paths either.
     """
     delta = _differing_paths(repo, merge_sha, reconstructed_tree)
     return _tree_paths(repo, merge_sha) if delta is None else delta

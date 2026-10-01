@@ -18,21 +18,20 @@ _INHERITED_LOCATION = ("GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE", "GIT_OBJECT
 def own_env() -> dict:
     """Build the environment a query of a repository's own objects runs in. Returns it."""
     env = {k: v for k, v in os.environ.items() if k not in _INHERITED_LOCATION}
-    env["GIT_GRAFT_FILE"] = os.path.join(os.devnull, "grafts")
     env["GIT_TERMINAL_PROMPT"] = "0"
     return env
 
 
-def own_view(repo: str | Path, args: list[str]):
-    """Ask git about the objects a repository holds. Takes the repo and the arguments. Returns the
-    completed process, or None when it could not run."""
-    return run(repo, ["--no-replace-objects", *args], env=own_env())
+def own_view(repo: str | Path, args: list[str], extra_env: dict | None = None):
+    """Ask git about the objects a repository holds. Takes the repo, the arguments and any variables
+    to add to the environment. Returns the completed process, or None when it could not run."""
+    return run(repo, args, env={**own_env(), **(extra_env or {})})
 
 
 def own_view_fed(repo: str | Path, args: list[str], stdin: bytes) -> bytes | None:
     """Ask git about the objects a repository holds, feeding `stdin`. Takes the repo, the arguments
     and the bytes to write. Returns the raw stdout, or None on any failure."""
-    return stdout_bytes_fed(repo, ["--no-replace-objects", *args], stdin, env=own_env())
+    return stdout_bytes_fed(repo, args, stdin, env=own_env())
 
 
 def batch_objects(raw: bytes):

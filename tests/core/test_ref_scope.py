@@ -46,7 +46,7 @@ class TestRefScope(GitSandbox):
 
     def test_a_fetched_branch_with_no_local_head_is_searched(self):
         self._fetched_only("feature", "b.txt", "two\n")
-        refs = [ref for name, ref in gitutil.branch_refs(self.d) if name == "feature"]
+        refs = [ref for name, ref in gitutil.listed_branch_refs(self.d) if name == "feature"]
         self.assertEqual(refs, ["refs/remotes/origin/feature"])
 
     def test_origin_head_notes_and_replace_refs_are_not_branches(self):
@@ -54,7 +54,7 @@ class TestRefScope(GitSandbox):
         self.git(self.d, "update-ref", "refs/remotes/origin/HEAD", head)
         self.git(self.d, "update-ref", "refs/remotes/origin/notes/commits", head)
         self.git(self.d, "update-ref", "refs/remotes/origin/replace/abc", head)
-        names = {name for name, _ref in gitutil.branch_refs(self.d)}
+        names = {name for name, _ref in gitutil.listed_branch_refs(self.d)}
         self.assertNotIn("HEAD", names)
         self.assertNotIn("notes/commits", names)
         self.assertNotIn("replace/abc", names)
@@ -63,7 +63,7 @@ class TestRefScope(GitSandbox):
         """Delivery picks one ref per name; the search scope must keep both, or a version that lives
         on only one side is never read."""
         self._diverged("feature", "p.js")
-        refs = [ref for name, ref in gitutil.branch_refs(self.d) if name == "feature"]
+        refs = [ref for name, ref in gitutil.listed_branch_refs(self.d) if name == "feature"]
         self.assertIn("refs/heads/feature", refs)
         self.assertIn("refs/remotes/origin/feature", refs)
 
@@ -92,7 +92,7 @@ class TestRefScope(GitSandbox):
         self.assertIn(sha, walked, "the carrier must survive a repository with thousands of refs")
 
     def test_the_walk_rejects_exactly_the_refs_that_are_not_branches(self):
-        """The globs the walk excludes and the filter `branch_refs` applies have to answer alike."""
+        """The globs the walk excludes and the filter `listed_branch_refs` applies have to answer alike."""
         self.git(self.d, "checkout", "-qb", "tmp")
         self.write(self.d, "noted.js", "fetch('https://evil.example/')\n")
         sha = self.commit(self.d, "reachable only from non-branch refs")
@@ -102,7 +102,7 @@ class TestRefScope(GitSandbox):
         self.git(self.d, "branch", "-qD", "tmp")
         self.assertEqual(gitutil.file_commits(self.d, "noted.js", limit=1000, all_branches=True), [],
                          "a commit only a non-branch ref reaches is not a carrier")
-        named = {name for name, _ref in gitutil.branch_refs(self.d)}
+        named = {name for name, _ref in gitutil.listed_branch_refs(self.d)}
         self.assertTrue(named.isdisjoint({"notes", "notes/commits", "replace/abc"}),
                         "and the filter rejects the same refs")
 

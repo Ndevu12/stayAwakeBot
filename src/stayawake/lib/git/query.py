@@ -12,7 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from stayawake.lib.git import remote as gitremote
-from stayawake.lib.git.objects import batch_objects, link_targets, own_env, own_view, own_view_fed
+from stayawake.lib.git.objects import (batch_objects, blob_text, link_targets, own_env, own_view,
+                                       own_view_fed)
 from stayawake.lib.git.run import run, stdout, stdout_bytes, stdout_bytes_fed
 
 
@@ -47,16 +48,10 @@ def ref_exists(repo: str | Path, ref: str) -> bool:
     return res is not None and res.returncode == 0
 
 
-def is_ancestor(repo: str | Path, ancestor: str, descendant: str) -> bool:
-    """True if `ancestor` is reachable from `descendant` — i.e. the update fast-forwards.
-    Distinguishes a fix branch we can extend from one occupied by unrelated work."""
-    return ancestry(repo, ancestor, descendant) is True
-
-
 def ancestry(repo: str | Path, ancestor: str, descendant: str) -> bool | None:
     """Ask whether one commit is an ancestor of another. Takes the repo and the two commits. Returns
     the answer, or None when git could not give one."""
-    res = run(repo, ["merge-base", "--is-ancestor", ancestor, descendant])
+    res = own_view(repo, ["merge-base", "--is-ancestor", ancestor, descendant])
     if res is None or res.returncode not in (0, 1):
         return None
     return res.returncode == 0
@@ -96,6 +91,15 @@ def commit_count(repo: str | Path, ref: str = "HEAD") -> int | None:
 _TYPE_MASK, _LINK_TYPE, _TREE_TYPE, _FILE_TYPE = 0o170000, 0o120000, 0o040000, 0o100000
 _ENTRY_TYPES = (_FILE_TYPE, _LINK_TYPE, _TREE_TYPE, 0o160000)
 _OBJECT_ID_BYTES = 20
+
+
+def holds_its_history(repo: str | Path) -> bool:
+    """Ask whether a repository holds its whole history: not a shallow clone, and not one that
+    fetches objects on demand. Takes the repo. Returns False when it does not, or when that could not
+    be told."""
+    res = own_view(repo, ["rev-parse", "--is-shallow-repository"])
+    return (res is not None and res.returncode == 0 and (res.stdout or "").strip() == "false"
+            and holds_its_objects(repo))
 
 
 def holds_its_objects(repo: str | Path) -> bool:
@@ -332,41 +336,68 @@ def branch_name_of(ref: str) -> str:
     return short
 
 
-def branch_refs(repo: str | Path) -> list[tuple[str, str]]:
-    """List every ref an amend has to read history from. Takes the repo. Returns `(name, ref)` for
-    each local head and each fetched origin branch, keeping BOTH where a name has one of each: a
-    local head and the origin ref of the same name diverge, and either may hold a version the other
-    does not. Which single ref an amend then updates is `branches_carrying`'s answer, not this one."""
-    return listed_branch_refs(repo) or []
+def _branch_targets(repo: str | Path) -> dict[str, str] | None:
+    """The object id each local head and fetched origin branch names, by ref, read without opening
+    the objects. Takes the repo. Returns them, or None when git could not list them."""
+    res = own_view(repo, ["for-each-ref", "--format=%(objectname) %(refname)",
+                          _LOCAL_REF.rstrip("/"), _ORIGIN_REF.rstrip("/")])
+    if res is None or res.returncode != 0:
+        return None
+    targets = {}
+    for line in (res.stdout or "").splitlines():
+        oid, _, ref = line.strip().partition(" ")
+        if branch_name_of(ref):
+            targets[ref] = oid
+    return targets
 
 
 def listed_branch_refs(repo: str | Path) -> list[tuple[str, str]] | None:
-    """List the refs `branch_refs` names. Takes the repo. Returns them, or None when git could not
-    list them."""
-    found: list[tuple[str, str]] = []
-    for scope in (_LOCAL_REF.rstrip("/"), _ORIGIN_REF.rstrip("/")):
-        res = run(repo, ["for-each-ref", "--format=%(refname)", scope])
-        if res is None or res.returncode != 0:
-            return None
-        for line in (res.stdout or "").splitlines():
-            ref = line.strip()
-            name = branch_name_of(ref)
-            if name:
-                found.append((name, ref))
-    return sorted(found)
+    """List every ref an amend has to read history from. Takes the repo. Returns `(name, ref)` for
+    each local head and each fetched origin branch, keeping BOTH where a name has one of each: a
+    local head and the origin ref of the same name diverge, and either may hold a version the other
+    does not. None when git could not list them."""
+    targets = _branch_targets(repo)
+    return None if targets is None else sorted((branch_name_of(ref), ref) for ref in targets)
 
 
-def branches_carrying(repo: str | Path, sha: str) -> list[tuple[str, str, str]]:
+def unreadable_branch_refs(repo: str | Path) -> list[str] | None:
+    """Find the refs an amend reads history from that name no commit the repository holds. Takes the
+    repo. Returns them, or None when git could not list them."""
+    targets = _branch_targets(repo)
+    if targets is None:
+        return None
+    if not targets:
+        return []
+    refs = sorted(targets)
+    kinds = own_view_fed(repo, ["cat-file", "--batch-check=%(objecttype)"],
+                         "\n".join(targets[ref] for ref in refs).encode())
+    answers = (kinds or b"").decode("ascii", "replace").splitlines()
+    if len(answers) != len(refs):
+        return None
+    return [ref for ref, kind in zip(refs, answers) if not kind.endswith("commit")]
+
+
+_BRANCH_WALK = (*(f"--exclude={glob}" for glob in _NOT_A_BRANCH), f"--glob={_ORIGIN_REF}*",
+                "--branches", "--full-history")
+
+
+def branches_carrying(repo: str | Path, sha: str) -> list[tuple[str, str, str]] | None:
     """Find every branch that still reaches `sha`. Takes the repo and the sha. Returns
     `(name, replay_tip, cas_old)` per branch, where `cas_old` is the local tip, or the zero SHA when
-    no local ref of that name exists yet; a local head for the same name wins the tip."""
-    full = stdout(repo, ["rev-parse", sha]).strip() or sha
+    no local ref of that name exists yet; a local head for the same name wins the tip. None when git
+    could not answer."""
+    res = run(repo, ["rev-parse", sha])
+    if res is None or res.returncode != 0:
+        return None
+    full = (res.stdout or "").strip() or sha
     found: dict[str, str] = {}
     local_tips: dict[str, str] = {}
     for scope in (_ORIGIN_REF.rstrip("/"), _LOCAL_REF.rstrip("/")):
-        listing = stdout(repo, ["for-each-ref", "--format=%(refname) %(objectname)",
-                                f"--contains={full}", scope])
-        for line in listing.splitlines():
+        res = run(repo, ["for-each-ref", "--format=%(refname) %(objectname)",
+                         f"--contains={full}", scope])
+        if res is None or res.returncode != 0:
+            return None
+        for line in (res.stdout or "").splitlines():
             parts = line.split()
             if len(parts) != 2:
                 continue
@@ -393,9 +424,12 @@ def remote_branches_matching(remote: str, pattern: str, *, repo: str | Path | No
             for ln in res.stdout.splitlines() if "refs/heads/" in ln]
 
 
-def parents(repo: str | Path, sha: str) -> list[str]:
-    out = stdout(repo, ["rev-list", "--parents", "-n", "1", sha]).split()
-    return out[1:] if len(out) > 1 else []
+def parents(repo: str | Path, sha: str) -> list[str] | None:
+    """The parents a commit stores. Takes the repo and the commit. Returns them, or None when git
+    could not read the commit."""
+    res = run(repo, ["rev-list", "--parents", "-n", "1", sha])
+    out = (res.stdout or "").split() if res is not None and res.returncode == 0 else []
+    return out[1:] if out else None
 
 
 def changed_paths(repo: str | Path, base: str, target: str,
@@ -429,29 +463,89 @@ def path_exists_at(repo: str | Path, treeish: str, path: str) -> bool:
     return res is not None and res.returncode == 0
 
 
-def tree_entry(repo: str | Path, treeish: str, path: str) -> tuple[str, str] | None:
-    """`(mode, oid)` for `path` at a commit/tree, or None when it is not there.
+TREE_MODE = "040000"
+GITLINK_MODE = "160000"
 
-    The MODE travels with the object: writing a blob back into an index without it turns an
-    executable into a plain file and a symlink into a file holding its target as text.
-    """
-    return entry_at(repo, treeish, path)[1]
+
+class Unread(Exception):
+    """Git could not read something a decision rests on. `subject` names it for the operator."""
+
+    def __init__(self, subject: str):
+        super().__init__(subject)
+        self.subject = subject
+
+
+_ARGV_BUDGET = 32_768
+
+
+def _batches(paths: list[str]):
+    """`paths` in order, in batches whose total length stays within one command line."""
+    batch: list[str] = []
+    size = 0
+    for path in paths:
+        if batch and size + len(path) > _ARGV_BUDGET:
+            yield batch
+            batch, size = [], 0
+        batch.append(path)
+        size += len(path) + 1
+    if batch:
+        yield batch
+
+
+def _parents_of(path: str) -> list[str]:
+    parts = path.split("/")[:-1]
+    return ["/".join(parts[:depth]) for depth in range(1, len(parts) + 1)]
+
+
+def _entries(repo: str | Path, args: list[str]) -> dict[str, tuple[str, str]] | None:
+    """The `(mode, oid)` of each entry `ls-tree -z <args>` names, by path, as the repository stores
+    them. Takes the repo and the arguments. Returns them, or None when git could not answer."""
+    res = own_view(repo, ["ls-tree", "-z", "--full-tree", *args])
+    if res is None or res.returncode != 0:
+        return None
+    found: dict[str, tuple[str, str]] = {}
+    for record in filter(None, (res.stdout or "").split("\0")):
+        head, tab, name = record.partition("\t")
+        fields = head.split()
+        if not tab or len(fields) < 3:
+            return None
+        found[name] = (fields[0], fields[2])
+    return found
 
 
 def entry_at(repo: str | Path, treeish: str, path: str) -> tuple[bool, tuple[str, str] | None]:
-    """Ask for the entry at a path in a commit or tree. Takes the repo, the commit or tree and the
-    path. Returns whether git answered, and the `(mode, oid)` entry, or None when the path is not
-    there."""
-    res = run(repo, ["ls-tree", "--full-tree", treeish, "--", path])
-    if res is None or res.returncode != 0:
+    """Ask for the entry at a path in a commit or tree, as the repository stores it. Takes the repo,
+    the commit or tree and the path. Returns whether git answered, and the `(mode, oid)` entry: the
+    path's own, the submodule's when a submodule holds the path, or None when the path is not there.
+
+    The MODE travels with the object: writing a blob back into an index without it turns an
+    executable into a plain file and a symlink into a file holding its target as text."""
+    found = _entries(repo, [treeish, "--", path])
+    if found is None:
         return False, None
-    line = (res.stdout or "").strip()
-    if not line:
-        return True, None
-    head = line.split("\t", 1)[0].split()
-    if len(head) < 3:
-        return False, None
-    return True, (head[0], head[2])
+    if path in found or not _parents_of(path):
+        return True, found.get(path)
+    for batch in _batches(_parents_of(path)):
+        parents = _entries(repo, ["-d", treeish, "--", *batch])
+        if parents is None:
+            return False, None
+        for parent in batch:
+            if parents.get(parent, ("",))[0] == GITLINK_MODE:
+                return True, parents[parent]
+    return True, None
+
+
+def file_text_at(repo: str | Path, treeish: str, path: str) -> tuple[str, str] | None:
+    """Read the file a commit holds at a path, as the repository stores it. Takes the repo, the commit
+    and the path. Returns its `(blob id, text)`, `("", "")` when no file is there, or None when git
+    could not read it or a submodule holds the path."""
+    answered, entry = entry_at(repo, treeish, path)
+    if not answered:
+        return None
+    if entry is None or entry[0] == TREE_MODE:
+        return "", ""
+    text = blob_text(repo, entry[1])
+    return None if text is None else (entry[1], text)
 
 
 def file_at(repo: str | Path, treeish: str, path: str) -> str:
@@ -462,14 +556,15 @@ def file_at(repo: str | Path, treeish: str, path: str) -> str:
     return res.stdout
 
 
-def list_tree(repo: str | Path, treeish: str, path: str | Path) -> list[str]:
-    """Repo-relative paths of the files under `path` AT a git ref (recursive), or [] if the ref or
-    directory is absent. Lets a caller reason about what a ref/branch actually CONTAINS — e.g. what
-    the default branch has, independent of a dirty/untracked working tree."""
-    res = run(repo, ["ls-tree", "-r", "--name-only", treeish, "--", str(path)])
-    if res is None or res.returncode != 0 or not res.stdout:
-        return []
-    return [ln for ln in res.stdout.splitlines() if ln.strip()]
+def list_tree(repo: str | Path, treeish: str, path: str | Path) -> list[str] | None:
+    """Repo-relative paths of the files under `path` AT a git ref (recursive), [] when the directory
+    is absent, or None when git could not read the ref. Lets a caller reason about what a ref/branch
+    actually CONTAINS — e.g. what the default branch has, independent of a dirty/untracked working
+    tree."""
+    res = run(repo, ["ls-tree", "-r", "-z", "--name-only", treeish, "--", str(path)])
+    if res is None or res.returncode != 0:
+        return None
+    return [name for name in (res.stdout or "").split("\0") if name]
 
 
 def tracked(repo: str | Path, path: str) -> bool:
@@ -479,7 +574,7 @@ def tracked(repo: str | Path, path: str) -> bool:
 
 
 def file_commits(repo: str | Path, path: str, limit: int = 50,
-                 first_parent: bool = False, all_branches: bool = False) -> list[str]:
+                 first_parent: bool = False, all_branches: bool = False) -> list[str] | None:
     """Commit SHAs that touched `path`, newest first (bounded). The walk that the
     remediator uses to find the most recent committed version that scans clean.
 
@@ -495,16 +590,19 @@ def file_commits(repo: str | Path, path: str, limit: int = 50,
     has one of each — with full history (no merge simplification), not only HEAD, so a version
     reachable only from a fetched branch is enumerated with the rest. The refs go in as globs, not
     one argument each, so a repository with many branches cannot outgrow the argument list.
+
+    Reads the repository as it stores it. Returns None when git could not walk the history.
     """
     args = ["log", f"-n{limit}", "--format=%H"]
     if first_parent:
         args.append("--first-parent")
     if all_branches:
-        args += [f"--exclude={glob}" for glob in _NOT_A_BRANCH]
-        args += [f"--glob={_ORIGIN_REF}*", "--branches", "--full-history"]
+        args += _BRANCH_WALK
     args += ["--", path]
-    out = stdout(repo, args)
-    return [ln.strip() for ln in out.splitlines() if ln.strip()]
+    res = own_view(repo, args)
+    if res is None or res.returncode != 0:
+        return None
+    return [ln.strip() for ln in (res.stdout or "").splitlines() if ln.strip()]
 
 
 _SHA_BYTES = frozenset(b"0123456789abcdef")
@@ -520,14 +618,13 @@ def _commit_header(token: bytes) -> bytes | None:
 
 def blob_paths(repo: str | Path, oid: str, limit: int = 100_000) -> list[str] | None:
     """Every path at which the blob `oid` was ever written or removed. Takes the repo, the blob id
-    and the walk bound. Returns the paths, or None when they could not be established."""
+    and the walk bound. Returns the paths, or None when the history is longer than the bound. Raises
+    `Unread` when git could not walk it."""
     args = ["-c", "log.showRoot=true", "log", f"-n{limit}", "--format=%H", "-m", "--raw", "-z",
-            "--no-abbrev", f"--find-object={oid}"]
-    args += [f"--exclude={glob}" for glob in _NOT_A_BRANCH]
-    args += [f"--glob={_ORIGIN_REF}*", "--branches", "--full-history"]
-    out = stdout_bytes(repo, args)
+            "--no-abbrev", f"--find-object={oid}", *_BRANCH_WALK]
+    out = own_view_fed(repo, args, b"")
     if out is None:
-        return None
+        raise Unread(f"the copies of {oid[:12]}")
     want = oid.encode("ascii")
     commits: set[bytes] = set()
     paths: list[str] = []

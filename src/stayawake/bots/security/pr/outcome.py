@@ -79,6 +79,9 @@ class Cause(Enum):
     SUPPLIED_CONTENT_REJECTED = "supplied-content-rejected"
     SUPPLIED_CONTENT_UNWRITABLE = "supplied-content-unwritable"
     HISTORY_TOO_LARGE_TO_ENUMERATE = "history-too-large-to-enumerate"
+    HISTORY_INCOMPLETE = "history-incomplete"
+    HISTORY_UNREADABLE = "history-unreadable"
+    BRANCH_NAMES_NO_COMMIT = "branch-names-no-commit"
     SAVED_WORK_CLEANED_HERE = "saved-work-cleaned-here"
     PAYLOAD_REACHABLE_FROM_OTHER_REFS = "payload-reachable-from-other-refs"
     REMOVAL_NOT_CONFIRMED = "removal-not-confirmed"
@@ -280,6 +283,12 @@ _PHRASE = {
         "the content you supplied for {detail} could not be written, so it was not used",
     Cause.HISTORY_TOO_LARGE_TO_ENUMERATE:
         "a reported file changed too many times to enumerate its history safely — recover it by hand",
+    Cause.HISTORY_INCOMPLETE:
+        "this clone does not hold its whole history — fetch it in full, then run this again",
+    Cause.HISTORY_UNREADABLE:
+        "git could not read {detail} — check the repository with `git fsck`, then run this again",
+    Cause.BRANCH_NAMES_NO_COMMIT:
+        "{detail} names no commit this clone holds — repair or delete it, then run this again",
 }
 
 _UNNAMED_CAUSE = "the run did not say why"

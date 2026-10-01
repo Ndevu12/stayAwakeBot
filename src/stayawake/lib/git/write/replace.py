@@ -12,13 +12,13 @@ from pathlib import Path
 
 from stayawake.lib.git.borrowed import borrow
 from stayawake.lib.git.merge.tree import AutoMerge
-from stayawake.lib.git.query import file_at, parents, path_exists_at, tree_entry
-from stayawake.lib.git.run import run, run_ok, stdout, stdout_bytes
+from stayawake.lib.git.objects import blob, own_view
+from stayawake.lib.git.query import GITLINK_MODE, Unread, entry_at, file_at, parents
+from stayawake.lib.git.run import run
 from stayawake.lib.git.write.transfer import adopt_objects
 
 from stayawake.utils import scratch
 
-_GITLINK = "160000"
 
 
 def _byte_subsequence(sub: bytes, whole: bytes) -> bool:
@@ -58,6 +58,21 @@ class Replacement:
     @property
     def ok(self) -> bool:
         return bool(self.tree) and not self.kind
+
+
+def _entry(repo: str | Path, treeish: str, path: str) -> tuple[str, str] | None:
+    """The `(mode, oid)` a commit or tree stores at a path, or None when nothing is there. Raises
+    `Unread` naming the path when git could not answer."""
+    answered, entry = entry_at(repo, treeish, path)
+    if not answered:
+        raise Unread(path)
+    return entry
+
+
+def _tree_of(repo: str | Path, commit: str) -> str | None:
+    """The tree a commit stores, or None when git could not read it."""
+    res = own_view(repo, ["rev-parse", f"{commit}^{{tree}}"])
+    return ((res.stdout or "").strip() or None) if res is not None and res.returncode == 0 else None
 
 
 def _refused(kind: str, refusal: str) -> Replacement:
@@ -104,7 +119,16 @@ def replacement_tree(repo: str | Path, commit: str, flagged_paths,
     if not flagged:
         return _refused("unnamed", "no path was named to replace")
 
+    try:
+        return _replacement_tree(repo, commit, flagged, still_carries)
+    except Unread as unread:
+        return _refused("unreadable", f"{unread.subject} could not be read at {commit[:12]}")
+
+
+def _replacement_tree(repo: str | Path, commit: str, flagged: list[str], still_carries) -> Replacement:
     ps = parents(repo, commit)
+    if ps is None:
+        raise Unread("its parents")
     baseline, conflicted = _baseline(repo, ps)
     plan: list[tuple[str, tuple[str, str] | None]] = []
     recovered: list[str] = []
@@ -113,16 +137,16 @@ def replacement_tree(repo: str | Path, commit: str, flagged_paths,
             return _refused("conflicted",
                             f"git could not merge {path} on its own, so there is no clean "
                             "version of it to restore")
-        recorded = tree_entry(repo, commit, path)
-        if recorded is not None and recorded[0] == _GITLINK:
+        recorded = _entry(repo, commit, path)
+        if recorded is not None and recorded[0] == GITLINK_MODE:
             return _refused("submodule", f"{path} is a submodule")
-        clean = tree_entry(repo, baseline, path) if baseline else None
+        clean = _entry(repo, baseline, path) if baseline else None
         from_parent = None
         if clean is None and baseline is not None:
-            from_parent = next((p for p in ps if path_exists_at(repo, p, path)), None)
-            clean = tree_entry(repo, from_parent, path) if from_parent is not None else None
+            from_parent = next((p for p in ps if _entry(repo, p, path) is not None), None)
+            clean = _entry(repo, from_parent, path) if from_parent is not None else None
         if clean is not None:
-            if clean[0] == _GITLINK:
+            if clean[0] == GITLINK_MODE:
                 return _refused("submodule", f"{path} is a submodule in the clean version")
             source = from_parent if from_parent is not None else baseline
             carried = still_carries(source, path) if still_carries else None
@@ -132,7 +156,7 @@ def replacement_tree(repo: str | Path, commit: str, flagged_paths,
             if from_parent is not None:
                 recovered.append(path)
             continue
-        if any(path_exists_at(repo, p, path) for p in ps):
+        if any(_entry(repo, p, path) is not None for p in ps):
             return _refused("shape",
                             f"{path} came from a parent and has no clean version to restore")
         plan.append((path, None))
@@ -162,8 +186,10 @@ def _not_applied(repo: str | Path, tree: str,
     """
     missed = []
     for path, entry in plan:
-        written = tree_entry(repo, tree, path)
-        if entry is None:
+        answered, written = entry_at(repo, tree, path)
+        if not answered:
+            missed.append(path)
+        elif entry is None:
             if written is not None:
                 missed.append(path)
         elif written != entry:
@@ -208,7 +234,7 @@ def write_blob_bytes(repo: str | Path, data: bytes) -> str | None:
 def carried_forward(repo: str | Path, commit: str,
                     corrections: dict[str, tuple[str, tuple[str, str] | None]],
                     still_carries=None, clean=None, remove=None,
-                    substitute=None, purge=None) -> tuple[str | None, str]:
+                    substitute=None, purge=None) -> tuple[str | None, tuple[str, str] | None]:
     """`commit`'s recorded tree with each correction carried into it, as `(tree, blocked)`.
 
     `corrections` maps a path to `(payload_blob, entry)`: where the commit's blob still equals
@@ -217,56 +243,66 @@ def carried_forward(repo: str | Path, commit: str,
     `carries`. `substitute` maps a path to `(payload_blob, entry)`: where the commit holds exactly
     `payload_blob` the path is set to `entry`. `remove` maps a path to a blob id, dropped wherever
     the commit holds exactly that blob. `purge` is a set of paths dropped at every commit whose blob
-    at that path `still_carries` a payload. `blocked` names a path that could not be made clean (then
-    `tree` is None), including a rewrite whose bytes are not a subsequence of the original blob and
-    that its corrector does not prove. Bytes that are not UTF-8 are carried through unchanged."""
+    at that path `still_carries` a payload. `blocked` is `(kind, path)` for a path that could not be
+    made clean (then `tree` is None): kind `"unreadable"` when git could not read it, else
+    `"changed-downstream"`, including a rewrite whose bytes are not a subsequence of the original
+    blob and that its corrector does not prove. Bytes that are not UTF-8 are carried through
+    unchanged."""
+    try:
+        return _carried_forward(repo, commit, corrections, still_carries, clean, remove, substitute,
+                                purge)
+    except Unread as unread:
+        return None, ("unreadable", unread.subject)
+
+
+def _carried_forward(repo, commit, corrections, still_carries, clean, remove, substitute, purge):
     plan = []
     dropped: set[str] = set()
     for path, oid in (remove or {}).items():
-        current = tree_entry(repo, commit, path)
+        current = _entry(repo, commit, path)
         if current is not None and current[1] == oid:
             plan.append((path, None))
             dropped.add(path)
     for path in (purge or set()):
         if path in dropped:
             continue
-        if tree_entry(repo, commit, path) is not None and still_carries and still_carries(commit, path):
+        if _entry(repo, commit, path) is not None and still_carries and still_carries(commit, path):
             plan.append((path, None))
             dropped.add(path)
     for path, (payload_blob, entry) in list(corrections.items()) + list((substitute or {}).items()):
-        current = tree_entry(repo, commit, path)
+        current = _entry(repo, commit, path)
         if current is None:
             continue
         if current[1] == payload_blob:
             plan.append((path, entry))
         elif still_carries and still_carries(commit, path):
-            return None, path
+            return None, ("changed-downstream", path)
     for path, (carries, corrector) in (clean or {}).items():
-        current = tree_entry(repo, commit, path)
+        current = _entry(repo, commit, path)
         if current is None:
             continue
-        original = stdout_bytes(repo, ["cat-file", "blob", current[1]])
+        original = blob(repo, current[1])
         if original is None:
-            return None, path
+            raise Unread(path)
         text = original.decode("utf-8", "surrogateescape")
         if not carries(text):
             continue
         cleaned = corrector(text)
         if cleaned is None or carries(cleaned):
-            return None, path
+            return None, ("changed-downstream", path)
         rewritten = cleaned.encode("utf-8", "surrogateescape")
         if not (_byte_subsequence(rewritten, original) or _proven(corrector, text, cleaned)):
-            return None, path
-        blob = write_blob_bytes(repo, rewritten)
-        if blob is None:
-            return None, path
-        plan.append((path, (current[0], blob)))
+            return None, ("changed-downstream", path)
+        written = write_blob_bytes(repo, rewritten)
+        if written is None:
+            return None, ("changed-downstream", path)
+        plan.append((path, (current[0], written)))
     if not plan:
-        return (stdout(repo, ["rev-parse", f"{commit}^{{tree}}"]).strip() or None), ""
+        return _tree_of(repo, commit), None
     tree = _write_corrected(repo, commit, plan)
     if tree is None or _not_applied(repo, tree, plan):
-        return None, ""
-    return tree, ""
+        return None, None
+    return tree, None
 
 
 def _write_corrected(repo: str | Path, commit: str,
@@ -274,21 +310,25 @@ def _write_corrected(repo: str | Path, commit: str,
     """Write the corrected tree through a throwaway index, so the repository's own index — and
     therefore anything uncommitted in a worktree — is never touched."""
     index_dir = scratch.new_dir("a throwaway index")
-    env = dict(os.environ, GIT_INDEX_FILE=str(index_dir / "index"))
+    index = {"GIT_INDEX_FILE": str(index_dir / "index")}
+
+    def done(args: list[str]) -> bool:
+        res = own_view(repo, args, index)
+        return res is not None and res.returncode == 0
+
     try:
-        if not run_ok(repo, ["read-tree", commit], env=env):
+        if not done(["read-tree", commit]):
             return None
         for path, entry in plan:
             if entry is None:
-                ok = run_ok(repo, ["update-index", "--force-remove", "--", path], env=env)
+                ok = done(["update-index", "--force-remove", "--", path])
             else:
                 mode, oid = entry
                 # The three-argument form: a path containing a comma breaks `<mode>,<oid>,<path>`.
-                ok = run_ok(repo, ["update-index", "--add", "--cacheinfo", mode, oid, path],
-                            env=env)
+                ok = done(["update-index", "--add", "--cacheinfo", mode, oid, path])
             if not ok:
                 return None
-        res = run(repo, ["write-tree"], env=env)
+        res = own_view(repo, ["write-tree"], index)
         if res is None or res.returncode != 0:
             return None
         oid = (res.stdout or "").strip()

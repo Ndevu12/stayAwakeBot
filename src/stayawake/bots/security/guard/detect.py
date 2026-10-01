@@ -272,7 +272,7 @@ def _ref_workflows(repo: Path, ref: str) -> dict[str, str]:
     """Workflow files as they exist ON a git ref (e.g. `origin/main`) — so `--pr` plans against the
     PR TARGET (the default branch), not a possibly-untracked working-tree file."""
     out: dict[str, str] = {}
-    for path in gitutil.list_tree(repo, ref, WORKFLOW_DIR):
+    for path in gitutil.list_tree(repo, ref, WORKFLOW_DIR) or []:
         if path.endswith((".yml", ".yaml")):
             text = gitutil.file_at(repo, ref, path)
             if text:
