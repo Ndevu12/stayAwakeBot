@@ -66,7 +66,7 @@ def _read(source: Path) -> tuple[DeliveryQuestion, ...] | None:
         if source.stat().st_size > _MAX_RECORD_BYTES:
             return None
         raw = json.loads(source.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         return None
     if not isinstance(raw, dict) or raw.get("format") != _FORMAT:
         return None

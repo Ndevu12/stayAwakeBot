@@ -59,13 +59,13 @@ class _Delivery(_AmendFixture):
         self.write(self.d, name, "later work\n")
         self.commit(self.d, "later work")
 
-    def _run(self, resolver=None, findings=None):
+    def _run(self, resolver=None, findings=None, pushed=True):
         found = [_foreign()] if findings is None else findings
         scan = ScanResult(target=str(self.d), source="local", findings=found)
         with self._remote(), \
                 mock.patch("stayawake.bots.security.pr.amend.scan_target", return_value=scan):
             return amend_outcome(self.d, "acme/app", ScanOptions(), load_signatures(), [], "t",
-                                 pusher=lambda *a: PushResult(True), resolver=resolver)
+                                 pusher=lambda *a: PushResult(pushed), resolver=resolver)
 
     def _in_history(self, path, blob=None):
         """Whether any commit a branch reaches holds `path`, at `blob` when given."""
@@ -153,6 +153,33 @@ class TestNobodyCanBeAsked(_Delivery):
             self.assertIn(path, outcome.removed)
         self.assertTrue((self.d / "later.txt").exists())
         self.assertEqual([], self._records())
+
+    def test_a_take_out_whose_push_is_refused_stays_recorded(self):
+        self._deliver()
+        self._later()
+        self._run()
+        resolver, _asked = _answering(TAKE_OUT)
+        self._run(resolver, findings=[], pushed=False)
+        for path in PADDING:
+            self.assertTrue(self._in_history(path), path)
+        recorded = {f.path for record in arrival_record.read_all("acme/app")[0]
+                    for q in record.deliveries for f in q.files}
+        self.assertEqual(set(PADDING), recorded)
+
+    def test_a_copy_another_branch_added_itself_survives_a_take_out(self):
+        base = self.git(self.d, "rev-parse", "--abbrev-ref", "HEAD").strip()
+        self.git(self.d, "checkout", "-q", "-b", "fonts-elsewhere")
+        self.write(self.d, PADDING[0], "genuine " + PADDING[0] + "\n")
+        self.commit(self.d, "the project's own font")
+        self.git(self.d, "checkout", "-q", base)
+        self._deliver()
+        self._later()
+        resolver, _asked = _answering(TAKE_OUT)
+        self._run(resolver)
+        self.assertNotEqual(0, self.git_may_fail(self.d, "cat-file", "-e",
+                                                 f"{base}:{PADDING[0]}").returncode)
+        self.assertEqual(0, self.git_may_fail(self.d, "cat-file", "-e",
+                                              f"fonts-elsewhere:{PADDING[0]}").returncode)
 
     def test_keeping_a_recorded_file_is_final(self):
         self._deliver()

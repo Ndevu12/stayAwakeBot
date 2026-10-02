@@ -28,13 +28,15 @@ class Questions:
 class Settled:
     """What became of the files put to the operator.
 
-    `take_out` are the files to remove as they were added; `kept` the files the operator kept;
+    `take_out` are the files to remove as they were added, and `delivered_in` maps each of them,
+    as `(path, blob)`, to the commit that added it; `kept` are the files the operator kept;
     `undecided` the questions nobody answered.
     """
 
     take_out: list[ArrivedFile] = field(default_factory=list)
     kept: list[ArrivedFile] = field(default_factory=list)
     undecided: list[DeliveryQuestion] = field(default_factory=list)
+    delivered_in: dict[tuple[str, str], str] = field(default_factory=dict)
 
 
 def _with_files(question: DeliveryQuestion, files) -> DeliveryQuestion:
@@ -112,17 +114,10 @@ def ask(questions, resolver, limit: int = ASKED_PER_RUN) -> Settled:
                 clashing.append(f)
             else:
                 settled.take_out.append(f)
+                settled.delivered_in[(f.path, f.blob)] = question.commit
         if clashing:
             settled.undecided.append(_with_files(question, clashing))
     return settled
-
-
-def dropping(recorded, files) -> list[DeliveryQuestion]:
-    """Remove files from recorded questions. Takes the questions and the files. Returns each
-    question without those files."""
-    gone = set(files)
-    return [_with_files(question, [f for f in question.files if f not in gone])
-            for question in recorded]
 
 
 def still_to_ask(recorded, settled: Settled,
