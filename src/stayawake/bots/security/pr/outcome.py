@@ -91,6 +91,7 @@ class Cause(Enum):
     ARRIVALS_IN_FIRST_COMMIT = "arrivals-in-first-commit"
     ARRIVALS_UNREAD = "arrivals-unread"
     ARRIVALS_NOT_RECORDED = "arrivals-not-recorded"
+    ARRIVALS_RECORD_UNREADABLE = "arrivals-record-unreadable"
 
 
 _NEEDING_NO_ACTION = frozenset({Cause.PREVIOUS_OBJECTS_UNCOLLECTED, Cause.NO_CONFIRMED_PAYLOAD,
@@ -305,6 +306,9 @@ _PHRASE = {
     Cause.ARRIVALS_UNREAD:
         "git could not read what else was added with the malware — check the repository with "
         "`git fsck`, then run this again",
+    Cause.ARRIVALS_RECORD_UNREADABLE:
+        "{detail} could not be read — review the commits that brought the malware yourself, then "
+        "delete it",
     Cause.ARRIVALS_NOT_RECORDED:
         "{detail} file(s) added in the same commit as the malware are your decision and were kept "
         "— review them yourself",

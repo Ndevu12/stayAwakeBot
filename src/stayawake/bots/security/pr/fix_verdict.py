@@ -115,17 +115,19 @@ class Arrivals:
     """The files added in the same commit as a confirmed payload, with no finding of their own.
 
     `files` are the operator's to decide; `first_commits` are first commits that carry a payload
-    beside other files; `unread` names what git could not read.
+    beside other files; `unread` names what git could not read; `unread_records` are earlier lists of
+    files to decide that could not be read.
     """
 
     files: tuple[str, ...] = ()
     first_commits: tuple[str, ...] = ()
     unread: tuple[str, ...] = ()
+    unread_records: tuple[str, ...] = ()
 
     @property
     def undecided(self) -> bool:
         """Tell whether anything is left for the operator. Returns the answer."""
-        return bool(self.files or self.first_commits or self.unread)
+        return bool(self.files or self.first_commits or self.unread or self.unread_records)
 
 
 @dataclass(frozen=True)
@@ -273,6 +275,9 @@ def _arrival_lines(found: Arrivals, detail: bool) -> list[str]:
     if found.first_commits:
         lines.append("the malware is in this repository's first commit — review that commit's "
                      "other files yourself")
+    if found.unread_records:
+        lines.append(f"{_paths(found.unread_records)} could not be read — review the commits that "
+                     "brought the malware yourself, then delete it")
     if found.unread:
         lines.append("git could not read what else was added with the malware — check the "
                      "repository with `git fsck`, then run this again")

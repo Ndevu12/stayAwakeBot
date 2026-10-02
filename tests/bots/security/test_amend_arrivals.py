@@ -152,6 +152,7 @@ class TestNobodyCanBeAsked(_Delivery):
             self.assertFalse(self._in_history(path), path)
             self.assertIn(path, outcome.removed)
         self.assertTrue((self.d / "later.txt").exists())
+        self.assertEqual([], self._records())
 
     def test_keeping_a_recorded_file_is_final(self):
         self._deliver()
@@ -184,7 +185,7 @@ class TestNobodyCanBeAsked(_Delivery):
         resolver, asked = _answering(TAKE_OUT)
         outcome = self._run(resolver, findings=[])
         self.assertEqual([], asked)
-        self.assertIn(Cause.ARRIVALS_UNREAD, self._causes(outcome))
+        self.assertIn(Cause.ARRIVALS_RECORD_UNREADABLE, self._causes(outcome))
         self.assertTrue(outcome.needs_review)
         self.assertEqual("{not json", record.read_text())
         for path in PADDING:
