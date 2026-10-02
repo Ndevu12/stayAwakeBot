@@ -70,6 +70,16 @@ class TestBareFixNamesWhatArrivedWithThePayload(_Project):
         self.assertIs(Grade.NEEDS_REVIEW, v.grade)
         self.assertNotIn("nothing to fix", render_fix_verdict(v))
 
+    def test_an_earlier_list_that_cannot_be_read_keeps_the_repository_in_review(self):
+        self.git(self.d, "remote", "add", "origin", "https://github.com/acme/app.git")
+        folder = arrival_record.state_dir("acme/app") / "0123456789ab"
+        folder.mkdir(parents=True)
+        (folder / arrival_record.RECORD_NAME).write_text("{not json")
+        v = self.verdict()
+        self.assertTrue(v.arrivals.unread_records)
+        self.assertIs(Grade.NEEDS_REVIEW, v.grade)
+        self.assertIn(arrival_record.RECORD_NAME, render_fix_verdict(v, detail=True))
+
     def test_a_payload_added_alone_names_nothing(self):
         self.write(self.d, PAYLOAD, LOADER)
         self.commit(self.d, "payload")

@@ -1047,13 +1047,13 @@ def _settle_arrivals(repo: Path, slug: str, deliveries: dict, brought: dict, exc
         remaining = arrival_questions.still_to_ask(record.deliveries, settled, held)
         arrival_record.keep_only(record, remaining)
         out.recorded.append((record, remaining))
-    out.taken = list(settled.take_out)
     too_large: list[str] = []
     for chosen in settled.take_out:
         with _naming_unread(unread):
             if _register_blob_removal(repo, chosen.path, chosen.blob, out.arrived, remove_shas,
                                       out.holders) == "too-large":
                 too_large.append(chosen.path)
+    out.taken = [f for f in settled.take_out if out.arrived.get(f.path) == f.blob]
     out.to_record = [q for q in settled.undecided if not q.recorded]
     out.reasons = _arrival_reasons(settled, live.first_commits,
                                    [*unread_deliveries, *live.unread], too_large, unreadable)
