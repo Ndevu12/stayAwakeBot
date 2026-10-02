@@ -36,7 +36,7 @@ def _is_binary(raw: bytes) -> bool:
 
 
 def _origin_line(item: UncertainItem) -> str:
-    """Say what the file arrived with, that git could not read it, or that saw could not place it.
+    """Say what the file arrived with, that git could not read it, or that it is not tied to one.
     Takes the item. Returns the line."""
     if item.introduced_by and item.arrived_with_removed:
         n = len(item.arrived_with_removed)
@@ -45,7 +45,7 @@ def _origin_line(item: UncertainItem) -> str:
                 f"file{'' if n == 1 else 's'} saw is already removing: {paths}")
     if item.origin_unread:
         return "origin:  git could not read what this file arrived with — treat with caution"
-    return "origin:  saw could not determine what this file arrived with — treat with caution"
+    return "origin:  not tied to a known delivery — treat with caution"
 
 
 def _body(item: UncertainItem) -> list[str]:

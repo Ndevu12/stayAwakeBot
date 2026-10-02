@@ -24,6 +24,32 @@ def history_of(repo: Path, path: str, **walk) -> list[str] | None:
     return None if len(changed) >= MAX_PATH_HISTORY else changed
 
 
+def commits_carrying(repo: Path, path: str, carries) -> list[str] | None:
+    """Walk a path's history and collect the commits whose version of it carries a payload. Takes
+    the repo, the path and `carries(sha, path)`. Returns those commits, newest first, or None when
+    the history is too long to walk."""
+    changed = history_of(repo, path, all_branches=True)
+    if changed is None:
+        return None
+    return [sha for sha in changed if carries(sha, path)]
+
+
+def add_first_carriers(repo: Path, carriers: Mapping[str, Iterable[str]], deliveries: dict,
+                       unread: list[str]) -> None:
+    """Add the commits that first carry each path's payload to the deliveries. Takes the repo, each
+    path mapped to the commits holding a payload version of it, the deliveries to add to, and where
+    to name a path git could not read."""
+    for path in sorted(carriers):
+        try:
+            found = first_carriers(repo, {path: carriers[path]})
+        except gitutil.Unread as missed:
+            if missed.subject not in unread:
+                unread.append(missed.subject)
+            continue
+        for sha, paths in found.items():
+            deliveries[sha] = tuple(dict.fromkeys(deliveries.get(sha, ()) + paths))
+
+
 @dataclass(frozen=True)
 class Brought:
     """What one commit brought.

@@ -295,17 +295,19 @@ _PHRASE = {
     Cause.BRANCH_NAMES_NO_COMMIT:
         "{detail} names no commit this clone holds — repair or delete it, then run this again",
     Cause.ARRIVALS_UNDECIDED:
-        "{detail} file(s) added in the same commit as the malware saw removed are your decision "
-        "and were kept for now — run saw fix amend in this repository, on a terminal, to be asked",
+        "{detail} file(s) added in the same commit as the malware are your decision and were kept "
+        "for now — run saw fix amend in this repository, on a terminal, to decide them",
     Cause.ARRIVALS_KEPT:
         "you kept {detail} file(s) added in the same commit as the malware",
     Cause.ARRIVALS_IN_FIRST_COMMIT:
-        "the malware is in this repository's first commit, so saw cannot tell which of its files "
-        "came with it — review that commit's files yourself",
+        "the malware is in this repository's first commit — review that commit's other files "
+        "yourself",
     Cause.ARRIVALS_UNREAD:
-        "saw could not read what else was added with the malware, so it is not called done",
+        "git could not read what else was added with the malware — check the repository with "
+        "`git fsck`, then run this again",
     Cause.ARRIVALS_NOT_RECORDED:
-        "saw could not record the files added with the malware for a later run to ask about",
+        "{detail} file(s) added in the same commit as the malware are your decision and were kept "
+        "— review them yourself",
 }
 
 _UNNAMED_CAUSE = "the run did not say why"

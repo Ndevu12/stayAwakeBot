@@ -9,8 +9,9 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 
 from stayawake.bots.security.models import HEURISTIC, Finding, Severity
-from stayawake.bots.security.pr import arrivals_for_fix
+from stayawake.bots.security.pr import arrival_record, arrivals_for_fix
 from stayawake.bots.security.pr import fix as fixmod
+from stayawake.bots.security.pr.resolve import ArrivedFile, DeliveryQuestion
 from stayawake.bots.security.pr.fix_verdict import (Arrivals, BaseFix, BaseState, Checkout,
                                                     FixVerdict, Grade, render_fix_verdict)
 from stayawake.bots.security.signatures import load_signatures
@@ -56,6 +57,18 @@ class TestBareFixNamesWhatArrivedWithThePayload(_Project):
         self.assertIn("saw fix amend", text)
         for path in PADDING:
             self.assertIn(path, text)
+
+    def test_files_an_earlier_amend_left_undecided_keep_a_clean_repository_in_review(self):
+        self.git(self.d, "remote", "add", "origin", "https://github.com/acme/app.git")
+        self.write(self.d, "public/fonts/inter-regular.woff", PADDING["public/fonts/inter-regular.woff"])
+        self.commit(self.d, "fonts")
+        left = DeliveryQuestion("1" * 40, "", "s", (PAYLOAD,),
+                                (ArrivedFile("public/fonts/inter-regular.woff", "2" * 40),))
+        arrival_record.write(arrival_record.state_dir("acme/app") / "0123456789ab", [left])
+        v = self.verdict()
+        self.assertIn("public/fonts/inter-regular.woff", v.arrivals.files)
+        self.assertIs(Grade.NEEDS_REVIEW, v.grade)
+        self.assertNotIn("nothing to fix", render_fix_verdict(v))
 
     def test_a_payload_added_alone_names_nothing(self):
         self.write(self.d, PAYLOAD, LOADER)
@@ -134,7 +147,7 @@ class TestTheArrivalsLine(unittest.TestCase):
     def test_what_git_could_not_read_is_never_called_clean(self):
         v = self._verdict(Arrivals(unread=("every copy of x",)))
         self.assertIs(Grade.NEEDS_REVIEW, v.grade)
-        self.assertIn("not called clean", render_fix_verdict(v))
+        self.assertIn("git could not read what else was added with the malware", render_fix_verdict(v))
 
     def test_no_arrivals_leave_the_grade_alone(self):
         self.assertIs(Grade.DONE, self._verdict(Arrivals()).grade)

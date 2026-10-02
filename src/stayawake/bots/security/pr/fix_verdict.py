@@ -268,14 +268,14 @@ def _arrival_lines(found: Arrivals, detail: bool) -> list[str]:
     if found.files:
         line = (f"{len(found.files)} file(s) added in the same commit as the malware have no "
                 "finding of their own and are your decision — run saw fix amend in this "
-                "repository, on a terminal, to be asked")
+                "repository, on a terminal, to decide them")
         lines.append(f"{line} ({_paths(found.files)})" if detail else line)
     if found.first_commits:
-        lines.append("the malware is in this repository's first commit, so saw cannot tell which "
-                     "of its files came with it — review that commit's files yourself")
+        lines.append("the malware is in this repository's first commit — review that commit's "
+                     "other files yourself")
     if found.unread:
-        lines.append("saw could not read what else was added with the malware, so it is not "
-                     "called clean")
+        lines.append("git could not read what else was added with the malware — check the "
+                     "repository with `git fsck`, then run this again")
     return lines
 
 

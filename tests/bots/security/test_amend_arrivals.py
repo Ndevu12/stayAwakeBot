@@ -105,6 +105,17 @@ class TestNobodyCanBeAsked(_Delivery):
         for path in PADDING:
             self.assertIn(path, line)
 
+    def test_files_that_could_not_be_remembered_are_left_to_review_without_a_promise(self):
+        self._deliver()
+        self._later()
+        with mock.patch.object(amendmod.arrival_record, "write", return_value=None):
+            outcome = self._run()
+        causes = self._causes(outcome)
+        self.assertIn(Cause.ARRIVALS_NOT_RECORDED, causes)
+        self.assertNotIn(Cause.ARRIVALS_UNDECIDED, causes)
+        self.assertTrue(outcome.needs_review)
+        self.assertNotIn("saw fix amend", render_amend_line(outcome))
+
     def test_a_file_with_its_own_finding_is_not_named_with_them(self):
         self._deliver()
         self._later()
