@@ -371,14 +371,19 @@ def _register_removal(repo: Path, path: str, remove: dict, remove_shas: set,
 
 
 def _register_blob_removal(repo: Path, path: str, oid: str, remove: dict, remove_shas: set,
-                           remove_holders: dict) -> str:
+                           remove_holders: dict, delivered_in: str = "") -> str:
     """Schedule `path` to be dropped wherever history holds it at blob `oid`, recording the commits
-    that hold it. Takes the repo, the path, the blob id and the three removal maps to fill. Returns
-    "too-large" when the history is too long to walk, else ""."""
+    that hold it. Takes the repo, the path, the blob id, the three removal maps to fill, and
+    optionally the commit that delivered it, limiting the drop to that commit and those after it
+    while history still holds it. Returns "too-large" when the history is too long to walk, else
+    ""."""
     hist = _foreign_history(repo, path, oid)
     if hist is None:
         return "too-large"
     _holders, foreign = hist
+    if delivered_in:
+        foreign = [sha for sha in foreign if gitutil.ancestry(repo, delivered_in, sha) is True] \
+            or foreign
     if not foreign:
         return ""
     remove[path] = oid
@@ -999,7 +1004,6 @@ class _Arrivals:
     to_record: list = field(default_factory=list)
     reasons: list[Reason] = field(default_factory=list)
     recorded: list = field(default_factory=list)
-    taken: list = field(default_factory=list)
 
 
 def _arrival_reasons(settled: arrival_questions.Settled, first_commits: list[str], unread: list[str],
@@ -1051,9 +1055,10 @@ def _settle_arrivals(repo: Path, slug: str, deliveries: dict, brought: dict, exc
     for chosen in settled.take_out:
         with _naming_unread(unread):
             if _register_blob_removal(repo, chosen.path, chosen.blob, out.arrived, remove_shas,
-                                      out.holders) == "too-large":
+                                      out.holders,
+                                      settled.delivered_in.get((chosen.path, chosen.blob), "")) \
+                    == "too-large":
                 too_large.append(chosen.path)
-    out.taken = [f for f in settled.take_out if out.arrived.get(f.path) == f.blob]
     out.to_record = [q for q in settled.undecided if not q.recorded]
     out.reasons = _arrival_reasons(settled, live.first_commits,
                                    [*unread_deliveries, *live.unread], too_large, unreadable)
@@ -1534,7 +1539,7 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
                         for p, (carries, _c) in clean.items()})
     left, unread_rewrite = _payload_left(
         repo, all_infected, rebuilt, [(name, delivered_tips[tip]) for name, tip, _c in deliverable],
-        path_checks, {**remove, **arrived})
+        path_checks, remove)
     if left:
         return _refuse(Cause.PAYLOAD_STILL_REACHABLE, "; ".join(left[:3]))
     unconfirmed += unread_rewrite
@@ -1598,8 +1603,6 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
                        recovery=str(captured.path or ""))
     if moved is None:
         return _refuse(Cause.REPLAY_FAILED, ", ".join(n for n, _, _ in deliverable))
-    for record, remaining in settled_arrivals.recorded:
-        arrival_record.keep_only(record, arrival_questions.dropping(remaining, settled_arrivals.taken))
 
     results: list[BranchResult] = []
     failed: list[str] = []
@@ -1661,6 +1664,10 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
         if unrestored:
             survivors.insert(0, Reason(Cause.LEFT_PART_WAY, ", ".join(unrestored)))
             recovery = str(captured.path or "")
+    held_now = _held_on_a_branch(repo)
+    for record, remaining in settled_arrivals.recorded:
+        arrival_record.keep_only(record, arrival_questions.still_to_ask(
+            remaining, arrival_questions.Settled(), held_now))
     removed = _delivered_removals(replacements, delivered_reach,
                                   {**remove_holders, **settled_arrivals.holders}, purge_holders)
     touched = len(delivered_infected)
