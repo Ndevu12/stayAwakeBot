@@ -103,10 +103,9 @@ def arrivals_beside(repo: Path, paths, findings, signatures, allowlist, opts) ->
                              seen, excluded, unread)
     recorded, unreadable = _recorded(repo)
     left = arrival_questions.from_records(recorded, excluded, seen, lambda path, blob: True)
-    if unreadable:
-        unread.append("files an earlier run left for you to decide")
     whole = gitutil.holds_its_history(repo) if put.first_commits else True
     return Arrivals(
         files=tuple(f.path for question in [*put.asked, *left] for f in question.files),
         first_commits=tuple(put.first_commits) if whole else (),
-        unread=tuple([*unread, *put.unread, *([] if whole else put.first_commits)]))
+        unread=tuple([*unread, *put.unread, *([] if whole else put.first_commits)]),
+        unread_records=tuple(unreadable))

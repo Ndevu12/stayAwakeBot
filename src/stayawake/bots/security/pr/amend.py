@@ -998,15 +998,19 @@ class _Arrivals:
     holders: dict[str, set[str]] = field(default_factory=dict)
     to_record: list = field(default_factory=list)
     reasons: list[Reason] = field(default_factory=list)
+    recorded: list = field(default_factory=list)
+    taken: list = field(default_factory=list)
 
 
 def _arrival_reasons(settled: arrival_questions.Settled, first_commits: list[str], unread: list[str],
-                     too_large: list[str]) -> list[Reason]:
+                     too_large: list[str], records_unread: list[str] = ()) -> list[Reason]:
     """Name what the operator decided and what is left to decide about the files added beside a
     payload. Takes what was settled, the first commits that carry a payload with other files, what
-    git could not read, and the chosen files whose history is too long to walk. Returns the
-    reasons."""
+    git could not read, the chosen files whose history is too long to walk, and the earlier records
+    that could not be read. Returns the reasons."""
     reasons = []
+    if records_unread:
+        reasons.append(Reason(Cause.ARRIVALS_RECORD_UNREADABLE, names_that_fit(list(records_unread))))
     undecided = [f.path for q in settled.undecided for f in q.files]
     if undecided:
         reasons.append(Reason(Cause.ARRIVALS_UNDECIDED, str(len(undecided)),
@@ -1038,9 +1042,12 @@ def _settle_arrivals(repo: Path, slug: str, deliveries: dict, brought: dict, exc
     recorded = [q for record in records for q in record.deliveries]
     settled = arrival_questions.ask(live.asked + arrival_questions.from_records(recorded, excluded, seen, held),
                            resolver)
-    for record in records:
-        arrival_record.keep_only(record, arrival_questions.still_to_ask(record.deliveries, settled, held))
     out = _Arrivals()
+    for record in records:
+        remaining = arrival_questions.still_to_ask(record.deliveries, settled, held)
+        arrival_record.keep_only(record, remaining)
+        out.recorded.append((record, remaining))
+    out.taken = list(settled.take_out)
     too_large: list[str] = []
     for chosen in settled.take_out:
         with _naming_unread(unread):
@@ -1049,7 +1056,7 @@ def _settle_arrivals(repo: Path, slug: str, deliveries: dict, brought: dict, exc
                 too_large.append(chosen.path)
     out.to_record = [q for q in settled.undecided if not q.recorded]
     out.reasons = _arrival_reasons(settled, live.first_commits,
-                                   [*unread_deliveries, *live.unread, *unreadable], too_large)
+                                   [*unread_deliveries, *live.unread], too_large, unreadable)
     return out
 
 
@@ -1591,6 +1598,8 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
                        recovery=str(captured.path or ""))
     if moved is None:
         return _refuse(Cause.REPLAY_FAILED, ", ".join(n for n, _, _ in deliverable))
+    for record, remaining in settled_arrivals.recorded:
+        arrival_record.keep_only(record, arrival_questions.dropping(remaining, settled_arrivals.taken))
 
     results: list[BranchResult] = []
     failed: list[str] = []

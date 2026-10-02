@@ -45,7 +45,7 @@ def _origin_line(item: UncertainItem) -> str:
                 f"file{'' if n == 1 else 's'} saw is already removing: {paths}")
     if item.origin_unread:
         return "origin:  git could not read what this file arrived with — treat with caution"
-    return "origin:  not tied to a known delivery — treat with caution"
+    return "origin:  no commit ties it to the malware — treat with caution"
 
 
 def _body(item: UncertainItem) -> list[str]:

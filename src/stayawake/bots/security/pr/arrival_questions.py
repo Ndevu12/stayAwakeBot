@@ -117,6 +117,14 @@ def ask(questions, resolver, limit: int = ASKED_PER_RUN) -> Settled:
     return settled
 
 
+def dropping(recorded, files) -> list[DeliveryQuestion]:
+    """Remove files from recorded questions. Takes the questions and the files. Returns each
+    question without those files."""
+    gone = set(files)
+    return [_with_files(question, [f for f in question.files if f not in gone])
+            for question in recorded]
+
+
 def still_to_ask(recorded, settled: Settled,
                  held: Callable[[str, str], bool]) -> list[DeliveryQuestion]:
     """Find what an earlier run's record must keep after this run. Takes the recorded questions,
