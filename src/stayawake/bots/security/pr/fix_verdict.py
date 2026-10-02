@@ -276,8 +276,9 @@ def _arrival_lines(found: Arrivals, detail: bool) -> list[str]:
         lines.append("the malware is in this repository's first commit — review that commit's "
                      "other files yourself")
     if found.unread_records:
-        lines.append(f"{_paths(found.unread_records)} could not be read — review the commits that "
-                     "brought the malware yourself, then delete it")
+        line = ("an earlier list of files for you to decide could not be read — review the commits "
+                "that brought the malware yourself, then delete it")
+        lines.append(f"{line} ({_paths(found.unread_records)})" if detail else line)
     if found.unread:
         lines.append("git could not read what else was added with the malware — check the "
                      "repository with `git fsck`, then run this again")
