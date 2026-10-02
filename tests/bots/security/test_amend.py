@@ -1273,7 +1273,7 @@ class TestAmendActsOnContentPayload(_AmendFixture):
         scan = ScanResult(target=str(self.d), source="local", findings=[finding])
         before = self._rev()
         calls = []
-        with mock.patch.object(arrival, "MAX_PATH_HISTORY", 2):
+        with mock.patch.object(delivery, "MAX_PATH_HISTORY", 2):
             outcome = self._act_full(scan, pusher=lambda *a: calls.append(a) or PushResult(True))
         self.assertFalse(outcome.completed)
         self.assertIn(Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, self._causes(outcome))

@@ -10,7 +10,7 @@ from pathlib import Path
 from stayawake.bots.security.pr.resolve import ArrivedFile, DeliveryQuestion
 from stayawake.utils import atomicwrite, env
 
-RECORD_NAME = "arrival_questions.json"
+RECORD_NAME = "arrivals.json"
 _FORMAT = 1
 _MAX_RECORD_BYTES = 8 * 1024 * 1024
 _HEX = frozenset("0123456789abcdef")
@@ -54,7 +54,7 @@ def _delivery(raw) -> DeliveryQuestion | None:
         if (not isinstance(item, dict) or not isinstance(item.get("path"), str)
                 or not item["path"] or not _is_object_id(item.get("blob"))):
             return None
-        arrivals_for_fix.append(ArrivedFile(item["path"], item["blob"]))
+        arrived.append(ArrivedFile(item["path"], item["blob"]))
     return DeliveryQuestion(raw["commit"], date, subject, tuple(removing), tuple(arrived),
                             recorded=True)
 

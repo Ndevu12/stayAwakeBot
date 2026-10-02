@@ -435,7 +435,8 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
                             checkout=seen), wt
             if scan.error or done.error:
                 return stopped("ABORTED — scan did not finish")
-            text = (f"'{base}' already clean — nothing to fix" if seen.state is Checkout.CLEAN
+            text = (f"'{base}' already clean — nothing to fix"
+                    if seen.state is Checkout.CLEAN and not seen.arrivals.undecided
                     else f"'{base}' is clean")
             return _Stopped(BaseState.NOTHING_TO_FIX, text, base, seen), wt
     return _Fix(base, branch, applied, tuple(computed), suspicious, findings, advisories, tuple(manual),

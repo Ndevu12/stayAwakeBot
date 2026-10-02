@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import contextlib
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Callable, NamedTuple
 
@@ -391,10 +391,8 @@ def _purge_carriers(repo: Path, path: str, survives) -> set[str] | None:
     """Walk `path`'s history and collect the commits whose version of it carries a payload. Takes the
     repo, the path, and the `survives` oracle that judges each version. Returns those commits, or None
     when the history is too long to walk."""
-    changed = delivery.history_of(repo, path, all_branches=True)
-    if changed is None:
-        return None
-    return {sha for sha in changed if survives(sha, path)}
+    found = delivery.commits_carrying(repo, path, survives)
+    return None if found is None else set(found)
 
 
 def _register_purge(repo: Path, path: str, purge: set, purge_shas: set, survives,
@@ -614,10 +612,7 @@ def _carrying_commits(repo: Path, path: str, carries) -> list[str] | None:
     """Walk `path`'s history and collect the commits whose version of it carries the footprint.
     Takes the repo, the path, and the footprint check. Returns those commits, or None when the
     history is too long to walk."""
-    changed = delivery.history_of(repo, path, all_branches=True)
-    if changed is None:
-        return None
-    return [sha for sha in changed if carries(_stored_text(repo, sha, path))]
+    return delivery.commits_carrying(repo, path, lambda sha, at: carries(_stored_text(repo, sha, at)))
 
 
 def _foreign_history(repo: Path, path: str, oid: str) -> tuple[list[str], list[str]] | None:
@@ -975,21 +970,6 @@ def _survivors(repo: Path, slug: str, olds: list[str], token: str | None) -> lis
     return reasons
 
 
-def _add_deliveries(repo: Path, carriers: dict, deliveries: dict, unread: list[str]) -> None:
-    """Add the commits that first carry each path's payload to the deliveries. Takes the repo, each
-    path mapped to the commits holding a payload version of it, the deliveries to add to, and where
-    to name a path git could not read."""
-    for path in sorted(carriers):
-        try:
-            found = delivery.first_carriers(repo, {path: carriers[path]})
-        except gitutil.Unread as missed:
-            if missed.subject not in unread:
-                unread.append(missed.subject)
-            continue
-        for sha, paths in found.items():
-            deliveries[sha] = tuple(dict.fromkeys(deliveries.get(sha, ()) + paths))
-
-
 def _held_on_a_branch(repo: Path) -> Callable[[str, str], bool]:
     """Build a check of whether a branch's history still holds a file at a blob, each pair walked
     once. Takes the repo. Returns `held(path, blob)`, which also answers True when the history
@@ -1293,7 +1273,7 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
 
     deliveries: dict[str, tuple[str, ...]] = dict(infected)
     unread_deliveries: list[str] = []
-    _add_deliveries(repo, {**clean_holders, **remove_holders, **purge_holders}, deliveries,
+    delivery.add_first_carriers(repo, {**clean_holders, **remove_holders, **purge_holders}, deliveries,
                     unread_deliveries)
     brought = delivery.brought_by_each(repo, deliveries)
     asked: set[str] = set()
@@ -1400,7 +1380,7 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
                             repo, item.path, purge, purge_shas, survives) == "too-large":
                         return _refuse(Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, item.path)
 
-    _add_deliveries(repo, {p: h for p, h in answered_holders.items() if h}, deliveries,
+    delivery.add_first_carriers(repo, {p: h for p, h in answered_holders.items() if h}, deliveries,
                     unread_deliveries)
     for sha in [*uncharacterized, *blocked_infected]:
         deliveries.pop(sha, None)
@@ -1601,7 +1581,8 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
         return _refuse(Cause.CAPTURE_FAILED, captured.reason)
     if settled_arrivals.to_record and arrival_record.write(
             _capture_path(slug, oldest[:12]).parent, settled_arrivals.to_record) is None:
-        arrival_reasons.append(Reason(Cause.ARRIVALS_NOT_RECORDED))
+        arrival_reasons[:] = [replace(r, cause=Cause.ARRIVALS_NOT_RECORDED)
+                              if r.cause == Cause.ARRIVALS_UNDECIDED else r for r in arrival_reasons]
 
     try:
         moved = gitamend.point_branches(repo, deliverable, delivered_tips, keep, staging)
