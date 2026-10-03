@@ -183,13 +183,10 @@ class TestTheVerdictIsStructural(unittest.TestCase):
                 self.assertEqual(outcome.needs_review, cause not in ao._NEEDING_NO_ACTION)
 
     def test_the_actionless_set_is_exactly_these(self):
-        """Fail-closed: a cause needs review until someone declares it actionless, so this set is
-        an allow-list that has to be argued for. Objects that remain until git collects them are
-        not work; neither is a repository with no confirmed payload to replace, nor saved work the
-        payload was already taken out of on this machine, which is never pushed."""
+        """Only the causes declared to need no person are actionless."""
         self.assertEqual(ao._NEEDING_NO_ACTION,
                          frozenset({Cause.PREVIOUS_OBJECTS_UNCOLLECTED, Cause.NO_CONFIRMED_PAYLOAD,
-                                    Cause.SAVED_WORK_CLEANED_HERE}))
+                                    Cause.SAVED_WORK_CLEANED_HERE, Cause.ARRIVALS_KEPT}))
 
     def test_a_branch_that_did_not_move_needs_review_whatever_the_reasons_say(self):
         outcome = AmendOutcome("o/r", completed=False, commit="abc123456789",

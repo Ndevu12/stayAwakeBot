@@ -6,15 +6,16 @@ from __future__ import annotations
 
 import contextlib
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Callable, NamedTuple
 
 from stayawake.bots.security.models import CONFIRMED
 from stayawake.utils import scratch
+from stayawake.bots.security.pr import arrival_questions, arrival_record
 from stayawake.bots.security.pr.resolve import REMOVE, RESTORE, SUPPLY
-from stayawake.bots.security.remediation import (changes, footprint, installed, live, oracle,
-                                                 preserve)
+from stayawake.bots.security.remediation import (delivery, changes, footprint, installed, live,
+                                                 oracle, preserve)
 from stayawake.bots.security.pr.fix_verdict import Checkout, checkout_clauses, checkout_of
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.targets import LocalRepoTarget
@@ -34,7 +35,6 @@ from stayawake.lib.git.write.push import PushResult, force_update_head, publish_
 from stayawake.lib.git.write import sign
 from stayawake.lib.git.write.replace import replacement_tree, write_blob_bytes
 from stayawake.lib import git as gitutil
-from stayawake.utils import env
 
 
 def _full(repo: Path, sha: str) -> str:
@@ -99,16 +99,6 @@ def _stored_text(repo: Path, treeish: str, path: str) -> str:
     if found is None:
         raise _unread(path)
     return found[1]
-
-
-def _history_of(repo: Path, path: str, **walk) -> list[str] | None:
-    """The commits that changed a path, newest first. Takes the repo, the path and the walk's
-    options. Returns them, or None when the history is too long to walk. Raises `Unread` naming
-    every copy of the path when git could not walk it."""
-    changed = gitutil.file_commits(repo, path, limit=_MAX_PATH_HISTORY, **walk)
-    if changed is None:
-        raise _unread(path)
-    return None if len(changed) >= _MAX_PATH_HISTORY else changed
 
 
 @contextlib.contextmanager
@@ -195,45 +185,6 @@ def _branches_carrying_any(repo: Path, infected) -> list[tuple[str, str, str]] |
         for name, tip, cas_old in carrying:
             heads.setdefault(name, (name, tip, cas_old))
     return list(heads.values())
-
-
-def _swept_paths(repo: Path, merge_sha: str, related, anchors) -> list[str]:
-    """The paths to remove from `related`: a confirmed-payload path, or a path in a payload's
-    entirely graft-introduced delivery tree. Takes the repo, the merge sha, the merge's introduced
-    paths, and the confirmed-payload paths among them. Returns the subset to remove."""
-    trees = {mergedetect.delivery_subtree(repo, merge_sha, a) for a in anchors}
-    trees.discard(None)
-    out = []
-    for path in related:
-        if path in anchors or any(path == d or path.startswith(d + "/") for d in trees):
-            out.append(path)
-    return out
-
-
-def _confirmed_commits(scan) -> list:
-    """Commit-carrying findings to act on, with the confirmed-payload paths in each. Takes the scan.
-    Returns `(finding, anchors)` per commit that is itself confirmed, or that names a confirmed
-    payload among its paths."""
-    external = {getattr(f, "path", "") for f in scan.findings
-                if getattr(f, "confidence", None) == CONFIRMED
-                and not getattr(f, "advisory_only", False)
-                and not getattr(f, "commit_sha", None)}
-    found = []
-    seen: set[str] = set()
-    for f in scan.findings:
-        related = getattr(f, "related_paths", None)
-        sha = getattr(f, "commit_sha", None)
-        if not related or not sha or sha in seen:
-            continue
-        confirmed = getattr(f, "confidence", None) == CONFIRMED
-        ext = set(related) & external
-        if not (confirmed or ext):
-            continue
-        own = set(getattr(f, "payload_paths", ()) or (related if confirmed else ()))
-        anchors = tuple(sorted((own | ext) & set(related)))
-        seen.add(sha)
-        found.append((f, anchors))
-    return found
 
 
 def _flat(signatures) -> list:
@@ -369,7 +320,7 @@ def _predates_content_targets(repo: Path, scan, signatures, allowlist, opts,
     payload = oracle.payload_matchers(signatures)
     out = []
     seen: set[str] = set()
-    for finding, anchors in _confirmed_commits(scan):
+    for finding, anchors in delivery.confirmed_commits(scan.findings):
         sha = getattr(finding, "commit_sha", None)
         if not sha:
             continue
@@ -390,21 +341,6 @@ def _predates_content_targets(repo: Path, scan, signatures, allowlist, opts,
                 seen.add(path)
                 out.append((path, carries, corrector))
     return out
-
-
-def _blast_radius(repo: Path, path: str,
-                  infected: dict[str, tuple[str, ...]]) -> tuple[str, tuple[str, ...]]:
-    """`(introduced_by, arrived_with_removed)` tying `path` to a confirmed injection merge that
-    brought it: the merge's short id and the confirmed paths saw is removing from it. `("", ())`
-    when no known injection merge brought this path; never raises."""
-    for sha, payloads in infected.items():
-        try:
-            born = mergedetect.born_at_merge(repo, sha, (path,))
-        except Exception:
-            continue
-        if path in born:
-            return sha[:12], tuple(payloads)
-    return "", ()
 
 
 def _delivered_removals(replacements: dict, delivered_reach: set[str],
@@ -431,13 +367,26 @@ def _register_removal(repo: Path, path: str, remove: dict, remove_shas: set,
     entry = _stored_entry(repo, treeish, path)
     if entry is None:
         return ""
-    hist = _foreign_history(repo, path, entry[1])
+    return _register_blob_removal(repo, path, entry[1], remove, remove_shas, remove_holders)
+
+
+def _register_blob_removal(repo: Path, path: str, oid: str, remove: dict, remove_shas: set,
+                           remove_holders: dict, delivered_in: str = "") -> str:
+    """Schedule `path` to be dropped wherever history holds it at blob `oid`, recording the commits
+    that hold it. Takes the repo, the path, the blob id, the three removal maps to fill, and
+    optionally the commit that delivered it, limiting the drop to that commit and those after it
+    while history still holds it. Returns "too-large" when the history is too long to walk, else
+    ""."""
+    hist = _foreign_history(repo, path, oid)
     if hist is None:
         return "too-large"
     _holders, foreign = hist
+    if delivered_in:
+        foreign = [sha for sha in foreign if gitutil.ancestry(repo, delivered_in, sha) is True] \
+            or foreign
     if not foreign:
         return ""
-    remove[path] = entry[1]
+    remove[path] = oid
     remove_shas.update(foreign)
     remove_holders[path] = set(foreign)
     return ""
@@ -447,10 +396,8 @@ def _purge_carriers(repo: Path, path: str, survives) -> set[str] | None:
     """Walk `path`'s history and collect the commits whose version of it carries a payload. Takes the
     repo, the path, and the `survives` oracle that judges each version. Returns those commits, or None
     when the history is too long to walk."""
-    changed = _history_of(repo, path, all_branches=True)
-    if changed is None:
-        return None
-    return {sha for sha in changed if survives(sha, path)}
+    found = delivery.commits_carrying(repo, path, survives)
+    return None if found is None else set(found)
 
 
 def _register_purge(repo: Path, path: str, purge: set, purge_shas: set, survives,
@@ -491,7 +438,7 @@ def _clean_ancestor(repo: Path, path: str, survives) -> tuple[tuple[str, str], s
     history holds no such version."""
     head = _stored_entry(repo, "HEAD", path)
     head_oid = head[1] if head else None
-    for sha in _history_of(repo, path, first_parent=True) or ():
+    for sha in delivery.history_of(repo, path, first_parent=True) or ():
         answered, entry = gitutil.entry_at(repo, sha, path)
         if not answered or entry is None or entry[1] == head_oid:
             continue
@@ -501,11 +448,12 @@ def _clean_ancestor(repo: Path, path: str, survives) -> tuple[tuple[str, str], s
 
 
 def _register_substitute(repo: Path, path: str, entry: tuple[str, str], substitute: dict,
-                         substitute_shas: set, treeish: str = "HEAD") -> str:
+                         substitute_shas: set, treeish: str = "HEAD",
+                         holders: dict | None = None) -> str:
     """Schedule `entry` to be put back wherever history holds `path` at the blob it has at `treeish`,
     recording the commits that hold it. Takes the repo, the path, the replacement tree entry, the two
-    substitution maps to fill, and the treeish to key on. Returns "too-large" when the history is too
-    long to walk, else ""."""
+    substitution maps to fill, the treeish to key on, and optionally a map recording which commits
+    held it. Returns "too-large" when the history is too long to walk, else ""."""
     current = _stored_entry(repo, treeish, path)
     if current is None:
         return ""
@@ -517,16 +465,18 @@ def _register_substitute(repo: Path, path: str, entry: tuple[str, str], substitu
         return ""
     substitute[path] = (current[1], entry)
     substitute_shas.update(foreign)
+    if holders is not None:
+        holders[path] = set(foreign)
     return ""
 
 
 def _register_supply(repo: Path, path: str, content: bytes, substitute: dict, substitute_shas: set,
-                     payload, allowlist, opts) -> str:
+                     payload, allowlist, opts, holders: dict | None = None) -> str:
     """Scan operator-supplied `content` and, when it carries no payload, schedule it to replace `path`
     wherever history holds the blob `path` has at HEAD. Takes the repo, the path, the content, the two
-    substitution maps to fill, and the scan inputs. Returns "carries" when the content itself carries a
-    payload, "unwritable" when its blob cannot be written, "too-large" when the history is too long to
-    walk, else ""."""
+    substitution maps to fill, the scan inputs, and optionally a map recording which commits held
+    it. Returns "carries" when the content itself carries a payload, "unwritable" when its blob
+    cannot be written, "too-large" when the history is too long to walk, else ""."""
     if oracle.content_confirms(content, path, payload, allowlist, opts):
         return "carries"
     current = _stored_entry(repo, "HEAD", path)
@@ -535,7 +485,8 @@ def _register_supply(repo: Path, path: str, content: bytes, substitute: dict, su
     blob = write_blob_bytes(repo, content)
     if blob is None:
         return "unwritable"
-    return _register_substitute(repo, path, (current[0], blob), substitute, substitute_shas)
+    return _register_substitute(repo, path, (current[0], blob), substitute, substitute_shas,
+                                holders=holders)
 
 
 def _unhandled_items(repo: Path, scan, unhandled: set[str], survives=None, *,
@@ -591,12 +542,11 @@ def _path_items(repo: Path, paths, treeish: str, introduced_by: str = "", *,
 
 
 def _uncertain_items(repo: Path, scan, taken: set[str],
-                     infected: dict[str, tuple[str, ...]], *, unread: list[str]) -> list:
+                     origin: Callable[[str], delivery.Origin], *, unread: list[str]) -> list:
     """Build the operator's list of heuristic file findings this verb would otherwise leave untouched.
-    Takes the repo, the scan, the paths the confirmed lanes already own, and each injection merge
-    mapped to the paths saw is removing from it, which tells the operator what a file arrived with.
-    Returns one `UncertainItem` per finding whose file is present at HEAD; a path git could not read
-    is named in `unread`."""
+    Takes the repo, the scan, the paths the confirmed lanes already own, and `origin(path)`, which
+    finds the delivery that added a file. Returns one `UncertainItem` per finding whose file is
+    present at HEAD; a path git could not read is named in `unread`."""
     from stayawake.bots.security.models import HEURISTIC
     from stayawake.bots.security.pr.resolve import UncertainItem
     out = []
@@ -612,13 +562,14 @@ def _uncertain_items(repo: Path, scan, taken: set[str],
             if entry is None:
                 continue
             seen.add(path)
-            introduced_by, arrived = _blast_radius(repo, path, infected)
+            came = origin(path)
             out.append(UncertainItem(
                 path=path, category=getattr(f, "category", "") or "",
                 signature_id=getattr(f, "signature_id", "") or "",
                 description=getattr(f, "description", "") or "",
                 preview=gitutil.blob(repo, entry[1]) or b"",
-                introduced_by=introduced_by, arrived_with_removed=arrived))
+                introduced_by=came.commit[:12], arrived_with_removed=came.payloads,
+                origin_unread=came.unread))
     return out
 
 
@@ -660,24 +611,20 @@ def _unhandled_confirmed(scan, signatures, revert_paths: set[str],
     return paths
 
 
-_MAX_PATH_HISTORY = 100_000
 
 
 def _carrying_commits(repo: Path, path: str, carries) -> list[str] | None:
     """Walk `path`'s history and collect the commits whose version of it carries the footprint.
     Takes the repo, the path, and the footprint check. Returns those commits, or None when the
     history is too long to walk."""
-    changed = _history_of(repo, path, all_branches=True)
-    if changed is None:
-        return None
-    return [sha for sha in changed if carries(_stored_text(repo, sha, path))]
+    return delivery.commits_carrying(repo, path, lambda sha, at: carries(_stored_text(repo, sha, at)))
 
 
 def _foreign_history(repo: Path, path: str, oid: str) -> tuple[list[str], list[str]] | None:
     """Walk `path`'s history and separate the commits that hold it from those holding exactly `oid`.
     Takes the repo, the path, and that blob id. Returns `(holders, holders at oid)`, or None when the
     history is too long to walk."""
-    changed = _history_of(repo, path, all_branches=True)
+    changed = delivery.history_of(repo, path, all_branches=True)
     if changed is None:
         return None
     holders, foreign = [], []
@@ -949,16 +896,9 @@ def _force_update_branch(repo: Path, slug: str, branch: str, token: str | None, 
 
 
 def _capture_path(slug: str, sha12: str) -> Path:
-    """Where the objects the replacement orphans are captured before any ref moves.
-
-    Outside the repository entirely. Inside the worktree a new file makes the tree dirty and the
-    ref move is then refused; inside the git directory the capture dies with the checkout, and on
-    `--remote` that checkout is a temporary clone deleted seconds after the remote refs move — so
-    the evidence had a shorter life than the destruction it authorised. Cross-run state is the one
-    place that outlives both.
-    """
-    safe = "".join(c if c.isalnum() or c in "-._" else "-" for c in slug) or "repository"
-    return Path(env.xdg_state_home()) / "saw" / "amend" / safe / sha12 / "capture.bundle"
+    """Find where the objects a replacement orphans are captured before any ref moves. Takes the
+    repository's slug and the short id of the oldest replaced commit. Returns the path."""
+    return arrival_record.state_dir(slug) / sha12 / "capture.bundle"
 
 
 _CAUSE_PER_REFUSAL_KIND = {
@@ -1035,6 +975,96 @@ def _survivors(repo: Path, slug: str, olds: list[str], token: str | None) -> lis
     return reasons
 
 
+def _held_on_a_branch(repo: Path) -> Callable[[str, str], bool]:
+    """Build a check of whether a branch's history still holds a file at a blob, each pair walked
+    once. Takes the repo. Returns `held(path, blob)`, which also answers True when the history
+    could not be walked."""
+    known: dict[tuple[str, str], bool] = {}
+
+    def held(path: str, blob: str) -> bool:
+        if (path, blob) not in known:
+            try:
+                hist = _foreign_history(repo, path, blob)
+            except gitutil.Unread:
+                hist = None
+            known[(path, blob)] = hist is None or bool(hist[1])
+        return known[(path, blob)]
+
+    return held
+
+
+@dataclass
+class _Arrivals:
+    """What became of the files added beside the payloads this run removes: the files to drop with
+    the commits holding each, the questions nobody answered that the run records, and the reasons
+    to report."""
+
+    arrived: dict[str, str] = field(default_factory=dict)
+    holders: dict[str, set[str]] = field(default_factory=dict)
+    to_record: list = field(default_factory=list)
+    reasons: list[Reason] = field(default_factory=list)
+    recorded: list = field(default_factory=list)
+
+
+def _arrival_reasons(settled: arrival_questions.Settled, first_commits: list[str], unread: list[str],
+                     too_large: list[str], records_unread: list[str] = ()) -> list[Reason]:
+    """Name what the operator decided and what is left to decide about the files added beside a
+    payload. Takes what was settled, the first commits that carry a payload with other files, what
+    git could not read, the chosen files whose history is too long to walk, and the earlier records
+    that could not be read. Returns the reasons."""
+    reasons = []
+    if records_unread:
+        reasons.append(Reason(Cause.ARRIVALS_RECORD_UNREADABLE, names_that_fit(list(records_unread))))
+    undecided = [f.path for q in settled.undecided for f in q.files]
+    if undecided:
+        reasons.append(Reason(Cause.ARRIVALS_UNDECIDED, str(len(undecided)),
+                              names_that_fit(undecided)))
+    if first_commits:
+        reasons.append(Reason(Cause.ARRIVALS_IN_FIRST_COMMIT, names_that_fit(first_commits)))
+    if unread:
+        reasons.append(Reason(Cause.ARRIVALS_UNREAD, names_that_fit(unread)))
+    if too_large:
+        reasons.append(Reason(Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, names_that_fit(too_large)))
+    if settled.kept:
+        kept = [f.path for f in settled.kept]
+        reasons.append(Reason(Cause.ARRIVALS_KEPT, str(len(kept)), names_that_fit(kept)))
+    return reasons
+
+
+def _settle_arrivals(repo: Path, slug: str, deliveries: dict, brought: dict, excluded: set[str],
+                     resolver, unread_deliveries: list[str], remove_shas: set,
+                     unread: list[str]) -> _Arrivals:
+    """Put the files each delivery added to the operator, with those an earlier run recorded, and
+    schedule the ones taken out. Takes the repo, its slug, each delivery mapped to the payload paths
+    saw removes from it, what each delivery brought, the paths to leave out, the resolver, what git
+    could not read while finding the deliveries, the commits to rebuild, which it adds to, and
+    where to name what git could not read. Returns the `_Arrivals`."""
+    seen: set[tuple[str, str]] = set()
+    live = arrival_questions.from_history(repo, deliveries, brought, excluded, seen)
+    records, unreadable = arrival_record.read_all(slug)
+    held = _held_on_a_branch(repo)
+    recorded = [q for record in records for q in record.deliveries]
+    settled = arrival_questions.ask(live.asked + arrival_questions.from_records(recorded, excluded, seen, held),
+                           resolver)
+    out = _Arrivals()
+    for record in records:
+        remaining = arrival_questions.still_to_ask(record.deliveries, settled, held)
+        arrival_record.keep_only(record, remaining)
+        out.recorded.append((record, remaining))
+    too_large: list[str] = []
+    for chosen in settled.take_out:
+        with _naming_unread(unread):
+            if _register_blob_removal(repo, chosen.path, chosen.blob, out.arrived, remove_shas,
+                                      out.holders,
+                                      settled.delivered_in.get((chosen.path, chosen.blob), "")) \
+                    == "too-large":
+                too_large.append(chosen.path)
+    out.to_record = [q for q in settled.undecided if not q.recorded]
+    out.reasons = _arrival_reasons(settled, live.first_commits,
+                                   [*unread_deliveries, *live.unread], too_large, unreadable)
+    return out
+
+
 def amend_repo(repo: Path, opts, signatures, allowlist, token: str | None = None, *,
                pusher=None,
                identity_fallback: str | None = None,
@@ -1097,12 +1127,14 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
     Returns the outcome."""
     pusher, identity_fallback, operator_context, resolver = operator
     rejected_supply: dict[str, Cause] = {}
+    arrival_reasons: list[Reason] = []
 
     def _refuse(cause: Cause, detail: str = "", subjects: str = "",
                 recovery: str = "") -> AmendOutcome:
-        """Refuse, carrying any operator answer the run could not use."""
+        """Refuse, carrying any operator answer the run could not use and what is left to decide
+        about the files added beside a payload."""
         return refused(display, cause, detail, subjects, recovery,
-                       also=_supply_refusals(rejected_supply))
+                       also=_supply_refusals(rejected_supply) + tuple(arrival_reasons))
 
     if not gitutil.is_git_repo(repo):
         return _refuse(Cause.NOT_A_GIT_REPOSITORY)
@@ -1141,7 +1173,7 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
         _add_file_findings(scan, committed)
     found.confirmed = any(getattr(f, "confidence", None) == CONFIRMED
                           and not getattr(f, "advisory_only", False) for f in scan.findings)
-    commits = _confirmed_commits(scan)
+    commits = delivery.confirmed_commits(scan.findings)
     infected: dict[str, tuple[str, ...]] = {}
     uncharacterized: dict[str, tuple[str, str]] = {}
     uncharacterized_paths: dict[str, tuple[str, ...]] = {}
@@ -1154,7 +1186,7 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
                            f"{reported[:12]}: {named}" if named else (reported[:12] or "?"))
         related = tuple(getattr(finding, "related_paths", ()) or ())
         try:
-            paths = tuple(_swept_paths(repo, sha, related, anchors))
+            paths = tuple(delivery.swept_by(repo, sha, related, anchors))
             born = () if paths else tuple(sorted(mergedetect.born_at_merge(repo, sha, related)))
         except gitutil.Unread as missed:
             return _refuse(Cause.HISTORY_UNREADABLE, missed.subject)
@@ -1163,9 +1195,11 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
             uncharacterized_paths[sha] = born
             continue
         infected[sha] = tuple(dict.fromkeys(infected.get(sha, ()) + paths))
+    swept = {p for ps in infected.values() for p in ps}
 
     clean: dict[str, tuple] = {}
     clean_shas: set[str] = set()
+    clean_holders: dict[str, set[str]] = {}
     cleaned_head: dict[str, str] = {}
     for finding, carries, corrector, head_clean in _content_targets(repo, scan, signatures, unread):
         with _naming_unread(unread):
@@ -1176,6 +1210,7 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
                 return _refuse(Cause.CONFIRMED_COMMIT_UNRESOLVED, finding.path)
             clean[finding.path] = (carries, corrector)
             clean_shas.update(carrying)
+            clean_holders[finding.path] = set(carrying)
             cleaned_head[finding.path] = head_clean
 
     for path, carries, corrector in _predates_content_targets(
@@ -1188,6 +1223,7 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
                 continue
             clean[path] = (carries, corrector)
             clean_shas.update(carrying)
+            clean_holders[path] = set(carrying)
 
     remove: dict[str, str] = {}
     remove_shas: set[str] = set()
@@ -1247,12 +1283,24 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
             if _register_purge(repo, path, purge, purge_shas, survives, purge_holders) == "too-large":
                 return _refuse(Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, path)
 
+    deliveries: dict[str, tuple[str, ...]] = dict(infected)
+    unread_deliveries: list[str] = []
+    delivery.add_first_carriers(repo, {**clean_holders, **remove_holders, **purge_holders}, deliveries,
+                    unread_deliveries)
+    brought = delivery.brought_by_each(repo, deliveries)
+    asked: set[str] = set()
+    answered_holders: dict[str, set[str]] = {}
+    substitute_holders: dict[str, set[str]] = {}
+
     if resolver is not None:
         held = set(clean) | set(remove) | {p for ps in infected.values() for p in ps}
-        for item in _uncertain_items(repo, scan, held, infected, unread=unread):
+        for item in _uncertain_items(repo, scan, held,
+                                     lambda path: delivery.origin_of(path, deliveries, brought),
+                                     unread=unread):
+            asked.add(item.path)
             try:
                 answer = resolver(item)
-            except Exception:                  # a resolver fault leaves the file for review
+            except Exception:
                 continue
             with _naming_unread(unread):
                 if answer.action == REMOVE and _register_operator_removal(
@@ -1272,6 +1320,7 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
         unhandled = [p for p in unhandled if _committed_anywhere(repo, p)]
     if resolver is not None and unhandled:
         for item in _unhandled_items(repo, scan, unhandled, survives, unread=unread):
+            asked.add(item.path)
             try:
                 answer = resolver(item)
             except Exception:
@@ -1279,12 +1328,13 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
             with _naming_unread(unread):
                 if answer.action == RESTORE and answer.restore is not None:
                     if _register_substitute(repo, item.path, answer.restore,
-                                            substitute, substitute_shas) == "too-large":
+                                            substitute, substitute_shas,
+                                            holders=substitute_holders) == "too-large":
                         return _refuse(Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, item.path)
                 elif answer.action == SUPPLY and isinstance(answer.supply, bytes):
                     refusal = _register_supply(repo, item.path, answer.supply, substitute,
                                                substitute_shas, oracle.payload_matchers(signatures),
-                                               allowlist, opts)
+                                               allowlist, opts, holders=substitute_holders)
                     if refusal == "too-large":
                         return _refuse(Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, item.path)
                     if refusal:
@@ -1296,6 +1346,9 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
                         purge, purge_shas, survives,
                         purge_holders=purge_holders) == "too-large":
                     return _refuse(Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, item.path)
+            answered_holders[item.path] = (remove_holders.get(item.path, set())
+                                           | purge_holders.get(item.path, set())
+                                           | substitute_holders.get(item.path, set()))
         unhandled = _unhandled_confirmed(scan, signatures, taken, cleaned_head,
                                          set(remove) | set(substitute) | set(purge))
         if keep_operator_changes:
@@ -1308,6 +1361,7 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
                 if not present:
                     continue
                 for item in _path_items(repo, present, sha, sha[:12], unread=unread):
+                    asked.add(item.path)
                     try:
                         answer = resolver(item)
                     except Exception:
@@ -1329,6 +1383,7 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
             with _naming_unread(unread):
                 present = [p for p in infected[sha] if _stored_entry(repo, sha, p) is not None]
                 for item in _path_items(repo, present, sha, sha[:12], unread=unread):
+                    asked.add(item.path)
                     try:
                         answer = resolver(item)
                     except Exception:
@@ -1337,7 +1392,20 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
                             repo, item.path, purge, purge_shas, survives) == "too-large":
                         return _refuse(Cause.HISTORY_TOO_LARGE_TO_ENUMERATE, item.path)
 
-    if not infected and not clean and not remove and not substitute and not purge:
+    delivery.add_first_carriers(repo, {p: h for p, h in answered_holders.items() if h}, deliveries,
+                    unread_deliveries)
+    for sha in [*uncharacterized, *blocked_infected]:
+        deliveries.pop(sha, None)
+    with_a_finding = {getattr(f, "path", "") or "" for f in scan.findings}
+    settled_arrivals = _settle_arrivals(
+        repo, slug, deliveries, delivery.brought_by_each(repo, deliveries, brought),
+        with_a_finding | asked | swept | set(clean) | set(remove) | set(purge) | set(substitute)
+        | {p for ps in uncharacterized_paths.values() for p in ps},
+        resolver, unread_deliveries, remove_shas, unread)
+    arrived = settled_arrivals.arrived
+    arrival_reasons.extend(settled_arrivals.reasons)
+
+    if not infected and not clean and not remove and not substitute and not purge and not arrived:
         if unhandled:
             return _refuse(Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY,
                            str(len(unhandled)), ", ".join(sorted(unhandled)))
@@ -1373,15 +1441,10 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
     plan = gitrebuild.commits_to_rebuild(graph, all_infected)
     uncovered = sorted(s for s in all_infected if s not in {sha for sha, _ps in plan})
     if uncovered:
-        # A confirmed commit no branch reaches is not amendable here, and counting it as replaced
-        # would report commits the run never touched.
         return _refuse(Cause.COMMIT_ON_NO_BRANCH,
                        ", ".join(s[:12] for s in uncovered))
     oldest = plan[0][0]
 
-    # Two sources: whether a signature is owed is read from the commits being replaced (`repo`);
-    # the signer that produces it is read from the operator's own config context. `operator_context`
-    # is not a context saw named, so its program keys are not trusted (see `signing_status`).
     signing = sign.signing_status(
         operator_context or repo,
         history_is_signed=sign.any_signed(repo, [sha for sha, _ps in plan]),
@@ -1428,18 +1491,18 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
         recovered_paths |= set(replacement.recovered)
         replacements[sha] = replacement
 
-    # Objects only — no reference moves until the capture below has been read back.
     rebuilt = gitrebuild.rebuild_without_payload(
         repo, plan, replacements,
         lambda sha, tree, new_parents: gitamend.rewrite_commit(repo, sha, tree, new_parents,
                                                                signing),
-        survives, clean=clean, remove=remove, pre_blocked=blocked_commits,
+        survives, clean=clean, remove={**remove, **arrived}, pre_blocked=blocked_commits,
         substitute=substitute, purge=purge)
     blocked = rebuilt.blocked
 
     new_tips = {tip: rebuilt.tip(tip) for _n, tip, _c in heads}
-    flagged = ({p for paths in infected.values() for p in paths}
-               | set(clean) | set(remove) | set(substitute) | set(purge))
+    payload_paths = ({p for paths in infected.values() for p in paths}
+                     | set(clean) | set(remove) | set(substitute) | set(purge))
+    flagged = payload_paths | set(arrived)
 
     deliverable: list[tuple[str, str, str]] = []
     isolated: list[BranchResult] = []
@@ -1466,13 +1529,12 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
         return _refuse(reason.cause, reason.detail, reason.subjects)
 
     delivered_tips = {tip: new_tips[tip] for _n, tip, _c in deliverable}
-    # Count and name only commits a delivered branch reaches, not ones rebuilt for an isolated one.
     delivered_reach = _reached_from(graph, [t for _n, t, _c in deliverable])
     oldest = next((sha for sha, _ps in plan
                    if sha in rebuilt.mapping and sha in delivered_reach), oldest)
     delivered_infected = [s for s in all_infected if s in rebuilt.mapping and s in delivered_reach]
 
-    path_checks = {p: (lambda tr, pth: _judged(survives(tr, pth))) for p in flagged}
+    path_checks = {p: (lambda tr, pth: _judged(survives(tr, pth))) for p in payload_paths}
     path_checks.update({p: (lambda tr, pth, c=carries: _carries_in(repo, tr, pth, c))
                         for p, (carries, _c) in clean.items()})
     left, unread_rewrite = _payload_left(
@@ -1529,6 +1591,10 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
                               _capture_path(slug, oldest[:12]))
     if not captured.ok:
         return _refuse(Cause.CAPTURE_FAILED, captured.reason)
+    if settled_arrivals.to_record and arrival_record.write(
+            _capture_path(slug, oldest[:12]).parent, settled_arrivals.to_record) is None:
+        arrival_reasons[:] = [replace(r, cause=Cause.ARRIVALS_NOT_RECORDED)
+                              if r.cause == Cause.ARRIVALS_UNDECIDED else r for r in arrival_reasons]
 
     try:
         moved = gitamend.point_branches(repo, deliverable, delivered_tips, keep, staging)
@@ -1582,6 +1648,8 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
                                    ", ".join(sorted(recovered_paths))))
     for reason in reversed(_supply_refusals(rejected_supply)):
         survivors.insert(0, reason)
+    for reason in reversed(arrival_reasons):
+        survivors.insert(0, reason)
     if unhandled:
         survivors.insert(0, Reason(Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY,
                                    str(len(unhandled)), ", ".join(sorted(unhandled))))
@@ -1594,12 +1662,14 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
         except gitamend.AmendUnwindFailed as unwound:
             unrestored = unwound.unrestored
         if unrestored:
-            # The pre-push caller already reports this; reporting it here too is the point — the
-            # same refused restore was silent on this side, and a local branch left on rewritten
-            # history is the operator's problem whether or not any push succeeded.
             survivors.insert(0, Reason(Cause.LEFT_PART_WAY, ", ".join(unrestored)))
             recovery = str(captured.path or "")
-    removed = _delivered_removals(replacements, delivered_reach, remove_holders, purge_holders)
+    held_now = _held_on_a_branch(repo)
+    for record, remaining in settled_arrivals.recorded:
+        arrival_record.keep_only(record, arrival_questions.still_to_ask(
+            remaining, arrival_questions.Settled(), held_now))
+    removed = _delivered_removals(replacements, delivered_reach,
+                                  {**remove_holders, **settled_arrivals.holders}, purge_holders)
     touched = len(delivered_infected)
     label = (oldest[:12] if touched == 1 else f"{touched} commits from {oldest[:12]}")
     if not results and not isolated:

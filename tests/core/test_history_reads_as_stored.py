@@ -80,7 +80,7 @@ class TestEntries(GitSandbox):
         self.assertEqual(query.list_tree(self.d, "HEAD", "nowhere"), [])
         self.write(self.d, "dir/b.js", "two\n")
         head = self.commit(self.d, "second")
-        with mock.patch.object(query, "entry_at", return_value=(False, None)):
+        with mock.patch.object(query, "_entries", return_value=None):
             with self.assertRaises(query.Unread):
                 mergedetect.born_at_merge(self.d, head, ["dir/a.js"])
 

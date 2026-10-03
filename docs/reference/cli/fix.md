@@ -60,6 +60,10 @@ or changed, on disk or in your staged changes, the run says so and names the rem
 for a commit the base branch already has, and [`saw fix amend`](amend.md) for your own commits. A
 stash entry is named only, because it also holds your own work.
 
+**Files added in the same commit as the malware are yours to decide.** When that commit added
+other files with no finding of their own, the run removes none of them, names them, and is not
+called done. Run [`saw fix amend`](amend.md) in that repository on a terminal to decide them.
+
 `fix` cleans your working tree and records that as a new commit. What the repository already
 stored stays stored: the payload is still there in the earlier commit, and one `git show` puts it
 back on disk. Anyone who cloned or forked the repository still has it too, and nothing you do to

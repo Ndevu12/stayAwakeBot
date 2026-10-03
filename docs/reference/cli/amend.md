@@ -62,6 +62,22 @@ completion only when the history it rewrote no longer holds them.
 If it cannot finish, it puts the branches back and says so. If it moved a branch and could not put
 it back, it names that branch: look at that repository before doing anything else with it.
 
+## Files added in the same commit as the malware
+
+The commit that brought the malware often added other files that carry no finding of their own.
+saw never removes those by itself.
+
+- **On a terminal, for one repository,** it shows each such commit — its id, date and subject as the
+  commit gives them, and what saw is removing from it — and lists the other files it added, numbered
+  by folder. Type `all` or the numbers of the files to take out, then `yes`. Press Enter to keep
+  them all. It asks about at most ten such commits in one run; the rest are asked on the next. A
+  file you take out is removed from every commit that still holds it as it was added; a version you
+  changed later stays. A file that commit changed, and did not add, is named, never removed.
+- **Anywhere else** — no terminal, CI, several repositories, `--remote` — none of them is removed. The
+  run names them, is not called done, and remembers them, so running `saw fix amend` in that
+  repository on a terminal later asks about them.
+- **When the malware is in the repository's first commit,** saw names that commit for you to review.
+
 ## What it leaves for you
 
 - **A protected branch is never force-updated.** The amended history is published beside it under

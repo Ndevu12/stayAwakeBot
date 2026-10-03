@@ -19,11 +19,11 @@ from stayawake.bots.security.remediation import live, manifest
 from stayawake.bots.security import remediation
 from stayawake.bots.security.remediation import installed
 from stayawake.core import proposal
-from stayawake.bots.security.pr import held
+from stayawake.bots.security.pr import arrivals_for_fix, held
 from stayawake.bots.security.pr.constants import FIX_BRANCH, PARTIAL_LABEL
 from stayawake.bots.security.pr.branches import choose_fix_branch
 from stayawake.bots.security.pr.fix_verdict import (
-    BaseFix, BaseState, Checkout, CheckoutDetail, FixVerdict, History, checkout_of)
+    Arrivals, BaseFix, BaseState, Checkout, CheckoutDetail, FixVerdict, History, checkout_of)
 from stayawake.bots.security.pr.render import (
     PARTIAL_MARK, manual_review_lines, computed_review_lines, suspicious_review_lines,
     _issue_spec, _pr_body, _render_submit)
@@ -60,10 +60,12 @@ def _reconcile_partial_label(owner: str, name: str, number: int, partial: bool, 
 
 @dataclass(frozen=True)
 class _CheckoutSeen:
-    """What the checkout pass came to, and what the history still stores where it cleared."""
+    """What the checkout pass came to, what the history still stores where it cleared, and what
+    was added beside it."""
     state: Checkout = Checkout.UNREAD
     detail: CheckoutDetail = CheckoutDetail()
     history: History = History()
+    arrivals: Arrivals = Arrivals()
 
 
 @dataclass(frozen=True)
@@ -291,7 +293,8 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
             lockfile_changes = _lockfile_changes(wt, removed)
         state, detail = checkout_of(checkout)
         seen = _CheckoutSeen(state, detail, held.history_holds(
-            repo, checkout.cleared, baseref, signatures, allowlist, opts, fix_branch=branch))
+            repo, checkout.cleared, baseref, signatures, allowlist, opts, fix_branch=branch),
+            arrivals_for_fix.arrivals_beside(repo, checkout.cleared, findings, signatures, allowlist, opts))
 
         def stopped(text: str) -> tuple[_Stopped, Path]:
             return _Stopped(BaseState.ABORTED, text, base, seen), wt
@@ -432,7 +435,8 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
                             checkout=seen), wt
             if scan.error or done.error:
                 return stopped("ABORTED — scan did not finish")
-            text = (f"'{base}' already clean — nothing to fix" if seen.state is Checkout.CLEAN
+            text = (f"'{base}' already clean — nothing to fix"
+                    if seen.state is Checkout.CLEAN and not seen.arrivals.undecided
                     else f"'{base}' is clean")
             return _Stopped(BaseState.NOTHING_TO_FIX, text, base, seen), wt
     return _Fix(base, branch, applied, tuple(computed), suspicious, findings, advisories, tuple(manual),
@@ -440,7 +444,8 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
 
 
 def _verdict(repository: str, base_fix: BaseFix, checkout: _CheckoutSeen) -> FixVerdict:
-    return FixVerdict(repository, base_fix, checkout.state, checkout.history, checkout.detail)
+    return FixVerdict(repository, base_fix, checkout.state, checkout.history, checkout.detail,
+                      checkout.arrivals)
 
 
 def _stopped_verdict(label: str, stop: _Stopped) -> FixVerdict:

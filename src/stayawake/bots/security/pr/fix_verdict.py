@@ -111,6 +111,26 @@ class History:
 
 
 @dataclass(frozen=True)
+class Arrivals:
+    """The files added in the same commit as a confirmed payload, with no finding of their own.
+
+    `files` are the operator's to decide; `first_commits` are first commits that carry a payload
+    beside other files; `unread` names what git could not read; `unread_records` are earlier lists of
+    files to decide that could not be read.
+    """
+
+    files: tuple[str, ...] = ()
+    first_commits: tuple[str, ...] = ()
+    unread: tuple[str, ...] = ()
+    unread_records: tuple[str, ...] = ()
+
+    @property
+    def undecided(self) -> bool:
+        """Tell whether anything is left for the operator. Returns the answer."""
+        return bool(self.files or self.first_commits or self.unread or self.unread_records)
+
+
+@dataclass(frozen=True)
 class FixVerdict:
     """One repository's `saw fix` run."""
 
@@ -119,11 +139,14 @@ class FixVerdict:
     checkout: Checkout
     history: History = History()
     checkout_detail: CheckoutDetail = CheckoutDetail()
+    arrivals: Arrivals = Arrivals()
 
     @property
     def grade(self) -> Grade:
-        """The remaining work. Anything not known to be settled needs review."""
+        """Grade the remaining work, anything not known to be settled needing review. Returns the
+        grade."""
         if (self.checkout not in (Checkout.CLEAN, Checkout.CLEANED) or self.history.unread
+                or self.arrivals.undecided
                 or not isinstance(self.base_fix, BaseFix) or self.base_fix.state not in _SETTLED):
             return Grade.NEEDS_REVIEW
         if self.history.holds:
@@ -240,6 +263,28 @@ def _hold_line(hold: HistoryHold, fix: BaseFix) -> str:
     return f"branch '{name}' carries it — saw fix amend removes it"
 
 
+def _arrival_lines(found: Arrivals, detail: bool) -> list[str]:
+    """Say what is left to the operator about files added beside a payload. Takes the arrivals and
+    whether paths may be named. Returns the lines."""
+    lines = []
+    if found.files:
+        line = (f"{len(found.files)} file(s) added in the same commit as the malware have no "
+                "finding of their own and are your decision — run saw fix amend in this "
+                "repository, on a terminal, to decide them")
+        lines.append(f"{line} ({_paths(found.files)})" if detail else line)
+    if found.first_commits:
+        lines.append("the malware is in this repository's first commit — review that commit's "
+                     "other files yourself")
+    if found.unread_records:
+        line = ("an earlier list of files for you to decide could not be read — review the commits "
+                "that brought the malware yourself, then delete it")
+        lines.append(f"{line} ({_paths(found.unread_records)})" if detail else line)
+    if found.unread:
+        lines.append("git could not read what else was added with the malware — check the "
+                     "repository with `git fsck`, then run this again")
+    return lines
+
+
 def render_fix_verdict(verdict: FixVerdict, detail: bool = False) -> str:
     """The operator's account of one repository's run. Takes the verdict and whether paths may be
     named. Returns the text; nothing reads it back."""
@@ -254,4 +299,5 @@ def render_fix_verdict(verdict: FixVerdict, detail: bool = False) -> str:
     if verdict.history.unread:
         lines.append(_INDENT + "git could not say what your history holds, so it is not called "
                      "clean")
+    lines += [_INDENT + line for line in _arrival_lines(verdict.arrivals, detail)]
     return "\n".join(lines)
