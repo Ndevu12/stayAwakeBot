@@ -169,6 +169,8 @@ def _merge_payload(repo: Path, swept: dict, anchored: dict, survives) -> tuple[s
         versions = None
         unread.append(missed.subject)
     if versions is None:
+        if not unread:
+            unread.extend(f"every copy of {p}" for p in paths)
         at_merge = [(p, merge) for merge, ps in swept.items() for p in ps]
     else:
         for path, by_blob in versions.items():

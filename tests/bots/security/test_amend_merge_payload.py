@@ -86,6 +86,14 @@ class TestConfirmedCopiesStillHoldTheRunBack(_EvilMerge):
         self.assertFalse(outcome.completed)
         self.assertIn(Cause.PAYLOAD_STILL_REACHABLE, self._causes(outcome))
 
+    def test_history_too_long_to_walk_is_named_for_review(self):
+        self.evil_merge({})
+        with mock.patch.object(amendmod.gitutil, "path_versions", return_value=None):
+            outcome = self.run_amend()
+        self.assertIn(Cause.REMOVAL_NOT_CONFIRMED, self._causes(outcome))
+        self.assertTrue(outcome.needs_review)
+        self.assertFalse(self.holds(self.base, "vendor/x/loader.js"))
+
     def test_history_git_cannot_walk_is_named_and_the_merge_versions_count(self):
         self.branch_with("other", "LICENSE.txt", "MIT\n")
         self.evil_merge({"vendor/x/LICENSE": "MIT\n"})
