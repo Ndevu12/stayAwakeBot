@@ -464,6 +464,37 @@ class TestWhatIsPutToTheOperator(_Delivery):
         self.assertTrue(self._in_history("docs/notes.md"))
 
 
+    def test_a_merge_that_could_not_be_rewritten_is_asked_about_once_its_payload_is_taken_out(self):
+        from types import SimpleNamespace
+        from stayawake.bots.security.pr.resolve import REMOVE, Resolution
+        from stayawake.bots.security.scanner import scan_target
+        from stayawake.bots.security.targets import LocalRepoTarget
+        self.write(self.d, "docs/guide.md", "# guide\n")
+        self.commit(self.d, "add docs")
+        self.git(self.d, "merge", "--no-commit", "--no-ff", "feature")
+        self.write(self.d, "vendor/loader.js",
+                   "global['_V']=function(x){return x};require('child_process').exec('id');\n")
+        self.write(self.d, "docs/notes.md", "# notes\n")
+        self.commit(self.d, "Merge pull request #7 from feature")
+        scan = scan_target(LocalRepoTarget(self.d, str(self.d), ScanOptions()), load_signatures())
+        asked: list[DeliveryQuestion] = []
+
+        def resolve(question):
+            if isinstance(question, DeliveryQuestion):
+                asked.append(question)
+                return DeliveryAnswer(KEEP, ())
+            return Resolution(REMOVE)
+
+        refused = SimpleNamespace(ok=False, kind="replacement", refusal="refused")
+        with self._remote(), \
+                mock.patch("stayawake.bots.security.pr.amend.scan_target", return_value=scan), \
+                mock.patch("stayawake.bots.security.pr.amend.replacement_tree",
+                           return_value=refused):
+            amend_outcome(self.d, "acme/app", ScanOptions(), load_signatures(), [], "t",
+                          pusher=lambda *a: PushResult(True), resolver=resolve)
+        self.assertFalse(self._in_history("vendor/loader.js"))
+        self.assertEqual(["docs/notes.md"], [f.path for q in asked for f in q.files])
+
 class TestTheRecord(unittest.TestCase):
     """The record saw keeps between runs reads back what it wrote and nothing else."""
 

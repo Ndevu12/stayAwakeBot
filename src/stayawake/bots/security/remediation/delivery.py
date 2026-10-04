@@ -2,7 +2,7 @@
 """What a commit that delivered a confirmed payload brought with it, read from the history."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Iterable, Mapping
 
@@ -146,6 +146,48 @@ def swept_by(repo: Path, merge_sha: str, related, anchors) -> list[str]:
     trees.discard(None)
     return [path for path in related
             if path in anchors or any(path == d or path.startswith(d + "/") for d in trees)]
+
+
+@dataclass
+class MergeSweeps:
+    """What removing an evil merge does with each commit a confirmed finding names.
+
+    `swept` maps each commit to the paths taken out of it without asking. `left_to_ask` maps each
+    commit with nothing to take out to the named files no parent of it holds, each put to the
+    operator on its own. `unresolved` names each reported commit that resolves to none, with its
+    files; `unread` names what git could not read.
+    """
+
+    swept: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    left_to_ask: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    unresolved: list[str] = field(default_factory=list)
+    unread: list[str] = field(default_factory=list)
+
+
+def sweep_merges(repo: Path, findings) -> MergeSweeps:
+    """Work out what removing an evil merge takes out of each commit a confirmed finding names.
+    Takes the repo and the scan's findings. Returns the `MergeSweeps`."""
+    out = MergeSweeps()
+    for finding, anchors in confirmed_commits(findings):
+        reported = getattr(finding, "commit_sha", None) or ""
+        related = tuple(getattr(finding, "related_paths", ()) or ())
+        sha = gitutil.stdout(repo, ["rev-parse", "--verify", "--quiet",
+                                    f"{reported}^{{commit}}"]).strip()
+        if not sha:
+            named = ", ".join(related)
+            out.unresolved.append(f"{reported[:12]}: {named}" if named else (reported[:12] or "?"))
+            continue
+        try:
+            taken = tuple(swept_by(repo, sha, related, anchors))
+            born = () if taken else tuple(sorted(mergedetect.born_at_merge(repo, sha, related)))
+        except gitutil.Unread as missed:
+            out.unread.append(missed.subject)
+            continue
+        if taken:
+            out.swept[sha] = tuple(dict.fromkeys(out.swept.get(sha, ()) + taken))
+        else:
+            out.left_to_ask[sha] = born
+    return out
 
 
 def _stored_blob(repo: Path, treeish: str, path: str) -> str | None:

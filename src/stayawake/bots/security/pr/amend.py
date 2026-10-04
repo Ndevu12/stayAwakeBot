@@ -27,7 +27,6 @@ from stayawake.bots.security.pr.outcome import (AmendOutcome, BranchResult, Caus
                                                 amended, names_that_fit, refused,
                                                 render_amend_line, with_checkout)
 from stayawake.lib.git import authority
-from stayawake.lib.git.merge import detect as mergedetect
 from stayawake.lib.git.write import amend as gitamend
 from stayawake.lib.git.write import rebuild as gitrebuild
 from stayawake.lib.git.write.capture import capture_bundle
@@ -35,10 +34,6 @@ from stayawake.lib.git.write.push import PushResult, force_update_head, publish_
 from stayawake.lib.git.write import sign
 from stayawake.lib.git.write.replace import replacement_tree, write_blob_bytes
 from stayawake.lib import git as gitutil
-
-
-def _full(repo: Path, sha: str) -> str:
-    return gitutil.stdout(repo, ["rev-parse", "--verify", f"{sha}^{{commit}}"]).strip()
 
 
 def _payload_left(repo: Path, olds, rebuilt, rewritten: list[tuple[str, str]],
@@ -1193,28 +1188,15 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
         _add_file_findings(scan, committed)
     found.confirmed = any(getattr(f, "confidence", None) == CONFIRMED
                           and not getattr(f, "advisory_only", False) for f in scan.findings)
-    commits = delivery.confirmed_commits(scan.findings)
-    infected: dict[str, tuple[str, ...]] = {}
-    uncharacterized: dict[str, tuple[str, str]] = {}
-    uncharacterized_paths: dict[str, tuple[str, ...]] = {}
-    for finding, anchors in commits:
-        reported = getattr(finding, "commit_sha", None) or ""
-        sha = _full(repo, reported)
-        if not sha:
-            named = ", ".join(getattr(finding, "related_paths", ()) or ())
-            return _refuse(Cause.CONFIRMED_COMMIT_UNRESOLVED,
-                           f"{reported[:12]}: {named}" if named else (reported[:12] or "?"))
-        related = tuple(getattr(finding, "related_paths", ()) or ())
-        try:
-            paths = tuple(delivery.swept_by(repo, sha, related, anchors))
-            born = () if paths else tuple(sorted(mergedetect.born_at_merge(repo, sha, related)))
-        except gitutil.Unread as missed:
-            return _refuse(Cause.HISTORY_UNREADABLE, missed.subject)
-        if not paths:
-            uncharacterized[sha] = ("shape", sha[:12])
-            uncharacterized_paths[sha] = born
-            continue
-        infected[sha] = tuple(dict.fromkeys(infected.get(sha, ()) + paths))
+    sweeps = delivery.sweep_merges(repo, scan.findings)
+    if sweeps.unresolved:
+        return _refuse(Cause.CONFIRMED_COMMIT_UNRESOLVED, sweeps.unresolved[0])
+    if sweeps.unread:
+        return _refuse(Cause.HISTORY_UNREADABLE, sweeps.unread[0])
+    infected = sweeps.swept
+    uncharacterized: dict[str, tuple[str, str]] = {sha: ("shape", sha[:12])
+                                                   for sha in sweeps.left_to_ask}
+    uncharacterized_paths = sweeps.left_to_ask
     swept = {p for ps in infected.values() for p in ps}
 
     clean: dict[str, tuple] = {}
@@ -1414,7 +1396,8 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
 
     delivery.add_first_carriers(repo, {p: h for p, h in answered_holders.items() if h}, deliveries,
                     unread_deliveries)
-    for sha in [*uncharacterized, *blocked_infected]:
+    for sha in [*uncharacterized,
+                *(s for s in blocked_infected if not all(p in purge for p in infected[s]))]:
         deliveries.pop(sha, None)
     with_a_finding = {getattr(f, "path", "") or "" for f in scan.findings}
     settled_arrivals = _settle_arrivals(

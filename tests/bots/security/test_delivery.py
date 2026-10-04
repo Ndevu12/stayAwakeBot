@@ -2,6 +2,7 @@
 """What a commit that delivered a payload brought with it, read from the history."""
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest import mock
 
 from stayawake.bots.security.remediation import delivery
@@ -136,6 +137,27 @@ class TestBornAtMerge(_History):
         self.assertEqual(30, len(born))
         self.assertEqual(2, read.call_count)
 
+
+
+class TestSweepMerges(_History):
+    def _finding(self, sha, related):
+        return SimpleNamespace(commit_sha=sha, related_paths=related)
+
+    def test_two_findings_on_one_merge_take_out_the_paths_of_both(self):
+        self.write(self.d, "a.js", "a\n")
+        sha = self.commit(self.d, "one")
+        found = [(self._finding(sha, ("a.js",)), {"a.js"}), (self._finding(sha, ("b.js",)), {"b.js"})]
+        with mock.patch.object(delivery, "confirmed_commits", return_value=found), \
+                mock.patch.object(delivery, "swept_by", side_effect=[["a.js"], ["b.js"]]):
+            sweeps = delivery.sweep_merges(self.d, [])
+        self.assertEqual({sha: ("a.js", "b.js")}, sweeps.swept)
+
+    def test_a_reported_commit_that_names_none_is_named_with_its_files(self):
+        found = [(self._finding("0" * 40, ("a.js",)), {"a.js"})]
+        with mock.patch.object(delivery, "confirmed_commits", return_value=found):
+            sweeps = delivery.sweep_merges(self.d, [])
+        self.assertEqual(["000000000000: a.js"], sweeps.unresolved)
+        self.assertEqual({}, sweeps.swept)
 
 class TestMentions(_History):
     def test_a_file_is_counted_by_the_other_files_that_name_it(self):
