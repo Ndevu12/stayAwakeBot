@@ -1841,6 +1841,17 @@ entry still stores what the run removed, or a payload your commit holds that you
 or changed, on disk or in your staged changes, the run says so and names the remedy: the fix pull request
 for a commit the base branch already has, and <a href="../amend/"><code>saw fix amend</code></a> for your own commits. A
 stash entry is named only, because it also holds your own work.</p>
+<p><strong>Files added in the same commit as the malware are yours to decide.</strong> When that commit added
+other files with no finding of their own, saw never removes them by itself.</p>
+<ul>
+<li><strong>On a terminal, for one repository,</strong> <code>saw fix</code> asks about them the same way
+  <a href="../amend/"><code>saw fix amend</code></a> does. A file you take out is removed in the branch it prepares, as the
+  payload is; your earlier commits keep it until <code>saw fix amend</code> rewrites them, and the run says
+  where it is still stored. A file you keep is not asked about again. Your answers are kept for
+  both commands.</li>
+<li><strong>Anywhere else</strong> — no terminal, CI, several repositories, <code>--remote</code> — the run removes none of
+  them, names them, and is not called done or clean.</li>
+</ul>
 <p><code>fix</code> cleans your working tree and records that as a new commit. What the repository already
 stored stays stored: the payload is still there in the earlier commit, and one <code>git show</code> puts it
 back on disk. Anyone who cloned or forked the repository still has it too, and nothing you do to

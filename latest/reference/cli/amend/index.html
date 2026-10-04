@@ -1082,6 +1082,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#files-added-in-the-same-commit-as-the-malware" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Files added in the same commit as the malware
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#what-it-leaves-for-you" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1891,6 +1902,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#files-added-in-the-same-commit-as-the-malware" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Files added in the same commit as the malware
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#what-it-leaves-for-you" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1991,6 +2013,34 @@ are taken out of every commit that carried them, whatever version each commit he
 completion only when the history it rewrote no longer holds them.</p>
 <p>If it cannot finish, it puts the branches back and says so. If it moved a branch and could not put
 it back, it names that branch: look at that repository before doing anything else with it.</p>
+<h2 id="files-added-in-the-same-commit-as-the-malware">Files added in the same commit as the malware<a class="headerlink" href="#files-added-in-the-same-commit-as-the-malware" title="Permanent link">&para;</a></h2>
+<p>The commit that brought the malware often added other files that carry no finding of their own.
+saw never removes those by itself.</p>
+<ul>
+<li><strong>On a terminal, for one repository,</strong> it shows each such commit — its id, date and subject as the
+  commit gives them, and what saw is removing from it — and lists the other files it added, numbered
+  by folder, each with how many other files of your project mention it ("named by 2", "named by
+  none"). Type <code>all</code> or the numbers of the files to take out, then <code>yes</code>. Press Enter to keep
+  them all. It asks about at most ten such commits in one run; the rest are asked on the next. A
+  file you take out is removed from that commit and every later commit that still holds it as it was
+  added, even when an earlier run already replaced that commit; a version you changed later, and a
+  copy another branch added on its own, stay. The same files added by the same malware on another
+  branch go too. A file that commit changed, and did not add, is named, never removed. If that commit
+  has left your history, saw takes out no copy of the file and names it for you to review.</li>
+<li><strong>Your answers are kept.</strong> A file you keep is not asked about again, by <code>saw fix amend</code> or
+  <code>saw fix</code>. A file you take out, here or in <code>saw fix</code>, is removed by later runs too, without asking
+  again.</li>
+<li><strong>Anywhere else</strong> — no terminal, CI, several repositories, <code>--remote</code> — none of them is removed. The
+  run names them, is not called done, and remembers them, so running <code>saw fix amend</code> in that
+  repository on a terminal later asks about them.</li>
+<li><strong>When the malware is in the repository's first commit,</strong> saw names that commit for you to review.</li>
+<li><strong>Everything a merge brought in with the malware is taken out with it.</strong> When a copy of one of
+  those files is still on another branch, tag or stash, the run names it for you to review; a copy
+  of the malware itself there keeps the run from being called done.</li>
+<li><strong>A merge that brought the malware</strong> may be asked about file by file on a terminal. A file you
+  remove there is taken out of that merge and the commits after it, and the merge's other files are
+  then asked about too.</li>
+</ul>
 <h2 id="what-it-leaves-for-you">What it leaves for you<a class="headerlink" href="#what-it-leaves-for-you" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>A protected branch is never force-updated.</strong> The amended history is published beside it under
