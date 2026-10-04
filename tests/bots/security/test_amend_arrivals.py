@@ -230,8 +230,13 @@ class TestNobodyCanBeAsked(_Delivery):
         real = amendmod.gitutil.ancestry
 
         def failing_after_delivery(repo, ancestor, descendant):
-            if sys._getframe(1).f_code.co_name == "_after_delivery":
-                return None
+            frame = sys._getframe(1)
+            for _ in range(3):
+                if frame is None:
+                    break
+                if frame.f_code.co_name == "_after_delivery":
+                    return None
+                frame = frame.f_back
             return real(repo, ancestor, descendant)
 
         with mock.patch.object(amendmod.gitutil, "ancestry", new=failing_after_delivery):
