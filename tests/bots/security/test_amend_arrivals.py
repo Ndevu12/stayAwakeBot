@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 import subprocess
+import sys
 import unittest
 from unittest import mock
 
@@ -200,6 +201,71 @@ class TestNobodyCanBeAsked(_Delivery):
                                               f"fonts-elsewhere:{PADDING[0]}").returncode)
         self.assertEqual([], self._records())
 
+    def test_a_take_out_leaves_an_infected_branchs_own_identical_copy(self):
+        base = self.git(self.d, "rev-parse", "--abbrev-ref", "HEAD").strip()
+        self.git(self.d, "checkout", "-q", "-b", "dev")
+        self.write(self.d, PAYLOAD, "wOF2\x00payload " + PAYLOAD + "\n")
+        self.commit(self.d, "branch hit by the worm")
+        self.write(self.d, PADDING[1], "genuine " + PADDING[1] + "\n")
+        self.commit(self.d, "the project's own copy")
+        self.git(self.d, "checkout", "-q", base)
+        self._deliver()
+        self._later()
+        outcome = self._run(_answering(TAKE_OUT, pick={PADDING[1]})[0])
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertNotEqual(0, self.git_may_fail(self.d, "cat-file", "-e",
+                                                 f"{base}:{PADDING[1]}").returncode)
+        self.assertEqual(0, self.git_may_fail(self.d, "cat-file", "-e",
+                                              f"dev:{PADDING[1]}").returncode)
+
+    def test_a_take_out_git_cannot_place_removes_nothing_more_and_is_named(self):
+        base = self.git(self.d, "rev-parse", "--abbrev-ref", "HEAD").strip()
+        self.git(self.d, "checkout", "-q", "-b", "fonts-elsewhere")
+        self.write(self.d, PADDING[0], "genuine " + PADDING[0] + "\n")
+        self.commit(self.d, "the project's own font")
+        self.git(self.d, "checkout", "-q", base)
+        self._deliver()
+        self._later()
+        real = amendmod.gitutil.ancestry
+
+        def failing_after_delivery(repo, ancestor, descendant):
+            if sys._getframe(1).f_code.co_name == "_after_delivery":
+                return None
+            return real(repo, ancestor, descendant)
+
+        with mock.patch.object(amendmod.gitutil, "ancestry", new=failing_after_delivery):
+            outcome = self._run(_answering(TAKE_OUT, pick={PADDING[0]})[0])
+        self.assertIn(Cause.REMOVAL_NOT_CONFIRMED, self._causes(outcome))
+        self.assertEqual(0, self.git_may_fail(self.d, "cat-file", "-e",
+                                              f"fonts-elsewhere:{PADDING[0]}").returncode)
+
+    def test_a_record_whose_commit_left_history_is_named_and_removes_nothing(self):
+        base = self.git(self.d, "rev-parse", "--abbrev-ref", "HEAD").strip()
+        self.git(self.d, "checkout", "-q", "-b", "fonts-elsewhere")
+        self.write(self.d, PADDING[0], "genuine " + PADDING[0] + "\n")
+        self.commit(self.d, "the project's own font")
+        self.git(self.d, "checkout", "-q", base)
+        self._deliver()
+        self._later()
+        self._run()
+        added = self.git(self.d, "log", "--format=%H", "-1", "--", PADDING[0]).strip()
+        self.git(self.d, "-c", "core.hooksPath=/dev/null", "rebase", "-q", "--force-rebase",
+                 f"{added}^")
+        outcome = self._run(_answering(TAKE_OUT)[0], findings=[])
+        self.assertFalse(outcome.completed)
+        self.assertIn(Cause.HISTORY_UNREADABLE, self._causes(outcome))
+        self.assertEqual(0, self.git_may_fail(self.d, "cat-file", "-e",
+                                              f"fonts-elsewhere:{PADDING[0]}").returncode)
+        self.assertEqual(1, len(self._records()))
+
+    def test_still_held_answers_yes_when_git_cannot_place_a_copy(self):
+        sha = self._deliver()
+        self._later()
+        held = amendmod._held_since_delivery(self.d)
+        blob = self.git(self.d, "rev-parse", f"{sha}:{PADDING[0]}").strip()
+        with mock.patch.object(amendmod.gitutil, "ancestry", return_value=None):
+            self.assertTrue(held((sha,), PADDING[0], blob))
+
     def test_keeping_a_recorded_file_is_final(self):
         self._deliver()
         self._later()
@@ -313,6 +379,51 @@ class TestTheOperatorDecides(_Delivery):
         for path in PADDING:
             self.assertTrue(self._in_history(path), path)
 
+    def _decide(self, delivery_sha, decision):
+        blobs = {p: self.git(self.d, "rev-parse", f"{delivery_sha}:{p}").strip() for p in PADDING}
+        arrival_record.add_decisions("acme/app", [
+            arrival_record.Decision(p, b, (delivery_sha,), decision) for p, b in blobs.items()])
+
+    def test_a_file_kept_in_an_earlier_run_is_not_asked_again(self):
+        sha = self._deliver()
+        self._later()
+        self._decide(sha, arrival_record.KEEP_DECISION)
+        resolver, asked = _answering(TAKE_OUT)
+        outcome = self._run(resolver)
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertEqual([], asked)
+        for path in PADDING:
+            self.assertTrue(self._in_history(path), path)
+
+    def test_a_file_taken_out_in_an_earlier_run_is_removed_without_asking(self):
+        sha = self._deliver()
+        self._later()
+        self._decide(sha, arrival_record.TAKE_OUT_DECISION)
+        outcome = self._run()
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        for path in PADDING:
+            self.assertFalse(self._in_history(path), path)
+        self.assertEqual([], arrival_record.read_decisions("acme/app")[0])
+
+    def test_a_take_out_saved_for_a_file_no_delivery_added_removes_nothing(self):
+        sha = self._deliver()
+        self._later()
+        blob = self.git(self.d, "rev-parse", "HEAD:later.txt").strip()
+        arrival_record.add_decisions("acme/app", [arrival_record.Decision(
+            "later.txt", blob, (sha,), arrival_record.TAKE_OUT_DECISION)])
+        outcome = self._run()
+        self.assertTrue(self._in_history("later.txt"))
+        self.assertNotIn("later.txt", getattr(outcome, "removed", ()) or ())
+
+    def test_the_answers_are_kept_for_later_runs(self):
+        self._deliver()
+        self._later()
+        self._run(_answering(KEEP)[0])
+        decided, read = arrival_record.read_decisions("acme/app")
+        self.assertTrue(read)
+        self.assertEqual({(p, arrival_record.KEEP_DECISION) for p in PADDING},
+                         {(d.path, d.decision) for d in decided})
+
     def test_an_answer_naming_a_file_not_offered_removes_nothing_else(self):
         self._deliver()
         self._later()
@@ -373,6 +484,17 @@ class TestWhatIsPutToTheOperator(_Delivery):
         resolver, asked = _answering(KEEP)
         self._run(resolver)
         self.assertEqual({PADDING[0]: 0, PADDING[1]: 1}, dict(asked[0].named_by))
+
+    def test_a_file_the_delivery_changed_does_not_count_as_naming_its_files(self):
+        self.write(self.d, "NOTES.md", "notes\n")
+        self.commit(self.d, "notes")
+        self.write(self.d, "NOTES.md", "notes: debug with launch.json\n")
+        self._deliver()
+        self._later()
+        resolver, asked = _answering(KEEP)
+        self._run(resolver)
+        self.assertIn("NOTES.md", asked[0].changed)
+        self.assertEqual(0, dict(asked[0].named_by)[PADDING[1]])
 
     def test_a_file_with_its_own_finding_keeps_its_own_question(self):
         self._deliver()
@@ -494,6 +616,54 @@ class TestWhatIsPutToTheOperator(_Delivery):
                           pusher=lambda *a: PushResult(True), resolver=resolve)
         self.assertFalse(self._in_history("vendor/loader.js"))
         self.assertEqual(["docs/notes.md"], [f.path for q in asked for f in q.files])
+
+    def test_removing_a_genuine_file_of_a_merge_that_could_not_be_rewritten_takes_it_out(self):
+        from types import SimpleNamespace
+        from stayawake.bots.security.pr.resolve import REMOVE, Resolution
+        from stayawake.bots.security.scanner import scan_target
+        from stayawake.bots.security.targets import LocalRepoTarget
+        base = self.git(self.d, "rev-parse", "--abbrev-ref", "HEAD").strip()
+        self.write(self.d, "docs/guide.md", "# guide\n")
+        self.commit(self.d, "add docs")
+        self.git(self.d, "merge", "--no-commit", "--no-ff", "feature")
+        self.write(self.d, "vendor/loader.js",
+                   "global['_V']=function(x){return x};require('child_process').exec('id');\n")
+        self.write(self.d, "vendor/helper.txt", "helper\n")
+        self.commit(self.d, "Merge pull request #7 from feature")
+        scan = scan_target(LocalRepoTarget(self.d, str(self.d), ScanOptions()), load_signatures())
+        refused = SimpleNamespace(ok=False, kind="replacement", refusal="refused")
+        with self._remote(), \
+                mock.patch("stayawake.bots.security.pr.amend.scan_target", return_value=scan), \
+                mock.patch("stayawake.bots.security.pr.amend.replacement_tree",
+                           return_value=refused), \
+                mock.patch("stayawake.bots.security.pr.amend.gitamend.replacement_commit",
+                           side_effect=AssertionError("a handled merge is not replaced")):
+            outcome = amend_outcome(self.d, "acme/app", ScanOptions(), load_signatures(), [], "t",
+                                    pusher=lambda *a: PushResult(True),
+                                    resolver=lambda q: Resolution(REMOVE))
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertNotEqual(0, self.git_may_fail(self.d, "cat-file", "-e",
+                                                 f"{base}:vendor/helper.txt").returncode)
+        self.assertNotEqual(0, self.git_may_fail(self.d, "cat-file", "-e",
+                                                 f"{base}:vendor/loader.js").returncode)
+
+    def test_a_genuine_file_of_a_merge_is_taken_out_only_from_that_merge_and_after(self):
+        base = self.git(self.d, "rev-parse", "--abbrev-ref", "HEAD").strip()
+        self.git(self.d, "checkout", "-q", "-b", "own-helper")
+        self.write(self.d, "vendor/helper.txt", "helper\n")
+        own = self.commit(self.d, "the project's own helper")
+        self.git(self.d, "checkout", "-q", base)
+        self.git(self.d, "merge", "--no-commit", "--no-ff", "feature")
+        self.write(self.d, "vendor/helper.txt", "helper\n")
+        merge = self.commit(self.d, "Merge pull request #7 from feature")
+        self._later()
+        taken, holders = {}, {}
+        outcome, scheduled = amendmod._register_merge_file_removal(
+            self.d, merge, "vendor/helper.txt", lambda tree, path: None, set(), set(), taken,
+            set(), holders)
+        self.assertEqual(("", True), (outcome, scheduled))
+        self.assertIn(merge, holders["vendor/helper.txt"])
+        self.assertNotIn(own, holders["vendor/helper.txt"])
 
 class TestTheRecord(unittest.TestCase):
     """The record saw keeps between runs reads back what it wrote and nothing else."""

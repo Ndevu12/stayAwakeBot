@@ -9,6 +9,7 @@ from typing import Callable, Mapping
 
 from stayawake.bots.security.pr.resolve import (KEEP, TAKE_OUT, ArrivedFile, DeliveryAnswer,
                                                 DeliveryQuestion)
+from stayawake.bots.security.pr import arrival_record
 from stayawake.bots.security.remediation import delivery
 from stayawake.bots.security.remediation.delivery import Brought
 from stayawake.lib import git as gitutil
@@ -29,8 +30,8 @@ class Questions:
 class Settled:
     """What became of the files put to the operator.
 
-    `take_out` are the files to remove as they were added, and `delivered_in` maps each of them,
-    as `(path, blob)`, to every id of the commit that added it; `kept` are the files the operator kept;
+    `take_out` are the files to remove as they were added; `kept` are the files the operator kept;
+    `delivered_in` maps each of both, as `(path, blob)`, to every id of the commit that added it;
     `undecided` the questions nobody answered.
     """
 
@@ -41,6 +42,7 @@ class Settled:
 
 
 def _with_files(question: DeliveryQuestion, files) -> DeliveryQuestion:
+    """Copy a question with other files. Takes the question and the files. Returns the copy."""
     return replace(question, files=tuple(files))
 
 
@@ -110,6 +112,7 @@ def ask(questions, resolver, limit: int = ASKED_PER_RUN) -> Settled:
         for f in question.files:
             if f.path not in chosen:
                 settled.kept.append(f)
+                settled.delivered_in[(f.path, f.blob)] = question.forms
             elif taken.setdefault(f.path, f.blob) != f.blob:
                 clashing.append(f)
             else:
@@ -118,6 +121,16 @@ def ask(questions, resolver, limit: int = ASKED_PER_RUN) -> Settled:
         if clashing:
             settled.undecided.append(_with_files(question, clashing))
     return settled
+
+
+def decisions(settled: Settled) -> list[arrival_record.Decision]:
+    """List what the operator answered, as decisions kept between runs. Takes what was settled.
+    Returns the decisions."""
+    return ([arrival_record.Decision(f.path, f.blob, settled.delivered_in[(f.path, f.blob)],
+                                     arrival_record.KEEP_DECISION) for f in settled.kept]
+            + [arrival_record.Decision(f.path, f.blob, settled.delivered_in[(f.path, f.blob)],
+                                       arrival_record.TAKE_OUT_DECISION)
+               for f in settled.take_out])
 
 
 def with_mentions(repo: Path, questions) -> list[DeliveryQuestion]:
@@ -129,10 +142,35 @@ def with_mentions(repo: Path, questions) -> list[DeliveryQuestion]:
         return list(questions)
     out = []
     for question in questions:
-        own = {*(f.path for f in question.files), *question.removing}
+        own = {*(f.path for f in question.files), *question.removing, *question.changed}
         counts = {f.path: len(naming[f.path] - own) for f in question.files if f.path in naming}
         out.append(replace(question, named_by=tuple(sorted(counts.items()))))
     return out
+
+
+def without(questions, pairs) -> list[DeliveryQuestion]:
+    """Leave files out of questions. Takes the questions and the `(path, blob)` pairs to leave out.
+    Returns the questions with a file left, each with only those files."""
+    out = []
+    for question in questions:
+        files = [f for f in question.files if (f.path, f.blob) not in pairs]
+        if files:
+            out.append(_with_files(question, files))
+    return out
+
+
+def files_of(questions) -> set[tuple[str, str]]:
+    """List the files the questions put. Takes the questions. Returns their `(path, blob)` pairs."""
+    return {(f.path, f.blob) for question in questions for f in question.files}
+
+
+def remapped_decisions(decided, mapping: Mapping[str, str]) -> list[arrival_record.Decision]:
+    """Add the ids a history rewrite gave each decision's delivery commit. Takes the decisions and
+    the rewrite's map from old commit ids to new. Returns the decisions, each with its new ids
+    added."""
+    return [replace(d, forms=tuple(dict.fromkeys([*d.forms, *(mapping[c] for c in d.forms
+                                                              if c in mapping)])))
+            for d in decided]
 
 
 def remapped(recorded, mapping: Mapping[str, str]) -> list[DeliveryQuestion]:
@@ -146,11 +184,13 @@ def remapped(recorded, mapping: Mapping[str, str]) -> list[DeliveryQuestion]:
 
 
 def still_to_ask(recorded, settled: Settled,
-                 held: Callable[[tuple[str, ...], str, str], bool]) -> list[DeliveryQuestion]:
+                 held: Callable[[tuple[str, ...], str, str], bool],
+                 kept_before=frozenset()) -> list[DeliveryQuestion]:
     """Find what an earlier run's record must keep after this run. Takes the recorded questions,
-    what this run settled, and `held(forms, path, blob)`. Returns each question with only the files
-    history after that delivery still holds that the operator did not keep."""
-    kept = set(settled.kept)
+    what this run settled, `held(forms, path, blob)`, and the `(path, blob)` pairs kept in earlier
+    runs. Returns each question with only the files history after that delivery still holds that
+    the operator has not kept."""
+    kept = set(settled.kept) | {ArrivedFile(path, blob) for path, blob in kept_before}
     out = []
     for question in recorded:
         files = [f for f in question.files if f not in kept and held(question.forms, f.path, f.blob)]

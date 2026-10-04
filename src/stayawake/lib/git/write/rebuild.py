@@ -87,11 +87,29 @@ def commits_to_rebuild(graph: list[tuple[str, list[str]]],
     return plan
 
 
+def _removals_at(repo: str | Path, sha: str, remove, remove_in) -> dict[str, str]:
+    """Collect the blobs to drop at one commit. Takes the repo, the commit and both removal maps.
+    Returns each path mapped to its blob."""
+    wanted: dict[str, set[str]] = {path: {oid} for path, oid in (remove or {}).items()}
+    for (path, oid), commits in (remove_in or {}).items():
+        if sha in commits:
+            wanted.setdefault(path, set()).add(oid)
+    out: dict[str, str] = {}
+    for path, oids in wanted.items():
+        if len(oids) > 1:
+            answered, entry = entry_at(repo, sha, path)
+            held = entry[1] if answered and entry is not None else None
+            out[path] = held if held in oids else min(oids)
+        else:
+            out[path] = next(iter(oids))
+    return out
+
+
 def rebuild_without_payload(repo: str | Path, graph: list[tuple[str, list[str]]],
                             replacements: dict[str, Replacement],
                             write_commit, still_carries=None, clean=None, remove=None,
                             pre_blocked: dict[str, tuple[str, str]] | None = None,
-                            substitute=None, purge=None) -> Rebuild:
+                            substitute=None, purge=None, remove_in=None) -> Rebuild:
     """Rebuild each infected commit parents-first and carry its correction into every commit after
     it. A commit that cannot be remediated, and its descendants, are recorded in `blocked` and
     skipped.
@@ -99,7 +117,8 @@ def rebuild_without_payload(repo: str | Path, graph: list[tuple[str, list[str]]]
     `write_commit(commit, tree, new_parents) -> (sha, kind, refusal)`, `still_carries`, `clean`,
     `remove`, and `substitute` are injected. `clean` maps a path to `(carries, corrector)`, excised
     in place at each commit whose blob at that path carries the footprint; `remove` maps a path to a
-    blob id, dropped from every commit that holds exactly that blob; `substitute` maps a path to
+    blob id, dropped from every commit that holds exactly that blob; `remove_in` maps a
+    `(path, blob)` to the commits it is dropped from, and from no other; `substitute` maps a path to
     `(payload_blob, entry)`, put back to `entry` at every commit holding exactly that blob; `purge`
     is a set of paths dropped from every commit whose blob at that path still carries a payload.
     `pre_blocked` seeds commits already known un-remediable.
@@ -134,9 +153,10 @@ def rebuild_without_payload(repo: str | Path, graph: list[tuple[str, list[str]]]
                 continue
 
         tree = None
-        if corrections or clean or remove or substitute or purge:
+        removing = _removals_at(repo, sha, remove, remove_in)
+        if corrections or clean or removing or substitute or purge:
             tree, refusal = carried_forward(repo, sha, corrections, still_carries, clean,
-                                            remove, substitute, purge)
+                                            removing, substitute, purge)
             if refusal:
                 kind, path = refusal
                 blocked[sha] = (kind, _BLOCKED[kind].format(sha=sha[:12], path=path))

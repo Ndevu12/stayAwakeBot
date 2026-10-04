@@ -61,8 +61,15 @@ for a commit the base branch already has, and [`saw fix amend`](amend.md) for yo
 stash entry is named only, because it also holds your own work.
 
 **Files added in the same commit as the malware are yours to decide.** When that commit added
-other files with no finding of their own, the run removes none of them, names them, and is not
-called done or clean. Run [`saw fix amend`](amend.md) in that repository on a terminal to decide them.
+other files with no finding of their own, saw never removes them by itself.
+
+- **On a terminal, for one repository,** `saw fix` asks about them the same way
+  [`saw fix amend`](amend.md) does. A file you take out is removed in the branch it prepares, as the
+  payload is; your earlier commits keep it until `saw fix amend` rewrites them, and the run says
+  where it is still stored. A file you keep is not asked about again. Your answers are kept for
+  both commands.
+- **Anywhere else** — no terminal, CI, several repositories, `--remote` — the run removes none of
+  them, names them, and is not called done or clean.
 
 `fix` cleans your working tree and records that as a new commit. What the repository already
 stored stays stored: the payload is still there in the earlier commit, and one `git show` puts it

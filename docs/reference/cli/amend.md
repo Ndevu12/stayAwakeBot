@@ -72,13 +72,20 @@ saw never removes those by itself.
   by folder, each with how many other files of your project mention it ("named by 2", "named by
   none"). Type `all` or the numbers of the files to take out, then `yes`. Press Enter to keep
   them all. It asks about at most ten such commits in one run; the rest are asked on the next. A
-  file you take out is removed from every later commit that still holds it as it was added, even
-  when an earlier run already replaced that commit; a version you changed later, and a copy another
-  branch added on its own, stay. A file that commit changed, and did not add, is named, never removed.
+  file you take out is removed from that commit and every later commit that still holds it as it was
+  added, even when an earlier run already replaced that commit; a version you changed later, and a
+  copy another branch added on its own, stay. A file that commit changed, and did not add, is named,
+  never removed.
+- **Your answers are kept.** A file you keep is not asked about again, by `saw fix amend` or
+  `saw fix`. A file you take out, here or in `saw fix`, is removed by later runs too, without asking
+  again.
 - **Anywhere else** — no terminal, CI, several repositories, `--remote` — none of them is removed. The
   run names them, is not called done, and remembers them, so running `saw fix amend` in that
   repository on a terminal later asks about them.
 - **When the malware is in the repository's first commit,** saw names that commit for you to review.
+- **A merge that brought the malware** may be asked about file by file on a terminal. A file you
+  remove there is taken out of that merge and the commits after it, and the merge's other files are
+  then asked about too.
 
 ## What it leaves for you
 

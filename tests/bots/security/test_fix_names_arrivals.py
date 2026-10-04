@@ -11,9 +11,11 @@ from contextlib import redirect_stderr, redirect_stdout
 from stayawake.bots.security.models import HEURISTIC, Finding, Severity
 from stayawake.bots.security.pr import arrival_record, arrivals_for_fix
 from stayawake.bots.security.pr import fix as fixmod
-from stayawake.bots.security.pr.resolve import ArrivedFile, DeliveryQuestion
+from stayawake.bots.security.pr.resolve import (KEEP, TAKE_OUT, ArrivedFile, DeliveryAnswer,
+                                                DeliveryQuestion)
 from stayawake.bots.security.pr.fix_verdict import (Arrivals, BaseFix, BaseState, Checkout,
-                                                    FixVerdict, Grade, render_fix_verdict)
+                                                    FixVerdict, Grade, HistoryHold, Remedy,
+                                                    render_fix_verdict)
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.targets.base import ScanOptions
 from tests.support.gitrepo import GitSandbox
@@ -48,13 +50,14 @@ class TestBareFixNamesWhatArrivedWithThePayload(_Project):
     def test_the_files_are_named_kept_and_the_run_needs_review(self):
         self.deliver()
         v = self.verdict()
+        self.assertNotRegex(render_fix_verdict(v), r"\b(is|already) clean(ed)?\b")
         self.assertEqual(set(PADDING), set(v.arrivals.files))
         self.assertIs(Grade.NEEDS_REVIEW, v.grade)
         for path in PADDING:
             self.assertTrue((self.d / path).exists(), path)
         self.assertFalse((self.d / PAYLOAD).exists())
         text = render_fix_verdict(v, detail=True)
-        self.assertIn("saw fix amend", text)
+        self.assertIn("run saw fix in this repository, on a terminal", text)
         for path in PADDING:
             self.assertIn(path, text)
 
@@ -150,7 +153,7 @@ class TestTheArrivalsLine(unittest.TestCase):
     def test_undecided_files_need_review_and_give_the_command(self):
         v = self._verdict(Arrivals(files=("pad.woff",)))
         self.assertIs(Grade.NEEDS_REVIEW, v.grade)
-        self.assertIn("run saw fix amend in this repository, on a terminal", render_fix_verdict(v))
+        self.assertIn("run saw fix in this repository, on a terminal", render_fix_verdict(v))
         self.assertNotIn("pad.woff", render_fix_verdict(v))
         self.assertIn("pad.woff", render_fix_verdict(v, detail=True))
 
@@ -161,6 +164,110 @@ class TestTheArrivalsLine(unittest.TestCase):
 
     def test_no_arrivals_leave_the_grade_alone(self):
         self.assertIs(Grade.DONE, self._verdict(Arrivals()).grade)
+
+
+
+class TestFixAsksOnATerminal(_Project):
+    """On a terminal, `saw fix` puts the files to the operator and keeps the answer."""
+
+    def setUp(self):
+        super().setUp()
+        self.git(self.d, "remote", "add", "origin", "https://github.com/acme/app.git")
+
+    def answering(self, action):
+        asked: list[DeliveryQuestion] = []
+
+        def resolve(question):
+            if not isinstance(question, DeliveryQuestion):
+                return None
+            asked.append(question)
+            chosen = tuple(f.path for f in question.files) if action == TAKE_OUT else ()
+            return DeliveryAnswer(action, chosen)
+
+        return resolve, asked
+
+    def run_fix(self, resolver=None):
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            return fixmod.prepare_fix(self.d, ScanOptions(), load_signatures(), [],
+                                      resolver=resolver)
+
+    def restore_checkout(self):
+        self.git(self.d, "checkout", "-q", "HEAD", "--", ".")
+
+    def stored(self, ref, path):
+        return subprocess.run(["git", "-C", str(self.d), "cat-file", "-e", f"{ref}:{path}"],
+                              capture_output=True).returncode == 0
+
+    def test_taking_out_removes_them_in_the_prepared_branch_and_names_where_they_stay(self):
+        self.deliver()
+        resolver, asked = self.answering(TAKE_OUT)
+        v = self.run_fix(resolver)
+        self.assertEqual(1, len(asked))
+        for path in PADDING:
+            self.assertFalse(self.stored(v.base_fix.branch, path), path)
+            self.assertTrue(self.stored("HEAD", path), path)
+        self.assertEqual((), v.arrivals.files)
+        self.assertEqual(set(PADDING), {p for h in v.arrivals.taken_out_held for p in h.paths})
+        self.assertIs(Grade.HISTORY_REMAINS, v.grade)
+        text = render_fix_verdict(v)
+        self.assertIn("files you chose to take out are still stored", text)
+        self.assertNotRegex(text, r"\b(is|already) clean\b")
+
+    def test_a_later_run_takes_them_out_again_without_asking(self):
+        self.deliver()
+        self.run_fix(self.answering(TAKE_OUT)[0])
+        self.restore_checkout()
+        resolver, asked = self.answering(KEEP)
+        v = self.run_fix(resolver)
+        self.assertEqual([], asked)
+        for path in PADDING:
+            self.assertFalse(self.stored(v.base_fix.branch, path), path)
+
+    def test_kept_files_are_not_asked_or_named_again(self):
+        self.deliver()
+        self.run_fix(self.answering(KEEP)[0])
+        self.restore_checkout()
+        resolver, asked = self.answering(TAKE_OUT)
+        v = self.run_fix(resolver)
+        self.assertEqual([], asked)
+        self.assertEqual((), v.arrivals.files)
+        self.assertFalse(v.arrivals.undecided)
+        for path in PADDING:
+            self.assertTrue(self.stored(v.base_fix.branch, path), path)
+        self.restore_checkout()
+        self.assertEqual((), self.run_fix().arrivals.files)
+
+    def test_a_take_out_saved_for_a_file_no_delivery_added_is_not_applied(self):
+        sha = self.deliver()
+        blob = self.git(self.d, "rev-parse", "HEAD:src/index.js").strip()
+        arrival_record.add_decisions("acme/app", [arrival_record.Decision(
+            "src/index.js", blob, (sha,), arrival_record.TAKE_OUT_DECISION)])
+        v = self.run_fix()
+        self.assertTrue(self.stored(v.base_fix.branch, "src/index.js"))
+        self.assertNotIn(("src/index.js", blob), v.arrivals.take_out)
+
+    def test_answers_that_cannot_be_kept_leave_the_run_in_review(self):
+        self.git(self.d, "remote", "remove", "origin")
+        self.deliver()
+        v = self.run_fix(self.answering(KEEP)[0])
+        self.assertTrue(v.arrivals.not_saved)
+        self.assertIs(Grade.NEEDS_REVIEW, v.grade)
+        self.assertIn("could not be saved", render_fix_verdict(v))
+
+    def test_a_file_taken_out_but_still_stored_leaves_history_to_clear(self):
+        hold = HistoryHold("head", "main", ("public/fonts/inter-regular.woff",), Remedy.FIX_PR)
+        v = FixVerdict("acme/app", BaseFix(BaseState.PREPARED, "prepared", "main", "auto"),
+                       Checkout.CLEANED, arrivals=Arrivals(taken_out_held=(hold,)))
+        self.assertIs(Grade.HISTORY_REMAINS, v.grade)
+
+    def test_earlier_answers_that_cannot_be_read_are_named(self):
+        folder = arrival_record.state_dir("acme/app")
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / arrival_record.DECIDED_NAME).write_text("{not json")
+        self.deliver()
+        v = self.run_fix()
+        self.assertIn(str(folder / arrival_record.DECIDED_NAME), v.arrivals.unread_records)
+        self.assertIs(Grade.NEEDS_REVIEW, v.grade)
 
 
 if __name__ == "__main__":

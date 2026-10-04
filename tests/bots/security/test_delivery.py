@@ -152,11 +152,21 @@ class TestSweepMerges(_History):
             sweeps = delivery.sweep_merges(self.d, [])
         self.assertEqual({sha: ("a.js", "b.js")}, sweeps.swept)
 
+    def test_failures_are_listed_in_the_findings_order(self):
+        self.write(self.d, "a.js", "a\n")
+        sha = self.commit(self.d, "one")
+        found = [(self._finding(sha, ("a.js",)), {"a.js"}),
+                 (self._finding("0" * 40, ("b.js",)), {"b.js"})]
+        with mock.patch.object(delivery, "confirmed_commits", return_value=found), \
+                mock.patch.object(delivery, "swept_by", side_effect=query.Unread("the merge")):
+            sweeps = delivery.sweep_merges(self.d, [])
+        self.assertEqual([delivery.UNREAD, delivery.UNRESOLVED], [k for k, _d in sweeps.failed])
+
     def test_a_reported_commit_that_names_none_is_named_with_its_files(self):
         found = [(self._finding("0" * 40, ("a.js",)), {"a.js"})]
         with mock.patch.object(delivery, "confirmed_commits", return_value=found):
             sweeps = delivery.sweep_merges(self.d, [])
-        self.assertEqual(["000000000000: a.js"], sweeps.unresolved)
+        self.assertEqual([(delivery.UNRESOLVED, "000000000000: a.js")], sweeps.failed)
         self.assertEqual({}, sweeps.swept)
 
 class TestMentions(_History):

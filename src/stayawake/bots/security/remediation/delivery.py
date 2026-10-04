@@ -148,20 +148,24 @@ def swept_by(repo: Path, merge_sha: str, related, anchors) -> list[str]:
             if path in anchors or any(path == d or path.startswith(d + "/") for d in trees)]
 
 
+UNRESOLVED = "unresolved"
+UNREAD = "unread"
+
+
 @dataclass
 class MergeSweeps:
     """What removing an evil merge does with each commit a confirmed finding names.
 
     `swept` maps each commit to the paths taken out of it without asking. `left_to_ask` maps each
     commit with nothing to take out to the named files no parent of it holds, each put to the
-    operator on its own. `unresolved` names each reported commit that resolves to none, with its
-    files; `unread` names what git could not read.
+    operator on its own. `failed` lists, in the findings' order, each reported commit that resolves
+    to none, as `(UNRESOLVED, its id and files)`, and what git could not read, as
+    `(UNREAD, what)`.
     """
 
     swept: dict[str, tuple[str, ...]] = field(default_factory=dict)
     left_to_ask: dict[str, tuple[str, ...]] = field(default_factory=dict)
-    unresolved: list[str] = field(default_factory=list)
-    unread: list[str] = field(default_factory=list)
+    failed: list[tuple[str, str]] = field(default_factory=list)
 
 
 def sweep_merges(repo: Path, findings) -> MergeSweeps:
@@ -175,13 +179,14 @@ def sweep_merges(repo: Path, findings) -> MergeSweeps:
                                     f"{reported}^{{commit}}"]).strip()
         if not sha:
             named = ", ".join(related)
-            out.unresolved.append(f"{reported[:12]}: {named}" if named else (reported[:12] or "?"))
+            out.failed.append((UNRESOLVED, f"{reported[:12]}: {named}" if named
+                               else (reported[:12] or "?")))
             continue
         try:
             taken = tuple(swept_by(repo, sha, related, anchors))
             born = () if taken else tuple(sorted(mergedetect.born_at_merge(repo, sha, related)))
         except gitutil.Unread as missed:
-            out.unread.append(missed.subject)
+            out.failed.append((UNREAD, missed.subject))
             continue
         if taken:
             out.swept[sha] = tuple(dict.fromkeys(out.swept.get(sha, ()) + taken))

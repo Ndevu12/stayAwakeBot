@@ -116,18 +116,24 @@ class Arrivals:
 
     `files` are the operator's to decide; `first_commits` are first commits that carry a payload
     beside other files; `unread` names what git could not read; `unread_records` are earlier lists of
-    files to decide that could not be read.
+    files to decide, or earlier answers, that could not be read. `take_out` are the `(path, blob)`
+    versions the operator chose to take out; `taken_out_held` are the places that still store one;
+    `not_saved` is True when this run's answers could not be kept.
     """
 
     files: tuple[str, ...] = ()
     first_commits: tuple[str, ...] = ()
     unread: tuple[str, ...] = ()
     unread_records: tuple[str, ...] = ()
+    take_out: tuple[tuple[str, str], ...] = ()
+    taken_out_held: tuple[HistoryHold, ...] = ()
+    not_saved: bool = False
 
     @property
     def undecided(self) -> bool:
         """Tell whether anything is left for the operator. Returns the answer."""
-        return bool(self.files or self.first_commits or self.unread or self.unread_records)
+        return bool(self.files or self.first_commits or self.unread or self.unread_records
+                    or self.not_saved)
 
 
 @dataclass(frozen=True)
@@ -149,7 +155,7 @@ class FixVerdict:
                 or self.arrivals.undecided
                 or not isinstance(self.base_fix, BaseFix) or self.base_fix.state not in _SETTLED):
             return Grade.NEEDS_REVIEW
-        if self.history.holds:
+        if self.history.holds or self.arrivals.taken_out_held:
             return Grade.HISTORY_REMAINS
         return Grade.DONE
 
@@ -196,8 +202,17 @@ def _paths(paths) -> str:
 
 
 def _checkout_line(verdict: FixVerdict, detail: bool) -> str:
-    if verdict.checkout is Checkout.CLEAN and verdict.arrivals.undecided:
+    """Say what the run did to the checkout. Takes the verdict and whether paths may be named.
+    Returns the line."""
+    if verdict.arrivals.undecided and verdict.checkout is Checkout.CLEAN:
         return "your checkout has no confirmed finding left"
+    if verdict.arrivals.undecided and verdict.checkout is Checkout.CLEANED:
+        found = verdict.checkout_detail
+        line = f"removed {found.removed} confirmed file(s) from your checkout"
+        if found.stripped:
+            line += f" and took what was found out of {found.stripped} more"
+        return line + ("; your history still carries it:" if verdict.history.holds
+                       else "; no confirmed finding is left in it")
     return checkout_sentence(verdict.checkout, verdict.checkout_detail,
                              history_follows=bool(verdict.history.holds), detail=detail)
 
@@ -239,30 +254,48 @@ def checkout_sentence(state: Checkout, found: CheckoutDetail, *, history_follows
     return "your checkout is clean"
 
 
-def _fix_pr_tail(fix: BaseFix) -> str:
+def _fix_pr_tail(fix: BaseFix, it: str = "it") -> str:
+    """Say what the base fix does about a commit the base branch holds. Takes the base fix and the
+    word for what it stores. Returns the clause, or "" when there is nothing to say."""
     base = f"'{textsafe.plain(fix.base, 120)}'"
     if fix.pull_request is not None:
-        return f" — pull request #{fix.pull_request} removes it from {base}"
+        return f" — pull request #{fix.pull_request} removes {it} from {base}"
     if fix.state in _BRANCH_MADE and fix.branch:
-        tail = f" — '{textsafe.plain(fix.branch, 120)}' removes it from {base} once merged"
+        tail = f" — '{textsafe.plain(fix.branch, 120)}' removes {it} from {base} once merged"
         return tail if fix.published else tail + "; saw fix --pr opens the pull request"
     if fix.state in (BaseState.NOTHING_TO_FIX, BaseState.SUSPICIOUS_ONLY):
-        return f" — {base} no longer carries it; update from {base}"
+        carries = "carries it" if it == "it" else f"holds {it}"
+        return f" — {base} no longer {carries}; update from {base}"
     return ""
 
 
-def _hold_line(hold: HistoryHold, fix: BaseFix) -> str:
+def _hold_line(hold: HistoryHold, fix: BaseFix, it: str = "it") -> str:
+    """Say where one place still stores what was found and what removes it. Takes the hold, the
+    base fix and the word for what it stores. Returns the line."""
     name = textsafe.plain(hold.name, 120)
+    carries = "carries it" if it == "it" else f"holds {it}"
     if hold.remedy is Remedy.NAMED_ONLY:
-        return f"stash entry {name} carries it"
+        return f"stash entry {name} {carries}"
     if hold.remedy is Remedy.FIX_PR:
         subject = ("the commit you are on" if hold.where == "head" else f"branch '{name}'")
-        return (f"{subject} is also on '{textsafe.plain(fix.base, 120)}'" + _fix_pr_tail(fix))
+        return (f"{subject} is also on '{textsafe.plain(fix.base, 120)}'" + _fix_pr_tail(fix, it))
     if hold.where == "head":
         where = ("is not on '" + textsafe.plain(fix.base, 120) + "'" if hold.on_remote
                  else "is only on this machine")
-        return f"the commit you are on {where} — saw fix amend removes it from your commits"
-    return f"branch '{name}' carries it — saw fix amend removes it"
+        return f"the commit you are on {where} — saw fix amend removes {it} from your commits"
+    return f"branch '{name}' {carries} — saw fix amend removes {it}"
+
+
+def _taken_out_lines(found: Arrivals, fix: BaseFix, detail: bool) -> list[str]:
+    """Say where the files the operator chose to take out are still stored. Takes the arrivals, the
+    base fix and whether paths may be named. Returns the lines."""
+    if not found.taken_out_held:
+        return []
+    lines = [_INDENT + "files you chose to take out are still stored:"]
+    for hold in found.taken_out_held:
+        line = _HOLD_INDENT + _hold_line(hold, fix, "them")
+        lines.append(f"{line} ({_paths(hold.paths)})" if detail else line)
+    return lines
 
 
 def _arrival_lines(found: Arrivals, detail: bool) -> list[str]:
@@ -271,8 +304,8 @@ def _arrival_lines(found: Arrivals, detail: bool) -> list[str]:
     lines = []
     if found.files:
         line = (f"{len(found.files)} file(s) added in the same commit as the malware have no "
-                "finding of their own and are your decision — run saw fix amend in this "
-                "repository, on a terminal, to decide them")
+                "finding of their own and are your decision — run saw fix in this repository, "
+                "on a terminal, to decide them")
         lines.append(f"{line} ({_paths(found.files)})" if detail else line)
     if found.first_commits:
         lines.append("the malware is in this repository's first commit — review that commit's "
@@ -281,6 +314,8 @@ def _arrival_lines(found: Arrivals, detail: bool) -> list[str]:
         line = ("an earlier list of files for you to decide could not be read — review the commits "
                 "that brought the malware yourself, then delete it")
         lines.append(f"{line} ({_paths(found.unread_records)})" if detail else line)
+    if found.not_saved:
+        lines.append("your answers about those files could not be saved — you will be asked again")
     if found.unread:
         lines.append("git could not read what else was added with the malware — check the "
                      "repository with `git fsck`, then run this again")
@@ -288,8 +323,8 @@ def _arrival_lines(found: Arrivals, detail: bool) -> list[str]:
 
 
 def render_fix_verdict(verdict: FixVerdict, detail: bool = False) -> str:
-    """The operator's account of one repository's run. Takes the verdict and whether paths may be
-    named. Returns the text; nothing reads it back."""
+    """Render the operator's account of one repository's run. Takes the verdict and whether paths
+    may be named. Returns the text."""
     lines = [verdict.base_fix.summary, _INDENT + _checkout_line(verdict, detail)]
     lines += [_INDENT + textsafe.plain(n, 300) for n in verdict.checkout_detail.notes]
     if verdict.history.holds:
@@ -301,5 +336,6 @@ def render_fix_verdict(verdict: FixVerdict, detail: bool = False) -> str:
     if verdict.history.unread:
         lines.append(_INDENT + "git could not say what your history holds, so it is not called "
                      "clean")
+    lines += _taken_out_lines(verdict.arrivals, verdict.base_fix, detail)
     lines += [_INDENT + line for line in _arrival_lines(verdict.arrivals, detail)]
     return "\n".join(lines)

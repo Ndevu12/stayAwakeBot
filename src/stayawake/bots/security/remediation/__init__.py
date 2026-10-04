@@ -11,7 +11,7 @@ from __future__ import annotations
 # `remediation.gates.<helper>` / `remediation.changes._backup` (their real home).
 from stayawake.bots.security.remediation.changes import (
     is_auto_fixable, rollback_path, Change, plan, strip_gitignore_text,
-    strip_settings_autorun, ensure_ignored, remove_residual, apply)
+    strip_settings_autorun, ensure_ignored, remove_residual, remove_paths, apply)
 from stayawake.bots.security.remediation.gates import (
     codeloader_content_sig, has_concealment_seam)
 from stayawake.bots.security.remediation.classify import (
@@ -25,7 +25,7 @@ from stayawake.lib import git as gitutil
 
 __all__ = [
     "is_auto_fixable", "rollback_path", "Change", "plan", "strip_gitignore_text",
-    "strip_settings_autorun", "ensure_ignored", "remove_residual", "apply",
+    "strip_settings_autorun", "ensure_ignored", "remove_residual", "remove_paths", "apply",
     "Recovery", "Manual", "Suggested", "codeloader_content_sig", "classify_recovery",
     "apply_recovery", "apply_suggested", "has_concealment_seam",
     "BORN_INFECTED", "INTRINSIC_MATCH", "LEGIT_CHANGES", "UNTRACKED", "NO_VCS", "INSPECT_FAILED",
