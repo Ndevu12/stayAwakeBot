@@ -250,8 +250,11 @@ class TestNobodyCanBeAsked(_Delivery):
         self._later()
         self._run()
         added = self.git(self.d, "log", "--format=%H", "-1", "--", PADDING[0]).strip()
-        self.git(self.d, "-c", "core.hooksPath=/dev/null", "rebase", "-q", "--force-rebase",
-                 f"{added}^")
+        with mock.patch.dict(os.environ, {"GIT_COMMITTER_DATE": "2001-01-01T00:00:00 +0000"}):
+            self.git(self.d, "-c", "core.hooksPath=/dev/null", "rebase", "-q", "--force-rebase",
+                     f"{added}^")
+        self.assertNotEqual(0, self.git_may_fail(self.d, "merge-base", "--is-ancestor", added,
+                                                 "HEAD").returncode)
         outcome = self._run(_answering(TAKE_OUT)[0], findings=[])
         self.assertFalse(outcome.completed)
         self.assertIn(Cause.ARRIVALS_DELIVERY_GONE, self._causes(outcome))
