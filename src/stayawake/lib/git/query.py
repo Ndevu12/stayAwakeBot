@@ -449,20 +449,13 @@ def parents(repo: str | Path, sha: str) -> list[str] | None:
 
 
 def changed_paths(repo: str | Path, base: str, target: str,
-                  diff_filter: str | None = None) -> set[str]:
-    """Paths that differ between two commits/trees (name-only). Raises `Unread` when git could not
-    compare them.
-
-    `diff_filter` is passed straight to `git diff --diff-filter` (e.g. "AM" keeps only the
-    paths `target` Adds or Modifies and drops Deletions) — callers that care about content
-    `target` *introduces* want to ignore paths it merely removes.
-    """
-    # `-z` is load-bearing, exactly as in `_differing_paths`: without it git C-quotes and
-    # octal-escapes any path holding a non-ASCII byte, a quote, a backslash, a tab or a newline.
-    # That spelling matches nothing when it is later looked up, so the path reads as absent —
-    # and a remediation path that treats "absent" as "this commit introduced it" then reports
-    # having removed something it never found.
+                  diff_filter: str | None = None, *, renames: bool = True) -> set[str]:
+    """Compare two commits or trees and list the paths that differ. Takes the repo, the base, the
+    target, the `git diff --diff-filter` letters to keep, and whether a renamed file is reported as
+    renamed. Returns the paths. Raises `Unread` when git could not compare them."""
     args = ["diff", "--name-only", "-z"]
+    if not renames:
+        args.append("--no-renames")
     if diff_filter:
         args.append(f"--diff-filter={diff_filter}")
     args += [base, target]
@@ -544,6 +537,25 @@ def entry_at(repo: str | Path, treeish: str, path: str) -> tuple[bool, tuple[str
     return True, None
 
 
+def entries_at(repo: str | Path, treeish: str, paths=None) -> dict[str, tuple[str, str]]:
+    """Read the entry a commit or tree holds at each of several paths, as the repository stores
+    them. Takes the repo, the commit or tree and the paths, or None for every file it holds. Returns
+    the `(mode, oid)` of each path with an entry of its own there, by path. Raises `Unread` naming
+    the commit when git could not answer."""
+    if paths is None:
+        listed = _entries(repo, ["-r", treeish])
+        if listed is None:
+            raise Unread(f"the files of {treeish[:12]}")
+        return listed
+    found: dict[str, tuple[str, str]] = {}
+    for batch in _batches(list(dict.fromkeys(paths))):
+        listed = _entries(repo, ["-r", "-t", treeish, "--", *batch])
+        if listed is None:
+            raise Unread(f"the files of {treeish[:12]}")
+        found.update({path: listed[path] for path in batch if path in listed})
+    return found
+
+
 def file_text_at(repo: str | Path, treeish: str, path: str) -> tuple[str, str] | None:
     """Read the file a commit holds at a path, as the repository stores it. Takes the repo, the commit
     and the path. Returns its `(blob id, text)`, `("", "")` when no file is there, or None when git
@@ -585,7 +597,8 @@ def tracked(repo: str | Path, path: str) -> bool:
 
 
 def file_commits(repo: str | Path, path: str, limit: int = 50,
-                 first_parent: bool = False, all_branches: bool = False) -> list[str] | None:
+                 first_parent: bool = False, all_branches: bool = False,
+                 start: str = "") -> list[str] | None:
     """Commit SHAs that touched `path`, newest first (bounded). The walk that the
     remediator uses to find the most recent committed version that scans clean.
 
@@ -602,13 +615,19 @@ def file_commits(repo: str | Path, path: str, limit: int = 50,
     reachable only from a fetched branch is enumerated with the rest. The refs go in as globs, not
     one argument each, so a repository with many branches cannot outgrow the argument list.
 
+    `start` is a commit id to walk from instead of HEAD.
+
     Reads the repository as it stores it. Returns None when git could not walk the history.
     """
+    if start and not (len(start) in (40, 64) and set(start) <= set("0123456789abcdef")):
+        return None
     args = ["log", f"-n{limit}", "--format=%H"]
     if first_parent:
         args.append("--first-parent")
     if all_branches:
         args += _BRANCH_WALK
+    elif start:
+        args.append(start)
     args += ["--", path]
     res = own_view(repo, args)
     if res is None or res.returncode != 0:
@@ -627,12 +646,91 @@ def _commit_header(token: bytes) -> bytes | None:
     return None
 
 
+
+_RAW_STATUSES = frozenset({b"A", b"M", b"D", b"T"})
+
+
+def _raw_record(meta: bytes) -> str | None:
+    """Read the blob a `--raw` record writes. Takes the record after its colon. Returns the blob id,
+    "" when it writes none, or None when the record is not in the one-parent form."""
+    fields = meta.split()
+    if (len(fields) != 5 or meta.startswith(b":") or fields[4] not in _RAW_STATUSES
+            or not all(len(f) == 6 and f.isdigit() for f in fields[:2])
+            or not all(len(f) in (40, 64) and set(f) <= _SHA_BYTES for f in fields[2:4])):
+        return None
+    blob = fields[3].decode("ascii")
+    return "" if set(blob) == {"0"} else blob
+
+
+def _stash_entries(repo: str | Path) -> list[str]:
+    """List every stash entry's commit. Takes the repo. Returns the ids, none when there is no
+    stash. Raises `Unread` when git could not list it."""
+    has = run(repo, ["rev-parse", "--verify", "--quiet", "refs/stash"])
+    if has is None or has.returncode not in (0, 1):
+        raise Unread("the stash")
+    if has.returncode == 1:
+        return []
+    listed = own_view(repo, ["log", "-g", "--format=%H", "refs/stash", "--"])
+    if listed is None or listed.returncode != 0:
+        raise Unread("the stash")
+    entries = [line.strip() for line in (listed.stdout or "").splitlines() if line.strip()]
+    if not all(len(e) in (40, 64) and set(e) <= set("0123456789abcdef") for e in entries):
+        raise Unread("the stash")
+    return entries
+
+
+def path_versions(repo: str | Path, paths, limit: int = 100_000) -> dict[str, dict[str, str]] | None:
+    """Find every version any ref's history, or any stash entry, wrote at each of several paths.
+    Takes the repo, the paths and the walk bound. Returns each path mapped to each blob id written
+    there and one commit that wrote it, or None when the history is longer than the bound. Raises
+    `Unread` when git could not walk it or printed what it could not read."""
+    wanted = list(dict.fromkeys(paths))
+    found: dict[str, dict[str, str]] = {p: {} for p in wanted}
+    stash = _stash_entries(repo)
+    for batch in _batches(wanted):
+        names = set(batch)
+        args = ["-c", "log.showRoot=true", "log", f"-n{limit}", "--format=%H",
+                "--diff-merges=separate", "--raw", "-z", "--no-abbrev", "--no-renames", "--all",
+                "--full-history", *stash, "--", *batch]
+        out = own_view_fed(repo, args, b"")
+        if out is None:
+            raise Unread(f"every copy of {batch[0]}")
+        commits: set[bytes] = set()
+        commit, blob, expect_path = "", "", False
+        for token in out.split(b"\0"):
+            if expect_path:
+                name = token.decode("utf-8", "surrogateescape")
+                if name not in names:
+                    raise Unread(f"every copy of {batch[0]}")
+                if blob:
+                    found[name].setdefault(blob, commit)
+                expect_path = False
+                continue
+            head, colon, meta = token.partition(b":")
+            sha = _commit_header(head)
+            if sha is None and head.strip(b"\n"):
+                raise Unread(f"every copy of {batch[0]}")
+            if sha is not None:
+                commits.add(sha)
+                commit = sha.decode("ascii")
+            if colon:
+                read = _raw_record(meta)
+                if read is None or not commit:
+                    raise Unread(f"every copy of {batch[0]}")
+                blob, expect_path = read, True
+        if expect_path:
+            raise Unread(f"every copy of {batch[0]}")
+        if len(commits) >= limit:
+            return None
+    return found
+
+
 def blob_paths(repo: str | Path, oid: str, limit: int = 100_000) -> list[str] | None:
     """Every path at which the blob `oid` was ever written or removed. Takes the repo, the blob id
     and the walk bound. Returns the paths, or None when the history is longer than the bound. Raises
     `Unread` when git could not walk it."""
-    args = ["-c", "log.showRoot=true", "log", f"-n{limit}", "--format=%H", "-m", "--raw", "-z",
-            "--no-abbrev", f"--find-object={oid}", *_BRANCH_WALK]
+    args = ["-c", "log.showRoot=true", "log", f"-n{limit}", "--format=%H", "--diff-merges=separate",
+            "--raw", "-z", "--no-abbrev", f"--find-object={oid}", *_BRANCH_WALK]
     out = own_view_fed(repo, args, b"")
     if out is None:
         raise Unread(f"the copies of {oid[:12]}")

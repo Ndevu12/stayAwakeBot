@@ -62,6 +62,35 @@ completion only when the history it rewrote no longer holds them.
 If it cannot finish, it puts the branches back and says so. If it moved a branch and could not put
 it back, it names that branch: look at that repository before doing anything else with it.
 
+## Files added in the same commit as the malware
+
+The commit that brought the malware often added other files that carry no finding of their own.
+saw never removes those by itself.
+
+- **On a terminal, for one repository,** it shows each such commit — its id, date and subject as the
+  commit gives them, and what saw is removing from it — and lists the other files it added, numbered
+  by folder, each with how many other files of your project mention it ("named by 2", "named by
+  none"). Type `all` or the numbers of the files to take out, then `yes`. Press Enter to keep
+  them all. It asks about at most ten such commits in one run; the rest are asked on the next. A
+  file you take out is removed from that commit and every later commit that still holds it as it was
+  added, even when an earlier run already replaced that commit; a version you changed later, and a
+  copy another branch added on its own, stay. The same files added by the same malware on another
+  branch go too. A file that commit changed, and did not add, is named, never removed. If that commit
+  has left your history, saw takes out no copy of the file and names it for you to review.
+- **Your answers are kept.** A file you keep is not asked about again, by `saw fix amend` or
+  `saw fix`. A file you take out, here or in `saw fix`, is removed by later runs too, without asking
+  again.
+- **Anywhere else** — no terminal, CI, several repositories, `--remote` — none of them is removed. The
+  run names them, is not called done, and remembers them, so running `saw fix amend` in that
+  repository on a terminal later asks about them.
+- **When the malware is in the repository's first commit,** saw names that commit for you to review.
+- **Everything a merge brought in with the malware is taken out with it.** When a copy of one of
+  those files is still on another branch, tag or stash, the run names it for you to review; a copy
+  of the malware itself there keeps the run from being called done.
+- **A merge that brought the malware** may be asked about file by file on a terminal. A file you
+  remove there is taken out of that merge and the commits after it, and the merge's other files are
+  then asked about too.
+
 ## What it leaves for you
 
 - **A protected branch is never force-updated.** The amended history is published beside it under

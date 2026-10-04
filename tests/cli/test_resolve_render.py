@@ -67,7 +67,7 @@ class TestRenderItem(unittest.TestCase):
 
     def test_an_unplaceable_file_says_treat_with_caution(self):
         out = render_item(_item(introduced_by="", arrived_with_removed=()))
-        self.assertIn("could not determine", out)
+        self.assertIn("no commit ties it to the malware", out)
         self.assertIn("treat with caution", out)
 
     def test_a_heuristic_file_says_unsure(self):

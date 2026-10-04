@@ -14,6 +14,14 @@ reader, not the mechanism or the weakness it closed.
 ## [Unreleased]
 
 ### Added
+- **On a terminal, `saw fix` and `saw fix amend` ask about the other files added in the same
+  commit as the malware.** Each file shows how many of your project's files mention it. You take out
+  all of them, some, or none; Enter keeps them. `saw fix` removes the ones you take out in the
+  branch it prepares; `saw fix amend` removes them from your history. Your answers are kept, so a
+  file is not asked about twice. Without a terminal, none of them is removed: they are named, and
+  the run is not called done or clean until you decide.
+- **When `saw fix amend` asks about the files of a merge that brought the malware one by one, a
+  file you remove is taken out of that merge and the commits after it.**
 - **`saw hook` now checks a push before the code leaves your machine.** On `git push`, it checks
   every file version the push would publish, on every branch and tag you push and in earlier
   commits of the push, as committed rather than as your working folder holds it, and what each
@@ -85,6 +93,12 @@ reader, not the mechanism or the weakness it closed.
 - **saw names the compromised versions instead of a version to install.**
 
 ### Fixed
+- **`saw fix amend` removes the malware an evil merge brought when a harmless file beside it, such
+  as an empty file, also exists elsewhere in the repository.** A copy of the malware itself on
+  another branch or tag still keeps the run from being called done; a copy elsewhere of another file
+  that came in with it is named for you to review.
+- **`saw fix amend` names the history it could not read for you to review** whenever it stops,
+  including when nothing else was left to replace.
 - **`saw fix` and `saw fix amend` also remove injected editor settings that hide the terminal and
   debug panels, and an injected `.gitignore` line that ignores the file itself.**
 - **`saw guard setup --pr` names what it could not read on the default branch** and does not plan

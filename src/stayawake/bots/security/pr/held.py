@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Mapping
 
 from stayawake.bots.security.pr.fix_verdict import History, HistoryHold, Remedy
 from stayawake.bots.security.remediation import live
@@ -16,19 +17,43 @@ class _Unanswered(Exception):
 
 def history_holds(repo: Path, paths, baseref: str, signatures, allowlist, opts, *,
                   fix_branch: str = "") -> History:
-    """Where the commit the checkout stands on, each local branch and each stash entry still store
-    confirmed content at the paths.
-
-    Takes the repository, the cleared paths, the ref the fix is prepared against, the by-matcher
-    signatures, the allowlist, the scan options and the branch the fix itself is prepared on, which
-    the base fix accounts for. Returns the holds; a commit the base ref reaches
-    is removed by the fix pull request, any other by `saw fix amend`, and a stash entry is only
-    named. When git cannot answer, `unread` says so.
-    """
+    """Find the places that still store confirmed content at the paths. Takes the repository, the
+    cleared paths, the ref the fix is prepared against, the by-matcher signatures, the allowlist,
+    the scan options and the branch the fix is prepared on. Returns the `History`, each hold with
+    its remedy, and `unread` set when git could not answer."""
     paths = sorted(set(paths))
     if not paths:
         return History()
-    stored = live.StoredContent(repo, signatures, allowlist, opts)
+    return _holds(repo, paths, baseref, live.StoredContent(repo, signatures, allowlist, opts),
+                  fix_branch)
+
+
+class _ExactVersions:
+    """A judge of stored entries that confirms only the versions named for each path."""
+
+    def __init__(self, versions: Mapping[str, set[str]]):
+        self._versions = versions
+
+    def confirms(self, path: str, entry: tuple[str, str]) -> bool:
+        """Takes the path and its `(mode, object)` entry. Returns whether it is a named version."""
+        return entry[1] in self._versions.get(path, ())
+
+
+def versions_held(repo: Path, versions: Mapping[str, set[str]], baseref: str, *,
+                  fix_branch: str = "") -> History:
+    """Find the places that still store one of the named versions of each path. Takes the
+    repository, each path mapped to its version ids, the ref the fix is prepared against and the
+    branch the fix is prepared on. Returns the `History`."""
+    paths = sorted(p for p, ids in versions.items() if ids)
+    if not paths:
+        return History()
+    return _holds(repo, paths, baseref, _ExactVersions(versions), fix_branch)
+
+
+def _holds(repo: Path, paths: list[str], baseref: str, stored, fix_branch: str) -> History:
+    """Find the places that still store what a judge confirms at the paths. Takes the repository,
+    the paths, the ref the fix is prepared against, the judge and the branch the fix is prepared on.
+    Returns the `History`."""
     try:
         holds = _at_head(repo, paths, baseref, stored)
         holds += _on_branches(repo, paths, baseref, stored, fix_branch)

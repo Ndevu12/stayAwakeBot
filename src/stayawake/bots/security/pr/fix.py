@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from stayawake.lib.adapters import github_api
@@ -15,15 +15,15 @@ from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.targets import LocalRepoTarget
 from stayawake.bots.security.dependencies.remediation import MALICIOUS
 from stayawake.bots.security.models import ROLLBACK_DIR, CONFIRMED, HEURISTIC
-from stayawake.bots.security.remediation import live, manifest
+from stayawake.bots.security.remediation import delivery, live, manifest
 from stayawake.bots.security import remediation
 from stayawake.bots.security.remediation import installed
 from stayawake.core import proposal
-from stayawake.bots.security.pr import held
+from stayawake.bots.security.pr import arrivals_for_fix, held
 from stayawake.bots.security.pr.constants import FIX_BRANCH, PARTIAL_LABEL
 from stayawake.bots.security.pr.branches import choose_fix_branch
 from stayawake.bots.security.pr.fix_verdict import (
-    BaseFix, BaseState, Checkout, CheckoutDetail, FixVerdict, History, checkout_of)
+    Arrivals, BaseFix, BaseState, Checkout, CheckoutDetail, FixVerdict, History, checkout_of)
 from stayawake.bots.security.pr.render import (
     PARTIAL_MARK, manual_review_lines, computed_review_lines, suspicious_review_lines,
     _issue_spec, _pr_body, _render_submit)
@@ -60,10 +60,12 @@ def _reconcile_partial_label(owner: str, name: str, number: int, partial: bool, 
 
 @dataclass(frozen=True)
 class _CheckoutSeen:
-    """What the checkout pass came to, and what the history still stores where it cleared."""
+    """What the checkout pass came to, what the history still stores where it cleared, and what
+    was added beside it."""
     state: Checkout = Checkout.UNREAD
     detail: CheckoutDetail = CheckoutDetail()
     history: History = History()
+    arrivals: Arrivals = Arrivals()
 
 
 @dataclass(frozen=True)
@@ -235,9 +237,35 @@ def _suspicious_only_outcome(label: str, fix: "_Fix") -> str:
             "review with `saw scan` (not asserted as malware)") + suspicious_review_lines(fix.suspicious)
 
 
+def _take_out_arrivals(wt: Path, versions, rollback: Path) -> tuple[list, list[str]]:
+    """Remove from the prepared branch each file the operator chose to take out that it holds as it
+    was added by one of those commits or a commit after one. Takes the worktree, the
+    `(path, blob, ids)` versions and the rollback folder. Returns the changes, and the files git
+    could not read there."""
+    wanted: list[str] = []
+    not_read: list[str] = []
+    for path, blob, forms in versions:
+        answered, entry = gitutil.entry_at(wt, "HEAD", path)
+        if not answered:
+            not_read.append(f"every copy of {path}")
+            continue
+        if entry is None or entry[1] != blob:
+            continue
+        came_after = delivery.came_after(wt, path, forms)
+        if came_after is None:
+            not_read.append(f"which copies of {path} came with the malware")
+        elif came_after:
+            wanted.append(path)
+    taken = remediation.remove_paths(wt, wanted, rollback, "added in the same commit as the malware")
+    return taken, not_read
+
+
 def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = None,
-               label: str = "", spin: bool = False) -> tuple["_Fix | _Stopped", Path | None]:
-    """Build the fix in a throwaway worktree. Returns `(fix or why none was prepared, worktree)`."""
+               label: str = "", spin: bool = False,
+               resolver=None) -> tuple["_Fix | _Stopped", Path | None]:
+    """Build the fix in a throwaway worktree. Takes the repo, the scan options, signatures and
+    allowlist, the base branch, the label, whether to show progress, and the resolver that asks the
+    operator, or None. Returns `(fix or why none was prepared, worktree)`."""
     base = base or gitutil.default_branch(repo)
     baseref = f"origin/{base}" if gitutil.ref_exists(repo, f"origin/{base}") else base
     if not gitutil.ref_exists(repo, baseref):
@@ -291,13 +319,21 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
             lockfile_changes = _lockfile_changes(wt, removed)
         state, detail = checkout_of(checkout)
         seen = _CheckoutSeen(state, detail, held.history_holds(
-            repo, checkout.cleared, baseref, signatures, allowlist, opts, fix_branch=branch))
+            repo, checkout.cleared, baseref, signatures, allowlist, opts, fix_branch=branch),
+            arrivals_for_fix.arrivals_beside(repo, checkout.cleared, findings, signatures,
+                                             allowlist, opts, resolver=resolver, baseref=baseref,
+                                             fix_branch=branch))
 
         def stopped(text: str) -> tuple[_Stopped, Path]:
             return _Stopped(BaseState.ABORTED, text, base, seen), wt
         if not scan.error:
             applied = (lockfile_changes + _manifest_changes(wt, findings)
                        + remediation.apply(wt, remediation.plan(findings), rollback))
+            taken_out, not_taken = _take_out_arrivals(wt, seen.arrivals.take_out, rollback)
+            applied += taken_out
+            if not_taken:
+                seen = replace(seen, arrivals=replace(
+                    seen.arrivals, unread=seen.arrivals.unread + tuple(not_taken)))
             for f in findings:
                 sha = _merge_sha(f)
                 if not sha:
@@ -432,15 +468,20 @@ def _build_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = No
                             checkout=seen), wt
             if scan.error or done.error:
                 return stopped("ABORTED — scan did not finish")
-            text = (f"'{base}' already clean — nothing to fix" if seen.state is Checkout.CLEAN
-                    else f"'{base}' is clean")
+            if seen.arrivals.undecided:
+                text = f"'{base}' has no confirmed finding left"
+            elif seen.state is Checkout.CLEAN:
+                text = f"'{base}' already clean — nothing to fix"
+            else:
+                text = f"'{base}' is clean"
             return _Stopped(BaseState.NOTHING_TO_FIX, text, base, seen), wt
     return _Fix(base, branch, applied, tuple(computed), suspicious, findings, advisories, tuple(manual),
                 signed=signed, checkout=seen), wt
 
 
 def _verdict(repository: str, base_fix: BaseFix, checkout: _CheckoutSeen) -> FixVerdict:
-    return FixVerdict(repository, base_fix, checkout.state, checkout.history, checkout.detail)
+    return FixVerdict(repository, base_fix, checkout.state, checkout.history, checkout.detail,
+                      checkout.arrivals)
 
 
 def _stopped_verdict(label: str, stop: _Stopped) -> FixVerdict:
@@ -459,10 +500,11 @@ def _prepared_state(fix: _Fix) -> BaseState:
 
 
 def prepare_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = None,
-                spin: bool = False) -> FixVerdict:
+                spin: bool = False, resolver=None) -> FixVerdict:
     """Prepare the fix on a local branch and stop. No push, no PR."""
     slug = gitutil.origin_slug(repo) or str(repo).replace(str(Path.home()), "~")
-    fix, wt = _build_fix(repo, opts, signatures, allowlist, base=base, label=slug, spin=spin)
+    fix, wt = _build_fix(repo, opts, signatures, allowlist, base=base, label=slug, spin=spin,
+                         resolver=resolver)
     try:
         if isinstance(fix, _Stopped):
             return _stopped_verdict(slug, fix)
@@ -494,15 +536,17 @@ def prepare_fix(repo: Path, opts, signatures, allowlist, *, base: str | None = N
 
 def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
                   patches_dir: Path | None = None, *, base: str | None = None,
-                  spin: bool = False) -> FixVerdict:
+                  spin: bool = False, resolver=None) -> FixVerdict:
     """Push the fix branch and open or update one PR."""
     slug = gitutil.origin_slug(repo)
     if not slug:
-        return _submit_without_origin(repo, opts, signatures, allowlist, base=base, spin=spin)
+        return _submit_without_origin(repo, opts, signatures, allowlist, base=base, spin=spin,
+                                      resolver=resolver)
 
     owner, name = slug.split("/", 1)
     gitutil.fetch(repo, "origin", gitutil.default_branch(repo))
-    fix, wt = _build_fix(repo, opts, signatures, allowlist, base=base, label=slug, spin=spin)
+    fix, wt = _build_fix(repo, opts, signatures, allowlist, base=base, label=slug, spin=spin,
+                         resolver=resolver)
     try:
         if isinstance(fix, _Stopped):
             return _stopped_verdict(slug, fix)
@@ -546,10 +590,11 @@ def submit_fix_pr(repo: Path, opts, signatures, allowlist, token: str,
 
 
 def _submit_without_origin(repo: Path, opts, signatures, allowlist, *, base: str | None,
-                           spin: bool) -> FixVerdict:
+                           spin: bool, resolver=None) -> FixVerdict:
     """`saw fix --pr` in a repository with no GitHub origin: prepare the branch and say so."""
     label = str(repo).replace(str(Path.home()), "~")
-    fix, wt = _build_fix(repo, opts, signatures, allowlist, base=base, label=label, spin=spin)
+    fix, wt = _build_fix(repo, opts, signatures, allowlist, base=base, label=label, spin=spin,
+                         resolver=resolver)
     try:
         if isinstance(fix, _Stopped):
             return _stopped_verdict(label, fix)

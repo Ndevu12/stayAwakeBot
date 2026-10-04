@@ -77,6 +77,7 @@ def register(sub) -> None:
 
 
 def run(a: argparse.Namespace) -> int:
+    """Run `saw fix` or `saw fix amend`. Takes the parsed arguments. Returns the command's status."""
     positionals = [*a.paths, *a.extra_paths]
     if positionals[:1] == ["amend"]:
         if a.pr:
@@ -103,4 +104,5 @@ def run(a: argparse.Namespace) -> int:
                           paths=None if remote else (positionals or None),
                           slugs=(positionals or None) if remote else None,
                           users=a.user or None, orgs=a.org or None, no_stream=no_stream_requested(a),
-                          jobs=a.jobs, branches=a.branch or None)
+                          jobs=a.jobs, branches=a.branch or None,
+                          resolver=None if remote else build_resolver())

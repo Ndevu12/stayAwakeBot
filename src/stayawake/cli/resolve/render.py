@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
-"""Render one uncertain file into safe operator text for the keep/remove prompt.
-
-Every line the file contributes is sanitised with `textsafe.plain` and shown inside a fixed frame;
-binary, unreadable, or not-human-judgeable content is described, not printed.
+"""Render what saw puts to the operator into safe text: one uncertain file, or the files one
+delivery commit added. Every attacker-controlled field goes through `textsafe.plain`.
 """
 from __future__ import annotations
 
+import posixpath
 import unicodedata
 
-from stayawake.bots.security.pr.resolve import UncertainItem
+from stayawake.bots.security.pr.resolve import DeliveryQuestion, UncertainItem
 from stayawake.utils import textsafe
 
 _READ_CAP = 4096
@@ -37,13 +36,16 @@ def _is_binary(raw: bytes) -> bool:
 
 
 def _origin_line(item: UncertainItem) -> str:
-    """One honest line of provenance: what the file arrived with, or that saw could not place it."""
+    """Say what the file arrived with, that git could not read it, or that it is not tied to one.
+    Takes the item. Returns the line."""
     if item.introduced_by and item.arrived_with_removed:
         n = len(item.arrived_with_removed)
         paths = ", ".join(textsafe.plain(p) for p in item.arrived_with_removed)
-        return (f"origin:  arrived in merge {textsafe.plain(item.introduced_by)} with {n} "
+        return (f"origin:  arrived in commit {textsafe.plain(item.introduced_by)} with {n} "
                 f"file{'' if n == 1 else 's'} saw is already removing: {paths}")
-    return "origin:  saw could not determine what this file arrived with — treat with caution"
+    if item.origin_unread:
+        return "origin:  git could not read what this file arrived with — treat with caution"
+    return "origin:  no commit ties it to the malware — treat with caution"
 
 
 def _body(item: UncertainItem) -> list[str]:
@@ -79,3 +81,82 @@ def render_item(item: UncertainItem) -> str:
                     f"{textsafe.plain(item.restore_source) or 'an earlier commit'}")
     head.append(_DIVIDER)
     return "\n".join(head + _body(item) + [_FOOTER])
+
+
+_DELIVERY_HEADER = ("─── files added in the same commit as the malware saw is removing — saw "
+                    "cannot tell them from your own work ───")
+FOLDERS_LISTED = 20
+NAMES_LISTED_PER_FOLDER = 8
+_TOP_LEVEL = "(top level)"
+
+
+def delivery_groups(question: DeliveryQuestion) -> list[tuple[str, list[str]]]:
+    """Group a delivery's files by folder, in the order they are numbered. Takes the question.
+    Returns `(folder, paths)` pairs; past the folder limit the files are grouped by their top
+    folder."""
+    def grouped(folder_of) -> list[tuple[str, list[str]]]:
+        folders: dict[str, list[str]] = {}
+        for f in sorted(question.files, key=lambda f: f.path):
+            folders.setdefault(folder_of(f.path), []).append(f.path)
+        return sorted(folders.items())
+
+    groups = grouped(posixpath.dirname)
+    if len(groups) > FOLDERS_LISTED:
+        groups = grouped(lambda path: path.split("/", 1)[0] if "/" in path else "")
+    return groups
+
+
+def _shown(path: str, folder: str, blobs: dict[str, str], clashes: set[str]) -> str:
+    """Name one file inside its group, marked with its blob when its name reads like another's.
+    Takes the path, its group's folder, each path's blob and the names that clash. Returns the
+    name."""
+    name = textsafe.plain(path[len(folder) + 1:] if folder else path)
+    return f"{name} [{blobs[path][:12]}]" if textsafe.plain(path) in clashes else name
+
+
+def _named_by(path: str, counts: dict[str, int]) -> str:
+    """Say how many other files of the project mention a file. Takes the path and the counts.
+    Returns the note, or "" when it was not counted."""
+    if path not in counts:
+        return ""
+    return f" (named by {counts[path]})" if counts[path] else " (named by none)"
+
+
+def render_delivery(question: DeliveryQuestion) -> str:
+    """Render one delivery commit and the files it added for the operator to choose from. Takes the
+    question. Returns the text; the caller adds the prompt."""
+    blobs = {f.path: f.blob for f in question.files}
+    named_by = dict(question.named_by)
+    names = [textsafe.plain(f.path) for f in question.files]
+    clashes = {n for n in names if names.count(n) > 1}
+    commit = textsafe.plain(question.commit[:12])
+    lines = [_DELIVERY_HEADER,
+             f"  commit:  {commit}  ({textsafe.plain(question.date) or 'no date'})  "
+             f"the commit says: \"{textsafe.plain(question.subject, 120)}\""]
+    if question.recorded:
+        lines.append("           saw recorded this commit in an earlier run, before replacing it")
+    lines.append("  saw is removing from it:  "
+                 + (", ".join(textsafe.plain(p) for p in question.removing) or "its payload"))
+    lines.append(f"  it also added {len(question.files)} file(s) with no finding of their own:")
+    groups = delivery_groups(question)
+    for number, (folder, paths) in enumerate(groups[:FOLDERS_LISTED], 1):
+        label = textsafe.plain(folder + "/") if folder else _TOP_LEVEL
+        lines.append(f"    {number}  {label}  ({len(paths)} file(s))")
+        entries = [f"{number}.{at} {_shown(p, folder, blobs, clashes)}{_named_by(p, named_by)}"
+                   for at, p in enumerate(paths[:NAMES_LISTED_PER_FOLDER], 1)]
+        lines.append("         " + "   ".join(entries))
+        hidden = len(paths) - NAMES_LISTED_PER_FOLDER
+        if hidden > 0:
+            lines.append(f"         … and {hidden} more — choosing {number} takes all of them")
+    if len(groups) > FOLDERS_LISTED:
+        rest = sum(len(paths) for _folder, paths in groups[FOLDERS_LISTED:])
+        lines.append(f"    … and {len(groups) - FOLDERS_LISTED} more folders ({rest} file(s)) — "
+                     "'all' takes them too")
+    if question.changed:
+        shown = question.changed[:NAMES_LISTED_PER_FOLDER]
+        hidden = len(question.changed) - len(shown)
+        lines.append("  it also changed, and saw leaves to you: "
+                     + ", ".join(textsafe.plain(p) for p in shown)
+                     + (f" and {hidden} more" if hidden else ""))
+    lines.append(_DIVIDER)
+    return "\n".join(lines)

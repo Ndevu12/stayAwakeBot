@@ -343,8 +343,14 @@ def _delete_stays_in(root: Path, target: Path) -> bool:
 
 def remove_residual(root: Path, findings, rollback: Path) -> list["Change"]:
     """Back up and remove each remaining flagged path."""
+    return remove_paths(root, {f.path for f in findings}, rollback, "residual after remediation")
+
+
+def remove_paths(root: Path, paths, rollback: Path, detail: str) -> list["Change"]:
+    """Back up and remove each path inside a tree. Takes the tree, the paths, the rollback folder
+    and what to note on each change. Returns the changes."""
     done: list[Change] = []
-    for rel in sorted({f.path for f in findings}):
+    for rel in sorted(set(paths)):
         target = root / rel
         if not target.exists() or not _delete_stays_in(root, target):
             continue
@@ -353,7 +359,7 @@ def remove_residual(root: Path, findings, rollback: Path) -> list["Change"]:
             shutil.rmtree(target)
         else:
             target.unlink()
-        done.append(Change("remove", rel, "residual after remediation"))
+        done.append(Change("remove", rel, detail))
     return done
 
 

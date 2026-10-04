@@ -205,9 +205,10 @@ def _item_label(display: str, base: str | None) -> str:
 # ── saw fix ──────────────────────────────────────────────────────────────────────
 
 def _fix_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *, publish: bool,
-               jobs=None, branches=None) -> list[FixOutcome]:
+               jobs=None, branches=None, resolver=None) -> list[FixOutcome]:
     """Fix LOCAL repositories. Default: PREPARE a `security/auto-clean` branch per repo (no
-    push, no network). `publish` (`--pr`): also push + open/update a PR (pre-flighted)."""
+    push, no network). `publish` (`--pr`): also push + open/update a PR (pre-flighted). The
+    resolver asks the operator only when one repository and one branch are fixed."""
     missing = named_but_absent(paths)
     if missing:
         prog.line(f"error: no such path: {', '.join(missing)}")
@@ -236,6 +237,7 @@ def _fix_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *, publish: bo
         return refused
     verb = "Opening PRs for" if publish else "Preparing fixes for"
     prog.line(f"{verb} {len(items)} target{'' if len(items) == 1 else 's'}…")
+    asking = resolver if len(items) == 1 else None
 
     # `spin` is on only in the sequential single-writer path; the concurrent path passes spin=False
     # and shows in-flight state on the board instead (see `_run_fix_sweep`). pr.{prepare_fix,
@@ -247,10 +249,12 @@ def _fix_local(cfg, opts, sigs, allowlist, paths, prog: Streamer, *, publish: bo
             tok, aerr = auth.act_token(token, source, gitutil.origin_slug(repo))
             if aerr:      # a repo no credential can reach was NOT fixed
                 return _review(f"{display}: error — {aerr}")
-            return _graded_fix(lambda: pr_submit.submit_fix_pr(repo, opts, sigs, allowlist, tok,
-                                                               base=base, spin=spin), display)
-        return _graded_fix(lambda: pr_submit.prepare_fix(repo, opts, sigs, allowlist, base=base,
-                                                          spin=spin), display)
+            return _graded_fix(lambda: pr_submit.submit_fix_pr(
+                repo, opts, sigs, allowlist, tok, base=base, spin=spin and asking is None,
+                resolver=asking), display)
+        return _graded_fix(lambda: pr_submit.prepare_fix(
+            repo, opts, sigs, allowlist, base=base, spin=spin and asking is None,
+            resolver=asking), display)
 
     labels = [_item_label(_disp(r), b) for r, b in items]
     return refused + _run_fix_sweep(items, labels, make_outcome, prog, jobs=jobs, verb="Fixing",
@@ -418,12 +422,14 @@ def fix(config_path: str | None = None, *, pr: bool = False, remote: bool = Fals
         paths: list[str] | None = None, users: list[str] | None = None,
         orgs: list[str] | None = None, slugs: list[str] | None = None,
         no_stream: bool = False, jobs: int | None = None,
-        branches: list[str] | None = None) -> int:
+        branches: list[str] | None = None, resolver=None) -> int:
     """`saw fix`: prepare a `security/auto-clean` branch per infected repo (no push). With
     `pr=True` (`--pr`) also push + open/update one rolling PR each; with `remote=True`
     (`--remote`) sweep GitHub targets resolved by the ladder (ad-hoc `users`/`orgs`/
     `slugs` → config → your own repos). A multi-repo sweep runs up to `jobs` repos at once
-    (AUTO by default; `-j 1` forces sequential). Streams each repo's outcome. Returns INCOMPLETE if
+    (AUTO by default; `-j 1` forces sequential). `resolver` asks the operator about the files added
+    beside a payload when one local repository is fixed. Streams each repo's outcome. Returns
+    INCOMPLETE if
     an explicit --config is missing or any repo needs review, FINDINGS if any history still stores
     what was cleared, else CLEAN."""
     cfg = _resolve_config(config_path, targets=None if remote else paths)
@@ -441,7 +447,7 @@ def fix(config_path: str | None = None, *, pr: bool = False, remote: bool = Fals
                             jobs=jobs)
                 if remote
                 else _fix_local(cfg, opts, sigs, allowlist, paths, prog, publish=pr, jobs=jobs,
-                                branches=branches))
+                                branches=branches, resolver=resolver))
     if not outcomes:
         prog.line("No repositories to fix.")
         return 0
