@@ -68,7 +68,7 @@ class TestBareFixNamesWhatArrivedWithThePayload(_Project):
         v = self.verdict()
         self.assertIn("public/fonts/inter-regular.woff", v.arrivals.files)
         self.assertIs(Grade.NEEDS_REVIEW, v.grade)
-        self.assertNotIn("nothing to fix", render_fix_verdict(v))
+        self.assertNotIn("clean", render_fix_verdict(v))
 
     def test_an_earlier_list_that_cannot_be_read_keeps_the_repository_in_review(self):
         self.git(self.d, "remote", "add", "origin", "https://github.com/acme/app.git")

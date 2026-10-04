@@ -196,6 +196,8 @@ def _paths(paths) -> str:
 
 
 def _checkout_line(verdict: FixVerdict, detail: bool) -> str:
+    if verdict.checkout is Checkout.CLEAN and verdict.arrivals.undecided:
+        return "your checkout has no confirmed finding left"
     return checkout_sentence(verdict.checkout, verdict.checkout_detail,
                              history_follows=bool(verdict.history.holds), detail=detail)
 
