@@ -102,7 +102,7 @@ def arrivals_beside(repo: Path, paths, findings, signatures, allowlist, opts) ->
         put = _from_this_run(repo, paths, findings, live.StoredContent(repo, signatures, allowlist, opts),
                              seen, excluded, unread)
     recorded, unreadable = _recorded(repo)
-    left = arrival_questions.from_records(recorded, excluded, seen, lambda path, blob: True)
+    left = arrival_questions.from_records(recorded, excluded, seen, lambda forms, path, blob: True)
     whole = gitutil.holds_its_history(repo) if put.first_commits else True
     return Arrivals(
         files=tuple(f.path for question in [*put.asked, *left] for f in question.files),

@@ -3,7 +3,7 @@
 delivery."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Callable, Mapping
 
@@ -29,19 +29,18 @@ class Settled:
     """What became of the files put to the operator.
 
     `take_out` are the files to remove as they were added, and `delivered_in` maps each of them,
-    as `(path, blob)`, to the commit that added it; `kept` are the files the operator kept;
+    as `(path, blob)`, to every id of the commit that added it; `kept` are the files the operator kept;
     `undecided` the questions nobody answered.
     """
 
     take_out: list[ArrivedFile] = field(default_factory=list)
     kept: list[ArrivedFile] = field(default_factory=list)
     undecided: list[DeliveryQuestion] = field(default_factory=list)
-    delivered_in: dict[tuple[str, str], str] = field(default_factory=dict)
+    delivered_in: dict[tuple[str, str], tuple[str, ...]] = field(default_factory=dict)
 
 
 def _with_files(question: DeliveryQuestion, files) -> DeliveryQuestion:
-    return DeliveryQuestion(question.commit, question.date, question.subject, question.removing,
-                            tuple(files), question.changed, question.recorded)
+    return replace(question, files=tuple(files))
 
 
 def from_history(repo: Path, deliveries: Mapping[str, tuple[str, ...]],
@@ -74,15 +73,15 @@ def from_history(repo: Path, deliveries: Mapping[str, tuple[str, ...]],
 
 
 def from_records(recorded, excluded: set[str], seen: set[tuple[str, str]],
-                 held: Callable[[str, str], bool]) -> list[DeliveryQuestion]:
+                 held: Callable[[tuple[str, ...], str, str], bool]) -> list[DeliveryQuestion]:
     """Build the questions an earlier run recorded and nobody answered. Takes the recorded
-    questions, the paths to leave out, the files already put, which it adds to, and `held(path,
-    blob)`, which says whether a branch still holds that file. Returns the questions with a file
-    still to ask."""
+    questions, the paths to leave out, the files already put, which it adds to, and
+    `held(forms, path, blob)`, which says whether history after that delivery still holds that file.
+    Returns the questions with a file still to ask."""
     out = []
     for question in recorded:
         fresh = [f for f in question.files if f.path not in excluded
-                 and (f.path, f.blob) not in seen and held(f.path, f.blob)]
+                 and (f.path, f.blob) not in seen and held(question.forms, f.path, f.blob)]
         if fresh:
             seen.update((f.path, f.blob) for f in fresh)
             out.append(_with_files(question, fresh))
@@ -114,20 +113,30 @@ def ask(questions, resolver, limit: int = ASKED_PER_RUN) -> Settled:
                 clashing.append(f)
             else:
                 settled.take_out.append(f)
-                settled.delivered_in[(f.path, f.blob)] = question.commit
+                settled.delivered_in[(f.path, f.blob)] = question.forms
         if clashing:
             settled.undecided.append(_with_files(question, clashing))
     return settled
 
 
+def remapped(recorded, mapping: Mapping[str, str]) -> list[DeliveryQuestion]:
+    """Add the ids a history rewrite gave each delivery commit. Takes the questions and the rewrite's
+    map from old commit ids to new. Returns the questions, each with its new ids added."""
+    out = []
+    for question in recorded:
+        new = [mapping[c] for c in question.forms if c in mapping and mapping[c] not in question.forms]
+        out.append(replace(question, known_as=tuple(dict.fromkeys([*question.known_as, *new]))))
+    return out
+
+
 def still_to_ask(recorded, settled: Settled,
-                 held: Callable[[str, str], bool]) -> list[DeliveryQuestion]:
+                 held: Callable[[tuple[str, ...], str, str], bool]) -> list[DeliveryQuestion]:
     """Find what an earlier run's record must keep after this run. Takes the recorded questions,
-    what this run settled, and `held(path, blob)`. Returns each question with only the files a
-    branch still holds that the operator did not keep."""
+    what this run settled, and `held(forms, path, blob)`. Returns each question with only the files
+    history after that delivery still holds that the operator did not keep."""
     kept = set(settled.kept)
     out = []
     for question in recorded:
-        files = [f for f in question.files if f not in kept and held(f.path, f.blob)]
+        files = [f for f in question.files if f not in kept and held(question.forms, f.path, f.blob)]
         out.append(_with_files(question, files))
     return out

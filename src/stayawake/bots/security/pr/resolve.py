@@ -75,7 +75,8 @@ class DeliveryQuestion:
 
     `commit`, `date` and `subject` are as the commit states them. `removing` are the confirmed paths
     saw removes from it. `files` are put to the operator; `changed` are only named. `recorded` is
-    True when the question comes from an earlier run's record.
+    True when the question comes from an earlier run's record. `known_as` are the ids the commit
+    has had since, one per history rewrite.
     """
 
     commit: str
@@ -85,6 +86,12 @@ class DeliveryQuestion:
     files: tuple[ArrivedFile, ...]
     changed: tuple[str, ...] = ()
     recorded: bool = False
+    known_as: tuple[str, ...] = ()
+
+    @property
+    def forms(self) -> tuple[str, ...]:
+        """List every id this delivery commit has had. Returns the ids, the original first."""
+        return (self.commit, *self.known_as)
 
 
 @dataclass(frozen=True)

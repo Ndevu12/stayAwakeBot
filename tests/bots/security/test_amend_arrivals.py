@@ -4,6 +4,7 @@ and removes them only on the operator's answer."""
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 import subprocess
 import unittest
 from unittest import mock
@@ -180,6 +181,24 @@ class TestNobodyCanBeAsked(_Delivery):
                                                  f"{base}:{PADDING[0]}").returncode)
         self.assertEqual(0, self.git_may_fail(self.d, "cat-file", "-e",
                                               f"fonts-elsewhere:{PADDING[0]}").returncode)
+
+    def test_a_take_out_from_an_older_record_leaves_another_branchs_own_copy(self):
+        base = self.git(self.d, "rev-parse", "--abbrev-ref", "HEAD").strip()
+        self.git(self.d, "checkout", "-q", "-b", "fonts-elsewhere")
+        self.write(self.d, PADDING[0], "genuine " + PADDING[0] + "\n")
+        self.commit(self.d, "the project's own font")
+        self.git(self.d, "checkout", "-q", base)
+        self._deliver()
+        self._later()
+        self._run()
+        resolver, asked = _answering(TAKE_OUT)
+        self._run(resolver, findings=[])
+        self.assertTrue(asked and asked[0].recorded)
+        self.assertNotEqual(0, self.git_may_fail(self.d, "cat-file", "-e",
+                                                 f"{base}:{PADDING[0]}").returncode)
+        self.assertEqual(0, self.git_may_fail(self.d, "cat-file", "-e",
+                                              f"fonts-elsewhere:{PADDING[0]}").returncode)
+        self.assertEqual([], self._records())
 
     def test_keeping_a_recorded_file_is_final(self):
         self._deliver()
@@ -483,6 +502,24 @@ class TestTheRecord(unittest.TestCase):
         self.assertEqual([str(target)], unreadable)
         self.assertIsNone(arrival_record.write(where, [self._question("y.txt")]))
         self.assertIn("not an object id", target.read_text())
+
+    def test_the_ids_a_delivery_commit_has_had_are_kept(self):
+        where = arrival_record.state_dir("acme/app") / "run"
+        arrival_record.write(where, [replace(self._question("x.txt"), known_as=("b" * 40,))])
+        (record,), _ = arrival_record.read_all("acme/app")
+        self.assertEqual(("b" * 40,), record.deliveries[0].known_as)
+
+    def test_a_record_without_later_ids_reads(self):
+        where = arrival_record.state_dir("acme/app") / "run"
+        arrival_record.write(where, [self._question("x.txt")])
+        stored = where / arrival_record.RECORD_NAME
+        data = json.loads(stored.read_text())
+        for delivery in data["deliveries"]:
+            delivery.pop("known_as", None)
+        stored.write_text(json.dumps(data))
+        (record,), unreadable = arrival_record.read_all("acme/app")
+        self.assertEqual([], unreadable)
+        self.assertEqual((), record.deliveries[0].known_as)
 
     def test_a_record_left_with_nothing_to_ask_is_removed(self):
         where = arrival_record.state_dir("acme/app") / "run"

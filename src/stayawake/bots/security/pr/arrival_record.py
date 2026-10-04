@@ -46,8 +46,10 @@ def _delivery(raw) -> DeliveryQuestion | None:
         return None
     date, subject, removing, files = (raw.get("date"), raw.get("subject"), raw.get("removing"),
                                       raw.get("files"))
+    known_as = raw.get("known_as", [])
     if not (isinstance(date, str) and isinstance(subject, str) and _strings(removing)
-            and isinstance(files, list)):
+            and isinstance(files, list) and isinstance(known_as, list)
+            and all(_is_object_id(c) for c in known_as)):
         return None
     arrived = []
     for item in files:
@@ -56,7 +58,7 @@ def _delivery(raw) -> DeliveryQuestion | None:
             return None
         arrived.append(ArrivedFile(item["path"], item["blob"]))
     return DeliveryQuestion(raw["commit"], date, subject, tuple(removing), tuple(arrived),
-                            recorded=True)
+                            recorded=True, known_as=tuple(known_as))
 
 
 def _read(source: Path) -> tuple[DeliveryQuestion, ...] | None:
@@ -103,7 +105,8 @@ def read_all(slug: str) -> tuple[list[Record], list[str]]:
 def _stored(question: DeliveryQuestion) -> dict:
     return {"commit": question.commit, "date": question.date, "subject": question.subject,
             "removing": list(question.removing),
-            "files": [{"path": f.path, "blob": f.blob} for f in question.files]}
+            "files": [{"path": f.path, "blob": f.blob} for f in question.files],
+            "known_as": list(question.known_as)}
 
 
 def _replace(target: Path, deliveries) -> bool:
@@ -123,8 +126,10 @@ def _merged(earlier, later) -> list[DeliveryQuestion]:
             out[question.commit] = question
             continue
         files = tuple(dict.fromkeys([*known.files, *question.files]))
+        known_as = tuple(dict.fromkeys([*known.known_as, *question.known_as]))
         out[question.commit] = DeliveryQuestion(known.commit, known.date, known.subject,
-                                                known.removing, files, recorded=True)
+                                                known.removing, files, recorded=True,
+                                                known_as=known_as)
     return list(out.values())
 
 
