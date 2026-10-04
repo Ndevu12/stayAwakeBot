@@ -94,6 +94,7 @@ class Cause(Enum):
     ARRIVALS_RECORD_UNREADABLE = "arrivals-record-unreadable"
     ARRIVALS_DELIVERY_GONE = "arrivals-delivery-gone"
     ARRIVALS_ANSWERS_NOT_SAVED = "arrivals-answers-not-saved"
+    ARRIVED_COPIES_REMAIN = "arrived-copies-remain"
 
 
 _NEEDING_NO_ACTION = frozenset({Cause.PREVIOUS_OBJECTS_UNCOLLECTED, Cause.NO_CONFIRMED_PAYLOAD,
@@ -317,6 +318,8 @@ _PHRASE = {
     Cause.ARRIVALS_DELIVERY_GONE:
         "the commit that added {detail} is no longer in your history, so no copy was taken out — "
         "review them yourself",
+    Cause.ARRIVED_COPIES_REMAIN:
+        "a copy of a file that came in with the malware is still on {detail} — review it there",
     Cause.ARRIVALS_ANSWERS_NOT_SAVED:
         "your answers about {detail} file(s) added in the same commit as the malware could not be "
         "saved — you may be asked again",

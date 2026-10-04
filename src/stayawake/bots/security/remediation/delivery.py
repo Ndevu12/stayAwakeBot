@@ -172,7 +172,8 @@ UNREAD = "unread"
 class MergeSweeps:
     """What removing an evil merge does with each commit a confirmed finding names.
 
-    `swept` maps each commit to the paths taken out of it without asking. `left_to_ask` maps each
+    `swept` maps each commit to the paths taken out of it without asking, and `payload` to the
+    confirmed payload paths among them. `left_to_ask` maps each
     commit with nothing to take out to the named files no parent of it holds, each put to the
     operator on its own. `failed` lists, in the findings' order, each reported commit that resolves
     to none, as `(UNRESOLVED, its id and files)`, and what git could not read, as
@@ -180,6 +181,7 @@ class MergeSweeps:
     """
 
     swept: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    payload: dict[str, tuple[str, ...]] = field(default_factory=dict)
     left_to_ask: dict[str, tuple[str, ...]] = field(default_factory=dict)
     failed: list[tuple[str, str]] = field(default_factory=list)
 
@@ -206,6 +208,8 @@ def sweep_merges(repo: Path, findings) -> MergeSweeps:
             continue
         if taken:
             out.swept[sha] = tuple(dict.fromkeys(out.swept.get(sha, ()) + taken))
+            out.payload[sha] = tuple(dict.fromkeys(
+                out.payload.get(sha, ()) + tuple(p for p in taken if p in anchors)))
         else:
             out.left_to_ask[sha] = born
     return out

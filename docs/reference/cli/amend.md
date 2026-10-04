@@ -84,6 +84,9 @@ saw never removes those by itself.
   run names them, is not called done, and remembers them, so running `saw fix amend` in that
   repository on a terminal later asks about them.
 - **When the malware is in the repository's first commit,** saw names that commit for you to review.
+- **Everything a merge brought in with the malware is taken out with it.** When a copy of one of
+  those files is still on another branch, tag or stash, the run names it for you to review; a copy
+  of the malware itself there keeps the run from being called done.
 - **A merge that brought the malware** may be asked about file by file on a terminal. A file you
   remove there is taken out of that merge and the commits after it, and the merge's other files are
   then asked about too.

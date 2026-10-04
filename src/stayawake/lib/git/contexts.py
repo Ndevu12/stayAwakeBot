@@ -43,6 +43,7 @@ _NO_EXECUTION = (
     ("credential.helper", ""),
     ("log.showSignature", "false"),
     ("log.mailmap", "false"),
+    ("log.diffMerges", "separate"),
     ("commit.gpgSign", "false"),
     ("tag.gpgSign", "false"),
     ("gpg.program", "false"),

@@ -646,12 +646,91 @@ def _commit_header(token: bytes) -> bytes | None:
     return None
 
 
+
+_RAW_STATUSES = frozenset({b"A", b"M", b"D", b"T"})
+
+
+def _raw_record(meta: bytes) -> str | None:
+    """Read the blob a `--raw` record writes. Takes the record after its colon. Returns the blob id,
+    "" when it writes none, or None when the record is not in the one-parent form."""
+    fields = meta.split()
+    if (len(fields) != 5 or meta.startswith(b":") or fields[4] not in _RAW_STATUSES
+            or not all(len(f) == 6 and f.isdigit() for f in fields[:2])
+            or not all(len(f) in (40, 64) and set(f) <= _SHA_BYTES for f in fields[2:4])):
+        return None
+    blob = fields[3].decode("ascii")
+    return "" if set(blob) == {"0"} else blob
+
+
+def _stash_entries(repo: str | Path) -> list[str]:
+    """List every stash entry's commit. Takes the repo. Returns the ids, none when there is no
+    stash. Raises `Unread` when git could not list it."""
+    has = run(repo, ["rev-parse", "--verify", "--quiet", "refs/stash"])
+    if has is None or has.returncode not in (0, 1):
+        raise Unread("the stash")
+    if has.returncode == 1:
+        return []
+    listed = own_view(repo, ["log", "-g", "--format=%H", "refs/stash", "--"])
+    if listed is None or listed.returncode != 0:
+        raise Unread("the stash")
+    entries = [line.strip() for line in (listed.stdout or "").splitlines() if line.strip()]
+    if not all(len(e) in (40, 64) and set(e) <= set("0123456789abcdef") for e in entries):
+        raise Unread("the stash")
+    return entries
+
+
+def path_versions(repo: str | Path, paths, limit: int = 100_000) -> dict[str, dict[str, str]] | None:
+    """Find every version any ref's history, or any stash entry, wrote at each of several paths.
+    Takes the repo, the paths and the walk bound. Returns each path mapped to each blob id written
+    there and one commit that wrote it, or None when the history is longer than the bound. Raises
+    `Unread` when git could not walk it or printed what it could not read."""
+    wanted = list(dict.fromkeys(paths))
+    found: dict[str, dict[str, str]] = {p: {} for p in wanted}
+    stash = _stash_entries(repo)
+    for batch in _batches(wanted):
+        names = set(batch)
+        args = ["-c", "log.showRoot=true", "log", f"-n{limit}", "--format=%H",
+                "--diff-merges=separate", "--raw", "-z", "--no-abbrev", "--no-renames", "--all",
+                "--full-history", *stash, "--", *batch]
+        out = own_view_fed(repo, args, b"")
+        if out is None:
+            raise Unread(f"every copy of {batch[0]}")
+        commits: set[bytes] = set()
+        commit, blob, expect_path = "", "", False
+        for token in out.split(b"\0"):
+            if expect_path:
+                name = token.decode("utf-8", "surrogateescape")
+                if name not in names:
+                    raise Unread(f"every copy of {batch[0]}")
+                if blob:
+                    found[name].setdefault(blob, commit)
+                expect_path = False
+                continue
+            head, colon, meta = token.partition(b":")
+            sha = _commit_header(head)
+            if sha is None and head.strip(b"\n"):
+                raise Unread(f"every copy of {batch[0]}")
+            if sha is not None:
+                commits.add(sha)
+                commit = sha.decode("ascii")
+            if colon:
+                read = _raw_record(meta)
+                if read is None or not commit:
+                    raise Unread(f"every copy of {batch[0]}")
+                blob, expect_path = read, True
+        if expect_path:
+            raise Unread(f"every copy of {batch[0]}")
+        if len(commits) >= limit:
+            return None
+    return found
+
+
 def blob_paths(repo: str | Path, oid: str, limit: int = 100_000) -> list[str] | None:
     """Every path at which the blob `oid` was ever written or removed. Takes the repo, the blob id
     and the walk bound. Returns the paths, or None when the history is longer than the bound. Raises
     `Unread` when git could not walk it."""
-    args = ["-c", "log.showRoot=true", "log", f"-n{limit}", "--format=%H", "-m", "--raw", "-z",
-            "--no-abbrev", f"--find-object={oid}", *_BRANCH_WALK]
+    args = ["-c", "log.showRoot=true", "log", f"-n{limit}", "--format=%H", "--diff-merges=separate",
+            "--raw", "-z", "--no-abbrev", f"--find-object={oid}", *_BRANCH_WALK]
     out = own_view_fed(repo, args, b"")
     if out is None:
         raise Unread(f"the copies of {oid[:12]}")

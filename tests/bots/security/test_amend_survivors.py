@@ -584,14 +584,15 @@ class TestEachGateCheckAnswersYesNoOrUnknown(_AmendFixture):
         self.commit(self.d, "a")
         head = self.git(self.d, "rev-parse", "HEAD").strip()
         clean = {"a.js": (lambda text: "marked" in text, None)}
-        oids, unsure = amendmod._payload_blobs(self.d, {}, {}, {}, clean, {head}, {})
+        oids, unsure = amendmod._payload_blobs(self.d, {}, {}, {}, clean, {head}, (set(), []))
         self.assertEqual({self.git(self.d, "rev-parse", "HEAD:a.js").strip()}, oids)
         self.assertEqual([], unsure)
         from stayawake.lib.git import query
         for broken in ({"entry_at": (False, None)}, {"blob_text": None}):
             (name, value), = broken.items()
             with mock.patch.object(query, name, return_value=value):
-                oids, unsure = amendmod._payload_blobs(self.d, {}, {}, {}, clean, {head}, {})
+                oids, unsure = amendmod._payload_blobs(self.d, {}, {}, {}, clean, {head},
+                                                       (set(), []))
             self.assertEqual((set(), ["every copy of a.js"]), (oids, unsure))
 
     def test_a_removed_version_it_could_not_read_is_named(self):
@@ -600,11 +601,13 @@ class TestEachGateCheckAnswersYesNoOrUnknown(_AmendFixture):
         self.commit(self.d, "a")
         head = self.git(self.d, "rev-parse", "HEAD").strip()
         with mock.patch.object(amendmod.gitutil, "entry_at", return_value=(False, None)):
-            oids, unsure = amendmod._payload_blobs(self.d, {}, {}, {"a.js": [head]}, {}, set(), {})
+            oids, unsure = amendmod._payload_blobs(self.d, {}, {}, {"a.js": [head]}, {}, set(),
+                                                   (set(), []))
         self.assertEqual(set(), oids)
         self.assertEqual(["every copy of a.js"], unsure)
         with mock.patch.object(amendmod.gitutil, "entry_at", return_value=(False, None)):
-            oids, unsure = amendmod._payload_blobs(self.d, {}, {}, {}, {}, set(), {head: ("a.js",)})
+            oids, unsure = amendmod._merge_payload(self.d, {head: ("a.js",)}, {head: ("a.js",)},
+                                                   lambda commit, path: None)
         self.assertEqual((set(), ["every copy of a.js"]), (oids, unsure))
 
     def test_a_directory_where_the_file_was_carries_nothing(self):

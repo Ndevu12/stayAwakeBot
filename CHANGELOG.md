@@ -93,6 +93,10 @@ reader, not the mechanism or the weakness it closed.
 - **saw names the compromised versions instead of a version to install.**
 
 ### Fixed
+- **`saw fix amend` removes the malware an evil merge brought when a harmless file beside it, such
+  as an empty file, also exists elsewhere in the repository.** A copy of the malware itself on
+  another branch or tag still keeps the run from being called done; a copy elsewhere of another file
+  that came in with it is named for you to review.
 - **`saw fix amend` names the history it could not read for you to review** whenever it stops,
   including when nothing else was left to replace.
 - **`saw fix` and `saw fix amend` also remove injected editor settings that hide the terminal and

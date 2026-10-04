@@ -21,6 +21,7 @@ from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.targets import LocalRepoTarget
 from stayawake.lib.git.auth import run_remote_git
 from stayawake.lib.git.borrowed import BorrowError, borrow
+from stayawake.lib.git.objects import read_blobs
 from stayawake.lib.git import remote as gitremote
 from stayawake.lib.git.run import LOCAL_TIMEOUT, UNTRUSTED
 from stayawake.bots.security.pr.outcome import (AmendOutcome, BranchResult, Cause, Reason,
@@ -126,16 +127,15 @@ def _holds(repo: Path, treeish: str, path: str, oid: str) -> bool | None:
 
 
 def _payload_blobs(repo: Path, remove: dict, substitute: dict, purge_holders: dict, clean: dict,
-                   clean_shas, infected: dict) -> tuple[set[str], list[str]]:
-    """Collect the stored versions this run takes out of history. Takes the repo, the blobs removed
+                   clean_shas, merge_payload: tuple[set[str], list[str]]) -> tuple[set[str], list[str]]:
+    """Collect the payload versions this run takes out of history. Takes the repo, the blobs removed
     and substituted, the commits holding each purged path, the excised paths with their footprint
-    checks, the commits carrying those footprints, and each confirmed commit with the paths it
-    carries the payload at. Returns their blob ids, and the paths whose version git could not
-    read."""
-    oids = set(remove.values()) | {fo for fo, _e in substitute.values()}
-    unsure: list[str] = []
+    checks, the commits carrying those footprints, and the payload versions of the paths merge
+    sweeps remove with what git could not walk for them. Returns their blob ids, and the paths whose
+    version git could not read."""
+    oids = set(remove.values()) | {fo for fo, _e in substitute.values()} | merge_payload[0]
+    unsure: list[str] = list(merge_payload[1])
     held = [(path, sha) for path, holders in purge_holders.items() for sha in holders]
-    held += [(path, sha) for sha, paths in infected.items() for path in paths]
     for path, sha in held:
         answered, entry = gitutil.entry_at(repo, sha, path)
         if not answered:
@@ -150,6 +150,56 @@ def _payload_blobs(repo: Path, remove: dict, substitute: dict, purge_holders: di
             elif found[0] and carries(found[1]):
                 oids.add(found[0])
     return oids, unsure
+
+
+def _merge_payload(repo: Path, swept: dict, anchored: dict, survives) -> tuple[set[str], list[str]]:
+    """Find the payload versions of the paths merge sweeps remove. Takes the repo, each merge with
+    its swept paths, each merge with its confirmed payload paths, and the `survives` oracle. Returns
+    their blob ids, and what git could not walk; when the history could not be walked, each swept
+    path's version at its merge counts."""
+    paths = sorted({p for ps in swept.values() for p in ps})
+    oids: set[str] = set()
+    unread: list[str] = []
+    if not paths:
+        return oids, unread
+    at_merge = [(p, merge) for merge, ps in anchored.items() for p in ps]
+    try:
+        versions = gitutil.path_versions(repo, paths)
+    except gitutil.Unread as missed:
+        versions = None
+        unread.append(missed.subject)
+    if versions is None:
+        at_merge = [(p, merge) for merge, ps in swept.items() for p in ps]
+    else:
+        for path, by_blob in versions.items():
+            oids.update(blob for blob, commit in by_blob.items() if survives(commit, path))
+    for path, merge in at_merge:
+        answered, entry = gitutil.entry_at(repo, merge, path)
+        if not answered:
+            unread.append(f"every copy of {path}")
+        elif entry is not None:
+            oids.add(entry[1])
+    return oids, unread
+
+
+def _arrived_versions(repo: Path, swept: dict, payload_oids: set[str]) -> tuple[set[str], list[str]]:
+    """Find the versions merge sweeps remove that are neither a confirmed payload nor empty. Takes the
+    repo, each merge with its swept paths, and the payload's blob ids. Returns their blob ids, and
+    what git could not read."""
+    oids: set[str] = set()
+    unread: list[str] = []
+    for merge, paths in swept.items():
+        for path in paths:
+            answered, entry = gitutil.entry_at(repo, merge, path)
+            if not answered:
+                unread.append(f"every copy of {path}")
+            elif (entry is not None and not entry[0].startswith(("040", "160"))
+                  and entry[1] not in payload_oids):
+                oids.add(entry[1])
+    if oids:
+        _bodies, sizes = read_blobs(repo, sorted(oids), max_each=0, max_total=0)
+        oids = {oid for oid in oids if sizes.get(oid, 1) > 0}
+    return oids, unread
 
 
 def _reached_from(graph: list[tuple[str, list[str]]], tips) -> set[str]:
@@ -1527,8 +1577,11 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
             return _refuse(Cause.HISTORY_UNREADABLE, names_that_fit(sorted(set(unread))))
         return _refuse(Cause.NO_CONFIRMED_PAYLOAD)
 
-    malicious_oids, unread_versions = _payload_blobs(repo, remove, substitute, purge_holders, clean,
-                                                     clean_shas, infected)
+    malicious_oids, unread_versions = _payload_blobs(
+        repo, remove, substitute, purge_holders, clean, clean_shas,
+        _merge_payload(repo, infected, sweeps.payload, survives))
+    arrived_oids, unread_arrived = _arrived_versions(repo, infected, malicious_oids)
+    unread_versions = [*unread_versions, *unread_arrived]
 
     all_infected = (set(infected) | clean_shas | remove_shas | substitute_shas | purge_shas
                     | set(uncharacterized))
@@ -1693,6 +1746,14 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
             elif malicious_oids & one:
                 holding.append(name)
         return _refuse(Cause.PAYLOAD_STILL_REACHABLE, names_that_fit(sorted(holding or unread)))
+    arrived_on: list[str] = []
+    if reached is not None and arrived_oids & reached:
+        for name, tip in post_view:
+            one = gitutil.reachable_objects(repo, [tip])
+            if one is None:
+                unconfirmed.append(f"branch {name}")
+            elif arrived_oids & one:
+                arrived_on.append(name)
 
     keep: dict[str, frozenset[str]] = {}
     staging: dict[str, dict] = {}
@@ -1754,6 +1815,12 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
     if reachable_elsewhere:
         survivors.append(Reason(Cause.PAYLOAD_REACHABLE_FROM_OTHER_REFS,
                                 names_that_fit(reachable_elsewhere)))
+    arrived_elsewhere, unread_arrived_refs = _refs_still_reaching(repo, arrived_oids,
+                                                                  list(delivered_tips.values()))
+    unconfirmed += unread_arrived_refs
+    if arrived_on or arrived_elsewhere:
+        survivors.append(Reason(Cause.ARRIVED_COPIES_REMAIN,
+                                names_that_fit(sorted({*arrived_on, *arrived_elsewhere}))))
     delivered_sub = []
     for path in substitute:
         held = {_path_at(repo, t, path) for t in delivered_tips.values()}
