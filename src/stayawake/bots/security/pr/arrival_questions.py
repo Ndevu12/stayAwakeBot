@@ -9,6 +9,7 @@ from typing import Callable, Mapping
 
 from stayawake.bots.security.pr.resolve import (KEEP, TAKE_OUT, ArrivedFile, DeliveryAnswer,
                                                 DeliveryQuestion)
+from stayawake.bots.security.remediation import delivery
 from stayawake.bots.security.remediation.delivery import Brought
 from stayawake.lib import git as gitutil
 
@@ -117,6 +118,21 @@ def ask(questions, resolver, limit: int = ASKED_PER_RUN) -> Settled:
         if clashing:
             settled.undecided.append(_with_files(question, clashing))
     return settled
+
+
+def with_mentions(repo: Path, questions) -> list[DeliveryQuestion]:
+    """Add to each question how many other files of the project mention each of its files, outside
+    the files of the same delivery. Takes the repo and the questions. Returns the questions with
+    `named_by` filled, or unchanged when the project could not be read in full."""
+    naming = delivery.files_naming(repo, [f.path for q in questions for f in q.files])
+    if naming is None:
+        return list(questions)
+    out = []
+    for question in questions:
+        own = {*(f.path for f in question.files), *question.removing}
+        counts = {f.path: len(naming[f.path] - own) for f in question.files if f.path in naming}
+        out.append(replace(question, named_by=tuple(sorted(counts.items()))))
+    return out
 
 
 def remapped(recorded, mapping: Mapping[str, str]) -> list[DeliveryQuestion]:

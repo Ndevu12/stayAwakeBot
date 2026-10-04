@@ -366,6 +366,14 @@ class TestWhatIsPutToTheOperator(_Delivery):
         self.assertEqual(set(PADDING), {f.path for f in question.files})
         self.assertEqual({self._blob(p) for p in PADDING}, {f.blob for f in question.files})
 
+    def test_the_question_says_how_many_project_files_name_each_file(self):
+        self._deliver()
+        self.write(self.d, "README.md", "debug with launch.json\n")
+        self.commit(self.d, "readme")
+        resolver, asked = _answering(KEEP)
+        self._run(resolver)
+        self.assertEqual({PADDING[0]: 0, PADDING[1]: 1}, dict(asked[0].named_by))
+
     def test_a_file_with_its_own_finding_keeps_its_own_question(self):
         self._deliver()
         self._later()

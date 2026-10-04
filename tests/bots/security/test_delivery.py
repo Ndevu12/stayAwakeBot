@@ -135,3 +135,21 @@ class TestBornAtMerge(_History):
             born = mergedetect.born_at_merge(self.d, merge, [f"new/{n}.txt" for n in range(30)])
         self.assertEqual(30, len(born))
         self.assertEqual(2, read.call_count)
+
+
+class TestMentions(_History):
+    def test_a_file_is_counted_by_the_other_files_that_name_it(self):
+        self.write(self.d, "fonts/icons.woff2", "font bytes\n")
+        self.write(self.d, "fonts/README.md", "uses icons.woff2\n")
+        self.write(self.d, "src/app.css", "src: url(fonts/icons.woff2);\n")
+        self.write(self.d, "src/other.css", "nothing here\n")
+        self.commit(self.d, "assets")
+        found = delivery.files_naming(self.d, ["fonts/icons.woff2", "fonts/README.md"])
+        self.assertEqual({"fonts/README.md", "src/app.css"}, set(found["fonts/icons.woff2"]))
+        self.assertEqual(frozenset(), found["fonts/README.md"])
+
+    def test_nothing_is_counted_when_a_file_could_not_be_read(self):
+        self.write(self.d, "fonts/icons.woff2", "font bytes\n")
+        self.commit(self.d, "assets")
+        with mock.patch.object(delivery, "read_blobs", return_value=({}, {})):
+            self.assertIsNone(delivery.files_naming(self.d, ["fonts/icons.woff2"]))

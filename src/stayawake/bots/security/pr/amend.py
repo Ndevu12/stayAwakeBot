@@ -1060,8 +1060,12 @@ def _settle_arrivals(repo: Path, slug: str, deliveries: dict, brought: dict, exc
     records, unreadable = arrival_record.read_all(slug)
     held = _held_since_delivery(repo)
     recorded = [q for record in records for q in record.deliveries]
-    settled = arrival_questions.ask(live.asked + arrival_questions.from_records(recorded, excluded, seen, held),
-                           resolver)
+    questions = live.asked + arrival_questions.from_records(recorded, excluded, seen, held)
+    if resolver is not None:
+        asked_now = arrival_questions.ASKED_PER_RUN
+        questions = (arrival_questions.with_mentions(repo, questions[:asked_now])
+                     + questions[asked_now:])
+    settled = arrival_questions.ask(questions, resolver)
     out = _Arrivals()
     for record in records:
         remaining = arrival_questions.still_to_ask(record.deliveries, settled, held)

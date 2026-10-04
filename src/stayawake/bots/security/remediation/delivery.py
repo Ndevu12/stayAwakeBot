@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Iterable, Mapping
 
 from stayawake.bots.security.models import CONFIRMED
 from stayawake.lib import git as gitutil
 from stayawake.lib.git.merge import detect as mergedetect
+from stayawake.lib.git.objects import read_blobs
 from stayawake.lib.git.query import GITLINK_MODE, TREE_MODE, entries_at
 
 MAX_PATH_HISTORY = 100_000
@@ -22,6 +23,35 @@ def history_of(repo: Path, path: str, **walk) -> list[str] | None:
     if changed is None:
         raise gitutil.Unread(f"every copy of {path}")
     return None if len(changed) >= MAX_PATH_HISTORY else changed
+
+
+MENTIONS_COUNTED = 60
+_MENTIONS_READ_EACH = 8 * 1024 * 1024
+_MENTIONS_READ_TOTAL = 128 * 1024 * 1024
+_BINARY_PROBE = 8000
+
+
+def files_naming(repo: Path, paths) -> dict[str, frozenset[str]] | None:
+    """Find, for each path, the text files of the checked-out commit that mention its file name.
+    Takes the repo and the paths, at most `MENTIONS_COUNTED` of which are looked up. Returns each
+    looked-up path mapped to the files naming it, or None when not every file could be read."""
+    try:
+        held = entries_at(repo, "HEAD")
+    except gitutil.Unread:
+        return None
+    files = {path: oid for path, (mode, oid) in held.items()
+             if mode not in (GITLINK_MODE, TREE_MODE)}
+    bodies, _sizes = read_blobs(repo, list(files.values()), max_each=_MENTIONS_READ_EACH,
+                                max_total=_MENTIONS_READ_TOTAL)
+    if any(oid not in bodies for oid in files.values()):
+        return None
+    texts = {path: bodies[oid] for path, oid in files.items()
+             if b"\0" not in bodies[oid][:_BINARY_PROBE]}
+    out = {}
+    for path in list(dict.fromkeys(paths))[:MENTIONS_COUNTED]:
+        name = PurePosixPath(path).name.encode("utf-8", "surrogateescape")
+        out[path] = frozenset(other for other, body in texts.items() if name and name in body)
+    return out
 
 
 def commits_carrying(repo: Path, path: str, carries) -> list[str] | None:

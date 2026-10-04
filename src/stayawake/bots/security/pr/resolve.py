@@ -76,7 +76,8 @@ class DeliveryQuestion:
     `commit`, `date` and `subject` are as the commit states them. `removing` are the confirmed paths
     saw removes from it. `files` are put to the operator; `changed` are only named. `recorded` is
     True when the question comes from an earlier run's record. `known_as` are the ids the commit
-    has had since, one per history rewrite.
+    has had since, one per history rewrite. `named_by` pairs each counted file with how many other
+    files of the project mention it.
     """
 
     commit: str
@@ -87,6 +88,7 @@ class DeliveryQuestion:
     changed: tuple[str, ...] = ()
     recorded: bool = False
     known_as: tuple[str, ...] = ()
+    named_by: tuple[tuple[str, int], ...] = ()
 
     @property
     def forms(self) -> tuple[str, ...]:

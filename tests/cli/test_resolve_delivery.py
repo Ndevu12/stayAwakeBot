@@ -54,6 +54,13 @@ class TestTheQuestionShows(unittest.TestCase):
         self.assertNotIn("\x1b", out)
         self.assertNotIn("##[", out)
 
+    def test_each_counted_file_says_how_many_project_files_name_it(self):
+        question = _question(named_by=((FILES[0], 2), (FILES[1], 0)))
+        out = render_delivery(question)
+        self.assertIn("(named by 2)", out)
+        self.assertIn("(named by none)", out)
+        self.assertEqual(2, out.count("(named by"))
+
     def test_two_files_whose_names_read_alike_are_told_apart(self):
         out = render_delivery(_question(paths=("dir/a.js", "dir/a.js\t")))
         self.assertIn("[111111111111]", out)

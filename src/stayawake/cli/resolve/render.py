@@ -114,10 +114,19 @@ def _shown(path: str, folder: str, blobs: dict[str, str], clashes: set[str]) -> 
     return f"{name} [{blobs[path][:12]}]" if textsafe.plain(path) in clashes else name
 
 
+def _named_by(path: str, counts: dict[str, int]) -> str:
+    """Say how many other files of the project mention a file. Takes the path and the counts.
+    Returns the note, or "" when it was not counted."""
+    if path not in counts:
+        return ""
+    return f" (named by {counts[path]})" if counts[path] else " (named by none)"
+
+
 def render_delivery(question: DeliveryQuestion) -> str:
     """Render one delivery commit and the files it added for the operator to choose from. Takes the
     question. Returns the text; the caller adds the prompt."""
     blobs = {f.path: f.blob for f in question.files}
+    named_by = dict(question.named_by)
     names = [textsafe.plain(f.path) for f in question.files]
     clashes = {n for n in names if names.count(n) > 1}
     commit = textsafe.plain(question.commit[:12])
@@ -133,7 +142,7 @@ def render_delivery(question: DeliveryQuestion) -> str:
     for number, (folder, paths) in enumerate(groups[:FOLDERS_LISTED], 1):
         label = textsafe.plain(folder + "/") if folder else _TOP_LEVEL
         lines.append(f"    {number}  {label}  ({len(paths)} file(s))")
-        entries = [f"{number}.{at} {_shown(p, folder, blobs, clashes)}"
+        entries = [f"{number}.{at} {_shown(p, folder, blobs, clashes)}{_named_by(p, named_by)}"
                    for at, p in enumerate(paths[:NAMES_LISTED_PER_FOLDER], 1)]
         lines.append("         " + "   ".join(entries))
         hidden = len(paths) - NAMES_LISTED_PER_FOLDER
