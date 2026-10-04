@@ -48,17 +48,22 @@ def _with_files(question: DeliveryQuestion, files) -> DeliveryQuestion:
 
 def from_history(repo: Path, deliveries: Mapping[str, tuple[str, ...]],
                  brought: Mapping[str, Brought | None], excluded: set[str],
-                 seen: set[tuple[str, str]]) -> Questions:
+                 seen: set[tuple[str, str]], added_by: dict | None = None) -> Questions:
     """Build one question per delivery from the files it added that nothing else handles. Takes the
     repo, each delivery mapped to the payload paths saw removes from it, what each brought (None
-    where git could not read it), the paths to leave out, and the files already put, which it adds
-    to. Returns the `Questions`."""
+    where git could not read it), the paths to leave out, the files already put, which it adds to,
+    and optionally each file mapped to the ids of every delivery that added it, which it adds to.
+    Returns the `Questions`."""
     out = Questions()
     for commit, removing in deliveries.items():
         found = brought.get(commit)
         if found is None:
             out.unread.append(commit[:12])
             continue
+        if added_by is not None and not found.parentless:
+            for path, blob in found.added:
+                if path not in excluded:
+                    added_by.setdefault((path, blob), set()).add(commit)
         fresh = [ArrivedFile(path, blob) for path, blob in found.added
                  if path not in excluded and (path, blob) not in seen]
         if found.parentless:
@@ -76,13 +81,19 @@ def from_history(repo: Path, deliveries: Mapping[str, tuple[str, ...]],
 
 
 def from_records(recorded, excluded: set[str], seen: set[tuple[str, str]],
-                 held: Callable[[tuple[str, ...], str, str], bool]) -> list[DeliveryQuestion]:
+                 held: Callable[[tuple[str, ...], str, str], bool],
+                 added_by: dict | None = None) -> list[DeliveryQuestion]:
     """Build the questions an earlier run recorded and nobody answered. Takes the recorded
-    questions, the paths to leave out, the files already put, which it adds to, and
-    `held(forms, path, blob)`, which says whether history after that delivery still holds that file.
+    questions, the paths to leave out, the files already put, which it adds to,
+    `held(forms, path, blob)`, which says whether history after that delivery still holds that file,
+    and optionally each file mapped to the ids of every delivery that added it, which it adds to.
     Returns the questions with a file still to ask."""
     out = []
     for question in recorded:
+        if added_by is not None:
+            for f in question.files:
+                if f.path not in excluded:
+                    added_by.setdefault((f.path, f.blob), set()).update(question.forms)
         fresh = [f for f in question.files if f.path not in excluded
                  and (f.path, f.blob) not in seen and held(question.forms, f.path, f.blob)]
         if fresh:
@@ -91,10 +102,16 @@ def from_records(recorded, excluded: set[str], seen: set[tuple[str, str]],
     return out
 
 
-def ask(questions, resolver, limit: int = ASKED_PER_RUN) -> Settled:
+def ask(questions, resolver, limit: int = ASKED_PER_RUN, added_by=None) -> Settled:
     """Put each question to the operator, at most `limit` of them. Takes the questions, the
-    resolver, or None when nobody can be asked, and the limit. Returns what was `Settled`; a file
-    chosen at a path already chosen at another blob is left undecided."""
+    resolver, or None when nobody can be asked, the limit, and optionally each file mapped to the
+    ids of every delivery that added it. Returns what was `Settled`; a file chosen at a path already
+    chosen at another blob is left undecided."""
+    added_by = added_by or {}
+
+    def forms_of(question: DeliveryQuestion, f: ArrivedFile) -> tuple[str, ...]:
+        return tuple(dict.fromkeys([*question.forms, *sorted(added_by.get((f.path, f.blob), ()))]))
+
     settled = Settled()
     taken: dict[str, str] = {}
     for at, question in enumerate(questions):
@@ -112,12 +129,12 @@ def ask(questions, resolver, limit: int = ASKED_PER_RUN) -> Settled:
         for f in question.files:
             if f.path not in chosen:
                 settled.kept.append(f)
-                settled.delivered_in[(f.path, f.blob)] = question.forms
+                settled.delivered_in[(f.path, f.blob)] = forms_of(question, f)
             elif taken.setdefault(f.path, f.blob) != f.blob:
                 clashing.append(f)
             else:
                 settled.take_out.append(f)
-                settled.delivered_in[(f.path, f.blob)] = question.forms
+                settled.delivered_in[(f.path, f.blob)] = forms_of(question, f)
         if clashing:
             settled.undecided.append(_with_files(question, clashing))
     return settled
@@ -145,6 +162,18 @@ def with_mentions(repo: Path, questions) -> list[DeliveryQuestion]:
         own = {*(f.path for f in question.files), *question.removing, *question.changed}
         counts = {f.path: len(naming[f.path] - own) for f in question.files if f.path in naming}
         out.append(replace(question, named_by=tuple(sorted(counts.items()))))
+    return out
+
+
+def standing(decided, added_by: Mapping) -> dict:
+    """Select the decisions that answer a file of a delivery this run knows. Takes the decisions
+    and each file mapped to the ids of every delivery that added it. Returns each such file's
+    `(path, blob)` mapped to its decision."""
+    out = {}
+    for d in decided:
+        known = added_by.get((d.path, d.blob))
+        if known and set(d.forms) & set(known):
+            out[(d.path, d.blob)] = d
     return out
 
 

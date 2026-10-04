@@ -4,6 +4,7 @@ and removes them only on the operator's answer."""
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import replace
 import subprocess
 import sys
@@ -253,7 +254,8 @@ class TestNobodyCanBeAsked(_Delivery):
                  f"{added}^")
         outcome = self._run(_answering(TAKE_OUT)[0], findings=[])
         self.assertFalse(outcome.completed)
-        self.assertIn(Cause.HISTORY_UNREADABLE, self._causes(outcome))
+        self.assertIn(Cause.ARRIVALS_DELIVERY_GONE, self._causes(outcome))
+        self.assertTrue(outcome.needs_review)
         self.assertEqual(0, self.git_may_fail(self.d, "cat-file", "-e",
                                               f"fonts-elsewhere:{PADDING[0]}").returncode)
         self.assertEqual(1, len(self._records()))
@@ -423,6 +425,81 @@ class TestTheOperatorDecides(_Delivery):
         self.assertTrue(read)
         self.assertEqual({(p, arrival_record.KEEP_DECISION) for p in PADDING},
                          {(d.path, d.decision) for d in decided})
+
+    def test_a_take_out_removes_the_same_files_the_worm_added_on_another_branch(self):
+        base = self.git(self.d, "rev-parse", "--abbrev-ref", "HEAD").strip()
+        self.git(self.d, "checkout", "-q", "-b", "dev")
+        self._deliver(subject="add build tooling (dev)")
+        self.git(self.d, "checkout", "-q", base)
+        self._deliver()
+        self._later()
+        outcome = self._run(_answering(TAKE_OUT)[0])
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        for ref in (base, "dev"):
+            for path in PADDING:
+                self.assertNotEqual(0, self.git_may_fail(self.d, "cat-file", "-e",
+                                                         f"{ref}:{path}").returncode, (ref, path))
+
+    def test_a_saved_take_out_naming_another_commit_reaches_no_other_copy(self):
+        root = self.git(self.d, "rev-list", "--max-parents=0", "HEAD").strip().split()[0]
+        base = self.git(self.d, "rev-parse", "--abbrev-ref", "HEAD").strip()
+        self.git(self.d, "checkout", "-q", "-b", "fonts-elsewhere")
+        self.write(self.d, PADDING[0], "genuine " + PADDING[0] + "\n")
+        self.commit(self.d, "the project's own font")
+        self.git(self.d, "checkout", "-q", base)
+        sha = self._deliver()
+        self._later()
+        blob = self.git(self.d, "rev-parse", f"{sha}:{PADDING[0]}").strip()
+        arrival_record.add_decisions("acme/app", [arrival_record.Decision(
+            PADDING[0], blob, (sha, root), arrival_record.TAKE_OUT_DECISION)])
+        self._run()
+        self.assertEqual(0, self.git_may_fail(self.d, "cat-file", "-e",
+                                              f"fonts-elsewhere:{PADDING[0]}").returncode)
+        self.assertNotEqual(0, self.git_may_fail(self.d, "cat-file", "-e",
+                                                 f"{base}:{PADDING[0]}").returncode)
+
+    def test_a_saved_keep_naming_another_commit_hides_nothing(self):
+        sha = self._deliver()
+        self._later()
+        blob = self.git(self.d, "rev-parse", f"{sha}:{PADDING[0]}").strip()
+        arrival_record.add_decisions("acme/app", [arrival_record.Decision(
+            PADDING[0], blob, ("e" * 40,), arrival_record.KEEP_DECISION)])
+        resolver, asked = _answering(KEEP)
+        self._run(resolver)
+        self.assertIn(PADDING[0], [f.path for q in asked for f in q.files])
+
+    def test_a_linked_store_of_answers_is_named_and_applies_nothing(self):
+        sha = self._deliver()
+        self._later()
+        blob = self.git(self.d, "rev-parse", f"{sha}:{PADDING[0]}").strip()
+        arrival_record.add_decisions("other/slug", [arrival_record.Decision(
+            PADDING[0], blob, (sha,), arrival_record.TAKE_OUT_DECISION)])
+        store = arrival_record.state_dir("acme/app") / arrival_record.DECIDED_NAME
+        store.parent.mkdir(parents=True, exist_ok=True)
+        os.symlink(arrival_record.state_dir("other/slug") / arrival_record.DECIDED_NAME, store)
+        outcome = self._run()
+        self.assertIn(Cause.ARRIVALS_RECORD_UNREADABLE, self._causes(outcome))
+        self.assertTrue(self._in_history(PADDING[0]))
+
+    def test_answers_that_cannot_be_saved_are_named(self):
+        store = arrival_record.state_dir("acme/app") / arrival_record.DECIDED_NAME
+        store.parent.mkdir(parents=True, exist_ok=True)
+        store.write_text("{not json")
+        self._deliver()
+        self._later()
+        outcome = self._run(_answering(KEEP)[0])
+        self.assertIn(Cause.ARRIVALS_ANSWERS_NOT_SAVED, self._causes(outcome))
+        self.assertIn(Cause.ARRIVALS_RECORD_UNREADABLE, self._causes(outcome))
+        self.assertTrue(outcome.needs_review)
+
+    def test_a_take_out_that_could_not_be_placed_is_not_reported_removed(self):
+        self._deliver()
+        self._later()
+        with mock.patch.object(amendmod, "_commits_after", return_value=None):
+            outcome = self._run(_answering(TAKE_OUT)[0])
+        self.assertIn(Cause.REMOVAL_NOT_CONFIRMED, self._causes(outcome))
+        for path in PADDING:
+            self.assertNotIn(path, getattr(outcome, "removed", ()) or ())
 
     def test_an_answer_naming_a_file_not_offered_removes_nothing_else(self):
         self._deliver()

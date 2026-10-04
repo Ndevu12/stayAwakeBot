@@ -116,8 +116,9 @@ class Arrivals:
 
     `files` are the operator's to decide; `first_commits` are first commits that carry a payload
     beside other files; `unread` names what git could not read; `unread_records` are earlier lists of
-    files to decide, or earlier answers, that could not be read. `take_out` are the `(path, blob)`
-    versions the operator chose to take out; `taken_out_held` are the places that still store one;
+    files to decide, or earlier answers, that could not be read. `take_out` are the versions the
+    operator chose to take out, as `(path, blob, ids of the commits that added it)`;
+    `taken_out_held` are the places that still store one;
     `not_saved` is True when this run's answers could not be kept.
     """
 
@@ -125,7 +126,7 @@ class Arrivals:
     first_commits: tuple[str, ...] = ()
     unread: tuple[str, ...] = ()
     unread_records: tuple[str, ...] = ()
-    take_out: tuple[tuple[str, str], ...] = ()
+    take_out: tuple[tuple[str, str, tuple[str, ...]], ...] = ()
     taken_out_held: tuple[HistoryHold, ...] = ()
     not_saved: bool = False
 

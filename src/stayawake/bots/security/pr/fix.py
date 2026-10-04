@@ -15,7 +15,7 @@ from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.targets import LocalRepoTarget
 from stayawake.bots.security.dependencies.remediation import MALICIOUS
 from stayawake.bots.security.models import ROLLBACK_DIR, CONFIRMED, HEURISTIC
-from stayawake.bots.security.remediation import live, manifest
+from stayawake.bots.security.remediation import delivery, live, manifest
 from stayawake.bots.security import remediation
 from stayawake.bots.security.remediation import installed
 from stayawake.core import proposal
@@ -238,16 +238,23 @@ def _suspicious_only_outcome(label: str, fix: "_Fix") -> str:
 
 
 def _take_out_arrivals(wt: Path, versions, rollback: Path) -> tuple[list, list[str]]:
-    """Remove from the prepared branch each file the operator chose to take out that it holds as
-    it was added. Takes the worktree, the `(path, blob)` versions and the rollback folder. Returns
-    the changes, and the files git could not read there."""
+    """Remove from the prepared branch each file the operator chose to take out that it holds as it
+    was added by one of those commits or a commit after one. Takes the worktree, the
+    `(path, blob, ids)` versions and the rollback folder. Returns the changes, and the files git
+    could not read there."""
     wanted: list[str] = []
     not_read: list[str] = []
-    for path, blob in versions:
+    for path, blob, forms in versions:
         answered, entry = gitutil.entry_at(wt, "HEAD", path)
         if not answered:
             not_read.append(f"every copy of {path}")
-        elif entry is not None and entry[1] == blob:
+            continue
+        if entry is None or entry[1] != blob:
+            continue
+        came_after = delivery.came_after(wt, path, forms)
+        if came_after is None:
+            not_read.append(f"which copies of {path} came with the malware")
+        elif came_after:
             wanted.append(path)
     taken = remediation.remove_paths(wt, wanted, rollback, "added in the same commit as the malware")
     return taken, not_read

@@ -3,6 +3,7 @@
 operator when one can be asked."""
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from stayawake.bots.security.pr import arrival_questions, arrival_record, held
@@ -29,11 +30,11 @@ def _confirmed_versions(repo: Path, path: str, stored) -> list[str]:
 
 
 def _from_this_run(repo: Path, paths: list[str], findings, stored, seen: set, excluded: set[str],
-                   unread: list[str]):
+                   unread: list[str], added_by: dict):
     """Build the questions for the deliveries of the confirmed payloads at the paths. Takes the
     repo, the paths, the scan's findings, the stored-content judge, the files already put, the
-    paths to leave out and where to name what git could not read, each of which it adds to.
-    Returns the `Questions`."""
+    paths to leave out, where to name what git could not read, and each file mapped to the ids of
+    every delivery that added it, each of which it adds to. Returns the `Questions`."""
     sweeps = delivery.sweep_merges(repo, findings)
     unread.extend(detail for _kind, detail in sweeps.failed)
     deliveries = dict(sweeps.swept)
@@ -49,7 +50,27 @@ def _from_this_run(repo: Path, paths: list[str], findings, stored, seen: set, ex
     excluded.update(p for paths in [*sweeps.swept.values(), *sweeps.left_to_ask.values()]
                     for p in paths)
     return arrival_questions.from_history(repo, deliveries, delivery.brought_by_each(repo, deliveries),
-                                          excluded, seen)
+                                          excluded, seen, added_by)
+
+
+def _delivered_holds(repo: Path, holds, forms_at) -> tuple:
+    """Keep, in each place that still stores a taken-out file, the files whose version came from
+    the delivery or after it. Takes the repo, the holds and each path mapped to its delivery ids.
+    Returns the holds; a stash entry, or a file git could not place, is kept."""
+    out = []
+    for hold in holds:
+        if hold.where == "stash":
+            out.append(hold)
+            continue
+        ref = "HEAD" if hold.where == "head" else f"refs/heads/{hold.name}"
+        commit = (gitutil.stdout(repo, ["rev-parse", "--verify", "--quiet",
+                                        f"{ref}^{{commit}}"]) or "").strip()
+        paths = tuple(p for p in hold.paths
+                      if not commit or delivery.came_after(repo, p, forms_at.get(p, ()),
+                                                           start=commit) is not False)
+        if paths:
+            out.append(replace(hold, paths=paths))
+    return tuple(out)
 
 
 def _decided_and_recorded(slug: str):
@@ -75,28 +96,30 @@ def arrivals_beside(repo: Path, paths, findings, signatures, allowlist, opts, *,
     unread: list[str] = []
     slug = gitutil.origin_slug(repo)
     decided, records, unreadable = _decided_and_recorded(slug)
-    pairs = frozenset((d.path, d.blob) for d in decided)
-    keeps = frozenset((d.path, d.blob) for d in decided
-                      if d.decision == arrival_record.KEEP_DECISION)
     seen: set[tuple[str, str]] = set()
+    added_by: dict[tuple[str, str], set[str]] = {}
     excluded = set(paths) | {getattr(f, "path", "") or "" for f in findings}
     put = arrival_questions.Questions()
     if paths:
         put = _from_this_run(repo, paths, findings, live.StoredContent(repo, signatures, allowlist, opts),
-                             seen, excluded, unread)
+                             seen, excluded, unread, added_by)
     recorded = [q for record in records for q in record.deliveries]
     every = [*put.asked,
-             *arrival_questions.from_records(recorded, excluded, seen, lambda forms, path, blob: True)]
-    candidates = arrival_questions.files_of(every)
-    undecided = arrival_questions.without(every, pairs)
-    taken = [(d.path, d.blob) for d in decided if d.decision == arrival_record.TAKE_OUT_DECISION
-             and (d.path, d.blob) in candidates]
+             *arrival_questions.from_records(recorded, excluded, seen, lambda forms, path, blob: True,
+                                             added_by)]
+    standing = arrival_questions.standing(decided, added_by)
+    keeps = frozenset(pair for pair, d in standing.items()
+                      if d.decision == arrival_record.KEEP_DECISION)
+    undecided = arrival_questions.without(every, standing)
+    taken = [(path, blob, tuple(sorted(added_by[(path, blob)])))
+             for (path, blob), d in standing.items()
+             if d.decision == arrival_record.TAKE_OUT_DECISION]
     saved = True
     if resolver is not None and undecided:
         asked_now = arrival_questions.ASKED_PER_RUN
         settled = arrival_questions.ask(
             arrival_questions.with_mentions(repo, undecided[:asked_now]) + undecided[asked_now:],
-            resolver)
+            resolver, added_by=added_by)
         answered = arrival_questions.decisions(settled)
         saved = not answered or (bool(slug) and arrival_record.add_decisions(slug, answered))
         if saved and answered:
@@ -106,12 +129,16 @@ def arrivals_beside(repo: Path, paths, findings, signatures, allowlist, opts, *,
                 arrival_record.keep_only(record, arrival_questions.still_to_ask(
                     record.deliveries, arrival_questions.Settled(), lambda forms, path, blob: True,
                     now))
-        taken += [(f.path, f.blob) for f in settled.take_out]
+        taken += [(f.path, f.blob, settled.delivered_in[(f.path, f.blob)])
+                  for f in settled.take_out]
         undecided = settled.undecided
     versions: dict[str, set[str]] = {}
-    for path, blob in taken:
+    forms_at: dict[str, set[str]] = {}
+    for path, blob, forms in taken:
         versions.setdefault(path, set()).add(blob)
+        forms_at.setdefault(path, set()).update(forms)
     stored = held.versions_held(repo, versions, baseref, fix_branch=fix_branch)
+    stored = replace(stored, holds=_delivered_holds(repo, stored.holds, forms_at))
     whole = gitutil.holds_its_history(repo) if put.first_commits else True
     return Arrivals(
         files=tuple(f.path for question in undecided for f in question.files),

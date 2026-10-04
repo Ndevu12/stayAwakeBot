@@ -371,8 +371,8 @@ def _register_blob_removal(repo: Path, path: str, oid: str, remove: dict, remove
     that hold it. Takes the repo, the path, the blob id, the three removal maps to fill, and
     optionally every id of the commit that delivered it, limiting the drop to that commit and the
     commits after it. Returns "too-large" when the history is too long to walk, else "". Raises
-    `Unread` when git could not tell which copies came after the delivery, or none of its ids is in
-    history any more."""
+    `Unread` when git could not tell which copies came after the delivery, and `_DeliveryGone` when
+    none of its ids is in history."""
     hist = _foreign_history(repo, path, oid)
     if hist is None:
         return "too-large"
@@ -387,10 +387,18 @@ def _register_blob_removal(repo: Path, path: str, oid: str, remove: dict, remove
     return ""
 
 
+class _DeliveryGone(Exception):
+    """The commit that added a file has left history. Carries the file's path."""
+
+    def __init__(self, path: str):
+        super().__init__(path)
+        self.path = path
+
+
 def _after_delivery(repo: Path, path: str, holders, delivered_in) -> list[str]:
     """Keep the holders that are a delivery commit or come after one. Takes the repo, the path, the
     holders and every id of the delivery commit. Returns them. Raises `Unread` when git could not
-    tell, or none of the ids is in history any more."""
+    tell, and `_DeliveryGone` when none of the ids is in history."""
     after = []
     for sha in holders:
         answers = [gitutil.ancestry(repo, c, sha) for c in delivered_in]
@@ -400,8 +408,10 @@ def _after_delivery(repo: Path, path: str, holders, delivered_in) -> list[str]:
             raise gitutil.Unread(f"which copies of {path} came with the malware")
     if not after:
         present = [gitutil.branches_carrying(repo, c) for c in delivered_in]
-        if any(found is None for found in present) or not any(present):
+        if any(found is None for found in present):
             raise gitutil.Unread(f"which copies of {path} came with the malware")
+        if not any(present):
+            raise _DeliveryGone(path)
     return after
 
 
@@ -1079,12 +1089,18 @@ class _Arrivals:
 
 
 def _arrival_reasons(settled: arrival_questions.Settled, first_commits: list[str], unread: list[str],
-                     too_large: list[str], records_unread: list[str] = ()) -> list[Reason]:
+                     too_large: list[str], records_unread: list[str] = (), gone: list[str] = (),
+                     not_saved: int = 0) -> list[Reason]:
     """Name what the operator decided and what is left to decide about the files added beside a
     payload. Takes what was settled, the first commits that carry a payload with other files, what
-    git could not read, the chosen files whose history is too long to walk, and the earlier records
-    that could not be read. Returns the reasons."""
+    git could not read, the chosen files whose history is too long to walk, the earlier records that
+    could not be read, the chosen files whose delivery commit has left history, and how many answers
+    could not be saved. Returns the reasons."""
     reasons = []
+    if gone:
+        reasons.append(Reason(Cause.ARRIVALS_DELIVERY_GONE, names_that_fit(list(gone))))
+    if not_saved:
+        reasons.append(Reason(Cause.ARRIVALS_ANSWERS_NOT_SAVED, str(not_saved)))
     if records_unread:
         reasons.append(Reason(Cause.ARRIVALS_RECORD_UNREADABLE, names_that_fit(list(records_unread))))
     undecided = [f.path for q in settled.undecided for f in q.files]
@@ -1112,45 +1128,53 @@ def _settle_arrivals(repo: Path, slug: str, deliveries: dict, brought: dict, exc
     could not read while finding the deliveries, the commits to rebuild, which it adds to, and
     where to name what git could not read. Returns the `_Arrivals`."""
     decided, decided_read = arrival_record.read_decisions(slug)
-    pairs = frozenset((d.path, d.blob) for d in decided)
-    keeps = frozenset((d.path, d.blob) for d in decided
-                      if d.decision == arrival_record.KEEP_DECISION)
     seen: set[tuple[str, str]] = set()
-    live = arrival_questions.from_history(repo, deliveries, brought, excluded, seen)
+    added_by: dict[tuple[str, str], set[str]] = {}
+    live = arrival_questions.from_history(repo, deliveries, brought, excluded, seen, added_by)
     records, unreadable = arrival_record.read_all(slug)
+    if not decided_read:
+        unreadable = [*unreadable, str(arrival_record.state_dir(slug) / arrival_record.DECIDED_NAME)]
     held = _held_since_delivery(repo)
     recorded = [q for record in records for q in record.deliveries]
-    every = live.asked + arrival_questions.from_records(recorded, excluded, seen, held)
-    candidates = arrival_questions.files_of(every)
-    questions = arrival_questions.without(every, pairs)
+    every = live.asked + arrival_questions.from_records(recorded, excluded, seen, held, added_by)
+    standing = arrival_questions.standing(decided, added_by)
+    keeps = frozenset(pair for pair, d in standing.items()
+                      if d.decision == arrival_record.KEEP_DECISION)
+    questions = arrival_questions.without(every, standing)
     if resolver is not None:
         asked_now = arrival_questions.ASKED_PER_RUN
         questions = (arrival_questions.with_mentions(repo, questions[:asked_now])
                      + questions[asked_now:])
-    settled = arrival_questions.ask(questions, resolver)
+    settled = arrival_questions.ask(questions, resolver, added_by=added_by)
     out = _Arrivals(decided=decided if decided_read else None)
-    if decided_read:
-        arrival_record.add_decisions(slug, arrival_questions.decisions(settled))
+    answered = arrival_questions.decisions(settled)
+    not_saved = len(answered) if answered and not (
+        decided_read and arrival_record.add_decisions(slug, answered)) else 0
     for record in records:
         remaining = arrival_questions.still_to_ask(record.deliveries, settled, held, keeps)
         arrival_record.keep_only(record, remaining)
         out.recorded.append((record, remaining))
     too_large: list[str] = []
+    gone: list[str] = []
     chosen_now = [(c.path, c.blob, settled.delivered_in.get((c.path, c.blob), ()))
                   for c in settled.take_out]
-    chosen_before = [(d.path, d.blob, d.forms) for d in decided
-                     if d.decision == arrival_record.TAKE_OUT_DECISION
-                     and (d.path, d.blob) in candidates]
+    chosen_before = [(path, blob, tuple(sorted(added_by[(path, blob)])))
+                     for (path, blob), d in standing.items()
+                     if d.decision == arrival_record.TAKE_OUT_DECISION]
     for path, blob, forms in [*chosen_now, *chosen_before]:
-        with _naming_unread(unread):
-            if _register_blob_removal(repo, path, blob, out.arrived, remove_shas, out.holders,
-                                      forms) == "too-large":
-                too_large.append(path)
-            elif out.arrived.get(path) == blob:
-                out.forms[(path, blob)] = forms
+        try:
+            with _naming_unread(unread):
+                if _register_blob_removal(repo, path, blob, out.arrived, remove_shas,
+                                          out.holders, forms) == "too-large":
+                    too_large.append(path)
+                elif out.arrived.get(path) == blob:
+                    out.forms[(path, blob)] = forms
+        except _DeliveryGone:
+            gone.append(path)
     out.to_record = [q for q in settled.undecided if not q.recorded]
     out.reasons = _arrival_reasons(settled, live.first_commits,
-                                   [*unread_deliveries, *live.unread], too_large, unreadable)
+                                   [*unread_deliveries, *live.unread], too_large, unreadable,
+                                   gone, not_saved)
     return out
 
 
@@ -1537,10 +1561,12 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
                        ", ".join(s[:12] for s in uncovered))
     oldest = plan[0][0]
     remove_in: dict[tuple[str, str], set[str]] = {}
+    unplaced: set[tuple[str, str]] = set()
     for (path, blob), forms in taken_forms.items():
         allowed = _commits_after(repo, plan, forms)
         if allowed is None:
             unconfirmed.append(f"which copies of {path} came with the malware")
+            unplaced.add((path, blob))
         else:
             remove_in[(path, blob)] = allowed
 
@@ -1771,14 +1797,17 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
             held_now))
     if settled_arrivals.decided is not None:
         decided_now, read_now = arrival_record.read_decisions(slug)
-        if read_now:
-            arrival_record.keep_decisions(slug, [
-                d for d in arrival_questions.remapped_decisions(decided_now, rebuilt.mapping)
-                if d.decision == arrival_record.KEEP_DECISION
-                or held_now(d.forms, d.path, d.blob)])
+        kept_now = [d for d in arrival_questions.remapped_decisions(decided_now, rebuilt.mapping)
+                    if d.decision == arrival_record.KEEP_DECISION
+                    or held_now(d.forms, d.path, d.blob)]
+        if not (read_now and arrival_record.keep_decisions(slug, kept_now)):
+            survivors.append(Reason(Cause.ARRIVALS_ANSWERS_NOT_SAVED, str(len(decided_now))))
+    placed_holders = {path: commits
+                      for path, commits in {**merge_taken_holders,
+                                            **settled_arrivals.holders}.items()
+                      if (path, arrived.get(path)) not in unplaced}
     removed = _delivered_removals(replacements, delivered_reach,
-                                  {**remove_holders, **merge_taken_holders,
-                                   **settled_arrivals.holders}, purge_holders)
+                                  {**remove_holders, **placed_holders}, purge_holders)
     touched = len(delivered_infected)
     label = (oldest[:12] if touched == 1 else f"{touched} commits from {oldest[:12]}")
     if not results and not isolated:

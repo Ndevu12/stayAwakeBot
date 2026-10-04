@@ -25,6 +25,22 @@ def history_of(repo: Path, path: str, **walk) -> list[str] | None:
     return None if len(changed) >= MAX_PATH_HISTORY else changed
 
 
+
+def came_after(repo: Path, path: str, forms, start: str = "") -> bool | None:
+    """Tell whether the version of a file a commit holds was set by one of a delivery's ids or a
+    commit after one. Takes the repo, the path, the ids, and the commit id, HEAD when "". Returns
+    the answer, or None when git could not tell."""
+    try:
+        changed = history_of(repo, path, start=start) if start else history_of(repo, path)
+    except gitutil.Unread:
+        return None
+    if not changed:
+        return None
+    answers = [c == changed[0] or gitutil.ancestry(repo, c, changed[0]) for c in forms]
+    if True in answers:
+        return True
+    return None if None in answers else False
+
 MENTIONS_COUNTED = 60
 _MENTIONS_READ_EACH = 8 * 1024 * 1024
 _MENTIONS_READ_TOTAL = 128 * 1024 * 1024

@@ -597,7 +597,8 @@ def tracked(repo: str | Path, path: str) -> bool:
 
 
 def file_commits(repo: str | Path, path: str, limit: int = 50,
-                 first_parent: bool = False, all_branches: bool = False) -> list[str] | None:
+                 first_parent: bool = False, all_branches: bool = False,
+                 start: str = "") -> list[str] | None:
     """Commit SHAs that touched `path`, newest first (bounded). The walk that the
     remediator uses to find the most recent committed version that scans clean.
 
@@ -614,13 +615,19 @@ def file_commits(repo: str | Path, path: str, limit: int = 50,
     reachable only from a fetched branch is enumerated with the rest. The refs go in as globs, not
     one argument each, so a repository with many branches cannot outgrow the argument list.
 
+    `start` is a commit id to walk from instead of HEAD.
+
     Reads the repository as it stores it. Returns None when git could not walk the history.
     """
+    if start and not (len(start) in (40, 64) and set(start) <= set("0123456789abcdef")):
+        return None
     args = ["log", f"-n{limit}", "--format=%H"]
     if first_parent:
         args.append("--first-parent")
     if all_branches:
         args += _BRANCH_WALK
+    elif start:
+        args.append(start)
     args += ["--", path]
     res = own_view(repo, args)
     if res is None or res.returncode != 0:

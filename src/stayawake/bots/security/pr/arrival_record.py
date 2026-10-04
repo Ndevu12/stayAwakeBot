@@ -205,6 +205,8 @@ def read_decisions(slug: str) -> tuple[list[Decision], bool]:
     store was read; an absent store reads as none."""
     source = state_dir(slug) / DECIDED_NAME
     try:
+        if source.is_symlink():
+            return [], False
         if not source.exists():
             return [], True
         if source.stat().st_size > _MAX_RECORD_BYTES:

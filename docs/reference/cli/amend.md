@@ -74,8 +74,9 @@ saw never removes those by itself.
   them all. It asks about at most ten such commits in one run; the rest are asked on the next. A
   file you take out is removed from that commit and every later commit that still holds it as it was
   added, even when an earlier run already replaced that commit; a version you changed later, and a
-  copy another branch added on its own, stay. A file that commit changed, and did not add, is named,
-  never removed.
+  copy another branch added on its own, stay. The same files added by the same malware on another
+  branch go too. A file that commit changed, and did not add, is named, never removed. If that commit
+  has left your history, saw takes out no copy of the file and names it for you to review.
 - **Your answers are kept.** A file you keep is not asked about again, by `saw fix amend` or
   `saw fix`. A file you take out, here or in `saw fix`, is removed by later runs too, without asking
   again.

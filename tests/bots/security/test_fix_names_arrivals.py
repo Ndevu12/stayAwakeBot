@@ -244,7 +244,22 @@ class TestFixAsksOnATerminal(_Project):
             "src/index.js", blob, (sha,), arrival_record.TAKE_OUT_DECISION)])
         v = self.run_fix()
         self.assertTrue(self.stored(v.base_fix.branch, "src/index.js"))
-        self.assertNotIn(("src/index.js", blob), v.arrivals.take_out)
+        self.assertNotIn(("src/index.js", blob), [(p, b) for p, b, _ids in v.arrivals.take_out])
+
+    def test_a_take_out_leaves_the_bases_own_copy_and_does_not_report_it(self):
+        base = self.git(self.d, "rev-parse", "--abbrev-ref", "HEAD").strip()
+        self.git(self.d, "checkout", "-q", "-b", "dev")
+        self.deliver()
+        self.git(self.d, "checkout", "-q", base)
+        own = ".vscode/extensions.json"
+        self.write(self.d, own, PADDING[own])
+        self.commit(self.d, "the project's own settings")
+        self.git(self.d, "checkout", "-q", "dev")
+        v = self.run_fix(self.answering(TAKE_OUT)[0])
+        self.git(self.d, "checkout", "-q", base)
+        held_on = {h.name: h.paths for h in v.arrivals.taken_out_held}
+        self.assertTrue(not v.base_fix.branch or self.stored(v.base_fix.branch, own))
+        self.assertNotIn(own, held_on.get(base, ()))
 
     def test_answers_that_cannot_be_kept_leave_the_run_in_review(self):
         self.git(self.d, "remote", "remove", "origin")
