@@ -14,8 +14,11 @@ description: saw fix amend — amend the infected commits and force-update the b
 Replace a past commit that still carries the payload and force-update each branch it sat on. That
 force-update is the fix: an amend that never reaches the remote is not one. The replaced
 commit keeps its original message and its original author, and the commits after it are replayed
-onto the replacement. Once the remote has moved, your clone's copy of the remote branches is
-refreshed to match it; if it cannot be, the run says so.
+onto the replacement. Malware in any commit it rewrites is repaired in place where that leaves the
+file clean, and otherwise taken out; the version you were shown when asked, and what your allowlist
+covers, is left as you decided. A file left for you to recover is named; any other confirmed copy
+still there after the rewrite stops the push and is named. Once the remote has moved, your clone's
+copy of the remote branches is refreshed to match it; if it cannot be, the run says so.
 
 ```text
 saw fix amend [TARGETS...]

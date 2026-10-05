@@ -14,7 +14,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from stayawake.bots.security import hookscript, outbound, push_record
+from stayawake.bots.security import hookscript, outbound, push_record, version_scan
 from stayawake.bots.security.matchers import git_history
 from stayawake.bots.security.matchers.installed_package_audit import InstalledPackageAuditMatcher
 from stayawake.bots.security.targets import HistoryTarget, LocalRepoTarget, PushedTarget, ScanOptions
@@ -554,7 +554,7 @@ class TestItNeverReadsAsCleanWhenUnsure(_Sandbox):
 
     def test_the_check_failing_is_reported_as_a_failure_not_a_result(self):
         self.commit({".gitignore": _PAYLOAD})
-        with mock.patch.object(outbound, "scan_target", side_effect=RuntimeError("boom")):
+        with mock.patch.object(version_scan, "scan_target", side_effect=RuntimeError("boom")):
             code, text = self.check(self.line("refs/heads/main"))
         self.assertEqual(code, 2)
         self.assertIn("could not check this push", text)

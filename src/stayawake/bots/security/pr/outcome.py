@@ -95,6 +95,7 @@ class Cause(Enum):
     ARRIVALS_DELIVERY_GONE = "arrivals-delivery-gone"
     ARRIVALS_ANSWERS_NOT_SAVED = "arrivals-answers-not-saved"
     ARRIVED_COPIES_REMAIN = "arrived-copies-remain"
+    HISTORY_PARTLY_READ = "history-partly-read"
 
 
 _NEEDING_NO_ACTION = frozenset({Cause.PREVIOUS_OBJECTS_UNCOLLECTED, Cause.NO_CONFIRMED_PAYLOAD,
@@ -318,6 +319,9 @@ _PHRASE = {
     Cause.ARRIVALS_DELIVERY_GONE:
         "the commit that added {detail} is no longer in your history, so no copy was taken out — "
         "review them yourself",
+    Cause.HISTORY_PARTLY_READ:
+        "{detail} file version(s) in the rewritten history were too large to read in full or are "
+        "kept outside git",
     Cause.ARRIVED_COPIES_REMAIN:
         "a copy of a file that came in with the malware is still on {detail} — review it there",
     Cause.ARRIVALS_ANSWERS_NOT_SAVED:
