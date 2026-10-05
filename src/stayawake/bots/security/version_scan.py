@@ -19,9 +19,9 @@ class BatchScan:
     """Hold what one batch's scan found.
 
     `findings` pairs each finding with the version it came from, or None; `unread` and `in_part` are
-    the paths read not at all or only in part; `runnable` are those read in part that git stores as a
-    program, that start as a script or that have no extension; `outside_git` are the paths whose
-    version points to a file kept outside git.
+    the paths read not at all or only in part; `outside_git` are the paths whose version points to a
+    file kept outside git; `runnable` are those read in part or kept outside git that git stores as
+    a program, that start as a script or that have no extension.
     """
 
     findings: list = field(default_factory=list)
@@ -70,7 +70,9 @@ def scan_batch(repo: Path, display: str, batch: list, merges: list[str], signatu
     if result.error:
         unread |= set(by_path) - {f.path for f in result.findings}
     in_part = set(getattr(target, "read_in_part", ()))
-    runnable = {p for p in in_part
+    outside_git = {e.path for e in batch
+                   if target.read_ahead.get(e.oid, b"").startswith(LFS_POINTER)}
+    runnable = {p for p in in_part | outside_git
                 if getattr(by_path.get(p), "executable", False) or not PurePosixPath(p).suffix
                 or (target.head(p, 2) or b"").startswith(b"#!")}
     return BatchScan(
@@ -78,5 +80,4 @@ def scan_batch(repo: Path, display: str, batch: list, merges: list[str], signatu
         unread=unread,
         in_part=in_part,
         runnable=runnable,
-        outside_git={e.path for e in batch
-                     if target.read_ahead.get(e.oid, b"").startswith(LFS_POINTER)})
+        outside_git=outside_git)

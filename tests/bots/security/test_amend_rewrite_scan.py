@@ -430,6 +430,16 @@ class TestWhatTheRewriteLeavesAlone(_Rewrite):
                 self.assertIn(Cause.HISTORY_PARTLY_READ, self._causes(outcome))
                 self.assertTrue(outcome.needs_review)
 
+    def test_a_program_kept_outside_git_is_named_for_review(self):
+        self.evil_merge()
+        self.write(self.d, "bin/tool.dat", "version https://git-lfs.github.com/spec/v1\n"
+                   "oid sha256:" + "0" * 64 + "\nsize 3000000\n")
+        os.chmod(self.d / "bin/tool.dat", 0o755)
+        self.commit(self.d, "a program kept outside git")
+        outcome = self.run_amend()
+        self.assertIn(Cause.HISTORY_PARTLY_READ, self._causes(outcome))
+        self.assertTrue(outcome.needs_review)
+
     def test_a_large_data_file_is_named_without_review(self):
         self.evil_merge()
         self.write(self.d, "data/blob.dat", "x" * 2_100_000 + "\n")
