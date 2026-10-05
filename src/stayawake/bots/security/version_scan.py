@@ -19,14 +19,14 @@ class BatchScan:
     """Hold what one batch's scan found.
 
     `findings` pairs each finding with the version it came from, or None; `unread` and `in_part` are
-    the paths read not at all or only in part; `outside_git` counts versions that point to a file
-    kept outside git.
+    the paths read not at all or only in part; `outside_git` are the paths whose version points to a
+    file kept outside git.
     """
 
     findings: list = field(default_factory=list)
     unread: set[str] = field(default_factory=set)
     in_part: set[str] = field(default_factory=set)
-    outside_git: int = 0
+    outside_git: set[str] = field(default_factory=set)
 
 
 def batches(queue: list) -> list[list]:
@@ -71,5 +71,5 @@ def scan_batch(repo: Path, display: str, batch: list, merges: list[str], signatu
         findings=[(f, by_path.get(f.path)) for f in result.findings],
         unread=unread,
         in_part=set(getattr(target, "read_in_part", ())),
-        outside_git=sum(1 for e in batch
-                        if target.read_ahead.get(e.oid, b"").startswith(LFS_POINTER)))
+        outside_git={e.path for e in batch
+                     if target.read_ahead.get(e.oid, b"").startswith(LFS_POINTER)})

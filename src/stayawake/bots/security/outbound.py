@@ -288,7 +288,7 @@ def _scan_batch(progress: _Progress, git_dir: Path, display: str, batch: list, m
         if progress.stop:
             return
         progress.confirmed += confirmed
-        progress.outside_git += outside_git
+        progress.outside_git += len(outside_git)
         progress.suspicious += suspicious
         for entry in batch:
             key = (entry.path, entry.oid)

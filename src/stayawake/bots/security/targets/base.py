@@ -41,6 +41,12 @@ def _ext(rel: str) -> str:
     return rel[i:].lower() if i != -1 else ""
 
 
+def is_source_path(rel: str) -> bool:
+    """Tell whether the content checks read a path as source. Takes the path. Returns True when its
+    extension is a source extension."""
+    return _ext(rel) in SOURCE_EXTS
+
+
 @dataclass
 class ScanOptions:
     exclude_dirs: set[str] = field(default_factory=lambda: {

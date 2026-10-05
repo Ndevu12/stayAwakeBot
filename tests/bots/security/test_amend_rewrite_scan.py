@@ -76,7 +76,7 @@ class TestTheRewriteIsReadInFull(_Rewrite):
         self.assertEqual("export const app = 1;\n",
                          self.git(self.d, "show", f"{self.base}:src/app.js"))
 
-    def test_a_copy_under_another_name_elsewhere_still_holds_the_run_back(self):
+    def test_a_copy_on_a_branch_it_does_not_rewrite_is_named_and_the_rest_is_cleaned(self):
         self.git(self.d, "checkout", "-q", "-b", "other")
         self.write(self.d, "tools/s3.js", STAGE3)
         self.commit(self.d, "a copy")
@@ -84,8 +84,11 @@ class TestTheRewriteIsReadInFull(_Rewrite):
         self.evil_merge()
         self.rename_and_change_then_delete()
         outcome = self.run_amend()
-        self.assertFalse(outcome.completed)
-        self.assertIn(Cause.PAYLOAD_STILL_REACHABLE, self._causes(outcome))
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertTrue(outcome.needs_review)
+        self.assertIn(Cause.PAYLOAD_REACHABLE_FROM_OTHER_REFS, self._causes(outcome))
+        self.assertFalse(self.ever_holds(STAGE3))
+        self.assertFalse(self.ever_holds(LOADER))
 
     def test_versions_it_could_not_list_are_named_for_review(self):
         self.evil_merge()
@@ -397,7 +400,7 @@ class TestWhatTheRewriteLeavesAlone(_Rewrite):
         self.assertTrue(outcome.completed, self._causes(outcome))
         self.assertNotIn(Cause.HISTORY_PARTLY_READ, self._causes(outcome))
 
-    def test_versions_not_read_in_full_are_named(self):
+    def test_code_not_read_in_full_is_named_for_review(self):
         self.evil_merge()
         self.write(self.d, "assets/big.js", "// " + "x" * 2_100_000 + "\n")
         self.commit(self.d, "a large asset")
@@ -406,6 +409,18 @@ class TestWhatTheRewriteLeavesAlone(_Rewrite):
         outcome = self.run_amend()
         self.assertTrue(outcome.completed, self._causes(outcome))
         self.assertIn(Cause.HISTORY_PARTLY_READ, self._causes(outcome))
+        self.assertTrue(outcome.needs_review)
+        self.assertIn("assets/big.js", " ".join(r.subjects for r in outcome.reasons))
+
+    def test_a_large_data_file_is_named_without_review(self):
+        self.evil_merge()
+        self.write(self.d, "data/blob.dat", "x" * 2_100_000 + "\n")
+        self.commit(self.d, "a large data file")
+        outcome = self.run_amend()
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertIn(Cause.LARGE_FILES_NOT_READ_IN_FULL, self._causes(outcome))
+        self.assertNotIn(Cause.HISTORY_PARTLY_READ, self._causes(outcome))
+        self.assertFalse(outcome.needs_review, self._causes(outcome))
 
 if __name__ == "__main__":
     unittest.main()

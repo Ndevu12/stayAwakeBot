@@ -20,6 +20,7 @@ from stayawake.bots.security.remediation import (delivery, changes, footprint, i
 from stayawake.bots.security.pr.fix_verdict import Checkout, checkout_clauses, checkout_of
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.targets import LocalRepoTarget
+from stayawake.bots.security.targets.base import is_source_path
 from stayawake.lib.git.auth import run_remote_git
 from stayawake.lib.git.borrowed import BorrowError, borrow
 from stayawake.lib.git.objects import read_blobs
@@ -219,7 +220,7 @@ class _HistoryPayloads:
     names the confirmed versions no step repairs, kept as `(path, blob)` in `named`; `judged` are the
     versions read and `confirmed` those found malicious; `region` maps the commits read to their
     parents; `unread`
-    names what could not be read; `partly_read` counts the versions read only in part or kept outside
+    names what could not be read; `partly_read` are the paths read only in part or kept outside
     git.
     """
 
@@ -232,7 +233,7 @@ class _HistoryPayloads:
     confirmed: set = field(default_factory=set)
     region: dict = field(default_factory=dict)
     unread: list = field(default_factory=list)
-    partly_read: int = 0
+    partly_read: set = field(default_factory=set)
 
 
 def _rewrite_boundary(plan) -> list[str]:
@@ -291,7 +292,7 @@ def _confirmed_versions(repo: Path, display: str, tips, boundary, signatures, al
                 found_here.add(entry.path)
                 out.confirmed.add((entry.path, entry.oid))
                 confirmed.append((finding, entry))
-        out.partly_read += len(result.in_part - found_here) + result.outside_git
+        out.partly_read |= (result.in_part - found_here) | result.outside_git
     return confirmed
 
 
@@ -345,26 +346,6 @@ def _reached_from(graph: list[tuple[str, list[str]]], tips) -> set[str]:
             seen.add(sha)
             stack.extend(parents.get(sha, ()))
     return seen
-
-
-def _branches_holding(repo: Path, oids: set[str], branches, beside: list[str]
-                      ) -> tuple[list[str], list[str]]:
-    """Name the branches whose history holds any of some objects that other commits do not reach.
-    Takes the repo, the object ids, the `(name, tip)` branches and the commits to leave out.
-    Returns the names holding one, and the names git could not walk."""
-    if not oids or not branches:
-        return [], []
-    union = gitutil.reachable_objects(repo, [tip for _n, tip in branches], beside)
-    if union is not None and not oids & union:
-        return [], []
-    holding, unread = [], []
-    for name, tip in branches:
-        one = gitutil.reachable_objects(repo, [tip], beside)
-        if one is None:
-            unread.append(name)
-        elif oids & one:
-            holding.append(name)
-    return holding, unread
 
 
 def _branches_carrying_any(repo: Path, infected) -> list[tuple[str, str, str]] | None:
@@ -1951,23 +1932,6 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
                 holding.append(name)
         return _refuse(Cause.PAYLOAD_STILL_REACHABLE, names_that_fit(sorted(holding or unread)))
     taken_out = {oid for _path, oid in history.take_out}
-    delivered_names = {name for name, _t, _c in deliverable}
-    beyond = [(n, t) for n, t in post_view if n not in delivered_names]
-    held_beyond, unread_beyond = _branches_holding(repo, taken_out, beyond,
-                                                   list(delivered_tips.values()))
-    unconfirmed += [f"branch {name}" for name in unread_beyond]
-    holding_copies: list[str] = []
-    for name, tip in beyond:
-        if name not in held_beyond:
-            continue
-        copies = _HistoryPayloads()
-        if _confirmed_versions(repo, display, [tip], list(delivered_tips.values()), signatures,
-                               allowlist, opts, lambda path, oid: oid not in taken_out, copies):
-            holding_copies.append(name)
-        elif copies.unread:
-            unconfirmed.append(f"branch {name}")
-    if holding_copies:
-        return _refuse(Cause.PAYLOAD_STILL_REACHABLE, names_that_fit(sorted(holding_copies)))
     rewritten = _HistoryPayloads()
     still_held = [f"{entry.path} in {entry.commit[:12]}" for _finding, entry in _confirmed_versions(
         repo, display, [delivered_tips[tip] for _n, tip, _c in deliverable],
@@ -2048,9 +2012,16 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
     if reachable_elsewhere:
         survivors.append(Reason(Cause.PAYLOAD_REACHABLE_FROM_OTHER_REFS,
                                 names_that_fit(reachable_elsewhere)))
-    if history.partly_read or rewritten.partly_read:
-        survivors.append(Reason(Cause.HISTORY_PARTLY_READ,
-                                str(history.partly_read + rewritten.partly_read)))
+    partly = history.partly_read | rewritten.partly_read
+    found_at = {path for path, _oid in history.confirmed | decided}
+    to_review = sorted(p for p in partly if p in found_at or is_source_path(p))
+    noted = sorted(partly - set(to_review))
+    if to_review:
+        survivors.append(Reason(Cause.HISTORY_PARTLY_READ, str(len(to_review)),
+                                names_that_fit(to_review)))
+    if noted:
+        survivors.append(Reason(Cause.LARGE_FILES_NOT_READ_IN_FULL, str(len(noted)),
+                                names_that_fit(noted)))
     arrived_elsewhere, unread_arrived_refs = _refs_still_reaching(repo, arrived_oids,
                                                                   list(delivered_tips.values()))
     unconfirmed += unread_arrived_refs
