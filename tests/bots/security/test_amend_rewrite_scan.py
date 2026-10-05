@@ -387,6 +387,16 @@ class TestWhatTheRewriteLeavesAlone(_Rewrite):
         self.assertIn("node_modules", older)
         self.assertNotIn("temp_auto_push.bat", older)
 
+    def test_a_large_version_found_and_taken_out_is_not_counted_as_partly_read(self):
+        self.evil_merge()
+        self.write(self.d, "assets/big.js", "// " + "x" * 2_100_000 + "\n" + STAGE3)
+        self.commit(self.d, "a large file with a payload at its end")
+        self.git(self.d, "rm", "-q", "assets/big.js")
+        self.commit(self.d, "drop it")
+        outcome = self.run_amend()
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertNotIn(Cause.HISTORY_PARTLY_READ, self._causes(outcome))
+
     def test_versions_not_read_in_full_are_named(self):
         self.evil_merge()
         self.write(self.d, "assets/big.js", "// " + "x" * 2_100_000 + "\n")

@@ -280,7 +280,7 @@ def _confirmed_versions(repo: Path, display: str, tips, boundary, signatures, al
     for batch in version_scan.batches(fresh):
         result = version_scan.scan_batch(repo, display, batch, [], payload, allowlist, opts)
         out.unread += [f"every copy of {p}" for p in sorted(result.unread)]
-        out.partly_read += len(result.in_part) + result.outside_git
+        found_here: set[str] = set()
         for finding, entry in result.findings:
             if (getattr(finding, "confidence", None) != CONFIRMED
                     or getattr(finding, "advisory_only", False)):
@@ -288,8 +288,10 @@ def _confirmed_versions(repo: Path, display: str, tips, boundary, signatures, al
             if entry is None:
                 out.unread.append(f"every copy of {getattr(finding, 'path', '') or '?'}")
             else:
+                found_here.add(entry.path)
                 out.confirmed.add((entry.path, entry.oid))
                 confirmed.append((finding, entry))
+        out.partly_read += len(result.in_part - found_here) + result.outside_git
     return confirmed
 
 
