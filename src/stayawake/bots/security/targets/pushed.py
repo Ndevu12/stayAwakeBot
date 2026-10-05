@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from stayawake.lib.git.objects import read_blobs
 
+from .base import reads_whole
 from .history import HistoryTarget
 
 _READ_AHEAD_BYTES = 64 << 20
@@ -21,5 +22,6 @@ class PushedTarget(HistoryTarget):
         self.merge_scope = list(merges or ())
         self.read_ahead, sizes = read_blobs(root, list(versions.values()),
                                             max_each=opts.max_file_bytes, max_total=_READ_AHEAD_BYTES)
+        self.sizes = sizes
         self.read_in_part = {path for path, oid in versions.items()
-                             if sizes.get(oid, 0) > opts.max_file_bytes}
+                             if not reads_whole(path, sizes.get(oid, 0), opts)}
