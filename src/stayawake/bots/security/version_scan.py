@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import bisect
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from stayawake.lib.git import objects
 from stayawake.bots.security.scanner import scan_target
@@ -19,13 +19,15 @@ class BatchScan:
     """Hold what one batch's scan found.
 
     `findings` pairs each finding with the version it came from, or None; `unread` and `in_part` are
-    the paths read not at all or only in part; `outside_git` are the paths whose version points to a
-    file kept outside git.
+    the paths read not at all or only in part; `runnable` are those read in part that git stores as a
+    program, that start as a script or that have no extension; `outside_git` are the paths whose
+    version points to a file kept outside git.
     """
 
     findings: list = field(default_factory=list)
     unread: set[str] = field(default_factory=set)
     in_part: set[str] = field(default_factory=set)
+    runnable: set[str] = field(default_factory=set)
     outside_git: set[str] = field(default_factory=set)
 
 
@@ -67,9 +69,14 @@ def scan_batch(repo: Path, display: str, batch: list, merges: list[str], signatu
     unread |= {path for path, oid in links_wanted.items() if oid not in text_of}
     if result.error:
         unread |= set(by_path) - {f.path for f in result.findings}
+    in_part = set(getattr(target, "read_in_part", ()))
+    runnable = {p for p in in_part
+                if getattr(by_path.get(p), "executable", False) or not PurePosixPath(p).suffix
+                or (target.head(p, 2) or b"").startswith(b"#!")}
     return BatchScan(
         findings=[(f, by_path.get(f.path)) for f in result.findings],
         unread=unread,
-        in_part=set(getattr(target, "read_in_part", ())),
+        in_part=in_part,
+        runnable=runnable,
         outside_git={e.path for e in batch
                      if target.read_ahead.get(e.oid, b"").startswith(LFS_POINTER)})

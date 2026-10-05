@@ -12,6 +12,7 @@ from stayawake.lib.git.objects import own_view, own_view_fed
 _OBJECT_ID = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 _FILE_MODES = frozenset({b"100644", b"100755"})
 _LINK_MODE = b"120000"
+_EXECUTABLE_MODE = b"100755"
 _SUBMODULE_MODE = b"160000"
 _INTRODUCING = frozenset({b"A", b"M", b"T"})
 
@@ -57,13 +58,14 @@ def read_push_updates(text: str) -> list[PushUpdate] | None:
 
 @dataclass(frozen=True)
 class Introduced:
-    """A file version a push would publish."""
+    """A file version a push would publish. `executable` is True when git stores it as a program."""
 
     path: str
     oid: str
     link: bool
     commit: str
     role: str
+    executable: bool = False
 
 
 @dataclass
@@ -194,7 +196,8 @@ def _collect(found, limit: int) -> tuple[list[Introduced], int, bool]:
         if mode == _SUBMODULE_MODE:
             submodules += 1
         elif mode in _FILE_MODES or mode == _LINK_MODE:
-            entries.append(Introduced(path, oid, mode == _LINK_MODE, commit, role))
+            entries.append(Introduced(path, oid, mode == _LINK_MODE, commit, role,
+                                      mode == _EXECUTABLE_MODE))
             if len(entries) > limit:
                 return entries, submodules, False
     return entries, submodules, True

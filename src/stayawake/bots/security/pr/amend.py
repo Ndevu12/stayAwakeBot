@@ -221,7 +221,7 @@ class _HistoryPayloads:
     versions read and `confirmed` those found malicious; `region` maps the commits read to their
     parents; `unread`
     names what could not be read; `partly_read` are the paths read only in part or kept outside
-    git.
+    git, and `runnable` those of them that run as programs.
     """
 
     take_out: dict = field(default_factory=dict)
@@ -234,6 +234,7 @@ class _HistoryPayloads:
     region: dict = field(default_factory=dict)
     unread: list = field(default_factory=list)
     partly_read: set = field(default_factory=set)
+    runnable: set = field(default_factory=set)
 
 
 def _rewrite_boundary(plan) -> list[str]:
@@ -293,6 +294,7 @@ def _confirmed_versions(repo: Path, display: str, tips, boundary, signatures, al
                 out.confirmed.add((entry.path, entry.oid))
                 confirmed.append((finding, entry))
         out.partly_read |= (result.in_part - found_here) | result.outside_git
+        out.runnable |= result.runnable - found_here
     return confirmed
 
 
@@ -2014,7 +2016,8 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
                                 names_that_fit(reachable_elsewhere)))
     partly = history.partly_read | rewritten.partly_read
     found_at = {path for path, _oid in history.confirmed | decided}
-    to_review = sorted(p for p in partly if p in found_at or is_source_path(p))
+    runnable = history.runnable | rewritten.runnable
+    to_review = sorted(p for p in partly if p in found_at or is_source_path(p) or p in runnable)
     noted = sorted(partly - set(to_review))
     if to_review:
         survivors.append(Reason(Cause.HISTORY_PARTLY_READ, str(len(to_review)),

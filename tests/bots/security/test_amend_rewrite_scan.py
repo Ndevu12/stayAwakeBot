@@ -412,6 +412,24 @@ class TestWhatTheRewriteLeavesAlone(_Rewrite):
         self.assertTrue(outcome.needs_review)
         self.assertIn("assets/big.js", " ".join(r.subjects for r in outcome.reasons))
 
+    def test_a_large_program_without_a_code_extension_is_named_for_review(self):
+        half = "// " + "a" * 96 + "\n"
+        half = half * (1_200_000 // len(half))
+        for path, body, mode in (("bin/tool.dat", "", 0o755),
+                                 (".husky/pre-commit", "", 0o644),
+                                 ("tools/run.dat", "#!/bin/sh\n", 0o644)):
+            with self.subTest(path=path):
+                self.setUp()
+                self.evil_merge()
+                self.write(self.d, path, body + half + STAGE3 + half)
+                os.chmod(self.d / path, mode)
+                self.commit(self.d, "a large program")
+                self.git(self.d, "rm", "-q", path)
+                self.commit(self.d, "drop it")
+                outcome = self.run_amend()
+                self.assertIn(Cause.HISTORY_PARTLY_READ, self._causes(outcome))
+                self.assertTrue(outcome.needs_review)
+
     def test_a_large_data_file_is_named_without_review(self):
         self.evil_merge()
         self.write(self.d, "data/blob.dat", "x" * 2_100_000 + "\n")
