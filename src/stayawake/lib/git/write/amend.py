@@ -31,26 +31,26 @@ def is_dirty(repo: str | Path) -> bool:
     return working_tree.is_dirty(repo)
 
 
-def _differing_paths(repo: str | Path, base: str, target: str) -> list[str] | None:
-    """Repo-relative paths where two commits/trees differ, or None when git could not compare
-    them — each caller decides what an unanswerable comparison means.
-
-    `-z` is load-bearing: git otherwise quotes a non-ASCII path, so a payload under such a
-    directory would be reported under a name matching nothing the caller holds. Renames stay
-    off — the claim is about the content at a path, not about identity across a move.
-    """
-    res = run(repo, ["diff", "--no-textconv", "--no-ext-diff", "--name-only", "--no-renames",
-                     "-z", base, target], context=UNTRUSTED)
-    if res is None or res.returncode != 0:
+def _names(raw: bytes | None) -> list[str] | None:
+    """Read a NUL-separated list of paths. Takes git's raw output. Returns the paths, sorted and
+    each once, or None when there was no output to read."""
+    if raw is None:
         return None
-    return sorted({p for p in (res.stdout or "").split("\0") if p})
+    return sorted({p.decode("utf-8", "surrogateescape") for p in raw.split(b"\0") if p})
+
+
+def _differing_paths(repo: str | Path, base: str, target: str) -> list[str] | None:
+    """List the paths where two commits or trees differ. Takes the repo and the two. Returns the
+    paths, or None when git could not compare them."""
+    return _names(stdout_bytes(repo, ["diff", "--no-textconv", "--no-ext-diff", "--name-only",
+                                      "--no-renames", "-z", base, target], context=UNTRUSTED))
 
 
 def _tree_paths(repo: str | Path, treeish: str) -> list[str] | None:
-    res = run(repo, ["ls-tree", "-r", "--name-only", "-z", treeish], context=UNTRUSTED)
-    if res is None or res.returncode != 0:
-        return None
-    return sorted({p for p in (res.stdout or "").split("\0") if p})
+    """List the paths of every file a commit or tree holds. Takes the repo and the commit or tree.
+    Returns the paths, or None when git could not list them."""
+    return _names(stdout_bytes(repo, ["ls-tree", "-r", "--name-only", "-z", treeish],
+                               context=UNTRUSTED))
 
 
 _CARRIED_HEADERS = (b"tree", b"parent", b"author", b"committer", b"gpgsig")

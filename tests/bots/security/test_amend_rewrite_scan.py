@@ -2,6 +2,7 @@
 """`saw fix amend` takes malware out of every commit it rewrites."""
 from __future__ import annotations
 
+import os
 import unittest
 from unittest import mock
 
@@ -156,6 +157,32 @@ class TestEveryRewrittenVersionIsJudged(_Rewrite):
         self.git(self.d, "branch", "-q", "-D", "side")
         self.git(self.d, "rm", "-q", "tools/z.js")
         self.commit(self.d, "drop the tool")
+        outcome = self.run_amend()
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertFalse(self.ever_holds(STAGE3))
+
+    def test_a_payload_under_a_name_that_is_not_utf8_is_taken_out(self):
+        self.evil_merge()
+        scratch = self.d.parent / "payload.txt"
+        scratch.write_text(STAGE3)
+        blob = self.git(self.d, "hash-object", "-w", str(scratch)).strip()
+        name = os.fsdecode(b"lib/\xff\xfe.js")
+        self.git(self.d, "update-index", "--add", "--cacheinfo", f"100644,{blob},{name}")
+        self.git(self.d, "commit", "-qm", "a file under an odd name")
+        self.git(self.d, "rm", "-q", "--cached", "--", name)
+        self.git(self.d, "commit", "-qm", "drop it")
+        outcome = self.run_amend()
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertFalse(self.ever_holds(STAGE3))
+
+    def test_a_payload_kept_at_the_tip_under_a_name_that_is_not_utf8_is_taken_out(self):
+        self.evil_merge()
+        name = os.fsdecode(b"dist/\xff\xfe.js")
+        try:
+            self.write(self.d, name, STAGE3)
+        except (OSError, UnicodeError):
+            self.skipTest("this filesystem refuses a file name that is not UTF-8")
+        self.commit(self.d, "build the stage under an odd name")
         outcome = self.run_amend()
         self.assertTrue(outcome.completed, self._causes(outcome))
         self.assertFalse(self.ever_holds(STAGE3))

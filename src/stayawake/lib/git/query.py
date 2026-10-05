@@ -502,16 +502,16 @@ def _parents_of(path: str) -> list[str]:
 def _entries(repo: str | Path, args: list[str]) -> dict[str, tuple[str, str]] | None:
     """The `(mode, oid)` of each entry `ls-tree -z <args>` names, by path, as the repository stores
     them. Takes the repo and the arguments. Returns them, or None when git could not answer."""
-    res = own_view(repo, ["ls-tree", "-z", "--full-tree", *args])
-    if res is None or res.returncode != 0:
+    raw = own_view_fed(repo, ["ls-tree", "-z", "--full-tree", *args], b"")
+    if raw is None:
         return None
     found: dict[str, tuple[str, str]] = {}
-    for record in filter(None, (res.stdout or "").split("\0")):
-        head, tab, name = record.partition("\t")
-        fields = head.split()
+    for record in filter(None, raw.split(b"\0")):
+        head, tab, name = record.partition(b"\t")
+        fields = head.decode("ascii", "replace").split()
         if not tab or len(fields) < 3:
             return None
-        found[name] = (fields[0], fields[2])
+        found[name.decode("utf-8", "surrogateescape")] = (fields[0], fields[2])
     return found
 
 
