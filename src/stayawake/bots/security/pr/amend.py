@@ -293,7 +293,7 @@ def _confirmed_versions(repo: Path, display: str, tips, boundary, signatures, al
                 found_here.add(entry.path)
                 out.confirmed.add((entry.path, entry.oid))
                 confirmed.append((finding, entry))
-        out.partly_read |= (result.in_part - found_here) | result.outside_git
+        out.partly_read |= result.outside_git
         out.runnable |= result.runnable - found_here
     return confirmed
 
@@ -2023,7 +2023,7 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
         survivors.append(Reason(Cause.HISTORY_PARTLY_READ, str(len(to_review)),
                                 names_that_fit(to_review)))
     if noted:
-        survivors.append(Reason(Cause.LARGE_FILES_NOT_READ_IN_FULL, str(len(noted)),
+        survivors.append(Reason(Cause.GIT_LFS_FILES_NOT_READ, str(len(noted)),
                                 names_that_fit(noted)))
     arrived_elsewhere, unread_arrived_refs = _refs_still_reaching(repo, arrived_oids,
                                                                   list(delivered_tips.values()))

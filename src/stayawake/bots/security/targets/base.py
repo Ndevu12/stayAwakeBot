@@ -29,8 +29,6 @@ SOURCE_EXTS = CODE_EXTS | {
 
 _SOURCE_WINDOW_OVERLAP = 65_536
 
-_MAX_INTERIOR_SCAN_BYTES = 64_000_000
-
 # Between a head and a tail, so no pattern can match across the join and report a
 # signature that is nowhere in the file.
 TRUNCATION_MARKER = b"\n/*\xe2\x80\xa6stayawake-truncated\xe2\x80\xa6*/\n"
@@ -41,29 +39,26 @@ def _ext(rel: str) -> str:
     return rel[i:].lower() if i != -1 else ""
 
 
-def reads_whole(rel: str, size: int, opts) -> bool:
-    """Tell whether the content checks read a file of a given name and size in full. Takes the path,
-    the size in bytes and the scan options. Returns False when only part of it is read."""
-    return size <= opts.max_file_bytes or (_ext(rel) in SOURCE_EXTS
-                                           and size <= _MAX_INTERIOR_SCAN_BYTES)
-
-
 def stream_windows(read: Callable[[int], bytes], size: int,
                    window: int) -> Iterator[tuple[int, str]]:
-    """Walk a byte stream in overlapping windows. Takes a `read(n)` function, the stream's size and
-    the window size. Yields `(line_offset, text)` per window, NUL bytes dropped."""
+    """Walk a byte stream in overlapping windows, the last one a full window ending at the end of
+    the stream. Takes a `read(n)` function, the stream's size and the window size. Yields
+    `(line_offset, text)` per window, NUL bytes dropped."""
     step = max(1, window - min(_SOURCE_WINDOW_OVERLAP, window // 2))
     buf, pos, nl_before, ended = b"", 0, 0, False
-    while pos < size:
+    while True:
         while len(buf) < window and not ended:
             chunk = read(window - len(buf))
             ended = not chunk
             buf += chunk or b""
         if not buf:
-            break
+            return
         yield nl_before, buf.replace(b"\x00", b"").decode("utf-8", errors="replace")
-        nl_before += buf.count(b"\n", 0, step)
-        buf, pos = buf[step:], pos + step
+        if ended or pos + len(buf) >= size:
+            return
+        advance = min(step, size - window - pos)
+        nl_before += buf.count(b"\n", 0, advance)
+        buf, pos = buf[advance:], pos + advance
 
 
 def is_source_path(rel: str) -> bool:
@@ -215,16 +210,11 @@ class Target:
             self._note_unreadable(rel, p, exc)
             return None
 
-    def _nonsource_scan_text(self, rel: str, p: Path, size: int) -> str | None:
-        """A NUL-stripped, bounded head+tail of a NON-source file for the confirmed content tier only.
-        A payload under a non-source extension (an oversized `.bin`, a NUL-laden fake `.png`) is skipped
-        by ``read_text``; this lets the cheap line-local content regexes still see a bounded window of
-        it. Head+tail (not head-only) so an appended payload is covered too, matching the oversized
-        source read. NUL bytes are stripped so 'binary' bytes decode to scannable text."""
-        if size > self.opts.max_file_bytes:
-            raw = self._head_tail(p, max(1, self.opts.max_file_bytes // 2))
-        else:
-            raw = self.read_bytes(rel)
+    def _nonsource_scan_text(self, rel: str) -> str | None:
+        """Read a non-source file that fits in `max_file_bytes` for the confirmed content checks.
+        Takes the path. Returns its text with NUL bytes dropped, or None when there is nothing to
+        read."""
+        raw = self.read_bytes(rel)
         if not raw:
             return None
         return raw.replace(b"\x00", b"").decode("utf-8", errors="replace")
@@ -248,17 +238,14 @@ class Target:
             self._note_unreadable(p.name, p, exc)   # unreadable oversized file — a gap (unless a symlink)
             return b""
 
-    # The rule read_text applies, exposed so nothing re-derives it — verify.py did, with its own
-    # window, and every adversarial round walked through the gap between the two.
     BINARY_SNIFF_BYTES = 8192
 
     @classmethod
-    def content_was_read(cls, ext: str, raw: bytes | None, oversized: bool) -> bool:
-        """Did read_text() examine this file's content, given what it saw? ONE definition, two callers."""
+    def content_was_read(cls, ext: str, raw: bytes | None) -> bool:
+        """Tell whether the confirmed content checks read a file's content. Takes its extension and
+        its first bytes. Returns False when nothing was read or the file is a binary."""
         if raw is None:
             return False
-        if oversized and ext not in SOURCE_EXTS:
-            return False                          # genuinely large binary — skipped wholesale
         if b"\x00" in raw[:cls.BINARY_SNIFF_BYTES] and ext not in SOURCE_EXTS:
             return False                          # real binary asset
         return True
@@ -292,24 +279,10 @@ class Target:
         return raw.decode("utf-8", errors="replace")
 
     def read_source_windows(self, rel: str) -> Iterator[tuple[int, str]]:
-        """Yield ``(line_offset, text)`` chunks covering the WHOLE body of a source file.
-
-        ``read_text`` truncates an oversized source file to head+tail, so the interior (offset
-        ~1 MB .. size-1 MB) is unscanned — a payload buried there is invisible to every matcher. This reader streams the full file in overlapping windows
-        so no interior region is skipped. It is for the CHEAP, line-local confirmed content-regex
-        tier ONLY (ContentMatcher). The expensive whole-file density heuristic deliberately stays
-        head/tail-bounded via ``read_text`` — do NOT route it through here (it is FP-prone on the
-        large minified bundles this method now reads in full).
-
-        Memory stays bounded: at most one window is resident (``max_file_bytes`` bytes), regardless
-        of file size — a 500 MB source file is scanned in ~2 MB working-set chunks, never read whole.
-        Total work is bounded too: files larger than ``_MAX_INTERIOR_SCAN_BYTES`` fall back to the
-        head+tail read so a hostile target can't force unbounded scanning with one enormous file.
-        ``line_offset`` is the count of newlines BEFORE the window's first byte, computed in the byte
-        domain (a caller adds ``text.count("\\n", 0, match)`` to it for the absolute 1-based line).
-        Small files (<= cap) yield exactly one ``(0, text)`` window equal to ``read_text`` — the
-        common path is byte-for-byte unchanged (verdict-identical).
-        """
+        """Read a whole file for the confirmed content checks. Takes the path. Yields
+        `(line_offset, text)`: one window, as `read_text` reads it or with NUL bytes dropped for a
+        non-source file, when the file fits in `max_file_bytes`; otherwise overlapping windows over
+        every byte. `line_offset` counts the newlines before the window."""
         p = self.root / rel
         ext = _ext(rel)
         try:
@@ -322,18 +295,8 @@ class Target:
         if not _stat.S_ISREG(st.st_mode):
             return                                # FIFO/socket/device → benign skip (no blocking open,)
         size = st.st_size
-        if ext not in SOURCE_EXTS:
-            text = self._nonsource_scan_text(rel, p, size)
-            if text is not None:
-                yield (0, text)
-            return
         if size <= self.opts.max_file_bytes:
-            text = self.read_text(rel)
-            if text is not None:
-                yield (0, text)
-            return
-        if size > _MAX_INTERIOR_SCAN_BYTES:
-            text = self.read_text(rel)
+            text = self.read_text(rel) if ext in SOURCE_EXTS else self._nonsource_scan_text(rel)
             if text is not None:
                 yield (0, text)
             return

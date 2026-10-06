@@ -99,6 +99,8 @@ reader, not the mechanism or the weakness it closed.
 - **The pre-push check names every file it could not finish reading.**
 - **The pre-push check, `saw scan --history` and `saw fix amend` read a stored file the way the scan
   of your checkout reads the same file.**
+- **`saw scan`, `saw audit --verify`, the pre-push check and `saw fix amend` read every file in full,
+  whatever its size or kind.**
 - **`saw fix amend` removes the malware an evil merge brought when a harmless file beside it, such
   as an empty file, also exists elsewhere in the repository.** A copy of the malware itself on
   another branch or tag still keeps the run from being called done; a copy elsewhere of another file

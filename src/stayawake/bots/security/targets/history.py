@@ -12,7 +12,7 @@ from stayawake.lib.git.objects import own_view
 from stayawake.lib.git.query import reachable_blobs
 from stayawake.lib.git.run import open_stdout
 
-from .base import TRUNCATION_MARKER, Target, reads_whole, stream_windows
+from .base import TRUNCATION_MARKER, Target, stream_windows
 
 _CHUNK = 1 << 20
 
@@ -93,7 +93,6 @@ class HistoryTarget(Target):
         size = self._size(sha)
         if size is None:
             self.read_errors.append(rel)
-        if size is None or not reads_whole(rel, size, self.opts):
             text = self.read_text(rel)
             if text:
                 yield 0, text
@@ -127,11 +126,6 @@ class HistoryTarget(Target):
         except ValueError:
             return None
         return self.sizes[sha]
-
-    def head(self, rel: str, size: int) -> bytes | None:
-        """Read the first bytes of a stored version. Takes the path and how many bytes. Returns them,
-        or None when git could not read them."""
-        return self._stream(rel, size)[0]
 
     def _cat_file(self, sha: str):
         """Stream the stored blob `sha`, as the walk that named it read the store: replace refs off.

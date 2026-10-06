@@ -187,7 +187,7 @@ class TestTheVerdictIsStructural(unittest.TestCase):
         self.assertEqual(ao._NEEDING_NO_ACTION,
                          frozenset({Cause.PREVIOUS_OBJECTS_UNCOLLECTED, Cause.NO_CONFIRMED_PAYLOAD,
                                     Cause.SAVED_WORK_CLEANED_HERE, Cause.ARRIVALS_KEPT,
-                                    Cause.LARGE_FILES_NOT_READ_IN_FULL}))
+                                    Cause.GIT_LFS_FILES_NOT_READ}))
 
     def test_a_branch_that_did_not_move_needs_review_whatever_the_reasons_say(self):
         outcome = AmendOutcome("o/r", completed=False, commit="abc123456789",

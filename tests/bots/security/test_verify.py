@@ -107,19 +107,20 @@ class TestVerifyDir(unittest.TestCase):
         self.assertIn(_UNREAD_ESCAPING, v.unread)
         self.assertFalse(v.has_markers)             # payload sat behind the (unscanned) link
 
-    def test_oversized_nonsource_file_is_not_clean(self):
-        # A non-source file over the 2MB cap is only head+tail-scanned; a payload in the middle is
-        # unseen, so we must NOT claim clean (regression for the honesty-hunt, PATH B).
+    def test_a_payload_in_the_middle_of_a_large_data_file_is_found(self):
         root = _tree()
         (root / "blob.dat").write_text("A" * 1_500_000 + _confirmed_payload() + "B" * 1_500_000,
                                        encoding="utf-8")
         v = verify_dir(root)
-        self.assertFalse(v.scanned_clean)
-        self.assertIn(_UNREAD_ARCHIVE, v.unread)
+        self.assertTrue(v.has_markers, v)
+
+    def test_a_large_data_file_without_a_payload_is_read_in_full(self):
+        root = _tree()
+        (root / "blob.dat").write_text("A" * 3_000_000, encoding="utf-8")
+        v = verify_dir(root)
+        self.assertTrue(v.scanned_clean, v)
 
     def test_large_source_file_under_cap_is_still_clean(self):
-        # A SOURCE file over 2MB but under the 64MB interior cap is windowed in FULL → it must NOT be
-        # flagged partial, or every large minified bundle would punt (over-conservative).
         root = _tree()
         (root / "big.js").write_text("var a = 1;\n" * 250_000, encoding="utf-8")   # ~2.7MB, benign
         v = verify_dir(root)
