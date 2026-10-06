@@ -20,6 +20,20 @@ LOADER = "global['_V']=function(x){return x};require('child_process').exec('id')
 FILLER = "// " + "a" * 96 + "\n"
 
 
+def _lfs_pointer(content: bytes) -> str:
+    import hashlib
+    return ("version https://git-lfs.github.com/spec/v1\noid sha256:"
+            + hashlib.sha256(content).hexdigest() + "\nsize " + str(len(content)) + "\n")
+
+
+def _keep_lfs_object(git_dir: Path, content: bytes) -> None:
+    import hashlib
+    oid = hashlib.sha256(content).hexdigest()
+    path = Path(git_dir) / "lfs" / "objects" / oid[:2] / oid[2:4] / oid
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content)
+
+
 class _Store(unittest.TestCase):
 
     def setUp(self):
@@ -95,6 +109,41 @@ class TestABinaryIsReadAtItsEnds(_Store):
             self.assertEqual(on_disk, stored, rel)
 
 
+class TestGitLfsContentIsRead(_Store):
+
+    def _scan(self, path, kept):
+        content = (FILLER * 15_000 + LOADER + FILLER * 15_000).encode()
+        if kept:
+            _keep_lfs_object(self.repo / ".git", content)
+        oids = self.store({path: _lfs_pointer(content).encode()})
+        batch = [SimpleNamespace(path=path, oid=oids[path], link=False)]
+        sigs = load_signatures()
+        return version_scan.scan_batch(self.repo, "repo", batch, [], oracle.payload_matchers(sigs),
+                                       [], ScanOptions())
+
+    def test_a_version_kept_in_git_lfs_here_is_read_in_full(self):
+        found = self._scan("assets/app.js", kept=True)
+        self.assertEqual(["assets/app.js"], [f.path for f, _e in found.findings
+                                             if f.confidence == "confirmed"][:1])
+        self.assertFalse(found.outside_git)
+
+    def test_a_version_kept_in_git_lfs_elsewhere_is_named(self):
+        found = self._scan("assets/app.js", kept=False)
+        self.assertFalse(found.findings)
+        self.assertEqual({"assets/app.js"}, found.outside_git)
+
+    def test_a_history_scan_reads_what_lfs_keeps_here_and_names_the_rest(self):
+        from stayawake.bots.security import scanner
+        content = (LOADER + FILLER).encode()
+        _keep_lfs_object(self.repo / ".git", content)
+        self.store({"kept.js": _lfs_pointer(content).encode(),
+                    "absent.js": _lfs_pointer(b"elsewhere").encode()})
+        note = scanner.history_residue_note(self.repo, ScanOptions(history=True),
+                                            load_signatures(), [])
+        self.assertIn("kept.js", note)
+        self.assertIn("1 stored version(s) are kept in Git LFS", note)
+
+
 class TestWindowsCoverTheWholeFile(unittest.TestCase):
 
     def test_windows_overlap_and_the_last_is_a_full_window_at_the_end(self):
@@ -167,19 +216,6 @@ class TestTheStoreIsAskedOnlyAboutLargeVersions(_Store):
         with mock.patch.object(HistoryTarget, "_size", return_value=None):
             list(target.read_source_windows("big.js"))
         self.assertIn("big.js", target.read_errors)
-
-
-class TestGitLfsPointers(unittest.TestCase):
-
-    def test_pointers_are_recognised_as_git_lfs_reads_them(self):
-        tail = b"\noid sha256:" + b"0" * 64 + b"\nsize 12\n"
-        for header in (b"version https://git-lfs.github.com/spec/v1",
-                       b"version https://hawser.github.com/spec/v1",
-                       b"\n\nversion https://git-lfs.github.com/spec/v1"):
-            self.assertTrue(version_scan.is_lfs_pointer(header + tail), header)
-        self.assertFalse(version_scan.is_lfs_pointer(b"version 1.2.3\n"))
-        self.assertFalse(version_scan.is_lfs_pointer(
-            b"version https://git-lfs.github.com/spec/v1" + tail + b"x" * 2000))
 
 
 if __name__ == "__main__":

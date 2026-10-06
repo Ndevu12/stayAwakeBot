@@ -239,7 +239,7 @@ def _history_residue_note(root, opts, signatures, allowlist) -> str | None:
             return "History was read: this repository stores no earlier version of any path."
         return ("History could not be read: nothing was returned for this repository, so whether "
                 f"it still stores a payload is UNKNOWN, not no.{finish}")
-    hits, scanned, unread = [], 0, set()
+    hits, scanned, unread, elsewhere = [], 0, set(), set()
     for index in range(_HISTORY_ROUNDS):
         target = HistoryTarget(root, str(root), opts, versions, index,
                                links if index == 0 else {})
@@ -249,6 +249,7 @@ def _history_residue_note(root, opts, signatures, allowlist) -> str | None:
         result = scan_target(target, signatures, allowlist)
         hits += [f for f in result.findings if f.confidence == CONFIRMED]
         unread |= set(target.read_errors)
+        elsewhere |= target.kept_elsewhere
     beyond = sum(max(len(v) - _HISTORY_ROUNDS, 0) for v in versions.values())
     cut = (f" {beyond} further version(s) of {sum(1 for v in versions.values() if len(v) > _HISTORY_ROUNDS)}"
            f" path(s) were not read." if beyond else "")
@@ -260,8 +261,12 @@ def _history_residue_note(root, opts, signatures, allowlist) -> str | None:
         # attempts inflated this fivefold and drove the number reported as read negative.
         scanned -= len(unread)
         cut += f" {len(unread)} stored version(s) could not be read at all."
+    if elsewhere:
+        scanned -= len(elsewhere)
+        cut += (f" {len(elsewhere)} stored version(s) are kept in Git LFS and not in this "
+                f"repository, so were not read.")
     if not hits:
-        if complete and every_link and not unread:
+        if complete and every_link and not unread and not elsewhere:
             return (f"History was read: no confirmed payload in {scanned} stored version(s) across "
                     f"{len(versions)} path(s).{cut}")
         return (f"History was read in part: no confirmed payload in {scanned} stored version(s) "

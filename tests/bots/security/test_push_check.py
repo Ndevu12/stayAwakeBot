@@ -320,6 +320,13 @@ class TestItNeverReadsAsCleanWhenUnsure(_Sandbox):
 
         return mock.patch.object(outbound, "operator_policy", small)
 
+    def test_a_large_binary_is_said_to_be_read_in_part(self):
+        self.commit({"big.bin": "\x00\x01" + "padding\n" * 500})
+        with self._small_reads():
+            code, text = self.check(self.line("refs/heads/main"))
+        self.assertEqual(code, 0, text)
+        self.assertIn("too large to read in full", text)
+
     def test_a_large_file_of_any_kind_is_read_in_full(self):
         loader = "global['_V']=function(x){return x};require('child_process').exec('id');\n"
         for name in ("big.js", "big.dat"):
@@ -328,6 +335,18 @@ class TestItNeverReadsAsCleanWhenUnsure(_Sandbox):
                 with self._small_reads():
                     code, text = self.check(self.line("refs/heads/main"))
                 self.assertEqual(code, 1, text)
+
+    def test_a_payload_kept_in_git_lfs_here_is_caught(self):
+        import hashlib
+        content = b"global['_V']=function(x){return x};require('child_process').exec('id');\n"
+        oid = hashlib.sha256(content).hexdigest()
+        store = self.work / ".git" / "lfs" / "objects" / oid[:2] / oid[2:4]
+        store.mkdir(parents=True)
+        (store / oid).write_bytes(content)
+        self.commit({"bin/run.js": "version https://git-lfs.github.com/spec/v1\noid sha256:" + oid
+                     + "\nsize " + str(len(content)) + "\n"})
+        code, text = self.check(self.line("refs/heads/main"))
+        self.assertEqual(code, 1, text)
 
     def test_the_budget_counts_from_the_start_of_the_check(self):
         self.commit({"more.js": "export const y = 2;\n"})
