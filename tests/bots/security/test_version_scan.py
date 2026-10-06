@@ -30,7 +30,7 @@ class TestScanBatch(unittest.TestCase):
     def _scan(self, error):
         class Target:
             def __init__(self, *args):
-                self.read_errors, self.read_in_part, self.read_ahead = [], (), {}
+                self.read_errors, self.read_ahead = [], {}
 
         batch = [SimpleNamespace(path=p, oid=p, link=False) for p in ("a.js", "b.js", "c.js")]
         result = SimpleNamespace(error=error, findings=[SimpleNamespace(path="a.js")])

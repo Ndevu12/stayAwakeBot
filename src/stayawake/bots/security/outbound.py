@@ -50,7 +50,6 @@ class _Progress:
     verified: list[tuple[str, str]] = field(default_factory=list)
     confirmed: list[tuple[object, str]] = field(default_factory=list)
     suspicious: list[str] = field(default_factory=list)
-    read_in_part: int = 0
     outside_git: int = 0
     crashed: str = ""
     finished: bool = False
@@ -273,7 +272,7 @@ def _scan_batch(progress: _Progress, git_dir: Path, display: str, batch: list, m
     policy."""
     scanned = version_scan.scan_batch(git_dir, display, batch, merges, policy.signatures,
                                       policy.allowlist, policy.opts)
-    in_part, outside_git, unread = scanned.in_part, scanned.outside_git, scanned.unread
+    outside_git, unread = scanned.outside_git, scanned.unread
     confirmed_paths: set[str] = set()
     confirmed, suspicious = [], []
     for finding, entry in scanned.findings:
@@ -295,8 +294,6 @@ def _scan_batch(progress: _Progress, git_dir: Path, display: str, batch: list, m
             progress.done.add(key)
             if entry.path in unread:
                 progress.unread.add(key)
-            elif entry.path in in_part:
-                progress.read_in_part += entry.path not in confirmed_paths
             elif entry.path not in confirmed_paths:
                 progress.verified.append(key)
 
@@ -407,9 +404,7 @@ def _report(progress: _Progress, record: push_record.PushRecord, display: str, r
     else:
         code = 0
         checked = sum(1 for e in progress.queue if (e.path, e.oid) in progress.done)
-        skipped = [s for s in (_count(progress.read_in_part, "file too large to read in full",
-                                      "files too large to read in full"),
-                               _count(progress.outside_git, "Git LFS file", "Git LFS files"),
+        skipped = [s for s in (_count(progress.outside_git, "Git LFS file", "Git LFS files"),
                                _count(scope.submodules, "submodule", "submodules")) if s]
         if skipped and not progress.suspicious:
             lines += page.headline("info", f"{BRAND}: no worm found in the "

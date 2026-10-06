@@ -12,7 +12,7 @@ from types import SimpleNamespace
 from stayawake.bots.security import version_scan
 from stayawake.bots.security.remediation import oracle
 from stayawake.bots.security.signatures import load_signatures
-from stayawake.bots.security.targets import PushedTarget, ScanOptions
+from stayawake.bots.security.targets import ScanOptions
 from stayawake.bots.security.targets.base import Target
 from stayawake.bots.security.targets.history import HistoryTarget
 
@@ -50,19 +50,17 @@ class TestLargeStoredCode(_Store):
         half = FILLER * (1_500_000 // len(FILLER))
         return (half + LOADER + half).encode()
 
-    def test_large_stored_code_is_read_in_full(self):
-        oids = self.store({"app.js": self._large_code()})
-        batch = [SimpleNamespace(path="app.js", oid=oids["app.js"], link=False)]
+    def test_a_large_stored_file_of_any_kind_is_read_in_full(self):
         sigs = load_signatures()
-        found = version_scan.scan_batch(self.repo, "repo", batch, [], oracle.payload_matchers(sigs),
-                                        [], ScanOptions())
-        self.assertTrue(any(f.confidence == "confirmed" for f, _e in found.findings))
-        self.assertNotIn("app.js", found.in_part)
-
-    def test_large_stored_data_is_counted_as_not_read_in_full(self):
-        oids = self.store({"app.js": self._large_code(), "blob.dat": self._large_code()})
-        target = PushedTarget(self.repo, "repo", ScanOptions(), oids)
-        self.assertEqual({"blob.dat"}, target.read_in_part)
+        for path in ("app.js", "blob.dat", "bin/tool"):
+            with self.subTest(path=path):
+                oids = self.store({path: self._large_code()})
+                batch = [SimpleNamespace(path=path, oid=oids[path], link=False)]
+                found = version_scan.scan_batch(self.repo, "repo", batch, [],
+                                                oracle.payload_matchers(sigs), [], ScanOptions())
+                self.assertEqual([path], [f.path for f, _e in found.findings
+                                          if f.confidence == "confirmed"][:1])
+                self.assertFalse(found.unread)
 
 
 class TestTheSameWindowsOnDiskAndInTheStore(_Store):
@@ -81,21 +79,43 @@ class TestTheSameWindowsOnDiskAndInTheStore(_Store):
             self.assertGreater(len(stored), 1)
 
 
+class TestABinaryIsReadAtItsEnds(_Store):
+
+    def test_a_large_binary_is_read_at_its_ends_and_text_in_full(self):
+        opts = ScanOptions()
+        opts.max_file_bytes = 4096
+        binary = b"\x89PNG\x00\x00" + b"ab\n" * 6000
+        text = b"ab\n" * 6000
+        oids = self.store({"img.dat": binary, "notes.dat": text})
+        for rel, many in (("img.dat", False), ("notes.dat", True)):
+            on_disk = list(Target(self.repo, "repo", opts).read_source_windows(rel))
+            stored = list(HistoryTarget(self.repo, "repo", opts, {rel: [oids[rel]]})
+                          .read_source_windows(rel))
+            self.assertEqual(many, len(on_disk) > 1, rel)
+            self.assertEqual(on_disk, stored, rel)
+
+
 class TestWindowsCoverTheWholeFile(unittest.TestCase):
 
-    def test_windows_cover_every_byte_with_the_right_line_offsets(self):
+    def test_windows_overlap_and_the_last_is_a_full_window_at_the_end(self):
         from io import BytesIO
         from stayawake.bots.security.targets import base
         rng = random.Random(315)
         window = 4096
-        step = window - min(base._SOURCE_WINDOW_OVERLAP, window // 2)
-        for n in (4097, 6144, 6145, 8192, 20481):
+        overlap = min(base._SOURCE_WINDOW_OVERLAP, window // 2)
+        for n in (4096, 4097, 6144, 6145, 8192, 20481):
             data = "".join(rng.choice("ab\nc{}();") for _ in range(n))
             got = list(base.stream_windows(BytesIO(data.encode()).read, n, window))
-            rebuilt = "".join(text[:step] for _off, text in got[:-1]) + got[-1][1]
-            self.assertEqual(data, rebuilt, n)
-            for k, (offset, _text) in enumerate(got):
-                self.assertEqual(data.count("\n", 0, k * step), offset, (n, k))
+            starts, at = [], 0
+            for offset, text in got:
+                at = data.index(text, at)
+                self.assertEqual(data.count("\n", 0, at), offset, (n, at))
+                starts.append(at)
+            ends = [s + len(t) for s, (_o, t) in zip(starts, got)]
+            self.assertEqual(0, starts[0], n)
+            self.assertEqual((n, min(n, window)), (ends[-1], len(got[-1][1])), n)
+            for k in range(1, len(got)):
+                self.assertGreaterEqual(ends[k - 1] - starts[k], overlap, (n, k))
 
 
 class TestAStoredReadCutShortIsUnread(unittest.TestCase):
@@ -121,11 +141,12 @@ class TestAStoredReadCutShortIsUnread(unittest.TestCase):
 
         opts = ScanOptions()
         opts.max_file_bytes = 4096
-        target = HistoryTarget(Path("/repo"), "repo", opts, {"f.js": ["a" * 40]})
-        target.sizes = {"a" * 40: 10_000}
-        with mock.patch.object(HistoryTarget, "_cat_file", side_effect=lambda _sha: Proc()):
-            list(target.read_source_windows("f.js"))
-        self.assertIn("f.js", target.read_errors)
+        for rel in ("f.js", "f.dat"):
+            target = HistoryTarget(Path("/repo"), "repo", opts, {rel: ["a" * 40]})
+            target.sizes = {"a" * 40: 10_000}
+            with mock.patch.object(HistoryTarget, "_cat_file", side_effect=lambda _sha: Proc()):
+                list(target.read_source_windows(rel))
+            self.assertIn(rel, target.read_errors)
 
 
 class TestTheStoreIsAskedOnlyAboutLargeVersions(_Store):

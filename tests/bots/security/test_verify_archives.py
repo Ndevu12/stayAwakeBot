@@ -101,7 +101,7 @@ class TestTheReportNamesArchivesAsUnread(ArchiveVerifyCase):
             pass
         unread = self._verify(d).unread
         self.assertNotIn(_UNREAD_ESCAPING, unread)
-        self.assertNotIn("a file too large to read in full, or one that could not be read", unread)
+        self.assertNotIn("a file could not be read", unread)
 
     def test_the_finding_tells_the_operator_archives_went_unread(self):
         from stayawake.bots.security.hygiene import host_artifacts

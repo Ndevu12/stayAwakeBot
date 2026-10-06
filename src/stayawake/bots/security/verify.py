@@ -12,11 +12,7 @@ from stayawake.bots.security.models import CONFIRMED
 from stayawake.bots.security.scanner import scan_target
 from stayawake.bots.security.signatures import load_signatures
 from stayawake.bots.security.targets import LocalRepoTarget, ScanOptions
-# The scanner's OWN full-read thresholds — imported so our coverage check can't drift from what the
-# confirmed content tier actually reads (a non-source file over max_file_bytes, or a source file over
-# _MAX_INTERIOR_SCAN_BYTES, is only head+tail-scanned, so its middle is unseen).
-from stayawake.bots.security.targets.base import (SOURCE_EXTS, _MAX_INTERIOR_SCAN_BYTES,
-                                                  _ext)
+from stayawake.bots.security.targets.base import _ext
 
 DEFAULT_MAX_FILES = 4000
 
@@ -65,10 +61,10 @@ def _escapes_root(p: Path, root_resolved: Path) -> bool:
         return True
 
 
-def _coverage(p: Path, max_file_bytes: int) -> str:
+def _coverage(p: Path) -> str:
     """Classify how the scanner's confirmed content tier covers one file:
       * 'full'    — the scanner reads its whole content;
-      * 'partial' — only head+tail (an oversized file), or NOT read at all (a symlink whose target
+      * 'partial' — NOT read at all (a symlink whose target
                     exists but is unreadable — silently benign-skipped by the scan with no gap
                     recorded, so unlike a plain unreadable file it would otherwise read as clean);
       * 'special' — a FIFO/socket/device whose BLOCKING open() could hang the scan forever; the caller
@@ -89,8 +85,7 @@ def _coverage(p: Path, max_file_bytes: int) -> str:
             head = fh.read(LocalRepoTarget.BINARY_SNIFF_BYTES)
     except OSError:
         return "partial"
-    if not LocalRepoTarget.content_was_read(_ext(p.name), head,
-                                            oversized=st.st_size > max_file_bytes):
+    if not LocalRepoTarget.content_was_read(_ext(p.name), head):
         return "opaque"                   # the scan reads the bytes, never the content behind them
     try:
         if p.is_symlink():                # a symlink to a REAL file: confirm the scan can READ it
@@ -98,24 +93,23 @@ def _coverage(p: Path, max_file_bytes: int) -> str:
                 fh.read(1)
     except OSError:
         return "partial"                  # exists but unreadable → the scan silently skips it
-    limit = _MAX_INTERIOR_SCAN_BYTES if _ext(p.name) in SOURCE_EXTS else max_file_bytes
-    return "partial" if st.st_size > limit else "full"
+    return "full"
 
 
 # One phrase per cause, so the report names what was actually not read.
 _UNREAD_ARCHIVE = "archives and binaries are not opened"
-_UNREAD_PARTIAL = "a file was too large to read in full, or could not be read"
+_UNREAD_PARTIAL = "a file could not be read"
 _UNREAD_DIR = "a folder could not be listed"
 _UNREAD_EXCLUDED = "a .git folder is never scanned"
 _UNREAD_ESCAPING = "a symlink points outside the folder"
 _UNREAD_SPECIAL = "a device or pipe must not be opened"
 
 
-def _survey(root: Path, cap: int, max_file_bytes: int) -> tuple[int | None, bool, bool, list[str]]:
+def _survey(root: Path, cap: int) -> tuple[int | None, bool, bool, list[str]]:
     """Walk `root` (excluding `.git`, not following symlinks — the SAME walk the scan uses) and
     return `(file_count | None if it exceeds cap, complete, scannable)`:
       * `complete` is False whenever the tree could not be fully READ (unreadable/​unlistable dir,
-        escaping directory symlink, oversized file, or unreadable symlinked file) — so a caller must
+        escaping directory symlink, or unreadable symlinked file) — so a caller must
         NOT report it as clean. (A plain unreadable NON-symlink file is caught separately: the scan
         fails CLOSED via result.error.)
       * `scannable` is False when the tree holds a FIFO/socket/device the blocking scan could HANG on
@@ -148,7 +142,7 @@ def _survey(root: Path, cap: int, max_file_bytes: int) -> tuple[int | None, bool
             n += 1
             if n > cap:
                 return None, complete, scannable, list(unread)
-            cov = _coverage(Path(dirpath) / fn, max_file_bytes)
+            cov = _coverage(Path(dirpath) / fn)
             if cov == "special":
                 scannable = False
                 complete = False
@@ -178,7 +172,7 @@ def verify_dir(path: str | Path, *, max_files: int = DEFAULT_MAX_FILES,
         return DirVerdict(path=str(root), error=f"unreadable: {exc}")
 
     opts = ScanOptions(exclude_dirs=set(_VERIFY_EXCLUDES))
-    count, complete, scannable, unread = _survey(root, max_files, opts.max_file_bytes)
+    count, complete, scannable, unread = _survey(root, max_files)
     if count is None:
         return DirVerdict(path=str(root), too_large=True)
     if not scannable:              # a FIFO/socket/device present — the scan's open() could HANG; skip it

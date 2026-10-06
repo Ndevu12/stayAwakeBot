@@ -76,16 +76,15 @@ class TestScannerEvasions(unittest.TestCase):
         (self.d / "straddle.mjs").write_bytes(body)
         self.assertIn("loader-fromcharcode-127", _scan(self.d, opts))
 
-    def test_oversized_over_ceiling_falls_back_to_head_tail(self):
-        # A file larger than the interior-scan ceiling falls back to head+tail (bounded work, no
-        # unbounded windowing) — an appended/tail payload is still caught; the deep middle is the
-        # documented residual. Patch the ceiling small so we needn't write 64 MB.
-        from stayawake.bots.security.targets import base as _base
+    def test_a_payload_deep_inside_a_large_file_of_any_kind_is_caught(self):
         opts = ScanOptions(max_file_bytes=200)
-        big = b"// pad\n" * 500 + b"\nString.fromCharCode(127);eval(1);\n"   # payload in the TAIL
-        (self.d / "huge.mjs").write_bytes(big)
-        with mock.patch.object(_base, "_MAX_INTERIOR_SCAN_BYTES", 500):  # < file size → fallback path
-            self.assertIn("loader-fromcharcode-127", _scan(self.d, opts))
+        pad = b"// pad\n" * 500
+        for name in ("huge.mjs", "huge.dat", "huge"):
+            with self.subTest(name=name):
+                for old in self.d.iterdir():
+                    old.unlink()
+                (self.d / name).write_bytes(pad + b"String.fromCharCode(127);eval(1);\n" + pad)
+                self.assertIn("loader-fromcharcode-127", _scan(self.d, opts))
 
     def test_large_spam_source_scans_without_catastrophic_backtracking(self):
         # Guardrail: the content tier must stay ~linear on a hostile multi-MB source file. If a future
