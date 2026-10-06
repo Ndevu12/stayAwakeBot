@@ -12,7 +12,7 @@ from stayawake.lib.git.objects import own_view
 from stayawake.lib.git.query import reachable_blobs
 from stayawake.lib.git.run import open_stdout
 
-from .base import TRUNCATION_MARKER, Target, stream_windows
+from .base import SOURCE_EXTS, TRUNCATION_MARKER, Target, _ext, stream_windows
 
 _CHUNK = 1 << 20
 
@@ -93,6 +93,8 @@ class HistoryTarget(Target):
         size = self._size(sha)
         if size is None:
             self.read_errors.append(rel)
+        ext = _ext(rel)
+        if size is None or (ext not in SOURCE_EXTS and not self.content_was_read(ext, data)):
             text = self.read_text(rel)
             if text:
                 yield 0, text

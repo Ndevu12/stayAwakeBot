@@ -279,10 +279,11 @@ class Target:
         return raw.decode("utf-8", errors="replace")
 
     def read_source_windows(self, rel: str) -> Iterator[tuple[int, str]]:
-        """Read a whole file for the confirmed content checks. Takes the path. Yields
+        """Read a file for the confirmed content checks. Takes the path. Yields
         `(line_offset, text)`: one window, as `read_text` reads it or with NUL bytes dropped for a
         non-source file, when the file fits in `max_file_bytes`; otherwise overlapping windows over
-        every byte. `line_offset` counts the newlines before the window."""
+        every byte of a text file, or the two ends of a binary one. `line_offset` counts the
+        newlines before the window."""
         p = self.root / rel
         ext = _ext(rel)
         try:
@@ -305,9 +306,16 @@ class Target:
             if fh is None:
                 return
             with fh:
-                yield from stream_windows(fh.read, size, self.opts.max_file_bytes)
+                if self.content_was_read(ext, fh.read(self.BINARY_SNIFF_BYTES)):
+                    fh.seek(0)
+                    yield from stream_windows(fh.read, size, self.opts.max_file_bytes)
+                    return
         except OSError as exc:
             self._note_unreadable(rel, p, exc)    # unreadable oversized file — a gap (unless a symlink)
+            return
+        raw = self._head_tail(p, max(1, self.opts.max_file_bytes // 2))
+        if raw:
+            yield (0, raw.replace(b"\x00", b"").decode("utf-8", errors="replace"))
             return
 
     def cleanup(self) -> None:

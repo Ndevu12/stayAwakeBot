@@ -79,6 +79,22 @@ class TestTheSameWindowsOnDiskAndInTheStore(_Store):
             self.assertGreater(len(stored), 1)
 
 
+class TestABinaryIsReadAtItsEnds(_Store):
+
+    def test_a_large_binary_is_read_at_its_ends_and_text_in_full(self):
+        opts = ScanOptions()
+        opts.max_file_bytes = 4096
+        binary = b"\x89PNG\x00\x00" + b"ab\n" * 6000
+        text = b"ab\n" * 6000
+        oids = self.store({"img.dat": binary, "notes.dat": text})
+        for rel, many in (("img.dat", False), ("notes.dat", True)):
+            on_disk = list(Target(self.repo, "repo", opts).read_source_windows(rel))
+            stored = list(HistoryTarget(self.repo, "repo", opts, {rel: [oids[rel]]})
+                          .read_source_windows(rel))
+            self.assertEqual(many, len(on_disk) > 1, rel)
+            self.assertEqual(on_disk, stored, rel)
+
+
 class TestWindowsCoverTheWholeFile(unittest.TestCase):
 
     def test_windows_overlap_and_the_last_is_a_full_window_at_the_end(self):
@@ -125,11 +141,12 @@ class TestAStoredReadCutShortIsUnread(unittest.TestCase):
 
         opts = ScanOptions()
         opts.max_file_bytes = 4096
-        target = HistoryTarget(Path("/repo"), "repo", opts, {"f.js": ["a" * 40]})
-        target.sizes = {"a" * 40: 10_000}
-        with mock.patch.object(HistoryTarget, "_cat_file", side_effect=lambda _sha: Proc()):
-            list(target.read_source_windows("f.js"))
-        self.assertIn("f.js", target.read_errors)
+        for rel in ("f.js", "f.dat"):
+            target = HistoryTarget(Path("/repo"), "repo", opts, {rel: ["a" * 40]})
+            target.sizes = {"a" * 40: 10_000}
+            with mock.patch.object(HistoryTarget, "_cat_file", side_effect=lambda _sha: Proc()):
+                list(target.read_source_windows(rel))
+            self.assertIn(rel, target.read_errors)
 
 
 class TestTheStoreIsAskedOnlyAboutLargeVersions(_Store):
