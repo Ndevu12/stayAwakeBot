@@ -97,6 +97,7 @@ class Cause(Enum):
     ARRIVED_COPIES_REMAIN = "arrived-copies-remain"
     HISTORY_PARTLY_READ = "history-partly-read"
     LARGE_FILES_NOT_READ_IN_FULL = "large-files-not-read-in-full"
+    PAST_COMMITS_READ_IN_PART = "past-commits-read-in-part"
 
 
 _NEEDING_NO_ACTION = frozenset({Cause.PREVIOUS_OBJECTS_UNCOLLECTED, Cause.NO_CONFIRMED_PAYLOAD,
@@ -238,7 +239,8 @@ _PHRASE = {
     Cause.LEFT_PART_WAY:
         "branches were moved and could not be put back — inspect this repository",
     Cause.SCAN_DID_NOT_FINISH: "the scan did not finish",
-    Cause.NO_CONFIRMED_PAYLOAD: "no confirmed payload in past commits to replace",
+    Cause.NO_CONFIRMED_PAYLOAD:
+        "no confirmed payload in the checkout or in the past commits of its branches",
     Cause.MANY_CONFIRMED_COMMITS: "{detail} confirmed past commits",
     Cause.CONFIRMED_COMMIT_UNRESOLVED: "the confirmed commit could not be resolved",
     Cause.COMMIT_ON_NO_BRANCH: "the commit is not on any branch",
@@ -327,6 +329,9 @@ _PHRASE = {
     Cause.LARGE_FILES_NOT_READ_IN_FULL:
         "{detail} large binary or Git LFS file version(s) in the rewritten history were not read "
         "in full",
+    Cause.PAST_COMMITS_READ_IN_PART:
+        "only the newest {detail} file versions in the past commits of its branches were read — "
+        "review the older ones yourself",
     Cause.ARRIVED_COPIES_REMAIN:
         "a copy of a file that came in with the malware is still on {detail} — review it there",
     Cause.ARRIVALS_ANSWERS_NOT_SAVED:

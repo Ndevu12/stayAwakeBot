@@ -497,5 +497,68 @@ class TestWhatTheRewriteLeavesAlone(_Rewrite):
         self.assertNotIn(Cause.HISTORY_PARTLY_READ, self._causes(outcome))
         self.assertFalse(outcome.needs_review, self._causes(outcome))
 
+class TestPastCommitsWhenTheCheckoutIsClean(_Rewrite):
+
+    def add_then_remove(self, path, text=LOADER):
+        self.write(self.d, path, text)
+        self.commit(self.d, "add it")
+        self.git(self.d, "rm", "-q", path)
+        self.commit(self.d, "remove it by hand")
+
+    def test_a_payload_removed_by_hand_is_taken_out_of_the_past_commits(self):
+        self.add_then_remove("vendor/x/loader.js")
+        outcome = self.run_amend()
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertFalse(self.ever_holds(LOADER))
+
+    def test_a_payload_only_on_another_branch_is_taken_out_there(self):
+        self.git(self.d, "checkout", "-qb", "side")
+        self.write(self.d, "vendor/x/loader.js", LOADER)
+        self.commit(self.d, "side work")
+        self.git(self.d, "checkout", "-q", self.base)
+        before = self.git(self.d, "rev-parse", self.base).strip()
+        outcome = self.run_amend()
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertFalse(self.holds("side", "vendor/x/loader.js"))
+        self.assertEqual(before, self.git(self.d, "rev-parse", self.base).strip())
+
+    def test_a_version_the_checkout_still_holds_is_left_for_recovery_by_hand(self):
+        self.write(self.d, "vendor/x/loader.js", LOADER)
+        self.commit(self.d, "add it")
+        before = self.git(self.d, "rev-parse", "HEAD").strip()
+        empty = self.d.parent / "empty"
+        empty.mkdir()
+        nothing = scan_target(LocalRepoTarget(empty, str(empty), ScanOptions()), load_signatures())
+        with self._remote(), \
+                mock.patch("stayawake.bots.security.pr.amend.scan_target", return_value=nothing):
+            outcome = amend_outcome(self.d, "acme/app", ScanOptions(), load_signatures(), [], "t",
+                                    pusher=lambda *a: PushResult(True), resolver=None)
+        self.assertFalse(outcome.completed)
+        self.assertIn(Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY, self._causes(outcome))
+        self.assertEqual(before, self.git(self.d, "rev-parse", "HEAD").strip())
+
+    def test_past_commits_it_could_not_list_are_named(self):
+        self.add_then_remove("vendor/x/loader.js")
+        with mock.patch.object(amendmod.pushed, "commits_between", return_value=None):
+            outcome = self.run_amend()
+        self.assertFalse(outcome.completed)
+        self.assertIn(Cause.HISTORY_UNREADABLE, self._causes(outcome))
+        self.assertIn("past commits", " ".join(r.subjects + r.detail for r in outcome.reasons))
+        self.assertTrue(self.ever_holds(LOADER))
+
+    def test_a_read_cut_at_its_bound_is_named_for_review(self):
+        self.write(self.d, "c.txt", "c\n")
+        self.commit(self.d, "more work")
+        with mock.patch.object(amendmod, "_PAST_VERSIONS_READ", 1):
+            outcome = self.run_amend()
+        self.assertIn(Cause.PAST_COMMITS_READ_IN_PART, self._causes(outcome))
+        self.assertTrue(outcome.needs_review)
+
+    def test_a_clean_history_needs_nothing(self):
+        outcome = self.run_amend()
+        self.assertEqual([Cause.NO_CONFIRMED_PAYLOAD], self._causes(outcome))
+        self.assertFalse(outcome.needs_review)
+
+
 if __name__ == "__main__":
     unittest.main()

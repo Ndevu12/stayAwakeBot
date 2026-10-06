@@ -107,6 +107,8 @@ reader, not the mechanism or the weakness it closed.
   full, whatever its size or name.**
 - **The pre-push check, `saw scan --history` and `saw fix amend` read a file kept in Git LFS when the
   repository holds its content, and name it when it does not.**
+- **`saw fix amend` reads the past commits of your branches when the checkout is clean.** Malware
+  removed by hand, or kept only on another branch, is taken out of the commits that hold it.
 - **`saw fix amend` removes the malware an evil merge brought when a harmless file beside it, such
   as an empty file, also exists elsewhere in the repository.** A copy of the malware itself on
   another branch or tag still keeps the run from being called done; a copy elsewhere of another file

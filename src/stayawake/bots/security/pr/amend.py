@@ -208,6 +208,8 @@ def _arrived_versions(repo: Path, swept: dict, payload_oids: set[str]) -> tuple[
 
 
 _REWRITTEN_VERSIONS = "the versions the rewritten history holds"
+_PAST_VERSIONS = "the past commits of its branches"
+_PAST_VERSIONS_READ = 5_000
 
 
 @dataclass
@@ -221,7 +223,8 @@ class _HistoryPayloads:
     versions read and `confirmed` those found malicious; `region` maps the commits read to their
     parents; `unread`
     names what could not be read; `partly_read` are the paths read only in part or kept outside
-    git, and `runnable` those of them that run as programs.
+    git, and `runnable` those of them that run as programs; `cut_at` is the number of versions a
+    bounded read stopped at, or 0.
     """
 
     take_out: dict = field(default_factory=dict)
@@ -235,6 +238,7 @@ class _HistoryPayloads:
     unread: list = field(default_factory=list)
     partly_read: set = field(default_factory=set)
     runnable: set = field(default_factory=set)
+    cut_at: int = 0
 
 
 def _rewrite_boundary(plan) -> list[str]:
@@ -261,20 +265,25 @@ def _note_decided(repo: Path, treeish: str, path: str, decided: set, undecided: 
 
 
 def _confirmed_versions(repo: Path, display: str, tips, boundary, signatures, allowlist, opts,
-                        skip, out: _HistoryPayloads) -> list:
+                        skip, out: _HistoryPayloads, *, subject: str = _REWRITTEN_VERSIONS,
+                        limit: int | None = None) -> list:
     """Read every version the history from a boundary to some tips adds, except those `skip(path,
     oid)` leaves to another step. Takes the repo, how it is shown, the tips, the boundary commits,
-    the signatures, allowlist and scan options, the skip check and the `_HistoryPayloads` whose
-    `judged`, `unread` and `partly_read` it fills. Returns each confirmed finding with its version."""
+    the signatures, allowlist and scan options, the skip check, the `_HistoryPayloads` whose
+    `judged`, `unread` and `partly_read` it fills, what to call the history when it cannot be read,
+    and a bound on the newest versions read. Returns each confirmed finding with its version."""
     commits = pushed.commits_between(repo, list(tips), list(boundary))
-    listed = pushed.history_entries(repo, commits) if commits is not None else None
+    listed = (pushed.history_entries(repo, commits, **({"limit": limit} if limit else {}))
+              if commits is not None else None)
     if listed is None:
-        out.unread.append(_REWRITTEN_VERSIONS)
+        out.unread.append(subject)
         return []
     out.region.update(commits)
     entries, _submodules, whole = listed
-    if not whole:
-        out.unread.append(_REWRITTEN_VERSIONS)
+    if not whole and limit:
+        out.cut_at = limit
+    elif not whole:
+        out.unread.append(subject)
     fresh = [e for e in entries if not skip(e.path, e.oid)]
     out.judged |= {(e.path, e.oid) for e in fresh}
     payload = oracle.payload_matchers(signatures)
@@ -296,6 +305,33 @@ def _confirmed_versions(repo: Path, display: str, tips, boundary, signatures, al
         out.partly_read |= (result.in_part - found_here) | result.outside_git
         out.runnable |= result.runnable - found_here
     return confirmed
+
+
+def _read_past_commits(repo: Path, display: str, signatures, allowlist, opts, skip,
+                       owned_paths: set[str], out: _HistoryPayloads) -> None:
+    """Read the past commits of every branch amend reads, newest first and up to a bound, and place
+    each confirmed version found. Takes the repo, how it is shown, the signatures, allowlist and
+    scan options, the skip check, the paths another step already rewrites and the
+    `_HistoryPayloads` to fill. A version the checkout still holds is named for recovery by hand."""
+    listed = gitutil.listed_branch_refs(repo)
+    if listed is None:
+        out.unread.append(_PAST_VERSIONS)
+        return
+    if not listed:
+        return
+    for finding, entry in _confirmed_versions(repo, display, [ref for _n, ref in listed], [],
+                                              signatures, allowlist, opts, skip, out,
+                                              subject=_PAST_VERSIONS, limit=_PAST_VERSIONS_READ):
+        try:
+            held = _stored_entry(repo, "HEAD", entry.path)
+        except gitutil.Unread as missed:
+            out.unread.append(missed.subject)
+            continue
+        if held is not None and held[1] == entry.oid:
+            out.manual.append(f"{entry.path} in {entry.commit[:12]}")
+            out.named.add((entry.path, entry.oid))
+            continue
+        _place_history_finding(repo, finding, entry, signatures, allowlist, opts, owned_paths, out)
 
 
 def _place_history_finding(repo: Path, finding, entry, signatures, allowlist, opts,
@@ -1714,7 +1750,10 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
     heads_now = _branches_carrying_any(repo, infected_now) if infected_now else []
     graph_now = (gitrebuild.ordered_graph(repo, [tip for _n, tip, _c in heads_now])
                  if heads_now else None)
-    if heads_now is None or (heads_now and graph_now is None):
+    if not infected_now:
+        _read_past_commits(repo, display, signatures, allowlist, opts, left_to_another_step,
+                           owned_paths, history)
+    elif heads_now is None or (heads_now and graph_now is None):
         history.unread.append(_REWRITTEN_VERSIONS)
     elif heads_now:
         for finding, entry in _confirmed_versions(
@@ -1753,12 +1792,15 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
                    **settled_arrivals.forms}
     arrival_reasons.extend(settled_arrivals.reasons)
 
-    if not infected and not clean and not remove and not substitute and not purge and not arrived:
+    if (not infected and not clean and not remove and not substitute and not purge and not arrived
+            and not history.take_out):
         if unhandled:
             return _refuse(Cause.PAYLOAD_NEEDS_MANUAL_RECOVERY,
                            str(len(unhandled)), ", ".join(sorted(unhandled)))
         if unread:
             return _refuse(Cause.HISTORY_UNREADABLE, names_that_fit(sorted(set(unread))))
+        if history.cut_at:
+            return _refuse(Cause.PAST_COMMITS_READ_IN_PART, str(history.cut_at))
         return _refuse(Cause.NO_CONFIRMED_PAYLOAD)
 
     malicious_oids, unread_versions = _payload_blobs(
@@ -2014,6 +2056,8 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
     if reachable_elsewhere:
         survivors.append(Reason(Cause.PAYLOAD_REACHABLE_FROM_OTHER_REFS,
                                 names_that_fit(reachable_elsewhere)))
+    if history.cut_at:
+        survivors.append(Reason(Cause.PAST_COMMITS_READ_IN_PART, str(history.cut_at)))
     partly = history.partly_read | rewritten.partly_read
     found_at = {path for path, _oid in history.confirmed | decided}
     runnable = history.runnable | rewritten.runnable
