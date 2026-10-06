@@ -84,9 +84,16 @@ class HistoryTarget(Target):
         return data.replace(b"\x00", b"").decode("utf-8", "replace")   # as the tree side decodes
 
     def read_source_windows(self, rel: str) -> Iterator[tuple[int, str]]:
-        sha = self._sha_by_path.get(rel)
-        size = self._size(sha) if sha is not None else None
-        if size is None or size <= self.opts.max_file_bytes or not reads_whole(rel, size, self.opts):
+        data, more = self._stream(rel, self.opts.max_file_bytes)
+        if not more:
+            if data:
+                yield 0, data.replace(b"\x00", b"").decode("utf-8", "replace")
+            return
+        sha = self._sha_by_path[rel]
+        size = self._size(sha)
+        if size is None:
+            self.read_errors.append(rel)
+        if size is None or not reads_whole(rel, size, self.opts):
             text = self.read_text(rel)
             if text:
                 yield 0, text
@@ -116,9 +123,10 @@ class HistoryTarget(Target):
         if res is None or res.returncode != 0:
             return None
         try:
-            return int((res.stdout or "").strip())
+            self.sizes[sha] = int((res.stdout or "").strip())
         except ValueError:
             return None
+        return self.sizes[sha]
 
     def head(self, rel: str, size: int) -> bytes | None:
         """Read the first bytes of a stored version. Takes the path and how many bytes. Returns them,

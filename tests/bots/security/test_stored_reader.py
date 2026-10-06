@@ -105,7 +105,13 @@ class TestAStoredReadCutShortIsUnread(unittest.TestCase):
         from unittest import mock
 
         class Proc:
-            stdout = BytesIO(b"x" * 5000)
+            returncode = 0
+
+            def __init__(self):
+                self.stdout = BytesIO(b"x" * 5000)
+
+            def kill(self):
+                pass
 
             def __enter__(self):
                 return self
@@ -117,9 +123,29 @@ class TestAStoredReadCutShortIsUnread(unittest.TestCase):
         opts.max_file_bytes = 4096
         target = HistoryTarget(Path("/repo"), "repo", opts, {"f.js": ["a" * 40]})
         target.sizes = {"a" * 40: 10_000}
-        with mock.patch.object(HistoryTarget, "_cat_file", return_value=Proc()):
+        with mock.patch.object(HistoryTarget, "_cat_file", side_effect=lambda _sha: Proc()):
             list(target.read_source_windows("f.js"))
         self.assertIn("f.js", target.read_errors)
+
+
+class TestTheStoreIsAskedOnlyAboutLargeVersions(_Store):
+
+    def test_a_small_version_is_read_without_asking_its_size(self):
+        from unittest import mock
+        oids = self.store({"a.js": b"var a = 1;\n"})
+        target = HistoryTarget(self.repo, "repo", ScanOptions(), {"a.js": [oids["a.js"]]})
+        with mock.patch.object(HistoryTarget, "_size", side_effect=AssertionError("asked")):
+            self.assertEqual([(0, "var a = 1;\n")], list(target.read_source_windows("a.js")))
+
+    def test_a_large_version_of_unknown_size_is_recorded_unread(self):
+        from unittest import mock
+        opts = ScanOptions()
+        opts.max_file_bytes = 4096
+        oids = self.store({"big.js": b"// pad\n" * 2000})
+        target = HistoryTarget(self.repo, "repo", opts, {"big.js": [oids["big.js"]]})
+        with mock.patch.object(HistoryTarget, "_size", return_value=None):
+            list(target.read_source_windows("big.js"))
+        self.assertIn("big.js", target.read_errors)
 
 
 class TestGitLfsPointers(unittest.TestCase):
