@@ -8,10 +8,11 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Iterator
 
+from stayawake.lib.git.objects import own_view
 from stayawake.lib.git.query import reachable_blobs
 from stayawake.lib.git.run import open_stdout
 
-from .base import TRUNCATION_MARKER, Target
+from .base import TRUNCATION_MARKER, Target, reads_whole, stream_windows
 
 _CHUNK = 1 << 20
 
@@ -54,6 +55,7 @@ class HistoryTarget(Target):
                              if index < len(shas)}
         self.stored_links = links or {}
         self.read_ahead: dict[str, bytes] = {}
+        self.sizes: dict[str, int] = {}
 
     def __len__(self) -> int:
         return len(self._sha_by_path)
@@ -82,9 +84,41 @@ class HistoryTarget(Target):
         return data.replace(b"\x00", b"").decode("utf-8", "replace")   # as the tree side decodes
 
     def read_source_windows(self, rel: str) -> Iterator[tuple[int, str]]:
-        text = self.read_text(rel)
-        if text:
-            yield 0, text
+        sha = self._sha_by_path.get(rel)
+        size = self._size(sha) if sha is not None else None
+        if size is None or size <= self.opts.max_file_bytes or not reads_whole(rel, size, self.opts):
+            text = self.read_text(rel)
+            if text:
+                yield 0, text
+            return
+        read = 0
+        try:
+            proc = self._cat_file(sha)
+            with proc:
+                def chunk(n: int) -> bytes:
+                    nonlocal read
+                    data = proc.stdout.read(n) or b""
+                    read += len(data)
+                    return data
+                yield from stream_windows(chunk, size, self.opts.max_file_bytes)
+        except (OSError, subprocess.SubprocessError):
+            self.read_errors.append(rel)
+            return
+        if read < size:
+            self.read_errors.append(rel)
+
+    def _size(self, sha: str) -> int | None:
+        """Ask the store for a version's size. Takes the blob id. Returns the size in bytes, or None
+        when git could not say."""
+        if sha in self.sizes:
+            return self.sizes[sha]
+        res = own_view(self.root, ["cat-file", "-s", sha])
+        if res is None or res.returncode != 0:
+            return None
+        try:
+            return int((res.stdout or "").strip())
+        except ValueError:
+            return None
 
     def head(self, rel: str, size: int) -> bytes | None:
         """Read the first bytes of a stored version. Takes the path and how many bytes. Returns them,

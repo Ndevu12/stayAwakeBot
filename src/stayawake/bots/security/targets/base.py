@@ -10,7 +10,7 @@ import os
 import stat as _stat
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator
 
 from stayawake.bots.security.models import SAW_DIR
 from stayawake.bots.security.write_sinks import sink_label
@@ -39,6 +39,31 @@ TRUNCATION_MARKER = b"\n/*\xe2\x80\xa6stayawake-truncated\xe2\x80\xa6*/\n"
 def _ext(rel: str) -> str:
     i = rel.rfind(".")
     return rel[i:].lower() if i != -1 else ""
+
+
+def reads_whole(rel: str, size: int, opts) -> bool:
+    """Tell whether the content checks read a file of a given name and size in full. Takes the path,
+    the size in bytes and the scan options. Returns False when only part of it is read."""
+    return size <= opts.max_file_bytes or (_ext(rel) in SOURCE_EXTS
+                                           and size <= _MAX_INTERIOR_SCAN_BYTES)
+
+
+def stream_windows(read: Callable[[int], bytes], size: int,
+                   window: int) -> Iterator[tuple[int, str]]:
+    """Walk a byte stream in overlapping windows. Takes a `read(n)` function, the stream's size and
+    the window size. Yields `(line_offset, text)` per window, NUL bytes dropped."""
+    step = max(1, window - min(_SOURCE_WINDOW_OVERLAP, window // 2))
+    buf, pos, nl_before, ended = b"", 0, 0, False
+    while pos < size:
+        while len(buf) < window and not ended:
+            chunk = read(window - len(buf))
+            ended = not chunk
+            buf += chunk or b""
+        if not buf:
+            break
+        yield nl_before, buf.replace(b"\x00", b"").decode("utf-8", errors="replace")
+        nl_before += buf.count(b"\n", 0, step)
+        buf, pos = buf[step:], pos + step
 
 
 def is_source_path(rel: str) -> bool:
@@ -312,24 +337,12 @@ class Target:
             if text is not None:
                 yield (0, text)
             return
-        window = self.opts.max_file_bytes
-        step = max(1, window - min(_SOURCE_WINDOW_OVERLAP, window // 2))
-        nl_before = 0
-        pos = 0
         try:
             fh = self._open_read(p)
             if fh is None:
                 return
             with fh:
-                while pos < size:
-                    fh.seek(pos)
-                    raw = fh.read(window)
-                    if not raw:
-                        break
-                    chunk = raw.replace(b"\x00", b"")
-                    yield (nl_before, chunk.decode("utf-8", errors="replace"))
-                    nl_before += raw.count(b"\n", 0, step)   # newlines we step past (byte domain — exact)
-                    pos += step
+                yield from stream_windows(fh.read, size, self.opts.max_file_bytes)
         except OSError as exc:
             self._note_unreadable(rel, p, exc)    # unreadable oversized file — a gap (unless a symlink)
             return

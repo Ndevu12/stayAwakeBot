@@ -400,13 +400,28 @@ class TestWhatTheRewriteLeavesAlone(_Rewrite):
         self.assertTrue(outcome.completed, self._causes(outcome))
         self.assertNotIn(Cause.HISTORY_PARTLY_READ, self._causes(outcome))
 
+    def test_a_payload_anywhere_in_large_code_is_taken_out(self):
+        half = "// " + "a" * 96 + "\n"
+        half = half * (1_500_000 // len(half))
+        self.evil_merge()
+        self.write(self.d, "assets/big.js", half + STAGE3 + half)
+        self.commit(self.d, "a large bundle")
+        self.git(self.d, "rm", "-q", "assets/big.js")
+        self.commit(self.d, "drop it")
+        outcome = self.run_amend()
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertNotIn(Cause.HISTORY_PARTLY_READ, self._causes(outcome))
+        self.assertFalse(self.ever_holds(half + STAGE3 + half))
+
     def test_code_not_read_in_full_is_named_for_review(self):
+        from stayawake.bots.security.targets import base
         self.evil_merge()
         self.write(self.d, "assets/big.js", "// " + "x" * 2_100_000 + "\n")
         self.commit(self.d, "a large asset")
         self.write(self.d, "assets/big.js", "// " + "y" * 2_100_000 + "\n")
         self.commit(self.d, "the asset updated")
-        outcome = self.run_amend()
+        with mock.patch.object(base, "_MAX_INTERIOR_SCAN_BYTES", 2_000_000):
+            outcome = self.run_amend()
         self.assertTrue(outcome.completed, self._causes(outcome))
         self.assertIn(Cause.HISTORY_PARTLY_READ, self._causes(outcome))
         self.assertTrue(outcome.needs_review)
