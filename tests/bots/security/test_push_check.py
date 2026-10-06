@@ -336,6 +336,18 @@ class TestItNeverReadsAsCleanWhenUnsure(_Sandbox):
                     code, text = self.check(self.line("refs/heads/main"))
                 self.assertEqual(code, 1, text)
 
+    def test_a_payload_kept_in_git_lfs_here_is_caught(self):
+        import hashlib
+        content = b"global['_V']=function(x){return x};require('child_process').exec('id');\n"
+        oid = hashlib.sha256(content).hexdigest()
+        store = self.work / ".git" / "lfs" / "objects" / oid[:2] / oid[2:4]
+        store.mkdir(parents=True)
+        (store / oid).write_bytes(content)
+        self.commit({"bin/run.js": "version https://git-lfs.github.com/spec/v1\noid sha256:" + oid
+                     + "\nsize " + str(len(content)) + "\n"})
+        code, text = self.check(self.line("refs/heads/main"))
+        self.assertEqual(code, 1, text)
+
     def test_the_budget_counts_from_the_start_of_the_check(self):
         self.commit({"more.js": "export const y = 2;\n"})
         refs = self.line("refs/heads/main")

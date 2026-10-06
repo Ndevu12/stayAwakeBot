@@ -413,6 +413,25 @@ class TestWhatTheRewriteLeavesAlone(_Rewrite):
         self.assertNotIn(Cause.HISTORY_PARTLY_READ, self._causes(outcome))
         self.assertFalse(self.ever_holds(half + STAGE3 + half))
 
+    def test_a_payload_kept_in_git_lfs_here_is_taken_out(self):
+        import hashlib
+        content = STAGE3.encode()
+        oid = hashlib.sha256(content).hexdigest()
+        store = self.d / ".git" / "lfs" / "objects" / oid[:2] / oid[2:4]
+        store.mkdir(parents=True, exist_ok=True)
+        (store / oid).write_bytes(content)
+        pointer = ("version https://git-lfs.github.com/spec/v1\noid sha256:" + oid
+                   + "\nsize " + str(len(content)) + "\n")
+        self.evil_merge()
+        self.write(self.d, "assets/run.js", pointer)
+        self.commit(self.d, "a file kept in git lfs")
+        self.git(self.d, "rm", "-q", "assets/run.js")
+        self.commit(self.d, "drop it")
+        outcome = self.run_amend()
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertNotIn(Cause.HISTORY_PARTLY_READ, self._causes(outcome))
+        self.assertFalse(self.ever_holds(pointer))
+
     def test_code_kept_outside_git_is_named_for_review(self):
         self.evil_merge()
         self.write(self.d, "assets/big.js", "version https://git-lfs.github.com/spec/v1\n"

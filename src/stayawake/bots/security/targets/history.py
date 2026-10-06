@@ -3,11 +3,13 @@
 every matcher applies to it without knowing where it came from."""
 from __future__ import annotations
 
+import os
 import subprocess
 from collections import defaultdict
 from pathlib import Path
 from typing import Iterator
 
+from stayawake.lib.git import lfs
 from stayawake.lib.git.objects import own_view
 from stayawake.lib.git.query import reachable_blobs
 from stayawake.lib.git.run import open_stdout
@@ -25,6 +27,26 @@ def versions_by_path(root, limit: int = 200_000,
     for sha, path in blobs:
         grouped[path].append(sha)
     return dict(grouped), complete
+
+
+class _ObjectStream:
+    """Read a local Git LFS object the way a stored blob is streamed."""
+
+    returncode = 0
+
+    def __init__(self, path: Path):
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        self.stdout = os.fdopen(fd, "rb")
+
+    def kill(self) -> None:
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc) -> bool:
+        self.stdout.close()
+        return False
 
 
 class HistoryTarget(Target):
@@ -57,6 +79,9 @@ class HistoryTarget(Target):
         self.read_ahead: dict[str, bytes] = {}
         self.sizes: dict[str, int] = {}
         self.read_in_part: set[str] = set()
+        self.objects: dict[str, Path | None] = {}
+        self.kept_elsewhere: set[str] = set()
+        self._lfs_store: Path | None | bool = False
 
     def __len__(self) -> int:
         return len(self._sha_by_path)
@@ -118,9 +143,28 @@ class HistoryTarget(Target):
         if read < size:
             self.read_errors.append(rel)
 
+    def local_object(self, sha: str, data: bytes | None = None) -> Path | None:
+        """Find the local Git LFS object a stored version points to. Takes the blob id and, when at
+        hand, its bytes. Returns the object's path, or None when the version is not a pointer or its
+        object is not kept here."""
+        if sha in self.objects:
+            return self.objects[sha]
+        data = self.read_ahead.get(sha) if data is None else data
+        if not data or not lfs.is_pointer(data):
+            return None
+        if self._lfs_store is False:
+            self._lfs_store = lfs.store_of(self.root)
+        self.objects[sha] = lfs.local_object(self._lfs_store, data) if self._lfs_store else None
+        return self.objects[sha]
+
     def _size(self, sha: str) -> int | None:
         """Ask the store for a version's size. Takes the blob id. Returns the size in bytes, or None
         when git could not say."""
+        if self.objects.get(sha):
+            try:
+                return os.stat(self.objects[sha]).st_size
+            except OSError:
+                return None
         if sha in self.sizes:
             return self.sizes[sha]
         res = own_view(self.root, ["cat-file", "-s", sha])
@@ -135,6 +179,8 @@ class HistoryTarget(Target):
     def _cat_file(self, sha: str):
         """Stream the stored blob `sha`, as the walk that named it read the store: replace refs off.
         Raises OSError when git could not start or refused the command."""
+        if self.objects.get(sha):
+            return _ObjectStream(self.objects[sha])
         proc = open_stdout(Path(self.root), ["--no-replace-objects", "cat-file", "blob", sha])
         if proc is None:
             raise OSError(f"git could not read stored blob {sha}")
@@ -150,7 +196,19 @@ class HistoryTarget(Target):
         sha = self._sha_by_path.get(rel)
         if sha is None:
             return None, False
-        if sha in self.read_ahead:
+        if not self.objects.get(sha):
+            data, more = self._stream_blob(rel, sha, max(cap, lfs.POINTER_MAX_BYTES))
+            if more or not data or not lfs.is_pointer(data):
+                return (data[:cap], more or len(data) > cap) if data else (data, more)
+            if self.local_object(sha, data) is None:
+                self.kept_elsewhere.add(rel)
+                return data[:cap], len(data) > cap
+        return self._stream_blob(rel, sha, cap)
+
+    def _stream_blob(self, rel: str, sha: str, cap: int) -> tuple[bytes | None, bool]:
+        """Read at most `cap` bytes of one stored version. Takes the path, the blob id and the cap.
+        Returns the bytes and whether there were more, or None when it could not be read."""
+        if sha in self.read_ahead and not self.objects.get(sha):
             data = self.read_ahead[sha]
             return data[:cap], len(data) > cap
         try:
