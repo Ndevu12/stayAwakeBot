@@ -56,6 +56,7 @@ class HistoryTarget(Target):
         self.stored_links = links or {}
         self.read_ahead: dict[str, bytes] = {}
         self.sizes: dict[str, int] = {}
+        self.read_in_part: set[str] = set()
 
     def __len__(self) -> int:
         return len(self._sha_by_path)
@@ -95,6 +96,8 @@ class HistoryTarget(Target):
             self.read_errors.append(rel)
         ext = _ext(rel)
         if size is None or (ext not in SOURCE_EXTS and not self.content_was_read(ext, data)):
+            if size is not None:
+                self.read_in_part.add(rel)
             text = self.read_text(rel)
             if text:
                 yield 0, text

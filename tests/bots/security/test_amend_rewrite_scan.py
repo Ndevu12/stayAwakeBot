@@ -452,6 +452,21 @@ class TestWhatTheRewriteLeavesAlone(_Rewrite):
         self.assertIn(Cause.HISTORY_PARTLY_READ, self._causes(outcome))
         self.assertTrue(outcome.needs_review)
 
+    def test_a_large_binary_is_named_and_a_large_binary_program_is_named_for_review(self):
+        binary = "\x00\x01" + "\x7f" * 2_200_000
+        for path, mode, review in (("assets/blob.bin", 0o644, False), ("bin/tool", 0o755, True)):
+            with self.subTest(path=path):
+                self.setUp()
+                self.evil_merge()
+                self.write(self.d, path, binary)
+                os.chmod(self.d / path, mode)
+                self.commit(self.d, "a large binary")
+                outcome = self.run_amend()
+                self.assertTrue(outcome.completed, self._causes(outcome))
+                self.assertEqual(review, outcome.needs_review, self._causes(outcome))
+                self.assertIn(Cause.HISTORY_PARTLY_READ if review
+                              else Cause.LARGE_FILES_NOT_READ_IN_FULL, self._causes(outcome))
+
     def test_data_kept_outside_git_is_named_without_review(self):
         self.evil_merge()
         self.write(self.d, "data/blob.dat", "version https://git-lfs.github.com/spec/v1\n"
@@ -459,7 +474,7 @@ class TestWhatTheRewriteLeavesAlone(_Rewrite):
         self.commit(self.d, "data kept outside git")
         outcome = self.run_amend()
         self.assertTrue(outcome.completed, self._causes(outcome))
-        self.assertIn(Cause.GIT_LFS_FILES_NOT_READ, self._causes(outcome))
+        self.assertIn(Cause.LARGE_FILES_NOT_READ_IN_FULL, self._causes(outcome))
         self.assertNotIn(Cause.HISTORY_PARTLY_READ, self._causes(outcome))
         self.assertFalse(outcome.needs_review, self._causes(outcome))
 

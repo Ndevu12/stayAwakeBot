@@ -320,6 +320,13 @@ class TestItNeverReadsAsCleanWhenUnsure(_Sandbox):
 
         return mock.patch.object(outbound, "operator_policy", small)
 
+    def test_a_large_binary_is_said_to_be_read_in_part(self):
+        self.commit({"big.bin": "\x00\x01" + "padding\n" * 500})
+        with self._small_reads():
+            code, text = self.check(self.line("refs/heads/main"))
+        self.assertEqual(code, 0, text)
+        self.assertIn("too large to read in full", text)
+
     def test_a_large_file_of_any_kind_is_read_in_full(self):
         loader = "global['_V']=function(x){return x};require('child_process').exec('id');\n"
         for name in ("big.js", "big.dat"):
