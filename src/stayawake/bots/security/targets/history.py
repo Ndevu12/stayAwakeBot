@@ -12,7 +12,7 @@ from stayawake.lib.git.objects import own_view
 from stayawake.lib.git.query import reachable_blobs
 from stayawake.lib.git.run import open_stdout
 
-from .base import TRUNCATION_MARKER, Target, reads_whole, stream_windows
+from .base import SOURCE_EXTS, TRUNCATION_MARKER, Target, _ext, stream_windows
 
 _CHUNK = 1 << 20
 
@@ -84,9 +84,17 @@ class HistoryTarget(Target):
         return data.replace(b"\x00", b"").decode("utf-8", "replace")   # as the tree side decodes
 
     def read_source_windows(self, rel: str) -> Iterator[tuple[int, str]]:
-        sha = self._sha_by_path.get(rel)
-        size = self._size(sha) if sha is not None else None
-        if size is None or size <= self.opts.max_file_bytes or not reads_whole(rel, size, self.opts):
+        data, more = self._stream(rel, self.opts.max_file_bytes)
+        if not more:
+            if data:
+                yield 0, data.replace(b"\x00", b"").decode("utf-8", "replace")
+            return
+        sha = self._sha_by_path[rel]
+        size = self._size(sha)
+        if size is None:
+            self.read_errors.append(rel)
+        ext = _ext(rel)
+        if size is None or (ext not in SOURCE_EXTS and not self.content_was_read(ext, data)):
             text = self.read_text(rel)
             if text:
                 yield 0, text
@@ -116,14 +124,10 @@ class HistoryTarget(Target):
         if res is None or res.returncode != 0:
             return None
         try:
-            return int((res.stdout or "").strip())
+            self.sizes[sha] = int((res.stdout or "").strip())
         except ValueError:
             return None
-
-    def head(self, rel: str, size: int) -> bytes | None:
-        """Read the first bytes of a stored version. Takes the path and how many bytes. Returns them,
-        or None when git could not read them."""
-        return self._stream(rel, size)[0]
+        return self.sizes[sha]
 
     def _cat_file(self, sha: str):
         """Stream the stored blob `sha`, as the walk that named it read the store: replace refs off.

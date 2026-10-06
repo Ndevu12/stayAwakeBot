@@ -320,23 +320,14 @@ class TestItNeverReadsAsCleanWhenUnsure(_Sandbox):
 
         return mock.patch.object(outbound, "operator_policy", small)
 
-    def test_a_version_too_large_to_read_in_full_is_said_so_every_time(self):
-        self.commit({"big.dat": "padding\n" * 500})
-        refs = self.line("refs/heads/main")
-        with self._small_reads():
-            first = self.check(refs)
-            second = self.check(refs)
-        for code, text in (first, second):
-            self.assertEqual(code, 0, text)
-            self.assertIn("too large to read in full", text)
-
-    def test_large_code_is_read_in_full(self):
+    def test_a_large_file_of_any_kind_is_read_in_full(self):
         loader = "global['_V']=function(x){return x};require('child_process').exec('id');\n"
-        self.commit({"big.js": "// padding\n" * 300 + loader + "// padding\n" * 300})
-        with self._small_reads():
-            code, text = self.check(self.line("refs/heads/main"))
-        self.assertEqual(code, 1, text)
-        self.assertNotIn("too large to read in full", text)
+        for name in ("big.js", "big.dat"):
+            with self.subTest(name=name):
+                self.commit({name: "// padding\n" * 300 + loader + "// padding\n" * 300})
+                with self._small_reads():
+                    code, text = self.check(self.line("refs/heads/main"))
+                self.assertEqual(code, 1, text)
 
     def test_the_budget_counts_from_the_start_of_the_check(self):
         self.commit({"more.js": "export const y = 2;\n"})

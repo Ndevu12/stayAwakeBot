@@ -413,37 +413,34 @@ class TestWhatTheRewriteLeavesAlone(_Rewrite):
         self.assertNotIn(Cause.HISTORY_PARTLY_READ, self._causes(outcome))
         self.assertFalse(self.ever_holds(half + STAGE3 + half))
 
-    def test_code_not_read_in_full_is_named_for_review(self):
-        from stayawake.bots.security.targets import base
+    def test_code_kept_outside_git_is_named_for_review(self):
         self.evil_merge()
-        self.write(self.d, "assets/big.js", "// " + "x" * 2_100_000 + "\n")
-        self.commit(self.d, "a large asset")
-        self.write(self.d, "assets/big.js", "// " + "y" * 2_100_000 + "\n")
-        self.commit(self.d, "the asset updated")
-        with mock.patch.object(base, "_MAX_INTERIOR_SCAN_BYTES", 2_000_000):
-            outcome = self.run_amend()
+        self.write(self.d, "assets/big.js", "version https://git-lfs.github.com/spec/v1\n"
+                   "oid sha256:" + "0" * 64 + "\nsize 3000000\n")
+        self.commit(self.d, "code kept outside git")
+        outcome = self.run_amend()
         self.assertTrue(outcome.completed, self._causes(outcome))
         self.assertIn(Cause.HISTORY_PARTLY_READ, self._causes(outcome))
         self.assertTrue(outcome.needs_review)
         self.assertIn("assets/big.js", " ".join(r.subjects for r in outcome.reasons))
 
-    def test_a_large_program_without_a_code_extension_is_named_for_review(self):
+    def test_a_payload_anywhere_in_a_large_file_of_any_kind_is_taken_out(self):
         half = "// " + "a" * 96 + "\n"
         half = half * (1_200_000 // len(half))
-        for path, body, mode in (("bin/tool.dat", "", 0o755),
-                                 (".husky/pre-commit", "", 0o644),
-                                 ("tools/run.dat", "#!/bin/sh\n", 0o644)):
+        for path, mode in (("bin/tool.dat", 0o755), (".husky/pre-commit", 0o644),
+                           ("data/blob.dat", 0o644)):
             with self.subTest(path=path):
                 self.setUp()
                 self.evil_merge()
-                self.write(self.d, path, body + half + STAGE3 + half)
+                self.write(self.d, path, half + STAGE3 + half)
                 os.chmod(self.d / path, mode)
-                self.commit(self.d, "a large program")
+                self.commit(self.d, "a large file")
                 self.git(self.d, "rm", "-q", path)
                 self.commit(self.d, "drop it")
                 outcome = self.run_amend()
-                self.assertIn(Cause.HISTORY_PARTLY_READ, self._causes(outcome))
-                self.assertTrue(outcome.needs_review)
+                self.assertTrue(outcome.completed, self._causes(outcome))
+                self.assertNotIn(Cause.HISTORY_PARTLY_READ, self._causes(outcome))
+                self.assertFalse(self.ever_holds(half + STAGE3 + half))
 
     def test_a_program_kept_outside_git_is_named_for_review(self):
         self.evil_merge()
@@ -455,13 +452,14 @@ class TestWhatTheRewriteLeavesAlone(_Rewrite):
         self.assertIn(Cause.HISTORY_PARTLY_READ, self._causes(outcome))
         self.assertTrue(outcome.needs_review)
 
-    def test_a_large_data_file_is_named_without_review(self):
+    def test_data_kept_outside_git_is_named_without_review(self):
         self.evil_merge()
-        self.write(self.d, "data/blob.dat", "x" * 2_100_000 + "\n")
-        self.commit(self.d, "a large data file")
+        self.write(self.d, "data/blob.dat", "version https://git-lfs.github.com/spec/v1\n"
+                   "oid sha256:" + "0" * 64 + "\nsize 3000000\n")
+        self.commit(self.d, "data kept outside git")
         outcome = self.run_amend()
         self.assertTrue(outcome.completed, self._causes(outcome))
-        self.assertIn(Cause.LARGE_FILES_NOT_READ_IN_FULL, self._causes(outcome))
+        self.assertIn(Cause.GIT_LFS_FILES_NOT_READ, self._causes(outcome))
         self.assertNotIn(Cause.HISTORY_PARTLY_READ, self._causes(outcome))
         self.assertFalse(outcome.needs_review, self._causes(outcome))
 
