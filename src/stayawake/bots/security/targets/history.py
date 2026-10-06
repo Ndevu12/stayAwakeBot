@@ -86,6 +86,11 @@ class HistoryTarget(Target):
         if text:
             yield 0, text
 
+    def head(self, rel: str, size: int) -> bytes | None:
+        """Read the first bytes of a stored version. Takes the path and how many bytes. Returns them,
+        or None when git could not read them."""
+        return self._stream(rel, size)[0]
+
     def _cat_file(self, sha: str):
         """Stream the stored blob `sha`, as the walk that named it read the store: replace refs off.
         Raises OSError when git could not start or refused the command."""

@@ -12,6 +12,7 @@ from stayawake.lib.git.objects import own_view, own_view_fed
 _OBJECT_ID = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 _FILE_MODES = frozenset({b"100644", b"100755"})
 _LINK_MODE = b"120000"
+_EXECUTABLE_MODE = b"100755"
 _SUBMODULE_MODE = b"160000"
 _INTRODUCING = frozenset({b"A", b"M", b"T"})
 
@@ -57,13 +58,14 @@ def read_push_updates(text: str) -> list[PushUpdate] | None:
 
 @dataclass(frozen=True)
 class Introduced:
-    """A file version a push would publish."""
+    """A file version a push would publish. `executable` is True when git stores it as a program."""
 
     path: str
     oid: str
     link: bool
     commit: str
     role: str
+    executable: bool = False
 
 
 @dataclass
@@ -104,11 +106,11 @@ def introduced(repo: str | Path, updates: list[PushUpdate], *, remote: str | Non
             scope.unnamed.append(oid)
     found: list[tuple[str, str, bytes, str]] = []
     if scope.tips:
-        commits = _commits(repo, list(scope.tips), sorted(held))
+        commits = commits_between(repo, list(scope.tips), sorted(held))
         if commits is None:
             return None
         believed = _believed(repo, remote, live)
-        newer = _commits(repo, list(scope.tips), sorted(held), extra=believed) if believed else None
+        newer = commits_between(repo, list(scope.tips), sorted(held), extra=believed) if believed else None
         if newer is None:
             work, scope.history, scope.history_role = [], commits, NEW_WORK
             scope.history_merges = [c for c, parents in commits if len(parents) > 1]
@@ -154,6 +156,23 @@ def history_entries(repo: str | Path, commits: list[tuple[str, list[str]]], *, r
     return _collect([(commit, path, meta, role) for commit, meta, path in _diff_entries(raw)], limit)
 
 
+def adding_commits(repo: str | Path, commits: list[tuple[str, list[str]]],
+                   wanted: set[tuple[str, str]]) -> dict[tuple[str, str], set[str]] | None:
+    """Find every commit that adds one of some file versions against its first parent. Takes the
+    repo, the commits with their parents and the `(path, blob)` versions wanted. Returns each found
+    version mapped to the commits adding it, or None when git could not answer."""
+    if not commits or not wanted:
+        return {}
+    raw = _introduced_by(repo, commits)
+    if raw is None:
+        return None
+    out: dict[tuple[str, str], set[str]] = {}
+    for commit, (_mode, oid, status), path in _diff_entries(raw):
+        if status in _INTRODUCING and (path, oid) in wanted:
+            out.setdefault((path, oid), set()).add(commit)
+    return out
+
+
 def _introduced_by(repo: str | Path, commits: list[tuple[str, list[str]]]) -> bytes | None:
     """Ask git what each commit adds against its first parent. Takes the repo and the commits with
     their parents. Returns the raw listing, or None when git could not answer."""
@@ -177,7 +196,8 @@ def _collect(found, limit: int) -> tuple[list[Introduced], int, bool]:
         if mode == _SUBMODULE_MODE:
             submodules += 1
         elif mode in _FILE_MODES or mode == _LINK_MODE:
-            entries.append(Introduced(path, oid, mode == _LINK_MODE, commit, role))
+            entries.append(Introduced(path, oid, mode == _LINK_MODE, commit, role,
+                                      mode == _EXECUTABLE_MODE))
             if len(entries) > limit:
                 return entries, submodules, False
     return entries, submodules, True
@@ -245,7 +265,7 @@ def _held(repo: str | Path, oids: list[str]) -> set[str] | None:
             if len(line.split()) == 3 and line.split()[0] == oid}
 
 
-def _commits(repo: str | Path, tips: list[str], exclude: list[str], *,
+def commits_between(repo: str | Path, tips: list[str], exclude: list[str], *,
              extra: list[str] | None = None) -> list[tuple[str, list[str]]] | None:
     """List the commits reachable from the tips and not from what is excluded. Takes the repo, the
     tips, the ids to exclude and any further revisions to exclude. Returns each commit with its

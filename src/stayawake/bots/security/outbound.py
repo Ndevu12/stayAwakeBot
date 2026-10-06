@@ -15,18 +15,15 @@ from stayawake.utils.render import LINK, MARKER, SEVERITY, block, marked_list, p
 from stayawake.utils.streaming import busy, say
 from stayawake.utils.terminal import supports_color
 from stayawake.lib import git as gitutil
-from stayawake.lib.git import objects, pushed
+from stayawake.lib.git import pushed
 from stayawake.lib.git.run import one_pass
 from stayawake.bots.security import push_record
 from stayawake.bots.security.hook_policy import HookPolicy, operator_policy
 from stayawake.bots.security.hook_report import BRAND
 from stayawake.bots.security.models import CONFIRMED
-from stayawake.bots.security.scanner import scan_target
-from stayawake.bots.security.targets import PushedTarget
+from stayawake.bots.security import version_scan
 
 EVENT = "pre-push"
-_PATHS_PER_BATCH = 64
-_LFS_POINTER = b"version https://git-lfs.github.com/spec/"
 _EARLIER_CHECK_SECONDS = 3.0
 _HISTORY_CHUNK = 2_000
 _EARLIER_WORK = "earlier new work"
@@ -256,7 +253,7 @@ def _scan_all(progress: _Progress, git_dir: Path, display: str, entries: list, m
     Takes the progress, the repository, how it is shown, the versions, the merges to judge, the
     versions this push newly adds, the policy and an optional time to stop. Returns False when the
     check was stopped."""
-    batches = _batches(entries)
+    batches = version_scan.batches(entries)
     if not batches and merges:
         batches = [[]]
     for index, batch in enumerate(batches):
@@ -269,45 +266,17 @@ def _scan_all(progress: _Progress, git_dir: Path, display: str, entries: list, m
     return True
 
 
-def _batches(queue: list) -> list[list]:
-    """Split the versions into scan batches that hold each path once. Takes the queue. Returns the
-    batches, in order."""
-    batches: list[list] = []
-    paths: list[set[str]] = []
-    for entry in queue:
-        for batch, held in zip(batches, paths):
-            if entry.path not in held and len(batch) < _PATHS_PER_BATCH:
-                batch.append(entry)
-                held.add(entry.path)
-                break
-        else:
-            batches.append([entry])
-            paths.append({entry.path})
-    return batches
-
-
 def _scan_batch(progress: _Progress, git_dir: Path, display: str, batch: list, merges: list[str],
                 fresh: set[tuple[str, str]], policy: HookPolicy) -> None:
     """Scan one batch and record what it established. Takes the progress, the repository, how it is
     shown, the batch, the merges to judge with it, the versions this push newly adds, and the
     policy."""
-    files = {e.path: e.oid for e in batch if not e.link}
-    links_wanted = {e.path: e.oid for e in batch if e.link}
-    text_of, _all = objects.link_targets(git_dir, list(links_wanted.values()))
-    links = {path: [text_of[oid]] for path, oid in links_wanted.items() if oid in text_of}
-    target = PushedTarget(git_dir, display, policy.opts, files, links, merges)
-    result = scan_target(target, policy.signatures, policy.allowlist)
-    by_path = {e.path: e for e in batch}
-    in_part = set(getattr(target, "read_in_part", ()))
-    outside_git = sum(1 for e in batch if target.read_ahead.get(e.oid, b"").startswith(_LFS_POINTER))
-    unread = set(getattr(target, "read_errors", []))
-    unread |= {path for path, oid in links_wanted.items() if oid not in text_of}
-    if result.error and not result.findings and not unread:
-        unread = set(by_path)
+    scanned = version_scan.scan_batch(git_dir, display, batch, merges, policy.signatures,
+                                      policy.allowlist, policy.opts)
+    in_part, outside_git, unread = scanned.in_part, scanned.outside_git, scanned.unread
     confirmed_paths: set[str] = set()
     confirmed, suspicious = [], []
-    for finding in result.findings:
-        entry = by_path.get(finding.path)
+    for finding, entry in scanned.findings:
         commit = entry.commit if entry else (getattr(finding, "commit_sha", "") or "")
         role = entry.role if entry else pushed.NEW_WORK
         if finding.confidence == CONFIRMED:
@@ -319,7 +288,7 @@ def _scan_batch(progress: _Progress, git_dir: Path, display: str, batch: list, m
         if progress.stop:
             return
         progress.confirmed += confirmed
-        progress.outside_git += outside_git
+        progress.outside_git += len(outside_git)
         progress.suspicious += suspicious
         for entry in batch:
             key = (entry.path, entry.oid)

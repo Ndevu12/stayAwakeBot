@@ -95,10 +95,13 @@ class Cause(Enum):
     ARRIVALS_DELIVERY_GONE = "arrivals-delivery-gone"
     ARRIVALS_ANSWERS_NOT_SAVED = "arrivals-answers-not-saved"
     ARRIVED_COPIES_REMAIN = "arrived-copies-remain"
+    HISTORY_PARTLY_READ = "history-partly-read"
+    LARGE_FILES_NOT_READ_IN_FULL = "large-files-not-read-in-full"
 
 
 _NEEDING_NO_ACTION = frozenset({Cause.PREVIOUS_OBJECTS_UNCOLLECTED, Cause.NO_CONFIRMED_PAYLOAD,
-                                Cause.SAVED_WORK_CLEANED_HERE, Cause.ARRIVALS_KEPT})
+                                Cause.SAVED_WORK_CLEANED_HERE, Cause.ARRIVALS_KEPT,
+                                Cause.LARGE_FILES_NOT_READ_IN_FULL})
 
 
 @dataclass(frozen=True)
@@ -318,6 +321,11 @@ _PHRASE = {
     Cause.ARRIVALS_DELIVERY_GONE:
         "the commit that added {detail} is no longer in your history, so no copy was taken out — "
         "review them yourself",
+    Cause.HISTORY_PARTLY_READ:
+        "{detail} file version(s) in the rewritten history were not read in full — review them "
+        "yourself",
+    Cause.LARGE_FILES_NOT_READ_IN_FULL:
+        "{detail} large or Git LFS file version(s) in the rewritten history were not read in full",
     Cause.ARRIVED_COPIES_REMAIN:
         "a copy of a file that came in with the malware is still on {detail} — review it there",
     Cause.ARRIVALS_ANSWERS_NOT_SAVED:

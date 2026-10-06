@@ -93,6 +93,10 @@ reader, not the mechanism or the weakness it closed.
 - **saw names the compromised versions instead of a version to install.**
 
 ### Fixed
+- **`saw fix amend` takes malware out of every commit it rewrites.** A confirmed copy still in the
+  rewritten history stops the push. A file left for you to recover, a copy on a branch or tag amend
+  does not rewrite, and a file it could not read in full are named.
+- **The pre-push check names every file it could not finish reading.**
 - **`saw fix amend` removes the malware an evil merge brought when a harmless file beside it, such
   as an empty file, also exists elsewhere in the repository.** A copy of the malware itself on
   another branch or tag still keeps the run from being called done; a copy elsewhere of another file
