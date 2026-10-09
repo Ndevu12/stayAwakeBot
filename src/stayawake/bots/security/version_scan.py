@@ -68,7 +68,7 @@ def scan_batch(repo: Path, display: str, batch: list, merges: list[str], signatu
     unread |= {path for path, oid in links_wanted.items() if oid not in text_of}
     if result.error:
         unread |= set(by_path) - {f.path for f in result.findings}
-    outside_git = target.kept_elsewhere | {
+    outside_git = set(getattr(target, "kept_elsewhere", ())) | {
         e.path for e in batch if lfs.checked_out_object(target.read_ahead.get(e.oid, b""))
         and target.local_object(e.oid) is None}
     in_part = set(getattr(target, "read_in_part", ()))
