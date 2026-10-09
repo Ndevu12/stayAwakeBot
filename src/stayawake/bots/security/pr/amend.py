@@ -307,6 +307,22 @@ def _confirmed_versions(repo: Path, display: str, tips, boundary, signatures, al
     return confirmed
 
 
+def _partly_read_reasons(partly: set[str], runnable: set[str], found_at: set[str]) -> list[Reason]:
+    """Name the past versions read only in part. Takes their paths, those of them that run as
+    programs, and the paths where malware was found. Returns a reason for those to review and one
+    for the rest."""
+    to_review = sorted(p for p in partly if p in found_at or is_source_path(p) or p in runnable)
+    noted = sorted(partly - set(to_review))
+    reasons = []
+    if to_review:
+        reasons.append(Reason(Cause.HISTORY_PARTLY_READ, str(len(to_review)),
+                              names_that_fit(to_review)))
+    if noted:
+        reasons.append(Reason(Cause.LARGE_FILES_NOT_READ_IN_FULL, str(len(noted)),
+                              names_that_fit(noted)))
+    return reasons
+
+
 def _read_past_commits(repo: Path, display: str, signatures, allowlist, opts, skip,
                        owned_paths: set[str], out: _HistoryPayloads) -> None:
     """Read the past commits of every branch amend reads, newest first and up to a bound, and place
@@ -317,9 +333,11 @@ def _read_past_commits(repo: Path, display: str, signatures, allowlist, opts, sk
     if listed is None:
         out.unread.append(_PAST_VERSIONS)
         return
-    if not listed:
+    tips = [ref for _n, ref in listed] + (["HEAD"] if _answer(repo, ["rev-parse", "--verify", "-q",
+                                                                     "HEAD"]) else [])
+    if not tips:
         return
-    for finding, entry in _confirmed_versions(repo, display, [ref for _n, ref in listed], [],
+    for finding, entry in _confirmed_versions(repo, display, tips, [],
                                               signatures, allowlist, opts, skip, out,
                                               subject=_PAST_VERSIONS, limit=_PAST_VERSIONS_READ):
         try:
@@ -1463,11 +1481,11 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
     arrival_reasons: list[Reason] = []
 
     def _refuse(cause: Cause, detail: str = "", subjects: str = "",
-                recovery: str = "") -> AmendOutcome:
-        """Refuse, carrying any operator answer the run could not use and what is left to decide
-        about the files added beside a payload."""
+                recovery: str = "", named: tuple = ()) -> AmendOutcome:
+        """Refuse, carrying any operator answer the run could not use, what is left to decide
+        about the files added beside a payload, and any further reasons `named`."""
         return refused(display, cause, detail, subjects, recovery,
-                       also=_supply_refusals(rejected_supply) + tuple(arrival_reasons))
+                       also=_supply_refusals(rejected_supply) + tuple(arrival_reasons) + named)
 
     if not gitutil.is_git_repo(repo):
         return _refuse(Cause.NOT_A_GIT_REPOSITORY)
@@ -1799,9 +1817,11 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
                            str(len(unhandled)), ", ".join(sorted(unhandled)))
         if unread:
             return _refuse(Cause.HISTORY_UNREADABLE, names_that_fit(sorted(set(unread))))
+        partly = tuple(_partly_read_reasons(history.partly_read, history.runnable,
+                                            {path for path, _oid in history.confirmed | decided}))
         if history.cut_at:
-            return _refuse(Cause.PAST_COMMITS_READ_IN_PART, str(history.cut_at))
-        return _refuse(Cause.NO_CONFIRMED_PAYLOAD)
+            return _refuse(Cause.PAST_COMMITS_READ_IN_PART, str(history.cut_at), named=partly)
+        return _refuse(Cause.NO_CONFIRMED_PAYLOAD, named=partly)
 
     malicious_oids, unread_versions = _payload_blobs(
         repo, remove, substitute, purge_holders, clean, clean_shas,
@@ -2058,17 +2078,9 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
                                 names_that_fit(reachable_elsewhere)))
     if history.cut_at:
         survivors.append(Reason(Cause.PAST_COMMITS_READ_IN_PART, str(history.cut_at)))
-    partly = history.partly_read | rewritten.partly_read
-    found_at = {path for path, _oid in history.confirmed | decided}
-    runnable = history.runnable | rewritten.runnable
-    to_review = sorted(p for p in partly if p in found_at or is_source_path(p) or p in runnable)
-    noted = sorted(partly - set(to_review))
-    if to_review:
-        survivors.append(Reason(Cause.HISTORY_PARTLY_READ, str(len(to_review)),
-                                names_that_fit(to_review)))
-    if noted:
-        survivors.append(Reason(Cause.LARGE_FILES_NOT_READ_IN_FULL, str(len(noted)),
-                                names_that_fit(noted)))
+    survivors += _partly_read_reasons(history.partly_read | rewritten.partly_read,
+                                      history.runnable | rewritten.runnable,
+                                      {path for path, _oid in history.confirmed | decided})
     arrived_elsewhere, unread_arrived_refs = _refs_still_reaching(repo, arrived_oids,
                                                                   list(delivered_tips.values()))
     unconfirmed += unread_arrived_refs

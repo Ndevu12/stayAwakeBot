@@ -324,11 +324,9 @@ _PHRASE = {
         "the commit that added {detail} is no longer in your history, so no copy was taken out — "
         "review them yourself",
     Cause.HISTORY_PARTLY_READ:
-        "{detail} file version(s) in the rewritten history were not read in full — review them "
-        "yourself",
+        "{detail} file version(s) in past commits were not read in full — review them yourself",
     Cause.LARGE_FILES_NOT_READ_IN_FULL:
-        "{detail} large binary or Git LFS file version(s) in the rewritten history were not read "
-        "in full",
+        "{detail} large binary or Git LFS file version(s) in past commits were not read in full",
     Cause.PAST_COMMITS_READ_IN_PART:
         "only the newest {detail} file versions in the past commits of its branches were read — "
         "review the older ones yourself",

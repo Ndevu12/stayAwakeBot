@@ -554,6 +554,34 @@ class TestPastCommitsWhenTheCheckoutIsClean(_Rewrite):
         self.assertIn(Cause.PAST_COMMITS_READ_IN_PART, self._causes(outcome))
         self.assertTrue(outcome.needs_review)
 
+    def test_past_versions_read_in_part_are_named(self):
+        binary = "\x00\x01" + "\x7f" * 2_200_000
+        pointer = ("version https://git-lfs.github.com/spec/v1\noid sha256:" + "0" * 64
+                   + "\nsize 3000000\n")
+        for path, text, mode, cause in (("bin/tool", binary, 0o755, Cause.HISTORY_PARTLY_READ),
+                                        ("assets/a.png", binary, 0o644,
+                                         Cause.LARGE_FILES_NOT_READ_IN_FULL),
+                                        ("assets/m.bin", pointer, 0o644,
+                                         Cause.LARGE_FILES_NOT_READ_IN_FULL)):
+            with self.subTest(path=path):
+                self.setUp()
+                self.write(self.d, path, text)
+                os.chmod(self.d / path, mode)
+                self.commit(self.d, "add it")
+                self.git(self.d, "rm", "-q", path)
+                self.commit(self.d, "remove it")
+                outcome = self.run_amend()
+                self.assertIn(cause, self._causes(outcome))
+                self.assertEqual(cause is Cause.HISTORY_PARTLY_READ, outcome.needs_review)
+
+    def test_a_detached_checkout_on_no_branch_is_read(self):
+        self.add_then_remove("vendor/x/loader.js")
+        self.git(self.d, "checkout", "-q", "--detach")
+        for branch in (self.base, "feature"):
+            self.git(self.d, "branch", "-q", "-D", branch)
+        outcome = self.run_amend()
+        self.assertNotEqual([Cause.NO_CONFIRMED_PAYLOAD], self._causes(outcome))
+
     def test_a_clean_history_needs_nothing(self):
         outcome = self.run_amend()
         self.assertEqual([Cause.NO_CONFIRMED_PAYLOAD], self._causes(outcome))
