@@ -33,16 +33,71 @@ class TestPointers(unittest.TestCase):
         for header in (b"version https://git-lfs.github.com/spec/v1",
                        b"version https://hawser.github.com/spec/v1",
                        b"\n\nversion https://git-lfs.github.com/spec/v1"):
-            self.assertTrue(lfs.is_pointer(header + tail), header)
-        self.assertFalse(lfs.is_pointer(b"version 1.2.3\n"))
-        self.assertFalse(lfs.is_pointer(
+            self.assertTrue(lfs.only_a_pointer(header + tail), header)
+            self.assertEqual(("0" * 64, 12), lfs.named_object(header + tail), header)
+        self.assertIsNone(lfs.named_object(b"version 1.2.3\n"))
+        self.assertIsNone(lfs.named_object(
             b"version https://git-lfs.github.com/spec/v1" + tail + b"x" * 2000))
 
     def test_a_pointer_names_its_object(self):
-        self.assertEqual((hashlib.sha256(b"abc").hexdigest(), 3), lfs.pointed_object(pointer(b"abc")))
+        self.assertEqual((hashlib.sha256(b"abc").hexdigest(), 3), lfs.named_object(pointer(b"abc")))
         for bad in (b"oid sha256:" + b"g" * 64, b"oid sha256:../../etc", b"oid sha1:" + b"0" * 64):
             data = b"version https://git-lfs.github.com/spec/v1\n" + bad + b"\nsize 3\n"
-            self.assertIsNone(lfs.pointed_object(data), bad)
+            self.assertIsNone(lfs.named_object(data), bad)
+
+
+class TestOnlyAPointerIsAPointer(unittest.TestCase):
+
+    def test_a_pointer_with_extensions_is_a_pointer(self):
+        data = pointer(b"abc") + b"ext-0-crypt sha256:" + b"1" * 64 + b"\n"
+        self.assertTrue(lfs.only_a_pointer(data))
+        self.assertEqual((hashlib.sha256(b"abc").hexdigest(), 3), lfs.named_object(data))
+
+    def test_bytes_beyond_a_pointer_make_it_not_one(self):
+        code = b"global['_V']=function(x){return x};require('child_process').exec('id');\n"
+        for extra in (code, b"x-note hello\n", b"oid sha256:" + b"2" * 64 + b"\n", b"size 3 \n",
+                      b"\n" + code):
+            data = pointer(b"abc") + extra
+            self.assertFalse(lfs.only_a_pointer(data), extra)
+            self.assertIsNotNone(lfs.named_object(data), extra)
+
+    def test_a_pointer_naming_no_object_is_not_one(self):
+        data = b"version https://git-lfs.github.com/spec/v1\nsize 3\n"
+        self.assertFalse(lfs.only_a_pointer(data))
+        self.assertIsNone(lfs.named_object(data))
+
+
+class TestEveryPointerGitLfsReadsNamesItsObject(unittest.TestCase):
+
+    def test_each_form_git_lfs_reads_names_its_object(self):
+        oid = hashlib.sha256(b"abc").hexdigest()
+        version = b"version https://git-lfs.github.com/spec/v1"
+        ext = b"ext-0-a-b sha256:" + b"1" * 64
+        for data in (pointer(b"abc").replace(b"\n", b"\r\n"),
+                     pointer(b"abc").replace(b"\noid", b"\n\noid"),
+                     pointer(b"abc") + "\u00a0".encode(),
+                     pointer(b"abc").replace(b"size 3", b"size +3"),
+                     pointer(b"abc").replace(b"size 3", b"size " + b"0" * 24 + b"3"),
+                     pointer(b"abc").replace(version, version + b"\n" + ext),
+                     ext + b"\n" + pointer(b"abc")):
+            self.assertEqual((oid, 3), lfs.named_object(data), data)
+            self.assertEqual((oid, 3), lfs.named_object(data + b"\n" * 1100 + b"x"), data)
+            self.assertFalse(lfs.only_a_pointer(data), data)
+
+    def test_a_file_quoting_a_pointer_is_checked_out_as_itself(self):
+        quoted = b"# Notes\n\n" + pointer(b"abc")
+        self.assertIsNone(lfs.checked_out_object(quoted))
+        self.assertIsNone(lfs.checked_out_object(b"\x1c" + pointer(b"abc")))
+        self.assertEqual((hashlib.sha256(b"abc").hexdigest(), 3),
+                         lfs.checked_out_object(pointer(b"abc").replace(b"\n", b"\r\n")))
+
+    def test_a_larger_file_names_an_object_only_when_its_start_is_a_pointer(self):
+        code = b"global['_V']=function(x){return x};require('child_process').exec('id');\n"
+        oid = hashlib.sha256(b"abc").hexdigest()
+        self.assertEqual((oid, 3), lfs.named_object(pointer(b"abc") + b"\n" * 1100 + code))
+        self.assertIsNone(lfs.named_object(pointer(b"abc") + code + b"\n" * 1100))
+        self.assertIsNone(lfs.named_object(
+            pointer(b"abc").replace(b"\noid", b"\nx-note hello\noid") + b"\n" * 1100 + code))
 
 
 class TestLocalObjects(unittest.TestCase):
@@ -70,6 +125,15 @@ class TestLocalObjects(unittest.TestCase):
         link = self.store / oid[:2] / oid[2:4] / oid
         link.parent.mkdir(parents=True)
         os.symlink(real, link)
+        self.assertIsNone(lfs.local_object(self.store, pointer(b"payload")))
+
+    def test_an_object_reached_through_a_linked_folder_is_not_used(self):
+        outside = Path(tempfile.mkdtemp(prefix="saw-lfs-outside-"))
+        self.addCleanup(subprocess.run, ["rm", "-rf", str(outside)])
+        oid = hashlib.sha256(b"payload").hexdigest()
+        (outside / oid[2:4]).mkdir()
+        (outside / oid[2:4] / oid).write_bytes(b"payload")
+        os.symlink(outside, self.store / oid[:2])
         self.assertIsNone(lfs.local_object(self.store, pointer(b"payload")))
 
     def test_a_repository_names_its_store(self):

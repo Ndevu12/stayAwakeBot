@@ -93,6 +93,10 @@ reader, not the mechanism or the weakness it closed.
 - **saw names the compromised versions instead of a version to install.**
 
 ### Fixed
+
+- **`saw scan --history`, `saw fix amend` and the push check read both a stored file's own text and
+  the content Git LFS keeps for it.**
+- **`saw scan --history` reports a history read that stopped early as read in part.**
 - **`saw fix amend` takes malware out of every commit it rewrites.** A confirmed copy still in the
   rewritten history stops the push. A file left for you to recover, a copy on a branch or tag amend
   does not rewrite, and a file it could not read in full are named.
