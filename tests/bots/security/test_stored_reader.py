@@ -142,6 +142,31 @@ class TestGitLfsContentIsRead(_Store):
         self.assertIn("bin/run", [f.path for f, _e in found.findings if f.confidence == "confirmed"])
         self.assertFalse(found.outside_git)
 
+    def test_each_form_git_lfs_reads_has_its_object_read(self):
+        bad = (FILLER * 50 + LOADER).encode()
+        _keep_lfs_object(self.repo / ".git", bad)
+        crlf = _lfs_pointer(bad).replace("\n", "\r\n").encode()
+        larger = _lfs_pointer(bad).encode() + b"\n" * 1100 + FILLER.encode()
+        both = _lfs_pointer(bad).encode() + LOADER.encode()
+        oids = self.store({"assets/a.js": crlf, "assets/b.js": larger, "assets/c.js": both})
+        batch = [SimpleNamespace(path=p, oid=oids[p], link=False) for p in oids]
+        found = version_scan.scan_batch(self.repo, "repo", batch, [],
+                                        oracle.payload_matchers(load_signatures()), [], ScanOptions())
+        self.assertEqual({"assets/a.js", "assets/b.js", "assets/c.js"},
+                         {f.path for f, _e in found.findings if f.confidence == "confirmed"})
+        pairs = [(f.signature_id, f.path) for f, _e in found.findings]
+        self.assertEqual(len(set(pairs)), len(pairs))
+
+    def test_a_form_git_lfs_reads_is_named_when_its_object_is_elsewhere(self):
+        crlf = _lfs_pointer(b"elsewhere").replace("\n", "\r\n").encode()
+        oids = self.store({"assets/a.js": crlf, "assets/b.js": crlf + b"\n" * 5000 + b"x"})
+        batch = [SimpleNamespace(path=p, oid=oids[p], link=False) for p in oids]
+        opts = ScanOptions()
+        opts.max_file_bytes = 4096
+        found = version_scan.scan_batch(self.repo, "repo", batch, [],
+                                        oracle.payload_matchers(load_signatures()), [], opts)
+        self.assertEqual({"assets/a.js", "assets/b.js"}, found.outside_git)
+
     def test_a_history_scan_reads_what_lfs_keeps_here_and_names_the_rest(self):
         from stayawake.bots.security import scanner
         content = (LOADER + FILLER).encode()

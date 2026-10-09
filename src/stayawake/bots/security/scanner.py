@@ -327,12 +327,17 @@ def scan_target(target, signatures_by_matcher: dict[str, list[dict[str, Any]]],
 
 
 def _scan_target(target, signatures_by_matcher, allowlist, all_sigs, order) -> ScanResult:
-    """`scan_target`'s body, run inside one pass. Takes the target, the signatures by matcher, the
-    allowlist, every signature and the matcher order. Returns the result."""
+    """Run every matcher over a target, and over what it reads beside its files, inside one pass.
+    Takes the target, the signatures by matcher, the allowlist, every signature and the matcher
+    order. Returns the result."""
     try:
         by_matcher = run_matchers(target, order, signatures_by_matcher, all_sigs)
-        # A named file has no tree to answer about: `root` is only the directory it sits in, and
-        # every root-keyed step below it would report on what the operator did not name.
+        beside = target.read_beside() if hasattr(target, "read_beside") else None
+        if beside is not None:
+            for name, found in run_matchers(beside, order, signatures_by_matcher, all_sigs).items():
+                known = {(f.signature_id, f.path) for f in by_matcher.get(name, [])}
+                by_matcher.setdefault(name, []).extend(
+                    f for f in found if (f.signature_id, f.path) not in known)
         root = (None if getattr(target, "names_one_file", False)
                 or not getattr(target, "reads_checkout", True) else getattr(target, "scan_root", None))
         return finalize(target.display, target.source, by_matcher, order,

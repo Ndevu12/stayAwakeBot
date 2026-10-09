@@ -79,8 +79,12 @@ class HistoryTarget(Target):
         self.read_ahead: dict[str, bytes] = {}
         self.sizes: dict[str, int] = {}
         self.read_in_part: set[str] = set()
-        self.objects: dict[str, Path | None] = {}
+        self.objects: dict[str, Path] = {}
+        self.objects_beside: dict[str, Path] = {}
+        self.bytes_beside: set[str] = set()
         self.kept_elsewhere: set[str] = set()
+        self.reads_git_lfs = True
+        self._held: dict[str, Path | None] = {}
         self._lfs_store: Path | None | bool = False
 
     def __len__(self) -> int:
@@ -144,18 +148,24 @@ class HistoryTarget(Target):
             self.read_errors.append(rel)
 
     def local_object(self, sha: str, data: bytes | None = None) -> Path | None:
-        """Find the local Git LFS object a stored version points to. Takes the blob id and, when at
-        hand, its bytes. Returns the object's path, or None when the version is not a pointer or its
+        """Find the local Git LFS object a stored version names. Takes the blob id and, when at
+        hand, its bytes. Returns the object's path, or None when the version names none or its
         object is not kept here."""
-        if sha in self.objects:
-            return self.objects[sha]
+        if sha in self._held:
+            return self._held[sha]
         data = self.read_ahead.get(sha) if data is None else data
-        if not data or not lfs.is_pointer(data):
+        if not data or lfs.named_object(data) is None:
             return None
         if self._lfs_store is False:
             self._lfs_store = lfs.store_of(self.root)
-        self.objects[sha] = lfs.local_object(self._lfs_store, data) if self._lfs_store else None
-        return self.objects[sha]
+        self._held[sha] = lfs.local_object(self._lfs_store, data) if self._lfs_store else None
+        return self._held[sha]
+
+    def read_beside(self) -> HistoryTarget | None:
+        """Build the target that reads what a checkout of these versions also holds: the Git LFS
+        object of a version read as its own bytes, and the bytes of one read as its object. Returns
+        it, or None when there is nothing more to read."""
+        return _ReadBeside(self) if self.objects_beside or self.bytes_beside else None
 
     def _size(self, sha: str) -> int | None:
         """Ask the store for a version's size. Takes the blob id. Returns the size in bytes, or None
@@ -187,28 +197,30 @@ class HistoryTarget(Target):
         return proc
 
     def _stream(self, rel: str, cap: int) -> tuple[bytes | None, bool]:
-        """At most `cap` bytes of a stored version, and whether there were more.
-
-        Streamed and capped rather than captured whole: a size test after the read cannot bound it,
-        because the read itself is what costs. The tree side stats before opening; a stored version
-        has nothing to stat, so the cap moves into the read.
-        """
+        """Read at most `cap` bytes of a stored version, or of the Git LFS object read in its place.
+        Takes the path and the cap. Returns the bytes and whether there were more, or None when the
+        version could not be read."""
         sha = self._sha_by_path.get(rel)
         if sha is None:
             return None, False
-        if not self.objects.get(sha):
-            data, more = self._stream_blob(rel, sha, max(cap, lfs.POINTER_MAX_BYTES))
-            if more or not data or not lfs.is_pointer(data):
+        if self.reads_git_lfs and sha not in self.objects:
+            data, more = self._stream_blob(rel, sha, max(cap, lfs.POINTER_MAX_BYTES + 1))
+            held = self.local_object(sha, data) if data else None
+            if held is None or len(data) > lfs.POINTER_MAX_BYTES:
+                if held is not None:
+                    self.objects_beside[rel] = held
+                elif data and lfs.named_object(data) is not None:
+                    self.kept_elsewhere.add(rel)
                 return (data[:cap], more or len(data) > cap) if data else (data, more)
-            if self.local_object(sha, data) is None:
-                self.kept_elsewhere.add(rel)
-                return data[:cap], len(data) > cap
+            self.objects[sha] = held
+            if not lfs.only_a_pointer(data):
+                self.bytes_beside.add(rel)
         return self._stream_blob(rel, sha, cap)
 
     def _stream_blob(self, rel: str, sha: str, cap: int) -> tuple[bytes | None, bool]:
         """Read at most `cap` bytes of one stored version. Takes the path, the blob id and the cap.
         Returns the bytes and whether there were more, or None when it could not be read."""
-        if sha in self.read_ahead and not self.objects.get(sha):
+        if sha in self.read_ahead and sha not in self.objects:
             data = self.read_ahead[sha]
             return data[:cap], len(data) > cap
         try:
@@ -253,3 +265,22 @@ class HistoryTarget(Target):
             self.read_errors.append(rel)
             return None
         return head if total <= half else head + TRUNCATION_MARKER + tail
+
+
+class _ReadBeside(HistoryTarget):
+    """Read what a checkout of some stored versions holds besides what was read for them, each under
+    its version's path."""
+
+    def __init__(self, origin: HistoryTarget):
+        """Build the reader. Takes the target whose versions were read."""
+        paths = set(origin.objects_beside) | origin.bytes_beside
+        super().__init__(origin.root, origin.display, origin.opts,
+                         {rel: [origin.sha_for(rel)] for rel in paths})
+        self.source = origin.source
+        self.reads_git_lfs = False
+        self.merge_scope: list[str] = []
+        self.objects = {origin.sha_for(rel): path for rel, path in origin.objects_beside.items()}
+        self.read_ahead = origin.read_ahead
+        self.sizes = origin.sizes
+        self.read_errors = origin.read_errors
+        self.read_in_part = origin.read_in_part
