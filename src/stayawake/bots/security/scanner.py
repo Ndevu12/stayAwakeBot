@@ -334,17 +334,18 @@ def _scan_target(target, signatures_by_matcher, allowlist, all_sigs, order) -> S
     order. Returns the result."""
     try:
         by_matcher = run_matchers(target, order, signatures_by_matcher, all_sigs)
-        beside = target.read_beside() if hasattr(target, "read_beside") else None
-        if beside is not None:
-            try:
-                found_beside = run_matchers(beside, order, signatures_by_matcher, all_sigs)
-            except Exception:
-                target.read_errors.extend(beside.iter_files())
-                found_beside = {}
-            for name, found in found_beside.items():
-                known = {(f.signature_id, f.path) for f in by_matcher.get(name, [])}
-                by_matcher.setdefault(name, []).extend(
-                    f for f in found if (f.signature_id, f.path) not in known)
+        beside = None
+        try:
+            beside = target.read_beside() if hasattr(target, "read_beside") else None
+            found_beside = (run_matchers(beside, order, signatures_by_matcher, all_sigs)
+                            if beside else {})
+        except Exception:
+            target.read_errors.extend((beside or target).iter_files())
+            found_beside = {}
+        for name, found in found_beside.items():
+            known = {(f.signature_id, f.path) for f in by_matcher.get(name, [])}
+            by_matcher.setdefault(name, []).extend(
+                f for f in found if (f.signature_id, f.path) not in known)
         root = (None if getattr(target, "names_one_file", False)
                 or not getattr(target, "reads_checkout", True) else getattr(target, "scan_root", None))
         return finalize(target.display, target.source, by_matcher, order,

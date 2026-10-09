@@ -183,6 +183,19 @@ class TestGitLfsContentIsRead(_Store):
         self.assertIn("assets/c.js", [f.path for f, _e in found.findings if f.confidence == "confirmed"])
         self.assertIn("assets/c.js", found.unread)
 
+    def test_a_second_reader_that_cannot_be_built_keeps_the_first_read(self):
+        from unittest import mock
+        bad = (FILLER * 50 + LOADER).encode()
+        _keep_lfs_object(self.repo / ".git", bad)
+        oids = self.store({"assets/c.js": _lfs_pointer(bad).encode() + b"// more\n"})
+        batch = [SimpleNamespace(path="assets/c.js", oid=oids["assets/c.js"], link=False)]
+        with mock.patch.object(HistoryTarget, "read_beside", side_effect=RuntimeError("stopped")):
+            found = version_scan.scan_batch(self.repo, "repo", batch, [],
+                                            oracle.payload_matchers(load_signatures()), [],
+                                            ScanOptions())
+        self.assertIn("assets/c.js", [f.path for f, _e in found.findings if f.confidence == "confirmed"])
+        self.assertIn("assets/c.js", found.unread)
+
     def test_a_form_git_lfs_reads_is_named_when_its_object_is_elsewhere(self):
         crlf = _lfs_pointer(b"elsewhere").replace("\n", "\r\n").encode()
         quoted = b"# Notes\n\n" + _lfs_pointer(b"elsewhere").encode()

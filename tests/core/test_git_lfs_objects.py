@@ -87,6 +87,7 @@ class TestEveryPointerGitLfsReadsNamesItsObject(unittest.TestCase):
     def test_a_file_quoting_a_pointer_is_checked_out_as_itself(self):
         quoted = b"# Notes\n\n" + pointer(b"abc")
         self.assertIsNone(lfs.checked_out_object(quoted))
+        self.assertIsNone(lfs.checked_out_object(b"\x1c" + pointer(b"abc")))
         self.assertEqual((hashlib.sha256(b"abc").hexdigest(), 3),
                          lfs.checked_out_object(pointer(b"abc").replace(b"\n", b"\r\n")))
 

@@ -16,6 +16,8 @@ POINTER_MAX_BYTES = 1024
 _SPEC_NAMES = (b"git-lfs", b"hawser", b"git-media")
 _POINTER_KEYS = (b"version", b"oid", b"size")
 _EXTENSION_KEY = re.compile(rb"ext-[0-9]-[0-9A-Za-z_]")
+_SPACE = ("\t\n\v\f\r \x85\xa0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009"
+          "\u200a\u2028\u2029\u202f\u205f\u3000")
 _HEX = frozenset(b"0123456789abcdef")
 _CHUNK = 1 << 20
 
@@ -45,7 +47,7 @@ def _size(value: bytes) -> int | None:
 
 def _trimmed(data: bytes) -> bytes:
     """Trim the white space around stored bytes. Takes the bytes. Returns them without it."""
-    return data.decode("utf-8", "surrogateescape").strip().encode("utf-8", "surrogateescape")
+    return data.decode("utf-8", "surrogateescape").strip(_SPACE).encode("utf-8", "surrogateescape")
 
 
 def _fields(data: bytes) -> dict[bytes, bytes] | None:
@@ -97,8 +99,8 @@ def _decoded(head: bytes) -> tuple[str, int] | None:
 
 def _listed(data: bytes) -> tuple[str, int] | None:
     """Find the object a pointer's lines name, in any order and among any other lines. Takes stored
-    bytes of at most a pointer's length. Returns the object's sha256 id and size, or None when they name
-    none."""
+    bytes of at most a pointer's length. Returns the object's sha256 id and size, or None when they
+    name none."""
     lines = [line.strip() for line in _trimmed(data).split(b"\n")]
     if not any(line == b"version " + url for line in lines for url in SPEC_URLS):
         return None
@@ -128,9 +130,9 @@ def checked_out_object(data: bytes) -> tuple[str, int] | None:
 
 
 def named_object(data: bytes) -> tuple[str, int] | None:
-    """Read the object a stored file names as a Git LFS pointer. Takes the file's bytes, or its first
-    bytes when there are more than a pointer holds. Returns the object's sha256 id and size, or None
-    when it names none."""
+    """Read the object a stored file names as a Git LFS pointer. Takes the file's bytes, or its
+    first bytes when there are more than a pointer holds. Returns the object's sha256 id and size,
+    or None when it names none."""
     if len(data) > POINTER_MAX_BYTES:
         return checked_out_object(data)
     if not data or not any(name in data for name in _SPEC_NAMES):
