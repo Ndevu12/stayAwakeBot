@@ -599,7 +599,8 @@ class TestPastCommitsWhenTheCheckoutIsClean(_Rewrite):
         self.git(self.d, "worktree", "add", "-q", str(self.d.parent / "other"), "gone")
         self.git(self.d, "update-ref", "-d", "refs/heads/gone")
         outcome = self.run_amend()
-        self.assertNotIn(Cause.HISTORY_UNREADABLE, self._causes(outcome))
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertNotIn(Cause.REMOVAL_NOT_CONFIRMED, self._causes(outcome))
         self.assertFalse(self.ever_holds(LOADER))
 
     def test_submodule_versions_in_past_commits_are_named(self):
@@ -610,7 +611,37 @@ class TestPastCommitsWhenTheCheckoutIsClean(_Rewrite):
         self.git(self.d, "commit", "-qm", "remove it")
         outcome = self.run_amend()
         self.assertIn(Cause.SUBMODULES_NOT_READ, self._causes(outcome))
+        self.assertFalse(outcome.needs_review)
+
+    def test_a_payload_only_a_tag_holds_is_named(self):
+        self.git(self.d, "checkout", "-qb", "side")
+        self.write(self.d, "vendor/x/loader.js", LOADER)
+        self.commit(self.d, "side work")
+        self.git(self.d, "tag", "v-side")
+        self.git(self.d, "checkout", "-q", self.base)
+        self.git(self.d, "branch", "-q", "-D", "side")
+        outcome = self.run_amend()
+        self.assertIn(Cause.PAYLOAD_REACHABLE_FROM_OTHER_REFS, self._causes(outcome))
+        self.assertIn("v-side", " ".join(r.detail for r in outcome.reasons))
         self.assertTrue(outcome.needs_review)
+
+    def test_refs_it_could_not_list_are_named(self):
+        with mock.patch.object(amendmod, "_candidate_refs", return_value=([], ["the tags"])):
+            outcome = self.run_amend()
+        self.assertIn(Cause.HISTORY_UNREADABLE, self._causes(outcome))
+        self.assertTrue(outcome.needs_review)
+
+    def test_a_tag_holding_its_own_copy_leaves_the_branches_cleaned(self):
+        self.git(self.d, "checkout", "-q", "--detach")
+        self.write(self.d, "vendor/y/loader.js", LOADER + "// kept by a tag\n")
+        self.commit(self.d, "tagged work")
+        self.git(self.d, "tag", "v-old")
+        self.git(self.d, "checkout", "-q", self.base)
+        self.add_then_remove("vendor/x/loader.js")
+        outcome = self.run_amend()
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertFalse(self.ever_holds(LOADER))
+        self.assertIn(Cause.PAYLOAD_REACHABLE_FROM_OTHER_REFS, self._causes(outcome))
 
     def test_a_clean_history_needs_nothing(self):
         outcome = self.run_amend()

@@ -103,7 +103,7 @@ class Cause(Enum):
 
 _NEEDING_NO_ACTION = frozenset({Cause.PREVIOUS_OBJECTS_UNCOLLECTED, Cause.NO_CONFIRMED_PAYLOAD,
                                 Cause.SAVED_WORK_CLEANED_HERE, Cause.ARRIVALS_KEPT,
-                                Cause.LARGE_FILES_NOT_READ_IN_FULL})
+                                Cause.LARGE_FILES_NOT_READ_IN_FULL, Cause.SUBMODULES_NOT_READ})
 
 
 @dataclass(frozen=True)
@@ -241,7 +241,7 @@ _PHRASE = {
         "branches were moved and could not be put back — inspect this repository",
     Cause.SCAN_DID_NOT_FINISH: "the scan did not finish",
     Cause.NO_CONFIRMED_PAYLOAD:
-        "no confirmed payload in the checkout or in the past commits of its branches and checkouts",
+        "no confirmed payload in the checkout or in the repository's past commits",
     Cause.MANY_CONFIRMED_COMMITS: "{detail} confirmed past commits",
     Cause.CONFIRMED_COMMIT_UNRESOLVED: "the confirmed commit could not be resolved",
     Cause.COMMIT_ON_NO_BRANCH: "the commit is not on any branch",
@@ -329,11 +329,11 @@ _PHRASE = {
     Cause.LARGE_FILES_NOT_READ_IN_FULL:
         "{detail} large binary or Git LFS file version(s) in past commits were not read in full",
     Cause.PAST_COMMITS_READ_IN_PART:
-        "only the newest {detail} file versions in the past commits of its branches and checkouts "
-        "were read — review the older ones yourself",
+        "only the newest {detail} file versions in the repository's past commits were read — "
+        "review the older ones yourself",
     Cause.SUBMODULES_NOT_READ:
-        "{detail} submodule version(s) in past commits were not read — review them in their own "
-        "repositories",
+        "{detail} submodule version(s) in past commits are kept in other repositories and were not "
+        "read",
     Cause.ARRIVED_COPIES_REMAIN:
         "a copy of a file that came in with the malware is still on {detail} — review it there",
     Cause.ARRIVALS_ANSWERS_NOT_SAVED:
