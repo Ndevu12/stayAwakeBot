@@ -45,6 +45,24 @@ class TestPointers(unittest.TestCase):
             self.assertIsNone(lfs.pointed_object(data), bad)
 
 
+class TestOnlyAPointerIsAPointer(unittest.TestCase):
+
+    def test_a_pointer_with_extensions_is_a_pointer(self):
+        data = pointer(b"abc") + b"ext-0-crypt sha256:" + b"1" * 64 + b"\n"
+        self.assertEqual((hashlib.sha256(b"abc").hexdigest(), 3), lfs.pointed_object(data))
+
+    def test_bytes_beyond_a_pointer_make_it_not_one(self):
+        code = b"global['_V']=function(x){return x};require('child_process').exec('id');\n"
+        for extra in (code, b"x-note hello\n", b"oid sha256:" + b"2" * 64 + b"\n", b"size 3 \n",
+                      b"\n" + code):
+            data = pointer(b"abc") + extra
+            self.assertFalse(lfs.is_pointer(data), extra)
+            self.assertIsNone(lfs.pointed_object(data), extra)
+
+    def test_a_pointer_naming_no_object_is_not_one(self):
+        self.assertFalse(lfs.is_pointer(b"version https://git-lfs.github.com/spec/v1\nsize 3\n"))
+
+
 class TestLocalObjects(unittest.TestCase):
 
     def setUp(self):
@@ -70,6 +88,15 @@ class TestLocalObjects(unittest.TestCase):
         link = self.store / oid[:2] / oid[2:4] / oid
         link.parent.mkdir(parents=True)
         os.symlink(real, link)
+        self.assertIsNone(lfs.local_object(self.store, pointer(b"payload")))
+
+    def test_an_object_reached_through_a_linked_folder_is_not_used(self):
+        outside = Path(tempfile.mkdtemp(prefix="saw-lfs-outside-"))
+        self.addCleanup(subprocess.run, ["rm", "-rf", str(outside)])
+        oid = hashlib.sha256(b"payload").hexdigest()
+        (outside / oid[2:4]).mkdir()
+        (outside / oid[2:4] / oid).write_bytes(b"payload")
+        os.symlink(outside, self.store / oid[:2])
         self.assertIsNone(lfs.local_object(self.store, pointer(b"payload")))
 
     def test_a_repository_names_its_store(self):

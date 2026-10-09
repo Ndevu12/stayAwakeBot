@@ -132,6 +132,16 @@ class TestGitLfsContentIsRead(_Store):
         self.assertFalse(found.findings)
         self.assertEqual({"assets/app.js"}, found.outside_git)
 
+    def test_a_pointer_carrying_more_lines_is_read_as_itself(self):
+        clean = (FILLER * 50).encode()
+        _keep_lfs_object(self.repo / ".git", clean)
+        oids = self.store({"bin/run": _lfs_pointer(clean).encode() + LOADER.encode()})
+        batch = [SimpleNamespace(path="bin/run", oid=oids["bin/run"], link=False)]
+        found = version_scan.scan_batch(self.repo, "repo", batch, [],
+                                        oracle.payload_matchers(load_signatures()), [], ScanOptions())
+        self.assertIn("bin/run", [f.path for f, _e in found.findings if f.confidence == "confirmed"])
+        self.assertFalse(found.outside_git)
+
     def test_a_history_scan_reads_what_lfs_keeps_here_and_names_the_rest(self):
         from stayawake.bots.security import scanner
         content = (LOADER + FILLER).encode()

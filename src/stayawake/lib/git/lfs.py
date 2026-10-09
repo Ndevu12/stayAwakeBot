@@ -16,30 +16,52 @@ _HEX = frozenset(b"0123456789abcdef")
 _CHUNK = 1 << 20
 
 
+def _sha256_ref(value: bytes) -> bool:
+    """Tell whether a pointer value is a sha256 reference. Takes the value. Returns the answer."""
+    digest = value[len(b"sha256:"):]
+    return value.startswith(b"sha256:") and len(digest) == 64 and set(digest) <= _HEX
+
+
+def _extension_key(key: bytes) -> bool:
+    """Tell whether a pointer key names an extension. Takes the key. Returns the answer."""
+    parts = key.split(b"-", 2)
+    return (len(parts) == 3 and parts[0] == b"ext" and len(parts[1]) == 1
+            and parts[1].isdigit() and parts[2].replace(b"_", b"").isalnum())
+
+
+def _fields(data: bytes) -> dict[bytes, bytes] | None:
+    """Split stored bytes into a pointer's fields. Takes the bytes. Returns each key's value when
+    every line is one a Git LFS pointer holds and it names an object, else None."""
+    if not data or len(data) > POINTER_MAX_BYTES:
+        return None
+    lines = data.strip().split(b"\n")
+    if not any(lines[0] == b"version " + url for url in SPEC_URLS):
+        return None
+    fields: dict[bytes, bytes] = {}
+    for line in lines[1:]:
+        key, sp, value = line.partition(b" ")
+        known = ((key == b"oid" and _sha256_ref(value))
+                 or (key == b"size" and value.isdigit() and len(value) <= 20)
+                 or (_extension_key(key) and _sha256_ref(value)))
+        if not sp or key in fields or not known:
+            return None
+        fields[key] = value
+    return fields if b"oid" in fields and b"size" in fields else None
+
+
 def is_pointer(data: bytes) -> bool:
     """Tell whether stored bytes are a Git LFS pointer. Takes the bytes. Returns True when git-lfs
-    reads them as one."""
-    if not data or len(data) > POINTER_MAX_BYTES:
-        return False
-    first = data.strip().split(b"\n", 1)[0].strip()
-    return any(first == b"version " + url for url in SPEC_URLS)
+    reads them as one: a version line, then only the keys a pointer holds."""
+    return _fields(data) is not None
 
 
 def pointed_object(data: bytes) -> tuple[str, int] | None:
     """Read the object a pointer names. Takes the pointer bytes. Returns its sha256 id and size, or
-    None when the bytes are not a pointer that names one."""
-    if not is_pointer(data):
+    None when the bytes are not a pointer."""
+    fields = _fields(data)
+    if fields is None:
         return None
-    oid = size = None
-    for line in data.strip().split(b"\n"):
-        key, _sp, value = line.strip().partition(b" ")
-        if key == b"oid" and value.startswith(b"sha256:"):
-            oid = value[len(b"sha256:"):]
-        elif key == b"size" and value.isdigit() and len(value) <= 20:
-            size = int(value)
-    if oid is None or size is None or len(oid) != 64 or not set(oid) <= _HEX:
-        return None
-    return oid.decode("ascii"), size
+    return fields[b"oid"][len(b"sha256:"):].decode("ascii"), int(fields[b"size"])
 
 
 def store_of(repo: str | Path) -> Path | None:
@@ -54,7 +76,8 @@ def store_of(repo: str | Path) -> Path | None:
 def local_object(store: Path, data: bytes) -> Path | None:
     """Find the object a pointer names in a local store, checked against the pointer. Takes the
     objects directory and the pointer bytes. Returns the object's path when it is a regular file
-    whose size and sha256 match the pointer, else None."""
+    inside the store, reached through no link, whose size and sha256 match the pointer, else
+    None."""
     named = pointed_object(data)
     if named is None:
         return None
@@ -63,6 +86,8 @@ def local_object(store: Path, data: bytes) -> Path | None:
     try:
         st = os.lstat(path)
         if not stat.S_ISREG(st.st_mode) or st.st_size != size:
+            return None
+        if os.path.realpath(path) != os.path.join(os.path.realpath(store), oid[:2], oid[2:4], oid):
             return None
         digest = hashlib.sha256()
         fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
