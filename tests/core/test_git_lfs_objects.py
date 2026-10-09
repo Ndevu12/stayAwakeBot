@@ -84,6 +84,12 @@ class TestEveryPointerGitLfsReadsNamesItsObject(unittest.TestCase):
             self.assertEqual((oid, 3), lfs.named_object(data + b"\n" * 1100 + b"x"), data)
             self.assertFalse(lfs.only_a_pointer(data), data)
 
+    def test_a_file_quoting_a_pointer_is_checked_out_as_itself(self):
+        quoted = b"# Notes\n\n" + pointer(b"abc")
+        self.assertIsNone(lfs.checked_out_object(quoted))
+        self.assertEqual((hashlib.sha256(b"abc").hexdigest(), 3),
+                         lfs.checked_out_object(pointer(b"abc").replace(b"\n", b"\r\n")))
+
     def test_a_larger_file_names_an_object_only_when_its_start_is_a_pointer(self):
         code = b"global['_V']=function(x){return x};require('child_process').exec('id');\n"
         oid = hashlib.sha256(b"abc").hexdigest()

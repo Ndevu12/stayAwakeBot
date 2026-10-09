@@ -249,6 +249,8 @@ def _history_residue_note(root, opts, signatures, allowlist) -> str | None:
         result = scan_target(target, signatures, allowlist)
         hits += [f for f in result.findings if f.confidence == CONFIRMED]
         unread |= set(target.read_errors)
+        if result.error:
+            unread |= set(target.iter_files()) - {f.path for f in result.findings}
         elsewhere |= target.kept_elsewhere
     beyond = sum(max(len(v) - _HISTORY_ROUNDS, 0) for v in versions.values())
     cut = (f" {beyond} further version(s) of {sum(1 for v in versions.values() if len(v) > _HISTORY_ROUNDS)}"
@@ -334,7 +336,12 @@ def _scan_target(target, signatures_by_matcher, allowlist, all_sigs, order) -> S
         by_matcher = run_matchers(target, order, signatures_by_matcher, all_sigs)
         beside = target.read_beside() if hasattr(target, "read_beside") else None
         if beside is not None:
-            for name, found in run_matchers(beside, order, signatures_by_matcher, all_sigs).items():
+            try:
+                found_beside = run_matchers(beside, order, signatures_by_matcher, all_sigs)
+            except Exception:
+                target.read_errors.extend(beside.iter_files())
+                found_beside = {}
+            for name, found in found_beside.items():
                 known = {(f.signature_id, f.path) for f in by_matcher.get(name, [])}
                 by_matcher.setdefault(name, []).extend(
                     f for f in found if (f.signature_id, f.path) not in known)

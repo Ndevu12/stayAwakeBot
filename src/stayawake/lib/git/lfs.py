@@ -118,14 +118,23 @@ def only_a_pointer(data: bytes) -> bool:
     return _fields(data) is not None
 
 
+def checked_out_object(data: bytes) -> tuple[str, int] | None:
+    """Read the object Git LFS checks out in place of a stored file. Takes the file's bytes, or its
+    first bytes when there are more than a pointer holds. Returns the object's sha256 id and size,
+    or None when Git LFS checks out the bytes themselves."""
+    if not data or not any(name in data[:POINTER_MAX_BYTES] for name in _SPEC_NAMES):
+        return None
+    return _decoded(data[:POINTER_MAX_BYTES])
+
+
 def named_object(data: bytes) -> tuple[str, int] | None:
     """Read the object a stored file names as a Git LFS pointer. Takes the file's bytes, or its first
     bytes when there are more than a pointer holds. Returns the object's sha256 id and size, or None
     when it names none."""
-    if not data or not any(name in data[:POINTER_MAX_BYTES] for name in _SPEC_NAMES):
-        return None
     if len(data) > POINTER_MAX_BYTES:
-        return _decoded(data[:POINTER_MAX_BYTES])
+        return checked_out_object(data)
+    if not data or not any(name in data for name in _SPEC_NAMES):
+        return None
     return _listed(data)
 
 

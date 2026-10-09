@@ -81,7 +81,7 @@ class HistoryTarget(Target):
         self.read_in_part: set[str] = set()
         self.objects: dict[str, Path] = {}
         self.objects_beside: dict[str, Path] = {}
-        self.bytes_beside: set[str] = set()
+        self.blobs_beside: set[str] = set()
         self.kept_elsewhere: set[str] = set()
         self.reads_git_lfs = True
         self._held: dict[str, Path | None] = {}
@@ -165,7 +165,7 @@ class HistoryTarget(Target):
         """Build the target that reads what a checkout of these versions also holds: the Git LFS
         object of a version read as its own bytes, and the bytes of one read as its object. Returns
         it, or None when there is nothing more to read."""
-        return _ReadBeside(self) if self.objects_beside or self.bytes_beside else None
+        return _ReadBeside(self) if self.objects_beside or self.blobs_beside else None
 
     def _size(self, sha: str) -> int | None:
         """Ask the store for a version's size. Takes the blob id. Returns the size in bytes, or None
@@ -209,12 +209,12 @@ class HistoryTarget(Target):
             if held is None or len(data) > lfs.POINTER_MAX_BYTES:
                 if held is not None:
                     self.objects_beside[rel] = held
-                elif data and lfs.named_object(data) is not None:
+                elif data and lfs.checked_out_object(data) is not None:
                     self.kept_elsewhere.add(rel)
                 return (data[:cap], more or len(data) > cap) if data else (data, more)
             self.objects[sha] = held
             if not lfs.only_a_pointer(data):
-                self.bytes_beside.add(rel)
+                self.blobs_beside.add(sha)
         return self._stream_blob(rel, sha, cap)
 
     def _stream_blob(self, rel: str, sha: str, cap: int) -> tuple[bytes | None, bool]:
@@ -273,7 +273,8 @@ class _ReadBeside(HistoryTarget):
 
     def __init__(self, origin: HistoryTarget):
         """Build the reader. Takes the target whose versions were read."""
-        paths = set(origin.objects_beside) | origin.bytes_beside
+        paths = set(origin.objects_beside) | {rel for rel in origin.iter_files()
+                                              if origin.sha_for(rel) in origin.blobs_beside}
         super().__init__(origin.root, origin.display, origin.opts,
                          {rel: [origin.sha_for(rel)] for rel in paths})
         self.source = origin.source

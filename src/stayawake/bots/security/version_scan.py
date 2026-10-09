@@ -69,7 +69,7 @@ def scan_batch(repo: Path, display: str, batch: list, merges: list[str], signatu
     if result.error:
         unread |= set(by_path) - {f.path for f in result.findings}
     outside_git = target.kept_elsewhere | {
-        e.path for e in batch if lfs.named_object(target.read_ahead.get(e.oid, b""))
+        e.path for e in batch if lfs.checked_out_object(target.read_ahead.get(e.oid, b""))
         and target.local_object(e.oid) is None}
     in_part = set(getattr(target, "read_in_part", ()))
     runnable = {p for p in in_part | outside_git

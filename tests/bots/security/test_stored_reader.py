@@ -157,9 +157,37 @@ class TestGitLfsContentIsRead(_Store):
         pairs = [(f.signature_id, f.path) for f, _e in found.findings]
         self.assertEqual(len(set(pairs)), len(pairs))
 
+    def test_the_same_stored_bytes_are_read_at_every_path(self):
+        clean = (FILLER * 50).encode()
+        _keep_lfs_object(self.repo / ".git", clean)
+        both = _lfs_pointer(clean).encode() + LOADER.encode()
+        oids = self.store({"assets/a.js": both, "assets/b.js": both})
+        batch = [SimpleNamespace(path=p, oid=oids[p], link=False) for p in oids]
+        found = version_scan.scan_batch(self.repo, "repo", batch, [],
+                                        oracle.payload_matchers(load_signatures()), [], ScanOptions())
+        self.assertEqual({"assets/a.js", "assets/b.js"},
+                         {f.path for f, _e in found.findings if f.confidence == "confirmed"})
+
+    def test_a_second_read_that_fails_keeps_the_first_and_is_named(self):
+        from unittest import mock
+        from stayawake.bots.security.targets import history
+        bad = (FILLER * 50 + LOADER).encode()
+        _keep_lfs_object(self.repo / ".git", bad)
+        oids = self.store({"assets/c.js": _lfs_pointer(bad).encode() + b"// more\n"})
+        batch = [SimpleNamespace(path="assets/c.js", oid=oids["assets/c.js"], link=False)]
+        with mock.patch.object(history._ReadBeside, "read_source_windows",
+                               side_effect=RuntimeError("stopped")):
+            found = version_scan.scan_batch(self.repo, "repo", batch, [],
+                                            oracle.payload_matchers(load_signatures()), [],
+                                            ScanOptions())
+        self.assertIn("assets/c.js", [f.path for f, _e in found.findings if f.confidence == "confirmed"])
+        self.assertIn("assets/c.js", found.unread)
+
     def test_a_form_git_lfs_reads_is_named_when_its_object_is_elsewhere(self):
         crlf = _lfs_pointer(b"elsewhere").replace("\n", "\r\n").encode()
-        oids = self.store({"assets/a.js": crlf, "assets/b.js": crlf + b"\n" * 5000 + b"x"})
+        quoted = b"# Notes\n\n" + _lfs_pointer(b"elsewhere").encode()
+        oids = self.store({"assets/a.js": crlf, "assets/b.js": crlf + b"\n" * 5000 + b"x",
+                           "docs/lfs.md": quoted})
         batch = [SimpleNamespace(path=p, oid=oids[p], link=False) for p in oids]
         opts = ScanOptions()
         opts.max_file_bytes = 4096
@@ -177,6 +205,17 @@ class TestGitLfsContentIsRead(_Store):
                                             load_signatures(), [])
         self.assertIn("kept.js", note)
         self.assertIn("1 stored version(s) are kept in Git LFS", note)
+
+    def test_a_history_scan_that_fails_is_never_reported_read(self):
+        from unittest import mock
+        from stayawake.bots.security import scanner
+        from stayawake.bots.security.models import ScanResult
+        self.store({"a.js": b"var a = 1;\n"})
+        failed = ScanResult(target="repo", source="history", error="stopped")
+        with mock.patch.object(scanner, "scan_target", return_value=failed):
+            note = scanner.history_residue_note(self.repo, ScanOptions(history=True),
+                                                load_signatures(), [])
+        self.assertIn("UNKNOWN", note)
 
 
 class TestWindowsCoverTheWholeFile(unittest.TestCase):
