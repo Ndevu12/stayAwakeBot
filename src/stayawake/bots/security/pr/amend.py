@@ -273,9 +273,9 @@ def _confirmed_versions(repo: Path, display: str, tips, boundary, signatures, al
                         limit: int | None = None) -> list:
     """Read every version the history from a boundary to some tips adds, except those `skip(path,
     oid)` leaves to another step. Takes the repo, how it is shown, the tips, the boundary commits,
-    the signatures, allowlist and scan options, the skip check, the `_HistoryPayloads` whose
-    `judged`, `unread`, `partly_read` and `submodules` it fills, what to call the history when it cannot be read,
-    and a bound on the newest versions read. Returns each confirmed finding with its version."""
+    the signatures, allowlist and scan options, the skip check, the `_HistoryPayloads` to fill, what
+    to call the history when it cannot be read, and a bound on the newest versions read. Returns
+    each confirmed finding with its version."""
     commits = pushed.commits_between(repo, list(tips), list(boundary))
     listed = (pushed.history_entries(repo, commits, **({"limit": limit} if limit else {}))
               if commits is not None else None)
@@ -289,6 +289,15 @@ def _confirmed_versions(repo: Path, display: str, tips, boundary, signatures, al
         out.cut_at = limit
     elif not whole:
         out.unread.append(subject)
+    return _scan_versions(repo, display, entries, signatures, allowlist, opts, skip, out)
+
+
+def _scan_versions(repo: Path, display: str, entries, signatures, allowlist, opts, skip,
+                   out: _HistoryPayloads) -> list:
+    """Scan stored versions for confirmed payloads, except those `skip(path, oid)` leaves to another
+    step. Takes the repo, how it is shown, the versions, the signatures, allowlist and scan options,
+    the skip check and the `_HistoryPayloads` whose `judged`, `confirmed`, `unread`, `partly_read`
+    and `runnable` it fills. Returns each confirmed finding with its version."""
     fresh = [e for e in entries if not skip(e.path, e.oid)]
     out.judged |= {(e.path, e.oid) for e in fresh}
     payload = oracle.payload_matchers(signatures)
@@ -341,7 +350,7 @@ def _read_past_commits(repo: Path, display: str, signatures, allowlist, opts, sk
         out.unread.append(_PAST_VERSIONS)
         return
     tips = [ref for _n, ref in listed]
-    _read_other_refs(repo, display, tips, signatures, allowlist, opts, skip, out)
+    _read_other_refs(repo, display, signatures, allowlist, opts, skip, out)
     if not tips:
         return
     for finding, entry in _confirmed_versions(repo, display, tips, [],
@@ -359,20 +368,32 @@ def _read_past_commits(repo: Path, display: str, signatures, allowlist, opts, sk
         _place_history_finding(repo, finding, entry, signatures, allowlist, opts, owned_paths, out)
 
 
-def _read_other_refs(repo: Path, display: str, tips: list[str], signatures, allowlist, opts, skip,
+def _read_other_refs(repo: Path, display: str, signatures, allowlist, opts, skip,
                      out: _HistoryPayloads) -> None:
-    """Read the past commits that only refs and checkouts other than branches reach. Takes the repo,
-    how it is shown, the branch tips, the signatures, allowlist and scan options, the
-    skip check and the `_HistoryPayloads` whose `on_other_refs`, `unread`, `partly_read`,
-    `runnable`, `submodules` and `cut_at` it fills."""
+    """Read what only refs and checkouts other than branches reach: their past commits, and the
+    files a ref pointing at a tree or a file holds. Takes the repo, how it is shown, the signatures,
+    allowlist and scan options, the skip check and the `_HistoryPayloads` whose `on_other_refs`,
+    `unread`, `partly_read`, `runnable`, `submodules` and `cut_at` it fills."""
+    listed = gitutil.listed_branch_refs(repo)
     candidates, unsure = _candidate_refs(repo)
+    if listed is None:
+        out.unread.append(_PAST_VERSIONS)
+        return
     out.unread += unsure
+    tips = [ref for _n, ref in listed]
     others = sorted({tip for _n, tip in candidates} - set(tips))
     if not others:
         return
-    elsewhere = _HistoryPayloads()
-    found = _confirmed_versions(repo, display, others, tips, signatures, allowlist, opts, skip,
-                                elsewhere, subject=_PAST_VERSIONS, limit=_PAST_VERSIONS_READ)
+    targets = pushed.tip_versions(repo, others, limit=_PAST_VERSIONS_READ)
+    if targets is None:
+        out.unread.append(_PAST_VERSIONS)
+        return
+    commits, held, submodules, whole = targets
+    elsewhere = _HistoryPayloads(submodules=submodules, cut_at=0 if whole else _PAST_VERSIONS_READ)
+    found = (_confirmed_versions(repo, display, commits, tips, signatures, allowlist, opts, skip,
+                                 elsewhere, subject=_PAST_VERSIONS, limit=_PAST_VERSIONS_READ)
+             if commits else [])
+    found += _scan_versions(repo, display, held, signatures, allowlist, opts, skip, elsewhere)
     out.on_other_refs |= {entry.oid for _finding, entry in found}
     out.unread += elsewhere.unread
     out.partly_read |= elsewhere.partly_read
@@ -1817,6 +1838,7 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
                 signatures, allowlist, opts, left_to_another_step, history):
             _place_history_finding(repo, finding, entry, signatures, allowlist, opts, owned_paths,
                                    history)
+        _read_other_refs(repo, display, signatures, allowlist, opts, left_to_another_step, history)
     adding = pushed.adding_commits(repo, list(history.region.items()), set(history.take_out))
     if adding is None:
         history.unread.append(_REWRITTEN_VERSIONS)

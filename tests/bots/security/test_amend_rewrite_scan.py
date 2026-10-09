@@ -625,11 +625,45 @@ class TestPastCommitsWhenTheCheckoutIsClean(_Rewrite):
         self.assertIn("v-side", " ".join(r.detail for r in outcome.reasons))
         self.assertTrue(outcome.needs_review)
 
+    def test_a_tag_on_a_tree_or_a_file_holding_a_payload_is_named(self):
+        self.write(self.d, "vendor/x/loader.js", LOADER)
+        self.git(self.d, "add", "vendor/x/loader.js")
+        tree = self.git(self.d, "write-tree").strip()
+        blob = self.git(self.d, "rev-parse", ":vendor/x/loader.js").strip()
+        self.git(self.d, "rm", "-q", "--cached", "vendor/x/loader.js")
+        (self.d / "vendor/x/loader.js").unlink()
+        for name, target in (("tree-bad", tree), ("blob-bad", blob)):
+            with self.subTest(tag=name):
+                self.git(self.d, "tag", name, target)
+                outcome = self.run_amend()
+                self.assertIn(Cause.PAYLOAD_REACHABLE_FROM_OTHER_REFS, self._causes(outcome))
+                self.assertIn(name, " ".join(r.detail for r in outcome.reasons))
+                self.git(self.d, "tag", "-d", name)
+
+    def test_a_tag_is_named_when_the_checkout_holds_malware_too(self):
+        self.git(self.d, "checkout", "-q", "--detach")
+        self.write(self.d, "vendor/y/loader.js", LOADER + "// kept by a tag\n")
+        self.commit(self.d, "tagged work")
+        self.git(self.d, "tag", "v-old")
+        self.git(self.d, "checkout", "-q", self.base)
+        self.evil_merge()
+        outcome = self.run_amend()
+        self.assertTrue(outcome.completed, self._causes(outcome))
+        self.assertIn(Cause.PAYLOAD_REACHABLE_FROM_OTHER_REFS, self._causes(outcome))
+        self.assertIn("v-old", " ".join(r.detail for r in outcome.reasons))
+        self.assertFalse(self.ever_holds(LOADER))
+
     def test_refs_it_could_not_list_are_named(self):
         with mock.patch.object(amendmod, "_candidate_refs", return_value=([], ["the tags"])):
             outcome = self.run_amend()
         self.assertIn(Cause.HISTORY_UNREADABLE, self._causes(outcome))
         self.assertTrue(outcome.needs_review)
+
+    def test_refs_whose_targets_it_could_not_read_are_named(self):
+        self.git(self.d, "tag", "v-old", "HEAD^{tree}")
+        with mock.patch.object(amendmod.pushed, "tip_versions", return_value=None):
+            outcome = self.run_amend()
+        self.assertIn(Cause.HISTORY_UNREADABLE, self._causes(outcome))
 
     def test_a_tag_holding_its_own_copy_leaves_the_branches_cleaned(self):
         self.git(self.d, "checkout", "-q", "--detach")
