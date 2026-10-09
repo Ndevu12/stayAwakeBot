@@ -208,7 +208,7 @@ def _arrived_versions(repo: Path, swept: dict, payload_oids: set[str]) -> tuple[
 
 
 _REWRITTEN_VERSIONS = "the versions the rewritten history holds"
-_PAST_VERSIONS = "the past commits of its branches"
+_PAST_VERSIONS = "the past commits of its branches and checkouts"
 _PAST_VERSIONS_READ = 5_000
 
 
@@ -223,8 +223,8 @@ class _HistoryPayloads:
     versions read and `confirmed` those found malicious; `region` maps the commits read to their
     parents; `unread`
     names what could not be read; `partly_read` are the paths read only in part or kept outside
-    git, and `runnable` those of them that run as programs; `cut_at` is the number of versions a
-    bounded read stopped at, or 0.
+    git, and `runnable` those of them that run as programs; `submodules` counts the submodule
+    versions read past; `cut_at` is the number of versions a bounded read stopped at, or 0.
     """
 
     take_out: dict = field(default_factory=dict)
@@ -238,6 +238,7 @@ class _HistoryPayloads:
     unread: list = field(default_factory=list)
     partly_read: set = field(default_factory=set)
     runnable: set = field(default_factory=set)
+    submodules: int = 0
     cut_at: int = 0
 
 
@@ -270,7 +271,7 @@ def _confirmed_versions(repo: Path, display: str, tips, boundary, signatures, al
     """Read every version the history from a boundary to some tips adds, except those `skip(path,
     oid)` leaves to another step. Takes the repo, how it is shown, the tips, the boundary commits,
     the signatures, allowlist and scan options, the skip check, the `_HistoryPayloads` whose
-    `judged`, `unread` and `partly_read` it fills, what to call the history when it cannot be read,
+    `judged`, `unread`, `partly_read` and `submodules` it fills, what to call the history when it cannot be read,
     and a bound on the newest versions read. Returns each confirmed finding with its version."""
     commits = pushed.commits_between(repo, list(tips), list(boundary))
     listed = (pushed.history_entries(repo, commits, **({"limit": limit} if limit else {}))
@@ -279,7 +280,8 @@ def _confirmed_versions(repo: Path, display: str, tips, boundary, signatures, al
         out.unread.append(subject)
         return []
     out.region.update(commits)
-    entries, _submodules, whole = listed
+    entries, submodules, whole = listed
+    out.submodules += submodules
     if not whole and limit:
         out.cut_at = limit
     elif not whole:
@@ -307,13 +309,14 @@ def _confirmed_versions(repo: Path, display: str, tips, boundary, signatures, al
     return confirmed
 
 
-def _partly_read_reasons(partly: set[str], runnable: set[str], found_at: set[str]) -> list[Reason]:
-    """Name the past versions read only in part. Takes their paths, those of them that run as
-    programs, and the paths where malware was found. Returns a reason for those to review and one
-    for the rest."""
+def _partly_read_reasons(partly: set[str], runnable: set[str], found_at: set[str],
+                         submodules: int) -> list[Reason]:
+    """Name the past versions read only in part or not at all. Takes their paths, those of them that
+    run as programs, the paths where malware was found and the count of submodule versions. Returns
+    a reason for those to review and one for the rest."""
     to_review = sorted(p for p in partly if p in found_at or is_source_path(p) or p in runnable)
     noted = sorted(partly - set(to_review))
-    reasons = []
+    reasons = [Reason(Cause.SUBMODULES_NOT_READ, str(submodules))] if submodules else []
     if to_review:
         reasons.append(Reason(Cause.HISTORY_PARTLY_READ, str(len(to_review)),
                               names_that_fit(to_review)))
@@ -325,16 +328,16 @@ def _partly_read_reasons(partly: set[str], runnable: set[str], found_at: set[str
 
 def _read_past_commits(repo: Path, display: str, signatures, allowlist, opts, skip,
                        owned_paths: set[str], out: _HistoryPayloads) -> None:
-    """Read the past commits of every branch amend reads, newest first and up to a bound, and place
+    """Read the past commits of every branch and checkout, newest first and up to a bound, and place
     each confirmed version found. Takes the repo, how it is shown, the signatures, allowlist and
     scan options, the skip check, the paths another step already rewrites and the
     `_HistoryPayloads` to fill. A version the checkout still holds is named for recovery by hand."""
     listed = gitutil.listed_branch_refs(repo)
-    if listed is None:
+    heads = _checkout_heads(repo)
+    if listed is None or heads is None:
         out.unread.append(_PAST_VERSIONS)
         return
-    tips = [ref for _n, ref in listed] + (["HEAD"] if _answer(repo, ["rev-parse", "--verify", "-q",
-                                                                     "HEAD"]) else [])
+    tips = [ref for _n, ref in listed] + [sha for _label, sha in heads if sha.strip("0")]
     if not tips:
         return
     for finding, entry in _confirmed_versions(repo, display, tips, [],
@@ -1041,9 +1044,8 @@ def _checkout_dirs(repo: Path) -> list[tuple[str, Path]] | None:
 
 
 def _candidate_refs(repo: Path) -> tuple[list[tuple[str, str]], list[str]]:
-    """Every ref the repository keeps, each checkout's own refs, every stash entry and each
-    checkout's HEAD, as `(name, tip)`. Takes the repo. Returns those it could list, and what it could
-    not list."""
+    """List the refs and checkouts that can still reach a commit. Takes the repo. Returns each as
+    `(name, tip)`, and what could not be listed."""
     out: list[tuple[str, str]] = []
     unsure: list[str] = []
     shared = _refs_in(repo, ["refs/"])
@@ -1068,16 +1070,25 @@ def _candidate_refs(repo: Path) -> tuple[list[tuple[str, str]], list[str]]:
             stashed = entries.split()
             out = [(name, tip) for name, tip in out if name != "refs/stash" or tip not in stashed]
             out += [(f"stash@{{{i}}}", sha) for i, sha in enumerate(stashed)]
+    heads = _checkout_heads(repo)
+    if heads is None:
+        unsure.append("the other checkouts")
+    return out + (heads or []), unsure
+
+
+def _checkout_heads(repo: Path) -> list[tuple[str, str]] | None:
+    """List the commit each checkout of the repository is on. Takes the repo. Returns each
+    checkout's label and commit, or None when git could not list them."""
     worktrees = _answer(repo, ["worktree", "list", "--porcelain"])
     if worktrees is None:
-        unsure.append("the other checkouts")
-    path = ""
-    for line in (worktrees or "").splitlines():
+        return None
+    heads, path = [], ""
+    for line in worktrees.splitlines():
         if line.startswith("worktree "):
             path = line[len("worktree "):]
         elif line.startswith("HEAD "):
-            out.append((f"worktree {path}", line[len("HEAD "):].strip()))
-    return out, unsure
+            heads.append((f"worktree {path}", line[len("HEAD "):].strip()))
+    return heads
 
 
 def _refs_still_reaching(repo: Path, oids: set[str],
@@ -1818,7 +1829,8 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
         if unread:
             return _refuse(Cause.HISTORY_UNREADABLE, names_that_fit(sorted(set(unread))))
         partly = tuple(_partly_read_reasons(history.partly_read, history.runnable,
-                                            {path for path, _oid in history.confirmed | decided}))
+                                            {path for path, _oid in history.confirmed | decided},
+                                            history.submodules))
         if history.cut_at:
             return _refuse(Cause.PAST_COMMITS_READ_IN_PART, str(history.cut_at), named=partly)
         return _refuse(Cause.NO_CONFIRMED_PAYLOAD, named=partly)
@@ -2080,7 +2092,8 @@ def _history_outcome(repo: Path, display: str, opts, signatures, allowlist, toke
         survivors.append(Reason(Cause.PAST_COMMITS_READ_IN_PART, str(history.cut_at)))
     survivors += _partly_read_reasons(history.partly_read | rewritten.partly_read,
                                       history.runnable | rewritten.runnable,
-                                      {path for path, _oid in history.confirmed | decided})
+                                      {path for path, _oid in history.confirmed | decided},
+                                      history.submodules)
     arrived_elsewhere, unread_arrived_refs = _refs_still_reaching(repo, arrived_oids,
                                                                   list(delivered_tips.values()))
     unconfirmed += unread_arrived_refs

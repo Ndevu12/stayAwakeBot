@@ -17,9 +17,9 @@ commit keeps its original message and its original author, and the commits after
 onto the replacement. Malware in any commit it rewrites is repaired in place where that leaves the
 file clean, and otherwise taken out; the version you were shown when asked, and what your allowlist
 covers, is left as you decided. When the checkout holds no malware, the past commits of your branches
-are read the same way. A confirmed copy still in the rewritten history stops the push and is
+and checkouts are read the same way. A confirmed copy still in the rewritten history stops the push and is
 named. A file left for you to recover, a copy on a branch or tag amend does not rewrite, and a file
-it could not read in full are named. Once the remote has moved, your clone's
+or submodule it could not read in full are named. Once the remote has moved, your clone's
 copy of the remote branches is refreshed to match it; if it cannot be, the run says so.
 
 ```text

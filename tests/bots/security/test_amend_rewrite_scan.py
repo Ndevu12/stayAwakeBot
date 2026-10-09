@@ -582,6 +582,36 @@ class TestPastCommitsWhenTheCheckoutIsClean(_Rewrite):
         outcome = self.run_amend()
         self.assertNotEqual([Cause.NO_CONFIRMED_PAYLOAD], self._causes(outcome))
 
+    def test_a_checkout_on_no_branch_in_another_folder_is_read(self):
+        self.git(self.d, "checkout", "-qb", "side")
+        self.write(self.d, "vendor/x/loader.js", LOADER)
+        self.commit(self.d, "side work")
+        self.git(self.d, "checkout", "-q", self.base)
+        self.git(self.d, "worktree", "add", "-q", "--detach", str(self.d.parent / "other"), "side")
+        self.git(self.d, "branch", "-q", "-D", "side")
+        outcome = self.run_amend()
+        self.assertNotEqual([Cause.NO_CONFIRMED_PAYLOAD], self._causes(outcome))
+        self.assertTrue(outcome.needs_review)
+
+    def test_a_checkout_whose_branch_is_gone_leaves_the_read_whole(self):
+        self.add_then_remove("vendor/x/loader.js")
+        self.git(self.d, "branch", "-q", "gone")
+        self.git(self.d, "worktree", "add", "-q", str(self.d.parent / "other"), "gone")
+        self.git(self.d, "update-ref", "-d", "refs/heads/gone")
+        outcome = self.run_amend()
+        self.assertNotIn(Cause.HISTORY_UNREADABLE, self._causes(outcome))
+        self.assertFalse(self.ever_holds(LOADER))
+
+    def test_submodule_versions_in_past_commits_are_named(self):
+        head = self.git(self.d, "rev-parse", "HEAD").strip()
+        self.git(self.d, "update-index", "--add", "--cacheinfo", f"160000,{head},lib/sub")
+        self.git(self.d, "commit", "-qm", "add a submodule")
+        self.git(self.d, "rm", "-q", "--cached", "lib/sub")
+        self.git(self.d, "commit", "-qm", "remove it")
+        outcome = self.run_amend()
+        self.assertIn(Cause.SUBMODULES_NOT_READ, self._causes(outcome))
+        self.assertTrue(outcome.needs_review)
+
     def test_a_clean_history_needs_nothing(self):
         outcome = self.run_amend()
         self.assertEqual([Cause.NO_CONFIRMED_PAYLOAD], self._causes(outcome))

@@ -362,7 +362,8 @@ class TestFixAmendRepo(_AmendFixture):
         _git(self.d, "commit", "-qm", "merge with new file")
         before = self._rev()
         line = self._amend()
-        self.assertIn("no confirmed payload in the checkout or in the past commits of its branches", line)
+        self.assertIn("no confirmed payload in the checkout or in the past commits of its branches and "
+                      "checkouts", line)
         self.assertEqual(before, self._rev())
 
     def test_dirty_tree_is_refused(self):
