@@ -653,6 +653,34 @@ class TestPastCommitsWhenTheCheckoutIsClean(_Rewrite):
         self.assertIn("v-old", " ".join(r.detail for r in outcome.reasons))
         self.assertFalse(self.ever_holds(LOADER))
 
+    def test_a_tag_on_files_already_read_reads_nothing_twice(self):
+        self.git(self.d, "tag", "v-tree", "HEAD^{tree}")
+        scanned = []
+        real = amendmod.version_scan.scan_batch
+
+        def spy(repo, display, batch, *rest):
+            scanned.extend((e.path, e.oid) for e in batch)
+            return real(repo, display, batch, *rest)
+
+        with mock.patch.object(amendmod.version_scan, "scan_batch", side_effect=spy):
+            outcome = self.run_amend()
+        self.assertEqual([Cause.NO_CONFIRMED_PAYLOAD], self._causes(outcome))
+        self.assertEqual(len(set(scanned)), len(scanned))
+
+    def test_files_already_read_do_not_count_toward_the_bound(self):
+        from types import SimpleNamespace
+        held = [SimpleNamespace(path=p, oid=o) for p, o in (("a.js", "1" * 40), ("b.js", "2" * 40))]
+        out = amendmod._HistoryPayloads(judged={(e.path, e.oid) for e in held})
+        with mock.patch.object(amendmod.gitutil, "listed_branch_refs", return_value=[]), \
+                mock.patch.object(amendmod, "_candidate_refs",
+                                  return_value=([("refs/tags/t", "3" * 40)], [])), \
+                mock.patch.object(amendmod.pushed, "tip_versions",
+                                  return_value=([], held, 0, True)), \
+                mock.patch.object(amendmod, "_PAST_VERSIONS_READ", 1):
+            amendmod._read_other_refs(self.d, "repo", load_signatures(), [], ScanOptions(),
+                                      lambda _p, _o: False, out)
+        self.assertEqual(0, out.cut_at)
+
     def test_refs_it_could_not_list_are_named(self):
         with mock.patch.object(amendmod, "_candidate_refs", return_value=([], ["the tags"])):
             outcome = self.run_amend()

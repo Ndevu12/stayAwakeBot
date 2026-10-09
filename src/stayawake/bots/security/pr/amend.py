@@ -350,12 +350,11 @@ def _read_past_commits(repo: Path, display: str, signatures, allowlist, opts, sk
         out.unread.append(_PAST_VERSIONS)
         return
     tips = [ref for _n, ref in listed]
+    found = (_confirmed_versions(repo, display, tips, [], signatures, allowlist, opts, skip, out,
+                                 subject=_PAST_VERSIONS, limit=_PAST_VERSIONS_READ)
+             if tips else [])
     _read_other_refs(repo, display, signatures, allowlist, opts, skip, out)
-    if not tips:
-        return
-    for finding, entry in _confirmed_versions(repo, display, tips, [],
-                                              signatures, allowlist, opts, skip, out,
-                                              subject=_PAST_VERSIONS, limit=_PAST_VERSIONS_READ):
+    for finding, entry in found:
         try:
             held = _stored_entry(repo, "HEAD", entry.path)
         except gitutil.Unread as missed:
@@ -370,10 +369,11 @@ def _read_past_commits(repo: Path, display: str, signatures, allowlist, opts, sk
 
 def _read_other_refs(repo: Path, display: str, signatures, allowlist, opts, skip,
                      out: _HistoryPayloads) -> None:
-    """Read what only refs and checkouts other than branches reach: their past commits, and the
-    files a ref pointing at a tree or a file holds. Takes the repo, how it is shown, the signatures,
-    allowlist and scan options, the skip check and the `_HistoryPayloads` whose `on_other_refs`,
-    `unread`, `partly_read`, `runnable`, `submodules` and `cut_at` it fills."""
+    """Read what only refs and checkouts other than branches reach, past the versions already read:
+    their past commits, and the files a ref pointing at a tree or a file holds. Takes the repo, how
+    it is shown, the signatures, allowlist and scan options, the skip check and the
+    `_HistoryPayloads` whose `on_other_refs`, `unread`, `partly_read`, `runnable`, `submodules` and
+    `cut_at` it fills."""
     listed = gitutil.listed_branch_refs(repo)
     candidates, unsure = _candidate_refs(repo)
     if listed is None:
@@ -384,16 +384,27 @@ def _read_other_refs(repo: Path, display: str, signatures, allowlist, opts, skip
     others = sorted({tip for _n, tip in candidates} - set(tips))
     if not others:
         return
-    targets = pushed.tip_versions(repo, others, limit=_PAST_VERSIONS_READ)
+    targets = pushed.tip_versions(repo, others)
     if targets is None:
         out.unread.append(_PAST_VERSIONS)
         return
     commits, held, submodules, whole = targets
-    elsewhere = _HistoryPayloads(submodules=submodules, cut_at=0 if whole else _PAST_VERSIONS_READ)
-    found = (_confirmed_versions(repo, display, commits, tips, signatures, allowlist, opts, skip,
-                                 elsewhere, subject=_PAST_VERSIONS, limit=_PAST_VERSIONS_READ)
+    judged = set(out.judged)
+
+    def left_alone(path: str, oid: str) -> bool:
+        """Tell whether a version is another step's or was already read. Takes its path and blob
+        id. Returns the answer."""
+        return skip(path, oid) or (path, oid) in judged
+
+    held = [e for e in held if not left_alone(e.path, e.oid)]
+    cut = not whole or len(held) > _PAST_VERSIONS_READ
+    elsewhere = _HistoryPayloads(submodules=submodules, cut_at=_PAST_VERSIONS_READ if cut else 0)
+    found = (_confirmed_versions(repo, display, commits, tips, signatures, allowlist, opts,
+                                 left_alone, elsewhere, subject=_PAST_VERSIONS,
+                                 limit=_PAST_VERSIONS_READ)
              if commits else [])
-    found += _scan_versions(repo, display, held, signatures, allowlist, opts, skip, elsewhere)
+    found += _scan_versions(repo, display, held[:_PAST_VERSIONS_READ], signatures, allowlist, opts,
+                            left_alone, elsewhere)
     out.on_other_refs |= {entry.oid for _finding, entry in found}
     out.unread += elsewhere.unread
     out.partly_read |= elsewhere.partly_read

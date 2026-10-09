@@ -329,8 +329,8 @@ _PHRASE = {
     Cause.LARGE_FILES_NOT_READ_IN_FULL:
         "{detail} large binary or Git LFS file version(s) in past commits were not read in full",
     Cause.PAST_COMMITS_READ_IN_PART:
-        "only the newest {detail} file versions in the repository's past commits were read — "
-        "review the older ones yourself",
+        "only {detail} of the file versions the repository keeps were read — review the rest "
+        "yourself",
     Cause.SUBMODULES_NOT_READ:
         "{detail} submodule version(s) in past commits are kept in other repositories and were not "
         "read",
