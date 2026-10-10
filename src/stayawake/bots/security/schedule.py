@@ -207,9 +207,9 @@ def _larger_than(where: Path, limit: int) -> bool:
 
 
 def _service_env() -> dict | None:
-    """Build the environment the service manager runs with. Returns the user's own session bus on
-    Linux, or None to keep the caller's environment elsewhere."""
-    return (sessionbus.session_bus_env() or {}) if _linux() else None
+    """Build the environment the service manager runs with. Returns the user's own runtime folder
+    and session bus on Linux, or None to keep the caller's environment elsewhere."""
+    return sessionbus.user_manager_env() if _linux() else None
 
 
 def is_ours(path: Path | None = None) -> bool:

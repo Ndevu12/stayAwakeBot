@@ -49,7 +49,7 @@ def _read_regular(path: Path, limit: int, extra_flags: int) -> bytes | None:
     accept and extra open flags. Returns the bytes, or None."""
     try:
         fd = os.open(str(path), os.O_RDONLY | extra_flags | getattr(os, "O_NONBLOCK", 0))
-    except (OSError, ValueError):
+    except OSError:
         return None
     try:
         info = os.fstat(fd)

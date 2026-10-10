@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from stayawake.bots.security import watchrecord
 from stayawake.bots.security.watchevents import (
-    ENDED, LEFT, NOT_READ, NOT_REMEMBERED, PASS_FAILED, QUIET, RETURNED, SENTENCE_FOR)
+    ENDED, LEFT, NOT_READ, NOT_REMEMBERED, PASS_FAILED, QUIET, RETURNED, SENTENCE_FOR, UNNAMED)
 from stayawake.utils import notify
 
 TITLE = "saw"
@@ -52,8 +52,9 @@ def decide(record: dict, kinds, now: float, today: str, hour: int) -> tuple[dict
     rec["failures"] = min(rec.get("failures", 0) + 1, watchrecord.MOST_COUNT) if failed else 0
     if not failed:
         rec["last_good"] = now
+    rec.setdefault("epoch", watchrecord.new_epoch())
     if RETURNED in kinds:
-        rec["last_returned"] = now
+        rec["returns_seen"] = min(rec.get("returns_seen", 0) + 1, watchrecord.MOST_COUNT)
         rec.setdefault("unacknowledged", now)
     for kind, flag in _PENDING.items():
         if kind in kinds:
@@ -83,9 +84,8 @@ def _as_of(rec: dict, now: float) -> dict:
     any time of sending or reminding dated in the future dropped; a future date never holds an
     alert back."""
     rec["sent"] = {kind: at for kind, at in rec.get("sent", {}).items() if at <= now}
-    for name in ("reminded", "acknowledged", "last_returned"):
-        if rec.get(name, now) > now:
-            rec.pop(name)
+    if rec.get("reminded", now) > now:
+        rec.pop("reminded")
     return rec
 
 
@@ -94,7 +94,7 @@ def _urgent_due(rec: dict, now: float) -> str | None:
     what it is about: code that came back, code that could not be stopped, or a reminder; at most
     one every `URGENT_EVERY_SECONDS`, and at once after a return was dealt with."""
     last = rec.get("sent", {}).get("urgent", float("-inf"))
-    if now - last < URGENT_EVERY_SECONDS and rec.get("acknowledged", float("-inf")) <= last:
+    if now - last < URGENT_EVERY_SECONDS and not rec.get("window_reopened"):
         return None
     for kind in (RETURNED, LEFT):
         if rec.get(_PENDING[kind]):
@@ -115,6 +115,7 @@ def delivered(record: dict, alerts, now: float, today: str) -> dict:
             sent["urgent"] = now
             rec["reminded"] = now
             rec.pop(_PENDING.get(alert.about, ""), None)
+            rec.pop("window_reopened", None)
         elif alert.about == DAILY:
             rec["daily_for"] = today
             rec["since"] = {}
@@ -134,6 +135,9 @@ def facts(since: dict) -> list[str]:
         said.append(f"Something could not be stopped {_times(since[LEFT])}.")
     if since.get(ENDED):
         said.append(f"Code running here was stopped {_times(since[ENDED])}.")
+    if since.get(UNNAMED):
+        said.append(f"Something ran here that this machine could not identify "
+                    f"{_times(since[UNNAMED])}.")
     unchecked = since.get(NOT_READ, 0) + since.get(PASS_FAILED, 0)
     if unchecked:
         said.append(f"This machine could not check itself {_times(unchecked)}.")

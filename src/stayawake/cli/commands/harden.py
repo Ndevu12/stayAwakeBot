@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import time
 
 from stayawake.bots.security import harden, watchrecord
 from stayawake.cli.helptext import add_command
@@ -38,12 +37,12 @@ def run(a: argparse.Namespace) -> int:
     exit code; a run that protected the machine also marks code that came back as dealt with."""
     label = "removing host denials…" if a.take_back else "creating host denials…"
     no_stream = no_stream_requested(a)
-    started = time.time()
+    counted = _returns_counted()
     with busy(label, no_stream=no_stream):
         code, text = harden.take_back() if a.take_back else harden.run()
     say(text, no_stream=no_stream)
     if code == 0 and not a.take_back:
-        line = _after_protecting(started)
+        line = _after_protecting(counted)
         if line:
             say(line, no_stream=no_stream)
     return code
@@ -55,11 +54,22 @@ _CAME_BACK_DURING = ("Code came back while saw harden was running. Take this mac
                      "network, then run `saw harden` again.")
 
 
-def _after_protecting(started: float) -> str:
-    """Mark code that came back before this run started as dealt with, never failing. Takes when
-    the run started. Returns the line to print, or "" when there is nothing to say."""
+def _returns_counted():
+    """Read which returns the watcher had counted before this run, never failing. Returns the
+    record's name and count, or None."""
     try:
-        if not acknowledge_came_back(started):
+        return watchrecord.returns_so_far(watchrecord.load())
+    except Exception:
+        return None
+
+
+def _after_protecting(counted) -> str:
+    """Mark the returns counted before this run started as dealt with, never failing. Takes what
+    was counted then. Returns the line to print, or "" when there is nothing to say."""
+    try:
+        if counted is None:
+            return ""
+        if not acknowledge_came_back(counted):
             return _NOT_ACKNOWLEDGED
         still = watchrecord.settled(watchrecord.load(), watchrecord.load_acknowledgement())
         return _CAME_BACK_DURING if still.get("unacknowledged") else ""

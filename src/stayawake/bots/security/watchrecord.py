@@ -4,22 +4,35 @@ from __future__ import annotations
 
 import json
 import math
-import time
+import re
+import secrets
 from pathlib import Path
 
-from stayawake.utils import atomicwrite, env, pathsafe
+from stayawake.utils import atomicwrite, pathsafe
 
 STALE_AFTER_SECONDS = 600
 MOST_BYTES = 64 << 10
 MOST_COUNT = 10 ** 9
-_TIMES = ("last_good", "unacknowledged", "reminded", "acknowledged", "saved", "undelivered",
-          "last_returned")
-_FLAGS = ("returned_unsent", "left_unsent")
+_TIMES = ("last_good", "unacknowledged", "reminded", "saved", "undelivered")
+_FLAGS = ("returned_unsent", "left_unsent", "window_reopened")
+_EPOCH = re.compile(r"[0-9a-f]{1,32}")
+
+
+def shared_folder() -> Path:
+    """Find the folder the scheduled watcher and the user's own commands both read and write.
+    Returns it under the home folder, whatever either environment sets for state."""
+    return Path.home() / ".local" / "state" / "saw"
 
 
 def record_path() -> Path:
-    """Find where the watcher keeps its record. Returns the path in saw's state folder."""
-    return Path(env.xdg_state_home()) / "saw" / "watch-events.json"
+    """Find where the watcher keeps its record. Returns the path."""
+    return shared_folder() / "watch-events.json"
+
+
+def new_epoch() -> str:
+    """Name a new record, so an acknowledgement for an earlier one never applies to it. Returns
+    the name."""
+    return secrets.token_hex(8)
 
 
 def load(path: Path | None = None) -> dict:
@@ -41,8 +54,11 @@ def well_formed(data) -> dict:
         return {}
     kept = {k: data[k] for k in _TIMES if is_time(data.get(k))}
     kept.update({k: True for k in _FLAGS if data.get(k) is True})
-    if is_count(data.get("failures")):
-        kept["failures"] = data["failures"]
+    for name in ("failures", "returns_seen"):
+        if is_count(data.get(name)):
+            kept[name] = data[name]
+    if is_epoch(data.get("epoch")):
+        kept["epoch"] = data["epoch"]
     if isinstance(data.get("daily_for"), str):
         kept["daily_for"] = data["daily_for"][:16]
     for name in ("since", "sent"):
@@ -63,6 +79,11 @@ def is_time(value) -> bool:
         return math.isfinite(value)
     except OverflowError:
         return False
+
+
+def is_epoch(value) -> bool:
+    """Tell whether a value names a record. Takes the value. Returns the answer."""
+    return isinstance(value, str) and _EPOCH.fullmatch(value) is not None
 
 
 def is_count(value) -> bool:
@@ -86,25 +107,33 @@ def save(record: dict, path: Path | None = None) -> bool:
 
 def acknowledgement_path() -> Path:
     """Find where `saw harden` records that it dealt with code that came back. Returns the path."""
-    return Path(env.xdg_state_home()) / "saw" / "watch-acknowledged.json"
+    return shared_folder() / "watch-acknowledged.json"
 
 
-def acknowledge(started_at: float, path: Path | None = None, *, now=time.time) -> bool:
-    """Record that a `saw harden` run which started at `started_at` dealt with code that came back
-    before it started. Takes that time, an optional path and the clock. Returns whether it was
+def returns_so_far(record: dict) -> tuple[str, int] | None:
+    """Say which returns a record has counted. Takes the record. Returns its name and how many
+    returns it has seen, or None when it names none."""
+    epoch = record.get("epoch")
+    return (epoch, record.get("returns_seen", 0)) if is_epoch(epoch) else None
+
+
+def acknowledge(through: tuple[str, int], path: Path | None = None) -> bool:
+    """Record that a `saw harden` run dealt with every return the watcher had counted when it
+    started. Takes the record's name and that count, and an optional path. Returns whether it was
     written."""
-    return save({"started": started_at, "at": now()}, path or acknowledgement_path())
+    epoch, count = through
+    return save({"epoch": epoch, "through": count}, path or acknowledgement_path())
 
 
-def load_acknowledgement(path: Path | None = None, *, now=time.time) -> tuple[float, float] | None:
-    """Read the last acknowledgement `saw harden` recorded. Takes an optional path and the clock.
-    Returns when that run started and when it finished, or None when there is none to use."""
+def load_acknowledgement(path: Path | None = None) -> tuple[str, int] | None:
+    """Read the last acknowledgement `saw harden` recorded. Takes an optional path. Returns the
+    record's name and the count of returns dealt with, or None when there is none to use."""
     raw = pathsafe.read_regular_no_follow(path or acknowledgement_path(), MOST_BYTES)
     try:
         data = json.loads(raw.decode("utf-8")) if raw is not None else None
-        started, at = data.get("started"), data.get("at")
-        if is_time(started) and is_time(at) and started <= at <= now():
-            return started, at
+        epoch, through = data.get("epoch"), data.get("through")
+        if is_epoch(epoch) and is_count(through):
+            return epoch, through
     except Exception:
         pass
     return None
@@ -112,16 +141,17 @@ def load_acknowledgement(path: Path | None = None, *, now=time.time) -> tuple[fl
 
 def settled(record: dict, acknowledgement) -> dict:
     """Apply `saw harden`'s acknowledgement to the watcher's record. Takes the record and the
-    acknowledgement, or None. Returns the record with every return seen before that run started
-    marked as dealt with; a return seen after it started stays open."""
+    acknowledgement, or None. Returns the record with its returns marked as dealt with when the
+    acknowledgement names this record and covers every return it has counted; a return counted
+    after that run started stays open."""
     rec = dict(record)
     if not acknowledgement or not rec.get("unacknowledged"):
         return rec
-    started, at = acknowledgement
-    if rec.get("last_returned", rec["unacknowledged"]) <= started:
+    epoch, through = acknowledgement
+    if rec.get("epoch") == epoch and rec.get("returns_seen", 0) <= through:
         for name in ("unacknowledged", "reminded", "returned_unsent"):
             rec.pop(name, None)
-        rec["acknowledged"] = max(at, rec.get("acknowledged", at))
+        rec["window_reopened"] = True
     return rec
 
 

@@ -80,7 +80,7 @@ class TestWhatMattersIsTold(unittest.TestCase):
 
     def test_a_return_after_it_was_dealt_with_is_told_at_once(self):
         record, _ = _run([(ENDED, RETURNED)], start=36000)
-        record = watchrecord.settled(record, (36050.0, 36100.0))
+        record = watchrecord.settled(record, watchrecord.returns_so_far(record))
         self.assertNotIn("unacknowledged", record)
         _, sent = _run([(ENDED, RETURNED)], start=36400, record=record)
         self.assertEqual([a.about for _, a in _urgent(sent)], [RETURNED])
@@ -88,8 +88,9 @@ class TestWhatMattersIsTold(unittest.TestCase):
     def test_a_return_seen_while_harden_ran_is_not_dealt_with_by_it(self):
         record, _ = _run([(ENDED, RETURNED)], start=36000)
         record, sent = _run([(ENDED, RETURNED)], start=36300, record=record)    # window busy
+        self.assertEqual(record["returns_seen"], 2)
         self.assertFalse(_urgent(sent))
-        record = watchrecord.settled(record, (36200.0, 36320.0))               # harden began first
+        record = watchrecord.settled(record, (record["epoch"], 1))             # harden began first
         self.assertTrue(record.get("unacknowledged"))
         _, sent = _run([(QUIET,)] * 30, start=36330, record=record)
         told = [(t, a.about) for t, a in _urgent(sent)]
@@ -99,13 +100,25 @@ class TestWhatMattersIsTold(unittest.TestCase):
     def test_an_acknowledgement_is_written_apart_from_the_record_and_read_back(self):
         with tempfile.TemporaryDirectory() as d:
             where = Path(d) / "ack.json"
-            self.assertTrue(watchrecord.acknowledge(100.0, where, now=lambda: 160.0))
-            self.assertEqual(watchrecord.load_acknowledgement(where, now=lambda: 200.0),
-                             (100.0, 160.0))
-            self.assertIsNone(watchrecord.load_acknowledgement(where, now=lambda: 150.0),
-                              "an acknowledgement dated ahead was used")
-            where.write_text('{"started": 1e400, "at": "x"}')
-            self.assertIsNone(watchrecord.load_acknowledgement(where, now=lambda: 200.0))
+            self.assertTrue(watchrecord.acknowledge(("ab12", 3), where))
+            self.assertEqual(watchrecord.load_acknowledgement(where), ("ab12", 3))
+            for bad in ('{"epoch": "../x", "through": 3}', '{"epoch": "ab", "through": -1}',
+                        '{"epoch": "ab", "through": %d}' % HUGE, "[1]", "{"):
+                with self.subTest(bad=bad[:24]):
+                    where.write_text(bad)
+                    self.assertIsNone(watchrecord.load_acknowledgement(where))
+
+    def test_no_clock_step_lets_an_acknowledgement_clear_a_later_return(self):
+        record, _ = _run([(ENDED, RETURNED)], start=10_000)
+        acknowledged = watchrecord.returns_so_far(record)                      # harden starts
+        for step_back in (30, 3600, DAY):
+            with self.subTest(step_back=step_back):
+                later, _ = _run([(ENDED, RETURNED)], start=10_060 - step_back, record=record)
+                self.assertTrue(watchrecord.settled(later, acknowledged).get("unacknowledged"))
+
+    def test_an_acknowledgement_for_another_record_never_applies(self):
+        record, _ = _run([(ENDED, RETURNED)], start=36000)
+        self.assertTrue(watchrecord.settled(record, ("0" * 16, 10 ** 6)).get("unacknowledged"))
 
     def test_something_that_could_not_be_stopped_is_told_even_in_one_pass(self):
         record, _ = _run([(ENDED, RETURNED)], start=36000)
@@ -229,6 +242,11 @@ class TestOneReportADay(unittest.TestCase):
         _, again = _run([(QUIET,)] * 10, start=36300, record=record)
         self.assertEqual(len([a for _, a in sent + again if a.about == A.DAILY]), 1)
 
+    def test_a_day_with_only_unidentified_code_is_not_called_quiet(self):
+        alert = A.daily_report({"unnamed": 4}, unacknowledged=None)
+        self.assertNotIn(A.QUIET_DAY, alert.body)
+        self.assertIn("could not identify 4 times", alert.body)
+
     def test_a_day_with_events_counts_them_and_says_what_to_run(self):
         record, _ = _run([(ENDED,)] * 3, start=0)
         _, sent = _run([(QUIET,)], start=32400, record=record)
@@ -293,10 +311,11 @@ class TestNothingOnDiskCanHangOrStopIt(unittest.TestCase):
     def test_a_huge_number_in_the_record_does_not_stop_harden_status_or_the_notice(self):
         with tempfile.TemporaryDirectory() as d:
             where = Path(d) / "w.json"
-            where.write_text('{"last_good": %d, "unacknowledged": 5}' % HUGE)
+            where.write_text('{"last_good": %d, "unacknowledged": 5, "epoch": "ab", '
+                             '"returns_seen": 1}' % HUGE)
             record = watchrecord.load(where)
-            self.assertEqual(record, {"unacknowledged": 5})
-            self.assertNotIn("unacknowledged", watchrecord.settled(record, (6.0, 7.0)))
+            self.assertEqual(record, {"unacknowledged": 5, "epoch": "ab", "returns_seen": 1})
+            self.assertNotIn("unacknowledged", watchrecord.settled(record, ("ab", 1)))
 
     def test_a_ledger_nested_deep_enough_to_break_a_reader_still_lets_the_pass_stop_code(self):
         deep = "[" * 100_000 + "]" * 100_000
@@ -356,11 +375,27 @@ class TestNothingOnDiskCanHangOrStopIt(unittest.TestCase):
         bus = {"XDG_RUNTIME_DIR": "/run/user/1000",
                "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus"}
         with mock.patch.object(schedule, "_linux", return_value=True), \
-             mock.patch.object(schedule.sessionbus, "session_bus_env", return_value=bus), \
+             mock.patch.object(schedule.sessionbus, "user_manager_env", return_value=bus), \
              mock.patch.dict(os.environ, {"DBUS_SESSION_BUS_ADDRESS": "unixexec:path=/bin/sh"}):
             schedule.is_running(run=lambda argv, **k: seen.append(k.get("env"))
                                 or mock.Mock(returncode=0), binary="/usr/bin/systemctl")
         self.assertEqual(seen, [bus])
+
+    def test_a_user_manager_without_a_session_bus_is_still_reached(self):
+        import stat as st
+        from types import SimpleNamespace
+        from stayawake.utils import sessionbus
+
+        def lstat(path):
+            if path == "/run/user/1000":
+                return SimpleNamespace(st_mode=st.S_IFDIR | 0o700, st_uid=1000)
+            raise FileNotFoundError(path)
+        self.assertEqual(sessionbus.user_manager_env(uid=lambda: 1000, lstat=lstat),
+                         {"XDG_RUNTIME_DIR": "/run/user/1000"})
+
+        def foreign(path):
+            return SimpleNamespace(st_mode=st.S_IFDIR | 0o700, st_uid=0)
+        self.assertEqual(sessionbus.user_manager_env(uid=lambda: 1000, lstat=foreign), {})
 
 
 class TestEveryCommandSaysWhenTheWatcherNeedsYou(unittest.TestCase):
@@ -422,38 +457,53 @@ class TestEveryCommandSaysWhenTheWatcherNeedsYou(unittest.TestCase):
         from stayawake.cli.commands import harden as cli_harden
         acked, said = [], []
 
-        def run_harden(code, ack, record=None):
+        open_return = {"unacknowledged": 1.0, "epoch": "ab", "returns_seen": 1}
+
+        def run_harden(code, ack, before=open_return, after=None):
+            reads = [dict(before), dict(after if after is not None else before)]
             with mock.patch.object(cli_harden.harden, "run", return_value=(code, "done")), \
                  mock.patch.object(cli_harden, "acknowledge_came_back", ack), \
-                 mock.patch.object(cli_harden.watchrecord, "load", lambda: dict(record or {})), \
+                 mock.patch.object(cli_harden.watchrecord, "load", lambda: reads.pop(0)), \
                  mock.patch.object(cli_harden.watchrecord, "load_acknowledgement",
-                                   lambda: (acked[-1], acked[-1]) if acked else None), \
+                                   lambda: acked[-1] if acked else None), \
                  mock.patch.object(cli_harden, "say", lambda text, **k: said.append(text)):
                 return cli_harden.run(argparse.Namespace(take_back=False, no_stream=True))
-        self.assertEqual(run_harden(0, lambda started: acked.append(started) or True), 0)
-        self.assertEqual(run_harden(3, lambda started: acked.append(-1) or True), 3)
-        self.assertEqual(len(acked), 1)
+        self.assertEqual(run_harden(0, lambda through: acked.append(through) or True), 0)
+        self.assertEqual(acked, [("ab", 1)], "harden did not acknowledge what it saw at its start")
+        self.assertEqual(run_harden(3, lambda through: acked.append(("x", 0)) or True), 3)
+        self.assertEqual(acked, [("ab", 1)])
         self.assertEqual(said, ["done", "done"])
 
-        def raising(started):
+        def raising(through):
             raise OverflowError("x")
         self.assertEqual(run_harden(0, raising), 0, "acknowledging failed the harden run")
         self.assertEqual(said[-1], cli_harden._NOT_ACKNOWLEDGED)
         self.assertIn("saw watch status", cli_harden._NOT_ACKNOWLEDGED)
-        late = {"unacknowledged": 1.0, "last_returned": time.time() + 3600}
-        run_harden(0, lambda started: acked.append(started) or True, record=late)
+        returned_during = dict(open_return, returns_seen=2)
+        run_harden(0, lambda through: acked.append(through) or True, after=returned_during)
         self.assertEqual(said[-1], cli_harden._CAME_BACK_DURING)
+        said.clear()
+        run_harden(0, lambda through: acked.append(through) or True, before={})
+        self.assertEqual(said, ["done"], "a machine without a watcher record got a watcher line")
 
 
 class TestTheRecordHoldsOnlyCountsAndTimes(unittest.TestCase):
-    def test_an_acknowledgement_settles_only_returns_seen_before_harden_started(self):
-        before = {"unacknowledged": 5.0, "last_returned": 5.0, "reminded": 6.0,
+    def test_an_acknowledgement_settles_only_returns_counted_before_harden_started(self):
+        before = {"unacknowledged": 5.0, "epoch": "ab", "returns_seen": 2, "reminded": 6.0,
                   "returned_unsent": True}
-        self.assertEqual(watchrecord.settled(before, (5.5, 7.0)),
-                         {"last_returned": 5.0, "acknowledged": 7.0})
-        after = dict(before, last_returned=8.0)
-        self.assertEqual(watchrecord.settled(after, (5.5, 9.0)), after)
+        self.assertEqual(watchrecord.settled(before, ("ab", 2)),
+                         {"epoch": "ab", "returns_seen": 2, "window_reopened": True})
+        self.assertEqual(watchrecord.settled(before, ("ab", 1)), before)
+        self.assertEqual(watchrecord.settled(before, ("cd", 9)), before)
         self.assertEqual(watchrecord.settled(before, None), before)
+
+    def test_the_watcher_and_the_users_commands_share_one_folder_whatever_the_state_setting(self):
+        with tempfile.TemporaryDirectory() as home:
+            with mock.patch.dict(os.environ, {"HOME": home, "XDG_STATE_HOME": "/elsewhere"}):
+                self.assertEqual(watchrecord.record_path().parent,
+                                 Path(home) / ".local" / "state" / "saw")
+                self.assertEqual(watchrecord.acknowledgement_path().parent,
+                                 watchrecord.record_path().parent)
 
     def test_a_heartbeat_too_old_or_dated_ahead_is_stale(self):
         self.assertTrue(watchrecord.stale({}, 1000.0))
