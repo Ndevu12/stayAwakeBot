@@ -20,6 +20,7 @@ HOOK_NAMES = frozenset((
     "p4-prepare-changelist p4-post-changelist p4-pre-submit").split())
 
 MAX_INCLUDE_DEPTH = 10
+INSTALL_PREFIX = "%(prefix)/"
 MAX_GIT_DIRS = 256
 MAX_CONFIG_BYTES = 4 << 20
 MAX_WAIT_FILES = 256
@@ -111,10 +112,18 @@ def list_config_file(path: Path) -> tuple[list[tuple[str, str | None]], str | No
 
 
 def _resolve(base: Path, value: str) -> Path:
-    """Resolve a path git reads from configuration. Takes the directory it is relative to and the
-    value. Returns the path, `~` expanded."""
+    """Resolve a path git reads from configuration to the file the system opens for it. Takes the
+    directory it is relative to and the value. Returns the path, `~` expanded."""
     expanded = os.path.expanduser(value)
-    return Path(os.path.normpath(expanded if os.path.isabs(expanded) else base / expanded))
+    joined = expanded if os.path.isabs(expanded) else os.path.join(base, expanded)
+    lexical = os.path.normpath(joined)
+    try:
+        opened = os.path.realpath(joined)
+        if opened != os.path.realpath(lexical):
+            return Path(opened)
+    except (OSError, ValueError):
+        pass
+    return Path(lexical)
 
 
 def _is_include(key: str) -> bool:
@@ -137,6 +146,9 @@ def read_config(path: Path, surface: ExecSurface, _chain: tuple[Path, ...] = (),
     for key, value in pairs:
         entries.append(ConfigEntry(key, value, path, _chain))
         if not _is_include(key) or not value:
+            continue
+        if value.startswith(INSTALL_PREFIX):
+            surface.unexamined.append(f"{path}: {key} names a file under git's install prefix")
             continue
         target = _resolve(path.parent, value)
         surface.includes.append(Include(path, target, key.lower() != "include.path"))
@@ -403,11 +415,33 @@ def _commands(entries: list[ConfigEntry], git_dir: Path) -> list[Command]:
     return found
 
 
-def _hooks_dir(work_tree: Path, common_dir: Path, entries: list[ConfigEntry]) -> Path:
+def _hooks_dir(work_tree: Path, common_dir: Path, entries: list[ConfigEntry],
+               surface: ExecSurface) -> Path:
+    """Find the directory git runs a repository's hooks from. Takes its working tree, its common
+    directory, its entries and the surface. Returns the directory."""
     configured = next((e for e in reversed(entries)
                        if rule_for(e.key) is not None and rule_for(e.key).runs == HOOKS_DIRECTORY
                        and e.value), None)
-    return _resolve(work_tree, configured.value) if configured else common_dir / "hooks"
+    if configured is None:
+        return common_dir / "hooks"
+    if configured.value.startswith(INSTALL_PREFIX):
+        surface.unexamined.append(f"{configured.source}: {configured.key} names a directory under "
+                                  "git's install prefix")
+    return _resolve(work_tree, configured.value)
+
+
+def _collect_what_runs(surface: ExecSurface, entries: list[ConfigEntry], work_tree: Path,
+                       common_dir: Path) -> Path:
+    """Collect the commands one repository's configuration names and the hooks git runs for it.
+    Takes the surface, the repository's entries, its working tree and its common directory.
+    Returns the directory git runs its hooks from."""
+    surface.commands += _commands(entries, common_dir)
+    hooks_dir = _hooks_dir(work_tree, common_dir, entries, surface)
+    surface.hooks += _hooks(hooks_dir, True, common_dir, surface)
+    default_hooks = common_dir / "hooks"
+    if os.path.normpath(hooks_dir) != os.path.normpath(default_hooks):
+        surface.hooks += _hooks(default_hooks, False, common_dir, surface)
+    return hooks_dir
 
 
 def read_exec_surface(work_tree: Path) -> ExecSurface | None:
@@ -430,12 +464,7 @@ def read_exec_surface(work_tree: Path) -> ExecSurface | None:
     entries = _repo_config(git_dir, common_dir, surface)
     surface.entries += entries
     surface.git_dirs = list(dict.fromkeys([git_dir, common_dir]))
-    surface.commands = _commands(entries, common_dir)
-    surface.hooks_dir = _hooks_dir(work_tree, common_dir, entries)
-    surface.hooks = _hooks(surface.hooks_dir, True, common_dir, surface)
-    default_hooks = common_dir / "hooks"
-    if os.path.normpath(surface.hooks_dir) != os.path.normpath(default_hooks):
-        surface.hooks += _hooks(default_hooks, False, common_dir, surface)
+    surface.hooks_dir = _collect_what_runs(surface, entries, work_tree, common_dir)
     others = list(common_dir.glob("worktrees/*/config.worktree"))
     for config in others:
         worktree_entries = read_config(config, surface)
@@ -449,11 +478,9 @@ def read_exec_surface(work_tree: Path) -> ExecSurface | None:
         if module in surface.git_dirs or len(surface.git_dirs) >= MAX_GIT_DIRS:
             continue
         surface.git_dirs.append(module)
-        module_entries = read_config(module / "config", surface)
-        surface.entries += module_entries
+        module_entries = _repo_config(module, module, surface)
         configured = _last(module_entries, "core.worktree")
         if configured is not None and configured.value:
             surface.work_trees[module] = _resolve(module, configured.value)
-        surface.commands += _commands(module_entries, module)
-        surface.hooks += _hooks(module / "hooks", True, module, surface)
+        _collect_what_runs(surface, module_entries, surface.work_trees.get(module, module), module)
     return surface

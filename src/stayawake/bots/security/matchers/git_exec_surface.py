@@ -300,9 +300,11 @@ def judge(surface: ExecSurface, payload_check, max_bytes: int) -> list[Judgement
     return out + grader.includes()
 
 
-def payload_check_for(signatures) -> object:
-    """Build the confirmed-payload check the grading uses. Takes every signature. Returns it."""
-    return build_any_payload_check([s for s in signatures if s.get("matcher") == "content"])
+def payload_check_for(signatures, *, holding_anywhere: bool = False) -> object:
+    """Build the confirmed-payload check the grading uses. Takes every signature and
+    `holding_anywhere` (see `build_any_payload_check`). Returns it."""
+    return build_any_payload_check([s for s in signatures if s.get("matcher") == "content"],
+                                   holding_anywhere=holding_anywhere)
 
 
 def evidence_of(judgement: Judgement) -> str:

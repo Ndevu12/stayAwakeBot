@@ -15,8 +15,8 @@ from stayawake.bots.security.matchers import git_exec_surface as grading
 from stayawake.bots.security.models import CONFIRMED
 from stayawake.bots.security.signatures import every_signature
 from stayawake.lib.git import operator_config
-from stayawake.lib.git.exec_surface import (ConfigEntry, ExecSurface, list_config_file,
-                                            read_config, read_exec_surface)
+from stayawake.lib.git.exec_surface import (HOOK_NAMES, ConfigEntry, ExecSurface,
+                                            list_config_file, read_config, read_exec_surface)
 from stayawake.lib.git.run import OPERATOR_CONFIG, run
 from stayawake.utils import pathsafe
 
@@ -25,6 +25,8 @@ NOT_READ = "could not be read in full, so it was left"
 NOT_TAKEN_OUT = "could not be taken out"
 A_HOOKS_DIRECTORY_FILE = ("is a file in the hooks directory, which saw fix does not remove — remove "
                           "it yourself")
+NAMED_AFTER_AN_EVENT = "is named after a hook event, so saw fix does not change it — remove it yourself"
+IN_A_SUBMODULE = "is in a submodule's settings, which saw fix does not change — remove it yourself"
 
 
 @dataclass
@@ -65,12 +67,13 @@ def take_out_payload_settings(root: Path, findings, signatures, opts) -> Setting
     if surface is None:
         removal.unread += sorted({path for path, _ in reported})
         return removal
-    known_payload = grading.payload_check_for(every_signature(signatures))
+    every = every_signature(signatures)
+    known_payload = grading.payload_check_for(every, holding_anywhere=True)
     matched, hooks_handled = set(), set()
-    for judgement in grading.judge(surface, known_payload,
+    for judgement in grading.judge(surface, grading.payload_check_for(every),
                                    getattr(opts, "max_file_bytes", 2_000_000)):
         finding_key = (grading.shown_path(judgement.where, root), grading.evidence_of(judgement))
-        if judgement.tier != CONFIRMED or finding_key not in reported:
+        if judgement.tier != CONFIRMED or finding_key not in reported or finding_key in matched:
             continue
         matched.add(finding_key)
         shown = finding_key[0]
@@ -83,7 +86,7 @@ def take_out_payload_settings(root: Path, findings, signatures, opts) -> Setting
             _take_out_setting_value(root, entry, shown, known_payload, removal)
         elif hook not in hooks_handled:
             hooks_handled.add(hook)
-            _take_out_configured_hook(root, surface, hook, shown, reported, known_payload, removal)
+            _take_out_configured_hook(root, surface, entry, shown, reported, known_payload, removal)
     removal.absent += sorted({path for path, _ in reported - matched})
     return removal
 
@@ -111,46 +114,59 @@ def _take_out_setting_value(root: Path, entry: ConfigEntry, shown: str, known_pa
     removal.stripped.append(grading.shown_path(source, root))
 
 
-def _take_out_configured_hook(root: Path, surface: ExecSurface, hook: str, shown: str, reported,
-                              known_payload, removal: SettingsRemoval) -> None:
-    """Take a hook configured in git's settings out key by key, when every entry of it git reads for
-    the repository is in the checkout and every command it names carries a known payload and was
-    reported. Takes the checkout, the surface, the hook's name, its file as the finding names it,
-    the reported findings, the payload check and the record."""
+def _take_out_configured_hook(root: Path, surface: ExecSurface, judged: ConfigEntry, shown: str,
+                              reported, known_payload, removal: SettingsRemoval) -> None:
+    """Take a hook configured in git's settings out key by key, events first, when every entry of it
+    git reads for the repository is in the checkout and every command it names carries a known
+    payload and was reported. Takes the checkout, the surface, the entry the finding names, its file
+    as the finding names it, the reported findings, the payload check and the record."""
+    hook = _configured_hook_name(judged.key)
     subject = f"hook.{hook}"
+    removal.confirmed_hook_left = True
+    if hook.lower() in HOOK_NAMES:
+        removal.record_left(shown, subject, NAMED_AFTER_AN_EVENT)
+        return
+    if judged not in surface.entries:
+        removal.record_left(shown, subject, IN_A_SUBMODULE)
+        return
     entries, unexamined = _entries_git_reads(surface)
     definition = [e for e in entries if _configured_hook_name(e.key) == hook]
     commands = [e for e in definition if e.key.lower().endswith(".command")]
     if unexamined:
         removal.record_left(shown, subject, NOT_READ)
         removal.unread.append(shown)
-        removal.confirmed_hook_left = True
         return
-    if not commands or not all(
-            known_payload(e.value or "")
-            and (grading.shown_path(Path(e.source), root), f"{e.key} = {e.value}") in reported
-            for e in commands):
+    if not commands or not all(known_payload(e.value or "") for e in commands):
         removal.record_left(shown, subject, NOT_A_KNOWN_PAYLOAD)
-        removal.confirmed_hook_left = True
+        return
+    unreported = sorted({grading.shown_path(Path(e.source), root) for e in commands
+                         if (grading.shown_path(Path(e.source), root), f"{e.key} = {e.value}")
+                         not in reported})
+    if unreported:
+        removal.record_left(shown, subject, f"also runs a command set in {', '.join(unreported)} that "
+                                            "this run did not report — review it")
         return
     outside = sorted({grading.shown_path(Path(e.source), root) for e in definition
                       if not _editable_in_checkout(root, Path(e.source))})
     if outside:
         removal.record_left(shown, subject, f"is also set in {', '.join(outside)}, outside your "
                                             "checkout — remove it yourself")
-        removal.confirmed_hook_left = True
         return
     files = list(dict.fromkeys(Path(e.source) for e in definition))
-    for config in files:
-        for key in dict.fromkeys(e.key for e in definition if Path(e.source) == config):
-            _remove_key(config, key)
-        pairs, unreadable = list_config_file(config)
-        if unreadable is not None or any(_configured_hook_name(k) == hook for k, _ in pairs):
-            removal.record_left(grading.shown_path(config, root), subject, NOT_TAKEN_OUT)
-            if unreadable is not None:
-                removal.unread.append(grading.shown_path(config, root))
-            removal.confirmed_hook_left = True
+    for in_this_pass in (_is_event_key, lambda k: not _is_event_key(k) and not _is_command_key(k),
+                         _is_command_key):
+        for config in files:
+            for key in dict.fromkeys(e.key for e in definition
+                                     if Path(e.source) == config and in_this_pass(e.key)):
+                _remove_key(config, key)
+        still_set, unreadable = _hook_keys_left(files, hook, in_this_pass)
+        if still_set or unreadable:
+            changed = [grading.shown_path(f, root) for f in files if f not in still_set + unreadable]
+            why = NOT_TAKEN_OUT + (f" in full; saw changed {', '.join(changed)}" if changed else "")
+            removal.record_left(shown, subject, why)
+            removal.unread += [grading.shown_path(f, root) for f in unreadable]
             return
+    removal.confirmed_hook_left = False
     removal.stripped += [grading.shown_path(f, root) for f in files]
 
 
@@ -166,6 +182,29 @@ def _entries_git_reads(surface: ExecSurface) -> tuple[list[ConfigEntry], list[st
     for config in operator_files or ():
         entries += read_config(config, probe)
     return entries, [*surface.unexamined, *probe.unexamined]
+
+
+def _hook_keys_left(files: list[Path], hook: str, in_this_pass) -> tuple[list[Path], list[Path]]:
+    """Read files back for keys of a configured hook. Takes the files, the hook's name and which of
+    its keys to look for. Returns the files still holding one and the files that could not be read."""
+    still_set, unreadable = [], []
+    for config in files:
+        pairs, why = list_config_file(config)
+        if why is not None:
+            unreadable.append(config)
+        elif any(_configured_hook_name(k) == hook and in_this_pass(k) for k, _ in pairs):
+            still_set.append(config)
+    return still_set, unreadable
+
+
+def _is_event_key(key: str) -> bool:
+    """Tell whether a configured hook's key names an event it runs on. Takes the key."""
+    return key.lower().endswith(".event")
+
+
+def _is_command_key(key: str) -> bool:
+    """Tell whether a configured hook's key names the command it runs. Takes the key."""
+    return key.lower().endswith(".command")
 
 
 def _configured_hook_name(key: str) -> str | None:
