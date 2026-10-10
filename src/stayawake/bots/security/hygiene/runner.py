@@ -151,7 +151,7 @@ def check_runner_persistence() -> list[HygieneIssue]:
 
     SAFETY: the remediation must NOT tell the user to rotate credentials first — rotating
     while the runner persistence is still live can trip the reported home-dir wiper.
-    Advise isolate → runner offline + registration/service removed → rebuild → THEN rotate."""
+    Advise runner offline + registration/service removed → rebuild → THEN rotate."""
     runner_dir, unread = _installed_runner_dir()
     runner_services = _runner_services()
 
@@ -172,7 +172,7 @@ def check_runner_persistence() -> list[HygieneIssue]:
         detail="A self-hosted runner is installed/registered — " + "; ".join(where)
                + ". If you did not set this up, it runs attacker workflows and survives credential "
                "rotation (reported runner name SHA1HULUD).",
-        remediation="Do NOT rotate credentials first. Isolate the host, remove the registration "
+        remediation="Do NOT rotate credentials first. Remove the registration "
                     "(./config.sh remove) and service, rebuild from a known-clean image, then "
                     f"rotate LAST: {_WIPER_NOTE}.",
     )] + extra

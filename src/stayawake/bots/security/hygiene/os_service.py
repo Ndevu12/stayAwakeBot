@@ -69,7 +69,7 @@ def check_persistence() -> list[HygieneIssue]:
     """Detect a planted OS service / launch agent (the reported gh-token-monitor rotation wiper
     and lookalikes) on this host. Stdlib-only, read-only, graceful when dirs are absent.
 
-    SAFETY: its mere presence makes rotation dangerous, so the remediation sequences isolate +
+    SAFETY: its mere presence makes rotation dangerous, so the remediation sequences
     neutralize BEFORE any credential rotation (the wiper tripwire)."""
     user = set(user_persistence_dirs())
     hits, unread = [], []
@@ -101,7 +101,7 @@ def check_persistence() -> list[HygieneIssue]:
         # the third statement of one fact. The MITRE ids belong in the docs, not the finding.
         detail="Found a planted OS service / launch agent — " + "; ".join(what)
                + ". It watches for credential rotation and wipes the home directory.",
-        remediation="Do NOT rotate any credential yet. Isolate the host, remove the service/agent, "
+        remediation="Do NOT rotate any credential yet. Remove the service/agent, "
                     f"rebuild from a known-clean image, then rotate LAST: {_WIPER_NOTE}.",
         command="systemctl --user disable --now <unit>\n"
                 "launchctl bootout gui/$UID/<label> && rm ~/Library/LaunchAgents/<label>.plist",

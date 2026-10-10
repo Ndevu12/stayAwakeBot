@@ -256,8 +256,8 @@ class TestRunnerPersistence(unittest.TestCase):
             self.assertIn("do not rotate credentials", rem)          # leads with the guardrail
             self.assertIn("rotate last", rem)                # rotation is sequenced last
             # The rotation ACTION (the LAST 'rotate' — not the "Do NOT rotate" guardrail) is
-            # sequenced AFTER isolation: a meaningful ordering check, not a phrase that never appears.
-            self.assertLess(rem.index("isolate the host"), rem.rindex("rotate"))
+            # sequenced AFTER the removal: a meaningful ordering check, not a phrase that never appears.
+            self.assertLess(rem.index("remove the registration"), rem.rindex("rotate"))
 
     def test_macos_launchd_runner_is_captured(self):
         # The launchd branch collects actions.runner labels; the wiper is NOT a runner (it's owned
@@ -306,7 +306,7 @@ class TestRunnerPersistence(unittest.TestCase):
         issue = hygiene.HygieneIssue("self-hosted-runner-persistence", "warning", "T", "D", "F")
         out = hygiene.render([issue]).lower()
         self.assertIn("rotate last", out)
-        self.assertLess(out.index("isolate the host"), out.index("rotate credentials"))
+        self.assertLess(out.index("run `saw harden`"), out.index("rotate credentials"))
 
     def test_audit_composes_runner_persistence(self):
         # Regression: audit() is the SINGLE composition site and must include every probe,
@@ -375,18 +375,18 @@ class TestPersistence(unittest.TestCase):
         self.assertEqual([i.id for i in issues], ["persistence-surface-unverified"])
         self.assertEqual(issues[0].severity, "unknown")
 
-    def test_remediation_sequences_isolate_before_rotate(self):
+    def test_remediation_sequences_removal_before_rotate(self):
         d = self._home_with([".config/systemd/user/gh-token-monitor.service"])
         with mock.patch.object(hygiene.Path, "home", return_value=d):
             rem = hygiene.check_persistence()[0].remediation.lower()
         self.assertIn("do not rotate", rem)
-        self.assertLess(rem.index("isolate"), rem.rindex("rotate"))   # isolate before rotation action
+        self.assertLess(rem.index("remove the service"), rem.rindex("rotate"))   # removal before rotation
 
     def test_os_service_persistence_triggers_incident_runbook(self):
         issue = hygiene.HygieneIssue("os-service-persistence", "warning", "T", "D", "F")
         out = hygiene.render([issue]).lower()
         self.assertIn("rotate last", out)
-        self.assertLess(out.index("isolate the host"), out.index("rotate credentials"))
+        self.assertLess(out.index("run `saw harden`"), out.index("rotate credentials"))
 
     def test_audit_composes_persistence(self):
         sentinel = hygiene.HygieneIssue("os-service-persistence", "warning", "T", "D", "F")
@@ -467,7 +467,7 @@ class TestHostArtifacts(unittest.TestCase):
         rem = issue.remediation.lower()
         self.assertEqual(issue.severity, "warning")
         self.assertIn("rotate credentials last", rem)
-        self.assertLess(rem.index("isolate"), rem.rindex("rotat"))
+        self.assertLess(rem.index("saw harden"), rem.rindex("rotat"))
 
     def test_a_weak_indicator_leaves_the_sequencing_to_the_run_verdict(self):
         from stayawake.bots.security.hygiene.models import rotation_safety
@@ -1161,7 +1161,7 @@ class TestMechanismPersistenceComposition(unittest.TestCase):
                     "git-fsmonitor-command", "git-hookspath-unsafe", "git-config-fetch-exec"):
             out = hygiene.render([hygiene.HygieneIssue(sid, "warning", "T", "D", "F")]).lower()
             self.assertIn("rotate last", out, sid)
-            self.assertLess(out.index("isolate the host"), out.index("rotate credentials"), sid)
+            self.assertLess(out.index("run `saw harden`"), out.index("rotate credentials"), sid)
 
     def test_hardening_only_findings_do_not_trigger_runbook(self):
         # Loose perms / info are hardening, not proof of live compromise → no rotate-LAST lead.
@@ -1270,11 +1270,11 @@ class TestAuditRender(unittest.TestCase):
 
     def test_credential_exposure_only_is_calm_not_full_runbook(self):
         # Proportionality: a lone credential EXPOSURE (no active persistence) gets a calm note, NOT the
-        # isolate-and-rebuild runbook — while keeping the don't-bulk-rotate-first (wiper) caveat.
+        # harden-and-rebuild runbook — while keeping the don't-bulk-rotate-first (wiper) caveat.
         out = hygiene.render([hygiene.HygieneIssue("git-credentials-plaintext", "warning", "T", "D", "F")])
         self.assertIn("no active host persistence", out.lower())       # honest: exposure, not compromise
         self.assertIn("bulk credential rotation", out.lower())         # keeps the wiper caveat
-        self.assertNotIn("Isolate the host from the network", out)     # NOT the full incident runbook
+        self.assertNotIn("Take self-hosted CI runners offline and rebuild", out)  # NOT the full runbook
         self.assertNotIn("Take self-hosted CI runners offline", out)
 
     def test_credential_plus_persistence_still_gets_full_runbook(self):
@@ -1283,7 +1283,7 @@ class TestAuditRender(unittest.TestCase):
         out = hygiene.render([
             hygiene.HygieneIssue("git-credentials-plaintext", "warning", "T", "D", "F"),
             hygiene.HygieneIssue("self-hosted-runner-persistence", "warning", "T", "D", "F")])
-        self.assertIn("Isolate the host from the network", out)
+        self.assertIn("Run `saw harden` to end the code running here", out)
         self.assertIn("Active host persistence detected", out)
         self.assertNotIn("no active host persistence", out.lower())
 
@@ -1293,7 +1293,7 @@ class TestAuditRender(unittest.TestCase):
 
     def test_incident_response_sequence_orders_rotation_last(self):
         joined = " ".join(hygiene.incident_response_sequence()).lower()
-        self.assertLess(joined.index("isolate"), joined.index("rotate"))
+        self.assertLess(joined.index("saw harden"), joined.index("rotate"))
         self.assertLess(joined.index("neutralize"), joined.index("rotate"))
         self.assertIn("wiper", joined)
 

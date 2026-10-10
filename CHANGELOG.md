@@ -26,6 +26,9 @@ reader, not the mechanism or the weakness it closed.
   macOS the notifications come from Script Editor; `saw watch` sends one when you set it up so
   you can allow them. If this machine already checks itself, run `saw watch stop`, then
   `saw watch`, once after upgrading.
+- **`saw audit`'s advice for a compromised machine names what to run.** The response order it
+  prints on active host persistence, and the fixes on the findings that lead to it, say to run
+  `saw harden` where they used to say to take the machine off the network.
 - **On a terminal, `saw fix` and `saw fix amend` ask about the other files added in the same
   commit as the malware.** Each file shows how many of your project's files mention it. You take out
   all of them, some, or none; Enter keeps them. `saw fix` removes the ones you take out in the

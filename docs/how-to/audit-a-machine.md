@@ -33,7 +33,7 @@ the new one straight to whatever is running there.
 
 Work in this order, and rotate **last**:
 
-1. **Isolate** the machine from the network.
+1. **Harden** it: `saw harden` ends the code running here and puts the host controls in place.
 2. **Neutralise** what the report names.
 3. **Rebuild** if you cannot account for it. A host is never auto-cleaned.
 4. **Rotate** credentials — from a machine you trust, not this one.

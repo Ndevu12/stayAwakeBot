@@ -591,7 +591,7 @@ def check_credentials() -> list[HygieneIssue]:
                    "(credential.helper=store) — any process running as you can read it. The "
                    "git-HTTPS store only; your gh token and SSH keys are separate.",
             remediation="Switch to a keychain helper or SSH, then delete the file. Rotate the token "
-                        f"LAST, after isolating the host: {_WIPER_NOTE}.",
+                        f"LAST, after `saw audit` says rotating is safe: {_WIPER_NOTE}.",
             command="git config --global credential.helper osxkeychain   # or: gh auth setup-git\n"
                     "rm ~/.git-credentials                                # after the helper is switched",
             reference=CREDENTIAL_HYGIENE_DOC,
