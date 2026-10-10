@@ -10,7 +10,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from stayawake.bots.security import schedule
+from stayawake.bots.security import schedule, watchack
 from stayawake.bots.security.hygiene import watching
 
 DURABLE = ["/opt/pipx/venvs/stayawakebot/bin/python", "-E", "-P", "-m", "stayawake"]
@@ -55,12 +55,33 @@ class TestTakingItBackForgetsIt(unittest.TestCase):
 
 
 class TestAMachineThatStoppedCheckingItselfSaysSo(unittest.TestCase):
-    def _check(self, *, placed=True, state=schedule.PRISTINE, loaded=True, supported=True):
+    def _check(self, *, placed=True, state=schedule.PRISTINE, loaded=True, supported=True,
+               record=None, now=1000.0, since=995.0, acknowledged=None):
         return watching.check_self_check(placed=lambda: placed, verdict=lambda: state,
-                                         running=lambda: loaded, supported=lambda: supported)
+                                         running=lambda: loaded, supported=lambda: supported,
+                                         record=lambda: dict(record or {}), clock=lambda: now,
+                                         placed_since=lambda: since,
+                                         acknowledged=lambda: acknowledged)
 
     def test_checking_and_running_reports_nothing(self):
         self.assertEqual(self._check(), [])
+        self.assertEqual(self._check(record={"last_good": 900.0}), [])
+
+    def test_running_but_not_checking_for_a_while_is_reported(self):
+        for record, since in (({"last_good": 0.0}, 995.0), ({}, 0.0), ({}, None)):
+            with self.subTest(record=record, since=since):
+                issues = self._check(record=record, now=10_000.0, since=since)
+                self.assertEqual([i.id for i in issues], [watching.STOPPED_ID])
+                self.assertIn("saw watch stop", issues[0].remediation)
+
+    def test_a_check_that_cannot_be_read_is_not_silence(self):
+        def broken():
+            raise OSError("unreadable")
+        with self.assertRaises(OSError):
+            watching.check_self_check(placed=lambda: True, verdict=broken,
+                                      running=lambda: True, supported=lambda: True,
+                                      record=dict, clock=lambda: 0.0,
+                                      placed_since=lambda: None, acknowledged=lambda: None)
 
     def test_one_never_set_up_is_not_a_finding(self):
         self.assertEqual(self._check(placed=False, state=schedule.ABSENT, loaded=False), [])
@@ -77,6 +98,18 @@ class TestAMachineThatStoppedCheckingItselfSaysSo(unittest.TestCase):
 
     def test_a_platform_without_one_reports_nothing(self):
         self.assertEqual(self._check(supported=False, state=schedule.ABSENT, loaded=False), [])
+
+    def test_what_the_watcher_found_and_is_not_dealt_with_is_reported(self):
+        came_back = {"last_good": 990.0, "unacknowledged": 5.0, "epoch": "ab", "returns_seen": 2}
+        self.assertEqual([i.id for i in self._check(record=came_back)], [watching.CAME_BACK_ID])
+        self.assertEqual(self._check(record=came_back, acknowledged=watchack.Counted("ab", 2)), [],
+                         "a return harden dealt with is still reported")
+        self.assertEqual([i.id for i in self._check(placed=False, state=schedule.ABSENT,
+                                                    loaded=False, record=came_back)],
+                         [watching.CAME_BACK_ID], "stopping the watcher hid an open return")
+        not_stopped = {"last_good": 990.0, "not_stopped": 900.0}
+        self.assertEqual([i.id for i in self._check(record=not_stopped)],
+                         [watching.NOT_STOPPED_ID])
 
     def test_it_names_no_location(self):
         for issue in self._check(state=schedule.ABSENT, loaded=False):

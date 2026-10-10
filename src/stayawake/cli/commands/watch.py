@@ -7,8 +7,11 @@ the scheduled item calls — hidden from help.
 from __future__ import annotations
 
 import argparse
+import time
 
-from stayawake.bots.security import watch
+from stayawake.bots.security import (watch, watchack, watchalerts, watchrecord, watchstatus,
+                                     watchteller)
+from stayawake.utils import notify
 from stayawake.cli.helptext import add_command, declare_streaming
 from stayawake.utils.streaming import busy, say
 from stayawake.cli.argtypes import no_stream_requested
@@ -51,11 +54,26 @@ def register(sub) -> None:
     internal.set_defaults(func=run_internal)
 
 
+_HERE = ("saw will tell you here when it stops code running on this machine, and once a day.")
+_SENT = ("A notification was sent to show where saw will tell you. If none appeared, allow "
+         "notifications for Script Editor in System Settings.")
+_NOT_SHOWN = ("Notifications could not be shown on this machine. Run `saw watch status` to see what "
+              "it finds.")
+notifier_for_this_machine = notify.platform_notifier
+
+
 def run(a: argparse.Namespace) -> int:
     no_stream = no_stream_requested(a)
     with busy("asking this machine to keep checking itself…", no_stream=no_stream):
         code, text = watch.schedule_it()
     say(text, no_stream=no_stream)
+    if code != 0:
+        return code
+    shown = notifier_for_this_machine().send(watchalerts.TITLE, _HERE)
+    if shown.state == notify.UNCONFIRMED:
+        say(_SENT, no_stream=no_stream)
+    elif shown.state != notify.SENT:
+        say(_NOT_SHOWN, no_stream=no_stream)
     return code
 
 
@@ -70,11 +88,15 @@ def run_stop(a: argparse.Namespace) -> int:
 def run_status(a: argparse.Namespace) -> int:
     no_stream = no_stream_requested(a)
     with busy("checking whether this machine is watching itself…", no_stream=no_stream):
-        code, text = watch.status_of()
+        code, text = watchstatus.status_of()
     say(text, no_stream=no_stream)
     return code
 
 
 def run_internal(a: argparse.Namespace) -> int:
-    """What the scheduled item calls: keep making the pass until stopped."""
-    return watch.keep_going()
+    """Keep making the pass until stopped, telling the user what it finds. Takes the parsed
+    arguments. Returns the code of the last pass."""
+    tell = watchteller.teller(notifier_for_this_machine(), load=watchrecord.load,
+                              save=watchrecord.save, clock=time.time, local=time.localtime,
+                              acknowledged=watchack.load_acknowledgement)
+    return watch.keep_going(tell=tell)

@@ -8,13 +8,15 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from stayawake.utils import env
+from stayawake.utils import env, pathsafe, sessionbus
+from stayawake.utils.systembin import system_binary
 
 
 LABEL = "com.ndevu.saw.watch"
@@ -65,18 +67,35 @@ def forget(path: Path | None = None) -> None:
 
 
 def was_placed(path: Path | None = None) -> bool:
-    """Whether this tool recorded placing an item on this machine."""
-    return recorded(path) is not None
+    """Tell whether this tool recorded placing an item on this machine. Takes an optional record
+    path. Returns True while a record is there, readable or not."""
+    try:
+        return os.path.lexists(path or record_path())
+    except (OSError, ValueError):
+        return True
+
+
+def placed_since(path: Path | None = None) -> float | None:
+    """Tell when saw last placed the item. Takes an optional record path. Returns the time, or None
+    when the record is missing, is a link, or cannot be read."""
+    try:
+        info = os.lstat(path or record_path())
+    except (OSError, ValueError):
+        return None
+    return info.st_mtime if stat.S_ISREG(info.st_mode) else None
 
 
 def recorded(path: Path | None = None) -> list[str] | None:
     """The argv saw last placed, or None when there is no readable record."""
+    raw = pathsafe.read_regular_no_follow(path or record_path(), _MOST_RECORD_BYTES)
     try:
-        data = json.loads((path or record_path()).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    argv = data.get("argv") if isinstance(data, dict) else None
-    return [str(a) for a in argv] if isinstance(argv, list) and argv else None
+        data = json.loads(raw.decode("utf-8")) if raw is not None else None
+        argv = data.get("argv") if isinstance(data, dict) else None
+        if isinstance(argv, list) and argv and all(isinstance(a, str) for a in argv):
+            return list(argv)
+    except Exception:
+        pass
+    return None
 
 
 def item_path() -> Path:
@@ -91,6 +110,7 @@ def program() -> list[str]:
     return [sys.executable, "-E", "-P", "-m", "stayawake"]
 
 
+_MOST_RECORD_BYTES = 256 << 10
 _CANNOT_SURVIVE = ("/tmp/", "/private/tmp/", "/var/tmp/", "/dev/shm/")
 
 
@@ -159,15 +179,37 @@ def verdict(path: Path | None = None, saw: list[str] | None = None,
     try:
         if where.is_symlink():
             return ALTERED
-        text = where.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return ABSENT
+        if not os.path.lexists(where):
+            return ABSENT
     except OSError:
         return UNREADABLE
+    raw = pathsafe.read_regular_no_follow(where, _MOST_RECORD_BYTES)
+    if raw is None:
+        return ALTERED if _larger_than(where, _MOST_RECORD_BYTES) else UNREADABLE
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return ALTERED
     for candidate in ([saw] if saw else [recorded(record), program()]):
         if candidate and text == content(candidate):
             return PRISTINE
     return ALTERED
+
+
+def _larger_than(where: Path, limit: int) -> bool:
+    """Tell whether a path is a regular file larger than a limit. Takes the path and the limit.
+    Returns the answer, False when it cannot be told."""
+    try:
+        info = os.lstat(where)
+    except OSError:
+        return False
+    return stat.S_ISREG(info.st_mode) and info.st_size > limit
+
+
+def _service_env() -> dict | None:
+    """Build the environment the service manager runs with. Returns the user's own runtime folder
+    and session bus on Linux, or None to keep the caller's environment elsewhere."""
+    return sessionbus.user_manager_env() if _linux() else None
 
 
 def is_ours(path: Path | None = None) -> bool:
@@ -188,11 +230,10 @@ _SERVICE_MANAGERS_BY_ABSOLUTE_PATH = {
 
 
 def _activator() -> str | None:
-    """The service manager's own binary, or None when there is no trustworthy one."""
-    for candidate in _SERVICE_MANAGERS_BY_ABSOLUTE_PATH.get("linux" if _linux() else "darwin", ()):
-        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-            return candidate
-    return None
+    """Find the service manager's own binary. Returns its path, or None when there is no
+    trustworthy one."""
+    return system_binary(_SERVICE_MANAGERS_BY_ABSOLUTE_PATH.get("linux" if _linux() else "darwin",
+                                                                ()))
 
 
 def _activate(where: Path, run=None, binary=None) -> bool:
@@ -211,7 +252,7 @@ def _activate(where: Path, run=None, binary=None) -> bool:
         commands = [[binary, "bootstrap", f"gui/{os.getuid()}", str(where)]]
     try:
         for argv in commands:
-            if run(argv, capture_output=True, timeout=20).returncode != 0:
+            if run(argv, capture_output=True, timeout=20, env=_service_env()).returncode != 0:
                 return False
     except (OSError, subprocess.SubprocessError):
         return False
@@ -227,7 +268,7 @@ def _running(run=None, binary=None) -> bool:
     argv = ([binary, "--user", "is-active", "--quiet", UNIT] if _linux()
             else [binary, "print", f"gui/{os.getuid()}/{LABEL}"])
     try:
-        return run(argv, capture_output=True, timeout=20).returncode == 0
+        return run(argv, capture_output=True, timeout=20, env=_service_env()).returncode == 0
     except (OSError, subprocess.SubprocessError):
         return False
 
@@ -246,7 +287,7 @@ def _deactivate(where: Path, run=None, binary=None) -> None:
     argv = ([binary, "--user", "disable", "--now", UNIT] if _linux()
             else [binary, "bootout", f"gui/{os.getuid()}", str(where)])
     try:
-        run(argv, capture_output=True, timeout=20)
+        run(argv, capture_output=True, timeout=20, env=_service_env())
     except (OSError, subprocess.SubprocessError):
         pass
 

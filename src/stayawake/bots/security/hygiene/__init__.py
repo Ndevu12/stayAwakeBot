@@ -165,8 +165,8 @@ def _safe(text: str) -> str:
 
 def _banner(issue_ids: set[str], *, color: bool, width: int) -> list[str]:
     """The incident banner, GRADED to the evidence (proportionality — see models): the full
-    isolate → rebuild → rotate-LAST runbook leads ONLY on active host persistence; a lone
-    credential EXPOSURE gets a calm, proportionate note (not "isolate and rebuild" over a cached
+    harden → rebuild → rotate-LAST runbook leads ONLY on active host persistence; a lone
+    credential EXPOSURE gets a calm, proportionate note (not "harden and rebuild" over a cached
     token); hygiene / info-only findings get no banner. Empty list when none is warranted.
 
     The runbook is a genuine ORDERED procedure (rotate LAST) → a NUMBERED list; the note is a set
@@ -194,7 +194,7 @@ def _rotation_verdict(issues: list[HygieneIssue], *, color: bool, width: int) ->
     """The run-level ROTATION-SAFETY verdict — ALWAYS stated, reachable even with zero
     findings. Says explicitly whether credential rotation is safe, because rotating while a
     `gh-token-monitor` daemon is live arms a home-directory wiper. Three states (see models):
-    SAFE (surface enumerated + clean), UNSAFE-persistence (a live foothold → the isolate/rotate-LAST
+    SAFE (surface enumerated + clean), UNSAFE-persistence (a live foothold → the harden/rotate-LAST
     runbook follows in _banner), UNSAFE-unknown (surface could not be read → treat as unsafe)."""
     verdict = rotation_safety({i.id for i in issues})
     if verdict == ROTATION_SAFE_PENDING_CHECK:

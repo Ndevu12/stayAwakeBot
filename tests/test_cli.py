@@ -35,13 +35,18 @@ def setUpModule():
     """These tests compose the real audit, which reads and rewrites saw's own cross-run state file.
     A return is reported once and then cleared, so a suite run would consume the operator's own
     evidence. Point it at a throwaway."""
-    global _state_dir
+    global _state_dir, _watcher_folder
     _state_dir = tempfile.mkdtemp(prefix="cli-state-")
     os.environ["SAW_AUTORUN_BASELINE"] = str(pathlib.Path(_state_dir) / "autorun-baseline.json")
+    from stayawake.bots.security import watchrecord
+    _watcher_folder = mock.patch.object(watchrecord, "shared_folder",
+                                        return_value=pathlib.Path(_state_dir) / "watcher")
+    _watcher_folder.start()
 
 
 def tearDownModule():
     os.environ.pop("SAW_AUTORUN_BASELINE", None)
+    _watcher_folder.stop()
     shutil.rmtree(_state_dir, ignore_errors=True)
 
 

@@ -41,7 +41,7 @@ class HygieneIssue:
 # destructive tripwire: the Mini Shai-Hulud variant is reported to install a service
 # (gh-token-monitor.service) that WIPES the home directory when it detects credential
 # rotation (MITRE T1485). So the reflexive "rotate everything now" reaction is exactly
-# what turns containment into data loss — isolate and neutralize persistence FIRST.
+# what turns containment into data loss — harden and neutralize persistence FIRST.
 
 _WIPER_NOTE = "rotating can trigger a reported wiper that deletes your home directory"
 
@@ -174,15 +174,15 @@ def display_rank(issue_id: str, severity: str) -> str:
 def incident_response_sequence() -> list[str]:
     """The canonical order for responding to a suspected worm compromise. Rotation is
     ALWAYS the last step: rotating while persistence is live can trigger the reported
-    home-directory wiper. Isolate → image → rebuild → neutralize → THEN rotate."""
+    home-directory wiper. Image → harden → rebuild → neutralize → THEN rotate."""
     # Steps only — no "1./2." prefixes: the renderer owns the numbering (core.render.marked_list),
     # so this stays pure data (and a non-terminal consumer can renumber/reformat it freely).
     return [
-        "Isolate the host from the network first.",
         # Before the rebuild, which destroys what a plain delete left recoverable. Whether any
         # survives is a property of the PAYLOAD this host-side path never saw — so it is not asserted.
         "If files are missing, image the disk before rebuilding or running any fix — every write "
         "can overwrite content, and how much is recoverable depends on the wipe variant.",
+        "Run `saw harden` to end the code running here and put the host controls in place.",
         "Take self-hosted CI runners offline and rebuild affected hosts from known-clean images.",
         "Neutralize per-host persistence: unexpected services, planted CI workflows, and editor "
         "or agent auto-run hooks.",
@@ -216,12 +216,13 @@ def left_outside_a_control_note() -> list[str]:
 def credential_exposure_note() -> list[str]:
     """Proportionate guidance when a credential is exposed but NO active persistence was detected —
     exposure, not a confirmed compromise. Keeps the rotate-carefully caveat (a rotation-triggered
-    home-directory wiper can't be fully excluded) WITHOUT the alarmist isolate-and-rebuild runbook."""
+    home-directory wiper can't be fully excluded) WITHOUT the full rebuild runbook."""
     return [
         "Move the exposed credential to a safer store — see the fix on each item below.",
         "No active host persistence was found, so this is exposure rather than a confirmed "
-        "compromise; isolating or rebuilding is not warranted on this alone.",
-        "Detection is best-effort: if you suspect this host for any other reason, isolate it first.",
+        "compromise; rebuilding is not warranted on this alone.",
+        "Detection is best-effort: if you suspect this host for any other reason, run "
+        "`saw audit --verify` and `saw harden` before rotating anything.",
         "Do not make a bulk credential rotation your first move — a rotation-triggered wiper cannot be fully "
         "excluded.",
     ]

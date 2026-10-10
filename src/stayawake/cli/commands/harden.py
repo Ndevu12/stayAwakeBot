@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 
-from stayawake.bots.security import harden
+from stayawake.bots.security import harden, watchack, watchrecord
 from stayawake.cli.helptext import add_command
 from stayawake.utils.streaming import busy, say
 from stayawake.cli.argtypes import no_stream_requested
@@ -29,10 +29,55 @@ def register(sub) -> None:
     p.set_defaults(func=run)
 
 
+acknowledge_came_back = watchack.acknowledge
+
+
 def run(a: argparse.Namespace) -> int:
+    """Put the host controls in place, or take them back. Takes the parsed arguments. Returns the
+    exit code; a run that ended the live code it found also marks what the watcher had found
+    before it started as dealt with."""
     label = "removing host denials…" if a.take_back else "creating host denials…"
     no_stream = no_stream_requested(a)
+    counted = _watcher_counted()
     with busy(label, no_stream=no_stream):
         code, text = harden.take_back() if a.take_back else harden.run()
     say(text, no_stream=no_stream)
+    if harden.dealt_with_live_code(code) and not a.take_back:
+        line = _after_protecting(counted)
+        if line:
+            say(line, no_stream=no_stream)
     return code
+
+
+_NOT_ACKNOWLEDGED = ("The watcher could not record that what it found has been dealt with, so it "
+                     "will keep reminding you. Run `saw watch status`.")
+_CAME_BACK_DURING = ("Code came back or kept running while saw harden ran. Run `saw harden` "
+                     "again, then `saw audit` to find what brings it back.")
+_SETTLE_WITHOUT_SUDO = ("Run `saw harden` again without sudo to mark what the watcher found as dealt "
+                        "with.")
+
+
+def _watcher_counted():
+    """Read what the watcher had found before this run, never failing. Returns what its record
+    counted, or None."""
+    try:
+        return watchack.counted_so_far(watchrecord.load())
+    except Exception:
+        return None
+
+
+def _after_protecting(counted) -> str:
+    """Mark what the watcher had found before this run started as dealt with, never failing. Takes
+    what was counted then. Returns the line to print, or "" when there is nothing to say."""
+    try:
+        if counted is None:
+            return ""
+        if watchrecord.owned_by_another_account(watchrecord.record_path()):
+            found = watchrecord.load()
+            return _SETTLE_WITHOUT_SUDO if "unacknowledged" in found or "not_stopped" in found else ""
+        if not acknowledge_came_back(counted):
+            return _NOT_ACKNOWLEDGED
+        still = watchack.settled(watchrecord.load(), watchack.load_acknowledgement())
+        return _CAME_BACK_DURING if "unacknowledged" in still or "not_stopped" in still else ""
+    except Exception:
+        return _NOT_ACKNOWLEDGED

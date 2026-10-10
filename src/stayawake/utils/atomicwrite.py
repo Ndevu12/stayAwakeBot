@@ -6,9 +6,12 @@ import os
 import tempfile
 from pathlib import Path
 
+from stayawake.utils import pathsafe
+
 
 def replace(where: Path, text: str, *, mode: int = 0o600) -> bool:
-    """Write `text` to `where` atomically. True only when a read-back returns what was written."""
+    """Write `text` to `where` atomically. True only when a read-back, which never follows a link
+    or waits on anything that is not a file, returns exactly what was written."""
     try:
         if where.is_symlink():
             return False
@@ -24,8 +27,5 @@ def replace(where: Path, text: str, *, mode: int = 0o600) -> bool:
                 os.unlink(staged)
     except OSError:
         return False
-    try:
-        with open(where, encoding="utf-8", newline="") as handle:
-            return handle.read() == text
-    except OSError:
-        return False
+    written = text.encode("utf-8")
+    return pathsafe.read_regular_no_follow(where, len(written)) == written

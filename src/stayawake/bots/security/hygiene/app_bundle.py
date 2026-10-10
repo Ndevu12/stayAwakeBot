@@ -478,7 +478,7 @@ def _finding(module: Path, pad: int, body: int, scan: _MarkerScan) -> HygieneIss
             title="Worm markers inside an installed application's own JavaScript",
             detail=f"{module} looks modified, and a scan of its directory is CONFIRMED: "
                    f"{', '.join(scan.markers)}.",
-            remediation="Treat as a LIVE compromise: isolate the host, reinstall the application, "
+            remediation="Treat as a LIVE compromise: run `saw harden`, reinstall the application, "
                         f"rotate credentials LAST — {_WIPER_NOTE}.",
         )
     return HygieneIssue(
@@ -487,7 +487,7 @@ def _finding(module: Path, pad: int, body: int, scan: _MarkerScan) -> HygieneIss
         title="An application module looks modified",
         detail=f"{module} carries content its build would not have produced. {_corroboration(scan)}",
         remediation="Compare it against the vendor's published copy, or reinstall the application. "
-                    "If it is not theirs, isolate this host.",
+                    "If it is not theirs, run `saw harden`.",
     )
 
 

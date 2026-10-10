@@ -293,7 +293,7 @@ def _corroborated_issue(found: list[str], *, active: bool) -> HygieneIssue:
             severity="warning",
             title="Files this wave leaves on a developer host are on this machine",
             detail=f"{len(found)} of them. Treat as a possible live compromise.",
-            remediation="Isolate this machine, run `saw harden`, and rotate credentials LAST — "
+            remediation="Run `saw harden`, and rotate credentials LAST — "
                         f"{_WIPER_NOTE}.",
         )
     return HygieneIssue(
@@ -438,7 +438,7 @@ def _verify_weak_artifact(item: tuple[str, Path]) -> list[HygieneIssue] | None:
             title="Content scan found worm markers inside a host artifact",
             detail=f"{len(v.markers)} confirmed marker(s) in {v.files} files. There is worm code "
                    "on this host.",
-            remediation="Treat as a LIVE compromise. Isolate this machine and rotate credentials "
+            remediation="Treat as a LIVE compromise. Run `saw harden`, and rotate credentials "
                         f"LAST — {_WIPER_NOTE}.",
         )]
     # Markers may only PROMOTE this finding, never lower it. Measured on a real incident'''s staged
@@ -461,6 +461,6 @@ def _verify_weak_artifact(item: tuple[str, Path]) -> list[HygieneIssue] | None:
         severity="info",
         title="Something unusual is on this host (weak indicator)",
         detail=f"Ordinary tooling creates these. {outcome}",
-        remediation="Confirm you created it. If not, isolate this machine and rotate "
-                    "credentials LAST.",
+        remediation="Confirm you created it. If not, run `saw harden` and rotate credentials "
+                    "LAST.",
     )]

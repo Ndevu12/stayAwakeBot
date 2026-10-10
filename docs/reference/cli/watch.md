@@ -37,13 +37,32 @@ One line about where this machine stands:
 
 - nothing is running code it should not;
 - code was running and has been stopped;
-- something that was stopped here before is running again — which is the sentence that matters, and
-  the point at which to take the machine off the network;
+- something that was stopped here before is running again — the sentence that matters, and the
+  point at which to run `saw harden`, then `saw audit` to find what brings it back;
 - something is running that this machine cannot identify;
 - something could not be stopped.
 
-It names no paths and no process numbers. If a pass could not finish what it started, it says so
-rather than reporting a clean machine.
+It names no paths and no process numbers. If a pass could not finish what it started, or could not
+examine what is running, it says so rather than reporting a clean machine.
+
+It tells you where you will notice. A desktop notification appears when it stops code, when code it
+stopped before comes back, when code could not be stopped, and when it has not been able to check
+the machine for a while. Code that came back, and code that could not be stopped, are repeated
+every hour until they are dealt with: run [`saw harden`](harden.md), and when code came back, run
+[`saw audit`](audit.md) to find what brings it back.
+Once a day it sends a short report, on quiet days too, so a day without one is worth a
+`saw watch status`.
+
+While something is not dealt with, every other `saw` command prints one line saying so, whether or
+not a notification was shown: code that came back, code that could not be stopped, or a watcher
+that has stopped checking. `saw watch status` lists the same, with what happened since the last
+report and any notifications that could not be sent, and `saw audit` reports code that came back
+or could not be stopped.
+
+`saw watch` sends one notification when you set it up, to show where they will appear. On macOS
+they come from Script Editor; if none appears, allow notifications for Script Editor in System
+Settings. On Linux they go to your desktop's notification service. A notification that cannot be
+shown is tried again later.
 
 ## When it runs by itself
 
@@ -56,16 +75,12 @@ or from your next login; where the system will not start it immediately, the arr
 made and takes effect then. It keeps doing that until `saw watch stop`.
 Asking twice changes nothing and says so.
 
-It is asked for by name rather than arranged by [`saw harden`](harden.md), because a process that
-keeps running and ends things is a larger thing to agree to than the controls harden places, and it
-should not arrive as a side effect of something else.
-
 What it runs is fixed. There is nothing in it to configure, and therefore nothing in it for anyone
 else to point somewhere else; if it is not exactly what `saw` wrote, running `saw watch` again puts it
 back and tells you it had been changed. Anything else found under that name is left alone —
 stopping removes saw's own work and nothing else.
 
-A quiet pass says nothing. Only a pass that found something speaks.
+A quiet pass sends nothing; the daily report says the machine was checked.
 
 ## The record
 
@@ -91,6 +106,8 @@ Elsewhere the command says it could not arrange it, rather than reporting a mach
 - [`saw audit`](audit.md) — what else this machine looks like
 
 `saw watch status` says whether this machine is checking itself. Whether it is running is asked
-of the system, not read from the file: one command stops the check without changing a byte.
+of the system, not read from the file: one command stops the check without changing a byte. If it
+says the machine has not checked itself recently, run `saw watch stop`, then `saw watch`; do the
+same once after upgrading saw.
 
 It is set up from the copy of saw you run it with, so run it from an installed one. A copy inside a temporary directory is refused: the check would work until that directory is cleaned up. If the check ever stops, `saw audit` says so.
