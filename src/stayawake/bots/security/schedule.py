@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from stayawake.utils import env
+from stayawake.utils.systembin import system_binary
 
 
 LABEL = "com.ndevu.saw.watch"
@@ -188,11 +189,10 @@ _SERVICE_MANAGERS_BY_ABSOLUTE_PATH = {
 
 
 def _activator() -> str | None:
-    """The service manager's own binary, or None when there is no trustworthy one."""
-    for candidate in _SERVICE_MANAGERS_BY_ABSOLUTE_PATH.get("linux" if _linux() else "darwin", ()):
-        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-            return candidate
-    return None
+    """Find the service manager's own binary. Returns its path, or None when there is no
+    trustworthy one."""
+    return system_binary(_SERVICE_MANAGERS_BY_ABSOLUTE_PATH.get("linux" if _linux() else "darwin",
+                                                                ()))
 
 
 def _activate(where: Path, run=None, binary=None) -> bool:
