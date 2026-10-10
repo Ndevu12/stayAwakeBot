@@ -657,9 +657,31 @@ class TestScanHostNote(unittest.TestCase):
         self.assertIn("Host note", out)
         self.assertIn("saw audit", out)
 
-    def test_infected_scan_omits_the_host_note(self):
-        out = sink_render.render_terminal(self._payload(infected=1))
-        self.assertNotIn("Host note", out)
+    def test_infected_scan_points_at_saw_audit_without_calling_the_repo_clean(self):
+        out = " ".join(sink_render.render_terminal(self._payload(infected=1)).split())
+        self.assertIn("Before rotating any credential, run `saw audit`", out)
+        self.assertNotIn("clean repo scan", out)
+
+    def test_the_saved_report_carries_the_host_note(self):
+        for infected in (0, 1):
+            out = " ".join(sink_render.render_markdown(self._payload(infected=infected)).split())
+            self.assertIn("run `saw audit`", out)
+
+    def test_the_saved_report_never_calls_an_unscanned_target_clean(self):
+        payload = self._payload(infected=0)
+        payload["results"][0]["error"] = "clone failed"
+        out = sink_render.render_markdown(payload)
+        self.assertNotIn("all scanned targets are clean", out)
+        self.assertIn("1 target(s) could not be scanned and are not clean", out)
+
+    def test_a_loader_path_reaches_the_terminal_escaped(self):
+        payload = self._payload(infected=1)
+        payload["results"][0]["findings"] = [{"category": "code-loader", "confidence": "confirmed",
+                                              "path": "a\x1b[2Jb.js", "signature_id": "x",
+                                              "severity": "critical", "description": "d"}]
+        out = sink_render._host_note(payload, sink_render.textsafe.plain)
+        self.assertIn("ON THIS MACHINE", out)
+        self.assertNotIn("\x1b", out)
 
 
 if __name__ == "__main__":

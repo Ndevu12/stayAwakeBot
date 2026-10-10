@@ -93,9 +93,18 @@ def _tape(no_stream: bool, dest=None):
     return Tape()
 
 
-def _warn_hookspath(stream) -> None:
+def _hooks_overridden() -> bool:
+    """Tell whether git is set to run every repository's hooks from a folder other than saw's.
+    Returns True when saw's hooks will not run."""
     hp = _global_hookspath()
-    if hp and not _same_path(os.path.expanduser(hp), _hooks_dir()):
+    return bool(hp) and not _same_path(os.path.expanduser(hp), _hooks_dir())
+
+
+def _warn_hookspath(stream) -> None:
+    """Warn that saw's hooks will not run when git runs hooks from another folder. Takes the stream
+    to print to."""
+    if _hooks_overridden():
+        hp = _global_hookspath() or ""
         print(_paint(f"  ⚠ git is set to run every repository's hooks from "
                      f"{textsafe.plain(hp, limit=4096)}, so saw's hooks will not run.", "warn", stream),
               file=stream)
@@ -367,7 +376,7 @@ def install(config_path: str | None = None, *, no_stream: bool = False,
         return done.code
     config = os.path.abspath(config_path) if config_path else None
     actions, target = done.actions, done.target
-    settled = done.settled
+    settled = done.settled and not _hooks_overridden()
 
     out = _tape(no_stream)
     if settled:
@@ -804,8 +813,9 @@ def run_event(event: str, argv: list[str], config_path: str | None = None,
             _bring_up_to_date()
             return outbound.check_push(argv, refs_text, config_path, no_stream=no_stream)
         return _run_event(event, argv, config_path, no_stream=no_stream)
-    except BaseException as exc:            # noqa: BLE001 — last-resort: never break/confuse git
-        print(_paint(f"{_BRAND}: scan-on-clone error — {exc}", "warn", sys.stderr), file=sys.stderr)
+    except BaseException:                   # noqa: BLE001 — last-resort: never break/confuse git
+        print(_paint(f"⚠  {_BRAND}: the scan did not complete — NOT verified. Run `saw scan` in "
+                     "this repository.", "warn", sys.stderr), file=sys.stderr)
         return 2
 
 
@@ -845,9 +855,10 @@ def _run_event(event: str, argv: list[str], config_path: str | None,
         _warn_infected(display, result)
         return 1
     if result.error:
-        print(_paint(f"{_BRAND}: scan-on-clone hit an error scanning {display} — "
-                     f"{textsafe.plain(result.error)}",
-                     "warn", err), file=err)
+        print(_paint(f"⚠  {_BRAND}: {display} could not be scanned — NOT verified "
+                     f"({textsafe.plain(result.error, limit=200)}).", "warn", err), file=err)
+        print("   " + _paint("Scan it yourself:", "dim", err) + " " + _cmd(f"saw scan {display}", err),
+              file=err)
         return 2
     if result.suspicious:
         print(_paint(f"⚠  {_BRAND}: {display} — {len(result.findings)} suspicious signal(s). "

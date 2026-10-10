@@ -15,6 +15,7 @@ from stayawake.utils.streaming import Streamer, stream_enabled, status
 from stayawake.utils.sweep import run_sweep
 from stayawake.utils.timeutil import now_iso
 from stayawake.bots.security.signatures import load_signatures
+from stayawake.bots.security.host_note import fix_host_note
 from stayawake.bots.security import resolution
 from stayawake.bots.security.config import resolve_config
 from stayawake.bots.security.service.config import _options
@@ -452,6 +453,7 @@ def fix(config_path: str | None = None, *, pr: bool = False, remote: bool = Fals
         prog.line("No repositories to fix.")
         return 0
     prog.line(fix_tally(outcomes))
+    prog.line(fix_host_note())
     return fix_status(outcomes)
 
 

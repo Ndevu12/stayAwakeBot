@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from stayawake.bots.security import redaction
+from stayawake.utils import textsafe
 from stayawake.utils.io import write_json
 
 try:                                       # version is derived from the git tag at build time
@@ -124,6 +125,7 @@ def build_sarif(payload: dict) -> dict[str, Any]:
                 rule_index[sig] = len(rules)
                 rules.append(_rule(f))
             results.append(_result(r, f, rule_index[sig]))
+    unscanned = [_unscanned(r) for r in payload.get("results", []) if r.get("error")]
     return {
         "$schema": SCHEMA,
         "version": "2.1.0",
@@ -134,9 +136,20 @@ def build_sarif(payload: dict) -> dict[str, Any]:
                 "version": __version__,
                 "rules": rules,
             }},
+            "invocations": [{"executionSuccessful": not unscanned,
+                             "toolExecutionNotifications": unscanned}],
             "results": results,
         }],
     }
+
+
+def _unscanned(result: dict) -> dict[str, Any]:
+    """Build the notification for a target the scan could not complete. Takes one result of the
+    payload. Returns a SARIF notification at error level."""
+    return {"level": "error",
+            "message": {"text": textsafe.plain(f"{result.get('target', '')} could not be scanned "
+                                               f"and is not clean: {result.get('error', '')}",
+                                               limit=500)}}
 
 
 def write_sarif(payload: dict, path: str | Path) -> Path:

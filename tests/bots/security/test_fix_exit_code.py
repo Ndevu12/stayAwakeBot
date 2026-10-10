@@ -56,6 +56,16 @@ class TestAnUnfixedRepoFailsClosed(RemoteFixExitCase):
         self.assertNotEqual(0, self._run(clone=mock.Mock(), submit=_verdict(BaseState.PARTIAL,
                                                                 "owner/repo: PARTIAL — 1 left")))
 
+    def test_a_fix_run_ends_by_pointing_at_saw_audit(self):
+        import contextlib
+        import io
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self._run(clone=mock.Mock(), submit=_verdict(BaseState.PR_OPENED, "owner/repo: fixed"))
+        tail = " ".join(err.getvalue().split())
+        self.assertIn("saw fix cleans repositories, not this machine", tail)
+        self.assertIn("run `saw audit`", tail)
+
     def test_a_real_fix_still_exits_zero(self):
         # The gate must not become "always fail" — that would be a different kind of useless.
         self.assertEqual(0, self._run(clone=mock.Mock(), submit=_verdict(BaseState.PR_OPENED,

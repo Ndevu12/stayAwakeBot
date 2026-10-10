@@ -17,6 +17,7 @@ from typing import Any
 
 from stayawake.bots.security.dependencies.remediation import (
     dependency_actions, markdown_lines)
+from stayawake.bots.security.host_note import scan_host_note
 from stayawake.bots.security.redaction import redact, render_redacted
 from stayawake.utils.render import MARKER, SEVERITY, STATUS, paint, rule
 from stayawake.utils import textsafe
@@ -181,24 +182,16 @@ def render_terminal(payload: dict[str, Any], *, color: bool = False,
     if notes:
         out += ["", "Coverage notes (not gating):"] + [
             f"  {MARKER['info']} {textsafe.plain(n, limit=_NOTE_LIMIT)}" for n in notes]
-    # nothing is infected — the exact moment a user might read "clean" and rotate a token, which can
-    # arm a rotation-wiper daemon. Terminal-only, never gates; the authoritative host verdict is
-    # `saw audit` (which now withholds its all-clear until the persistence surface is verified).
-    if not s.get("infected"):
-        out += ["", "Host note: a clean repo scan is NOT a host all-clear — it does not check host "
-                    "persistence. Before rotating any credential, run `saw audit` (rotating while a "
-                    "persistence daemon is live can arm a home-directory wiper)."]
-    elif _local_loader_paths(payload):
-        # A loader confirmed in a working tree on THIS machine may already have run — the vectors it
-        # arrives through execute on folder-open or build. A remote target says nothing about this
-        # host, so only local ones escalate. Terminal-only: `saw audit` owns the host verdict.
-        out += ["", "Host note: a code loader was found in a working tree ON THIS MACHINE "
-                    f"({', '.join(_local_loader_paths(payload)[:3])}). It may already have run — "
-                    "the ways it arrives execute when the folder is opened or the project is built. "
-                    "Treat this host as compromised until `saw audit` says otherwise, and do NOT "
-                    "rotate credentials first (rotating while a persistence daemon is live can arm "
-                    "a home-directory wiper)."]
+    out += ["", _host_note(payload, textsafe.plain)]
     return "\n".join(out) + "\n"
+
+
+def _host_note(payload: dict[str, Any], escape) -> str:
+    """Build the run's note on what its verdict covers on this machine. Takes the report payload
+    and the escaping the sink applies to a path. Returns the note."""
+    infected = bool(payload["summary"].get("infected"))
+    loaders = [escape(p) for p in _local_loader_paths(payload)] if infected else []
+    return scan_host_note(infected=infected, local_loaders=loaders)
 
 
 def _local_loader_paths(payload: dict[str, Any]) -> list[str]:
@@ -333,7 +326,10 @@ def render_markdown(payload: dict[str, Any]) -> str:
                 out.append(f"  - details: {_md_url(f['reference'])}")
         out.append("")
     if not any_f:
-        out.append("_No findings — all scanned targets are clean._")
+        unread = sum(1 for r in payload["results"] if r.get("error"))
+        out.append("_No findings — all scanned targets are clean._" if not unread else
+                   f"_No findings in what was read; {unread} target(s) could not be scanned and are "
+                   "not clean._")
 
     advised = [r for r in sorted(payload["results"], key=report_order) if r.get("advisories")]
     if advised:
@@ -359,4 +355,5 @@ def render_markdown(payload: dict[str, Any]) -> str:
     if notes:
         out += ["## Coverage notes", "", "_Not gating — what this scan did not look at._", ""]
         out += [f"- {textsafe.code(n)}" for n in notes] + [""]
+    out += [_host_note(payload, textsafe.code), ""]
     return "\n".join(out) + "\n"

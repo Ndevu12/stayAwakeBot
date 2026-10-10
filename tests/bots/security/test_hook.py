@@ -264,6 +264,27 @@ class TestTheHookJudgesAsTheScanDoes(_Isolated):
         with mock.patch.object(hook, "_scan_within_budget", return_value=result):
             self.assertEqual(self._clone_event(repo), 1)
 
+    def test_a_scan_that_hit_an_error_says_not_verified_and_what_to_run(self):
+        from stayawake.bots.security.models import ScanResult
+        repo = self._repo_here({"a.txt": "ok\n"})
+        result = ScanResult(target=str(repo), source="local", error="b.js could not be read")
+        err = io.StringIO()
+        with mock.patch.object(hook, "_scan_within_budget", return_value=result), \
+             contextlib.redirect_stderr(err):
+            code = hook.run_event("post-checkout", ["0" * 40, self._head(repo), "1"])
+        self.assertEqual(code, 2)
+        out = " ".join(err.getvalue().split())
+        self.assertIn("NOT verified", out)
+        self.assertIn("saw scan", out)
+
+    def test_a_check_that_crashed_says_not_verified_without_its_exception(self):
+        err = io.StringIO()
+        with mock.patch.object(hook, "_run_event", side_effect=RuntimeError("\x1b[2Jboom")), \
+             contextlib.redirect_stderr(err):
+            self.assertEqual(hook.run_event("post-checkout", ["a", "b", "1"]), 2)
+        self.assertIn("NOT verified", err.getvalue())
+        self.assertNotIn("boom", err.getvalue())
+
     def test_an_infected_repository_is_reported_on_every_clone(self):
         repo = self._repo_here({".gitignore": _INFECTED})
         self.assertEqual(self._clone_event(repo), 1)
@@ -340,9 +361,10 @@ class TestInstallUninstall(_Isolated):
         hook.gitutil.run_ok(None, ["config", "--global", "core.hooksPath", str(self.home / "hp")], context=hook.gitutil.OPERATOR_CONFIG)
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            self.assertEqual(hook.install(), 0)
+            self.assertEqual(hook.install(), 3)
         self.assertIn(str(self.home / "hp"), buf.getvalue())
         self.assertIn("will not run", buf.getvalue())
+        self.assertNotIn("✓ scan-on-clone installed", buf.getvalue())
 
 
 class TestNeverClobber(_Isolated):

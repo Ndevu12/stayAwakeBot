@@ -113,6 +113,24 @@ class TestSarifBuild(unittest.TestCase):
         self.assertEqual(uri("l"), "x.js")             # local → workspace-relative
 
 
+class TestSarifSaysWhatWasNotScanned(unittest.TestCase):
+    def test_a_target_that_could_not_be_scanned_fails_the_run(self):
+        bad = dict(_result(target="repo-b"), error="clone failed")
+        run = sarif.build_sarif(_payload([_result(target="repo-a"), bad]))["runs"][0]
+        invocation = run["invocations"][0]
+        self.assertFalse(invocation["executionSuccessful"])
+        self.assertEqual(len(invocation["toolExecutionNotifications"]), 1)
+        note = invocation["toolExecutionNotifications"][0]
+        self.assertEqual(note["level"], "error")
+        self.assertIn("repo-b", note["message"]["text"])
+        self.assertIn("not clean", note["message"]["text"])
+
+    def test_a_complete_run_succeeds_with_no_notifications(self):
+        run = sarif.build_sarif(_payload([_result()]))["runs"][0]
+        self.assertEqual(run["invocations"], [{"executionSuccessful": True,
+                                               "toolExecutionNotifications": []}])
+
+
 class TestSarifWiredIntoScan(unittest.TestCase):
     def test_scan_writes_sarif_only_at_requested_path(self):
         work = Path(tempfile.mkdtemp())
