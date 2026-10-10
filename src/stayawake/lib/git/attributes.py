@@ -3,9 +3,9 @@
 repository saw owns."""
 from __future__ import annotations
 
-import os
-import stat
 from pathlib import Path
+
+from stayawake.utils.pathsafe import read_regular_no_follow
 
 ATTRIBUTES_FILE = ".gitattributes"
 _MAX_ATTRIBUTES_BYTES = 1 << 20
@@ -14,21 +14,7 @@ _MAX_ATTRIBUTES_BYTES = 1 << 20
 def read_regular(path: Path, limit: int = _MAX_ATTRIBUTES_BYTES) -> bytes | None:
     """The bytes of `path` when it is a regular file within `limit`, without following a link and
     without waiting on anything that is not a file. Returns None otherwise."""
-    try:
-        fd = os.open(str(path), os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-                     | getattr(os, "O_NONBLOCK", 0))
-    except OSError:
-        return None
-    try:
-        info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode) or info.st_size > limit:
-            return None
-        with os.fdopen(fd, "rb", closefd=False) as fh:
-            return fh.read(limit + 1)[:limit]
-    except OSError:
-        return None
-    finally:
-        os.close(fd)
+    return read_regular_no_follow(path, limit)
 
 
 def _rooted(directory: str, line: bytes) -> bytes | None:

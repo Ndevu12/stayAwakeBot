@@ -54,7 +54,9 @@ has stopped checking or has found code that came back.
 
 `saw watch` sends one notification when you set it up, to show where they will appear. On macOS
 they come from Script Editor; if none appears, allow notifications for Script Editor in System
-Settings.
+Settings. On Linux they go to your desktop's notification service. If a notification cannot be
+shown, saw tries again on the next pass, every `saw` command says so, and `saw watch status` lists
+what happened since the last report.
 
 ## When it runs by itself
 

@@ -50,13 +50,26 @@ class TestMacOS(unittest.TestCase):
         self.assertEqual(got.state, notify.UNAVAILABLE)
 
 
+def _bus(mode=stat.S_IFSOCK | 0o600, uid=1000):
+    def lstat(path):
+        if path != "/run/user/1000/bus":
+            raise FileNotFoundError(path)
+        return SimpleNamespace(st_mode=mode, st_uid=uid)
+    return lstat
+
+
+def _linux(run, **kw):
+    kw.setdefault("lstat", _bus())
+    return notify.FreedesktopNotifier(run=run, binary="/usr/bin/busctl", uid=lambda: 1000, **kw)
+
+
 class TestLinux(unittest.TestCase):
     def test_typed_arguments_escaped_markup_and_only_the_session_bus_environment(self):
         run = _Capture(stdout="u 42\n")
-        notifier = notify.FreedesktopNotifier(run=run, binary="/usr/bin/busctl",
-                                              environ={"PATH": "/tmp/evil", "HOME": "/h",
-                                                       "XDG_RUNTIME_DIR": "/run/user/1"})
-        got = notifier.send("saw", _HOSTILE, urgent=True, replaces=7)
+        with mock.patch.dict("os.environ", {"DBUS_SESSION_BUS_ADDRESS":
+                                            "unixexec:path=/bin/sh,argv1=-c,argv2=id",
+                                            "XDG_RUNTIME_DIR": "/tmp/evil", "PATH": "/tmp/evil"}):
+            got = _linux(run).send("saw", _HOSTILE, urgent=True, replaces=7)
         argv, kw = run.calls[0]
         self.assertEqual(argv[:5], ["/usr/bin/busctl", "--user", "--timeout=10", "--", "call"])
         self.assertIn("susssasa{sv}i", argv)
@@ -65,19 +78,36 @@ class TestLinux(unittest.TestCase):
         self.assertNotIn("\x1b", body)
         self.assertEqual(argv[argv.index("susssasa{sv}i") + 2], "7")
         self.assertEqual(argv[-2:], ["2", "0"])
-        self.assertEqual(kw["env"], {"XDG_RUNTIME_DIR": "/run/user/1"})
+        self.assertEqual(kw["env"], {"XDG_RUNTIME_DIR": "/run/user/1000",
+                                     "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus"})
         self.assertEqual(got, notify.Delivery(notify.SENT, 42))
 
+    def test_a_bus_that_is_not_this_users_own_socket_is_not_used(self):
+        for lstat in (_bus(uid=0), _bus(mode=stat.S_IFREG | 0o600), _bus(mode=stat.S_IFIFO),
+                      lambda p: (_ for _ in ()).throw(FileNotFoundError(p))):
+            with self.subTest(lstat=lstat):
+                run = _Capture()
+                self.assertEqual(_linux(run, lstat=lstat).send("t", "b").state, notify.UNAVAILABLE)
+                self.assertEqual(run.calls, [])
+
     def test_no_notification_service_is_a_failure(self):
-        got = notify.FreedesktopNotifier(run=_Capture(returncode=1), binary="/b",
-                                         environ={}).send("t", "b")
-        self.assertEqual(got.state, notify.FAILED)
+        self.assertEqual(_linux(_Capture(returncode=1)).send("t", "b").state, notify.FAILED)
 
     def test_a_runner_that_hangs_is_a_failure(self):
         def hang(argv, **kw):
             raise subprocess.TimeoutExpired(argv, 1)
-        got = notify.FreedesktopNotifier(run=hang, binary="/b", environ={}).send("t", "b")
-        self.assertEqual(got.state, notify.FAILED)
+        self.assertEqual(_linux(hang).send("t", "b").state, notify.FAILED)
+
+    def test_an_answer_it_cannot_read_never_raises(self):
+        def undecodable(argv, **kw):
+            raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+        for answer in ("u \u00b2", "u 99999999999999999999", "x"):
+            with self.subTest(answer=answer):
+                self.assertEqual(_linux(_Capture(stdout=answer)).send("t", "b").state, notify.SENT,
+                                 "a notification that was shown must not be shown again")
+        self.assertEqual(_linux(undecodable).send("t", "b").state, notify.FAILED)
+        self.assertEqual(notify.OsascriptNotifier(run=undecodable, binary="/x").send("t", "b").state,
+                         notify.FAILED)
 
 
 class TestNothingIsSentWhereNothingIsSupported(unittest.TestCase):

@@ -40,6 +40,18 @@ def run(a: argparse.Namespace) -> int:
     with busy(label, no_stream=no_stream):
         code, text = harden.take_back() if a.take_back else harden.run()
     say(text, no_stream=no_stream)
-    if code == 0 and not a.take_back:
-        acknowledge_came_back()
+    if code == 0 and not a.take_back and not _acknowledged():
+        say(_NOT_ACKNOWLEDGED, no_stream=no_stream)
     return code
+
+
+_NOT_ACKNOWLEDGED = ("The watcher could not record that code which came back has been dealt with, "
+                     "so it will keep reminding you.")
+
+
+def _acknowledged() -> bool:
+    """Mark code that came back as dealt with. Returns whether it was recorded, never failing."""
+    try:
+        return acknowledge_came_back()
+    except Exception:
+        return False

@@ -14,12 +14,13 @@ from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
 
-from stayawake.utils import env
+from stayawake.utils import env, pathsafe
 
 
 ABSENT, LOADED, CORRUPT, EDITED = "absent", "loaded", "corrupt", "edited"
 
 _MAX_ENTRIES = 512
+_MOST_BYTES = 4 << 20
 
 
 def ledger_path() -> Path:
@@ -61,14 +62,16 @@ def load(path: Path | None = None) -> Ledger:
     """Read the record. Every failure is a STATE, never an exception and never an empty all-clear."""
     where = path or ledger_path()
     try:
-        raw = where.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return Ledger(status=ABSENT)
+        if not os.path.lexists(where):
+            return Ledger(status=ABSENT)
     except OSError:
         return Ledger(status=CORRUPT)
+    raw = pathsafe.read_regular_no_follow(where, _MOST_BYTES)
+    if raw is None:
+        return Ledger(status=CORRUPT)
     try:
-        data = json.loads(raw)
-    except ValueError:
+        data = json.loads(raw.decode("utf-8", errors="replace"))
+    except (ValueError, RecursionError):
         return Ledger(status=CORRUPT)
     held = data.get("entries") if isinstance(data, dict) else None
     if not isinstance(held, dict):
@@ -77,10 +80,14 @@ def load(path: Path | None = None) -> Ledger:
     for key, row in held.items():
         if not isinstance(row, dict):
             return Ledger(status=CORRUPT)
-        entries[str(key)] = Seen(first=str(row.get("first", "")), last=str(row.get("last", "")),
-                                 times=int(row.get("times", 0) or 0),
-                                 identified=bool(row.get("identified")),
-                                 ended=int(row.get("ended", 0) or 0))
+        try:
+            entries[str(key)] = Seen(first=str(row.get("first", ""))[:64],
+                                     last=str(row.get("last", ""))[:64],
+                                     times=int(row.get("times", 0) or 0),
+                                     identified=bool(row.get("identified")),
+                                     ended=int(row.get("ended", 0) or 0))
+        except (TypeError, ValueError, OverflowError):
+            return Ledger(status=CORRUPT)
     if data.get("self_hash") != _self_hash(held):
         return Ledger(entries=entries, status=EDITED)
     return Ledger(entries=entries, status=LOADED)

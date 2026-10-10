@@ -77,6 +77,24 @@ def _run(seen, ender=None, before=None):
     return code, text, saved.get("ledger"), ender
 
 
+class TestARecordThatCouldNotBeKeptIsSaid(unittest.TestCase):
+    def test_an_unwritable_or_changed_record_is_said_and_the_pass_is_incomplete(self):
+        cases = ((lambda ledger: False, liveledger.Ledger(status=liveledger.LOADED)),
+                 (lambda ledger: True, liveledger.Ledger(status=liveledger.EDITED)),
+                 (lambda ledger: True, liveledger.Ledger(status=liveledger.CORRUPT)))
+        for save, before in cases:
+            with self.subTest(status=before.status):
+                code, kinds = watch.examine(find=lambda: [], stop=None, load=lambda b=before: b,
+                                            save=save, look=lambda: _READABLE)
+                self.assertIn(watch.NOT_REMEMBERED, kinds)
+                self.assertEqual(code, exitcodes.INCOMPLETE)
+
+    def test_a_kept_record_says_nothing_about_it(self):
+        code, kinds = watch.examine(find=lambda: [], stop=None, load=liveledger.Ledger,
+                                    save=lambda ledger: True, look=lambda: _READABLE)
+        self.assertEqual((code, kinds), (exitcodes.CLEAN, (watch.QUIET,)))
+
+
 class TestAPassThatCouldNotLookIsNeverQuiet(unittest.TestCase):
     def test_a_process_table_it_cannot_read_is_not_a_quiet_machine(self):
         for snap in (Snapshot(supported=False), Snapshot(processes=[])):

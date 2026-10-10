@@ -30,6 +30,27 @@ def read_regular_bytes(path: Path) -> bytes | None:
         return None
 
 
+def read_regular_no_follow(path: Path, limit: int) -> bytes | None:
+    """Read a regular file without following a link and without waiting on anything that is not a
+    file. Takes the path and the most bytes to accept. Returns the bytes, or None when the path is
+    not a regular file, is larger than `limit`, or cannot be read."""
+    try:
+        fd = os.open(str(path), os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                     | getattr(os, "O_NONBLOCK", 0))
+    except OSError:
+        return None
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_size > limit:
+            return None
+        with os.fdopen(fd, "rb", closefd=False) as fh:
+            return fh.read(limit + 1)[:limit]
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+
+
 def read_regular_text(path: Path, *, errors: str = "replace") -> str | None:
     """The UTF-8 text of a regular file, or None (absent / non-regular / unreadable). Decodes
     tolerantly (`errors="replace"` by default) so a non-UTF-8 byte can't crash a read of an

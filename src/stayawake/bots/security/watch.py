@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import time
 
-from stayawake.bots.security import liveledger, schedule, watchrecord
+from stayawake.bots.security import liveledger, schedule, watchalerts, watchrecord
+from stayawake.bots.security.watchevents import (  # noqa: F401
+    _ENDED, _LEFT, _NOT_READ, _NOT_REMEMBERED, _PASS_FAILED, _QUIET, _RETURNED, _UNNAMED, ENDED,
+    LEFT, NOT_READ, NOT_REMEMBERED, PASS_FAILED, QUIET, RETURNED, SENTENCE_FOR, UNNAMED)
 from stayawake.bots.security.harden.live import end_live_code
 from stayawake.bots.security.livecode import fingerprint, live_code_processes
 from stayawake.utils import elevate, exitcodes
@@ -17,14 +20,9 @@ from stayawake.utils.procsnap import snapshot
 
 BETWEEN_PASSES = 30
 
-_ENDED = "Code running on this machine was stopped."
-_RETURNED = "It has been stopped here before and is running again. Take this machine off the network."
-_LEFT = "Something running here could not be stopped. Run `saw harden`."
-_UNNAMED = "Something is running that this machine cannot identify."
-_QUIET = "Nothing on this machine is running code it should not."
-_NOT_READ = "Running processes could not be examined, so nothing here covers one."
-_PASS_FAILED = "This machine could not check itself. Run `saw watch status`."
 _NOT_TOLD = "What this machine found could not be recorded or announced. Run `saw watch status`."
+_NOT_SHOWN = "This machine could not show you notifications. Run `saw watch status`."
+_NOT_SHOWN_STATUS = "Notifications could not be shown on this machine. Since the last report:"
 _STALLED = ("This machine is set to check itself but has not done so recently. Run `saw watch stop`, "
             "then `saw watch`.")
 _CAME_BACK = ("Code stopped here before came back and has not been dealt with. Take this machine "
@@ -47,12 +45,6 @@ _CANNOT_TELL = "Whether this machine checks itself could not be established."
 def _never_asks(pids, *, signatures):
     """Refuse privilege rather than seek it. Returns the refusal and nothing ended."""
     return elevate.CANNOT_ASK, []
-
-
-ENDED, RETURNED, LEFT, UNNAMED, QUIET = "ended", "returned", "left", "unnamed", "quiet"
-NOT_READ, PASS_FAILED = "not-read", "pass-failed"
-SENTENCE_FOR = {ENDED: _ENDED, RETURNED: _RETURNED, LEFT: _LEFT, UNNAMED: _UNNAMED, QUIET: _QUIET,
-                NOT_READ: _NOT_READ, PASS_FAILED: _PASS_FAILED}
 
 
 def watch_once(**collaborators) -> tuple[int, str]:
@@ -82,7 +74,8 @@ def examine(*, find=None, stop=end_live_code, load=liveledger.load,
     ended_keys = set()
     if ending is not None and ending.ended:
         ended_keys = {fingerprint(item.code) for item in identified}
-    save(liveledger.record(before, seen, ended_keys=ended_keys, now=now))
+    kept = save(liveledger.record(before, seen, ended_keys=ended_keys, now=now))
+    remembered = kept and before.status in (liveledger.LOADED, liveledger.ABSENT)
 
     returning = any(before.returning(fingerprint(item.code)) for item in identified)
     unfinished = ending is not None and not ending.finished
@@ -96,10 +89,12 @@ def examine(*, find=None, stop=end_live_code, load=liveledger.load,
             kinds.append(LEFT)
     if len(seen) > len(identified):
         kinds.append(UNNAMED)
+    if not remembered:
+        kinds.append(NOT_REMEMBERED)
     if not kinds:
         kinds.append(QUIET)
 
-    if unfinished:
+    if unfinished or not remembered:
         return exitcodes.INCOMPLETE, tuple(kinds)
     if identified:
         return exitcodes.FINDINGS, tuple(kinds)
@@ -119,16 +114,25 @@ def keep_going(*, once=examine, sleep=time.sleep, between=BETWEEN_PASSES, passes
         except Exception:
             code, kinds = exitcodes.INCOMPLETE, (PASS_FAILED,)
         if code != exitcodes.CLEAN:
-            report("\n".join(SENTENCE_FOR[kind] for kind in kinds))
+            _print_safely(report, "\n".join(SENTENCE_FOR[kind] for kind in kinds))
         if tell is not None:
             try:
                 tell(kinds)
             except Exception:
-                report(_NOT_TOLD)
+                _print_safely(report, _NOT_TOLD)
         made += 1
         if passes is None or made < passes:
             sleep(between)
     return code
+
+
+def _print_safely(report, text: str) -> None:
+    """Print a pass's lines without letting a broken output end the watch. Takes the printer and
+    the text."""
+    try:
+        report(text)
+    except Exception:
+        pass
 
 
 def schedule_it(*, settle=schedule.settle) -> tuple[int, str]:
@@ -154,6 +158,10 @@ def status_of(*, supported=schedule.supported, verdict=schedule.verdict,
         code, line = exitcodes.FINDINGS, _STALLED
     if kept.get("unacknowledged"):
         line += "\n" + _CAME_BACK
+    if kept.get("undelivered"):
+        code = max(code, exitcodes.FINDINGS)
+        said = watchalerts.facts(kept.get("since", {})) or [watchalerts.QUIET_DAY]
+        line += "\n" + " ".join([_NOT_SHOWN_STATUS] + said)
     return code, line
 
 
@@ -167,7 +175,9 @@ def foreground_notice(*, record=None, placed=schedule.was_placed, clock=time.tim
             return ""
         if kept.get("unacknowledged"):
             return _CAME_BACK
-        return _STALLED if watchrecord.stale(kept, clock(), placed_since()) else ""
+        if watchrecord.stale(kept, clock(), placed_since()):
+            return _STALLED
+        return _NOT_SHOWN if kept.get("undelivered") else ""
     except Exception:
         return ""
 

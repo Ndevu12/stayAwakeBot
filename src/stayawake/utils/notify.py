@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import stat
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -16,7 +17,6 @@ TIMEOUT_SECONDS = 10
 TEXT_LIMIT = 240
 _OSASCRIPT = ("/usr/bin/osascript",)
 _BUSCTL = ("/usr/bin/busctl", "/bin/busctl")
-_SESSION_BUS_ENV = ("XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS")
 _MARKUP = {"&": "&amp;", "<": "&lt;", ">": "&gt;"}
 
 
@@ -61,40 +61,58 @@ class OsascriptNotifier:
         try:
             done = (self._run or subprocess.run)(argv, capture_output=True,
                                                  timeout=TIMEOUT_SECONDS, env={})
-        except (OSError, subprocess.SubprocessError):
+            return Delivery(UNCONFIRMED if done.returncode == 0 else FAILED, replaces)
+        except Exception:
             return Delivery(FAILED, replaces)
-        return Delivery(UNCONFIRMED if done.returncode == 0 else FAILED, replaces)
 
 
 class FreedesktopNotifier:
     """Raise a notification on Linux through the session bus's notification service."""
 
-    def __init__(self, run=None, binary: str | None = None, environ=None):
+    def __init__(self, run=None, binary: str | None = None, runtime_dir: str | None = None,
+                 lstat=os.lstat, uid=os.getuid):
         self._run = run
         self._binary = binary
-        self._environ = os.environ if environ is None else environ
+        self._runtime_dir = runtime_dir
+        self._lstat = lstat
+        self._uid = uid
 
     def send(self, title: str, body: str, *, urgent: bool = False, replaces: int = 0) -> Delivery:
         """Raise one notification. Takes the title, the body, whether it is urgent and the id it
         replaces. Returns a sent delivery carrying the notification's id, else failed or
         unavailable."""
         binary = self._binary or system_binary(_BUSCTL)
-        if binary is None:
+        env = self._session_bus()
+        if binary is None or env is None:
             return Delivery(UNAVAILABLE, replaces)
         argv = [binary, "--user", f"--timeout={TIMEOUT_SECONDS}", "--", "call",
                 "org.freedesktop.Notifications", "/org/freedesktop/Notifications",
                 "org.freedesktop.Notifications", "Notify", "susssasa{sv}i",
                 APP_NAME, str(max(int(replaces), 0)), "", _escaped(title), _escaped(body),
                 "0", "1", "urgency", "y", "2" if urgent else "1", "0" if urgent else "-1"]
-        env = {k: self._environ[k] for k in _SESSION_BUS_ENV if k in self._environ}
         try:
             done = (self._run or subprocess.run)(argv, capture_output=True, text=True,
-                                                 timeout=TIMEOUT_SECONDS + 2, env=env)
-        except (OSError, subprocess.SubprocessError):
+                                                 errors="replace", timeout=TIMEOUT_SECONDS + 2,
+                                                 env=env)
+            if done.returncode != 0:
+                return Delivery(FAILED, replaces)
+            return Delivery(SENT, _notification_id(done.stdout) or replaces)
+        except Exception:
             return Delivery(FAILED, replaces)
-        if done.returncode != 0:
-            return Delivery(FAILED, replaces)
-        return Delivery(SENT, _notification_id(done.stdout) or replaces)
+
+    def _session_bus(self) -> dict | None:
+        """Build the environment that reaches this user's own session bus. Returns it, or None when
+        the bus socket is missing or is not this user's."""
+        uid = self._uid()
+        runtime = self._runtime_dir or f"/run/user/{uid}"
+        socket_path = f"{runtime}/bus"
+        try:
+            info = self._lstat(socket_path)
+        except OSError:
+            return None
+        if not stat.S_ISSOCK(info.st_mode) or info.st_uid != uid:
+            return None
+        return {"XDG_RUNTIME_DIR": runtime, "DBUS_SESSION_BUS_ADDRESS": f"unix:path={socket_path}"}
 
 
 def _escaped(text: str) -> str:
@@ -107,7 +125,8 @@ def _notification_id(answer: str) -> int:
     """Read the id the notification service returned. Takes busctl's answer, such as `u 12`.
     Returns the id, or 0 when there is none."""
     parts = (answer or "").split()
-    return int(parts[1]) if len(parts) == 2 and parts[0] == "u" and parts[1].isdigit() else 0
+    ok = len(parts) == 2 and parts[0] == "u" and parts[1].isascii() and parts[1].isdigit()
+    return int(parts[1][:10]) if ok else 0
 
 
 def platform_notifier(platform: str | None = None):

@@ -14,7 +14,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from stayawake.utils import env
+from stayawake.utils import env, pathsafe
 from stayawake.utils.systembin import system_binary
 
 
@@ -81,9 +81,10 @@ def placed_since(path: Path | None = None) -> float | None:
 
 def recorded(path: Path | None = None) -> list[str] | None:
     """The argv saw last placed, or None when there is no readable record."""
+    raw = pathsafe.read_regular_no_follow(path or record_path(), _MOST_RECORD_BYTES)
     try:
-        data = json.loads((path or record_path()).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        data = json.loads(raw.decode("utf-8", errors="replace")) if raw is not None else None
+    except (ValueError, RecursionError):
         return None
     argv = data.get("argv") if isinstance(data, dict) else None
     return [str(a) for a in argv] if isinstance(argv, list) and argv else None
@@ -101,6 +102,7 @@ def program() -> list[str]:
     return [sys.executable, "-E", "-P", "-m", "stayawake"]
 
 
+_MOST_RECORD_BYTES = 256 << 10
 _CANNOT_SURVIVE = ("/tmp/", "/private/tmp/", "/var/tmp/", "/dev/shm/")
 
 
@@ -169,11 +171,14 @@ def verdict(path: Path | None = None, saw: list[str] | None = None,
     try:
         if where.is_symlink():
             return ALTERED
-        text = where.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return ABSENT
+        if not os.path.lexists(where):
+            return ABSENT
     except OSError:
         return UNREADABLE
+    raw = pathsafe.read_regular_no_follow(where, _MOST_RECORD_BYTES)
+    if raw is None:
+        return UNREADABLE
+    text = raw.decode("utf-8", errors="replace")
     for candidate in ([saw] if saw else [recorded(record), program()]):
         if candidate and text == content(candidate):
             return PRISTINE

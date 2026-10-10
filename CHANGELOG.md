@@ -20,7 +20,8 @@ reader, not the mechanism or the weakness it closed.
   `saw harden`. A short report arrives once a day, on quiet days too. Every other `saw` command
   prints one line when the watcher has stopped checking or found code that came back, and
   `saw watch status` and `saw audit` say so too. On macOS the notifications come from Script
-  Editor; `saw watch` sends one when you set it up so you can allow them. If this machine already
+  Editor; `saw watch` sends one when you set it up so you can allow them. A notification that
+  cannot be shown is tried again, and every `saw` command says so. If this machine already
   checks itself, run `saw watch stop`, then `saw watch`, once after upgrading.
 - **On a terminal, `saw fix` and `saw fix amend` ask about the other files added in the same
   commit as the malware.** Each file shows how many of your project's files mention it. You take out

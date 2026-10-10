@@ -43,11 +43,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _say_watcher_notice() -> None:
-    """Print one line when this machine's watcher has stopped or found code that came back."""
-    from stayawake.bots.security.watch import foreground_notice
-    line = foreground_notice()
-    if line:
-        print(f"saw: {line}", file=sys.stderr)
+    """Print one line on stderr when this machine's watcher needs the user; never on stdout and
+    never in the way of the command."""
+    try:
+        from stayawake.bots.security.watch import foreground_notice
+        line = foreground_notice()
+        if line and sys.stderr is not None:
+            print(f"saw: {line}", file=sys.stderr)
+    except Exception:
+        pass
 
 
 def _clear_scratch() -> None:
